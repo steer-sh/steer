@@ -49,7 +49,11 @@ In headless mode you MUST:
     "positive_fail": 0,
     "negative_pass": 2,
     "negative_fail": 0
-  }
+  },
+  "prompt_version": "optional instruction version",
+  "prompt_modules": ["optional module names"],
+  "model_used": "optional model id",
+  "skill_version": "optional skill/package version"
 }
 ```
 
@@ -208,7 +212,14 @@ After determining scope:
 Use the bundled steer CLI to register the hook. The binary is at `${CLAUDE_PLUGIN_ROOT}/scripts/steer`:
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/scripts/steer" register <scope>/hooks/<rule-name>-hook.py --rule "<original rule text>" --scope <project|global>
+"${CLAUDE_PLUGIN_ROOT}/scripts/steer" register <scope>/hooks/<rule-name>-hook.py --rule "<original rule text>" --scope <project|global> \
+  --source generated \
+  --prompt-version "<prompt_version_or_unknown>" \
+  --hook-version "<hook_version_or_manual>" \
+  --prompt-modules "<comma,separated,modules>" \
+  --model "<model_used_optional>" \
+  --skill-version "<skill_version_optional>" \
+  --self-test '{"passed":true,"positive_pass":2,"positive_fail":0,"negative_pass":2,"negative_fail":0}'
 ```
 
 If `${CLAUDE_PLUGIN_ROOT}` is not set, fall back to finding the steer binary in PATH:
@@ -221,6 +232,8 @@ This atomically:
 - Consolidates all individual hooks into a single `steer-hooks.py` master hook
 - Registers only the master hook in settings.json (preserving non-steer hooks)
 - Adds the rule to the matching CLAUDE.md under `## Steer Rules`
+
+If optional generation metadata is unavailable, omit those flags and let CLI defaults apply.
 
 ### Step 5: Test the Hook (MANDATORY)
 

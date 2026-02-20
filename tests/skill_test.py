@@ -8,6 +8,8 @@ them against canonical positive/negative test files from prompts.yaml.
 Usage:
     python3 tests/skill_test.py --test python-command-injection
     python3 tests/skill_test.py --test console-log-block --model claude-sonnet-4-6
+    python3 tests/skill_test.py --test sql-injection-prevention --save
+    python3 tests/skill_test.py --test sql-injection-prevention --save /tmp/hooks
     python3 tests/skill_test.py --list
 
 Note: Run from the steer repo root.
@@ -32,6 +34,7 @@ NEGATIVE_DIR = TESTS_DIR / "test_data" / "negative_files"
 IMAGES_DIR = TESTS_DIR / "test_data" / "images"
 FAILURES_DIR = TESTS_DIR / "failures"
 DEFAULT_MODEL = "claude-opus-4-6"
+DEFAULT_SAVE_DIR = TESTS_DIR.parent / "cli" / "internal" / "presets" / "hooks"
 
 
 def load_test_cases():
@@ -138,6 +141,24 @@ def generate_hook(rule: str, workdir: Path, model: str) -> dict:
     return skill_result
 
 
+def resolve_save_dir(save_arg: str | None) -> Path | None:
+    """Resolve --save argument to an absolute directory path."""
+    if save_arg is None:
+        return None
+    if save_arg == "__factory_default__":
+        return DEFAULT_SAVE_DIR.resolve()
+    return Path(save_arg).expanduser().resolve()
+
+
+def save_hook_artifact(hook_path: Path, test_name: str, save_dir: Path) -> Path:
+    """Persist a passing generated hook to a stable filename."""
+    save_dir.mkdir(parents=True, exist_ok=True)
+    destination = save_dir / f"{test_name}.py"
+    shutil.copy2(hook_path, destination)
+    destination.chmod(0o755)
+    return destination
+
+
 def _prepare_fixture_workspace(workdir: Path) -> Path:
     """
     Create a temporary workspace tree with canonical fixtures.
@@ -231,7 +252,7 @@ def run_hook_against_file(
     return blocked, stdout
 
 
-def run_test_case(test_case: dict, model: str) -> tuple[bool, float]:
+def run_test_case(test_case: dict, model: str, save_dir: Path | None = None) -> tuple[bool, float]:
     """Generate hook and validate against canonical files. Returns (passed, cost_usd)."""
     name = test_case["name"]
     rule = test_case["rule"]
@@ -314,6 +335,9 @@ def run_test_case(test_case: dict, model: str) -> tuple[bool, float]:
                 json.dumps(skill_result, indent=2)
             )
             print(f"\n  Hook saved for inspection: {fail_dir}/")
+        elif save_dir is not None:
+            saved_path = save_hook_artifact(hook_path, name, save_dir)
+            print(f"\n  Hook saved to factory library path: {saved_path}")
 
         print(f"\nResult: {'ALL PASS' if all_pass else 'FAILURES DETECTED'}")
         return all_pass, cost
@@ -337,6 +361,13 @@ def main():
         action="store_true",
         help="List available test case names"
     )
+    parser.add_argument(
+        "--save",
+        nargs="?",
+        const="__factory_default__",
+        metavar="DIR",
+        help="If test passes, save generated hook to DIR. Use --save with no DIR to save into cli/internal/presets/hooks/"
+    )
     args = parser.parse_args()
 
     test_cases = load_test_cases()
@@ -357,7 +388,8 @@ def main():
         print(f"Run with --list to see available test cases")
         sys.exit(1)
 
-    passed, cost = run_test_case(test_cases[args.test], args.model)
+    save_dir = resolve_save_dir(args.save)
+    passed, cost = run_test_case(test_cases[args.test], args.model, save_dir=save_dir)
     sys.exit(0 if passed else 1)
 
 

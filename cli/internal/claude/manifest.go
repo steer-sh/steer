@@ -1,6 +1,8 @@
 package claude
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,6 +11,30 @@ import (
 	"time"
 )
 
+const (
+	SourceManual    = "manual"
+	SourceGenerated = "generated"
+	SourceFactory   = "factory"
+
+	DefaultPromptVersion = "unknown"
+	DefaultHookVersion   = "manual"
+)
+
+var validSources = map[string]struct{}{
+	SourceManual:    {},
+	SourceGenerated: {},
+	SourceFactory:   {},
+}
+
+// SelfTestSummary stores high-level generated hook test outcomes.
+type SelfTestSummary struct {
+	Passed       bool `json:"passed"`
+	PositivePass int  `json:"positive_pass"`
+	PositiveFail int  `json:"positive_fail"`
+	NegativePass int  `json:"negative_pass"`
+	NegativeFail int  `json:"negative_fail"`
+}
+
 // Manifest stores hook metadata used for list/remove/CLAUDE.md cleanup.
 type Manifest struct {
 	Hooks map[string]ManifestEntry `json:"hooks"`
@@ -16,17 +42,79 @@ type Manifest struct {
 
 // ManifestEntry is metadata for one registered hook.
 type ManifestEntry struct {
-	File    string `json:"file"`
-	Rule    string `json:"rule"`
-	Created string `json:"created"`
+	File          string           `json:"file"`
+	Rule          string           `json:"rule"`
+	Created       string           `json:"created"`
+	Updated       string           `json:"updated,omitempty"`
+	Source        string           `json:"source,omitempty"`
+	SourceID      string           `json:"source_id,omitempty"`
+	SourceVersion string           `json:"source_version,omitempty"`
+	PromptVersion string           `json:"prompt_version,omitempty"`
+	PromptModules []string         `json:"prompt_modules,omitempty"`
+	HookVersion   string           `json:"hook_version,omitempty"`
+	Model         string           `json:"model,omitempty"`
+	SkillVersion  string           `json:"skill_version,omitempty"`
+	RuleHash      string           `json:"rule_hash,omitempty"`
+	SelfTest      *SelfTestSummary `json:"self_test,omitempty"`
 }
 
 // ManifestListEntry is a flattened view for list output.
 type ManifestListEntry struct {
-	Name    string
-	File    string
-	Rule    string
-	Created string
+	Name          string
+	File          string
+	Rule          string
+	Created       string
+	Updated       string
+	Source        string
+	PromptVersion string
+	HookVersion   string
+	Model         string
+}
+
+// NormalizeSource validates source values and applies defaults.
+func NormalizeSource(source string) (string, error) {
+	normalized := strings.ToLower(strings.TrimSpace(source))
+	if normalized == "" {
+		normalized = SourceManual
+	}
+	if _, ok := validSources[normalized]; !ok {
+		return "", fmt.Errorf("invalid source %q: expected manual, generated, or factory", source)
+	}
+	return normalized, nil
+}
+
+// NormalizeRule normalizes rule text for stable hashing.
+func NormalizeRule(rule string) string {
+	return strings.Join(strings.Fields(strings.TrimSpace(rule)), " ")
+}
+
+// HashRule returns a stable sha256 hash of the normalized rule.
+func HashRule(rule string) string {
+	sum := sha256.Sum256([]byte(NormalizeRule(rule)))
+	return hex.EncodeToString(sum[:])
+}
+
+func normalizeStringList(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		out = append(out, trimmed)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // LoadManifest reads steer-manifest.json for the provided scope.
@@ -86,8 +174,8 @@ func SaveManifest(scope string, manifest *Manifest) error {
 	return nil
 }
 
-// AddHook adds a hook mapping to the manifest.
-func AddHook(scope, hookName, fileName, rule string) error {
+// AddOrUpdateHook writes one manifest entry and optionally overwrites.
+func AddOrUpdateHook(scope, hookName string, entry ManifestEntry, overwrite bool) error {
 	manifest, err := LoadManifest(scope)
 	if err != nil {
 		return err
@@ -97,15 +185,91 @@ func AddHook(scope, hookName, fileName, rule string) error {
 	if hookName == "" {
 		return fmt.Errorf("hook name cannot be empty")
 	}
-	if _, exists := manifest.Hooks[hookName]; exists {
+	existingEntry, exists := manifest.Hooks[hookName]
+	if exists && !overwrite {
 		return fmt.Errorf("hook already registered: %s", hookName)
 	}
 
-	manifest.Hooks[hookName] = ManifestEntry{
-		File:    fileName,
-		Rule:    strings.TrimSpace(rule),
-		Created: time.Now().Format("2006-01-02"),
+	now := time.Now().Format("2006-01-02")
+	if entry.Created == "" {
+		entry.Created = existingEntry.Created
 	}
+	if entry.Created == "" {
+		entry.Created = now
+	}
+	if entry.Updated == "" {
+		entry.Updated = now
+	}
+	if entry.File == "" {
+		entry.File = existingEntry.File
+	}
+	entry.File = strings.TrimSpace(entry.File)
+	entry.Rule = strings.TrimSpace(entry.Rule)
+
+	source, err := NormalizeSource(entry.Source)
+	if err != nil {
+		return err
+	}
+	entry.Source = source
+
+	if strings.TrimSpace(entry.PromptVersion) == "" {
+		entry.PromptVersion = DefaultPromptVersion
+	}
+	if strings.TrimSpace(entry.HookVersion) == "" {
+		entry.HookVersion = DefaultHookVersion
+	}
+	entry.SourceID = strings.TrimSpace(entry.SourceID)
+	entry.SourceVersion = strings.TrimSpace(entry.SourceVersion)
+	entry.PromptModules = normalizeStringList(entry.PromptModules)
+	entry.Model = strings.TrimSpace(entry.Model)
+	entry.SkillVersion = strings.TrimSpace(entry.SkillVersion)
+	if entry.Rule != "" {
+		entry.RuleHash = HashRule(entry.Rule)
+	}
+
+	manifest.Hooks[hookName] = entry
+	return SaveManifest(scope, manifest)
+}
+
+// AddHook adds a hook mapping to the manifest.
+// Kept for backwards compatibility; new callers should use AddOrUpdateHook.
+func AddHook(scope, hookName, fileName, rule string) error {
+	return AddOrUpdateHook(scope, hookName, ManifestEntry{
+		File:          fileName,
+		Rule:          strings.TrimSpace(rule),
+		Source:        SourceManual,
+		PromptVersion: DefaultPromptVersion,
+		HookVersion:   DefaultHookVersion,
+	}, false)
+}
+
+// GetHookEntry returns manifest metadata for a hook name.
+func GetHookEntry(scope, hookName string) (ManifestEntry, bool, error) {
+	manifest, err := LoadManifest(scope)
+	if err != nil {
+		return ManifestEntry{}, false, err
+	}
+	entry, ok := manifest.Hooks[strings.TrimSpace(hookName)]
+	return entry, ok, nil
+}
+
+// SetHookEntry upserts manifest metadata for a hook name.
+func SetHookEntry(scope, hookName string, entry ManifestEntry) error {
+	return AddOrUpdateHook(scope, hookName, entry, true)
+}
+
+// TouchHookUpdated refreshes the Updated date for an existing hook.
+func TouchHookUpdated(scope, hookName string) error {
+	manifest, err := LoadManifest(scope)
+	if err != nil {
+		return err
+	}
+	entry, ok := manifest.Hooks[strings.TrimSpace(hookName)]
+	if !ok {
+		return nil
+	}
+	entry.Updated = time.Now().Format("2006-01-02")
+	manifest.Hooks[strings.TrimSpace(hookName)] = entry
 
 	return SaveManifest(scope, manifest)
 }
@@ -149,10 +313,15 @@ func ListHooks(scope string) ([]ManifestListEntry, error) {
 	entries := make([]ManifestListEntry, 0, len(manifest.Hooks))
 	for name, entry := range manifest.Hooks {
 		entries = append(entries, ManifestListEntry{
-			Name:    name,
-			File:    entry.File,
-			Rule:    entry.Rule,
-			Created: entry.Created,
+			Name:          name,
+			File:          entry.File,
+			Rule:          entry.Rule,
+			Created:       entry.Created,
+			Updated:       entry.Updated,
+			Source:        entry.Source,
+			PromptVersion: entry.PromptVersion,
+			HookVersion:   entry.HookVersion,
+			Model:         entry.Model,
 		})
 	}
 

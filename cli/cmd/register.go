@@ -1,9 +1,11 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -13,6 +15,14 @@ import (
 )
 
 var registerRule string
+var registerSource string
+var registerPromptVersion string
+var registerHookVersion string
+var registerPromptModules string
+var registerModel string
+var registerSkillVersion string
+var registerSelfTest string
+var registerForce bool
 
 var registerCmd = &cobra.Command{
 	Use:   "register <hook-path>",
@@ -22,9 +32,13 @@ steer-managed artifacts in sync:
 - updates steer-manifest.json
 - rebuilds .claude/hooks/steer-hooks.py
 - upserts master hook command in settings.json (preserving non-steer hooks)
-- appends the provided rule to CLAUDE.md`,
+- appends the provided rule to CLAUDE.md
+
+Optional provenance flags can be used to persist generation metadata.`,
 	Example: `  steer register .claude/hooks/no-var-hook.py --rule "never use var | use const or let"
-  steer register /tmp/my-hook.py --rule "block TODO in prod files" --scope global`,
+  steer register /tmp/my-hook.py --rule "block TODO in prod files" --scope global
+  steer register .claude/hooks/no-var-hook.py --rule "never use var" --force
+  steer register .claude/hooks/sql-hook.py --rule "block SQL f-strings" --source generated --prompt-version v1 --hook-version h1`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		fmt.Println()
@@ -54,75 +68,37 @@ steer-managed artifacts in sync:
 			return fmt.Errorf("hook file must be a .py file")
 		}
 
-		utils.Working("Ensuring hook directories exist...")
-		if err := claude.EnsureDirectories(scope); err != nil {
-			return err
+		content, err := os.ReadFile(sourceAbs)
+		if err != nil {
+			return fmt.Errorf("failed to read source hook file: %w", err)
 		}
 
-		hooksDir, err := claude.GetHooksDir(scope)
+		modules := parseCommaList(registerPromptModules)
+		selfTest, err := parseSelfTestSummary(registerSelfTest)
 		if err != nil {
 			return err
 		}
 
 		fileName := filepath.Base(sourceAbs)
-		if fileName == claude.MasterHookName {
-			return fmt.Errorf("cannot register %s directly", claude.MasterHookName)
-		}
-
 		hookName := strings.TrimSuffix(fileName, ".py")
-		targetPath := filepath.Join(hooksDir, fileName)
-		targetAbs, err := filepath.Abs(targetPath)
+		utils.Registering("Installing hook and syncing managed artifacts...")
+		result, err := claude.InstallManagedHook(scope, claude.InstallManagedHookInput{
+			HookName: hookName,
+			FileName: fileName,
+			Rule:     rule,
+			Content:  content,
+			Force:    registerForce,
+			Metadata: claude.HookInstallMetadata{
+				Source:        registerSource,
+				PromptVersion: registerPromptVersion,
+				HookVersion:   registerHookVersion,
+				PromptModules: modules,
+				Model:         registerModel,
+				SkillVersion:  registerSkillVersion,
+				SelfTest:      selfTest,
+			},
+		})
 		if err != nil {
-			return fmt.Errorf("failed to resolve target hook path: %w", err)
-		}
-
-		manifest, err := claude.LoadManifest(scope)
-		if err != nil {
-			return err
-		}
-		if _, exists := manifest.Hooks[hookName]; exists {
-			return fmt.Errorf("hook already registered: %s", hookName)
-		}
-
-		if sourceAbs != targetAbs {
-			if _, err := os.Stat(targetPath); err == nil {
-				return fmt.Errorf("hook file already exists in hooks directory: %s", targetPath)
-			} else if !os.IsNotExist(err) {
-				return fmt.Errorf("failed to check target hook file: %w", err)
-			}
-
-			content, err := os.ReadFile(sourceAbs)
-			if err != nil {
-				return fmt.Errorf("failed to read source hook file: %w", err)
-			}
-			utils.Saving("Copying hook into scope directory...")
-			if err := os.WriteFile(targetPath, content, 0o755); err != nil {
-				return fmt.Errorf("failed to copy hook file into hooks directory: %w", err)
-			}
-		} else {
-			utils.Saving("Updating hook permissions...")
-			if err := os.Chmod(targetPath, 0o755); err != nil {
-				return fmt.Errorf("failed to ensure hook is executable: %w", err)
-			}
-		}
-
-		utils.Registering("Recording hook manifest...")
-		if err := claude.AddHook(scope, hookName, fileName, rule); err != nil {
-			return err
-		}
-
-		utils.Working("Consolidating master hook...")
-		if err := claude.ConsolidateHooks(scope); err != nil {
-			return err
-		}
-
-		utils.Registering("Registering master hook in settings.json...")
-		if err := claude.RegisterMasterHook(scope); err != nil {
-			return err
-		}
-
-		utils.Saving("Appending rule to CLAUDE.md...")
-		if err := claude.AppendRule(rule, scope); err != nil {
 			return err
 		}
 
@@ -130,15 +106,144 @@ steer-managed artifacts in sync:
 		fmt.Println(styles.SuccessBox.Render(fmt.Sprintf(
 			"Registered hook: %s\nPath: %s\nScope: %s",
 			hookName,
-			targetPath,
+			result.HookPath,
 			scope,
 		)))
 		return nil
 	},
 }
 
+func parseCommaList(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	seen := map[string]struct{}{}
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		out = append(out, trimmed)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func parseSelfTestSummary(raw string) (*claude.SelfTestSummary, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+
+	var summary claude.SelfTestSummary
+	if strings.HasPrefix(raw, "{") {
+		if err := json.Unmarshal([]byte(raw), &summary); err != nil {
+			return nil, fmt.Errorf("invalid --self-test JSON: %w", err)
+		}
+		return &summary, nil
+	}
+
+	parts := strings.Split(raw, ",")
+	if len(parts) == 5 {
+		passed, err := parseCompactBool(parts[0])
+		if err != nil {
+			return nil, fmt.Errorf("invalid --self-test compact form: %w", err)
+		}
+		positivePass, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+		if err != nil {
+			return nil, fmt.Errorf("invalid --self-test positive_pass: %w", err)
+		}
+		positiveFail, err := strconv.Atoi(strings.TrimSpace(parts[2]))
+		if err != nil {
+			return nil, fmt.Errorf("invalid --self-test positive_fail: %w", err)
+		}
+		negativePass, err := strconv.Atoi(strings.TrimSpace(parts[3]))
+		if err != nil {
+			return nil, fmt.Errorf("invalid --self-test negative_pass: %w", err)
+		}
+		negativeFail, err := strconv.Atoi(strings.TrimSpace(parts[4]))
+		if err != nil {
+			return nil, fmt.Errorf("invalid --self-test negative_fail: %w", err)
+		}
+		summary.Passed = passed
+		summary.PositivePass = positivePass
+		summary.PositiveFail = positiveFail
+		summary.NegativePass = negativePass
+		summary.NegativeFail = negativeFail
+		return &summary, nil
+	}
+
+	values := map[string]string{}
+	for _, token := range parts {
+		kv := strings.SplitN(strings.TrimSpace(token), "=", 2)
+		if len(kv) != 2 {
+			return nil, fmt.Errorf("invalid --self-test format: expected JSON, passed,pp,pf,np,nf, or key=value pairs")
+		}
+		key := strings.ToLower(strings.TrimSpace(kv[0]))
+		value := strings.TrimSpace(kv[1])
+		values[key] = value
+	}
+
+	if passedValue, ok := values["passed"]; ok {
+		passed, err := parseCompactBool(passedValue)
+		if err != nil {
+			return nil, fmt.Errorf("invalid --self-test passed: %w", err)
+		}
+		summary.Passed = passed
+	}
+	for key, target := range map[string]*int{
+		"positive_pass": &summary.PositivePass,
+		"positive_fail": &summary.PositiveFail,
+		"negative_pass": &summary.NegativePass,
+		"negative_fail": &summary.NegativeFail,
+	} {
+		value, ok := values[key]
+		if !ok {
+			continue
+		}
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			return nil, fmt.Errorf("invalid --self-test %s: %w", key, err)
+		}
+		*target = parsed
+	}
+	if _, ok := values["passed"]; !ok {
+		summary.Passed = summary.PositiveFail == 0 && summary.NegativeFail == 0
+	}
+
+	return &summary, nil
+}
+
+func parseCompactBool(raw string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "t", "yes", "y":
+		return true, nil
+	case "0", "false", "f", "no", "n":
+		return false, nil
+	default:
+		return false, fmt.Errorf("expected boolean value, got %q", raw)
+	}
+}
+
 func init() {
 	rootCmd.AddCommand(registerCmd)
 	registerCmd.Flags().StringVar(&registerRule, "rule", "", "Original rule text for manifest and CLAUDE.md")
 	registerCmd.MarkFlagRequired("rule")
+	registerCmd.Flags().StringVar(&registerSource, "source", claude.SourceManual, "Hook source metadata (manual|generated|factory)")
+	registerCmd.Flags().StringVar(&registerPromptVersion, "prompt-version", claude.DefaultPromptVersion, "Prompt/instruction version used to produce this hook")
+	registerCmd.Flags().StringVar(&registerHookVersion, "hook-version", claude.DefaultHookVersion, "Hook implementation revision")
+	registerCmd.Flags().StringVar(&registerPromptModules, "prompt-modules", "", "Comma-separated prompt module names")
+	registerCmd.Flags().StringVar(&registerModel, "model", "", "Model used for generation (if applicable)")
+	registerCmd.Flags().StringVar(&registerSkillVersion, "skill-version", "", "Skill/package version used for generation")
+	registerCmd.Flags().StringVar(&registerSelfTest, "self-test", "", "Self-test summary JSON or compact form: passed,positive_pass,positive_fail,negative_pass,negative_fail")
+	registerCmd.Flags().BoolVar(&registerForce, "force", false, "Overwrite conflicting existing hook and metadata")
 }

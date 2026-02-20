@@ -56,48 +56,9 @@ artifacts:
 			}
 		}
 
-		rule, err := claude.GetRule(scope, hook.Name)
-		if err != nil {
+		utils.Working("Removing hook and syncing managed artifacts...")
+		if _, err := claude.RemoveManagedHook(scope, identifier); err != nil {
 			return err
-		}
-
-		utils.Working("Deleting hook file...")
-		if err := os.Remove(hook.Path); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("failed to delete hook file: %w", err)
-		}
-
-		utils.Registering("Updating manifest...")
-		if err := claude.RemoveHook(scope, hook.Name); err != nil {
-			return err
-		}
-
-		if rule != "" {
-			utils.Saving("Updating CLAUDE.md...")
-			if err := claude.RemoveRule(rule, scope); err != nil {
-				return err
-			}
-		}
-
-		utils.Working("Rebuilding master hook...")
-		if err := claude.ConsolidateHooks(scope); err != nil {
-			return err
-		}
-
-		remaining, err := claude.ListIndividualHooks(scope)
-		if err != nil {
-			return err
-		}
-
-		if len(remaining) == 0 {
-			utils.Working("Removing steer master hook from settings.json...")
-			if err := claude.RemoveMasterHook(scope); err != nil {
-				return err
-			}
-		} else {
-			utils.Working("Refreshing steer master hook registration...")
-			if err := claude.RegisterMasterHook(scope); err != nil {
-				return err
-			}
 		}
 
 		fmt.Println()

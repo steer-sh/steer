@@ -3,19 +3,25 @@ package cmd
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/styles"
 )
 
+var listVerbose bool
+
 var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List registered individual hooks",
 	Long: `List displays individual steer-managed hooks by scanning the hooks directory
 for .py files (excluding steer-hooks.py). It reads rule text from
-steer-manifest.json and does not rely on settings.json entries.`,
+steer-manifest.json and does not rely on settings.json entries.
+
+Use --verbose to include provenance metadata (source, prompt_version, hook_version, updated, model).`,
 	Example: `  steer list
+  steer list --verbose
   steer list --scope global`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		fmt.Println()
@@ -46,8 +52,9 @@ steer-manifest.json and does not rely on settings.json entries.`,
 		fmt.Println()
 
 		for i, hook := range hooks {
+			entry, ok := manifest.Hooks[hook.Name]
 			rule := ""
-			if entry, ok := manifest.Hooks[hook.Name]; ok {
+			if ok {
 				rule = entry.Rule
 			}
 			if rule == "" {
@@ -55,6 +62,40 @@ steer-manifest.json and does not rely on settings.json entries.`,
 			}
 
 			fmt.Println(styles.HookListItemWithRule(i+1, hook.Name, hook.Path, rule))
+			if listVerbose {
+				source := strings.TrimSpace(entry.Source)
+				if source == "" {
+					source = claude.SourceManual
+				}
+				promptVersion := strings.TrimSpace(entry.PromptVersion)
+				if promptVersion == "" {
+					promptVersion = claude.DefaultPromptVersion
+				}
+				hookVersion := strings.TrimSpace(entry.HookVersion)
+				if hookVersion == "" {
+					hookVersion = claude.DefaultHookVersion
+				}
+				updated := strings.TrimSpace(entry.Updated)
+				if updated == "" {
+					updated = entry.Created
+				}
+				if strings.TrimSpace(updated) == "" {
+					updated = "(unknown)"
+				}
+				model := strings.TrimSpace(entry.Model)
+				if model == "" {
+					model = "-"
+				}
+				metadataLine := fmt.Sprintf(
+					"     Meta: source=%s prompt_version=%s hook_version=%s updated=%s model=%s",
+					source,
+					promptVersion,
+					hookVersion,
+					updated,
+					model,
+				)
+				fmt.Println(styles.MutedText.Render(metadataLine))
+			}
 			if i < len(hooks)-1 {
 				fmt.Println()
 			}
@@ -66,4 +107,5 @@ steer-manifest.json and does not rely on settings.json entries.`,
 
 func init() {
 	rootCmd.AddCommand(listCmd)
+	listCmd.Flags().BoolVar(&listVerbose, "verbose", false, "Include metadata columns")
 }

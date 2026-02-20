@@ -10,14 +10,21 @@ Usage:
     python3 tests/run_tests.py --filter python           # run tests matching "python"
     python3 tests/run_tests.py --stop-on-fail            # bail on first failure
     python3 tests/run_tests.py --model claude-sonnet-4-6 # override model
+    python3 tests/run_tests.py --filter security --save  # save passing hooks to factory library
     python3 tests/run_tests.py --list                    # list available tests
 """
 
 import argparse
 import sys
 import time
+from pathlib import Path
 
-from skill_test import load_test_cases, run_test_case, DEFAULT_MODEL
+from skill_test import (
+    load_test_cases,
+    run_test_case,
+    DEFAULT_MODEL,
+    resolve_save_dir,
+)
 
 
 def main():
@@ -43,7 +50,15 @@ def main():
         action="store_true",
         help="List test cases that would run (with filter applied) and exit"
     )
+    parser.add_argument(
+        "--save",
+        nargs="?",
+        const="__factory_default__",
+        metavar="DIR",
+        help="If a test passes, save generated hook to DIR. Use --save with no DIR to save into cli/internal/presets/hooks/"
+    )
     args = parser.parse_args()
+    save_dir: Path | None = resolve_save_dir(args.save)
 
     all_cases = load_test_cases()
 
@@ -62,6 +77,8 @@ def main():
         for name in cases:
             rule = cases[name]["rule"][:70]
             print(f"  {name:<40} {rule}")
+        if save_dir is not None:
+            print(f"\nPassing hooks will be saved to: {save_dir}")
         return
 
     # Run
@@ -77,7 +94,7 @@ def main():
     for i, (name, tc) in enumerate(cases.items(), 1):
         print(f"\n[{i}/{total}] ", end="")
         try:
-            ok, cost = run_test_case(tc, args.model)
+            ok, cost = run_test_case(tc, args.model, save_dir=save_dir)
             total_cost += cost
         except SystemExit:
             # run_test_case calls sys.exit on generation errors — catch it

@@ -7,7 +7,7 @@ If you care about preventing repeated mistakes, policy drift, or security regres
 ## What This Repo Contains
 
 - `skills/steer/SKILL.md`: the steer skill prompt and workflow used by `/steer`.
-- `cli/`: Go CLI source (`register`, `list`, `test`, `remove`).
+- `cli/`: Go CLI source (`register`, `list`, `test`, `remove`, `preset`).
 - `bin/`: prebuilt binaries for:
   - `darwin-amd64`
   - `darwin-arm64`
@@ -66,6 +66,11 @@ steer test no-var-hook --code "var x = 1"
 
 # Remove a hook and clean up managed state
 steer remove no-var-hook
+
+# Manage bundled factory presets
+steer preset list
+steer preset enable sql-injection-prevention
+steer preset enable-bundle security
 ```
 
 All commands support `--scope project|global` (default: `project`).
