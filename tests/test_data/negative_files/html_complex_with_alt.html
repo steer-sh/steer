@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Complex Accessible Web Page</title>
+    <style>
+        .gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
+        .card { border: 1px solid #ccc; padding: 1rem; }
+        .icon { width: 24px; height: 24px; }
+    </style>
+</head>
+<body>
+    <header>
+        <nav>
+            <!-- Good: navigation logo with alt -->
+            <img src="nav-logo.svg" alt="TechCorp - Home" class="nav-logo">
+            <ul>
+                <li><a href="#home">Home</a></li>
+                <li><a href="#about">About</a></li>
+                <li><a href="#services">Services</a></li>
+                <li><a href="#contact">Contact</a></li>
+            </ul>
+        </nav>
+    </header>
+    
+    <main>
+        <section id="home" class="hero">
+            <div class="hero-content">
+                <h1>Innovative Technology Solutions</h1>
+                <!-- Good: hero image with descriptive alt -->
+                <img src="hero/innovation.jpg" alt="Engineers working with advanced computer systems and holographic displays">
+                <p>Leading the future of technology</p>
+            </div>
+        </section>
+        
+        <section id="about" class="company-info">
+            <h2>About TechCorp</h2>
+            <div class="stats">
+                <div class="stat">
+                    <!-- Good: icon with descriptive alt -->
+                    <img src="icons/users.svg" alt="Users icon" class="icon">
+                    <span>10,000+ Customers</span>
+                </div>
+                <div class="stat">
+                    <!-- Good: another icon with alt -->
+                    <img src="icons/projects.svg" alt="Projects icon" class="icon">
+                    <span>500+ Projects</span>
+                </div>
+                <div class="stat">
+                    <!-- Good: award icon with alt -->
+                    <img src="icons/award.svg" alt="Award icon" class="icon">
+                    <span>50+ Awards</span>
+                </div>
+            </div>
+        </section>
+        
+        <section id="services" class="services">
+            <h2>Our Services</h2>
+            <div class="service-grid">
+                <div class="card">
+                    <h3>Cloud Computing</h3>
+                    <!-- Good: service illustration with alt -->
+                    <img src="services/cloud.jpg" alt="Cloud infrastructure diagram showing distributed servers and data flow">
+                    <p>Scalable cloud solutions for your business</p>
+                </div>
+                
+                <div class="card">
+                    <h3>AI & Machine Learning</h3>
+                    <!-- Good: AI service image with alt -->
+                    <img src="services/ai.jpg" alt="Neural network visualization with interconnected nodes and data processing">
+                    <p>Intelligent automation and insights</p>
+                </div>
+                
+                <div class="card">
+                    <h3>Cybersecurity</h3>
+                    <!-- Good: security service image with alt -->
+                    <img src="services/security.jpg" alt="Digital shield protecting network infrastructure from cyber threats">
+                    <p>Comprehensive security solutions</p>
+                </div>
+            </div>
+        </section>
+        
+        <section class="testimonials">
+            <h2>What Our Clients Say</h2>
+            <div class="testimonial">
+                <!-- Good: client photo with alt -->
+                <img src="clients/client1.jpg" alt="Sarah Johnson, CEO of DataFlow Inc" class="client-photo">
+                <blockquote>"TechCorp transformed our business operations completely."</blockquote>
+                <cite>Sarah Johnson, CEO of DataFlow Inc</cite>
+            </div>
+            
+            <div class="testimonial">
+                <!-- Good: another client photo with alt -->
+                <img src="clients/client2.jpg" alt="Michael Chen, CTO of StartupXYZ" class="client-photo">
+                <blockquote>"Outstanding technical expertise and support."</blockquote>
+                <cite>Michael Chen, CTO of StartupXYZ</cite>
+            </div>
+        </section>
+        
+        <section class="gallery">
+            <h2>Our Work</h2>
+            <!-- Good: all gallery images have descriptive alt text -->
+            <img src="gallery/project1.jpg" alt="Modern office building with smart lighting system installation">
+            <img src="gallery/project2.jpg" alt="Data center with organized server racks and cable management">
+            <img src="gallery/project3.jpg" alt="Team presenting AI dashboard to corporate clients">
+            <img src="gallery/project4.jpg" alt="Mobile app interface showing real-time analytics">
+            <img src="gallery/project5.jpg" alt="Network security operations center with monitoring displays">
+            <img src="gallery/project6.jpg" alt="Cloud migration process visualization on large screens">
+        </section>
+        
+        <section id="contact" class="contact">
+            <h2>Get In Touch</h2>
+            <div class="contact-info">
+                <div class="contact-method">
+                    <!-- Good: contact icons with alt -->
+                    <img src="icons/phone.svg" alt="Phone icon" class="icon">
+                    <span>+1 (555) 123-4567</span>
+                </div>
+                <div class="contact-method">
+                    <img src="icons/email.svg" alt="Email icon" class="icon">
+                    <span>contact@techcorp.com</span>
+                </div>
+                <div class="contact-method">
+                    <img src="icons/location.svg" alt="Location icon" class="icon">
+                    <span>123 Tech Street, Silicon Valley, CA</span>
+                </div>
+            </div>
+        </section>
+    </main>
+    
+    <footer>
+        <div class="footer-content">
+            <div class="footer-section">
+                <!-- Good: footer logo with alt -->
+                <img src="footer-logo.svg" alt="TechCorp logo - Return to top of page" class="footer-logo">
+                <p>Leading technology solutions since 2010</p>
+            </div>
+            
+            <div class="footer-section">
+                <h3>Follow Us</h3>
+                <div class="social-links">
+                    <!-- Good: social media icons with descriptive alt -->
+                    <a href="#"><img src="social/linkedin.svg" alt="Follow TechCorp on LinkedIn" class="icon"></a>
+                    <a href="#"><img src="social/twitter.svg" alt="Follow TechCorp on Twitter" class="icon"></a>
+                    <a href="#"><img src="social/github.svg" alt="TechCorp GitHub repositories" class="icon"></a>
+                    <a href="#"><img src="social/youtube.svg" alt="TechCorp YouTube channel" class="icon"></a>
+                </div>
+            </div>
+            
+            <div class="footer-section">
+                <h3>Certifications</h3>
+                <!-- Good: certification badges with alt -->
+                <img src="certs/iso27001.png" alt="ISO 27001 Information Security Management certification">
+                <img src="certs/aws-partner.png" alt="Amazon Web Services Advanced Technology Partner">
+                <img src="certs/microsoft-gold.png" alt="Microsoft Gold Partner certification">
+            </div>
+        </div>
+        
+        <div class="footer-bottom">
+            <p>&copy; 2024 TechCorp. All rights reserved.</p>
+        </div>
+    </footer>
+</body>
+</html>

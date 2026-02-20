@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Steer CLI shim — dispatches to the correct platform binary.
+# Works on macOS (Intel + Apple Silicon) and Linux (x64 + arm64).
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PLUGIN_DIR="$(dirname "$SCRIPT_DIR")"
+BIN_DIR="${PLUGIN_DIR}/bin"
+
+OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+ARCH="$(uname -m)"
+
+case "$ARCH" in
+    x86_64)        ARCH="amd64" ;;
+    aarch64|arm64) ARCH="arm64" ;;
+    *)
+        echo "steer: unsupported architecture: $ARCH" >&2
+        exit 1
+        ;;
+esac
+
+BINARY="${BIN_DIR}/${OS}-${ARCH}/steer"
+
+if [[ ! -x "$BINARY" ]]; then
+    echo "steer: binary not found at ${BINARY}" >&2
+    echo "Run: cd ${PLUGIN_DIR}/cli && bash build.sh" >&2
+    exit 1
+fi
+
+exec "$BINARY" "$@"
