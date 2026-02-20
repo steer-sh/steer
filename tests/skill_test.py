@@ -78,6 +78,7 @@ def generate_hook(rule: str, workdir: Path, model: str) -> dict:
         f"/steer --headless {rule}",
         "--output-format", "json",
         "--model", model,
+        "--no-session-persistence",
         "--dangerously-skip-permissions",
     ]
 
@@ -85,7 +86,10 @@ def generate_hook(rule: str, workdir: Path, model: str) -> dict:
     # to ~/.claude/settings.json which would poison future claude sessions.
     settings_snapshot = _snapshot_global_settings()
 
-    print(f"  Running: claude -p \"/steer --headless {rule[:60]}...\" --model {model}")
+    print(
+        f"  Running: claude -p \"/steer --headless {rule[:60]}...\" "
+        f"--model {model} --no-session-persistence"
+    )
     result = subprocess.run(
         cmd,
         capture_output=True,

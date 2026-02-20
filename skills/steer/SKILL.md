@@ -57,7 +57,7 @@ In headless mode you MUST:
 }
 ```
 
-The test harness invokes: `claude -p "/steer --headless <rule>" --output-format json` and parses this result from the response.
+The test harness invokes: `claude -p "/steer --headless <rule>" --output-format json --no-session-persistence` and parses this result from the response.
 
 ## Specialist Prompts
 
