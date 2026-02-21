@@ -88,7 +88,11 @@ def main():
         file_path = ''
     elif tool_name in ('Edit', 'MultiEdit', 'Write'):
         file_path = tool_input.get('file_path', '')
-        content_to_check = tool_input.get('new_string', '') or tool_input.get('content', '') or ''
+        if tool_name == 'MultiEdit':
+            edits = tool_input.get('edits', [])
+            content_to_check = '\n'.join(e.get('new_string', '') for e in edits)
+        else:
+            content_to_check = tool_input.get('new_string', '') or tool_input.get('content', '') or ''
         # Only check shell-relevant files
         shell_extensions = ('.sh', '.bash', '.zsh', '.fish', '.yml', '.yaml', '.mk')
         basename = file_path.lower().split('/')[-1] if file_path else ''

@@ -130,9 +130,13 @@ def main():
     if not file_path.endswith('.py'):
         sys.exit(0)
 
-    new_string = tool_input.get('new_string', '')
-    content = tool_input.get('content', '')
-    content_to_check = new_string or content or ''
+    if tool_name == 'MultiEdit':
+        edits = tool_input.get('edits', [])
+        content_to_check = '\n'.join(e.get('new_string', '') for e in edits)
+    else:
+        new_string = tool_input.get('new_string', '')
+        content = tool_input.get('content', '')
+        content_to_check = new_string or content or ''
 
     if not content_to_check.strip():
         sys.exit(0)
