@@ -2,6 +2,7 @@
 name: steer
 description: Generate Claude Code hooks from natural language rules to enforce coding standards, security policies, and best practices
 user-invocable: true
+prompt_version: 1
 ---
 
 # Steer - Hook Generation from Natural Language Rules
@@ -50,12 +51,16 @@ In headless mode you MUST:
     "negative_pass": 2,
     "negative_fail": 0
   },
-  "prompt_version": "optional instruction version",
-  "prompt_modules": ["optional module names"],
-  "model_used": "optional model id",
-  "skill_version": "optional skill/package version"
+  "prompt_version": 1,
+  "prompt_modules": ["simple-regex"],
+  "model_used": "claude-sonnet-4-20250514"
 }
 ```
+
+**Metadata fields:**
+- `prompt_version`: Read from the `prompt_version` field in this file's YAML frontmatter (top of SKILL.md). Do not guess.
+- `prompt_modules`: List the specialist prompt filenames you read (e.g., `["simple-regex", "python-security"]`). Empty list `[]` if none.
+- `model_used`: Your model name as shown in your system prompt. Report it exactly.
 
 The test harness invokes: `claude -p "/steer --headless <rule>" --output-format json --no-session-persistence` and parses this result from the response.
 
@@ -63,21 +68,28 @@ The test harness invokes: `claude -p "/steer --headless <rule>" --output-format 
 
 Before generating a hook, read the appropriate specialist prompt for domain-specific patterns, examples, and critical edge cases. These contain hard-won knowledge about false positive avoidance and detection strategies.
 
-| Rule targets... | Read |
-|---|---|
-| Simple keyword/pattern blocking (console.log, eval(), TODO, var, debugger) | [prompts/simple-regex.md](prompts/simple-regex.md) |
-| Python security (subprocess, os.system, SQL injection, eval/exec, dangerous imports) | [prompts/python-security.md](prompts/python-security.md) |
-| Python style (naming conventions, docstrings, mutable defaults, imports) | [prompts/python-style.md](prompts/python-style.md) |
-| Terraform/HCL (resource config, tagging, security groups) | [prompts/terraform-hcl.md](prompts/terraform-hcl.md) |
-| HTML (accessibility, XSS, semantic markup) | [prompts/generic-html.md](prompts/generic-html.md) |
-| Prompt firewall (AI manipulation, system enumeration, sensitive paths) | [prompts/prompt-firewall.md](prompts/prompt-firewall.md) |
-| Shell script safety (command chaining, data exfiltration, env exposure) | [prompts/shell-lint.md](prompts/shell-lint.md) |
-| React/JSX (hooks, component patterns, data fetching) | [prompts/react-jsx.md](prompts/react-jsx.md) |
-| Security Layer 2 (hardcoded secrets, postinstall scripts, env enumeration) | [prompts/security-layer2.md](prompts/security-layer2.md) |
+| Rule targets... | Read | Type |
+|---|---|---|
+| Simple keyword/pattern blocking (console.log, eval(), TODO, var, debugger) | [prompts/simple-regex.md](prompts/simple-regex.md) | detection |
+| Python security (subprocess, os.system, SQL injection, eval/exec, dangerous imports) | [prompts/python-security.md](prompts/python-security.md) | detection |
+| Python style (naming conventions, docstrings, mutable defaults, imports) | [prompts/python-style.md](prompts/python-style.md) | detection |
+| Terraform/HCL (resource config, tagging, security groups) | [prompts/terraform-hcl.md](prompts/terraform-hcl.md) | detection |
+| HTML (accessibility, XSS, semantic markup) | [prompts/generic-html.md](prompts/generic-html.md) | detection |
+| Prompt firewall (AI manipulation, system enumeration, sensitive paths) | [prompts/prompt-firewall.md](prompts/prompt-firewall.md) | detection |
+| Shell safety & Bash commands (command blocking, chaining, exfiltration, env exposure, dangerous flags) | [prompts/shell-lint.md](prompts/shell-lint.md) | **template-override** |
+| React/JSX (hooks, component patterns, data fetching) | [prompts/react-jsx.md](prompts/react-jsx.md) | detection |
+| Security Layer 2 (hardcoded secrets, postinstall scripts, env enumeration) | [prompts/security-layer2.md](prompts/security-layer2.md) | detection |
+
+### Specialist Types
+
+- **detection** specialists provide detection logic that plugs into the standard template from Step 2. The template skeleton stays the same.
+- **template-override** specialists provide their own complete hook template. When using a template-override specialist, **use their template instead of the one in Step 2**.
 
 **If the rule doesn't clearly fit one category**, use the general protocol below without reading a specialist prompt.
 
-**If the rule spans two categories**, read both specialist prompts.
+**If the rule spans two categories**, read both specialist prompts. If one is a template-override, use that specialist's template as the base and incorporate detection logic from the other.
+
+**If the rule targets both file content AND Bash commands** (e.g., "never use rm -rf" should block it in shell scripts AND in the Bash tool), generate a single combined hook that handles both tool types. Read the shell-lint specialist for the combined template and the relevant detection specialist for file-content-specific logic.
 
 ## How Claude Code Hooks Work
 
@@ -175,9 +187,15 @@ def main():
         sys.exit(0)
 
     file_path = tool_input.get('file_path', '')
-    new_string = tool_input.get('new_string', '')
-    content = tool_input.get('content', '')
-    content_to_check = new_string or content or ''
+
+    # MultiEdit passes an array of edits, not a single new_string
+    if tool_name == 'MultiEdit':
+        edits = tool_input.get('edits', [])
+        content_to_check = '\n'.join(e.get('new_string', '') for e in edits)
+    else:
+        new_string = tool_input.get('new_string', '')
+        content = tool_input.get('content', '')
+        content_to_check = new_string or content or ''
 
     if not content_to_check.strip():
         sys.exit(0)
@@ -214,11 +232,10 @@ Use the bundled steer CLI to register the hook. The binary is at `${CLAUDE_PLUGI
 ```bash
 "${CLAUDE_PLUGIN_ROOT}/scripts/steer" register <scope>/hooks/<rule-name>-hook.py --rule "<original rule text>" --scope <project|global> \
   --source generated \
-  --prompt-version "<prompt_version_or_unknown>" \
+  --prompt-version "<prompt_version from SKILL.md frontmatter>" \
   --hook-version "<hook_version_or_manual>" \
   --prompt-modules "<comma,separated,modules>" \
-  --model "<model_used_optional>" \
-  --skill-version "<skill_version_optional>" \
+  --model "<your model name from system prompt>" \
   --self-test '{"passed":true,"positive_pass":2,"positive_fail":0,"negative_pass":2,"negative_fail":0}'
 ```
 
@@ -233,7 +250,7 @@ This atomically:
 - Registers only the master hook in settings.json (preserving non-steer hooks)
 - Adds the rule to the matching CLAUDE.md under `## Steer Rules`
 
-If optional generation metadata is unavailable, omit those flags and let CLI defaults apply.
+The `--prompt-version` value MUST come from this file's YAML frontmatter — do not guess or hallucinate a version number. If other optional metadata is unavailable, omit those flags and let CLI defaults apply.
 
 ### Step 5: Test the Hook (MANDATORY)
 
@@ -272,6 +289,8 @@ Expected: no stdout, exit code 0
 
 The hardest bugs to find are false positives on safe code that *looks* like the dangerous pattern. Your negative tests must exercise this boundary.
 
+**If the rule uses `|` suggestion syntax**, add one test that verifies the `stopReason` output contains the user's suggestion text. Pipe a positive test case and check that the JSON output includes the suggestion. The user chose those words deliberately — the stopReason must include them.
+
 ### Step 6: Report to User
 
 After all tests pass, report:
@@ -285,10 +304,11 @@ After all tests pass, report:
 1. **Never crash** - Wrap stdin parsing in try/except. Exit 0 on any error.
 2. **Exit early** - Filter irrelevant tools and file types before expensive analysis.
 3. **Minimize false positives** - A false positive that blocks legitimate code is worse than missing a violation. Be precise.
-4. **Clear stopReason** - Explain WHAT was wrong and HOW to fix it.
-5. **Safe regex** - Never use nested quantifiers like `(a*)*` or `(a|b)*` inside repetition. These cause catastrophic backtracking (ReDoS).
-6. **Handle Edit and Write** - Edit provides `new_string`, Write provides `content`. Always check both: `content_to_check = new_string or content or ''`
-7. **Multi-language rules** - When the rule mentions multiple languages, handle ALL of them with file extension routing. Don't focus on only one.
+4. **Comments and strings** - A pattern inside a comment or string literal is almost never a violation. For Python, prefer AST parsing (`ast` module) over regex — it inherently ignores comments and strings. For JS/TS and other languages without convenient AST access, strip comments and string literals before running regex detection. A rule blocking `console.log` must not block `// I removed console.log`. This is the #1 cause of developer frustration with custom hooks.
+5. **Clear stopReason** - Explain WHAT was wrong and HOW to fix it.
+6. **Safe regex** - Never use nested quantifiers like `(a*)*` or `(a|b)*` inside repetition. These cause catastrophic backtracking (ReDoS).
+7. **Handle Edit, MultiEdit, and Write** - Edit provides `new_string`, Write provides `content`, MultiEdit provides `edits` (an array — concatenate all `new_string` values). See the template in Step 2.
+8. **Multi-language rules** - When the rule mentions multiple languages, handle ALL of them with file extension routing. Don't focus on only one.
 
 ## User Suggestion Syntax
 
