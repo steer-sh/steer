@@ -7,7 +7,7 @@ If you care about preventing repeated mistakes, policy drift, or security regres
 ## What This Repo Contains
 
 - `skills/steer/SKILL.md`: the steer skill prompt and workflow used by `/steer`.
-- `cli/`: Go CLI source (`register`, `list`, `test`, `remove`, `preset`).
+- `cli/`: Go CLI source (`register`, `list`, `test`, `remove`, `preset`, `verify`, `git-hooks`).
 - `bin/`: prebuilt binaries for:
   - `darwin-amd64`
   - `darwin-arm64`
@@ -71,9 +71,41 @@ steer remove no-var-hook
 steer preset list
 steer preset enable sql-injection-prevention
 steer preset enable-bundle security
+
+# Verify staged content against active project hooks
+steer verify --staged
+
+# Install a pre-commit hook that runs steer verify --staged
+steer git-hooks install
+
+# CI check for changed files in a commit range
+steer verify --changed --base origin/main --head HEAD
 ```
 
 All commands support `--scope project|global` (default: `project`).
+
+## Git Enforcement
+
+Use these commands to enforce rules for humans writing code in git workflows.
+
+```bash
+# Local: verify staged/index content before commit
+steer verify --staged
+
+# Optional: include both project and global hooks
+steer verify --staged --include-global
+
+# Install pre-commit hook that runs staged verification
+steer git-hooks install
+
+# CI: verify files changed between two refs/SHAs
+steer verify --changed --base origin/main --head HEAD
+```
+
+Typical setup:
+
+1. Run `steer git-hooks install` once per repo for local pre-commit checks.
+2. Add `steer verify --changed --base <sha> --head <sha>` as a required CI check on pull requests.
 
 ## Build / Install From Source
 

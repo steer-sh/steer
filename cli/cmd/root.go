@@ -22,10 +22,14 @@ Workflow:
   1. steer register <hook.py> --rule "your rule"   # Register hook + consolidate
   2. steer test <hook-name> --code "sample code"   # Test locally (optional)
   3. steer list                                     # Review active hooks
-  4. steer remove <hook-name>                      # Remove when no longer needed`,
+  4. steer verify --staged                          # Verify staged changes before commit
+  5. steer git-hooks install                        # Install pre-commit enforcement
+  6. steer remove <hook-name>                       # Remove when no longer needed`,
 	Example: `  steer register .claude/hooks/no-var-hook.py --rule "never use var | use const or let"
   steer test no-var-hook --code "var x = 1"
   steer list
+  steer verify --staged
+  steer git-hooks install
   steer remove no-var-hook --force`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		scope = strings.ToLower(strings.TrimSpace(scope))
