@@ -15,9 +15,9 @@ const (
 	BundleSecurity = "security"
 	BundleQuality  = "quality"
 
-	ExpectedPresetCount   = 12
 	ExpectedSecurityCount = 12
 	ExpectedQualityCount  = 0
+	ExpectedInternalCount = 1
 )
 
 var validBundles = map[string]struct{}{
@@ -36,15 +36,17 @@ type Catalog struct {
 
 // CatalogItem defines one preset entry in the embedded catalog.
 type CatalogItem struct {
-	Name          string   `json:"name"`
-	Description   string   `json:"description"`
-	Rule          string   `json:"rule"`
-	HookFile      string   `json:"hook_file"`
-	Bundles       []string `json:"bundles"`
-	OS            []string `json:"os"`
-	PromptVersion string   `json:"prompt_version"`
-	PromptModules []string `json:"prompt_modules"`
-	HookVersion   string   `json:"hook_version"`
+	Name                  string   `json:"name"`
+	Description           string   `json:"description"`
+	Rule                  string   `json:"rule"`
+	HookFile              string   `json:"hook_file"`
+	Bundles               []string `json:"bundles"`
+	OS                    []string `json:"os"`
+	PromptVersion         string   `json:"prompt_version"`
+	PromptModules         []string `json:"prompt_modules"`
+	HookVersion           string   `json:"hook_version"`
+	Internal              bool     `json:"internal,omitempty"`
+	AutoEnableWithFactory bool     `json:"auto_enable_with_factory,omitempty"`
 }
 
 var (
@@ -110,6 +112,19 @@ func sortedUnique(values []string) []string {
 	return out
 }
 
+func partitionPresets(items []CatalogItem) (visible []CatalogItem, internal []CatalogItem) {
+	visible = make([]CatalogItem, 0, len(items))
+	internal = make([]CatalogItem, 0, len(items))
+	for _, item := range items {
+		if item.Internal {
+			internal = append(internal, item)
+			continue
+		}
+		visible = append(visible, item)
+	}
+	return visible, internal
+}
+
 func validateCatalog(catalog *Catalog) error {
 	if catalog == nil {
 		return fmt.Errorf("preset catalog is nil")
@@ -117,9 +132,7 @@ func validateCatalog(catalog *Catalog) error {
 	if strings.TrimSpace(catalog.CatalogVersion) == "" {
 		return fmt.Errorf("preset catalog must include catalog_version")
 	}
-	if len(catalog.Presets) != ExpectedPresetCount {
-		return fmt.Errorf("preset catalog must contain exactly %d entries, found %d", ExpectedPresetCount, len(catalog.Presets))
-	}
+	_, internalPresets := partitionPresets(catalog.Presets)
 
 	nameSet := map[string]struct{}{}
 	bundleCounts := map[string]int{
@@ -152,7 +165,7 @@ func validateCatalog(catalog *Catalog) error {
 			return fmt.Errorf("preset %q hook asset missing: %s", name, hookAssetPath)
 		}
 
-		if len(item.Bundles) == 0 {
+		if len(item.Bundles) == 0 && !item.Internal {
 			return fmt.Errorf("preset %q must include at least one bundle", name)
 		}
 		for _, bundle := range item.Bundles {
@@ -160,7 +173,9 @@ func validateCatalog(catalog *Catalog) error {
 			if err != nil {
 				return fmt.Errorf("preset %q has invalid bundle: %w", name, err)
 			}
-			bundleCounts[normalized]++
+			if !item.Internal {
+				bundleCounts[normalized]++
+			}
 		}
 
 		if len(item.OS) == 0 {
@@ -180,6 +195,9 @@ func validateCatalog(catalog *Catalog) error {
 	if bundleCounts[BundleQuality] != ExpectedQualityCount {
 		return fmt.Errorf("quality bundle must contain %d presets, found %d", ExpectedQualityCount, bundleCounts[BundleQuality])
 	}
+	if len(internalPresets) != ExpectedInternalCount {
+		return fmt.Errorf("catalog must contain exactly %d internal preset(s), found %d", ExpectedInternalCount, len(internalPresets))
+	}
 
 	return nil
 }
@@ -195,8 +213,8 @@ func (catalog *Catalog) Find(name string) (CatalogItem, bool) {
 	return CatalogItem{}, false
 }
 
-// List returns all presets sorted by name, optionally filtered by bundle.
-func (catalog *Catalog) List(bundle string) ([]CatalogItem, error) {
+// ListVisible returns visible (non-internal) presets sorted by name, optionally filtered by bundle.
+func (catalog *Catalog) ListVisible(bundle string) ([]CatalogItem, error) {
 	normalized, err := normalizeBundle(bundle)
 	if err != nil {
 		return nil, err
@@ -204,6 +222,9 @@ func (catalog *Catalog) List(bundle string) ([]CatalogItem, error) {
 
 	filtered := make([]CatalogItem, 0, len(catalog.Presets))
 	for _, item := range catalog.Presets {
+		if item.Internal {
+			continue
+		}
 		if normalized == "" {
 			filtered = append(filtered, item)
 			continue
@@ -222,9 +243,14 @@ func (catalog *Catalog) List(bundle string) ([]CatalogItem, error) {
 	return filtered, nil
 }
 
+// List returns visible presets for backwards compatibility.
+func (catalog *Catalog) List(bundle string) ([]CatalogItem, error) {
+	return catalog.ListVisible(bundle)
+}
+
 // BundleMembers returns preset names in one bundle.
 func (catalog *Catalog) BundleMembers(bundle string) ([]string, error) {
-	items, err := catalog.List(bundle)
+	items, err := catalog.ListVisible(bundle)
 	if err != nil {
 		return nil, err
 	}
@@ -248,4 +274,19 @@ func (catalog *Catalog) ReadHookContent(item CatalogItem) ([]byte, error) {
 // BundleFor returns a deterministic bundle label for display.
 func BundleFor(item CatalogItem) string {
 	return strings.Join(sortedUnique(item.Bundles), ",")
+}
+
+// InternalAutoEnabled returns internal presets that must be auto-managed with factory presets.
+func (catalog *Catalog) InternalAutoEnabled() []CatalogItem {
+	items := make([]CatalogItem, 0, len(catalog.Presets))
+	for _, item := range catalog.Presets {
+		if item.Internal && item.AutoEnableWithFactory {
+			items = append(items, item)
+		}
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].Name < items[j].Name
+	})
+	return items
 }

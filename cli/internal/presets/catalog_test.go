@@ -5,28 +5,21 @@ import (
 	"testing"
 )
 
-func TestLoadCatalog(t *testing.T) {
+func TestLoadCatalogPartitionsVisibleAndInternal(t *testing.T) {
 	catalog, err := LoadCatalog()
 	if err != nil {
 		t.Fatalf("LoadCatalog returned error: %v", err)
 	}
 
-	if got := len(catalog.Presets); got != ExpectedPresetCount {
-		t.Fatalf("expected %d presets, got %d", ExpectedPresetCount, got)
-	}
-
-	names := map[string]struct{}{}
+	var visibleCount int
+	var internalCount int
 	bundleCounts := map[string]int{
 		BundleSecurity: 0,
 		BundleQuality:  0,
 	}
+	selfProtectionFound := false
 
 	for _, item := range catalog.Presets {
-		if _, exists := names[item.Name]; exists {
-			t.Fatalf("duplicate preset name: %s", item.Name)
-		}
-		names[item.Name] = struct{}{}
-
 		content, err := catalog.ReadHookContent(item)
 		if err != nil {
 			t.Fatalf("failed to read hook asset for %s: %v", item.Name, err)
@@ -34,6 +27,18 @@ func TestLoadCatalog(t *testing.T) {
 		if strings.TrimSpace(string(content)) == "" {
 			t.Fatalf("hook asset for %s is empty", item.Name)
 		}
+
+		if item.Internal {
+			internalCount++
+			if item.Name == "steer-self-protection" {
+				selfProtectionFound = true
+				if !item.AutoEnableWithFactory {
+					t.Fatalf("steer-self-protection must be auto_enable_with_factory")
+				}
+			}
+			continue
+		}
+		visibleCount++
 
 		for _, bundle := range item.Bundles {
 			bundleCounts[bundle]++
@@ -46,9 +51,18 @@ func TestLoadCatalog(t *testing.T) {
 	if bundleCounts[BundleQuality] != ExpectedQualityCount {
 		t.Fatalf("expected %d quality presets, got %d", ExpectedQualityCount, bundleCounts[BundleQuality])
 	}
+	if internalCount != ExpectedInternalCount {
+		t.Fatalf("expected %d internal presets, got %d", ExpectedInternalCount, internalCount)
+	}
+	if visibleCount != ExpectedSecurityCount+ExpectedQualityCount {
+		t.Fatalf("expected %d visible presets, got %d", ExpectedSecurityCount+ExpectedQualityCount, visibleCount)
+	}
+	if !selfProtectionFound {
+		t.Fatalf("expected internal preset steer-self-protection to exist")
+	}
 }
 
-func TestCatalogBundleMembers(t *testing.T) {
+func TestCatalogBundleMembersVisibleOnly(t *testing.T) {
 	catalog, err := LoadCatalog()
 	if err != nil {
 		t.Fatalf("LoadCatalog returned error: %v", err)
@@ -71,13 +85,59 @@ func TestCatalogBundleMembers(t *testing.T) {
 	}
 }
 
-func TestCatalogListRejectsInvalidBundle(t *testing.T) {
+func TestCatalogListVisibleRejectsInvalidBundle(t *testing.T) {
 	catalog, err := LoadCatalog()
 	if err != nil {
 		t.Fatalf("LoadCatalog returned error: %v", err)
 	}
 
-	if _, err := catalog.List("not-a-bundle"); err == nil {
+	if _, err := catalog.ListVisible("not-a-bundle"); err == nil {
 		t.Fatalf("expected invalid bundle error, got nil")
+	}
+}
+
+func TestInternalPresetCanBeBundleless(t *testing.T) {
+	catalog, err := LoadCatalog()
+	if err != nil {
+		t.Fatalf("LoadCatalog returned error: %v", err)
+	}
+
+	item, ok := catalog.Find("steer-self-protection")
+	if !ok {
+		t.Fatalf("expected steer-self-protection in catalog")
+	}
+	if !item.Internal {
+		t.Fatalf("steer-self-protection must be internal")
+	}
+	if len(item.Bundles) != 0 {
+		t.Fatalf("expected internal preset to allow empty bundles, got %v", item.Bundles)
+	}
+}
+
+func TestValidateCatalogEnforcesInternalCount(t *testing.T) {
+	catalog, err := LoadCatalog()
+	if err != nil {
+		t.Fatalf("LoadCatalog returned error: %v", err)
+	}
+
+	filtered := make([]CatalogItem, 0, len(catalog.Presets))
+	for _, item := range catalog.Presets {
+		if item.Internal {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+
+	missingInternal := &Catalog{
+		CatalogVersion: catalog.CatalogVersion,
+		Presets:        filtered,
+	}
+
+	err = validateCatalog(missingInternal)
+	if err == nil {
+		t.Fatalf("expected internal count validation error, got nil")
+	}
+	if !strings.Contains(err.Error(), "internal preset") {
+		t.Fatalf("expected internal preset error, got %v", err)
 	}
 }

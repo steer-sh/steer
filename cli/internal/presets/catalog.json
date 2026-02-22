@@ -132,6 +132,19 @@
       "prompt_version": "factory-prompt-v1",
       "prompt_modules": ["shell-lint"],
       "hook_version": "factory-hook-v1"
+    },
+    {
+      "name": "steer-self-protection",
+      "description": "Protect factory-managed hooks and core steer artifacts from mutation",
+      "rule": "Block mutations to factory-managed hooks and protected steer files in this scope | Use steer preset sync for reconcile and only mutate user hooks directly",
+      "hook_file": "steer-self-protection.py",
+      "bundles": [],
+      "os": ["all"],
+      "prompt_version": "factory-prompt-v1",
+      "prompt_modules": ["security-layer2"],
+      "hook_version": "factory-hook-v1",
+      "internal": true,
+      "auto_enable_with_factory": true
     }
   ]
 }
