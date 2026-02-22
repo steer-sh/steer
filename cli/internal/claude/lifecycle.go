@@ -129,6 +129,11 @@ func applyMetadataHeader(content []byte, source, promptVersion, hookVersion stri
 	return []byte(updated)
 }
 
+// ApplyMetadataHeader returns hook content normalized with the steer metadata header.
+func ApplyMetadataHeader(content []byte, source, promptVersion, hookVersion string) []byte {
+	return applyMetadataHeader(content, source, promptVersion, hookVersion)
+}
+
 // InstallManagedHook writes an individual hook and syncs all managed artifacts.
 func InstallManagedHook(scope string, input InstallManagedHookInput) (*InstallManagedHookResult, error) {
 	scope = strings.ToLower(strings.TrimSpace(scope))

@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,9 +17,43 @@ import (
 )
 
 var (
-	presetListEnabledOnly bool
-	presetListBundle      string
-	presetListVerbose     bool
+	presetListEnabledOnly  bool
+	presetListBundle       string
+	presetListVerbose      bool
+	presetSyncDryRun       bool
+	presetSyncStrict       bool
+	presetSyncPruneOrphans bool
+)
+
+type presetSyncOptions struct {
+	DryRun       bool
+	Strict       bool
+	PruneOrphans bool
+}
+
+type presetSyncOrphan struct {
+	HookName string
+	SourceID string
+}
+
+type presetSyncResult struct {
+	CheckedFactory  int
+	UpToDate        int
+	Reinstalled     int
+	MetadataDrift   int
+	MissingFile     int
+	ContentDrift    int
+	InternalEnsured int
+	DryRunPlanned   int
+	OrphansKept     int
+	OrphansPruned   int
+	Orphans         []presetSyncOrphan
+}
+
+const (
+	presetDriftMetadata    = "metadata"
+	presetDriftMissingFile = "missing_file"
+	presetDriftContent     = "content"
 )
 
 var presetCmd = &cobra.Command{
@@ -45,7 +81,7 @@ var presetListCmd = &cobra.Command{
 			return err
 		}
 
-		items, err := catalog.List(presetListBundle)
+		items, err := catalog.ListVisible(presetListBundle)
 		if err != nil {
 			return err
 		}
@@ -148,7 +184,7 @@ var presetEnableCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		item, ok := catalog.Find(name)
+		item, ok := findVisiblePreset(catalog, name)
 		if !ok {
 			return fmt.Errorf("preset not found: %s", name)
 		}
@@ -158,7 +194,15 @@ var presetEnableCmd = &cobra.Command{
 			return err
 		}
 
+		ensuredCount, err := ensureAutoManagedFactoryPresets(scope, catalog, false)
+		if err != nil {
+			return fmt.Errorf("enabled preset %s but failed to ensure internal factory presets: %w", name, err)
+		}
+
 		message := fmt.Sprintf("Preset: %s\nStatus: %s\nScope: %s", name, status, scope)
+		if ensuredCount > 0 {
+			message += fmt.Sprintf("\nInternal auto-managed ensured: %d", ensuredCount)
+		}
 		fmt.Println(styles.SuccessBox.Render(message))
 		return nil
 	},
@@ -181,7 +225,7 @@ var presetDisableCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		item, ok := catalog.Find(name)
+		item, ok := findVisiblePreset(catalog, name)
 		if !ok {
 			return fmt.Errorf("preset not found: %s", name)
 		}
@@ -225,10 +269,10 @@ var presetEnableBundleCmd = &cobra.Command{
 		failureCount := 0
 
 		for _, name := range names {
-			item, ok := catalog.Find(name)
+			item, ok := findVisiblePreset(catalog, name)
 			if !ok {
 				failureCount++
-				fmt.Println(styles.ErrorText.Render(fmt.Sprintf("✗ %s: preset missing from catalog map", name)))
+				fmt.Println(styles.ErrorText.Render(fmt.Sprintf("✗ %s: preset missing from visible catalog map", name)))
 				continue
 			}
 			utils.Working(fmt.Sprintf("Enabling %s...", name))
@@ -246,12 +290,19 @@ var presetEnableBundleCmd = &cobra.Command{
 			fmt.Println(styles.SuccessText.Render(fmt.Sprintf("✓ %s: %s", name, status)))
 		}
 
+		internalEnsured, err := ensureAutoManagedFactoryPresets(scope, catalog, false)
+		if err != nil {
+			failureCount++
+			fmt.Println(styles.ErrorText.Render(fmt.Sprintf("✗ internal auto-managed ensure failed: %s", err)))
+		}
+
 		fmt.Println()
 		fmt.Println(styles.InfoBox.Render(fmt.Sprintf(
-			"Bundle: %s\nEnabled: %d\nAlready enabled: %d\nFailed: %d",
+			"Bundle: %s\nEnabled: %d\nAlready enabled: %d\nInternal auto-managed ensured: %d\nFailed: %d",
 			bundle,
 			enabledCount,
 			alreadyCount,
+			internalEnsured,
 			failureCount,
 		)))
 
@@ -290,10 +341,10 @@ var presetDisableBundleCmd = &cobra.Command{
 		failureCount := 0
 
 		for _, name := range names {
-			item, ok := catalog.Find(name)
+			item, ok := findVisiblePreset(catalog, name)
 			if !ok {
 				failureCount++
-				fmt.Println(styles.ErrorText.Render(fmt.Sprintf("✗ %s: preset missing from catalog map", name)))
+				fmt.Println(styles.ErrorText.Render(fmt.Sprintf("✗ %s: preset missing from visible catalog map", name)))
 				continue
 			}
 			utils.Working(fmt.Sprintf("Disabling %s...", name))
@@ -327,6 +378,84 @@ var presetDisableBundleCmd = &cobra.Command{
 	},
 }
 
+var presetSyncCmd = &cobra.Command{
+	Use:   "sync",
+	Short: "Reconcile enabled factory presets with the embedded catalog",
+	Example: `  steer preset sync
+  steer preset sync --dry-run
+  steer preset sync --strict
+  steer preset sync --prune-orphans`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		fmt.Println()
+		fmt.Println(styles.MainHeader.Render("🔄 Sync Presets"))
+		fmt.Println()
+
+		scope := currentScope()
+
+		catalog, err := presets.LoadCatalog()
+		if err != nil {
+			return err
+		}
+
+		result, syncErr := syncFactoryPresets(scope, catalog, presetSyncOptions{
+			DryRun:       presetSyncDryRun,
+			Strict:       presetSyncStrict,
+			PruneOrphans: presetSyncPruneOrphans,
+		})
+		if result == nil {
+			result = &presetSyncResult{}
+		}
+
+		summary := fmt.Sprintf(
+			"Scope: %s\nChecked factory presets: %d\nUp-to-date: %d\nReinstalled: %d\nMetadata drift: %d\nMissing file: %d\nContent drift: %d\nInternal ensured: %d\nOrphans kept: %d\nOrphans pruned: %d",
+			scope,
+			result.CheckedFactory,
+			result.UpToDate,
+			result.Reinstalled,
+			result.MetadataDrift,
+			result.MissingFile,
+			result.ContentDrift,
+			result.InternalEnsured,
+			result.OrphansKept,
+			result.OrphansPruned,
+		)
+		if presetSyncDryRun {
+			summary += fmt.Sprintf("\nDry-run planned mutations: %d", result.DryRunPlanned)
+		}
+
+		if syncErr != nil {
+			fmt.Println(styles.WarningBox.Render(summary))
+		} else {
+			fmt.Println(styles.SuccessBox.Render(summary))
+		}
+
+		if len(result.Orphans) > 0 {
+			fmt.Println()
+			fmt.Println(styles.SectionHeader.Render("Orphan Factory Entries"))
+			for _, orphan := range result.Orphans {
+				sourceID := orphan.SourceID
+				if strings.TrimSpace(sourceID) == "" {
+					sourceID = "(empty)"
+				}
+				fmt.Println(styles.WarningText.Render(fmt.Sprintf("- hook=%s source_id=%s", orphan.HookName, sourceID)))
+			}
+		}
+
+		if syncErr != nil {
+			return syncErr
+		}
+		return nil
+	},
+}
+
+func findVisiblePreset(catalog *presets.Catalog, name string) (presets.CatalogItem, bool) {
+	item, ok := catalog.Find(strings.TrimSpace(name))
+	if !ok || item.Internal {
+		return presets.CatalogItem{}, false
+	}
+	return item, true
+}
+
 func enablePreset(scope string, catalog *presets.Catalog, item presets.CatalogItem, force bool) (string, error) {
 	hookName := strings.TrimSuffix(item.HookFile, ".py")
 	if hookName == "" {
@@ -352,9 +481,8 @@ func enablePreset(scope string, catalog *presets.Catalog, item presets.CatalogIt
 				return "already enabled", nil
 			} else if !os.IsNotExist(err) {
 				return "", fmt.Errorf("failed to check hook file %s: %w", targetPath, err)
-			} else {
-				installForce = true
 			}
+			installForce = true
 		}
 		if !force {
 			return "", fmt.Errorf("conflict: hook %s already exists with source=%s source_id=%s (use --force to overwrite)", hookName, existing.Source, existing.SourceID)
@@ -369,9 +497,25 @@ func enablePreset(scope string, catalog *presets.Catalog, item presets.CatalogIt
 		return "", fmt.Errorf("failed to check hook file %s: %w", targetPath, err)
 	}
 
-	content, err := catalog.ReadHookContent(item)
+	result, err := installFactoryPreset(scope, catalog, item, installForce)
 	if err != nil {
 		return "", err
+	}
+	if result.Overwritten {
+		return "enabled (overwrote existing hook)", nil
+	}
+	return "enabled", nil
+}
+
+func installFactoryPreset(scope string, catalog *presets.Catalog, item presets.CatalogItem, force bool) (*claude.InstallManagedHookResult, error) {
+	hookName := strings.TrimSuffix(item.HookFile, ".py")
+	if hookName == "" {
+		return nil, fmt.Errorf("invalid preset hook_file for %s", item.Name)
+	}
+
+	content, err := catalog.ReadHookContent(item)
+	if err != nil {
+		return nil, err
 	}
 
 	result, err := claude.InstallManagedHook(scope, claude.InstallManagedHookInput{
@@ -379,7 +523,7 @@ func enablePreset(scope string, catalog *presets.Catalog, item presets.CatalogIt
 		FileName: item.HookFile,
 		Rule:     item.Rule,
 		Content:  content,
-		Force:    installForce,
+		Force:    force,
 		Metadata: claude.HookInstallMetadata{
 			Source:        claude.SourceFactory,
 			SourceID:      item.Name,
@@ -390,13 +534,9 @@ func enablePreset(scope string, catalog *presets.Catalog, item presets.CatalogIt
 		},
 	})
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-
-	if result.Overwritten {
-		return "enabled (overwrote existing hook)", nil
-	}
-	return "enabled", nil
+	return result, nil
 }
 
 func disablePreset(scope string, item presets.CatalogItem, force bool) (string, error) {
@@ -440,6 +580,216 @@ func disablePreset(scope string, item presets.CatalogItem, force bool) (string, 
 	return "disabled", nil
 }
 
+func ensureAutoManagedFactoryPresets(scope string, catalog *presets.Catalog, dryRun bool) (int, error) {
+	manifest, err := claude.LoadManifest(scope)
+	if err != nil {
+		return 0, err
+	}
+
+	ensuredCount := 0
+	for _, item := range catalog.InternalAutoEnabled() {
+		hookName := strings.TrimSuffix(item.HookFile, ".py")
+		if hookName == "" {
+			return ensuredCount, fmt.Errorf("invalid preset hook_file for %s", item.Name)
+		}
+
+		entry, hasEntry := manifest.Hooks[hookName]
+		needsInstall := true
+		if hasEntry && strings.EqualFold(strings.TrimSpace(entry.Source), claude.SourceFactory) && strings.TrimSpace(entry.SourceID) == item.Name {
+			var reason string
+			needsInstall, reason, err = factoryPresetNeedsReinstall(scope, catalog, item, hookName, entry)
+			if err != nil {
+				return ensuredCount, err
+			}
+			_ = reason
+		}
+
+		if !needsInstall {
+			continue
+		}
+
+		ensuredCount++
+		if dryRun {
+			continue
+		}
+
+		if _, err := installFactoryPreset(scope, catalog, item, true); err != nil {
+			return ensuredCount, err
+		}
+
+		manifest, err = claude.LoadManifest(scope)
+		if err != nil {
+			return ensuredCount, err
+		}
+	}
+
+	return ensuredCount, nil
+}
+
+func syncFactoryPresets(scope string, catalog *presets.Catalog, options presetSyncOptions) (*presetSyncResult, error) {
+	result := &presetSyncResult{}
+
+	manifest, err := claude.LoadManifest(scope)
+	if err != nil {
+		return result, err
+	}
+
+	factoryHookNames := make([]string, 0, len(manifest.Hooks))
+	for hookName, entry := range manifest.Hooks {
+		if !strings.EqualFold(strings.TrimSpace(entry.Source), claude.SourceFactory) {
+			continue
+		}
+		factoryHookNames = append(factoryHookNames, hookName)
+	}
+	sort.Strings(factoryHookNames)
+
+	ensuredInternal := map[string]struct{}{}
+	for _, hookName := range factoryHookNames {
+		entry := manifest.Hooks[hookName]
+		sourceID := strings.TrimSpace(entry.SourceID)
+
+		item, found := catalog.Find(sourceID)
+		if sourceID == "" || !found {
+			result.Orphans = append(result.Orphans, presetSyncOrphan{
+				HookName: hookName,
+				SourceID: sourceID,
+			})
+
+			if options.PruneOrphans {
+				if options.DryRun {
+					result.OrphansPruned++
+					result.DryRunPlanned++
+				} else {
+					if _, err := claude.RemoveManagedHook(scope, hookName); err != nil {
+						return result, err
+					}
+					result.OrphansPruned++
+				}
+			} else {
+				result.OrphansKept++
+			}
+			continue
+		}
+
+		if item.Internal && item.AutoEnableWithFactory {
+			ensuredInternal[item.Name] = struct{}{}
+		}
+
+		result.CheckedFactory++
+		needsInstall, driftReason, err := factoryPresetNeedsReinstall(scope, catalog, item, hookName, entry)
+		if err != nil {
+			return result, err
+		}
+		if !needsInstall {
+			result.UpToDate++
+			continue
+		}
+
+		switch driftReason {
+		case presetDriftMetadata:
+			result.MetadataDrift++
+		case presetDriftMissingFile:
+			result.MissingFile++
+		case presetDriftContent:
+			result.ContentDrift++
+		}
+
+		if options.DryRun {
+			result.Reinstalled++
+			result.DryRunPlanned++
+			continue
+		}
+		if _, err := installFactoryPreset(scope, catalog, item, true); err != nil {
+			return result, err
+		}
+		result.Reinstalled++
+	}
+
+	for _, item := range catalog.InternalAutoEnabled() {
+		if _, seen := ensuredInternal[item.Name]; seen {
+			continue
+		}
+		result.InternalEnsured++
+		if options.DryRun {
+			result.Reinstalled++
+			result.DryRunPlanned++
+			continue
+		}
+		if _, err := installFactoryPreset(scope, catalog, item, true); err != nil {
+			return result, err
+		}
+		result.Reinstalled++
+	}
+
+	if options.Strict && result.OrphansKept > 0 {
+		return result, fmt.Errorf("strict mode: found %d orphan factory entries", result.OrphansKept)
+	}
+
+	return result, nil
+}
+
+func factoryPresetNeedsReinstall(scope string, catalog *presets.Catalog, item presets.CatalogItem, hookName string, entry claude.ManifestEntry) (bool, string, error) {
+	expectedHookName := strings.TrimSuffix(item.HookFile, ".py")
+	if expectedHookName == "" {
+		return false, "", fmt.Errorf("invalid preset hook_file for %s", item.Name)
+	}
+
+	if hookName != expectedHookName {
+		return true, presetDriftMetadata, nil
+	}
+	if strings.TrimSpace(entry.SourceID) != item.Name {
+		return true, presetDriftMetadata, nil
+	}
+	if strings.TrimSpace(entry.SourceVersion) != catalog.CatalogVersion {
+		return true, presetDriftMetadata, nil
+	}
+	if strings.TrimSpace(entry.PromptVersion) != item.PromptVersion {
+		return true, presetDriftMetadata, nil
+	}
+	if strings.TrimSpace(entry.HookVersion) != item.HookVersion {
+		return true, presetDriftMetadata, nil
+	}
+	if file := strings.TrimSpace(entry.File); file != "" && file != item.HookFile {
+		return true, presetDriftMetadata, nil
+	}
+
+	hooksDir, err := claude.GetHooksDir(scope)
+	if err != nil {
+		return false, "", err
+	}
+	targetPath := filepath.Join(hooksDir, item.HookFile)
+	actual, err := os.ReadFile(targetPath)
+	if os.IsNotExist(err) {
+		return true, presetDriftMissingFile, nil
+	}
+	if err != nil {
+		return false, "", fmt.Errorf("failed reading preset hook %s: %w", targetPath, err)
+	}
+
+	expected, err := expectedFactoryPresetContent(catalog, item)
+	if err != nil {
+		return false, "", err
+	}
+
+	if sha256Hex(actual) != sha256Hex(expected) {
+		return true, presetDriftContent, nil
+	}
+	return false, "", nil
+}
+
+func expectedFactoryPresetContent(catalog *presets.Catalog, item presets.CatalogItem) ([]byte, error) {
+	content, err := catalog.ReadHookContent(item)
+	if err != nil {
+		return nil, err
+	}
+	return claude.ApplyMetadataHeader(content, claude.SourceFactory, item.PromptVersion, item.HookVersion), nil
+}
+
+func sha256Hex(content []byte) string {
+	sum := sha256.Sum256(content)
+	return hex.EncodeToString(sum[:])
+}
+
 func init() {
 	rootCmd.AddCommand(presetCmd)
 
@@ -448,6 +798,7 @@ func init() {
 	presetCmd.AddCommand(presetDisableCmd)
 	presetCmd.AddCommand(presetEnableBundleCmd)
 	presetCmd.AddCommand(presetDisableBundleCmd)
+	presetCmd.AddCommand(presetSyncCmd)
 
 	presetListCmd.Flags().BoolVar(&presetListEnabledOnly, "enabled-only", false, "Show only enabled presets")
 	presetListCmd.Flags().StringVar(&presetListBundle, "bundle", "", "Filter by bundle (security|quality)")
@@ -457,4 +808,8 @@ func init() {
 	presetDisableCmd.Flags().Bool("force", false, "Remove even when ownership metadata conflicts")
 	presetEnableBundleCmd.Flags().Bool("force", false, "Overwrite conflicting existing hooks")
 	presetDisableBundleCmd.Flags().Bool("force", false, "Remove hooks even when ownership metadata conflicts")
+
+	presetSyncCmd.Flags().BoolVar(&presetSyncDryRun, "dry-run", false, "Preview reconcile actions without mutating files")
+	presetSyncCmd.Flags().BoolVar(&presetSyncStrict, "strict", false, "Return non-zero when orphan factory entries are kept")
+	presetSyncCmd.Flags().BoolVar(&presetSyncPruneOrphans, "prune-orphans", false, "Remove orphan factory entries via managed lifecycle")
 }
