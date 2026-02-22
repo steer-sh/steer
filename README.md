@@ -71,6 +71,10 @@ steer remove no-var-hook
 steer preset list
 steer preset enable sql-injection-prevention
 steer preset enable-bundle security
+steer preset sync
+steer preset sync --dry-run
+steer preset sync --strict
+steer preset sync --prune-orphans
 
 # Verify staged content against active project hooks
 steer verify --staged
@@ -83,6 +87,13 @@ steer verify --changed --base origin/main --head HEAD
 ```
 
 All commands support `--scope project|global` (default: `project`).
+
+`steer preset sync` reconciles enabled factory presets in the selected scope against the embedded catalog:
+
+- re-installs missing/tampered/drifted factory preset hooks
+- auto-ensures internal factory protection presets
+- reports orphan factory entries (catalog source IDs no longer present)
+- keeps orphans by default, fails with `--strict`, and removes with `--prune-orphans`
 
 ## Git Enforcement
 
