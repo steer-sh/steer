@@ -154,3 +154,29 @@ func TestHashRuleStability(t *testing.T) {
 		t.Fatalf("expected whitespace-normalized hashes to match: %s %s %s", hashA, hashB, hashC)
 	}
 }
+
+func TestGeneratedHookVersionDefaultsToPromptVersion(t *testing.T) {
+	withProjectTempDir(t)
+
+	err := AddOrUpdateHook(ProjectScope, "generated-hook", ManifestEntry{
+		File:          "generated-hook.py",
+		Rule:          "never use var",
+		Source:        SourceGenerated,
+		PromptVersion: "factory-prompt-v2",
+	}, false)
+	if err != nil {
+		t.Fatalf("AddOrUpdateHook returned error: %v", err)
+	}
+
+	manifest, err := LoadManifest(ProjectScope)
+	if err != nil {
+		t.Fatalf("LoadManifest returned error: %v", err)
+	}
+	entry, ok := manifest.Hooks["generated-hook"]
+	if !ok {
+		t.Fatalf("expected generated-hook entry to exist")
+	}
+	if entry.HookVersion != "factory-prompt-v2" {
+		t.Fatalf("expected hook_version to default to prompt_version for generated hooks, got %q", entry.HookVersion)
+	}
+}

@@ -240,7 +240,7 @@ func init() {
 	registerCmd.MarkFlagRequired("rule")
 	registerCmd.Flags().StringVar(&registerSource, "source", claude.SourceManual, "Hook source metadata (manual|generated|factory)")
 	registerCmd.Flags().StringVar(&registerPromptVersion, "prompt-version", claude.DefaultPromptVersion, "Prompt/instruction version used to produce this hook")
-	registerCmd.Flags().StringVar(&registerHookVersion, "hook-version", claude.DefaultHookVersion, "Hook implementation revision")
+	registerCmd.Flags().StringVar(&registerHookVersion, "hook-version", "", "Hook implementation revision (optional; defaults to prompt-version for source=generated, otherwise manual)")
 	registerCmd.Flags().StringVar(&registerPromptModules, "prompt-modules", "", "Comma-separated prompt module names")
 	registerCmd.Flags().StringVar(&registerModel, "model", "", "Model used for generation (if applicable)")
 	registerCmd.Flags().StringVar(&registerSkillVersion, "skill-version", "", "Skill/package version used for generation")

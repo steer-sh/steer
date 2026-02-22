@@ -216,7 +216,11 @@ func AddOrUpdateHook(scope, hookName string, entry ManifestEntry, overwrite bool
 		entry.PromptVersion = DefaultPromptVersion
 	}
 	if strings.TrimSpace(entry.HookVersion) == "" {
-		entry.HookVersion = DefaultHookVersion
+		if entry.Source == SourceGenerated {
+			entry.HookVersion = entry.PromptVersion
+		} else {
+			entry.HookVersion = DefaultHookVersion
+		}
 	}
 	entry.SourceID = strings.TrimSpace(entry.SourceID)
 	entry.SourceVersion = strings.TrimSpace(entry.SourceVersion)

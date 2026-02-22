@@ -61,7 +61,11 @@ func normalizeInstallMetadata(metadata HookInstallMetadata) (HookInstallMetadata
 	}
 	metadata.HookVersion = strings.TrimSpace(metadata.HookVersion)
 	if metadata.HookVersion == "" {
-		metadata.HookVersion = DefaultHookVersion
+		if metadata.Source == SourceGenerated {
+			metadata.HookVersion = metadata.PromptVersion
+		} else {
+			metadata.HookVersion = DefaultHookVersion
+		}
 	}
 	metadata.Model = strings.TrimSpace(metadata.Model)
 	metadata.SkillVersion = strings.TrimSpace(metadata.SkillVersion)
