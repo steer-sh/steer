@@ -1,6 +1,10 @@
 # Simple Regex Hook Guidance
 
-Use this guidance when the rule targets simple keyword or pattern blocking: console.log, eval(), TODO/FIXME comments, var declarations, debugger statements, API key detection.
+Use this guidance when the rule targets simple keyword or pattern blocking: console.log, TODO/FIXME comments, var declarations, debugger statements, API key detection, and `eval()` in JavaScript/TypeScript.
+
+Do not use this specialist for Python `eval`/`exec`/`compile` rules — route those to `python-security.md`.
+Do not use this specialist for sensitive file/path references (`id_rsa`, `.env`, `keystore`, `wallet.dat`) or `process.env` enumeration rules — route those to `security-layer2.md`.
+Do not use this specialist for command-level env exposure or shell exfiltration rules — route those to `shell-lint.md`.
 
 ## Core Patterns
 
@@ -54,23 +58,39 @@ if re.search(r'\bvar\s+[a-zA-Z_$][a-zA-Z0-9_$]*', clean):
 
 ### API Key / Hardcoded Secret Detection
 
-Exclude secure patterns first to avoid false positives:
+Exclude secure patterns per line (or per match) to avoid false positives **without** suppressing real secrets elsewhere in the file:
 ```python
 secure_patterns = [
     r'process\.env\.\w+', r'os\.getenv\(', r'os\.environ\.',
     r'config\.\w+', r'settings\.\w+',
     r'your-\w+-here', r'XXXXXXX', r'example\.com', r'placeholder',
 ]
-is_secure = any(re.search(p, content_to_check, re.IGNORECASE) for p in secure_patterns)
+api_key_patterns = [
+    r'api_key\s*=\s*["\'][^"\']+["\']',
+    r'secret\s*=\s*["\'][^"\']+["\']',
+    r'sk_live_[a-zA-Z0-9]{24,}',  # Stripe
+    r'AKIA[0-9A-Z]{16}',  # AWS
+]
 
-if not is_secure:
-    api_key_patterns = [
-        r'api_key\s*=\s*["\'][^"\']+["\']',
-        r'secret\s*=\s*["\'][^"\']+["\']',
-        r'sk_live_[a-zA-Z0-9]{24,}',  # Stripe
-        r'AKIA[0-9A-Z]{16}',  # AWS
-    ]
+def line_has_secure_reference(line):
+    return any(re.search(p, line, re.IGNORECASE) for p in secure_patterns)
+
+for line in content_to_check.splitlines():
+    stripped = line.strip()
+    if not stripped or stripped.startswith(('#', '//', '/*', '*', '<!--')):
+        continue
+
+    # Skip only this line when it clearly uses secure sources/placeholders
+    if line_has_secure_reference(line):
+        continue
+
+    for pattern in api_key_patterns:
+        if re.search(pattern, line):
+            # block
+            pass
 ```
+
+Never use a file-wide gate like `is_secure = any(... content_to_check ...)` for secret detection. One secure reference in a file must not disable detection for other lines.
 
 ## Context-Aware Matching
 

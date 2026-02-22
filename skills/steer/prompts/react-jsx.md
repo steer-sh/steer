@@ -4,29 +4,31 @@ Use this guidance when the rule targets React patterns: hooks usage, component p
 
 ## The Challenge: JSX Parsing
 
-React JSX cannot be reliably parsed by Python's `ast` module or simple regex. Two strategies:
+React JSX cannot be reliably parsed by Python's `ast` module or simple regex. Prefer local/offline analysis first. Hook logic should not require internet access by default.
 
-### Strategy 1: Hybrid Python + Node.js (Most Accurate)
+### Strategy 1: Hybrid Python + Local Node.js Parser (Preferred)
 
-Generate a Python hook that embeds a Node.js analyzer script using `acorn` + `acorn-jsx` parsers:
+Generate a Python hook that embeds a Node.js analyzer script using locally available parsers (`acorn` + `acorn-jsx`, or `@babel/parser` if already present):
 
 ```python
 NODE_ANALYZER_SCRIPT = """
-import { Parser } from 'https://esm.sh/acorn@8.11.3';
-import jsx from 'https://esm.sh/acorn-jsx@5.3.2';
+import { Parser } from 'acorn';
+import jsx from 'acorn-jsx';
 const JsxParser = Parser.extend(jsx());
 // ... analysis logic
 """
 
-# Execute with: node --experimental-network-imports analyzer.mjs
+# Execute locally (no network imports)
 process = subprocess.run(
-    ['node', '--experimental-network-imports', analyzer_path],
+    ['node', analyzer_path],
     input=content_to_check,
     capture_output=True, text=True, timeout=30
 )
 ```
 
-### Strategy 2: Regex Fallback (Simpler, Less Accurate)
+If local parser execution fails or parser modules are unavailable, degrade to Strategy 2 and avoid crashing/blocking on parser setup issues.
+
+### Strategy 2: Regex + Brace Counting Fallback (Portable)
 
 For simpler rules, use regex with component detection:
 
@@ -37,6 +39,10 @@ component_regex = r'(?:const|function)\s+([A-Z][a-zA-Z0-9]*)\s*'
 # Find component body using brace counting (not regex!)
 # Then search within the component body
 ```
+
+### Strategy 3: Network Imports (Last Resort, Explicit)
+
+Only use network imports if the user explicitly requests it and the environment permits network access. Never make this the default path.
 
 ## Common React Patterns
 
@@ -66,7 +72,7 @@ For `.js`/`.ts` files, optionally check if they contain JSX-like patterns before
 
 ## TypeScript Handling
 
-When using the Node.js parser, handle TypeScript by stripping type annotations if parsing fails:
+When using a local Node.js parser, handle TypeScript by stripping type annotations if parsing fails:
 ```javascript
 const jsCode = sourceCode
     .replace(/interface\s+\w+\s*{[^}]*}/g, '')  // Remove interfaces

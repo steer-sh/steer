@@ -70,12 +70,11 @@ Before generating a hook, read the appropriate specialist prompt for domain-spec
 
 | Rule targets... | Read | Type |
 |---|---|---|
-| Simple keyword/pattern blocking (console.log, eval(), TODO, var, debugger) | [prompts/simple-regex.md](prompts/simple-regex.md) | detection |
-| Python security (subprocess, os.system, SQL injection, eval/exec, dangerous imports) | [prompts/python-security.md](prompts/python-security.md) | detection |
+| Simple keyword/pattern blocking (console.log, TODO, var, debugger, JS/TS eval()) | [prompts/simple-regex.md](prompts/simple-regex.md) | detection |
+| Python security (subprocess, os.system, SQL injection, Python eval/exec/compile, dangerous imports) | [prompts/python-security.md](prompts/python-security.md) | detection |
 | Python style (naming conventions, docstrings, mutable defaults, imports) | [prompts/python-style.md](prompts/python-style.md) | detection |
 | Terraform/HCL (resource config, tagging, security groups) | [prompts/terraform-hcl.md](prompts/terraform-hcl.md) | detection |
 | HTML (accessibility, XSS, semantic markup) | [prompts/generic-html.md](prompts/generic-html.md) | detection |
-| Prompt firewall (AI manipulation, system enumeration, sensitive paths) | [prompts/prompt-firewall.md](prompts/prompt-firewall.md) | detection |
 | Shell safety & Bash commands (command blocking, chaining, exfiltration, env exposure, dangerous flags) | [prompts/shell-lint.md](prompts/shell-lint.md) | **template-override** |
 | React/JSX (hooks, component patterns, data fetching) | [prompts/react-jsx.md](prompts/react-jsx.md) | detection |
 | Security Layer 2 (hardcoded secrets, postinstall scripts, env enumeration) | [prompts/security-layer2.md](prompts/security-layer2.md) | detection |
@@ -84,6 +83,19 @@ Before generating a hook, read the appropriate specialist prompt for domain-spec
 
 - **detection** specialists provide detection logic that plugs into the standard template from Step 2. The template skeleton stays the same.
 - **template-override** specialists provide their own complete hook template. When using a template-override specialist, **use their template instead of the one in Step 2**.
+
+### Routing Precedence (Secrets and Env Rules)
+
+Use these boundaries to avoid specialist selection ambiguity:
+
+- **API key/token patterns in code** (`sk_live`, `AKIA`, hardcoded `api_key=...`) → `simple-regex.md`
+- **Sensitive file/path references in code/config** (`id_rsa`, `.env`, `secrets.json`, `keystore`, `wallet.dat`) → `security-layer2.md`
+- **Code-level env enumeration** (`Object.keys(process.env)`, `for ... in process.env`, `...process.env`) → `security-layer2.md`
+- **Command-level env exposure and shell data exfiltration** (`env`, piping to network tools, dangerous shell command patterns) → `shell-lint.md`
+
+Tie-break guidance:
+- If a rule says "prevent secret exposure" or "prevent env exposure" without details, read **both** `simple-regex.md` and `security-layer2.md`.
+- If the same rule also targets Bash command behavior, also read `shell-lint.md` and use its template as the base.
 
 **If the rule doesn't clearly fit one category**, use the general protocol below without reading a specialist prompt.
 
@@ -233,7 +245,6 @@ Use the bundled steer CLI to register the hook. The binary is at `${CLAUDE_PLUGI
 "${CLAUDE_PLUGIN_ROOT}/scripts/steer" register <scope>/hooks/<rule-name>-hook.py --rule "<original rule text>" --scope <project|global> \
   --source generated \
   --prompt-version "<prompt_version from SKILL.md frontmatter>" \
-  --hook-version "<hook_version_or_manual>" \
   --prompt-modules "<comma,separated,modules>" \
   --model "<your model name from system prompt>" \
   --self-test '{"passed":true,"positive_pass":2,"positive_fail":0,"negative_pass":2,"negative_fail":0}'
@@ -250,7 +261,7 @@ This atomically:
 - Registers only the master hook in settings.json (preserving non-steer hooks)
 - Adds the rule to the matching CLAUDE.md under `## Steer Rules`
 
-The `--prompt-version` value MUST come from this file's YAML frontmatter — do not guess or hallucinate a version number. If other optional metadata is unavailable, omit those flags and let CLI defaults apply.
+The `--prompt-version` value MUST come from this file's YAML frontmatter — do not guess or hallucinate a version number. For generated hooks, when `--hook-version` is omitted the CLI automatically derives it from `--prompt-version`. If other optional metadata is unavailable, omit those flags and let CLI defaults apply.
 
 ### Step 5: Test the Hook (MANDATORY)
 

@@ -2,6 +2,10 @@
 
 Use this guidance when the rule targets shell/CLI behavior: command blocking (rm -rf, chmod 777, curl piping), command chaining, data exfiltration, environment exposure, pipeline complexity, or dangerous flags.
 
+Routing boundary:
+- Use `security-layer2.md` for code-level `process.env` enumeration and sensitive file/path string references.
+- Use `simple-regex.md` for API key/token literal patterns in source code.
+
 **This is a template-override specialist.** Use the template below instead of the standard Step 2 template.
 
 ## Template

@@ -2,6 +2,10 @@
 
 Use this guidance when the rule targets: hardcoded secret references, supply chain attacks (postinstall scripts), environment variable enumeration, sensitive file detection.
 
+Routing boundary:
+- Use `simple-regex.md` for API key/token literal patterns (e.g., `sk_live`, `AKIA`, `api_key="..."`).
+- Use `shell-lint.md` for command-level env exposure (`env` command), shell pipelines, and Bash exfiltration behavior.
+
 ## Hardcoded Secrets Detection
 
 ### Sensitive File Patterns

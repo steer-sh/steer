@@ -40,12 +40,27 @@ for match in blank_links:
 
 ## Accessibility Patterns
 
-### Missing Alt Text
+### Missing/Empty Alt Text
 ```python
 img_tags = re.finditer(r'<img[^>]*>', content_to_check, re.IGNORECASE)
 for match in img_tags:
-    if 'alt=' not in match.group(0).lower():
-        # block
+    tag = match.group(0)
+    alt_match = re.search(r'\balt\s*=\s*(["\'])(.*?)\1', tag, re.IGNORECASE | re.DOTALL)
+    if not alt_match:
+        # block - missing alt attribute
+        continue
+
+    alt_text = re.sub(r'\s+', ' ', alt_match.group(2)).strip()
+    if not alt_text:
+        # block - empty alt value
+        continue
+
+    # Optional "meaningful text" heuristic for strict accessibility rules.
+    # Use only when the user explicitly asks for meaningful/descriptive alt text.
+    low_signal_alt = {'image', 'img', 'photo', 'picture', 'placeholder', 'todo'}
+    if alt_text.lower() in low_signal_alt:
+        # block - non-descriptive alt text
+        continue
 ```
 
 ### Form Inputs Without Labels

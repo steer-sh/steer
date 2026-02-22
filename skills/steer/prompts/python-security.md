@@ -1,6 +1,8 @@
 # Python Security Hook Guidance
 
-Use this guidance when the rule targets Python security concerns: subprocess/os.system command injection, SQL injection, eval/exec, dangerous imports.
+Use this guidance when the rule targets Python security concerns: subprocess/os.system command injection, SQL injection, Python `eval`/`exec`/`compile`, dangerous imports.
+
+Route JavaScript/TypeScript `eval()` rules to `simple-regex.md`.
 
 ## Detection Strategy: Always Use AST
 
@@ -55,11 +57,11 @@ subprocess.run(full_command, shell=True)  # full_command is a Name node, NOT a J
 **Pattern 3 is the hardest to detect.** The subprocess argument is a variable (`ast.Name` node), not an f-string or a direct `shlex.quote()` call. Your hook MUST trace variables back to their assignments.
 
 To detect safe quoting, check if:
-1. The module `shlex` is imported
-2. The argument is a direct `shlex.quote()` call → ALLOW
-3. The argument is an f-string (JoinedStr) and shlex is imported → ALLOW
-4. **The argument is a variable (Name node) and shlex is imported** → trace the variable's assignment in the same function scope; if it was built from shlex-quoted parts or an f-string with shlex context → ALLOW
-5. The function name suggests safety (e.g., `_safe`, `_quoted`, `with_shell_safe`)
+1. The argument is a direct `shlex.quote()` call (or `from shlex import quote` alias) → ALLOW
+2. The argument is an f-string (JoinedStr) where **every interpolated value** is proven safe (quoted with `shlex.quote()` or traced to a previously proven-safe variable) → ALLOW
+3. **The argument is a variable (Name node)** → trace the variable assignment in the same function scope; allow only if it was built from safe quoted parts
+4. If safety cannot be proven structurally, **BLOCK**
+5. Never treat naming hints (e.g., `_safe`, `_quoted`) as proof of safety
 
 ### Reference AST Visitor
 
@@ -67,40 +69,87 @@ To detect safe quoting, check if:
 class CommandInjectionVisitor(ast.NodeVisitor):
     def __init__(self):
         self.violations = []
-        self.has_shlex_import = False
-        self.safe_vars = set()  # Track variables assigned from shlex.quote() or safe f-strings
+        self.safe_vars = set()  # Variables proven to contain shell-safe fragments
+        self.literal_string_vars = set()  # Variables assigned static string literals
+        self.shlex_aliases = {'shlex'}  # import shlex as sx -> track sx
+        self.quote_aliases = set()  # from shlex import quote as q -> track q
 
     def visit_Import(self, node):
         for alias in node.names:
             if alias.name == 'shlex':
-                self.has_shlex_import = True
+                self.shlex_aliases.add(alias.asname or alias.name)
+        self.generic_visit(node)
+
+    def visit_ImportFrom(self, node):
+        if node.module == 'shlex':
+            for alias in node.names:
+                if alias.name == 'quote':
+                    self.quote_aliases.add(alias.asname or alias.name)
         self.generic_visit(node)
 
     def visit_Assign(self, node):
-        """Track variables assigned from shlex.quote() calls or safe f-strings"""
-        if self.has_shlex_import:
-            for target in node.targets:
-                if isinstance(target, ast.Name):
-                    if self._value_is_shlex_safe(node.value):
-                        self.safe_vars.add(target.id)
+        """Track variables assigned from safe shell expressions."""
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                if self._value_is_shlex_safe(node.value):
+                    self.safe_vars.add(target.id)
+                if self._is_static_string(node.value):
+                    self.literal_string_vars.add(target.id)
         self.generic_visit(node)
 
-    def _value_is_shlex_safe(self, node):
-        """Check if a value comes from shlex.quote() or an f-string in shlex context"""
-        # Direct shlex.quote() call
+    def _is_shlex_quote_call(self, node):
         if isinstance(node, ast.Call):
-            if (isinstance(node.func, ast.Attribute) and
-                isinstance(node.func.value, ast.Name) and
-                node.func.value.id == 'shlex' and node.func.attr == 'quote'):
+            # shlex.quote(x) with module alias support
+            if (
+                isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id in self.shlex_aliases
+                and node.func.attr == 'quote'
+            ):
                 return True
-        # f-string when shlex is imported (conservative: assume safe quoting)
-        if isinstance(node, ast.JoinedStr) and self.has_shlex_import:
+            # quote(x) from "from shlex import quote" (with alias support)
+            if isinstance(node.func, ast.Name) and node.func.id in self.quote_aliases:
+                return True
+        return False
+
+    def _formatted_value_is_safe(self, formatted_value):
+        """Allow only proven-safe dynamic fragments inside f-strings."""
+        expr = formatted_value.value
+        if self._is_shlex_quote_call(expr):
             return True
-        # List comprehension with shlex.quote inside
+        if isinstance(expr, ast.Name) and (
+            expr.id in self.safe_vars or expr.id in self.literal_string_vars
+        ):
+            return True
+        # Allow " ".join(quoted_args) if quoted_args was already proven safe
+        if (
+            isinstance(expr, ast.Call)
+            and isinstance(expr.func, ast.Attribute)
+            and expr.func.attr == 'join'
+            and all(isinstance(arg, ast.Name) and arg.id in self.safe_vars for arg in expr.args)
+        ):
+            return True
+        return False
+
+    def _joinedstr_is_shlex_safe(self, node):
+        has_dynamic = False
+        for value in node.values:
+            if isinstance(value, ast.FormattedValue):
+                has_dynamic = True
+                if not self._formatted_value_is_safe(value):
+                    return False
+        return has_dynamic
+
+    def _value_is_shlex_safe(self, node):
+        """Check if a value is provably shell-safe."""
+        if self._is_shlex_quote_call(node):
+            return True
+        if isinstance(node, ast.JoinedStr):
+            return self._joinedstr_is_shlex_safe(node)
+        if isinstance(node, ast.Name):
+            return node.id in self.safe_vars
         if isinstance(node, ast.ListComp):
-            elt = node.elt
-            if self._value_is_shlex_safe(elt):
-                return True
+            return self._value_is_shlex_safe(node.elt)
         return False
 
     def visit_Call(self, node):
@@ -146,23 +195,8 @@ class CommandInjectionVisitor(ast.NodeVisitor):
         return isinstance(node, ast.Constant) and isinstance(node.value, str)
 
     def _uses_shlex_quote(self, node):
-        """Check if the expression uses shlex.quote() for safe escaping"""
-        # Direct shlex.quote() call
-        if isinstance(node, ast.Call):
-            if (isinstance(node.func, ast.Attribute) and
-                isinstance(node.func.value, ast.Name) and
-                node.func.value.id == 'shlex' and node.func.attr == 'quote'):
-                return True
-        # f-string when shlex is imported
-        if isinstance(node, ast.JoinedStr) and self.has_shlex_import:
-            return True
-        # Variable that was previously assigned from a safe source
-        if isinstance(node, ast.Name) and node.id in self.safe_vars:
-            return True
-        # Variable - if shlex is imported, check if it's likely safe
-        if isinstance(node, ast.Name) and self.has_shlex_import:
-            return node.id in self.safe_vars
-        return False
+        """Check if the expression is structurally proven safe."""
+        return self._value_is_shlex_safe(node)
 ```
 
 ## SQL Injection Prevention
@@ -190,6 +224,16 @@ class SQLInjectionVisitor(ast.NodeVisitor):
             if isinstance(node.left.value, str):
                 if any(kw in node.left.value.upper() for kw in self.SQL_KEYWORDS):
                     self.violations.append((node.lineno, "%-formatting with SQL keywords"))
+        self.generic_visit(node)
+
+    def visit_Call(self, node):
+        """.format() on SQL string literals"""
+        if (isinstance(node.func, ast.Attribute)
+                and node.func.attr == 'format'
+                and isinstance(node.func.value, ast.Constant)
+                and isinstance(node.func.value.value, str)):
+            if any(kw in node.func.value.value.upper() for kw in self.SQL_KEYWORDS):
+                self.violations.append((node.lineno, ".format() with SQL keywords"))
         self.generic_visit(node)
 ```
 
