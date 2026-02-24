@@ -7,3 +7,6 @@ CLAUDE.md
 .claude/
 *.html
 statusline.md
+GEMINI.md
+plugin*.md
+discover-plugins.md

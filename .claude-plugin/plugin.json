@@ -3,9 +3,12 @@
   "version": "0.1.0",
   "description": "Generate Claude Code hooks from natural language rules to enforce coding standards, security policies, and best practices",
   "author": {
-    "name": "steer"
+    "name": "Jeremy Janzen",
+    "url": "https://steer.sh"
   },
-  "repository": "https://github.com/steer-sh/steer-skill",
+  "homepage": "https://steer.sh",
+  "repository": "FILL_IN_THE_BLANK",
   "license": "MIT",
-  "keywords": ["hooks", "code-quality", "security", "linting", "enforcement"]
+  "keywords": ["hooks", "code-quality", "security", "linting", "enforcement"],
+  "skills": ["./skills/steer"]
 }
