@@ -4,8 +4,33 @@
 
 If you care about preventing repeated mistakes, policy drift, or security regressions while coding with AI assistance, this gives you a practical enforcement layer with low operational overhead.
 
+## Install as Claude Code Plugin
+
+```bash
+claude plugin add github:steer-sh/steer-skill
+```
+
+This gives you the `/steer` command inside Claude Code. The plugin includes prebuilt binaries for all supported platforms — no additional setup required.
+
+## Install Standalone CLI
+
+If you want to use `steer` outside of Claude Code (CI pipelines, scripts, shell workflows):
+
+```bash
+bash scripts/install-prebuilt.sh            # user install (~/.local/bin/steer)
+bash scripts/install-prebuilt.sh --system   # system-wide (/usr/local/bin/steer)
+```
+
+Or build from source:
+
+```bash
+cd cli && bash build.sh              # build all platforms
+cd cli && bash build.sh --install    # build + install current platform to /usr/local/bin
+```
+
 ## What This Repo Contains
 
+- `.claude-plugin/plugin.json`: plugin manifest for Claude Code plugin system.
 - `skills/steer/SKILL.md`: the steer skill prompt and workflow used by `/steer`.
 - `cli/`: Go CLI source (`register`, `list`, `test`, `remove`, `preset`, `verify`, `git-hooks`).
 - `bin/`: prebuilt binaries for:
@@ -15,7 +40,8 @@ If you care about preventing repeated mistakes, policy drift, or security regres
   - `linux-arm64`
   - `windows-amd64`
 - `scripts/steer` and `scripts/steer.cmd`: platform launchers that dispatch to the correct binary.
-- `tests/`: headless generation + canonical fixture validation harness.
+- `scripts/install-prebuilt.sh`: standalone CLI installer for use outside the plugin system.
+- `tests/`: headless generation + canonical fixture validation harness (dev only).
 
 ## How Steer Works
 
@@ -118,23 +144,6 @@ Typical setup:
 1. Run `steer git-hooks install` once per repo for local pre-commit checks.
 2. Add `steer verify --changed --base <sha> --head <sha>` as a required CI check on pull requests.
 
-## Build / Install From Source
-
-Build all supported binaries:
-
-```bash
-cd cli
-bash build.sh
-```
-
-Optional local install of the current platform binary to `/usr/local/bin`:
-
-```bash
-cd cli
-bash build.sh --install
-```
-
-If using this as a Claude plugin, use the included launcher scripts (`scripts/steer` on macOS/Linux, `scripts/steer.cmd` on Windows).
 
 ## Test Harness
 
