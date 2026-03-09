@@ -72,7 +72,6 @@ func addOrphanFactoryHook(t *testing.T, scope, hookName, sourceID, rule string) 
 		FileName: hookName + ".py",
 		Rule:     rule,
 		Content:  []byte("#!/usr/bin/env python3\n\ndef main():\n    return\n"),
-		Force:    true,
 		Metadata: claude.HookInstallMetadata{
 			Source:        claude.SourceFactory,
 			SourceID:      sourceID,

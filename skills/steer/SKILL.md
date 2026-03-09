@@ -239,21 +239,17 @@ After determining scope:
 
 ### Step 4: Register the Hook
 
-Use the bundled steer CLI to register the hook. The binary is at `${CLAUDE_PLUGIN_ROOT}/scripts/steer`:
+Use the steer CLI to register the hook. Use `steer` from PATH if available, otherwise fall back to `${CLAUDE_PLUGIN_ROOT}/scripts/steer`. Run a **single command** — do not try one and then the other:
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/scripts/steer" register <scope>/hooks/<rule-name>-hook.py --rule "<original rule text>" --scope <project|global> \
+STEER_BIN="${CLAUDE_PLUGIN_ROOT:+${CLAUDE_PLUGIN_ROOT}/scripts/steer}"
+STEER_BIN="${STEER_BIN:-steer}"
+"${STEER_BIN}" register <scope>/hooks/<rule-name>-hook.py --rule "<original rule text>" --scope <project|global> \
   --source generated \
   --prompt-version "<prompt_version from SKILL.md frontmatter>" \
   --prompt-modules "<comma,separated,modules>" \
   --model "<your model name from system prompt>" \
   --self-test '{"passed":true,"positive_pass":2,"positive_fail":0,"negative_pass":2,"negative_fail":0}'
-```
-
-If `${CLAUDE_PLUGIN_ROOT}` is not set, fall back to finding the steer binary in PATH:
-
-```bash
-steer register <scope>/hooks/<rule-name>-hook.py --rule "<original rule text>" --scope <project|global>
 ```
 
 This atomically:

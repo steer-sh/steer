@@ -22,7 +22,6 @@ var registerPromptModules string
 var registerModel string
 var registerSkillVersion string
 var registerSelfTest string
-var registerForce bool
 
 var registerCmd = &cobra.Command{
 	Use:   "register <hook-path>",
@@ -37,7 +36,6 @@ steer-managed artifacts in sync:
 Optional provenance flags can be used to persist generation metadata.`,
 	Example: `  steer register .claude/hooks/no-var-hook.py --rule "never use var | use const or let"
   steer register /tmp/my-hook.py --rule "block TODO in prod files" --scope global
-  steer register .claude/hooks/no-var-hook.py --rule "never use var" --force
   steer register .claude/hooks/sql-hook.py --rule "block SQL f-strings" --source generated --prompt-version v1 --hook-version h1`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -87,7 +85,6 @@ Optional provenance flags can be used to persist generation metadata.`,
 			FileName: fileName,
 			Rule:     rule,
 			Content:  content,
-			Force:    registerForce,
 			Metadata: claude.HookInstallMetadata{
 				Source:        registerSource,
 				PromptVersion: registerPromptVersion,
@@ -245,5 +242,4 @@ func init() {
 	registerCmd.Flags().StringVar(&registerModel, "model", "", "Model used for generation (if applicable)")
 	registerCmd.Flags().StringVar(&registerSkillVersion, "skill-version", "", "Skill/package version used for generation")
 	registerCmd.Flags().StringVar(&registerSelfTest, "self-test", "", "Self-test summary JSON or compact form: passed,positive_pass,positive_fail,negative_pass,negative_fail")
-	registerCmd.Flags().BoolVar(&registerForce, "force", false, "Overwrite conflicting existing hook and metadata")
 }

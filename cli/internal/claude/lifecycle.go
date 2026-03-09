@@ -27,7 +27,6 @@ type InstallManagedHookInput struct {
 	FileName string
 	Rule     string
 	Content  []byte
-	Force    bool
 	Metadata HookInstallMetadata
 }
 
@@ -186,17 +185,6 @@ func InstallManagedHook(scope string, input InstallManagedHookInput) (*InstallMa
 	}
 
 	existingEntry, manifestExists := manifest.Hooks[hookName]
-	if manifestExists && !input.Force {
-		return nil, fmt.Errorf("hook already registered: %s (use --force to overwrite)", hookName)
-	}
-
-	if _, err := os.Stat(targetPath); err == nil {
-		if !input.Force && !manifestExists {
-			return nil, fmt.Errorf("hook file already exists: %s (use --force to overwrite)", targetPath)
-		}
-	} else if !os.IsNotExist(err) {
-		return nil, fmt.Errorf("failed to check target hook file: %w", err)
-	}
 
 	now := time.Now().Format("2006-01-02")
 	created := existingEntry.Created

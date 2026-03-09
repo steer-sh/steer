@@ -131,8 +131,8 @@ func TestSelfProtectionBlocksFactoryMutations(t *testing.T) {
 	}{
 		{name: "remove factory hook", command: "steer remove sql-injection-prevention"},
 		{name: "disable factory preset", command: "steer preset disable sql-injection-prevention"},
-		{name: "register force collision", command: "steer register .claude/hooks/sql-injection-prevention.py --rule \"x\" --force"},
-		{name: "demote force collision", command: "steer register .claude/hooks/sql-injection-prevention.py --rule \"x\" --source manual --force"},
+		{name: "register collision", command: "steer register .claude/hooks/sql-injection-prevention.py --rule \"x\""},
+		{name: "demote collision", command: "steer register .claude/hooks/sql-injection-prevention.py --rule \"x\" --source manual"},
 	}
 
 	for _, tc := range tests {
@@ -156,7 +156,7 @@ func TestSelfProtectionAllowsUserMutationsAndReadOnlyOps(t *testing.T) {
 		command string
 	}{
 		{name: "remove user hook", command: "steer remove user-custom"},
-		{name: "register force user hook", command: "steer register .claude/hooks/user-custom.py --rule \"x\" --force"},
+		{name: "register user hook", command: "steer register .claude/hooks/user-custom.py --rule \"x\""},
 		{name: "preset list", command: "steer preset list"},
 		{name: "preset enable", command: "steer preset enable sql-injection-prevention"},
 		{name: "preset sync", command: "steer preset sync --dry-run"},

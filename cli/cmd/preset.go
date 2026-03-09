@@ -523,7 +523,6 @@ func installFactoryPreset(scope string, catalog *presets.Catalog, item presets.C
 		FileName: item.HookFile,
 		Rule:     item.Rule,
 		Content:  content,
-		Force:    force,
 		Metadata: claude.HookInstallMetadata{
 			Source:        claude.SourceFactory,
 			SourceID:      item.Name,

@@ -171,6 +171,10 @@ Run the full suite:
 python3 tests/run_tests.py
 ```
 
+## Supported Models
+
+Steer is tested and certified with **Claude Opus 4.6** (medium reasoning). You can use any Anthropic model to generate hooks via `/steer`, but hook quality and test pass rates are only validated against that configuration.
+
 ## Testing Notes
 
 - Tests invoke Claude in headless mode via `/steer --headless ...` and require a working `claude` CLI.

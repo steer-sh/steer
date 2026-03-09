@@ -277,8 +277,8 @@ def evaluate_bash_command(command_text, factory_names, factory_files, factory_pa
 
     if operation == "register":
         target = first_positional(args)
-        if has_flag(args, "--force") and is_factory_identifier(target, factory_names, factory_files, factory_paths):
-            return "Blocking force register collision against a factory-managed hook."
+        if is_factory_identifier(target, factory_names, factory_files, factory_paths):
+            return "Blocking register collision against a factory-managed hook."
         return None
 
     if not shell_command_mutates(tokens):
