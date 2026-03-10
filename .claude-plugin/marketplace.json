@@ -1,0 +1,27 @@
+{
+  "name": "steer-marketplace",
+  "owner": {
+    "name": "Jeremy Janzen"
+  },
+  "metadata": {
+    "description": "Steer plugin marketplace — hook generation and enforcement for Claude Code",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "steer",
+      "source": "./",
+      "strict": false,
+      "description": "Generate Claude Code hooks from natural language rules to enforce coding standards, security policies, and best practices",
+      "version": "0.1.0",
+      "author": {
+        "name": "Jeremy Janzen"
+      },
+      "homepage": "https://steer.sh",
+      "repository": "https://github.com/steer-sh/steer-skill",
+      "license": "MIT",
+      "keywords": ["hooks", "code-quality", "security", "linting", "enforcement"],
+      "skills": ["."]
+    }
+  ]
+}

@@ -15,7 +15,7 @@ Installs the `/steer` skill into Claude Code (and any other [Agent Skills](https
 ### Claude Code Plugin (alternative install path)
 
 ```bash
-claude plugin marketplace add steer-sh/steer-marketplace
+claude plugin marketplace add steer-sh/steer-skill
 claude plugin install steer@steer-marketplace
 ```
 
@@ -37,8 +37,9 @@ cd cli && bash build.sh --install    # build + install current platform to /usr/
 
 ## What This Repo Contains
 
-- `.claude-plugin/plugin.json`: plugin manifest for Claude Code plugin system.
-- `skills/steer/SKILL.md`: the steer skill prompt and workflow used by `/steer`.
+- `.claude-plugin/marketplace.json`: plugin manifest and marketplace catalog (monorepo — plugin and marketplace in one repo).
+- `SKILL.md`: the steer skill prompt and workflow used by `/steer`.
+- `prompts/`: specialist prompt modules for domain-specific hook generation.
 - `cli/`: Go CLI source (`register`, `list`, `test`, `remove`, `preset`, `verify`, `git-hooks`).
 - `bin/`: prebuilt binaries for:
   - `darwin-amd64`
