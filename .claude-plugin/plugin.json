@@ -7,7 +7,7 @@
     "url": "https://steer.sh"
   },
   "homepage": "https://steer.sh",
-  "repository": "FILL_IN_THE_BLANK",
+  "repository": "https://github.com/steer-sh/steer-skill",
   "license": "MIT",
   "keywords": ["hooks", "code-quality", "security", "linting", "enforcement"],
   "skills": ["./skills/steer"]

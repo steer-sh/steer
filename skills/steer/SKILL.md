@@ -1,8 +1,10 @@
 ---
 name: steer
-description: Generate Claude Code hooks from natural language rules to enforce coding standards, security policies, and best practices
+description: Generates and installs PreToolUse Python hooks from natural language rules. Use when enforcing coding standards, blocking insecure patterns, managing hook lifecycle, or running steer CLI commands (register, remove, list, test, preset, verify, git-hooks).
 user-invocable: true
 prompt_version: 1
+compatibility: Requires Claude Code with hooks support (PreToolUse). Hooks are installed into .claude/hooks/ and registered in settings.json. steer CLI must be available on PATH or bundled under skills/steer/scripts/.
+allowed-tools: Bash(steer *), Bash(python3 *), Bash(echo *), Read, Write
 ---
 
 # Steer - Hook Generation from Natural Language Rules

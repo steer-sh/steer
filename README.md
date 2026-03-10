@@ -4,13 +4,20 @@
 
 If you care about preventing repeated mistakes, policy drift, or security regressions while coding with AI assistance, this gives you a practical enforcement layer with low operational overhead.
 
-## Install as Claude Code Plugin
+## Install
 
 ```bash
-claude plugin add github:steer-sh/steer-skill
+npx skills add steer-sh/steer-skill
 ```
 
-This gives you the `/steer` command inside Claude Code. The plugin includes prebuilt binaries for all supported platforms — no additional setup required.
+Installs the `/steer` skill into Claude Code (and any other [Agent Skills](https://agentskills.io)-compatible tool).
+
+### Claude Code Plugin (alternative install path)
+
+```bash
+claude plugin marketplace add steer-sh/steer-marketplace
+claude plugin install steer@steer-marketplace
+```
 
 ## Install Standalone CLI
 
