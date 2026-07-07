@@ -1,8 +1,13 @@
 # steer-skill
 
-`steer` turns natural-language rules into enforceable Claude Code guardrails. Instead of relying on memory, code review luck, or lint configs that do not match your actual policy intent, steer generates real hook scripts, installs them into Claude Code, and keeps rule state synchronized across settings and documentation.
+`steer` turns natural-language rules into enforceable Claude Code guardrails. You describe a rule once; steer generates a deterministic Python hook, self-tests it against boundary cases, installs it, and keeps rule state synchronized across settings and documentation. You pay generation cost once — enforcement is then free and instant on every tool call.
 
-If you care about preventing repeated mistakes, policy drift, or security regressions while coding with AI assistance, this gives you a practical enforcement layer with low operational overhead.
+Two things distinguish this from a linter:
+
+- **It blocks before the write, and tells the agent what to do instead.** The hook fires at tool time, and its `stopReason` carries your suggested alternative (the `detect | suggest` syntax below) — so the agent self-corrects in the same turn. A linter reports a problem for a human to triage later; steer redirects the agent to your preferred pattern immediately.
+- **It covers shell commands, not just file content.** A rule like "block piping file-reading commands to network tools" intercepts `cat .env | curl ...` at the Bash tool.
+
+Steer enforces lexical and syntactic rules: patterns, imports, call forms, command shapes. Broader semantic rules ("no business logic in controllers") are handled by negotiating them down to a concrete, enforceable rule during creation — the interactive flow asks clarifying questions until the rule is precise enough to compile.
 
 ## Install
 
@@ -87,6 +92,8 @@ Steer gives you two enforcement layers:
 - Hard steer: hook-level block/allow decisions at tool time.
 - Soft steer: rule text persisted into `CLAUDE.md` (`## Steer Rules`) so the assistant is continually nudged by project policy even before a hard block fires.
 
+In practice the soft layer prevents most violations before any hook fires; the hard layer is the deterministic backstop for the rest.
+
 ## CLI Workflow
 
 ```bash
@@ -136,7 +143,7 @@ All commands support `--scope project|global` (default: `project`).
 
 ## Git Enforcement
 
-Use these commands to enforce rules for humans writing code in git workflows.
+Tool-time hooks are not a sandbox — content produced through indirect means (a Bash heredoc, a generator script) can slip past them. Commit-time verification applies the same rule corpus as a backstop, and extends enforcement to humans writing code in git workflows.
 
 ```bash
 # Local: verify staged/index content before commit
