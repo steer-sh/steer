@@ -300,6 +300,14 @@ The hardest bugs to find are false positives on safe code that *looks* like the 
 
 **If the rule uses `|` suggestion syntax**, add one test that verifies the `stopReason` output contains the user's suggestion text. Pipe a positive test case and check that the JSON output includes the suggestion. The user chose those words deliberately — the stopReason must include them.
 
+**Verify the consolidated master hook (MANDATORY).** Registration (Step 4) consolidates your hook into `<scope>/hooks/steer-hooks.py`, and consolidation rewrites the code — it can break a hook that passed every individual test. After registration, re-run at least one positive and one negative case through the master:
+
+```bash
+echo '{"tool_name":"Write","tool_input":{"file_path":"test.js","content":"console.log(1)"}}' | python3 <scope>/hooks/steer-hooks.py
+```
+
+The positive case must produce `"decision": "block"` from the master itself. If the master allows what the individual hook blocks, the consolidated output is broken — report it as a steer CLI bug and do not report the hook as successfully installed.
+
 ### Step 6: Report to User
 
 After all tests pass, report:

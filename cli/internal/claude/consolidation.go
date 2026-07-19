@@ -22,6 +22,17 @@ type HookFunction struct {
 	OriginalName    string
 	Code            string
 	HelperFunctions []HelperFunction
+	Constants       []ModuleConstant
+}
+
+// ModuleConstant is a top-level assignment in a hook file (e.g. a compiled
+// regex) that main() or helpers reference. Constants must be carried into the
+// master hook or those references fail at runtime — silently, because the
+// master swallows hook exceptions.
+type ModuleConstant struct {
+	Name         string
+	PrefixedName string
+	Code         string
 }
 
 // HelperFunction represents a helper function within a hook.
@@ -185,19 +196,35 @@ func parseHookFile(filePath string) (HookFunction, []string, error) {
 	}
 
 	helpers := extractHelperFunctions(contentStr, funcName)
+	constants := extractModuleConstants(contentStr, funcName)
 
-	// Update helper references in helper bodies and in main body.
+	// Update helper and constant references in helper bodies, constant
+	// bodies, and the main body.
 	for i := range helpers {
 		updated := helpers[i].Code
 		for _, helper := range helpers {
 			updated = replaceFunctionCalls(updated, helper.Name, helper.PrefixedName)
 		}
+		for _, c := range constants {
+			updated = replaceIdentifier(updated, c.Name, c.PrefixedName)
+		}
 		helpers[i].Code = updated
+	}
+
+	for i := range constants {
+		updated := constants[i].Code
+		for _, c := range constants {
+			updated = replaceIdentifier(updated, c.Name, c.PrefixedName)
+		}
+		constants[i].Code = updated
 	}
 
 	updatedMain := mainFunc
 	for _, helper := range helpers {
 		updatedMain = replaceFunctionCalls(updatedMain, helper.Name, helper.PrefixedName)
+	}
+	for _, c := range constants {
+		updatedMain = replaceIdentifier(updatedMain, c.Name, c.PrefixedName)
 	}
 
 	return HookFunction{
@@ -205,6 +232,7 @@ func parseHookFile(filePath string) (HookFunction, []string, error) {
 		OriginalName:    filename,
 		Code:            updatedMain,
 		HelperFunctions: helpers,
+		Constants:       constants,
 	}, extractImports(contentStr), nil
 }
 
@@ -360,6 +388,131 @@ func replaceFunctionCalls(code, oldName, newName string) string {
 	return callRegex.ReplaceAllString(code, newName+"(")
 }
 
+func replaceIdentifier(code, oldName, newName string) string {
+	idRegex := regexp.MustCompile(`\b` + regexp.QuoteMeta(oldName) + `\b`)
+	return idRegex.ReplaceAllString(code, newName)
+}
+
+// extractModuleConstants collects top-level assignment statements (constants,
+// compiled regexes, lookup tables) so they survive consolidation. Statements
+// spanning multiple lines are consumed with a string-aware bracket scanner.
+func extractModuleConstants(content, hookPrefix string) []ModuleConstant {
+	lines := strings.Split(content, "\n")
+	assignRegex := regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)\s*=(?:[^=]|$)`)
+
+	constants := make([]ModuleConstant, 0)
+	var docState pyLineState
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+
+		// Track module-level (doc)strings so their content is never
+		// mistaken for an assignment.
+		if docState.inTriple {
+			scanPythonLine(line, &docState)
+			continue
+		}
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, `"""`) || strings.HasPrefix(trimmed, "'''") {
+			scanPythonLine(line, &docState)
+			continue
+		}
+
+		if !isTopLevel(line) {
+			continue
+		}
+
+		// Skip block statements: their bodies are indented and therefore
+		// non-top-level, but the header line itself must not be scanned.
+		if strings.HasPrefix(trimmed, "def ") || strings.HasPrefix(trimmed, "class ") ||
+			strings.HasPrefix(trimmed, "if ") || strings.HasPrefix(trimmed, "@") ||
+			strings.HasPrefix(trimmed, "try") || strings.HasPrefix(trimmed, "with ") ||
+			strings.HasPrefix(trimmed, "for ") || strings.HasPrefix(trimmed, "while ") {
+			continue
+		}
+
+		match := assignRegex.FindStringSubmatch(line)
+		if match == nil {
+			continue
+		}
+
+		stmt := []string{line}
+		var state pyLineState
+		depth := scanPythonLine(line, &state)
+		for (depth > 0 || state.inTriple) && i+1 < len(lines) {
+			i++
+			stmt = append(stmt, lines[i])
+			depth += scanPythonLine(lines[i], &state)
+		}
+
+		constants = append(constants, ModuleConstant{
+			Name:         match[1],
+			PrefixedName: hookPrefix + "_" + match[1],
+			Code:         strings.Join(stmt, "\n"),
+		})
+	}
+
+	return constants
+}
+
+// pyLineState carries multi-line string state across scanPythonLine calls.
+type pyLineState struct {
+	inTriple bool
+	tripleCh byte
+}
+
+// scanPythonLine returns the bracket-depth delta of one line, ignoring
+// brackets inside string literals and comments. Good enough for statement
+// boundary detection; not a full tokenizer.
+func scanPythonLine(line string, state *pyLineState) int {
+	depth := 0
+	for i := 0; i < len(line); {
+		c := line[i]
+
+		if state.inTriple {
+			if c == state.tripleCh && strings.HasPrefix(line[i:], strings.Repeat(string(state.tripleCh), 3)) {
+				state.inTriple = false
+				i += 3
+				continue
+			}
+			i++
+			continue
+		}
+
+		switch c {
+		case '\'', '"':
+			if strings.HasPrefix(line[i:], strings.Repeat(string(c), 3)) {
+				state.inTriple = true
+				state.tripleCh = c
+				i += 3
+				continue
+			}
+			j := i + 1
+			for j < len(line) {
+				if line[j] == '\\' {
+					j += 2
+					continue
+				}
+				if line[j] == c {
+					break
+				}
+				j++
+			}
+			i = j + 1
+		case '#':
+			return depth
+		case '(', '[', '{':
+			depth++
+			i++
+		case ')', ']', '}':
+			depth--
+			i++
+		default:
+			i++
+		}
+	}
+	return depth
+}
+
 func isTopLevel(line string) bool {
 	trimmed := strings.TrimSpace(line)
 	if trimmed == "" {
@@ -384,6 +537,13 @@ Generated automatically - do not edit manually.
 		builder.WriteString("\n")
 	}
 	builder.WriteString("\n")
+
+	for _, hookFunc := range hookFunctions {
+		for _, constant := range hookFunc.Constants {
+			builder.WriteString(constant.Code)
+			builder.WriteString("\n\n")
+		}
+	}
 
 	for _, hookFunc := range hookFunctions {
 		for _, helper := range hookFunc.HelperFunctions {
