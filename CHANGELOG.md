@@ -6,10 +6,18 @@
 
 - **`/steer-report` skill**: Mines recent Claude Code transcripts and CLAUDE.md for recurring friction (repeated user corrections, rejected tool calls, lint/test failures, unenforced CLAUDE.md directives) and proposes evidence-backed steer hooks. Recommends a fresh session when invoked mid-conversation; `--headless` emits candidates as JSON without creating hooks.
 - **`steer report` CLI command**: Streaming transcript scanner behind the skill. Scans `~/.claude/projects` over a look-back window (`--days`, default 30; all projects by default, `--project-only` to narrow) and emits a versioned, size-capped JSON digest (`--max-digest-bytes`, default 40KB) — lowest-scoring clusters are evicted to fit, and `stats.truncated` reports honesty. Pure JSON on stdout, progress on stderr.
+- **Audit log**: Every hook block appends a JSON line to `.claude/hooks/steer-audit.jsonl` (`timestamp`, `rule`, `hook_name`, `enforcement`, `file_path`, `tool_name`, `snippet`) — the artifact a team lead reads to answer "what did steer stop this week"
+- **Team policy in git**: `steer team lock` writes a repo-committed lockfile with embedded hook content and integrity hashes; `steer team apply` reconciles a clone against it (floor semantics by default, `--force` for strict match, `--dry-run` to preview); `steer team verify --ci` fails pipelines on drift
+- **Shared reconcile engine**: `steer preset sync` and `steer team apply` now run on one drift-detection/repair core
 
 ### Fixes
 
 - **Consolidation drops module-level constants**: `steer register` consolidation extracted `main()` and helper functions but silently dropped top-level assignments (e.g. compiled regexes), producing a master hook whose `NameError` was swallowed at runtime — the hook passed individual self-tests but enforced nothing. Constants are now carried into the master with prefixed names; the steer skill additionally verifies the consolidated master after registration.
+
+### Security
+
+- Self-protection hook now guards `steer-audit.jsonl` (a blocked agent can't erase its audit trail) and `steer-team.lock.json` (`steer team lock` is the sanctioned writer); `steer team` commands are classified as trusted reconcile paths
+- Self-protection hardening: protected-path scan now runs before steer-CLI classification, and mutating commands are detected anywhere in a compound command — closes `rm steer-hooks.py; steer preset sync` style evasions
 
 ## v1.0.0
 

@@ -118,6 +118,12 @@ steer preset sync --dry-run
 steer preset sync --strict
 steer preset sync --prune-orphans
 
+# Distribute team policy through a repo-committed lockfile
+steer team lock
+steer team apply
+steer team apply --dry-run
+steer team verify --ci
+
 # Verify staged content against active project hooks
 steer verify --staged
 
@@ -140,6 +146,38 @@ All commands support `--scope project|global` (default: `project`).
 - auto-ensures internal factory protection presets
 - reports orphan factory entries (catalog source IDs no longer present)
 - keeps orphans by default, fails with `--strict`, and removes with `--prune-orphans`
+
+## Audit Log
+
+Every hook block appends one JSON line to `.claude/hooks/steer-audit.jsonl` — the artifact that answers "what did steer stop this week":
+
+```bash
+# Blocks in the last run, by rule
+jq -r '.hook_name' .claude/hooks/steer-audit.jsonl | sort | uniq -c | sort -rn
+
+# Full detail for one hook
+jq 'select(.hook_name == "sql-injection-prevention")' .claude/hooks/steer-audit.jsonl
+```
+
+Each entry carries `timestamp`, `rule`, `hook_name`, `enforcement`, `file_path`, `tool_name`, and a `snippet` of the blocked input. The log is append-only and protected by the self-protection hook — the agent that got blocked can't erase the evidence.
+
+## Team Policy in Git
+
+`steer team` distributes policy the git-native way: a repo-committed lockfile is the source of truth, reviewed like any other file — no cloud push, no live API.
+
+```bash
+# Lead: snapshot current steer state and commit it
+steer team lock
+git add steer-team.lock.json && git commit -m "steer: team policy"
+
+# Everyone else: reconcile a clone against the lockfile
+steer team apply
+
+# CI: fail the pipeline on drift
+steer team verify --ci
+```
+
+The lockfile embeds hook content and integrity hashes, so `apply` works on a fresh clone and rejects tampered lockfiles. By default team policy is a floor, not a ceiling: `apply` installs locked hooks and removes factory extras, but personal hooks outside the lockfile survive. `steer team apply --force` switches to strict mode — local state exactly matches the lockfile.
 
 ## Git Enforcement
 
