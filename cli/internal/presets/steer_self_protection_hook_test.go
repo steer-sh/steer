@@ -160,6 +160,10 @@ func TestSelfProtectionAllowsUserMutationsAndReadOnlyOps(t *testing.T) {
 		{name: "preset list", command: "steer preset list"},
 		{name: "preset enable", command: "steer preset enable sql-injection-prevention"},
 		{name: "preset sync", command: "steer preset sync --dry-run"},
+		{name: "team lock", command: "steer team lock"},
+		{name: "team apply", command: "steer team apply --force"},
+		{name: "team verify", command: "steer team verify --ci"},
+		{name: "read lockfile", command: "cat steer-team.lock.json"},
 	}
 
 	for _, tc := range tests {
@@ -182,6 +186,14 @@ func TestSelfProtectionBlocksProtectedFileMutationsViaBash(t *testing.T) {
 		"rm .claude/hooks/steer-manifest.json",
 		"rm .claude/hooks/steer-hooks.py",
 		"echo '{}' > .claude/settings.json",
+		"rm .claude/hooks/steer-audit.jsonl",
+		"echo '' > .claude/hooks/steer-audit.jsonl",
+		"rm steer-team.lock.json",
+		"sed -i 's/factory/manual/' steer-team.lock.json",
+		"echo '{}' > steer-team.lock.json",
+		"rm .claude/hooks/steer-hooks.py; steer preset sync",
+		"rm steer-team.lock.json && steer team apply",
+		"echo done; rm .claude/hooks/steer-hooks.py",
 	}
 
 	for _, command := range tests {
@@ -222,6 +234,20 @@ func TestSelfProtectionBlocksProtectedFileMutationsViaEditWriteMultiEdit(t *test
 				"edits": []map[string]any{
 					{"old_string": "{}", "new_string": "{\"hooks\": {}}"},
 				},
+			},
+		},
+		{
+			"tool_name": "Edit",
+			"tool_input": map[string]any{
+				"file_path":  "steer-team.lock.json",
+				"new_string": "{}",
+			},
+		},
+		{
+			"tool_name": "Write",
+			"tool_input": map[string]any{
+				"file_path": ".claude/hooks/steer-audit.jsonl",
+				"content":   "",
 			},
 		},
 	}

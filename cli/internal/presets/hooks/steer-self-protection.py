@@ -141,11 +141,14 @@ def first_positional(args):
     return ""
 
 
+def strip_shell_punctuation(token):
+    return str(token).strip().rstrip(";&|")
+
+
 def shell_command_mutates(tokens):
     if not tokens:
         return False
 
-    cmd = tokens[0]
     mutating_commands = {
         "rm",
         "mv",
@@ -159,10 +162,16 @@ def shell_command_mutates(tokens):
         "dd",
         "touch",
     }
-    if cmd in mutating_commands:
-        return True
+    # Scan every token, not just tokens[0]: compound commands
+    # (`echo hi; rm ...`) put the mutating command mid-string. A stray match
+    # only triggers the target scan, which blocks solely on protected paths.
+    for token in tokens:
+        if strip_shell_punctuation(token) in mutating_commands:
+            return True
 
-    if cmd in ("sed", "perl") and any(token.startswith("-i") for token in tokens[1:]):
+    if any(strip_shell_punctuation(token) in ("sed", "perl") for token in tokens) and any(
+        token.startswith("-i") for token in tokens[1:]
+    ):
         return True
 
     for token in tokens:
@@ -201,7 +210,9 @@ def referenced_targets(tokens):
             continue
 
         if looks_like_target_token(token):
-            targets.append(token)
+            cleaned = strip_shell_punctuation(token)
+            if cleaned:
+                targets.append(cleaned)
     return targets
 
 
@@ -257,6 +268,16 @@ def evaluate_bash_command(command_text, factory_names, factory_files, factory_pa
     if not tokens:
         return None
 
+    # Path-target scan runs before steer-CLI classification so a compound
+    # command cannot smuggle a protected-file mutation past an allowed steer
+    # subcommand (e.g. `rm steer-hooks.py; steer preset sync`).
+    if shell_command_mutates(tokens):
+        for raw_target in referenced_targets(tokens):
+            if matches_protected_target(raw_target, protected_paths, protected_files):
+                return "Blocking mutation of protected steer-managed files in this scope."
+            if matches_factory_target(raw_target, factory_paths, factory_files):
+                return "Blocking mutation of factory-managed hook files in this scope."
+
     operation, args = parse_steer_operation(tokens)
     if operation == "preset":
         if not args:
@@ -267,6 +288,13 @@ def evaluate_bash_command(command_text, factory_names, factory_files, factory_pa
             return None
         if preset_action in ("disable", "disable-bundle"):
             return "Blocking factory preset disable operation. Use steer preset sync for reconciliation."
+        return None
+
+    if operation == "team":
+        # lock/apply/verify are trusted reconcile paths mediated by the steer
+        # CLI: lock is the sanctioned lockfile writer, apply reconciles against
+        # the human-authored lockfile (itself a protected file), verify is
+        # read-only.
         return None
 
     if operation == "remove":
@@ -280,15 +308,6 @@ def evaluate_bash_command(command_text, factory_names, factory_files, factory_pa
         if is_factory_identifier(target, factory_names, factory_files, factory_paths):
             return "Blocking register collision against a factory-managed hook."
         return None
-
-    if not shell_command_mutates(tokens):
-        return None
-
-    for raw_target in referenced_targets(tokens):
-        if matches_protected_target(raw_target, protected_paths, protected_files):
-            return "Blocking mutation of protected steer-managed files in this scope."
-        if matches_factory_target(raw_target, factory_paths, factory_files):
-            return "Blocking mutation of factory-managed hook files in this scope."
 
     return None
 
@@ -317,12 +336,24 @@ def main():
     manifest_path = os.path.join(hooks_dir, "steer-manifest.json")
     settings_path = os.path.join(os.path.dirname(hooks_dir), "settings.json")
 
+    project_root = os.path.dirname(os.path.dirname(hooks_dir))
     protected_paths = {
         canonicalize_path(os.path.join(hooks_dir, "steer-hooks.py")),
         canonicalize_path(manifest_path),
         canonicalize_path(settings_path),
+        canonicalize_path(os.path.join(hooks_dir, "steer-audit.jsonl")),
+        canonicalize_path(os.path.join(project_root, "steer-team.lock.json")),
+        # Also resolve the lockfile against the working directory so a
+        # globally-installed hook still protects the current project's lockfile.
+        canonicalize_path("steer-team.lock.json"),
     }
-    protected_files = {"steer-hooks.py", "steer-manifest.json", "settings.json"}
+    protected_files = {
+        "steer-hooks.py",
+        "steer-manifest.json",
+        "settings.json",
+        "steer-audit.jsonl",
+        "steer-team.lock.json",
+    }
 
     manifest_hooks = load_manifest(manifest_path)
     factory_names, factory_files, factory_paths = collect_factory_targets(hooks_dir, manifest_hooks)
