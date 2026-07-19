@@ -40,6 +40,16 @@ cd cli && bash build.sh              # build all platforms
 cd cli && bash build.sh --install    # build + install current platform to /usr/local/bin
 ```
 
+## First Run: Let Your History Write the Rules
+
+Steer can propose rules from evidence instead of guesswork. Run `/steer-report` in Claude Code as your first step after installing:
+
+1. It scans your recent Claude Code transcripts and CLAUDE.md for recurring friction — corrections you keep repeating, patterns you keep reverting.
+2. It presents hook candidates with the evidence behind each one (how often, in which projects).
+3. Accept a candidate and it hands off to `/steer` to generate, test, and install the hook.
+
+The raw digest is also available outside Claude Code: `steer report --days 30` emits versioned JSON on stdout for your own tooling.
+
 ## What This Repo Contains
 
 - `.claude-plugin/marketplace.json`: plugin manifest and marketplace catalog (monorepo — plugin and marketplace in one repo).
@@ -139,6 +149,15 @@ steer report --project-only      # restrict to the current directory's transcrip
 ```
 
 All commands support `--scope project|global` (default: `project`).
+
+## When a Hook Misbehaves
+
+A hook that blocks wrongly has one immediate fix: remove it.
+
+- **Hooks you registered:** `steer remove <hook-name>` uninstalls the hook and cleans up all managed state in one step. The agent can run this for you — ask it to remove the hook by name.
+- **Factory preset hooks:** the self-protection preset blocks the agent from running `steer remove` or `steer preset disable` against factory-managed hooks — a blocked agent must not be able to lift its own guardrails. Run `steer preset disable <name>` (or `steer preset disable-bundle <bundle>`) yourself in a terminal; hooks only intercept agent tool calls, so your own shell is never blocked.
+
+The same self-protection covers steer's managed artifacts (manifest, consolidated hook, team lockfile, audit log), so a misfiring hook can't be worked around by editing those files through the agent either.
 
 `steer preset sync` reconciles enabled factory presets in the selected scope against the embedded catalog:
 
