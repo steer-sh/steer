@@ -17,6 +17,7 @@ const (
 	SettingsName    = "settings.json"
 	MasterHookName  = "steer-hooks.py"
 	ManifestName    = "steer-manifest.json"
+	AuditLogName    = "steer-audit.jsonl"
 	ClaudeMDName    = "CLAUDE.md"
 	BackupExtension = ".backup"
 )

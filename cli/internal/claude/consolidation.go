@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -147,12 +148,21 @@ func ConsolidateHooks(scope string) error {
 		return nil
 	}
 
+	manifest, err := LoadManifest(scope)
+	if err != nil {
+		return fmt.Errorf("failed to load manifest: %w", err)
+	}
+
 	hookFunctions := make([]HookFunction, 0, len(hooks))
 	importSet := map[string]struct{}{
-		"import io":   {},
-		"import json": {},
-		"import sys":  {},
+		"import datetime": {},
+		"import io":       {},
+		"import json":     {},
+		"import os":       {},
+		"import sys":      {},
 	}
+
+	hookMeta := make(map[string]map[string]string, len(hooks))
 
 	for _, hook := range hooks {
 		hookFunc, imports, err := parseHookFile(hook.Path)
@@ -160,6 +170,15 @@ func ConsolidateHooks(scope string) error {
 			return fmt.Errorf("failed to parse hook %s: %w", hook.Path, err)
 		}
 		hookFunctions = append(hookFunctions, hookFunc)
+
+		rule := ""
+		if entry, ok := manifest.Hooks[hook.Name]; ok {
+			rule = strings.TrimSpace(entry.Rule)
+		}
+		hookMeta[hookFunc.Name] = map[string]string{
+			"hook_name": hook.Name,
+			"rule":      rule,
+		}
 
 		for _, line := range imports {
 			importSet[line] = struct{}{}
@@ -172,7 +191,7 @@ func ConsolidateHooks(scope string) error {
 	}
 	sort.Strings(importLines)
 
-	masterContent := generateMasterHook(hookFunctions, importLines)
+	masterContent := generateMasterHook(hookFunctions, importLines, hookMeta)
 	if err := os.WriteFile(masterPath, []byte(masterContent), 0o755); err != nil {
 		return fmt.Errorf("failed to write master hook file: %w", err)
 	}
@@ -521,7 +540,51 @@ func isTopLevel(line string) bool {
 	return len(line) == len(strings.TrimLeft(line, " \t"))
 }
 
-func generateMasterHook(hookFunctions []HookFunction, importLines []string) string {
+// auditHelperSource is embedded in the generated master hook. It appends one
+// JSON line per block decision to steer-audit.jsonl next to the master hook.
+// Auditing must never break or weaken the block decision, so every failure
+// path is swallowed.
+const auditHelperSource = `def steer_audit_log(hook_func_name, stdin_data):
+    try:
+        meta = STEER_HOOK_META.get(hook_func_name, {})
+        try:
+            payload = json.loads(stdin_data)
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        tool_input = payload.get("tool_input")
+        if not isinstance(tool_input, dict):
+            tool_input = {}
+        snippet = ""
+        for key in ("command", "content", "new_string"):
+            value = tool_input.get(key)
+            if isinstance(value, str) and value.strip():
+                snippet = value[:200]
+                break
+        file_path = tool_input.get("file_path")
+        if not isinstance(file_path, str):
+            file_path = ""
+        tool_name = payload.get("tool_name")
+        if not isinstance(tool_name, str):
+            tool_name = ""
+        entry = {
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "rule": meta.get("rule", ""),
+            "hook_name": meta.get("hook_name", hook_func_name),
+            "enforcement": "block",
+            "file_path": file_path,
+            "tool_name": tool_name,
+            "snippet": snippet,
+        }
+        audit_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "steer-audit.jsonl")
+        with open(audit_path, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry) + "\n")
+    except Exception:
+        pass
+`
+
+func generateMasterHook(hookFunctions []HookFunction, importLines []string, hookMeta map[string]map[string]string) string {
 	var builder strings.Builder
 
 	builder.WriteString(`#!/usr/bin/env python3
@@ -536,6 +599,17 @@ Generated automatically - do not edit manually.
 		builder.WriteString(imp)
 		builder.WriteString("\n")
 	}
+	builder.WriteString("\n")
+
+	// A JSON object with string keys/values is also a valid Python dict literal.
+	metaJSON, err := json.MarshalIndent(hookMeta, "", "    ")
+	if err != nil {
+		metaJSON = []byte("{}")
+	}
+	builder.WriteString("STEER_HOOK_META = ")
+	builder.Write(metaJSON)
+	builder.WriteString("\n\n")
+	builder.WriteString(auditHelperSource)
 	builder.WriteString("\n")
 
 	for _, hookFunc := range hookFunctions {
@@ -602,6 +676,7 @@ Generated automatically - do not edit manually.
 	builder.WriteString("                compact_output = \"\".join(output.split())\n")
 	builder.WriteString("                blocked = \"\\\"decision\\\":\\\"block\\\"\" in compact_output\n\n")
 	builder.WriteString("            if blocked:\n")
+	builder.WriteString("                steer_audit_log(hook_func.__name__, stdin_data)\n")
 	builder.WriteString("                print(output)\n")
 	builder.WriteString("                sys.exit(0)\n\n")
 	builder.WriteString("    sys.exit(0)\n\n")
