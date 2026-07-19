@@ -34,14 +34,78 @@ type HookEntry struct {
 	Hooks   []CommandHook `json:"hooks"`
 }
 
-// Hooks contains the different types of hook events.
+// Hooks contains the different types of hook events. Only PreToolUse is
+// modeled; every other event key (SessionStart, PostToolUse, ...) is carried
+// through extra so a settings round-trip never drops hooks steer doesn't own.
 type Hooks struct {
-	PreToolUse []HookEntry `json:"PreToolUse,omitempty"`
+	PreToolUse []HookEntry
+	extra      map[string]json.RawMessage
 }
 
-// Settings is the root object of the settings.json file.
+// Settings is the root object of the settings.json file. Only the hooks key
+// is modeled; all other top-level keys (permissions, env, model, ...) are
+// carried through extra unchanged.
 type Settings struct {
-	Hooks Hooks `json:"hooks"`
+	Hooks Hooks
+	extra map[string]json.RawMessage
+}
+
+func (h *Hooks) UnmarshalJSON(data []byte) error {
+	raw := map[string]json.RawMessage{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if pre, ok := raw["PreToolUse"]; ok {
+		if err := json.Unmarshal(pre, &h.PreToolUse); err != nil {
+			return err
+		}
+		delete(raw, "PreToolUse")
+	}
+	h.extra = raw
+	return nil
+}
+
+func (h Hooks) MarshalJSON() ([]byte, error) {
+	raw := map[string]json.RawMessage{}
+	for key, value := range h.extra {
+		raw[key] = value
+	}
+	if len(h.PreToolUse) > 0 {
+		pre, err := json.Marshal(h.PreToolUse)
+		if err != nil {
+			return nil, err
+		}
+		raw["PreToolUse"] = pre
+	}
+	return json.Marshal(raw)
+}
+
+func (s *Settings) UnmarshalJSON(data []byte) error {
+	raw := map[string]json.RawMessage{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if hooks, ok := raw["hooks"]; ok {
+		if err := json.Unmarshal(hooks, &s.Hooks); err != nil {
+			return err
+		}
+		delete(raw, "hooks")
+	}
+	s.extra = raw
+	return nil
+}
+
+func (s Settings) MarshalJSON() ([]byte, error) {
+	raw := map[string]json.RawMessage{}
+	for key, value := range s.extra {
+		raw[key] = value
+	}
+	hooks, err := json.Marshal(s.Hooks)
+	if err != nil {
+		return nil, err
+	}
+	raw["hooks"] = hooks
+	return json.Marshal(raw)
 }
 
 // ValidateScope ensures scope is one of the supported values.
