@@ -87,6 +87,14 @@ When checking file content (Edit/MultiEdit/Write), filter to shell-related files
 
 ## Detection Strategies
 
+### Command-Position Matching (critical for command-blocking rules)
+
+When a rule blocks *invoking* a command (as opposed to a dangerous flag pattern), match the token only at **command position** — the first word of a command segment — never anywhere in the line. Argument-position mentions are prose, not invocations: `git commit -m "switch from python to rust"` and `echo python is fun` must not block a rule against bare `python`.
+
+- Split each line into segments at `; & | ( ) \`` and `$(`; check each segment's first token after skipping `VAR=value` assignments, command wrappers (`sudo`, `env`, `time`, `nohup`, `xargs`, `exec`, ...), and wrapper flags.
+- **Skip heredoc bodies.** Text between `<<DELIM` (or `<<-DELIM`, `<<'DELIM'`) and the closing delimiter line is data — commit messages, file content — not commands. Track opened delimiters per line and skip lines until each closes. A blocked `git commit -F- <<'EOF' ...` whose message merely *mentions* the command is the #1 real-world false positive for this rule class.
+- Negative tests MUST include: the token quoted in a string, the token in argument position unquoted (`echo <token> is fun`), and the token inside a heredoc body at line start.
+
 ### Exact Command Blocking
 ```python
 # Block specific commands (e.g., rm -rf)
