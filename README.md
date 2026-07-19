@@ -39,8 +39,9 @@ cd cli && bash build.sh --install    # build + install current platform to /usr/
 
 - `.claude-plugin/marketplace.json`: plugin manifest and marketplace catalog (monorepo — plugin and marketplace in one repo).
 - `SKILL.md`: the steer skill prompt and workflow used by `/steer`.
+- `skills/steer-report/SKILL.md`: the usage-mining skill behind `/steer-report`.
 - `prompts/`: specialist prompt modules for domain-specific hook generation.
-- `cli/`: Go CLI source (`register`, `list`, `test`, `remove`, `preset`, `verify`, `git-hooks`).
+- `cli/`: Go CLI source (`register`, `list`, `test`, `remove`, `preset`, `verify`, `git-hooks`, `report`).
 - `bin/`: prebuilt binaries for:
   - `darwin-amd64`
   - `darwin-arm64`
@@ -118,6 +119,10 @@ steer git-hooks install
 
 # CI check for changed files in a commit range
 steer verify --changed --base origin/main --head HEAD
+
+# Mine recent Claude Code transcripts for hook-suggestion evidence (JSON digest on stdout)
+steer report --days 30            # all projects by default
+steer report --project-only      # restrict to the current directory's transcripts
 ```
 
 All commands support `--scope project|global` (default: `project`).
