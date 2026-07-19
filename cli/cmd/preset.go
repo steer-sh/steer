@@ -51,9 +51,9 @@ type presetSyncResult struct {
 }
 
 const (
-	presetDriftMetadata    = "metadata"
-	presetDriftMissingFile = "missing_file"
-	presetDriftContent     = "content"
+	presetDriftMetadata    = claude.DriftMetadata
+	presetDriftMissingFile = claude.DriftMissingFile
+	presetDriftContent     = claude.DriftContent
 )
 
 var presetCmd = &cobra.Command{
@@ -507,18 +507,18 @@ func enablePreset(scope string, catalog *presets.Catalog, item presets.CatalogIt
 	return "enabled", nil
 }
 
-func installFactoryPreset(scope string, catalog *presets.Catalog, item presets.CatalogItem, force bool) (*claude.InstallManagedHookResult, error) {
+func desiredHookFromCatalogItem(catalog *presets.Catalog, item presets.CatalogItem) (claude.DesiredHook, error) {
 	hookName := strings.TrimSuffix(item.HookFile, ".py")
 	if hookName == "" {
-		return nil, fmt.Errorf("invalid preset hook_file for %s", item.Name)
+		return claude.DesiredHook{}, fmt.Errorf("invalid preset hook_file for %s", item.Name)
 	}
 
 	content, err := catalog.ReadHookContent(item)
 	if err != nil {
-		return nil, err
+		return claude.DesiredHook{}, err
 	}
 
-	result, err := claude.InstallManagedHook(scope, claude.InstallManagedHookInput{
+	return claude.DesiredHook{
 		HookName: hookName,
 		FileName: item.HookFile,
 		Rule:     item.Rule,
@@ -531,6 +531,21 @@ func installFactoryPreset(scope string, catalog *presets.Catalog, item presets.C
 			PromptModules: item.PromptModules,
 			HookVersion:   item.HookVersion,
 		},
+	}, nil
+}
+
+func installFactoryPreset(scope string, catalog *presets.Catalog, item presets.CatalogItem, force bool) (*claude.InstallManagedHookResult, error) {
+	desired, err := desiredHookFromCatalogItem(catalog, item)
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := claude.InstallManagedHook(scope, claude.InstallManagedHookInput{
+		HookName: desired.HookName,
+		FileName: desired.FileName,
+		Rule:     desired.Rule,
+		Content:  desired.Content,
+		Metadata: desired.Metadata,
 	})
 	if err != nil {
 		return nil, err
@@ -728,52 +743,20 @@ func syncFactoryPresets(scope string, catalog *presets.Catalog, options presetSy
 }
 
 func factoryPresetNeedsReinstall(scope string, catalog *presets.Catalog, item presets.CatalogItem, hookName string, entry claude.ManifestEntry) (bool, string, error) {
-	expectedHookName := strings.TrimSuffix(item.HookFile, ".py")
-	if expectedHookName == "" {
-		return false, "", fmt.Errorf("invalid preset hook_file for %s", item.Name)
-	}
-
-	if hookName != expectedHookName {
-		return true, presetDriftMetadata, nil
-	}
-	if strings.TrimSpace(entry.SourceID) != item.Name {
-		return true, presetDriftMetadata, nil
-	}
-	if strings.TrimSpace(entry.SourceVersion) != catalog.CatalogVersion {
-		return true, presetDriftMetadata, nil
-	}
-	if strings.TrimSpace(entry.PromptVersion) != item.PromptVersion {
-		return true, presetDriftMetadata, nil
-	}
-	if strings.TrimSpace(entry.HookVersion) != item.HookVersion {
-		return true, presetDriftMetadata, nil
-	}
-	if file := strings.TrimSpace(entry.File); file != "" && file != item.HookFile {
-		return true, presetDriftMetadata, nil
-	}
-
-	hooksDir, err := claude.GetHooksDir(scope)
-	if err != nil {
-		return false, "", err
-	}
-	targetPath := filepath.Join(hooksDir, item.HookFile)
-	actual, err := os.ReadFile(targetPath)
-	if os.IsNotExist(err) {
-		return true, presetDriftMissingFile, nil
-	}
-	if err != nil {
-		return false, "", fmt.Errorf("failed reading preset hook %s: %w", targetPath, err)
-	}
-
-	expected, err := expectedFactoryPresetContent(catalog, item)
+	desired, err := desiredHookFromCatalogItem(catalog, item)
 	if err != nil {
 		return false, "", err
 	}
 
-	if sha256Hex(actual) != sha256Hex(expected) {
-		return true, presetDriftContent, nil
+	if hookName != desired.HookName {
+		return true, presetDriftMetadata, nil
 	}
-	return false, "", nil
+
+	drifted, reason, err := claude.DesiredHookDrift(scope, desired, entry, true)
+	if err != nil {
+		return false, "", err
+	}
+	return drifted, reason, nil
 }
 
 func expectedFactoryPresetContent(catalog *presets.Catalog, item presets.CatalogItem) ([]byte, error) {
