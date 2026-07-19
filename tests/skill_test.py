@@ -43,23 +43,65 @@ def load_test_cases():
     return {tc["name"]: tc for tc in data["test_cases"]}
 
 
-GLOBAL_SETTINGS = Path.home() / ".claude" / "settings.json"
+GLOBAL_CLAUDE_DIR = Path.home() / ".claude"
+GLOBAL_SETTINGS = GLOBAL_CLAUDE_DIR / "settings.json"
+GLOBAL_CLAUDE_MD = GLOBAL_CLAUDE_DIR / "CLAUDE.md"
+GLOBAL_HOOKS_DIR = GLOBAL_CLAUDE_DIR / "hooks"
 
 
-def _snapshot_global_settings() -> str | None:
-    """Read current global settings.json content, or None if it doesn't exist."""
-    if GLOBAL_SETTINGS.exists():
-        return GLOBAL_SETTINGS.read_text()
-    return None
+def _read_hooks_tree() -> dict[str, bytes]:
+    """Map of relative path → content for every file under ~/.claude/hooks/."""
+    tree = {}
+    if GLOBAL_HOOKS_DIR.exists():
+        for path in sorted(GLOBAL_HOOKS_DIR.rglob("*")):
+            if path.is_file():
+                tree[str(path.relative_to(GLOBAL_HOOKS_DIR))] = path.read_bytes()
+    return tree
 
 
-def _restore_global_settings(snapshot: str | None):
-    """Restore global settings.json to its pre-test state."""
+def _snapshot_global_state() -> dict:
+    """Snapshot the steer-managed global surface before a generation run.
+
+    The skill is instructed to register at project scope, but models sometimes
+    register at user scope anyway (observed with haiku: hook files written into
+    ~/.claude/hooks/, rule lines added to global CLAUDE.md, master hook wired
+    into global settings.json). Snapshot everything a leak can touch.
+    """
+    return {
+        "settings": GLOBAL_SETTINGS.read_text() if GLOBAL_SETTINGS.exists() else None,
+        "claude_md": GLOBAL_CLAUDE_MD.read_text() if GLOBAL_CLAUDE_MD.exists() else None,
+        "hooks": _read_hooks_tree(),
+    }
+
+
+def _restore_file(path: Path, snapshot: str | None):
     if snapshot is None:
-        if GLOBAL_SETTINGS.exists():
-            GLOBAL_SETTINGS.unlink()
+        path.unlink(missing_ok=True)
     else:
-        GLOBAL_SETTINGS.write_text(snapshot)
+        path.write_text(snapshot)
+
+
+def _restore_global_state(snapshot: dict) -> bool:
+    """Restore the global surface to its pre-test state.
+
+    Returns True if anything had been changed (i.e. the generation leaked
+    out of its temp workdir).
+    """
+    leaked = snapshot != _snapshot_global_state()
+    _restore_file(GLOBAL_SETTINGS, snapshot["settings"])
+    _restore_file(GLOBAL_CLAUDE_MD, snapshot["claude_md"])
+
+    if GLOBAL_HOOKS_DIR.exists():
+        for path in list(GLOBAL_HOOKS_DIR.rglob("*")):
+            if path.is_file() and str(path.relative_to(GLOBAL_HOOKS_DIR)) not in snapshot["hooks"]:
+                path.unlink()
+    for rel, content in snapshot["hooks"].items():
+        target = GLOBAL_HOOKS_DIR / rel
+        if not target.exists() or target.read_bytes() != content:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(content)
+
+    return leaked
 
 
 def generate_hook(rule: str, workdir: Path, model: str) -> dict:
@@ -82,9 +124,9 @@ def generate_hook(rule: str, workdir: Path, model: str) -> dict:
         "--dangerously-skip-permissions",
     ]
 
-    # Snapshot global settings before the run — the skill may add hook registrations
-    # to ~/.claude/settings.json which would poison future claude sessions.
-    settings_snapshot = _snapshot_global_settings()
+    # Snapshot the global steer surface before the run — a generation that
+    # registers at user scope would poison live sessions and later tests.
+    state_snapshot = _snapshot_global_state()
 
     print(
         f"  Running: claude -p \"/steer --headless {rule[:60]}...\" "
@@ -98,8 +140,10 @@ def generate_hook(rule: str, workdir: Path, model: str) -> dict:
         env=env,
     )
 
-    # Always restore global settings after the run, whether it succeeded or not.
-    _restore_global_settings(settings_snapshot)
+    # Always restore global state after the run, whether it succeeded or not.
+    if _restore_global_state(state_snapshot):
+        print("  WARNING: generation leaked into ~/.claude (restored). "
+              "The hook may have been registered at user scope instead of the temp workdir.")
 
     if result.returncode != 0:
         print(f"  ERROR: claude exited with code {result.returncode}")
