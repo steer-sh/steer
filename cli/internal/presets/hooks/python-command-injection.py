@@ -13,55 +13,113 @@ import ast
 class CommandInjectionVisitor(ast.NodeVisitor):
     def __init__(self):
         self.violations = []
-        self.has_shlex_import = False
         self.safe_vars = set()
+        self.literal_string_vars = set()
+        self.shlex_aliases = {'shlex'}
+        self.quote_aliases = set()
 
     def visit_Import(self, node):
         for alias in node.names:
             if alias.name == 'shlex':
-                self.has_shlex_import = True
+                self.shlex_aliases.add(alias.asname or alias.name)
         self.generic_visit(node)
 
     def visit_ImportFrom(self, node):
         if node.module == 'shlex':
-            self.has_shlex_import = True
+            for alias in node.names:
+                if alias.name == 'quote':
+                    self.quote_aliases.add(alias.asname or alias.name)
         self.generic_visit(node)
 
     def visit_Assign(self, node):
-        if self.has_shlex_import:
-            for target in node.targets:
-                if isinstance(target, ast.Name):
-                    if self._value_is_shlex_safe(node.value):
-                        self.safe_vars.add(target.id)
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                if self._value_is_shlex_safe(node.value):
+                    self.safe_vars.add(target.id)
+                if self._is_static_string(node.value):
+                    self.literal_string_vars.add(target.id)
         self.generic_visit(node)
 
-    def _value_is_shlex_safe(self, node):
-        # Direct shlex.quote() call
+    def _is_shlex_quote_call(self, node):
         if isinstance(node, ast.Call):
-            if (isinstance(node.func, ast.Attribute) and
-                isinstance(node.func.value, ast.Name) and
-                node.func.value.id == 'shlex' and node.func.attr == 'quote'):
+            # shlex.quote(x) with module alias support
+            if (
+                isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id in self.shlex_aliases
+                and node.func.attr == 'quote'
+            ):
                 return True
-        # f-string when shlex is imported
-        if isinstance(node, ast.JoinedStr) and self.has_shlex_import:
-            return True
-        # List comprehension with shlex.quote inside
-        if isinstance(node, ast.ListComp):
-            if self._value_is_shlex_safe(node.elt):
+            # quote(x) from "from shlex import quote" (with alias support)
+            if isinstance(node.func, ast.Name) and node.func.id in self.quote_aliases:
                 return True
         return False
+
+    def _formatted_value_is_safe(self, formatted_value):
+        """Allow only proven-safe dynamic fragments inside f-strings."""
+        expr = formatted_value.value
+        if self._is_shlex_quote_call(expr):
+            return True
+        if isinstance(expr, ast.Name) and (
+            expr.id in self.safe_vars or expr.id in self.literal_string_vars
+        ):
+            return True
+        # Allow " ".join(quoted_args) if quoted_args was already proven safe
+        if (
+            isinstance(expr, ast.Call)
+            and isinstance(expr.func, ast.Attribute)
+            and expr.func.attr == 'join'
+            and all(isinstance(arg, ast.Name) and arg.id in self.safe_vars for arg in expr.args)
+        ):
+            return True
+        return False
+
+    def _joinedstr_is_shlex_safe(self, node):
+        has_dynamic = False
+        formatted = [v for v in node.values if isinstance(v, ast.FormattedValue)]
+        for value in node.values:
+            if isinstance(value, ast.FormattedValue):
+                has_dynamic = True
+                if not self._formatted_value_is_safe(value):
+                    # Leading bare-Name token is the program name (caller-chosen,
+                    # not argument data). Permit it only when the string has other
+                    # dynamic parts and every one of them is proven safe.
+                    if (
+                        value is node.values[0]
+                        and isinstance(value.value, ast.Name)
+                        and len(formatted) > 1
+                        and all(self._formatted_value_is_safe(f) for f in formatted[1:])
+                    ):
+                        continue
+                    return False
+        return has_dynamic
+
+    def _value_is_shlex_safe(self, node):
+        """Check if a value is provably shell-safe."""
+        if self._is_shlex_quote_call(node):
+            return True
+        if isinstance(node, ast.JoinedStr):
+            return self._joinedstr_is_shlex_safe(node)
+        if isinstance(node, ast.Name):
+            return node.id in self.safe_vars
+        if isinstance(node, ast.ListComp):
+            return self._value_is_shlex_safe(node.elt)
+        return False
+
+    def _uses_shlex_quote(self, node):
+        return self._value_is_shlex_safe(node)
 
     def visit_Call(self, node):
         if not isinstance(node.func, ast.Attribute):
             self.generic_visit(node)
             return
 
-        try:
-            module_name = node.func.value.id
-            func_name = node.func.attr
-        except AttributeError:
+        if not isinstance(node.func.value, ast.Name):
             self.generic_visit(node)
             return
+
+        module_name = node.func.value.id
+        func_name = node.func.attr
 
         # os.system: always uses shell
         if module_name == 'os' and func_name == 'system':
@@ -94,21 +152,6 @@ class CommandInjectionVisitor(ast.NodeVisitor):
 
     def _is_static_string(self, node):
         return isinstance(node, ast.Constant) and isinstance(node.value, str)
-
-    def _uses_shlex_quote(self, node):
-        # Direct shlex.quote() call
-        if isinstance(node, ast.Call):
-            if (isinstance(node.func, ast.Attribute) and
-                isinstance(node.func.value, ast.Name) and
-                node.func.value.id == 'shlex' and node.func.attr == 'quote'):
-                return True
-        # f-string when shlex is imported
-        if isinstance(node, ast.JoinedStr) and self.has_shlex_import:
-            return True
-        # Variable that was previously assigned from a safe source
-        if isinstance(node, ast.Name) and node.id in self.safe_vars:
-            return True
-        return False
 
 
 def main():

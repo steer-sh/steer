@@ -54,14 +54,18 @@ full_command = f"{command} {' '.join(quoted_args)}"
 subprocess.run(full_command, shell=True)  # full_command is a Name node, NOT a JoinedStr!
 ```
 
-**Pattern 3 is the hardest to detect.** The subprocess argument is a variable (`ast.Name` node), not an f-string or a direct `shlex.quote()` call. Your hook MUST trace variables back to their assignments.
+**Pattern 3 is the hardest to detect.** Two things make it hard:
+- The subprocess argument is a variable (`ast.Name` node), not an f-string or a direct `shlex.quote()` call. Your hook MUST trace variables back to their assignments.
+- The leading `{command}` token is a bare, unprovable variable — the program name, chosen by the caller, not argument data. A visitor that demands proof for **every** interpolated value blocks Pattern 3 and produces a false positive.
+
+**Leading-token trust decision:** a bare variable is permitted in the *leading* position of the command string only, and only when the string contains at least one other dynamic part and every one of those parts is proven quoted. A lone bare variable (`f"{cmd}"`) or a bare variable followed by unproven parts (`f"{cmd} {user_input}"`) must still BLOCK. Do NOT widen this into "any f-string is fine if shlex is imported somewhere in the file" — a file-level import proves nothing about an individual call site.
 
 To detect safe quoting, check if:
 1. The argument is a direct `shlex.quote()` call (or `from shlex import quote` alias) → ALLOW
-2. The argument is an f-string (JoinedStr) where **every interpolated value** is proven safe (quoted with `shlex.quote()` or traced to a previously proven-safe variable) → ALLOW
+2. The argument is an f-string (JoinedStr) where **every interpolated value** is proven safe (quoted with `shlex.quote()` or traced to a previously proven-safe variable), applying the leading-token exception above → ALLOW
 3. **The argument is a variable (Name node)** → trace the variable assignment in the same function scope; allow only if it was built from safe quoted parts
 4. If safety cannot be proven structurally, **BLOCK**
-5. Never treat naming hints (e.g., `_safe`, `_quoted`) as proof of safety
+5. Never treat naming hints (e.g., `_safe`, `_quoted`) or file-level imports as proof of safety
 
 ### Reference AST Visitor
 
@@ -133,10 +137,21 @@ class CommandInjectionVisitor(ast.NodeVisitor):
 
     def _joinedstr_is_shlex_safe(self, node):
         has_dynamic = False
+        formatted = [v for v in node.values if isinstance(v, ast.FormattedValue)]
         for value in node.values:
             if isinstance(value, ast.FormattedValue):
                 has_dynamic = True
                 if not self._formatted_value_is_safe(value):
+                    # Leading bare-Name token is the program name (caller-chosen,
+                    # not argument data). Permit it only when the string has other
+                    # dynamic parts and every one of them is proven safe.
+                    if (
+                        value is node.values[0]
+                        and isinstance(value.value, ast.Name)
+                        and len(formatted) > 1
+                        and all(self._formatted_value_is_safe(f) for f in formatted[1:])
+                    ):
+                        continue
                     return False
         return has_dynamic
 
