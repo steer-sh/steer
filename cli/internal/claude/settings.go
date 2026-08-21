@@ -26,6 +26,9 @@ const (
 type CommandHook struct {
 	Type    string `json:"type"`
 	Command string `json:"command"`
+	// Timeout is the hook's wall-clock budget in seconds. Zero means the key is
+	// absent and Claude Code applies its own default.
+	Timeout int `json:"timeout,omitempty"`
 }
 
 // HookEntry represents a configuration for a set of hooks with a common matcher.
@@ -325,7 +328,10 @@ func RegisterMasterHook(scope string) error {
 			}
 
 			if !found {
-				filteredHooks = append(filteredHooks, CommandHook{Type: "command", Command: masterCommand})
+				// Keep the existing timeout: steer owns the command, not the budget.
+				filteredHooks = append(filteredHooks, CommandHook{
+					Type: "command", Command: masterCommand, Timeout: hook.Timeout,
+				})
 				found = true
 			}
 		}
@@ -382,4 +388,125 @@ func RemoveMasterHook(scope string) error {
 
 	settings.Hooks.PreToolUse = updatedEntries
 	return SaveSettings(scope, settings)
+}
+
+// CommitGateMatcher is the PreToolUse matcher the commit gate registers under. It
+// matches Bash alone: the gate's own first act is to check the tool name, and a
+// broader matcher spends a process on every tool call to reach the same answer.
+const CommitGateMatcher = "Bash"
+
+// commitGateIdentity is how a settings.json hook command is recognised as the gate.
+const commitGateIdentity = "commit-gate review"
+
+// IsCommitGateCommand reports whether a settings.json hook command is the commit gate.
+func IsCommitGateCommand(command string) bool {
+	return strings.Contains(command, commitGateIdentity)
+}
+
+// RegisterCommitGateHook upserts the gate's PreToolUse entry under CommitGateMatcher,
+// with an explicit timeout, and removes any gate hook sitting under another matcher.
+//
+// The command must pass IsCommitGateCommand: a hook this package cannot recognise
+// afterwards is one a later register duplicates instead of upserting.
+func RegisterCommitGateHook(scope, command string, timeout int) error {
+	if !IsCommitGateCommand(command) {
+		return fmt.Errorf("refusing to register %q as the commit gate: the command must "+
+			"contain %q or the hook cannot be recognised again", command, commitGateIdentity)
+	}
+	if err := EnsureDirectories(scope); err != nil {
+		return err
+	}
+	settings, err := LoadSettings(scope)
+	if err != nil {
+		return err
+	}
+
+	entries := make([]HookEntry, 0, len(settings.Hooks.PreToolUse)+1)
+	for _, entry := range settings.Hooks.PreToolUse {
+		hooks := make([]CommandHook, 0, len(entry.Hooks))
+		for _, hook := range entry.Hooks {
+			if !IsCommitGateCommand(hook.Command) {
+				hooks = append(hooks, hook)
+			}
+		}
+		if len(hooks) > 0 {
+			entry.Hooks = hooks
+			entries = append(entries, entry)
+		}
+	}
+	entries = append(entries, HookEntry{
+		Matcher: CommitGateMatcher,
+		Hooks:   []CommandHook{{Type: "command", Command: command, Timeout: timeout}},
+	})
+
+	settings.Hooks.PreToolUse = entries
+	return SaveSettings(scope, settings)
+}
+
+// RemoveCommitGateHook drops the commit gate's PreToolUse entry, preserving every
+// other hook.
+func RemoveCommitGateHook(scope string) error {
+	settings, err := LoadSettings(scope)
+	if err != nil {
+		return err
+	}
+	removed := false
+	entries := make([]HookEntry, 0, len(settings.Hooks.PreToolUse))
+	for _, entry := range settings.Hooks.PreToolUse {
+		hooks := make([]CommandHook, 0, len(entry.Hooks))
+		for _, hook := range entry.Hooks {
+			if IsCommitGateCommand(hook.Command) {
+				removed = true
+				continue
+			}
+			hooks = append(hooks, hook)
+		}
+		if len(hooks) > 0 {
+			entry.Hooks = hooks
+			entries = append(entries, entry)
+		}
+	}
+	if !removed {
+		return nil
+	}
+	settings.Hooks.PreToolUse = entries
+	return SaveSettings(scope, settings)
+}
+
+// CommitGateArming is what a scope's settings.json says about the gate.
+type CommitGateArming struct {
+	// Registered is true when a gate command is present anywhere in PreToolUse.
+	Registered bool
+	// Timeout is the wall clock the entry carries; zero means the key is absent and
+	// Claude Code applies its own default.
+	Timeout int
+	// Matcher is the entry the hook sits under. Registered but not Effective means the
+	// hook exists and will never run on a commit.
+	Matcher string
+}
+
+// Effective reports whether the gate will actually fire on a Bash tool call.
+//
+// Registration alone is not the question an operator is asking. A hook whose entry
+// carries a non-Bash matcher is present in the file and never invoked on a commit, so
+// reporting it as armed describes the config while the commits land unreviewed — the
+// silent failure this subsystem exists to prevent, one layer up.
+func (a CommitGateArming) Effective() bool {
+	return a.Registered && a.Matcher == CommitGateMatcher
+}
+
+// CommitGateHookArmed reports what this scope's settings.json says about the gate.
+func CommitGateHookArmed(scope string) CommitGateArming {
+	settings, err := LoadSettings(scope)
+	if err != nil {
+		return CommitGateArming{}
+	}
+	for _, entry := range settings.Hooks.PreToolUse {
+		for _, hook := range entry.Hooks {
+			if IsCommitGateCommand(hook.Command) {
+				return CommitGateArming{Registered: true, Timeout: hook.Timeout, Matcher: entry.Matcher}
+			}
+		}
+	}
+	return CommitGateArming{}
 }

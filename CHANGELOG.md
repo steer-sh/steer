@@ -4,6 +4,8 @@
 
 ### Features
 
+- **`steer commit-gate`**: a panel of independent reviewers red-teams a change's diff before it lands, blocking while a finding stands and writing an adjudication row for every decision. Two channels share one engine — `commit-gate review` (Claude Code PreToolUse) and `commit-gate precommit` (git hook) — with agy, Codex and `claude -p` as reviewer providers. `install` writes the hook's timeout from the reviewer timeout so the pair cannot drift, and refuses to arm both channels for one repo without `--both-channels`.
+
 - **`/steer-report` skill**: Mines recent Claude Code transcripts and CLAUDE.md for recurring friction (repeated user corrections, rejected tool calls, lint/test failures, unenforced CLAUDE.md directives) and proposes evidence-backed steer hooks. Recommends a fresh session when invoked mid-conversation; `--headless` emits candidates as JSON without creating hooks.
 - **`steer report` CLI command**: Streaming transcript scanner behind the skill. Scans `~/.claude/projects` over a look-back window (`--days`, default 30; all projects by default, `--project-only` to narrow) and emits a versioned, size-capped JSON digest (`--max-digest-bytes`, default 40KB) — lowest-scoring clusters are evicted to fit, and `stats.truncated` reports honesty. Pure JSON on stdout, progress on stderr.
 - **Audit log**: Every hook block appends a JSON line to `.claude/hooks/steer-audit.jsonl` (`timestamp`, `rule`, `hook_name`, `enforcement`, `file_path`, `tool_name`, `snippet`) — the artifact a team lead reads to answer "what did steer stop this week"

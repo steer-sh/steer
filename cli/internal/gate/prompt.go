@@ -1,0 +1,84 @@
+package gate
+
+import (
+	"crypto/sha256"
+	_ "embed"
+	"encoding/hex"
+	"fmt"
+	"strings"
+)
+
+// The five prompts, byte-identical to the Python hook's templates. Byte identity is
+// load-bearing twice over: the instrument digest is a hash of reviewPrompt, and a
+// drifting template silently reclassifies every row that follows.
+var (
+	//go:embed prompts/review.md
+	reviewPrompt string
+	//go:embed prompts/deny.md
+	denyTemplate string
+	//go:embed prompts/cap.md
+	capTemplate string
+	//go:embed prompts/round-note.md
+	roundNote string
+	//go:embed prompts/rerun-note.md
+	rerunNoteText string
+)
+
+func fill(tmpl string, fields map[string]string) string {
+	pairs := make([]string, 0, len(fields)*2)
+	for key, value := range fields {
+		pairs = append(pairs, "{"+key+"}", value)
+	}
+	return strings.NewReplacer(pairs...).Replace(tmpl)
+}
+
+// BuildReviewPrompt assembles the reviewer prompt. `context` is already a rendered
+// block (or empty); message and diff must be neutralised by the caller.
+func BuildReviewPrompt(message, diff, context string) string {
+	return fill(reviewPrompt, map[string]string{
+		"message": message, "diff": diff, "context": context,
+	})
+}
+
+// BuildDeny renders the blocking message the agent reads on a fired gate.
+func BuildDeny(count int, review string, firing, cap int, rerun string) string {
+	round := ""
+	if firing != 1 {
+		round = fill(roundNote, map[string]string{
+			"firing": fmt.Sprint(firing), "cap": fmt.Sprint(cap),
+		})
+	}
+	return fill(denyTemplate, map[string]string{
+		"count": fmt.Sprint(count), "review": review, "cap": fmt.Sprint(cap),
+		"firing": fmt.Sprint(firing), "round_note": round, "rerun_note": rerun,
+	})
+}
+
+// BuildCap renders the capped chain's terminal, non-blocking review message.
+func BuildCap(count int, review string, firing, cap int) string {
+	return fill(capTemplate, map[string]string{
+		"count": fmt.Sprint(count), "review": review,
+		"firing": fmt.Sprint(firing), "cap": fmt.Sprint(cap),
+	})
+}
+
+// RerunNoteText is prepended to the deny only when the denied command writes a file.
+// A deny stops the whole command, so a heredoc or `>` inside it never runs and the
+// file it would have written is not on disk; a retry of the `git commit` half alone
+// then exits 128 on the missing path. Only the Claude Code adapter can tell, so it
+// decides and passes the result to BuildDeny.
+func RerunNoteText() string { return rerunNoteText }
+
+// PromptDigest is the first 8 hex chars of sha256(reviewPrompt) — the instrument's
+// prompt half.
+func PromptDigest() string {
+	sum := sha256.Sum256([]byte(reviewPrompt))
+	return hex.EncodeToString(sum[:])[:8]
+}
+
+// InstrumentID identifies the reviewer that produced a row: model, run count, prompt
+// digest, implementation. Stamped on every row so a later reading of the log can tell
+// a change in the code being reviewed from a change in the thing doing the reviewing.
+func (c Config) InstrumentID() string {
+	return fmt.Sprintf("%s/%d/%s/%s", c.ReviewerModel, c.ReviewerRuns, PromptDigest(), InstrumentSuffix)
+}
