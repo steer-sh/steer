@@ -47,6 +47,9 @@ type harness struct {
 	cfg      Config
 	repo     string
 	reviewer *stubReviewer
+	// spec is the tree the gate reads, which the real adapter takes from the shape of
+	// the command. Varying it between rounds is what a dropped staging step looks like.
+	spec DiffSpec
 }
 
 func newHarness(t *testing.T, replies ...RawRun) *harness {
@@ -55,7 +58,8 @@ func newHarness(t *testing.T, replies ...RawRun) *harness {
 	cfg.StateDir = t.TempDir()
 	cfg.ReviewerRuns = 2
 	repo := buildRepo(t, map[string]string{"a.py": lines(120)})
-	return &harness{t: t, cfg: cfg, repo: repo, reviewer: &stubReviewer{replies: replies}}
+	return &harness{t: t, cfg: cfg, repo: repo, reviewer: &stubReviewer{replies: replies},
+		spec: DiffSpec{StagedOnly: true}}
 }
 
 func (h *harness) handle() Decision {
@@ -66,7 +70,7 @@ func (h *harness) handle() Decision {
 		Actor:     "session-1",
 		Channel:   ChannelPreToolUse,
 		SessionID: "session-1",
-		Spec:      DiffSpec{StagedOnly: true},
+		Spec:      h.spec,
 		Message:   "subject",
 	})
 }
@@ -361,5 +365,163 @@ func TestRetryOnOverBudgetFileSeesTheEdit(t *testing.T) {
 	row := h.lastRow()
 	if row["phase"] != "clean" {
 		t.Fatalf("phase = %v, want clean — a re-review, not a byte-identical chain end", row["phase"])
+	}
+}
+
+// withHistory gives the harness a repo that has a HEAD, so a diff against the working
+// tree resolves. buildRepo alone leaves the first tree staged and unrecorded.
+func (h *harness) withHistory() {
+	h.t.Helper()
+	root := buildRepo(h.t, map[string]string{"a.py": lines(120)})
+	gitCmd(h.t, root, verb, "-m", "base")
+	writeFileAt(h.t, root, "a.py", lines(200))
+	gitCmd(h.t, root, "add", "-A")
+	h.repo = root
+}
+
+// A round reviewed on the working tree, retried by a command that reads the index,
+// with edits still unstaged: the retry can be reading code from before the fixes and
+// nothing in the diff says so, so the agent has to be told.
+func TestRetryReadingAStaleIndexTellsTheAgent(t *testing.T) {
+	h := newHarness(t, findingReply(oneFinding), findingReply("NO FINDINGS"))
+	h.withHistory()
+	h.spec = DiffSpec{}
+	if d := h.handle(); d.Kind != Deny {
+		t.Fatalf("first firing Kind = %v, want Deny", d.Kind)
+	}
+	// The fix lands in the working tree and is never staged.
+	writeFileAt(t, h.repo, "a.py", lines(160))
+	h.spec = DiffSpec{StagedOnly: true}
+	d := h.handle()
+	if !strings.Contains(d.Reason, "REVIEWS THE INDEX") {
+		t.Fatalf("Reason did not carry the stale-index notice: %q", d.Reason)
+	}
+	if d.Kind == Allow {
+		t.Error("Kind = Allow — a commit reviewed on a possibly stale index must not " +
+			"also skip the permission prompt")
+	}
+	var retry map[string]any
+	for _, row := range h.rows() {
+		if row["phase"] == "retry" {
+			retry = row
+		}
+	}
+	if retry == nil || retry["spec_changed"] != true {
+		t.Fatalf("retry row = %v, want spec_changed true", retry)
+	}
+}
+
+// Staging everything and then re-issuing the bare command is the ordinary way to
+// recover from a denied bundle. Nothing is left unstaged there, so the notice must
+// stay quiet even though the two commands read different trees.
+func TestRetryAfterStagingEverythingIsQuiet(t *testing.T) {
+	h := newHarness(t, findingReply(oneFinding), findingReply("NO FINDINGS"))
+	h.withHistory()
+	h.spec = DiffSpec{}
+	if d := h.handle(); d.Kind != Deny {
+		t.Fatalf("first firing Kind = %v, want Deny", d.Kind)
+	}
+	writeFileAt(t, h.repo, "a.py", lines(160))
+	writeFileAt(t, h.repo, "scratch.txt", "untracked, and nobody's fix\n")
+	gitCmd(t, h.repo, "add", "a.py")
+	h.spec = DiffSpec{StagedOnly: true}
+	d := h.handle()
+	if strings.Contains(d.Reason, "REVIEWS THE INDEX") {
+		t.Fatalf("stale-index notice fired on a fully staged retry: %q", d.Reason)
+	}
+	if d.Kind != Allow {
+		t.Fatalf("Kind = %v, want Allow", d.Kind)
+	}
+}
+
+// A retry that reads the WORKING TREE sees every edit the last round saw and more. It
+// hides nothing, so it earns no notice and keeps its auto-approval.
+func TestRetryReadingTheWorkingTreeIsQuiet(t *testing.T) {
+	h := newHarness(t, findingReply(oneFinding), findingReply("NO FINDINGS"))
+	h.withHistory()
+	if d := h.handle(); d.Kind != Deny {
+		t.Fatalf("first firing Kind = %v, want Deny", d.Kind)
+	}
+	writeFileAt(t, h.repo, "a.py", lines(160))
+	h.spec = DiffSpec{}
+	d := h.handle()
+	if d.Reason != "" {
+		t.Fatalf("Reason = %q, want none", d.Reason)
+	}
+	if d.Kind != Allow {
+		t.Fatalf("Kind = %v, want Allow", d.Kind)
+	}
+}
+
+// The denied bundle never ran its own staging step, so a bare retry finds nothing
+// staged at all. That empty index IS the drift, and a silent gate hides it in the one
+// case that most needs saying.
+func TestBareRetryOnAnEmptyIndexIsNotSilent(t *testing.T) {
+	h := newHarness(t, findingReply(oneFinding), findingReply("NO FINDINGS"))
+	h.withHistory()
+	gitCmd(t, h.repo, "reset", "-q")
+	h.spec = DiffSpec{}
+	if d := h.handle(); d.Kind != Deny {
+		t.Fatalf("first firing Kind = %v, want Deny", d.Kind)
+	}
+	h.spec = DiffSpec{StagedOnly: true}
+	d := h.handle()
+	if d.Kind == Silent {
+		t.Fatal("Kind = Silent — the empty index is exactly what the agent must be told about")
+	}
+	if !strings.Contains(d.Reason, "REVIEWS THE INDEX") {
+		t.Fatalf("Reason did not carry the stale-index notice: %q", d.Reason)
+	}
+}
+
+// A retry reading the index while edits sit unstaged carries the notice on every path
+// out, the byte-identical chain end included — and that end must not write a cleared
+// record, which would let the same stale diff skip the gate outright next time.
+func TestTheChainEndOnAStaleIndexWarnsAndClearsNothing(t *testing.T) {
+	h := newHarness(t, findingReply(oneFinding))
+	h.withHistory()
+	h.spec = DiffSpec{}
+	if d := h.handle(); d.Kind != Deny {
+		t.Fatalf("first firing Kind = %v, want Deny", d.Kind)
+	}
+	// The fix lands in the working tree and is never staged, so the index still holds
+	// exactly the diff round 1 was denied on.
+	writeFileAt(t, h.repo, "a.py", lines(160))
+	h.spec = DiffSpec{StagedOnly: true}
+	d := h.handle()
+	if !strings.Contains(d.Reason, "REVIEWS THE INDEX") {
+		t.Fatalf("the chain end lost the notice: %q", d.Reason)
+	}
+	if d.Kind == Allow {
+		t.Error("Kind = Allow — a commit reviewed on a possibly stale index must not " +
+			"also skip the permission prompt")
+	}
+	chain := NewChain(h.cfg, ChainKey{Actor: "session-1", Repo: h.repo})
+	if record := chain.LoadCleared(stagedDiff(t, h.cfg, h.repo)); record != nil {
+		t.Error("a cleared record was written for a diff the agent was warned about")
+	}
+}
+
+// Nothing is reviewed on an empty-index pass, so the round awaiting an answer is still
+// awaiting one. Without this the agent follows the notice into a brand-new chain, and
+// the firing count and the cap start over.
+func TestTheEmptyIndexNoticeKeepsTheChain(t *testing.T) {
+	h := newHarness(t, findingReply(oneFinding))
+	h.withHistory()
+	gitCmd(t, h.repo, "reset", "-q")
+	h.spec = DiffSpec{}
+	if d := h.handle(); d.Kind != Deny {
+		t.Fatalf("first firing Kind = %v, want Deny", d.Kind)
+	}
+	h.spec = DiffSpec{StagedOnly: true}
+	h.handle()
+	chain := NewChain(h.cfg, ChainKey{Actor: "session-1", Repo: h.repo})
+	state := chain.Load()
+	if !chain.Pending(state) {
+		t.Fatal("the chain was dropped — the next commit starts over at firing 1")
+	}
+	if state.Firing != 1 {
+		t.Errorf("Firing = %d, want 1 — the pass reviewed nothing and must not count",
+			state.Firing)
 	}
 }

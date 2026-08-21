@@ -392,3 +392,34 @@ func renderDiff(cfg Config, plan *diffPlan, diff, names string, newPaths []strin
 	}
 	return diff
 }
+
+// HasUnstagedEdits reports whether the working tree holds edits to tracked files that
+// the index does not have. Untracked files are deliberately outside it: a scratch file
+// nobody staged is not evidence that a fix went missing, and counting it would fire the
+// stale-index notice on every repo with a stray file in it.
+//
+// ok=false from git reads as "no unstaged edits" — fail open, like every other read here.
+func HasUnstagedEdits(cfg Config, cwd string) bool {
+	out, ok := Git(cwd, gitMedium, "diff", "--name-only", "--no-relative")
+	return ok && strings.TrimSpace(out) != ""
+}
+
+// StaleIndexNotice is agent-facing text for a retry that reads the index while edits
+// sit unstaged in the working tree.
+//
+// Which tree the gate reads is invisible from the diff: it comes from the SHAPE of the
+// command, so a staging step joined to the commit reads the working tree and a bare
+// commit reads the index. A denied command never ran its own staging step — the deny
+// stops the whole command — so the retry after one finds the index exactly as stale as
+// it was before the fixes.
+//
+// It says what was OBSERVED and stops. The reviewers' own tree is not named, because
+// this fires on any retry reading the index and the round before it may have read
+// either one.
+func StaleIndexNotice() string {
+	return "[commit-gate] THIS COMMAND REVIEWS THE INDEX, and you have unstaged edits " +
+		"in the working tree. The gate reads the tree from the command's shape, and a " +
+		"denied command never ran its own staging step, so what is staged may predate " +
+		"your fixes and the reviews above may be of code you already replaced. Stage " +
+		"your edits and re-issue the command whole if that is not what you meant.\n\n"
+}

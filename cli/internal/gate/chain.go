@@ -30,6 +30,11 @@ type ChainState struct {
 	Files         int    `json:"files"`
 	Diff          string `json:"diff"`
 	Firing        int    `json:"firing"`
+	// Spec is the tree the denying round read: the index, or the working tree. It is
+	// an observation for the ledger's spec_changed field and drives no decision — the
+	// stale-index notice asks the repository what is unstaged instead, because a chain
+	// that settles onto the index stops drifting while the miss stays.
+	Spec DiffSpec `json:"spec"`
 }
 
 // ClearedRecord says the gate reviewed this exact diff in this repo and let it

@@ -96,6 +96,9 @@ func (e *Engine) log(req Request, row Row) error {
 type prepared struct {
 	paths []string
 	diff  string
+	// notice is agent-facing text that must survive whatever this round rules. It
+	// carries what the reviewers CANNOT know: which tree they were handed.
+	notice string
 	// raw is the unrendered diff. It is the commit's IDENTITY — the cleared record,
 	// the chain state and the changed-since-last-round test all key on it — because
 	// two different over-budget versions of one file render to the same stat block.
@@ -188,6 +191,27 @@ func (e *Engine) handleRetry(ctx context.Context, req Request, chain *Chain, sta
 	// whether anything happened.
 	after, _ := GetDiffSized(e.cfg, req.Repo, req.Spec)
 	changed := after.Raw != state.Diff
+	// A retry that reads a different tree than the round it retries is not a retry of
+	// the same question: the comparison above weighs two TREES rather than two versions
+	// of one. The agent has to be told which tree its reviewers were handed, because
+	// nothing in the diff says.
+	//
+	// Gated on the two trees actually HOLDING different code, not on the specs
+	// differing. Staging everything and then committing bare is the ordinary way to
+	// recover from a denied bundle, and there the specs disagree while the code does not.
+	// Two observed facts, and neither is the previous round's tree. A rule keyed on the
+	// drift ITSELF goes quiet the moment a chain settles onto the index: round 2 warns,
+	// round 3 sees two index rounds in a row, agrees with itself, and ends the chain on
+	// a diff that still lacks the fixes.
+	//
+	// A retry that reads the WORKING TREE hides nothing — it sees every edit the last
+	// round saw and more — so only the index needs asking about. The unstaged-edit test
+	// is what keeps this quiet on the ordinary recovery: stage everything, re-issue the
+	// bare command, and there is no unstaged edit left to warn about.
+	notice := ""
+	if req.Spec.StagedOnly && HasUnstagedEdits(e.cfg, req.Repo) {
+		notice = StaleIndexNotice()
+	}
 	firing := state.Firing
 	if firing == 0 {
 		firing = 1
@@ -197,6 +221,8 @@ func (e *Engine) handleRetry(ctx context.Context, req Request, chain *Chain, sta
 		"finding_slots":   state.FindingSlots,
 		"diff_changed":    changed,
 		"firing":          firing,
+		"spec_changed":    state.Spec != req.Spec,
+		"stale_index":     notice != "",
 		"files":           state.Files,
 		"session_id":      req.SessionID,
 		"deny_ts":         state.TS,
@@ -217,20 +243,32 @@ func (e *Engine) handleRetry(ctx context.Context, req Request, chain *Chain, sta
 	if !changed {
 		// The chain's real stop. An all-rejected round produces this, which is why the
 		// cap almost never binds.
-		if err := chain.RememberCleared(after.Raw, req.Channel); err != nil && logErr == nil {
-			logErr = err
+		//
+		// No cleared record while edits sit unstaged, for the reason the clean-review
+		// path withholds one: the record means "reviewed and let through", and writing
+		// it here blesses the very tree the notice exists to question.
+		if notice == "" {
+			if err := chain.RememberCleared(after.Raw, req.Channel); err != nil && logErr == nil {
+				logErr = err
+			}
+		}
+		kind := NoteOnly
+		if notice != "" {
+			kind = ContextOnly
 		}
 		return Decision{
-			Kind: NoteOnly,
+			Kind:   kind,
+			Reason: notice,
 			SystemMessage: fmt.Sprintf("[commit-gate] gate chain ended after %d firing(s) — the "+
 				"retry diff is byte-identical to the one already reviewed, so a re-review "+
-				"would read no new code. Commit proceeds.", firing),
+				"would read no new code. Commit proceeds.%s", firing, separated(notice)),
 			LedgerError: logErr,
 		}
 	}
 
 	next := firing + 1
 	p, status, err := e.prepare(req, next, &after)
+	p.notice = notice
 	if err != nil && logErr == nil {
 		logErr = err
 	}
@@ -240,6 +278,21 @@ func (e *Engine) handleRetry(ctx context.Context, req Request, chain *Chain, sta
 		return withLedgerError(d, logErr)
 	}
 	if status != "" {
+		if notice != "" && status == "empty" {
+			// The empty index IS the miss: a denied bundle never ran its staging step,
+			// so the retry finds nothing staged. Silence here hides the notice in the
+			// one case that most needs it.
+			//
+			// The chain is put back as it was. Nothing was reviewed on this pass, so
+			// the round it retries is still the round awaiting an answer — and without
+			// this the agent follows the notice into handleFirst, where the firing
+			// count and the cap start over.
+			if err := chain.Save(state); err != nil && logErr == nil {
+				logErr = err
+			}
+			return Decision{Kind: ContextOnly, Reason: notice,
+				SystemMessage: notice, LedgerError: logErr}
+		}
 		return Decision{Kind: Silent, LedgerError: logErr}
 	}
 	// The diff changed, so this round reviews code no reviewer has read.
@@ -268,11 +321,16 @@ func (e *Engine) reviewCommit(ctx context.Context, req Request, chain *Chain, p 
 				"files": len(p.paths), "firing": firing, "chars": len(p.raw),
 				"session_id": req.SessionID},
 			ReviewerReport(e.cfg, result.Runs)))
+		kind := Allow
+		if p.notice != "" {
+			kind = ContextOnly
+		}
 		return Decision{
-			Kind: Allow,
+			Kind:   kind,
+			Reason: p.notice,
 			SystemMessage: fmt.Sprintf("[commit-gate] all %d reviewers unavailable — %s. "+
-				"This commit was NOT reviewed and went through ungated.",
-				e.cfg.ReviewerRuns, ReviewerTrouble(result.Runs)),
+				"This commit was NOT reviewed and went through ungated.%s",
+				e.cfg.ReviewerRuns, ReviewerTrouble(result.Runs), separated(p.notice)),
 			LedgerError: err,
 		}
 	}
@@ -283,18 +341,32 @@ func (e *Engine) reviewCommit(ctx context.Context, req Request, chain *Chain, p 
 				"files": len(p.paths), "firing": firing, "session_id": req.SessionID},
 			ReviewerReport(e.cfg, result.Runs),
 			e.ledger.SaveDiff(req.SessionID, firing, p.diff)))
-		if cerr := chain.RememberCleared(p.raw, req.Channel); cerr != nil && err == nil {
-			err = cerr
+		if p.notice == "" {
+			// No cleared record while edits sit unstaged. The record's meaning is
+			// "reviewed and let through", and a later commit presenting this same diff
+			// would skip the gate on the strength of it — blessing the tree the notice
+			// exists to question.
+			if cerr := chain.RememberCleared(p.raw, req.Channel); cerr != nil && err == nil {
+				err = cerr
+			}
 		}
 		thin := ""
 		if result.Answered < e.cfg.ReviewerRuns {
 			thin = fmt.Sprintf(" Only %d/%d answered — %s.",
 				result.Answered, e.cfg.ReviewerRuns, ReviewerTrouble(result.Runs))
 		}
+		kind := Allow
+		if p.notice != "" {
+			// ContextOnly rather than Allow: the notice is for the AGENT, and an allow
+			// carries only the operator receipt. It costs this commit its auto-approval
+			// and buys the agent the one fact the reviewers could not see.
+			kind = ContextOnly
+		}
 		return Decision{
-			Kind: Allow,
+			Kind:   kind,
+			Reason: p.notice,
 			SystemMessage: fmt.Sprintf("[commit-gate] %d reviewers read the diff on firing %d "+
-				"and found nothing — commit proceeds.%s", result.Answered, firing, thin),
+				"and found nothing — commit proceeds.%s%s", result.Answered, firing, thin, separated(p.notice)),
 			LedgerError: err,
 		}
 	}
@@ -304,7 +376,7 @@ func (e *Engine) reviewCommit(ctx context.Context, req Request, chain *Chain, p 
 	// closes.
 	saveErr := chain.Save(ChainState{
 		AwaitingRetry: true, TS: time.Now().Unix(), FindingSlots: findings,
-		Files: len(p.paths), Diff: p.raw, Firing: firing,
+		Files: len(p.paths), Diff: p.raw, Firing: firing, Spec: req.Spec,
 	})
 	err := e.log(req, mergeRows(
 		Row{"ts": time.Now().Unix(), "phase": "deny", "reviewers": result.Answered,
@@ -331,7 +403,7 @@ func (e *Engine) reviewCommit(ctx context.Context, req Request, chain *Chain, p 
 	}
 	return Decision{
 		Kind:          Deny,
-		Reason:        BuildDeny(result.Answered, review, firing, e.cfg.MaxFirings, req.RerunNote),
+		Reason:        p.notice + BuildDeny(result.Answered, review, firing, e.cfg.MaxFirings, req.RerunNote),
 		SystemMessage: note,
 		LedgerError:   err,
 	}
@@ -343,9 +415,15 @@ func (e *Engine) reviewCommit(ctx context.Context, req Request, chain *Chain, p 
 func (e *Engine) terminalReview(ctx context.Context, req Request, chain *Chain, p prepared, status string, firing int) Decision {
 	capped := fmt.Sprintf("[commit-gate] gate chain hit the %d-firing cap", e.cfg.MaxFirings)
 	if status != "" {
-		return Decision{Kind: NoteOnly, SystemMessage: fmt.Sprintf(
-			"%s. The final review did not run (%s), so round %d's fixes are UNREVIEWED.",
-			capped, status, e.cfg.MaxFirings)}
+		kind := NoteOnly
+		if p.notice != "" {
+			// NoteOnly speaks to the operator alone, so a Reason set beside it never
+			// reaches the agent that has to act on it.
+			kind = ContextOnly
+		}
+		return Decision{Kind: kind, Reason: p.notice, SystemMessage: fmt.Sprintf(
+			"%s. The final review did not run (%s), so round %d's fixes are UNREVIEWED.%s",
+			capped, status, e.cfg.MaxFirings, separated(p.notice))}
 	}
 	result := e.review(ctx, req, p)
 	row := mergeRows(
@@ -372,9 +450,14 @@ func (e *Engine) terminalReview(ctx context.Context, req Request, chain *Chain, 
 		if err == nil {
 			err = clearedErr
 		}
-		return Decision{Kind: NoteOnly, SystemMessage: fmt.Sprintf(
+		kind := NoteOnly
+		if p.notice != "" {
+			kind = ContextOnly
+		}
+		return Decision{Kind: kind, Reason: p.notice, SystemMessage: fmt.Sprintf(
 			"%s. The final non-blocking review read round %d's fixes and %d reviewers "+
-				"found nothing.", capped, e.cfg.MaxFirings, result.Answered), LedgerError: err}
+				"found nothing.%s", capped, e.cfg.MaxFirings, result.Answered, separated(p.notice)),
+			LedgerError: err}
 	}
 
 	review, findings := ComposeReview(result.Reviews)
@@ -396,7 +479,7 @@ func (e *Engine) terminalReview(ctx context.Context, req Request, chain *Chain, 
 		capped, e.cfg.MaxFirings, findings, blocking, result.Answered)
 	return Decision{
 		Kind:          ContextOnly,
-		Reason:        BuildCap(result.Answered, review, firing, e.cfg.MaxFirings),
+		Reason:        p.notice + BuildCap(result.Answered, review, firing, e.cfg.MaxFirings),
 		SystemMessage: note,
 		LedgerError:   err,
 	}
@@ -410,4 +493,13 @@ func mergeRows(rows ...Row) Row {
 		}
 	}
 	return out
+}
+
+// separated puts a break before a notice appended to an operator line, and stays empty
+// when there is no notice to append.
+func separated(notice string) string {
+	if notice == "" {
+		return ""
+	}
+	return "\n\n" + notice
 }
