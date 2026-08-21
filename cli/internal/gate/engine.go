@@ -96,12 +96,16 @@ func (e *Engine) log(req Request, row Row) error {
 type prepared struct {
 	paths []string
 	diff  string
+	// raw is the unrendered diff. It is the commit's IDENTITY — the cleared record,
+	// the chain state and the changed-since-last-round test all key on it — because
+	// two different over-budget versions of one file render to the same stat block.
+	raw string
 }
 
 // prepare resolves the diff for this round, logging the skip rows itself so both
 // callers record them identically. A non-empty status means there is nothing to
 // review: "norepo" (git could not answer — fail open), "prose", or "empty".
-func (e *Engine) prepare(req Request, firing int, diff string, haveDiff bool) (prepared, string, error) {
+func (e *Engine) prepare(req Request, firing int, d *DiffResult) (prepared, string, error) {
 	paths, ok := ChangedFiles(e.cfg, req.Repo, req.Spec)
 	if !ok {
 		return prepared{}, "norepo", nil
@@ -111,19 +115,23 @@ func (e *Engine) prepare(req Request, firing int, diff string, haveDiff bool) (p
 			"files": len(paths), "firing": firing})
 		return prepared{}, "prose", err
 	}
-	if !haveDiff {
-		diff, _ = GetDiff(e.cfg, req.Repo, req.Spec)
+	if d == nil {
+		got, _ := GetDiffSized(e.cfg, req.Repo, req.Spec)
+		d = &got
 	}
-	if len(diff) < e.cfg.MinDiffChars {
+	// The RAW length decides, not the rendered one. They differ only when rendering
+	// makes the diff shorter, which is exactly the over-budget branches — so testing
+	// the rendered length made the smallest-commit filter discard the largest commits.
+	if len(d.Raw) < e.cfg.MinDiffChars {
 		// Logged, not silent. This was the only skip path writing no row, so a staging
 		// bypass read as "no commit happened" rather than "a commit went ungated" —
 		// the log is the experiment's data, and an invisible skip corrupts it in the
 		// direction that flatters the gate.
 		err := e.log(req, Row{"ts": time.Now().Unix(), "phase": "skip-empty",
-			"files": len(paths), "chars": len(diff), "firing": firing})
+			"files": len(paths), "chars": len(d.Raw), "firing": firing})
 		return prepared{}, "empty", err
 	}
-	return prepared{paths: paths, diff: diff}, "", nil
+	return prepared{paths: paths, diff: d.Text, raw: d.Raw}, "", nil
 }
 
 // review runs the panel over a prepared round.
@@ -147,18 +155,18 @@ func (e *Engine) Handle(ctx context.Context, req Request) Decision {
 }
 
 func (e *Engine) handleFirst(ctx context.Context, req Request, chain *Chain) Decision {
-	p, status, err := e.prepare(req, 1, "", false)
+	p, status, err := e.prepare(req, 1, nil)
 	if status != "" {
 		return Decision{Kind: Silent, LedgerError: err}
 	}
 	// The cleared record is read once the diff is in hand, because it is keyed on the
 	// diff's own content. That is also one `git diff` cheaper than probing first.
-	if record := chain.LoadCleared(p.diff); record != nil {
+	if record := chain.LoadCleared(p.raw); record != nil {
 		// Logged, never silent, for the reason skip-empty is: a pass the log does not
 		// carry is an invisible skip. The phase is deliberately NOT one mine.py opens
 		// a chain on — a chain here is the phantom this removes.
 		logErr := e.log(req, Row{"ts": time.Now().Unix(), "phase": "skip-cleared",
-			"firing": 1, "diff_sha": record.DiffSHA, "chars": len(p.diff),
+			"firing": 1, "diff_sha": record.DiffSHA, "chars": len(p.raw),
 			"session_id": req.SessionID, "cleared_ts": record.TS,
 			"cleared_channel": record.Channel})
 		return Decision{
@@ -178,8 +186,8 @@ func (e *Engine) handleRetry(ctx context.Context, req Request, chain *Chain, sta
 	// the agent's own account. Either alone is misleading — a changed diff says
 	// nothing about which concerns drove it, and an accept count says nothing about
 	// whether anything happened.
-	after, _ := GetDiff(e.cfg, req.Repo, req.Spec)
-	changed := after != state.Diff
+	after, _ := GetDiffSized(e.cfg, req.Repo, req.Spec)
+	changed := after.Raw != state.Diff
 	firing := state.Firing
 	if firing == 0 {
 		firing = 1
@@ -209,7 +217,7 @@ func (e *Engine) handleRetry(ctx context.Context, req Request, chain *Chain, sta
 	if !changed {
 		// The chain's real stop. An all-rejected round produces this, which is why the
 		// cap almost never binds.
-		if err := chain.RememberCleared(after, req.Channel); err != nil && logErr == nil {
+		if err := chain.RememberCleared(after.Raw, req.Channel); err != nil && logErr == nil {
 			logErr = err
 		}
 		return Decision{
@@ -222,7 +230,7 @@ func (e *Engine) handleRetry(ctx context.Context, req Request, chain *Chain, sta
 	}
 
 	next := firing + 1
-	p, status, err := e.prepare(req, next, after, true)
+	p, status, err := e.prepare(req, next, &after)
 	if err != nil && logErr == nil {
 		logErr = err
 	}
@@ -257,7 +265,7 @@ func (e *Engine) reviewCommit(ctx context.Context, req Request, chain *Chain, p 
 		// happened. No cleared record: nothing was reviewed, so nothing is cleared.
 		err := e.log(req, mergeRows(
 			Row{"ts": time.Now().Unix(), "phase": "ungated", "reviewers": 0,
-				"files": len(p.paths), "firing": firing, "chars": len(p.diff),
+				"files": len(p.paths), "firing": firing, "chars": len(p.raw),
 				"session_id": req.SessionID},
 			ReviewerReport(e.cfg, result.Runs)))
 		return Decision{
@@ -275,7 +283,7 @@ func (e *Engine) reviewCommit(ctx context.Context, req Request, chain *Chain, p 
 				"files": len(p.paths), "firing": firing, "session_id": req.SessionID},
 			ReviewerReport(e.cfg, result.Runs),
 			e.ledger.SaveDiff(req.SessionID, firing, p.diff)))
-		if cerr := chain.RememberCleared(p.diff, req.Channel); cerr != nil && err == nil {
+		if cerr := chain.RememberCleared(p.raw, req.Channel); cerr != nil && err == nil {
 			err = cerr
 		}
 		thin := ""
@@ -296,7 +304,7 @@ func (e *Engine) reviewCommit(ctx context.Context, req Request, chain *Chain, p 
 	// closes.
 	saveErr := chain.Save(ChainState{
 		AwaitingRetry: true, TS: time.Now().Unix(), FindingSlots: findings,
-		Files: len(p.paths), Diff: p.diff, Firing: firing,
+		Files: len(p.paths), Diff: p.raw, Firing: firing,
 	})
 	err := e.log(req, mergeRows(
 		Row{"ts": time.Now().Unix(), "phase": "deny", "reviewers": result.Answered,
@@ -356,7 +364,7 @@ func (e *Engine) terminalReview(ctx context.Context, req Request, chain *Chain, 
 
 	// Below this line a reviewer read the diff and the commit proceeds, which is what
 	// the cleared record means. The branch above reviewed nothing and must not write it.
-	clearedErr := chain.RememberCleared(p.diff, req.Channel)
+	clearedErr := chain.RememberCleared(p.raw, req.Channel)
 
 	if len(result.Reviews) == 0 {
 		row["finding_slots"] = 0

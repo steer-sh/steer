@@ -321,3 +321,45 @@ func TestLedgerAppendFailureIsReturned(t *testing.T) {
 		t.Error("a ledger append that cannot happen must be reported, not swallowed")
 	}
 }
+
+// The stat-only fallback renders SHORTER than the raw diff it replaces, so testing the
+// rendered length against MinDiffChars made the smallest-commit filter discard the
+// largest commits: a one-file change too big to inline was never reviewed.
+func TestOverBudgetSingleFileIsReviewed(t *testing.T) {
+	h := newHarness(t, findingReply("NO FINDINGS"))
+	h.cfg.MaxDiffChars = 500
+	h.repo = buildRepo(t, map[string]string{"a.py": lines(300)})
+	d := h.handle()
+	if d.Kind != Allow {
+		t.Fatalf("Kind = %v, want Allow", d.Kind)
+	}
+	row := h.lastRow()
+	if row["phase"] != "clean" {
+		t.Fatalf("phase = %v, want clean — the commit is one file over the diff budget, "+
+			"which the stat-only fallback exists to review anyway", row["phase"])
+	}
+}
+
+// The chain's changed-since-last-round test keys on the RAW diff. Two different
+// versions of one over-budget file render to the same stat block, so a rendered
+// comparison would end the chain on "byte-identical" without reading the fix.
+func TestRetryOnOverBudgetFileSeesTheEdit(t *testing.T) {
+	h := newHarness(t, findingReply(oneFinding), findingReply("NO FINDINGS"))
+	h.cfg.MaxDiffChars = 500
+	h.repo = buildRepo(t, map[string]string{"a.py": lines(300)})
+	if d := h.handle(); d.Kind != Deny {
+		t.Fatalf("first firing Kind = %v, want Deny", d.Kind)
+	}
+	// An edit of the same byte length: the stat block and the raw char count both
+	// stay put, so only the raw text itself can report the change.
+	writeFileAt(t, h.repo, "a.py", strings.Replace(lines(300), "line x", "line y", 1))
+	gitCmd(t, h.repo, "add", "-A")
+	d := h.handle()
+	if d.Kind != Allow {
+		t.Fatalf("retry Kind = %v, want Allow — the retry diff differs and must be reviewed", d.Kind)
+	}
+	row := h.lastRow()
+	if row["phase"] != "clean" {
+		t.Fatalf("phase = %v, want clean — a re-review, not a byte-identical chain end", row["phase"])
+	}
+}

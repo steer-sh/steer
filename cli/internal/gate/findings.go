@@ -25,6 +25,32 @@ func CountFindings(text string) int {
 	return len(severityRe.FindAllString(text, -1))
 }
 
+// The wrappers a reviewer puts around the clean reply: markdown emphasis, code
+// ticks, quotes, a closing period. Both readers below strip the same set, so a
+// decorated reply cannot be clean to one of them and a finding to the other.
+const cleanReplyTrim = "*`_.!\"' \t\n\r"
+
+// IsNoFindings reports whether a reply OPENS with the clean answer the review prompt
+// asks for. Loose on purpose: it decides only whether a reply reaches the composed
+// review, where a false negative would deny a clean commit over a reviewer's closing
+// remark.
+func IsNoFindings(text string) bool {
+	return strings.HasPrefix(cleanReplyCore(text), "NO FINDINGS")
+}
+
+// IsCleanReply reports whether a reply is the clean answer and NOTHING else. Strict
+// where IsNoFindings is loose, because it decides whether a FAILED run counts as a
+// review at all: "NO FINDINGS could be determined, the tool was denied" opens with
+// the protocol's words and is a failure report, and counting it would inflate the
+// answered-reviewer count that the ungated branch reads.
+func IsCleanReply(text string) bool {
+	return cleanReplyCore(text) == "NO FINDINGS"
+}
+
+func cleanReplyCore(text string) string {
+	return strings.Trim(strings.ToUpper(text), cleanReplyTrim)
+}
+
 // CountFindingsLoose is the measurement-only count. Divergence from CountFindings in
 // the real corpus is evidence for changing the strict pattern; it never blocks.
 func CountFindingsLoose(text string) int {

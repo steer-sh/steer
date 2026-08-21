@@ -14,14 +14,19 @@ import (
 type RunOutcome string
 
 const (
-	OutcomeOK          RunOutcome = "ok"
-	OutcomeSalvaged    RunOutcome = "salvaged"
-	OutcomeLost        RunOutcome = "lost"
-	OutcomeEmpty       RunOutcome = "empty"
-	OutcomeTimeout     RunOutcome = "timeout"
-	OutcomeSpawn       RunOutcome = "spawn"
-	OutcomeExit        RunOutcome = "exit"
-	OutcomeUnparseable RunOutcome = "unparseable"
+	OutcomeOK RunOutcome = "ok"
+	// OutcomeSalvagedClean is a reply that conforms to the prompt's clean protocol
+	// under a failed status. It is kept apart from ok so the ledger still records
+	// that the provider errored — a denied command sets status ERROR for the whole
+	// invocation even though the model answered in full.
+	OutcomeSalvagedClean RunOutcome = "salvaged_clean"
+	OutcomeSalvaged      RunOutcome = "salvaged"
+	OutcomeLost          RunOutcome = "lost"
+	OutcomeEmpty         RunOutcome = "empty"
+	OutcomeTimeout       RunOutcome = "timeout"
+	OutcomeSpawn         RunOutcome = "spawn"
+	OutcomeExit          RunOutcome = "exit"
+	OutcomeUnparseable   RunOutcome = "unparseable"
 )
 
 // ReviewRun is one reviewer run. Text is the usable review or empty.
@@ -58,9 +63,10 @@ type Reviewer interface {
 	Review(ctx context.Context, prompt, cwd string) RawRun
 }
 
-// Classify turns a provider's raw result into a run outcome. A non-success status
-// still carrying findings is kept as `salvaged`; one carrying none is dropped as
-// `lost`, because only the drop errs toward denying.
+// Classify turns a provider's raw result into a run outcome. A body that conforms to
+// the review protocol — findings, or the clean reply — is a completed review whatever
+// the status says: `salvaged` and `salvaged_clean`. Only a body conforming to neither
+// is dropped as `lost`.
 func Classify(raw RawRun) ReviewRun {
 	if raw.Outcome != "" {
 		return ReviewRun{Outcome: raw.Outcome, Detail: raw.Detail}
@@ -78,6 +84,9 @@ func Classify(raw RawRun) ReviewRun {
 	}
 	if CountFindings(text) > 0 {
 		return ReviewRun{Text: text, Outcome: OutcomeSalvaged, Detail: detail}
+	}
+	if IsCleanReply(text) {
+		return ReviewRun{Text: text, Outcome: OutcomeSalvagedClean, Detail: detail}
 	}
 	return ReviewRun{Outcome: OutcomeLost, Detail: detail}
 }
@@ -123,7 +132,9 @@ func (p *Panel) Run(ctx context.Context, prompt, cwd string) PanelResult {
 			continue
 		}
 		result.Answered++
-		if !strings.HasPrefix(strings.ToUpper(run.Text), "NO FINDINGS") {
+		// A reply may OPEN with the clean words and still carry a finding below them.
+		// The finding count is what decides, so the opener can never bury one.
+		if CountFindings(run.Text) > 0 || !IsNoFindings(run.Text) {
 			result.Reviews = append(result.Reviews, run.Text)
 		}
 	}

@@ -325,16 +325,32 @@ func ChangedFiles(cfg Config, cwd string, spec DiffSpec) (paths []string, ok boo
 	return paths, true
 }
 
+// DiffResult is the rendered diff plus the raw one it came from. The pair is the
+// point: rendering SHORTENS an over-budget diff, so Text answers "what do the
+// reviewers read" while only Raw answers "is there enough here to review" and "did
+// this commit change since the last round". A stat-only render is byte-identical
+// across two different versions of an over-budget file, so it cannot carry identity.
+type DiffResult struct {
+	Text string
+	Raw  string
+}
+
 // GetDiff assembles the diff text the reviewers read: filtered, budgeted, and
 // preambled with what the harness dropped. An empty return means git could not
 // answer.
 func GetDiff(cfg Config, cwd string, spec DiffSpec) (string, bool) {
+	result, ok := GetDiffSized(cfg, cwd, spec)
+	return result.Text, ok
+}
+
+// GetDiffSized is GetDiff carrying the raw length as well.
+func GetDiffSized(cfg Config, cwd string, spec DiffSpec) (DiffResult, bool) {
 	plan := newDiffPlan(cfg, cwd, spec)
 	diff, names, newPaths, ok := plan.run()
 	if !ok {
-		return "", false
+		return DiffResult{}, false
 	}
-	return renderDiff(cfg, plan, diff, names, newPaths), true
+	return DiffResult{Text: renderDiff(cfg, plan, diff, names, newPaths), Raw: diff}, true
 }
 
 func renderDiff(cfg Config, plan *diffPlan, diff, names string, newPaths []string) string {
