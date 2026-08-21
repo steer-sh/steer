@@ -166,3 +166,73 @@ func TestCommitGateRoundTripPreservesOtherKeys(t *testing.T) {
 		t.Errorf("a non-steer hook lost its command or timeout: %v", hook)
 	}
 }
+
+// The round trip must preserve keys one level below the hook event too: statusMessage
+// rides the innermost hook object, and dropping it silently changes what Claude Code
+// shows while another team's hook runs.
+func TestCommitGateRoundTripPreservesInnerHookKeys(t *testing.T) {
+	withProjectDir(t)
+	writeSettings(t, `{"hooks":{"PreToolUse":[{"matcher":"ExitPlanMode","note":"keep me","hooks":[
+		{"type":"command","command":"python3 plan-review.py","timeout":300,
+		 "statusMessage":"red-teaming the plan ...","futureKey":{"a":1}}]}]}}`)
+	if err := RegisterCommitGateHook(ProjectScope, "steer commit-gate review", 210); err != nil {
+		t.Fatal(err)
+	}
+	if err := RemoveCommitGateHook(ProjectScope); err != nil {
+		t.Fatal(err)
+	}
+	pre := readSettings(t)["hooks"].(map[string]any)["PreToolUse"].([]any)
+	entry := pre[0].(map[string]any)
+	if entry["note"] != "keep me" {
+		t.Errorf("an unmodeled key on the hook entry was dropped: %v", entry)
+	}
+	hook := entry["hooks"].([]any)[0].(map[string]any)
+	if hook["statusMessage"] != "red-teaming the plan ..." {
+		t.Errorf("statusMessage lost: %v", hook)
+	}
+	if hook["futureKey"] == nil {
+		t.Errorf("an unmodeled key on the inner hook was dropped: %v", hook)
+	}
+	if hook["timeout"] != float64(300) || hook["command"] != "python3 plan-review.py" {
+		t.Errorf("a modeled key changed: %v", hook)
+	}
+}
+
+// The gate's own hook carries a statusMessage, or a commit review runs with no sign
+// that anything is happening.
+func TestRegisterCommitGateHookWritesStatusMessage(t *testing.T) {
+	withProjectDir(t)
+	if err := RegisterCommitGateHook(ProjectScope, "steer commit-gate review", 210); err != nil {
+		t.Fatal(err)
+	}
+	pre := readSettings(t)["hooks"].(map[string]any)["PreToolUse"].([]any)
+	hook := pre[0].(map[string]any)["hooks"].([]any)[0].(map[string]any)
+	if hook["statusMessage"] != CommitGateStatusMessage {
+		t.Errorf("statusMessage = %v, want %q", hook["statusMessage"], CommitGateStatusMessage)
+	}
+}
+
+// A hook with no timeout and no statusMessage must not gain empty ones: Claude Code
+// applies its own default for an absent timeout, and a zero would override it.
+func TestCommitGateRoundTripOmitsAbsentInnerKeys(t *testing.T) {
+	withProjectDir(t)
+	writeSettings(t, `{"hooks":{"PreToolUse":[{"matcher":"Read","hooks":[
+		{"type":"command","command":"echo hi"}]}]}}`)
+	if err := RegisterCommitGateHook(ProjectScope, "steer commit-gate review", 210); err != nil {
+		t.Fatal(err)
+	}
+	pre := readSettings(t)["hooks"].(map[string]any)["PreToolUse"].([]any)
+	for _, raw := range pre {
+		entry := raw.(map[string]any)
+		if entry["matcher"] != "Read" {
+			continue
+		}
+		hook := entry["hooks"].([]any)[0].(map[string]any)
+		if _, ok := hook["timeout"]; ok {
+			t.Errorf("an absent timeout was materialised: %v", hook)
+		}
+		if _, ok := hook["statusMessage"]; ok {
+			t.Errorf("an absent statusMessage was materialised: %v", hook)
+		}
+	}
+}

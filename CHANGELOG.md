@@ -14,6 +14,8 @@
 
 ### Fixes
 
+- **settings.json round trip dropped keys on the innermost hook object**: registering or removing a steer hook rewrote every PreToolUse hook through a closed struct modeling only `type`, `command` and `timeout`, so any other key on a neighbouring hook — `statusMessage`, or anything Claude Code adds later — was silently lost. `CommandHook` and `HookEntry` now carry unmodeled keys through unchanged, the way the top level and the hook-event level already did. The commit gate's own hook gains a `statusMessage`.
+
 - **Consolidation drops module-level constants**: `steer register` consolidation extracted `main()` and helper functions but silently dropped top-level assignments (e.g. compiled regexes), producing a master hook whose `NameError` was swallowed at runtime — the hook passed individual self-tests but enforced nothing. Constants are now carried into the master with prefixed names; the steer skill additionally verifies the consolidated master after registration.
 
 ### Security

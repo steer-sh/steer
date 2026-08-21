@@ -22,19 +22,127 @@ const (
 	BackupExtension = ".backup"
 )
 
-// CommandHook represents the innermost hook object.
+// CommandHook represents the innermost hook object. Only the four keys steer reads
+// or writes are modeled; every other key rides extra so a settings round-trip never
+// drops a field on a hook steer does not own.
 type CommandHook struct {
-	Type    string `json:"type"`
-	Command string `json:"command"`
+	Type    string
+	Command string
 	// Timeout is the hook's wall-clock budget in seconds. Zero means the key is
 	// absent and Claude Code applies its own default.
-	Timeout int `json:"timeout,omitempty"`
+	Timeout int
+	// StatusMessage is the line Claude Code shows while the hook runs. Empty
+	// means the key is absent.
+	StatusMessage string
+
+	extra map[string]json.RawMessage
+}
+
+func (c *CommandHook) UnmarshalJSON(data []byte) error {
+	raw := map[string]json.RawMessage{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	for key, target := range map[string]any{
+		"type":          &c.Type,
+		"command":       &c.Command,
+		"timeout":       &c.Timeout,
+		"statusMessage": &c.StatusMessage,
+	} {
+		value, ok := raw[key]
+		if !ok {
+			continue
+		}
+		if err := json.Unmarshal(value, target); err != nil {
+			return err
+		}
+		delete(raw, key)
+	}
+	c.extra = raw
+	return nil
+}
+
+func (c CommandHook) MarshalJSON() ([]byte, error) {
+	raw := map[string]json.RawMessage{}
+	for key, value := range c.extra {
+		raw[key] = value
+	}
+	for key, value := range map[string]any{
+		"type":          c.Type,
+		"command":       c.Command,
+		"timeout":       c.Timeout,
+		"statusMessage": c.StatusMessage,
+	} {
+		if isZero(value) {
+			delete(raw, key)
+			continue
+		}
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return nil, err
+		}
+		raw[key] = encoded
+	}
+	return json.Marshal(raw)
+}
+
+// isZero reports whether a modeled field is absent from the JSON object.
+func isZero(value any) bool {
+	switch v := value.(type) {
+	case string:
+		return v == ""
+	case int:
+		return v == 0
+	}
+	return false
 }
 
 // HookEntry represents a configuration for a set of hooks with a common matcher.
+// Unmodeled keys ride extra, as they do on CommandHook.
 type HookEntry struct {
-	Matcher string        `json:"matcher"`
-	Hooks   []CommandHook `json:"hooks"`
+	Matcher string
+	Hooks   []CommandHook
+
+	extra map[string]json.RawMessage
+}
+
+func (e *HookEntry) UnmarshalJSON(data []byte) error {
+	raw := map[string]json.RawMessage{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if matcher, ok := raw["matcher"]; ok {
+		if err := json.Unmarshal(matcher, &e.Matcher); err != nil {
+			return err
+		}
+		delete(raw, "matcher")
+	}
+	if hooks, ok := raw["hooks"]; ok {
+		if err := json.Unmarshal(hooks, &e.Hooks); err != nil {
+			return err
+		}
+		delete(raw, "hooks")
+	}
+	e.extra = raw
+	return nil
+}
+
+func (e HookEntry) MarshalJSON() ([]byte, error) {
+	raw := map[string]json.RawMessage{}
+	for key, value := range e.extra {
+		raw[key] = value
+	}
+	matcher, err := json.Marshal(e.Matcher)
+	if err != nil {
+		return nil, err
+	}
+	raw["matcher"] = matcher
+	hooks, err := json.Marshal(e.Hooks)
+	if err != nil {
+		return nil, err
+	}
+	raw["hooks"] = hooks
+	return json.Marshal(raw)
 }
 
 // Hooks contains the different types of hook events. Only PreToolUse is
@@ -398,6 +506,9 @@ const CommitGateMatcher = "Bash"
 // commitGateIdentity is how a settings.json hook command is recognised as the gate.
 const commitGateIdentity = "commit-gate review"
 
+// CommitGateStatusMessage is the line Claude Code shows while the review runs.
+const CommitGateStatusMessage = "red-teaming the commit ..."
+
 // IsCommitGateCommand reports whether a settings.json hook command is the commit gate.
 func IsCommitGateCommand(command string) bool {
 	return strings.Contains(command, commitGateIdentity)
@@ -436,7 +547,12 @@ func RegisterCommitGateHook(scope, command string, timeout int) error {
 	}
 	entries = append(entries, HookEntry{
 		Matcher: CommitGateMatcher,
-		Hooks:   []CommandHook{{Type: "command", Command: command, Timeout: timeout}},
+		Hooks: []CommandHook{{
+			Type:          "command",
+			Command:       command,
+			Timeout:       timeout,
+			StatusMessage: CommitGateStatusMessage,
+		}},
 	})
 
 	settings.Hooks.PreToolUse = entries
