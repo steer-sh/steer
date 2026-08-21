@@ -191,23 +191,9 @@ func (e *Engine) handleRetry(ctx context.Context, req Request, chain *Chain, sta
 	// whether anything happened.
 	after, _ := GetDiffSized(e.cfg, req.Repo, req.Spec)
 	changed := after.Raw != state.Diff
-	// A retry that reads a different tree than the round it retries is not a retry of
-	// the same question: the comparison above weighs two TREES rather than two versions
-	// of one. The agent has to be told which tree its reviewers were handed, because
-	// nothing in the diff says.
-	//
-	// Gated on the two trees actually HOLDING different code, not on the specs
-	// differing. Staging everything and then committing bare is the ordinary way to
-	// recover from a denied bundle, and there the specs disagree while the code does not.
-	// Two observed facts, and neither is the previous round's tree. A rule keyed on the
-	// drift ITSELF goes quiet the moment a chain settles onto the index: round 2 warns,
-	// round 3 sees two index rounds in a row, agrees with itself, and ends the chain on
-	// a diff that still lacks the fixes.
-	//
-	// A retry that reads the WORKING TREE hides nothing — it sees every edit the last
-	// round saw and more — so only the index needs asking about. The unstaged-edit test
-	// is what keeps this quiet on the ordinary recovery: stage everything, re-issue the
-	// bare command, and there is no unstaged edit left to warn about.
+	// Two observed facts, and neither is the previous round's tree: this command reads
+	// the index, and edits sit unstaged. A retry reading the working tree hides nothing,
+	// so only the index needs asking about.
 	notice := ""
 	if req.Spec.StagedOnly && HasUnstagedEdits(e.cfg, req.Repo) {
 		notice = StaleIndexNotice()
@@ -279,14 +265,8 @@ func (e *Engine) handleRetry(ctx context.Context, req Request, chain *Chain, sta
 	}
 	if status != "" {
 		if notice != "" && status == "empty" {
-			// The empty index IS the miss: a denied bundle never ran its staging step,
-			// so the retry finds nothing staged. Silence here hides the notice in the
-			// one case that most needs it.
-			//
-			// The chain is put back as it was. Nothing was reviewed on this pass, so
-			// the round it retries is still the round awaiting an answer — and without
-			// this the agent follows the notice into handleFirst, where the firing
-			// count and the cap start over.
+			// The chain goes back as it was: this pass reviewed nothing, so the round
+			// it retries is still awaiting an answer.
 			if err := chain.Save(state); err != nil && logErr == nil {
 				logErr = err
 			}

@@ -405,17 +405,8 @@ func HasUnstagedEdits(cfg Config, cwd string) bool {
 }
 
 // StaleIndexNotice is agent-facing text for a retry that reads the index while edits
-// sit unstaged in the working tree.
-//
-// Which tree the gate reads is invisible from the diff: it comes from the SHAPE of the
-// command, so a staging step joined to the commit reads the working tree and a bare
-// commit reads the index. A denied command never ran its own staging step — the deny
-// stops the whole command — so the retry after one finds the index exactly as stale as
-// it was before the fixes.
-//
-// It says what was OBSERVED and stops. The reviewers' own tree is not named, because
-// this fires on any retry reading the index and the round before it may have read
-// either one.
+// sit unstaged in the working tree. It names only what was observed: the round before
+// it may have read either tree.
 func StaleIndexNotice() string {
 	return "[commit-gate] THIS COMMAND REVIEWS THE INDEX, and you have unstaged edits " +
 		"in the working tree. The gate reads the tree from the command's shape, and a " +
