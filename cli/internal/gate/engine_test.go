@@ -525,3 +525,66 @@ func TestTheEmptyIndexNoticeKeepsTheChain(t *testing.T) {
 			state.Firing)
 	}
 }
+
+// The clean-review path under a stale index, which the chain-end test cannot reach: the
+// index has to differ from the denied round for a review to happen at all. The notice
+// rides the clean pass, and that pass writes no cleared record.
+func TestACleanReviewOnAStaleIndexWarnsAndClearsNothing(t *testing.T) {
+	h := newHarness(t, findingReply(oneFinding), findingReply("NO FINDINGS"))
+	h.withHistory()
+	h.spec = DiffSpec{}
+	if d := h.handle(); d.Kind != Deny {
+		t.Fatalf("first firing Kind = %v, want Deny", d.Kind)
+	}
+	// Part of the work is staged, so the index moved and the round reviews something.
+	// The rest stays unstaged, which is the miss the notice names.
+	writeFileAt(t, h.repo, "a.py", lines(240))
+	gitCmd(t, h.repo, "add", "-A")
+	writeFileAt(t, h.repo, "a.py", lines(260))
+	h.spec = DiffSpec{StagedOnly: true}
+	d := h.handle()
+	if !strings.Contains(d.Reason, "REVIEWS THE INDEX") {
+		t.Fatalf("the clean pass lost the notice: %q", d.Reason)
+	}
+	if d.Kind == Allow {
+		t.Error("Kind = Allow — a clean review of a possibly stale index must not also " +
+			"skip the permission prompt")
+	}
+	if row := h.lastRow(); row["phase"] != "clean" {
+		t.Fatalf("phase = %v, want clean — the index moved, so a review had to run",
+			row["phase"])
+	}
+	chain := NewChain(h.cfg, ChainKey{Actor: "session-1", Repo: h.repo})
+	if record := chain.LoadCleared(stagedDiff(t, h.cfg, h.repo)); record != nil {
+		t.Error("a cleared record was written for a diff the agent was warned about")
+	}
+}
+
+// The capped final pass is the last place the notice can reach the agent, and the last
+// place a stale diff can be blessed for reuse.
+func TestTheCappedPassOnAStaleIndexWarnsAndClearsNothing(t *testing.T) {
+	h := newHarness(t, findingReply(oneFinding))
+	h.withHistory()
+	h.cfg.MaxFirings = 1
+	h.spec = DiffSpec{}
+	if d := h.handle(); d.Kind != Deny {
+		t.Fatalf("first firing Kind = %v, want Deny", d.Kind)
+	}
+	h.reviewer.replies = []RawRun{findingReply("NO FINDINGS")}
+	h.reviewer.calls = 0
+	writeFileAt(t, h.repo, "a.py", lines(240))
+	gitCmd(t, h.repo, "add", "-A")
+	writeFileAt(t, h.repo, "a.py", lines(260))
+	h.spec = DiffSpec{StagedOnly: true}
+	d := h.handle()
+	if !strings.Contains(d.Reason, "REVIEWS THE INDEX") {
+		t.Fatalf("the capped pass lost the notice: %q", d.Reason)
+	}
+	if row := h.lastRow(); row["phase"] != "cap" {
+		t.Fatalf("phase = %v, want cap", row["phase"])
+	}
+	chain := NewChain(h.cfg, ChainKey{Actor: "session-1", Repo: h.repo})
+	if record := chain.LoadCleared(stagedDiff(t, h.cfg, h.repo)); record != nil {
+		t.Error("a cleared record was written for a diff the agent was warned about")
+	}
+}

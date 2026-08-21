@@ -434,15 +434,25 @@ func (e *Engine) terminalReview(ctx context.Context, req Request, chain *Chain, 
 
 	if result.Answered == 0 {
 		err := e.log(req, row)
-		return Decision{Kind: NoteOnly, SystemMessage: fmt.Sprintf(
+		kind := NoteOnly
+		if p.notice != "" {
+			kind = ContextOnly
+		}
+		return Decision{Kind: kind, Reason: p.notice, SystemMessage: fmt.Sprintf(
 			"%s and every reviewer was unavailable for the final pass, so round %d's "+
-				"fixes are UNREVIEWED — %s.", capped, e.cfg.MaxFirings, ReviewerTrouble(result.Runs)),
+				"fixes are UNREVIEWED — %s.%s", capped, e.cfg.MaxFirings,
+			ReviewerTrouble(result.Runs), separated(p.notice)),
 			LedgerError: err}
 	}
 
 	// Below this line a reviewer read the diff and the commit proceeds, which is what
-	// the cleared record means. The branch above reviewed nothing and must not write it.
-	clearedErr := chain.RememberCleared(p.raw, req.Channel)
+	// the cleared record means. The branch above reviewed nothing and must not write it,
+	// and neither does a pass carrying the stale-index notice: the record would bless
+	// the tree the notice questions.
+	var clearedErr error
+	if p.notice == "" {
+		clearedErr = chain.RememberCleared(p.raw, req.Channel)
+	}
 
 	if len(result.Reviews) == 0 {
 		row["finding_slots"] = 0
