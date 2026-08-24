@@ -11,12 +11,24 @@ Read the reviews the same way you read a fired gate: state each distinct concern
 Two things follow from this being terminal rather than blocking:
 
 1. There is no retry to fold fixes into. Anything BLOCKING that survives your adjudication needs a FOLLOW-UP commit. Anything that does not survive needs nothing.
-2. Jeremy sees only a one-line count of these findings, never the text. So the ledger is how he learns what they said and what you did about it, and it is mandatory here exactly as it is on a fired gate. Emit it in THIS reply, one line per distinct concern, each line self-contained:
+2. Jeremy sees only a one-line count of these findings, never the text. So the ledger is how he learns what they said and what you did about it, and it is mandatory here exactly as it is on a fired gate. The chain is over and this commit is proceeding, so THIS reply is where the chain ledger goes — one section per round the chain fired, in order, ending with this terminal round. Every line self-contained:
 
-**Commit gate fired (round {firing}, terminal)** — <N> reviewers, <M> raw findings, <K> distinct concerns. Commit not blocked.
+**Commit gate fired — chain ledger**
+
+**Round 1/{cap}** — <N> reviewers, <M> raw findings, <K> distinct concerns.
+
+- **ACCEPTED** — <the concern in one clause> → <the change you made, file:line>
+- **REJECTED** — <the concern in one clause> → <the premise, and why it is false>
+- Weakest surviving: <the concern> — <why it still stands, or that none survived>
+
+- one section in this shape for every round that fired, then:
+
+**Round {firing}, terminal** — <N> reviewers, <M> raw findings, <K> distinct concerns. Commit not blocked.
 
 - **ACCEPTED** — <the concern in one clause> → <the fix, and whether it needs a follow-up commit>
 - **REJECTED** — <the concern in one clause> → <the premise, and why it is false>
 - Weakest surviving: <the concern> — <why it still stands, or that none survived>
+
+A round with no section reads as a round you never adjudicated, so the number of sections must equal the number of rounds that fired.
 
 Do NOT put this ledger in a commit message.

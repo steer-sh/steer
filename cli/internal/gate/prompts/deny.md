@@ -14,23 +14,33 @@ For each finding: state its load-bearing premise in one sentence, then test THAT
 
 {rerun_note}Then fix what survives and commit again.
 
-Reporting — this is not optional and not deferrable
----------------------------------------------------
-JEREMY CANNOT SEE ANY OF THIS. The reviews above went to you alone; they are not in his transcript and he has no way to read them. To him, a commit simply took longer. So every reply that follows a fired gate MUST carry the ledger below, in the SAME reply, written to be understood by someone who has read NONE of the review text.
+Reporting — this is not optional
+--------------------------------
+JEREMY CANNOT SEE ANY OF THIS. The reviews above went to you alone; they are not in his transcript and he has no way to read them. To him, a commit simply took longer. So this chain MUST end with the ledger below, written to be understood by someone who has read NONE of the review text.
 
-ONE LEDGER PER ROUND. The ledger you write now covers round {firing} and nothing else: the findings above, and no others. Do not defer it to the end of the chain, do not fold these verdicts into a later round's ledger, and do not restate earlier rounds here.
+ONE LEDGER PER CHAIN, and it is the last thing the chain produces. Do not write it now. Write it in the reply where the commit SUCCEEDS, with one section per round the chain fired, in order. Round {firing} is a section of that ledger, never a ledger of its own.
 
-That means each line is SELF-CONTAINED. Never refer to a finding by a bare label — "E2", "the third finding", "R1.2" alone — because those identifiers exist only in text he does not have. Say what the finding CLAIMED, in your own words, before ruling on it.
+Keep your round-{firing} verdicts where you can find them again. A round reconstructed from memory two rounds later is how a section ends up under the wrong number.
 
-Emit exactly this shape, ahead of your other commentary. The round number is part of the header and is not optional — it is the key that files this ledger against the round it answers:
+Each line is SELF-CONTAINED. Never refer to a finding by a bare label — "E2", "the third finding", "R1.2" alone — because those identifiers exist only in text he does not have. Say what the finding CLAIMED, in your own words, before ruling on it.
 
-**Commit gate fired (round {firing}/{cap})** — <N> reviewers, <M> raw findings, <K> distinct concerns.
+Emit exactly this shape, ahead of your other commentary. Every round that fired gets a section, and its round number is not optional — it is the key that files that section against the round it answers:
+
+**Commit gate fired — chain ledger**
+
+**Round 1/{cap}** — <N> reviewers, <M> raw findings, <K> distinct concerns.
 
 - **ACCEPTED** — <the concern in one clause> → <the change you made, file:line>
 - **REJECTED** — <the concern in one clause> → <the premise, and why it is false>
 - Weakest surviving: <the concern> — <why it still stands, or that none survived>
 
+**Round 2/{cap}** — <N> reviewers, <M> raw findings, <K> distinct concerns.
+
+- one section in this shape for every round that fired, up to and including the last.
+
 One line per DISTINCT concern, not per reviewer. If every finding was rejected, say so plainly and give the reasons — "the gate fired and I rejected all four, here is why" is a complete and expected outcome, not a failure to report.
+
+A round with no section reads as a round you never adjudicated, so the number of sections must equal the number of rounds that fired.
 
 Do NOT put this ledger in the commit message.
 

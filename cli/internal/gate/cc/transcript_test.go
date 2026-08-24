@@ -185,6 +185,24 @@ func TestLedgerRound(t *testing.T) {
 	if led := ReadLedger(writeTranscript(t, assistantRow(t, realLedger)), t0, 2); led == nil {
 		t.Error("the marker is newer than some transcripts; an unmarked ledger still counts")
 	}
+	// A chain ledger carries no header round either, but it is not an old-shape ledger:
+	// it covers every round, so summing it onto this one round is a wrong join that the
+	// resolver can never revisit.
+	chained := "**Commit gate fired — chain ledger**\n\n**Round 1/4** — 3 reviewers.\n" +
+		"\n- **ACCEPTED** — a concern → a fix\n\n**Round 2/4** — 3 reviewers.\n" +
+		"\n- **REJECTED** — another concern → a reason\n"
+	if !HasRoundSections(chained) || HasRoundSections(realLedger) {
+		t.Error("a section is `**Round N/`; a per-round ledger's header is not one")
+	}
+	if led := ReadLedger(writeTranscript(t, assistantRow(t, chained)), t0, 2); led != nil {
+		t.Error("a chain ledger answers the whole chain, so no single round captures it")
+	}
+	marked := strings.Replace(chained, "**Commit gate fired —",
+		"**Commit gate fired (round 2/4) —", 1)
+	if led := ReadLedger(writeTranscript(t, assistantRow(t, marked)), t0, 2); led != nil {
+		t.Error("sections decide, not the header; a stray marker matches this firing " +
+			"exactly when the text is this chain's own ledger")
+	}
 	led := ReadLedger(writeTranscript(t,
 		assistantRow(t, r3), transcriptRowJSON(t, r2, tsLater, "assistant", false)), t0, 3)
 	if led["ledger_round"] != 3 {
@@ -215,14 +233,28 @@ func TestLedgerRound(t *testing.T) {
 	}
 }
 
-// The header the agent is told to write and the pattern that reads it back are one
-// contract, so this asserts against the RENDERED template rather than a copy of it.
-func TestTemplateHeadersParse(t *testing.T) {
-	if got, _ := LedgerRound(gate.BuildDeny(3, "r", 2, 4, "")); got != 2 {
-		t.Errorf("deny template round = %d, want 2", got)
+// The shape the agent is told to write is a contract with its readers, so this asserts
+// against the RENDERED template rather than a copy of it. The ledger's unit is the
+// chain: its header names no round, and each round appears as its own section. Only the
+// Python resolver parses those sections, so the sections are pinned here as text.
+func TestTemplateHeadersCarryNoRound(t *testing.T) {
+	deny := gate.BuildDeny(3, "r", 2, 4, "")
+	if _, ok := LedgerRound(deny); ok {
+		t.Error("the chain ledger's header names no round")
 	}
-	if got, _ := LedgerRound(gate.BuildCap(3, "r", 5, 4)); got != 5 {
-		t.Errorf("cap template round = %d, want 5", got)
+	for _, want := range []string{"**Round 1/4**", "**Round 2/4**"} {
+		if !strings.Contains(deny, want) {
+			t.Errorf("deny template is missing the %s section", want)
+		}
+	}
+	capped := gate.BuildCap(3, "r", 5, 4)
+	if _, ok := LedgerRound(capped); ok {
+		t.Error("the terminal template hands over that same chain header")
+	}
+	for _, want := range []string{"**Round 1/4**", "**Round 5, terminal**"} {
+		if !strings.Contains(capped, want) {
+			t.Errorf("cap template is missing the %s section", want)
+		}
 	}
 }
 

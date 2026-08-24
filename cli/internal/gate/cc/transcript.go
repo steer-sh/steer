@@ -256,6 +256,15 @@ const LedgerHeader = "Commit gate fired"
 var ledgerRoundRe = regexp.MustCompile(
 	`(?im)^[ \t]*(?:[-+>]\s*)?\**\s*` + regexp.QuoteMeta(LedgerHeader) + `[^\n]*?\(\s*round\s*(\d+)`)
 
+// ledgerSectionRe reads one round's section out of a chain ledger: `**Round 3/4**` or
+// `**Round 5, terminal**`. A ledger carrying these answers every round of its chain, so
+// it belongs to no single round and only the resolver can join it.
+var ledgerSectionRe = regexp.MustCompile(`(?im)^[ \t]*(?:[-+>]\s*)?\**\s*Round\s+\d+\s*[/,]`)
+
+// HasRoundSections reports whether the text is a chain ledger — one report covering
+// every round, rather than one round's own.
+func HasRoundSections(text string) bool { return ledgerSectionRe.MatchString(text) }
+
 const (
 	// 24 clears the densest ledger on record (16 concerns) with headroom. The cap
 	// bounds a row's size; it is not a claim about how many concerns a round may
@@ -434,6 +443,15 @@ func ReadLedger(transcript string, sinceTS float64, firing int) gate.Row {
 			// ledger still counts: the marker is newer than some of the transcripts.
 			got, hasRound := LedgerRound(text)
 			if firing > 0 && hasRound && got != firing {
+				continue
+			}
+			// A chain ledger sums the verdicts of every round it covers, so capturing it
+			// here would file the whole chain's counts onto this one round — and the
+			// resolver skips any row already carrying a ledger, so that never gets
+			// corrected. Sections decide this, not the header: a header round on a text
+			// carrying sections is a stray marker, and it happens to match this firing
+			// exactly when the text is the chain's own ledger.
+			if firing > 0 && HasRoundSections(text) {
 				continue
 			}
 			// Last qualifying message wins: if the agent restates the ledger after
