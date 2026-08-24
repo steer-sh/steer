@@ -450,8 +450,9 @@ func ReadLedger(transcript string, sinceTS float64, firing int) gate.Row {
 			// resolver skips any row already carrying a ledger, so that never gets
 			// corrected. Sections decide this, not the header: a header round on a text
 			// carrying sections is a stray marker, and it happens to match this firing
-			// exactly when the text is the chain's own ledger.
-			if firing > 0 && HasRoundSections(text) {
+			// exactly when the text is the chain's own ledger. The round asked for does
+			// not decide it either: no round owns a chain ledger, firing 0 included.
+			if HasRoundSections(text) {
 				continue
 			}
 			// Last qualifying message wins: if the agent restates the ledger after

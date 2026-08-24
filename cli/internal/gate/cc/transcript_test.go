@@ -197,6 +197,10 @@ func TestLedgerRound(t *testing.T) {
 	if led := ReadLedger(writeTranscript(t, assistantRow(t, chained)), t0, 2); led != nil {
 		t.Error("a chain ledger answers the whole chain, so no single round captures it")
 	}
+	if led := ReadLedger(writeTranscript(t, assistantRow(t, chained)), t0, 0); led != nil {
+		t.Error("no round owns a chain ledger, so the round asked for does not decide " +
+			"it — firing 0 must not be a way past the check")
+	}
 	marked := strings.Replace(chained, "**Commit gate fired —",
 		"**Commit gate fired (round 2/4) —", 1)
 	if led := ReadLedger(writeTranscript(t, assistantRow(t, marked)), t0, 2); led != nil {
