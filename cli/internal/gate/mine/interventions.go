@@ -1,0 +1,327 @@
+package mine
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+)
+
+// Record is one intervention-log entry. It is a map so unmodeled keys survive a
+// round-trip and numbers keep their original text, the same reasoning gate.Row records.
+type Record = map[string]any
+
+// refusalStatuses are the record statuses that installed no gate.
+var refusalStatuses = map[string]bool{"rejected": true, "reopened": true}
+
+// InterventionsPath is the log's location: inside the state directory, tracked while the
+// adjudication shards beside it are gitignored.
+func InterventionsPath(stateDir string) string {
+	return filepath.Join(stateDir, "interventions.jsonl")
+}
+
+// Load reads the intervention log, skipping malformed lines.
+func Load(stateDir string) ([]Record, error) {
+	data, err := readFileIfExists(InterventionsPath(stateDir))
+	if err != nil || data == nil {
+		return nil, err
+	}
+	var out []Record
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		dec := json.NewDecoder(strings.NewReader(line))
+		dec.UseNumber()
+		var m map[string]any
+		if err := dec.Decode(&m); err != nil {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out, nil
+}
+
+// Save writes the log atomically: tmp file, then rename.
+func Save(stateDir string, records []Record) error {
+	path := InterventionsPath(stateDir)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	var b strings.Builder
+	for _, r := range records {
+		b.WriteString(pyDumps(r, 0))
+		b.WriteByte('\n')
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(b.String()), 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+// RecordKindFilter is the verdict filter a record's regex was authored against.
+func RecordKindFilter(record Record) string {
+	kind := "accepted"
+	if k := str(record["kind"]); k != "" {
+		kind = k
+	}
+	switch kind {
+	case "defect":
+		return "accepted"
+	case "false-positive":
+		return "rejected"
+	default:
+		return kind
+	}
+}
+
+// SplitTS is the timestamp a record's before/after windows split on.
+func SplitTS(record Record) float64 {
+	if truthy(record["installed_ts"]) {
+		return numFloat(record["installed_ts"])
+	}
+	if truthy(record["rejected_ts"]) {
+		return numFloat(record["rejected_ts"])
+	}
+	return 0
+}
+
+// StandsRejected reports a refusal still in force — one no later install overturned.
+func StandsRejected(record Record) bool { return str(record["status"]) == "rejected" }
+
+// IsRejected reports a record that installed nothing — a refusal, live or overturned.
+func IsRejected(record Record) bool { return refusalStatuses[str(record["status"])] }
+
+// Overlap counts the chains a candidate regex and a recorded class's regex both match.
+// The prior regex is read under the verdict filter it was authored against.
+func Overlap(record Record, chains []Chain, pattern *regexp.Regexp, kind string) (shared, total int, err error) {
+	prior, err := compilePattern(str(record["match"]))
+	if err != nil {
+		return 0, 0, err
+	}
+	priorKind := RecordKindFilter(record)
+	var candidate []Chain
+	for _, ch := range chains {
+		if len(ChainHits(ch, pattern, kind)) > 0 {
+			candidate = append(candidate, ch)
+		}
+	}
+	for _, ch := range candidate {
+		if len(ChainHits(ch, prior, priorKind)) > 0 {
+			shared++
+		}
+	}
+	return shared, len(candidate), nil
+}
+
+// Decision pairs a record with its overlap against a candidate.
+type Decision struct {
+	Record Record
+	Shared int
+	Total  int
+	Ratio  float64
+}
+
+// OverlappingDecisions lists recorded classes sharing chains with a candidate, most
+// overlapping first. A record authored against the other verdict filter is skipped.
+func OverlappingDecisions(records []Record, chains []Chain, pattern *regexp.Regexp, kind string) ([]Decision, error) {
+	var out []Decision
+	for _, record := range records {
+		if kind != "both" && RecordKindFilter(record) != kind {
+			continue
+		}
+		shared, total, err := Overlap(record, chains, pattern, kind)
+		if err != nil {
+			return nil, err
+		}
+		if shared > 0 {
+			ratio := 0.0
+			if total > 0 {
+				ratio = float64(shared) / float64(total)
+			}
+			out = append(out, Decision{record, shared, total, ratio})
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Ratio > out[j].Ratio })
+	return out, nil
+}
+
+var (
+	slugNonAlnum = regexp.MustCompile(`[^a-z0-9]+`)
+	slugDashes   = regexp.MustCompile(`-+`)
+)
+
+// Slugify mirrors mine.py's slugify: lowercase, non-alphanumerics to dashes, collapse.
+func Slugify(name string) string {
+	s := slugNonAlnum.ReplaceAllString(strings.ToLower(name), "-")
+	s = slugDashes.ReplaceAllString(s, "-")
+	return strings.Trim(s, "-")
+}
+
+// UniqueID returns base, or base-2, base-3… when base is already taken.
+func UniqueID(base string, existing []Record) string {
+	ids := map[string]bool{}
+	for _, r := range existing {
+		ids[str(r["id"])] = true
+	}
+	if !ids[base] {
+		return base
+	}
+	for n := 2; ; n++ {
+		cand := base + "-" + strconv.Itoa(n)
+		if !ids[cand] {
+			return cand
+		}
+	}
+}
+
+// SteerHookFacts reads a steer hook's manifest entry: the rule text and sha256(rule).
+// Returns nil when the manifest, the entry, or the read is unavailable.
+func SteerHookFacts(hookID string) map[string]any {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	data, err := os.ReadFile(filepath.Join(home, ".claude", "hooks", "steer-manifest.json"))
+	if err != nil {
+		return nil
+	}
+	var manifest struct {
+		Hooks map[string]struct {
+			Rule     string `json:"rule"`
+			RuleHash string `json:"rule_hash"`
+			File     string `json:"file"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return nil
+	}
+	entry, ok := manifest.Hooks[hookID]
+	if !ok {
+		return nil
+	}
+	ruleHash := entry.RuleHash
+	if ruleHash == "" {
+		sum := sha256.Sum256([]byte(entry.Rule))
+		ruleHash = hex.EncodeToString(sum[:])
+	}
+	return map[string]any{
+		"rule":      entry.Rule,
+		"rule_hash": ruleHash,
+		"hook_file": entry.File,
+	}
+}
+
+// ScoreRecord recomputes an intervention's before/after incidence and its verdict,
+// producing the JSON shape mine.py emits (rate and p as Python floats; empty lists as
+// [], not null; instrument null when the record predates the field).
+func ScoreRecord(record Record, chains []Chain, minAfter int) (map[string]any, error) {
+	pattern, err := compilePattern(str(record["match"]))
+	if err != nil {
+		return nil, err
+	}
+	kf := RecordKindFilter(record)
+	before, after := SplitChains(chains, SplitTS(record))
+	bHits, bTotal, bRate := Incidence(before, pattern, kf)
+	aHits, aTotal, aRate := Incidence(after, pattern, kf)
+
+	var label string
+	var p float64
+	if IsRejected(record) {
+		label, p = TrendFor(bHits, bTotal, bRate, aHits, aTotal, aRate, minAfter)
+	} else {
+		label, p = VerdictFor(bHits, bTotal, bRate, aHits, aTotal, aRate, minAfter)
+	}
+
+	authored := str(record["instrument"])
+	afterInstruments := InstrumentsIn(after)
+	drift := authored != "" && anyDiffers(afterInstruments, authored)
+
+	beforeHosts, afterHosts := HostsIn(before), HostsIn(after)
+	hostDrift := len(beforeHosts) > 0 && len(afterHosts) > 0 && !sameStringSet(beforeHosts, afterHosts)
+
+	return map[string]any{
+		"id":                str(record["id"]),
+		"class":             str(record["class"]),
+		"tier":              str(record["tier"]),
+		"target":            getString(record, "target", ""),
+		"hook_id":           getString(record, "hook_id", ""),
+		"status":            getString(record, "status", "active"),
+		"installed":         installedLabel(record),
+		"reason":            getString(record, "reason", ""),
+		"reopen":            getString(record, "reopen", ""),
+		"before":            incidenceMap(bHits, bTotal, bRate),
+		"after":             incidenceMap(aHits, aTotal, aRate),
+		"p":                 pyFloat(round4(p)),
+		"verdict":           label,
+		"instrument":        record["instrument"],
+		"instrument_drift":  drift,
+		"after_instruments": emptyIfNil(afterInstruments),
+		"before_hosts":      emptyIfNil(beforeHosts),
+		"after_hosts":       emptyIfNil(afterHosts),
+		"host_mix_drift":    hostDrift,
+	}, nil
+}
+
+func incidenceMap(hits, total int, rate float64) map[string]any {
+	return map[string]any{"hits": hits, "chains": total, "rate": pyFloat(round4(rate))}
+}
+
+func installedLabel(record Record) string {
+	if d := str(record["installed_date"]); d != "" {
+		return d
+	}
+	return getString(record, "rejected_date", "?")
+}
+
+func getString(record Record, key, fallback string) string {
+	if v, ok := record[key]; ok {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return fallback
+}
+
+func anyDiffers(list []string, v string) bool {
+	for _, x := range list {
+		if x != v {
+			return true
+		}
+	}
+	return false
+}
+
+func sameStringSet(a, b []string) bool {
+	set := map[string]bool{}
+	for _, x := range a {
+		set[x] = true
+	}
+	other := map[string]bool{}
+	for _, x := range b {
+		other[x] = true
+	}
+	if len(set) != len(other) {
+		return false
+	}
+	for x := range set {
+		if !other[x] {
+			return false
+		}
+	}
+	return true
+}
+
+func emptyIfNil(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
+}

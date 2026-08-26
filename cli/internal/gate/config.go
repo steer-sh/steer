@@ -112,7 +112,11 @@ func Defaults() Config {
 // Load returns the shipped configuration with environment overrides applied.
 func Load() Config {
 	c := Defaults()
+	// COMMIT_GATE_STATE_DIR wins over COMMIT_REVIEW_STATE. The second is mine.py's
+	// own variable, so the miner and an existing mine.py invocation read one directory.
 	if v := os.Getenv("COMMIT_GATE_STATE_DIR"); v != "" {
+		c.StateDir = v
+	} else if v := os.Getenv("COMMIT_REVIEW_STATE"); v != "" {
 		c.StateDir = v
 	}
 	if v := envInt("COMMIT_GATE_RUNS"); v > 0 {
