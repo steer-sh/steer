@@ -86,6 +86,12 @@ func (e *Engine) Ledger() *Ledger { return e.ledger }
 
 func (e *Engine) log(req Request, row Row) error {
 	setDefault(row, "channel", req.Channel)
+	// The chain key. Two chains in one repo differ by their subject and by nothing else
+	// the row carries, and a session holds far more same-repo chain pairs than
+	// cross-repo ones.
+	if subject := CommitSubject(req.Message); subject != "" {
+		setDefault(row, "subject", subject)
+	}
 	for key, value := range req.RowExtra {
 		setDefault(row, key, value)
 	}
@@ -383,7 +389,7 @@ func (e *Engine) reviewCommit(ctx context.Context, req Request, chain *Chain, p 
 	}
 	return Decision{
 		Kind:          Deny,
-		Reason:        p.notice + BuildDeny(result.Answered, review, firing, e.cfg.MaxFirings, req.RerunNote),
+		Reason:        p.notice + BuildDeny(result.Answered, review, firing, e.cfg.MaxFirings, req.RerunNote, CommitSubject(req.Message)),
 		SystemMessage: note,
 		LedgerError:   err,
 	}
@@ -469,7 +475,7 @@ func (e *Engine) terminalReview(ctx context.Context, req Request, chain *Chain, 
 		capped, e.cfg.MaxFirings, findings, blocking, result.Answered)
 	return Decision{
 		Kind:          ContextOnly,
-		Reason:        p.notice + BuildCap(result.Answered, review, firing, e.cfg.MaxFirings),
+		Reason:        p.notice + BuildCap(result.Answered, review, firing, e.cfg.MaxFirings, CommitSubject(req.Message)),
 		SystemMessage: note,
 		LedgerError:   err,
 	}

@@ -11,9 +11,9 @@ Read the reviews the same way you read a fired gate: state each distinct concern
 Two things follow from this being terminal rather than blocking:
 
 1. There is no retry to fold fixes into. Anything BLOCKING that survives your adjudication needs a FOLLOW-UP commit. Anything that does not survive needs nothing.
-2. Jeremy sees only a one-line count of these findings, never the text. So the ledger is how he learns what they said and what you did about it, and it is mandatory here exactly as it is on a fired gate. The chain is over and this commit is proceeding, so THIS reply is where the chain ledger goes — one section per round the chain fired, in order, ending with this terminal round. Every line self-contained:
+2. Jeremy sees only a one-line count of these findings, never the text. So the ledger is how he learns what they said and what you did about it, and it is mandatory here exactly as it is on a fired gate. The chain is over and this commit is proceeding, so THIS reply is where the chain ledger goes — one section per round the chain fired, in order, ending with this terminal round. Copy the header line as it stands, subject included: it is what files this ledger against THIS commit, and one turn often commits more than once to the same repo. Every line self-contained:
 
-**Commit gate fired — chain ledger**
+**Commit gate fired — chain ledger, {subject}**
 
 **Round 1/{cap}** — <N> reviewers, <M> raw findings, <K> distinct concerns.
 

@@ -24,9 +24,9 @@ Keep your round-{firing} verdicts where you can find them again. A round reconst
 
 Each line is SELF-CONTAINED. Never refer to a finding by a bare label — "E2", "the third finding", "R1.2" alone — because those identifiers exist only in text he does not have. Say what the finding CLAIMED, in your own words, before ruling on it.
 
-Emit exactly this shape, ahead of your other commentary. Every round that fired gets a section, and its round number is not optional — it is the key that files that section against the round it answers:
+Emit exactly this shape, ahead of your other commentary. Copy the header line as it stands, subject included — it is what files this ledger against THIS commit, and one turn often commits more than once to the same repo. Every round that fired then gets a section, and its round number is not optional either — that is what files the section against the round it answers:
 
-**Commit gate fired — chain ledger**
+**Commit gate fired — chain ledger, {subject}**
 
 **Round 1/{cap}** — <N> reviewers, <M> raw findings, <K> distinct concerns.
 

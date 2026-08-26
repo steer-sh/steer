@@ -242,7 +242,7 @@ func TestLedgerRound(t *testing.T) {
 // chain: its header names no round, and each round appears as its own section. Only the
 // Python resolver parses those sections, so the sections are pinned here as text.
 func TestTemplateHeadersCarryNoRound(t *testing.T) {
-	deny := gate.BuildDeny(3, "r", 2, 4, "")
+	deny := gate.BuildDeny(3, "r", 2, 4, "", "s")
 	if _, ok := LedgerRound(deny); ok {
 		t.Error("the chain ledger's header names no round")
 	}
@@ -251,7 +251,7 @@ func TestTemplateHeadersCarryNoRound(t *testing.T) {
 			t.Errorf("deny template is missing the %s section", want)
 		}
 	}
-	capped := gate.BuildCap(3, "r", 5, 4)
+	capped := gate.BuildCap(3, "r", 5, 4, "s")
 	if _, ok := LedgerRound(capped); ok {
 		t.Error("the terminal template hands over that same chain header")
 	}

@@ -24,6 +24,29 @@ var (
 	rerunNoteText string
 )
 
+// MaxSubjectChars bounds the chain key. The template hands the agent the same
+// truncation the row stores, so the two carry one string and match exactly.
+const MaxSubjectChars = 100
+
+// NoSubject stands in when the commit message could not be read. It never matches a
+// row, which leaves those chains on the bound they were joined by before.
+const NoSubject = "this commit"
+
+// CommitSubject is the commit message's first real line, truncated to whole runes.
+func CommitSubject(message string) string {
+	for _, line := range strings.Split(message, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if runes := []rune(line); len(runes) > MaxSubjectChars {
+			line = strings.TrimSpace(string(runes[:MaxSubjectChars]))
+		}
+		return line
+	}
+	return ""
+}
+
 func fill(tmpl string, fields map[string]string) string {
 	pairs := make([]string, 0, len(fields)*2)
 	for key, value := range fields {
@@ -41,24 +64,32 @@ func BuildReviewPrompt(message, diff, context string) string {
 }
 
 // BuildDeny renders the blocking message the agent reads on a fired gate.
-func BuildDeny(count int, review string, firing, cap int, rerun string) string {
+func BuildDeny(count int, review string, firing, cap int, rerun, subject string) string {
 	round := ""
 	if firing != 1 {
 		round = fill(roundNote, map[string]string{
 			"firing": fmt.Sprint(firing), "cap": fmt.Sprint(cap),
 		})
 	}
+	if subject == "" {
+		subject = NoSubject
+	}
 	return fill(denyTemplate, map[string]string{
 		"count": fmt.Sprint(count), "review": review, "cap": fmt.Sprint(cap),
 		"firing": fmt.Sprint(firing), "round_note": round, "rerun_note": rerun,
+		"subject": subject,
 	})
 }
 
 // BuildCap renders the capped chain's terminal, non-blocking review message.
-func BuildCap(count int, review string, firing, cap int) string {
+func BuildCap(count int, review string, firing, cap int, subject string) string {
+	if subject == "" {
+		subject = NoSubject
+	}
 	return fill(capTemplate, map[string]string{
 		"count": fmt.Sprint(count), "review": review,
 		"firing": fmt.Sprint(firing), "cap": fmt.Sprint(cap),
+		"subject": subject,
 	})
 }
 
