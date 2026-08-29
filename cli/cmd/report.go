@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -162,9 +164,112 @@ queue, so the skill's nudge can hash the queue for change detection.`,
 	},
 }
 
+// sessionStartOutput is the SessionStart hook's stdout contract. The docs do not
+// confirm SessionStart shows systemMessage ("some events discard it"), so the nudge
+// rides hookSpecificOutput.additionalContext — the documented SessionStart channel,
+// guaranteed to deliver. That puts one actionable line in the model's context, the
+// plan's accepted fallback. systemMessage is kept as a bonus operator line where the
+// harness honors it; it costs nothing where it does not.
+type sessionStartOutput struct {
+	SystemMessage      string                 `json:"systemMessage,omitempty"`
+	HookSpecificOutput sessionStartHookOutput `json:"hookSpecificOutput"`
+}
+
+type sessionStartHookOutput struct {
+	HookEventName     string `json:"hookEventName"`
+	AdditionalContext string `json:"additionalContext"`
+}
+
+var reportCadenceCmd = &cobra.Command{
+	Use:   "cadence",
+	Short: "SessionStart entrypoint: refresh the queue in the background, nudge if work is pending",
+	Long: `cadence is the plugin-native SessionStart entrypoint of the feedback loop. It
+must never block startup and fails open on every error — a cadence check that
+cannot read state emits nothing and exits 0.
+
+It does two things:
+
+  1. If the last refresh is older than 7 days, it spawns 'steer report refresh'
+     detached in the background. This session proceeds; the next session sees the
+     result.
+  2. If the queue holds pending work, it emits one line naming the counts and the
+     command to run. The line rides hookSpecificOutput.additionalContext, the
+     documented SessionStart channel, so delivery is guaranteed; it also sets
+     systemMessage for an operator line where the harness honors it. It re-emits
+     only when the queue changes or a new refresh cycle has run — never every
+     session.`,
+	Example: `  steer report cadence`,
+	// SilenceErrors/Usage: this runs as a hook. Any failure must be silent and
+	// exit 0, never a stderr dump into the session's startup.
+	SilenceErrors: true,
+	SilenceUsage:  true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		runCadence()
+		return nil
+	},
+}
+
+// runCadence is the fail-open body of the cadence hook. Every step degrades to
+// "emit nothing" on error; it never returns a non-nil error to the caller.
+func runCadence() {
+	dir := cadence.StateDir()
+
+	if time.Since(cadence.LastRefresh(dir)) > cadence.StaleAfter {
+		spawnRefresh()
+	}
+
+	queueBytes, err := os.ReadFile(cadence.QueuePath(dir))
+	if err != nil {
+		return // no queue yet, or unreadable — nothing to nudge about
+	}
+	q, err := cadence.ReadQueue(dir)
+	if err != nil {
+		return
+	}
+	refresh := cadence.LastRefresh(dir)
+	hash := cadence.QueueHash(queueBytes)
+
+	emit, rec := cadence.ShouldNudge(dir, q, hash, refresh)
+	if !emit {
+		return
+	}
+
+	candidates, ineffective := cadence.PendingCounts(q)
+	msg := fmt.Sprintf("steer: %d candidate(s) and %d ineffective hook(s) pending — run /steer-report",
+		candidates, ineffective)
+	out, err := json.Marshal(sessionStartOutput{
+		SystemMessage: msg,
+		HookSpecificOutput: sessionStartHookOutput{
+			HookEventName:     "SessionStart",
+			AdditionalContext: msg,
+		},
+	})
+	if err != nil {
+		return
+	}
+	fmt.Println(string(out))
+	// Persist only after a successful emit, so a failed print re-nudges next time.
+	_ = cadence.WriteNudge(dir, rec)
+}
+
+// spawnRefresh starts 'steer report refresh' detached, so a stale queue refreshes
+// without blocking startup. Failure is silent — the worst case is a queue one
+// cycle older than 7 days, which the next session retries.
+func spawnRefresh() {
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	c := exec.Command(exe, "report", "refresh")
+	c.Stdin, c.Stdout, c.Stderr = nil, nil, nil
+	c.SysProcAttr = detachAttr()
+	_ = c.Start() // do not Wait — the refresh outlives this process
+}
+
 func init() {
 	rootCmd.AddCommand(reportCmd)
 	reportCmd.AddCommand(reportRefreshCmd)
+	reportCmd.AddCommand(reportCadenceCmd)
 	reportRefreshCmd.Flags().IntVar(&reportDays, "days", 30, "Transcript look-back window in days")
 	reportRefreshCmd.Flags().BoolVar(&reportProjectOnly, "project-only", false, "Restrict the transcript scan to the current working directory")
 	reportCmd.Flags().IntVar(&reportDays, "days", 30, "Look-back window in days")

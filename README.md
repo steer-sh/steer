@@ -147,6 +147,20 @@ steer verify --changed --base origin/main --head HEAD
 steer report --days 30            # all projects by default
 steer report --project-only      # restrict to the current directory's transcripts
 steer report refresh             # run the deterministic tier; write the /steer-report work queue
+steer report cadence             # SessionStart entrypoint: refresh in the background, nudge if work is pending
+```
+
+The steer plugin ships a `SessionStart` hook that runs `steer report cadence` at
+every session start. It refreshes the work queue in the background on a weekly
+cadence and, when hooks need review, shows one operator line: `run /steer-report`.
+Zero setup — the hook is plugin-native.
+
+To run the analysis on a schedule instead (cron, CI), the skill has a headless
+form. `/steer-report` is an agent skill, not a shell binary, so run it through the
+agent harness:
+
+```bash
+claude -p '/steer-report --headless'   # same headless call the test harness uses
 ```
 
 All commands support `--scope project|global` (default: `project`).

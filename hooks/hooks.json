@@ -1,0 +1,16 @@
+{
+  "description": "steer feedback-loop cadence — refresh the work queue on a weekly cadence and nudge when hooks need review",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/steer\" report cadence",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
