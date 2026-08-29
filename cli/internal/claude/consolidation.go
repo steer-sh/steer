@@ -172,12 +172,18 @@ func ConsolidateHooks(scope string) error {
 		hookFunctions = append(hookFunctions, hookFunc)
 
 		rule := ""
+		source := ""
+		sourceID := ""
 		if entry, ok := manifest.Hooks[hook.Name]; ok {
 			rule = strings.TrimSpace(entry.Rule)
+			source = strings.TrimSpace(entry.Source)
+			sourceID = strings.TrimSpace(entry.SourceID)
 		}
 		hookMeta[hookFunc.Name] = map[string]string{
 			"hook_name": hook.Name,
 			"rule":      rule,
+			"source":    source,
+			"source_id": sourceID,
 		}
 
 		for _, line := range imports {
@@ -584,6 +590,41 @@ const auditHelperSource = `def steer_audit_log(hook_func_name, stdin_data):
         pass
 `
 
+// footerHelperSource is embedded in the generated master hook. It appends a
+// provenance footer to a blocked reply's stopReason: the hook name and the
+// command that removes it. The command reads the manifest source — a factory
+// preset is disabled, a user rule is removed — and a hook with no manifest
+// entry gets its name only.
+const footerHelperSource = `def steer_removal_footer(hook_func_name):
+    meta = STEER_HOOK_META.get(hook_func_name, {})
+    hook_name = meta.get("hook_name", hook_func_name)
+    source = meta.get("source", "")
+    source_id = meta.get("source_id", "")
+    if not source:
+        return "\n\n— steer hook: " + hook_name
+    if source == "factory":
+        cmd = "steer preset disable " + (source_id or hook_name)
+    else:
+        cmd = "steer remove " + hook_name
+    return "\n\n— steer hook: " + hook_name + " · remove: " + cmd
+
+
+def steer_append_footer(output, hook_func_name):
+    try:
+        result = json.loads(output)
+    except Exception:
+        return output
+    if not isinstance(result, dict):
+        return output
+    footer = steer_removal_footer(hook_func_name)
+    reason = result.get("stopReason")
+    if isinstance(reason, str):
+        result["stopReason"] = reason + footer
+    else:
+        result["stopReason"] = footer.lstrip()
+    return json.dumps(result)
+`
+
 func generateMasterHook(hookFunctions []HookFunction, importLines []string, hookMeta map[string]map[string]string) string {
 	var builder strings.Builder
 
@@ -610,6 +651,8 @@ Generated automatically - do not edit manually.
 	builder.Write(metaJSON)
 	builder.WriteString("\n\n")
 	builder.WriteString(auditHelperSource)
+	builder.WriteString("\n")
+	builder.WriteString(footerHelperSource)
 	builder.WriteString("\n")
 
 	for _, hookFunc := range hookFunctions {
@@ -677,6 +720,7 @@ Generated automatically - do not edit manually.
 	builder.WriteString("                blocked = \"\\\"decision\\\":\\\"block\\\"\" in compact_output\n\n")
 	builder.WriteString("            if blocked:\n")
 	builder.WriteString("                steer_audit_log(hook_func.__name__, stdin_data)\n")
+	builder.WriteString("                output = steer_append_footer(output, hook_func.__name__)\n")
 	builder.WriteString("                print(output)\n")
 	builder.WriteString("                sys.exit(0)\n\n")
 	builder.WriteString("    sys.exit(0)\n\n")

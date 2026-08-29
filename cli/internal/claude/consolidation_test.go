@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -81,6 +82,121 @@ func consolidateFixture(t *testing.T, hookContent string) string {
 		t.Fatal(err)
 	}
 	return string(master)
+}
+
+// consolidateWithManifest writes the hook plus a manifest entry keyed by the
+// hook stem, then consolidates and returns the master hook source.
+func consolidateWithManifest(t *testing.T, hookContent string, entry ManifestEntry) string {
+	t.Helper()
+
+	dir := t.TempDir()
+	origWd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origWd) })
+
+	hooksDir := filepath.Join(dir, ClaudeDirName, HooksDirName)
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const stem = "python3-not-python-hook"
+	if err := os.WriteFile(filepath.Join(hooksDir, stem+".py"), []byte(hookContent), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if entry.Source != "" {
+		m := &Manifest{Hooks: map[string]ManifestEntry{stem: entry}}
+		if err := SaveManifest(ProjectScope, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := ConsolidateHooks(ProjectScope); err != nil {
+		t.Fatalf("ConsolidateHooks: %v", err)
+	}
+
+	master, err := os.ReadFile(filepath.Join(hooksDir, MasterHookName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(master)
+}
+
+// runMaster executes a master hook source on a blocking input and returns the
+// stopReason field of the emitted block reply.
+func runMaster(t *testing.T, master string) string {
+	t.Helper()
+
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 not available")
+	}
+
+	dir := t.TempDir()
+	masterPath := filepath.Join(dir, "master.py")
+	if err := os.WriteFile(masterPath, []byte(master), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command(python, masterPath)
+	cmd.Stdin = strings.NewReader(`{"tool_name":"Bash","tool_input":{"command":"python script.py"}}`)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("master hook errored: %v", err)
+	}
+
+	var reply struct {
+		StopReason string `json:"stopReason"`
+	}
+	if err := json.Unmarshal(out, &reply); err != nil {
+		t.Fatalf("block reply is not JSON: %q (%v)", out, err)
+	}
+	return reply.StopReason
+}
+
+func TestBlockFooterNamesRemoval(t *testing.T) {
+	cases := []struct {
+		name  string
+		entry ManifestEntry
+		want  string
+	}{
+		{
+			name:  "factory preset disables by source_id",
+			entry: ManifestEntry{Source: SourceFactory, SourceID: "python3-not-python", Rule: "use python3"},
+			want:  "steer preset disable python3-not-python",
+		},
+		{
+			name:  "generated rule removes by hook name",
+			entry: ManifestEntry{Source: SourceGenerated, Rule: "use python3"},
+			want:  "steer remove python3-not-python-hook",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reason := runMaster(t, consolidateWithManifest(t, constantHook, tc.entry))
+			if !strings.Contains(reason, "use python3") {
+				t.Errorf("footer dropped the original reason: %q", reason)
+			}
+			if !strings.Contains(reason, tc.want) {
+				t.Errorf("stopReason missing removal command %q: %q", tc.want, reason)
+			}
+		})
+	}
+
+	t.Run("no manifest entry names the hook only", func(t *testing.T) {
+		reason := runMaster(t, consolidateWithManifest(t, constantHook, ManifestEntry{}))
+		if !strings.Contains(reason, "python3-not-python-hook") {
+			t.Errorf("footer missing hook name: %q", reason)
+		}
+		if strings.Contains(reason, "steer remove") || strings.Contains(reason, "steer preset disable") {
+			t.Errorf("footer printed a removal command with no manifest entry: %q", reason)
+		}
+	})
 }
 
 func TestConsolidationCarriesModuleConstants(t *testing.T) {
