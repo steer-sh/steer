@@ -27,6 +27,33 @@ func writeLedger(t *testing.T, rows []gate.Row) (stateDir, ledger string) {
 	return stateDir, ledger
 }
 
+// TestLegacyBaselineChainsRoundTrip pins the migration-safety claim: a row written
+// before the units migration, keyed baseline.chains, survives Save/Load untouched.
+// The writer never rewrites it to units, so no reader breaks on a mixed corpus.
+func TestLegacyBaselineChainsRoundTrip(t *testing.T) {
+	stateDir := t.TempDir()
+	legacy := Record{
+		"id":       "legacy-class",
+		"class":    "legacy class",
+		"match":    "legacy",
+		"status":   "active",
+		"baseline": map[string]any{"hits": 5, "chains": 20, "rate": 0.25},
+	}
+	if err := Save(stateDir, []Record{legacy}); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded) != 1 {
+		t.Fatalf("want 1 record, got %d", len(loaded))
+	}
+	baseline := loaded[0]["baseline"].(map[string]any)
+	check(t, "legacy chains key survives", numInt(baseline["chains"]), 20)
+	check(t, "no units key was injected", baseline["units"], nil)
+}
+
 func TestRegisterScoreRoundTrip(t *testing.T) {
 	var rows []gate.Row
 	ts := 1000
@@ -56,7 +83,11 @@ func TestRegisterScoreRoundTrip(t *testing.T) {
 	check(t, "one intervention recorded", len(recorded), 1)
 	baseline := recorded[0]["baseline"].(map[string]any)
 	check(t, "baseline hits", numInt(baseline["hits"]), 12)
-	check(t, "baseline chains", numInt(baseline["chains"]), 12)
+	// Pin the corpus-neutral key literally: a revert to "chains" must fail here.
+	check(t, "baseline units", numInt(baseline["units"]), 12)
+	check(t, "no legacy chains key", baseline["chains"], nil)
+	check(t, "corpus tag", str(recorded[0]["corpus"]), CorpusReviewFindings)
+	check(t, "unit tag", str(recorded[0]["unit"]), UnitChain)
 	check(t, "id is slugified", str(recorded[0]["id"]), "widget-parser-flag-loss")
 
 	allRows, _ := LoadRows(stateDir, ledger)

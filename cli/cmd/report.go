@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steer-sh/steer-cli/internal/cadence"
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/report"
 )
@@ -126,8 +127,46 @@ func collectClaudeMDs() []report.ClaudeMD {
 	return out
 }
 
+var reportRefreshCmd = &cobra.Command{
+	Use:   "refresh",
+	Short: "Run the deterministic tier of the feedback loop and write the work queue",
+	Long: `refresh is the deterministic tier of the steer feedback loop. It spends no
+model tokens and runs in seconds. It scores the review-corpus interventions the
+local engine can score, sweeps every corpus present on this machine, applies the
+thresholds each tier can compute without a model, and writes a queue of pending
+work to ~/.claude/state/steer-report/ for the /steer-report skill to finish.
+
+The queue content is deterministic: a second run over the same evidence produces
+a byte-identical queue. The refresh timestamp lives in a sibling file, not the
+queue, so the skill's nudge can hash the queue for change detection.`,
+	Example: `  steer report refresh
+  steer report refresh --days 7 --project-only`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		q, err := cadence.Refresh(cadence.Options{
+			GateStateDir: gateConfig().StateDir,
+			WindowDays:   reportDays,
+			AllProjects:  !reportProjectOnly,
+		})
+		if err != nil {
+			return err
+		}
+		dir := cadence.StateDir()
+		if err := cadence.WriteQueue(dir, q, time.Now()); err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr,
+			"Wrote queue: %d intervention(s) needing attention, %d candidate(s), %d unscored.\n",
+			len(q.Interventions), len(q.Candidates), len(q.Unscored))
+		fmt.Println(cadence.QueuePath(dir))
+		return nil
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(reportCmd)
+	reportCmd.AddCommand(reportRefreshCmd)
+	reportRefreshCmd.Flags().IntVar(&reportDays, "days", 30, "Transcript look-back window in days")
+	reportRefreshCmd.Flags().BoolVar(&reportProjectOnly, "project-only", false, "Restrict the transcript scan to the current working directory")
 	reportCmd.Flags().IntVar(&reportDays, "days", 30, "Look-back window in days")
 	reportCmd.Flags().BoolVar(&reportProjectOnly, "project-only", false, "Restrict the scan to transcripts of the current working directory")
 	reportCmd.Flags().IntVar(&reportMaxBytes, "max-digest-bytes", report.DefaultMaxDigestBytes, "Hard cap on digest size; lowest-scoring clusters are evicted to fit")

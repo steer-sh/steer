@@ -146,6 +146,7 @@ steer verify --changed --base origin/main --head HEAD
 # Mine recent Claude Code transcripts for hook-suggestion evidence (JSON digest on stdout)
 steer report --days 30            # all projects by default
 steer report --project-only      # restrict to the current directory's transcripts
+steer report refresh             # run the deterministic tier; write the /steer-report work queue
 ```
 
 All commands support `--scope project|global` (default: `project`).

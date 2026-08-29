@@ -317,6 +317,8 @@ func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 		"class":          o.Class,
 		"match":          o.Match,
 		"kind":           o.Kind,
+		"corpus":         CorpusReviewFindings,
+		"unit":           UnitChain,
 		"tier":           o.Tier,
 		"target":         o.Target,
 		"note":           o.Note,
@@ -410,6 +412,8 @@ func Reject(w io.Writer, stateDir string, o RejectOpts) error {
 		"class":         o.Class,
 		"match":         o.Match,
 		"kind":          o.Kind,
+		"corpus":        CorpusReviewFindings,
+		"unit":          UnitChain,
 		"tier":          "none",
 		"target":        "",
 		"note":          o.Note,
@@ -429,8 +433,13 @@ func Reject(w io.Writer, stateDir string, o RejectOpts) error {
 	return nil
 }
 
+// baselineMap is the stored baseline in the one candidate-record contract. Its
+// count key is the corpus-neutral "units", not "chains": the record no longer
+// assumes a chain corpus. The field is write-only today — nothing reads the stored
+// baseline count, so legacy rows still keyed "chains" break no reader; a reader
+// built later tolerates both keys at its own call site.
 func baselineMap(hits, total int, rate float64) map[string]any {
-	return map[string]any{"hits": hits, "chains": total, "rate": pyFloat(round4(rate))}
+	return map[string]any{"hits": hits, "units": total, "rate": pyFloat(round4(rate))}
 }
 
 // instrumentValue is the current reviewer, or nil so the record stores null the way

@@ -40,9 +40,22 @@ The analysis reads a sizable digest and a finding dump, then reasons over both. 
 
 Respect the user's choice. If the conversation is fresh, skip the warning and proceed. In `--headless` mode, skip this gate entirely and never ask questions.
 
-## Step 1: Audit the installed interventions
+## Step 1: Refresh the queue, then audit the installed interventions
 
-Score the commit-review interventions first. If this machine has no commit-review ledger, `mine score` reports an empty corpus — say "no interventions to audit on this machine" in one line and go to Step 2.
+A deterministic tier runs this loop's mechanical half — scoring, corpus sweeps, threshold checks — with no model. It may have run on a schedule already; run it again now, synchronously, so you never read a stale queue. It takes seconds and spends no tokens.
+
+```bash
+steer report refresh --days 30
+```
+
+Then Read the queue **once**: `~/.claude/state/steer-report/queue.json`. It holds:
+
+- `interventions[]` — full contract records the tier already scored and flagged as **needing attention** (verdict `ineffective` or `class-grew`). These carry a `match`; they are the audit's action list, pre-filtered.
+- `unscored[]` — intervention ids the local engine cannot score (session-unit hooks needing the audit-log join, unbuilt). Report their existence; do not read a verdict into them.
+- `candidates[]` — pointers to new clusters. Transcript rows carry `pattern`/`count`/`sessions`; the review row carries `undecided_chains` and a `dump` command. These carry **no** `match` — authoring the regex is your job, below.
+- `corpora[]` — one row per corpus (`review-findings`, `transcript-friction`, `auto-denials`) with `present` and `size`. Relay this sweep to the user in one sentence.
+
+The queue tells you what is pending. The full dumps below are the raw material you cluster over. Score the commit-review interventions for the complete audit — the queue lists only the ones needing action, not the `effective`/`promising`/`partial` ones worth showing too. If this machine has no commit-review ledger, `mine score` reports an empty corpus — say "no interventions to audit on this machine" in one line and go to Step 2.
 
 ```bash
 steer commit-gate mine score
@@ -82,6 +95,8 @@ Then Read `${TMPDIR:-/tmp}/steer-digest.json` **once**. Do not cat the file and 
 
 All projects are scanned by default (cross-project habits are the strongest candidates). Pass through any flags the user supplied (`--days N`, `--project-only`, `--max-digest-bytes N`). Strip `--headless` — it is a skill flag, not a CLI flag.
 
+The queue's transcript candidates already list the correction clusters that cleared the deterministic threshold (3+ sessions). Treat that count as an upper bound: it is the mechanical grouping, not the final class. Read the full digest to refine, split, or discard those clusters and to catch anything the threshold missed.
+
 Digest schema (`digest_version: 1`):
 
 - `stats` — coverage: `sessions_scanned`, `bytes_scanned`, `clusters_found`, `clusters_emitted`, `truncated`. **Always relay coverage to the user in one sentence.** If `truncated` is true, say so and suggest narrowing (`--days 7`) or raising `--max-digest-bytes`.
@@ -103,6 +118,8 @@ steer commit-gate mine findings --kind rejected > "${TMPDIR:-/tmp}/gate-rejected
 ```
 
 Read each file **once**. Do not cat them and do not re-read.
+
+The queue's review candidate names how many chains carry an accepted finding that no class regex — active or rejected — yet covers (`undecided_chains`). That is the pool the classes below come from; the review side has no per-class threshold the tier can compute, because a new class has no regex until you author one.
 
 Output is grouped by chain — one chain per commit attempt, findings deduplicated within it. The header line gives the denominator (`N chains reviewed`), which is what every rate on the review side is over.
 
@@ -223,6 +240,16 @@ Author the regex the same way as for `register`, and test it with `match` first 
 Record a refusal only for a candidate you actually examined against the corpus. Every one-off finding is not a rejected class, and a log padded with them buries the four or five refusals that matter.
 
 Register only after the fix exists. The install timestamp is the split point for every future measurement, so registering early credits the fix with commits it was never present for.
+
+### Clear the queue
+
+After you register, reject, rework, or remove anything, run the refresh once more:
+
+```bash
+steer report refresh --days 30
+```
+
+This rewrites the queue and its timestamp from the new state, so the SessionStart nudge stops pointing at work you just finished. Skip it only when you changed nothing this pass.
 
 ## Reading the numbers honestly
 
