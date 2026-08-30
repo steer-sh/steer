@@ -346,7 +346,8 @@ var arrowSplitRe = regexp.MustCompile(`\s*(?:→|->)\s*`)
 // ParseLedgerText turns the verdict bullets of one ledger message into the row fields
 // they become.
 func ParseLedgerText(text string) gate.Row {
-	var concerns []Concern
+	// Non-nil so an empty result marshals to [] like Python's list, not null.
+	concerns := []Concern{}
 	accepted, rejected := 0, 0
 	for _, line := range strings.Split(text, "\n") {
 		parsed, ok := parseLedgerLine(line)
@@ -357,8 +358,10 @@ func ParseLedgerText(text string) gate.Row {
 		// later. Everything downstream of the arrow is what was done, not the claim.
 		claim := arrowSplitRe.Split(parsed.Concern, 2)[0]
 		claim = strings.TrimSpace(claim)
-		if len(claim) > maxConcernChars {
-			claim = claim[:maxConcernChars]
+		// Cap by rune, as Python slices a str by code point; a byte cap splits a
+		// multibyte char and drops a different last word on the same text.
+		if r := []rune(claim); len(r) > maxConcernChars {
+			claim = string(r[:maxConcernChars])
 		}
 		concerns = append(concerns, Concern{Verdict: parsed.Verdict, Concern: claim})
 		if parsed.Verdict == "ACCEPTED" {
