@@ -125,7 +125,7 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, stdin io.
 	// The author fields and the repo fields are stamped on every row this request
 	// writes. They are gathered once, because reading the transcript is the expensive
 	// half and it does not change mid-decision.
-	rowExtra := gate.Row{}
+	rowExtra := gate.Row{"client": "claude-code", "harness": "claude-code"}
 	for key, value := range AuthorFields(engine.Ledger(), cfg, payload.TranscriptPath, session) {
 		rowExtra[key] = value
 	}

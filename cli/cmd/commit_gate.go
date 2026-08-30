@@ -9,8 +9,10 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/claude"
+	codexhooks "github.com/steer-sh/steer-cli/internal/codex"
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/cc"
+	gatecodex "github.com/steer-sh/steer-cli/internal/gate/codex"
 	"github.com/steer-sh/steer-cli/internal/gate/gitgate"
 	"github.com/steer-sh/steer-cli/internal/gate/reviewers"
 	"github.com/steer-sh/steer-cli/internal/styles"
@@ -30,6 +32,7 @@ var (
 	commitGateModel        string
 	commitGateBothChannels bool
 	commitGateForce        bool
+	commitGateHarness      string
 )
 
 var commitGateCmd = &cobra.Command{
@@ -39,8 +42,9 @@ var commitGateCmd = &cobra.Command{
 blocks the commit while a finding stands, writing an adjudication row for every
 decision.
 
-Two channels share one review engine:
-  review     PreToolUse hook for Claude Code — reads a JSON payload on stdin
+Three channels share one review engine:
+  review        PreToolUse hook for Claude Code — reads a JSON payload on stdin
+  review-codex  PreToolUse hook for Codex — reads a JSON payload on stdin
   precommit  git pre-commit hook — reads the index
 
 Arming both channels in one repository reviews every commit twice. Use
@@ -132,6 +136,23 @@ fail open.`,
 	},
 }
 
+var commitGateCodexReviewCmd = &cobra.Command{
+	Use:   "review-codex",
+	Short: "Codex PreToolUse hook: rule on an exec_command git commit before it runs",
+	Long: `review-codex reads a Codex PreToolUse payload on stdin and writes Codex's
+native hook reply on stdout. It always exits 0 so adapter failures fail open.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg := gateConfig()
+		reviewer, err := buildReviewer(cfg)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "steer commit-gate:", err)
+			return nil
+		}
+		gatecodex.Run(context.Background(), cfg, reviewer, os.Stdin, os.Stdout)
+		return nil
+	},
+}
+
 var commitGateInstallCmd = &cobra.Command{
 	Use:   "install",
 	Short: "Arm the commit gate on one channel",
@@ -158,14 +179,40 @@ func installReviewChannel(cfg gate.Config) error {
 		}
 	}
 	timeout := int(cfg.ReviewTimeout.Seconds()) + commitGateTimeoutMargin
-	if err := claude.RegisterCommitGateHook(scope, commitGateCommand(), timeout); err != nil {
+	harness := normalizedCommitGateHarness()
+	if harness != "claude-code" && harness != "codex" {
+		return fmt.Errorf("unknown hook harness %q: expected claude-code or codex", commitGateHarness)
+	}
+	var path string
+	var err error
+	if harness == "codex" {
+		cwd, cwdErr := codexProjectDir()
+		if cwdErr != nil {
+			return cwdErr
+		}
+		path, err = codexhooks.RegisterCommitGate(scope, cwd, commitGateCodexCommand(), timeout)
+	} else {
+		err = claude.RegisterCommitGateHook(scope, commitGateCommand(), timeout)
+	}
+	if err != nil {
 		return err
 	}
 	fmt.Println()
-	fmt.Println(styles.SuccessBox.Render(fmt.Sprintf(
-		"Armed the commit gate on the PreToolUse channel\nScope: %s\nTimeout: %ds (reviewer timeout %ds + %ds margin)",
-		scope, timeout, int(cfg.ReviewTimeout.Seconds()), commitGateTimeoutMargin)))
+	message := fmt.Sprintf("Armed the %s commit gate on PreToolUse\nScope: %s\nTimeout: %ds (reviewer timeout %ds + %ds margin)",
+		harness, scope, timeout, int(cfg.ReviewTimeout.Seconds()), commitGateTimeoutMargin)
+	if harness == "codex" {
+		message += "\nHooks: " + path + "\nTrust: restart Codex and approve this definition in /hooks"
+	}
+	fmt.Println(styles.SuccessBox.Render(message))
 	return nil
+}
+
+func normalizedCommitGateHarness() string {
+	h := strings.ToLower(strings.TrimSpace(commitGateHarness))
+	if h == "" || h == "claude" {
+		return "claude-code"
+	}
+	return h
 }
 
 func installPreCommitChannel(cfg gate.Config) error {
@@ -227,6 +274,10 @@ func commitGateCommand() string {
 	return "steer commit-gate review" + commitGateProviderArgs()
 }
 
+func commitGateCodexCommand() string {
+	return "steer commit-gate review-codex" + commitGateProviderArgs()
+}
+
 // commitGateProviderArgs renders the reviewer selection both channels must persist.
 func commitGateProviderArgs() string {
 	var parts []string
@@ -258,7 +309,36 @@ func reviewChannelArmed() (bool, string) {
 			return true, scope
 		}
 	}
+	cwd, _ := codexProjectDir()
+	for _, scope := range []string{claude.ProjectScope, claude.GlobalScope} {
+		if codexhooks.CommitGateArming(scope, cwd).Registered {
+			return true, "codex " + scope
+		}
+	}
 	return false, ""
+}
+
+var commitGateRemoveCmd = &cobra.Command{
+	Use:   "remove",
+	Short: "Remove one harness's PreToolUse commit gate",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		scope := currentScope()
+		if normalizedCommitGateHarness() == "codex" {
+			cwd, err := codexProjectDir()
+			if err != nil {
+				return err
+			}
+			path, err := codexhooks.RemoveCommitGate(scope, cwd)
+			if err == nil {
+				fmt.Println("Removed Codex commit gate from " + path)
+			}
+			return err
+		}
+		if normalizedCommitGateHarness() != "claude-code" {
+			return fmt.Errorf("unknown hook harness %q: expected claude-code or codex", commitGateHarness)
+		}
+		return claude.RemoveCommitGateHook(scope)
+	},
 }
 
 var commitGateStatusCmd = &cobra.Command{
@@ -293,7 +373,25 @@ var commitGateStatusCmd = &cobra.Command{
 				state = fmt.Sprintf("REGISTERED BUT INERT — matcher %q does not match %q, "+
 					"so commits are NOT reviewed; re-run install", arming.Matcher, claude.CommitGateMatcher)
 			}
-			fmt.Printf("  PreToolUse   %s scope: %s\n", scope, state)
+			fmt.Printf("  Claude       %s scope: %s\n", scope, state)
+		}
+		cwd, _ := codexProjectDir()
+		for _, scope := range []string{claude.ProjectScope, claude.GlobalScope} {
+			arming := codexhooks.CommitGateArming(scope, cwd)
+			state := "not armed"
+			switch {
+			case arming.Effective():
+				trust := "no trust record — approval required"
+				if !arming.TrustStateKnown {
+					trust = "trust state unavailable"
+				} else if arming.TrustRecordPresent {
+					trust = "trust record present, handler hash unverified"
+				}
+				state = fmt.Sprintf("registered, timeout %ds, %s", arming.Timeout, trust)
+			case arming.Registered:
+				state = fmt.Sprintf("REGISTERED BUT INERT — matcher %q does not match %q", arming.Matcher, codexhooks.CommitGateMatcher)
+			}
+			fmt.Printf("  Codex        %s scope: %s\n", scope, state)
 		}
 		armed, path := preCommitArmedHere()
 		if armed {
@@ -305,10 +403,21 @@ var commitGateStatusCmd = &cobra.Command{
 	},
 }
 
+func codexProjectDir() (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	if repo := gate.Toplevel(cwd); repo != "" {
+		return repo, nil
+	}
+	return cwd, nil
+}
+
 func init() {
 	rootCmd.AddCommand(commitGateCmd)
-	commitGateCmd.AddCommand(commitGateReviewCmd, commitGatePreCommitCmd,
-		commitGateInstallCmd, commitGateStatusCmd)
+	commitGateCmd.AddCommand(commitGateReviewCmd, commitGateCodexReviewCmd, commitGatePreCommitCmd,
+		commitGateInstallCmd, commitGateRemoveCmd, commitGateStatusCmd)
 
 	commitGateCmd.PersistentFlags().StringVar(&commitGateProvider, "provider", "",
 		"Reviewer provider (agy|codex|claude-code); default agy")
@@ -321,4 +430,8 @@ func init() {
 		"Arm this channel even though the other one is already armed for this repository")
 	commitGateInstallCmd.Flags().BoolVar(&commitGateForce, "force", false,
 		"Overwrite an existing non-steer pre-commit hook")
+	commitGateInstallCmd.Flags().StringVar(&commitGateHarness, "harness", "claude-code",
+		"PreToolUse harness (claude-code|codex)")
+	commitGateRemoveCmd.Flags().StringVar(&commitGateHarness, "harness", "claude-code",
+		"PreToolUse harness (claude-code|codex)")
 }

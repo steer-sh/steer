@@ -140,6 +140,13 @@ steer verify --staged
 # Install a pre-commit hook that runs steer verify --staged
 steer git-hooks install
 
+# Red-team commits from Codex before exec_command runs
+steer commit-gate install --harness codex --scope global
+steer commit-gate status
+
+# Remove the Codex tool-time gate (the git pre-commit channel is independent)
+steer commit-gate remove --harness codex --scope global
+
 # CI check for changed files in a commit range
 steer verify --changed --base origin/main --head HEAD
 
@@ -164,6 +171,13 @@ claude -p '/steer-report --headless'   # same headless call the test harness use
 ```
 
 All commands support `--scope project|global` (default: `project`).
+
+Codex hook definitions require local trust. After installing or changing the global
+commit gate, restart Codex and approve its PreToolUse definition in `/hooks`. Status can
+locate the index-keyed trust record but cannot verify Codex's internal handler hash. The Codex
+adapter reuses the same review engine and ledger as Claude Code and the git pre-commit
+adapter; rows identify the client and harness, while Codex rows omit Claude-only
+transcript enrichment.
 
 ## When a Hook Misbehaves
 

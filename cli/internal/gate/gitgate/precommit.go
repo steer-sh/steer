@@ -53,7 +53,7 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, cwd strin
 
 	// The author fields are absent by construction under this channel, not lost; `channel`
 	// on every row is what lets a reader tell those apart.
-	rowExtra := gate.Row{"repo": repo}
+	rowExtra := gate.Row{"repo": repo, "client": "git", "harness": "git"}
 	if head != "" {
 		rowExtra["base_sha"] = head
 		gate.Git(repo, 5*time.Second, "update-ref", "refs/commit-review/"+head, head)
