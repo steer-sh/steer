@@ -341,6 +341,42 @@ var commitGateRemoveCmd = &cobra.Command{
 	},
 }
 
+var (
+	backfillApply     bool
+	backfillIfDue     bool
+	backfillQuiet     bool
+	backfillReresolve bool
+)
+
+var commitGateBackfillCmd = &cobra.Command{
+	Use:   "backfill",
+	Short: "Reconcile ledger_found for retry rows from local transcripts",
+	Long: `backfill harvests the agent's self-reported ledger from ~/.claude/projects and
+stamps ledger_found on this machine's shard. The PreToolUse hook fires before the
+retry commit runs, so the ledger lands after the row; this resolves it late. It is
+idempotent and, without --apply, writes nothing.
+
+  --apply      write the resolved rows (default is a dry run)
+  --if-due     exit early unless some row is unresolved and old enough to resolve
+  --quiet      silence the report
+  --reresolve  re-examine rows already stamped as a miss (never removes a ledger)`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg := gateConfig()
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil
+		}
+		opts := cc.BackfillOptions{
+			Apply:     backfillApply,
+			IfDue:     backfillIfDue,
+			Quiet:     backfillQuiet,
+			Reresolve: backfillReresolve,
+		}
+		cc.RunBackfill(cfg, filepath.Join(home, ".claude", "projects"), opts, os.Stdout, nil)
+		return nil
+	},
+}
+
 var commitGateStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Report which channels are armed and where the ledger lives",
@@ -417,7 +453,12 @@ func codexProjectDir() (string, error) {
 func init() {
 	rootCmd.AddCommand(commitGateCmd)
 	commitGateCmd.AddCommand(commitGateReviewCmd, commitGateCodexReviewCmd, commitGatePreCommitCmd,
-		commitGateInstallCmd, commitGateRemoveCmd, commitGateStatusCmd)
+		commitGateInstallCmd, commitGateRemoveCmd, commitGateStatusCmd, commitGateBackfillCmd)
+
+	commitGateBackfillCmd.Flags().BoolVar(&backfillApply, "apply", false, "Write the resolved rows")
+	commitGateBackfillCmd.Flags().BoolVar(&backfillIfDue, "if-due", false, "Exit early unless a row is due")
+	commitGateBackfillCmd.Flags().BoolVar(&backfillQuiet, "quiet", false, "Silence the report")
+	commitGateBackfillCmd.Flags().BoolVar(&backfillReresolve, "reresolve", false, "Re-examine stamped misses")
 
 	commitGateCmd.PersistentFlags().StringVar(&commitGateProvider, "provider", "",
 		"Reviewer provider (agy|codex|claude-code); default agy")
