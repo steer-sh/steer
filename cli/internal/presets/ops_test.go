@@ -1,4 +1,4 @@
-package cmd
+package presets
 
 import (
 	"os"
@@ -8,10 +8,9 @@ import (
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/claude"
-	"github.com/steer-sh/steer-cli/internal/presets"
 )
 
-func withCmdProjectTempDir(t *testing.T) string {
+func withPresetProjectTempDir(t *testing.T) string {
 	t.Helper()
 
 	oldWD, err := os.Getwd()
@@ -29,15 +28,15 @@ func withCmdProjectTempDir(t *testing.T) string {
 	return tempDir
 }
 
-func loadCatalogAndOneVisiblePreset(t *testing.T) (*presets.Catalog, presets.CatalogItem) {
+func loadCatalogAndOneVisiblePreset(t *testing.T) (*Catalog, CatalogItem) {
 	t.Helper()
 
-	catalog, err := presets.LoadCatalog()
+	catalog, err := LoadCatalog()
 	if err != nil {
 		t.Fatalf("LoadCatalog returned error: %v", err)
 	}
 
-	names, err := catalog.BundleMembers(presets.BundleSecurity)
+	names, err := catalog.BundleMembers(BundleSecurity)
 	if err != nil {
 		t.Fatalf("BundleMembers returned error: %v", err)
 	}
@@ -53,14 +52,14 @@ func loadCatalogAndOneVisiblePreset(t *testing.T) (*presets.Catalog, presets.Cat
 	return catalog, item
 }
 
-func installVisibleAndInternal(t *testing.T, scope string, catalog *presets.Catalog, visible presets.CatalogItem) {
+func installVisibleAndInternal(t *testing.T, scope string, catalog *Catalog, visible CatalogItem) {
 	t.Helper()
 
-	if _, err := enablePreset(scope, catalog, visible, false); err != nil {
-		t.Fatalf("enablePreset returned error: %v", err)
+	if _, err := EnablePreset(scope, catalog, visible, false); err != nil {
+		t.Fatalf("EnablePreset returned error: %v", err)
 	}
-	if _, err := ensureAutoManagedFactoryPresets(scope, catalog, false); err != nil {
-		t.Fatalf("ensureAutoManagedFactoryPresets returned error: %v", err)
+	if _, err := EnsureAutoManagedFactoryPresets(scope, catalog, false); err != nil {
+		t.Fatalf("EnsureAutoManagedFactoryPresets returned error: %v", err)
 	}
 }
 
@@ -92,14 +91,14 @@ func addOrphanFactoryHook(t *testing.T, scope, hookName, sourceID, rule string) 
 }
 
 func TestPresetSyncNoOpWhenFullyMatching(t *testing.T) {
-	withCmdProjectTempDir(t)
+	withPresetProjectTempDir(t)
 	catalog, visible := loadCatalogAndOneVisiblePreset(t)
 
 	installVisibleAndInternal(t, claude.ProjectScope, catalog, visible)
 
-	result, err := syncFactoryPresets(claude.ProjectScope, catalog, presetSyncOptions{})
+	result, err := SyncFactoryPresets(claude.ProjectScope, catalog, SyncOptions{})
 	if err != nil {
-		t.Fatalf("syncFactoryPresets returned error: %v", err)
+		t.Fatalf("SyncFactoryPresets returned error: %v", err)
 	}
 	if result.CheckedFactory != 2 {
 		t.Fatalf("expected 2 checked presets (visible + internal), got %d", result.CheckedFactory)
@@ -116,7 +115,7 @@ func TestPresetSyncNoOpWhenFullyMatching(t *testing.T) {
 }
 
 func TestPresetSyncReinstallsOnMetadataMismatch(t *testing.T) {
-	withCmdProjectTempDir(t)
+	withPresetProjectTempDir(t)
 	catalog, visible := loadCatalogAndOneVisiblePreset(t)
 	installVisibleAndInternal(t, claude.ProjectScope, catalog, visible)
 
@@ -132,9 +131,9 @@ func TestPresetSyncReinstallsOnMetadataMismatch(t *testing.T) {
 		t.Fatalf("SaveManifest returned error: %v", err)
 	}
 
-	result, err := syncFactoryPresets(claude.ProjectScope, catalog, presetSyncOptions{})
+	result, err := SyncFactoryPresets(claude.ProjectScope, catalog, SyncOptions{})
 	if err != nil {
-		t.Fatalf("syncFactoryPresets returned error: %v", err)
+		t.Fatalf("SyncFactoryPresets returned error: %v", err)
 	}
 	if result.MetadataDrift < 1 {
 		t.Fatalf("expected metadata drift count >= 1, got %d", result.MetadataDrift)
@@ -154,7 +153,7 @@ func TestPresetSyncReinstallsOnMetadataMismatch(t *testing.T) {
 }
 
 func TestPresetSyncReinstallsOnContentTamper(t *testing.T) {
-	withCmdProjectTempDir(t)
+	withPresetProjectTempDir(t)
 	catalog, visible := loadCatalogAndOneVisiblePreset(t)
 	installVisibleAndInternal(t, claude.ProjectScope, catalog, visible)
 
@@ -167,29 +166,29 @@ func TestPresetSyncReinstallsOnContentTamper(t *testing.T) {
 		t.Fatalf("failed to tamper hook file: %v", err)
 	}
 
-	result, err := syncFactoryPresets(claude.ProjectScope, catalog, presetSyncOptions{})
+	result, err := SyncFactoryPresets(claude.ProjectScope, catalog, SyncOptions{})
 	if err != nil {
-		t.Fatalf("syncFactoryPresets returned error: %v", err)
+		t.Fatalf("SyncFactoryPresets returned error: %v", err)
 	}
 	if result.ContentDrift < 1 {
 		t.Fatalf("expected content drift count >= 1, got %d", result.ContentDrift)
 	}
 
-	expected, err := expectedFactoryPresetContent(catalog, visible)
+	expected, err := ExpectedFactoryPresetContent(catalog, visible)
 	if err != nil {
-		t.Fatalf("expectedFactoryPresetContent returned error: %v", err)
+		t.Fatalf("ExpectedFactoryPresetContent returned error: %v", err)
 	}
 	actual, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("failed to read synced hook file: %v", err)
 	}
-	if sha256Hex(expected) != sha256Hex(actual) {
+	if Sha256Hex(expected) != Sha256Hex(actual) {
 		t.Fatalf("expected hook content to be restored after sync")
 	}
 }
 
 func TestPresetSyncReinstallsOnMissingFile(t *testing.T) {
-	withCmdProjectTempDir(t)
+	withPresetProjectTempDir(t)
 	catalog, visible := loadCatalogAndOneVisiblePreset(t)
 	installVisibleAndInternal(t, claude.ProjectScope, catalog, visible)
 
@@ -202,9 +201,9 @@ func TestPresetSyncReinstallsOnMissingFile(t *testing.T) {
 		t.Fatalf("failed to remove hook file: %v", err)
 	}
 
-	result, err := syncFactoryPresets(claude.ProjectScope, catalog, presetSyncOptions{})
+	result, err := SyncFactoryPresets(claude.ProjectScope, catalog, SyncOptions{})
 	if err != nil {
-		t.Fatalf("syncFactoryPresets returned error: %v", err)
+		t.Fatalf("SyncFactoryPresets returned error: %v", err)
 	}
 	if result.MissingFile < 1 {
 		t.Fatalf("expected missing file count >= 1, got %d", result.MissingFile)
@@ -215,14 +214,14 @@ func TestPresetSyncReinstallsOnMissingFile(t *testing.T) {
 }
 
 func TestPresetSyncKeepsOrphanByDefault(t *testing.T) {
-	withCmdProjectTempDir(t)
+	withPresetProjectTempDir(t)
 	catalog, _ := loadCatalogAndOneVisiblePreset(t)
 
 	orphanPath := addOrphanFactoryHook(t, claude.ProjectScope, "orphan-kept", "unknown-catalog-id", "orphan keep rule")
 
-	result, err := syncFactoryPresets(claude.ProjectScope, catalog, presetSyncOptions{})
+	result, err := SyncFactoryPresets(claude.ProjectScope, catalog, SyncOptions{})
 	if err != nil {
-		t.Fatalf("syncFactoryPresets returned error: %v", err)
+		t.Fatalf("SyncFactoryPresets returned error: %v", err)
 	}
 	if result.OrphansKept != 1 {
 		t.Fatalf("expected 1 orphan kept, got %d", result.OrphansKept)
@@ -236,12 +235,12 @@ func TestPresetSyncKeepsOrphanByDefault(t *testing.T) {
 }
 
 func TestPresetSyncStrictFailsOnOrphan(t *testing.T) {
-	withCmdProjectTempDir(t)
+	withPresetProjectTempDir(t)
 	catalog, _ := loadCatalogAndOneVisiblePreset(t)
 
 	_ = addOrphanFactoryHook(t, claude.ProjectScope, "orphan-strict", "missing-source-id", "orphan strict rule")
 
-	result, err := syncFactoryPresets(claude.ProjectScope, catalog, presetSyncOptions{Strict: true})
+	result, err := SyncFactoryPresets(claude.ProjectScope, catalog, SyncOptions{Strict: true})
 	if err == nil {
 		t.Fatalf("expected strict mode error on orphan, got nil")
 	}
@@ -251,12 +250,12 @@ func TestPresetSyncStrictFailsOnOrphan(t *testing.T) {
 }
 
 func TestPresetSyncDryRunPruneStrictDoesNotFailOnOrphan(t *testing.T) {
-	withCmdProjectTempDir(t)
+	withPresetProjectTempDir(t)
 	catalog, _ := loadCatalogAndOneVisiblePreset(t)
 
 	orphanPath := addOrphanFactoryHook(t, claude.ProjectScope, "orphan-dry-prune-strict", "missing-source-id", "orphan dry prune strict rule")
 
-	result, err := syncFactoryPresets(claude.ProjectScope, catalog, presetSyncOptions{
+	result, err := SyncFactoryPresets(claude.ProjectScope, catalog, SyncOptions{
 		DryRun:       true,
 		Strict:       true,
 		PruneOrphans: true,
@@ -279,7 +278,7 @@ func TestPresetSyncDryRunPruneStrictDoesNotFailOnOrphan(t *testing.T) {
 }
 
 func TestPresetSyncPruneOrphansUsesManagedRemovePath(t *testing.T) {
-	withCmdProjectTempDir(t)
+	withPresetProjectTempDir(t)
 	catalog, _ := loadCatalogAndOneVisiblePreset(t)
 
 	rule := "orphan prune rule"
@@ -297,9 +296,9 @@ func TestPresetSyncPruneOrphansUsesManagedRemovePath(t *testing.T) {
 		t.Fatalf("expected orphan rule in CLAUDE.md before prune")
 	}
 
-	result, err := syncFactoryPresets(claude.ProjectScope, catalog, presetSyncOptions{PruneOrphans: true})
+	result, err := SyncFactoryPresets(claude.ProjectScope, catalog, SyncOptions{PruneOrphans: true})
 	if err != nil {
-		t.Fatalf("syncFactoryPresets returned error: %v", err)
+		t.Fatalf("SyncFactoryPresets returned error: %v", err)
 	}
 	if result.OrphansPruned != 1 {
 		t.Fatalf("expected 1 pruned orphan, got %d", result.OrphansPruned)
@@ -327,11 +326,11 @@ func TestPresetSyncPruneOrphansUsesManagedRemovePath(t *testing.T) {
 }
 
 func TestPresetSyncDryRunDoesNotMutate(t *testing.T) {
-	withCmdProjectTempDir(t)
+	withPresetProjectTempDir(t)
 	catalog, visible := loadCatalogAndOneVisiblePreset(t)
 
-	if _, err := enablePreset(claude.ProjectScope, catalog, visible, false); err != nil {
-		t.Fatalf("enablePreset returned error: %v", err)
+	if _, err := EnablePreset(claude.ProjectScope, catalog, visible, false); err != nil {
+		t.Fatalf("EnablePreset returned error: %v", err)
 	}
 
 	hooksDir, err := claude.GetHooksDir(claude.ProjectScope)
@@ -346,12 +345,12 @@ func TestPresetSyncDryRunDoesNotMutate(t *testing.T) {
 
 	orphanPath := addOrphanFactoryHook(t, claude.ProjectScope, "orphan-dry-run", "not-in-catalog", "orphan dry run rule")
 
-	result, err := syncFactoryPresets(claude.ProjectScope, catalog, presetSyncOptions{
+	result, err := SyncFactoryPresets(claude.ProjectScope, catalog, SyncOptions{
 		DryRun:       true,
 		PruneOrphans: true,
 	})
 	if err != nil {
-		t.Fatalf("syncFactoryPresets returned error: %v", err)
+		t.Fatalf("SyncFactoryPresets returned error: %v", err)
 	}
 	if result.DryRunPlanned < 2 {
 		t.Fatalf("expected at least 2 planned dry-run mutations, got %d", result.DryRunPlanned)
@@ -361,11 +360,11 @@ func TestPresetSyncDryRunDoesNotMutate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed reading visible hook after dry-run: %v", err)
 	}
-	expected, err := expectedFactoryPresetContent(catalog, visible)
+	expected, err := ExpectedFactoryPresetContent(catalog, visible)
 	if err != nil {
-		t.Fatalf("expectedFactoryPresetContent returned error: %v", err)
+		t.Fatalf("ExpectedFactoryPresetContent returned error: %v", err)
 	}
-	if sha256Hex(actual) == sha256Hex(expected) {
+	if Sha256Hex(actual) == Sha256Hex(expected) {
 		t.Fatalf("expected visible hook tamper to remain during dry-run")
 	}
 	if _, err := os.Stat(orphanPath); err != nil {
