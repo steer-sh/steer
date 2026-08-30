@@ -40,7 +40,23 @@ The analysis reads a sizable digest and a finding dump, then reasons over both. 
 
 Respect the user's choice. If the conversation is fresh, skip the warning and proceed. In `--headless` mode, skip this gate entirely and never ask questions.
 
-## Step 1: Refresh the queue, then audit the installed interventions
+## Step 1: Snapshot the loop, refresh the queue, then audit
+
+First read the whole loop's posture and full class inventory in one snapshot:
+
+```bash
+STEER_BIN="${CLAUDE_PLUGIN_ROOT:+${CLAUDE_PLUGIN_ROOT}/scripts/steer}"
+STEER_BIN="${STEER_BIN:-steer}"
+"${STEER_BIN}" status --json > "${TMPDIR:-/tmp}/steer-status.json"
+```
+
+Read `${TMPDIR:-/tmp}/steer-status.json` **once**. The `interventions[]` array is
+the **full** scored inventory — every live class across every tier, `effective`
+ones included. This is your dedup source: when you cluster new candidates in
+Step 3, drop any class already here scored `effective` or `ineffective`. An
+`ineffective` class is a rework, not a new hook. The schema is documented in "The
+`steer status --json` contract" below. Fail soft — if the command errors, say so
+in one line and continue; the audit below still runs.
 
 A deterministic tier runs this loop's mechanical half — scoring, corpus sweeps, threshold checks — with no model. It may have run on a schedule already; run it again now, synchronously, so you never read a stale queue. It takes seconds and spends no tokens.
 
@@ -107,6 +123,29 @@ Digest schema (`digest_version: 1`):
 - `signals.hook_blocks[]` — operations already blocked by existing hooks. These are enforcement *working*; use them only to avoid suggesting duplicates.
 
 The digest is size-capped: the CLI evicts the lowest-scoring clusters to fit, and reports honesty in `stats`.
+
+### The `steer status --json` contract (`status_version: 1`)
+
+Step 1 reads this snapshot for posture and the full class inventory. The unit is
+the failure class and its verdict, not the hook count. This schema is byte-shared
+with the root `SKILL.md`; change both together (see CLAUDE.md Key Contracts).
+Fields:
+
+- `status_version` — the schema version. `--json` is a stable agent contract.
+- `posture` — the arming state: `instrument` (reviewer model / runs / prompt
+  digest), `reviewer`, `ledger` path, and `commit_gate[]` / `denials[]`. Each is
+  a scope row with `registered` and `effective`.
+- `interventions[]` — the **full** scored inventory. It carries every live
+  class, `effective` ones included. Each row: `id`, `class`, `tier`, `target`,
+  `status` (`active` or `rejected`), `verdict`, and `before` / `after` incidence
+  (`hits`, `units`, `rate`). This is the dedup source — a class here is decided.
+- `summary` — `total` plus `counts` by verdict.
+- `chains[]` — recent review chains, findings split `accepted` / `rejected`.
+- `attention` — the subset needing action: `interventions[]` (verdict
+  `ineffective` or `class-grew`), `candidates[]` (no `match` yet), and
+  `unscored[]` (session-unit ids the engine cannot score).
+- `telemetry` — corpus sizes: `review_chains`, `denials_rows`, `audit_firings`.
+- `corpora[]` — one row per corpus with `present` and `size`.
 
 ### 2b. Commit-review findings
 

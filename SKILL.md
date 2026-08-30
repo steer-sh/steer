@@ -2,7 +2,7 @@
 name: steer
 description: Generates and installs PreToolUse Python hooks from natural language rules. Use when enforcing coding standards, blocking insecure patterns, managing hook lifecycle, or running steer CLI commands (register, remove, list, test, preset, verify, git-hooks).
 user-invocable: true
-prompt_version: 2
+prompt_version: 3
 compatibility: Requires Claude Code with hooks support (PreToolUse). Hooks are installed into .claude/hooks/ and registered in settings.json. steer CLI must be available on PATH or bundled under scripts/.
 allowed-tools: Bash(steer *), Bash(python3 *), Bash(echo *), Read, Write
 ---
@@ -146,7 +146,32 @@ To **allow**: exit with code 0, print nothing to stdout.
 
 ## Generation Protocol
 
-Follow these steps for every hook creation:
+Follow these steps for every hook creation.
+
+### Pre-flight: Check guardrail health
+
+Before you generate anything, read the full failure-class inventory. This step
+stops you from re-proposing a class the loop already decided.
+
+```bash
+STEER_BIN="${CLAUDE_PLUGIN_ROOT:+${CLAUDE_PLUGIN_ROOT}/scripts/steer}"
+STEER_BIN="${STEER_BIN:-steer}"
+"${STEER_BIN}" status --json
+```
+
+Read the `interventions[]` array. Each row is one live intervention with its
+`class`, `tier`, `target`, `status`, and measured `verdict`. Match the user's
+rule against the classes there:
+
+- The rule matches a class scored `effective`: the class is covered. Tell the
+  user, and stop. Do not install a duplicate.
+- The rule matches a class scored `ineffective`: the current gate does not work.
+  Treat this as a rework of that intervention, not a new hook.
+- No match: continue to Step 0.
+
+Fail soft. If the command errors, or the CLI is absent, say so in one line and
+continue. This check is an optimization, not a gate. The `status --json` schema
+is documented in "The `steer status --json` contract" below.
 
 ### Step 0: Parse the Rule
 
@@ -335,3 +360,27 @@ The `|` pipe splits a rule into a detection part and an optional suggestion (see
 - stopReason: `"Use of npm detected. Suggestion: please use yarn instead"`
 
 Never invent suggestions. Only include them when explicitly provided after `|`.
+
+## The `steer status --json` contract (`status_version: 1`)
+
+`steer status` composes one read-only snapshot of the whole loop. The unit is the
+failure class and its verdict, not the hook count. The Pre-flight step reads it to
+dedup a rule against classes the loop already decided. This schema is byte-shared
+with `skills/steer-report/SKILL.md`; change both together (see CLAUDE.md Key
+Contracts). Fields:
+
+- `status_version` — the schema version. `--json` is a stable agent contract.
+- `posture` — the arming state: `instrument` (reviewer model / runs / prompt
+  digest), `reviewer`, `ledger` path, and `commit_gate[]` / `denials[]`. Each is
+  a scope row with `registered` and `effective`.
+- `interventions[]` — the **full** scored inventory. It carries every live
+  class, `effective` ones included. Each row: `id`, `class`, `tier`, `target`,
+  `status` (`active` or `rejected`), `verdict`, and `before` / `after` incidence
+  (`hits`, `units`, `rate`). This is the dedup source — a class here is decided.
+- `summary` — `total` plus `counts` by verdict.
+- `chains[]` — recent review chains, findings split `accepted` / `rejected`.
+- `attention` — the subset needing action: `interventions[]` (verdict
+  `ineffective` or `class-grew`), `candidates[]` (no `match` yet), and
+  `unscored[]` (session-unit ids the engine cannot score).
+- `telemetry` — corpus sizes: `review_chains`, `denials_rows`, `audit_firings`.
+- `corpora[]` — one row per corpus with `present` and `size`.
