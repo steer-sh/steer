@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"bytes"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
@@ -13,6 +15,8 @@ import (
 
 var (
 	statusJSON        bool
+	statusHTML        bool
+	statusOut         string
 	statusDays        int
 	statusProjectOnly bool
 )
@@ -32,9 +36,13 @@ sizes. It writes no state.
 
 --json prints the versioned SystemStatus contract on stdout, progress on stderr —
 the same discipline as 'steer report'. An agent runs 'steer status --json' before
-installing a hook to see the full class inventory and skip a class already scored.`,
+installing a hook to see the full class inventory and skip a class already scored.
+
+--html renders the same snapshot as one self-contained HTML file: no server, no
+runtime dependency. It writes to --out, or to stdout when --out is absent.`,
 	Example: `  steer status
   steer status --json
+  steer status --html --out steer-status.html
   steer status --days 7 --project-only`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		s, err := status.Collect(status.Options{
@@ -45,6 +53,12 @@ installing a hook to see the full class inventory and skip a class already score
 		})
 		if err != nil {
 			return err
+		}
+		if statusJSON && statusHTML {
+			return fmt.Errorf("--json and --html are separate render targets; pass one")
+		}
+		if statusHTML {
+			return writeStatusHTML(s)
 		}
 		if statusJSON {
 			data, err := s.MarshalIndent()
@@ -57,6 +71,24 @@ installing a hook to see the full class inventory and skip a class already score
 		renderStatus(s)
 		return nil
 	},
+}
+
+// writeStatusHTML renders the snapshot to --out, or to stdout when --out is
+// absent. It buffers first, so a render error leaves no half-written file.
+func writeStatusHTML(s *status.SystemStatus) error {
+	var buf bytes.Buffer
+	if err := s.RenderHTML(&buf); err != nil {
+		return err
+	}
+	if statusOut == "" {
+		_, err := os.Stdout.Write(buf.Bytes())
+		return err
+	}
+	if err := os.WriteFile(statusOut, buf.Bytes(), 0o644); err != nil {
+		return fmt.Errorf("failed to write %s: %w", statusOut, err)
+	}
+	fmt.Fprintf(os.Stderr, "wrote %s\n", statusOut)
+	return nil
 }
 
 // renderStatus prints the loop-first human view: posture, then the attention
@@ -189,6 +221,8 @@ func renderSummary(s *status.SystemStatus) {
 func init() {
 	rootCmd.AddCommand(statusCmd)
 	statusCmd.Flags().BoolVar(&statusJSON, "json", false, "Emit the versioned SystemStatus JSON on stdout")
+	statusCmd.Flags().BoolVar(&statusHTML, "html", false, "Render the snapshot as one self-contained HTML file")
+	statusCmd.Flags().StringVar(&statusOut, "out", "", "Destination file for --html (default: stdout)")
 	statusCmd.Flags().IntVar(&statusDays, "days", 30, "Transcript look-back window in days for the attention refresh")
 	statusCmd.Flags().BoolVar(&statusProjectOnly, "project-only", false, "Restrict the transcript scan to the current working directory")
 }
