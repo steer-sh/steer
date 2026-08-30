@@ -195,7 +195,8 @@ func TestUndecidedChainsResidualFindingInMixedChain(t *testing.T) {
 }
 
 func TestNeedsAttention(t *testing.T) {
-	for _, v := range []string{"harmful", "ineffective", "class-grew", "legacy-unscoped"} {
+	for _, v := range []string{"harmful", "ineffective", "class-grew",
+		"legacy-unscoped", "evidence-incomplete", "confounded"} {
 		if !needsAttention(v) {
 			t.Errorf("%s should need attention", v)
 		}

@@ -148,12 +148,17 @@ func matchesAnyPath(re *regexp.Regexp, paths []string) bool {
 }
 
 // Coverage is a window's chains split by standing: Total == Eligible+Ineligible+Unknown.
+// UnknownScope and UnknownEvidence break Unknown down by cause, and Pending is the
+// share of UnknownEvidence whose ledger may still arrive.
 type Coverage struct {
-	Total      int `json:"total"`
-	Eligible   int `json:"eligible"`
-	Ineligible int `json:"ineligible"`
-	Unknown    int `json:"unknown"`
-	chains     []Chain
+	Total           int `json:"total"`
+	Eligible        int `json:"eligible"`
+	Ineligible      int `json:"ineligible"`
+	Unknown         int `json:"unknown"`
+	UnknownScope    int `json:"unknown_scope"`
+	UnknownEvidence int `json:"unknown_evidence"`
+	Pending         int `json:"pending"`
+	chains          []Chain
 }
 
 // EligibleChains is the subset that counts toward incidence.
@@ -162,11 +167,31 @@ func (c Coverage) EligibleChains() []Chain { return c.chains }
 // Cover classifies every chain in a window against the scope. A nil scope admits every
 // chain, so a caller that has not branched on scope presence gets the whole window.
 func Cover(chains []Chain, scope *Scope) Coverage {
+	return CoverEvidence(chains, scope, 0)
+}
+
+// CoverEvidence classifies against the scope and then against adjudication
+// completeness. A scope-eligible chain whose findings are pending or missing moves to
+// Unknown: it neither counts as a clean miss nor shrinks the class's measured rate.
+// now is the clock the grace window is read against; 0 skips the evidence pass, which
+// is what a register-time scope preview wants.
+func CoverEvidence(chains []Chain, scope *Scope, now float64) Coverage {
 	cov := Coverage{Total: len(chains)}
 	for _, ch := range chains {
 		e := Eligible
 		if scope != nil {
 			e = scope.Classify(ch)
+		}
+		if e == Eligible && now > 0 {
+			switch ChainEvidence(ch, now) {
+			case EvidencePending:
+				e = Unknown
+				cov.Pending++
+				cov.UnknownEvidence++
+			case EvidenceMissing:
+				e = Unknown
+				cov.UnknownEvidence++
+			}
 		}
 		switch e {
 		case Eligible:
@@ -178,6 +203,7 @@ func Cover(chains []Chain, scope *Scope) Coverage {
 			cov.Unknown++
 		}
 	}
+	cov.UnknownScope = cov.Unknown - cov.UnknownEvidence
 	return cov
 }
 

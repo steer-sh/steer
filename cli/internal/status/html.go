@@ -22,7 +22,8 @@ var templateFS embed.FS
 // verdictOrder ranks the verdict vocabulary for display: the verdicts that
 // demand action first, then the abstentions, then the settled ones.
 var verdictOrder = []string{
-	"harmful", "ineffective", "class-grew", "legacy-unscoped",
+	"harmful", "ineffective", "class-grew",
+	"legacy-unscoped", "evidence-incomplete", "confounded",
 	"collecting", "inconclusive", "class-inconclusive", "no-baseline", "unscored",
 	"class-steady", "class-faded", "effective",
 }

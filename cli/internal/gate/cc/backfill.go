@@ -31,8 +31,6 @@ const (
 
 	// A lock older than this is a crashed run's leftover and is taken over.
 	backfillLockStale = 300 // seconds
-	// How long after a deny --if-due waits before scanning transcripts for the row.
-	ledgerGrace = 120 // seconds
 )
 
 // ledgerChainRe matches a chain ledger's header line. One message can carry more than
@@ -450,7 +448,7 @@ func (r *resolver) pending(rows []resolverRow) bool {
 		if !expectsLedger(row) || pyTruthy(row["ledger_found"]) || pyTruthy(row["backfilled"]) {
 			continue
 		}
-		if denyTS, ok := anchorTS(rows, i); ok && now >= denyTS+ledgerGrace {
+		if denyTS, ok := anchorTS(rows, i); ok && now >= denyTS+gate.LedgerGrace {
 			return true
 		}
 	}

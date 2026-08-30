@@ -177,9 +177,12 @@ func TestLedgerSortsUrgentVerdictsFirst(t *testing.T) {
 		{Class: "a", Verdict: "effective"},
 		{Class: "b", Verdict: "ineffective"},
 		{Class: "c", Verdict: "collecting"},
+		{Class: "d", Verdict: "confounded"},
+		{Class: "e", Verdict: "evidence-incomplete"},
 		{Class: "d", Verdict: "harmful"},
 	})
-	want := []string{"harmful", "ineffective", "collecting", "effective"}
+	want := []string{"harmful", "ineffective", "evidence-incomplete", "confounded",
+		"collecting", "effective"}
 	for i, v := range want {
 		if got[i].Verdict != v {
 			t.Errorf("row %d: got %q, want %q", i, got[i].Verdict, v)

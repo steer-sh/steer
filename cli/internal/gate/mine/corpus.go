@@ -138,10 +138,15 @@ type Chain struct {
 	// is false when no row carried repo metadata. Paths is the union of changed paths
 	// across the chain's rounds; PathsKnown is false when no row stamped or recovered a
 	// path list, which a scope reads as Unknown rather than an empty match.
-	Repo       string
-	RepoKnown  bool
-	Paths      []string
-	PathsKnown bool
+	// AuthorModels is the set of models that authored the chain's diffs;
+	// AuthorModelKnown is false when no row carried the stamp, which a confound check
+	// reads as Unknown rather than a disjoint support.
+	Repo             string
+	RepoKnown        bool
+	Paths            []string
+	PathsKnown       bool
+	AuthorModels     []string
+	AuthorModelKnown bool
 
 	seen map[string]bool
 }
@@ -223,6 +228,10 @@ func chainsForHost(rows []gate.Row, strictJoins bool) []Chain {
 			ch.Repo = slashBase(repo)
 			ch.RepoKnown = true
 		}
+		if model := str(row["author_model"]); model != "" {
+			ch.AuthorModels = appendUnique(ch.AuthorModels, model)
+			ch.AuthorModelKnown = true
+		}
 		if raw, ok := row["changed_paths"]; ok {
 			ch.PathsKnown = true
 			for _, p := range asList(raw) {
@@ -280,6 +289,7 @@ func chainsForHost(rows []gate.Row, strictJoins bool) []Chain {
 		ch := &chains[i]
 		sort.Strings(ch.Sessions)
 		sort.Strings(ch.Instruments)
+		sort.Strings(ch.AuthorModels)
 		ch.Files = maxRowInt(ch.Rows, "files", 0)
 		ch.Rounds = maxRowInt(ch.Rows, "firing", 1)
 	}

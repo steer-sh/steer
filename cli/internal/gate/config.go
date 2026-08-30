@@ -178,3 +178,8 @@ func (c Config) LogFile() string {
 func (c Config) DiffDir() string   { return filepath.Join(c.StateDir, "diffs") }
 func (c Config) TaskDir() string   { return filepath.Join(c.StateDir, "tasks") }
 func (c Config) PrefixDir() string { return filepath.Join(c.StateDir, "prefixes") }
+
+// LedgerGrace is how long after the findings were handed to the agent a ledger may
+// still arrive. The cc resolver waits it out before scanning; mine reads it to tell a
+// chain whose adjudication is merely young from one whose adjudication never came.
+const LedgerGrace = 120 // seconds

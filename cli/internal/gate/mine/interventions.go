@@ -250,7 +250,9 @@ func ScoreRecord(record Record, chains []Chain, minAfter int) (map[string]any, e
 	}
 	beforeWindow, _ := SplitChains(chains, splitTS)
 	_, afterWindow := SplitChains(chains, afterStart)
-	beforeCov, afterCov := Cover(beforeWindow, scope), Cover(afterWindow, scope)
+	clock := float64(now())
+	beforeCov := CoverEvidence(beforeWindow, scope, clock)
+	afterCov := CoverEvidence(afterWindow, scope, clock)
 	before, after := beforeCov.EligibleChains(), afterCov.EligibleChains()
 
 	bHits, bTotal, bRate := Incidence(before, pattern, kf)
@@ -258,21 +260,27 @@ func ScoreRecord(record Record, chains []Chain, minAfter int) (map[string]any, e
 	m := Measure(bHits, bTotal, bRate, HitSequence(after, pattern, kf), aRate)
 	p := FisherOneSided(bHits, bTotal-bHits, aHits, aTotal-aHits)
 
+	authored := str(record["instrument"])
+	afterInstruments := InstrumentsIn(after)
+	drift := authored != "" && anyDiffers(afterInstruments, authored)
+	hard, soft := Confounds(before, after, authored)
+
 	// A record predating scopes has no frozen denominator, so its windows describe
-	// different opportunity sets and no verdict is available from them.
+	// different opportunity sets and no verdict is available from them. Withholding
+	// outranks the range: legacy-unscoped, then missing evidence, then a confound.
 	var label string
 	switch {
 	case !hasScope:
 		label = "legacy-unscoped"
+	case evidenceVerdict(beforeCov, afterCov) != "":
+		label = evidenceVerdict(beforeCov, afterCov)
+	case len(hard) > 0:
+		label = "confounded"
 	case IsRejected(record):
 		label = TrendFor(m, aTotal, minAfter)
 	default:
 		label = VerdictFor(m, aTotal, minAfter)
 	}
-
-	authored := str(record["instrument"])
-	afterInstruments := InstrumentsIn(after)
-	drift := authored != "" && anyDiffers(afterInstruments, authored)
 
 	beforeHosts, afterHosts := HostsIn(before), HostsIn(after)
 	hostDrift := len(beforeHosts) > 0 && len(afterHosts) > 0 && !sameStringSet(beforeHosts, afterHosts)
@@ -294,6 +302,8 @@ func ScoreRecord(record Record, chains []Chain, minAfter int) (map[string]any, e
 		"scope":             record["scope"],
 		"effect":            effectMap(m.Effect),
 		"required_after":    requiredAfterValue(m),
+		"confounds":         confoundList(hard),
+		"composition":       confoundList(soft),
 		"p":                 pyFloat(round4(p)),
 		"verdict":           label,
 		"instrument":        record["instrument"],
@@ -316,11 +326,36 @@ func requiredAfterValue(m Measurement) any {
 
 func coverageMap(c Coverage) map[string]any {
 	return map[string]any{
-		"total":      c.Total,
-		"eligible":   c.Eligible,
-		"ineligible": c.Ineligible,
-		"unknown":    c.Unknown,
+		"total":            c.Total,
+		"eligible":         c.Eligible,
+		"ineligible":       c.Ineligible,
+		"unknown":          c.Unknown,
+		"unknown_scope":    c.UnknownScope,
+		"unknown_evidence": c.UnknownEvidence,
+		"pending":          c.Pending,
 	}
+}
+
+// evidenceVerdict withholds when a window has no eligible chain left and unknown chains
+// are why. It reads the causes in order of permanence: a closed miss and an unknown
+// scope are both permanent and both incomplete, while a window emptied only by ledgers
+// still inside the grace window becomes measurable on its own and is collecting.
+// It returns "" to fall through to the range ladder.
+func evidenceVerdict(before, after Coverage) string {
+	for _, c := range []Coverage{before, after} {
+		if c.Eligible > 0 || c.Unknown == 0 {
+			continue
+		}
+		switch {
+		case c.UnknownEvidence > c.Pending: // a ledger the resolver closed as gone
+			return "evidence-incomplete"
+		case c.UnknownScope > 0: // metadata a scope needs and no row carried
+			return "evidence-incomplete"
+		default:
+			return "collecting"
+		}
+	}
+	return ""
 }
 
 func incidenceMap(hits, total int, rate float64) map[string]any {

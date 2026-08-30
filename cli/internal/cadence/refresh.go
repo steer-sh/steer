@@ -191,11 +191,14 @@ func Refresh(opts Options) (*Queue, error) {
 
 // AttentionVerdicts are the scored verdicts the cadence queues for action. Every
 // consumer that groups the queue by verdict must cover this set.
-var AttentionVerdicts = []string{"harmful", "ineffective", "class-grew", "legacy-unscoped"}
+var AttentionVerdicts = []string{
+	"harmful", "ineffective", "class-grew",
+	"legacy-unscoped", "evidence-incomplete", "confounded",
+}
 
 // needsAttention is the deterministic threshold on scored interventions: a hook that
-// did not reduce its class, a refusal a growing class overtook, or a record carrying no
-// scope to measure against.
+// did not reduce its class, a refusal a growing class overtook, or a record whose
+// measurement conditions are invalid — no scope, missing evidence, or a confound.
 func needsAttention(verdict string) bool {
 	for _, v := range AttentionVerdicts {
 		if v == verdict {
