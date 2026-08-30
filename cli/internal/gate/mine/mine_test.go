@@ -283,31 +283,6 @@ func TestFisher(t *testing.T) {
 	}
 }
 
-func TestVerdicts(t *testing.T) {
-	v := func(bh, bt int, br float64, ah, at int, ar float64) string {
-		label, _ := VerdictFor(bh, bt, br, ah, at, ar, 12)
-		return label
-	}
-	check(t, "sparse after-window withholds a verdict", v(5, 20, 0.25, 0, 3, 0.0), "insufficient-data")
-	check(t, "a rate that rose is ineffective", v(2, 20, 0.10, 4, 20, 0.20), "ineffective")
-	check(t, "an equal rate is ineffective", v(2, 20, 0.10, 2, 20, 0.10), "ineffective")
-	check(t, "elimination with volume is effective", v(10, 20, 0.5, 0, 20, 0.0), "effective")
-	check(t, "a thin elimination is only promising", v(2, 13, 0.154, 0, 13, 0.0), "promising")
-	check(t, "a partial drop is partial", v(10, 20, 0.5, 8, 20, 0.4), "partial")
-	check(t, "no baseline is reported, not scored", v(0, 20, 0.0, 0, 20, 0.0), "no-baseline")
-}
-
-func TestTrends(t *testing.T) {
-	tr := func(bh, bt int, br float64, ah, at int, ar float64) string {
-		label, _ := TrendFor(bh, bt, br, ah, at, ar, 12)
-		return label
-	}
-	check(t, "a class that grew is class-grew", tr(2, 20, 0.10, 5, 20, 0.25), "class-grew")
-	check(t, "a class that halved is class-faded", tr(10, 20, 0.50, 4, 20, 0.20), "class-faded")
-	check(t, "a class holding its rate is class-steady", tr(10, 20, 0.50, 8, 20, 0.40), "class-steady")
-	check(t, "a thin after-window withholds a trend", tr(10, 20, 0.50, 0, 3, 0.0), "insufficient-data")
-}
-
 func mustJSON(t *testing.T, r gate.Row) []byte {
 	t.Helper()
 	data, err := json.Marshal(r)

@@ -21,10 +21,6 @@ var (
 	statusProjectOnly bool
 )
 
-// attentionVerdictOrder groups the attention block the way an operator reads it:
-// broken interventions first, then a class a refusal let grow.
-var attentionVerdictOrder = []string{"ineffective", "class-grew"}
-
 var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show the steer feedback loop's state — posture, attention, verdicts",
@@ -170,7 +166,7 @@ func renderAttention(s *status.SystemStatus) {
 			iv.Before.Hits, iv.Before.Units, iv.After.Hits, iv.After.Units)
 		byVerdict[iv.Verdict] = append(byVerdict[iv.Verdict], line)
 	}
-	for _, v := range attentionVerdictOrder {
+	for _, v := range cadence.AttentionVerdicts {
 		lines := byVerdict[v]
 		if len(lines) == 0 {
 			continue

@@ -176,9 +176,10 @@ func TestLedgerSortsUrgentVerdictsFirst(t *testing.T) {
 	got := sortedLedger([]ScoredIntervention{
 		{Class: "a", Verdict: "effective"},
 		{Class: "b", Verdict: "ineffective"},
-		{Class: "c", Verdict: "insufficient-data"},
+		{Class: "c", Verdict: "collecting"},
+		{Class: "d", Verdict: "harmful"},
 	})
-	want := []string{"ineffective", "insufficient-data", "effective"}
+	want := []string{"harmful", "ineffective", "collecting", "effective"}
 	for i, v := range want {
 		if got[i].Verdict != v {
 			t.Errorf("row %d: got %q, want %q", i, got[i].Verdict, v)

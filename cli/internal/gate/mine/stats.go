@@ -2,28 +2,15 @@ package mine
 
 import (
 	"encoding/json"
+	"math"
 	"math/big"
 	"strconv"
 	"strings"
 )
 
-const (
-	// MinAfterChains is the post-install chain count below which score withholds a verdict.
-	MinAfterChains = 12
-	// EffectiveRatio: an intervention must at least halve incidence to be called effective.
-	EffectiveRatio = 0.5
-	// GrowthRatio: a rejected class must grow by half again before the refusal reopens.
-	GrowthRatio = 1.5
-	// Alpha is the one-sided Fisher significance threshold.
-	Alpha = 0.10
-	// OverlapBlock: a candidate sharing this fraction of its chains with a rejected class
-	// is that class again under a new name, so register stops rather than warns.
-	OverlapBlock = 0.5
-)
-
 // FisherOneSided is P(after hits <= c) with margins fixed — a/b before hit/miss, c/d
 // after. It returns 1.0 when a margin is empty, so an untestable table never reads as
-// significant.
+// significant. Reported beside the range; no verdict reads it.
 func FisherOneSided(a, b, c, d int) float64 {
 	r1, r2 := a+b, c+d
 	c1, n := a+c, a+b+c+d
@@ -52,45 +39,93 @@ func binomial(n, k int) *big.Int {
 	return new(big.Int).Binomial(int64(n), int64(k))
 }
 
-// VerdictFor classifies an installed intervention from its before/after incidence.
-func VerdictFor(bHits, bTotal int, bRate float64, aHits, aTotal int, aRate float64, minAfter int) (string, float64) {
-	p := FisherOneSided(bHits, bTotal-bHits, aHits, aTotal-aHits)
+// Measurement is one record's two windows expressed as a relative-risk range.
+type Measurement struct {
+	Baseline    Interval // exact interval on the before-window rate
+	After       Interval // running mixture sequence on the after-window rate
+	Effect      Effect   // the ratio of the two
+	Required    int      // clean after-chains that could reach EffectiveRatio; 0 = unreachable
+	HasBaseline bool     // the before-window carries the class at all
+}
+
+// Measure builds the range. afterHits is the after-window's per-chain hit sequence in
+// time order, which the running intersection needs.
+func Measure(bHits, bTotal int, bRate float64, afterHits []bool, aRate float64) Measurement {
+	m := Measurement{HasBaseline: bTotal > 0 && bHits > 0}
+	m.Baseline = ClopperPearson(bHits, bTotal, PieceAlpha)
+	m.After = RunningMixtureCS(afterHits, PieceAlpha)
+	m.Effect = RelativeRisk(m.Baseline, m.After, bRate, aRate)
+	m.Required = RequiredAfter(m.Baseline, EffectiveRatio)
+	return m
+}
+
+// VerdictFor classifies an installed intervention from its range. It abstains — with
+// collecting or inconclusive — whenever the range clears no boundary.
+func VerdictFor(m Measurement, aTotal, minAfter int) string {
+	if !m.HasBaseline {
+		return "no-baseline"
+	}
+	if aTotal < minAfter {
+		return "collecting"
+	}
+	lower, upper := m.Effect.Lower, m.Effect.Upper
 	switch {
-	case aTotal < minAfter:
-		return "insufficient-data", p
-	case bTotal == 0 || bHits == 0:
-		return "no-baseline", p
-	case aRate >= bRate:
-		return "ineffective", p
-	case aRate <= bRate*EffectiveRatio:
-		if p <= Alpha {
-			return "effective", p
-		}
-		return "promising", p
+	case upper <= EffectiveRatio:
+		return "effective"
+	case lower > HarmfulRatio:
+		return "harmful"
+	case lower > EffectiveRatio:
+		return "ineffective"
+	case m.Required == 0 || aTotal < m.Required:
+		return "collecting"
 	default:
-		return "partial", p
+		return "inconclusive"
 	}
 }
 
 // TrendFor classifies a rejected class by how its incidence moved after the refusal.
-func TrendFor(bHits, bTotal int, bRate float64, aHits, aTotal int, aRate float64, minAfter int) (string, float64) {
-	p := FisherOneSided(bHits, bTotal-bHits, aHits, aTotal-aHits)
+// class-inconclusive is the abstention: the range supports no conclusion yet.
+func TrendFor(m Measurement, aTotal, minAfter int) string {
+	if !m.HasBaseline {
+		return "no-baseline"
+	}
+	if aTotal < minAfter {
+		return "class-inconclusive"
+	}
+	lower, upper := m.Effect.Lower, m.Effect.Upper
 	switch {
-	case aTotal < minAfter:
-		return "insufficient-data", p
-	case bTotal == 0 || bHits == 0:
-		return "no-baseline", p
-	case aRate >= bRate*GrowthRatio:
-		return "class-grew", p
-	case aRate <= bRate*EffectiveRatio:
-		return "class-faded", p
+	case lower >= GrowthRatio:
+		return "class-grew"
+	case upper <= EffectiveRatio:
+		return "class-faded"
+	case lower >= EffectiveRatio && upper <= GrowthRatio:
+		return "class-steady"
 	default:
-		return "class-steady", p
+		return "class-inconclusive"
 	}
 }
 
-// round4 reproduces Python round(x, 4): format to four decimals with ties-to-even, then
-// parse back to the nearest double.
+// effectMap renders an Effect for the scored record. An unbounded upper bound and an
+// undefined estimate are both null.
+func effectMap(e Effect) map[string]any {
+	m := map[string]any{
+		"estimate":   nil,
+		"lower":      pyFloat(round4(e.Lower)),
+		"upper":      nil,
+		"confidence": pyFloat(Confidence),
+		"method":     e.Method,
+	}
+	if e.Estimate != nil {
+		m["estimate"] = pyFloat(round4(*e.Estimate))
+	}
+	if !math.IsInf(e.Upper, 1) {
+		m["upper"] = pyFloat(round4(e.Upper))
+	}
+	return m
+}
+
+// round4 formats to four decimals with ties-to-even, then parses back to the nearest
+// double.
 func round4(x float64) float64 {
 	s := strconv.FormatFloat(x, 'f', 4, 64)
 	v, _ := strconv.ParseFloat(s, 64)

@@ -1,6 +1,7 @@
 package mine
 
 import (
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -370,4 +371,67 @@ func containsQuestionMark(s string) bool {
 		}
 	}
 	return false
+}
+
+// TestScoreEmitsTheRange pins the measurement fields a scored record carries, and that a
+// record predating scopes abstains instead of reporting a verdict.
+func TestScoreEmitsTheRange(t *testing.T) {
+	var rows []gate.Row
+	ts := 1000
+	for i := 0; i < 20; i++ {
+		rows = append(rows, row(ts, "deny"),
+			concerns(row(ts+1, "retry"), "round", c("widget parser drops a flag")),
+			firing(row(ts+2, "clean"), 2))
+		ts += 100
+	}
+	install := ts
+	for i := 0; i < 20; i++ {
+		rows = append(rows, row(ts, "deny"),
+			concerns(row(ts+1, "retry"), "round", c("unrelated naming nit")),
+			firing(row(ts+2, "clean"), 2))
+		ts += 100
+	}
+	stateDir, ledger := writeLedger(t, rows)
+	if err := Register(io.Discard, stateDir, RegisterOpts{
+		ScopeAll: true, Ledger: ledger, Class: "widget parser flag loss", Match: "widget parser",
+		Kind: "defect", Tier: "check", Target: "check.sh", InstalledTS: int64(install),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	recorded, _ := Load(stateDir)
+	allRows, _ := LoadRows(stateDir, ledger)
+	chains := BuildChains(allRows, false)
+
+	scored, err := ScoreRecord(recorded[0], chains, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	effect := scored["effect"].(map[string]any)
+	check(t, "the effect names its method", effect["method"], EffectMethod)
+	check(t, "the effect names its level", effect["confidence"], pyFloat(Confidence))
+	if _, ok := effect["lower"].(json.Number); !ok {
+		t.Errorf("the lower bound must always be a number, got %v", effect["lower"])
+	}
+	if effect["upper"] == nil {
+		t.Error("a measured baseline bounds the ratio above")
+	}
+	if n, ok := scored["required_after"].(int); !ok || n <= 0 {
+		t.Errorf("a measured baseline names its exposure floor, got %v", scored["required_after"])
+	}
+	cov := scored["before_coverage"].(map[string]any)
+	check(t, "an all-scope makes every before-chain eligible", cov["eligible"], cov["total"])
+	check(t, "an all-scope leaves nothing unknown", cov["unknown"], 0)
+
+	// A record written before scopes existed has no frozen denominator, so its windows
+	// describe different opportunity sets.
+	legacy := Record{}
+	for k, v := range recorded[0] {
+		legacy[k] = v
+	}
+	delete(legacy, "scope")
+	unscoped, err := ScoreRecord(legacy, chains, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(t, "a scopeless record abstains", unscoped["verdict"], "legacy-unscoped")
 }

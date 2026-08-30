@@ -195,12 +195,13 @@ func TestUndecidedChainsResidualFindingInMixedChain(t *testing.T) {
 }
 
 func TestNeedsAttention(t *testing.T) {
-	for _, v := range []string{"ineffective", "class-grew"} {
+	for _, v := range []string{"harmful", "ineffective", "class-grew", "legacy-unscoped"} {
 		if !needsAttention(v) {
 			t.Errorf("%s should need attention", v)
 		}
 	}
-	for _, v := range []string{"effective", "promising", "partial", "insufficient-data", "no-baseline", "class-faded"} {
+	for _, v := range []string{"effective", "collecting", "inconclusive", "no-baseline",
+		"class-faded", "class-steady", "class-inconclusive"} {
 		if needsAttention(v) {
 			t.Errorf("%s should not need attention", v)
 		}

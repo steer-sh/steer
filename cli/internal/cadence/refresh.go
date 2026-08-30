@@ -92,16 +92,13 @@ type Options struct {
 	Ledger       string // single-ledger override, or "" for the shard glob
 	WindowDays   int    // transcript look-back
 	AllProjects  bool   // scan every project, not just the cwd
-	MinAfter     int    // post-install chains below which a verdict is withheld
+	MinAfter     int    // optional floor on eligible after-chains; 0 = no floor
 }
 
 // Refresh runs the deterministic tier and returns the queue. It never calls a
 // model. Errors from one corpus do not abort the others: a machine missing a
 // ledger still gets its transcript half.
 func Refresh(opts Options) (*Queue, error) {
-	if opts.MinAfter == 0 {
-		opts.MinAfter = mine.MinAfterChains
-	}
 	q := &Queue{
 		Version:       QueueVersion,
 		Interventions: []Intervention{},
@@ -192,10 +189,20 @@ func Refresh(opts Options) (*Queue, error) {
 	return q, nil
 }
 
-// needsAttention is the deterministic threshold on scored interventions: a hook
-// that did not reduce its class, or a refusal a growing class overtook.
+// AttentionVerdicts are the scored verdicts the cadence queues for action. Every
+// consumer that groups the queue by verdict must cover this set.
+var AttentionVerdicts = []string{"harmful", "ineffective", "class-grew", "legacy-unscoped"}
+
+// needsAttention is the deterministic threshold on scored interventions: a hook that
+// did not reduce its class, a refusal a growing class overtook, or a record carrying no
+// scope to measure against.
 func needsAttention(verdict string) bool {
-	return verdict == "ineffective" || verdict == "class-grew"
+	for _, v := range AttentionVerdicts {
+		if v == verdict {
+			return true
+		}
+	}
+	return false
 }
 
 // undecidedChains counts chains carrying an accepted finding that no live class

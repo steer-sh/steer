@@ -32,11 +32,21 @@ func ChainHits(ch Chain, pattern *regexp.Regexp, kind string) []Finding {
 	return out
 }
 
+// HitSequence is one bool per chain, in the order the chains occurred: whether the class
+// occurred on that chain. The confidence sequence reads it prefix by prefix.
+func HitSequence(chains []Chain, pattern *regexp.Regexp, kind string) []bool {
+	seq := make([]bool, len(chains))
+	for i, ch := range chains {
+		seq[i] = len(ChainHits(ch, pattern, kind)) > 0
+	}
+	return seq
+}
+
 // Incidence is chain-level: a class either occurred on a commit or it did not. Three
 // reviewers reporting one defect is one occurrence, and the reviewer count varies.
 func Incidence(chains []Chain, pattern *regexp.Regexp, kind string) (hits, total int, rate float64) {
-	for _, ch := range chains {
-		if len(ChainHits(ch, pattern, kind)) > 0 {
+	for _, hit := range HitSequence(chains, pattern, kind) {
+		if hit {
 			hits++
 		}
 	}

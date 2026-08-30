@@ -270,7 +270,7 @@ func init() {
 	s := commitGateMineScoreCmd.Flags()
 	s.StringVar(&mineScoreID, "id", "", "score only this intervention")
 	s.BoolVar(&mineScoreAll, "all", false, "include reworked and removed interventions")
-	s.IntVar(&mineScoreMinAfter, "min-after", mine.MinAfterChains, "withhold a verdict below this many post-install chains")
+	s.IntVar(&mineScoreMinAfter, "min-after", 0, "extra floor: withhold a verdict below this many eligible after-chains")
 	s.BoolVar(&mineScoreJSON, "json", false, "emit JSON")
 
 	commitGateMineListCmd.Flags().BoolVar(&mineListJSON, "json", false, "emit JSON")

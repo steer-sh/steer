@@ -20,15 +20,16 @@ import (
 var templateFS embed.FS
 
 // verdictOrder ranks the verdict vocabulary for display: the verdicts that
-// demand action first, the settled ones last.
+// demand action first, then the abstentions, then the settled ones.
 var verdictOrder = []string{
-	"ineffective", "class-grew", "partial", "class-steady",
-	"insufficient-data", "no-baseline", "unscored",
-	"promising", "class-faded", "effective",
+	"harmful", "ineffective", "class-grew", "legacy-unscoped",
+	"collecting", "inconclusive", "class-inconclusive", "no-baseline", "unscored",
+	"class-steady", "class-faded", "effective",
 }
 
-// attentionOrder groups the attention block the way an operator reads it.
-var attentionOrder = []string{"ineffective", "class-grew"}
+// attentionOrder groups the attention block the way an operator reads it. It is the
+// cadence's own list, so a queued verdict can never go unrendered here.
+var attentionOrder = cadence.AttentionVerdicts
 
 // tierOrder is the intervention ladder, cheapest tier first.
 var tierOrder = []string{"check", "guard", "instruction", "review"}
@@ -132,14 +133,15 @@ func buildView(s *SystemStatus) *view {
 	return v
 }
 
-// scoredVerdict reports whether a verdict carries a measurement. The withheld
-// labels and the session-unit placeholder do not.
+// scoredVerdict reports whether a verdict carries a measurement. An abstention, a
+// withheld label and the session-unit placeholder do not, so the set is named
+// positively: a label added later counts as unmeasured until it is listed.
 func scoredVerdict(v string) bool {
 	switch v {
-	case "", "unscored", "insufficient-data", "no-baseline":
-		return false
+	case "effective", "harmful", "ineffective", "class-grew", "class-faded", "class-steady":
+		return true
 	}
-	return true
+	return false
 }
 
 // sortedLedger orders the full inventory by verdict urgency, then by class.

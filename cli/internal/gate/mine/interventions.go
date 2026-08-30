@@ -248,21 +248,26 @@ func ScoreRecord(record Record, chains []Chain, minAfter int) (map[string]any, e
 	if v := numFloat(record["scope_set_ts"]); v != 0 {
 		afterStart = v
 	}
-	before, _ := SplitChains(chains, splitTS)
-	_, after := SplitChains(chains, afterStart)
-	if hasScope {
-		before = Cover(before, scope).EligibleChains()
-		after = Cover(after, scope).EligibleChains()
-	}
+	beforeWindow, _ := SplitChains(chains, splitTS)
+	_, afterWindow := SplitChains(chains, afterStart)
+	beforeCov, afterCov := Cover(beforeWindow, scope), Cover(afterWindow, scope)
+	before, after := beforeCov.EligibleChains(), afterCov.EligibleChains()
+
 	bHits, bTotal, bRate := Incidence(before, pattern, kf)
 	aHits, aTotal, aRate := Incidence(after, pattern, kf)
+	m := Measure(bHits, bTotal, bRate, HitSequence(after, pattern, kf), aRate)
+	p := FisherOneSided(bHits, bTotal-bHits, aHits, aTotal-aHits)
 
+	// A record predating scopes has no frozen denominator, so its windows describe
+	// different opportunity sets and no verdict is available from them.
 	var label string
-	var p float64
-	if IsRejected(record) {
-		label, p = TrendFor(bHits, bTotal, bRate, aHits, aTotal, aRate, minAfter)
-	} else {
-		label, p = VerdictFor(bHits, bTotal, bRate, aHits, aTotal, aRate, minAfter)
+	switch {
+	case !hasScope:
+		label = "legacy-unscoped"
+	case IsRejected(record):
+		label = TrendFor(m, aTotal, minAfter)
+	default:
+		label = VerdictFor(m, aTotal, minAfter)
 	}
 
 	authored := str(record["instrument"])
@@ -284,6 +289,11 @@ func ScoreRecord(record Record, chains []Chain, minAfter int) (map[string]any, e
 		"reopen":            getString(record, "reopen", ""),
 		"before":            incidenceMap(bHits, bTotal, bRate),
 		"after":             incidenceMap(aHits, aTotal, aRate),
+		"before_coverage":   coverageMap(beforeCov),
+		"after_coverage":    coverageMap(afterCov),
+		"scope":             record["scope"],
+		"effect":            effectMap(m.Effect),
+		"required_after":    requiredAfterValue(m),
 		"p":                 pyFloat(round4(p)),
 		"verdict":           label,
 		"instrument":        record["instrument"],
@@ -293,6 +303,24 @@ func ScoreRecord(record Record, chains []Chain, minAfter int) (map[string]any, e
 		"after_hosts":       emptyIfNil(afterHosts),
 		"host_mix_drift":    hostDrift,
 	}, nil
+}
+
+// requiredAfterValue is null when no clean window of any size could reach the effect
+// target, which an unmeasurably loose baseline causes.
+func requiredAfterValue(m Measurement) any {
+	if !m.HasBaseline || m.Required == 0 {
+		return nil
+	}
+	return m.Required
+}
+
+func coverageMap(c Coverage) map[string]any {
+	return map[string]any{
+		"total":      c.Total,
+		"eligible":   c.Eligible,
+		"ineligible": c.Ineligible,
+		"unknown":    c.Unknown,
+	}
 }
 
 func incidenceMap(hits, total int, rate float64) map[string]any {

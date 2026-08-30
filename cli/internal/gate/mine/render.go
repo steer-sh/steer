@@ -611,6 +611,9 @@ func Score(w io.Writer, stateDir string, o ScoreOpts) error {
 			before["hits"], before["chains"], pct(rateOf(before)),
 			after["hits"], after["chains"], pct(rateOf(after)),
 			r["p"].(json.Number).String())
+		fmt.Fprintf(w, "    effect %s  (%d%% range %s)%s\n",
+			effectPoint(r["effect"]), int(Confidence*100), effectRange(r["effect"]),
+			requiredSuffix(r["required_after"]))
 		verb := "installed"
 		if refusalStatuses[str(r["status"])] {
 			verb = "rejected"
@@ -731,4 +734,38 @@ func nonNilMaps(m []map[string]any) []map[string]any {
 		return []map[string]any{}
 	}
 	return m
+}
+
+// effectPoint renders the relative-risk point estimate, or "n/a" when the baseline
+// carries no rate to divide by.
+func effectPoint(v any) string {
+	m, _ := v.(map[string]any)
+	n, ok := m["estimate"].(json.Number)
+	if !ok {
+		return "n/a"
+	}
+	return n.String() + "x"
+}
+
+// effectRange renders the two bounds, with an unbounded upper bound as an infinity sign.
+func effectRange(v any) string {
+	m, _ := v.(map[string]any)
+	lo := "0.0"
+	if n, ok := m["lower"].(json.Number); ok {
+		lo = n.String()
+	}
+	hi := "inf"
+	if n, ok := m["upper"].(json.Number); ok {
+		hi = n.String()
+	}
+	return lo + " - " + hi
+}
+
+// requiredSuffix names the clean after-window a verdict still needs, when one exists.
+func requiredSuffix(v any) string {
+	n, ok := v.(int)
+	if !ok || n == 0 {
+		return ""
+	}
+	return fmt.Sprintf("  needs %d clean chains", n)
 }

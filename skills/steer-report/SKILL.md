@@ -71,22 +71,23 @@ Then Read the queue **once**: `~/.claude/state/steer-report/queue.json`. It hold
 - `candidates[]` — pointers to new clusters. Transcript rows carry `pattern`/`count`/`sessions`; the review row carries `undecided_chains` and a `dump` command. These carry **no** `match` — authoring the regex is your job, below.
 - `corpora[]` — one row per corpus (`review-findings`, `transcript-friction`, `auto-denials`) with `present` and `size`. Relay this sweep to the user in one sentence.
 
-The queue tells you what is pending. The full dumps below are the raw material you cluster over. Score the commit-review interventions for the complete audit — the queue lists only the ones needing action, not the `effective`/`promising`/`partial` ones worth showing too. If this machine has no commit-review ledger, `mine score` reports an empty corpus — say "no interventions to audit on this machine" in one line and go to Step 2.
+The queue tells you what is pending. The full dumps below are the raw material you cluster over. Score the commit-review interventions for the complete audit — the queue lists only the ones needing action, not the `effective` or abstaining ones worth showing too. If this machine has no commit-review ledger, `mine score` reports an empty corpus — say "no interventions to audit on this machine" in one line and go to Step 2.
 
 ```bash
 steer commit-gate mine score
 ```
 
-Each record reports before/after **chain incidence** — the fraction of reviewed commits on which the class appeared — split at the install timestamp, plus a one-sided Fisher p-value. Verdicts:
+Each record reports before/after **chain incidence** — the fraction of reviewed commits on which the class appeared — split at the install timestamp, and an `effect` range: the after-rate divided by the before-rate, at 90% confidence. The verdict reads that range, never the point rate. `required_after` is the clean after-window the class would need before any conclusion is available; a record below it is still collecting. The `p` field is a Fisher cross-check that no verdict reads.
 
-- `effective` — incidence at least halved and the drop clears p ≤ 0.10. Leave it alone.
-- `promising` — incidence at least halved, too little data to clear alpha. Leave it, re-score later.
-- `partial` — a real but under-half drop. Judgement call: tighten the gate or accept it.
-- `ineffective` — incidence flat or higher. **Act on this.** Either the gate does not catch what the class actually is, or the class was never mechanizable.
-- `insufficient-data` — fewer than 12 post-install chains. Say so and move on; do not read a verdict into it.
+- `effective` — the range's upper bound is at or below 0.50, so the halving is established. Leave it alone.
+- `harmful` — the lower bound is above 1.00: incidence rose. **Act on this first.**
+- `ineffective` — the lower bound is above 0.50, so a halving is ruled out. **Act on this.** Either the gate does not catch what the class actually is, or the class was never mechanizable.
+- `collecting` — the after-window has not reached `required_after` yet. Say so and move on; do not read a verdict into it.
+- `inconclusive` — enough exposure, but the range still straddles the boundary. Leave it and re-score later.
+- `legacy-unscoped` — the record carries no eligibility scope, so its two windows count different opportunity sets. **Act on this:** scope it with `steer commit-gate mine scope <id>`, which restarts its after-window.
 - `no-baseline` — the regex matches nothing before install. The class definition is wrong.
 
-Rejected classes are scored too, and carry their own labels — nothing was installed, so effectiveness is not the question. `class-grew` is the one to act on: incidence rose by half again since the refusal, which is usually the reopen condition arriving. `class-faded` and `class-steady` confirm the refusal still stands. Read the record's `reopen if:` line before reopening anything; the condition was written by the pass that had the evidence in front of it.
+Rejected classes are scored too, and carry their own labels — nothing was installed, so effectiveness is not the question. `class-grew` is the one to act on: the range's lower bound reached 1.50, which is usually the reopen condition arriving. `class-faded` (upper bound at or below 0.50) and `class-steady` (the whole range inside 0.50–1.50) confirm the refusal still stands. `class-inconclusive` means the range supports none of the three. Read the record's `reopen if:` line before reopening anything; the condition was written by the pass that had the evidence in front of it.
 
 For every `ineffective` record, open the target file and decide between:
 
@@ -312,7 +313,7 @@ This rewrites the queue and its timestamp from the new state, so the SessionStar
 - **The instrument moves under the measurement.** Every ledger row is stamped with the reviewer that produced it (`model/runs/prompt-digest`), and `score` reports `INSTRUMENT DRIFT` when the after-window was reviewed by something other than what the regex was authored against. On a drift flag, re-read the findings before believing the verdict — a regex leaning on the reviewer's framing verbs ("hardcodes", "still advertises") is far more exposed than one leaning on code vocabulary, which is a reason to prefer the latter when authoring.
   - The stamp cannot catch vendor-side drift. An external model alias whose behaviour changes with no local diff makes an unchanged instrument string weaker evidence than a changed one.
 - **Workload confounds the split.** A `check`-tier fix scoped to Python cannot recur in a month of shell commits, and that reads as success. Check the date span and the kind of work in the after-window before believing a clean drop.
-- **`insufficient-data` is the normal state of a fresh intervention.** The gate reviews on the order of a few commits a week. Re-score on a cadence rather than the day after installing.
+- **`collecting` is the normal state of a fresh intervention.** The gate reviews on the order of a few commits a week, and `required_after` is often in the hundreds of chains when the baseline is a low rate. Re-score on a cadence rather than the day after installing, and never read a fresh clean window as success.
 - **Never inject this history into the reviewer or the authoring session.** A reviewer handed past findings re-finds them instead of searching, and a list of old defects is a gauge rather than a directive. The output of this loop is a gate, not a reminder.
 
 ## Headless mode
@@ -326,7 +327,7 @@ When the invocation contains `--headless`: skip the gate, ask nothing, install n
   "interventions": [
     {
       "class": "stale test-count claim",
-      "verdict": "partial",
+      "verdict": "inconclusive",
       "before": "4/82",
       "after": "1/29"
     }

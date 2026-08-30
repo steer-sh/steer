@@ -37,7 +37,7 @@ type Options struct {
 	Config       gate.Config
 	WindowDays   int    // transcript look-back for the attention refresh
 	AllProjects  bool   // scan every project, not just the cwd
-	MinAfter     int    // post-install chains below which a verdict is withheld
+	MinAfter     int    // optional floor on eligible after-chains; 0 = no floor
 	Scope        string // active scope for the config-state read (default global)
 }
 
@@ -180,9 +180,6 @@ type SystemStatus struct {
 // missing ledger yields an empty section, never an error. GeneratedAt is the one
 // non-deterministic field; a --json caller wanting byte stability clears it.
 func Collect(opts Options) (*SystemStatus, error) {
-	if opts.MinAfter == 0 {
-		opts.MinAfter = mine.MinAfterChains
-	}
 	if opts.Scope == "" {
 		opts.Scope = claude.GlobalScope
 	}
