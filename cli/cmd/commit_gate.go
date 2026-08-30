@@ -25,7 +25,16 @@ const (
 	// value equal to the review timeout does exactly that, so the margin is not
 	// decoration.
 	commitGateTimeoutMargin = 60
+	// The resolver reads transcripts and rewrites the shard; 30s clears the largest
+	// local corpus with headroom.
+	backfillHookTimeout = 30
 )
+
+// backfillCommand is the Stop hook steer registers alongside the Claude Code review
+// hook: harvest late, only when a row is due, silently.
+func backfillCommand() string {
+	return "steer commit-gate backfill --if-due --apply --quiet"
+}
 
 var (
 	commitGateProvider     string
@@ -192,7 +201,10 @@ func installReviewChannel(cfg gate.Config) error {
 		}
 		path, err = codexhooks.RegisterCommitGate(scope, cwd, commitGateCodexCommand(), timeout)
 	} else {
-		err = claude.RegisterCommitGateHook(scope, commitGateCommand(), timeout)
+		// The review hook and the resolver are one Claude Code installation, armed in
+		// one write: the review writes the rows the resolver later reconciles from the
+		// transcript, so a half-armed install leaves the ledger permanently unresolved.
+		err = claude.RegisterCommitGateAndResolver(scope, commitGateCommand(), timeout, backfillCommand(), backfillHookTimeout)
 	}
 	if err != nil {
 		return err
@@ -200,6 +212,9 @@ func installReviewChannel(cfg gate.Config) error {
 	fmt.Println()
 	message := fmt.Sprintf("Armed the %s commit gate on PreToolUse\nScope: %s\nTimeout: %ds (reviewer timeout %ds + %ds margin)",
 		harness, scope, timeout, int(cfg.ReviewTimeout.Seconds()), commitGateTimeoutMargin)
+	if harness == "claude-code" {
+		message += "\nResolver: Stop hook armed (steer commit-gate backfill)"
+	}
 	if harness == "codex" {
 		message += "\nHooks: " + path + "\nTrust: restart Codex and approve this definition in /hooks"
 	}
@@ -337,7 +352,9 @@ var commitGateRemoveCmd = &cobra.Command{
 		if normalizedCommitGateHarness() != "claude-code" {
 			return fmt.Errorf("unknown hook harness %q: expected claude-code or codex", commitGateHarness)
 		}
-		return claude.RemoveCommitGateHook(scope)
+		// Both steer-owned Claude Code entries come down in one write, preserving
+		// unrelated PreToolUse and Stop hooks.
+		return claude.RemoveCommitGateAndResolver(scope)
 	},
 }
 
@@ -410,6 +427,17 @@ var commitGateStatusCmd = &cobra.Command{
 					"so commits are NOT reviewed; re-run install", arming.Matcher, claude.CommitGateMatcher)
 			}
 			fmt.Printf("  Claude       %s scope: %s\n", scope, state)
+		}
+		for _, scope := range []string{claude.ProjectScope, claude.GlobalScope} {
+			armed, timeout := claude.BackfillHookArmed(scope)
+			state := "not armed"
+			if armed {
+				state = fmt.Sprintf("armed, timeout %ds", timeout)
+			}
+			fmt.Printf("  Resolver     %s scope: %s\n", scope, state)
+		}
+		if unresolved := cc.CountUnresolved(cfg); unresolved > 0 {
+			fmt.Printf("  Unresolved   %d row(s) owe a ledger — run: steer commit-gate backfill --apply\n", unresolved)
 		}
 		cwd, _ := codexProjectDir()
 		for _, scope := range []string{claude.ProjectScope, claude.GlobalScope} {

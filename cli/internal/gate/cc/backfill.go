@@ -607,6 +607,23 @@ func (r *resolver) writeRows(rows []resolverRow, seenLines int) error {
 	return nil
 }
 
+// CountUnresolved counts local-shard rows that owe a ledger the resolver has not yet
+// stamped: a retry or cap the resolver would still act on. Read-only — status reads it
+// to report resolver debt without invoking the resolver.
+func CountUnresolved(cfg gate.Config) int {
+	n := 0
+	for _, line := range splitLedgerLines(cfg.LogFile()) {
+		row := decodeResolverRow(line)
+		if row == nil {
+			continue
+		}
+		if expectsLedger(row) && !pyTruthy(row["ledger_found"]) && !pyTruthy(row["backfilled"]) {
+			n++
+		}
+	}
+	return n
+}
+
 // --- helpers -----------------------------------------------------------------
 
 func splitLedgerLines(path string) []string {

@@ -145,13 +145,51 @@ func (e HookEntry) MarshalJSON() ([]byte, error) {
 	return json.Marshal(raw)
 }
 
-// Hooks contains the different types of hook events. Only PreToolUse and
-// PermissionDenied are modeled; every other event key (SessionStart,
-// PostToolUse, ...) is carried through extra so a settings round-trip never
-// drops hooks steer doesn't own.
+// StopHookEntry is a Stop-event group. Stop hooks carry no matcher, so this type
+// round-trips hooks plus any unmodeled keys WITHOUT forcing a matcher onto entries
+// steer does not own — HookEntry always emits one, which would rewrite the sibling Stop
+// hooks in the file.
+type StopHookEntry struct {
+	Hooks []CommandHook
+
+	extra map[string]json.RawMessage
+}
+
+func (e *StopHookEntry) UnmarshalJSON(data []byte) error {
+	raw := map[string]json.RawMessage{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if hooks, ok := raw["hooks"]; ok {
+		if err := json.Unmarshal(hooks, &e.Hooks); err != nil {
+			return err
+		}
+		delete(raw, "hooks")
+	}
+	e.extra = raw
+	return nil
+}
+
+func (e StopHookEntry) MarshalJSON() ([]byte, error) {
+	raw := map[string]json.RawMessage{}
+	for key, value := range e.extra {
+		raw[key] = value
+	}
+	hooks, err := json.Marshal(e.Hooks)
+	if err != nil {
+		return nil, err
+	}
+	raw["hooks"] = hooks
+	return json.Marshal(raw)
+}
+
+// Hooks contains the different types of hook events. Only PreToolUse, PermissionDenied
+// and Stop are modeled; every other event key (SessionStart, PostToolUse, ...) is
+// carried through extra so a settings round-trip never drops hooks steer doesn't own.
 type Hooks struct {
 	PreToolUse       []HookEntry
 	PermissionDenied []HookEntry
+	Stop             []StopHookEntry
 	extra            map[string]json.RawMessage
 }
 
@@ -180,6 +218,12 @@ func (h *Hooks) UnmarshalJSON(data []byte) error {
 		}
 		delete(raw, "PermissionDenied")
 	}
+	if stop, ok := raw["Stop"]; ok {
+		if err := json.Unmarshal(stop, &h.Stop); err != nil {
+			return err
+		}
+		delete(raw, "Stop")
+	}
 	h.extra = raw
 	return nil
 }
@@ -202,6 +246,15 @@ func (h Hooks) MarshalJSON() ([]byte, error) {
 			return nil, err
 		}
 		raw["PermissionDenied"] = denied
+	}
+	if len(h.Stop) > 0 {
+		stop, err := json.Marshal(h.Stop)
+		if err != nil {
+			return nil, err
+		}
+		raw["Stop"] = stop
+	} else {
+		delete(raw, "Stop")
 	}
 	return json.Marshal(raw)
 }
@@ -536,8 +589,7 @@ func IsCommitGateCommand(command string) bool {
 // afterwards is one a later register duplicates instead of upserting.
 func RegisterCommitGateHook(scope, command string, timeout int) error {
 	if !IsCommitGateCommand(command) {
-		return fmt.Errorf("refusing to register %q as the commit gate: the command must "+
-			"contain %q or the hook cannot be recognised again", command, commitGateIdentity)
+		return commitGateIdentityErr(command)
 	}
 	if err := EnsureDirectories(scope); err != nil {
 		return err
@@ -546,7 +598,41 @@ func RegisterCommitGateHook(scope, command string, timeout int) error {
 	if err != nil {
 		return err
 	}
+	applyCommitGateHook(settings, command, timeout)
+	return SaveSettings(scope, settings)
+}
 
+// RegisterCommitGateAndResolver arms the review hook and the resolver in ONE write, so
+// the settings file never lands with the review armed and the resolver missing. The
+// review writes the rows the resolver later reconciles; a half-armed install leaves the
+// ledger permanently unresolved.
+func RegisterCommitGateAndResolver(scope, review string, reviewTimeout int, backfill string, backfillTimeout int) error {
+	if !IsCommitGateCommand(review) {
+		return commitGateIdentityErr(review)
+	}
+	if !strings.Contains(backfill, backfillIdentity) {
+		return backfillIdentityErr(backfill)
+	}
+	if err := EnsureDirectories(scope); err != nil {
+		return err
+	}
+	settings, err := LoadSettings(scope)
+	if err != nil {
+		return err
+	}
+	applyCommitGateHook(settings, review, reviewTimeout)
+	applyBackfillHook(settings, backfill, backfillTimeout)
+	return SaveSettings(scope, settings)
+}
+
+func commitGateIdentityErr(command string) error {
+	return fmt.Errorf("refusing to register %q as the commit gate: the command must "+
+		"contain %q or the hook cannot be recognised again", command, commitGateIdentity)
+}
+
+// applyCommitGateHook upserts the gate's PreToolUse entry in memory, removing any gate
+// hook sitting under another matcher. It does not write.
+func applyCommitGateHook(settings *Settings, command string, timeout int) {
 	entries := make([]HookEntry, 0, len(settings.Hooks.PreToolUse)+1)
 	for _, entry := range settings.Hooks.PreToolUse {
 		hooks := make([]CommandHook, 0, len(entry.Hooks))
@@ -569,9 +655,7 @@ func RegisterCommitGateHook(scope, command string, timeout int) error {
 			StatusMessage: CommitGateStatusMessage,
 		}},
 	})
-
 	settings.Hooks.PreToolUse = entries
-	return SaveSettings(scope, settings)
 }
 
 // RemoveCommitGateHook drops the commit gate's PreToolUse entry, preserving every
@@ -581,6 +665,15 @@ func RemoveCommitGateHook(scope string) error {
 	if err != nil {
 		return err
 	}
+	if !removeCommitGateHooks(settings) {
+		return nil
+	}
+	return SaveSettings(scope, settings)
+}
+
+// removeCommitGateHooks drops the gate's PreToolUse entry in memory, preserving every
+// other hook. It returns whether it removed anything and does not write.
+func removeCommitGateHooks(settings *Settings) bool {
 	removed := false
 	entries := make([]HookEntry, 0, len(settings.Hooks.PreToolUse))
 	for _, entry := range settings.Hooks.PreToolUse {
@@ -597,11 +690,8 @@ func RemoveCommitGateHook(scope string) error {
 			entries = append(entries, entry)
 		}
 	}
-	if !removed {
-		return nil
-	}
 	settings.Hooks.PreToolUse = entries
-	return SaveSettings(scope, settings)
+	return removed
 }
 
 // CommitGateArming is what a scope's settings.json says about the gate.
@@ -624,6 +714,112 @@ type CommitGateArming struct {
 // silent failure this subsystem exists to prevent, one layer up.
 func (a CommitGateArming) Effective() bool {
 	return a.Registered && a.Matcher == CommitGateMatcher
+}
+
+// backfillIdentity recognises steer's Go resolver Stop hook.
+const backfillIdentity = "commit-gate backfill"
+
+// legacyBackfillIdentity recognises the deprecated Python resolver Stop hook that
+// install replaces.
+const legacyBackfillIdentity = "backfill_ledger.py"
+
+// IsBackfillCommand reports whether a Stop hook command is steer's resolver — the Go
+// hook or the Python one it supersedes. Both are steer-owned and removed together.
+func IsBackfillCommand(command string) bool {
+	return strings.Contains(command, backfillIdentity) || strings.Contains(command, legacyBackfillIdentity)
+}
+
+func backfillIdentityErr(command string) error {
+	return fmt.Errorf("refusing to register %q as the resolver: the command must "+
+		"contain %q or the hook cannot be recognised again", command, backfillIdentity)
+}
+
+// RegisterBackfillHook upserts the resolver's Stop hook, replacing any recognised
+// resolver command (the Go hook or the Python one it supersedes) and preserving every
+// other Stop hook. A settings.json with no Stop groups gains one.
+func RegisterBackfillHook(scope, command string, timeout int) error {
+	if !strings.Contains(command, backfillIdentity) {
+		return backfillIdentityErr(command)
+	}
+	if err := EnsureDirectories(scope); err != nil {
+		return err
+	}
+	settings, err := LoadSettings(scope)
+	if err != nil {
+		return err
+	}
+	applyBackfillHook(settings, command, timeout)
+	return SaveSettings(scope, settings)
+}
+
+// applyBackfillHook upserts the resolver's Stop hook in memory. It does not write.
+func applyBackfillHook(settings *Settings, command string, timeout int) {
+	groups := stripBackfillHooks(settings.Hooks.Stop)
+	hook := CommandHook{Type: "command", Command: command, Timeout: timeout}
+	if len(groups) > 0 {
+		groups[0].Hooks = append(groups[0].Hooks, hook)
+	} else {
+		groups = append(groups, StopHookEntry{Hooks: []CommandHook{hook}})
+	}
+	settings.Hooks.Stop = groups
+}
+
+// RemoveBackfillHook drops steer's resolver Stop hook, preserving every other Stop hook
+// and removing a group left empty.
+func RemoveBackfillHook(scope string) error {
+	settings, err := LoadSettings(scope)
+	if err != nil {
+		return err
+	}
+	settings.Hooks.Stop = stripBackfillHooks(settings.Hooks.Stop)
+	return SaveSettings(scope, settings)
+}
+
+// RemoveCommitGateAndResolver takes down both steer-owned Claude Code entries in ONE
+// write, preserving unrelated PreToolUse and Stop hooks.
+func RemoveCommitGateAndResolver(scope string) error {
+	settings, err := LoadSettings(scope)
+	if err != nil {
+		return err
+	}
+	removeCommitGateHooks(settings)
+	settings.Hooks.Stop = stripBackfillHooks(settings.Hooks.Stop)
+	return SaveSettings(scope, settings)
+}
+
+// stripBackfillHooks returns the Stop groups with every resolver hook removed and any
+// group left empty dropped.
+func stripBackfillHooks(groups []StopHookEntry) []StopHookEntry {
+	out := make([]StopHookEntry, 0, len(groups))
+	for _, group := range groups {
+		hooks := make([]CommandHook, 0, len(group.Hooks))
+		for _, hook := range group.Hooks {
+			if !IsBackfillCommand(hook.Command) {
+				hooks = append(hooks, hook)
+			}
+		}
+		if len(hooks) > 0 || len(group.extra) > 0 {
+			group.Hooks = hooks
+			out = append(out, group)
+		}
+	}
+	return out
+}
+
+// BackfillHookArmed reports whether steer's Go resolver Stop hook is registered.
+func BackfillHookArmed(scope string) (bool, int) {
+	settings, err := LoadSettings(scope)
+	if err != nil {
+		return false, 0
+	}
+	for _, group := range settings.Hooks.Stop {
+		for _, hook := range group.Hooks {
+			if strings.Contains(hook.Command, backfillIdentity) {
+				return true, hook.Timeout
+			}
+		}
+	}
+	return false, 0
 }
 
 // CommitGateHookArmed reports what this scope's settings.json says about the gate.
