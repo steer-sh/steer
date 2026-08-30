@@ -141,7 +141,7 @@ func TestCollectEmptyMachineFailsSoft(t *testing.T) {
 // so a renamed or reordered json tag fails here, the agent-contract guard.
 func TestJSONContractIsStable(t *testing.T) {
 	s := &SystemStatus{
-		StatusVersion: 1,
+		StatusVersion: 2,
 		GeneratedAt:   "2026-01-01T00:00:00Z",
 		Posture: Posture{
 			Instrument: "agy@sha", Reviewer: "gemini", Ledger: "/l.jsonl",
@@ -149,11 +149,16 @@ func TestJSONContractIsStable(t *testing.T) {
 			Denials:    []ScopeArming{{Scope: "global", Registered: true, Effective: true}},
 		},
 		Interventions: []ScoredIntervention{{
-			ID: "widget-flag", Class: "widget flag loss", Tier: "check", Target: "check.sh",
+			ID: "widget-flag", Class: "widget flag loss", Match: "widget.*flag", Tier: "guard", Target: "guard.py",
 			Status: "active", Verdict: "effective",
 			Before: cadence.Incidence{Hits: 12, Units: 12, Rate: 1}, After: cadence.Incidence{Hits: 0, Units: 12, Rate: 0},
+			PValue: 0.02, InstrumentDrift: true, FiringsApplicable: true,
+		}, {
+			ID: "taste-nit", Class: "taste nit", Match: "nit", Tier: "check", Target: "check.sh",
+			Status: "rejected", Verdict: "class-steady",
+			Reason: "not mechanizable", Reopen: "incidence doubles", RejectedTS: 1700,
 		}},
-		Summary: VerdictSummary{Total: 1, Counts: map[string]int{"effective": 1}},
+		Summary: VerdictSummary{Total: 2, Counts: map[string]int{"effective": 1, "class-steady": 1}},
 		Chains: []ChainSummary{{
 			Host: "h", StartTS: 1000, Rounds: 2, Files: 1, Findings: 1, Accepted: 1, Sessions: 1, Terminal: "clean",
 		}},
@@ -163,7 +168,10 @@ func TestJSONContractIsStable(t *testing.T) {
 			Candidates:    []cadence.Candidate{},
 		},
 		Telemetry: Telemetry{ReviewChains: 24},
-		Corpora:   []cadence.CorpusStatus{{Corpus: "review-findings", Present: true, Size: 24}},
+		Corpora:   []CorpusRow{{Corpus: "review-findings", Present: true, Size: 24, Path: "/state/review"}},
+		Hooks:     []HookInfo{{Name: "no-console", Scope: "global", Source: "generated", Rule: "no console.log"}},
+		Presets:   []PresetInfo{{Name: "shell-safety", Bundle: "security", Description: "block risky shell", Enabled: true, Drifted: false}},
+		Team:      TeamState{Present: true, Path: "steer-team.lock.json", HooksLocked: 3, CatalogVersion: "v7"},
 	}
 	got, err := s.MarshalIndent()
 	if err != nil {
@@ -175,7 +183,7 @@ func TestJSONContractIsStable(t *testing.T) {
 }
 
 const goldenStatusJSON = `{
-  "status_version": 1,
+  "status_version": 2,
   "generated_at": "2026-01-01T00:00:00Z",
   "posture": {
     "instrument": "agy@sha",
@@ -201,8 +209,9 @@ const goldenStatusJSON = `{
     {
       "id": "widget-flag",
       "class": "widget flag loss",
-      "tier": "check",
-      "target": "check.sh",
+      "match": "widget.*flag",
+      "tier": "guard",
+      "target": "guard.py",
       "status": "active",
       "verdict": "effective",
       "before": {
@@ -214,12 +223,39 @@ const goldenStatusJSON = `{
         "hits": 0,
         "units": 12,
         "rate": 0
-      }
+      },
+      "p_value": 0.02,
+      "instrument_drift": true,
+      "firings_applicable": true
+    },
+    {
+      "id": "taste-nit",
+      "class": "taste nit",
+      "match": "nit",
+      "tier": "check",
+      "target": "check.sh",
+      "status": "rejected",
+      "verdict": "class-steady",
+      "before": {
+        "hits": 0,
+        "units": 0,
+        "rate": 0
+      },
+      "after": {
+        "hits": 0,
+        "units": 0,
+        "rate": 0
+      },
+      "firings_applicable": false,
+      "reason": "not mechanizable",
+      "reopen": "incidence doubles",
+      "rejected_ts": 1700
     }
   ],
   "summary": {
-    "total": 1,
+    "total": 2,
     "counts": {
+      "class-steady": 1,
       "effective": 1
     }
   },
@@ -250,7 +286,31 @@ const goldenStatusJSON = `{
     {
       "corpus": "review-findings",
       "present": true,
-      "size": 24
+      "size": 24,
+      "path": "/state/review"
     }
-  ]
+  ],
+  "hooks": [
+    {
+      "name": "no-console",
+      "scope": "global",
+      "source": "generated",
+      "rule": "no console.log"
+    }
+  ],
+  "presets": [
+    {
+      "name": "shell-safety",
+      "bundle": "security",
+      "description": "block risky shell",
+      "enabled": true,
+      "drifted": false
+    }
+  ],
+  "team": {
+    "present": true,
+    "path": "steer-team.lock.json",
+    "hooks_locked": 3,
+    "catalog_version": "v7"
+  }
 }`

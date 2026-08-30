@@ -50,6 +50,7 @@ runtime dependency. It writes to --out, or to stdout when --out is absent.`,
 			Config:       gateConfig(),
 			WindowDays:   statusDays,
 			AllProjects:  !statusProjectOnly,
+			Scope:        currentScope(),
 		})
 		if err != nil {
 			return err

@@ -323,7 +323,7 @@ func armingWord(a ScopeArming) string {
 }
 
 // presentCount counts the corpora present on this machine.
-func presentCount(rows []cadence.CorpusStatus) int {
+func presentCount(rows []CorpusRow) int {
 	n := 0
 	for _, r := range rows {
 		if r.Present {

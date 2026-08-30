@@ -361,7 +361,7 @@ The `|` pipe splits a rule into a detection part and an optional suggestion (see
 
 Never invent suggestions. Only include them when explicitly provided after `|`.
 
-## The `steer status --json` contract (`status_version: 1`)
+## The `steer status --json` contract (`status_version: 2`)
 
 `steer status` composes one read-only snapshot of the whole loop. The unit is the
 failure class and its verdict, not the hook count. The Pre-flight step reads it to
@@ -374,13 +374,23 @@ Contracts). Fields:
   digest), `reviewer`, `ledger` path, and `commit_gate[]` / `denials[]`. Each is
   a scope row with `registered` and `effective`.
 - `interventions[]` — the **full** scored inventory. It carries every live
-  class, `effective` ones included. Each row: `id`, `class`, `tier`, `target`,
-  `status` (`active` or `rejected`), `verdict`, and `before` / `after` incidence
-  (`hits`, `units`, `rate`). This is the dedup source — a class here is decided.
+  class, `effective` ones included. Each row: `id`, `class`, `match` (the regex
+  that defines the class), `tier`, `target`, `status` (`active` or `rejected`),
+  `verdict`, `before` / `after` incidence (`hits`, `units`, `rate`), `p_value`,
+  `instrument_drift` (a measurement window spanning two reviewer prompts; the
+  verdict stands, the flag rides beside it), `firings_applicable` (true only for the `guard` tier, whose master hook writes the audit log that `audit_firings` counts; check, instruction and review write none), and for
+  a refused class `reason`, `reopen` and `rejected_ts`. This is the dedup source
+  — a class here is decided.
 - `summary` — `total` plus `counts` by verdict.
 - `chains[]` — recent review chains, findings split `accepted` / `rejected`.
 - `attention` — the subset needing action: `interventions[]` (verdict
   `ineffective` or `class-grew`), `candidates[]` (no `match` yet), and
   `unscored[]` (session-unit ids the engine cannot score).
 - `telemetry` — corpus sizes: `review_chains`, `denials_rows`, `audit_firings`.
-- `corpora[]` — one row per corpus with `present` and `size`.
+- `corpora[]` — one row per corpus with `present`, `size` and `path`.
+- `hooks[]` — the registered managed hooks in the active scope: `name`, `scope`,
+  `source`, `rule`.
+- `presets[]` — the catalog roster: `name`, `bundle`, `description`, `enabled`,
+  `drifted`.
+- `team` — the repo-committed team lockfile summary: `present`, `path`,
+  `hooks_locked`, `catalog_version`.

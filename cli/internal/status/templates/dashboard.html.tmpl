@@ -234,13 +234,25 @@ footer { color: var(--faint); font-size: 11.5px; border-top: 1px solid var(--lin
       <tbody>
       {{- range .Ledger }}
         <tr>
-          <td><span class="mono">{{ .Class }}</span>{{ if .HookID }}<div class="dimtext mono">{{ .HookID }}</div>{{ end }}</td>
+          <td>
+            <span class="mono">{{ .Class }}</span>
+            {{- if .Match }}<div class="dimtext mono">/{{ .Match }}/</div>{{ end }}
+            {{- if .HookID }}<div class="dimtext mono">{{ .HookID }}</div>{{ end }}
+          </td>
           <td><span class="tier">{{ .Tier }}</span> <span class="dimtext mono">{{ .Target }}</span></td>
           <td class="dimtext">{{ .Status }}</td>
           <td class="num">{{ .Before.Hits }}/{{ .Before.Units }}<div class="dimtext">{{ pct .Before.Rate }}</div></td>
           <td class="num">{{ .After.Hits }}/{{ .After.Units }}<div class="dimtext">{{ pct .After.Rate }}</div></td>
           <td class="num">{{ delta .Before.Rate .After.Rate }}</td>
-          <td><span class="pill v-{{ slug .Verdict }}">{{ .Verdict }}</span></td>
+          <td>
+            <span class="pill v-{{ slug .Verdict }}">{{ .Verdict }}</span>
+            {{- if .InstrumentDrift }}<div class="dimtext">⚠ instrument drift</div>{{ end }}
+            {{- if .PValue }}<div class="dimtext">p={{ printf "%.3f" .PValue }}</div>{{ end }}
+            {{- if eq .Status "rejected" }}
+              {{- if .Reason }}<div class="dimtext">{{ .Reason }}</div>{{ end }}
+              {{- if .Reopen }}<div class="dimtext">reopen if: {{ .Reopen }}</div>{{ end }}
+            {{- end }}
+          </td>
         </tr>
       {{- end }}
       </tbody>
@@ -316,7 +328,7 @@ footer { color: var(--faint); font-size: 11.5px; border-top: 1px solid var(--lin
       <dl>
       {{- range .Status.Corpora }}
         <dt>{{ .Corpus }}</dt>
-        <dd>{{ if .Present }}{{ .Size }} rows{{ else }}absent{{ end }}</dd>
+        <dd>{{ if .Present }}{{ .Size }} rows{{ else }}absent{{ end }}{{ if .Path }}<div class="dimtext mono">{{ .Path }}</div>{{ end }}</dd>
       {{- end }}
       </dl>
     </div>

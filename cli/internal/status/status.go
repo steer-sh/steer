@@ -7,8 +7,10 @@ package status
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/steer-sh/steer-cli/internal/cadence"
@@ -16,12 +18,13 @@ import (
 	"github.com/steer-sh/steer-cli/internal/denials"
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
+	"github.com/steer-sh/steer-cli/internal/presets"
 )
 
 // StatusVersion is the schema version of the emitted snapshot. It mirrors
 // report.DigestVersion: --json is a stable agent contract, so bump this whenever
 // the shape or semantics of SystemStatus change.
-const StatusVersion = 1
+const StatusVersion = 2
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20
@@ -32,9 +35,10 @@ type Options struct {
 	GateStateDir string // commit-review state: interventions.jsonl + ledger shards
 	Ledger       string // single-ledger override, or "" for the shard glob
 	Config       gate.Config
-	WindowDays   int  // transcript look-back for the attention refresh
-	AllProjects  bool // scan every project, not just the cwd
-	MinAfter     int  // post-install chains below which a verdict is withheld
+	WindowDays   int    // transcript look-back for the attention refresh
+	AllProjects  bool   // scan every project, not just the cwd
+	MinAfter     int    // post-install chains below which a verdict is withheld
+	Scope        string // active scope for the config-state read (default global)
 }
 
 // ScoredIntervention is one live intervention with its recomputed verdict. It is
@@ -44,6 +48,7 @@ type Options struct {
 type ScoredIntervention struct {
 	ID      string            `json:"id"`
 	Class   string            `json:"class"`
+	Match   string            `json:"match,omitempty"`
 	Tier    string            `json:"tier"`
 	Target  string            `json:"target"`
 	Status  string            `json:"status"`
@@ -51,6 +56,53 @@ type ScoredIntervention struct {
 	Verdict string            `json:"verdict"`
 	Before  cadence.Incidence `json:"before"`
 	After   cadence.Incidence `json:"after"`
+	// PValue is the Fisher one-sided p from the score, 0 when unscored.
+	PValue float64 `json:"p_value,omitempty"`
+	// InstrumentDrift flags a measurement window spanning two reviewer prompts.
+	// The verdict stands; this flag rides beside it, never rewrites it.
+	InstrumentDrift bool `json:"instrument_drift,omitempty"`
+	// FiringsApplicable is false for check and instruction tiers, which produce
+	// no audit-log firings by construction, so a reader shows n/a, not zero.
+	FiringsApplicable bool `json:"firings_applicable"`
+	// Reason, Reopen and RejectedTS explain a refused class: why it was refused
+	// and the condition that reopens it.
+	Reason     string  `json:"reason,omitempty"`
+	Reopen     string  `json:"reopen,omitempty"`
+	RejectedTS float64 `json:"rejected_ts,omitempty"`
+}
+
+// HookInfo is one registered managed hook in a scope.
+type HookInfo struct {
+	Name   string `json:"name"`
+	Scope  string `json:"scope"`
+	Source string `json:"source"`
+	Rule   string `json:"rule,omitempty"`
+}
+
+// PresetInfo is one catalog preset with its enable and drift state in a scope.
+type PresetInfo struct {
+	Name        string `json:"name"`
+	Bundle      string `json:"bundle"`
+	Description string `json:"description"`
+	Enabled     bool   `json:"enabled"`
+	Drifted     bool   `json:"drifted"`
+}
+
+// TeamState summarizes the repo-committed team lockfile, when one is present.
+type TeamState struct {
+	Present        bool   `json:"present"`
+	Path           string `json:"path,omitempty"`
+	HooksLocked    int    `json:"hooks_locked"`
+	CatalogVersion string `json:"catalog_version,omitempty"`
+}
+
+// CorpusRow is one corpus's presence, size and path on this machine. It carries
+// the path cadence.CorpusStatus omits, so a reader knows where to look.
+type CorpusRow struct {
+	Corpus  string `json:"corpus"`
+	Present bool   `json:"present"`
+	Size    int    `json:"size"`
+	Path    string `json:"path,omitempty"`
 }
 
 // ChainSummary is one commit attempt's review outcome, without the finding text.
@@ -109,15 +161,19 @@ type Telemetry struct {
 // SystemStatus is the one snapshot all render targets read. It is versioned so
 // --json is a stable agent contract.
 type SystemStatus struct {
-	StatusVersion int                    `json:"status_version"`
-	GeneratedAt   string                 `json:"generated_at"`
-	Posture       Posture                `json:"posture"`
-	Interventions []ScoredIntervention   `json:"interventions"`
-	Summary       VerdictSummary         `json:"summary"`
-	Chains        []ChainSummary         `json:"chains"`
-	Attention     AttentionQueue         `json:"attention"`
-	Telemetry     Telemetry              `json:"telemetry"`
-	Corpora       []cadence.CorpusStatus `json:"corpora"`
+	StatusVersion int                  `json:"status_version"`
+	GeneratedAt   string               `json:"generated_at"`
+	Posture       Posture              `json:"posture"`
+	Interventions []ScoredIntervention `json:"interventions"`
+	Summary       VerdictSummary       `json:"summary"`
+	Chains        []ChainSummary       `json:"chains"`
+	Attention     AttentionQueue       `json:"attention"`
+	Telemetry     Telemetry            `json:"telemetry"`
+	Corpora       []CorpusRow          `json:"corpora"`
+	// Config state — what the dashboard panels mutate. Each reads fail-soft.
+	Hooks   []HookInfo   `json:"hooks"`
+	Presets []PresetInfo `json:"presets"`
+	Team    TeamState    `json:"team"`
 }
 
 // Collect composes the snapshot. It never writes and every source fails soft: a
@@ -127,13 +183,18 @@ func Collect(opts Options) (*SystemStatus, error) {
 	if opts.MinAfter == 0 {
 		opts.MinAfter = mine.MinAfterChains
 	}
+	if opts.Scope == "" {
+		opts.Scope = claude.GlobalScope
+	}
 	s := &SystemStatus{
 		StatusVersion: StatusVersion,
 		GeneratedAt:   time.Now().UTC().Format(time.RFC3339),
 		Interventions: []ScoredIntervention{},
 		Chains:        []ChainSummary{},
-		Corpora:       []cadence.CorpusStatus{},
+		Corpora:       []CorpusRow{},
 		Summary:       VerdictSummary{Counts: map[string]int{}},
+		Hooks:         []HookInfo{},
+		Presets:       []PresetInfo{},
 	}
 
 	// Full scored inventory + recent chains, from one miner, read-only.
@@ -159,7 +220,7 @@ func Collect(opts Options) (*SystemStatus, error) {
 			Unscored:      q.Unscored,
 			Candidates:    q.Candidates,
 		}
-		s.Corpora = q.Corpora
+		s.Corpora = corpusRows(q.Corpora, opts)
 	} else {
 		s.Attention = AttentionQueue{
 			Interventions: []cadence.Intervention{},
@@ -174,6 +235,9 @@ func Collect(opts Options) (*SystemStatus, error) {
 		DenialsRows:  denialsCount(),
 		AuditFirings: auditFirings(),
 	}
+	s.Hooks = collectHooks(opts.Scope)
+	s.Presets = collectPresets(opts.Scope)
+	s.Team = collectTeam()
 	return s, nil
 }
 
@@ -188,15 +252,21 @@ func scoreInventory(records []mine.Record, chains []mine.Chain, minAfter int) []
 		if st != "active" && st != "rejected" {
 			continue
 		}
+		tier := str(r["tier"])
 		if str(r["unit"]) == "session" {
 			out = append(out, ScoredIntervention{
-				ID:      str(r["id"]),
-				Class:   str(r["class"]),
-				Tier:    str(r["tier"]),
-				Target:  str(r["target"]),
-				Status:  st,
-				HookID:  str(r["hook_id"]),
-				Verdict: "unscored",
+				ID:                str(r["id"]),
+				Class:             str(r["class"]),
+				Match:             str(r["match"]),
+				Tier:              tier,
+				Target:            str(r["target"]),
+				Status:            st,
+				HookID:            str(r["hook_id"]),
+				Verdict:           "unscored",
+				FiringsApplicable: firingsApplicable(tier),
+				Reason:            str(r["reason"]),
+				Reopen:            str(r["reopen"]),
+				RejectedTS:        numFloat(r["rejected_ts"]),
 			})
 			continue
 		}
@@ -204,16 +274,24 @@ func scoreInventory(records []mine.Record, chains []mine.Chain, minAfter int) []
 		if err != nil {
 			continue
 		}
+		scoredTier := str(scored["tier"])
 		out = append(out, ScoredIntervention{
-			ID:      str(scored["id"]),
-			Class:   str(scored["class"]),
-			Tier:    str(scored["tier"]),
-			Target:  str(scored["target"]),
-			Status:  str(scored["status"]),
-			HookID:  str(scored["hook_id"]),
-			Verdict: str(scored["verdict"]),
-			Before:  incidenceOf(scored["before"]),
-			After:   incidenceOf(scored["after"]),
+			ID:                str(scored["id"]),
+			Class:             str(scored["class"]),
+			Match:             str(r["match"]),
+			Tier:              scoredTier,
+			Target:            str(scored["target"]),
+			Status:            str(scored["status"]),
+			HookID:            str(scored["hook_id"]),
+			Verdict:           str(scored["verdict"]),
+			Before:            incidenceOf(scored["before"]),
+			After:             incidenceOf(scored["after"]),
+			PValue:            numFloat(scored["p"]),
+			InstrumentDrift:   boolOf(scored["instrument_drift"]),
+			FiringsApplicable: firingsApplicable(scoredTier),
+			Reason:            str(scored["reason"]),
+			Reopen:            str(scored["reopen"]),
+			RejectedTS:        numFloat(r["rejected_ts"]),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
@@ -314,6 +392,132 @@ func auditFirings() int {
 		return 0
 	}
 	return countLines(filepath.Join(dir, claude.AuditLogName))
+}
+
+// firingsApplicable reports whether a tier contributes to the audit-log firing
+// count. Only the guard tier's master PreToolUse hook writes that log; check,
+// instruction and review write no audit-log firings, so a reader shows n/a
+// rather than a misleading zero. The review tier's firings live in the
+// adjudication ledger, surfaced already as chains and incidence, not here.
+func firingsApplicable(tier string) bool {
+	return tier == "guard"
+}
+
+// boolOf reads a bool value from a decoded map, false when absent or not a bool.
+func boolOf(v any) bool {
+	b, _ := v.(bool)
+	return b
+}
+
+// corpusRows carries the cadence corpus sweep into the snapshot, adding the path
+// each corpus lives at so a reader knows where to look.
+func corpusRows(rows []cadence.CorpusStatus, opts Options) []CorpusRow {
+	// Keys match the corpus names cadence.Refresh emits. review-findings lives at
+	// the gate state dir (the ledger shards); auto-denials at the denials dir.
+	paths := map[string]string{
+		"review-findings": opts.GateStateDir,
+		"auto-denials":    denials.StateDir(),
+	}
+	out := make([]CorpusRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, CorpusRow{
+			Corpus:  r.Corpus,
+			Present: r.Present,
+			Size:    r.Size,
+			Path:    paths[r.Corpus],
+		})
+	}
+	return out
+}
+
+// collectHooks reads the registered managed hooks in a scope. A missing manifest
+// yields an empty list, never an error.
+func collectHooks(scope string) []HookInfo {
+	manifest, err := claude.LoadManifest(scope)
+	if err != nil || manifest == nil {
+		return []HookInfo{}
+	}
+	out := make([]HookInfo, 0, len(manifest.Hooks))
+	for name, entry := range manifest.Hooks {
+		source := entry.Source
+		if source == "" {
+			source = "manual"
+		}
+		out = append(out, HookInfo{
+			Name:   name,
+			Scope:  scope,
+			Source: source,
+			Rule:   entry.Rule,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// collectPresets reads the catalog roster with each preset's enable and drift
+// state in a scope. A missing catalog or manifest yields an empty list.
+func collectPresets(scope string) []PresetInfo {
+	catalog, err := presets.LoadCatalog()
+	if err != nil {
+		return []PresetInfo{}
+	}
+	items, err := catalog.ListVisible("")
+	if err != nil {
+		return []PresetInfo{}
+	}
+	manifest, err := claude.LoadManifest(scope)
+	if err != nil || manifest == nil {
+		manifest = &claude.Manifest{Hooks: map[string]claude.ManifestEntry{}}
+	}
+	out := make([]PresetInfo, 0, len(items))
+	for _, item := range items {
+		hookName := strings.TrimSuffix(item.HookFile, ".py")
+		entry, ok := manifest.Hooks[hookName]
+		enabled := ok && strings.EqualFold(strings.TrimSpace(entry.Source), claude.SourceFactory) && strings.TrimSpace(entry.SourceID) == item.Name
+		drifted := false
+		if enabled {
+			if needs, _, derr := presets.FactoryPresetNeedsReinstall(scope, catalog, item, hookName, entry); derr == nil {
+				drifted = needs
+			}
+		}
+		out = append(out, PresetInfo{
+			Name:        item.Name,
+			Bundle:      presets.BundleFor(item),
+			Description: item.Description,
+			Enabled:     enabled,
+			Drifted:     drifted,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// teamLockfileName is the repo-committed team policy lockfile at project root.
+// The read here is a minimal, decoupled decode of the file cmd/team.go writes.
+const teamLockfileName = "steer-team.lock.json"
+
+// collectTeam reads the repo-committed team lockfile summary, when one is present
+// at the project root. A missing or unreadable lockfile reads as absent.
+func collectTeam() TeamState {
+	data, err := os.ReadFile(teamLockfileName)
+	if err != nil {
+		return TeamState{Present: false}
+	}
+	var lf struct {
+		CatalogVersion string `json:"catalog_version"`
+		Hooks          []struct {
+			Name string `json:"name"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(data, &lf); err != nil {
+		return TeamState{Present: false}
+	}
+	return TeamState{
+		Present:        true,
+		Path:           teamLockfileName,
+		HooksLocked:    len(lf.Hooks),
+		CatalogVersion: lf.CatalogVersion,
+	}
 }
 
 // MarshalIndent renders the snapshot as indented JSON.

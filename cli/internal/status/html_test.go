@@ -48,8 +48,8 @@ func sample() *SystemStatus {
 			Candidates: []cadence.Candidate{{Corpus: "transcript-friction", Pattern: "use pnpm", Count: 7, Sessions: 4}},
 		},
 		Telemetry: Telemetry{ReviewChains: 24, DenialsRows: 5, AuditFirings: 47},
-		Corpora: []cadence.CorpusStatus{
-			{Corpus: "review-findings", Present: true, Size: 24},
+		Corpora: []CorpusRow{
+			{Corpus: "review-findings", Present: true, Size: 24, Path: "/state/review"},
 			{Corpus: "auto-denials", Present: false},
 		},
 	}
