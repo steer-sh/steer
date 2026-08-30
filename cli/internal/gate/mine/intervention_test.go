@@ -435,3 +435,46 @@ func TestScoreEmitsTheRange(t *testing.T) {
 	}
 	check(t, "a scopeless record abstains", unscoped["verdict"], "legacy-unscoped")
 }
+
+// TestStoredBaselineMatchesTheScoredWindow pins that a writer freezes its baseline
+// over the chains the scorer will actually measure. A chain carrying no adjudication
+// is not evidence of the class's absence, so it belongs in neither count; counting it
+// in the receipt and not in the verdict is how the two came to disagree on disk.
+func TestStoredBaselineMatchesTheScoredWindow(t *testing.T) {
+	var rows []gate.Row
+	ts := 1000
+	for i := 0; i < 8; i++ { // adjudicated before-chains carrying the class
+		rows = append(rows, row(ts, "deny"), concerns(row(ts+1, "retry"), "round", c("widget parser drops a flag")))
+		ts += 100
+	}
+	for i := 0; i < 5; i++ { // before-chains the resolver closed as permanently unadjudicated
+		rows = append(rows, row(ts, "deny"), closedMiss(ts+1))
+		ts += 100
+	}
+	install := ts
+	stateDir, ledger := writeLedger(t, rows)
+
+	withClock(int64(install)+1_000_000, func() {
+		if err := Register(io.Discard, stateDir, RegisterOpts{
+			ScopeAll: true, Ledger: ledger, Class: "widget parser flag loss", Match: "widget parser",
+			Kind: "defect", Tier: "check", Target: "check.sh", InstalledTS: int64(install),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		recorded, _ := Load(stateDir)
+		stored := recorded[0]["baseline"].(map[string]any)
+		check(t, "the unadjudicated chains stay out of the stored baseline",
+			numInt(stored["units"]), 8)
+
+		allRows, _ := LoadRows(stateDir, ledger)
+		scored, err := ScoreRecord(recorded[0], BuildChains(allRows, false), 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		before := scored["before"].(map[string]any)
+		check(t, "the stored count is the scored count",
+			numInt(stored["units"]), numInt(before["chains"]))
+		check(t, "and so is the hit count",
+			numInt(stored["hits"]), numInt(before["hits"]))
+	})
+}

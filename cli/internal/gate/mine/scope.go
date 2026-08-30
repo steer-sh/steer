@@ -173,8 +173,8 @@ func Cover(chains []Chain, scope *Scope) Coverage {
 // CoverEvidence classifies against the scope and then against adjudication
 // completeness. A scope-eligible chain whose findings are pending or missing moves to
 // Unknown: it neither counts as a clean miss nor shrinks the class's measured rate.
-// now is the clock the grace window is read against; 0 skips the evidence pass, which
-// is what a register-time scope preview wants.
+// now is the clock the grace window is read against; 0 skips the evidence pass, for a
+// caller asking about scope selectivity alone.
 func CoverEvidence(chains []Chain, scope *Scope, now float64) Coverage {
 	cov := Coverage{Total: len(chains)}
 	for _, ch := range chains {
@@ -209,7 +209,9 @@ func CoverEvidence(chains []Chain, scope *Scope, now float64) Coverage {
 
 // CoverCorpus classifies the whole corpus against the scope the given predicates
 // describe, so an author sees the eligible/ineligible/unknown split before committing.
-// Empty predicates preview an all-scope. A bad regex is returned as an error.
+// It runs the evidence pass the writers run, so the preview and the baseline the write
+// freezes count one set of chains. Empty predicates preview an all-scope. A bad regex
+// is returned as an error.
 func CoverCorpus(stateDir, ledger, repoExpr, pathExpr string) (Coverage, error) {
 	rows, err := LoadRows(stateDir, ledger)
 	if err != nil {
@@ -231,7 +233,7 @@ func CoverCorpus(stateDir, ledger, repoExpr, pathExpr string) (Coverage, error) 
 	if err != nil {
 		return Coverage{}, err
 	}
-	return Cover(chains, scope), nil
+	return CoverEvidence(chains, scope, float64(now())), nil
 }
 
 // pathsFromDiff recovers changed paths from a saved diff sidecar, for chains whose rows

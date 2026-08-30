@@ -251,3 +251,42 @@ func TestScopeSetMigration(t *testing.T) {
 		t.Error("an installed scope must be frozen")
 	}
 }
+
+// TestCoverCorpusPreviewsWhatTheWriteFreezes pins the workbench preview against the
+// baseline a register would store. An author who reads one number and gets another has
+// no way to tell a bad regex from an incomplete corpus.
+func TestCoverCorpusPreviewsWhatTheWriteFreezes(t *testing.T) {
+	var rows []gate.Row
+	ts := 1000
+	for i := 0; i < 6; i++ { // adjudicated chains carrying the class
+		rows = append(rows, row(ts, "deny"), concerns(row(ts+1, "retry"), "round", c("widget parser drops a flag")))
+		ts += 100
+	}
+	for i := 0; i < 4; i++ { // chains the resolver closed as permanently unadjudicated
+		rows = append(rows, row(ts, "deny"), closedMiss(ts+1))
+		ts += 100
+	}
+	install := ts
+	stateDir, ledger := writeLedger(t, rows)
+
+	withClock(int64(install)+1_000_000, func() {
+		cov, err := CoverCorpus(stateDir, ledger, "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		check(t, "the preview counts only measurable chains", cov.Eligible, 6)
+		check(t, "and says why the rest are unknown", cov.UnknownEvidence, 4)
+		check(t, "no scope excluded anything under an all-scope", cov.UnknownScope, 0)
+
+		if err := Register(io.Discard, stateDir, RegisterOpts{
+			ScopeAll: true, Ledger: ledger, Class: "widget parser flag loss", Match: "widget parser",
+			Kind: "defect", Tier: "check", Target: "check.sh", InstalledTS: int64(install),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		recorded, _ := Load(stateDir)
+		stored := recorded[0]["baseline"].(map[string]any)
+		check(t, "the write froze the window the preview promised",
+			numInt(stored["units"]), cov.Eligible)
+	})
+}

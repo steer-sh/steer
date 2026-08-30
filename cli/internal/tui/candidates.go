@@ -141,8 +141,10 @@ func (m *Model) updateMatchPreview() {
 			m.matchCount = "invalid scope: " + err.Error()
 			return
 		}
-		m.matchCount = fmt.Sprintf("scope: %d eligible · %d ineligible · %d unknown of %d chains",
-			cov.Eligible, cov.Ineligible, cov.Unknown, cov.Total)
+		// Split the unknown column by cause: a chain the scope cannot classify is a
+		// regex problem the author can fix here; one with no adjudication is not.
+		m.matchCount = fmt.Sprintf("scope: %d eligible · %d ineligible · %d unknown scope · %d without a ledger, of %d chains",
+			cov.Eligible, cov.Ineligible, cov.UnknownScope, cov.UnknownEvidence, cov.Total)
 	default:
 		m.matchCount = ""
 	}

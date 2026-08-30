@@ -294,7 +294,7 @@ func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 		installed = now()
 	}
 	before, _ := SplitChains(chains, float64(installed))
-	before = Cover(before, scope).EligibleChains()
+	before = baselineWindow(before, scope)
 	bHits, bTotal, bRate := Incidence(before, pattern, kindFilter)
 	if bHits == 0 && !o.Force {
 		return fmt.Errorf("regex matches no finding in the scoped baseline — an intervention " +
@@ -421,7 +421,7 @@ func Reject(w io.Writer, stateDir string, o RejectOpts) error {
 		rejected = now()
 	}
 	before, _ := SplitChains(chains, float64(rejected))
-	before = Cover(before, scope).EligibleChains()
+	before = baselineWindow(before, scope)
 	bHits, bTotal, bRate := Incidence(before, pattern, kindFilter)
 	if bHits == 0 && !o.Force {
 		return fmt.Errorf("regex matches no finding in the scoped baseline — a rejection with " +
@@ -504,7 +504,7 @@ func ScopeSet(w io.Writer, stateDir, id string, o ScopeSetOpts) error {
 	}
 	chains := BuildChains(rows, false)
 	before, _ := SplitChains(chains, SplitTS(rec))
-	before = Cover(before, scope).EligibleChains()
+	before = baselineWindow(before, scope)
 	bHits, bTotal, bRate := Incidence(before, pattern, RecordKindFilter(rec))
 	if bHits == 0 && !o.Force {
 		return fmt.Errorf("regex matches no finding in the scoped baseline — widen the scope, or pass --force")
@@ -521,6 +521,14 @@ func ScopeSet(w io.Writer, stateDir, id string, o ScopeSetOpts) error {
 	}
 	fmt.Fprintln(w, pyDumps(rec, 2))
 	return nil
+}
+
+// baselineWindow is the eligible before-window a writer freezes its baseline over. It
+// runs the same evidence pass ScoreRecord runs, so the stored baseline and the scored
+// one describe one set of chains. A chain with no adjudication is not evidence of the
+// class's absence, so it belongs in neither.
+func baselineWindow(before []Chain, scope *Scope) []Chain {
+	return CoverEvidence(before, scope, float64(now())).EligibleChains()
 }
 
 // baselineMap is the stored baseline in the one candidate-record contract. Its
