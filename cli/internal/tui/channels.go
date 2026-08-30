@@ -16,6 +16,9 @@ const commitGateTimeoutMargin = 60
 // denialsTimeout matches cmd's denials recorder settings.json wall clock.
 const denialsTimeout = 10
 
+// backfillTimeout matches cmd's Stop-hook resolver wall clock.
+const backfillTimeout = 30
+
 // channelRow is one armable channel: a commit gate or denials recorder in a scope.
 type channelRow struct {
 	label string
@@ -65,11 +68,16 @@ func (m *Model) toggleChannel(row channelRow) error {
 	on := row.armed.Effective || row.armed.Registered
 	switch row.kind {
 	case "commit-gate":
+		// The review hook and the Stop-hook resolver are one Claude Code
+		// installation, armed and removed in one write — the same pair the CLI
+		// install writes, so a toggle here can never leave the resolver behind.
 		if on {
-			return claude.RemoveCommitGateHook(row.scope)
+			return claude.RemoveCommitGateAndResolver(row.scope)
 		}
 		timeout := int(m.cfg.ReviewTimeout.Seconds()) + commitGateTimeoutMargin
-		return claude.RegisterCommitGateHook(row.scope, "steer commit-gate review", timeout)
+		return claude.RegisterCommitGateAndResolver(row.scope,
+			"steer commit-gate review", timeout,
+			"steer commit-gate backfill --if-due --apply --quiet", backfillTimeout)
 	case "denials":
 		if on {
 			return claude.RemoveDenialsHook(row.scope)
@@ -86,6 +94,13 @@ func (m *Model) viewChannels() string {
 	out := header("Channels — arming posture")
 	for i, r := range rows {
 		out += fmt.Sprintf("%s %-16s %-8s %s\n", pointer(i == m.cursor[panelChannels]), r.label, r.scope, armingBadge(r.armed))
+	}
+	for _, a := range m.snap.Posture.Resolver {
+		out += fmt.Sprintf("  %-16s %-8s %s\n", "resolver", a.Scope, armingBadge(a))
+	}
+	out += dim("  the resolver arms and disarms with the commit gate on the same scope.\n")
+	if n := m.snap.Posture.Unresolved; n > 0 {
+		out += warn(fmt.Sprintf("  %d ledger row(s) owe a transcript join — run: steer commit-gate backfill --apply\n", n))
 	}
 	out += "\n" + dim("git pre-commit and steer git-hooks install through the CLI: "+
 		"steer commit-gate install --precommit · steer git-hooks install")

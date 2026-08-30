@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -45,6 +46,10 @@ func (m *Model) viewClasses() string {
 			dim(fmt.Sprintf("%s → %s", it.Tier, it.Target)))
 		out += line + "\n"
 		out += "     " + dim(detailLine(it)) + "\n"
+		out += "     " + dim(measureLine(it)) + "\n"
+		for _, r := range confoundLines(it) {
+			out += "     " + warn(r) + "\n"
+		}
 	}
 	return out
 }
@@ -67,14 +72,38 @@ func detailLine(it status.ScoredIntervention) string {
 	return s
 }
 
-// verdictBadge colors a verdict by whether it demands action.
+// measureLine is the third row for a class: the effect range, the frozen scope, and
+// each window's coverage under it.
+func measureLine(it status.ScoredIntervention) string {
+	parts := []string{}
+	if e := status.EffectPhrase(it.Effect); e != "" {
+		parts = append(parts, e)
+	}
+	if r := status.RequiredPhrase(it.RequiredAfter, it.Verdict); r != "" {
+		parts = append(parts, r)
+	}
+	parts = append(parts,
+		"scope "+status.ScopePhrase(it.Scope),
+		"before "+status.CoveragePhrase(it.BeforeCoverage),
+		"after "+status.CoveragePhrase(it.AfterCoverage))
+	return strings.Join(parts, " · ")
+}
+
+// confoundLines are the withheld-verdict reasons and the softer composition shifts.
+func confoundLines(it status.ScoredIntervention) []string {
+	out := status.ConfoundPhrases("confound", it.Confounds)
+	return append(out, status.ConfoundPhrases("composition", it.Composition)...)
+}
+
+// verdictBadge colors a verdict by whether it demands action. The abstentions the
+// cadence queues read as warnings; the abstentions it leaves quiet read as dim.
 func verdictBadge(v string) string {
 	switch v {
-	case "effective", "promising", "class-faded", "class-steady":
+	case "effective", "class-faded":
 		return ok(v)
-	case "ineffective", "class-grew":
+	case "harmful", "ineffective", "class-grew":
 		return errText(v)
-	case "partial":
+	case "class-steady", "confounded", "evidence-incomplete", "legacy-unscoped":
 		return warn(v)
 	}
 	return dim(v)

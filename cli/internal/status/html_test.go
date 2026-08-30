@@ -6,7 +6,11 @@ import (
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/cadence"
+	"github.com/steer-sh/steer-cli/internal/gate/mine"
 )
+
+func fptr(f float64) *float64 { return &f }
+func iptr(n int) *int         { return &n }
 
 // sample is a populated snapshot covering every branch the page renders: a live
 // effective class, a flagged one, a candidate, an unscored record and a chain.
@@ -20,30 +24,80 @@ func sample() *SystemStatus {
 				{Scope: "project", Registered: false},
 				{Scope: "global", Registered: true, Effective: true, Timeout: 90},
 			},
-			Denials: []ScopeArming{{Scope: "global", Registered: true}},
+			Denials:  []ScopeArming{{Scope: "global", Registered: true}},
+			Resolver: []ScopeArming{{Scope: "global", Registered: true, Effective: true, Timeout: 30}},
+			// Unresolved rows are why a window can read evidence-incomplete, so the
+			// page must name the count and the command that clears it.
+			Unresolved: 4,
 		},
 		Interventions: []ScoredIntervention{
 			{ID: "widget-flag", Class: "widget flag loss", Tier: "check", Target: "check.sh",
 				Status: "active", HookID: "h1", Verdict: "effective",
-				Before: cadence.Incidence{Hits: 12, Units: 12, Rate: 1},
-				After:  cadence.Incidence{Hits: 0, Units: 12, Rate: 0}},
+				Before:         cadence.Incidence{Hits: 12, Units: 12, Rate: 1},
+				After:          cadence.Incidence{Hits: 0, Units: 12, Rate: 0},
+				Scope:          &cadence.Scope{Version: 1, Repo: "steer.*", Path: `\.go$`},
+				BeforeCoverage: cadence.Coverage{Total: 14, Eligible: 12, Ineligible: 2},
+				AfterCoverage:  cadence.Coverage{Total: 13, Eligible: 12, Unknown: 1, Pending: 1},
+				Effect: cadence.Effect{Estimate: fptr(0), Upper: fptr(0.31),
+					Confidence: 0.9, Method: "clopper-pearson / mixture-cs"},
+				RequiredAfter: iptr(9),
+				Composition: []mine.Confound{{Category: "host", Reason: "host set changed",
+					Before: []string{"a"}, After: []string{"a", "b"}}}},
 			{ID: "bare-python", Class: "bare python call", Tier: "guard", Target: "steer",
 				Status: "active", Verdict: "ineffective",
-				Before: cadence.Incidence{Hits: 2, Units: 20, Rate: 0.1},
-				After:  cadence.Incidence{Hits: 5, Units: 20, Rate: 0.25}},
+				Before:         cadence.Incidence{Hits: 2, Units: 20, Rate: 0.1},
+				After:          cadence.Incidence{Hits: 5, Units: 20, Rate: 0.25},
+				Scope:          &cadence.Scope{Version: 1, All: true},
+				BeforeCoverage: cadence.Coverage{Total: 20, Eligible: 20},
+				AfterCoverage:  cadence.Coverage{Total: 20, Eligible: 20},
+				Effect: cadence.Effect{Estimate: fptr(2.5), Lower: 1.4, Upper: fptr(4.2),
+					Confidence: 0.9, Method: "clopper-pearson / mixture-cs"}},
+			{ID: "drifted-gate", Class: "drifted gate", Tier: "review", Target: "prompts",
+				Status: "active", Verdict: "confounded",
+				Scope:          &cadence.Scope{Version: 1, All: true},
+				BeforeCoverage: cadence.Coverage{Total: 8, Eligible: 8},
+				AfterCoverage:  cadence.Coverage{Total: 6, Eligible: 6},
+				Confounds: []mine.Confound{{Category: "instrument", Reason: "after-window reviewed by another instrument",
+					Before: []string{"agy@sha"}, After: []string{"agy@other"}}}},
+			{ID: "lost-ledger", Class: "lost ledger", Tier: "guard", Target: "guard.py",
+				Status: "active", Verdict: "evidence-incomplete",
+				Scope:          &cadence.Scope{Version: 1, All: true},
+				BeforeCoverage: cadence.Coverage{Total: 5, Eligible: 5},
+				AfterCoverage:  cadence.Coverage{Total: 4, Unknown: 4, UnknownEvidence: 4}},
 			{ID: "taste-rule", Class: "naming taste", Tier: "instruction", Target: "CLAUDE.md",
 				Status: "rejected", Verdict: "unscored"},
 		},
-		Summary: VerdictSummary{Total: 3, Counts: map[string]int{
-			"effective": 1, "ineffective": 1, "unscored": 1}},
+		Summary: VerdictSummary{Total: 5, Counts: map[string]int{
+			"effective": 1, "ineffective": 1, "confounded": 1,
+			"evidence-incomplete": 1, "unscored": 1}},
 		Chains: []ChainSummary{{Host: "h", StartTS: 1700000000, Rounds: 2, Files: 3,
 			Findings: 2, Accepted: 1, Rejected: 1, Sessions: 1, Terminal: "clean"}},
 		Attention: AttentionQueue{
 			Interventions: []cadence.Intervention{{
 				ID: "bare-python", Class: "bare python call", Tier: "guard", Target: "steer",
-				Verdict: "ineffective",
-				Before:  cadence.Incidence{Hits: 2, Units: 20, Rate: 0.1},
-				After:   cadence.Incidence{Hits: 5, Units: 20, Rate: 0.25}}},
+				Verdict:        "ineffective",
+				Before:         cadence.Incidence{Hits: 2, Units: 20, Rate: 0.1},
+				After:          cadence.Incidence{Hits: 5, Units: 20, Rate: 0.25},
+				Scope:          &cadence.Scope{Version: 1, All: true},
+				BeforeCoverage: cadence.Coverage{Total: 20, Eligible: 20},
+				AfterCoverage:  cadence.Coverage{Total: 20, Eligible: 20},
+				Effect: cadence.Effect{Estimate: fptr(2.5), Lower: 1.4, Upper: fptr(4.2),
+					Confidence: 0.9, Method: "clopper-pearson / mixture-cs"},
+			}, {
+				ID: "drifted-gate", Class: "drifted gate", Tier: "review", Target: "prompts",
+				Verdict:        "confounded",
+				Scope:          &cadence.Scope{Version: 1, All: true},
+				BeforeCoverage: cadence.Coverage{Total: 8, Eligible: 8},
+				AfterCoverage:  cadence.Coverage{Total: 6, Eligible: 6},
+				Confounds: []mine.Confound{{Category: "instrument", Reason: "after-window reviewed by another instrument",
+					Before: []string{"agy@sha"}, After: []string{"agy@other"}}},
+			}, {
+				ID: "lost-ledger", Class: "lost ledger", Tier: "guard", Target: "guard.py",
+				Verdict:        "evidence-incomplete",
+				Scope:          &cadence.Scope{Version: 1, All: true},
+				BeforeCoverage: cadence.Coverage{Total: 5, Eligible: 5},
+				AfterCoverage:  cadence.Coverage{Total: 4, Unknown: 4, UnknownEvidence: 4},
+			}},
 			Unscored:   []string{"taste-rule"},
 			Candidates: []cadence.Candidate{{Corpus: "transcript-friction", Pattern: "use pnpm", Count: 7, Sessions: 4}},
 		},
@@ -72,8 +126,17 @@ func TestRenderHTMLCarriesEverySection(t *testing.T) {
 		"Active interventions by tier", "Recent review chains", "System health",
 		"widget flag loss", "bare python call", "naming taste",
 		"use pnpm", "taste-rule",
-		"v-effective", "v-ineffective",
+		"v-effective", "v-ineffective", "v-confounded", "v-evidence-incomplete",
 		"1 of 2 present", "agy@sha",
+		// The measurement conditions the verdict rests on, one target at a time.
+		"RR 0.00 [0.00, 0.31] @90%", "needs 9 clean eligible chain(s)",
+		"scope repo=/steer.*/ AND path=/\\.go$/", "scope all",
+		"12 eligible / 14 (2 out of scope)", "12 eligible / 13 (1 pending)",
+		"0 eligible / 4 (4 without a ledger)",
+		"confound (instrument): after-window reviewed by another instrument",
+		"composition (host): host set changed",
+		// Resolver posture: the arming row and the unresolved backlog.
+		"resolver global", "4 row(s) owe a ledger",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("rendered page is missing %q", want)

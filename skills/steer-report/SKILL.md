@@ -64,9 +64,9 @@ A deterministic tier runs this loop's mechanical half — scoring, corpus sweeps
 steer report refresh --days 30
 ```
 
-Then Read the queue **once**: `~/.claude/state/steer-report/queue.json`. It holds:
+Then Read the queue **once**: `~/.claude/state/steer-report/queue.json` (`version: 2`). It holds:
 
-- `interventions[]` — full contract records the tier already scored and flagged as **needing attention** (verdict `ineffective` or `class-grew`). These carry a `match`; they are the audit's action list, pre-filtered.
+- `interventions[]` — full contract records the tier already scored and flagged as **needing attention** (verdict `harmful`, `ineffective`, `class-grew`, `legacy-unscoped`, `evidence-incomplete` or `confounded`). These carry a `match`; they are the audit's action list, pre-filtered. Each also carries the measurement conditions the verdict rests on: `scope` (the frozen eligibility rule, `null` on a legacy record), `before_coverage` / `after_coverage` (`total`, `eligible`, `ineligible`, `unknown`, `unknown_scope`, `unknown_evidence`, `pending`), the `effect` range, `required_after`, and `confounds` / `composition`.
 - `unscored[]` — intervention ids the local engine cannot score (session-unit hooks needing the audit-log join, unbuilt). Report their existence; do not read a verdict into them.
 - `candidates[]` — pointers to new clusters. Transcript rows carry `pattern`/`count`/`sessions`; the review row carries `undecided_chains` and a `dump` command. These carry **no** `match` — authoring the regex is your job, below.
 - `corpora[]` — one row per corpus (`review-findings`, `transcript-friction`, `auto-denials`) with `present` and `size`. Relay this sweep to the user in one sentence.
@@ -85,6 +85,8 @@ Each record reports before/after **chain incidence** — the fraction of reviewe
 - `collecting` — the after-window has not reached `required_after` yet. Say so and move on; do not read a verdict into it.
 - `inconclusive` — enough exposure, but the range still straddles the boundary. Leave it and re-score later.
 - `legacy-unscoped` — the record carries no eligibility scope, so its two windows count different opportunity sets. **Act on this:** scope it with `steer commit-gate mine scope <id>`, which restarts its after-window.
+- `evidence-incomplete` — a window has no eligible chain left and unknown chains are why: a ledger row the resolver closed as gone, or scope metadata no row carried. **Act on this:** run `steer commit-gate backfill --apply` and re-score. A window emptied only by rows still inside the resolver grace period reads `collecting` instead, and settles on its own.
+- `confounded` — a hard confound stands between the windows: the after-chains carry a different reviewer instrument, or the before/after supports for host, repository, author model or changed-path kind are disjoint. The range is not a measurement of the fix. **Act on this:** name the `confounds[]` category in the report and re-score once the windows overlap again. A `composition[]` entry is the softer case — the category sets overlap but shifted — and warns without withholding.
 - `no-baseline` — the regex matches nothing before install. The class definition is wrong.
 
 Rejected classes are scored too, and carry their own labels — nothing was installed, so effectiveness is not the question. `class-grew` is the one to act on: the range's lower bound reached 1.50, which is usually the reopen condition arriving. `class-faded` (upper bound at or below 0.50) and `class-steady` (the whole range inside 0.50–1.50) confirm the refusal still stands. `class-inconclusive` means the range supports none of the three. Read the record's `reopen if:` line before reopening anything; the condition was written by the pass that had the evidence in front of it.
@@ -125,7 +127,7 @@ Digest schema (`digest_version: 1`):
 
 The digest is size-capped: the CLI evicts the lowest-scoring clusters to fit, and reports honesty in `stats`.
 
-### The `steer status --json` contract (`status_version: 2`)
+### The `steer status --json` contract (`status_version: 3`)
 
 Step 1 reads this snapshot for posture and the full class inventory. The unit is
 the failure class and its verdict, not the hook count. This schema is byte-shared
@@ -134,8 +136,12 @@ Fields:
 
 - `status_version` — the schema version. `--json` is a stable agent contract.
 - `posture` — the arming state: `instrument` (reviewer model / runs / prompt
-  digest), `reviewer`, `ledger` path, and `commit_gate[]` / `denials[]`. Each is
-  a scope row with `registered` and `effective`.
+  digest), `reviewer`, `ledger` path, and `commit_gate[]` / `denials[]` /
+  `resolver[]`. Each is a scope row with `registered` and `effective`. The
+  resolver is the Stop hook that joins ledger rows to transcripts; it arms with
+  the commit gate on the same scope. `unresolved_rows` counts the rows still
+  owing that join — the scorer withholds on them, and
+  `steer commit-gate backfill --apply` clears them.
 - `interventions[]` — the **full** scored inventory. It carries every live
   class, `effective` ones included. Each row: `id`, `class`, `match` (the regex
   that defines the class), `tier`, `target`, `status` (`active` or `rejected`),
@@ -143,11 +149,29 @@ Fields:
   `instrument_drift` (a measurement window spanning two reviewer prompts; the
   verdict stands, the flag rides beside it), `firings_applicable` (true only for the `guard` tier, whose master hook writes the audit log that `audit_firings` counts; check, instruction and review write none), and for
   a refused class `reason`, `reopen` and `rejected_ts`. This is the dedup source
-  — a class here is decided.
+  — a class here is decided. Each row also carries its measurement conditions:
+  - `scope` — the frozen eligibility rule: `{version, all}` or
+    `{version, repo, path}`, both regexes combining with AND. `null` is a legacy
+    record, which scores `legacy-unscoped` and never gets a scope inferred for it.
+  - `before_coverage` / `after_coverage` — each window's chain accounting:
+    `total`, `eligible` (the denominator), `ineligible`, `unknown`,
+    `unknown_scope`, `unknown_evidence`, `pending`. An unknown chain withholds;
+    it never shrinks the denominator.
+  - `effect` — the joint relative-risk range: `estimate`, `lower`, `upper`
+    (`null` when unbounded above), `confidence`, `method`. The verdict reads the
+    bounds, never the estimate.
+  - `required_after` — the smallest clean eligible after-window that could still
+    place `upper` at or below the 0.50 effect target. `null` means no window of
+    any size could, which an unmeasurably loose baseline causes.
+  - `confounds` — hard confounds that withhold the verdict; each is
+    `{category, reason, before, after}` over `instrument`, `host`, `repo`,
+    `author_model` or `path_kind`. `composition` is the same shape for
+    overlapping-but-changed category sets, which warn without withholding.
 - `summary` — `total` plus `counts` by verdict.
 - `chains[]` — recent review chains, findings split `accepted` / `rejected`.
 - `attention` — the subset needing action: `interventions[]` (verdict
-  `ineffective` or `class-grew`), `candidates[]` (no `match` yet), and
+  `harmful`, `ineffective`, `class-grew`, `legacy-unscoped`,
+  `evidence-incomplete` or `confounded`), `candidates[]` (no `match` yet), and
   `unscored[]` (session-unit ids the engine cannot score).
 - `telemetry` — corpus sizes: `review_chains`, `denials_rows`, `audit_firings`.
 - `corpora[]` — one row per corpus with `present`, `size` and `path`.

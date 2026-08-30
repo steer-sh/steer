@@ -19,6 +19,10 @@ func (m *Model) viewHealth() string {
 		}
 	}
 
+	if n := m.snap.Posture.Unresolved; n > 0 {
+		out += "   " + warn(fmt.Sprintf("%d ledger row(s) owe a transcript join — the scorer withholds on them\n", n))
+	}
+
 	out += section("Telemetry")
 	out += fmt.Sprintf("   review chains %d · denials %d · audit firings %d\n",
 		m.snap.Telemetry.ReviewChains, m.snap.Telemetry.DenialsRows, m.snap.Telemetry.AuditFirings)

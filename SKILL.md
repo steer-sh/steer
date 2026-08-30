@@ -2,7 +2,7 @@
 name: steer
 description: Generates and installs PreToolUse Python hooks from natural language rules. Use when enforcing coding standards, blocking insecure patterns, managing hook lifecycle, or running steer CLI commands (register, remove, list, test, preset, verify, git-hooks).
 user-invocable: true
-prompt_version: 3
+prompt_version: 4
 compatibility: Requires Claude Code with hooks support (PreToolUse). Hooks are installed into .claude/hooks/ and registered in settings.json. steer CLI must be available on PATH or bundled under scripts/.
 allowed-tools: Bash(steer *), Bash(python3 *), Bash(echo *), Read, Write
 ---
@@ -165,8 +165,13 @@ rule against the classes there:
 
 - The rule matches a class scored `effective`: the class is covered. Tell the
   user, and stop. Do not install a duplicate.
-- The rule matches a class scored `ineffective`: the current gate does not work.
-  Treat this as a rework of that intervention, not a new hook.
+- The rule matches a class scored `ineffective` or `harmful`: the current gate
+  does not work. Treat this as a rework of that intervention, not a new hook.
+- The rule matches a class scored `collecting` or `inconclusive`: the class is
+  installed and still under measurement. Say so, and do not install a duplicate.
+- The rule matches a class whose verdict withholds — `legacy-unscoped`,
+  `evidence-incomplete` or `confounded`: the class is installed but unmeasured.
+  Name the reason from the row, and do not install a duplicate.
 - No match: continue to Step 0.
 
 Fail soft. If the command errors, or the CLI is absent, say so in one line and
@@ -361,7 +366,7 @@ The `|` pipe splits a rule into a detection part and an optional suggestion (see
 
 Never invent suggestions. Only include them when explicitly provided after `|`.
 
-## The `steer status --json` contract (`status_version: 2`)
+## The `steer status --json` contract (`status_version: 3`)
 
 `steer status` composes one read-only snapshot of the whole loop. The unit is the
 failure class and its verdict, not the hook count. The Pre-flight step reads it to
@@ -371,8 +376,12 @@ Contracts). Fields:
 
 - `status_version` — the schema version. `--json` is a stable agent contract.
 - `posture` — the arming state: `instrument` (reviewer model / runs / prompt
-  digest), `reviewer`, `ledger` path, and `commit_gate[]` / `denials[]`. Each is
-  a scope row with `registered` and `effective`.
+  digest), `reviewer`, `ledger` path, and `commit_gate[]` / `denials[]` /
+  `resolver[]`. Each is a scope row with `registered` and `effective`. The
+  resolver is the Stop hook that joins ledger rows to transcripts; it arms with
+  the commit gate on the same scope. `unresolved_rows` counts the rows still
+  owing that join — the scorer withholds on them, and
+  `steer commit-gate backfill --apply` clears them.
 - `interventions[]` — the **full** scored inventory. It carries every live
   class, `effective` ones included. Each row: `id`, `class`, `match` (the regex
   that defines the class), `tier`, `target`, `status` (`active` or `rejected`),
@@ -380,11 +389,29 @@ Contracts). Fields:
   `instrument_drift` (a measurement window spanning two reviewer prompts; the
   verdict stands, the flag rides beside it), `firings_applicable` (true only for the `guard` tier, whose master hook writes the audit log that `audit_firings` counts; check, instruction and review write none), and for
   a refused class `reason`, `reopen` and `rejected_ts`. This is the dedup source
-  — a class here is decided.
+  — a class here is decided. Each row also carries its measurement conditions:
+  - `scope` — the frozen eligibility rule: `{version, all}` or
+    `{version, repo, path}`, both regexes combining with AND. `null` is a legacy
+    record, which scores `legacy-unscoped` and never gets a scope inferred for it.
+  - `before_coverage` / `after_coverage` — each window's chain accounting:
+    `total`, `eligible` (the denominator), `ineligible`, `unknown`,
+    `unknown_scope`, `unknown_evidence`, `pending`. An unknown chain withholds;
+    it never shrinks the denominator.
+  - `effect` — the joint relative-risk range: `estimate`, `lower`, `upper`
+    (`null` when unbounded above), `confidence`, `method`. The verdict reads the
+    bounds, never the estimate.
+  - `required_after` — the smallest clean eligible after-window that could still
+    place `upper` at or below the 0.50 effect target. `null` means no window of
+    any size could, which an unmeasurably loose baseline causes.
+  - `confounds` — hard confounds that withhold the verdict; each is
+    `{category, reason, before, after}` over `instrument`, `host`, `repo`,
+    `author_model` or `path_kind`. `composition` is the same shape for
+    overlapping-but-changed category sets, which warn without withholding.
 - `summary` — `total` plus `counts` by verdict.
 - `chains[]` — recent review chains, findings split `accepted` / `rejected`.
 - `attention` — the subset needing action: `interventions[]` (verdict
-  `ineffective` or `class-grew`), `candidates[]` (no `match` yet), and
+  `harmful`, `ineffective`, `class-grew`, `legacy-unscoped`,
+  `evidence-incomplete` or `confounded`), `candidates[]` (no `match` yet), and
   `unscored[]` (session-unit ids the engine cannot score).
 - `telemetry` — corpus sizes: `review_chains`, `denials_rows`, `audit_firings`.
 - `corpora[]` — one row per corpus with `present`, `size` and `path`.
@@ -394,3 +421,29 @@ Contracts). Fields:
   `drifted`.
 - `team` — the repo-committed team lockfile summary: `present`, `path`,
   `hooks_locked`, `catalog_version`.
+
+### The verdict vocabulary
+
+A verdict is a claim about the range, not about the point estimate. The loop
+prefers an abstention over an unsupported conclusion.
+
+Active interventions:
+
+- `effective` — the range's upper bound is at or below 0.50.
+- `harmful` — the lower bound is above 1.00.
+- `ineffective` — the lower bound is above 0.50.
+- `collecting` — no bound is crossed and the eligible after-window is smaller
+  than `required_after`. More evidence can still decide it.
+- `inconclusive` — the exposure is there and the range still crosses the
+  decision boundary.
+- `no-baseline` — the before-window never carried the class.
+- `legacy-unscoped` — the record has no frozen scope, so its two windows describe
+  different opportunity sets. Run `steer commit-gate mine scope <id>`.
+- `evidence-incomplete` — a window has no eligible chain left and unknown chains
+  are why: a ledger the resolver closed as gone, or scope metadata no row carried.
+- `confounded` — a hard confound stands between the windows.
+
+Refused classes (`status: rejected`) use their own ladder: `class-grew` (lower
+bound at or above 1.50), `class-faded` (upper bound at or below 0.50),
+`class-steady` (the whole range sits inside 0.50–1.50), and
+`class-inconclusive` when none of those holds.

@@ -110,11 +110,13 @@ tbody tr:hover { background: var(--panel-2); }
 }
 .v-effective, .v-class-faded { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 50%, transparent);
   background: color-mix(in srgb, var(--ok) 12%, transparent); }
-.v-promising { color: var(--info); border-color: color-mix(in srgb, var(--info) 50%, transparent);
+.v-collecting, .v-inconclusive, .v-class-inconclusive, .v-no-baseline {
+  color: var(--info); border-color: color-mix(in srgb, var(--info) 50%, transparent);
   background: color-mix(in srgb, var(--info) 12%, transparent); }
-.v-ineffective, .v-class-grew { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 50%, transparent);
+.v-ineffective, .v-class-grew, .v-harmful { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 50%, transparent);
   background: color-mix(in srgb, var(--bad) 12%, transparent); }
-.v-partial, .v-class-steady { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 50%, transparent);
+.v-class-steady, .v-confounded, .v-evidence-incomplete, .v-legacy-unscoped {
+  color: var(--warn); border-color: color-mix(in srgb, var(--warn) 50%, transparent);
   background: color-mix(in srgb, var(--warn) 12%, transparent); }
 .tier { display: inline-block; padding: 1px 8px; border-radius: 5px; font-family: var(--mono);
   font-size: 11px; border: 1px solid var(--line); background: var(--panel-2); color: var(--dim); }
@@ -145,6 +147,12 @@ footer { color: var(--faint); font-size: 11.5px; border-top: 1px solid var(--lin
   {{- end }}
   {{- range .Status.Posture.Denials }}
   <div class="chip"><span class="dot {{ arming . }}"></span><b>denials {{ .Scope }}</b><span class="v">{{ arming . }}</span></div>
+  {{- end }}
+  {{- range .Status.Posture.Resolver }}
+  <div class="chip"><span class="dot {{ arming . }}"></span><b>resolver {{ .Scope }}</b><span class="v">{{ arming . }}</span></div>
+  {{- end }}
+  {{- if .Status.Posture.Unresolved }}
+  <div class="chip"><b>unresolved</b><span class="v">{{ .Status.Posture.Unresolved }} row(s) owe a ledger</span></div>
   {{- end }}
   <div class="chip"><b>corpora</b><span class="v">{{ present .Status.Corpora }} of {{ len .Status.Corpora }} present</span></div>
 </div>
@@ -177,6 +185,10 @@ footer { color: var(--faint); font-size: 11.5px; border-top: 1px solid var(--lin
         <span class="cls">{{ .Class }}</span>
         <span class="sub">{{ .Tier }} → {{ .Target }}</span>
         <span class="right">{{ .Before.Hits }}/{{ .Before.Units }} ({{ pct .Before.Rate }}) → {{ .After.Hits }}/{{ .After.Units }} ({{ pct .After.Rate }})</span>
+        <div class="sub mono">{{ effect .Effect }}{{ with needs .RequiredAfter .Verdict }} · {{ . }}{{ end }}</div>
+        <div class="sub">scope {{ scope .Scope }} · before {{ cover .BeforeCoverage }} · after {{ cover .AfterCoverage }}</div>
+        {{- range reasons "confound" .Confounds }}<div class="sub">{{ . }}</div>{{ end }}
+        {{- range reasons "composition" .Composition }}<div class="sub">{{ . }}</div>{{ end }}
       </li>
       {{- end }}
     </ul>
@@ -229,7 +241,7 @@ footer { color: var(--faint); font-size: 11.5px; border-top: 1px solid var(--lin
       <thead><tr>
         <th>Class</th><th>Tier → target</th><th>Status</th>
         <th class="num">Baseline</th><th class="num">Post-install</th><th class="num">Δ rate</th>
-        <th>Verdict</th>
+        <th>Effect range</th><th>Verdict</th>
       </tr></thead>
       <tbody>
       {{- range .Ledger }}
@@ -244,6 +256,14 @@ footer { color: var(--faint); font-size: 11.5px; border-top: 1px solid var(--lin
           <td class="num">{{ .Before.Hits }}/{{ .Before.Units }}<div class="dimtext">{{ pct .Before.Rate }}</div></td>
           <td class="num">{{ .After.Hits }}/{{ .After.Units }}<div class="dimtext">{{ pct .After.Rate }}</div></td>
           <td class="num">{{ delta .Before.Rate .After.Rate }}</td>
+          <td>
+            <span class="mono">{{ effect .Effect }}</span>
+            {{- with needs .RequiredAfter .Verdict }}<div class="dimtext">{{ . }}</div>{{ end }}
+            <div class="dimtext">scope {{ scope .Scope }}</div>
+            <div class="dimtext">before {{ cover .BeforeCoverage }} · after {{ cover .AfterCoverage }}</div>
+            {{- range reasons "confound" .Confounds }}<div class="dimtext">{{ . }}</div>{{ end }}
+            {{- range reasons "composition" .Composition }}<div class="dimtext">{{ . }}</div>{{ end }}
+          </td>
           <td>
             <span class="pill v-{{ slug .Verdict }}">{{ .Verdict }}</span>
             {{- if .InstrumentDrift }}<div class="dimtext">⚠ instrument drift</div>{{ end }}

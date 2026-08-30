@@ -16,7 +16,7 @@ import (
 )
 
 // QueueVersion is the schema version of the queue file the skill reads.
-const QueueVersion = 1
+const QueueVersion = 2
 
 // minCandidateSessions is the deterministic threshold on transcript clusters: a
 // correction pattern must repeat across this many sessions to become a candidate.
@@ -50,6 +50,18 @@ type Intervention struct {
 	Verdict string    `json:"verdict"`
 	Before  Incidence `json:"before"`
 	After   Incidence `json:"after"`
+	// Scope is the frozen eligibility rule, null on a legacy record.
+	Scope *Scope `json:"scope"`
+	// BeforeCoverage and AfterCoverage account for each window under that scope.
+	BeforeCoverage Coverage `json:"before_coverage"`
+	AfterCoverage  Coverage `json:"after_coverage"`
+	// Effect is the relative-risk range; RequiredAfter is the clean eligible
+	// after-window that could still reach the effect target, null when none can.
+	Effect        Effect `json:"effect"`
+	RequiredAfter *int   `json:"required_after"`
+	// Confounds withhold the verdict; Composition only warns beside it.
+	Confounds   []mine.Confound `json:"confounds"`
+	Composition []mine.Confound `json:"composition"`
 }
 
 // Candidate is a pointer to a new cluster the model must cluster, phrase, and author
@@ -144,6 +156,14 @@ func Refresh(opts Options) (*Queue, error) {
 			Verdict: verdict,
 			Before:  incidenceOf(scored["before"]),
 			After:   incidenceOf(scored["after"]),
+
+			Scope:          ScopeOf(scored["scope"]),
+			BeforeCoverage: CoverageOf(scored["before_coverage"]),
+			AfterCoverage:  CoverageOf(scored["after_coverage"]),
+			Effect:         EffectOf(scored["effect"]),
+			RequiredAfter:  RequiredAfterOf(scored["required_after"]),
+			Confounds:      ConfoundsOf(scored["confounds"]),
+			Composition:    ConfoundsOf(scored["composition"]),
 		})
 	}
 	sort.Slice(q.Interventions, func(i, j int) bool { return q.Interventions[i].ID < q.Interventions[j].ID })

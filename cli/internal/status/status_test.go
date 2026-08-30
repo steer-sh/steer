@@ -136,27 +136,45 @@ func TestCollectEmptyMachineFailsSoft(t *testing.T) {
 	}
 }
 
+func floatPtr(f float64) *float64 { return &f }
+func intPtr(n int) *int           { return &n }
+
 // TestJSONContractIsStable pins the emitted key set and order. It marshals a fully
 // populated SystemStatus literal — no Config, no machine state — against a golden
 // so a renamed or reordered json tag fails here, the agent-contract guard.
 func TestJSONContractIsStable(t *testing.T) {
 	s := &SystemStatus{
-		StatusVersion: 2,
+		StatusVersion: 3,
 		GeneratedAt:   "2026-01-01T00:00:00Z",
 		Posture: Posture{
 			Instrument: "agy@sha", Reviewer: "gemini", Ledger: "/l.jsonl",
 			CommitGate: []ScopeArming{{Scope: "global", Registered: true, Effective: true, Timeout: 90}},
 			Denials:    []ScopeArming{{Scope: "global", Registered: true, Effective: true}},
+			Resolver:   []ScopeArming{{Scope: "global", Registered: true, Effective: true, Timeout: 30}},
+			Unresolved: 4,
 		},
 		Interventions: []ScoredIntervention{{
 			ID: "widget-flag", Class: "widget flag loss", Match: "widget.*flag", Tier: "guard", Target: "guard.py",
 			Status: "active", Verdict: "effective",
 			Before: cadence.Incidence{Hits: 12, Units: 12, Rate: 1}, After: cadence.Incidence{Hits: 0, Units: 12, Rate: 0},
 			PValue: 0.02, InstrumentDrift: true, FiringsApplicable: true,
+			Scope:          &cadence.Scope{Version: 1, Repo: "steer.*", Path: `\.go$`},
+			BeforeCoverage: cadence.Coverage{Total: 14, Eligible: 12, Ineligible: 1, Unknown: 1, UnknownScope: 1},
+			AfterCoverage:  cadence.Coverage{Total: 13, Eligible: 12, Unknown: 1, UnknownEvidence: 1, Pending: 1},
+			Effect: cadence.Effect{
+				Estimate: floatPtr(0), Lower: 0, Upper: floatPtr(0.31),
+				Confidence: 0.9, Method: "clopper-pearson / mixture-cs",
+			},
+			RequiredAfter: intPtr(9),
+			Confounds:     []mine.Confound{},
+			Composition:   []mine.Confound{{Category: "host", Reason: "host set changed", Before: []string{"a"}, After: []string{"a", "b"}}},
 		}, {
 			ID: "taste-nit", Class: "taste nit", Match: "nit", Tier: "check", Target: "check.sh",
 			Status: "rejected", Verdict: "class-steady",
 			Reason: "not mechanizable", Reopen: "incidence doubles", RejectedTS: 1700,
+			Scope:       &cadence.Scope{Version: 1, All: true},
+			Confounds:   []mine.Confound{},
+			Composition: []mine.Confound{},
 		}},
 		Summary: VerdictSummary{Total: 2, Counts: map[string]int{"effective": 1, "class-steady": 1}},
 		Chains: []ChainSummary{{
@@ -183,7 +201,7 @@ func TestJSONContractIsStable(t *testing.T) {
 }
 
 const goldenStatusJSON = `{
-  "status_version": 2,
+  "status_version": 3,
   "generated_at": "2026-01-01T00:00:00Z",
   "posture": {
     "instrument": "agy@sha",
@@ -203,7 +221,16 @@ const goldenStatusJSON = `{
         "registered": true,
         "effective": true
       }
-    ]
+    ],
+    "resolver": [
+      {
+        "scope": "global",
+        "registered": true,
+        "effective": true,
+        "timeout": 30
+      }
+    ],
+    "unresolved_rows": 4
   },
   "interventions": [
     {
@@ -226,7 +253,52 @@ const goldenStatusJSON = `{
       },
       "p_value": 0.02,
       "instrument_drift": true,
-      "firings_applicable": true
+      "firings_applicable": true,
+      "scope": {
+        "version": 1,
+        "repo": "steer.*",
+        "path": "\\.go$"
+      },
+      "before_coverage": {
+        "total": 14,
+        "eligible": 12,
+        "ineligible": 1,
+        "unknown": 1,
+        "unknown_scope": 1,
+        "unknown_evidence": 0,
+        "pending": 0
+      },
+      "after_coverage": {
+        "total": 13,
+        "eligible": 12,
+        "ineligible": 0,
+        "unknown": 1,
+        "unknown_scope": 0,
+        "unknown_evidence": 1,
+        "pending": 1
+      },
+      "effect": {
+        "estimate": 0,
+        "lower": 0,
+        "upper": 0.31,
+        "confidence": 0.9,
+        "method": "clopper-pearson / mixture-cs"
+      },
+      "required_after": 9,
+      "confounds": [],
+      "composition": [
+        {
+          "category": "host",
+          "reason": "host set changed",
+          "before": [
+            "a"
+          ],
+          "after": [
+            "a",
+            "b"
+          ]
+        }
+      ]
     },
     {
       "id": "taste-nit",
@@ -249,7 +321,39 @@ const goldenStatusJSON = `{
       "firings_applicable": false,
       "reason": "not mechanizable",
       "reopen": "incidence doubles",
-      "rejected_ts": 1700
+      "rejected_ts": 1700,
+      "scope": {
+        "version": 1,
+        "all": true
+      },
+      "before_coverage": {
+        "total": 0,
+        "eligible": 0,
+        "ineligible": 0,
+        "unknown": 0,
+        "unknown_scope": 0,
+        "unknown_evidence": 0,
+        "pending": 0
+      },
+      "after_coverage": {
+        "total": 0,
+        "eligible": 0,
+        "ineligible": 0,
+        "unknown": 0,
+        "unknown_scope": 0,
+        "unknown_evidence": 0,
+        "pending": 0
+      },
+      "effect": {
+        "estimate": null,
+        "lower": 0,
+        "upper": null,
+        "confidence": 0,
+        "method": ""
+      },
+      "required_after": null,
+      "confounds": [],
+      "composition": []
     }
   ],
   "summary": {

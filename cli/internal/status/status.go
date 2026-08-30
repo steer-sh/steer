@@ -17,6 +17,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/denials"
 	"github.com/steer-sh/steer-cli/internal/gate"
+	"github.com/steer-sh/steer-cli/internal/gate/cc"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
 	"github.com/steer-sh/steer-cli/internal/presets"
 )
@@ -24,7 +25,7 @@ import (
 // StatusVersion is the schema version of the emitted snapshot. It mirrors
 // report.DigestVersion: --json is a stable agent contract, so bump this whenever
 // the shape or semantics of SystemStatus change.
-const StatusVersion = 2
+const StatusVersion = 3
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20
@@ -69,6 +70,18 @@ type ScoredIntervention struct {
 	Reason     string  `json:"reason,omitempty"`
 	Reopen     string  `json:"reopen,omitempty"`
 	RejectedTS float64 `json:"rejected_ts,omitempty"`
+	// Scope is the frozen eligibility rule, null on a legacy record.
+	Scope *cadence.Scope `json:"scope"`
+	// BeforeCoverage and AfterCoverage account for each window under that scope.
+	BeforeCoverage cadence.Coverage `json:"before_coverage"`
+	AfterCoverage  cadence.Coverage `json:"after_coverage"`
+	// Effect is the relative-risk range the verdict reads; RequiredAfter is the
+	// clean eligible after-window that could still reach the effect target.
+	Effect        cadence.Effect `json:"effect"`
+	RequiredAfter *int           `json:"required_after"`
+	// Confounds withhold the verdict; Composition only warns beside it.
+	Confounds   []mine.Confound `json:"confounds"`
+	Composition []mine.Confound `json:"composition"`
 }
 
 // HookInfo is one registered managed hook in a scope.
@@ -141,6 +154,10 @@ type Posture struct {
 	Ledger     string        `json:"ledger"`
 	CommitGate []ScopeArming `json:"commit_gate"`
 	Denials    []ScopeArming `json:"denials"`
+	// Resolver is the Stop-hook backfill arming per scope. Unresolved counts the
+	// ledger rows still owing a transcript join — evidence the scorer withholds on.
+	Resolver   []ScopeArming `json:"resolver"`
+	Unresolved int           `json:"unresolved_rows"`
 }
 
 // AttentionQueue is the subset of the loop needing action: the cadence queue
@@ -260,6 +277,8 @@ func scoreInventory(records []mine.Record, chains []mine.Chain, minAfter int) []
 				Status:            st,
 				HookID:            str(r["hook_id"]),
 				Verdict:           "unscored",
+				Confounds:         []mine.Confound{},
+				Composition:       []mine.Confound{},
 				FiringsApplicable: firingsApplicable(tier),
 				Reason:            str(r["reason"]),
 				Reopen:            str(r["reopen"]),
@@ -289,6 +308,14 @@ func scoreInventory(records []mine.Record, chains []mine.Chain, minAfter int) []
 			Reason:            str(scored["reason"]),
 			Reopen:            str(scored["reopen"]),
 			RejectedTS:        numFloat(r["rejected_ts"]),
+
+			Scope:          cadence.ScopeOf(scored["scope"]),
+			BeforeCoverage: cadence.CoverageOf(scored["before_coverage"]),
+			AfterCoverage:  cadence.CoverageOf(scored["after_coverage"]),
+			Effect:         cadence.EffectOf(scored["effect"]),
+			RequiredAfter:  cadence.RequiredAfterOf(scored["required_after"]),
+			Confounds:      cadence.ConfoundsOf(scored["confounds"]),
+			Composition:    cadence.ConfoundsOf(scored["composition"]),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
@@ -349,6 +376,8 @@ func collectPosture(cfg gate.Config) Posture {
 		Ledger:     cfg.LogFile(),
 		CommitGate: []ScopeArming{},
 		Denials:    []ScopeArming{},
+		Resolver:   []ScopeArming{},
+		Unresolved: cc.CountUnresolved(cfg),
 	}
 	for _, scope := range []string{claude.ProjectScope, claude.GlobalScope} {
 		g := claude.CommitGateHookArmed(scope)
@@ -367,6 +396,15 @@ func collectPosture(cfg gate.Config) Posture {
 			Registered: d.Registered,
 			Effective:  d.Registered && d.Matcher == claude.DenialsMatcher,
 			Timeout:    d.Timeout,
+		})
+		// The resolver rides the Stop event, which takes no matcher: registered is
+		// effective.
+		armed, timeout := claude.BackfillHookArmed(scope)
+		p.Resolver = append(p.Resolver, ScopeArming{
+			Scope:      scope,
+			Registered: armed,
+			Effective:  armed,
+			Timeout:    timeout,
 		})
 	}
 	return p

@@ -113,6 +113,13 @@ func renderPosture(s *status.SystemStatus) {
 	for _, a := range s.Posture.Denials {
 		fmt.Printf("  Denials      %s scope: %s\n", a.Scope, armingLabel(a))
 	}
+	for _, a := range s.Posture.Resolver {
+		fmt.Printf("  Resolver     %s scope: %s\n", a.Scope, armingLabel(a))
+	}
+	if s.Posture.Unresolved > 0 {
+		fmt.Printf("  Unresolved   %s\n", styles.WarningText.Render(
+			fmt.Sprintf("%d row(s) owe a ledger — run: steer commit-gate backfill --apply", s.Posture.Unresolved)))
+	}
 	fmt.Printf("  Corpora      %s\n", corporaLine(s))
 	fmt.Printf("  Audit log    %d block firing(s)\n", s.Telemetry.AuditFirings)
 }
@@ -161,9 +168,13 @@ func renderAttention(s *status.SystemStatus) {
 	}
 	byVerdict := map[string][]string{}
 	for _, iv := range a.Interventions {
-		line := fmt.Sprintf("    %s [%s → %s]  before %d/%d, after %d/%d",
+		line := fmt.Sprintf("    %s [%s → %s]  before %d/%d, after %d/%d   %s",
 			iv.Class, iv.Tier, iv.Target,
-			iv.Before.Hits, iv.Before.Units, iv.After.Hits, iv.After.Units)
+			iv.Before.Hits, iv.Before.Units, iv.After.Hits, iv.After.Units,
+			status.EffectPhrase(iv.Effect))
+		for _, extra := range interventionNotes(iv) {
+			line += "\n      " + styles.MutedText.Render(extra)
+		}
 		byVerdict[iv.Verdict] = append(byVerdict[iv.Verdict], line)
 	}
 	for _, v := range cadence.AttentionVerdicts {
@@ -186,6 +197,22 @@ func renderAttention(s *status.SystemStatus) {
 		fmt.Printf("  %s: %d session-unit intervention(s) the engine cannot score\n",
 			styles.MutedText.Render("unscored"), len(a.Unscored))
 	}
+}
+
+// interventionNotes are the sub-lines under a queued class: its scope, its window
+// accounting, and any confound or composition shift.
+func interventionNotes(iv cadence.Intervention) []string {
+	notes := []string{
+		"scope: " + status.ScopePhrase(iv.Scope),
+		"coverage: before " + status.CoveragePhrase(iv.BeforeCoverage) +
+			", after " + status.CoveragePhrase(iv.AfterCoverage),
+	}
+	if r := status.RequiredPhrase(iv.RequiredAfter, iv.Verdict); r != "" {
+		notes = append(notes, r)
+	}
+	notes = append(notes, status.ConfoundPhrases("confound", iv.Confounds)...)
+	notes = append(notes, status.ConfoundPhrases("composition", iv.Composition)...)
+	return notes
 }
 
 func candidateLine(c cadence.Candidate) string {
