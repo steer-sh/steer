@@ -70,6 +70,9 @@ var (
 	mineRegisterSupersedes  string
 	mineRegisterInstalledTS int64
 	mineRegisterForce       bool
+	mineRegisterScopeAll    bool
+	mineRegisterScopeRepo   string
+	mineRegisterScopePath   string
 )
 
 var commitGateMineRegisterCmd = &cobra.Command{
@@ -88,6 +91,9 @@ var commitGateMineRegisterCmd = &cobra.Command{
 			Supersedes:  mineRegisterSupersedes,
 			InstalledTS: mineRegisterInstalledTS,
 			Force:       mineRegisterForce,
+			ScopeAll:    mineRegisterScopeAll,
+			ScopeRepo:   mineRegisterScopeRepo,
+			ScopePath:   mineRegisterScopePath,
 		})
 	},
 }
@@ -101,6 +107,9 @@ var (
 	mineRejectNote       string
 	mineRejectRejectedTS int64
 	mineRejectForce      bool
+	mineRejectScopeAll   bool
+	mineRejectScopeRepo  string
+	mineRejectScopePath  string
 )
 
 var commitGateMineRejectCmd = &cobra.Command{
@@ -117,6 +126,33 @@ var commitGateMineRejectCmd = &cobra.Command{
 			Note:       mineRejectNote,
 			RejectedTS: mineRejectRejectedTS,
 			Force:      mineRejectForce,
+			ScopeAll:   mineRejectScopeAll,
+			ScopeRepo:  mineRejectScopeRepo,
+			ScopePath:  mineRejectScopePath,
+		})
+	},
+}
+
+var (
+	mineScopeAll   bool
+	mineScopeRepo  string
+	mineScopePath  string
+	mineScopeSetTS int64
+	mineScopeForce bool
+)
+
+var commitGateMineScopeCmd = &cobra.Command{
+	Use:   "scope ID",
+	Short: "Install a frozen scope on a legacy, unscoped intervention",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return mine.ScopeSet(os.Stdout, gateConfig().StateDir, args[0], mine.ScopeSetOpts{
+			Ledger:     mineLedger,
+			ScopeAll:   mineScopeAll,
+			ScopeRepo:  mineScopeRepo,
+			ScopePath:  mineScopePath,
+			ScopeSetTS: mineScopeSetTS,
+			Force:      mineScopeForce,
 		})
 	},
 }
@@ -170,8 +206,8 @@ var commitGateMineRetireCmd = &cobra.Command{
 func init() {
 	commitGateCmd.AddCommand(commitGateMineCmd)
 	commitGateMineCmd.AddCommand(commitGateMineFindingsCmd, commitGateMineMatchCmd,
-		commitGateMineRegisterCmd, commitGateMineRejectCmd, commitGateMineScoreCmd,
-		commitGateMineListCmd, commitGateMineRetireCmd)
+		commitGateMineRegisterCmd, commitGateMineRejectCmd, commitGateMineScopeCmd,
+		commitGateMineScoreCmd, commitGateMineListCmd, commitGateMineRetireCmd)
 
 	commitGateMineCmd.PersistentFlags().StringVar(&mineLedger, "ledger", "",
 		"Override the adjudication ledger path (a single file, not the shard glob)")
@@ -199,6 +235,9 @@ func init() {
 	r.StringVar(&mineRegisterSupersedes, "supersedes", "", "id of a record this replaces")
 	r.Int64Var(&mineRegisterInstalledTS, "installed-ts", 0, "install timestamp (default now)")
 	r.BoolVar(&mineRegisterForce, "force", false, "record despite a zero baseline or a blocking rejection")
+	r.BoolVar(&mineRegisterScopeAll, "scope-all", false, "eligibility scope: every chain (exclusive with --scope-repo/--scope-path)")
+	r.StringVar(&mineRegisterScopeRepo, "scope-repo", "", "eligibility scope: regex on the repository root basename")
+	r.StringVar(&mineRegisterScopePath, "scope-path", "", "eligibility scope: regex on a repo-relative changed path")
 	_ = commitGateMineRegisterCmd.MarkFlagRequired("class")
 	_ = commitGateMineRegisterCmd.MarkFlagRequired("match")
 	_ = commitGateMineRegisterCmd.MarkFlagRequired("tier")
@@ -213,10 +252,20 @@ func init() {
 	rj.StringVar(&mineRejectNote, "note", "", "free-text note")
 	rj.Int64Var(&mineRejectRejectedTS, "rejected-ts", 0, "rejection timestamp (default now)")
 	rj.BoolVar(&mineRejectForce, "force", false, "record despite a zero baseline")
+	rj.BoolVar(&mineRejectScopeAll, "scope-all", false, "eligibility scope: every chain (exclusive with --scope-repo/--scope-path)")
+	rj.StringVar(&mineRejectScopeRepo, "scope-repo", "", "eligibility scope: regex on the repository root basename")
+	rj.StringVar(&mineRejectScopePath, "scope-path", "", "eligibility scope: regex on a repo-relative changed path")
 	_ = commitGateMineRejectCmd.MarkFlagRequired("class")
 	_ = commitGateMineRejectCmd.MarkFlagRequired("match")
 	_ = commitGateMineRejectCmd.MarkFlagRequired("reason")
 	_ = commitGateMineRejectCmd.MarkFlagRequired("reopen")
+
+	sc := commitGateMineScopeCmd.Flags()
+	sc.BoolVar(&mineScopeAll, "scope-all", false, "eligibility scope: every chain (exclusive with --scope-repo/--scope-path)")
+	sc.StringVar(&mineScopeRepo, "scope-repo", "", "eligibility scope: regex on the repository root basename")
+	sc.StringVar(&mineScopePath, "scope-path", "", "eligibility scope: regex on a repo-relative changed path")
+	sc.Int64Var(&mineScopeSetTS, "scope-set-ts", 0, "migration timestamp opening the after-window (default now)")
+	sc.BoolVar(&mineScopeForce, "force", false, "record despite a zero scoped baseline")
 
 	s := commitGateMineScoreCmd.Flags()
 	s.StringVar(&mineScoreID, "id", "", "score only this intervention")

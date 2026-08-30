@@ -61,6 +61,8 @@ func (m *Model) startForm(kind formKind, cand cadence.Candidate) {
 		steps = []formStep{
 			{label: "class", value: class},
 			{label: "match", value: cand.Pattern},
+			{label: "scope-repo", value: ""},
+			{label: "scope-path", value: ""},
 			{label: "tier", value: "check"},
 			{label: "target", value: "check.sh"},
 		}
@@ -68,6 +70,8 @@ func (m *Model) startForm(kind formKind, cand cadence.Candidate) {
 		steps = []formStep{
 			{label: "class", value: class},
 			{label: "match", value: cand.Pattern},
+			{label: "scope-repo", value: ""},
+			{label: "scope-path", value: ""},
 			{label: "reason", value: ""},
 			{label: "reopen", value: ""},
 		}
@@ -111,24 +115,50 @@ func (m *Model) updateEditing(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// updateMatchPreview recomputes the live match count while the match step is
-// active, so a regex is tested against the corpus as it is typed.
+// updateMatchPreview recomputes the live preview under the active step: a match count
+// on the match step, and the eligible/ineligible/unknown split on either scope step.
 func (m *Model) updateMatchPreview() {
-	if m.form == nil || m.form.steps[m.form.idx].label != "match" {
+	if m.form == nil {
 		m.matchCount = ""
 		return
 	}
-	regex := strings.TrimSpace(m.input.Value())
-	if regex == "" {
+	switch m.form.steps[m.form.idx].label {
+	case "match":
+		regex := strings.TrimSpace(m.input.Value())
+		if regex == "" {
+			m.matchCount = ""
+			return
+		}
+		var buf strings.Builder
+		if err := mine.Match(&buf, m.cfg.StateDir, "", regex, "", false); err != nil {
+			m.matchCount = "invalid regex: " + err.Error()
+			return
+		}
+		m.matchCount = lastLine(buf.String())
+	case "scope-repo", "scope-path":
+		cov, err := mine.CoverCorpus(m.cfg.StateDir, "", m.scopeVal("scope-repo"), m.scopeVal("scope-path"))
+		if err != nil {
+			m.matchCount = "invalid scope: " + err.Error()
+			return
+		}
+		m.matchCount = fmt.Sprintf("scope: %d eligible · %d ineligible · %d unknown of %d chains",
+			cov.Eligible, cov.Ineligible, cov.Unknown, cov.Total)
+	default:
 		m.matchCount = ""
-		return
 	}
-	var buf strings.Builder
-	if err := mine.Match(&buf, m.cfg.StateDir, "", regex, "", false); err != nil {
-		m.matchCount = "invalid regex: " + err.Error()
-		return
+}
+
+// scopeVal reads a scope step's value, taking the live input when it is the active step.
+func (m *Model) scopeVal(label string) string {
+	if m.form.steps[m.form.idx].label == label {
+		return strings.TrimSpace(m.input.Value())
 	}
-	m.matchCount = lastLine(buf.String())
+	for _, s := range m.form.steps {
+		if s.label == label {
+			return s.value
+		}
+	}
+	return ""
 }
 
 // commitForm runs the wizard's write, then refreshes and closes the editor.
@@ -141,24 +171,33 @@ func (m *Model) commitForm() tea.Cmd {
 		}
 		return ""
 	}
+	// An author who names neither predicate means every chain, the all-scope.
+	repo, path := val("scope-repo"), val("scope-path")
+	scopeAll := repo == "" && path == ""
 	var buf strings.Builder
 	var err error
 	switch m.form.kind {
 	case formRegister:
 		err = mine.Register(&buf, m.cfg.StateDir, mine.RegisterOpts{
-			Class:  val("class"),
-			Match:  val("match"),
-			Kind:   "accepted",
-			Tier:   val("tier"),
-			Target: val("target"),
+			Class:     val("class"),
+			Match:     val("match"),
+			Kind:      "accepted",
+			Tier:      val("tier"),
+			Target:    val("target"),
+			ScopeAll:  scopeAll,
+			ScopeRepo: repo,
+			ScopePath: path,
 		})
 	case formReject:
 		err = mine.Reject(&buf, m.cfg.StateDir, mine.RejectOpts{
-			Class:  val("class"),
-			Match:  val("match"),
-			Kind:   "accepted",
-			Reason: val("reason"),
-			Reopen: val("reopen"),
+			Class:     val("class"),
+			Match:     val("match"),
+			Kind:      "accepted",
+			Reason:    val("reason"),
+			Reopen:    val("reopen"),
+			ScopeAll:  scopeAll,
+			ScopeRepo: repo,
+			ScopePath: path,
 		})
 	case formRetire:
 		err = mine.Retire(&buf, m.cfg.StateDir, m.form.id, val("reason"), "removed")

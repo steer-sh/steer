@@ -393,6 +393,20 @@ func renderDiff(cfg Config, plan *diffPlan, diff, names string, newPaths []strin
 	return diff
 }
 
+// SlashPaths returns the paths with OS separators normalised to forward slashes, the
+// form the ledger stores so a scope's path regex reads one separator on every host.
+// git already emits forward slashes, so this only ever changes a Windows-authored path.
+func SlashPaths(paths []string) []string {
+	if len(paths) == 0 {
+		return nil
+	}
+	out := make([]string, len(paths))
+	for i, p := range paths {
+		out[i] = strings.ReplaceAll(p, "\\", "/")
+	}
+	return out
+}
+
 // HasUnstagedEdits reports whether the working tree holds edits to tracked files that
 // the index does not have. Untracked files are deliberately outside it: a scratch file
 // nobody staged is not evidence that a fix went missing, and counting it would fire the

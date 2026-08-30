@@ -237,7 +237,23 @@ func ScoreRecord(record Record, chains []Chain, minAfter int) (map[string]any, e
 		return nil, err
 	}
 	kf := RecordKindFilter(record)
-	before, after := SplitChains(chains, SplitTS(record))
+	scope, hasScope, err := ParseScope(record)
+	if err != nil {
+		return nil, err
+	}
+	// The after-window opens at scope_set_ts when a legacy record was migrated later, so
+	// inspecting its historical post-install results cannot influence the new denominator.
+	splitTS := SplitTS(record)
+	afterStart := splitTS
+	if v := numFloat(record["scope_set_ts"]); v != 0 {
+		afterStart = v
+	}
+	before, _ := SplitChains(chains, splitTS)
+	_, after := SplitChains(chains, afterStart)
+	if hasScope {
+		before = Cover(before, scope).EligibleChains()
+		after = Cover(after, scope).EligibleChains()
+	}
 	bHits, bTotal, bRate := Incidence(before, pattern, kf)
 	aHits, aTotal, aRate := Incidence(after, pattern, kf)
 

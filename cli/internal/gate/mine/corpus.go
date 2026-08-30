@@ -6,6 +6,7 @@ package mine
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -68,6 +69,7 @@ func LoadRows(stateDir, ledger string) ([]gate.Row, error) {
 			if _, ok := row["host"]; !ok {
 				row["host"] = fallback
 			}
+			recoverChangedPaths(stateDir, row)
 			rows = append(rows, row)
 		}
 	}
@@ -91,6 +93,34 @@ func decodeRow(line string) gate.Row {
 
 func rowTS(row gate.Row) float64 { return numFloat(row["ts"]) }
 
+// recoverChangedPaths fills a row's changed_paths from its saved diff sidecar when the
+// row predates the stamp. It stamps only when it recovers at least one path: a stat-only
+// sidecar (an over-budget diff) carries no file headers, and stamping its empty result
+// would mark paths known-and-empty, wrongly excluding a chain that did touch files. An
+// unrecoverable sidecar leaves the key absent, which a scope reads as Unknown.
+func recoverChangedPaths(stateDir string, row gate.Row) {
+	if _, ok := row["changed_paths"]; ok {
+		return
+	}
+	name := str(row["diff_file"])
+	if name == "" || stateDir == "" {
+		return
+	}
+	data, err := os.ReadFile(filepath.Join(stateDir, "diffs", name))
+	if err != nil {
+		return
+	}
+	paths := pathsFromDiff(string(data))
+	if len(paths) == 0 {
+		return
+	}
+	list := make([]any, len(paths))
+	for i, p := range paths {
+		list[i] = p
+	}
+	row["changed_paths"] = list
+}
+
 // Chain is one commit attempt: the run of rows from one firing-1 opener to the next.
 type Chain struct {
 	Host        string
@@ -103,6 +133,15 @@ type Chain struct {
 	Instruments []string
 	Files       int
 	Rounds      int
+
+	// Repo is the repository root basename a scope's repo predicate matches; RepoKnown
+	// is false when no row carried repo metadata. Paths is the union of changed paths
+	// across the chain's rounds; PathsKnown is false when no row stamped or recovered a
+	// path list, which a scope reads as Unknown rather than an empty match.
+	Repo       string
+	RepoKnown  bool
+	Paths      []string
+	PathsKnown bool
 
 	seen map[string]bool
 }
@@ -180,6 +219,18 @@ func chainsForHost(rows []gate.Row, strictJoins bool) []Chain {
 		if inst := str(row["instrument"]); inst != "" {
 			ch.Instruments = appendUnique(ch.Instruments, inst)
 		}
+		if repo := str(row["repo"]); repo != "" && !ch.RepoKnown {
+			ch.Repo = slashBase(repo)
+			ch.RepoKnown = true
+		}
+		if raw, ok := row["changed_paths"]; ok {
+			ch.PathsKnown = true
+			for _, p := range asList(raw) {
+				if s := str(p); s != "" {
+					ch.Paths = appendUnique(ch.Paths, s)
+				}
+			}
+		}
 		if phase == "clean" || phase == "cap" {
 			p := phase
 			ch.Terminal = &p
@@ -244,6 +295,17 @@ var normWhitespaceRe = regexp.MustCompile(
 func Norm(text string) string {
 	collapsed := normWhitespaceRe.ReplaceAllString(text, " ")
 	return strings.ToLower(strings.Trim(collapsed, " "))
+}
+
+// slashBase is filepath.Base over forward slashes, so a repo path stays basenamed the
+// same way on every host — git reports forward slashes, and changed_paths are stored
+// slash-normalised, so the repo predicate must read the one separator too.
+func slashBase(p string) string {
+	p = strings.TrimRight(strings.ReplaceAll(p, "\\", "/"), "/")
+	if i := strings.LastIndexByte(p, '/'); i >= 0 {
+		return p[i+1:]
+	}
+	return p
 }
 
 func rowHost(row gate.Row) string {

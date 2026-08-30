@@ -304,8 +304,8 @@ func (e *Engine) reviewCommit(ctx context.Context, req Request, chain *Chain, p 
 		// happened. No cleared record: nothing was reviewed, so nothing is cleared.
 		err := e.log(req, mergeRows(
 			Row{"ts": time.Now().Unix(), "phase": "ungated", "reviewers": 0,
-				"files": len(p.paths), "firing": firing, "chars": len(p.raw),
-				"session_id": req.SessionID},
+				"files": len(p.paths), "changed_paths": SlashPaths(p.paths),
+				"firing": firing, "chars": len(p.raw), "session_id": req.SessionID},
 			ReviewerReport(e.cfg, result.Runs)))
 		kind := Allow
 		if p.notice != "" {
@@ -324,7 +324,8 @@ func (e *Engine) reviewCommit(ctx context.Context, req Request, chain *Chain, p 
 	if len(result.Reviews) == 0 {
 		err := e.log(req, mergeRows(
 			Row{"ts": time.Now().Unix(), "phase": "clean", "reviewers": result.Answered,
-				"files": len(p.paths), "firing": firing, "session_id": req.SessionID},
+				"files": len(p.paths), "changed_paths": SlashPaths(p.paths),
+				"firing": firing, "session_id": req.SessionID},
 			ReviewerReport(e.cfg, result.Runs),
 			e.ledger.SaveDiff(req.SessionID, firing, p.diff)))
 		if p.notice == "" {
@@ -366,7 +367,8 @@ func (e *Engine) reviewCommit(ctx context.Context, req Request, chain *Chain, p 
 	})
 	err := e.log(req, mergeRows(
 		Row{"ts": time.Now().Unix(), "phase": "deny", "reviewers": result.Answered,
-			"finding_slots": findings, "files": len(p.paths), "firing": firing,
+			"finding_slots": findings, "files": len(p.paths),
+			"changed_paths": SlashPaths(p.paths), "firing": firing,
 			"session_id": req.SessionID, "severity_lines_loose": LooseFindingCount(result.Reviews)},
 		ReviewerReport(e.cfg, result.Runs),
 		e.ledger.SaveDiff(req.SessionID, firing, p.diff),
@@ -414,7 +416,8 @@ func (e *Engine) terminalReview(ctx context.Context, req Request, chain *Chain, 
 	result := e.review(ctx, req, p)
 	row := mergeRows(
 		Row{"ts": time.Now().Unix(), "phase": "cap", "firing": firing,
-			"reviewers": result.Answered, "files": len(p.paths), "session_id": req.SessionID},
+			"reviewers": result.Answered, "files": len(p.paths),
+			"changed_paths": SlashPaths(p.paths), "session_id": req.SessionID},
 		ReviewerReport(e.cfg, result.Runs),
 		e.ledger.SaveDiff(req.SessionID, firing, p.diff))
 

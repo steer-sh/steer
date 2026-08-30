@@ -261,10 +261,13 @@ For each accepted review candidate:
      --match 'YOUR REGEX' \
      --kind defect \
      --tier check --target check.sh \
+     --scope-repo 'steer' --scope-path '\.go$' \
      --note "why this tell was chosen"
    ```
 
    `register` computes the pre-install baseline and refuses a regex with no baseline, since an unmatched class can never be scored. Use `--kind false-positive` for reviewer suppressions; it scores against rejected findings instead of accepted ones.
+
+   **A scope is required.** It names the opportunity window the class is measured over, and it is frozen at register time. Pass `--scope-all` for every chain, or one or both of `--scope-repo REGEX` (matches the repository root basename) and `--scope-path REGEX` (matches a repo-relative changed path); two predicates combine with AND. Scope repo and path metadata only — never the finding text. Selecting chains on the failure content is the bias the scope exists to remove, so a `check`-tier fix in Go code scopes to `--scope-path '\.go$'`, not to the finding's words. The baseline `register` reports is already restricted to the scope; widen the scope if it reads as zero.
 
    **`--tier steer` additionally requires `--hook-id`** — the steer-manifest key, which is also the `hook_name` in `hooks/steer-audit.jsonl`. That id makes the audit-log join deterministic. Reconstructing it later from `target` means searching the manifest for a path, and the manifest stops describing a hook the moment this loop renames or retires it. `register` also copies the rule text and `rule_hash` from the manifest, so the join survives a rename.
 
@@ -278,11 +281,14 @@ For each review candidate you examine and refuse, record the refusal:
 steer commit-gate mine reject \
   --class "within-chain repeat finding" \
   --match 'YOUR REGEX' \
+  --scope-all \
   --reason "why no gate was installed" \
   --reopen "the observation that would change this answer"
 ```
 
-Author the regex the same way as for `register`, and test it with `match` first — a rejection whose regex matches nothing cannot recognise the class when it returns, so `reject` refuses one, exactly as `register` does.
+Author the regex the same way as for `register`, and test it with `match` first — a rejection whose regex matches nothing cannot recognise the class when it returns, so `reject` refuses one, exactly as `register` does. A rejection also takes a frozen scope, on the same `--scope-all` / `--scope-repo` / `--scope-path` rule as `register`: it is the window the class's growth is watched over if the refusal is ever revisited.
+
+A legacy record written before scopes existed carries no scope. `steer commit-gate mine scope <id> --scope-…` installs one: it sets the scope once, recomputes the baseline over the eligible chains, and opens a fresh after-window at the migration moment so inspecting the record's own history cannot pick a scope that flatters it. An installed scope is frozen — correct one by retiring the record and registering afresh.
 
 `--reason` and `--reopen` are both required, and the second is the load-bearing one. "It is not mechanizable" is a verdict on today's instrument, not a permanent property of the class. Name what would have to change: a signal that starts being persisted, a rate that triples, a tier that becomes cheap. The durable version of that reasoning belongs in a durable design note; the record here is what fires at re-proposal time.
 

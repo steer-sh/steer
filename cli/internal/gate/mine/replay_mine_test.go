@@ -212,18 +212,45 @@ func TestReplayMineWrite(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// The Go writer requires a frozen scope mine.py has no concept of, so the two
+	// diverge on the scope key alone. stripScope drops it before the compare, which
+	// keeps mine.py parity on every field the port did not intentionally add.
 	must(Register(bytesDiscard(), goDir, RegisterOpts{Class: "Replay Probe", Match: "the",
-		Tier: "check", Target: "check.sh", InstalledTS: 1780000000, Force: true}))
+		Tier: "check", Target: "check.sh", InstalledTS: 1780000000, Force: true, ScopeAll: true}))
 	must(Reject(bytesDiscard(), goDir, RejectOpts{Class: "Replay Refusal", Match: "flag",
-		Reason: "r", Reopen: "o", RejectedTS: 1780000001, Force: true}))
+		Reason: "r", Reopen: "o", RejectedTS: 1780000001, Force: true, ScopeAll: true}))
 	must(Register(bytesDiscard(), goDir, RegisterOpts{Class: "Replay Probe v2", Match: "the",
-		Tier: "check", Target: "check.sh", InstalledTS: 1780000002, Supersedes: "replay-probe", Force: true}))
+		Tier: "check", Target: "check.sh", InstalledTS: 1780000002, Supersedes: "replay-probe",
+		Force: true, ScopeAll: true}))
 
 	pyFile, _ := os.ReadFile(filepath.Join(pyDir, "interventions.jsonl"))
 	goFile, _ := os.ReadFile(filepath.Join(goDir, "interventions.jsonl"))
-	if !bytes.Equal(pyFile, goFile) {
-		t.Errorf("interventions.jsonl differs after the write sequence\n python:\n%s\n go:\n%s", pyFile, goFile)
+	if got, want := stripScope(t, goFile), string(pyFile); got != want {
+		t.Errorf("interventions.jsonl differs after the write sequence (scope aside)\n python:\n%s\n go:\n%s", want, got)
 	}
+}
+
+// stripScope re-emits each interventions.jsonl line with the Go-only scope keys removed,
+// so the remaining fields can be compared byte-for-byte with mine.py's output.
+func stripScope(t *testing.T, data []byte) string {
+	t.Helper()
+	var out strings.Builder
+	for _, line := range strings.Split(strings.TrimRight(string(data), "\n"), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		dec := json.NewDecoder(strings.NewReader(line))
+		dec.UseNumber()
+		var rec map[string]any
+		if err := dec.Decode(&rec); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		delete(rec, "scope")
+		delete(rec, "scope_set_ts")
+		out.WriteString(pyDumps(rec, 0))
+		out.WriteByte('\n')
+	}
+	return out.String()
 }
 
 func bytesDiscard() *bytes.Buffer { return &bytes.Buffer{} }

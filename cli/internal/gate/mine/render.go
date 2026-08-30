@@ -258,6 +258,9 @@ type RegisterOpts struct {
 	Supersedes  string
 	InstalledTS int64
 	Force       bool
+	ScopeAll    bool
+	ScopeRepo   string
+	ScopePath   string
 }
 
 // Register records an intervention with its baseline incidence.
@@ -273,6 +276,14 @@ func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 	if err != nil {
 		return fmt.Errorf("bad regex %s: %w", pyRepr(o.Match), err)
 	}
+	scopeMap, err := BuildScope(o.ScopeAll, o.ScopeRepo, o.ScopePath)
+	if err != nil {
+		return err
+	}
+	scope, _, err := ParseScope(Record{"scope": scopeMap})
+	if err != nil {
+		return err
+	}
 	rows, err := LoadRows(stateDir, o.Ledger)
 	if err != nil {
 		return err
@@ -283,10 +294,11 @@ func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 		installed = now()
 	}
 	before, _ := SplitChains(chains, float64(installed))
+	before = Cover(before, scope).EligibleChains()
 	bHits, bTotal, bRate := Incidence(before, pattern, kindFilter)
 	if bHits == 0 && !o.Force {
-		return fmt.Errorf("regex matches no finding before install — an intervention with " +
-			"no baseline can never be scored. Fix the regex or pass --force")
+		return fmt.Errorf("regex matches no finding in the scoped baseline — an intervention " +
+			"with no baseline can never be scored. Widen the scope or the regex, or pass --force")
 	}
 	records, err := Load(stateDir)
 	if err != nil {
@@ -325,6 +337,7 @@ func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 		"installed_ts":   int(installed),
 		"installed_date": stamp(float64(installed)),
 		"status":         "active",
+		"scope":          scopeMap,
 		"baseline":       baselineMap(bHits, bTotal, bRate),
 		"instrument":     instrumentValue(chains),
 	}
@@ -372,6 +385,9 @@ type RejectOpts struct {
 	Note       string
 	RejectedTS int64
 	Force      bool
+	ScopeAll   bool
+	ScopeRepo  string
+	ScopePath  string
 }
 
 // Reject records a class examined and refused, so it is not re-proposed.
@@ -387,6 +403,14 @@ func Reject(w io.Writer, stateDir string, o RejectOpts) error {
 	if err != nil {
 		return fmt.Errorf("bad regex %s: %w", pyRepr(o.Match), err)
 	}
+	scopeMap, err := BuildScope(o.ScopeAll, o.ScopeRepo, o.ScopePath)
+	if err != nil {
+		return err
+	}
+	scope, _, err := ParseScope(Record{"scope": scopeMap})
+	if err != nil {
+		return err
+	}
 	rows, err := LoadRows(stateDir, o.Ledger)
 	if err != nil {
 		return err
@@ -397,11 +421,12 @@ func Reject(w io.Writer, stateDir string, o RejectOpts) error {
 		rejected = now()
 	}
 	before, _ := SplitChains(chains, float64(rejected))
+	before = Cover(before, scope).EligibleChains()
 	bHits, bTotal, bRate := Incidence(before, pattern, kindFilter)
 	if bHits == 0 && !o.Force {
-		return fmt.Errorf("regex matches no finding before the rejection — a rejection with " +
+		return fmt.Errorf("regex matches no finding in the scoped baseline — a rejection with " +
 			"no baseline can never be re-scored, and cannot be recognised when the class " +
-			"returns. Fix the regex or pass --force")
+			"returns. Widen the scope or the regex, or pass --force")
 	}
 	records, err := Load(stateDir)
 	if err != nil {
@@ -422,6 +447,7 @@ func Reject(w io.Writer, stateDir string, o RejectOpts) error {
 		"rejected_ts":   int(rejected),
 		"rejected_date": stamp(float64(rejected)),
 		"status":        "rejected",
+		"scope":         scopeMap,
 		"baseline":      baselineMap(bHits, bTotal, bRate),
 		"instrument":    instrumentValue(chains),
 	}
@@ -430,6 +456,70 @@ func Reject(w io.Writer, stateDir string, o RejectOpts) error {
 		return err
 	}
 	fmt.Fprintln(w, pyDumps(record, 2))
+	return nil
+}
+
+// ScopeSetOpts are the flags of `mine scope`.
+type ScopeSetOpts struct {
+	Ledger     string
+	ScopeAll   bool
+	ScopeRepo  string
+	ScopePath  string
+	ScopeSetTS int64
+	Force      bool
+}
+
+// ScopeSet installs a scope on a legacy, unscoped record. It recomputes the scoped
+// baseline and stamps scope_set_ts, which opens the after-window so a migration cannot
+// select on already-observed post-install results. An existing scope is never edited;
+// correcting one is a retire plus a fresh register.
+func ScopeSet(w io.Writer, stateDir, id string, o ScopeSetOpts) error {
+	records, err := Load(stateDir)
+	if err != nil {
+		return err
+	}
+	rec := findRecord(records, id)
+	if rec == nil {
+		return fmt.Errorf("no intervention with id %s", pyRepr(id))
+	}
+	if _, has := rec["scope"]; has {
+		return fmt.Errorf("%s already carries a scope — an installed scope is frozen. "+
+			"Retire it and register a fresh record to correct the eligibility rule", pyRepr(id))
+	}
+	scopeMap, err := BuildScope(o.ScopeAll, o.ScopeRepo, o.ScopePath)
+	if err != nil {
+		return err
+	}
+	scope, _, err := ParseScope(Record{"scope": scopeMap})
+	if err != nil {
+		return err
+	}
+	pattern, err := compilePattern(str(rec["match"]))
+	if err != nil {
+		return fmt.Errorf("bad regex %s: %w", pyRepr(str(rec["match"])), err)
+	}
+	rows, err := LoadRows(stateDir, o.Ledger)
+	if err != nil {
+		return err
+	}
+	chains := BuildChains(rows, false)
+	before, _ := SplitChains(chains, SplitTS(rec))
+	before = Cover(before, scope).EligibleChains()
+	bHits, bTotal, bRate := Incidence(before, pattern, RecordKindFilter(rec))
+	if bHits == 0 && !o.Force {
+		return fmt.Errorf("regex matches no finding in the scoped baseline — widen the scope, or pass --force")
+	}
+	setTS := o.ScopeSetTS
+	if setTS == 0 {
+		setTS = now()
+	}
+	rec["scope"] = scopeMap
+	rec["scope_set_ts"] = int(setTS)
+	rec["baseline"] = baselineMap(bHits, bTotal, bRate)
+	if err := Save(stateDir, records); err != nil {
+		return err
+	}
+	fmt.Fprintln(w, pyDumps(rec, 2))
 	return nil
 }
 
