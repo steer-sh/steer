@@ -9,12 +9,14 @@ import (
 	"encoding/json"
 	"sort"
 	"time"
+
+	"github.com/steer-sh/steer-cli/internal/harness"
 )
 
 // DigestVersion is the schema version of the emitted digest. The steer-report
 // skill prompt reads this field; bump it whenever the shape or semantics of
 // the digest change.
-const DigestVersion = 1
+const DigestVersion = 2
 
 // DefaultMaxDigestBytes caps the marshaled digest so it can be read into a
 // session without crowding the context window.
@@ -58,46 +60,66 @@ type Signals struct {
 	HookBlocks []*Cluster `json:"hook_blocks"`
 }
 
-// Directive is a CLAUDE.md bullet outside the Steer Rules section — a standing
+// Directive is an instruction-file bullet outside the Steer Rules section — a standing
 // instruction not yet backed by a deterministic hook.
 type Directive struct {
 	Section string `json:"section"`
 	Text    string `json:"text"`
 }
 
-// ClaudeMD summarizes one CLAUDE.md file: rules already enforced by steer and
-// directives that are candidates for enforcement.
-type ClaudeMD struct {
+// InstructionFile summarizes one harness instruction document — CLAUDE.md or
+// AGENTS.md: rules already enforced by steer, and directives that are
+// candidates for enforcement.
+type InstructionFile struct {
+	Harness    harness.ID  `json:"harness"`
 	Path       string      `json:"path"`
 	SteerRules []string    `json:"steer_rules"`
 	Directives []Directive `json:"directives"`
 }
 
+// HarnessCoverage is one harness's share of the scan. It answers what the
+// totals cannot: whether a harness contributed no evidence because it has none
+// on this machine, or because the scan never reached it.
+type HarnessCoverage struct {
+	Harness         harness.ID `json:"harness"`
+	FilesScanned    int        `json:"files_scanned"`
+	SessionsScanned int        `json:"sessions_scanned"`
+	ThreadsScanned  int        `json:"threads_scanned"`
+	BytesScanned    int64      `json:"bytes_scanned"`
+	EntriesScanned  int        `json:"entries_scanned"`
+	EntriesSkipped  int        `json:"entries_skipped"`
+}
+
 // Stats reports scan coverage and honesty about truncation.
 type Stats struct {
-	FilesScanned    int   `json:"files_scanned"`
-	SessionsScanned int   `json:"sessions_scanned"`
-	BytesScanned    int64 `json:"bytes_scanned"`
-	EntriesScanned  int   `json:"entries_scanned"`
-	EntriesSkipped  int   `json:"entries_skipped"`
-	ClustersFound   int   `json:"clusters_found"`
-	ClustersEmitted int   `json:"clusters_emitted"`
-	Truncated       bool  `json:"truncated"`
+	FilesScanned    int `json:"files_scanned"`
+	SessionsScanned int `json:"sessions_scanned"`
+	// ThreadsScanned counts subagent threads seen under those sessions. A
+	// thread is provenance, never a unit: it is reported and never counted as
+	// a session.
+	ThreadsScanned  int               `json:"threads_scanned"`
+	BytesScanned    int64             `json:"bytes_scanned"`
+	EntriesScanned  int               `json:"entries_scanned"`
+	EntriesSkipped  int               `json:"entries_skipped"`
+	ClustersFound   int               `json:"clusters_found"`
+	ClustersEmitted int               `json:"clusters_emitted"`
+	Truncated       bool              `json:"truncated"`
+	Harnesses       []HarnessCoverage `json:"harnesses"`
 }
 
 // Digest is the JSON contract between the scanner and the steer-report skill.
 type Digest struct {
-	DigestVersion   int        `json:"digest_version"`
-	GeneratedAt     string     `json:"generated_at"`
-	WindowDays      int        `json:"window_days"`
-	ProjectsScanned []string   `json:"projects_scanned"`
-	Stats           Stats      `json:"stats"`
-	ClaudeMD        []ClaudeMD `json:"claude_md"`
-	Signals         Signals    `json:"signals"`
+	DigestVersion    int               `json:"digest_version"`
+	GeneratedAt      string            `json:"generated_at"`
+	WindowDays       int               `json:"window_days"`
+	ProjectsScanned  []string          `json:"projects_scanned"`
+	Stats            Stats             `json:"stats"`
+	InstructionFiles []InstructionFile `json:"instruction_files"`
+	Signals          Signals           `json:"signals"`
 }
 
 // Marshal renders the digest within maxBytes, evicting the lowest-scoring
-// signal clusters until it fits. ClaudeMD sections are exempt from eviction:
+// signal clusters until it fits. InstructionFiles are exempt from eviction:
 // they are small and the highest-precision source. Stats.Truncated and
 // ClustersEmitted are updated to reflect what survived.
 func (d *Digest) Marshal(maxBytes int) ([]byte, error) {
@@ -181,7 +203,7 @@ func NewDigest(windowDays int) *Digest {
 			ToolFailures:    []*Cluster{},
 			HookBlocks:      []*Cluster{},
 		},
-		ClaudeMD:        []ClaudeMD{},
-		ProjectsScanned: []string{},
+		InstructionFiles: []InstructionFile{},
+		ProjectsScanned:  []string{},
 	}
 }

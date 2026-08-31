@@ -4,6 +4,7 @@
 package transcript
 
 import (
+	"strings"
 	"time"
 
 	"github.com/steer-sh/steer-cli/internal/harness"
@@ -52,12 +53,32 @@ type Event struct {
 	Meta bool
 	// Tool names the tool for a call or a result.
 	Tool string
+	// Shell reports that a tool call ran a shell command. A classifier reads
+	// this instead of the tool's name, which differs per harness.
+	Shell bool
 	// Target is the tool's subject: a shell command, or a file path.
 	Target string
 	// ToolUseID joins a result back to its call.
 	ToolUseID string
 	// IsError reports a failed tool result.
 	IsError bool
+}
+
+// NormalizeProject collapses a path or a harness's munged form of one to a
+// canonical key: every non-alphanumeric byte becomes '-'. Harnesses name a
+// project on disk in undocumented ways, so both sides of a comparison are
+// normalized rather than one side being trusted.
+func NormalizeProject(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		} else {
+			b.WriteRune('-')
+		}
+	}
+	return b.String()
 }
 
 // Filter narrows both discovery and streaming. Since drops sessions last

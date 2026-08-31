@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/transcript"
 )
 
@@ -43,6 +44,7 @@ var whitespaceRun = regexp.MustCompile(`\s+`)
 type toolCall struct {
 	Name   string
 	Target string
+	Shell  bool
 }
 
 // Scanner accumulates signal clusters from normalized transcript events. It
@@ -52,6 +54,17 @@ type Scanner struct {
 	stats    Stats
 	clusters map[string]map[string]*Cluster
 	sessions map[string]struct{}
+	threads  map[string]struct{}
+	coverage map[harness.ID]*harnessScan
+}
+
+// harnessScan is one harness's running coverage. It keeps its own id sets: the
+// scanner-wide sets answer "how many sessions in all", which is not the sum of
+// the per-harness counts if two harnesses ever mint the same id.
+type harnessScan struct {
+	cov      HarnessCoverage
+	sessions map[string]struct{}
+	threads  map[string]struct{}
 }
 
 // NewScanner returns a Scanner that ignores entries older than since.
@@ -65,6 +78,8 @@ func NewScanner(since time.Time) *Scanner {
 			kindHookBlock:  {},
 		},
 		sessions: map[string]struct{}{},
+		threads:  map[string]struct{}{},
+		coverage: map[harness.ID]*harnessScan{},
 	}
 }
 
@@ -73,25 +88,60 @@ func (s *Scanner) ScanSession(a transcript.Adapter, session transcript.Session) 
 	// tool call id → call info, so results can be attributed. Per-session:
 	// results always land in the same transcript as their call.
 	calls := map[string]toolCall{}
+	hs := s.harnessScanFor(session.Harness)
 
 	counts, err := a.Stream(session, transcript.Filter{Since: s.Since}, func(e transcript.Event) error {
-		s.classify(e, calls)
+		s.classify(e, calls, hs)
 		return nil
 	})
 	s.stats.FilesScanned++
 	s.stats.BytesScanned += counts.Bytes
 	s.stats.EntriesScanned += counts.Entries
 	s.stats.EntriesSkipped += counts.Skipped
+	hs.cov.FilesScanned++
+	hs.cov.BytesScanned += counts.Bytes
+	hs.cov.EntriesScanned += counts.Entries
+	hs.cov.EntriesSkipped += counts.Skipped
 	return err
 }
 
-func (s *Scanner) classify(e transcript.Event, calls map[string]toolCall) {
+// Reached opens a harness's coverage row, and is what separates a harness that
+// scanned clean from one the scan never got to: a caller must call it for every
+// harness whose transcripts it could read, whether or not any session followed.
+// A row of zeros then means no evidence; no row at all means unreachable.
+func (s *Scanner) Reached(id harness.ID) { s.harnessScanFor(id) }
+
+func (s *Scanner) harnessScanFor(id harness.ID) *harnessScan {
+	hs, ok := s.coverage[id]
+	if !ok {
+		hs = &harnessScan{
+			cov:      HarnessCoverage{Harness: id},
+			sessions: map[string]struct{}{},
+			threads:  map[string]struct{}{},
+		}
+		s.coverage[id] = hs
+	}
+	return hs
+}
+
+func (s *Scanner) classify(e transcript.Event, calls map[string]toolCall, hs *harnessScan) {
 	if e.SessionID != "" {
+		if _, seen := hs.sessions[e.SessionID]; !seen {
+			hs.sessions[e.SessionID] = struct{}{}
+			hs.cov.SessionsScanned++
+		}
 		s.sessions[e.SessionID] = struct{}{}
+	}
+	if e.ThreadID != "" {
+		if _, seen := hs.threads[e.ThreadID]; !seen {
+			hs.threads[e.ThreadID] = struct{}{}
+			hs.cov.ThreadsScanned++
+		}
+		s.threads[e.ThreadID] = struct{}{}
 	}
 	switch e.Kind {
 	case transcript.KindToolCall:
-		calls[e.ToolUseID] = toolCall{Name: e.Tool, Target: e.Target}
+		calls[e.ToolUseID] = toolCall{Name: e.Tool, Target: e.Target, Shell: e.Shell}
 	case transcript.KindHumanTurn:
 		if !e.Meta {
 			s.checkCorrection(e.Text, e)
@@ -138,7 +188,7 @@ func (s *Scanner) checkToolResult(e transcript.Event, calls map[string]toolCall)
 	case e.IsError && strings.Contains(lower, "hook") && (strings.Contains(lower, "block") || strings.Contains(lower, "denied")):
 		snippet := matchLine(text, strings.Index(lower, "hook"))
 		s.addCluster(kindHookBlock, snippet, snippet, e)
-	case call.Name == "Bash":
+	case call.Shell:
 		if loc := failurePattern.FindStringIndex(text); loc != nil {
 			snippet := matchLine(text, loc[0])
 			s.addCluster(kindFailure, snippet, snippet+" — cmd: "+call.Target, e)
@@ -214,12 +264,16 @@ func (s *Scanner) addCluster(kind, keyBasis, example string, e transcript.Event)
 // Finalize assembles the digest from accumulated clusters. Single-occurrence
 // correction clusters are kept — the model layer may still find them useful —
 // but they rank last and evict first.
-func (s *Scanner) Finalize(windowDays int, projects []string, claudeMDs []ClaudeMD) *Digest {
+func (s *Scanner) Finalize(windowDays int, projects []string, instructionFiles []InstructionFile) *Digest {
 	d := NewDigest(windowDays)
 	d.ProjectsScanned = projects
-	d.ClaudeMD = claudeMDs
+	if instructionFiles != nil {
+		d.InstructionFiles = instructionFiles
+	}
 
 	s.stats.SessionsScanned = len(s.sessions)
+	s.stats.ThreadsScanned = len(s.threads)
+	s.stats.Harnesses = s.harnessRows()
 	d.Stats = s.stats
 
 	d.Signals.UserCorrections = collect(s.clusters[kindCorrection])
@@ -228,6 +282,18 @@ func (s *Scanner) Finalize(windowDays int, projects []string, claudeMDs []Claude
 	d.Signals.HookBlocks = collect(s.clusters[kindHookBlock])
 
 	return d
+}
+
+// harnessRows renders coverage in registry order, so the digest is
+// deterministic whatever order the scan visited harnesses in.
+func (s *Scanner) harnessRows() []HarnessCoverage {
+	out := []HarnessCoverage{}
+	for _, h := range harness.All() {
+		if hs, ok := s.coverage[h.ID]; ok {
+			out = append(out, hs.cov)
+		}
+	}
+	return out
 }
 
 func collect(m map[string]*Cluster) []*Cluster {

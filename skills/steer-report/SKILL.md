@@ -1,9 +1,9 @@
 ---
 name: steer-report
-description: Audits the interventions steer already installed, then mines Claude Code transcripts and the commit-review ledger for new hook candidates backed by evidence. Use for steer onboarding ("what hooks should I create?"), periodic review of installed hooks, or when the user asks to mine usage history for candidates.
+description: Audits the interventions steer already installed, then mines Claude Code and Codex transcripts and the commit-review ledger for new hook candidates backed by evidence. Use for steer onboarding ("what hooks should I create?"), periodic review of installed hooks, or when the user asks to mine usage history for candidates.
 user-invocable: true
-digest_version: 1
-compatibility: Requires the steer CLI (report and commit-gate subcommands) on PATH or bundled under scripts/. Reads transcripts from ~/.claude/projects and, when present, the commit-review ledger under ~/.claude/state/commit-review.
+digest_version: 2
+compatibility: Requires the steer CLI (report and commit-gate subcommands) on PATH or bundled under scripts/. Reads transcripts from ~/.claude/projects and $CODEX_HOME/sessions, and, when present, the commit-review ledger under ~/.claude/state/commit-review.
 allowed-tools: Bash(steer *), Read, Edit, Write
 ---
 
@@ -18,7 +18,7 @@ The audit comes first on purpose. Proposing new hooks is the interesting half, a
 
 Two corpora feed this skill, and either may be empty on a given machine:
 
-- **Transcript friction** — repeated corrections, rejected tool calls, recurring lint/test failures, and CLAUDE.md rules not yet enforced. Mined by `steer report`.
+- **Transcript friction** — repeated corrections, rejected tool calls, recurring lint/test failures, and instruction-file rules (CLAUDE.md, AGENTS.md) not yet enforced. Mined by `steer report` across every harness with transcripts on this machine.
 - **Commit-review findings** — defects the commit-review gate found and adjudicated. Mined by `steer commit-gate mine`. Absent when there is no commit-review ledger on this machine.
 
 An empty corpus produces one line, never an error. An adopter with no commit-review ledger still gets the transcript half — the cold-start front door.
@@ -112,17 +112,19 @@ STEER_BIN="${STEER_BIN:-steer}"
 
 Then Read `${TMPDIR:-/tmp}/steer-digest.json` **once**. Do not cat the file and do not re-read it later — everything needed for analysis is in that single read.
 
-All projects are scanned by default (cross-project habits are the strongest candidates). Pass through any flags the user supplied (`--days N`, `--project-only`, `--max-digest-bytes N`). Strip `--headless` — it is a skill flag, not a CLI flag.
+All projects and every harness are scanned by default (cross-project, cross-harness habits are the strongest candidates). Pass through any flags the user supplied (`--days N`, `--project-only`, `--harness claude-code|codex`, `--max-digest-bytes N`). Strip `--headless` — it is a skill flag, not a CLI flag.
 
 The queue's transcript candidates already list the correction clusters that cleared the deterministic threshold (3+ sessions). Treat that count as an upper bound: it is the mechanical grouping, not the final class. Read the full digest to refine, split, or discard those clusters and to catch anything the threshold missed.
 
-Digest schema (`digest_version: 1`):
+Digest schema (`digest_version: 2`):
 
-- `stats` — coverage: `sessions_scanned`, `bytes_scanned`, `clusters_found`, `clusters_emitted`, `truncated`. **Always relay coverage to the user in one sentence.** If `truncated` is true, say so and suggest narrowing (`--days 7`) or raising `--max-digest-bytes`.
-- `claude_md[]` — per CLAUDE.md file: `steer_rules` (already enforced by hooks) and `directives` (standing instructions with their section heading, NOT yet enforced).
+- `stats` — coverage: `sessions_scanned`, `threads_scanned`, `bytes_scanned`, `clusters_found`, `clusters_emitted`, `truncated`. **Always relay coverage to the user in one sentence.** If `truncated` is true, say so and suggest narrowing (`--days 7`) or raising `--max-digest-bytes`.
+- `stats.harnesses[]` — per harness: `harness`, `files_scanned`, `sessions_scanned`, `threads_scanned`, `bytes_scanned`, `entries_scanned`, `entries_skipped`. A harness missing from this list was never reached; a harness present with zeros has no evidence on this machine. Say which when a harness contributes nothing.
+- The session is the unit and a subagent thread is provenance under its root session. `threads_scanned` reports how many threads rode along; it is never added to `sessions_scanned`.
+- `instruction_files[]` — per instruction document (CLAUDE.md or AGENTS.md), tagged with its `harness`: `steer_rules` (already enforced by hooks) and `directives` (standing instructions with their section heading, NOT yet enforced).
 - `signals.user_corrections[]` — user turns matching correction language. Each cluster: `pattern`, `count`, `sessions` (distinct sessions), `first_seen`, `last_seen`, `examples` (up to 3 raw snippets).
 - `signals.user_rejections[]` — tool calls the user declined at the permission prompt (pattern is `Tool: target`).
-- `signals.tool_failures[]` — recurring lint/test/compile failures from Bash output.
+- `signals.tool_failures[]` — recurring lint/test/compile failures from shell-tool output, whichever harness ran the shell.
 - `signals.hook_blocks[]` — operations already blocked by existing hooks. These are enforcement *working*; use them only to avoid suggesting duplicates.
 
 The digest is size-capped: the CLI evicts the lowest-scoring clusters to fit, and reports honesty in `stats`.
@@ -346,8 +348,8 @@ When the invocation contains `--headless`: skip the gate, ask nothing, install n
 
 ```json
 {
-  "digest_version": 1,
-  "stats": { "sessions_scanned": 0, "truncated": false },
+  "digest_version": 2,
+  "stats": { "sessions_scanned": 0, "threads_scanned": 0, "truncated": false },
   "interventions": [
     {
       "class": "stale test-count claim",
@@ -362,7 +364,7 @@ When the invocation contains `--headless`: skip the gate, ask nothing, install n
       "rule": "never use console.log | use logger instead",
       "scope": "project",
       "tier": "steer",
-      "sources": ["claude_md", "user_corrections"],
+      "sources": ["instruction_files", "user_corrections"],
       "evidence": "corrected in 4 sessions; directive in CLAUDE.md §Conventions"
     },
     {

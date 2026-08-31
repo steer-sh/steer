@@ -31,24 +31,6 @@ func (Adapter) Root() (string, error) {
 	return filepath.Join(home, ".claude", "projects"), nil
 }
 
-// normalizeForMatch collapses a path or munged directory name to a canonical
-// form for comparison: every non-alphanumeric byte becomes '-'. Claude Code
-// munges project paths this way when naming transcript directories, but the
-// exact character set it replaces is undocumented — normalizing both sides
-// makes the comparison robust to that.
-func normalizeForMatch(s string) string {
-	var b strings.Builder
-	b.Grow(len(s))
-	for _, r := range s {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
-			b.WriteRune(r)
-		} else {
-			b.WriteRune('-')
-		}
-	}
-	return b.String()
-}
-
 // Discover lists transcript files modified at or after f.Since. Callers pass
 // both the literal working directory and its symlink-resolved form: Claude Code
 // names transcript directories after whichever path the session was launched
@@ -64,7 +46,7 @@ func (a Adapter) Discover(root string, f transcript.Filter) ([]transcript.Sessio
 
 	want := map[string]struct{}{}
 	for _, p := range f.Projects {
-		want[normalizeForMatch(p)] = struct{}{}
+		want[transcript.NormalizeProject(p)] = struct{}{}
 	}
 
 	var sessions []transcript.Session
@@ -73,7 +55,7 @@ func (a Adapter) Discover(root string, f transcript.Filter) ([]transcript.Sessio
 			continue
 		}
 		if !f.AllProjects {
-			if _, ok := want[normalizeForMatch(entry.Name())]; !ok {
+			if _, ok := want[transcript.NormalizeProject(entry.Name())]; !ok {
 				continue
 			}
 		}
@@ -239,6 +221,7 @@ func (a Adapter) emitToolCalls(raw json.RawMessage, base transcript.Event, emit 
 		}
 		event := base
 		event.Kind, event.Tool, event.Target, event.ToolUseID = transcript.KindToolCall, b.Name, target, b.ID
+		event.Shell = b.Name == "Bash"
 		if err := emit(event); err != nil {
 			return err
 		}

@@ -212,7 +212,7 @@ func TestDigestEvictionRespectsBudget(t *testing.T) {
 	}
 }
 
-func TestExtractClaudeMD(t *testing.T) {
+func TestExtractInstructionFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "CLAUDE.md")
 	content := `# Project
@@ -233,7 +233,7 @@ func TestExtractClaudeMD(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	md, err := ExtractClaudeMD(path)
+	md, err := ExtractInstructionFile(harness.ClaudeCode, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,11 +247,164 @@ func TestExtractClaudeMD(t *testing.T) {
 		t.Errorf("section = %q", md.Directives[0].Section)
 	}
 
-	missing, err := ExtractClaudeMD(filepath.Join(dir, "nope.md"))
+	missing, err := ExtractInstructionFile(harness.ClaudeCode, filepath.Join(dir, "nope.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(missing.SteerRules) != 0 || len(missing.Directives) != 0 {
 		t.Error("missing file should yield empty result")
+	}
+}
+
+// fakeAdapter replays prepared events, so a coverage test needs no second
+// on-disk transcript format.
+type fakeAdapter struct {
+	id     harness.ID
+	events []transcript.Event
+}
+
+func (f fakeAdapter) Harness() harness.ID   { return f.id }
+func (f fakeAdapter) Root() (string, error) { return "/fake", nil }
+
+func (f fakeAdapter) Discover(string, transcript.Filter) ([]transcript.Session, error) {
+	return []transcript.Session{{Harness: f.id, Path: "/fake/a.jsonl", Project: "/repo/alpha"}}, nil
+}
+
+func (f fakeAdapter) Stream(_ transcript.Session, _ transcript.Filter, emit func(transcript.Event) error) (transcript.Counts, error) {
+	for _, e := range f.events {
+		if err := emit(e); err != nil {
+			return transcript.Counts{}, err
+		}
+	}
+	return transcript.Counts{Entries: len(f.events), Bytes: 10}, nil
+}
+
+func TestDigestReportsCoveragePerHarness(t *testing.T) {
+	codexEvents := []transcript.Event{
+		{Kind: transcript.KindHumanTurn, SessionID: "root-1", Text: "stop adding docstrings"},
+		{Kind: transcript.KindHumanTurn, SessionID: "root-1", ThreadID: "thread-9", Text: "why do you keep using sed"},
+	}
+	claudeEvents := []transcript.Event{
+		{Kind: transcript.KindHumanTurn, SessionID: "cc-1", Text: "I said use the logger"},
+	}
+	adapters := []transcript.Adapter{
+		fakeAdapter{id: harness.ClaudeCode, events: claudeEvents},
+		fakeAdapter{id: harness.Codex, events: codexEvents},
+	}
+
+	scanner, projects := Scan(adapters, time.Time{}, transcript.Filter{AllProjects: true}, nil)
+	d := scanner.Finalize(30, projects, nil)
+
+	if d.DigestVersion != 2 {
+		t.Errorf("digest_version = %d; want 2", d.DigestVersion)
+	}
+	// Two root sessions and one thread: a thread is provenance, not a unit.
+	if d.Stats.SessionsScanned != 2 || d.Stats.ThreadsScanned != 1 {
+		t.Errorf("stats = %+v", d.Stats)
+	}
+	if len(d.Stats.Harnesses) != 2 {
+		t.Fatalf("harness coverage = %+v", d.Stats.Harnesses)
+	}
+	// Registry order, whatever order the scan ran in.
+	if d.Stats.Harnesses[0].Harness != harness.ClaudeCode || d.Stats.Harnesses[1].Harness != harness.Codex {
+		t.Fatalf("coverage order = %+v", d.Stats.Harnesses)
+	}
+	if d.Stats.Harnesses[1].SessionsScanned != 1 || d.Stats.Harnesses[1].ThreadsScanned != 1 {
+		t.Errorf("codex coverage = %+v", d.Stats.Harnesses[1])
+	}
+	if d.Stats.Harnesses[0].ThreadsScanned != 0 {
+		t.Errorf("claude coverage = %+v", d.Stats.Harnesses[0])
+	}
+	if len(d.Signals.UserCorrections) != 3 {
+		t.Errorf("both harnesses should contribute corrections: %d", len(d.Signals.UserCorrections))
+	}
+}
+
+func TestScannerAttributesFailuresByShellFlag(t *testing.T) {
+	events := []transcript.Event{
+		{Kind: transcript.KindToolCall, SessionID: "s", ToolUseID: "t1", Tool: "exec_command", Target: "go test ./...", Shell: true},
+		{Kind: transcript.KindToolResult, SessionID: "s", ToolUseID: "t1", Text: "FAIL: alpha_test.go:14"},
+		// A non-shell tool reading a file full of failure text is not a failure.
+		{Kind: transcript.KindToolCall, SessionID: "s", ToolUseID: "t2", Tool: "apply_patch", Target: "log.txt"},
+		{Kind: transcript.KindToolResult, SessionID: "s", ToolUseID: "t2", Text: "FAIL: alpha_test.go:14"},
+	}
+	scanner, projects := Scan([]transcript.Adapter{fakeAdapter{id: harness.Codex, events: events}}, time.Time{}, transcript.Filter{AllProjects: true}, nil)
+	d := scanner.Finalize(30, projects, nil)
+
+	if len(d.Signals.ToolFailures) != 1 {
+		t.Fatalf("tool failures = %+v", d.Signals.ToolFailures)
+	}
+	if !strings.Contains(d.Signals.ToolFailures[0].Examples[0], "go test ./...") {
+		t.Errorf("failure example should name the command: %+v", d.Signals.ToolFailures[0].Examples)
+	}
+}
+
+// emptyAdapter reaches its root cleanly and finds nothing there.
+type emptyAdapter struct{ id harness.ID }
+
+func (e emptyAdapter) Harness() harness.ID   { return e.id }
+func (e emptyAdapter) Root() (string, error) { return "/fake", nil }
+
+func (e emptyAdapter) Discover(string, transcript.Filter) ([]transcript.Session, error) {
+	return nil, nil
+}
+
+func (e emptyAdapter) Stream(transcript.Session, transcript.Filter, func(transcript.Event) error) (transcript.Counts, error) {
+	return transcript.Counts{}, nil
+}
+
+// unreachableAdapter cannot resolve a transcript root at all.
+type unreachableAdapter struct{ id harness.ID }
+
+func (u unreachableAdapter) Harness() harness.ID   { return u.id }
+func (u unreachableAdapter) Root() (string, error) { return "", os.ErrNotExist }
+
+func (u unreachableAdapter) Discover(string, transcript.Filter) ([]transcript.Session, error) {
+	return nil, nil
+}
+
+func (u unreachableAdapter) Stream(transcript.Session, transcript.Filter, func(transcript.Event) error) (transcript.Counts, error) {
+	return transcript.Counts{}, nil
+}
+
+func TestCoverageSeparatesCleanScansFromUnreachableHarnesses(t *testing.T) {
+	// Reached but empty: a row of zeros.
+	scanner, projects := Scan([]transcript.Adapter{emptyAdapter{id: harness.Codex}}, time.Time{}, transcript.Filter{AllProjects: true}, nil)
+	d := scanner.Finalize(30, projects, nil)
+	if len(d.Stats.Harnesses) != 1 {
+		t.Fatalf("a reached harness must report a row: %+v", d.Stats.Harnesses)
+	}
+	got := d.Stats.Harnesses[0]
+	if got.Harness != harness.Codex || got.FilesScanned != 0 || got.SessionsScanned != 0 {
+		t.Errorf("clean scan row = %+v; want zeros", got)
+	}
+
+	// Never reached: no row at all.
+	scanner, projects = Scan([]transcript.Adapter{unreachableAdapter{id: harness.Codex}}, time.Time{}, transcript.Filter{AllProjects: true}, nil)
+	d = scanner.Finalize(30, projects, nil)
+	if len(d.Stats.Harnesses) != 0 {
+		t.Errorf("an unreachable harness must report no row: %+v", d.Stats.Harnesses)
+	}
+}
+
+func TestCoverageCountsEachHarnessOnItsOwnIDs(t *testing.T) {
+	// Both harnesses use the id "s1". Neither may swallow the other's session.
+	shared := []transcript.Event{{Kind: transcript.KindHumanTurn, SessionID: "s1", ThreadID: "t1", Text: "I said use the logger"}}
+	adapters := []transcript.Adapter{
+		fakeAdapter{id: harness.ClaudeCode, events: shared},
+		fakeAdapter{id: harness.Codex, events: shared},
+	}
+
+	scanner, projects := Scan(adapters, time.Time{}, transcript.Filter{AllProjects: true}, nil)
+	d := scanner.Finalize(30, projects, nil)
+
+	for _, cov := range d.Stats.Harnesses {
+		if cov.SessionsScanned != 1 || cov.ThreadsScanned != 1 {
+			t.Errorf("%s coverage = %+v; want 1 session and 1 thread", cov.Harness, cov)
+		}
+	}
+	// The scanner-wide totals still deduplicate: one id is one session.
+	if d.Stats.SessionsScanned != 1 || d.Stats.ThreadsScanned != 1 {
+		t.Errorf("totals = %+v", d.Stats)
 	}
 }

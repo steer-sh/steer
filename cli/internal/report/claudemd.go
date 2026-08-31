@@ -3,6 +3,8 @@ package report
 import (
 	"os"
 	"strings"
+
+	"github.com/steer-sh/steer-cli/internal/harness"
 )
 
 const (
@@ -11,12 +13,13 @@ const (
 	steerRulesHeader  = "## Steer Rules"
 )
 
-// ExtractClaudeMD parses one CLAUDE.md into steer-enforced rules and
-// unenforced directives. Bullets under "## Steer Rules" are already backed by
-// hooks; top-level bullets elsewhere are candidates for enforcement. A missing
-// file yields an empty result, not an error.
-func ExtractClaudeMD(path string) (ClaudeMD, error) {
-	out := ClaudeMD{Path: path, SteerRules: []string{}, Directives: []Directive{}}
+// ExtractInstructionFile parses one harness instruction document — CLAUDE.md
+// or AGENTS.md — into steer-enforced rules and unenforced directives. Bullets
+// under "## Steer Rules" are already backed by hooks; top-level bullets
+// elsewhere are candidates for enforcement. A missing file yields an empty
+// result, not an error.
+func ExtractInstructionFile(id harness.ID, path string) (InstructionFile, error) {
+	out := InstructionFile{Harness: id, Path: path, SteerRules: []string{}, Directives: []Directive{}}
 
 	data, err := os.ReadFile(path)
 	if err != nil {
