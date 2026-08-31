@@ -18,7 +18,13 @@ const (
 	LegacyCommitGateMatcher = "exec_command"
 	commitGateIdentity      = "commit-gate review-codex"
 	CommitGateStatusMessage = "red-teaming the commit ..."
+	// resolverIdentity marks the resolver's handlers so removal finds them again.
+	resolverIdentity = "commit-gate backfill"
 )
+
+// resolverEvents are the two turn-end events the resolver runs on. A gate that fires
+// inside a subagent is adjudicated there, and only SubagentStop follows that thread.
+var resolverEvents = []string{"Stop", "SubagentStop"}
 
 type commandHook struct {
 	Type          string `json:"type"`
@@ -88,15 +94,24 @@ func load(path string) (map[string]any, error) {
 	return root, nil
 }
 
-func preToolUse(root map[string]any) []any {
+func eventEntries(root map[string]any, event string) []any {
 	hooks, _ := root["hooks"].(map[string]any)
-	entries, _ := hooks["PreToolUse"].([]any)
+	entries, _ := hooks[event].([]any)
 	return entries
 }
 
+func preToolUse(root map[string]any) []any { return eventEntries(root, "PreToolUse") }
+
 func isGate(command string) bool { return strings.Contains(command, commitGateIdentity) }
 
-func filter(entries []any) []any {
+func isResolver(command string) bool { return strings.Contains(command, resolverIdentity) }
+
+func isSteerOwned(command string) bool { return isGate(command) || isResolver(command) }
+
+// filter drops this gate's own handlers, keeping every other key at every level.
+func filter(entries []any) []any { return filterBy(entries, isGate) }
+
+func filterBy(entries []any, drop func(string) bool) []any {
 	out := make([]any, 0, len(entries))
 	for _, raw := range entries {
 		entry, ok := raw.(map[string]any)
@@ -113,7 +128,7 @@ func filter(entries []any) []any {
 		for _, rawHook := range hooks {
 			hook, ok := rawHook.(map[string]any)
 			command, _ := hook["command"].(string)
-			if !ok || !isGate(command) {
+			if !ok || !drop(command) {
 				kept = append(kept, rawHook)
 			}
 		}
@@ -156,8 +171,20 @@ func save(path string, root map[string]any) error {
 // RegisterCommitGate upserts one Bash PreToolUse handler while preserving unrelated
 // JSON keys at every level.
 func RegisterCommitGate(scope, cwd, command string, timeout int) (string, error) {
-	if !isGate(command) {
+	return RegisterCommitGateAndResolver(scope, cwd, command, timeout, "", 0)
+}
+
+// RegisterCommitGateAndResolver writes the review hook and the resolver in one save.
+// The review writes the rows the resolver later reconciles from the rollout, so a
+// half-armed install leaves the ledger permanently unresolved. An empty resolver
+// command arms the review channel alone.
+func RegisterCommitGateAndResolver(scope, cwd, review string, reviewTimeout int,
+	resolver string, resolverTimeout int) (string, error) {
+	if !isGate(review) {
 		return "", fmt.Errorf("commit gate command must contain %q", commitGateIdentity)
+	}
+	if resolver != "" && !isResolver(resolver) {
+		return "", fmt.Errorf("resolver command must contain %q", resolverIdentity)
 	}
 	path, err := hooksPath(scope, cwd)
 	if err != nil {
@@ -172,18 +199,53 @@ func RegisterCommitGate(scope, cwd, command string, timeout int) (string, error)
 		hooks = map[string]any{}
 		root["hooks"] = hooks
 	}
-	entries := filter(preToolUse(root))
-	entryRaw, _ := json.Marshal(hookEntry{Matcher: CommitGateMatcher, Hooks: []commandHook{{
-		Type: "command", Command: command, Timeout: timeout, StatusMessage: CommitGateStatusMessage,
-	}}})
-	var entry any
-	_ = json.Unmarshal(entryRaw, &entry)
-	hooks["PreToolUse"] = append(entries, entry)
+	hooks["PreToolUse"] = append(filterBy(preToolUse(root), isSteerOwned), entryValue(hookEntry{
+		Matcher: CommitGateMatcher,
+		Hooks: []commandHook{{Type: "command", Command: review, Timeout: reviewTimeout,
+			StatusMessage: CommitGateStatusMessage}},
+	}))
+	for _, event := range resolverEvents {
+		kept := filterBy(eventEntries(root, event), isSteerOwned)
+		if resolver == "" {
+			setOrDrop(hooks, event, kept)
+			continue
+		}
+		// No matcher: Stop ignores one outright, and every subagent type owes the same
+		// reconciliation.
+		hooks[event] = append(kept, entryValue(hookEntry{
+			Hooks: []commandHook{{Type: "command", Command: resolver, Timeout: resolverTimeout}},
+		}))
+	}
 	return path, save(path, root)
+}
+
+// entryValue renders one entry as the generic JSON value the file is edited as, so an
+// unrelated key elsewhere in the document is never re-typed through a closed struct.
+func entryValue(e hookEntry) any {
+	raw, _ := json.Marshal(e)
+	var out any
+	_ = json.Unmarshal(raw, &out)
+	return out
+}
+
+// setOrDrop keeps an event key only while it holds something, so disarming the
+// resolver does not leave an empty list behind.
+func setOrDrop(hooks map[string]any, event string, entries []any) {
+	if len(entries) == 0 {
+		delete(hooks, event)
+		return
+	}
+	hooks[event] = entries
 }
 
 // RemoveCommitGate removes only this gate's handlers.
 func RemoveCommitGate(scope, cwd string) (string, error) {
+	return RemoveCommitGateAndResolver(scope, cwd)
+}
+
+// RemoveCommitGateAndResolver takes both steer-owned channels out in one save and
+// leaves unrelated hooks alone.
+func RemoveCommitGateAndResolver(scope, cwd string) (string, error) {
 	path, err := hooksPath(scope, cwd)
 	if err != nil {
 		return "", err
@@ -196,8 +258,47 @@ func RemoveCommitGate(scope, cwd string) (string, error) {
 	if hooks == nil {
 		return path, nil
 	}
-	hooks["PreToolUse"] = filter(preToolUse(root))
+	setOrDrop(hooks, "PreToolUse", filterBy(preToolUse(root), isSteerOwned))
+	for _, event := range resolverEvents {
+		setOrDrop(hooks, event, filterBy(eventEntries(root, event), isSteerOwned))
+	}
 	return path, save(path, root)
+}
+
+// ResolverArming reports whether the resolver is registered on both turn-end events,
+// and the timeout it carries.
+func ResolverArming(scope, cwd string) (bool, int) {
+	path, err := hooksPath(scope, cwd)
+	if err != nil {
+		return false, 0
+	}
+	root, err := load(path)
+	if err != nil {
+		return false, 0
+	}
+	timeout := 0
+	for _, event := range resolverEvents {
+		found := false
+		for _, raw := range eventEntries(root, event) {
+			entry, _ := raw.(map[string]any)
+			hooks, _ := entry["hooks"].([]any)
+			for _, rawHook := range hooks {
+				hook, _ := rawHook.(map[string]any)
+				command, _ := hook["command"].(string)
+				if !isResolver(command) {
+					continue
+				}
+				found = true
+				if t, ok := hook["timeout"].(float64); ok {
+					timeout = int(t)
+				}
+			}
+		}
+		if !found {
+			return false, 0
+		}
+	}
+	return true, timeout
 }
 
 // CommitGateArming reads registration and checks whether config.toml has a trust

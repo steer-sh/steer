@@ -17,8 +17,8 @@ import (
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/denials"
 	"github.com/steer-sh/steer-cli/internal/gate"
-	"github.com/steer-sh/steer-cli/internal/gate/cc"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
+	"github.com/steer-sh/steer-cli/internal/gate/resolve"
 	"github.com/steer-sh/steer-cli/internal/presets"
 )
 
@@ -377,7 +377,7 @@ func collectPosture(cfg gate.Config) Posture {
 		CommitGate: []ScopeArming{},
 		Denials:    []ScopeArming{},
 		Resolver:   []ScopeArming{},
-		Unresolved: cc.CountUnresolved(cfg),
+		Unresolved: resolve.CountUnresolved(cfg),
 	}
 	for _, scope := range []string{claude.ProjectScope, claude.GlobalScope} {
 		g := claude.CommitGateHookArmed(scope)

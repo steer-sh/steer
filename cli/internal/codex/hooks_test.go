@@ -114,3 +114,65 @@ func TestLegacyMatcherRegistrationIsInert(t *testing.T) {
 		t.Fatalf("re-install did not repair the matcher: %#v", arming)
 	}
 }
+
+func TestRegisterArmsBothResolverEventsAndRemovesThemTogether(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	path := filepath.Join(home, "hooks.json")
+	original := `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"unrelated-stop"}]}]}}`
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if _, err := RegisterCommitGateAndResolver("global", "",
+			"steer commit-gate review-codex", 210, "steer commit-gate backfill --if-due --apply --quiet", 30); err != nil {
+			t.Fatal(err)
+		}
+	}
+	armed, timeout := ResolverArming("global", "")
+	if !armed || timeout != 30 {
+		t.Fatalf("resolver arming = %v, %d", armed, timeout)
+	}
+	if !CommitGateArming("global", "").Effective() {
+		t.Fatal("the review hook did not arm alongside the resolver")
+	}
+
+	raw, _ := os.ReadFile(path)
+	var root map[string]any
+	if err := json.Unmarshal(raw, &root); err != nil {
+		t.Fatal(err)
+	}
+	hooks := root["hooks"].(map[string]any)
+	if len(hooks["Stop"].([]any)) != 2 || len(hooks["SubagentStop"].([]any)) != 1 {
+		t.Fatalf("resolver entries not upserted once per event: %s", raw)
+	}
+
+	if _, err := RemoveCommitGateAndResolver("global", ""); err != nil {
+		t.Fatal(err)
+	}
+	if armed, _ = ResolverArming("global", ""); armed {
+		t.Fatal("the resolver survived removal")
+	}
+	if CommitGateArming("global", "").Registered {
+		t.Fatal("the review hook survived removal")
+	}
+	raw, _ = os.ReadFile(path)
+	if err := json.Unmarshal(raw, &root); err != nil {
+		t.Fatal(err)
+	}
+	hooks = root["hooks"].(map[string]any)
+	if len(hooks["Stop"].([]any)) != 1 {
+		t.Fatalf("an unrelated Stop hook was removed: %s", raw)
+	}
+	if _, ok := hooks["SubagentStop"]; ok {
+		t.Fatalf("an empty SubagentStop list was left behind: %s", raw)
+	}
+}
+
+func TestRegisterRefusesAnUnrecognisableResolver(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	if _, err := RegisterCommitGateAndResolver("global", "",
+		"steer commit-gate review-codex", 210, "some-other-command", 30); err == nil {
+		t.Fatal("a resolver command the remover cannot find again was accepted")
+	}
+}

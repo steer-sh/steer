@@ -1,4 +1,4 @@
-package cc
+package resolve
 
 import (
 	"encoding/json"
@@ -34,21 +34,21 @@ func testResolver() *resolver {
 	}
 }
 
-func ledgerFix(when float64, firing int) ledgerMsg {
+func ledgerFix(when float64, firing int) LedgerMsg {
 	return ledgerFixSession(when, firing, fixSession)
 }
 
-func ledgerFixSession(when float64, firing int, session string) ledgerMsg {
+func ledgerFixSession(when float64, firing int, session string) LedgerMsg {
 	head := "**Commit gate fired"
 	if firing != 0 {
 		head += fmt.Sprintf(" (round %d/4)**", firing)
 	} else {
 		head += "**"
 	}
-	return ledgerMsg{when, session, "/t.jsonl", head + fixBody}
+	return LedgerMsg{When: when, Key: session, Path: "/t.jsonl", Text: head + fixBody}
 }
 
-func chainLedgerFix(when float64, rounds []int, subject string, terminal int) ledgerMsg {
+func chainLedgerFix(when float64, rounds []int, subject string, terminal int) LedgerMsg {
 	if subject == "" {
 		subject = "a subject"
 	}
@@ -59,7 +59,7 @@ func chainLedgerFix(when float64, rounds []int, subject string, terminal int) le
 	if terminal != 0 {
 		text += fmt.Sprintf("\n**Round %d, terminal** — 3 reviewers, 1 raw finding, 1 concern. Commit not blocked.\n", terminal) + fixBody
 	}
-	return ledgerMsg{when, fixSession, "/t.jsonl", text}
+	return LedgerMsg{When: when, Key: fixSession, Path: "/t.jsonl", Text: text}
 }
 
 func chainRows(start float64, rounds int, subject string) []resolverRow {
@@ -88,22 +88,22 @@ func retryIndexes(rows []resolverRow) []int {
 	return out
 }
 
-func candRound(m *ledgerMsg) (int, bool) {
+func candRound(m *LedgerMsg) (int, bool) {
 	if m == nil {
 		return 0, false
 	}
-	return LedgerRound(m.text)
+	return gate.LedgerRound(m.Text)
 }
 
 func TestResolverSectionPatternsAgree(t *testing.T) {
 	// The pattern that files a section and the one that declines a chain ledger must
 	// agree on what a section line is — the Go twin of test_resolver's identity checks.
 	section := "**Round 3/4** — 3 reviewers.\n"
-	if !ledgerSectionRe.MatchString(section) || !ledgerSectionCapRe.MatchString(section) {
+	if !gate.HasRoundSections(section) || len(gate.LedgerRounds(section)) == 0 {
 		t.Fatal("both section patterns must match a section line")
 	}
 	header := "**Commit gate fired — chain ledger, x**\n"
-	if ledgerSectionRe.MatchString(header) || ledgerSectionCapRe.MatchString(header) {
+	if gate.HasRoundSections(header) || len(gate.LedgerRounds(header)) != 0 {
 		t.Fatal("neither section pattern may match a header line")
 	}
 }
@@ -111,7 +111,7 @@ func TestResolverSectionPatternsAgree(t *testing.T) {
 func TestResolverPerRound(t *testing.T) {
 	r := testResolver()
 	rows := chainRows(fixT, 4, "")
-	var leds []ledgerMsg
+	var leds []LedgerMsg
 	for n := 1; n <= 4; n++ {
 		leds = append(leds, ledgerFix(fixT+float64(n-1)*100+150, n))
 	}
@@ -127,7 +127,7 @@ func TestResolverPerRound(t *testing.T) {
 func TestResolverMissingRound(t *testing.T) {
 	r := testResolver()
 	rows := chainRows(fixT, 3, "")
-	leds := []ledgerMsg{ledgerFix(fixT+150, 1), ledgerFix(fixT+350, 3)}
+	leds := []LedgerMsg{ledgerFix(fixT+150, 1), ledgerFix(fixT+350, 3)}
 	cand, join := r.pickLedger(rows, retryIndexes(rows)[1], fixT+100, leds)
 	if cand != nil || join != "round" {
 		t.Fatalf("round 2 wrote no ledger; got (cand!=nil=%v, join=%s), want (nil, round)", cand != nil, join)
@@ -137,12 +137,12 @@ func TestResolverMissingRound(t *testing.T) {
 func TestResolverCrossChain(t *testing.T) {
 	r := testResolver()
 	rows := append(chainRows(fixT, 1, ""), chainRows(fixT+1657, 1, "")...)
-	leds := []ledgerMsg{ledgerFix(fixT+1763, 1)}
+	leds := []LedgerMsg{ledgerFix(fixT+1763, 1)}
 	cand, _ := r.pickLedger(rows, retryIndexes(rows)[0], fixT, leds)
 	if cand != nil {
 		t.Fatal("a later chain reaching the same round bounds the search")
 	}
-	if !(fixT <= leds[0].when && leds[0].when <= fixT+r.staleAfter()) {
+	if !(fixT <= leds[0].When && leds[0].When <= fixT+r.staleAfter()) {
 		t.Fatal("fixture: the ledger must sit inside the window it escapes")
 	}
 	cand, _ = r.pickLedger(rows, retryIndexes(rows)[1], fixT+1657, leds)
@@ -155,7 +155,7 @@ func TestResolverClearedNotAStart(t *testing.T) {
 	r := testResolver()
 	rows := chainRows(fixT, 1, "")
 	rows = append(rows, resolverRow{"phase": "skip-cleared", "ts": fixT + 20, "firing": 1, "session_id": fixSession})
-	cand, _ := r.pickLedger(rows, retryIndexes(rows)[0], fixT, []ledgerMsg{ledgerFix(fixT+150, 1)})
+	cand, _ := r.pickLedger(rows, retryIndexes(rows)[0], fixT, []LedgerMsg{ledgerFix(fixT+150, 1)})
 	if cand == nil {
 		t.Fatal("a row where no reviewer ran starts no chain")
 	}
@@ -164,7 +164,7 @@ func TestResolverClearedNotAStart(t *testing.T) {
 func TestResolverCleanNotABound(t *testing.T) {
 	r := testResolver()
 	rows := append(chainRows(fixT, 1, ""), resolverRow{"phase": "clean", "ts": fixT + 200, "firing": 1, "session_id": fixSession})
-	cand, _ := r.pickLedger(rows, retryIndexes(rows)[0], fixT, []ledgerMsg{ledgerFix(fixT+400, 1)})
+	cand, _ := r.pickLedger(rows, retryIndexes(rows)[0], fixT, []LedgerMsg{ledgerFix(fixT+400, 1)})
 	if cand == nil {
 		t.Fatal("a chain that found nothing can own no ledger")
 	}
@@ -189,7 +189,7 @@ func TestResolverReopen(t *testing.T) {
 func TestResolverShortChainBound(t *testing.T) {
 	r := testResolver()
 	rows := append(chainRows(fixT, 2, ""), chainRows(fixT+1000, 1, "")...)
-	cand, _ := r.pickLedger(rows, retryIndexes(rows)[1], fixT+100, []ledgerMsg{ledgerFix(fixT+1100, 2)})
+	cand, _ := r.pickLedger(rows, retryIndexes(rows)[1], fixT+100, []LedgerMsg{ledgerFix(fixT+1100, 2)})
 	if cand != nil {
 		t.Fatal("the next chain STARTING bounds the search")
 	}
@@ -200,9 +200,9 @@ func TestResolverChainEveryRound(t *testing.T) {
 	rows := chainRows(fixCT, 4, "")
 	led := chainLedgerFix(fixCT+500, []int{1, 2, 3, 4}, "", 0)
 	for _, i := range retryIndexes(rows) {
-		cand, join := r.pickLedger(rows, i, pyNumOr(rows[i]["deny_ts"]), []ledgerMsg{led})
-		if join != "chain" || cand == nil || cand.text != led.text {
-			t.Fatalf("one ledger answers all four rounds; got join=%s match=%v", join, cand != nil && cand.text == led.text)
+		cand, join := r.pickLedger(rows, i, pyNumOr(rows[i]["deny_ts"]), []LedgerMsg{led})
+		if join != "chain" || cand == nil || cand.Text != led.Text {
+			t.Fatalf("one ledger answers all four rounds; got join=%s match=%v", join, cand != nil && cand.Text == led.Text)
 		}
 	}
 }
@@ -211,24 +211,24 @@ func TestResolverChainMissingSection(t *testing.T) {
 	r := testResolver()
 	rows := chainRows(fixCT, 3, "")
 	led := chainLedgerFix(fixCT+400, []int{1, 3}, "", 0)
-	cand, join := r.pickLedger(rows, retryIndexes(rows)[1], fixCT+100, []ledgerMsg{led})
+	cand, join := r.pickLedger(rows, retryIndexes(rows)[1], fixCT+100, []LedgerMsg{led})
 	if cand != nil || join != "chain" {
 		t.Fatalf("round 2 has no section; got (cand!=nil=%v, join=%s), want (nil, chain)", cand != nil, join)
 	}
-	cand, _ = r.pickLedger(rows, retryIndexes(rows)[2], fixCT+200, []ledgerMsg{led})
-	if cand == nil || cand.text != led.text {
+	cand, _ = r.pickLedger(rows, retryIndexes(rows)[2], fixCT+200, []LedgerMsg{led})
+	if cand == nil || cand.Text != led.Text {
 		t.Fatal("the rounds that DID get a section still resolve")
 	}
 }
 
 func TestResolverSectionRounds(t *testing.T) {
-	if got := ledgerRounds(chainLedgerFix(0, []int{1, 2}, "", 0).text); !sameSet(got, 1, 2) {
+	if got := gate.LedgerRounds(chainLedgerFix(0, []int{1, 2}, "", 0).Text); !sameSet(got, 1, 2) {
 		t.Fatalf("section rounds = %v, want {1,2}", got)
 	}
-	if got := ledgerRounds(chainLedgerFix(0, []int{4}, "", 5).text); !sameSet(got, 4, 5) {
+	if got := gate.LedgerRounds(chainLedgerFix(0, []int{4}, "", 5).Text); !sameSet(got, 4, 5) {
 		t.Fatalf("terminal section rounds = %v, want {4,5}", got)
 	}
-	if got := ledgerRounds(ledgerFix(0, 2).text); len(got) != 0 {
+	if got := gate.LedgerRounds(ledgerFix(0, 2).Text); len(got) != 0 {
 		t.Fatalf("a per-round ledger has no sections, got %v", got)
 	}
 	r := testResolver()
@@ -241,12 +241,12 @@ func TestResolverChainCrossChain(t *testing.T) {
 	r := testResolver()
 	rows := append(chainRows(fixCT, 1, ""), chainRows(fixCT+1000, 1, "")...)
 	led := chainLedgerFix(fixCT+1100, []int{1}, "", 0)
-	cand, _ := r.pickLedger(rows, retryIndexes(rows)[0], fixCT, []ledgerMsg{led})
+	cand, _ := r.pickLedger(rows, retryIndexes(rows)[0], fixCT, []LedgerMsg{led})
 	if cand != nil {
 		t.Fatal("the next chain STARTING bounds the search")
 	}
-	cand, _ = r.pickLedger(rows, retryIndexes(rows)[1], fixCT+1000, []ledgerMsg{led})
-	if cand == nil || cand.text != led.text {
+	cand, _ = r.pickLedger(rows, retryIndexes(rows)[1], fixCT+1000, []LedgerMsg{led})
+	if cand == nil || cand.Text != led.Text {
 		t.Fatal("the ledger still resolves for chain B")
 	}
 }
@@ -254,7 +254,7 @@ func TestResolverChainCrossChain(t *testing.T) {
 func TestResolverOldShapeFallback(t *testing.T) {
 	r := testResolver()
 	rows := chainRows(fixCT, 2, "")
-	cand, join := r.pickLedger(rows, retryIndexes(rows)[1], fixCT+100, []ledgerMsg{ledgerFix(fixCT+250, 2)})
+	cand, join := r.pickLedger(rows, retryIndexes(rows)[1], fixCT+100, []LedgerMsg{ledgerFix(fixCT+250, 2)})
 	if join != "round" || cand == nil {
 		t.Fatalf("a per-round ledger under the chain era joins on round; got (join=%s, cand!=nil=%v)", join, cand != nil)
 	}
@@ -263,7 +263,7 @@ func TestResolverOldShapeFallback(t *testing.T) {
 func TestResolverHistoricalRoundJoin(t *testing.T) {
 	r := testResolver()
 	rows := chainRows(fixT, 2, "")
-	cand, join := r.pickLedger(rows, retryIndexes(rows)[1], fixT+100, []ledgerMsg{ledgerFix(fixT+250, 2)})
+	cand, join := r.pickLedger(rows, retryIndexes(rows)[1], fixT+100, []LedgerMsg{ledgerFix(fixT+250, 2)})
 	if join != "round" || cand == nil {
 		t.Fatalf("rows under the round join keep it; got (join=%s, cand!=nil=%v)", join, cand != nil)
 	}
@@ -274,9 +274,9 @@ func TestResolverCapSection(t *testing.T) {
 	rows := append(chainRows(fixCT, 4, ""),
 		resolverRow{"phase": "cap", "ts": fixCT + 400, "firing": 5, "finding_slots": 3, "session_id": fixSession})
 	led := chainLedgerFix(fixCT+500, []int{1, 2, 3, 4}, "", 5)
-	cand, join := r.pickLedger(rows, len(rows)-1, fixCT+400, []ledgerMsg{led})
-	if join != "chain" || cand == nil || cand.text != led.text {
-		t.Fatalf("the terminal round is a section like any other; got join=%s match=%v", join, cand != nil && cand.text == led.text)
+	cand, join := r.pickLedger(rows, len(rows)-1, fixCT+400, []LedgerMsg{led})
+	if join != "chain" || cand == nil || cand.Text != led.Text {
+		t.Fatalf("the terminal round is a section like any other; got join=%s match=%v", join, cand != nil && cand.Text == led.Text)
 	}
 }
 
@@ -286,14 +286,14 @@ const multiLedger = "**Commit gate fired — chain ledger**\n" +
 	"- **REJECTED** — third → another reason\n"
 
 func TestResolverSectionSlice(t *testing.T) {
-	concerns := ParseLedgerText(ledgerSection(multiLedger, 1))["concerns"].([]Concern)
+	concerns := gate.ParseLedgerText(gate.LedgerSection(multiLedger, 1))["concerns"].([]gate.Concern)
 	if len(concerns) != 1 || concerns[0].Verdict != "ACCEPTED" || concerns[0].Concern != "first" {
 		t.Fatalf("round 1's row carries round 1's one concern, got %+v", concerns)
 	}
-	if got := ParseLedgerText(ledgerSection(multiLedger, 2))["self_reported_rejected"]; got != 2 {
+	if got := gate.ParseLedgerText(gate.LedgerSection(multiLedger, 2))["self_reported_rejected"]; got != 2 {
 		t.Fatalf("the last section runs to the end; rejected = %v, want 2", got)
 	}
-	if got := ledgerSection(multiLedger, 3); got != "" {
+	if got := gate.LedgerSection(multiLedger, 3); got != "" {
 		t.Fatalf("a round with no section has nothing to slice, got %q", got)
 	}
 }
@@ -301,9 +301,9 @@ func TestResolverSectionSlice(t *testing.T) {
 func TestResolverResolvedRow(t *testing.T) {
 	r := testResolver()
 	r.quiet = true
-	r.ledgersOverride = func() []ledgerMsg {
-		return []ledgerMsg{{fixCT + 400, fixSession, "/t.jsonl", multiLedger}}
-	}
+	r.harvests = []Harvest{func() []LedgerMsg {
+		return []LedgerMsg{{When: fixCT + 400, Key: fixSession, Path: "/t.jsonl", Text: multiLedger}}
+	}}
 	rows := chainRows(fixCT, 2, "")
 	r.resolveAndWrite(rows, len(rows), false)
 	r1 := rows[retryIndexes(rows)[0]]
@@ -317,15 +317,15 @@ func TestResolverResolvedRow(t *testing.T) {
 func TestResolverTwoChainsOneRepo(t *testing.T) {
 	r := testResolver()
 	rows := append(chainRows(fixCT, 2, "feat: first commit"), chainRows(fixCT+1000, 2, "fix: second commit")...)
-	both := chainLedgerFix(0, []int{1, 2}, "feat: first commit", 0).text + "\n" +
-		chainLedgerFix(0, []int{1, 2}, "fix: second commit", 0).text
-	leds := []ledgerMsg{{fixCT + 1400, fixSession, "/t.jsonl", both}}
+	both := chainLedgerFix(0, []int{1, 2}, "feat: first commit", 0).Text + "\n" +
+		chainLedgerFix(0, []int{1, 2}, "fix: second commit", 0).Text
+	leds := []LedgerMsg{{fixCT + 1400, fixSession, "/t.jsonl", both}}
 	var got []string
 	for _, i := range retryIndexes(rows) {
 		cand, join := r.pickLedger(rows, i, pyNumOr(rows[i]["deny_ts"]), leds)
 		head := ""
 		if cand != nil {
-			head = strings.SplitN(cand.text, "\n", 2)[0]
+			head = strings.SplitN(cand.Text, "\n", 2)[0]
 		}
 		tag := "nil"
 		switch {
@@ -342,10 +342,10 @@ func TestResolverTwoChainsOneRepo(t *testing.T) {
 			t.Fatalf("each chain takes the block naming ITS commit; got %v, want %v", got, want)
 		}
 	}
-	if len(chainBlocks(both)) != 2 {
+	if len(gate.ChainBlocks(both)) != 2 {
 		t.Fatal("one message can hold two chain ledgers")
 	}
-	if s := blockSubject("**Commit gate fired — chain ledger, feat: x**\n- **ACCEPTED** — fix: y → done\n"); s != "feat: x" {
+	if s := gate.BlockSubject("**Commit gate fired — chain ledger, feat: x**\n- **ACCEPTED** — fix: y → done\n"); s != "feat: x" {
 		t.Fatalf("only the header line names the commit; got %q", s)
 	}
 }
@@ -353,7 +353,7 @@ func TestResolverTwoChainsOneRepo(t *testing.T) {
 func TestResolverSubjectAbsentFallsBack(t *testing.T) {
 	r := testResolver()
 	rows := chainRows(fixCT, 2, "")
-	leds := []ledgerMsg{chainLedgerFix(fixCT+400, []int{1, 2}, "feat: unmatched", 0)}
+	leds := []LedgerMsg{chainLedgerFix(fixCT+400, []int{1, 2}, "feat: unmatched", 0)}
 	cand, join := r.pickLedger(rows, retryIndexes(rows)[0], fixCT, leds)
 	if join != "chain" || cand == nil {
 		t.Fatalf("an unread commit message leaves the row on the bound it had; got (join=%s, cand!=nil=%v)", join, cand != nil)
@@ -363,7 +363,7 @@ func TestResolverSubjectAbsentFallsBack(t *testing.T) {
 func TestResolverLegacyAndSpans(t *testing.T) {
 	r := testResolver()
 	rows := chainRows(fixLegacyT, 2, "")
-	leds := []ledgerMsg{ledgerFix(fixLegacyT+150, 0), ledgerFix(fixLegacyT+250, 0)}
+	leds := []LedgerMsg{ledgerFix(fixLegacyT+150, 0), ledgerFix(fixLegacyT+250, 0)}
 	_, join := r.pickLedger(rows, retryIndexes(rows)[0], fixLegacyT, leds)
 	if join != "window" {
 		t.Fatalf("unmarked ledgers fall back to the window join, got %s", join)
@@ -379,7 +379,7 @@ func TestResolverLegacyAndSpans(t *testing.T) {
 func TestResolverSessionIsolation(t *testing.T) {
 	r := testResolver()
 	rows := chainRows(fixT, 1, "")
-	cand, _ := r.pickLedger(rows, retryIndexes(rows)[0], fixT, []ledgerMsg{ledgerFixSession(fixT+150, 1, "other")})
+	cand, _ := r.pickLedger(rows, retryIndexes(rows)[0], fixT, []LedgerMsg{ledgerFixSession(fixT+150, 1, "other")})
 	if cand != nil {
 		t.Fatal("another session's ledger is never this row's")
 	}
@@ -390,20 +390,20 @@ func TestResolverCap(t *testing.T) {
 	capRows := append(chainRows(fixT, 4, ""),
 		resolverRow{"phase": "cap", "ts": fixT + 400, "firing": 5, "finding_slots": 3, "session_id": fixSession})
 	idx := len(capRows) - 1
-	if !expectsLedger(capRows[idx]) {
+	if !ExpectsLedger(capRows[idx]) {
 		t.Fatal("a terminal review with findings demands a ledger")
 	}
-	if expectsLedger(resolverRow{"phase": "cap", "firing": 5, "finding_slots": 0}) {
+	if ExpectsLedger(resolverRow{"phase": "cap", "firing": 5, "finding_slots": 0}) {
 		t.Fatal("a clean terminal review asked for nothing")
 	}
 	if ts, _ := anchorTS(capRows, idx); ts != fixT+400 {
 		t.Fatalf("the cap row IS the handover moment; anchor = %v, want %v", ts, fixT+400)
 	}
-	cand, join := r.pickLedger(capRows, idx, fixT+400, []ledgerMsg{ledgerFix(fixT+500, 5)})
+	cand, join := r.pickLedger(capRows, idx, fixT+400, []LedgerMsg{ledgerFix(fixT+500, 5)})
 	if round, _ := candRound(cand); join != "round" || round != 5 {
 		t.Fatalf("the terminal ledger joins on its own round; got (join=%s, round=%d)", join, round)
 	}
-	cand, _ = r.pickLedger(capRows, idx, fixT+400, []ledgerMsg{ledgerFix(fixT+500, 4)})
+	cand, _ = r.pickLedger(capRows, idx, fixT+400, []LedgerMsg{ledgerFix(fixT+500, 4)})
 	if cand != nil {
 		t.Fatal("round 4's ledger answers round 4's deny, not the terminal review")
 	}
@@ -438,7 +438,7 @@ func TestResolverOpenWindowUntouched(t *testing.T) {
 	r := testResolver()
 	r.quiet = true
 	r.now = func() float64 { return now }
-	r.ledgersOverride = func() []ledgerMsg { return nil }
+	r.harvests = []Harvest{func() []LedgerMsg { return nil }}
 	waiting := []resolverRow{
 		{"phase": "deny", "ts": now - 200, "firing": 1, "session_id": fixSession},
 		{"phase": "retry", "ts": now - 190, "deny_ts": now - 200, "firing": 1, "session_id": fixSession},
@@ -478,7 +478,7 @@ func TestResolverConcurrentAppendKept(t *testing.T) {
 	f.Write(append(appended, '\n'))
 	f.Close()
 
-	r := &resolver{cfg: cfg, quiet: true, now: func() float64 { return 2_000_000_000 }, ledgersOverride: func() []ledgerMsg { return nil }}
+	r := &resolver{cfg: cfg, quiet: true, now: func() float64 { return 2_000_000_000 }, harvests: []Harvest{func() []LedgerMsg { return nil }}}
 	rows := []resolverRow{copyRow(snapshot[0]), copyRow(snapshot[1])}
 	if code := r.resolveAndWrite(rows, seen, true); code != 0 {
 		t.Fatalf("resolver exit = %d, want 0", code)
@@ -539,7 +539,58 @@ func readShard(t *testing.T, path string) []resolverRow {
 		if line == "" {
 			continue
 		}
-		rows = append(rows, decodeResolverRow(line))
+		rows = append(rows, DecodeRow(line))
 	}
 	return rows
+}
+
+// A harness that gates inside a subagent writes two chains under one session id. The
+// join key is the thread, so neither chain can claim the other's ledger.
+func TestResolverKeysAThreadedRowOnItsThread(t *testing.T) {
+	r := testResolver()
+	r.quiet = true
+	rootRows := chainRows(fixCT, 1, "feat: root commit")
+	threadRows := chainRows(fixCT+200, 1, "fix: thread commit")
+	for _, row := range threadRows {
+		row["thread_id"] = "agent-9"
+	}
+	rows := append(rootRows, threadRows...)
+
+	rootLedger := chainLedgerFix(fixCT+50, []int{1}, "feat: root commit", 0)
+	threadLedger := chainLedgerFix(fixCT+250, []int{1}, "fix: thread commit", 0)
+	threadLedger.Key = "agent-9"
+	r.harvests = []Harvest{func() []LedgerMsg { return []LedgerMsg{rootLedger, threadLedger} }}
+
+	r.resolveAndWrite(rows, len(rows), false)
+	idx := retryIndexes(rows)
+	if len(idx) != 2 {
+		t.Fatalf("retry rows = %d, want 2", len(idx))
+	}
+	for _, i := range idx {
+		if rows[i]["ledger_found"] != true {
+			t.Fatalf("row %d found no ledger: %v", i, rows[i])
+		}
+	}
+	// The parent's session id must survive: the thread is provenance, not the unit.
+	if rows[idx[1]]["session_id"] != fixSession {
+		t.Fatalf("session_id = %v, want the parent's", rows[idx[1]]["session_id"])
+	}
+}
+
+// A thread's ledger is not the parent's, however close in time it landed.
+func TestResolverThreadedRowRefusesTheParentLedger(t *testing.T) {
+	r := testResolver()
+	r.quiet = true
+	rows := chainRows(fixCT, 1, "fix: thread commit")
+	for _, row := range rows {
+		row["thread_id"] = "agent-9"
+	}
+	parent := chainLedgerFix(fixCT+50, []int{1}, "fix: thread commit", 0)
+	r.harvests = []Harvest{func() []LedgerMsg { return []LedgerMsg{parent} }}
+
+	r.resolveAndWrite(rows, len(rows), false)
+	row := rows[retryIndexes(rows)[0]]
+	if row["ledger_found"] == true {
+		t.Fatalf("the thread claimed the parent's ledger: %v", row)
+	}
 }

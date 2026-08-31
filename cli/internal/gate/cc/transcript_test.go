@@ -78,7 +78,7 @@ func TestReadLedgerHappyPath(t *testing.T) {
 	if led["self_reported_rejected"] != 1 {
 		t.Errorf("rejected = %v, want 1 — one REJECTED bullet", led["self_reported_rejected"])
 	}
-	concerns := led["concerns"].([]Concern)
+	concerns := led["concerns"].([]gate.Concern)
 	if len(concerns) != 3 {
 		t.Fatalf("concerns = %d, want 3 — `Weakest surviving:` is not a verdict line", len(concerns))
 	}
@@ -99,7 +99,7 @@ func TestReadLedgerASCIIArrow(t *testing.T) {
 	if led == nil {
 		t.Fatal("an ASCII-arrow ledger must parse")
 	}
-	concerns := led["concerns"].([]Concern)
+	concerns := led["concerns"].([]gate.Concern)
 	if want := "the caller is never reached"; concerns[0].Concern != want {
 		t.Errorf("concern = %q, want %q — `->` splits like `→`, and the separator "+
 			"hyphen must not eat the arrow's head", concerns[0].Concern, want)
@@ -136,13 +136,13 @@ func TestReadLedgerGuards(t *testing.T) {
 func TestReadLedgerTruncation(t *testing.T) {
 	var sb strings.Builder
 	sb.WriteString("**Commit gate fired** — 3 reviewers.\n\n")
-	total := maxConcerns + 5
+	total := gate.MaxConcerns + 5
 	for i := 0; i < total; i++ {
 		sb.WriteString("- **ACCEPTED** — concern → fixed\n")
 	}
 	led := ReadLedger(writeTranscript(t, assistantRow(t, sb.String())), t0, 0)
-	if got := len(led["concerns"].([]Concern)); got != maxConcerns {
-		t.Errorf("stored concerns = %d, want %d — the cap bounds a row's size", got, maxConcerns)
+	if got := len(led["concerns"].([]gate.Concern)); got != gate.MaxConcerns {
+		t.Errorf("stored concerns = %d, want %d — the cap bounds a row's size", got, gate.MaxConcerns)
 	}
 	if led["concerns_total"] != total {
 		t.Errorf("concerns_total = %v, want %d — the true total the agent adjudicated",
@@ -170,10 +170,10 @@ func TestLedgerRound(t *testing.T) {
 	r2 := strings.Replace(realLedger, "**Commit gate fired**", "**Commit gate fired (round 2/4)**", 1)
 	r3 := strings.Replace(realLedger, "**Commit gate fired**", "**Commit gate fired (round 3/4)**", 1)
 
-	if got, ok := LedgerRound(r2); !ok || got != 2 {
-		t.Errorf("LedgerRound(r2) = %d,%v, want 2,true — the marker is read off the header", got, ok)
+	if got, ok := gate.LedgerRound(r2); !ok || got != 2 {
+		t.Errorf("gate.LedgerRound(r2) = %d,%v, want 2,true — the marker is read off the header", got, ok)
 	}
-	if _, ok := LedgerRound(realLedger); ok {
+	if _, ok := gate.LedgerRound(realLedger); ok {
 		t.Error("an unmarked ledger must report no round rather than a wrong one")
 	}
 	if led := ReadLedger(writeTranscript(t, assistantRow(t, r2)), t0, 2); led["ledger_round"] != 2 {
@@ -191,7 +191,7 @@ func TestLedgerRound(t *testing.T) {
 	chained := "**Commit gate fired — chain ledger**\n\n**Round 1/4** — 3 reviewers.\n" +
 		"\n- **ACCEPTED** — a concern → a fix\n\n**Round 2/4** — 3 reviewers.\n" +
 		"\n- **REJECTED** — another concern → a reason\n"
-	if !HasRoundSections(chained) || HasRoundSections(realLedger) {
+	if !gate.HasRoundSections(chained) || gate.HasRoundSections(realLedger) {
 		t.Error("a section is `**Round N/`; a per-round ledger's header is not one")
 	}
 	if led := ReadLedger(writeTranscript(t, assistantRow(t, chained)), t0, 2); led != nil {
@@ -223,17 +223,17 @@ func TestLedgerRound(t *testing.T) {
 	// A reply that discusses the gate before reporting on it. The round is read off the
 	// header line, so the sentence above it is not a candidate.
 	proseFirst := "As noted when the commit gate fired (round 1), the caller was already fixed.\n\n" + r2
-	if got, _ := LedgerRound(proseFirst); got != 2 {
-		t.Errorf("LedgerRound(prose decoy) = %d, want 2 — the header line owns the round", got)
+	if got, _ := gate.LedgerRound(proseFirst); got != 2 {
+		t.Errorf("gate.LedgerRound(prose decoy) = %d, want 2 — the header line owns the round", got)
 	}
-	if _, ok := LedgerRound("recall that the Commit gate fired (round 3) earlier today"); ok {
+	if _, ok := gate.LedgerRound("recall that the Commit gate fired (round 3) earlier today"); ok {
 		t.Error("a round named only in a sentence is not a marker at all")
 	}
-	if got, _ := LedgerRound("- " + r2); got != 2 {
-		t.Errorf("LedgerRound(bulleted) = %d, want 2 — a bulleted header is still a header", got)
+	if got, _ := gate.LedgerRound("- " + r2); got != 2 {
+		t.Errorf("gate.LedgerRound(bulleted) = %d, want 2 — a bulleted header is still a header", got)
 	}
-	if got, _ := LedgerRound("> " + r2); got != 2 {
-		t.Errorf("LedgerRound(quoted) = %d, want 2 — likewise a blockquote", got)
+	if got, _ := gate.LedgerRound("> " + r2); got != 2 {
+		t.Errorf("gate.LedgerRound(quoted) = %d, want 2 — likewise a blockquote", got)
 	}
 }
 
@@ -243,7 +243,7 @@ func TestLedgerRound(t *testing.T) {
 // Python resolver parses those sections, so the sections are pinned here as text.
 func TestTemplateHeadersCarryNoRound(t *testing.T) {
 	deny := gate.BuildDeny(3, "r", 2, 4, "", "s")
-	if _, ok := LedgerRound(deny); ok {
+	if _, ok := gate.LedgerRound(deny); ok {
 		t.Error("the chain ledger's header names no round")
 	}
 	for _, want := range []string{"**Round 1/4**", "**Round 2/4**"} {
@@ -252,7 +252,7 @@ func TestTemplateHeadersCarryNoRound(t *testing.T) {
 		}
 	}
 	capped := gate.BuildCap(3, "r", 5, 4, "s")
-	if _, ok := LedgerRound(capped); ok {
+	if _, ok := gate.LedgerRound(capped); ok {
 		t.Error("the terminal template hands over that same chain header")
 	}
 	for _, want := range []string{"**Round 1/4**", "**Round 5, terminal**"} {

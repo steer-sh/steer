@@ -1,4 +1,8 @@
-package cc
+// Package resolve reconciles the self-reported ledger for rows that owe one, joining
+// this machine's shard to the harnesses' transcripts. The join engine is
+// harness-neutral: a Harvest supplies the ledgers, and only a harvest knows a
+// transcript format.
+package resolve
 
 import (
 	"encoding/json"
@@ -7,7 +11,6 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -15,11 +18,9 @@ import (
 	"github.com/steer-sh/steer-cli/internal/gate"
 )
 
-// The resolver reconciles the self-reported ledger for retry rows in THIS machine's
-// shard. Its evidence is ~/.claude/projects, so it rules only on rows whose transcript
-// is local, and its neighbour scans (denyTSFor, chainEndTS) are valid only within one
-// machine's stream. A port of ~/.claude/hooks/commit-review/backfill_ledger.py; run it
-// whenever the numbers should be current, it is idempotent.
+// The resolver rules only on rows whose transcript is local, and its neighbour scans
+// (denyTSFor, chainEndTS) are valid only within one machine's stream. It is idempotent;
+// run it whenever the numbers should be current.
 
 const (
 	// ledgerRequiredTS is when the ledger became mandatory; a deny before it required
@@ -33,17 +34,6 @@ const (
 	backfillLockStale = 300 // seconds
 )
 
-// ledgerChainRe matches a chain ledger's header line. One message can carry more than
-// one, so a candidate is a BLOCK of a message, never the whole message.
-var ledgerChainRe = regexp.MustCompile(
-	`(?im)^[ \t]*(?:[-+>]\s*)?\**\s*` + regexp.QuoteMeta(LedgerHeader) + `[^\n]*chain ledger`)
-
-// ledgerSectionCapRe is ledgerSectionRe with the round number captured.
-var ledgerSectionCapRe = regexp.MustCompile(`(?im)^[ \t]*(?:[-+>]\s*)?\**\s*Round\s+(\d+)\s*[/,]`)
-
-// blockSubjectRe reads the commit subject a chain ledger's header line names.
-var blockSubjectRe = regexp.MustCompile(`(?i)chain ledger,\s*(.+?)\s*\**\s*$`)
-
 // BackfillOptions are the resolver's four flags, matching the Python CLI.
 type BackfillOptions struct {
 	Apply     bool
@@ -56,19 +46,27 @@ type BackfillOptions struct {
 // across two writers and read by key.
 type resolverRow = map[string]any
 
-// ledgerMsg is one real ledger found in a transcript.
-type ledgerMsg struct {
-	when    float64
-	session string
-	path    string
-	text    string
+// LedgerMsg is one real ledger a harvest found in a transcript.
+type LedgerMsg struct {
+	// When is the epoch second the agent wrote it.
+	When float64
+	// Key is the thread the ledger answers for: the root session, or a subagent
+	// thread where the harness gates inside one. It joins to a row's own key.
+	Key string
+	// Path is the transcript file, kept for the operator, not for the join.
+	Path string
+	Text string
 }
 
-// RunBackfill resolves the local shard, optionally rewriting it, and returns a process
-// exit code (always 0 — the resolver fails open). projectsDir is ~/.claude/projects;
-// now supplies the wall clock (nil uses time.Now).
-func RunBackfill(cfg gate.Config, projectsDir string, opts BackfillOptions, out io.Writer, now func() float64) int {
-	r := &resolver{cfg: cfg, projectsDir: projectsDir, quiet: opts.Quiet, out: out, now: now}
+// Harvest returns every ledger one harness's transcripts hold. Only a harvest knows a
+// transcript format; the join below reads none.
+type Harvest func() []LedgerMsg
+
+// RunBackfill resolves the local shard against every harvest, optionally rewriting it,
+// and returns a process exit code (always 0 — the resolver fails open). now supplies
+// the wall clock (nil uses time.Now).
+func RunBackfill(cfg gate.Config, harvests []Harvest, opts BackfillOptions, out io.Writer, now func() float64) int {
+	r := &resolver{cfg: cfg, harvests: harvests, quiet: opts.Quiet, out: out, now: now}
 	if r.now == nil {
 		r.now = func() float64 { return float64(time.Now().Unix()) }
 	}
@@ -84,7 +82,7 @@ func RunBackfill(cfg gate.Config, projectsDir string, opts BackfillOptions, out 
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		if row := decodeResolverRow(line); row != nil {
+		if row := DecodeRow(line); row != nil {
 			rows = append(rows, row)
 		}
 	}
@@ -104,21 +102,40 @@ func RunBackfill(cfg gate.Config, projectsDir string, opts BackfillOptions, out 
 }
 
 type resolver struct {
-	cfg         gate.Config
-	projectsDir string
-	quiet       bool
-	out         io.Writer
-	now         func() float64
-	// ledgersOverride replaces the transcript harvest in tests. Production leaves it
-	// nil and reads ~/.claude/projects.
-	ledgersOverride func() []ledgerMsg
+	cfg      gate.Config
+	harvests []Harvest
+	quiet    bool
+	out      io.Writer
+	now      func() float64
 }
 
-func (r *resolver) allLedgers() []ledgerMsg {
-	if r.ledgersOverride != nil {
-		return r.ledgersOverride()
+// allLedgers runs every harvest and orders the union, so the result does not depend on
+// which harness was read first.
+func (r *resolver) allLedgers() []LedgerMsg {
+	var out []LedgerMsg
+	for _, harvest := range r.harvests {
+		out = append(out, harvest()...)
 	}
-	return r.ledgerMessages()
+	SortLedgers(out)
+	return out
+}
+
+// SortLedgers orders a harvest by (when, key, path, text). A harvest calls it so its
+// own output is stable on its own; RunBackfill calls it again over the union.
+func SortLedgers(msgs []LedgerMsg) {
+	sort.Slice(msgs, func(i, j int) bool {
+		a, b := msgs[i], msgs[j]
+		if a.When != b.When {
+			return a.When < b.When
+		}
+		if a.Key != b.Key {
+			return a.Key < b.Key
+		}
+		if a.Path != b.Path {
+			return a.Path < b.Path
+		}
+		return a.Text < b.Text
+	})
 }
 
 func (r *resolver) say(format string, args ...any) {
@@ -170,142 +187,9 @@ func (r *resolver) acquireLock() bool {
 
 func (r *resolver) releaseLock() { os.Remove(r.lockPath()) }
 
-// ledgerMessages returns every real ledger in every transcript, sorted by (when,
-// session, path, text).
-func (r *resolver) ledgerMessages() []ledgerMsg {
-	var out []ledgerMsg
-	matches, _ := filepath.Glob(filepath.Join(r.projectsDir, "*", "*.jsonl"))
-	for _, p := range matches {
-		data, err := os.ReadFile(p)
-		if err != nil {
-			continue
-		}
-		for _, line := range strings.Split(string(data), "\n") {
-			if !strings.Contains(line, LedgerHeader) {
-				continue
-			}
-			var row struct {
-				Type        string            `json:"type"`
-				IsSidechain bool              `json:"isSidechain"`
-				SessionID   string            `json:"sessionId"`
-				Timestamp   string            `json:"timestamp"`
-				Message     transcriptContent `json:"message"`
-			}
-			if err := json.Unmarshal([]byte(line), &row); err != nil {
-				continue
-			}
-			if row.Type != "assistant" || row.IsSidechain {
-				continue
-			}
-			when := isoEpoch(row.Timestamp)
-			if when == nil {
-				continue
-			}
-			for _, text := range textBlocks(row.Message.Content) {
-				if strings.Contains(text, LedgerHeader) && HasLedgerLine(text) {
-					out = append(out, ledgerMsg{*when, row.SessionID, p, text})
-				}
-			}
-		}
-	}
-	sort.Slice(out, func(i, j int) bool {
-		a, b := out[i], out[j]
-		if a.when != b.when {
-			return a.when < b.when
-		}
-		if a.session != b.session {
-			return a.session < b.session
-		}
-		if a.path != b.path {
-			return a.path < b.path
-		}
-		return a.text < b.text
-	})
-	return out
-}
-
-// transcriptContent is the message subset ledgerMessages reads.
-type transcriptContent struct {
-	Content json.RawMessage `json:"content"`
-}
-
-// ledgerRounds returns the rounds a chain ledger reports on. Empty for a legacy
-// per-round ledger, whose one round lives in the header LedgerRound reads.
-func ledgerRounds(text string) map[int]bool {
-	out := map[int]bool{}
-	for _, m := range ledgerSectionCapRe.FindAllStringSubmatch(text, -1) {
-		if n, ok := atoiOK(m[1]); ok {
-			out[n] = true
-		}
-	}
-	return out
-}
-
-// chainBlocks returns each chain ledger inside one message, header line first.
-func chainBlocks(text string) []string {
-	locs := ledgerChainRe.FindAllStringIndex(text, -1)
-	if len(locs) == 0 {
-		return nil
-	}
-	starts := make([]int, len(locs))
-	for i, loc := range locs {
-		starts[i] = loc[0]
-	}
-	out := make([]string, len(starts))
-	for i, s := range starts {
-		end := len(text)
-		if i+1 < len(starts) {
-			end = starts[i+1]
-		}
-		out[i] = text[s:end]
-	}
-	return out
-}
-
-// blockSubject returns the commit subject a chain ledger's HEADER names, or "". Only the
-// first line is read: a subject quoted inside a bullet names no commit.
-func blockSubject(block string) string {
-	first := block
-	if idx := strings.IndexByte(block, '\n'); idx >= 0 {
-		first = block[:idx]
-	}
-	if m := blockSubjectRe.FindStringSubmatch(first); m != nil {
-		return m[1]
-	}
-	return ""
-}
-
-// ledgerSection returns one round's slice of a chain ledger: its section heading up to
-// the next one, or "" when the ledger carries no section for that round.
-func ledgerSection(text string, firing int) string {
-	locs := ledgerSectionCapRe.FindAllStringSubmatchIndex(text, -1)
-	type bound struct {
-		start int
-		n     int
-	}
-	var bounds []bound
-	for _, loc := range locs {
-		n, ok := atoiOK(text[loc[2]:loc[3]])
-		if !ok {
-			continue
-		}
-		bounds = append(bounds, bound{loc[0], n})
-	}
-	for k, b := range bounds {
-		if b.n == firing {
-			end := len(text)
-			if k+1 < len(bounds) {
-				end = bounds[k+1].start
-			}
-			return text[b.start:end]
-		}
-	}
-	return ""
-}
-
-// expectsLedger reports whether a row demanded a ledger: every retry, and a cap whose
+// ExpectsLedger reports whether a row demanded a ledger: every retry, and a cap whose
 // terminal review had findings to adjudicate.
-func expectsLedger(row resolverRow) bool {
+func ExpectsLedger(row map[string]any) bool {
 	switch pyStr(row["phase"]) {
 	case "retry":
 		return true
@@ -348,7 +232,7 @@ func (r *resolver) chainEndTS(rows []resolverRow, i int, session string, firing 
 		if gate.NonReviewPhases[phase] || phase == "clean" {
 			continue
 		}
-		if session != "" && pyStr(row["session_id"]) != session {
+		if session != "" && joinKey(row) != session {
 			continue
 		}
 		f, _ := pyInt(row["firing"])
@@ -362,18 +246,28 @@ func (r *resolver) chainEndTS(rows []resolverRow, i int, session string, firing 
 	return math.Inf(1)
 }
 
+// joinKey is the thread a row's ledger was written in. A harness that gates inside a
+// subagent stamps thread_id, and two threads of one session share a session_id — so
+// keying on the session alone would let one thread claim the other's ledger.
+func joinKey(row resolverRow) string {
+	if thread := pyStr(row["thread_id"]); thread != "" {
+		return thread
+	}
+	return pyStr(row["session_id"])
+}
+
 // pickLedger returns the ledger answering row i and how it was joined: "chain",
 // "round" or "window". A miss returns (nil, join).
-func (r *resolver) pickLedger(rows []resolverRow, i int, denyTS float64, ledgers []ledgerMsg) (*ledgerMsg, string) {
+func (r *resolver) pickLedger(rows []resolverRow, i int, denyTS float64, ledgers []LedgerMsg) (*LedgerMsg, string) {
 	row := rows[i]
-	session := pyStr(row["session_id"])
+	session := joinKey(row)
 	firing, hasFiring := pyInt(row["firing"])
 	firingTruthy := hasFiring && firing != 0
 
-	inWindow := func(span float64) []ledgerMsg {
-		var out []ledgerMsg
+	inWindow := func(span float64) []LedgerMsg {
+		var out []LedgerMsg
 		for _, x := range ledgers {
-			if denyTS <= x.when && x.when <= denyTS+span && (session == "" || x.session == session) {
+			if denyTS <= x.When && x.When <= denyTS+span && (session == "" || x.Key == session) {
 				out = append(out, x)
 			}
 		}
@@ -383,20 +277,20 @@ func (r *resolver) pickLedger(rows []resolverRow, i int, denyTS float64, ledgers
 	if firingTruthy && denyTS >= ledgerChainTS {
 		bound := r.chainEndTS(rows, i, session, firing)
 		subject := pyStr(row["subject"])
-		var named, bounded []ledgerMsg
+		var named, bounded []LedgerMsg
 		for _, x := range inWindow(r.spanFor("chain")) {
-			for _, block := range chainBlocks(x.text) {
-				if !ledgerRounds(block)[firing] {
+			for _, block := range gate.ChainBlocks(x.Text) {
+				if !gate.LedgerRounds(block)[firing] {
 					continue
 				}
-				got := blockSubject(block)
+				got := gate.BlockSubject(block)
 				if subject != "" && got != "" && got != subject {
 					continue
 				}
-				cand := ledgerMsg{x.when, x.session, x.path, block}
+				cand := LedgerMsg{When: x.When, Key: x.Key, Path: x.Path, Text: block}
 				if subject != "" && got == subject {
 					named = append(named, cand)
-				} else if x.when < bound {
+				} else if x.When < bound {
 					bounded = append(bounded, cand)
 				}
 			}
@@ -407,9 +301,9 @@ func (r *resolver) pickLedger(rows []resolverRow, i int, denyTS float64, ledgers
 		if len(bounded) > 0 {
 			return &bounded[len(bounded)-1], "chain"
 		}
-		var mine []ledgerMsg
+		var mine []LedgerMsg
 		for _, x := range inWindow(r.spanFor("round")) {
-			if n, ok := LedgerRound(x.text); x.when < bound && ok && n == firing {
+			if n, ok := gate.LedgerRound(x.Text); x.When < bound && ok && n == firing {
 				mine = append(mine, x)
 			}
 		}
@@ -421,9 +315,9 @@ func (r *resolver) pickLedger(rows []resolverRow, i int, denyTS float64, ledgers
 
 	if firingTruthy && denyTS >= ledgerRoundTS {
 		bound := r.chainEndTS(rows, i, session, firing)
-		var mine []ledgerMsg
+		var mine []LedgerMsg
 		for _, x := range inWindow(r.spanFor("round")) {
-			if n, ok := LedgerRound(x.text); x.when < bound && ok && n == firing {
+			if n, ok := gate.LedgerRound(x.Text); x.When < bound && ok && n == firing {
 				mine = append(mine, x)
 			}
 		}
@@ -445,7 +339,7 @@ func (r *resolver) pickLedger(rows []resolverRow, i int, denyTS float64, ledgers
 func (r *resolver) pending(rows []resolverRow) bool {
 	now := r.now()
 	for i, row := range rows {
-		if !expectsLedger(row) || pyTruthy(row["ledger_found"]) || pyTruthy(row["backfilled"]) {
+		if !ExpectsLedger(row) || pyTruthy(row["ledger_found"]) || pyTruthy(row["backfilled"]) {
 			continue
 		}
 		if denyTS, ok := anchorTS(rows, i); ok && now >= denyTS+gate.LedgerGrace {
@@ -478,7 +372,7 @@ func (r *resolver) resolveAndWrite(rows []resolverRow, seenLines int, apply bool
 
 	changed := 0
 	for i, row := range rows {
-		if !expectsLedger(row) || pyTruthy(row["ledger_found"]) || pyTruthy(row["backfilled"]) {
+		if !ExpectsLedger(row) || pyTruthy(row["ledger_found"]) || pyTruthy(row["backfilled"]) {
 			continue
 		}
 		denyTS, ok := anchorTS(rows, i)
@@ -518,27 +412,27 @@ func (r *resolver) resolveAndWrite(rows []resolverRow, seenLines int, apply bool
 		}
 
 		delete(row, "_recheck")
-		text := cand.text
+		text := cand.Text
 		firing, _ := pyInt(row["firing"])
 		if join == "chain" {
-			text = ledgerSection(text, firing)
+			text = gate.LedgerSection(text, firing)
 		}
-		for k, v := range ParseLedgerText(text) {
+		for k, v := range gate.ParseLedgerText(text) {
 			row[k] = v
 		}
 		if join == "chain" {
 			row["ledger_round"] = firing
 		}
 		row["ledger_found"] = true
-		row["ledger_ts"] = int64(cand.when)
+		row["ledger_ts"] = int64(cand.When)
 		row["ledger_join"] = join
 		row["backfilled"] = true
-		if cand.session != "" && pyStr(row["session_id"]) == "" {
-			row["session_id"] = cand.session
+		if cand.Key != "" && pyStr(row["session_id"]) == "" && pyStr(row["thread_id"]) == "" {
+			row["session_id"] = cand.Key
 		}
 		changed++
 		r.say("  ts=%v deny=%d  ledger at %d join=%s: %v/%v",
-			row["ts"], int64(denyTS), int64(cand.when), join,
+			row["ts"], int64(denyTS), int64(cand.When), join,
 			row["self_reported_accepted"], row["self_reported_rejected"])
 	}
 
@@ -611,11 +505,11 @@ func (r *resolver) writeRows(rows []resolverRow, seenLines int) error {
 func CountUnresolved(cfg gate.Config) int {
 	n := 0
 	for _, line := range splitLedgerLines(cfg.LogFile()) {
-		row := decodeResolverRow(line)
+		row := DecodeRow(line)
 		if row == nil {
 			continue
 		}
-		if expectsLedger(row) && !pyTruthy(row["ledger_found"]) && !pyTruthy(row["backfilled"]) {
+		if ExpectsLedger(row) && !pyTruthy(row["ledger_found"]) && !pyTruthy(row["backfilled"]) {
 			n++
 		}
 	}
@@ -636,7 +530,10 @@ func splitLedgerLines(path string) []string {
 	return strings.Split(strings.TrimSuffix(text, "\n"), "\n")
 }
 
-func decodeResolverRow(line string) resolverRow {
+// DecodeRow reads one ledger line the way the resolver does: numbers stay
+// json.Number, so a rewrite reproduces the original text rather than a float's
+// rendering of it.
+func DecodeRow(line string) map[string]any {
 	dec := json.NewDecoder(strings.NewReader(line))
 	dec.UseNumber()
 	var m map[string]any
@@ -650,20 +547,6 @@ func popRecheck(row resolverRow) bool {
 	had := pyTruthy(row["_recheck"])
 	delete(row, "_recheck")
 	return had
-}
-
-func atoiOK(s string) (int, bool) {
-	if s == "" {
-		return 0, false
-	}
-	n := 0
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			return 0, false
-		}
-		n = n*10 + int(c-'0')
-	}
-	return n, true
 }
 
 // pyNum mirrors Python's numeric read: json.Number, float or int yields a value; every

@@ -8,10 +8,12 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/steer-sh/steer-cli/internal/gate"
+	"github.com/steer-sh/steer-cli/internal/gate/resolve"
 )
 
 // TestReplayBackfill runs backfill_ledger.py beside the Go resolver over the real local
@@ -58,8 +60,9 @@ func TestReplayBackfill(t *testing.T) {
 	// Go side: same reset shard, same transcripts, same wall clock band. HostID makes
 	// RunBackfill read the seeded shard rather than an empty-host name.
 	cfg := gate.Config{StateDir: goDir, HostID: hostID, StaleAfter: 30 * time.Minute}
-	opts := BackfillOptions{Apply: true, Quiet: true}
-	RunBackfill(cfg, projects, opts, nil, func() float64 { return float64(time.Now().Unix()) })
+	opts := resolve.BackfillOptions{Apply: true, Quiet: true}
+	resolve.RunBackfill(cfg, []resolve.Harvest{Harvest(projects)}, opts,
+		nil, func() float64 { return float64(time.Now().Unix()) })
 
 	pyRows := readShard(t, filepath.Join(pyDir, shardName))
 	goRows := readShard(t, filepath.Join(goDir, shardName))
@@ -71,7 +74,7 @@ func TestReplayBackfill(t *testing.T) {
 		if !reflect.DeepEqual(pyRows[i], goRows[i]) {
 			t.Errorf("row %d differs\n python: %v\n     go: %v", i, pyRows[i], goRows[i])
 		}
-		if pyTruthy(goRows[i]["backfilled"]) {
+		if stamped(goRows[i]["backfilled"]) {
 			restamped++
 		}
 	}
@@ -92,7 +95,7 @@ func resetShard(t *testing.T, path string) ([]byte, int) {
 	owing := 0
 	var sb bytes.Buffer
 	for _, row := range rows {
-		if expectsLedger(row) {
+		if resolve.ExpectsLedger(row) {
 			delete(row, "backfilled")
 			delete(row, "ledger_found")
 			owing++
@@ -125,4 +128,26 @@ func driverPath(t *testing.T) string {
 		t.Fatal("runtime.Caller failed")
 	}
 	return filepath.Join(filepath.Dir(self), "replay_backfill.py")
+}
+
+// stamped reads the resolver's boolean marker the way a JSON reader sees it.
+func stamped(v any) bool {
+	b, ok := v.(bool)
+	return ok && b
+}
+
+func readShard(t *testing.T, path string) []map[string]any {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rows []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		if line == "" {
+			continue
+		}
+		rows = append(rows, resolve.DecodeRow(line))
+	}
+	return rows
 }

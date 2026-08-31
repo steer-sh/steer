@@ -166,15 +166,15 @@ func RepoDir(cmd, cwd string) string {
 	span := CommitSpan(cmd)
 	base := cwd
 	for _, m := range cdRe.FindAllStringSubmatch(cmd[:span.Start], -1) {
-		base = resolve(m[1], base) // last cd wins, as the shell does
+		base = resolveDir(m[1], base) // last cd wins, as the shell does
 	}
 	if m := dashCRe.FindStringSubmatch(cmd[span.Start:span.End]); m != nil {
-		return resolve(m[1], base)
+		return resolveDir(m[1], base)
 	}
 	return base
 }
 
-func resolve(token, base string) string {
+func resolveDir(token, base string) string {
 	path := strings.Trim(token, `'"`)
 	if strings.HasPrefix(path, "~") {
 		if home, err := os.UserHomeDir(); err == nil {

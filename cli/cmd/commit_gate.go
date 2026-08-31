@@ -14,6 +14,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/gate/cc"
 	gatecodex "github.com/steer-sh/steer-cli/internal/gate/codex"
 	"github.com/steer-sh/steer-cli/internal/gate/gitgate"
+	"github.com/steer-sh/steer-cli/internal/gate/resolve"
 	"github.com/steer-sh/steer-cli/internal/gate/reviewers"
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/styles"
@@ -31,8 +32,8 @@ const (
 	backfillHookTimeout = 30
 )
 
-// backfillCommand is the Stop hook steer registers alongside the Claude Code review
-// hook: harvest late, only when a row is due, silently.
+// backfillCommand is the turn-end hook steer registers alongside the review hook:
+// harvest late, only when a row is due, silently.
 func backfillCommand() string {
 	return "steer commit-gate backfill --if-due --apply --quiet"
 }
@@ -200,7 +201,8 @@ func installReviewChannel(cfg gate.Config) error {
 		if cwdErr != nil {
 			return cwdErr
 		}
-		path, err = codexhooks.RegisterCommitGate(scope, cwd, commitGateCodexCommand(), timeout)
+		path, err = codexhooks.RegisterCommitGateAndResolver(scope, cwd,
+			commitGateCodexCommand(), timeout, backfillCommand(), backfillHookTimeout)
 	} else {
 		// The review hook and the resolver are one Claude Code installation, armed in
 		// one write: the review writes the rows the resolver later reconciles from the
@@ -217,7 +219,8 @@ func installReviewChannel(cfg gate.Config) error {
 		message += "\nResolver: Stop hook armed (steer commit-gate backfill)"
 	}
 	if target == harness.Codex {
-		message += "\nHooks: " + path + "\nTrust: restart Codex and approve this definition in /hooks"
+		message += "\nResolver: Stop and SubagentStop hooks armed (steer commit-gate backfill)" +
+			"\nHooks: " + path + "\nTrust: restart Codex and approve these definitions in /hooks"
 	}
 	fmt.Println(styles.SuccessBox.Render(message))
 	return nil
@@ -340,7 +343,7 @@ var commitGateRemoveCmd = &cobra.Command{
 			if err != nil {
 				return err
 			}
-			path, err := codexhooks.RemoveCommitGate(scope, cwd)
+			path, err := codexhooks.RemoveCommitGateAndResolver(scope, cwd)
 			if err == nil {
 				fmt.Println("Removed Codex commit gate from " + path)
 			}
@@ -373,19 +376,28 @@ idempotent and, without --apply, writes nothing.
   --reresolve  re-examine rows already stamped as a miss (never removes a ledger)`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg := gateConfig()
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil
-		}
-		opts := cc.BackfillOptions{
+		opts := resolve.BackfillOptions{
 			Apply:     backfillApply,
 			IfDue:     backfillIfDue,
 			Quiet:     backfillQuiet,
 			Reresolve: backfillReresolve,
 		}
-		cc.RunBackfill(cfg, filepath.Join(home, ".claude", "projects"), opts, os.Stdout, nil)
+		resolve.RunBackfill(cfg, ledgerHarvests(), opts, os.Stdout, nil)
 		return nil
 	},
+}
+
+// ledgerHarvests is one harvest per harness whose transcripts are readable here. A
+// harness with no tree contributes nothing rather than failing the run.
+func ledgerHarvests() []resolve.Harvest {
+	var harvests []resolve.Harvest
+	if home, err := os.UserHomeDir(); err == nil {
+		harvests = append(harvests, cc.Harvest(filepath.Join(home, ".claude", "projects")))
+	}
+	if root, err := gatecodex.SessionsRoot(); err == nil {
+		harvests = append(harvests, gatecodex.Harvest(root))
+	}
+	return harvests
 }
 
 var commitGateStatusCmd = &cobra.Command{
@@ -430,7 +442,7 @@ var commitGateStatusCmd = &cobra.Command{
 			}
 			fmt.Printf("  Resolver     %s scope: %s\n", scope, state)
 		}
-		if unresolved := cc.CountUnresolved(cfg); unresolved > 0 {
+		if unresolved := resolve.CountUnresolved(cfg); unresolved > 0 {
 			fmt.Printf("  Unresolved   %d row(s) owe a ledger — run: steer commit-gate backfill --apply\n", unresolved)
 		}
 		cwd, _ := codexProjectDir()
@@ -451,6 +463,12 @@ var commitGateStatusCmd = &cobra.Command{
 					"so commits are NOT reviewed; re-run install", arming.Matcher, codexhooks.CommitGateMatcher)
 			}
 			fmt.Printf("  Codex        %s scope: %s\n", scope, state)
+			armed, timeout := codexhooks.ResolverArming(scope, cwd)
+			resolverState := "not armed"
+			if armed {
+				resolverState = fmt.Sprintf("Stop and SubagentStop armed, timeout %ds", timeout)
+			}
+			fmt.Printf("  Resolver     codex %s scope: %s\n", scope, resolverState)
 		}
 		armed, path := preCommitArmedHere()
 		if armed {

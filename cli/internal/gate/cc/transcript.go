@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -239,168 +238,6 @@ func RepoFields(cwd string) gate.Row {
 	return fields
 }
 
-// --- the agent's self-reported ledger ----------------------------------------
-
-// LedgerHeader is the phrase the deny and cap templates instruct the agent to write.
-// It is required in the SAME message as the verdict bullets: the bullet shape alone
-// matches ordinary prose about the gate — a session discussing this very gate contains
-// `**ACCEPTED**` in running text — and a forged row corrupts the exact dataset this
-// exists to build. A missed ledger is recoverable from the transcript later; a
-// fabricated one is not distinguishable from a real one afterwards.
-const LedgerHeader = "Commit gate fired"
-
-// ledgerRoundRe reads the round marker off the HEADER LINE, which is what files a
-// ledger against the round it answers. Optional in the pattern because ledgers written
-// before it was required carry no round; a row with a null round is one of those, not
-// a mismatch.
-var ledgerRoundRe = regexp.MustCompile(
-	`(?im)^[ \t]*(?:[-+>]\s*)?\**\s*` + regexp.QuoteMeta(LedgerHeader) + `[^\n]*?\(\s*round\s*(\d+)`)
-
-// ledgerSectionRe reads one round's section out of a chain ledger: `**Round 3/4**` or
-// `**Round 5, terminal**`. A ledger carrying these answers every round of its chain, so
-// it belongs to no single round and only the resolver can join it.
-var ledgerSectionRe = regexp.MustCompile(`(?im)^[ \t]*(?:[-+>]\s*)?\**\s*Round\s+\d+\s*[/,]`)
-
-// HasRoundSections reports whether the text is a chain ledger — one report covering
-// every round, rather than one round's own.
-func HasRoundSections(text string) bool { return ledgerSectionRe.MatchString(text) }
-
-const (
-	// 24 clears the densest ledger on record (16 concerns) with headroom. The cap
-	// bounds a row's size; it is not a claim about how many concerns a round may
-	// raise, so a row that hits it still reports the true total in concerns_total.
-	maxConcerns     = 24
-	maxConcernChars = 300
-)
-
-// Concern is one adjudicated finding as the agent reported it.
-type Concern struct {
-	Verdict string `json:"verdict"`
-	Concern string `json:"concern"`
-}
-
-// LedgerRound is the round a ledger message names, or ok=false when it names none.
-func LedgerRound(text string) (int, bool) {
-	m := ledgerRoundRe.FindStringSubmatch(text)
-	if m == nil {
-		return 0, false
-	}
-	n, err := strconv.Atoi(m[1])
-	if err != nil {
-		return 0, false
-	}
-	return n, true
-}
-
-// parseLedgerLine is `^[ \t]*[-*][ \t]*\*\*(ACCEPTED|REJECTED)\*\*[ \t]*(?:[—–:]|-(?!>))?[ \t]*(.+?)[ \t]*$`
-// hand-rolled. The separator alternative needs `-(?!>)`, which RE2 cannot express: a
-// hyphen followed by `>` is the head of an ASCII `->` arrow, and consuming it leaves
-// the concern parsed as `> ...` with the arrow split never firing.
-func parseLedgerLine(line string) (Concern, bool) {
-	rest := strings.TrimLeft(line, " \t")
-	if rest == "" || (rest[0] != '-' && rest[0] != '*') {
-		return Concern{}, false
-	}
-	rest = strings.TrimLeft(rest[1:], " \t")
-	if !strings.HasPrefix(rest, "**") {
-		return Concern{}, false
-	}
-	rest = rest[2:]
-	var verdict string
-	switch {
-	case strings.HasPrefix(rest, "ACCEPTED"):
-		verdict = "ACCEPTED"
-	case strings.HasPrefix(rest, "REJECTED"):
-		verdict = "REJECTED"
-	default:
-		return Concern{}, false
-	}
-	rest = rest[len(verdict):]
-	if !strings.HasPrefix(rest, "**") {
-		return Concern{}, false
-	}
-	rest = strings.TrimLeft(rest[2:], " \t")
-	for _, sep := range []string{"—", "–", ":"} {
-		if strings.HasPrefix(rest, sep) {
-			rest = rest[len(sep):]
-			goto separatorDone
-		}
-	}
-	// `-(?!>)`: a hyphen followed by `>` is the head of an ASCII `->` arrow. Consuming
-	// it would leave the concern parsed as `> ...` with the arrow split never firing.
-	if strings.HasPrefix(rest, "-") && !strings.HasPrefix(rest, "->") {
-		rest = rest[1:]
-	}
-separatorDone:
-	rest = strings.TrimRight(strings.TrimLeft(rest, " \t"), " \t")
-	if rest == "" {
-		return Concern{}, false
-	}
-	return Concern{Verdict: verdict, Concern: rest}, true
-}
-
-// arrowSplit is the template's `→`, or its ASCII spelling, separating the concern from
-// what was done about it.
-var arrowSplitRe = regexp.MustCompile(`\s*(?:→|->)\s*`)
-
-// ParseLedgerText turns the verdict bullets of one ledger message into the row fields
-// they become.
-func ParseLedgerText(text string) gate.Row {
-	// Non-nil so an empty result marshals to [] like Python's list, not null.
-	concerns := []Concern{}
-	accepted, rejected := 0, 0
-	for _, line := range strings.Split(text, "\n") {
-		parsed, ok := parseLedgerLine(line)
-		if !ok {
-			continue
-		}
-		// Keep the concern, not the resolution: an integer alone is unreadable a month
-		// later. Everything downstream of the arrow is what was done, not the claim.
-		claim := arrowSplitRe.Split(parsed.Concern, 2)[0]
-		claim = strings.TrimSpace(claim)
-		// Cap by rune, as Python slices a str by code point; a byte cap splits a
-		// multibyte char and drops a different last word on the same text.
-		if r := []rune(claim); len(r) > maxConcernChars {
-			claim = string(r[:maxConcernChars])
-		}
-		concerns = append(concerns, Concern{Verdict: parsed.Verdict, Concern: claim})
-		if parsed.Verdict == "ACCEPTED" {
-			accepted++
-		} else {
-			rejected++
-		}
-	}
-	stored := concerns
-	if len(stored) > maxConcerns {
-		stored = stored[:maxConcerns]
-	}
-	row := gate.Row{
-		"self_reported_accepted": accepted,
-		"self_reported_rejected": rejected,
-		// concerns_total, because the counts run over the FULL list while the stored
-		// text is capped. Rows carrying more verdicts than concerns read as a parse
-		// bug; without this field a reader cannot tell truncation from one.
-		"concerns_total": len(concerns),
-		"concerns":       stored,
-	}
-	if round, ok := LedgerRound(text); ok {
-		row["ledger_round"] = round
-	} else {
-		row["ledger_round"] = nil
-	}
-	return row
-}
-
-// HasLedgerLine reports whether any line of the text is a verdict bullet.
-func HasLedgerLine(text string) bool {
-	for _, line := range strings.Split(text, "\n") {
-		if _, ok := parseLedgerLine(line); ok {
-			return true
-		}
-	}
-	return false
-}
-
 // ReadLedger recovers the agent's ACCEPT/REJECT ledger for a fired gate from the
 // transcript. This is the SELF-REPORTED half of the retry row and is not an oracle.
 //
@@ -417,7 +254,7 @@ func ReadLedger(transcript string, sinceTS float64, firing int) gate.Row {
 	var latest, marked string
 	for _, line := range lines {
 		// Cheap prefilter: skip the JSON parse for the rows that cannot match.
-		if !strings.Contains(line, LedgerHeader) {
+		if !strings.Contains(line, gate.LedgerHeader) {
 			continue
 		}
 		var row transcriptRow
@@ -438,13 +275,13 @@ func ReadLedger(transcript string, sinceTS float64, firing int) gate.Row {
 			continue
 		}
 		for _, text := range textBlocks(message.Content) {
-			if !strings.Contains(text, LedgerHeader) || !HasLedgerLine(text) {
+			if !strings.Contains(text, gate.LedgerHeader) || !gate.HasLedgerLine(text) {
 				continue
 			}
 			// A ledger naming a DIFFERENT round answers a different round, so it is not
 			// this row's ledger no matter how close in time it landed. An unmarked
 			// ledger still counts: the marker is newer than some of the transcripts.
-			got, hasRound := LedgerRound(text)
+			got, hasRound := gate.LedgerRound(text)
 			if firing > 0 && hasRound && got != firing {
 				continue
 			}
@@ -455,7 +292,7 @@ func ReadLedger(transcript string, sinceTS float64, firing int) gate.Row {
 			// carrying sections is a stray marker, and it happens to match this firing
 			// exactly when the text is the chain's own ledger. The round asked for does
 			// not decide it either: no round owns a chain ledger, firing 0 included.
-			if HasRoundSections(text) {
+			if gate.HasRoundSections(text) {
 				continue
 			}
 			// Last qualifying message wins: if the agent restates the ledger after
@@ -473,5 +310,5 @@ func ReadLedger(transcript string, sinceTS float64, firing int) gate.Row {
 	if latest == "" {
 		return nil
 	}
-	return ParseLedgerText(latest)
+	return gate.ParseLedgerText(latest)
 }
