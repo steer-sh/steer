@@ -1,14 +1,12 @@
 package report
 
 import (
-	"bufio"
-	"encoding/json"
-	"io"
-	"os"
 	"regexp"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/steer-sh/steer-cli/internal/transcript"
 )
 
 const (
@@ -22,7 +20,7 @@ const (
 	maxResultScan = 4096
 )
 
-// correctionPatterns match user-turn language indicating Claude repeated
+// correctionPatterns match user-turn language indicating the agent repeated
 // something the user already corrected. Precision beats recall here: a missed
 // correction costs one suggestion, a false positive pollutes the report.
 var correctionPatterns = []*regexp.Regexp{
@@ -40,44 +38,15 @@ var failurePattern = regexp.MustCompile(`(?i)(error TS\d+|\beslint\b|\bFAILED\b|
 
 var whitespaceRun = regexp.MustCompile(`\s+`)
 
-// transcript entry shapes — only the fields the scanner reads.
-type entry struct {
-	Type        string   `json:"type"`
-	IsMeta      bool     `json:"isMeta"`
-	IsSidechain bool     `json:"isSidechain"`
-	Timestamp   string   `json:"timestamp"`
-	SessionID   string   `json:"sessionId"`
-	Message     *message `json:"message"`
-}
-
-type message struct {
-	Content json.RawMessage `json:"content"`
-}
-
-type contentBlock struct {
-	Type      string          `json:"type"`
-	Text      string          `json:"text"`
-	Content   json.RawMessage `json:"content"`
-	IsError   bool            `json:"is_error"`
-	ToolUseID string          `json:"tool_use_id"`
-	ID        string          `json:"id"`
-	Name      string          `json:"name"`
-	Input     json.RawMessage `json:"input"`
-}
-
-type toolUseInput struct {
-	Command  string `json:"command"`
-	FilePath string `json:"file_path"`
-}
-
-// toolCall is what the scanner remembers about an assistant tool_use so the
-// later tool_result can be attributed.
+// toolCall is what the scanner remembers about a tool call so the later result
+// can be attributed.
 type toolCall struct {
 	Name   string
 	Target string
 }
 
-// Scanner streams transcript files and accumulates signal clusters.
+// Scanner accumulates signal clusters from normalized transcript events. It
+// reads no harness format of its own: an Adapter supplies the events.
 type Scanner struct {
 	Since    time.Time
 	stats    Stats
@@ -99,113 +68,41 @@ func NewScanner(since time.Time) *Scanner {
 	}
 }
 
-// ScanFile streams one transcript. Unparsable lines are skipped, never fatal:
-// a partially-written transcript must not sink the whole report.
-func (s *Scanner) ScanFile(tf TranscriptFile) error {
-	f, err := os.Open(tf.Path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	s.stats.FilesScanned++
-
-	// tool_use id → call info, so tool_results can be attributed. Per-file:
+// ScanSession streams one session through the adapter and classifies its events.
+func (s *Scanner) ScanSession(a transcript.Adapter, session transcript.Session) error {
+	// tool call id → call info, so results can be attributed. Per-session:
 	// results always land in the same transcript as their call.
 	calls := map[string]toolCall{}
 
-	reader := bufio.NewReaderSize(f, 256*1024)
-	for {
-		line, err := reader.ReadBytes('\n')
-		if len(line) > 0 {
-			s.stats.BytesScanned += int64(len(line))
-			s.scanLine(line, calls)
-		}
-		if err == io.EOF {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-	}
+	counts, err := a.Stream(session, transcript.Filter{Since: s.Since}, func(e transcript.Event) error {
+		s.classify(e, calls)
+		return nil
+	})
+	s.stats.FilesScanned++
+	s.stats.BytesScanned += counts.Bytes
+	s.stats.EntriesScanned += counts.Entries
+	s.stats.EntriesSkipped += counts.Skipped
+	return err
 }
 
-func (s *Scanner) scanLine(line []byte, calls map[string]toolCall) {
-	var e entry
-	if err := json.Unmarshal(line, &e); err != nil {
-		s.stats.EntriesSkipped++
-		return
-	}
-
-	if e.Type != "user" && e.Type != "assistant" {
-		s.stats.EntriesSkipped++
-		return
-	}
-	if e.IsSidechain || e.Message == nil {
-		s.stats.EntriesSkipped++
-		return
-	}
-	if !s.inWindow(e.Timestamp) {
-		s.stats.EntriesSkipped++
-		return
-	}
-
-	s.stats.EntriesScanned++
+func (s *Scanner) classify(e transcript.Event, calls map[string]toolCall) {
 	if e.SessionID != "" {
 		s.sessions[e.SessionID] = struct{}{}
 	}
-
-	if e.Type == "assistant" {
-		s.recordToolCalls(e.Message.Content, calls)
-		return
-	}
-
-	// User entry: plain text (a human turn) or tool_result blocks.
-	var text string
-	if err := json.Unmarshal(e.Message.Content, &text); err == nil {
-		if !e.IsMeta {
-			s.checkCorrection(text, e)
+	switch e.Kind {
+	case transcript.KindToolCall:
+		calls[e.ToolUseID] = toolCall{Name: e.Tool, Target: e.Target}
+	case transcript.KindHumanTurn:
+		if !e.Meta {
+			s.checkCorrection(e.Text, e)
 		}
-		return
-	}
-
-	var blocks []contentBlock
-	if err := json.Unmarshal(e.Message.Content, &blocks); err != nil {
-		return
-	}
-	for _, b := range blocks {
-		switch b.Type {
-		case "text":
-			if !e.IsMeta {
-				s.checkCorrection(b.Text, e)
-			}
-		case "tool_result":
-			s.checkToolResult(b, calls, e)
-		}
-	}
-}
-
-func (s *Scanner) recordToolCalls(raw json.RawMessage, calls map[string]toolCall) {
-	var blocks []contentBlock
-	if err := json.Unmarshal(raw, &blocks); err != nil {
-		return
-	}
-	for _, b := range blocks {
-		if b.Type != "tool_use" || b.ID == "" {
-			continue
-		}
-		var input toolUseInput
-		_ = json.Unmarshal(b.Input, &input)
-		target := input.Command
-		if target == "" {
-			target = input.FilePath
-		}
-		calls[b.ID] = toolCall{Name: b.Name, Target: target}
+	case transcript.KindToolResult:
+		s.checkToolResult(e, calls)
 	}
 }
 
 // checkCorrection matches a human turn against correction language.
-func (s *Scanner) checkCorrection(text string, e entry) {
+func (s *Scanner) checkCorrection(text string, e transcript.Event) {
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" || strings.HasPrefix(trimmed, "<") || strings.HasPrefix(trimmed, "Caveat:") {
 		return
@@ -221,24 +118,24 @@ func (s *Scanner) checkCorrection(text string, e entry) {
 	}
 }
 
-// checkToolResult classifies a tool_result as rejection, hook block, or
-// lint/test failure.
-func (s *Scanner) checkToolResult(b contentBlock, calls map[string]toolCall, e entry) {
-	text := resultText(b)
+// checkToolResult classifies a result as rejection, hook block, or lint/test
+// failure.
+func (s *Scanner) checkToolResult(e transcript.Event, calls map[string]toolCall) {
+	text := e.Text
 	if text == "" {
 		return
 	}
 	if len(text) > maxResultScan {
 		text = text[:maxResultScan]
 	}
-	call := calls[b.ToolUseID]
+	call := calls[e.ToolUseID]
 	lower := strings.ToLower(text)
 
 	switch {
 	case strings.Contains(lower, "doesn't want to proceed") || strings.Contains(lower, "user rejected"):
 		key := call.Name + ": " + call.Target
 		s.addCluster(kindRejection, key, key, e)
-	case b.IsError && strings.Contains(lower, "hook") && (strings.Contains(lower, "block") || strings.Contains(lower, "denied")):
+	case e.IsError && strings.Contains(lower, "hook") && (strings.Contains(lower, "block") || strings.Contains(lower, "denied")):
 		snippet := matchLine(text, strings.Index(lower, "hook"))
 		s.addCluster(kindHookBlock, snippet, snippet, e)
 	case call.Name == "Bash":
@@ -247,25 +144,6 @@ func (s *Scanner) checkToolResult(b contentBlock, calls map[string]toolCall, e e
 			s.addCluster(kindFailure, snippet, snippet+" — cmd: "+call.Target, e)
 		}
 	}
-}
-
-// resultText flattens a tool_result content payload (string or text blocks).
-func resultText(b contentBlock) string {
-	var text string
-	if err := json.Unmarshal(b.Content, &text); err == nil {
-		return text
-	}
-	var blocks []contentBlock
-	if err := json.Unmarshal(b.Content, &blocks); err != nil {
-		return ""
-	}
-	var parts []string
-	for _, inner := range blocks {
-		if inner.Type == "text" && inner.Text != "" {
-			parts = append(parts, inner.Text)
-		}
-	}
-	return strings.Join(parts, "\n")
 }
 
 // matchLine returns the line containing byte offset pos, for use as a cluster
@@ -300,7 +178,7 @@ func normalizeKey(s string) string {
 	return key
 }
 
-func (s *Scanner) addCluster(kind, keyBasis, example string, e entry) {
+func (s *Scanner) addCluster(kind, keyBasis, example string, e transcript.Event) {
 	key := normalizeKey(keyBasis)
 	if key == "" {
 		return
@@ -331,17 +209,6 @@ func (s *Scanner) addCluster(kind, keyBasis, example string, e entry) {
 		}
 		c.Examples = append(c.Examples, ex)
 	}
-}
-
-func (s *Scanner) inWindow(timestamp string) bool {
-	if timestamp == "" || s.Since.IsZero() {
-		return true
-	}
-	t, err := time.Parse(time.RFC3339, timestamp)
-	if err != nil {
-		return true
-	}
-	return !t.Before(s.Since)
 }
 
 // Finalize assembles the digest from accumulated clusters. Single-occurrence

@@ -6,12 +6,15 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/cadence"
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/report"
+	"github.com/steer-sh/steer-cli/internal/transcript"
+	"github.com/steer-sh/steer-cli/internal/transcript/cc"
 )
 
 var (
@@ -46,7 +49,8 @@ stats.truncated.`,
 			return fmt.Errorf("--days must be positive, got %d", reportDays)
 		}
 
-		projectsDir, err := report.ProjectsDir()
+		adapter := cc.New()
+		root, err := adapter.Root()
 		if err != nil {
 			return err
 		}
@@ -63,27 +67,30 @@ stats.truncated.`,
 		}
 
 		since := time.Now().AddDate(0, 0, -reportDays)
-		files, err := report.FindTranscripts(projectsDir, projectPaths, !reportProjectOnly, since)
+		sessions, err := adapter.Discover(root, transcript.Filter{
+			Since: since, Projects: projectPaths, AllProjects: !reportProjectOnly,
+		})
 		if err != nil {
 			return err
 		}
 
-		fmt.Fprintf(os.Stderr, "Scanning %d transcript file(s) from the last %d day(s)...\n", len(files), reportDays)
+		fmt.Fprintf(os.Stderr, "Scanning %d transcript file(s) from the last %d day(s)...\n", len(sessions), reportDays)
 
 		scanner := report.NewScanner(since)
 		projects := map[string]struct{}{}
-		for _, f := range files {
-			if err := scanner.ScanFile(f); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: skipping %s: %v\n", filepath.Base(f.Path), err)
+		for _, session := range sessions {
+			if err := scanner.ScanSession(adapter, session); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: skipping %s: %v\n", filepath.Base(session.Path), err)
 				continue
 			}
-			projects[f.ProjectDir] = struct{}{}
+			projects[session.Project] = struct{}{}
 		}
 
 		projectNames := make([]string, 0, len(projects))
 		for name := range projects {
 			projectNames = append(projectNames, name)
 		}
+		sort.Strings(projectNames) // map order is random; sort so the digest is reproducible
 
 		claudeMDs := collectClaudeMDs()
 

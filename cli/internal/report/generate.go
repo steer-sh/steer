@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"sort"
 	"time"
+
+	"github.com/steer-sh/steer-cli/internal/transcript"
+	"github.com/steer-sh/steer-cli/internal/transcript/cc"
 )
 
 // Generate runs the transcript scan end to end and returns the in-memory digest,
@@ -13,7 +16,8 @@ import (
 // directives, which Generate omits — the cadence runner draws candidates from the
 // transcript signal clusters, not from standing rules.
 func Generate(windowDays int, allProjects bool) (*Digest, error) {
-	projectsDir, err := ProjectsDir()
+	adapter := cc.New()
+	root, err := adapter.Root()
 	if err != nil {
 		return nil, err
 	}
@@ -27,18 +31,19 @@ func Generate(windowDays int, allProjects bool) (*Digest, error) {
 	}
 
 	since := time.Now().AddDate(0, 0, -windowDays)
-	files, err := FindTranscripts(projectsDir, projectPaths, allProjects, since)
+	filter := transcript.Filter{Since: since, Projects: projectPaths, AllProjects: allProjects}
+	sessions, err := adapter.Discover(root, filter)
 	if err != nil {
 		return nil, err
 	}
 
 	scanner := NewScanner(since)
 	projects := map[string]struct{}{}
-	for _, f := range files {
-		if err := scanner.ScanFile(f); err != nil {
+	for _, session := range sessions {
+		if err := scanner.ScanSession(adapter, session); err != nil {
 			continue
 		}
-		projects[f.ProjectDir] = struct{}{}
+		projects[session.Project] = struct{}{}
 	}
 	names := make([]string, 0, len(projects))
 	for name := range projects {

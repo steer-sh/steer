@@ -8,15 +8,19 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/steer-sh/steer-cli/internal/harness"
+	"github.com/steer-sh/steer-cli/internal/transcript"
+	"github.com/steer-sh/steer-cli/internal/transcript/cc"
 )
 
-func writeTranscript(t *testing.T, dir, name string, lines []string) TranscriptFile {
+func writeTranscript(t *testing.T, dir, name string, lines []string) transcript.Session {
 	t.Helper()
 	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return TranscriptFile{Path: path, ProjectDir: filepath.Base(dir)}
+	return transcript.Session{Harness: harness.ClaudeCode, Path: path, Project: filepath.Base(dir)}
 }
 
 func userTextEntry(session, ts, text string) string {
@@ -59,7 +63,7 @@ func TestScannerExtractsCorrections(t *testing.T) {
 	})
 
 	s := NewScanner(time.Time{})
-	if err := s.ScanFile(tf); err != nil {
+	if err := s.ScanSession(cc.New(), tf); err != nil {
 		t.Fatal(err)
 	}
 	d := s.Finalize(30, []string{"p"}, nil)
@@ -81,7 +85,7 @@ func TestScannerClustersRepeatedCorrections(t *testing.T) {
 	tf := writeTranscript(t, dir, "s.jsonl", lines)
 
 	s := NewScanner(time.Time{})
-	if err := s.ScanFile(tf); err != nil {
+	if err := s.ScanSession(cc.New(), tf); err != nil {
 		t.Fatal(err)
 	}
 	d := s.Finalize(30, nil, nil)
@@ -106,7 +110,7 @@ func TestScannerIgnoresMetaSidechainAndCommands(t *testing.T) {
 	tf := writeTranscript(t, dir, "s.jsonl", []string{meta, sidechain, command})
 
 	s := NewScanner(time.Time{})
-	if err := s.ScanFile(tf); err != nil {
+	if err := s.ScanSession(cc.New(), tf); err != nil {
 		t.Fatal(err)
 	}
 	d := s.Finalize(30, nil, nil)
@@ -124,7 +128,7 @@ func TestScannerWindowFiltersOldEntries(t *testing.T) {
 
 	since, _ := time.Parse(time.RFC3339, "2026-07-01T00:00:00Z")
 	s := NewScanner(since)
-	if err := s.ScanFile(tf); err != nil {
+	if err := s.ScanSession(cc.New(), tf); err != nil {
 		t.Fatal(err)
 	}
 	d := s.Finalize(30, nil, nil)
@@ -148,7 +152,7 @@ func TestScannerAttributesToolSignals(t *testing.T) {
 	})
 
 	s := NewScanner(time.Time{})
-	if err := s.ScanFile(tf); err != nil {
+	if err := s.ScanSession(cc.New(), tf); err != nil {
 		t.Fatal(err)
 	}
 	d := s.Finalize(30, nil, nil)
@@ -249,53 +253,5 @@ func TestExtractClaudeMD(t *testing.T) {
 	}
 	if len(missing.SteerRules) != 0 || len(missing.Directives) != 0 {
 		t.Error("missing file should yield empty result")
-	}
-}
-
-func TestFindTranscriptsMatchesProject(t *testing.T) {
-	root := t.TempDir()
-	match := filepath.Join(root, "-Users-jeremy-my-proj")
-	other := filepath.Join(root, "-Users-jeremy-other")
-	for _, d := range []string{match, other} {
-		if err := os.MkdirAll(d, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(d, "a.jsonl"), []byte("{}\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	files, err := FindTranscripts(root, []string{"/Users/jeremy/my.proj"}, false, time.Time{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(files) != 1 || files[0].ProjectDir != "-Users-jeremy-my-proj" {
-		t.Fatalf("expected only matching project, got %+v", files)
-	}
-
-	// A symlinked cwd matches via its resolved alias.
-	aliased, err := FindTranscripts(root, []string{"/Volumes/Ext/my.proj", "/Users/jeremy/my.proj"}, false, time.Time{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(aliased) != 1 {
-		t.Fatalf("expected alias path to match, got %+v", aliased)
-	}
-
-	all, err := FindTranscripts(root, []string{"/Users/jeremy/my.proj"}, true, time.Time{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(all) != 2 {
-		t.Fatalf("expected 2 files with --all-projects, got %d", len(all))
-	}
-
-	future := time.Now().Add(time.Hour)
-	none, err := FindTranscripts(root, []string{"/Users/jeremy/my.proj"}, true, future)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(none) != 0 {
-		t.Fatalf("expected mtime filter to exclude all files, got %d", len(none))
 	}
 }
