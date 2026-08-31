@@ -81,6 +81,7 @@ var registry = map[ID]Harness{
 		InstructionFile: "AGENTS.md",
 		ConfigDirName:   ".codex",
 		HomeEnv:         "CODEX_HOME",
+		DetectEnv:       "CODEX_SESSION_ID",
 		Capabilities: Capabilities{
 			HookRegistration: true,
 			Transcripts:      true,
@@ -139,21 +140,28 @@ func names() []string {
 }
 
 // Detect names the harness running this process, from its session marker. It
-// returns Unknown from an ordinary shell and from any harness whose marker
-// Steer has not verified.
+// returns Unknown from an ordinary shell, and from a nested session where more
+// than one marker is set: a child harness inherits its parent's environment, so
+// two markers name a process whose harness cannot be read off the environment
+// at all. STEER_HARNESS resolves that case.
 func Detect() ID {
 	if id := strings.TrimSpace(os.Getenv("STEER_HARNESS")); id != "" {
 		if parsed, err := Parse(id); err == nil {
 			return parsed
 		}
 	}
+	found := Unknown
 	for _, id := range order {
 		env := registry[id].DetectEnv
-		if env != "" && os.Getenv(env) != "" {
-			return id
+		if env == "" || os.Getenv(env) == "" {
+			continue
 		}
+		if found != Unknown {
+			return Unknown
+		}
+		found = id
 	}
-	return Unknown
+	return found
 }
 
 // ConfigDir resolves this harness's config directory for a scope. cwd is the

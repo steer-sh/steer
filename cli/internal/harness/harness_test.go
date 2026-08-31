@@ -38,13 +38,23 @@ func TestParseAcceptsAliasAndRejectsUnknown(t *testing.T) {
 func TestDetectReadsTheSessionMarker(t *testing.T) {
 	t.Setenv("STEER_HARNESS", "")
 	t.Setenv("CLAUDECODE", "")
+	t.Setenv("CODEX_SESSION_ID", "")
 	if got := Detect(); got != Unknown {
 		t.Errorf("Detect with no marker = %q; want Unknown", got)
 	}
+	t.Setenv("CODEX_SESSION_ID", "01a055bc-8abe-7d31-8a36-70a36665e791")
+	if got := Detect(); got != Codex {
+		t.Errorf("Detect with CODEX_SESSION_ID = %q; want %q", got, Codex)
+	}
 	t.Setenv("CLAUDECODE", "1")
+	if got := Detect(); got != Unknown {
+		t.Errorf("two markers detected as %q; a nested session must be Unknown", got)
+	}
+	t.Setenv("CODEX_SESSION_ID", "")
 	if got := Detect(); got != ClaudeCode {
 		t.Errorf("Detect with CLAUDECODE = %q; want %q", got, ClaudeCode)
 	}
+	t.Setenv("CODEX_SESSION_ID", "01a055bc-8abe-7d31-8a36-70a36665e791")
 	t.Setenv("STEER_HARNESS", "codex")
 	if got := Detect(); got != Codex {
 		t.Errorf("STEER_HARNESS did not override the session marker: got %q", got)
@@ -91,7 +101,8 @@ func TestEveryRegistryEntryIsComplete(t *testing.T) {
 		t.Fatalf("All returned %d entries; the registry holds %d", len(all), len(registry))
 	}
 	for _, h := range all {
-		if h.ID == Unknown || h.DisplayName == "" || h.InstructionFile == "" || h.ConfigDirName == "" {
+		if h.ID == Unknown || h.DisplayName == "" || h.InstructionFile == "" ||
+			h.ConfigDirName == "" || h.DetectEnv == "" {
 			t.Errorf("%+v is missing a required field", h)
 		}
 	}
