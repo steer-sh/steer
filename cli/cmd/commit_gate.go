@@ -15,6 +15,7 @@ import (
 	gatecodex "github.com/steer-sh/steer-cli/internal/gate/codex"
 	"github.com/steer-sh/steer-cli/internal/gate/gitgate"
 	"github.com/steer-sh/steer-cli/internal/gate/reviewers"
+	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/styles"
 )
 
@@ -188,13 +189,13 @@ func installReviewChannel(cfg gate.Config) error {
 		}
 	}
 	timeout := int(cfg.ReviewTimeout.Seconds()) + commitGateTimeoutMargin
-	harness := normalizedCommitGateHarness()
-	if harness != "claude-code" && harness != "codex" {
-		return fmt.Errorf("unknown hook harness %q: expected claude-code or codex", commitGateHarness)
+	target, err := harness.Parse(commitGateHarness)
+	if err != nil {
+		return err
 	}
+	entry, _ := harness.Get(target)
 	var path string
-	var err error
-	if harness == "codex" {
+	if target == harness.Codex {
 		cwd, cwdErr := codexProjectDir()
 		if cwdErr != nil {
 			return cwdErr
@@ -211,23 +212,15 @@ func installReviewChannel(cfg gate.Config) error {
 	}
 	fmt.Println()
 	message := fmt.Sprintf("Armed the %s commit gate on PreToolUse\nScope: %s\nTimeout: %ds (reviewer timeout %ds + %ds margin)",
-		harness, scope, timeout, int(cfg.ReviewTimeout.Seconds()), commitGateTimeoutMargin)
-	if harness == "claude-code" {
+		entry.DisplayName, scope, timeout, int(cfg.ReviewTimeout.Seconds()), commitGateTimeoutMargin)
+	if target == harness.ClaudeCode {
 		message += "\nResolver: Stop hook armed (steer commit-gate backfill)"
 	}
-	if harness == "codex" {
+	if target == harness.Codex {
 		message += "\nHooks: " + path + "\nTrust: restart Codex and approve this definition in /hooks"
 	}
 	fmt.Println(styles.SuccessBox.Render(message))
 	return nil
-}
-
-func normalizedCommitGateHarness() string {
-	h := strings.ToLower(strings.TrimSpace(commitGateHarness))
-	if h == "" || h == "claude" {
-		return "claude-code"
-	}
-	return h
 }
 
 func installPreCommitChannel(cfg gate.Config) error {
@@ -338,7 +331,11 @@ var commitGateRemoveCmd = &cobra.Command{
 	Short: "Remove one harness's PreToolUse commit gate",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		scope := currentScope()
-		if normalizedCommitGateHarness() == "codex" {
+		target, err := harness.Parse(commitGateHarness)
+		if err != nil {
+			return err
+		}
+		if target == harness.Codex {
 			cwd, err := codexProjectDir()
 			if err != nil {
 				return err
@@ -348,9 +345,6 @@ var commitGateRemoveCmd = &cobra.Command{
 				fmt.Println("Removed Codex commit gate from " + path)
 			}
 			return err
-		}
-		if normalizedCommitGateHarness() != "claude-code" {
-			return fmt.Errorf("unknown hook harness %q: expected claude-code or codex", commitGateHarness)
 		}
 		// Both steer-owned Claude Code entries come down in one write, preserving
 		// unrelated PreToolUse and Stop hooks.

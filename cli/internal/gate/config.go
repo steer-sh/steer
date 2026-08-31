@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/steer-sh/steer-cli/internal/steerpath"
 )
 
 // Config holds every tunable the engine reads. Defaults() carries the values the
@@ -143,13 +145,7 @@ func envInt(key string) int {
 	return n
 }
 
-func defaultStateDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return filepath.Join(".claude", "state", "commit-review")
-	}
-	return filepath.Join(home, ".claude", "state", "commit-review")
-}
+func defaultStateDir() string { return steerpath.StateDir("commit-review") }
 
 var hostSlugRe = regexp.MustCompile(`[^a-z0-9]+`)
 
