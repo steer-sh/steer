@@ -11,7 +11,11 @@ import (
 )
 
 const (
-	CommitGateMatcher       = "exec_command"
+	// CommitGateMatcher is the canonical hook tool name Codex reports for a shell
+	// command. LegacyCommitGateMatcher is what older builds sent; a registration
+	// carrying it matches nothing and is reported as inert.
+	CommitGateMatcher       = "Bash"
+	LegacyCommitGateMatcher = "exec_command"
 	commitGateIdentity      = "commit-gate review-codex"
 	CommitGateStatusMessage = "red-teaming the commit ..."
 )
@@ -149,8 +153,8 @@ func save(path string, root map[string]any) error {
 	return os.Rename(tmpPath, path)
 }
 
-// RegisterCommitGate upserts one exec_command PreToolUse handler while preserving
-// unrelated JSON keys at every level.
+// RegisterCommitGate upserts one Bash PreToolUse handler while preserving unrelated
+// JSON keys at every level.
 func RegisterCommitGate(scope, cwd, command string, timeout int) (string, error) {
 	if !isGate(command) {
 		return "", fmt.Errorf("commit gate command must contain %q", commitGateIdentity)

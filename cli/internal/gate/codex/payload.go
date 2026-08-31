@@ -11,32 +11,55 @@ import (
 	"github.com/steer-sh/steer-cli/internal/gate/cc"
 )
 
+// ToolName is the canonical hook tool name Codex reports for a shell command, and the
+// matcher registration must use. LegacyToolName is what older builds sent instead.
+const (
+	ToolName       = "Bash"
+	LegacyToolName = "exec_command"
+)
+
 type Payload struct {
 	HookEventName string `json:"hook_event_name"`
 	ToolName      string `json:"tool_name"`
 	ToolInput     struct {
-		Cmd        string `json:"cmd"`
 		Command    string `json:"command"`
+		Cmd        string `json:"cmd"`
 		Workdir    string `json:"workdir"`
 		WorkingDir string `json:"working_directory"`
 	} `json:"tool_input"`
 	SessionID string `json:"session_id"`
 	TurnID    string `json:"turn_id"`
-	CWD       string `json:"cwd"`
+	// AgentID names the subagent thread the call came from, and is absent on the root
+	// thread. SessionID stays the parent's in both cases.
+	AgentID        string `json:"agent_id"`
+	AgentType      string `json:"agent_type"`
+	Model          string `json:"model"`
+	TranscriptPath string `json:"transcript_path"`
+	CWD            string `json:"cwd"`
 }
 
+// Output is the hook's reply in Codex's native shape.
 type Output struct {
-	Decision          string `json:"decision,omitempty"`
-	Reason            string `json:"reason,omitempty"`
-	AdditionalContext string `json:"additionalContext,omitempty"`
-	SystemMessage     string `json:"systemMessage,omitempty"`
+	HookSpecificOutput *hookOutput `json:"hookSpecificOutput,omitempty"`
+	SystemMessage      string      `json:"systemMessage,omitempty"`
+}
+
+type hookOutput struct {
+	HookEventName            string `json:"hookEventName"`
+	PermissionDecision       string `json:"permissionDecision,omitempty"`
+	PermissionDecisionReason string `json:"permissionDecisionReason,omitempty"`
+	AdditionalContext        string `json:"additionalContext,omitempty"`
 }
 
 type invocation struct {
-	command   string
-	cwd       string
-	actor     string
-	sessionID string
+	command    string
+	cwd        string
+	actor      string
+	sessionID  string
+	threadID   string
+	agentType  string
+	model      string
+	transcript string
 }
 
 func (i invocation) provenanceSessionID() string {
@@ -48,15 +71,22 @@ func (i invocation) provenanceSessionID() string {
 
 func parsePayload(raw []byte) (invocation, bool) {
 	var payload Payload
-	if json.Unmarshal(raw, &payload) != nil || payload.HookEventName != "PreToolUse" ||
-		payload.ToolName != "exec_command" {
+	if json.Unmarshal(raw, &payload) != nil || payload.HookEventName != "PreToolUse" {
 		return invocation{}, false
 	}
-	command := payload.ToolInput.Cmd
-	if command == "" {
-		command = payload.ToolInput.Command
+	if payload.ToolName != ToolName && payload.ToolName != LegacyToolName {
+		return invocation{}, false
 	}
-	actor := payload.SessionID
+	command := payload.ToolInput.Command
+	if command == "" {
+		command = payload.ToolInput.Cmd
+	}
+	// The subagent thread keys the chain. Two threads of one session commit
+	// concurrently, and the parent's session id is the same string in both.
+	actor := payload.AgentID
+	if actor == "" {
+		actor = payload.SessionID
+	}
 	if actor == "" {
 		actor = payload.TurnID
 	}
@@ -70,10 +100,22 @@ func parsePayload(raw []byte) (invocation, bool) {
 	if cwd == "" {
 		cwd = payload.CWD
 	}
-	return invocation{command: command, cwd: cwd, actor: actor, sessionID: payload.SessionID}, true
+	return invocation{
+		command:    command,
+		cwd:        cwd,
+		actor:      actor,
+		sessionID:  payload.SessionID,
+		threadID:   payload.AgentID,
+		agentType:  payload.AgentType,
+		model:      payload.Model,
+		transcript: payload.TranscriptPath,
+	}, true
 }
 
-// Render preserves Codex's normal approval path except for an actual deny.
+// Render turns an engine Decision into the hook's reply, or ok=false when the gate has
+// nothing to say. Allow carries no permission decision: an allow skips Codex's own
+// approval prompt, and a gate that reviewed cleanly must not also start approving
+// commits the operator would have been asked about.
 func Render(d gate.Decision) (Output, bool) {
 	message := d.SystemMessage
 	if d.LedgerError != nil {
@@ -87,9 +129,22 @@ func Render(d gate.Decision) (Output, bool) {
 	}
 	switch d.Kind {
 	case gate.Deny:
-		return Output{Decision: "block", Reason: d.Reason, SystemMessage: message}, true
+		return Output{
+			HookSpecificOutput: &hookOutput{
+				HookEventName:            "PreToolUse",
+				PermissionDecision:       "deny",
+				PermissionDecisionReason: d.Reason,
+			},
+			SystemMessage: message,
+		}, true
 	case gate.ContextOnly:
-		return Output{AdditionalContext: d.Reason, SystemMessage: message}, true
+		return Output{
+			HookSpecificOutput: &hookOutput{
+				HookEventName:     "PreToolUse",
+				AdditionalContext: d.Reason,
+			},
+			SystemMessage: message,
+		}, true
 	default:
 		if message == "" {
 			return Output{}, false
@@ -111,19 +166,28 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, stdin io.
 	if !cc.IsCommitCommand(command) {
 		return
 	}
-	actor := invocation.actor
 	cwd := invocation.cwd
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
 	repo := cc.RepoDir(command, cwd)
 	stagedOnly, includeUntracked := cc.DiffSources(command)
+
+	engine := gate.NewEngine(cfg, reviewer)
 	rowExtra := gate.Row{"client": "codex", "harness": "codex"}
+	if invocation.threadID != "" {
+		rowExtra["thread_id"] = invocation.threadID
+		rowExtra["agent_type"] = invocation.agentType
+	}
+	for key, value := range AuthorFields(engine.Ledger(), cfg, invocation.transcript, invocation.actor, invocation.model) {
+		rowExtra[key] = value
+	}
 	for key, value := range cc.RepoFields(repo) {
 		rowExtra[key] = value
 	}
-	decision := gate.NewEngine(cfg, reviewer).Handle(ctx, gate.Request{
-		Repo: repo, Actor: actor, Channel: gate.ChannelPreToolUse,
+
+	decision := engine.Handle(ctx, gate.Request{
+		Repo: repo, Actor: invocation.actor, Channel: gate.ChannelPreToolUse,
 		SessionID: invocation.provenanceSessionID(),
 		Spec:      gate.DiffSpec{StagedOnly: stagedOnly, IncludeUntracked: includeUntracked},
 		Message:   cc.ExtractMessage(command, repo), RowExtra: rowExtra,

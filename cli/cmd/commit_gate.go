@@ -148,7 +148,7 @@ fail open.`,
 
 var commitGateCodexReviewCmd = &cobra.Command{
 	Use:   "review-codex",
-	Short: "Codex PreToolUse hook: rule on an exec_command git commit before it runs",
+	Short: "Codex PreToolUse hook: rule on a Bash git commit before it runs",
 	Long: `review-codex reads a Codex PreToolUse payload on stdin and writes Codex's
 native hook reply on stdout. It always exits 0 so adapter failures fail open.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -447,7 +447,8 @@ var commitGateStatusCmd = &cobra.Command{
 				}
 				state = fmt.Sprintf("registered, timeout %ds, %s", arming.Timeout, trust)
 			case arming.Registered:
-				state = fmt.Sprintf("REGISTERED BUT INERT — matcher %q does not match %q", arming.Matcher, codexhooks.CommitGateMatcher)
+				state = fmt.Sprintf("REGISTERED BUT INERT — matcher %q does not match %q, "+
+					"so commits are NOT reviewed; re-run install", arming.Matcher, codexhooks.CommitGateMatcher)
 			}
 			fmt.Printf("  Codex        %s scope: %s\n", scope, state)
 		}

@@ -94,3 +94,23 @@ func TestTrustSectionEscapesWindowsPath(t *testing.T) {
 		t.Fatalf("trust section = %q, want %q", got, want)
 	}
 }
+
+func TestLegacyMatcherRegistrationIsInert(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	legacy := `{"hooks":{"PreToolUse":[{"matcher":"` + LegacyCommitGateMatcher +
+		`","hooks":[{"type":"command","command":"steer commit-gate review-codex","timeout":210}]}]}}`
+	if err := os.WriteFile(filepath.Join(home, "hooks.json"), []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	arming := CommitGateArming("global", "")
+	if !arming.Registered || arming.Effective() {
+		t.Fatalf("legacy matcher reported as effective: %#v", arming)
+	}
+	if _, err := RegisterCommitGate("global", "", "steer commit-gate review-codex", 210); err != nil {
+		t.Fatal(err)
+	}
+	if arming = CommitGateArming("global", ""); !arming.Effective() || arming.Matcher != CommitGateMatcher {
+		t.Fatalf("re-install did not repair the matcher: %#v", arming)
+	}
+}
