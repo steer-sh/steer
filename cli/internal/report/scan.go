@@ -121,9 +121,12 @@ func (c *Classifier) toolResult(e transcript.Event) (Signal, bool) {
 	case e.IsError && strings.Contains(lower, "hook") && (strings.Contains(lower, "block") || strings.Contains(lower, "denied")):
 		snippet := matchLine(text, strings.Index(lower, "hook"))
 		return Signal{kindHookBlock, snippet, snippet}, true
-	case call.Shell:
-		if loc := failurePattern.FindStringIndex(text); loc != nil {
-			snippet := matchLine(text, loc[0])
+	// Only a command that RUNS a program can report a lint, test or compile
+	// failure of its own. A reader prints somebody else's text, and a shell call
+	// whose command was not recorded cannot be told apart from one.
+	case call.Shell && shellRunsProgram(call.Target):
+		if pos, ok := failureMatch(text); ok {
+			snippet := matchLine(text, pos)
 			return Signal{kindFailure, snippet, snippet + " — cmd: " + call.Target}, true
 		}
 	}
@@ -141,6 +144,12 @@ func ParserInstrument() string {
 	}
 	h.Write([]byte(failurePattern.String()))
 	h.Write([]byte{0})
+	h.Write([]byte("failure:runner-command+unquoted-match"))
+	h.Write([]byte{0})
+	for _, v := range sortedRunnerVerbs() {
+		h.Write([]byte(v))
+		h.Write([]byte{0})
+	}
 	h.Write([]byte("rejection:doesn't want to proceed|user rejected"))
 	h.Write([]byte{0})
 	h.Write([]byte("hookblock:hook+block|denied"))

@@ -1,0 +1,339 @@
+package report
+
+import (
+	"path"
+	"regexp"
+	"sort"
+	"strings"
+)
+
+// runnerVerbs name the commands that EXECUTE a build, a test or a linter. The
+// set is an allowlist because the alternative is unbounded: a command that only
+// prints is anything else at all, and a reader is not only cat, sed and grep.
+var runnerVerbs = map[string]bool{
+	"go": true, "gofmt": true, "golangci-lint": true, "staticcheck": true,
+	"cargo": true, "rustc": true,
+	"npm": true, "npx": true, "pnpm": true, "yarn": true, "bun": true, "deno": true,
+	"node": true, "tsc": true, "jest": true, "vitest": true, "eslint": true, "prettier": true,
+	"python": true, "python3": true, "pytest": true, "tox": true, "uv": true, "poetry": true,
+	"pip": true, "pip3": true, "ruff": true, "mypy": true, "flake8": true, "black": true, "pylint": true,
+	"ruby": true, "rake": true, "rspec": true, "bundle": true,
+	"php": true, "phpunit": true, "composer": true,
+	"java": true, "javac": true, "mvn": true, "gradle": true, "dotnet": true, "swift": true,
+	"make": true, "cmake": true, "ctest": true, "bazel": true, "ninja": true,
+	"gcc": true, "g++": true, "clang": true, "clang++": true,
+	"bash": true, "sh": true, "zsh": true, "shellcheck": true,
+	"docker": true, "terraform": true,
+}
+
+// wrapperVerbs run another command and take its exit status. The verb that
+// matters is the one after them.
+var wrapperVerbs = map[string]bool{
+	"sudo": true, "env": true, "time": true, "timeout": true, "nohup": true,
+	"nice": true, "stdbuf": true, "command": true, "xargs": true, "watch": true,
+}
+
+// scriptSuffixes name a file that a shell executes directly.
+var scriptSuffixes = []string{".sh", ".bash", ".py", ".rb", ".js", ".ts", ".pl"}
+
+// shellRunsProgram reports whether a shell command runs a program, as opposed to
+// printing text somebody else wrote. Only a runner can produce a lint, test or
+// compile failure of its own; a reader that prints one is quoting a file. The
+// answer is true when ANY segment of the command line is a runner, because a
+// trailing pipe does not make `go test | tail` a read.
+func shellRunsProgram(cmd string) bool {
+	for _, seg := range shellSegments(cmd) {
+		if segmentRuns(seg) {
+			return true
+		}
+	}
+	return false
+}
+
+// shellSegments splits a command line on the separators that start a new
+// command: the pipe, the list operators, the newline and a substitution. A
+// heredoc body is text the command is fed, so it is removed first: its lines are
+// not commands, and one of them beginning with `go` or `python3` does not make
+// the `cat > file` that writes it a runner.
+func shellSegments(cmd string) []string {
+	cmd = strings.ReplaceAll(stripHeredocs(cmd), "$(", "\n")
+	var out []string
+	var seg strings.Builder
+	var single, double bool
+	flush := func() {
+		if strings.TrimSpace(seg.String()) != "" {
+			out = append(out, seg.String())
+		}
+		seg.Reset()
+	}
+	for i := 0; i < len(cmd); i++ {
+		c := cmd[i]
+		switch {
+		case c == '\\' && i+1 < len(cmd):
+			seg.WriteByte(c)
+			i++
+			seg.WriteByte(cmd[i])
+			continue
+		case c == '\'' && !double:
+			single = !single
+		case c == '"' && !single:
+			double = !double
+		case (single || double) == false && strings.IndexByte("|&;\n()`", c) >= 0:
+			// A separator outside quotes starts a new command. Inside them it
+			// is an argument's text: `grep "foo | go test" x.log` runs grep.
+			flush()
+			continue
+		}
+		seg.WriteByte(c)
+	}
+	flush()
+	return out
+}
+
+// heredocStart matches a heredoc redirection and captures its terminator.
+var heredocStart = regexp.MustCompile(`<<-?\s*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?`)
+
+// stripHeredocs removes every heredoc body from a command line, keeping the
+// command lines around it. A start with no terminator strips nothing: `<<` also
+// writes a shift and a stream insertion, and eating every line after one would
+// hide the runners below it.
+func stripHeredocs(cmd string) string {
+	lines := strings.Split(cmd, "\n")
+	var out []string
+	for i := 0; i < len(lines); i++ {
+		out = append(out, lines[i])
+		m := heredocStart.FindStringSubmatch(lines[i])
+		if m == nil {
+			continue
+		}
+		end := -1
+		for j := i + 1; j < len(lines); j++ {
+			if strings.TrimSpace(lines[j]) == m[1] {
+				end = j
+				break
+			}
+		}
+		if end >= 0 {
+			i = end
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+// shellFields splits a segment into tokens on whitespace OUTSIDE quotes, so a
+// quoted argument stays one token: `CFLAGS="-O2 -g" make` assigns once and runs
+// make.
+func shellFields(seg string) []string {
+	var out []string
+	var tok strings.Builder
+	var single, double bool
+	flush := func() {
+		if tok.Len() > 0 {
+			out = append(out, tok.String())
+			tok.Reset()
+		}
+	}
+	for i := 0; i < len(seg); i++ {
+		c := seg[i]
+		switch {
+		case c == '\\' && i+1 < len(seg):
+			tok.WriteByte(c)
+			i++
+			tok.WriteByte(seg[i])
+		case c == '\'' && !double:
+			single = !single
+			tok.WriteByte(c)
+		case c == '"' && !single:
+			double = !double
+			tok.WriteByte(c)
+		case !single && !double && (c == ' ' || c == '\t'):
+			flush()
+		default:
+			tok.WriteByte(c)
+		}
+	}
+	flush()
+	return out
+}
+
+// argFlags name, per wrapper, the options that take a value of their own. Only
+// these consume the token after them: `sudo -u root go test` runs go, while
+// `sudo -E cat deploy.sh` reads a file. A wrapper's own boolean flags are not
+// listed, so the command after them decides.
+var argFlags = map[string]map[string]bool{
+	"sudo":    {"-u": true, "-g": true, "-C": true, "--user": true, "--group": true},
+	"env":     {"-u": true, "-C": true, "-S": true, "--unset": true, "--chdir": true},
+	"xargs":   {"-I": true, "-i": true, "-n": true, "-L": true, "-P": true, "-s": true, "-a": true, "-d": true, "-E": true},
+	"nice":    {"-n": true},
+	"timeout": {"-k": true, "-s": true, "--kill-after": true, "--signal": true},
+	"watch":   {"-n": true, "--interval": true},
+	"time":    {"-o": true, "-f": true, "--output": true, "--format": true},
+	"stdbuf":  {"-i": true, "-o": true, "-e": true},
+}
+
+// segmentRuns answers shellRunsProgram for one segment: it finds the verb, past
+// any leading variable assignment and any wrapper, and tests it. A wrapper takes
+// options of its own (`sudo -u root go test`, `xargs -I {} pytest`), so past one
+// an unrecognized token continues the search rather than answering it. Before
+// one, the first token IS the verb and answers for the segment: scanning on
+// would read the argument of `grep "go test"` as a command.
+func segmentRuns(seg string) bool {
+	wrapped, afterFlag, wrapper := false, false, ""
+	for _, verb := range shellFields(seg) {
+		if isAssignment(verb) {
+			continue
+		}
+		if isDuration(verb) {
+			// A bare number is the wrapper's limit, and it is the argument any
+			// preceding option was waiting for.
+			afterFlag = false
+			continue
+		}
+		if strings.HasPrefix(verb, "-") {
+			afterFlag = argFlags[wrapper][verb] && !strings.Contains(verb, "=")
+			continue
+		}
+		if strings.ContainsAny(verb, `"'`) {
+			// A quoted token is an argument's text, not a command.
+			return false
+		}
+		base := path.Base(verb)
+		if wrapperVerbs[base] {
+			wrapped, afterFlag, wrapper = true, false, base
+			continue
+		}
+		if runnerVerbs[base] || isScript(verb, base) {
+			return true
+		}
+		// Past a wrapper, a token that runs nothing can still belong to the
+		// wrapper: the argument of its own option (`xargs -I {} pytest`). Any
+		// other token is the command the wrapper runs, and it decides —
+		// `sudo cat script.py` reads a file.
+		if wrapped && afterFlag {
+			afterFlag = false
+			continue
+		}
+		return false
+	}
+	return false
+}
+
+// isDuration reports whether a token is a bare number, with or without a time
+// unit. `timeout 60 go test` names its limit between the wrapper and the verb.
+func isDuration(tok string) bool {
+	t := strings.TrimRight(tok, "smh")
+	digit := false
+	for i := 0; i < len(t); i++ {
+		switch {
+		case t[i] >= '0' && t[i] <= '9':
+			digit = true
+		case t[i] == '.':
+		default:
+			return false
+		}
+	}
+	return digit
+}
+
+// isAssignment reports whether a token is a leading `NAME=value` assignment
+// rather than the verb.
+func isAssignment(tok string) bool {
+	i := strings.IndexByte(tok, '=')
+	if i <= 0 || strings.ContainsAny(tok[:i], "/ '\"") {
+		return false
+	}
+	return true
+}
+
+// isScript reports whether a token names a file the shell executes: a path
+// relative to the working directory, or a name carrying a script suffix. An
+// absolute path alone is NOT one: `/bin/cat` and `/usr/bin/grep` are the readers
+// this whole file exists to exclude, and a script named absolutely still carries
+// its suffix.
+func isScript(tok, base string) bool {
+	if strings.HasPrefix(tok, "./") || strings.HasPrefix(tok, "../") {
+		return true
+	}
+	for _, s := range scriptSuffixes {
+		if strings.HasSuffix(base, s) {
+			return true
+		}
+	}
+	return false
+}
+
+// failureMatch finds the first failurePattern match that has the SHAPE of a
+// failure a command reported: it sits outside a quoted string. A failure echoed
+// out of a source file is the text of the message it belongs to, inside the
+// quotes that make it a string. A later match on the same output still counts,
+// so a run that prints one source line before failing is not lost.
+func failureMatch(text string) (int, bool) {
+	for _, loc := range failurePattern.FindAllStringIndex(text, -1) {
+		start := strings.LastIndexByte(text[:loc[0]], '\n') + 1
+		if !insideQuotes(text[start:loc[0]]) {
+			return loc[0], true
+		}
+	}
+	return 0, false
+}
+
+// insideQuotes reports whether the text before a match on its line opens a quote
+// it does not close.
+func insideQuotes(prefix string) bool {
+	var double, single, back bool
+	for i := 0; i < len(prefix); i++ {
+		switch prefix[i] {
+		case '\\':
+			i++
+		case '"':
+			if !single && !back {
+				double = !double
+			}
+		case '\'':
+			// An apostrophe between two letters is a contraction, not a quote:
+			// `couldn't connect: build failed` reports a real failure. The test
+			// comes first, or a contraction inside backticks would close them.
+			if isLetter(byteAt(prefix, i-1)) && isLetter(byteAt(prefix, i+1)) {
+				continue
+			}
+			// GNU tools quote a name as `name', so a closing apostrophe ends an
+			// open backtick: "No rule to make target `test'." quotes nothing on.
+			if back {
+				back = false
+				continue
+			}
+			if !double && !back {
+				single = !single
+			}
+		case '`':
+			if !double && !single {
+				back = !back
+			}
+		}
+	}
+	return double || single || back
+}
+
+// sortedRunnerVerbs renders the allowlist for ParserInstrument, so adding a verb
+// reads as instrument drift rather than as a moved failure rate.
+func sortedRunnerVerbs() []string {
+	out := make([]string, 0, len(runnerVerbs))
+	for v := range runnerVerbs {
+		out = append(out, v)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// byteAt returns the byte at i, or 0 when i is outside s.
+func byteAt(s string, i int) byte {
+	if i < 0 || i >= len(s) {
+		return 0
+	}
+	return s[i]
+}
+
+// isLetter reports whether b is an ASCII letter.
+func isLetter(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
+}
