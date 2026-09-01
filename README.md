@@ -24,9 +24,40 @@ claude plugin marketplace add steer-sh/steer-skill
 claude plugin install steer@steer-marketplace
 ```
 
+### Codex Plugin
+
+```bash
+codex plugin marketplace add steer-sh/steer-skill
+codex plugin add steer@steer-marketplace
+```
+
+This installs the same two skills and the bundled `SessionStart` cadence hook.
+Codex does not trust a plugin's hooks on install: run `/hooks` in an interactive
+Codex session, review the `steer` entry, and trust it. Until you do, Codex loads
+the hook and skips it.
+
+The plugin bundles the cadence hook only. The commit gate and the generated
+guards stay explicit activations, and each one asks for a fresh `/hooks` review:
+
+```bash
+steer commit-gate install --harness codex --scope global
+steer preset enable --harness codex <preset>
+```
+
+Steer keeps one guard store, one inventory and one audit stream per scope, under
+`.steer/hooks` (project) and `~/.steer/hooks` (global). Both harnesses register
+that one store. A machine whose guards still live in `.claude/hooks` is migrated
+on the next mutating command; the legacy files are copied, never deleted, so an
+older steer binary keeps working.
+
+Read the loop across every installed harness with `steer status`, and write to
+one harness with `--harness claude-code` or `--harness codex`. A command run
+from an ordinary shell, with no harness marker in the environment, writes to
+Claude Code and prints the harness it wrote to.
+
 ## Install Standalone CLI
 
-If you want to use `steer` outside of Claude Code (CI pipelines, scripts, shell workflows):
+If you want to use `steer` outside a coding agent (CI pipelines, scripts, shell workflows):
 
 ```bash
 bash scripts/install-prebuilt.sh            # user install (~/.local/bin/steer)
@@ -52,7 +83,9 @@ The raw digest is also available outside Claude Code: `steer report --days 30` e
 
 ## What This Repo Contains
 
-- `.claude-plugin/marketplace.json`: plugin manifest and marketplace catalog (monorepo — plugin and marketplace in one repo).
+- `.claude-plugin/marketplace.json`: Claude Code plugin manifest and marketplace catalog (monorepo — plugin and marketplace in one repo).
+- `.agents/plugins/marketplace.json` and `.codex-plugin/plugin.json`: the same plugin for Codex. The three manifests describe one plugin, and a test pins them to each other.
+- `hooks/hooks.json`: the bundled `SessionStart` cadence hook. Its command reads `PLUGIN_ROOT` (Codex) and falls back to `CLAUDE_PLUGIN_ROOT` (Claude Code), so one file serves both.
 - `SKILL.md`: the steer skill prompt and workflow used by `/steer`.
 - `skills/steer-report/SKILL.md`: the usage-mining skill behind `/steer-report`.
 - `prompts/`: specialist prompt modules for domain-specific hook generation.

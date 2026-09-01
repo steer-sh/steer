@@ -4,7 +4,7 @@
     "name": "Jeremy Janzen"
   },
   "metadata": {
-    "description": "Steer plugin marketplace — hook generation and enforcement for Claude Code",
+    "description": "Steer plugin marketplace — hook generation and enforcement for Claude Code and Codex",
     "version": "1.0.0"
   },
   "plugins": [
@@ -12,7 +12,7 @@
       "name": "steer",
       "source": "./",
       "strict": false,
-      "description": "Generate Claude Code hooks from natural language rules to enforce coding standards, security policies, and best practices",
+      "description": "Generate Claude Code and Codex hooks from natural language rules to enforce coding standards, security policies, and best practices",
       "version": "0.1.0",
       "author": {
         "name": "Jeremy Janzen"

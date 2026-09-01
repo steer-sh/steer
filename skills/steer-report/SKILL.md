@@ -45,7 +45,8 @@ Respect the user's choice. If the conversation is fresh, skip the warning and pr
 First read the whole loop's posture and full class inventory in one snapshot:
 
 ```bash
-STEER_BIN="${CLAUDE_PLUGIN_ROOT:+${CLAUDE_PLUGIN_ROOT}/scripts/steer}"
+STEER_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}"
+STEER_BIN="${STEER_ROOT:+${STEER_ROOT}/scripts/steer}"
 STEER_BIN="${STEER_BIN:-steer}"
 "${STEER_BIN}" status --json > "${TMPDIR:-/tmp}/steer-status.json"
 ```
@@ -109,10 +110,11 @@ A gate that never fires is not free. It costs oracle runtime on every commit and
 
 ### 2a. Transcript friction
 
-Use `steer` from PATH if available, otherwise fall back to `${CLAUDE_PLUGIN_ROOT}/scripts/steer`. Redirect the digest to a temp file so it enters context exactly once — via Read, not via command output. Run a **single command**:
+Use `steer` from PATH if available, otherwise fall back to the plugin root (`PLUGIN_ROOT` on Codex, `CLAUDE_PLUGIN_ROOT` on Claude Code). Redirect the digest to a temp file so it enters context exactly once — via Read, not via command output. Run a **single command**:
 
 ```bash
-STEER_BIN="${CLAUDE_PLUGIN_ROOT:+${CLAUDE_PLUGIN_ROOT}/scripts/steer}"
+STEER_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}"
+STEER_BIN="${STEER_ROOT:+${STEER_ROOT}/scripts/steer}"
 STEER_BIN="${STEER_BIN:-steer}"
 "${STEER_BIN}" report --days 30 > "${TMPDIR:-/tmp}/steer-digest.json"
 ```

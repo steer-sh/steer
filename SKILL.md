@@ -2,7 +2,7 @@
 name: steer
 description: Generates and installs PreToolUse Python hooks from natural language rules. Use when enforcing coding standards, blocking insecure patterns, managing hook lifecycle, or running steer CLI commands (register, remove, list, test, preset, verify, git-hooks).
 user-invocable: true
-prompt_version: 8
+prompt_version: 9
 compatibility: Requires Claude Code or Codex with PreToolUse hook support. Hooks are installed into .steer/hooks/ and registered in the invoking harness (settings.json for Claude Code, hooks.json for Codex). steer CLI must be available on PATH or bundled under scripts/.
 allowed-tools: Bash(steer *), Bash(python3 *), Bash(echo *), Read, Write
 ---
@@ -154,7 +154,8 @@ Before you generate anything, read the full failure-class inventory. This step
 stops you from re-proposing a class the loop already decided.
 
 ```bash
-STEER_BIN="${CLAUDE_PLUGIN_ROOT:+${CLAUDE_PLUGIN_ROOT}/scripts/steer}"
+STEER_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}"
+STEER_BIN="${STEER_ROOT:+${STEER_ROOT}/scripts/steer}"
 STEER_BIN="${STEER_BIN:-steer}"
 "${STEER_BIN}" status --json
 ```
@@ -272,10 +273,11 @@ After determining scope:
 
 ### Step 4: Register the Hook
 
-Use the steer CLI to register the hook. Use `steer` from PATH if available, otherwise fall back to `${CLAUDE_PLUGIN_ROOT}/scripts/steer`. Run a **single command** — do not try one and then the other:
+Use the steer CLI to register the hook. Use `steer` from PATH if available, otherwise fall back to the plugin root (`PLUGIN_ROOT` on Codex, `CLAUDE_PLUGIN_ROOT` on Claude Code). Run a **single command** — do not try one and then the other:
 
 ```bash
-STEER_BIN="${CLAUDE_PLUGIN_ROOT:+${CLAUDE_PLUGIN_ROOT}/scripts/steer}"
+STEER_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}"
+STEER_BIN="${STEER_ROOT:+${STEER_ROOT}/scripts/steer}"
 STEER_BIN="${STEER_BIN:-steer}"
 "${STEER_BIN}" register <store>/hooks/<rule-name>-hook.py --rule "<original rule text>" --scope <project|global> \
   --source generated \

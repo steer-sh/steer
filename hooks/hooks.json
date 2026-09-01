@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/steer\" report cadence",
+            "command": "\"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/steer\" report cadence",
             "timeout": 10
           }
         ]
