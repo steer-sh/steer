@@ -86,9 +86,8 @@ The raw digest is also available outside Claude Code: `steer report --days 30` e
 - `.claude-plugin/marketplace.json`: Claude Code plugin manifest and marketplace catalog (monorepo — plugin and marketplace in one repo).
 - `.agents/plugins/marketplace.json` and `.codex-plugin/plugin.json`: the same plugin for Codex. The three manifests describe one plugin, and a test pins them to each other.
 - `hooks/hooks.json`: the bundled `SessionStart` cadence hook. Its command reads `PLUGIN_ROOT` (Codex) and falls back to `CLAUDE_PLUGIN_ROOT` (Claude Code), so one file serves both.
-- `SKILL.md`: the steer skill prompt and workflow used by `/steer`.
+- `skills/steer/SKILL.md`: the steer skill prompt and workflow used by `/steer`, with its specialist prompt modules under `skills/steer/prompts/`.
 - `skills/steer-report/SKILL.md`: the usage-mining skill behind `/steer-report`.
-- `prompts/`: specialist prompt modules for domain-specific hook generation.
 - `cli/`: Go CLI source (`register`, `list`, `test`, `remove`, `preset`, `verify`, `git-hooks`, `report`).
 - `bin/`: prebuilt binaries for:
   - `darwin-amd64`
