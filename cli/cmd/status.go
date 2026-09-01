@@ -132,6 +132,9 @@ func renderPosture(s *status.SystemStatus) {
 		if m.Stale() {
 			row = fmt.Sprintf("%s, %s scope: %s", m.Harness, m.Scope, styles.WarningText.Render(phrase))
 		}
+		if o := status.MasterObservedPhrase(m); o != "" {
+			row += styles.MutedText.Render(" · " + o)
+		}
 		fmt.Printf("  Guard master %s\n", row)
 	}
 	if s.Posture.Unresolved > 0 {
@@ -148,6 +151,12 @@ func armingRow(a status.ScopeArming) string {
 	row := fmt.Sprintf("%s, %s scope: %s", a.Harness, a.Scope, armingLabel(a))
 	if t := status.TrustPhrase(a.Trust); t != "" && a.Registered {
 		row += styles.MutedText.Render(" (" + t + ")")
+	}
+	if o := status.ObservedPhrase(a); o != "" && a.Registered {
+		row += styles.MutedText.Render(" · " + o)
+	}
+	if r := status.ResolvePhrase(a); r != "" {
+		row += "\n" + strings.Repeat(" ", 15) + styles.WarningText.Render(r)
 	}
 	return row
 }

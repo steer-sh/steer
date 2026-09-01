@@ -7,6 +7,7 @@ import (
 
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/status"
+	"github.com/steer-sh/steer-cli/internal/steerbin"
 )
 
 // commitGateTimeoutMargin matches cmd's margin: the hook timeout is the reviewer
@@ -75,14 +76,18 @@ func (m *Model) toggleChannel(row channelRow) error {
 			return claude.RemoveCommitGateAndResolver(row.scope)
 		}
 		timeout := int(m.cfg.ReviewTimeout.Seconds()) + commitGateTimeoutMargin
-		return claude.RegisterCommitGateAndResolver(row.scope,
-			"steer commit-gate review", timeout,
-			"steer commit-gate backfill --if-due --apply --quiet", backfillTimeout)
+		// A failed copy of the stable executable returns the PATH form beside its
+		// error. Register that rather than nothing, exactly as the CLI does: the
+		// posture then reports whether the command resolves.
+		review, _ := steerbin.HookCommand("commit-gate review")
+		resolver, _ := steerbin.HookCommand("commit-gate backfill --if-due --apply --quiet")
+		return claude.RegisterCommitGateAndResolver(row.scope, review, timeout, resolver, backfillTimeout)
 	case "denials":
 		if on {
 			return claude.RemoveDenialsHook(row.scope)
 		}
-		return claude.RegisterDenialsHook(row.scope, "steer denials record", denialsTimeout)
+		record, _ := steerbin.HookCommand("denials record")
+		return claude.RegisterDenialsHook(row.scope, record, denialsTimeout)
 	}
 	return nil
 }
@@ -107,14 +112,28 @@ func (m *Model) viewChannels() string {
 	return out
 }
 
-// armingBadge names a scope's arming state, colored.
+// armingBadge names a scope's arming state, colored. A registration whose command
+// does not resolve reads as broken rather than armed: the harness runs the tool
+// anyway and reports nothing, so "armed" would be the lie this panel exists to
+// prevent.
 func armingBadge(a status.ScopeArming) string {
 	switch {
+	case a.Registered && a.Resolvable == status.ResolveMissing:
+		return warn("broken (command does not resolve — steer bin install)")
 	case a.Effective:
-		return ok("armed")
+		return ok("armed" + dim(observedSuffix(a)))
 	case a.Registered:
 		return warn("inert (registered, not effective)")
 	default:
 		return dim("off")
 	}
+}
+
+// observedSuffix names when the channel last wrote a row, or nothing when the
+// channel writes no corpus of its own.
+func observedSuffix(a status.ScopeArming) string {
+	if o := status.ObservedPhrase(a); o != "" {
+		return " · " + o
+	}
+	return ""
 }

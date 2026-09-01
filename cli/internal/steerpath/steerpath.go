@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -77,4 +78,43 @@ func scopedDir(scope, root string) (string, error) {
 	default:
 		return "", fmt.Errorf("invalid scope %q: expected %q or %q", scope, ProjectScope, GlobalScope)
 	}
+}
+
+// binDirName holds the stable copy of the steer executable inside the neutral
+// root. A hook registration names that path, so it must not move when the
+// binary a user runs moves.
+const binDirName = "bin"
+
+// BinStem is the executable's name without an extension. It is what identifies a
+// command as steer's own, on every platform.
+const BinStem = "steer"
+
+// BinName is the file the stable executable is written as. Windows runs a file by
+// its extension, so the stable copy carries .exe there or the registration names
+// a file Windows will not execute.
+var BinName = binName()
+
+func binName() string {
+	if runtime.GOOS == "windows" {
+		return BinStem + ".exe"
+	}
+	return BinStem
+}
+
+// BinDir returns the directory holding the stable executable.
+func BinDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve home directory: %w", err)
+	}
+	return filepath.Join(home, steerHome, binDirName), nil
+}
+
+// BinPath returns the stable executable's absolute path.
+func BinPath() (string, error) {
+	dir, err := BinDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, BinName), nil
 }

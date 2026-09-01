@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/cadence"
+	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
 )
@@ -166,24 +167,33 @@ func intPtr(n int) *int           { return &n }
 // so a renamed or reordered json tag fails here, the agent-contract guard.
 func TestJSONContractIsStable(t *testing.T) {
 	s := &SystemStatus{
-		StatusVersion: 5,
+		StatusVersion: 6,
 		GeneratedAt:   "2026-01-01T00:00:00Z",
 		Posture: Posture{
 			Instrument: "agy@sha", Reviewer: "gemini", Ledger: "/l.jsonl",
 			CommitGate: []ScopeArming{
-				{Harness: "claude-code", Scope: "global", Registered: true, Effective: true, Timeout: 90, Trust: TrustNotApplicable},
-				{Harness: "codex", Scope: "global", Registered: true, Effective: true, Timeout: 90, Trust: TrustRecordPresent},
+				{Harness: "claude-code", Scope: "global", Registered: true, Effective: true, Timeout: 90,
+					Trust: TrustNotApplicable, Command: "/h/.steer/bin/steer commit-gate review",
+					Resolvable: ResolveResolvable, Observed: 1700, ObservedCorpus: ledgerCorpus},
+				{Harness: "codex", Scope: "global", Registered: true, Effective: true, Timeout: 90,
+					Trust: TrustRecordPresent, Command: "steer commit-gate review-codex",
+					Resolvable: ResolveMissing, ObservedCorpus: ledgerCorpus},
 			},
 			Denials: []ScopeArming{
-				{Harness: "claude-code", Scope: "global", Registered: true, Effective: true, Trust: TrustNotApplicable},
+				{Harness: "claude-code", Scope: "global", Registered: true, Effective: true,
+					Trust: TrustNotApplicable, Command: "/h/.steer/bin/steer denials record",
+					Resolvable: ResolveResolvable, Observed: 1650, ObservedCorpus: denialsCorpus},
 			},
 			Resolver: []ScopeArming{
-				{Harness: "claude-code", Scope: "global", Registered: true, Effective: true, Timeout: 30, Trust: TrustNotApplicable},
-				{Harness: "codex", Scope: "global", Registered: false, Effective: false, Trust: TrustMissing},
+				{Harness: "claude-code", Scope: "global", Registered: true, Effective: true, Timeout: 30,
+					Trust: TrustNotApplicable, Command: "/h/.steer/bin/steer commit-gate backfill",
+					Resolvable: ResolveResolvable},
+				{Harness: "codex", Scope: "global", Registered: false, Effective: false,
+					Trust: TrustMissing, Resolvable: ResolveNotRegistered},
 			},
 			Masters: []MasterRuntime{
 				{Harness: "claude-code", Scope: "global", Path: "/h/steer-hooks.py",
-					Runtime: "aaaaaaaa", Version: "0.1.0", Expected: "bbbbbbbb", State: MasterStale},
+					Runtime: "aaaaaaaa", Version: "0.1.0", Expected: "bbbbbbbb", State: MasterStale, Observed: 1690},
 				{Harness: "codex", Scope: "global", Expected: "bbbbbbbb", State: MasterNotRegistered},
 			},
 			Unresolved: 4,
@@ -250,7 +260,7 @@ func TestJSONContractIsStable(t *testing.T) {
 }
 
 const goldenStatusJSON = `{
-  "status_version": 5,
+  "status_version": 6,
   "generated_at": "2026-01-01T00:00:00Z",
   "posture": {
     "instrument": "agy@sha",
@@ -263,7 +273,11 @@ const goldenStatusJSON = `{
         "registered": true,
         "effective": true,
         "timeout": 90,
-        "trust": "not-applicable"
+        "trust": "not-applicable",
+        "command": "/h/.steer/bin/steer commit-gate review",
+        "resolvable": "resolvable",
+        "observed": 1700,
+        "observed_corpus": "commit-review"
       },
       {
         "harness": "codex",
@@ -271,7 +285,10 @@ const goldenStatusJSON = `{
         "registered": true,
         "effective": true,
         "timeout": 90,
-        "trust": "record-present-unverified"
+        "trust": "record-present-unverified",
+        "command": "steer commit-gate review-codex",
+        "resolvable": "missing",
+        "observed_corpus": "commit-review"
       }
     ],
     "denials": [
@@ -280,7 +297,11 @@ const goldenStatusJSON = `{
         "scope": "global",
         "registered": true,
         "effective": true,
-        "trust": "not-applicable"
+        "trust": "not-applicable",
+        "command": "/h/.steer/bin/steer denials record",
+        "resolvable": "resolvable",
+        "observed": 1650,
+        "observed_corpus": "steer-denials"
       }
     ],
     "resolver": [
@@ -290,14 +311,17 @@ const goldenStatusJSON = `{
         "registered": true,
         "effective": true,
         "timeout": 30,
-        "trust": "not-applicable"
+        "trust": "not-applicable",
+        "command": "/h/.steer/bin/steer commit-gate backfill",
+        "resolvable": "resolvable"
       },
       {
         "harness": "codex",
         "scope": "global",
         "registered": false,
         "effective": false,
-        "trust": "missing"
+        "trust": "missing",
+        "resolvable": "not-registered"
       }
     ],
     "unresolved_rows": 4,
@@ -309,7 +333,8 @@ const goldenStatusJSON = `{
         "runtime": "aaaaaaaa",
         "version": "0.1.0",
         "expected": "bbbbbbbb",
-        "state": "stale"
+        "state": "stale",
+        "observed": 1690
       },
       {
         "harness": "codex",
@@ -549,3 +574,82 @@ const goldenStatusJSON = `{
     "catalog_version": "v7"
   }
 }`
+
+// TestABrokenRegistrationIsNotArmed pins the reading item 14 measured: a gate
+// whose command does not resolve reads as registered and effective from the
+// configuration alone, so the posture has to carry the second reading. It also
+// pins the third: a channel that never wrote a row reports never observed.
+func TestABrokenRegistrationIsNotArmed(t *testing.T) {
+	isolate(t)
+	if err := claude.RegisterCommitGateHook(claude.GlobalScope,
+		"steer-not-real-xyz commit-gate review", 210); err != nil {
+		t.Fatal(err)
+	}
+
+	p := collectPosture(gate.Config{}, mine.EvidenceSet{})
+
+	var row ScopeArming
+	for _, a := range p.CommitGate {
+		if a.Harness == "claude-code" && a.Scope == claude.GlobalScope {
+			row = a
+		}
+	}
+	if !row.Registered || !row.Effective {
+		t.Fatalf("the configuration reads as %+v; the registration is present", row)
+	}
+	if row.Resolvable != ResolveMissing {
+		t.Fatalf("resolvable = %q, want %q", row.Resolvable, ResolveMissing)
+	}
+	if row.Command != "steer-not-real-xyz commit-gate review" {
+		t.Fatalf("command = %q, want the registered one verbatim", row.Command)
+	}
+	if got := ResolvePhrase(row); got == "" {
+		t.Fatal("a missing command renders no warning")
+	}
+	if row.ObservedCorpus != ledgerCorpus || row.Observed != 0 {
+		t.Fatalf("observed = %v/%q, want never observed over the ledger", row.Observed, row.ObservedCorpus)
+	}
+	if got := ObservedPhrase(row); got != "never observed" {
+		t.Fatalf("observed phrase = %q, want %q", got, "never observed")
+	}
+}
+
+// TestAnUnregisteredChannelResolvesToNothing: a scope with no registration has no
+// command to test, so it reports not-registered rather than missing — a missing
+// command is a broken install, and an absent one is not installed.
+func TestAnUnregisteredChannelResolvesToNothing(t *testing.T) {
+	isolate(t)
+
+	p := collectPosture(gate.Config{}, mine.EvidenceSet{})
+
+	for _, a := range append(append([]ScopeArming{}, p.CommitGate...), p.Denials...) {
+		if a.Resolvable != ResolveNotRegistered {
+			t.Fatalf("%s %s scope: resolvable = %q, want %q", a.Harness, a.Scope, a.Resolvable, ResolveNotRegistered)
+		}
+	}
+}
+
+// TestObservedReadsTheNewestRowPerHarness pins that the commit gate's observed
+// reading is the ledger's newest chain for THAT harness. A chain with no harness
+// stamp counts for no harness rather than for every one.
+func TestObservedReadsTheNewestRowPerHarness(t *testing.T) {
+	isolate(t)
+	ev := mine.EvidenceSet{Chains: []mine.Chain{
+		{Harness: "claude-code", HarnessKnown: true, EndTS: 1000.0},
+		{Harness: "claude-code", HarnessKnown: true, EndTS: 2000.0},
+		{Harness: "codex", HarnessKnown: true, EndTS: 1500.0},
+		{EndTS: 9000.0},
+	}}
+
+	observed := observedChannels(ev)
+
+	if observed.gate["claude-code"] != 2000 {
+		t.Fatalf("claude-code observed = %v, want 2000", observed.gate["claude-code"])
+	}
+	if observed.gate["codex"] != 1500 {
+		t.Fatalf("codex observed = %v, want 1500", observed.gate["codex"])
+	}
+	if len(observed.gate) != 2 {
+		t.Fatalf("unstamped chain credited to %v", observed.gate)
+	}
+}

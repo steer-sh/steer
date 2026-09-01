@@ -17,6 +17,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/gate/resolve"
 	"github.com/steer-sh/steer-cli/internal/gate/reviewers"
 	"github.com/steer-sh/steer-cli/internal/harness"
+	"github.com/steer-sh/steer-cli/internal/steerbin"
 	"github.com/steer-sh/steer-cli/internal/styles"
 )
 
@@ -35,7 +36,7 @@ const (
 // backfillCommand is the turn-end hook steer registers alongside the review hook:
 // harvest late, only when a row is due, silently.
 func backfillCommand() string {
-	return "steer commit-gate backfill --if-due --apply --quiet"
+	return steerHookCommand("commit-gate backfill --if-due --apply --quiet")
 }
 
 var (
@@ -293,12 +294,23 @@ func buildCommitGatePreCommitScript() string {
 	}, "\n")
 }
 
+// commandNote warns when a registered hook command does not resolve from here. A
+// harness that cannot resolve a hook command runs the tool anyway and reports
+// nothing, so this line is the only place the failure is visible.
+func commandNote(registered bool, command string) string {
+	if !registered || steerbin.Resolve(command) != steerbin.Missing {
+		return ""
+	}
+	return "\n               the command does not resolve here — the hook is skipped " +
+		"silently; run: steer bin install"
+}
+
 func commitGateCommand() string {
-	return "steer commit-gate review" + commitGateProviderArgs()
+	return steerHookCommand("commit-gate review" + commitGateProviderArgs())
 }
 
 func commitGateCodexCommand() string {
-	return "steer commit-gate review-codex" + commitGateProviderArgs()
+	return steerHookCommand("commit-gate review-codex" + commitGateProviderArgs())
 }
 
 // commitGateProviderArgs renders the reviewer selection both channels must persist.
@@ -450,15 +462,17 @@ var commitGateStatusCmd = &cobra.Command{
 				state = fmt.Sprintf("REGISTERED BUT INERT — matcher %q does not match %q, "+
 					"so commits are NOT reviewed; re-run install", arming.Matcher, claude.CommitGateMatcher)
 			}
-			fmt.Printf("  Claude       %s scope: %s\n", scope, state)
+			fmt.Printf("  Claude       %s scope: %s%s\n", scope, state,
+				commandNote(arming.Registered, arming.Command))
 		}
 		for _, scope := range []string{claude.ProjectScope, claude.GlobalScope} {
-			armed, timeout := claude.BackfillHookArmed(scope)
+			resolver := claude.BackfillHookArming(scope)
 			state := "not armed"
-			if armed {
-				state = fmt.Sprintf("armed, timeout %ds", timeout)
+			if resolver.Registered {
+				state = fmt.Sprintf("armed, timeout %ds", resolver.Timeout)
 			}
-			fmt.Printf("  Resolver     %s scope: %s\n", scope, state)
+			fmt.Printf("  Resolver     %s scope: %s%s\n", scope, state,
+				commandNote(resolver.Registered, resolver.Command))
 		}
 		if unresolved := resolve.CountUnresolved(cfg); unresolved > 0 {
 			fmt.Printf("  Unresolved   %d row(s) owe a ledger — run: steer commit-gate backfill --apply\n", unresolved)
@@ -480,13 +494,15 @@ var commitGateStatusCmd = &cobra.Command{
 				state = fmt.Sprintf("REGISTERED BUT INERT — matcher %q does not match %q, "+
 					"so commits are NOT reviewed; re-run install", arming.Matcher, codexhooks.CommitGateMatcher)
 			}
-			fmt.Printf("  Codex        %s scope: %s\n", scope, state)
-			armed, timeout := codexhooks.ResolverArming(scope, cwd)
+			fmt.Printf("  Codex        %s scope: %s%s\n", scope, state,
+				commandNote(arming.Registered, arming.Command))
+			resolver := codexhooks.ResolverArmingRow(scope, cwd)
 			resolverState := "not armed"
-			if armed {
-				resolverState = fmt.Sprintf("Stop and SubagentStop armed, timeout %ds", timeout)
+			if resolver.Registered {
+				resolverState = fmt.Sprintf("Stop and SubagentStop armed, timeout %ds", resolver.Timeout)
 			}
-			fmt.Printf("  Resolver     codex %s scope: %s\n", scope, resolverState)
+			fmt.Printf("  Resolver     codex %s scope: %s%s\n", scope, resolverState,
+				commandNote(resolver.Registered, resolver.Command))
 		}
 		armed, path := preCommitArmedHere()
 		if armed {

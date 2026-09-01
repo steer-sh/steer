@@ -24,12 +24,13 @@ import (
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/presets"
 	"github.com/steer-sh/steer-cli/internal/sessions"
+	"github.com/steer-sh/steer-cli/internal/steerbin"
 )
 
 // StatusVersion is the schema version of the emitted snapshot. It mirrors
 // report.DigestVersion: --json is a stable agent contract, so bump this whenever
 // the shape or semantics of SystemStatus change.
-const StatusVersion = 5
+const StatusVersion = 6
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20
@@ -163,7 +164,21 @@ const (
 	TrustMissing       = "missing"
 )
 
-// ScopeArming is one harness and scope's registration state for a hook.
+// Resolution states for the command a registration names. A harness runs the tool
+// anyway when the command does not resolve, and reports nothing, so a registered
+// channel that cannot run reads as armed everywhere else.
+const (
+	ResolveResolvable    = steerbin.Resolvable
+	ResolveMissing       = steerbin.Missing
+	ResolveUnknown       = steerbin.Unknown
+	ResolveNotRegistered = "not-registered"
+)
+
+// ScopeArming is one harness and scope's registration state for a hook. Three
+// separate readings, because registration alone proves the least of them:
+// Registered is what the configuration says, Resolvable is whether the command
+// resolves from THIS process, and Observed is when the channel last wrote to its
+// own corpus.
 type ScopeArming struct {
 	Harness    string `json:"harness"`
 	Scope      string `json:"scope"`
@@ -173,6 +188,20 @@ type ScopeArming struct {
 	// Trust is the harness's posture on this registration. Registration alone does
 	// not prove enforcement on a harness that reviews hook trust.
 	Trust string `json:"trust"`
+	// Command is the command the registration names, verbatim.
+	Command string `json:"command,omitempty"`
+	// Resolvable is a PROXY and never a proof of enforcement: the hook runs under
+	// the harness's environment, whose PATH may differ from this process's. It can
+	// prove a command absent; it can never prove one runs.
+	Resolvable string `json:"resolvable"`
+	// Observed is the epoch second of the newest row this channel wrote, 0 when it
+	// never wrote one. Never observed is not proof of breakage — nobody may have
+	// attempted the action the channel fires on.
+	Observed float64 `json:"observed,omitempty"`
+	// ObservedCorpus names the corpus Observed was read from, "" when the channel
+	// writes no corpus of its own and nothing can be observed. A corpus records no
+	// scope, so both scopes of one harness report the same evidence.
+	ObservedCorpus string `json:"observed_corpus,omitempty"`
 }
 
 // Master runtime states. The stamp names the runtime spliced into a registered
@@ -200,6 +229,9 @@ type MasterRuntime struct {
 	// Expected is the running binary's runtime digest.
 	Expected string `json:"expected"`
 	State    string `json:"state"`
+	// Observed is the epoch second of the newest row in the audit log beside this
+	// registered master, 0 when the master never blocked a call.
+	Observed float64 `json:"observed,omitempty"`
 }
 
 // Stale reports whether this master needs a rebuild. An unstamped master is
@@ -322,7 +354,7 @@ func Collect(opts Options) (*SystemStatus, error) {
 		}
 	}
 
-	s.Posture = collectPosture(opts.Config)
+	s.Posture = collectPosture(opts.Config, ev)
 	s.Telemetry = telemetry(ev)
 	s.Hooks = collectHooks(opts.Scope)
 	s.Presets = collectPresets(opts.Scope)
@@ -450,7 +482,8 @@ func recentChains(chains []mine.Chain, limit int) []ChainSummary {
 
 // collectPosture reads the arming state both scopes report for the commit gate
 // and the denials recorder, plus the reviewer identity from the config.
-func collectPosture(cfg gate.Config) Posture {
+func collectPosture(cfg gate.Config, ev mine.EvidenceSet) Posture {
+	observed := observedChannels(ev)
 	p := Posture{
 		Instrument: cfg.InstrumentID(),
 		Reviewer:   cfg.ReviewerModel,
@@ -466,60 +499,121 @@ func collectPosture(cfg gate.Config) Posture {
 	codexID := string(harness.Codex)
 	for _, scope := range []string{claude.ProjectScope, claude.GlobalScope} {
 		g := claude.CommitGateHookArmed(scope)
-		p.CommitGate = append(p.CommitGate, ScopeArming{
+		p.CommitGate = append(p.CommitGate, withEvidence(ScopeArming{
 			Harness:    claudeID,
 			Scope:      scope,
 			Registered: g.Registered,
 			Effective:  g.Effective(),
 			Timeout:    g.Timeout,
 			Trust:      TrustNotApplicable,
-		})
+			Command:    g.Command,
+		}, ledgerCorpus, observed.gate[claudeID]))
 		cg := codex.CommitGateArming(scope, cwd)
-		p.CommitGate = append(p.CommitGate, ScopeArming{
+		p.CommitGate = append(p.CommitGate, withEvidence(ScopeArming{
 			Harness:    codexID,
 			Scope:      scope,
 			Registered: cg.Registered,
 			Effective:  cg.Effective(),
 			Timeout:    cg.Timeout,
 			Trust:      trustState(harness.Codex, cg.TrustStateKnown, cg.TrustRecordPresent),
-		})
+			Command:    cg.Command,
+		}, ledgerCorpus, observed.gate[codexID]))
 		// The denials recorder rides Claude Code's PermissionDenied event. Codex
 		// declares no equivalent, so it gets no row rather than a false zero.
 		d, err := claude.DenialsHookArming(scope)
 		if err != nil {
 			d = claude.DenialsArming{}
 		}
-		p.Denials = append(p.Denials, ScopeArming{
+		p.Denials = append(p.Denials, withEvidence(ScopeArming{
 			Harness:    claudeID,
 			Scope:      scope,
 			Registered: d.Registered,
 			Effective:  d.Registered && d.Matcher == claude.DenialsMatcher,
 			Timeout:    d.Timeout,
 			Trust:      TrustNotApplicable,
-		})
+			Command:    d.Command,
+		}, denialsCorpus, observed.denials))
 		// The resolver rides a turn-end event, which takes no matcher: registered is
 		// effective.
-		armed, timeout := claude.BackfillHookArmed(scope)
-		p.Resolver = append(p.Resolver, ScopeArming{
+		b := claude.BackfillHookArming(scope)
+		p.Resolver = append(p.Resolver, withEvidence(ScopeArming{
 			Harness:    claudeID,
 			Scope:      scope,
-			Registered: armed,
-			Effective:  armed,
-			Timeout:    timeout,
+			Registered: b.Registered,
+			Effective:  b.Registered,
+			Timeout:    b.Timeout,
 			Trust:      TrustNotApplicable,
-		})
+			Command:    b.Command,
+		}, "", 0))
 		p.Masters = append(p.Masters, masterRuntimes(scope)...)
-		codexArmed, codexTimeout := codex.ResolverArming(scope, cwd)
-		p.Resolver = append(p.Resolver, ScopeArming{
+		cr := codex.ResolverArmingRow(scope, cwd)
+		p.Resolver = append(p.Resolver, withEvidence(ScopeArming{
 			Harness:    codexID,
 			Scope:      scope,
-			Registered: codexArmed,
-			Effective:  codexArmed,
-			Timeout:    codexTimeout,
+			Registered: cr.Registered,
+			Effective:  cr.Registered,
+			Timeout:    cr.Timeout,
 			Trust:      trustState(harness.Codex, cg.TrustStateKnown, cg.TrustRecordPresent),
-		})
+			Command:    cr.Command,
+		}, "", 0))
 	}
 	return p
+}
+
+// Corpus names a channel writes its evidence to. A channel with no name here
+// writes no corpus of its own, so nothing about it can be observed.
+const (
+	ledgerCorpus  = "commit-review"
+	denialsCorpus = "steer-denials"
+)
+
+// channelEvidence is the newest row each channel wrote, by harness where the
+// corpus carries one.
+type channelEvidence struct {
+	gate    map[string]float64
+	denials float64
+}
+
+// observedChannels reads the newest row each channel wrote. The commit gate's
+// rows carry a harness stamp; the denials recorder rides Claude Code alone. A
+// row with no harness stamp counts for no harness rather than for all of them.
+func observedChannels(ev mine.EvidenceSet) channelEvidence {
+	out := channelEvidence{gate: map[string]float64{}}
+	for _, ch := range ev.Chains {
+		if !ch.HarnessKnown {
+			continue
+		}
+		if ts := numFloat(ch.EndTS); ts > out.gate[ch.Harness] {
+			out.gate[ch.Harness] = ts
+		}
+	}
+	rows, err := denials.Read()
+	if err != nil {
+		return out
+	}
+	for _, row := range rows {
+		if ts, err := time.Parse(time.RFC3339, row.Timestamp); err == nil {
+			if secs := float64(ts.Unix()); secs > out.denials {
+				out.denials = secs
+			}
+		}
+	}
+	return out
+}
+
+// withEvidence adds the two readings a registration cannot give: whether the
+// command resolves from this process, and when the channel last wrote a row.
+func withEvidence(a ScopeArming, corpus string, observed float64) ScopeArming {
+	a.Resolvable = ResolveNotRegistered
+	if a.Registered {
+		a.Resolvable = steerbin.Resolve(a.Command)
+	}
+	a.ObservedCorpus = corpus
+	a.Observed = observed
+	if corpus == "" {
+		a.Observed = 0
+	}
+	return a
 }
 
 // MasterRuntimes reports each harness's registered master in the named scopes.
@@ -558,6 +652,7 @@ func masterRuntimes(scope string) []MasterRuntime {
 			continue
 		}
 		row.Path = path
+		row.Observed = newestFiring(filepath.Dir(path))
 		stamp, ok := guard.ReadStamp(path)
 		if !ok {
 			row.State = MasterUnknown
@@ -572,6 +667,23 @@ func masterRuntimes(scope string) []MasterRuntime {
 		out = append(out, row)
 	}
 	return out
+}
+
+// newestFiring is the epoch second of the last block the audit log beside a
+// registered master recorded, 0 when the log holds none. The log records blocks
+// only, so a master that has allowed every call reads as never observed.
+func newestFiring(dir string) float64 {
+	firings, present := mine.LoadFirings(dir)
+	if !present {
+		return 0
+	}
+	newest := 0.0
+	for _, f := range firings {
+		if f.TS > newest {
+			newest = f.TS
+		}
+	}
+	return newest
 }
 
 // trustState reports what this machine can honestly say about a registration's trust.

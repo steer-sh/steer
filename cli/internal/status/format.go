@@ -6,6 +6,7 @@ package status
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/steer-sh/steer-cli/internal/cadence"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
@@ -148,4 +149,42 @@ func MasterPhrase(m MasterRuntime) string {
 		return fmt.Sprintf("runtime unknown (unstamped master) — run: steer hooks rebuild --scope %s", m.Scope)
 	}
 	return ""
+}
+
+// ResolvePhrase names what this process can say about the command a registration
+// points at. It is a proxy for enforcement, never a proof of it: the hook runs
+// under the harness's environment, whose PATH may differ from this one's. So a
+// resolvable command says nothing worth printing, and only a missing one does.
+func ResolvePhrase(a ScopeArming) string {
+	if a.Resolvable == ResolveMissing {
+		return "the command does not resolve here — the hook is skipped silently; " +
+			"run: steer bin install"
+	}
+	return ""
+}
+
+// ObservedPhrase names when this channel last wrote a row of its own. An empty
+// string means the channel writes no corpus, so nothing about it is observable.
+// "never observed" is not proof of breakage: nobody may have attempted the action
+// the channel fires on.
+func ObservedPhrase(a ScopeArming) string {
+	if a.ObservedCorpus == "" {
+		return ""
+	}
+	if a.Observed == 0 {
+		return "never observed"
+	}
+	return "last row " + time.Unix(int64(a.Observed), 0).Format("2006-01-02 15:04")
+}
+
+// MasterObservedPhrase names the last block a registered master recorded. The
+// audit log holds blocks only, so a master that allowed every call has none.
+func MasterObservedPhrase(m MasterRuntime) string {
+	if m.State == MasterNotRegistered {
+		return ""
+	}
+	if m.Observed == 0 {
+		return "no block observed"
+	}
+	return "last block " + time.Unix(int64(m.Observed), 0).Format("2006-01-02 15:04")
 }

@@ -54,7 +54,7 @@ var denialsInstallCmd = &cobra.Command{
 			return err
 		}
 		target := currentScope()
-		if err := claude.RegisterDenialsHook(target, "steer denials record", denialsTimeout); err != nil {
+		if err := claude.RegisterDenialsHook(target, steerHookCommand("denials record"), denialsTimeout); err != nil {
 			return err
 		}
 		fmt.Println()

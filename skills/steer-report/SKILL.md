@@ -138,7 +138,7 @@ Digest schema (`digest_version: 2`):
 
 The digest is size-capped: the CLI evicts the lowest-scoring clusters to fit, and reports honesty in `stats`.
 
-### The `steer status --json` contract (`status_version: 5`)
+### The `steer status --json` contract (`status_version: 6`)
 
 Step 1 reads this snapshot for posture and the full class inventory. The unit is
 the failure class and its verdict, not the hook count. This schema is byte-shared
@@ -148,8 +148,23 @@ Fields:
 - `status_version` — the schema version. `--json` is a stable agent contract.
 - `posture` — the arming state: `instrument` (reviewer model / runs / prompt
   digest), `reviewer`, `ledger` path, and `commit_gate[]` / `denials[]` /
-  `resolver[]`. Each row carries `harness`, `scope`, `registered`, `effective`
-  and `trust`. One guard store serves both harnesses but each harness holds its
+  `resolver[]`. Each row carries `harness`, `scope`, `registered`, `effective`,
+  `trust`, `command`, `resolvable`, `observed` and `observed_corpus`. A
+  registration is three separate readings, and only the first is what the
+  configuration says. `command` is the command the registration names, verbatim.
+  `resolvable` is whether that command resolves — `resolvable`, `missing`,
+  `unknown`, or `not-registered` when there is no command to test. Treat it as a
+  PROXY, never a proof: the hook runs under the harness's environment, whose
+  PATH may differ, so it can prove a command absent and never prove one runs.
+  **Act on `missing`:** neither harness reports a command it cannot resolve — the
+  tool call runs, the hook is skipped, and nothing says so — and
+  `steer bin install` repoints every registration at `~/.steer/bin/steer`.
+  `observed` is the epoch second of the newest row the channel wrote to
+  `observed_corpus`, 0 when it never wrote one, and both fields are absent when
+  the channel writes no corpus of its own (the resolver). Never observed is not
+  proof of breakage: nobody may have attempted the action the channel fires on.
+  A corpus records no scope, so both scopes of one harness report the same
+  evidence. One guard store serves both harnesses but each harness holds its
   own registration, so a scope alone does not identify a row: `commit_gate` and
   `resolver` report one row per harness per scope, and `denials` is Claude
   Code's alone. `trust` is `not-applicable` (the harness reviews no hook trust),
@@ -161,7 +176,9 @@ Fields:
   `masters[]` is the guard master's runtime provenance, one row per harness per
   scope: `path`, `runtime` (the digest of the Python runtime spliced into it),
   `version` (the steer that wrote it), `expected` (this binary's runtime digest)
-  and `state`. `state` is `current`, `stale` (an older runtime, so a firing
+  `state` and `observed` (the epoch second of the last block in the audit log
+  beside this registered master; the log holds blocks only, so a master that
+  allowed every call reads as 0). `state` is `current`, `stale` (an older runtime, so a firing
   writes fewer audit fields than the scorer joins on), `unknown` (an unstamped
   master — every store built before the stamp existed, which never reads as
   current) or `not-registered`. The row reads the REGISTERED master, not the one

@@ -78,20 +78,23 @@ type view struct {
 // RenderHTML writes the snapshot as one self-contained HTML page.
 func (s *SystemStatus) RenderHTML(w io.Writer) error {
 	tmpl, err := template.New("dashboard.html.tmpl").Funcs(template.FuncMap{
-		"pct":     pct,
-		"delta":   delta,
-		"stamp":   stamp,
-		"slug":    slug,
-		"arming":  armingWord,
-		"present": presentCount,
-		"effect":  EffectPhrase,
-		"scope":   ScopePhrase,
-		"cover":   CoveragePhrase,
-		"needs":   RequiredPhrase,
-		"reasons": ConfoundPhrases,
-		"attrib":  AttributionPhrase,
-		"trust":   TrustPhrase,
-		"master":  MasterPhrase,
+		"pct":       pct,
+		"delta":     delta,
+		"stamp":     stamp,
+		"slug":      slug,
+		"arming":    armingWord,
+		"present":   presentCount,
+		"effect":    EffectPhrase,
+		"scope":     ScopePhrase,
+		"cover":     CoveragePhrase,
+		"needs":     RequiredPhrase,
+		"reasons":   ConfoundPhrases,
+		"attrib":    AttributionPhrase,
+		"trust":     TrustPhrase,
+		"master":    MasterPhrase,
+		"resolves":  ResolvePhrase,
+		"observed":  ObservedPhrase,
+		"mobserved": MasterObservedPhrase,
 	}).ParseFS(templateFS, "templates/dashboard.html.tmpl")
 	if err != nil {
 		return fmt.Errorf("failed to parse the dashboard template: %w", err)
@@ -321,9 +324,13 @@ func slug(s string) string {
 	}, s)
 }
 
-// armingWord names a scope's arming state in one word.
+// armingWord names a scope's arming state in one word. A registration whose
+// command does not resolve is broken, not armed: the harness runs the tool anyway
+// and says nothing.
 func armingWord(a ScopeArming) string {
 	switch {
+	case a.Registered && a.Resolvable == ResolveMissing:
+		return "broken"
 	case a.Effective:
 		return "armed"
 	case a.Registered:

@@ -72,6 +72,8 @@ type DenialsArming struct {
 	// Timeout is the wall clock the entry carries; zero means Claude Code applies
 	// its own default.
 	Timeout int
+	// Command is the registered command verbatim.
+	Command string
 }
 
 // DenialsHookArming reads a scope's settings.json and reports the recorder's state.
@@ -87,6 +89,7 @@ func DenialsHookArming(scope string) (DenialsArming, error) {
 					Registered: true,
 					Matcher:    entry.Matcher,
 					Timeout:    hook.Timeout,
+					Command:    hook.Command,
 				}, nil
 			}
 		}

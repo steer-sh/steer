@@ -1,0 +1,177 @@
+package cmd
+
+import (
+	"fmt"
+	"os"
+
+	"github.com/spf13/cobra"
+	"github.com/steer-sh/steer-cli/internal/claude"
+	codexhooks "github.com/steer-sh/steer-cli/internal/codex"
+	"github.com/steer-sh/steer-cli/internal/steerbin"
+	"github.com/steer-sh/steer-cli/internal/styles"
+	"github.com/steer-sh/steer-cli/internal/utils"
+)
+
+// steerHookCommand renders a hook command naming the stable executable, placing
+// that executable first. A failure falls back to the bare word and says so: a
+// registration resolved on PATH beats no registration at all.
+func steerHookCommand(args string) string {
+	command, err := steerbin.HookCommand(args)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "steer: could not install the stable executable, "+
+			"registering the PATH form instead:", err)
+	}
+	return command
+}
+
+var binCmd = &cobra.Command{
+	Use:   "bin",
+	Short: "Manage the stable executable hook registrations name",
+}
+
+var binInstallCmd = &cobra.Command{
+	Use:   "install",
+	Short: "Place the running binary at ~/.steer/bin/steer and repoint every registration",
+	Long: `install copies the running binary to ~/.steer/bin/steer and rewrites every
+steer-owned hook registration to name that absolute path.
+
+A registration naming the bare word "steer" is resolved on PATH at hook time.
+Neither harness reports a command it cannot resolve: the tool call runs, the hook
+is skipped, and nothing says so. The gate reads as armed while the commits land
+unreviewed.
+
+The copy and the re-registration are one operation, because a path written into a
+config is stranded the moment the file it names moves.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		path, err := steerbin.Ensure()
+		if err != nil {
+			return err
+		}
+		fmt.Println()
+		fmt.Println(styles.MainHeader.Render("Stable Executable"))
+		fmt.Println()
+		utils.Success("Installed " + path)
+
+		rewritten := 0
+		for _, scope := range []string{claude.ProjectScope, claude.GlobalScope} {
+			n, err := relinkClaude(scope, path)
+			if err != nil {
+				return err
+			}
+			rewritten += n
+			n, err = relinkCodex(scope, path)
+			if err != nil {
+				return err
+			}
+			rewritten += n
+		}
+		if rewritten == 0 {
+			utils.Info("No registration needed rewriting.")
+			return nil
+		}
+		utils.Info(fmt.Sprintf("Repointed %d registration(s) at the stable executable.", rewritten))
+		return nil
+	},
+}
+
+// relinkClaude repoints this scope's Claude Code registrations, reporting how many
+// changed. A registration already naming the stable path is left untouched, and one
+// naming a command that is not steer's own is never rewritten.
+func relinkClaude(scope, path string) (int, error) {
+	rewritten := 0
+	gate := claude.CommitGateHookArmed(scope)
+	if next, ok := relinked(gate.Registered, gate.Command, path); ok {
+		if err := claude.RegisterCommitGateHook(scope, next, gate.Timeout); err != nil {
+			return rewritten, err
+		}
+		reportRelink("claude-code", scope, "commit gate", next)
+		rewritten++
+	}
+	resolver := claude.BackfillHookArming(scope)
+	if next, ok := relinked(resolver.Registered, resolver.Command, path); ok {
+		if err := claude.RegisterBackfillHook(scope, next, resolver.Timeout); err != nil {
+			return rewritten, err
+		}
+		reportRelink("claude-code", scope, "resolver", next)
+		rewritten++
+	}
+	denials, err := claude.DenialsHookArming(scope)
+	if err != nil {
+		return rewritten, nil
+	}
+	if next, ok := relinked(denials.Registered, denials.Command, path); ok {
+		if err := claude.RegisterDenialsHook(scope, next, denials.Timeout); err != nil {
+			return rewritten, err
+		}
+		reportRelink("claude-code", scope, "denials recorder", next)
+		rewritten++
+	}
+	return rewritten, nil
+}
+
+// relinkCodex repoints this scope's Codex registrations. The gate and the resolver
+// are written together, because Codex's writer arms them in one save.
+func relinkCodex(scope, path string) (int, error) {
+	// Only the project scope needs a working directory: the global registration
+	// lives under CODEX_HOME. So an unreadable cwd skips project scope alone.
+	cwd, err := codexProjectDir()
+	if err != nil && scope != claude.GlobalScope {
+		return 0, nil
+	}
+	gate := codexhooks.CommitGateArming(scope, cwd)
+	resolver := codexhooks.ResolverArmingRow(scope, cwd)
+	if !gate.Registered {
+		// Codex's writer arms the gate and the resolver together and refuses a save
+		// with no gate command, so a resolver left behind by a removed gate cannot be
+		// repaired here. Naming it beats rewriting it into a state steer never writes.
+		if _, changed := relinked(resolver.Registered, resolver.Command, path); changed {
+			utils.Info(fmt.Sprintf("codex, %s scope: the resolver is registered without a gate; "+
+				"run: steer commit-gate install --harness codex --scope %s", scope, scope))
+		}
+		return 0, nil
+	}
+	nextGate, gateChanged := relinked(gate.Registered, gate.Command, path)
+	nextResolver, resolverChanged := relinked(resolver.Registered, resolver.Command, path)
+	if !gateChanged && !resolverChanged {
+		return 0, nil
+	}
+	if !gateChanged {
+		nextGate = gate.Command
+	}
+	if !resolverChanged {
+		nextResolver = resolver.Command
+	}
+	if _, err := codexhooks.RegisterCommitGateAndResolver(scope, cwd,
+		nextGate, gate.Timeout, nextResolver, resolver.Timeout); err != nil {
+		return 0, err
+	}
+	rewritten := 0
+	if gateChanged {
+		reportRelink("codex", scope, "commit gate", nextGate)
+		rewritten++
+	}
+	if resolverChanged {
+		reportRelink("codex", scope, "resolver", nextResolver)
+		rewritten++
+	}
+	return rewritten, nil
+}
+
+// relinked answers what a registered command becomes, and whether that differs from
+// what it is now.
+func relinked(registered bool, command, path string) (string, bool) {
+	if !registered {
+		return "", false
+	}
+	next := steerbin.Relink(command, path)
+	return next, next != command
+}
+
+func reportRelink(harnessID, scope, channel, command string) {
+	utils.Info(fmt.Sprintf("%s, %s scope: %s -> %s", harnessID, scope, channel, command))
+}
+
+func init() {
+	rootCmd.AddCommand(binCmd)
+	binCmd.AddCommand(binInstallCmd)
+}

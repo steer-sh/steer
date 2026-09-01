@@ -705,6 +705,9 @@ type CommitGateArming struct {
 	// Matcher is the entry the hook sits under. Registered but not Effective means the
 	// hook exists and will never run on a commit.
 	Matcher string
+	// Command is the registered command verbatim. A reader reports the command the
+	// harness invokes, never the one an installer would choose today.
+	Command string
 }
 
 // Effective reports whether the gate will actually fire on a Bash tool call.
@@ -807,20 +810,34 @@ func stripBackfillHooks(groups []StopHookEntry) []StopHookEntry {
 	return out
 }
 
-// BackfillHookArmed reports whether steer's Go resolver Stop hook is registered.
-func BackfillHookArmed(scope string) (bool, int) {
+// BackfillArming is what a scope's settings.json says about the resolver.
+type BackfillArming struct {
+	Registered bool
+	Timeout    int
+	// Command is the registered command verbatim.
+	Command string
+}
+
+// BackfillHookArming reads a scope's settings.json and reports the resolver's state.
+func BackfillHookArming(scope string) BackfillArming {
 	settings, err := LoadSettings(scope)
 	if err != nil {
-		return false, 0
+		return BackfillArming{}
 	}
 	for _, group := range settings.Hooks.Stop {
 		for _, hook := range group.Hooks {
 			if strings.Contains(hook.Command, backfillIdentity) {
-				return true, hook.Timeout
+				return BackfillArming{Registered: true, Timeout: hook.Timeout, Command: hook.Command}
 			}
 		}
 	}
-	return false, 0
+	return BackfillArming{}
+}
+
+// BackfillHookArmed reports whether steer's Go resolver Stop hook is registered.
+func BackfillHookArmed(scope string) (bool, int) {
+	a := BackfillHookArming(scope)
+	return a.Registered, a.Timeout
 }
 
 // CommitGateHookArmed reports what this scope's settings.json says about the gate.
@@ -832,7 +849,8 @@ func CommitGateHookArmed(scope string) CommitGateArming {
 	for _, entry := range settings.Hooks.PreToolUse {
 		for _, hook := range entry.Hooks {
 			if IsCommitGateCommand(hook.Command) {
-				return CommitGateArming{Registered: true, Timeout: hook.Timeout, Matcher: entry.Matcher}
+				return CommitGateArming{Registered: true, Timeout: hook.Timeout,
+					Matcher: entry.Matcher, Command: hook.Command}
 			}
 		}
 	}

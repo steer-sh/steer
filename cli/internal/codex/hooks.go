@@ -271,15 +271,24 @@ func RemoveCommitGateAndResolver(scope, cwd string) (string, error) {
 // ResolverArming reports whether the resolver is registered on both turn-end events,
 // and the timeout it carries.
 func ResolverArming(scope, cwd string) (bool, int) {
+	a := ResolverArmingRow(scope, cwd)
+	return a.Registered, a.Timeout
+}
+
+// ResolverArmingRow reports the resolver's registration, its timeout and the command
+// it names. The resolver rides a turn-end event, which takes no matcher.
+func ResolverArmingRow(scope, cwd string) Arming {
 	path, err := hooksPath(scope, cwd)
 	if err != nil {
-		return false, 0
+		return Arming{}
 	}
+	a := Arming{Path: path}
 	root, err := load(path)
 	if err != nil {
-		return false, 0
+		return a
 	}
 	timeout := 0
+	command := ""
 	for _, event := range resolverEvents {
 		found := false
 		for _, raw := range eventEntries(root, event) {
@@ -287,21 +296,23 @@ func ResolverArming(scope, cwd string) (bool, int) {
 			hooks, _ := entry["hooks"].([]any)
 			for _, rawHook := range hooks {
 				hook, _ := rawHook.(map[string]any)
-				command, _ := hook["command"].(string)
-				if !isResolver(command) {
+				cmdText, _ := hook["command"].(string)
+				if !isResolver(cmdText) {
 					continue
 				}
 				found = true
+				command = cmdText
 				if t, ok := hook["timeout"].(float64); ok {
 					timeout = int(t)
 				}
 			}
 		}
 		if !found {
-			return false, 0
+			return Arming{Path: path}
 		}
 	}
-	return true, timeout
+	a.Registered, a.Timeout, a.Command = true, timeout, command
+	return a
 }
 
 // CommitGateArming reads registration and checks whether config.toml has a trust

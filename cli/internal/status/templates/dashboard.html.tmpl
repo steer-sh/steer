@@ -143,18 +143,18 @@ footer { color: var(--faint); font-size: 11.5px; border-top: 1px solid var(--lin
   <div class="chip"><b>instrument</b><span class="v">{{ .Status.Posture.Instrument }}</span></div>
   <div class="chip"><b>reviewer</b><span class="v">{{ .Status.Posture.Reviewer }}</span></div>
   {{- range .Status.Posture.CommitGate }}
-  <div class="chip"><span class="dot {{ arming . }}"></span><b>gate {{ .Harness }} {{ .Scope }}</b><span class="v">{{ arming . }}{{ if .Timeout }} · {{ .Timeout }}s{{ end }}{{ if .Registered }}{{ with trust .Trust }} · {{ . }}{{ end }}{{ end }}</span></div>
+  <div class="chip"><span class="dot {{ arming . }}"></span><b>gate {{ .Harness }} {{ .Scope }}</b><span class="v">{{ arming . }}{{ if .Timeout }} · {{ .Timeout }}s{{ end }}{{ if .Registered }}{{ with trust .Trust }} · {{ . }}{{ end }}{{ with observed . }} · {{ . }}{{ end }}{{ with resolves . }} · {{ . }}{{ end }}{{ end }}</span></div>
   {{- end }}
   {{- range .Status.Posture.Denials }}
-  <div class="chip"><span class="dot {{ arming . }}"></span><b>denials {{ .Harness }} {{ .Scope }}</b><span class="v">{{ arming . }}</span></div>
+  <div class="chip"><span class="dot {{ arming . }}"></span><b>denials {{ .Harness }} {{ .Scope }}</b><span class="v">{{ arming . }}{{ if .Registered }}{{ with observed . }} · {{ . }}{{ end }}{{ with resolves . }} · {{ . }}{{ end }}{{ end }}</span></div>
   {{- end }}
   {{- range .Status.Posture.Resolver }}
-  <div class="chip"><span class="dot {{ arming . }}"></span><b>resolver {{ .Harness }} {{ .Scope }}</b><span class="v">{{ arming . }}{{ if .Registered }}{{ with trust .Trust }} · {{ . }}{{ end }}{{ end }}</span></div>
+  <div class="chip"><span class="dot {{ arming . }}"></span><b>resolver {{ .Harness }} {{ .Scope }}</b><span class="v">{{ arming . }}{{ if .Registered }}{{ with trust .Trust }} · {{ . }}{{ end }}{{ with resolves . }} · {{ . }}{{ end }}{{ end }}</span></div>
   {{- end }}
   {{- range .Status.Posture.Masters }}
   {{- $m := . }}
   {{- with master . }}
-  <div class="chip"><b>guard master {{ $m.Harness }} {{ $m.Scope }}</b><span class="v">{{ . }}</span></div>
+  <div class="chip"><b>guard master {{ $m.Harness }} {{ $m.Scope }}</b><span class="v">{{ . }}{{ with mobserved $m }} · {{ . }}{{ end }}</span></div>
   {{- end }}
   {{- end }}
   {{- if .Status.Posture.Unresolved }}
