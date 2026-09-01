@@ -369,7 +369,8 @@ func (e *Engine) reviewCommit(ctx context.Context, req Request, chain *Chain, p 
 		Row{"ts": time.Now().Unix(), "phase": "deny", "reviewers": result.Answered,
 			"finding_slots": findings, "files": len(p.paths),
 			"changed_paths": SlashPaths(p.paths), "firing": firing,
-			"session_id": req.SessionID, "severity_lines_loose": LooseFindingCount(result.Reviews)},
+			"session_id": req.SessionID, "severity_lines_loose": LooseFindingCount(result.Reviews),
+			"reviews_off_format": OffFormatReviews(result.Reviews)},
 		ReviewerReport(e.cfg, result.Runs),
 		e.ledger.SaveDiff(req.SessionID, firing, p.diff),
 		FindingShape(result.Reviews, p.paths)))
@@ -463,6 +464,7 @@ func (e *Engine) terminalReview(ctx context.Context, req Request, chain *Chain, 
 	shape := FindingShape(result.Reviews, p.paths)
 	row["finding_slots"] = findings
 	row["severity_lines_loose"] = LooseFindingCount(result.Reviews)
+	row["reviews_off_format"] = OffFormatReviews(result.Reviews)
 	err := e.log(req, mergeRows(row, shape))
 	if err == nil {
 		err = clearedErr

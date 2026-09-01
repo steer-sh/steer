@@ -7,22 +7,23 @@ import (
 	"testing"
 )
 
-// The digests of the five templates as commit-review.py shipped them. review.md's is
-// the instrument's prompt half, so a change there reclassifies every row written
-// after it — these are golden values, not a checksum of convenience. Regenerate one
-// only when the prompt change is the intended change.
+// The digests of the five templates. Four are still byte-identical to what
+// commit-review.py shipped; review.md is not, and its digest is the instrument's
+// prompt half, so rows written after that change are a different instrument.
+// These are golden values, not a checksum of convenience. Regenerate one only
+// when the prompt change is the intended change.
 var promptDigests = map[string]struct {
 	text string
 	want string
 }{
-	"review":     {reviewPrompt, "f39dc72c7b990c0846eee4d85e831909b61b1efb08f2c0761a8a09998bbdef7b"},
+	"review":     {reviewPrompt, "dc6cf507198c8d72199dbd70cf0bc3ac14a0fd6b79929a34a21d17d756c51dad"},
 	"deny":       {denyTemplate, "0d59cc3099d745f60df34ade4c059c8e4e1e2993663df5ae1e56f64a11582dbb"},
 	"cap":        {capTemplate, "2879eff9c450d4a1469208c0f2037addcc74f62f3dfcb82345508add0fd592d8"},
 	"round-note": {roundNote, "f40acabd50e95481f309c08ccacf4cac025835d79e8e265601170f7c4a4d34c3"},
 	"rerun-note": {rerunNoteText, "e3e48ce9edf1a6b74b2fd347234805b8c26decd553b2549d582918d00922b4e8"},
 }
 
-func TestPromptsAreByteIdenticalToPython(t *testing.T) {
+func TestPromptDigestsArePinned(t *testing.T) {
 	for name, tc := range promptDigests {
 		sum := sha256.Sum256([]byte(tc.text))
 		if got := hex.EncodeToString(sum[:]); got != tc.want {
@@ -33,7 +34,7 @@ func TestPromptsAreByteIdenticalToPython(t *testing.T) {
 
 func TestInstrumentID(t *testing.T) {
 	c := Defaults()
-	if got, want := c.InstrumentID(), "gemini-3.7-flash-high/3/f39dc72c/go"; got != want {
+	if got, want := c.InstrumentID(), "gemini-3.7-flash-high/3/dc6cf507/go"; got != want {
 		t.Errorf("InstrumentID() = %q, want %q", got, want)
 	}
 }
@@ -99,5 +100,17 @@ func TestFiringOneHasNoRoundNote(t *testing.T) {
 	}
 	if !strings.Contains(BuildDeny(3, "r", 2, 4, "", "s"), "This is firing 2 of at most 4") {
 		t.Error("firing 2 must carry the round note")
+	}
+}
+
+// The prompt's own example is the parser's input contract. If a future edit rewrites
+// the example into a shape CountFindings does not match, the gate would ask for a
+// format it cannot count.
+func TestReviewPromptExampleParsesAsFindings(t *testing.T) {
+	if got := CountFindings(reviewPrompt); got != 2 {
+		t.Errorf("strict counter reads %d findings in the prompt's example block, want 2", got)
+	}
+	if !strings.Contains(reviewPrompt, "NO FINDINGS") {
+		t.Error("prompt no longer names the clean reply")
 	}
 }

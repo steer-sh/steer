@@ -275,3 +275,31 @@ func trimTagName(raw string) string {
 	}
 	return name
 }
+
+// The failure this counter exists for: a reviewer that abandons the severity line and
+// writes its findings as markdown. The strict count reads zero, so the row would
+// otherwise record a clean diff over real defects.
+func TestOffFormatReviewsCountsProseFindings(t *testing.T) {
+	prose := "### Defect: the resolver drops a thread\n\nThe join keys on session_id, so two threads collide.\n"
+	inFormat := "[1] SEVERITY: BLOCKING\n    FILE: a.go\n    CLAIM: one.\n    FAILS WHEN: always.\n"
+
+	cases := []struct {
+		name    string
+		reviews []string
+		want    int
+	}{
+		{"prose review", []string{prose}, 1},
+		{"in-format review", []string{inFormat}, 0},
+		{"clean reply", []string{"NO FINDINGS"}, 0},
+		{"empty text", []string{"   "}, 0},
+		{"mixed panel", []string{inFormat, prose, "NO FINDINGS"}, 1},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := OffFormatReviews(tc.reviews); got != tc.want {
+				t.Errorf("OffFormatReviews = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}

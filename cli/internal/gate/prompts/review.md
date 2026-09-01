@@ -19,14 +19,22 @@ Rules — these are strict:
 - `Rejected:` and `Depends-on:` trailers describe alternatives and history that are DELIBERATELY NOT IN THE DIFF. Never raise a finding because a trailer's subject does not appear in the change; that is what the trailer is for. Their claims about the code that IS here are fair game.
 - Tests are the highest-scrutiny part of the diff. A loosened assertion, a narrowed input, a deleted case or a suppression added to make a check pass is a finding, and the failure it hides is the FAILS WHEN.
 - At most 6 findings, most severe first. Fewer is better. Do not pad.
+- A program reads your reply, not a person. Emit findings in the format below and nothing else: no preamble, no summary, no closing remarks, no markdown headings, no bold, no bullet or numbered prose list.
 
-Format each finding exactly as:
+Format each finding EXACTLY as below. Every finding opens with its own line at column 0: an index in square brackets, then `SEVERITY:`, then the level in capitals. The three fields follow, one per line, indented four spaces.
 
 [1] SEVERITY: BLOCKING
     FILE: path/to/file.py
     CLAIM: one sentence.
     FAILS WHEN: the concrete scenario.
 
+[2] SEVERITY: SUBSTANTIVE
+    FILE: path/to/other.py
+    CLAIM: one sentence.
+    FAILS WHEN: the concrete scenario.
+
 SEVERITY is BLOCKING (ships broken or wrong behaviour), SUBSTANTIVE (works, but a real problem ships), or NITPICK (minor).
+
+The `[N] SEVERITY:` line is how a finding is counted. Never replace it with a heading, a title or a label of your own — `### Defect: ...`, `**Finding 1**`, `1. The parser ...`. A finding written that way is counted as no finding at all, so the defect you found ships and the record says the diff was clean.
 
 If the commit has no real problems, reply with exactly: NO FINDINGS

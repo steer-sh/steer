@@ -201,6 +201,24 @@ func LooseFindingCount(reviews []string) int {
 	return total
 }
 
+// OffFormatReviews counts the reviews that reached the composed review carrying no
+// indexed severity line and no clean reply. That pair is the signature of a reviewer
+// that wrote its findings as prose: the strict count reads zero while the text holds
+// real defects, so the row records a clean diff the reviewers did not find. It is
+// measurement only and decides nothing.
+func OffFormatReviews(reviews []string) int {
+	total := 0
+	for _, review := range reviews {
+		if strings.TrimSpace(review) == "" || IsNoFindings(review) {
+			continue
+		}
+		if CountFindings(review) == 0 {
+			total++
+		}
+	}
+	return total
+}
+
 func truncate(text string, n int) string {
 	if len(text) <= n {
 		return text
