@@ -19,13 +19,19 @@ const (
 )
 
 // expectsLedger reports a row whose findings were handed to the agent and therefore owe
-// an adjudication. It mirrors the resolver's own predicate in gate/cc.
+// an adjudication. It mirrors the resolver's own predicate in gate/resolve.
 func expectsLedger(row gate.Row) bool {
 	switch str(row["phase"]) {
 	case "retry":
 		return true
 	case "cap":
-		return numInt(row["finding_slots"]) > 0
+		// A cap row reaches the agent with review text whenever the panel returned any
+		// review at all. The strict count is one reading of that text, not the test of
+		// whether it was handed over: a reviewer that wrote its findings as prose scores
+		// zero slots and still costs the agent an adjudication. reviews_off_format
+		// counts exactly those reviews, and it is absent on a row whose panel returned
+		// nothing, so the clean cap still owes no ledger.
+		return numInt(row["finding_slots"]) > 0 || numInt(row["reviews_off_format"]) > 0
 	}
 	return false
 }

@@ -40,6 +40,14 @@ func TestChainEvidence(t *testing.T) {
 	check(t, "a cap that showed no findings owes no ledger",
 		ChainEvidence(empty, 9_000_000), EvidenceComplete)
 
+	// A cap whose reviewers wrote prose scores zero slots and still owes a ledger.
+	prose := row(3510, "cap")
+	prose["finding_slots"] = 0
+	prose["reviews_off_format"] = 2
+	offFormat := BuildChains([]gate.Row{row(3500, "deny"), prose}, false)[0]
+	check(t, "an off-format cap still owes a ledger",
+		ChainEvidence(offFormat, 9_000_000), EvidenceMissing)
+
 	// The worst row wins: one complete round does not excuse an unresolved one.
 	mixed := BuildChains([]gate.Row{
 		row(4000, "deny"), concerns(row(4010, "retry"), "round", c("x")),

@@ -188,14 +188,16 @@ func (r *resolver) acquireLock() bool {
 func (r *resolver) releaseLock() { os.Remove(r.lockPath()) }
 
 // ExpectsLedger reports whether a row demanded a ledger: every retry, and a cap whose
-// terminal review had findings to adjudicate.
+// terminal review reached the agent. Findings written as prose score zero slots and are
+// counted by reviews_off_format, which a cap with no review at all never carries.
 func ExpectsLedger(row map[string]any) bool {
 	switch pyStr(row["phase"]) {
 	case "retry":
 		return true
 	case "cap":
 		n, _ := pyInt(row["finding_slots"])
-		return n > 0
+		off, _ := pyInt(row["reviews_off_format"])
+		return n > 0 || off > 0
 	}
 	return false
 }

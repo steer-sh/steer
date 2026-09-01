@@ -396,6 +396,10 @@ func TestResolverCap(t *testing.T) {
 	if ExpectsLedger(resolverRow{"phase": "cap", "firing": 5, "finding_slots": 0}) {
 		t.Fatal("a clean terminal review asked for nothing")
 	}
+	if !ExpectsLedger(resolverRow{"phase": "cap", "firing": 5, "finding_slots": 0,
+		"reviews_off_format": 2}) {
+		t.Fatal("prose findings reached the agent and owe a ledger, whatever the slots read")
+	}
 	if ts, _ := anchorTS(capRows, idx); ts != fixT+400 {
 		t.Fatalf("the cap row IS the handover moment; anchor = %v, want %v", ts, fixT+400)
 	}
