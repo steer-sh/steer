@@ -5,7 +5,9 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/steer-sh/steer-cli/internal/evidence"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
+	"github.com/steer-sh/steer-cli/internal/sessions"
 )
 
 // The intervention commands exist under two parents: `steer intervention`, the
@@ -24,11 +26,14 @@ type interventionFlags struct {
 
 	matchKind        string
 	matchStrictJoins bool
+	matchCorpus      string
+	matchSignalKind  string
 
 	registerClass       string
 	registerMatch       string
 	registerKind        string
 	registerCorpus      string
+	registerSignalKind  string
 	registerTier        string
 	registerTarget      string
 	registerHookID      string
@@ -45,6 +50,7 @@ type interventionFlags struct {
 	rejectMatch      string
 	rejectKind       string
 	rejectCorpus     string
+	rejectSignalKind string
 	rejectReason     string
 	rejectReopen     string
 	rejectNote       string
@@ -75,6 +81,19 @@ type interventionFlags struct {
 
 const scopeHarnessUsage = "eligibility scope: harness ids the class is measured on (repeatable or comma-separated)"
 
+const corpusUsage = "evidence corpus the class is counted over: review-findings (by chain) or transcript-friction (by session)"
+
+const signalKindUsage = "transcript-friction only: the classifier kind the class is counted over " +
+	"(any|user_corrections|user_rejections|tool_failures|hook_blocks)"
+
+// storedSessions reads the transcript-session snapshot store. A machine that never
+// refreshed it has none, and a session-corpus write then refuses for want of a
+// baseline rather than freezing an empty one.
+func storedSessions() []mine.SessionUnit {
+	units, _ := sessions.Load(sessions.StateDir())
+	return units
+}
+
 // interventionCommands builds one tree's subcommands. withFindings adds `findings`,
 // which reads the review corpus rather than managing an intervention, so it belongs to
 // the commit-gate tree alone.
@@ -87,13 +106,22 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 		Short: "Test a candidate class regex against the corpus",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return mine.Match(out(), gateConfig().StateDir, v.ledger, args[0],
-				v.matchKind, v.matchStrictJoins)
+			return mine.Match(out(), gateConfig().StateDir, mine.MatchOpts{
+				Ledger:      v.ledger,
+				Regex:       args[0],
+				Kind:        v.matchKind,
+				StrictJoins: v.matchStrictJoins,
+				Corpus:      v.matchCorpus,
+				SignalKind:  v.matchSignalKind,
+				Sessions:    storedSessions(),
+			})
 		},
 	}
 	m := match.Flags()
 	m.StringVar(&v.matchKind, "kind", "accepted", "accepted|rejected|both")
 	m.BoolVar(&v.matchStrictJoins, "strict-joins", false, "round-joined rows only")
+	m.StringVar(&v.matchCorpus, "corpus", mine.CorpusReviewFindings, corpusUsage)
+	m.StringVar(&v.matchSignalKind, "signal-kind", "", signalKindUsage)
 
 	register := &cobra.Command{
 		Use:   "register",
@@ -105,6 +133,8 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 				Match:        v.registerMatch,
 				Kind:         v.registerKind,
 				Corpus:       v.registerCorpus,
+				SignalKind:   v.registerSignalKind,
+				Sessions:     storedSessions(),
 				Tier:         v.registerTier,
 				Target:       v.registerTarget,
 				Note:         v.registerNote,
@@ -123,7 +153,8 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 	r.StringVar(&v.registerClass, "class", "", "class name (required)")
 	r.StringVar(&v.registerMatch, "match", "", "regex defining class membership (required)")
 	r.StringVar(&v.registerKind, "kind", "defect", "defect|false-positive")
-	r.StringVar(&v.registerCorpus, "corpus", mine.CorpusReviewFindings, "evidence corpus the class is counted over")
+	r.StringVar(&v.registerCorpus, "corpus", mine.CorpusReviewFindings, corpusUsage)
+	r.StringVar(&v.registerSignalKind, "signal-kind", "", signalKindUsage)
 	r.StringVar(&v.registerTier, "tier", "", "check|steer|prose|prompt (required)")
 	r.StringVar(&v.registerTarget, "target", "", "file the fix landed in (required)")
 	r.StringVar(&v.registerHookID, "hook-id", "",
@@ -150,6 +181,8 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 				Match:        v.rejectMatch,
 				Kind:         v.rejectKind,
 				Corpus:       v.rejectCorpus,
+				SignalKind:   v.rejectSignalKind,
+				Sessions:     storedSessions(),
 				Reason:       v.rejectReason,
 				Reopen:       v.rejectReopen,
 				Note:         v.rejectNote,
@@ -166,7 +199,8 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 	rj.StringVar(&v.rejectClass, "class", "", "class name (required)")
 	rj.StringVar(&v.rejectMatch, "match", "", "regex defining class membership (required)")
 	rj.StringVar(&v.rejectKind, "kind", "defect", "defect|false-positive")
-	rj.StringVar(&v.rejectCorpus, "corpus", mine.CorpusReviewFindings, "evidence corpus the class is counted over")
+	rj.StringVar(&v.rejectCorpus, "corpus", mine.CorpusReviewFindings, corpusUsage)
+	rj.StringVar(&v.rejectSignalKind, "signal-kind", "", signalKindUsage)
 	rj.StringVar(&v.rejectReason, "reason", "", "why no gate was installed (required)")
 	rj.StringVar(&v.rejectReopen, "reopen", "", "the observation that would make this worth reconsidering (required)")
 	rj.StringVar(&v.rejectNote, "note", "", "free-text note")
@@ -187,6 +221,7 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return mine.ScopeSet(out(), gateConfig().StateDir, args[0], mine.ScopeSetOpts{
 				Ledger:       v.ledger,
+				Sessions:     storedSessions(),
 				ScopeAll:     v.scopeAll,
 				ScopeHarness: v.scopeHrn,
 				ScopeRepo:    v.scopeRepo,
@@ -208,12 +243,19 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 		Use:   "score",
 		Short: "Recompute before/after incidence and verdict",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ev := evidence.Gather(evidence.Options{
+				GateStateDir: gateConfig().StateDir,
+				Ledger:       v.ledger,
+			})
 			return mine.Score(out(), gateConfig().StateDir, mine.ScoreOpts{
-				Ledger:   v.ledger,
-				ID:       v.scoreID,
-				All:      v.scoreAll,
-				MinAfter: v.scoreMinAfter,
-				JSON:     v.scoreJSON,
+				Ledger:       v.ledger,
+				ID:           v.scoreID,
+				All:          v.scoreAll,
+				MinAfter:     v.scoreMinAfter,
+				JSON:         v.scoreJSON,
+				Sessions:     ev.Sessions,
+				Firings:      ev.Firings,
+				AuditPresent: ev.AuditPresent,
 			})
 		},
 	}

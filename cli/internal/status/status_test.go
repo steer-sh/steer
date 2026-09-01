@@ -130,9 +130,31 @@ func TestCollectEmptyMachineFailsSoft(t *testing.T) {
 	if len(s.Attention.Interventions) != 0 || len(s.Attention.Candidates) != 0 {
 		t.Error("empty machine should carry an empty attention queue")
 	}
-	// Posture reads still populate both scopes, all not armed.
-	if len(s.Posture.CommitGate) != 2 || len(s.Posture.Denials) != 2 {
-		t.Errorf("posture should report both scopes, got %+v", s.Posture)
+	// Posture is harness-qualified: the commit gate and its resolver report both
+	// harnesses in both scopes, denials only Claude Code, and nothing is armed.
+	if len(s.Posture.CommitGate) != 4 || len(s.Posture.Resolver) != 4 {
+		t.Errorf("gate posture should report both harnesses in both scopes, got %+v", s.Posture)
+	}
+	if len(s.Posture.Denials) != 2 {
+		t.Errorf("denials is Claude Code's alone, got %+v", s.Posture.Denials)
+	}
+	for _, row := range append(append([]ScopeArming{}, s.Posture.CommitGate...), s.Posture.Denials...) {
+		if row.Harness == "" {
+			t.Errorf("every posture row names its harness, got %+v", row)
+		}
+		if row.Registered || row.Effective {
+			t.Errorf("an empty machine arms nothing, got %+v", row)
+		}
+	}
+	// Codex reviews hook trust itself, so registration alone proves nothing there.
+	for _, row := range s.Posture.CommitGate {
+		want := TrustNotApplicable
+		if row.Harness == "codex" {
+			want = TrustUnknown
+		}
+		if row.Trust != want {
+			t.Errorf("%s trust: got %q, want %q", row.Harness, row.Trust, want)
+		}
 	}
 }
 
@@ -144,23 +166,35 @@ func intPtr(n int) *int           { return &n }
 // so a renamed or reordered json tag fails here, the agent-contract guard.
 func TestJSONContractIsStable(t *testing.T) {
 	s := &SystemStatus{
-		StatusVersion: 3,
+		StatusVersion: 4,
 		GeneratedAt:   "2026-01-01T00:00:00Z",
 		Posture: Posture{
 			Instrument: "agy@sha", Reviewer: "gemini", Ledger: "/l.jsonl",
-			CommitGate: []ScopeArming{{Scope: "global", Registered: true, Effective: true, Timeout: 90}},
-			Denials:    []ScopeArming{{Scope: "global", Registered: true, Effective: true}},
-			Resolver:   []ScopeArming{{Scope: "global", Registered: true, Effective: true, Timeout: 30}},
+			CommitGate: []ScopeArming{
+				{Harness: "claude-code", Scope: "global", Registered: true, Effective: true, Timeout: 90, Trust: TrustNotApplicable},
+				{Harness: "codex", Scope: "global", Registered: true, Effective: true, Timeout: 90, Trust: TrustRecordPresent},
+			},
+			Denials: []ScopeArming{
+				{Harness: "claude-code", Scope: "global", Registered: true, Effective: true, Trust: TrustNotApplicable},
+			},
+			Resolver: []ScopeArming{
+				{Harness: "claude-code", Scope: "global", Registered: true, Effective: true, Timeout: 30, Trust: TrustNotApplicable},
+				{Harness: "codex", Scope: "global", Registered: false, Effective: false, Trust: TrustMissing},
+			},
 			Unresolved: 4,
 		},
 		Interventions: []ScoredIntervention{{
 			ID: "widget-flag", Class: "widget flag loss", Match: "widget.*flag", Tier: "guard", Target: "guard.py",
-			Status: "active", Verdict: "effective",
+			Status: "active", HookID: "no-widget-flag", Verdict: "effective",
+			Corpus: mine.CorpusReviewFindings, Unit: mine.UnitChain,
+			Attribution: cadence.Attribution{
+				Applicable: true, LogPresent: true, HookID: "no-widget-flag", Firings: 3, Sessions: 2,
+			},
 			Before: cadence.Incidence{Hits: 12, Units: 12, Rate: 1}, After: cadence.Incidence{Hits: 0, Units: 12, Rate: 0},
 			PValue: 0.02, InstrumentDrift: true, FiringsApplicable: true,
 			Scope:          &cadence.Scope{Version: 1, Repo: "steer.*", Path: `\.go$`},
 			BeforeCoverage: cadence.Coverage{Total: 14, Eligible: 12, Ineligible: 1, Unknown: 1, UnknownScope: 1},
-			AfterCoverage:  cadence.Coverage{Total: 13, Eligible: 12, Unknown: 1, UnknownEvidence: 1, Pending: 1},
+			AfterCoverage:  cadence.Coverage{Total: 13, Eligible: 12, Unknown: 1, UnknownEvidence: 1, Pending: 1, PartialExposure: 1},
 			Effect: cadence.Effect{
 				Estimate: floatPtr(0), Lower: 0, Upper: floatPtr(0.31),
 				Confidence: 0.9, Method: "clopper-pearson / mixture-cs",
@@ -171,6 +205,7 @@ func TestJSONContractIsStable(t *testing.T) {
 		}, {
 			ID: "taste-nit", Class: "taste nit", Match: "nit", Tier: "check", Target: "check.sh",
 			Status: "rejected", Verdict: "class-steady",
+			Corpus: mine.CorpusTranscript, Unit: mine.UnitSession, SignalKind: mine.SignalCorrection,
 			Reason: "not mechanizable", Reopen: "incidence doubles", RejectedTS: 1700,
 			Scope:       &cadence.Scope{Version: 1, All: true},
 			Confounds:   []mine.Confound{},
@@ -185,11 +220,20 @@ func TestJSONContractIsStable(t *testing.T) {
 			Unscored:      []string{},
 			Candidates:    []cadence.Candidate{},
 		},
-		Telemetry: Telemetry{ReviewChains: 24},
-		Corpora:   []CorpusRow{{Corpus: "review-findings", Present: true, Size: 24, Path: "/state/review"}},
-		Hooks:     []HookInfo{{Name: "no-console", Scope: "global", Source: "generated", Rule: "no console.log"}},
-		Presets:   []PresetInfo{{Name: "shell-safety", Bundle: "security", Description: "block risky shell", Enabled: true, Drifted: false}},
-		Team:      TeamState{Present: true, Path: "steer-team.lock.json", HooksLocked: 3, CatalogVersion: "v7"},
+		Telemetry: Telemetry{
+			ReviewChains: 24, DenialsRows: 2, AuditFirings: 3, SessionSnapshots: 40,
+			Harnesses: []HarnessTelemetry{
+				{Harness: "claude-code", Sessions: 30, Firings: 3, Chains: 24},
+				{Harness: "codex", Sessions: 10},
+			},
+		},
+		Corpora: []CorpusRow{
+			{Corpus: "review-findings", Present: true, Size: 24, Path: "/state/review"},
+			{Corpus: "transcript-friction", Present: true, Size: 40, Path: "/state/sessions"},
+		},
+		Hooks:   []HookInfo{{Name: "no-console", Scope: "global", Source: "generated", Rule: "no console.log"}},
+		Presets: []PresetInfo{{Name: "shell-safety", Bundle: "security", Description: "block risky shell", Enabled: true, Drifted: false}},
+		Team:    TeamState{Present: true, Path: "steer-team.lock.json", HooksLocked: 3, CatalogVersion: "v7"},
 	}
 	got, err := s.MarshalIndent()
 	if err != nil {
@@ -201,7 +245,7 @@ func TestJSONContractIsStable(t *testing.T) {
 }
 
 const goldenStatusJSON = `{
-  "status_version": 3,
+  "status_version": 4,
   "generated_at": "2026-01-01T00:00:00Z",
   "posture": {
     "instrument": "agy@sha",
@@ -209,25 +253,46 @@ const goldenStatusJSON = `{
     "ledger": "/l.jsonl",
     "commit_gate": [
       {
+        "harness": "claude-code",
         "scope": "global",
         "registered": true,
         "effective": true,
-        "timeout": 90
+        "timeout": 90,
+        "trust": "not-applicable"
+      },
+      {
+        "harness": "codex",
+        "scope": "global",
+        "registered": true,
+        "effective": true,
+        "timeout": 90,
+        "trust": "record-present-unverified"
       }
     ],
     "denials": [
       {
+        "harness": "claude-code",
         "scope": "global",
         "registered": true,
-        "effective": true
+        "effective": true,
+        "trust": "not-applicable"
       }
     ],
     "resolver": [
       {
+        "harness": "claude-code",
         "scope": "global",
         "registered": true,
         "effective": true,
-        "timeout": 30
+        "timeout": 30,
+        "trust": "not-applicable"
+      },
+      {
+        "harness": "codex",
+        "scope": "global",
+        "registered": false,
+        "effective": false,
+        "trust": "missing"
       }
     ],
     "unresolved_rows": 4
@@ -240,6 +305,7 @@ const goldenStatusJSON = `{
       "tier": "guard",
       "target": "guard.py",
       "status": "active",
+      "hook_id": "no-widget-flag",
       "verdict": "effective",
       "before": {
         "hits": 12,
@@ -266,7 +332,8 @@ const goldenStatusJSON = `{
         "unknown": 1,
         "unknown_scope": 1,
         "unknown_evidence": 0,
-        "pending": 0
+        "pending": 0,
+        "partial_exposure": 0
       },
       "after_coverage": {
         "total": 13,
@@ -275,7 +342,8 @@ const goldenStatusJSON = `{
         "unknown": 1,
         "unknown_scope": 0,
         "unknown_evidence": 1,
-        "pending": 1
+        "pending": 1,
+        "partial_exposure": 1
       },
       "effect": {
         "estimate": 0,
@@ -298,7 +366,16 @@ const goldenStatusJSON = `{
             "b"
           ]
         }
-      ]
+      ],
+      "corpus": "review-findings",
+      "unit": "chain",
+      "attribution": {
+        "applicable": true,
+        "log_present": true,
+        "hook_id": "no-widget-flag",
+        "firings": 3,
+        "sessions": 2
+      }
     },
     {
       "id": "taste-nit",
@@ -333,7 +410,8 @@ const goldenStatusJSON = `{
         "unknown": 0,
         "unknown_scope": 0,
         "unknown_evidence": 0,
-        "pending": 0
+        "pending": 0,
+        "partial_exposure": 0
       },
       "after_coverage": {
         "total": 0,
@@ -342,7 +420,8 @@ const goldenStatusJSON = `{
         "unknown": 0,
         "unknown_scope": 0,
         "unknown_evidence": 0,
-        "pending": 0
+        "pending": 0,
+        "partial_exposure": 0
       },
       "effect": {
         "estimate": null,
@@ -353,7 +432,16 @@ const goldenStatusJSON = `{
       },
       "required_after": null,
       "confounds": [],
-      "composition": []
+      "composition": [],
+      "corpus": "transcript-friction",
+      "unit": "session",
+      "signal_kind": "user_corrections",
+      "attribution": {
+        "applicable": false,
+        "log_present": false,
+        "firings": 0,
+        "sessions": 0
+      }
     }
   ],
   "summary": {
@@ -383,8 +471,23 @@ const goldenStatusJSON = `{
   },
   "telemetry": {
     "review_chains": 24,
-    "denials_rows": 0,
-    "audit_firings": 0
+    "denials_rows": 2,
+    "audit_firings": 3,
+    "session_snapshots": 40,
+    "harnesses": [
+      {
+        "harness": "claude-code",
+        "sessions": 30,
+        "firings": 3,
+        "chains": 24
+      },
+      {
+        "harness": "codex",
+        "sessions": 10,
+        "firings": 0,
+        "chains": 0
+      }
+    ]
   },
   "corpora": [
     {
@@ -392,6 +495,12 @@ const goldenStatusJSON = `{
       "present": true,
       "size": 24,
       "path": "/state/review"
+    },
+    {
+      "corpus": "transcript-friction",
+      "present": true,
+      "size": 40,
+      "path": "/state/sessions"
     }
   ],
   "hooks": [

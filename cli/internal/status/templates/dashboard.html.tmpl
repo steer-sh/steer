@@ -113,9 +113,9 @@ tbody tr:hover { background: var(--panel-2); }
 .v-collecting, .v-inconclusive, .v-class-inconclusive, .v-no-baseline {
   color: var(--info); border-color: color-mix(in srgb, var(--info) 50%, transparent);
   background: color-mix(in srgb, var(--info) 12%, transparent); }
-.v-ineffective, .v-class-grew, .v-harmful { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 50%, transparent);
+.v-ineffective, .v-class-grew, .v-harmful, .v-not-triggered { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 50%, transparent);
   background: color-mix(in srgb, var(--bad) 12%, transparent); }
-.v-class-steady, .v-confounded, .v-evidence-incomplete, .v-legacy-unscoped {
+.v-class-steady, .v-confounded, .v-evidence-incomplete, .v-legacy-unscoped, .v-unattributed {
   color: var(--warn); border-color: color-mix(in srgb, var(--warn) 50%, transparent);
   background: color-mix(in srgb, var(--warn) 12%, transparent); }
 .tier { display: inline-block; padding: 1px 8px; border-radius: 5px; font-family: var(--mono);
@@ -143,13 +143,13 @@ footer { color: var(--faint); font-size: 11.5px; border-top: 1px solid var(--lin
   <div class="chip"><b>instrument</b><span class="v">{{ .Status.Posture.Instrument }}</span></div>
   <div class="chip"><b>reviewer</b><span class="v">{{ .Status.Posture.Reviewer }}</span></div>
   {{- range .Status.Posture.CommitGate }}
-  <div class="chip"><span class="dot {{ arming . }}"></span><b>gate {{ .Scope }}</b><span class="v">{{ arming . }}{{ if .Timeout }} · {{ .Timeout }}s{{ end }}</span></div>
+  <div class="chip"><span class="dot {{ arming . }}"></span><b>gate {{ .Harness }} {{ .Scope }}</b><span class="v">{{ arming . }}{{ if .Timeout }} · {{ .Timeout }}s{{ end }}{{ if .Registered }}{{ with trust .Trust }} · {{ . }}{{ end }}{{ end }}</span></div>
   {{- end }}
   {{- range .Status.Posture.Denials }}
-  <div class="chip"><span class="dot {{ arming . }}"></span><b>denials {{ .Scope }}</b><span class="v">{{ arming . }}</span></div>
+  <div class="chip"><span class="dot {{ arming . }}"></span><b>denials {{ .Harness }} {{ .Scope }}</b><span class="v">{{ arming . }}</span></div>
   {{- end }}
   {{- range .Status.Posture.Resolver }}
-  <div class="chip"><span class="dot {{ arming . }}"></span><b>resolver {{ .Scope }}</b><span class="v">{{ arming . }}</span></div>
+  <div class="chip"><span class="dot {{ arming . }}"></span><b>resolver {{ .Harness }} {{ .Scope }}</b><span class="v">{{ arming . }}{{ if .Registered }}{{ with trust .Trust }} · {{ . }}{{ end }}{{ end }}</span></div>
   {{- end }}
   {{- if .Status.Posture.Unresolved }}
   <div class="chip"><b>unresolved</b><span class="v">{{ .Status.Posture.Unresolved }} row(s) owe a ledger</span></div>
@@ -187,6 +187,7 @@ footer { color: var(--faint); font-size: 11.5px; border-top: 1px solid var(--lin
         <span class="right">{{ .Before.Hits }}/{{ .Before.Units }} ({{ pct .Before.Rate }}) → {{ .After.Hits }}/{{ .After.Units }} ({{ pct .After.Rate }})</span>
         <div class="sub mono">{{ effect .Effect }}{{ with needs .RequiredAfter .Verdict }} · {{ . }}{{ end }}</div>
         <div class="sub">scope {{ scope .Scope }} · before {{ cover .BeforeCoverage }} · after {{ cover .AfterCoverage }}</div>
+        {{- with attrib .Attribution }}<div class="sub">{{ . }}</div>{{ end }}
         {{- range reasons "confound" .Confounds }}<div class="sub">{{ . }}</div>{{ end }}
         {{- range reasons "composition" .Composition }}<div class="sub">{{ . }}</div>{{ end }}
       </li>
@@ -211,7 +212,7 @@ footer { color: var(--faint); font-size: 11.5px; border-top: 1px solid var(--lin
     <ul>
       <li>
         <span class="pill">unscored</span>
-        <span class="sub">{{ len .Status.Attention.Unscored }} session-unit intervention(s) the chain engine cannot score</span>
+        <span class="sub">{{ len .Status.Attention.Unscored }} intervention(s) from a corpus no engine reads</span>
         <span class="right mono">{{ range .Status.Attention.Unscored }}{{ . }} {{ end }}</span>
       </li>
     </ul>
@@ -261,6 +262,7 @@ footer { color: var(--faint); font-size: 11.5px; border-top: 1px solid var(--lin
             {{- with needs .RequiredAfter .Verdict }}<div class="dimtext">{{ . }}</div>{{ end }}
             <div class="dimtext">scope {{ scope .Scope }}</div>
             <div class="dimtext">before {{ cover .BeforeCoverage }} · after {{ cover .AfterCoverage }}</div>
+            {{- with attrib .Attribution }}<div class="dimtext">{{ . }}</div>{{ end }}
             {{- range reasons "confound" .Confounds }}<div class="dimtext">{{ . }}</div>{{ end }}
             {{- range reasons "composition" .Composition }}<div class="dimtext">{{ . }}</div>{{ end }}
           </td>

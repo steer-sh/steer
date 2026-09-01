@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/steer-sh/steer-cli/internal/evidence"
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
 	"github.com/steer-sh/steer-cli/internal/harness"
@@ -84,20 +85,23 @@ func (m *Model) Init() tea.Cmd { return nil }
 // refresh recomposes the snapshot and the cached chains so panels render current
 // state. Every mutation calls it.
 func (m *Model) refresh() {
+	// The dashboard mutates registrations, never the evidence: it reads the stored
+	// snapshots and rebuilds none.
+	ev := evidence.Gather(evidence.Options{GateStateDir: m.cfg.StateDir, AllProjects: true})
 	s, err := status.Collect(status.Options{
 		GateStateDir: m.cfg.StateDir,
 		Config:       m.cfg,
 		WindowDays:   30,
 		AllProjects:  true,
 		Scope:        m.scope,
+		Evidence:     ev,
 	})
 	if err != nil {
 		m.err = err
 		return
 	}
 	m.snap = s
-	rows, _ := mine.LoadRows(m.cfg.StateDir, "")
-	m.chains = mine.BuildChains(rows, false)
+	m.chains = ev.Chains
 	for i := range m.cursor {
 		m.clampCursor(panel(i))
 	}

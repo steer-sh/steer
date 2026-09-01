@@ -151,8 +151,32 @@ func filterFindings(findings []Finding, kind string) []Finding {
 
 // --- match ------------------------------------------------------------------
 
-// Match tests a candidate class regex against the corpus.
-func Match(w io.Writer, stateDir, ledger, regex, kind string, strictJoins bool) error {
+// MatchOpts are the flags of `intervention match`.
+type MatchOpts struct {
+	Ledger      string
+	Regex       string
+	Kind        string
+	StrictJoins bool
+	// Corpus names the evidence the regex is tested against; empty is review-findings.
+	Corpus string
+	// SignalKind narrows the session corpus to one classifier kind.
+	SignalKind string
+	// Sessions is the session corpus, supplied by the caller that reads the store.
+	Sessions []SessionUnit
+}
+
+// Match tests a candidate class regex against the corpus its record will be counted
+// over. It routes to the engine that corpus names, so an author sees the same
+// denominator the register will freeze.
+func Match(w io.Writer, stateDir string, o MatchOpts) error {
+	spec, err := writableCorpus(o.Corpus)
+	if err != nil {
+		return err
+	}
+	if spec.Engine == EngineSession {
+		return matchSessions(w, o)
+	}
+	regex, kind, ledger, strictJoins := o.Regex, o.Kind, o.Ledger, o.StrictJoins
 	pattern, err := compilePattern(regex)
 	if err != nil {
 		return fmt.Errorf("bad regex %s: %w", pyRepr(regex), err)
@@ -253,6 +277,8 @@ type RegisterOpts struct {
 	Match        string
 	Kind         string
 	Corpus       string
+	SignalKind   string
+	Sessions     []SessionUnit
 	Tier         string
 	Target       string
 	Note         string
@@ -283,8 +309,14 @@ func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 	if err != nil {
 		return fmt.Errorf("bad regex %s: %w", pyRepr(o.Match), err)
 	}
+	if err := spec.ValidateSignalKind(o.SignalKind); err != nil {
+		return err
+	}
 	scopeMap, err := BuildScope(o.ScopeAll, o.ScopeHarness, o.ScopeRepo, o.ScopePath)
 	if err != nil {
+		return err
+	}
+	if err := spec.ValidateScope(scopeMap); err != nil {
 		return err
 	}
 	scope, _, err := ParseScope(Record{"scope": scopeMap})
@@ -300,20 +332,37 @@ func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 	if installed == 0 {
 		installed = now()
 	}
-	before, _ := SplitChains(chains, float64(installed))
-	before = baselineWindow(before, scope)
-	bHits, bTotal, bRate := Incidence(before, pattern, kindFilter)
-	if bHits == 0 && !o.Force {
-		return fmt.Errorf("regex matches no finding in the scoped baseline — an intervention " +
-			"with no baseline can never be scored. Widen the scope or the regex, or pass --force")
-	}
 	records, err := Load(stateDir)
 	if err != nil {
 		return err
 	}
-	decisions, err := OverlappingDecisions(records, chains, pattern, kindFilter)
+	var bHits, bTotal int
+	var bRate float64
+	var instrument any
+	var decisions []Decision
+	if spec.Engine == EngineSession {
+		signalKind := o.SignalKind
+		if signalKind == "" {
+			signalKind = SignalAny
+		}
+		beforeUnits, _, _ := SplitSessions(o.Sessions, float64(installed))
+		beforeUnits = SessionBaselineWindow(beforeUnits, scope)
+		bHits, bTotal, bRate = SessionIncidence(beforeUnits, pattern, signalKind)
+		instrument = sessionInstrumentValue(o.Sessions)
+		decisions, err = SessionOverlappingDecisions(records, o.Sessions, pattern, signalKind)
+	} else {
+		before, _ := SplitChains(chains, float64(installed))
+		before = baselineWindow(before, scope)
+		bHits, bTotal, bRate = Incidence(before, pattern, kindFilter)
+		instrument = instrumentValue(chains)
+		decisions, err = OverlappingDecisions(recordsForCorpus(records, spec.Corpus), chains, pattern, kindFilter)
+	}
 	if err != nil {
 		return err
+	}
+	if bHits == 0 && !o.Force {
+		return fmt.Errorf("regex matches no unit in the scoped baseline — an intervention " +
+			"with no baseline can never be scored. Widen the scope or the regex, or pass --force")
 	}
 	if !o.Force {
 		for _, d := range decisions {
@@ -346,7 +395,14 @@ func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 		"status":         "active",
 		"scope":          scopeMap,
 		"baseline":       baselineMap(bHits, bTotal, bRate),
-		"instrument":     instrumentValue(chains),
+		"instrument":     instrument,
+	}
+	if spec.Engine == EngineSession {
+		if o.SignalKind != "" {
+			record["signal_kind"] = o.SignalKind
+		} else {
+			record["signal_kind"] = SignalAny
+		}
 	}
 	if o.HookID != "" {
 		record["hook_id"] = o.HookID
@@ -388,6 +444,8 @@ type RejectOpts struct {
 	Match        string
 	Kind         string
 	Corpus       string
+	SignalKind   string
+	Sessions     []SessionUnit
 	Reason       string
 	Reopen       string
 	Note         string
@@ -416,8 +474,14 @@ func Reject(w io.Writer, stateDir string, o RejectOpts) error {
 	if err != nil {
 		return fmt.Errorf("bad regex %s: %w", pyRepr(o.Match), err)
 	}
+	if err := spec.ValidateSignalKind(o.SignalKind); err != nil {
+		return err
+	}
 	scopeMap, err := BuildScope(o.ScopeAll, o.ScopeHarness, o.ScopeRepo, o.ScopePath)
 	if err != nil {
+		return err
+	}
+	if err := spec.ValidateScope(scopeMap); err != nil {
 		return err
 	}
 	scope, _, err := ParseScope(Record{"scope": scopeMap})
@@ -433,11 +497,26 @@ func Reject(w io.Writer, stateDir string, o RejectOpts) error {
 	if rejected == 0 {
 		rejected = now()
 	}
-	before, _ := SplitChains(chains, float64(rejected))
-	before = baselineWindow(before, scope)
-	bHits, bTotal, bRate := Incidence(before, pattern, kindFilter)
+	var bHits, bTotal int
+	var bRate float64
+	var instrument any
+	if spec.Engine == EngineSession {
+		signalKind := o.SignalKind
+		if signalKind == "" {
+			signalKind = SignalAny
+		}
+		beforeUnits, _, _ := SplitSessions(o.Sessions, float64(rejected))
+		beforeUnits = SessionBaselineWindow(beforeUnits, scope)
+		bHits, bTotal, bRate = SessionIncidence(beforeUnits, pattern, signalKind)
+		instrument = sessionInstrumentValue(o.Sessions)
+	} else {
+		before, _ := SplitChains(chains, float64(rejected))
+		before = baselineWindow(before, scope)
+		bHits, bTotal, bRate = Incidence(before, pattern, kindFilter)
+		instrument = instrumentValue(chains)
+	}
 	if bHits == 0 && !o.Force {
-		return fmt.Errorf("regex matches no finding in the scoped baseline — a rejection with " +
+		return fmt.Errorf("regex matches no unit in the scoped baseline — a rejection with " +
 			"no baseline can never be re-scored, and cannot be recognised when the class " +
 			"returns. Widen the scope or the regex, or pass --force")
 	}
@@ -462,7 +541,14 @@ func Reject(w io.Writer, stateDir string, o RejectOpts) error {
 		"status":        "rejected",
 		"scope":         scopeMap,
 		"baseline":      baselineMap(bHits, bTotal, bRate),
-		"instrument":    instrumentValue(chains),
+		"instrument":    instrument,
+	}
+	if spec.Engine == EngineSession {
+		if o.SignalKind != "" {
+			record["signal_kind"] = o.SignalKind
+		} else {
+			record["signal_kind"] = SignalAny
+		}
 	}
 	records = append(records, record)
 	if err := Save(stateDir, records); err != nil {
@@ -475,6 +561,7 @@ func Reject(w io.Writer, stateDir string, o RejectOpts) error {
 // ScopeSetOpts are the flags of `mine scope`.
 type ScopeSetOpts struct {
 	Ledger       string
+	Sessions     []SessionUnit
 	ScopeAll     bool
 	ScopeHarness []string
 	ScopeRepo    string
@@ -500,8 +587,15 @@ func ScopeSet(w io.Writer, stateDir, id string, o ScopeSetOpts) error {
 		return fmt.Errorf("%s already carries a scope — an installed scope is frozen. "+
 			"Retire it and register a fresh record to correct the eligibility rule", pyRepr(id))
 	}
+	spec, err := writableCorpus(CorpusOf(rec))
+	if err != nil {
+		return err
+	}
 	scopeMap, err := BuildScope(o.ScopeAll, o.ScopeHarness, o.ScopeRepo, o.ScopePath)
 	if err != nil {
+		return err
+	}
+	if err := spec.ValidateScope(scopeMap); err != nil {
 		return err
 	}
 	scope, _, err := ParseScope(Record{"scope": scopeMap})
@@ -512,16 +606,23 @@ func ScopeSet(w io.Writer, stateDir, id string, o ScopeSetOpts) error {
 	if err != nil {
 		return fmt.Errorf("bad regex %s: %w", pyRepr(str(rec["match"])), err)
 	}
-	rows, err := LoadRows(stateDir, o.Ledger)
-	if err != nil {
-		return err
+	var bHits, bTotal int
+	var bRate float64
+	if spec.Engine == EngineSession {
+		beforeUnits, _, _ := SplitSessions(o.Sessions, SplitTS(rec))
+		beforeUnits = SessionBaselineWindow(beforeUnits, scope)
+		bHits, bTotal, bRate = SessionIncidence(beforeUnits, pattern, SessionSignalKind(rec))
+	} else {
+		rows, err := LoadRows(stateDir, o.Ledger)
+		if err != nil {
+			return err
+		}
+		before, _ := SplitChains(BuildChains(rows, false), SplitTS(rec))
+		before = baselineWindow(before, scope)
+		bHits, bTotal, bRate = Incidence(before, pattern, RecordKindFilter(rec))
 	}
-	chains := BuildChains(rows, false)
-	before, _ := SplitChains(chains, SplitTS(rec))
-	before = baselineWindow(before, scope)
-	bHits, bTotal, bRate := Incidence(before, pattern, RecordKindFilter(rec))
 	if bHits == 0 && !o.Force {
-		return fmt.Errorf("regex matches no finding in the scoped baseline — widen the scope, or pass --force")
+		return fmt.Errorf("regex matches no unit in the scoped baseline — widen the scope, or pass --force")
 	}
 	setTS := o.ScopeSetTS
 	if setTS == 0 {
@@ -581,6 +682,12 @@ type ScoreOpts struct {
 	All      bool
 	MinAfter int
 	JSON     bool
+	// Sessions is the transcript-friction corpus, and Firings the guard audit stream.
+	// A caller that reads only the ledger leaves them empty; a record scored by the
+	// session engine then reports missing evidence rather than a range.
+	Sessions     []SessionUnit
+	Firings      []Firing
+	AuditPresent bool
 }
 
 // Score recomputes each intervention's before/after incidence and verdict.
@@ -612,13 +719,17 @@ func Score(w io.Writer, stateDir string, o ScoreOpts) error {
 	if err != nil {
 		return err
 	}
-	chains := BuildChains(rows, false)
+	ev := EvidenceSet{
+		Chains:       BuildChains(rows, false),
+		Sessions:     o.Sessions,
+		Firings:      o.Firings,
+		AuditPresent: o.AuditPresent,
+	}
 	results := make([]map[string]any, 0, len(records))
 	var unscored []string
 	for _, r := range records {
-		// A record from another corpus is carried unscored rather than counted against
-		// evidence it was never authored over. Naming one by --id is an error, because
-		// the caller asked for a verdict this engine cannot give.
+		// A record from a corpus no engine reads is carried unscored. Naming one by
+		// --id is an error, because the caller asked for a verdict nothing can give.
 		if !Scorable(r) {
 			if o.ID != "" {
 				return requireScorable(r)
@@ -626,7 +737,7 @@ func Score(w io.Writer, stateDir string, o ScoreOpts) error {
 			unscored = append(unscored, str(r["id"]))
 			continue
 		}
-		res, err := ScoreRecord(r, chains, o.MinAfter)
+		res, err := ScoreWith(r, ev, o.MinAfter)
 		if err != nil {
 			return err
 		}
@@ -637,7 +748,7 @@ func Score(w io.Writer, stateDir string, o ScoreOpts) error {
 	}
 	if len(unscored) > 0 {
 		sort.Strings(unscored)
-		fmt.Fprintf(w, "# unscored here (another corpus): %s\n", strings.Join(unscored, ", "))
+		fmt.Fprintf(w, "# unscored here (no engine reads that corpus): %s\n", strings.Join(unscored, ", "))
 	}
 	for _, r := range results {
 		where := firstNonEmpty(str(r["hook_id"]), str(r["target"]), "nothing installed")
@@ -651,6 +762,9 @@ func Score(w io.Writer, stateDir string, o ScoreOpts) error {
 		fmt.Fprintf(w, "    effect %s  (%d%% range %s)%s\n",
 			effectPoint(r["effect"]), int(Confidence*100), effectRange(r["effect"]),
 			requiredSuffix(r["required_after"]))
+		if line := attributionLine(r["attribution"]); line != "" {
+			fmt.Fprintf(w, "    %s\n", line)
+		}
 		verb := "installed"
 		if refusalStatuses[str(r["status"])] {
 			verb = "rejected"
@@ -798,6 +912,24 @@ func effectRange(v any) string {
 	return lo + " - " + hi
 }
 
+// attributionLine names the guard's audit join, empty when the record's tier writes no
+// audit rows. A silent guard is stated plainly: a range it did not cause is not its
+// effect.
+func attributionLine(v any) string {
+	attr, ok := v.(Attribution)
+	if !ok || !attr.Applicable {
+		return ""
+	}
+	if !attr.LogPresent {
+		return "attribution: no guard audit log on this machine — the firing join is unavailable"
+	}
+	if attr.Firings == 0 {
+		return fmt.Sprintf("attribution: %s never fired in the after-window", pyRepr(attr.HookID))
+	}
+	return fmt.Sprintf("attribution: %s fired %d time(s) across %d after-window session(s)",
+		pyRepr(attr.HookID), attr.Firings, attr.Sessions)
+}
+
 // requiredSuffix names the clean after-window a verdict still needs, when one exists.
 func requiredSuffix(v any) string {
 	n, ok := v.(int)
@@ -808,9 +940,8 @@ func requiredSuffix(v any) string {
 }
 
 // writableCorpus resolves a --corpus flag against the registry. An empty value is
-// review-findings, the corpus this engine's baseline is counted over; a corpus this
-// engine cannot count a baseline for is refused at write time rather than recorded with
-// a baseline no reader agrees with.
+// review-findings. A corpus no engine can freeze a baseline over is refused at write
+// time rather than recorded with a baseline no reader agrees with.
 func writableCorpus(name string) (CorpusSpec, error) {
 	if name == "" {
 		name = CorpusReviewFindings
@@ -821,9 +952,37 @@ func writableCorpus(name string) (CorpusSpec, error) {
 			pyRepr(name), strings.Join(Corpora(), ", "))
 	}
 	if !spec.Scorable {
-		return CorpusSpec{}, fmt.Errorf("corpus %s counts by %s; this engine reads the "+
-			"commit-review ledger by %s and cannot freeze a baseline over it",
-			pyRepr(name), pyRepr(spec.Unit), pyRepr(UnitChain))
+		return CorpusSpec{}, fmt.Errorf("corpus %s counts by %s, which no scoring engine "+
+			"reads; it cannot freeze a baseline", pyRepr(name), pyRepr(spec.Unit))
 	}
 	return spec, nil
+}
+
+// ValidateScope refuses a scope predicate this corpus's unit cannot decide. A predicate
+// no unit carries would leave every unit Unknown, which reads as missing evidence
+// forever rather than as the write-time mistake it is.
+func (spec CorpusSpec) ValidateScope(m map[string]any) error {
+	if !spec.PathScope && str(m["path"]) != "" {
+		return fmt.Errorf("--scope-path cannot be decided over corpus %s: a %s carries no "+
+			"changed-path list. Scope it by harness or repo instead",
+			pyRepr(spec.Corpus), pyRepr(spec.Unit))
+	}
+	return nil
+}
+
+// ValidateSignalKind refuses a signal kind the corpus does not classify by.
+func (spec CorpusSpec) ValidateSignalKind(kind string) error {
+	if kind == "" {
+		return nil
+	}
+	if spec.Engine != EngineSession {
+		return fmt.Errorf("--signal-kind applies to corpus %s only", pyRepr(CorpusTranscript))
+	}
+	for _, k := range SignalKinds() {
+		if k == kind {
+			return nil
+		}
+	}
+	return fmt.Errorf("unknown signal kind %s — known: %s",
+		pyRepr(kind), strings.Join(SignalKinds(), ", "))
 }

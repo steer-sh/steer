@@ -89,6 +89,8 @@ func (s *SystemStatus) RenderHTML(w io.Writer) error {
 		"cover":   CoveragePhrase,
 		"needs":   RequiredPhrase,
 		"reasons": ConfoundPhrases,
+		"attrib":  AttributionPhrase,
+		"trust":   TrustPhrase,
 	}).ParseFS(templateFS, "templates/dashboard.html.tmpl")
 	if err != nil {
 		return fmt.Errorf("failed to parse the dashboard template: %w", err)

@@ -12,8 +12,10 @@ type Scope struct {
 	Path    string   `json:"path,omitempty"`
 }
 
-// Coverage accounts for one window's chains against the scope. Eligible chains are
-// the denominator; unknown chains withhold rather than shrink it.
+// Coverage accounts for one window's units against the scope. Eligible units are the
+// denominator; unknown units withhold rather than shrink it. UnknownScope, Pending and
+// UnknownEvidence break the chain corpus's unknowns down by cause; PartialExposure is
+// the session corpus's own category, for a session that straddled the install.
 type Coverage struct {
 	Total           int `json:"total"`
 	Eligible        int `json:"eligible"`
@@ -22,6 +24,7 @@ type Coverage struct {
 	UnknownScope    int `json:"unknown_scope"`
 	UnknownEvidence int `json:"unknown_evidence"`
 	Pending         int `json:"pending"`
+	PartialExposure int `json:"partial_exposure"`
 }
 
 // Effect is the joint relative-risk range the verdict reads. Estimate is null with no
@@ -70,6 +73,7 @@ func CoverageOf(v any) Coverage {
 		UnknownScope:    numInt(m["unknown_scope"]),
 		UnknownEvidence: numInt(m["unknown_evidence"]),
 		Pending:         numInt(m["pending"]),
+		PartialExposure: numInt(m["partial_exposure"]),
 	}
 }
 
@@ -103,6 +107,21 @@ func RequiredAfterOf(v any) *int {
 	}
 	n := numInt(v)
 	return &n
+}
+
+// AttributionOf reads the guard audit join, zero when the record carries none.
+func AttributionOf(v any) Attribution {
+	a, ok := v.(mine.Attribution)
+	if !ok {
+		return Attribution{}
+	}
+	return Attribution{
+		Applicable: a.Applicable,
+		LogPresent: a.LogPresent,
+		HookID:     a.HookID,
+		Firings:    a.Firings,
+		Sessions:   a.Sessions,
+	}
 }
 
 // ConfoundsOf reads a scored confound list, never nil so a consumer sees [].

@@ -16,7 +16,7 @@ import (
 )
 
 // QueueVersion is the schema version of the queue file the skill reads.
-const QueueVersion = 2
+const QueueVersion = 3
 
 // minCandidateSessions is the deterministic threshold on transcript clusters: a
 // correction pattern must repeat across this many sessions to become a candidate.
@@ -28,6 +28,15 @@ const (
 	corpusTranscript     = "transcript-friction"
 	corpusDenials        = "auto-denials"
 )
+
+// Attribution is the guard audit join carried beside a session-scored verdict.
+type Attribution struct {
+	Applicable bool   `json:"applicable"`
+	LogPresent bool   `json:"log_present"`
+	HookID     string `json:"hook_id,omitempty"`
+	Firings    int    `json:"firings"`
+	Sessions   int    `json:"sessions"`
+}
 
 // Incidence is a before/after chain count in the scored contract.
 type Incidence struct {
@@ -62,6 +71,12 @@ type Intervention struct {
 	// Confounds withhold the verdict; Composition only warns beside it.
 	Confounds   []mine.Confound `json:"confounds"`
 	Composition []mine.Confound `json:"composition"`
+	// SignalKind is the classifier kind a session-unit class is counted over, empty
+	// on a chain-unit record.
+	SignalKind string `json:"signal_kind,omitempty"`
+	// Attribution is the guard's audit join over the after-window. Applicable is
+	// false wherever the tier writes no audit rows, and on every chain-unit record.
+	Attribution Attribution `json:"attribution"`
 }
 
 // Candidate is a pointer to a new cluster the model must cluster, phrase, and author
@@ -104,7 +119,11 @@ type Options struct {
 	Ledger       string // single-ledger override, or "" for the shard glob
 	WindowDays   int    // transcript look-back
 	AllProjects  bool   // scan every project, not just the cwd
-	MinAfter     int    // optional floor on eligible after-chains; 0 = no floor
+	MinAfter     int    // optional floor on eligible after-units; 0 = no floor
+	// Evidence is every corpus a scoring pass reads, gathered by the caller. A caller
+	// that leaves it zero scores the ledger alone; the session engine then reports
+	// missing evidence rather than a range it cannot support.
+	Evidence mine.EvidenceSet
 }
 
 // Refresh runs the deterministic tier and returns the queue. It never calls a
@@ -119,24 +138,27 @@ func Refresh(opts Options) (*Queue, error) {
 		Corpora:       []CorpusStatus{},
 	}
 
-	// --- review-findings corpus: score what the local engine can score --------
+	// --- score every record an engine reads ----------------------------------
 	records, _ := mine.Load(opts.GateStateDir)
-	rows, _ := mine.LoadRows(opts.GateStateDir, opts.Ledger)
-	chains := mine.BuildChains(rows, false)
+	ev := opts.Evidence
+	if ev.Chains == nil {
+		rows, _ := mine.LoadRows(opts.GateStateDir, opts.Ledger)
+		ev.Chains = mine.BuildChains(rows, false)
+	}
+	chains := ev.Chains
 
 	for _, r := range records {
 		status := str(r["status"])
 		if status != "active" && status != "rejected" {
 			continue // reworked/removed are history, not pending work
 		}
-		// The engine reads only the commit-review ledger by chain. A record from
-		// another corpus needs evidence this engine does not hold, so the registry
-		// routes it to unscored rather than scoring it against the wrong corpus.
+		// A record from a corpus no engine reads is routed to unscored rather than
+		// scored against evidence it was never authored over.
 		if !mine.Scorable(r) {
 			q.Unscored = append(q.Unscored, str(r["id"]))
 			continue
 		}
-		scored, err := mine.ScoreRecord(r, chains, opts.MinAfter)
+		scored, err := mine.ScoreWith(r, ev, opts.MinAfter)
 		if err != nil {
 			continue
 		}
@@ -164,6 +186,8 @@ func Refresh(opts Options) (*Queue, error) {
 			RequiredAfter:  RequiredAfterOf(scored["required_after"]),
 			Confounds:      ConfoundsOf(scored["confounds"]),
 			Composition:    ConfoundsOf(scored["composition"]),
+			SignalKind:     str(scored["signal_kind"]),
+			Attribution:    AttributionOf(scored["attribution"]),
 		})
 	}
 	sort.Slice(q.Interventions, func(i, j int) bool { return q.Interventions[i].ID < q.Interventions[j].ID })
@@ -198,7 +222,11 @@ func Refresh(opts Options) (*Queue, error) {
 	sortCandidates(q.Candidates)
 
 	// --- corpus sweep: one row per corpus, present when it holds data ---------
-	transcriptSize := sessionsScanned(digest, derr)
+	// The transcript corpus's size is the snapshot store, falling back to the scan.
+	transcriptSize := len(ev.Sessions)
+	if transcriptSize == 0 {
+		transcriptSize = sessionsScanned(digest, derr)
+	}
 	denialCount := denialsSize()
 	q.Corpora = []CorpusStatus{
 		{Corpus: corpusReviewFindings, Present: len(chains) > 0, Size: len(chains)},
@@ -212,7 +240,7 @@ func Refresh(opts Options) (*Queue, error) {
 // AttentionVerdicts are the scored verdicts the cadence queues for action. Every
 // consumer that groups the queue by verdict must cover this set.
 var AttentionVerdicts = []string{
-	"harmful", "ineffective", "class-grew",
+	"harmful", "ineffective", "not-triggered", "unattributed", "class-grew",
 	"legacy-unscoped", "evidence-incomplete", "confounded",
 }
 

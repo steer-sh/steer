@@ -223,7 +223,7 @@ func SteerHookFacts(hookID string) map[string]any {
 // producing the JSON shape mine.py emits (rate and p as Python floats; empty lists as
 // [], not null; instrument null when the record predates the field).
 func ScoreRecord(record Record, chains []Chain, minAfter int) (map[string]any, error) {
-	if err := requireScorable(record); err != nil {
+	if err := requireChainCorpus(record); err != nil {
 		return nil, err
 	}
 	pattern, err := compilePattern(str(record["match"]))
@@ -307,6 +307,32 @@ func ScoreRecord(record Record, chains []Chain, minAfter int) (map[string]any, e
 		"after_hosts":       emptyIfNil(afterHosts),
 		"host_mix_drift":    hostDrift,
 	}, nil
+}
+
+// EvidenceSet is every corpus a scoring pass may read, gathered once by the caller. Each
+// engine takes the whole struct and reads the part its corpus is counted over.
+type EvidenceSet struct {
+	// Chains is the commit-review corpus, segmented.
+	Chains []Chain
+	// Sessions is the transcript-friction corpus: normalized root-session snapshots.
+	Sessions []SessionUnit
+	// Firings is the guard audit stream; AuditPresent reports that a store was
+	// readable, so a silent guard is told apart from absent evidence.
+	Firings      []Firing
+	AuditPresent bool
+}
+
+// ScoreWith scores one record through the engine its corpus names.
+func ScoreWith(record Record, ev EvidenceSet, minAfter int) (map[string]any, error) {
+	if err := requireScorable(record); err != nil {
+		return nil, err
+	}
+	switch EngineOf(record) {
+	case EngineSession:
+		return ScoreSessionRecord(record, ev, minAfter)
+	default:
+		return ScoreRecord(record, ev.Chains, minAfter)
+	}
 }
 
 // requiredAfterValue is null when no clean window of any size could reach the effect

@@ -498,9 +498,9 @@ func TestDefaultRegisterStillWritesAV1Scope(t *testing.T) {
 	check(t, "no harness key", scope["harness"], nil)
 }
 
-// TestScoreCarriesAnotherCorpusRatherThanAborting: one unscorable record in the
-// inventory must not cost the verdicts of every record beside it.
-func TestScoreCarriesAnotherCorpusRatherThanAborting(t *testing.T) {
+// TestScoreCarriesAnUnscorableRecordRatherThanAborting: one record no engine reads
+// must not cost the verdicts of every record beside it.
+func TestScoreCarriesAnUnscorableRecordRatherThanAborting(t *testing.T) {
 	stateDir, ledger := writeLedger(t, []gate.Row{
 		row(1000, "deny"), concerns(row(1001, "retry"), "round", c("widget parser drops a flag")),
 	})
@@ -512,8 +512,8 @@ func TestScoreCarriesAnotherCorpusRatherThanAborting(t *testing.T) {
 	}
 	records, _ := Load(stateDir)
 	records = append(records, Record{
-		"id": "friction", "class": "f", "match": "x", "status": "active",
-		"corpus": CorpusTranscript, "unit": UnitSession,
+		"id": "orphan", "class": "o", "match": "x", "status": "active",
+		"corpus": "made-up", "unit": "made-up-unit",
 	})
 	if err := Save(stateDir, records); err != nil {
 		t.Fatal(err)
@@ -523,14 +523,52 @@ func TestScoreCarriesAnotherCorpusRatherThanAborting(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "# unscored here (another corpus): friction") {
-		t.Errorf("the other corpus must be named, got:\n%s", out)
+	if !strings.Contains(out, "# unscored here (no engine reads that corpus): orphan") {
+		t.Errorf("the unreadable corpus must be named, got:\n%s", out)
 	}
 	if !strings.Contains(out, "scorable") {
 		t.Errorf("the scorable record must still be scored, got:\n%s", out)
 	}
 	// Naming it by --id is an error: the caller asked for a verdict that does not exist.
-	if err := Score(io.Discard, stateDir, ScoreOpts{Ledger: ledger, ID: "friction"}); err == nil {
-		t.Error("scoring another corpus by id must be refused")
+	if err := Score(io.Discard, stateDir, ScoreOpts{Ledger: ledger, ID: "orphan"}); err == nil {
+		t.Error("scoring an unreadable corpus by id must be refused")
+	}
+}
+
+// TestScoreReadsASessionRecordThroughTheSessionEngine: a record of the transcript
+// corpus is scored beside a chain record, over its own evidence and its own unit.
+func TestScoreReadsASessionRecordThroughTheSessionEngine(t *testing.T) {
+	stateDir, ledger := writeLedger(t, []gate.Row{
+		row(1000, "deny"), concerns(row(1001, "retry"), "round", c("widget parser drops a flag")),
+	})
+	if err := Register(io.Discard, stateDir, RegisterOpts{
+		ScopeAll: true, Ledger: ledger, Class: "scorable", Match: "widget parser",
+		Tier: "check", Target: "check.sh", InstalledTS: 2000,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sessions := []SessionUnit{
+		friction(1000, "claude-code", "proj", "bare python here"),
+		friction(1100, "claude-code", "proj", "bare python again"),
+		friction(3000, "claude-code", "proj", "nothing to see"),
+		friction(3100, "claude-code", "proj", "nothing to see"),
+	}
+	if err := Register(io.Discard, stateDir, RegisterOpts{
+		ScopeAll: true, Ledger: ledger, Class: "bare python", Match: "bare python",
+		Corpus: CorpusTranscript, Sessions: sessions,
+		Tier: "check", Target: "check.sh", InstalledTS: 2000,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var buf strings.Builder
+	if err := Score(&buf, stateDir, ScoreOpts{Ledger: ledger, Sessions: sessions}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if strings.Contains(out, "# unscored here") {
+		t.Errorf("a session record must be scored, not carried unscored, got:\n%s", out)
+	}
+	if !strings.Contains(out, "bare-python") || !strings.Contains(out, "scorable") {
+		t.Errorf("both engines' records must appear, got:\n%s", out)
 	}
 }

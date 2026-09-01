@@ -57,6 +57,12 @@ func (m *Model) viewClasses() string {
 // detailLine is the second row for a class: its regex and rate columns.
 func detailLine(it status.ScoredIntervention) string {
 	s := "/" + it.Match + "/"
+	if it.Unit != "" {
+		s += "   " + it.Unit + "s"
+	}
+	if it.SignalKind != "" {
+		s += " [" + it.SignalKind + "]"
+	}
 	if it.Verdict != "unscored" && it.Verdict != "" {
 		s += fmt.Sprintf("   %d/%d → %d/%d", it.Before.Hits, it.Before.Units, it.After.Hits, it.After.Units)
 		if it.PValue > 0 {
@@ -86,6 +92,9 @@ func measureLine(it status.ScoredIntervention) string {
 		"scope "+status.ScopePhrase(it.Scope),
 		"before "+status.CoveragePhrase(it.BeforeCoverage),
 		"after "+status.CoveragePhrase(it.AfterCoverage))
+	if a := status.AttributionPhrase(it.Attribution); a != "" {
+		parts = append(parts, a)
+	}
 	return strings.Join(parts, " · ")
 }
 
@@ -101,9 +110,9 @@ func verdictBadge(v string) string {
 	switch v {
 	case "effective", "class-faded":
 		return ok(v)
-	case "harmful", "ineffective", "class-grew":
+	case "harmful", "ineffective", "class-grew", "not-triggered":
 		return errText(v)
-	case "class-steady", "confounded", "evidence-incomplete", "legacy-unscoped":
+	case "class-steady", "confounded", "evidence-incomplete", "legacy-unscoped", "unattributed":
 		return warn(v)
 	}
 	return dim(v)

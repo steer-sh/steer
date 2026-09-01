@@ -21,11 +21,16 @@ func sample() *SystemStatus {
 		Posture: Posture{
 			Instrument: "agy@sha", Reviewer: "gemini", Ledger: "/l.jsonl",
 			CommitGate: []ScopeArming{
-				{Scope: "project", Registered: false},
-				{Scope: "global", Registered: true, Effective: true, Timeout: 90},
+				{Harness: "claude-code", Scope: "project", Registered: false, Trust: TrustNotApplicable},
+				{Harness: "claude-code", Scope: "global", Registered: true, Effective: true, Timeout: 90,
+					Trust: TrustNotApplicable},
+				{Harness: "codex", Scope: "global", Registered: true, Effective: true, Timeout: 90,
+					Trust: TrustRecordPresent},
 			},
-			Denials:  []ScopeArming{{Scope: "global", Registered: true}},
-			Resolver: []ScopeArming{{Scope: "global", Registered: true, Effective: true, Timeout: 30}},
+			Denials: []ScopeArming{{Harness: "claude-code", Scope: "global", Registered: true,
+				Trust: TrustNotApplicable}},
+			Resolver: []ScopeArming{{Harness: "claude-code", Scope: "global", Registered: true,
+				Effective: true, Timeout: 30, Trust: TrustNotApplicable}},
 			// Unresolved rows are why a window can read evidence-incomplete, so the
 			// page must name the count and the command that clears it.
 			Unresolved: 4,
@@ -44,12 +49,15 @@ func sample() *SystemStatus {
 				Composition: []mine.Confound{{Category: "host", Reason: "host set changed",
 					Before: []string{"a"}, After: []string{"a", "b"}}}},
 			{ID: "bare-python", Class: "bare python call", Tier: "guard", Target: "steer",
-				Status: "active", Verdict: "ineffective",
+				Status: "active", HookID: "no-bare-python", Verdict: "not-triggered",
+				Corpus: mine.CorpusTranscript, Unit: mine.UnitSession, SignalKind: mine.SignalCorrection,
 				Before:         cadence.Incidence{Hits: 2, Units: 20, Rate: 0.1},
 				After:          cadence.Incidence{Hits: 5, Units: 20, Rate: 0.25},
 				Scope:          &cadence.Scope{Version: 1, All: true},
 				BeforeCoverage: cadence.Coverage{Total: 20, Eligible: 20},
-				AfterCoverage:  cadence.Coverage{Total: 20, Eligible: 20},
+				AfterCoverage:  cadence.Coverage{Total: 22, Eligible: 20, PartialExposure: 2},
+				Attribution: cadence.Attribution{
+					Applicable: true, LogPresent: true, HookID: "no-bare-python"},
 				Effect: cadence.Effect{Estimate: fptr(2.5), Lower: 1.4, Upper: fptr(4.2),
 					Confidence: 0.9, Method: "clopper-pearson / mixture-cs"}},
 			{ID: "drifted-gate", Class: "drifted gate", Tier: "review", Target: "prompts",
@@ -126,7 +134,7 @@ func TestRenderHTMLCarriesEverySection(t *testing.T) {
 		"Active interventions by tier", "Recent review chains", "System health",
 		"widget flag loss", "bare python call", "naming taste",
 		"use pnpm", "taste-rule",
-		"v-effective", "v-ineffective", "v-confounded", "v-evidence-incomplete",
+		"v-effective", "v-not-triggered", "v-confounded", "v-evidence-incomplete",
 		"1 of 2 present", "agy@sha",
 		// The measurement conditions the verdict rests on, one target at a time.
 		"RR 0.00 [0.00, 0.31] @90%", "needs 9 clean eligible chain(s)",
@@ -136,7 +144,12 @@ func TestRenderHTMLCarriesEverySection(t *testing.T) {
 		"confound (instrument): after-window reviewed by another instrument",
 		"composition (host): host set changed",
 		// Resolver posture: the arming row and the unresolved backlog.
-		"resolver global", "4 row(s) owe a ledger",
+		"resolver claude-code global", "4 row(s) owe a ledger",
+		// Posture is harness-qualified, and Codex's trust is a record, not a proof.
+		"gate codex global", "trust record present, unverified",
+		// The session corpus's own accounting and the guard's audit join.
+		"20 eligible / 22 (2 partly exposed)",
+		"attribution: no-bare-python never fired in the after-window",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("rendered page is missing %q", want)

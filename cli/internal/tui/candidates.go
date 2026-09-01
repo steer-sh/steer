@@ -8,7 +8,15 @@ import (
 
 	"github.com/steer-sh/steer-cli/internal/cadence"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
+	"github.com/steer-sh/steer-cli/internal/sessions"
 )
+
+// storedSessions reads the transcript-session snapshot store, the session corpus the
+// wizard previews and writes against.
+func storedSessions() []mine.SessionUnit {
+	units, _ := sessions.Load(sessions.StateDir())
+	return units
+}
 
 // formKind is which write a wizard commits when its last step is filled.
 type formKind int
@@ -34,6 +42,15 @@ type formState struct {
 	idx   int
 }
 
+// corpus is the evidence the wizard's class is counted over, taken from the candidate
+// it opened on, so the preview and the write agree without asking the author.
+func (f *formState) corpus() string {
+	if f == nil || f.cand.Corpus == "" {
+		return mine.CorpusReviewFindings
+	}
+	return f.cand.Corpus
+}
+
 // candidatesKey opens the register wizard on enter and the reject wizard on x.
 func (m *Model) candidatesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	cands := m.snap.Attention.Candidates
@@ -56,27 +73,30 @@ func (m *Model) startForm(kind formKind, cand cadence.Candidate) {
 	if class == "" {
 		class = cand.Corpus
 	}
-	var steps []formStep
+	// A session carries no changed-path list, so the transcript corpus offers a signal
+	// kind in place of the path predicate its scope cannot decide.
+	scopeSteps := []formStep{
+		{label: "scope-harness", value: ""},
+		{label: "scope-repo", value: ""},
+		{label: "scope-path", value: ""},
+	}
+	if cand.Corpus == mine.CorpusTranscript {
+		scopeSteps = []formStep{
+			{label: "signal-kind", value: mine.SignalAny},
+			{label: "scope-harness", value: ""},
+			{label: "scope-repo", value: ""},
+		}
+	}
+	steps := []formStep{{label: "class", value: class}, {label: "match", value: cand.Pattern}}
+	steps = append(steps, scopeSteps...)
 	if kind == formRegister {
-		steps = []formStep{
-			{label: "class", value: class},
-			{label: "match", value: cand.Pattern},
-			{label: "scope-harness", value: ""},
-			{label: "scope-repo", value: ""},
-			{label: "scope-path", value: ""},
-			{label: "tier", value: "check"},
-			{label: "target", value: "check.sh"},
-		}
+		steps = append(steps,
+			formStep{label: "tier", value: "check"},
+			formStep{label: "target", value: "check.sh"})
 	} else {
-		steps = []formStep{
-			{label: "class", value: class},
-			{label: "match", value: cand.Pattern},
-			{label: "scope-harness", value: ""},
-			{label: "scope-repo", value: ""},
-			{label: "scope-path", value: ""},
-			{label: "reason", value: ""},
-			{label: "reopen", value: ""},
-		}
+		steps = append(steps,
+			formStep{label: "reason", value: ""},
+			formStep{label: "reopen", value: ""})
 	}
 	m.form = &formState{kind: kind, cand: cand, steps: steps}
 	m.editing = true
@@ -132,12 +152,30 @@ func (m *Model) updateMatchPreview() {
 			return
 		}
 		var buf strings.Builder
-		if err := mine.Match(&buf, m.cfg.StateDir, "", regex, "", false); err != nil {
+		err := mine.Match(&buf, m.cfg.StateDir, mine.MatchOpts{
+			Regex:      regex,
+			Corpus:     m.form.corpus(),
+			SignalKind: m.scopeVal("signal-kind"),
+			Sessions:   storedSessions(),
+		})
+		if err != nil {
 			m.matchCount = "invalid regex: " + err.Error()
 			return
 		}
 		m.matchCount = lastLine(buf.String())
 	case "scope-harness", "scope-repo", "scope-path":
+		if m.form.corpus() == mine.CorpusTranscript {
+			cov, err := mine.CoverCorpusSessions(storedSessions(),
+				splitList(m.scopeVal("scope-harness")), m.scopeVal("scope-repo"))
+			if err != nil {
+				m.matchCount = "invalid scope: " + err.Error()
+				return
+			}
+			m.matchCount = fmt.Sprintf(
+				"scope: %d eligible · %d ineligible · %d unknown scope, of %d sessions",
+				cov.Eligible, cov.Ineligible, cov.Unknown, cov.Total)
+			return
+		}
 		cov, err := mine.CoverCorpus(m.cfg.StateDir, "", splitList(m.scopeVal("scope-harness")),
 			m.scopeVal("scope-repo"), m.scopeVal("scope-path"))
 		if err != nil {
@@ -188,6 +226,9 @@ func (m *Model) commitForm() tea.Cmd {
 			Class:        val("class"),
 			Match:        val("match"),
 			Kind:         "accepted",
+			Corpus:       m.form.corpus(),
+			SignalKind:   val("signal-kind"),
+			Sessions:     storedSessions(),
 			Tier:         val("tier"),
 			Target:       val("target"),
 			ScopeAll:     scopeAll,
@@ -200,6 +241,9 @@ func (m *Model) commitForm() tea.Cmd {
 			Class:        val("class"),
 			Match:        val("match"),
 			Kind:         "accepted",
+			Corpus:       m.form.corpus(),
+			SignalKind:   val("signal-kind"),
+			Sessions:     storedSessions(),
 			Reason:       val("reason"),
 			Reopen:       val("reopen"),
 			ScopeAll:     scopeAll,

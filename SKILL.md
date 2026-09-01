@@ -2,7 +2,7 @@
 name: steer
 description: Generates and installs PreToolUse Python hooks from natural language rules. Use when enforcing coding standards, blocking insecure patterns, managing hook lifecycle, or running steer CLI commands (register, remove, list, test, preset, verify, git-hooks).
 user-invocable: true
-prompt_version: 7
+prompt_version: 8
 compatibility: Requires Claude Code or Codex with PreToolUse hook support. Hooks are installed into .steer/hooks/ and registered in the invoking harness (settings.json for Claude Code, hooks.json for Codex). steer CLI must be available on PATH or bundled under scripts/.
 allowed-tools: Bash(steer *), Bash(python3 *), Bash(echo *), Read, Write
 ---
@@ -373,7 +373,7 @@ The `|` pipe splits a rule into a detection part and an optional suggestion (see
 
 Never invent suggestions. Only include them when explicitly provided after `|`.
 
-## The `steer status --json` contract (`status_version: 3`)
+## The `steer status --json` contract (`status_version: 4`)
 
 `steer status` composes one read-only snapshot of the whole loop. The unit is the
 failure class and its verdict, not the hook count. The Pre-flight step reads it to
@@ -384,11 +384,16 @@ Contracts). Fields:
 - `status_version` — the schema version. `--json` is a stable agent contract.
 - `posture` — the arming state: `instrument` (reviewer model / runs / prompt
   digest), `reviewer`, `ledger` path, and `commit_gate[]` / `denials[]` /
-  `resolver[]`. Each is a scope row with `registered` and `effective`. The
-  resolver is the Stop hook that joins ledger rows to transcripts; it arms with
-  the commit gate on the same scope. `unresolved_rows` counts the rows still
-  owing that join — the scorer withholds on them, and
-  `steer commit-gate backfill --apply` clears them.
+  `resolver[]`. Each row carries `harness`, `scope`, `registered`, `effective`
+  and `trust`. One guard store serves both harnesses but each harness holds its
+  own registration, so a scope alone does not identify a row: `commit_gate` and
+  `resolver` report one row per harness per scope, and `denials` is Claude
+  Code's alone. `trust` is `not-applicable` (the harness reviews no hook trust),
+  `record-present-unverified`, `missing` or `unknown` — Steer never claims to
+  have verified a harness's internal hash. The resolver is the Stop hook that
+  joins ledger rows to transcripts; it arms with the commit gate on the same
+  scope. `unresolved_rows` counts the rows still owing that join — the scorer
+  withholds on them, and `steer commit-gate backfill --apply` clears them.
 - `interventions[]` — the **full** scored inventory. It carries every live
   class, `effective` ones included. Each row: `id`, `class`, `match` (the regex
   that defines the class), `tier`, `target`, `status` (`active` or `rejected`),
@@ -396,14 +401,24 @@ Contracts). Fields:
   `instrument_drift` (a measurement window spanning two reviewer prompts; the
   verdict stands, the flag rides beside it), `firings_applicable` (true only for the `guard` tier, whose master hook writes the audit log that `audit_firings` counts; check, instruction and review write none), and for
   a refused class `reason`, `reopen` and `rejected_ts`. This is the dedup source
-  — a class here is decided. Each row also carries its measurement conditions:
-  - `scope` — the frozen eligibility rule: `{version, all}` or
-    `{version, repo, path}`, both regexes combining with AND. `null` is a legacy
-    record, which scores `legacy-unscoped` and never gets a scope inferred for it.
-  - `before_coverage` / `after_coverage` — each window's chain accounting:
+  — a class here is decided. `corpus` and `unit` name the evidence the class is
+  counted over and what one denominator entry is: `review-findings` counts by
+  `chain`, `transcript-friction` by `session`. Never compare a chain rate to a
+  session rate. A session-unit row also carries `signal_kind` — the classifier
+  kind its regex was authored against (`any`, `user_corrections`,
+  `user_rejections`, `tool_failures` or `hook_blocks`). Each row also carries
+  its measurement conditions:
+  - `scope` — the frozen eligibility rule: `{version, all}`, or `{version, repo,
+    path}` at version 1, plus a `harness` id list at version 2. The predicates
+    combine with AND. `null` is a legacy record, which scores `legacy-unscoped`
+    and never gets a scope inferred for it.
+  - `before_coverage` / `after_coverage` — each window's unit accounting:
     `total`, `eligible` (the denominator), `ineligible`, `unknown`,
-    `unknown_scope`, `unknown_evidence`, `pending`. An unknown chain withholds;
-    it never shrinks the denominator.
+    `unknown_scope`, `unknown_evidence`, `pending`, `partial_exposure`. An
+    unknown unit withholds; it never shrinks the denominator. `partial_exposure`
+    is the session corpus's own category, for a session that straddled the
+    install and so ran under both regimes: `unknown` means the scope could not
+    decide, `partial_exposure` means the window could not.
   - `effect` — the joint relative-risk range: `estimate`, `lower`, `upper`
     (`null` when unbounded above), `confidence`, `method`. The verdict reads the
     bounds, never the estimate.
@@ -411,16 +426,24 @@ Contracts). Fields:
     place `upper` at or below the 0.50 effect target. `null` means no window of
     any size could, which an unmeasurably loose baseline causes.
   - `confounds` — hard confounds that withhold the verdict; each is
-    `{category, reason, before, after}` over `instrument`, `host`, `repo`,
-    `author_model` or `path_kind`. `composition` is the same shape for
-    overlapping-but-changed category sets, which warn without withholding.
+    `{category, reason, before, after}` over `instrument`, `host`, `harness`,
+    `repo`, `author_model`, `path_kind` or `project`. `composition` is the same
+    shape for overlapping-but-changed category sets, which warn without
+    withholding.
+  - `attribution` — the guard's audit join over the after-window:
+    `{applicable, log_present, hook_id, firings, sessions}`. `applicable` is
+    false for a tier that writes no audit rows and for a record naming no hook,
+    and the verdict then reads the range alone.
 - `summary` — `total` plus `counts` by verdict.
 - `chains[]` — recent review chains, findings split `accepted` / `rejected`.
 - `attention` — the subset needing action: `interventions[]` (verdict
-  `harmful`, `ineffective`, `class-grew`, `legacy-unscoped`,
-  `evidence-incomplete` or `confounded`), `candidates[]` (no `match` yet), and
-  `unscored[]` (session-unit ids the engine cannot score).
-- `telemetry` — corpus sizes: `review_chains`, `denials_rows`, `audit_firings`.
+  `harmful`, `ineffective`, `not-triggered`, `unattributed`, `class-grew`,
+  `legacy-unscoped`, `evidence-incomplete` or `confounded`), `candidates[]` (no
+  `match` yet), and `unscored[]` (ids of records no engine reads).
+- `telemetry` — corpus sizes: `review_chains`, `denials_rows`, `audit_firings`,
+  `session_snapshots`, plus `harnesses[]` — one row per harness with its
+  `sessions`, `firings` and `chains`, so a harness that contributed nothing reads
+  differently from one that was never mined.
 - `corpora[]` — one row per corpus with `present`, `size` and `path`.
 - `hooks[]` — the registered managed hooks in the active scope: `name`, `scope`,
   `source`, `rule`.
@@ -449,6 +472,12 @@ Active interventions:
 - `evidence-incomplete` — a window has no eligible chain left and unknown chains
   are why: a ledger the resolver closed as gone, or scope metadata no row carried.
 - `confounded` — a hard confound stands between the windows.
+- `unattributed` — the incidence fell effectively, but the guard never fired in
+  the after-window. Something else caused the fall; find it before crediting the
+  guard.
+- `not-triggered` — the class persisted while the guard stayed silent. The
+  matcher is aimed wrong. These two split what `effective` and `ineffective`
+  alone conflate, and they name two different repairs.
 
 Refused classes (`status: rejected`) use their own ladder: `class-grew` (lower
 bound at or above 1.50), `class-faded` (upper bound at or below 0.50),

@@ -15,17 +15,20 @@ import (
 
 	"github.com/steer-sh/steer-cli/internal/cadence"
 	"github.com/steer-sh/steer-cli/internal/claude"
+	"github.com/steer-sh/steer-cli/internal/codex"
 	"github.com/steer-sh/steer-cli/internal/denials"
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
 	"github.com/steer-sh/steer-cli/internal/gate/resolve"
+	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/presets"
+	"github.com/steer-sh/steer-cli/internal/sessions"
 )
 
 // StatusVersion is the schema version of the emitted snapshot. It mirrors
 // report.DigestVersion: --json is a stable agent contract, so bump this whenever
 // the shape or semantics of SystemStatus change.
-const StatusVersion = 3
+const StatusVersion = 4
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20
@@ -38,8 +41,11 @@ type Options struct {
 	Config       gate.Config
 	WindowDays   int    // transcript look-back for the attention refresh
 	AllProjects  bool   // scan every project, not just the cwd
-	MinAfter     int    // optional floor on eligible after-chains; 0 = no floor
+	MinAfter     int    // optional floor on eligible after-units; 0 = no floor
 	Scope        string // active scope for the config-state read (default global)
+	// Evidence is every corpus a scoring pass reads. A caller leaving it zero gets
+	// the ledger alone, and every session-unit record reports missing evidence.
+	Evidence mine.EvidenceSet
 }
 
 // ScoredIntervention is one live intervention with its recomputed verdict. It is
@@ -82,6 +88,14 @@ type ScoredIntervention struct {
 	// Confounds withhold the verdict; Composition only warns beside it.
 	Confounds   []mine.Confound `json:"confounds"`
 	Composition []mine.Confound `json:"composition"`
+	// Corpus and Unit name the evidence the class is counted over and what one
+	// denominator entry is, so a reader never compares a chain rate to a session rate.
+	Corpus string `json:"corpus"`
+	Unit   string `json:"unit"`
+	// SignalKind is the classifier kind a session-unit class is counted over.
+	SignalKind string `json:"signal_kind,omitempty"`
+	// Attribution is the guard's audit join over the after-window.
+	Attribution cadence.Attribution `json:"attribution"`
 }
 
 // HookInfo is one registered managed hook in a scope.
@@ -139,12 +153,25 @@ type VerdictSummary struct {
 	Counts map[string]int `json:"counts"`
 }
 
-// ScopeArming is one scope's registration state for a hook.
+// Trust states a harness reports for a registered hook. Steer never claims to have
+// verified a harness's internal hash: a record's presence is all it can read.
+const (
+	TrustNotApplicable = "not-applicable"
+	TrustUnknown       = "unknown"
+	TrustRecordPresent = "record-present-unverified"
+	TrustMissing       = "missing"
+)
+
+// ScopeArming is one harness and scope's registration state for a hook.
 type ScopeArming struct {
+	Harness    string `json:"harness"`
 	Scope      string `json:"scope"`
 	Registered bool   `json:"registered"`
 	Effective  bool   `json:"effective"`
 	Timeout    int    `json:"timeout,omitempty"`
+	// Trust is the harness's posture on this registration. Registration alone does
+	// not prove enforcement on a harness that reviews hook trust.
+	Trust string `json:"trust"`
 }
 
 // Posture is the arming and instrument state — what is guarding, and with what.
@@ -168,11 +195,22 @@ type AttentionQueue struct {
 	Candidates    []cadence.Candidate    `json:"candidates"`
 }
 
+// HarnessTelemetry is one harness's share of the corpora, so a reader can tell a
+// harness that contributed nothing from one that was never mined.
+type HarnessTelemetry struct {
+	Harness  string `json:"harness"`
+	Sessions int    `json:"sessions"`
+	Firings  int    `json:"firings"`
+	Chains   int    `json:"chains"`
+}
+
 // Telemetry reports corpus sizes — cheap line and row counts, no model call.
 type Telemetry struct {
-	ReviewChains int `json:"review_chains"`
-	DenialsRows  int `json:"denials_rows"`
-	AuditFirings int `json:"audit_firings"`
+	ReviewChains     int                `json:"review_chains"`
+	DenialsRows      int                `json:"denials_rows"`
+	AuditFirings     int                `json:"audit_firings"`
+	SessionSnapshots int                `json:"session_snapshots"`
+	Harnesses        []HarnessTelemetry `json:"harnesses"`
 }
 
 // SystemStatus is the one snapshot all render targets read. It is versioned so
@@ -211,12 +249,16 @@ func Collect(opts Options) (*SystemStatus, error) {
 		Presets:       []PresetInfo{},
 	}
 
-	// Full scored inventory + recent chains, from one miner, read-only.
+	// Full scored inventory + recent chains, read-only.
 	records, _ := mine.Load(opts.GateStateDir)
-	rows, _ := mine.LoadRows(opts.GateStateDir, opts.Ledger)
-	chains := mine.BuildChains(rows, false)
+	ev := opts.Evidence
+	if ev.Chains == nil {
+		rows, _ := mine.LoadRows(opts.GateStateDir, opts.Ledger)
+		ev.Chains = mine.BuildChains(rows, false)
+	}
+	chains := ev.Chains
 
-	s.Interventions = scoreInventory(records, chains, opts.MinAfter)
+	s.Interventions = scoreInventory(records, ev, opts.MinAfter)
 	s.Summary = summarize(s.Interventions)
 	s.Chains = recentChains(chains, recentChainLimit)
 
@@ -227,6 +269,7 @@ func Collect(opts Options) (*SystemStatus, error) {
 		WindowDays:   opts.WindowDays,
 		AllProjects:  opts.AllProjects,
 		MinAfter:     opts.MinAfter,
+		Evidence:     ev,
 	})
 	if err == nil && q != nil {
 		s.Attention = AttentionQueue{
@@ -244,11 +287,7 @@ func Collect(opts Options) (*SystemStatus, error) {
 	}
 
 	s.Posture = collectPosture(opts.Config)
-	s.Telemetry = Telemetry{
-		ReviewChains: len(chains),
-		DenialsRows:  denialsCount(),
-		AuditFirings: auditFirings(),
-	}
+	s.Telemetry = telemetry(ev)
 	s.Hooks = collectHooks(opts.Scope)
 	s.Presets = collectPresets(opts.Scope)
 	s.Team = collectTeam()
@@ -259,7 +298,7 @@ func Collect(opts Options) (*SystemStatus, error) {
 // removed records are dropped as history — the filter Refresh applies. A record
 // from a corpus the chain engine cannot score is carried with verdict "unscored"
 // rather than scored against the wrong corpus; the registry decides which.
-func scoreInventory(records []mine.Record, chains []mine.Chain, minAfter int) []ScoredIntervention {
+func scoreInventory(records []mine.Record, ev mine.EvidenceSet, minAfter int) []ScoredIntervention {
 	out := []ScoredIntervention{}
 	for _, r := range records {
 		st := str(r["status"])
@@ -277,6 +316,8 @@ func scoreInventory(records []mine.Record, chains []mine.Chain, minAfter int) []
 				Status:            st,
 				HookID:            str(r["hook_id"]),
 				Verdict:           "unscored",
+				Corpus:            mine.CorpusOf(r),
+				Unit:              mine.UnitOf(r),
 				Confounds:         []mine.Confound{},
 				Composition:       []mine.Confound{},
 				FiringsApplicable: firingsApplicable(tier),
@@ -286,7 +327,7 @@ func scoreInventory(records []mine.Record, chains []mine.Chain, minAfter int) []
 			})
 			continue
 		}
-		scored, err := mine.ScoreRecord(r, chains, minAfter)
+		scored, err := mine.ScoreWith(r, ev, minAfter)
 		if err != nil {
 			continue
 		}
@@ -316,6 +357,10 @@ func scoreInventory(records []mine.Record, chains []mine.Chain, minAfter int) []
 			RequiredAfter:  cadence.RequiredAfterOf(scored["required_after"]),
 			Confounds:      cadence.ConfoundsOf(scored["confounds"]),
 			Composition:    cadence.ConfoundsOf(scored["composition"]),
+			Corpus:         mine.CorpusOf(r),
+			Unit:           mine.UnitOf(r),
+			SignalKind:     str(scored["signal_kind"]),
+			Attribution:    cadence.AttributionOf(scored["attribution"]),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
@@ -379,35 +424,123 @@ func collectPosture(cfg gate.Config) Posture {
 		Resolver:   []ScopeArming{},
 		Unresolved: resolve.CountUnresolved(cfg),
 	}
+	cwd, _ := os.Getwd()
+	claudeID := string(harness.ClaudeCode)
+	codexID := string(harness.Codex)
 	for _, scope := range []string{claude.ProjectScope, claude.GlobalScope} {
 		g := claude.CommitGateHookArmed(scope)
 		p.CommitGate = append(p.CommitGate, ScopeArming{
+			Harness:    claudeID,
 			Scope:      scope,
 			Registered: g.Registered,
 			Effective:  g.Effective(),
 			Timeout:    g.Timeout,
+			Trust:      TrustNotApplicable,
 		})
+		cg := codex.CommitGateArming(scope, cwd)
+		p.CommitGate = append(p.CommitGate, ScopeArming{
+			Harness:    codexID,
+			Scope:      scope,
+			Registered: cg.Registered,
+			Effective:  cg.Effective(),
+			Timeout:    cg.Timeout,
+			Trust:      trustState(harness.Codex, cg.TrustStateKnown, cg.TrustRecordPresent),
+		})
+		// The denials recorder rides Claude Code's PermissionDenied event. Codex
+		// declares no equivalent, so it gets no row rather than a false zero.
 		d, err := claude.DenialsHookArming(scope)
 		if err != nil {
 			d = claude.DenialsArming{}
 		}
 		p.Denials = append(p.Denials, ScopeArming{
+			Harness:    claudeID,
 			Scope:      scope,
 			Registered: d.Registered,
 			Effective:  d.Registered && d.Matcher == claude.DenialsMatcher,
 			Timeout:    d.Timeout,
+			Trust:      TrustNotApplicable,
 		})
-		// The resolver rides the Stop event, which takes no matcher: registered is
+		// The resolver rides a turn-end event, which takes no matcher: registered is
 		// effective.
 		armed, timeout := claude.BackfillHookArmed(scope)
 		p.Resolver = append(p.Resolver, ScopeArming{
+			Harness:    claudeID,
 			Scope:      scope,
 			Registered: armed,
 			Effective:  armed,
 			Timeout:    timeout,
+			Trust:      TrustNotApplicable,
+		})
+		codexArmed, codexTimeout := codex.ResolverArming(scope, cwd)
+		p.Resolver = append(p.Resolver, ScopeArming{
+			Harness:    codexID,
+			Scope:      scope,
+			Registered: codexArmed,
+			Effective:  codexArmed,
+			Timeout:    codexTimeout,
+			Trust:      trustState(harness.Codex, cg.TrustStateKnown, cg.TrustRecordPresent),
 		})
 	}
 	return p
+}
+
+// trustState reports what this machine can honestly say about a registration's trust.
+// A harness that never reviews hook trust is not-applicable; one that does reports
+// record presence, never a verified hash.
+func trustState(id harness.ID, known, present bool) string {
+	h, ok := harness.Get(id)
+	if !ok || !h.Capabilities.TrustReview {
+		return TrustNotApplicable
+	}
+	switch {
+	case !known:
+		return TrustUnknown
+	case present:
+		return TrustRecordPresent
+	default:
+		return TrustMissing
+	}
+}
+
+// telemetry counts each corpus and splits the session and firing counts per harness.
+func telemetry(ev mine.EvidenceSet) Telemetry {
+	t := Telemetry{
+		ReviewChains:     len(ev.Chains),
+		DenialsRows:      denialsCount(),
+		AuditFirings:     len(ev.Firings),
+		SessionSnapshots: len(ev.Sessions),
+		Harnesses:        []HarnessTelemetry{},
+	}
+	if t.AuditFirings == 0 {
+		t.AuditFirings = auditFirings()
+	}
+	rows := map[string]*HarnessTelemetry{}
+	row := func(id string) *HarnessTelemetry {
+		r, ok := rows[id]
+		if !ok {
+			r = &HarnessTelemetry{Harness: id}
+			rows[id] = r
+		}
+		return r
+	}
+	for _, h := range harness.All() {
+		row(string(h.ID))
+	}
+	for _, u := range ev.Sessions {
+		row(u.Harness).Sessions++
+	}
+	for _, f := range ev.Firings {
+		row(f.Harness).Firings++
+	}
+	for _, ch := range ev.Chains {
+		if ch.HarnessKnown {
+			row(ch.Harness).Chains++
+		}
+	}
+	for _, h := range harness.All() {
+		t.Harnesses = append(t.Harnesses, *row(string(h.ID)))
+	}
+	return t
 }
 
 // denialsCount is the size of the auto-mode denials corpus on this machine.
@@ -450,8 +583,9 @@ func corpusRows(rows []cadence.CorpusStatus, opts Options) []CorpusRow {
 	// Keys match the corpus names cadence.Refresh emits. review-findings lives at
 	// the gate state dir (the ledger shards); auto-denials at the denials dir.
 	paths := map[string]string{
-		"review-findings": opts.GateStateDir,
-		"auto-denials":    denials.StateDir(),
+		"review-findings":     opts.GateStateDir,
+		"transcript-friction": sessions.StateDir(),
+		"auto-denials":        denials.StateDir(),
 	}
 	out := make([]CorpusRow, 0, len(rows))
 	for _, r := range rows {

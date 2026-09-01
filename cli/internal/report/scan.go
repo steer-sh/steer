@@ -1,6 +1,8 @@
 package report
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"regexp"
 	"sort"
 	"strings"
@@ -47,6 +49,104 @@ type toolCall struct {
 	Shell  bool
 }
 
+// Classifier turns one session's normalized events into friction signals. It is the
+// one classifier the digest and the session-snapshot store share, so a class regex
+// authored against one reads the same text in the other. It is stateful — a tool
+// result is attributed through the call it answers — so one Classifier serves one
+// session.
+type Classifier struct {
+	calls map[string]toolCall
+}
+
+// NewClassifier returns a classifier for one session.
+func NewClassifier() *Classifier { return &Classifier{calls: map[string]toolCall{}} }
+
+// Signal is one classified friction event. Key is the text a class regex is matched
+// against; Example is the longer form a digest shows.
+type Signal struct {
+	Kind    string
+	Key     string
+	Example string
+}
+
+// Classify records a tool call, or classifies a human turn or a tool result. The bool
+// is false when the event carries no signal.
+func (c *Classifier) Classify(e transcript.Event) (Signal, bool) {
+	switch e.Kind {
+	case transcript.KindToolCall:
+		c.calls[e.ToolUseID] = toolCall{Name: e.Tool, Target: e.Target, Shell: e.Shell}
+	case transcript.KindHumanTurn:
+		if !e.Meta {
+			return c.correction(e.Text)
+		}
+	case transcript.KindToolResult:
+		return c.toolResult(e)
+	}
+	return Signal{}, false
+}
+
+// correction matches a human turn against correction language.
+func (c *Classifier) correction(text string) (Signal, bool) {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" || strings.HasPrefix(trimmed, "<") || strings.HasPrefix(trimmed, "Caveat:") {
+		return Signal{}, false
+	}
+	for _, p := range correctionPatterns {
+		loc := p.FindStringIndex(trimmed)
+		if loc == nil {
+			continue
+		}
+		snippet := matchLine(trimmed, loc[0])
+		return Signal{kindCorrection, snippet, snippet}, true
+	}
+	return Signal{}, false
+}
+
+// toolResult classifies a result as rejection, hook block, or lint/test failure.
+func (c *Classifier) toolResult(e transcript.Event) (Signal, bool) {
+	text := e.Text
+	if text == "" {
+		return Signal{}, false
+	}
+	if len(text) > maxResultScan {
+		text = text[:maxResultScan]
+	}
+	call := c.calls[e.ToolUseID]
+	lower := strings.ToLower(text)
+
+	switch {
+	case strings.Contains(lower, "doesn't want to proceed") || strings.Contains(lower, "user rejected"):
+		key := call.Name + ": " + call.Target
+		return Signal{kindRejection, key, key}, true
+	case e.IsError && strings.Contains(lower, "hook") && (strings.Contains(lower, "block") || strings.Contains(lower, "denied")):
+		snippet := matchLine(text, strings.Index(lower, "hook"))
+		return Signal{kindHookBlock, snippet, snippet}, true
+	case call.Shell:
+		if loc := failurePattern.FindStringIndex(text); loc != nil {
+			snippet := matchLine(text, loc[0])
+			return Signal{kindFailure, snippet, snippet + " — cmd: " + call.Target}, true
+		}
+	}
+	return Signal{}, false
+}
+
+// ParserInstrument identifies the classifier that produced a set of signals. A record
+// stores it at registration, so a later change to these patterns reads as instrument
+// drift rather than as an effect of the intervention.
+func ParserInstrument() string {
+	h := sha256.New()
+	for _, p := range correctionPatterns {
+		h.Write([]byte(p.String()))
+		h.Write([]byte{0})
+	}
+	h.Write([]byte(failurePattern.String()))
+	h.Write([]byte{0})
+	h.Write([]byte("rejection:doesn't want to proceed|user rejected"))
+	h.Write([]byte{0})
+	h.Write([]byte("hookblock:hook+block|denied"))
+	return "scan-" + hex.EncodeToString(h.Sum(nil))[:12]
+}
+
 // Scanner accumulates signal clusters from normalized transcript events. It
 // reads no harness format of its own: an Adapter supplies the events.
 type Scanner struct {
@@ -85,13 +185,13 @@ func NewScanner(since time.Time) *Scanner {
 
 // ScanSession streams one session through the adapter and classifies its events.
 func (s *Scanner) ScanSession(a transcript.Adapter, session transcript.Session) error {
-	// tool call id → call info, so results can be attributed. Per-session:
-	// results always land in the same transcript as their call.
-	calls := map[string]toolCall{}
+	// One classifier per session: a tool result is attributed through the call it
+	// answers, and results always land in the same transcript as their call.
+	c := NewClassifier()
 	hs := s.harnessScanFor(session.Harness)
 
 	counts, err := a.Stream(session, transcript.Filter{Since: s.Since}, func(e transcript.Event) error {
-		s.classify(e, calls, hs)
+		s.classify(e, c, hs)
 		return nil
 	})
 	s.stats.FilesScanned++
@@ -124,7 +224,7 @@ func (s *Scanner) harnessScanFor(id harness.ID) *harnessScan {
 	return hs
 }
 
-func (s *Scanner) classify(e transcript.Event, calls map[string]toolCall, hs *harnessScan) {
+func (s *Scanner) classify(e transcript.Event, c *Classifier, hs *harnessScan) {
 	if e.SessionID != "" {
 		if _, seen := hs.sessions[e.SessionID]; !seen {
 			hs.sessions[e.SessionID] = struct{}{}
@@ -139,60 +239,8 @@ func (s *Scanner) classify(e transcript.Event, calls map[string]toolCall, hs *ha
 		}
 		s.threads[e.ThreadID] = struct{}{}
 	}
-	switch e.Kind {
-	case transcript.KindToolCall:
-		calls[e.ToolUseID] = toolCall{Name: e.Tool, Target: e.Target, Shell: e.Shell}
-	case transcript.KindHumanTurn:
-		if !e.Meta {
-			s.checkCorrection(e.Text, e)
-		}
-	case transcript.KindToolResult:
-		s.checkToolResult(e, calls)
-	}
-}
-
-// checkCorrection matches a human turn against correction language.
-func (s *Scanner) checkCorrection(text string, e transcript.Event) {
-	trimmed := strings.TrimSpace(text)
-	if trimmed == "" || strings.HasPrefix(trimmed, "<") || strings.HasPrefix(trimmed, "Caveat:") {
-		return
-	}
-	for _, p := range correctionPatterns {
-		loc := p.FindStringIndex(trimmed)
-		if loc == nil {
-			continue
-		}
-		snippet := matchLine(trimmed, loc[0])
-		s.addCluster(kindCorrection, snippet, snippet, e)
-		return
-	}
-}
-
-// checkToolResult classifies a result as rejection, hook block, or lint/test
-// failure.
-func (s *Scanner) checkToolResult(e transcript.Event, calls map[string]toolCall) {
-	text := e.Text
-	if text == "" {
-		return
-	}
-	if len(text) > maxResultScan {
-		text = text[:maxResultScan]
-	}
-	call := calls[e.ToolUseID]
-	lower := strings.ToLower(text)
-
-	switch {
-	case strings.Contains(lower, "doesn't want to proceed") || strings.Contains(lower, "user rejected"):
-		key := call.Name + ": " + call.Target
-		s.addCluster(kindRejection, key, key, e)
-	case e.IsError && strings.Contains(lower, "hook") && (strings.Contains(lower, "block") || strings.Contains(lower, "denied")):
-		snippet := matchLine(text, strings.Index(lower, "hook"))
-		s.addCluster(kindHookBlock, snippet, snippet, e)
-	case call.Shell:
-		if loc := failurePattern.FindStringIndex(text); loc != nil {
-			snippet := matchLine(text, loc[0])
-			s.addCluster(kindFailure, snippet, snippet+" — cmd: "+call.Target, e)
-		}
+	if sig, ok := c.Classify(e); ok {
+		s.addCluster(sig.Kind, sig.Key, sig.Example, e)
 	}
 }
 

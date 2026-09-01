@@ -140,18 +140,46 @@ const (
 	predUnknown
 )
 
-// Classify places one chain against the scope. A definite non-match on either predicate
-// excludes; an undecidable predicate with no definite non-match is Unknown.
-func (s *Scope) Classify(ch Chain) Eligibility {
+// Subject is the metadata a scope reads about one denominator entry. A chain and a
+// transcript session both reduce to it, so one predicate serves both corpora and no
+// scope rule is written twice. Scope reads this and never the evidence text, which
+// would select on the outcome.
+type Subject struct {
+	Harness      string
+	HarnessKnown bool
+	Repo         string
+	RepoKnown    bool
+	Paths        []string
+	PathsKnown   bool
+}
+
+// Subject reduces a chain to the metadata a scope reads.
+func (ch Chain) Subject() Subject {
+	return Subject{
+		Harness:      ch.Harness,
+		HarnessKnown: ch.HarnessKnown,
+		Repo:         ch.Repo,
+		RepoKnown:    ch.RepoKnown,
+		Paths:        ch.Paths,
+		PathsKnown:   ch.PathsKnown,
+	}
+}
+
+// Classify places one chain against the scope.
+func (s *Scope) Classify(ch Chain) Eligibility { return s.ClassifySubject(ch.Subject()) }
+
+// ClassifySubject places one subject against the scope. A definite non-match on any
+// predicate excludes; an undecidable predicate with no definite non-match is Unknown.
+func (s *Scope) ClassifySubject(sub Subject) Eligibility {
 	if s.All {
 		return Eligible
 	}
 	hrn := predMatch
 	if len(s.Harness) > 0 {
 		switch {
-		case !ch.HarnessKnown:
+		case !sub.HarnessKnown:
 			hrn = predUnknown
-		case containsString(s.Harness, ch.Harness):
+		case containsString(s.Harness, sub.Harness):
 			hrn = predMatch
 		default:
 			hrn = predNoMatch
@@ -160,9 +188,9 @@ func (s *Scope) Classify(ch Chain) Eligibility {
 	repo := predMatch
 	if s.Repo != nil {
 		switch {
-		case !ch.RepoKnown:
+		case !sub.RepoKnown:
 			repo = predUnknown
-		case s.Repo.MatchString(ch.Repo):
+		case s.Repo.MatchString(sub.Repo):
 			repo = predMatch
 		default:
 			repo = predNoMatch
@@ -171,9 +199,9 @@ func (s *Scope) Classify(ch Chain) Eligibility {
 	path := predMatch
 	if s.Path != nil {
 		switch {
-		case !ch.PathsKnown:
+		case !sub.PathsKnown:
 			path = predUnknown
-		case matchesAnyPath(s.Path, ch.Paths):
+		case matchesAnyPath(s.Path, sub.Paths):
 			path = predMatch
 		default:
 			path = predNoMatch
@@ -278,6 +306,21 @@ func CoverCorpus(stateDir, ledger string, harnesses []string, repoExpr, pathExpr
 		return Coverage{}, err
 	}
 	return CoverEvidence(chains, scope, float64(now())), nil
+}
+
+// CoverCorpusSessions classifies the session corpus against the scope the predicates
+// describe, the session engine's analogue of CoverCorpus.
+func CoverCorpusSessions(units []SessionUnit, harnesses []string, repoExpr string) (SessionCoverage, error) {
+	all := len(harnesses) == 0 && repoExpr == ""
+	m, err := BuildScope(all, harnesses, repoExpr, "")
+	if err != nil {
+		return SessionCoverage{}, err
+	}
+	scope, _, err := ParseScope(Record{"scope": m})
+	if err != nil {
+		return SessionCoverage{}, err
+	}
+	return CoverSessions(units, scope, 0), nil
 }
 
 // pathsFromDiff recovers changed paths from a saved diff sidecar, for chains whose rows

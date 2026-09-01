@@ -83,6 +83,11 @@ func CoveragePhrase(c cadence.Coverage) string {
 	if c.Pending > 0 {
 		extra = append(extra, fmt.Sprintf("%d pending", c.Pending))
 	}
+	// A session that straddled the install ran under both regimes, so it is evidence
+	// about neither window. It is not an unknown: the scope decided it fine.
+	if c.PartialExposure > 0 {
+		extra = append(extra, fmt.Sprintf("%d partly exposed", c.PartialExposure))
+	}
 	if len(extra) > 0 {
 		s += " (" + strings.Join(extra, ", ") + ")"
 	}
@@ -96,4 +101,35 @@ func ConfoundPhrases(kind string, cs []mine.Confound) []string {
 		out = append(out, fmt.Sprintf("%s (%s): %s", kind, c.Category, c.Reason))
 	}
 	return out
+}
+
+// AttributionPhrase reports the guard's audit join beside the range. An empty string
+// means the join says nothing here: the tier writes no audit rows, or the record names
+// no hook to join on.
+func AttributionPhrase(a cadence.Attribution) string {
+	if !a.Applicable {
+		return ""
+	}
+	if !a.LogPresent {
+		return "attribution: no guard audit stream on this machine"
+	}
+	if a.Firings == 0 {
+		return fmt.Sprintf("attribution: %s never fired in the after-window", a.HookID)
+	}
+	return fmt.Sprintf("attribution: %s fired %d time(s) in %d session(s)",
+		a.HookID, a.Firings, a.Sessions)
+}
+
+// TrustPhrase names a harness's posture on a registration. Registration alone does not
+// prove enforcement on a harness that reviews hook trust itself.
+func TrustPhrase(trust string) string {
+	switch trust {
+	case TrustRecordPresent:
+		return "trust record present, unverified"
+	case TrustMissing:
+		return "no trust record"
+	case TrustUnknown:
+		return "trust unknown"
+	}
+	return ""
 }

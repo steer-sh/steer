@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/cadence"
+	"github.com/steer-sh/steer-cli/internal/evidence"
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/report"
 	"github.com/steer-sh/steer-cli/internal/transcript"
@@ -158,10 +159,19 @@ queue, so the skill's nudge can hash the queue for change detection.`,
 	Example: `  steer report refresh
   steer report refresh --days 7 --project-only`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// refresh is the one writer of the snapshot store: it rebuilds the session
+		// corpus from the harnesses' transcripts before scoring over it.
+		ev := evidence.Gather(evidence.Options{
+			GateStateDir: gateConfig().StateDir,
+			WindowDays:   reportDays,
+			AllProjects:  !reportProjectOnly,
+			Rebuild:      true,
+		})
 		q, err := cadence.Refresh(cadence.Options{
 			GateStateDir: gateConfig().StateDir,
 			WindowDays:   reportDays,
 			AllProjects:  !reportProjectOnly,
+			Evidence:     ev,
 		})
 		if err != nil {
 			return err
@@ -171,8 +181,9 @@ queue, so the skill's nudge can hash the queue for change detection.`,
 			return err
 		}
 		fmt.Fprintf(os.Stderr,
-			"Wrote queue: %d intervention(s) needing attention, %d candidate(s), %d unscored.\n",
-			len(q.Interventions), len(q.Candidates), len(q.Unscored))
+			"Wrote queue: %d intervention(s) needing attention, %d candidate(s), %d unscored, "+
+				"%d session snapshot(s).\n",
+			len(q.Interventions), len(q.Candidates), len(q.Unscored), len(ev.Sessions))
 		fmt.Println(cadence.QueuePath(dir))
 		return nil
 	},

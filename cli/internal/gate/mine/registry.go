@@ -12,19 +12,34 @@ const (
 	UnitSession = "session"
 )
 
-// CorpusSpec is one corpus's entry in the registry: the unit its records count by, and
-// whether this engine can score them. The mine engine reads the commit-review ledger by
-// chain, so it scores that corpus alone; a record from another corpus is carried
-// unscored rather than counted against evidence it was never authored over.
+// The scoring engines. Each reads one evidence set and counts one unit; a record names
+// its corpus and the registry names the engine that corpus is scored by.
+const (
+	EngineChain   = "chain"
+	EngineSession = "session"
+)
+
+// CorpusSpec is one corpus's entry in the registry: the unit its records count by, the
+// engine that scores it, and the scope predicates that engine can decide.
 type CorpusSpec struct {
 	Corpus   string
 	Unit     string
+	Engine   string
 	Scorable bool
+	// PathScope reports that a unit of this corpus carries a changed-path list, so
+	// --scope-path can decide it. A session carries none.
+	PathScope bool
 }
 
 var corpora = map[string]CorpusSpec{
-	CorpusReviewFindings: {Corpus: CorpusReviewFindings, Unit: UnitChain, Scorable: true},
-	CorpusTranscript:     {Corpus: CorpusTranscript, Unit: UnitSession, Scorable: false},
+	CorpusReviewFindings: {
+		Corpus: CorpusReviewFindings, Unit: UnitChain,
+		Engine: EngineChain, Scorable: true, PathScope: true,
+	},
+	CorpusTranscript: {
+		Corpus: CorpusTranscript, Unit: UnitSession,
+		Engine: EngineSession, Scorable: true,
+	},
 }
 
 // Corpora lists the registered corpora by name, for a caller validating a flag.
@@ -59,19 +74,25 @@ func UnitOf(record Record) string {
 	return UnitChain
 }
 
-// Scorable reports whether this engine can score the record. A caller that scores an
-// inventory reads this instead of testing a corpus name, so one registry decides it.
+// Scorable reports whether a registered engine can score the record. A caller that
+// scores an inventory reads this instead of testing a corpus name.
 func Scorable(record Record) bool {
 	spec, ok := LookupCorpus(CorpusOf(record))
-	if !ok {
+	if !ok || !spec.Scorable {
 		return false
 	}
-	if !spec.Scorable {
-		return false
-	}
-	// A record tagged with a unit its corpus does not count by cannot be scored here
-	// either: the denominator the engine builds is chains.
+	// A record tagged with a unit its corpus does not count by cannot be scored: the
+	// denominator its engine builds is the corpus's own unit.
 	return UnitOf(record) == spec.Unit
+}
+
+// EngineOf names the engine a record is scored by, empty when none can score it.
+func EngineOf(record Record) string {
+	spec, ok := LookupCorpus(CorpusOf(record))
+	if !ok || !Scorable(record) {
+		return ""
+	}
+	return spec.Engine
 }
 
 // requireScorable is the guard every scoring entry point runs first.
@@ -79,7 +100,19 @@ func requireScorable(record Record) error {
 	if Scorable(record) {
 		return nil
 	}
-	return fmt.Errorf("intervention %s is corpus %s by %s; this engine scores %s by %s",
-		pyRepr(str(record["id"])), pyRepr(CorpusOf(record)), pyRepr(UnitOf(record)),
-		pyRepr(CorpusReviewFindings), pyRepr(UnitChain))
+	return fmt.Errorf("intervention %s is corpus %s by %s, which no scoring engine reads",
+		pyRepr(str(record["id"])), pyRepr(CorpusOf(record)), pyRepr(UnitOf(record)))
+}
+
+// requireChainCorpus is the guard on the chain engine's own entry point, for a caller
+// holding chains and nothing else.
+func requireChainCorpus(record Record) error {
+	if err := requireScorable(record); err != nil {
+		return err
+	}
+	if EngineOf(record) != EngineChain {
+		return fmt.Errorf("intervention %s is scored by the %s engine, not %s",
+			pyRepr(str(record["id"])), pyRepr(EngineOf(record)), pyRepr(EngineChain))
+	}
+	return nil
 }

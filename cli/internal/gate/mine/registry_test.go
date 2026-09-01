@@ -22,34 +22,52 @@ func TestUnitOfPrefersTheStoredTag(t *testing.T) {
 	}
 }
 
-func TestAnotherCorpusIsNotScoredAgainstChains(t *testing.T) {
+func TestTheSessionCorpusIsScoredByItsOwnEngine(t *testing.T) {
 	r := Record{"id": "friction", "corpus": CorpusTranscript, "unit": UnitSession, "match": "x"}
-	if Scorable(r) {
-		t.Error("a transcript-friction record must not be scorable by the chain engine")
+	if !Scorable(r) {
+		t.Error("a transcript-friction record must be scorable by the session engine")
 	}
+	check(t, "engine", EngineOf(r), EngineSession)
+	// The chain engine's own entry point still refuses it: it counts a different unit.
 	if _, err := ScoreRecord(r, nil, 0); err == nil {
-		t.Error("ScoreRecord must refuse a corpus it cannot count")
+		t.Error("ScoreRecord must refuse a record the chain engine cannot count")
+	}
+	if _, err := ScoreWith(r, EvidenceSet{}, 0); err != nil {
+		t.Errorf("ScoreWith must route a session record to the session engine: %v", err)
 	}
 	unknown := Record{"id": "u", "corpus": "made-up"}
 	if Scorable(unknown) {
 		t.Error("an unregistered corpus must not be scorable")
 	}
+	if _, err := ScoreWith(unknown, EvidenceSet{}, 0); err == nil {
+		t.Error("ScoreWith must refuse an unregistered corpus")
+	}
 }
 
-func TestRegisterRefusesACorpusItCannotBaseline(t *testing.T) {
+func TestRegisterRefusesOnlyACorpusItCannotBaseline(t *testing.T) {
 	dir := t.TempDir()
 	err := Register(discard{}, dir, RegisterOpts{
-		Class: "c", Match: "x", Corpus: CorpusTranscript,
-		Tier: "check", Target: "check.sh", ScopeAll: true, Force: true,
+		Class: "c", Match: "bare python", Corpus: CorpusTranscript,
+		Sessions: []SessionUnit{friction(1000, "claude-code", "proj", "bare python here")},
+		Tier:     "check",
+		Target:   "check.sh", ScopeAll: true, InstalledTS: 2000,
 	})
-	if err == nil {
-		t.Fatal("registering a non-chain corpus must be refused at write time")
+	if err != nil {
+		t.Fatalf("the session corpus can freeze a baseline: %v", err)
 	}
 	if err := Register(discard{}, dir, RegisterOpts{
 		Class: "c", Match: "x", Corpus: "made-up",
 		Tier: "check", Target: "check.sh", ScopeAll: true, Force: true,
 	}); err == nil {
 		t.Fatal("an unknown corpus must be refused")
+	}
+	// A session carries no changed-path list, so a path predicate cannot be decided.
+	if err := Register(discard{}, dir, RegisterOpts{
+		Class: "c", Match: "bare python", Corpus: CorpusTranscript,
+		Sessions: []SessionUnit{friction(1000, "claude-code", "proj", "bare python here")},
+		Tier:     "check", Target: "check.sh", ScopePath: "cli/", InstalledTS: 2000,
+	}); err == nil {
+		t.Fatal("--scope-path over the session corpus must be refused")
 	}
 }
 

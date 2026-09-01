@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/cadence"
+	"github.com/steer-sh/steer-cli/internal/evidence"
 	"github.com/steer-sh/steer-cli/internal/status"
 	"github.com/steer-sh/steer-cli/internal/styles"
 )
@@ -41,12 +42,18 @@ runtime dependency. It writes to --out, or to stdout when --out is absent.`,
   steer status --html --out steer-status.html
   steer status --days 7 --project-only`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// status never writes: it reads the stored snapshots rather than rebuilding
+		// them, so the one writer stays `steer report refresh`.
 		s, err := status.Collect(status.Options{
 			GateStateDir: gateConfig().StateDir,
 			Config:       gateConfig(),
 			WindowDays:   statusDays,
 			AllProjects:  !statusProjectOnly,
 			Scope:        currentScope(),
+			Evidence: evidence.Gather(evidence.Options{
+				GateStateDir: gateConfig().StateDir,
+				AllProjects:  !statusProjectOnly,
+			}),
 		})
 		if err != nil {
 			return err
@@ -108,13 +115,13 @@ func renderPosture(s *status.SystemStatus) {
 	fmt.Printf("  Reviewer     %s\n", s.Posture.Reviewer)
 	fmt.Printf("  Ledger       %s\n", s.Posture.Ledger)
 	for _, a := range s.Posture.CommitGate {
-		fmt.Printf("  Commit gate  %s scope: %s\n", a.Scope, armingLabel(a))
+		fmt.Printf("  Commit gate  %s\n", armingRow(a))
 	}
 	for _, a := range s.Posture.Denials {
-		fmt.Printf("  Denials      %s scope: %s\n", a.Scope, armingLabel(a))
+		fmt.Printf("  Denials      %s\n", armingRow(a))
 	}
 	for _, a := range s.Posture.Resolver {
-		fmt.Printf("  Resolver     %s scope: %s\n", a.Scope, armingLabel(a))
+		fmt.Printf("  Resolver     %s\n", armingRow(a))
 	}
 	if s.Posture.Unresolved > 0 {
 		fmt.Printf("  Unresolved   %s\n", styles.WarningText.Render(
@@ -122,6 +129,16 @@ func renderPosture(s *status.SystemStatus) {
 	}
 	fmt.Printf("  Corpora      %s\n", corporaLine(s))
 	fmt.Printf("  Audit log    %d block firing(s)\n", s.Telemetry.AuditFirings)
+}
+
+// armingRow names the harness a registration lives in, because one store serves both
+// and a scope alone no longer identifies a registration.
+func armingRow(a status.ScopeArming) string {
+	row := fmt.Sprintf("%s, %s scope: %s", a.Harness, a.Scope, armingLabel(a))
+	if t := status.TrustPhrase(a.Trust); t != "" && a.Registered {
+		row += styles.MutedText.Render(" (" + t + ")")
+	}
+	return row
 }
 
 func armingLabel(a status.ScopeArming) string {
@@ -194,7 +211,7 @@ func renderAttention(s *status.SystemStatus) {
 		}
 	}
 	if len(a.Unscored) > 0 {
-		fmt.Printf("  %s: %d session-unit intervention(s) the engine cannot score\n",
+		fmt.Printf("  %s: %d intervention(s) from a corpus no engine reads\n",
 			styles.MutedText.Render("unscored"), len(a.Unscored))
 	}
 }
@@ -209,6 +226,9 @@ func interventionNotes(iv cadence.Intervention) []string {
 	}
 	if r := status.RequiredPhrase(iv.RequiredAfter, iv.Verdict); r != "" {
 		notes = append(notes, r)
+	}
+	if a := status.AttributionPhrase(iv.Attribution); a != "" {
+		notes = append(notes, a)
 	}
 	notes = append(notes, status.ConfoundPhrases("confound", iv.Confounds)...)
 	notes = append(notes, status.ConfoundPhrases("composition", iv.Composition)...)
