@@ -264,3 +264,104 @@ func TestConsolidatedMasterBlocksLikeIndividualHook(t *testing.T) {
 		t.Errorf("master hook blocked safe command: %q", allowed)
 	}
 }
+
+// bareCallHook ends with a top-level main() call instead of the usual
+// "if __name__" guard, and calls the module constant across a line break whose
+// continuation sits at column 0. Its allow path falls off the end of main()
+// rather than exiting, which is what makes the absorbed call reachable:
+// extraction used to pull it into the guard body, so the master recursed
+// guard -> main -> steer_run -> guard until Python raised RecursionError.
+const bareCallHook = `#!/usr/bin/env python3
+"""
+Hook: block bare python invocations
+Rule: never use bare "python" in bash commands | use python3 instead
+"""
+
+import json
+import sys
+import re
+
+PYTHON_TOKEN_RE = re.compile(
+    r'(?<![\w./-])python(?![\w.])'
+)
+
+def main():
+    try:
+        data = json.loads(sys.stdin.read())
+    except Exception:
+        return
+
+    if data.get('tool_name', '') != 'Bash':
+        return
+
+    command = data.get('tool_input', {}).get('command', '')
+    if PYTHON_TOKEN_RE.search(
+command
+    ):
+        print(json.dumps({"decision": "block", "continue": True, "stopReason": "use python3"}))
+        sys.exit(0)
+
+main()
+`
+
+// guardBody returns the master's text from the named guard function up to the
+// next top-level definition.
+func guardBody(master, name string) string {
+	start := strings.Index(master, "def "+name+"():")
+	if start < 0 {
+		return ""
+	}
+	rest := master[start:]
+	if end := strings.Index(rest[1:], "\ndef "); end >= 0 {
+		return rest[:end+1]
+	}
+	return rest
+}
+
+func TestTrailingCallIsNotPartOfTheGuardBody(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 not available")
+	}
+
+	master := consolidateFixture(t, bareCallHook)
+	body := guardBody(master, "python3_not_python_hook")
+	if body == "" {
+		t.Fatal("master hook is missing the guard function")
+	}
+	if strings.Contains(body, "main()") {
+		t.Errorf("trailing main() call was absorbed into the guard body:\n%s", body)
+	}
+	if !strings.Contains(body, "python3_not_python_hook_PYTHON_TOKEN_RE.search(") {
+		t.Error("guard body does not reference the prefixed constant")
+	}
+	if !strings.Contains(body, "command") {
+		t.Error("guard body dropped the column-0 continuation line")
+	}
+
+	dir := t.TempDir()
+	masterPath := filepath.Join(dir, "master.py")
+	if err := os.WriteFile(masterPath, []byte(master), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	run := func(input string) string {
+		cmd := exec.Command(python, masterPath)
+		cmd.Stdin = strings.NewReader(input)
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("master hook errored on %s: %v", input, err)
+		}
+		return string(out)
+	}
+
+	blocked := run(`{"tool_name":"Bash","tool_input":{"command":"python script.py"}}`)
+	if !strings.Contains(blocked, `"decision": "block"`) {
+		t.Errorf("master hook failed to block bare python: %q", blocked)
+	}
+
+	allowed := run(`{"tool_name":"Bash","tool_input":{"command":"python3 script.py"}}`)
+	if strings.TrimSpace(allowed) != "" {
+		t.Errorf("master hook blocked safe command: %q", allowed)
+	}
+}

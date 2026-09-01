@@ -321,11 +321,13 @@ func extractMainFunction(content string) (string, error) {
 	}
 
 	body := make([]string, 0)
+	var scan bodyScanner
+	scan.endsBody(lines[start])
+
 	for i := start + 1; i < len(lines); i++ {
 		line := lines[i]
-		trimmed := strings.TrimSpace(line)
 
-		if isTopLevel(line) && (strings.HasPrefix(trimmed, "def ") || strings.HasPrefix(trimmed, "if __name__")) {
+		if scan.endsBody(line) {
 			break
 		}
 
@@ -380,12 +382,12 @@ func extractHelperFunctions(content, hookPrefix string) []HelperFunction {
 func extractFunctionCode(lines []string, start int) (string, int) {
 	funcLines := make([]string, 0)
 	end := len(lines)
+	var scan bodyScanner
 
 	for i := start; i < len(lines); i++ {
 		line := lines[i]
-		trimmed := strings.TrimSpace(line)
 
-		if i > start && isTopLevel(line) && (strings.HasPrefix(trimmed, "def ") || strings.HasPrefix(trimmed, "if __name__")) {
+		if scan.endsBody(line) && i > start {
 			end = i
 			break
 		}
@@ -476,6 +478,29 @@ func extractModuleConstants(content, hookPrefix string) []ModuleConstant {
 	}
 
 	return constants
+}
+
+// bodyScanner decides where a function body ends. Feed it every line of the
+// definition in order, starting with the "def" line itself.
+type bodyScanner struct {
+	state pyLineState
+	depth int
+}
+
+// endsBody reports whether line is the first line after the body, and consumes
+// the line's bracket and string state either way. A line at column 0 ends the
+// body unless it continues an open bracket or triple-quoted string, or is a
+// bare comment.
+func (b *bodyScanner) endsBody(line string) bool {
+	continued := b.depth > 0 || b.state.inTriple
+	b.depth += scanPythonLine(line, &b.state)
+	if b.depth < 0 {
+		b.depth = 0
+	}
+	if continued || !isTopLevel(line) {
+		return false
+	}
+	return !strings.HasPrefix(strings.TrimSpace(line), "#")
 }
 
 // pyLineState carries multi-line string state across scanPythonLine calls.
