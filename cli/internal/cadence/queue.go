@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/steer-sh/steer-cli/internal/steerpath"
+	"github.com/steer-sh/steer-cli/internal/statestore"
 )
 
 // stateSubdir is the machine-local, partial-by-design output directory.
@@ -18,7 +18,7 @@ const stateSubdir = "steer-report"
 const lockStaleAfter = 5 * time.Minute
 
 // StateDir is where the queue and its timestamp live.
-func StateDir() string { return steerpath.StateDir(stateSubdir) }
+func StateDir() string { return statestore.Resolve(stateSubdir) }
 
 // QueuePath is the queue file the skill reads.
 func QueuePath(dir string) string { return filepath.Join(dir, "queue.json") }

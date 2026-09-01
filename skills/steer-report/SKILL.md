@@ -3,7 +3,7 @@ name: steer-report
 description: Audits the interventions steer already installed, then mines Claude Code and Codex transcripts and the commit-review ledger for new hook candidates backed by evidence. Use for steer onboarding ("what hooks should I create?"), periodic review of installed hooks, or when the user asks to mine usage history for candidates.
 user-invocable: true
 digest_version: 2
-compatibility: Requires the steer CLI (report and commit-gate subcommands) on PATH or bundled under scripts/. Reads transcripts from ~/.claude/projects and $CODEX_HOME/sessions, and, when present, the commit-review ledger under ~/.claude/state/commit-review.
+compatibility: Requires the steer CLI (report and commit-gate subcommands) on PATH or bundled under scripts/. Reads transcripts from ~/.claude/projects and $CODEX_HOME/sessions, and, when present, the commit-review ledger under ~/.steer/state/commit-review (~/.claude/state/commit-review on a machine that has not yet migrated).
 allowed-tools: Bash(steer *), Read, Edit, Write
 ---
 
@@ -65,7 +65,7 @@ A deterministic tier runs this loop's mechanical half — scoring, corpus sweeps
 steer report refresh --days 30
 ```
 
-Then Read the queue **once**: `~/.claude/state/steer-report/queue.json` (`version: 3`). It holds:
+Then Read the queue **once**: `~/.steer/state/steer-report/queue.json` (`version: 3`). It holds:
 
 - `interventions[]` — full contract records the tier already scored and flagged as **needing attention** (verdict `harmful`, `ineffective`, `not-triggered`, `unattributed`, `class-grew`, `legacy-unscoped`, `evidence-incomplete` or `confounded`). These carry a `match`; they are the audit's action list, pre-filtered. Each also carries the measurement conditions the verdict rests on: `corpus` and `unit` (`review-findings` counts by `chain`, `transcript-friction` by `session` — never compare the two rates), `signal_kind` on a session-unit record, `scope` (the frozen eligibility rule, `null` on a legacy record), `before_coverage` / `after_coverage` (`total`, `eligible`, `ineligible`, `unknown`, `unknown_scope`, `unknown_evidence`, `pending`, `partial_exposure`), the `effect` range, `required_after`, `confounds` / `composition`, and `attribution` — the guard's audit join over the after-window (`applicable`, `log_present`, `hook_id`, `firings`, `sessions`).
 - `unscored[]` — ids of records no engine reads. Report their existence; do not read a verdict into them.

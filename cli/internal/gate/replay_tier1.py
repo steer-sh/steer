@@ -4,7 +4,12 @@ import importlib.util, pathlib, json, hashlib, sys
 spec = importlib.util.spec_from_file_location("cr", pathlib.Path.home()/".claude/hooks/commit-review.py")
 cr = importlib.util.module_from_spec(spec); spec.loader.exec_module(cr)
 
-DIFFS = pathlib.Path.home()/".claude/state/commit-review/diffs"
+# The evidence root moved to ~/.steer. Like statestore.Resolve, this reads the
+# legacy root only while the neutral one carries no `.steer-state` marker.
+ROOT = pathlib.Path.home()/".steer/state/commit-review"
+if not (ROOT/".steer-state").exists():
+    ROOT = pathlib.Path.home()/".claude/state/commit-review"
+DIFFS = ROOT/"diffs"
 
 def section_paths(diff):
     """One path per column-0 `diff --git ` header, taken from the b-side."""

@@ -10,38 +10,46 @@ import (
 	"strings"
 )
 
-// evidenceHome is the directory the state root sits under. Steer's corpora are
-// harness-neutral, but the shards already on disk live under the Claude Code
-// home, and a reader that cannot find them reports an empty corpus rather than
-// an error.
-const evidenceHome = ".claude"
-
-// steerHome is the neutral root holding the guard store. Guards are shared
-// between harnesses: one master, one manifest and one audit stream per scope,
-// so the store cannot sit inside either harness's config directory.
+// steerHome is the neutral root holding everything Steer owns: the guard store
+// and the evidence corpora. Both are harness-neutral — one master, one audit
+// stream and one adjudication ledger serve every harness — so neither can sit
+// inside one harness's config directory.
 const steerHome = ".steer"
 
-// legacyGuardHome is where the guard store lived while Claude Code was the only
-// harness.
-const legacyGuardHome = ".claude"
+// legacyHome is where the guard store and the corpora lived while Claude Code
+// was the only harness.
+const legacyHome = ".claude"
 
 // hooksDirName is the guard directory inside either root.
 const hooksDirName = "hooks"
+
+// stateDirName is the evidence directory inside either root.
+const stateDirName = "state"
 
 const (
 	ProjectScope = "project"
 	GlobalScope  = "global"
 )
 
-// StateDir returns the directory holding one component's state, such as
+// StateDir returns the neutral directory holding one component's state, such as
 // "commit-review" or "steer-report". When the home directory cannot be
 // resolved, it returns the same path relative to the working directory.
 func StateDir(component string) string {
+	return stateDir(steerHome, component)
+}
+
+// LegacyStateDir returns the directory Steer wrote a component's state to
+// before the evidence root moved out of the Claude Code home.
+func LegacyStateDir(component string) string {
+	return stateDir(legacyHome, component)
+}
+
+func stateDir(root, component string) string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return filepath.Join(evidenceHome, "state", component)
+		return filepath.Join(root, stateDirName, component)
 	}
-	return filepath.Join(home, evidenceHome, "state", component)
+	return filepath.Join(home, root, stateDirName, component)
 }
 
 // HooksDir returns the neutral guard directory for a scope. Project scope is
@@ -53,7 +61,7 @@ func HooksDir(scope string) (string, error) {
 
 // LegacyHooksDir returns the guard directory Steer wrote before the store moved.
 func LegacyHooksDir(scope string) (string, error) {
-	return scopedDir(scope, legacyGuardHome)
+	return scopedDir(scope, legacyHome)
 }
 
 func scopedDir(scope, root string) (string, error) {

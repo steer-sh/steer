@@ -106,6 +106,9 @@ var commitGateReviewCmd = &cobra.Command{
 	Long: `review reads a Claude Code PreToolUse payload on stdin and writes the hook's
 reply on stdout. It always exits 0: a gate that cannot answer must fail open.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := prepareState(); err != nil {
+			fmt.Fprintln(os.Stderr, "steer commit-gate:", err)
+		}
 		cfg := gateConfig()
 		reviewer, err := buildReviewer(cfg)
 		if err != nil {
@@ -126,6 +129,9 @@ var commitGatePreCommitCmd = &cobra.Command{
 a finding stands. Any other failure exits 0, because a gate that cannot answer must
 fail open.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := prepareState(); err != nil {
+			fmt.Fprintln(os.Stderr, "steer commit-gate:", err)
+		}
 		cfg := gateConfig()
 		reviewer, err := buildReviewer(cfg)
 		if err != nil {
@@ -153,6 +159,9 @@ var commitGateCodexReviewCmd = &cobra.Command{
 	Long: `review-codex reads a Codex PreToolUse payload on stdin and writes Codex's
 native hook reply on stdout. It always exits 0 so adapter failures fail open.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := prepareState(); err != nil {
+			fmt.Fprintln(os.Stderr, "steer commit-gate:", err)
+		}
 		cfg := gateConfig()
 		reviewer, err := buildReviewer(cfg)
 		if err != nil {
@@ -171,6 +180,9 @@ var commitGateInstallCmd = &cobra.Command{
 from the reviewer timeout so the pair cannot drift. Use --precommit to install the git
 pre-commit hook in this repository instead.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := prepareState(); err != nil {
+			fmt.Fprintln(os.Stderr, "steer commit-gate:", err)
+		}
 		cfg := gateConfig()
 		if commitGatePreCommitChannel {
 			return installPreCommitChannel(cfg)
@@ -375,6 +387,12 @@ idempotent and, without --apply, writes nothing.
   --quiet      silence the report
   --reresolve  re-examine rows already stamped as a miss (never removes a ledger)`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// A dry run writes nothing, and migrating the corpus is a write.
+		if backfillApply {
+			if err := prepareState(); err != nil {
+				fmt.Fprintln(os.Stderr, "steer commit-gate:", err)
+			}
+		}
 		cfg := gateConfig()
 		opts := resolve.BackfillOptions{
 			Apply:     backfillApply,

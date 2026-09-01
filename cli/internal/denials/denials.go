@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/steer-sh/steer-cli/internal/steerpath"
+	"github.com/steer-sh/steer-cli/internal/statestore"
 )
 
 // snippetLimit matches the block-event audit log, so a reader that knows one
@@ -78,7 +78,7 @@ func StateDir() string {
 	if dir := os.Getenv("STEER_DENIALS_DIR"); dir != "" {
 		return dir
 	}
-	return steerpath.StateDir("steer-denials")
+	return statestore.Resolve("steer-denials")
 }
 
 // LogFile is the per-machine shard, so two hosts never append to the same file.

@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestStateDirIsUnderTheEvidenceHome(t *testing.T) {
+func TestStateDirIsUnderTheNeutralHome(t *testing.T) {
 	dir := t.TempDir()
 	if runtime.GOOS == "windows" {
 		t.Setenv("USERPROFILE", dir)
@@ -19,8 +19,13 @@ func TestStateDirIsUnderTheEvidenceHome(t *testing.T) {
 		t.Fatalf("UserHomeDir: %v", err)
 	}
 	got := StateDir("commit-review")
-	want := filepath.Join(home, ".claude", "state", "commit-review")
+	want := filepath.Join(home, ".steer", "state", "commit-review")
 	if got != want {
 		t.Errorf("StateDir = %q; want %q", got, want)
+	}
+	got = LegacyStateDir("commit-review")
+	want = filepath.Join(home, ".claude", "state", "commit-review")
+	if got != want {
+		t.Errorf("LegacyStateDir = %q; want %q", got, want)
 	}
 }

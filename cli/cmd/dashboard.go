@@ -16,6 +16,11 @@ and health — each acting through the same package functions the equivalent CLI
 commands call. The read model is the same snapshot 'steer status' renders,
 recomposed after every write.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// The dashboard is the mutation surface, so it migrates before it reads:
+		// every panel that writes goes on to write the path this snapshot names.
+		if err := prepareState(); err != nil {
+			return err
+		}
 		targets, err := currentRegistrars()
 		if err != nil {
 			return err

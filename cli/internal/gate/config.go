@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/steer-sh/steer-cli/internal/steerpath"
+	"github.com/steer-sh/steer-cli/internal/statestore"
 )
 
 // Config holds every tunable the engine reads. Defaults() carries the values the
@@ -145,7 +145,7 @@ func envInt(key string) int {
 	return n
 }
 
-func defaultStateDir() string { return steerpath.StateDir("commit-review") }
+func defaultStateDir() string { return statestore.Resolve("commit-review") }
 
 var hostSlugRe = regexp.MustCompile(`[^a-z0-9]+`)
 

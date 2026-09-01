@@ -36,6 +36,9 @@ var denialsRecordCmd = &cobra.Command{
 row. It writes nothing on stdout and always exits 0: a recorder that reported failure
 would put its own errors in front of the user on a tool call that already failed.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := prepareState(); err != nil {
+			fmt.Fprintln(os.Stderr, "steer denials:", err)
+		}
 		if _, err := denials.Record(os.Stdin, time.Now()); err != nil {
 			fmt.Fprintln(os.Stderr, "steer denials:", err)
 		}
@@ -47,6 +50,9 @@ var denialsInstallCmd = &cobra.Command{
 	Use:   "install",
 	Short: "Register the recorder on the PermissionDenied channel",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := prepareState(); err != nil {
+			return err
+		}
 		target := currentScope()
 		if err := claude.RegisterDenialsHook(target, "steer denials record", denialsTimeout); err != nil {
 			return err

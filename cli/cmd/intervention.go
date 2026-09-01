@@ -127,6 +127,9 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 		Use:   "register",
 		Short: "Record an intervention with its baseline incidence",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := prepareState(); err != nil {
+				return err
+			}
 			return mine.Register(out(), gateConfig().StateDir, mine.RegisterOpts{
 				Ledger:       v.ledger,
 				Class:        v.registerClass,
@@ -175,6 +178,9 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 		Use:   "reject",
 		Short: "Record a class examined and refused",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := prepareState(); err != nil {
+				return err
+			}
 			return mine.Reject(out(), gateConfig().StateDir, mine.RejectOpts{
 				Ledger:       v.ledger,
 				Class:        v.rejectClass,
@@ -219,6 +225,9 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 		Short: "Install a frozen scope on a legacy, unscoped intervention",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := prepareState(); err != nil {
+				return err
+			}
 			return mine.ScopeSet(out(), gateConfig().StateDir, args[0], mine.ScopeSetOpts{
 				Ledger:       v.ledger,
 				Sessions:     storedSessions(),
@@ -279,6 +288,9 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 		Short: "Mark an intervention reworked or removed",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := prepareState(); err != nil {
+				return err
+			}
 			return mine.Retire(out(), gateConfig().StateDir, args[0],
 				v.retireReason, v.retireStatus)
 		},

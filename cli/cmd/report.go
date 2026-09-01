@@ -154,7 +154,7 @@ var reportRefreshCmd = &cobra.Command{
 model tokens and runs in seconds. It scores the review-corpus interventions the
 local engine can score, sweeps every corpus present on this machine, applies the
 thresholds each tier can compute without a model, and writes a queue of pending
-work to ~/.claude/state/steer-report/ for the /steer-report skill to finish.
+work to ~/.steer/state/steer-report/ for the /steer-report skill to finish.
 
 The queue content is deterministic: a second run over the same evidence produces
 a byte-identical queue. The refresh timestamp lives in a sibling file, not the
@@ -162,6 +162,9 @@ queue, so the skill's nudge can hash the queue for change detection.`,
 	Example: `  steer report refresh
   steer report refresh --days 7 --project-only`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := prepareState(); err != nil {
+			return err
+		}
 		// refresh is the one writer of the snapshot store: it rebuilds the session
 		// corpus from the harnesses' transcripts before scoring over it.
 		ev := evidence.Gather(evidence.Options{

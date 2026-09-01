@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/claude"
+	"github.com/steer-sh/steer-cli/internal/statestore"
 	"github.com/steer-sh/steer-cli/internal/styles"
 )
 
@@ -46,6 +47,11 @@ func Execute() error {
 	}
 	return nil
 }
+
+// prepareState migrates the evidence corpora into the neutral root. A writing
+// entry point calls it before it resolves any state path, so nothing in the same
+// process holds a path from the root the migration just left.
+func prepareState() error { return statestore.PrepareAll() }
 
 func currentScope() string {
 	if scope == "" {

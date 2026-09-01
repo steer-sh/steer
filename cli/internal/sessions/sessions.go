@@ -15,7 +15,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/report"
-	"github.com/steer-sh/steer-cli/internal/steerpath"
+	"github.com/steer-sh/steer-cli/internal/statestore"
 	"github.com/steer-sh/steer-cli/internal/transcript"
 )
 
@@ -27,7 +27,7 @@ const stateSubdir = "transcript-sessions"
 const shardPrefix = "sessions"
 
 // StateDir is where the snapshot shards live.
-func StateDir() string { return steerpath.StateDir(stateSubdir) }
+func StateDir() string { return statestore.Resolve(stateSubdir) }
 
 // ShardPath is the file this machine writes.
 func ShardPath(dir, host string) string {
