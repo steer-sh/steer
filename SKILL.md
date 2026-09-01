@@ -2,8 +2,8 @@
 name: steer
 description: Generates and installs PreToolUse Python hooks from natural language rules. Use when enforcing coding standards, blocking insecure patterns, managing hook lifecycle, or running steer CLI commands (register, remove, list, test, preset, verify, git-hooks).
 user-invocable: true
-prompt_version: 4
-compatibility: Requires Claude Code with hooks support (PreToolUse). Hooks are installed into .claude/hooks/ and registered in settings.json. steer CLI must be available on PATH or bundled under scripts/.
+prompt_version: 5
+compatibility: Requires Claude Code with hooks support (PreToolUse). Hooks are installed into .steer/hooks/ and registered in settings.json. steer CLI must be available on PATH or bundled under scripts/.
 allowed-tools: Bash(steer *), Bash(python3 *), Bash(echo *), Read, Write
 ---
 
@@ -43,7 +43,7 @@ In headless mode you MUST:
 
 ```json
 {
-  "hook_path": ".claude/hooks/<name>-hook.py",
+  "hook_path": ".steer/hooks/<name>-hook.py",
   "hook_name": "<name>",
   "rule": "<the original rule text>",
   "self_test_passed": true,
@@ -258,15 +258,16 @@ if __name__ == "__main__":
 
 **In interactive mode**, ask the user before saving:
 
-> "Should this hook apply to **this project only** (saves to `.claude/hooks/`) or **all your projects** (saves to `~/.claude/hooks/`)? [default: this project]"
+> "Should this hook apply to **this project only** (saves to `.steer/hooks/`) or **all your projects** (saves to `~/.steer/hooks/`)? [default: this project]"
 
-If the user doesn't respond or says "default", use **project-level** (`.claude/hooks/`).
+If the user doesn't respond or says "default", use **project-level** (`.steer/hooks/`).
 
-**In headless mode**, default to **project-level** (`.claude/hooks/`) without asking.
+**In headless mode**, default to **project-level** (`.steer/hooks/`) without asking.
 
 After determining scope:
 - Create the directory if it doesn't exist
-- Write to `<scope>/hooks/<rule-name>-hook.py` using descriptive kebab-case naming
+- The store is `.steer` for project scope and `~/.steer` for global scope. `<store>` below names it.
+- Write to `<store>/hooks/<rule-name>-hook.py` using descriptive kebab-case naming
 - Remember the scope for Step 4 (settings.json must match)
 
 ### Step 4: Register the Hook
@@ -276,7 +277,7 @@ Use the steer CLI to register the hook. Use `steer` from PATH if available, othe
 ```bash
 STEER_BIN="${CLAUDE_PLUGIN_ROOT:+${CLAUDE_PLUGIN_ROOT}/scripts/steer}"
 STEER_BIN="${STEER_BIN:-steer}"
-"${STEER_BIN}" register <scope>/hooks/<rule-name>-hook.py --rule "<original rule text>" --scope <project|global> \
+"${STEER_BIN}" register <store>/hooks/<rule-name>-hook.py --rule "<original rule text>" --scope <project|global> \
   --source generated \
   --prompt-version "<prompt_version from SKILL.md frontmatter>" \
   --prompt-modules "<comma,separated,modules>" \
@@ -299,13 +300,13 @@ Create test cases by piping simulated JSON input through the hook:
 
 **Positive test (MUST block):**
 ```bash
-echo '{"tool_name":"Write","tool_input":{"file_path":"test.js","content":"console.log(\"hello world\")"}}' | python3 .claude/hooks/console-log-hook.py
+echo '{"tool_name":"Write","tool_input":{"file_path":"test.js","content":"console.log(\"hello world\")"}}' | python3 .steer/hooks/console-log-hook.py
 ```
 Expected: stdout contains `"decision": "block"`
 
 **Negative test (MUST allow):**
 ```bash
-echo '{"tool_name":"Write","tool_input":{"file_path":"test.js","content":"logger.info(\"hello world\")"}}' | python3 .claude/hooks/console-log-hook.py
+echo '{"tool_name":"Write","tool_input":{"file_path":"test.js","content":"logger.info(\"hello world\")"}}' | python3 .steer/hooks/console-log-hook.py
 ```
 Expected: no stdout, exit code 0
 
@@ -330,10 +331,10 @@ The hardest bugs to find are false positives on safe code that *looks* like the 
 
 **If the rule uses `|` suggestion syntax**, add one test that verifies the `stopReason` output contains the user's suggestion text. Pipe a positive test case and check that the JSON output includes the suggestion. The user chose those words deliberately — the stopReason must include them.
 
-**Verify the consolidated master hook (MANDATORY).** Registration (Step 4) consolidates your hook into `<scope>/hooks/steer-hooks.py`, and consolidation rewrites the code — it can break a hook that passed every individual test. After registration, re-run at least one positive and one negative case through the master:
+**Verify the consolidated master hook (MANDATORY).** Registration (Step 4) consolidates your hook into `<store>/hooks/steer-hooks.py`, and consolidation rewrites the code — it can break a hook that passed every individual test. After registration, re-run at least one positive and one negative case through the master:
 
 ```bash
-echo '{"tool_name":"Write","tool_input":{"file_path":"test.js","content":"console.log(1)"}}' | python3 <scope>/hooks/steer-hooks.py
+echo '{"tool_name":"Write","tool_input":{"file_path":"test.js","content":"console.log(1)"}}' | python3 <store>/hooks/steer-hooks.py
 ```
 
 The positive case must produce `"decision": "block"` from the master itself. If the master allows what the individual hook blocks, the consolidated output is broken — report it as a steer CLI bug and do not report the hook as successfully installed.

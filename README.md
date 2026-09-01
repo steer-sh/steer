@@ -108,7 +108,7 @@ In practice the soft layer prevents most violations before any hook fires; the h
 
 ```bash
 # Register a generated (or hand-written) hook
-steer register .claude/hooks/no-var-hook.py --rule "never use var | use const or let"
+steer register .steer/hooks/no-var-hook.py --rule "never use var | use const or let"
 
 # See active hooks and their rules
 steer list
@@ -197,14 +197,14 @@ The same self-protection covers steer's managed artifacts (manifest, consolidate
 
 ## Audit Log
 
-Every hook block appends one JSON line to `.claude/hooks/steer-audit.jsonl` — the artifact that answers "what did steer stop this week":
+Every hook block appends one JSON line to `.steer/hooks/steer-audit.jsonl` — the artifact that answers "what did steer stop this week":
 
 ```bash
 # Blocks in the last run, by rule
-jq -r '.hook_name' .claude/hooks/steer-audit.jsonl | sort | uniq -c | sort -rn
+jq -r '.hook_name' .steer/hooks/steer-audit.jsonl | sort | uniq -c | sort -rn
 
 # Full detail for one hook
-jq 'select(.hook_name == "sql-injection-prevention")' .claude/hooks/steer-audit.jsonl
+jq 'select(.hook_name == "sql-injection-prevention")' .steer/hooks/steer-audit.jsonl
 ```
 
 Each entry carries `timestamp`, `rule`, `hook_name`, `enforcement`, `file_path`, `tool_name`, and a `snippet` of the blocked input. The log is append-only and protected by the self-protection hook — the agent that got blocked can't erase the evidence.

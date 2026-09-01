@@ -52,6 +52,17 @@ if __name__ == "__main__":
     main()
 `
 
+// mustHooksDir names the guard store the consolidator writes to, relative to the
+// project root the test changed into.
+func mustHooksDir(t *testing.T) string {
+	t.Helper()
+	hooksDir, err := GetHooksDir(ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return hooksDir
+}
+
 func consolidateFixture(t *testing.T, hookContent string) string {
 	t.Helper()
 
@@ -65,7 +76,7 @@ func consolidateFixture(t *testing.T, hookContent string) string {
 	}
 	t.Cleanup(func() { _ = os.Chdir(origWd) })
 
-	hooksDir := filepath.Join(dir, ClaudeDirName, HooksDirName)
+	hooksDir := filepath.Join(dir, mustHooksDir(t))
 	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +110,7 @@ func consolidateWithManifest(t *testing.T, hookContent string, entry ManifestEnt
 	}
 	t.Cleanup(func() { _ = os.Chdir(origWd) })
 
-	hooksDir := filepath.Join(dir, ClaudeDirName, HooksDirName)
+	hooksDir := filepath.Join(dir, mustHooksDir(t))
 	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
 		t.Fatal(err)
 	}

@@ -25,7 +25,7 @@ Workflow:
   4. steer verify --staged                          # Verify staged changes before commit
   5. steer git-hooks install                        # Install pre-commit enforcement
   6. steer remove <hook-name>                       # Remove when no longer needed`,
-	Example: `  steer register .claude/hooks/no-var-hook.py --rule "never use var | use const or let"
+	Example: `  steer register .steer/hooks/no-var-hook.py --rule "never use var | use const or let"
   steer test no-var-hook --code "var x = 1"
   steer list
   steer verify --staged

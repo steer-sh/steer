@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/steer-sh/steer-cli/internal/hookstore"
 )
 
 const (
@@ -13,7 +15,6 @@ const (
 	GlobalScope  = "global"
 
 	ClaudeDirName   = ".claude"
-	HooksDirName    = "hooks"
 	SettingsName    = "settings.json"
 	MasterHookName  = "steer-hooks.py"
 	ManifestName    = "steer-manifest.json"
@@ -319,13 +320,15 @@ func GetClaudeDir(scope string) (string, error) {
 	return ClaudeDirName, nil
 }
 
-// GetHooksDir returns the scope-specific hooks directory.
+// GetHooksDir returns the scope-specific guard directory. The store is neutral
+// and shared between harnesses, so it resolves through hookstore rather than
+// sitting under the Claude Code config directory.
 func GetHooksDir(scope string) (string, error) {
-	claudeDir, err := GetClaudeDir(scope)
-	if err != nil {
+	scope = normalizeScope(scope)
+	if err := ValidateScope(scope); err != nil {
 		return "", err
 	}
-	return filepath.Join(claudeDir, HooksDirName), nil
+	return hookstore.Resolve(scope)
 }
 
 // GetSettingsFile returns the scope-specific settings.json path.
@@ -354,15 +357,11 @@ func GetMasterHookCommand(scope string) (string, error) {
 		return "", err
 	}
 
-	if scope == GlobalScope {
-		masterPath, err := GetMasterHookPath(scope)
-		if err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("python3 %s", masterPath), nil
+	masterPath, err := GetMasterHookPath(scope)
+	if err != nil {
+		return "", err
 	}
-
-	return fmt.Sprintf("python3 %s", filepath.ToSlash(filepath.Join(ClaudeDirName, HooksDirName, MasterHookName))), nil
+	return fmt.Sprintf("python3 %s", filepath.ToSlash(masterPath)), nil
 }
 
 // GetManifestFile returns the scope-specific manifest path.
@@ -392,16 +391,15 @@ func GetClaudeMDFile(scope string) (string, error) {
 	return ClaudeMDName, nil
 }
 
-// EnsureDirectories creates .claude and hooks directories for the scope.
+// EnsureDirectories creates the guard directory for the scope and moves a legacy
+// store into it. Every mutating entry point calls this before it reads a path.
 func EnsureDirectories(scope string) error {
-	hooksDir, err := GetHooksDir(scope)
-	if err != nil {
+	scope = normalizeScope(scope)
+	if err := ValidateScope(scope); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
-		return fmt.Errorf("failed to create hooks directory: %w", err)
-	}
-	return nil
+	_, err := hookstore.Prepare(scope)
+	return err
 }
 
 // LoadSettings reads and parses the settings.json file.
@@ -440,6 +438,9 @@ func SaveSettings(scope string, settings *Settings) error {
 	settingsPath, err := GetSettingsFile(scope)
 	if err != nil {
 		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
+		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
 	if err := createBackup(settingsPath); err != nil {

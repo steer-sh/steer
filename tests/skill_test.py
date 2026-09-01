@@ -46,16 +46,20 @@ def load_test_cases():
 GLOBAL_CLAUDE_DIR = Path.home() / ".claude"
 GLOBAL_SETTINGS = GLOBAL_CLAUDE_DIR / "settings.json"
 GLOBAL_CLAUDE_MD = GLOBAL_CLAUDE_DIR / "CLAUDE.md"
-GLOBAL_HOOKS_DIR = GLOBAL_CLAUDE_DIR / "hooks"
+# The guard store is neutral. The legacy directory stays under watch because a
+# model can still write a hook there by hand.
+GLOBAL_HOOKS_DIRS = [Path.home() / ".steer" / "hooks", GLOBAL_CLAUDE_DIR / "hooks"]
 
 
 def _read_hooks_tree() -> dict[str, bytes]:
-    """Map of relative path → content for every file under ~/.claude/hooks/."""
+    """Map of "<store index>/<relative path>" → content for every guard store file."""
     tree = {}
-    if GLOBAL_HOOKS_DIR.exists():
-        for path in sorted(GLOBAL_HOOKS_DIR.rglob("*")):
+    for index, hooks_dir in enumerate(GLOBAL_HOOKS_DIRS):
+        if not hooks_dir.exists():
+            continue
+        for path in sorted(hooks_dir.rglob("*")):
             if path.is_file():
-                tree[str(path.relative_to(GLOBAL_HOOKS_DIR))] = path.read_bytes()
+                tree[f"{index}/{path.relative_to(hooks_dir)}"] = path.read_bytes()
     return tree
 
 
@@ -64,7 +68,7 @@ def _snapshot_global_state() -> dict:
 
     The skill is instructed to register at project scope, but models sometimes
     register at user scope anyway (observed with haiku: hook files written into
-    ~/.claude/hooks/, rule lines added to global CLAUDE.md, master hook wired
+    the global guard store, rule lines added to global CLAUDE.md, master hook wired
     into global settings.json). Snapshot everything a leak can touch.
     """
     return {
@@ -91,12 +95,15 @@ def _restore_global_state(snapshot: dict) -> bool:
     _restore_file(GLOBAL_SETTINGS, snapshot["settings"])
     _restore_file(GLOBAL_CLAUDE_MD, snapshot["claude_md"])
 
-    if GLOBAL_HOOKS_DIR.exists():
-        for path in list(GLOBAL_HOOKS_DIR.rglob("*")):
-            if path.is_file() and str(path.relative_to(GLOBAL_HOOKS_DIR)) not in snapshot["hooks"]:
+    for index, hooks_dir in enumerate(GLOBAL_HOOKS_DIRS):
+        if not hooks_dir.exists():
+            continue
+        for path in list(hooks_dir.rglob("*")):
+            if path.is_file() and f"{index}/{path.relative_to(hooks_dir)}" not in snapshot["hooks"]:
                 path.unlink()
-    for rel, content in snapshot["hooks"].items():
-        target = GLOBAL_HOOKS_DIR / rel
+    for key, content in snapshot["hooks"].items():
+        index, rel = key.split("/", 1)
+        target = GLOBAL_HOOKS_DIRS[int(index)] / rel
         if not target.exists() or target.read_bytes() != content:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(content)
@@ -142,7 +149,7 @@ def generate_hook(rule: str, workdir: Path, model: str) -> dict:
 
     # Always restore global state after the run, whether it succeeded or not.
     if _restore_global_state(state_snapshot):
-        print("  WARNING: generation leaked into ~/.claude (restored). "
+        print("  WARNING: generation leaked into the global store (restored). "
               "The hook may have been registered at user scope instead of the temp workdir.")
 
     if result.returncode != 0:

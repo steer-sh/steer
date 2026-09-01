@@ -256,6 +256,10 @@ func RemoveManagedHook(scope, identifier string) (*RemoveManagedHookResult, erro
 		return nil, fmt.Errorf("hook identifier cannot be empty")
 	}
 
+	if err := EnsureDirectories(scope); err != nil {
+		return nil, err
+	}
+
 	manifest, err := LoadManifest(scope)
 	if err != nil {
 		return nil, err

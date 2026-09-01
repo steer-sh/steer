@@ -29,14 +29,14 @@ var registerCmd = &cobra.Command{
 	Long: `Register installs an individual hook into the selected scope and keeps all
 steer-managed artifacts in sync:
 - updates steer-manifest.json
-- rebuilds .claude/hooks/steer-hooks.py
+- rebuilds .steer/hooks/steer-hooks.py
 - upserts master hook command in settings.json (preserving non-steer hooks)
 - appends the provided rule to CLAUDE.md
 
 Optional provenance flags can be used to persist generation metadata.`,
-	Example: `  steer register .claude/hooks/no-var-hook.py --rule "never use var | use const or let"
+	Example: `  steer register .steer/hooks/no-var-hook.py --rule "never use var | use const or let"
   steer register /tmp/my-hook.py --rule "block TODO in prod files" --scope global
-  steer register .claude/hooks/sql-hook.py --rule "block SQL f-strings" --source generated --prompt-version v1 --hook-version h1`,
+  steer register .steer/hooks/sql-hook.py --rule "block SQL f-strings" --source generated --prompt-version v1 --hook-version h1`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		fmt.Println()

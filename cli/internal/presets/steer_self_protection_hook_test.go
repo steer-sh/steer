@@ -19,10 +19,15 @@ func setupSelfProtectionRuntime(t *testing.T) selfProtectionRuntime {
 	t.Helper()
 
 	root := t.TempDir()
+	// The guard store is neutral; the harness registration it protects stays in
+	// the harness's own config directory.
 	claudeDir := filepath.Join(root, ".claude")
-	hooksDir := filepath.Join(claudeDir, "hooks")
+	hooksDir := filepath.Join(root, ".steer", "hooks")
 	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
 		t.Fatalf("failed to create hooks dir: %v", err)
+	}
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		t.Fatalf("failed to create claude dir: %v", err)
 	}
 
 	scriptSource := filepath.Join("hooks", "steer-self-protection.py")
@@ -131,8 +136,8 @@ func TestSelfProtectionBlocksFactoryMutations(t *testing.T) {
 	}{
 		{name: "remove factory hook", command: "steer remove sql-injection-prevention"},
 		{name: "disable factory preset", command: "steer preset disable sql-injection-prevention"},
-		{name: "register collision", command: "steer register .claude/hooks/sql-injection-prevention.py --rule \"x\""},
-		{name: "demote collision", command: "steer register .claude/hooks/sql-injection-prevention.py --rule \"x\" --source manual"},
+		{name: "register collision", command: "steer register .steer/hooks/sql-injection-prevention.py --rule \"x\""},
+		{name: "demote collision", command: "steer register .steer/hooks/sql-injection-prevention.py --rule \"x\" --source manual"},
 	}
 
 	for _, tc := range tests {
@@ -156,7 +161,7 @@ func TestSelfProtectionAllowsUserMutationsAndReadOnlyOps(t *testing.T) {
 		command string
 	}{
 		{name: "remove user hook", command: "steer remove user-custom"},
-		{name: "register user hook", command: "steer register .claude/hooks/user-custom.py --rule \"x\""},
+		{name: "register user hook", command: "steer register .steer/hooks/user-custom.py --rule \"x\""},
 		{name: "preset list", command: "steer preset list"},
 		{name: "preset enable", command: "steer preset enable sql-injection-prevention"},
 		{name: "preset sync", command: "steer preset sync --dry-run"},
@@ -183,17 +188,17 @@ func TestSelfProtectionBlocksProtectedFileMutationsViaBash(t *testing.T) {
 	rt := setupSelfProtectionRuntime(t)
 
 	tests := []string{
-		"rm .claude/hooks/steer-manifest.json",
-		"rm .claude/hooks/steer-hooks.py",
+		"rm .steer/hooks/steer-manifest.json",
+		"rm .steer/hooks/steer-hooks.py",
 		"echo '{}' > .claude/settings.json",
-		"rm .claude/hooks/steer-audit.jsonl",
-		"echo '' > .claude/hooks/steer-audit.jsonl",
+		"rm .steer/hooks/steer-audit.jsonl",
+		"echo '' > .steer/hooks/steer-audit.jsonl",
 		"rm steer-team.lock.json",
 		"sed -i 's/factory/manual/' steer-team.lock.json",
 		"echo '{}' > steer-team.lock.json",
-		"rm .claude/hooks/steer-hooks.py; steer preset sync",
+		"rm .steer/hooks/steer-hooks.py; steer preset sync",
 		"rm steer-team.lock.json && steer team apply",
-		"echo done; rm .claude/hooks/steer-hooks.py",
+		"echo done; rm .steer/hooks/steer-hooks.py",
 	}
 
 	for _, command := range tests {
@@ -216,14 +221,14 @@ func TestSelfProtectionBlocksProtectedFileMutationsViaEditWriteMultiEdit(t *test
 		{
 			"tool_name": "Edit",
 			"tool_input": map[string]any{
-				"file_path":  ".claude/hooks/steer-manifest.json",
+				"file_path":  ".steer/hooks/steer-manifest.json",
 				"new_string": "{}",
 			},
 		},
 		{
 			"tool_name": "Write",
 			"tool_input": map[string]any{
-				"file_path": ".claude/hooks/steer-hooks.py",
+				"file_path": ".steer/hooks/steer-hooks.py",
 				"content":   "print('x')",
 			},
 		},
@@ -246,7 +251,7 @@ func TestSelfProtectionBlocksProtectedFileMutationsViaEditWriteMultiEdit(t *test
 		{
 			"tool_name": "Write",
 			"tool_input": map[string]any{
-				"file_path": ".claude/hooks/steer-audit.jsonl",
+				"file_path": ".steer/hooks/steer-audit.jsonl",
 				"content":   "",
 			},
 		},

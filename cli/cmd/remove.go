@@ -23,7 +23,7 @@ artifacts:
 - re-consolidates steer-hooks.py
 - removes master hook registration when no hooks remain`,
 	Example: `  steer remove no-var-hook --force
-  steer remove .claude/hooks/no-var-hook.py`,
+  steer remove .steer/hooks/no-var-hook.py`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		fmt.Println()

@@ -334,9 +334,11 @@ def main():
 
     hooks_dir = os.path.dirname(os.path.realpath(__file__))
     manifest_path = os.path.join(hooks_dir, "steer-manifest.json")
-    settings_path = os.path.join(os.path.dirname(hooks_dir), "settings.json")
 
+    # The guard store is neutral, so the harness registration it protects sits
+    # beside the store's root rather than above the store itself.
     project_root = os.path.dirname(os.path.dirname(hooks_dir))
+    settings_path = os.path.join(project_root, ".claude", "settings.json")
     protected_paths = {
         canonicalize_path(os.path.join(hooks_dir, "steer-hooks.py")),
         canonicalize_path(manifest_path),
