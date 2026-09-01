@@ -337,3 +337,109 @@ func byteAt(s string, i int) byte {
 func isLetter(b byte) bool {
 	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
 }
+
+// tracebackOpener is the first line of a Python traceback. The line names no
+// cause, so it is the failurePattern match that carries the least.
+const tracebackOpener = "Traceback (most recent call last)"
+
+// exceptionLine has the shape of a Python exception: a dotted identifier whose
+// last segment is capitalized, ending the line or introducing a message. A
+// runner's banner under a traceback does not — `--- FAIL:` opens with a dash,
+// `make: *** [test] Error 1` is lowercase, and `FAILED tests/x.py` carries no
+// colon.
+var exceptionLine = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*(?::|$)`)
+
+// chainNotes are the sentences CPython prints between the tracebacks of one
+// chain. An opener that follows one continues the chain; an opener that does
+// not begins an unrelated crash.
+var chainNotes = []string{
+	"During handling of the above exception, another exception occurred:",
+	"The above exception was the direct cause of the following exception:",
+}
+
+// tracebackException returns the exception line the Python traceback at the head
+// of text ends on, or "" when it holds none. CPython prints every frame deeper
+// than the opener and returns the exception to the opener's own column, so the
+// exception is the next line at EXACTLY that depth. Reading depths relative to
+// the opener lets a traceback indented as a whole — inside a test runner's
+// output — read the same as a bare one, and leaves a shallower runner banner to
+// the runner.
+//
+// A traceback cut off before its exception yields "": the line that lands at the
+// opener's depth has to have an exception's shape, or nothing is claimed and the
+// caller keeps the opener.
+//
+// A chain reports the outermost exception last, so a later link replaces an
+// earlier one. An opener arriving with no chain note before it is a separate
+// crash and ends the read — whether or not the first traceback yielded
+// anything, because the caller's match is the failure being keyed and a later
+// unrelated crash is not it.
+func tracebackException(text string) string {
+	var found string
+	indent := -1
+	seen := false
+	chained := true
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimRight(line, " \t\r")
+		body := strings.TrimLeft(trimmed, " \t")
+		if body == "" {
+			continue
+		}
+		depth := len(trimmed) - len(body)
+		if strings.HasPrefix(body, tracebackOpener) {
+			if seen && !chained {
+				return found
+			}
+			indent = depth
+			seen = true
+			chained = false
+			continue
+		}
+		if isChainNote(body) {
+			chained = true
+			continue
+		}
+		if indent < 0 {
+			continue
+		}
+		// Frames sit deeper and the exception sits level. A shallower line is
+		// outside the block, so the traceback ended without one.
+		if depth < indent {
+			indent = -1
+			continue
+		}
+		if depth > indent {
+			continue
+		}
+		indent = -1
+		if exceptionLine.MatchString(body) && isExceptionName(body) {
+			found = body
+		}
+	}
+	return found
+}
+
+func isChainNote(body string) bool {
+	for _, note := range chainNotes {
+		if strings.HasPrefix(body, note) {
+			return true
+		}
+	}
+	return false
+}
+
+// isExceptionName reports whether the line's leading identifier names a Python
+// exception type. Most are capitalized, and the lower-case ones the standard
+// library ships — `re.error`, `struct.error`, `curses.error` — are qualified by
+// their module. A runner's banner is neither: `make:` is one bare lower-case
+// word.
+func isExceptionName(body string) bool {
+	name := body
+	if i := strings.IndexByte(name, ':'); i >= 0 {
+		name = name[:i]
+	}
+	if strings.Contains(name, ".") {
+		return true
+	}
+	return name != "" && name[0] >= 'A' && name[0] <= 'Z'
+}

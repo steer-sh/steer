@@ -127,6 +127,17 @@ func (c *Classifier) toolResult(e transcript.Event) (Signal, bool) {
 	case call.Shell && shellRunsProgram(call.Target):
 		if pos, ok := failureMatch(text); ok {
 			snippet := matchLine(text, pos)
+			// A traceback opener names no cause, so every Python crash keys to
+			// the one word and no class regex can tell them apart. The
+			// exception the traceback ends on is the discriminating line.
+			if strings.HasPrefix(snippet, tracebackOpener) {
+				// From the matched line, never from the whole result: a later
+				// unrelated crash in the same output is not this signal's cause.
+				from := strings.LastIndexByte(text[:pos], '\n') + 1
+				if exc := tracebackException(text[from:]); exc != "" {
+					snippet = exc
+				}
+			}
 			return Signal{kindFailure, snippet, snippet + " — cmd: " + call.Target}, true
 		}
 	}
@@ -144,7 +155,7 @@ func ParserInstrument() string {
 	}
 	h.Write([]byte(failurePattern.String()))
 	h.Write([]byte{0})
-	h.Write([]byte("failure:runner-command+unquoted-match"))
+	h.Write([]byte("failure:runner-command+unquoted-match+traceback-exception-by-indent"))
 	h.Write([]byte{0})
 	for _, v := range sortedRunnerVerbs() {
 		h.Write([]byte(v))
