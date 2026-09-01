@@ -134,6 +134,9 @@ type Chain struct {
 	Files       int
 	Rounds      int
 
+	// Harness is the coding agent whose gate wrote the chain's rows; HarnessKnown is
+	// false when no row carried the stamp, which a scope reads as Unknown and a confound
+	// check reads as an unknown support rather than a disjoint one.
 	// Repo is the repository root basename a scope's repo predicate matches; RepoKnown
 	// is false when no row carried repo metadata. Paths is the union of changed paths
 	// across the chain's rounds; PathsKnown is false when no row stamped or recovered a
@@ -141,6 +144,8 @@ type Chain struct {
 	// AuthorModels is the set of models that authored the chain's diffs;
 	// AuthorModelKnown is false when no row carried the stamp, which a confound check
 	// reads as Unknown rather than a disjoint support.
+	Harness          string
+	HarnessKnown     bool
 	Repo             string
 	RepoKnown        bool
 	Paths            []string
@@ -223,6 +228,10 @@ func chainsForHost(rows []gate.Row, strictJoins bool) []Chain {
 		ch.EndTS = row["ts"]
 		if inst := str(row["instrument"]); inst != "" {
 			ch.Instruments = appendUnique(ch.Instruments, inst)
+		}
+		if h := str(row["harness"]); h != "" && !ch.HarnessKnown {
+			ch.Harness = h
+			ch.HarnessKnown = true
 		}
 		if repo := str(row["repo"]); repo != "" && !ch.RepoKnown {
 			ch.Repo = slashBase(repo)

@@ -3,19 +3,31 @@ package mine
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
+
+	"github.com/steer-sh/steer-cli/internal/harness"
 )
 
-// ScopeVersion is the only scope schema this build reads or writes.
-const ScopeVersion = 1
+// The scope schema versions this build understands. v1 carries repo and path; v2 adds
+// the harness predicate. A scope is written at the lowest version that can express it,
+// so a scope naming no harness stays v1 and an older binary still reads it.
+const (
+	ScopeVersionV1 = 1
+	ScopeVersionV2 = 2
 
-// Scope is a record's frozen eligibility rule over repo and path metadata. All is
-// exclusive with Repo/Path; both predicates present combine with AND.
+	// ScopeVersion is the newest version this build writes.
+	ScopeVersion = ScopeVersionV2
+)
+
+// Scope is a record's frozen eligibility rule over harness, repo and path metadata. All
+// is exclusive with the predicates; every predicate present combines with AND.
 type Scope struct {
-	All  bool
-	Repo *regexp.Regexp
-	Path *regexp.Regexp
-	raw  map[string]any
+	All     bool
+	Harness []string
+	Repo    *regexp.Regexp
+	Path    *regexp.Regexp
+	raw     map[string]any
 }
 
 // Eligibility is one chain's standing against a scope. Unknown means the chain's
@@ -35,13 +47,20 @@ func ParseScope(record Record) (*Scope, bool, error) {
 	if !ok {
 		return nil, false, nil
 	}
-	if v := numInt(raw["version"]); v != ScopeVersion {
-		return nil, true, fmt.Errorf("scope version %d is not %d — this binary cannot score it", v, ScopeVersion)
+	version := numInt(raw["version"])
+	if version != ScopeVersionV1 && version != ScopeVersionV2 {
+		return nil, true, fmt.Errorf("scope version %d is not %d or %d — this binary cannot score it",
+			version, ScopeVersionV1, ScopeVersionV2)
 	}
 	s := &Scope{raw: raw}
 	if truthy(raw["all"]) {
 		s.All = true
 		return s, true, nil
+	}
+	for _, item := range asList(raw["harness"]) {
+		if id := str(item); id != "" {
+			s.Harness = appendUnique(s.Harness, id)
+		}
 	}
 	if expr := str(raw["repo"]); expr != "" {
 		re, err := compilePattern(expr)
@@ -57,26 +76,46 @@ func ParseScope(record Record) (*Scope, bool, error) {
 		}
 		s.Path = re
 	}
-	if s.Repo == nil && s.Path == nil {
-		return nil, true, fmt.Errorf("scope has neither all, repo, nor path")
+	if s.Repo == nil && s.Path == nil && len(s.Harness) == 0 {
+		return nil, true, fmt.Errorf("scope has neither all, harness, repo, nor path")
 	}
 	return s, true, nil
 }
 
 // BuildScope assembles and validates the record's stored scope from the flags. Exactly
-// one of scopeAll or (repo|path) may be set.
-func BuildScope(scopeAll bool, repoExpr, pathExpr string) (map[string]any, error) {
-	hasPredicate := repoExpr != "" || pathExpr != ""
+// one of scopeAll or (harness|repo|path) may be set. The harness list names exact
+// harness ids, not a regex: a harness is a closed set, so a typo is a write-time error
+// rather than a predicate that silently matches nothing.
+func BuildScope(scopeAll bool, harnesses []string, repoExpr, pathExpr string) (map[string]any, error) {
+	hasPredicate := repoExpr != "" || pathExpr != "" || len(harnesses) > 0
 	if scopeAll && hasPredicate {
-		return nil, fmt.Errorf("--scope-all is exclusive with --scope-repo/--scope-path")
+		return nil, fmt.Errorf("--scope-all is exclusive with --scope-harness/--scope-repo/--scope-path")
 	}
 	if !scopeAll && !hasPredicate {
-		return nil, fmt.Errorf("a scope is required: pass --scope-all, or at least one of --scope-repo/--scope-path")
+		return nil, fmt.Errorf("a scope is required: pass --scope-all, or at least one of " +
+			"--scope-harness/--scope-repo/--scope-path")
 	}
 	if scopeAll {
-		return map[string]any{"version": ScopeVersion, "all": true}, nil
+		return map[string]any{"version": ScopeVersionV1, "all": true}, nil
 	}
-	out := map[string]any{"version": ScopeVersion}
+	// v1 expresses repo and path, so a scope naming no harness is written as v1 and an
+	// older binary keeps scoring it. Only the new predicate costs compatibility.
+	version := ScopeVersionV1
+	if len(harnesses) > 0 {
+		version = ScopeVersionV2
+	}
+	out := map[string]any{"version": version}
+	if len(harnesses) > 0 {
+		ids, err := normalizeHarnesses(harnesses)
+		if err != nil {
+			return nil, err
+		}
+		list := make([]any, len(ids))
+		for i, id := range ids {
+			list[i] = id
+		}
+		out["harness"] = list
+	}
 	if repoExpr != "" {
 		if _, err := compilePattern(repoExpr); err != nil {
 			return nil, fmt.Errorf("bad --scope-repo regex %s: %w", pyRepr(repoExpr), err)
@@ -107,6 +146,17 @@ func (s *Scope) Classify(ch Chain) Eligibility {
 	if s.All {
 		return Eligible
 	}
+	hrn := predMatch
+	if len(s.Harness) > 0 {
+		switch {
+		case !ch.HarnessKnown:
+			hrn = predUnknown
+		case containsString(s.Harness, ch.Harness):
+			hrn = predMatch
+		default:
+			hrn = predNoMatch
+		}
+	}
 	repo := predMatch
 	if s.Repo != nil {
 		switch {
@@ -129,10 +179,10 @@ func (s *Scope) Classify(ch Chain) Eligibility {
 			path = predNoMatch
 		}
 	}
-	if repo == predNoMatch || path == predNoMatch {
+	if hrn == predNoMatch || repo == predNoMatch || path == predNoMatch {
 		return Ineligible
 	}
-	if repo == predUnknown || path == predUnknown {
+	if hrn == predUnknown || repo == predUnknown || path == predUnknown {
 		return Unknown
 	}
 	return Eligible
@@ -212,22 +262,16 @@ func CoverEvidence(chains []Chain, scope *Scope, now float64) Coverage {
 // It runs the evidence pass the writers run, so the preview and the baseline the write
 // freezes count one set of chains. Empty predicates preview an all-scope. A bad regex
 // is returned as an error.
-func CoverCorpus(stateDir, ledger, repoExpr, pathExpr string) (Coverage, error) {
+func CoverCorpus(stateDir, ledger string, harnesses []string, repoExpr, pathExpr string) (Coverage, error) {
 	rows, err := LoadRows(stateDir, ledger)
 	if err != nil {
 		return Coverage{}, err
 	}
 	chains := BuildChains(rows, false)
-	m := map[string]any{"version": ScopeVersion}
-	if repoExpr == "" && pathExpr == "" {
-		m["all"] = true
-	} else {
-		if repoExpr != "" {
-			m["repo"] = repoExpr
-		}
-		if pathExpr != "" {
-			m["path"] = pathExpr
-		}
+	all := len(harnesses) == 0 && repoExpr == "" && pathExpr == ""
+	m, err := BuildScope(all, harnesses, repoExpr, pathExpr)
+	if err != nil {
+		return Coverage{}, err
 	}
 	scope, _, err := ParseScope(Record{"scope": m})
 	if err != nil {
@@ -273,4 +317,37 @@ func pathsFromDiff(text string) []string {
 		}
 	}
 	return out
+}
+
+// normalizeHarnesses validates each id against the registry and returns them sorted and
+// deduplicated, so one scope has one stored form whatever order the flags arrived in.
+func normalizeHarnesses(names []string) ([]string, error) {
+	var out []string
+	for _, name := range names {
+		for _, part := range strings.Split(name, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			id, err := harness.Parse(part)
+			if err != nil {
+				return nil, fmt.Errorf("bad --scope-harness %s: %w", pyRepr(part), err)
+			}
+			out = appendUnique(out, string(id))
+		}
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("--scope-harness names no harness")
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+func containsString(list []string, v string) bool {
+	for _, x := range list {
+		if x == v {
+			return true
+		}
+	}
+	return false
 }

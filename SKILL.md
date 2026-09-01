@@ -2,7 +2,7 @@
 name: steer
 description: Generates and installs PreToolUse Python hooks from natural language rules. Use when enforcing coding standards, blocking insecure patterns, managing hook lifecycle, or running steer CLI commands (register, remove, list, test, preset, verify, git-hooks).
 user-invocable: true
-prompt_version: 6
+prompt_version: 7
 compatibility: Requires Claude Code or Codex with PreToolUse hook support. Hooks are installed into .steer/hooks/ and registered in the invoking harness (settings.json for Claude Code, hooks.json for Codex). steer CLI must be available on PATH or bundled under scripts/.
 allowed-tools: Bash(steer *), Bash(python3 *), Bash(echo *), Read, Write
 ---
@@ -445,7 +445,7 @@ Active interventions:
   decision boundary.
 - `no-baseline` — the before-window never carried the class.
 - `legacy-unscoped` — the record has no frozen scope, so its two windows describe
-  different opportunity sets. Run `steer commit-gate mine scope <id>`.
+  different opportunity sets. Run `steer intervention scope <id>`.
 - `evidence-incomplete` — a window has no eligible chain left and unknown chains
   are why: a ledger the resolver closed as gone, or scope metadata no row carried.
 - `confounded` — a hard confound stands between the windows.

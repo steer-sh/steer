@@ -61,6 +61,7 @@ func (m *Model) startForm(kind formKind, cand cadence.Candidate) {
 		steps = []formStep{
 			{label: "class", value: class},
 			{label: "match", value: cand.Pattern},
+			{label: "scope-harness", value: ""},
 			{label: "scope-repo", value: ""},
 			{label: "scope-path", value: ""},
 			{label: "tier", value: "check"},
@@ -70,6 +71,7 @@ func (m *Model) startForm(kind formKind, cand cadence.Candidate) {
 		steps = []formStep{
 			{label: "class", value: class},
 			{label: "match", value: cand.Pattern},
+			{label: "scope-harness", value: ""},
 			{label: "scope-repo", value: ""},
 			{label: "scope-path", value: ""},
 			{label: "reason", value: ""},
@@ -135,8 +137,9 @@ func (m *Model) updateMatchPreview() {
 			return
 		}
 		m.matchCount = lastLine(buf.String())
-	case "scope-repo", "scope-path":
-		cov, err := mine.CoverCorpus(m.cfg.StateDir, "", m.scopeVal("scope-repo"), m.scopeVal("scope-path"))
+	case "scope-harness", "scope-repo", "scope-path":
+		cov, err := mine.CoverCorpus(m.cfg.StateDir, "", splitList(m.scopeVal("scope-harness")),
+			m.scopeVal("scope-repo"), m.scopeVal("scope-path"))
 		if err != nil {
 			m.matchCount = "invalid scope: " + err.Error()
 			return
@@ -173,33 +176,36 @@ func (m *Model) commitForm() tea.Cmd {
 		}
 		return ""
 	}
-	// An author who names neither predicate means every chain, the all-scope.
+	// An author who names no predicate means every chain, the all-scope.
 	repo, path := val("scope-repo"), val("scope-path")
-	scopeAll := repo == "" && path == ""
+	harnesses := splitList(val("scope-harness"))
+	scopeAll := repo == "" && path == "" && len(harnesses) == 0
 	var buf strings.Builder
 	var err error
 	switch m.form.kind {
 	case formRegister:
 		err = mine.Register(&buf, m.cfg.StateDir, mine.RegisterOpts{
-			Class:     val("class"),
-			Match:     val("match"),
-			Kind:      "accepted",
-			Tier:      val("tier"),
-			Target:    val("target"),
-			ScopeAll:  scopeAll,
-			ScopeRepo: repo,
-			ScopePath: path,
+			Class:        val("class"),
+			Match:        val("match"),
+			Kind:         "accepted",
+			Tier:         val("tier"),
+			Target:       val("target"),
+			ScopeAll:     scopeAll,
+			ScopeHarness: harnesses,
+			ScopeRepo:    repo,
+			ScopePath:    path,
 		})
 	case formReject:
 		err = mine.Reject(&buf, m.cfg.StateDir, mine.RejectOpts{
-			Class:     val("class"),
-			Match:     val("match"),
-			Kind:      "accepted",
-			Reason:    val("reason"),
-			Reopen:    val("reopen"),
-			ScopeAll:  scopeAll,
-			ScopeRepo: repo,
-			ScopePath: path,
+			Class:        val("class"),
+			Match:        val("match"),
+			Kind:         "accepted",
+			Reason:       val("reason"),
+			Reopen:       val("reopen"),
+			ScopeAll:     scopeAll,
+			ScopeHarness: harnesses,
+			ScopeRepo:    repo,
+			ScopePath:    path,
 		})
 	case formRetire:
 		err = mine.Retire(&buf, m.cfg.StateDir, m.form.id, val("reason"), "removed")
@@ -278,4 +284,15 @@ func lastLine(s string) string {
 		}
 	}
 	return ""
+}
+
+// splitList reads a comma-separated wizard field into a list, dropping empty entries.
+func splitList(v string) []string {
+	var out []string
+	for _, part := range strings.Split(v, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }

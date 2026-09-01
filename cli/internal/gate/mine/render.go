@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -247,26 +248,32 @@ func printDecisionIncidence(w io.Writer, record Record, chains []Chain) {
 
 // RegisterOpts are the flags of `mine register`.
 type RegisterOpts struct {
-	Ledger      string
-	Class       string
-	Match       string
-	Kind        string
-	Tier        string
-	Target      string
-	Note        string
-	HookID      string
-	Supersedes  string
-	InstalledTS int64
-	Force       bool
-	ScopeAll    bool
-	ScopeRepo   string
-	ScopePath   string
+	Ledger       string
+	Class        string
+	Match        string
+	Kind         string
+	Corpus       string
+	Tier         string
+	Target       string
+	Note         string
+	HookID       string
+	Supersedes   string
+	InstalledTS  int64
+	Force        bool
+	ScopeAll     bool
+	ScopeHarness []string
+	ScopeRepo    string
+	ScopePath    string
 }
 
 // Register records an intervention with its baseline incidence.
 func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 	if o.Kind == "" {
 		o.Kind = "defect"
+	}
+	spec, err := writableCorpus(o.Corpus)
+	if err != nil {
+		return err
 	}
 	kindFilter := "accepted"
 	if o.Kind == "false-positive" {
@@ -276,7 +283,7 @@ func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 	if err != nil {
 		return fmt.Errorf("bad regex %s: %w", pyRepr(o.Match), err)
 	}
-	scopeMap, err := BuildScope(o.ScopeAll, o.ScopeRepo, o.ScopePath)
+	scopeMap, err := BuildScope(o.ScopeAll, o.ScopeHarness, o.ScopeRepo, o.ScopePath)
 	if err != nil {
 		return err
 	}
@@ -329,8 +336,8 @@ func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 		"class":          o.Class,
 		"match":          o.Match,
 		"kind":           o.Kind,
-		"corpus":         CorpusReviewFindings,
-		"unit":           UnitChain,
+		"corpus":         spec.Corpus,
+		"unit":           spec.Unit,
 		"tier":           o.Tier,
 		"target":         o.Target,
 		"note":           o.Note,
@@ -376,24 +383,30 @@ func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 
 // RejectOpts are the flags of `mine reject`.
 type RejectOpts struct {
-	Ledger     string
-	Class      string
-	Match      string
-	Kind       string
-	Reason     string
-	Reopen     string
-	Note       string
-	RejectedTS int64
-	Force      bool
-	ScopeAll   bool
-	ScopeRepo  string
-	ScopePath  string
+	Ledger       string
+	Class        string
+	Match        string
+	Kind         string
+	Corpus       string
+	Reason       string
+	Reopen       string
+	Note         string
+	RejectedTS   int64
+	Force        bool
+	ScopeAll     bool
+	ScopeHarness []string
+	ScopeRepo    string
+	ScopePath    string
 }
 
 // Reject records a class examined and refused, so it is not re-proposed.
 func Reject(w io.Writer, stateDir string, o RejectOpts) error {
 	if o.Kind == "" {
 		o.Kind = "defect"
+	}
+	spec, err := writableCorpus(o.Corpus)
+	if err != nil {
+		return err
 	}
 	kindFilter := "accepted"
 	if o.Kind == "false-positive" {
@@ -403,7 +416,7 @@ func Reject(w io.Writer, stateDir string, o RejectOpts) error {
 	if err != nil {
 		return fmt.Errorf("bad regex %s: %w", pyRepr(o.Match), err)
 	}
-	scopeMap, err := BuildScope(o.ScopeAll, o.ScopeRepo, o.ScopePath)
+	scopeMap, err := BuildScope(o.ScopeAll, o.ScopeHarness, o.ScopeRepo, o.ScopePath)
 	if err != nil {
 		return err
 	}
@@ -437,8 +450,8 @@ func Reject(w io.Writer, stateDir string, o RejectOpts) error {
 		"class":         o.Class,
 		"match":         o.Match,
 		"kind":          o.Kind,
-		"corpus":        CorpusReviewFindings,
-		"unit":          UnitChain,
+		"corpus":        spec.Corpus,
+		"unit":          spec.Unit,
 		"tier":          "none",
 		"target":        "",
 		"note":          o.Note,
@@ -461,12 +474,13 @@ func Reject(w io.Writer, stateDir string, o RejectOpts) error {
 
 // ScopeSetOpts are the flags of `mine scope`.
 type ScopeSetOpts struct {
-	Ledger     string
-	ScopeAll   bool
-	ScopeRepo  string
-	ScopePath  string
-	ScopeSetTS int64
-	Force      bool
+	Ledger       string
+	ScopeAll     bool
+	ScopeHarness []string
+	ScopeRepo    string
+	ScopePath    string
+	ScopeSetTS   int64
+	Force        bool
 }
 
 // ScopeSet installs a scope on a legacy, unscoped record. It recomputes the scoped
@@ -486,7 +500,7 @@ func ScopeSet(w io.Writer, stateDir, id string, o ScopeSetOpts) error {
 		return fmt.Errorf("%s already carries a scope — an installed scope is frozen. "+
 			"Retire it and register a fresh record to correct the eligibility rule", pyRepr(id))
 	}
-	scopeMap, err := BuildScope(o.ScopeAll, o.ScopeRepo, o.ScopePath)
+	scopeMap, err := BuildScope(o.ScopeAll, o.ScopeHarness, o.ScopeRepo, o.ScopePath)
 	if err != nil {
 		return err
 	}
@@ -600,7 +614,18 @@ func Score(w io.Writer, stateDir string, o ScoreOpts) error {
 	}
 	chains := BuildChains(rows, false)
 	results := make([]map[string]any, 0, len(records))
+	var unscored []string
 	for _, r := range records {
+		// A record from another corpus is carried unscored rather than counted against
+		// evidence it was never authored over. Naming one by --id is an error, because
+		// the caller asked for a verdict this engine cannot give.
+		if !Scorable(r) {
+			if o.ID != "" {
+				return requireScorable(r)
+			}
+			unscored = append(unscored, str(r["id"]))
+			continue
+		}
 		res, err := ScoreRecord(r, chains, o.MinAfter)
 		if err != nil {
 			return err
@@ -609,6 +634,10 @@ func Score(w io.Writer, stateDir string, o ScoreOpts) error {
 	}
 	if o.JSON {
 		return writeJSON(w, results)
+	}
+	if len(unscored) > 0 {
+		sort.Strings(unscored)
+		fmt.Fprintf(w, "# unscored here (another corpus): %s\n", strings.Join(unscored, ", "))
 	}
 	for _, r := range results {
 		where := firstNonEmpty(str(r["hook_id"]), str(r["target"]), "nothing installed")
@@ -776,4 +805,25 @@ func requiredSuffix(v any) string {
 		return ""
 	}
 	return fmt.Sprintf("  needs %d clean chains", n)
+}
+
+// writableCorpus resolves a --corpus flag against the registry. An empty value is
+// review-findings, the corpus this engine's baseline is counted over; a corpus this
+// engine cannot count a baseline for is refused at write time rather than recorded with
+// a baseline no reader agrees with.
+func writableCorpus(name string) (CorpusSpec, error) {
+	if name == "" {
+		name = CorpusReviewFindings
+	}
+	spec, ok := LookupCorpus(name)
+	if !ok {
+		return CorpusSpec{}, fmt.Errorf("unknown corpus %s — known: %s",
+			pyRepr(name), strings.Join(Corpora(), ", "))
+	}
+	if !spec.Scorable {
+		return CorpusSpec{}, fmt.Errorf("corpus %s counts by %s; this engine reads the "+
+			"commit-review ledger by %s and cannot freeze a baseline over it",
+			pyRepr(name), pyRepr(spec.Unit), pyRepr(UnitChain))
+	}
+	return spec, nil
 }

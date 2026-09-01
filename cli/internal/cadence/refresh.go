@@ -129,10 +129,10 @@ func Refresh(opts Options) (*Queue, error) {
 		if status != "active" && status != "rejected" {
 			continue // reworked/removed are history, not pending work
 		}
-		// The engine reads only the commit-review ledger by chain. A session-unit
-		// intervention needs the audit-log join, which is unbuilt, so it is
-		// reported unscored rather than scored against the wrong corpus.
-		if str(r["unit"]) == "session" {
+		// The engine reads only the commit-review ledger by chain. A record from
+		// another corpus needs evidence this engine does not hold, so the registry
+		// routes it to unscored rather than scoring it against the wrong corpus.
+		if !mine.Scorable(r) {
 			q.Unscored = append(q.Unscored, str(r["id"]))
 			continue
 		}
@@ -148,8 +148,8 @@ func Refresh(opts Options) (*Queue, error) {
 			ID:      str(scored["id"]),
 			Class:   str(scored["class"]),
 			Match:   str(r["match"]),
-			Corpus:  strOr(r["corpus"], corpusReviewFindings),
-			Unit:    strOr(r["unit"], mine.UnitChain),
+			Corpus:  mine.CorpusOf(r),
+			Unit:    mine.UnitOf(r),
 			Tier:    str(scored["tier"]),
 			Target:  str(scored["target"]),
 			HookID:  str(scored["hook_id"]),

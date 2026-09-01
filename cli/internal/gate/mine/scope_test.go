@@ -20,23 +20,23 @@ func paths(r gate.Row, ps ...string) gate.Row {
 }
 
 func TestBuildScopeValidation(t *testing.T) {
-	if _, err := BuildScope(true, "steer", ""); err == nil {
+	if _, err := BuildScope(true, nil, "steer", ""); err == nil {
 		t.Error("all with a predicate must be refused")
 	}
-	if _, err := BuildScope(false, "", ""); err == nil {
+	if _, err := BuildScope(false, nil, "", ""); err == nil {
 		t.Error("no scope at all must be refused")
 	}
-	if _, err := BuildScope(false, "(", ""); err == nil {
+	if _, err := BuildScope(false, nil, "(", ""); err == nil {
 		t.Error("a bad repo regex must be refused")
 	}
-	all, err := BuildScope(true, "", "")
+	all, err := BuildScope(true, nil, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	check(t, "all scope stores the flag", all["all"], true)
-	check(t, "all scope stores the version", all["version"], ScopeVersion)
+	check(t, "all scope stores the version", all["version"], ScopeVersionV1)
 
-	pred, err := BuildScope(false, "steer", `cli/.*\.go`)
+	pred, err := BuildScope(false, nil, "steer", `cli/.*\.go`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestParseScope(t *testing.T) {
 	if _, has, err := ParseScope(Record{"id": "x"}); has || err != nil {
 		t.Errorf("a legacy record has no scope: has=%v err=%v", has, err)
 	}
-	if _, _, err := ParseScope(Record{"scope": map[string]any{"version": 2, "all": true}}); err == nil {
+	if _, _, err := ParseScope(Record{"scope": map[string]any{"version": 3, "all": true}}); err == nil {
 		t.Error("a future scope version must be refused")
 	}
 	s, has, err := ParseScope(Record{"scope": map[string]any{"version": 1, "all": true}})
@@ -270,7 +270,7 @@ func TestCoverCorpusPreviewsWhatTheWriteFreezes(t *testing.T) {
 	stateDir, ledger := writeLedger(t, rows)
 
 	withClock(int64(install)+1_000_000, func() {
-		cov, err := CoverCorpus(stateDir, ledger, "", "")
+		cov, err := CoverCorpus(stateDir, ledger, nil, "", "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -289,4 +289,84 @@ func TestCoverCorpusPreviewsWhatTheWriteFreezes(t *testing.T) {
 		check(t, "the write froze the window the preview promised",
 			numInt(stored["units"]), cov.Eligible)
 	})
+}
+
+// --- scope v2: the harness predicate ----------------------------------------
+
+func TestScopeWithNoHarnessStaysV1(t *testing.T) {
+	// v1 expresses repo and path, so an existing workflow keeps writing a v1 scope an
+	// older binary can still read. Only the new predicate costs compatibility.
+	pred, err := BuildScope(false, nil, "steer", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(t, "repo-only scope version", pred["version"], ScopeVersionV1)
+
+	withHarness, err := BuildScope(false, []string{"codex"}, "steer", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(t, "harness scope version", withHarness["version"], ScopeVersionV2)
+	check(t, "harness list", withHarness["harness"], []any{"codex"})
+}
+
+func TestBuildScopeNormalizesAndValidatesHarnesses(t *testing.T) {
+	m, err := BuildScope(false, []string{"codex,claude", "codex"}, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(t, "sorted and deduplicated", m["harness"], []any{"claude-code", "codex"})
+
+	if _, err := BuildScope(false, []string{"emacs"}, "", ""); err == nil {
+		t.Error("an unknown harness id must be refused at write time")
+	}
+	if _, err := BuildScope(true, []string{"codex"}, "", ""); err == nil {
+		t.Error("--scope-all is exclusive with --scope-harness")
+	}
+	if _, err := BuildScope(false, []string{" , "}, "", ""); err == nil {
+		t.Error("a harness list of only separators names no harness")
+	}
+}
+
+func TestHarnessPredicateAndsWithRepoAndPath(t *testing.T) {
+	scope, has, err := ParseScope(Record{"scope": map[string]any{
+		"version": ScopeVersionV2,
+		"harness": []any{"codex"},
+		"repo":    "^steer$",
+	}})
+	if err != nil || !has {
+		t.Fatalf("parse: has=%v err=%v", has, err)
+	}
+	cases := []struct {
+		name string
+		ch   Chain
+		want Eligibility
+	}{
+		{"both predicates match", Chain{Harness: "codex", HarnessKnown: true, Repo: "steer", RepoKnown: true}, Eligible},
+		{"harness differs", Chain{Harness: "claude-code", HarnessKnown: true, Repo: "steer", RepoKnown: true}, Ineligible},
+		{"repo differs", Chain{Harness: "codex", HarnessKnown: true, Repo: "other", RepoKnown: true}, Ineligible},
+		{"harness unstamped", Chain{Repo: "steer", RepoKnown: true}, Unknown},
+		// A definite non-match outranks an unknown: the chain is excluded whatever the
+		// missing stamp would have said.
+		{"unknown harness, wrong repo", Chain{Repo: "other", RepoKnown: true}, Ineligible},
+	}
+	for _, tc := range cases {
+		if got := scope.Classify(tc.ch); got != tc.want {
+			t.Errorf("%s: Classify = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestAV1ScopeIgnoresHarnessAltogether(t *testing.T) {
+	// A record frozen before the predicate existed must classify exactly as it did.
+	scope, _, err := ParseScope(Record{"scope": map[string]any{"version": ScopeVersionV1, "repo": "^steer$"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range []string{"claude-code", "codex", ""} {
+		ch := Chain{Repo: "steer", RepoKnown: true, Harness: h, HarnessKnown: h != ""}
+		if got := scope.Classify(ch); got != Eligible {
+			t.Errorf("harness %q: Classify = %v, want Eligible", h, got)
+		}
+	}
 }

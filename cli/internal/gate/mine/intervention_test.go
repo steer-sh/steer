@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/gate"
@@ -477,4 +478,59 @@ func TestStoredBaselineMatchesTheScoredWindow(t *testing.T) {
 		check(t, "and so is the hit count",
 			numInt(stored["hits"]), numInt(before["hits"]))
 	})
+}
+
+// TestDefaultRegisterStillWritesAV1Scope is the compatibility pin for scope v2: an
+// author who names no harness writes exactly the record an older binary reads.
+func TestDefaultRegisterStillWritesAV1Scope(t *testing.T) {
+	stateDir, ledger := writeLedger(t, []gate.Row{
+		row(1000, "deny"), concerns(row(1001, "retry"), "round", c("widget parser drops a flag")),
+	})
+	if err := Register(io.Discard, stateDir, RegisterOpts{
+		ScopeRepo: "steer", Ledger: ledger, Class: "c", Match: "widget parser",
+		Tier: "check", Target: "check.sh", InstalledTS: 2000, Force: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	recorded, _ := Load(stateDir)
+	scope := recorded[0]["scope"].(map[string]any)
+	check(t, "an unharnessed scope stays v1", numInt(scope["version"]), ScopeVersionV1)
+	check(t, "no harness key", scope["harness"], nil)
+}
+
+// TestScoreCarriesAnotherCorpusRatherThanAborting: one unscorable record in the
+// inventory must not cost the verdicts of every record beside it.
+func TestScoreCarriesAnotherCorpusRatherThanAborting(t *testing.T) {
+	stateDir, ledger := writeLedger(t, []gate.Row{
+		row(1000, "deny"), concerns(row(1001, "retry"), "round", c("widget parser drops a flag")),
+	})
+	if err := Register(io.Discard, stateDir, RegisterOpts{
+		ScopeAll: true, Ledger: ledger, Class: "scorable", Match: "widget parser",
+		Tier: "check", Target: "check.sh", InstalledTS: 2000,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	records, _ := Load(stateDir)
+	records = append(records, Record{
+		"id": "friction", "class": "f", "match": "x", "status": "active",
+		"corpus": CorpusTranscript, "unit": UnitSession,
+	})
+	if err := Save(stateDir, records); err != nil {
+		t.Fatal(err)
+	}
+	var buf strings.Builder
+	if err := Score(&buf, stateDir, ScoreOpts{Ledger: ledger}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "# unscored here (another corpus): friction") {
+		t.Errorf("the other corpus must be named, got:\n%s", out)
+	}
+	if !strings.Contains(out, "scorable") {
+		t.Errorf("the scorable record must still be scored, got:\n%s", out)
+	}
+	// Naming it by --id is an error: the caller asked for a verdict that does not exist.
+	if err := Score(io.Discard, stateDir, ScoreOpts{Ledger: ledger, ID: "friction"}); err == nil {
+		t.Error("scoring another corpus by id must be refused")
+	}
 }

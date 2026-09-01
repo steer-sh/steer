@@ -98,3 +98,43 @@ func TestConfoundsInstrumentDriftIsHard(t *testing.T) {
 		t.Errorf("a record predating the instrument field confounds nothing, got %#v", none)
 	}
 }
+
+func withHarness(r gate.Row, h string) gate.Row { r["harness"] = h; return r }
+
+func TestChainCarriesHarness(t *testing.T) {
+	ch := chain(t, 1000, withHarness(row(1000, "deny"), "codex"))
+	check(t, "the harness is recorded", ch.Harness, "codex")
+	check(t, "the harness is known", ch.HarnessKnown, true)
+
+	bare := chain(t, 2000, row(2000, "deny"))
+	check(t, "an unstamped chain knows no harness", bare.HarnessKnown, false)
+	check(t, "an unstamped chain names no harness", bare.Harness, "")
+}
+
+func TestDisjointHarnessSupportsAreAHardConfound(t *testing.T) {
+	before := []Chain{chain(t, 1000, withHarness(row(1000, "deny"), "claude-code"))}
+	after := []Chain{chain(t, 2000, withHarness(row(2000, "deny"), "codex"))}
+	hard, _ := Confounds(before, after, "")
+	var found bool
+	for _, c := range hard {
+		if c.Category == "harness" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("a class measured on one harness then another is confounded, got %#v", hard)
+	}
+}
+
+func TestAnUnstampedHarnessIsNotAShift(t *testing.T) {
+	// A window whose rows predate the stamp says nothing about whether the harness
+	// changed, so it must not raise a confound of its own.
+	before := []Chain{chain(t, 1000, row(1000, "deny"))}
+	after := []Chain{chain(t, 2000, withHarness(row(2000, "deny"), "codex"))}
+	hard, soft := Confounds(before, after, "")
+	for _, c := range append(append([]Confound{}, hard...), soft...) {
+		if c.Category == "harness" {
+			t.Errorf("an unknown harness support is not a shift, got %#v", c)
+		}
+	}
+}

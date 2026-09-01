@@ -74,8 +74,13 @@ Then Read the queue **once**: `~/.claude/state/steer-report/queue.json` (`versio
 The queue tells you what is pending. The full dumps below are the raw material you cluster over. Score the commit-review interventions for the complete audit — the queue lists only the ones needing action, not the `effective` or abstaining ones worth showing too. If this machine has no commit-review ledger, `mine score` reports an empty corpus — say "no interventions to audit on this machine" in one line and go to Step 2.
 
 ```bash
-steer commit-gate mine score
+steer intervention score
 ```
+
+`steer intervention` is the intervention command set — `match`, `register`, `reject`,
+`scope`, `score`, `list`, `retire`. `steer commit-gate mine` is the same set under its
+original name and still works; `findings`, which dumps the review corpus rather than
+managing an intervention, lives only there.
 
 Each record reports before/after **chain incidence** — the fraction of reviewed commits on which the class appeared — split at the install timestamp, and an `effect` range: the after-rate divided by the before-rate, at 90% confidence. The verdict reads that range, never the point rate. `required_after` is the clean after-window the class would need before any conclusion is available; a record below it is still collecting. The `p` field is a Fisher cross-check that no verdict reads.
 
@@ -84,7 +89,7 @@ Each record reports before/after **chain incidence** — the fraction of reviewe
 - `ineffective` — the lower bound is above 0.50, so a halving is ruled out. **Act on this.** Either the gate does not catch what the class actually is, or the class was never mechanizable.
 - `collecting` — the after-window has not reached `required_after` yet. Say so and move on; do not read a verdict into it.
 - `inconclusive` — enough exposure, but the range still straddles the boundary. Leave it and re-score later.
-- `legacy-unscoped` — the record carries no eligibility scope, so its two windows count different opportunity sets. **Act on this:** scope it with `steer commit-gate mine scope <id>`, which restarts its after-window.
+- `legacy-unscoped` — the record carries no eligibility scope, so its two windows count different opportunity sets. **Act on this:** scope it with `steer intervention scope <id>`, which restarts its after-window.
 - `evidence-incomplete` — a window has no eligible chain left and unknown chains are why: a ledger row the resolver closed as gone, or scope metadata no row carried. **Act on this:** run `steer commit-gate backfill --apply` and re-score. A window emptied only by rows still inside the resolver grace period reads `collecting` instead, and settles on its own.
 - `confounded` — a hard confound stands between the windows: the after-chains carry a different reviewer instrument, or the before/after supports for host, repository, author model or changed-path kind are disjoint. The range is not a measurement of the fix. **Act on this:** name the `confounds[]` category in the report and re-score once the windows overlap again. A `composition[]` entry is the softer case — the category sets overlap but shifted — and warns without withholding.
 - `no-baseline` — the regex matches nothing before install. The class definition is wrong.
@@ -271,7 +276,7 @@ For each accepted review candidate:
 1. **Author the regex and test it before writing any fix:**
 
    ```bash
-   steer commit-gate mine match 'YOUR REGEX' --kind accepted
+   steer intervention match 'YOUR REGEX' --kind accepted
    ```
 
    `match` also reports every recorded class that covers chains your candidate matches. A high share against a rejected class means you are re-proposing it: read the reason before going further.
@@ -283,7 +288,7 @@ For each accepted review candidate:
 3. **Register it**, after the fix is in:
 
    ```bash
-   steer commit-gate mine register \
+   steer intervention register \
      --class "stale test-count claim" \
      --match 'YOUR REGEX' \
      --kind defect \
@@ -294,7 +299,7 @@ For each accepted review candidate:
 
    `register` computes the pre-install baseline and refuses a regex with no baseline, since an unmatched class can never be scored. Use `--kind false-positive` for reviewer suppressions; it scores against rejected findings instead of accepted ones.
 
-   **A scope is required.** It names the opportunity window the class is measured over, and it is frozen at register time. Pass `--scope-all` for every chain, or one or both of `--scope-repo REGEX` (matches the repository root basename) and `--scope-path REGEX` (matches a repo-relative changed path); two predicates combine with AND. Scope repo and path metadata only — never the finding text. Selecting chains on the failure content is the bias the scope exists to remove, so a `check`-tier fix in Go code scopes to `--scope-path '\.go$'`, not to the finding's words. The baseline `register` reports is restricted to the scope and to chains that carry an adjudication; widen the scope if it reads as zero, and check `steer commit-gate backfill --apply` first, because unresolved rows shrink the baseline the write can see.
+   **A scope is required.** It names the opportunity window the class is measured over, and it is frozen at register time. Pass `--scope-all` for every chain, or any of `--scope-harness IDS` (exact harness ids — `claude-code`, `codex` — repeatable or comma-separated), `--scope-repo REGEX` (matches the repository root basename) and `--scope-path REGEX` (matches a repo-relative changed path); the predicates combine with AND. Scope to a harness when the fix exists in only one of them: a guard installed in Codex alone must not be measured over Claude Code's chains. Scope repo and path metadata only — never the finding text. Selecting chains on the failure content is the bias the scope exists to remove, so a `check`-tier fix in Go code scopes to `--scope-path '\.go$'`, not to the finding's words. The baseline `register` reports is restricted to the scope and to chains that carry an adjudication; widen the scope if it reads as zero, and check `steer commit-gate backfill --apply` first, because unresolved rows shrink the baseline the write can see.
 
    **`--tier steer` additionally requires `--hook-id`** — the steer-manifest key, which is also the `hook_name` in `hooks/steer-audit.jsonl`. That id makes the audit-log join deterministic. Reconstructing it later from `target` means searching the manifest for a path, and the manifest stops describing a hook the moment this loop renames or retires it. `register` also copies the rule text and `rule_hash` from the manifest, so the join survives a rename.
 
@@ -305,7 +310,7 @@ For each accepted review candidate:
 For each review candidate you examine and refuse, record the refusal:
 
 ```bash
-steer commit-gate mine reject \
+steer intervention reject \
   --class "within-chain repeat finding" \
   --match 'YOUR REGEX' \
   --scope-all \
@@ -313,9 +318,9 @@ steer commit-gate mine reject \
   --reopen "the observation that would change this answer"
 ```
 
-Author the regex the same way as for `register`, and test it with `match` first — a rejection whose regex matches nothing cannot recognise the class when it returns, so `reject` refuses one, exactly as `register` does. A rejection also takes a frozen scope, on the same `--scope-all` / `--scope-repo` / `--scope-path` rule as `register`: it is the window the class's growth is watched over if the refusal is ever revisited.
+Author the regex the same way as for `register`, and test it with `match` first — a rejection whose regex matches nothing cannot recognise the class when it returns, so `reject` refuses one, exactly as `register` does. A rejection also takes a frozen scope, on the same `--scope-all` / `--scope-harness` / `--scope-repo` / `--scope-path` rule as `register`: it is the window the class's growth is watched over if the refusal is ever revisited.
 
-A legacy record written before scopes existed carries no scope. `steer commit-gate mine scope <id> --scope-…` installs one: it sets the scope once, recomputes the baseline over the eligible chains, and opens a fresh after-window at the migration moment so inspecting the record's own history cannot pick a scope that flatters it. An installed scope is frozen — correct one by retiring the record and registering afresh.
+A legacy record written before scopes existed carries no scope. `steer intervention scope <id> --scope-…` installs one: it sets the scope once, recomputes the baseline over the eligible chains, and opens a fresh after-window at the migration moment so inspecting the record's own history cannot pick a scope that flatters it. An installed scope is frozen — correct one by retiring the record and registering afresh.
 
 `--reason` and `--reopen` are both required, and the second is the load-bearing one. "It is not mechanizable" is a verdict on today's instrument, not a permanent property of the class. Name what would have to change: a signal that starts being persisted, a rate that triples, a tier that becomes cheap. The durable version of that reasoning belongs in a durable design note; the record here is what fires at re-proposal time.
 

@@ -256,9 +256,9 @@ func Collect(opts Options) (*SystemStatus, error) {
 }
 
 // scoreInventory recomputes every live intervention's verdict. Reworked and
-// removed records are dropped as history — the filter Refresh applies. A
-// session-unit record the chain engine cannot score is carried with verdict
-// "unscored" rather than scored against the wrong corpus.
+// removed records are dropped as history — the filter Refresh applies. A record
+// from a corpus the chain engine cannot score is carried with verdict "unscored"
+// rather than scored against the wrong corpus; the registry decides which.
 func scoreInventory(records []mine.Record, chains []mine.Chain, minAfter int) []ScoredIntervention {
 	out := []ScoredIntervention{}
 	for _, r := range records {
@@ -267,7 +267,7 @@ func scoreInventory(records []mine.Record, chains []mine.Chain, minAfter int) []
 			continue
 		}
 		tier := str(r["tier"])
-		if str(r["unit"]) == "session" {
+		if !mine.Scorable(r) {
 			out = append(out, ScoredIntervention{
 				ID:                str(r["id"]),
 				Class:             str(r["class"]),

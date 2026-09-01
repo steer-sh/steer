@@ -5,10 +5,11 @@ import "github.com/steer-sh/steer-cli/internal/gate/mine"
 // Scope is a record's frozen eligibility rule, carried verbatim from the stored
 // record. A nil pointer is a legacy record with no scope at all.
 type Scope struct {
-	Version int    `json:"version"`
-	All     bool   `json:"all,omitempty"`
-	Repo    string `json:"repo,omitempty"`
-	Path    string `json:"path,omitempty"`
+	Version int      `json:"version"`
+	All     bool     `json:"all,omitempty"`
+	Harness []string `json:"harness,omitempty"`
+	Repo    string   `json:"repo,omitempty"`
+	Path    string   `json:"path,omitempty"`
 }
 
 // Coverage accounts for one window's chains against the scope. Eligible chains are
@@ -39,12 +40,20 @@ func ScopeOf(v any) *Scope {
 	if m == nil {
 		return nil
 	}
-	return &Scope{
+	sc := &Scope{
 		Version: numInt(m["version"]),
 		All:     truthy(m["all"]),
 		Repo:    str(m["repo"]),
 		Path:    str(m["path"]),
 	}
+	if list, ok := m["harness"].([]any); ok {
+		for _, item := range list {
+			if id := str(item); id != "" {
+				sc.Harness = append(sc.Harness, id)
+			}
+		}
+	}
+	return sc
 }
 
 // CoverageOf reads one window's scope accounting.

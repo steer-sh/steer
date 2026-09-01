@@ -57,6 +57,18 @@ func authorModelsIn(chains []Chain) []string {
 	return seen
 }
 
+// harnessesIn is the union of harnesses over the chains that carry the stamp.
+func harnessesIn(chains []Chain) []string {
+	var seen []string
+	for _, ch := range chains {
+		if ch.HarnessKnown {
+			seen = appendUnique(seen, ch.Harness)
+		}
+	}
+	sort.Strings(seen)
+	return seen
+}
+
 // reposIn is the union of repository basenames over the chains that carry one.
 func reposIn(chains []Chain) []string {
 	var seen []string
@@ -95,6 +107,7 @@ func Confounds(before, after []Chain, authored string) (hard, soft []Confound) {
 		of   func([]Chain) []string
 	}{
 		{"host", sortedHosts},
+		{"harness", harnessesIn},
 		{"repo", reposIn},
 		{"author_model", authorModelsIn},
 		{"path_kind", pathKindsIn},

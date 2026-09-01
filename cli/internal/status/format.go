@@ -53,6 +53,9 @@ func ScopePhrase(sc *cadence.Scope) string {
 		return "all"
 	}
 	parts := []string{}
+	if len(sc.Harness) > 0 {
+		parts = append(parts, "harness="+strings.Join(sc.Harness, "|"))
+	}
 	if sc.Repo != "" {
 		parts = append(parts, "repo=/"+sc.Repo+"/")
 	}

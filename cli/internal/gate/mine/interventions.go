@@ -19,15 +19,6 @@ type Record = map[string]any
 // refusalStatuses are the record statuses that installed no gate.
 var refusalStatuses = map[string]bool{"rejected": true, "reopened": true}
 
-// The candidate-record contract's corpus and unit tags. The mine engine reads only
-// the commit-review ledger, one row per chain, so every record it writes is
-// review-findings by chain. Transcript-friction / session records are authored by
-// the report miner, not here.
-const (
-	CorpusReviewFindings = "review-findings"
-	UnitChain            = "chain"
-)
-
 // InterventionsPath is the log's location: inside the state directory, tracked while the
 // adjudication shards beside it are gitignored.
 func InterventionsPath(stateDir string) string {
@@ -232,6 +223,9 @@ func SteerHookFacts(hookID string) map[string]any {
 // producing the JSON shape mine.py emits (rate and p as Python floats; empty lists as
 // [], not null; instrument null when the record predates the field).
 func ScoreRecord(record Record, chains []Chain, minAfter int) (map[string]any, error) {
+	if err := requireScorable(record); err != nil {
+		return nil, err
+	}
 	pattern, err := compilePattern(str(record["match"]))
 	if err != nil {
 		return nil, err
