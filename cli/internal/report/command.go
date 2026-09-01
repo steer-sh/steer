@@ -342,11 +342,10 @@ func isLetter(b byte) bool {
 // cause, so it is the failurePattern match that carries the least.
 const tracebackOpener = "Traceback (most recent call last)"
 
-// exceptionLine has the shape of a Python exception: a dotted identifier whose
-// last segment is capitalized, ending the line or introducing a message. A
-// runner's banner under a traceback does not — `--- FAIL:` opens with a dash,
-// `make: *** [test] Error 1` is lowercase, and `FAILED tests/x.py` carries no
-// colon.
+// exceptionLine is the LAYOUT half of the shape test: a bare dotted identifier
+// that ends the line or introduces a message. `--- FAIL:` opens with a dash and
+// `FAILED tests/x.py` carries no colon, so neither reaches isExceptionName,
+// which decides whether the identifier is Python's.
 var exceptionLine = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*(?::|$)`)
 
 // chainNotes are the sentences CPython prints between the tracebacks of one
@@ -429,17 +428,33 @@ func isChainNote(body string) bool {
 }
 
 // isExceptionName reports whether the line's leading identifier names a Python
-// exception type. Most are capitalized, and the lower-case ones the standard
-// library ships — `re.error`, `struct.error`, `curses.error` — are qualified by
-// their module. A runner's banner is neither: `make:` is one bare lower-case
-// word.
+// exception type. Every test runs on the TAIL — the segment after the last dot
+// — because the module prefix is not the type: `logger.ERROR:` carries lower
+// case in `logger` while naming no exception at all.
+//
+// An exception type is CamelCase, so a tail with no lower-case letter is a
+// status marker (`FAIL:`, `ERROR:`) or a file extension (`TestFoo.C:10:`) and
+// never Python's. A leading underscore is part of a private type's name, not
+// part of its case. The lower-case types the standard library ships all carry
+// `error` in the tail — `re.error`, `socket.gaierror`, `ftplib.error_perm` —
+// and are qualified by their module, which is what keeps `test_foo.py:10:` out.
 func isExceptionName(body string) bool {
 	name := body
 	if i := strings.IndexByte(name, ':'); i >= 0 {
 		name = name[:i]
 	}
-	if strings.Contains(name, ".") {
+	tail := name
+	dotted := false
+	if i := strings.LastIndexByte(tail, '.'); i >= 0 {
+		tail = tail[i+1:]
+		dotted = true
+	}
+	tail = strings.TrimLeft(tail, "_")
+	if tail == "" || !strings.ContainsAny(tail, "abcdefghijklmnopqrstuvwxyz") {
+		return false
+	}
+	if tail[0] >= 'A' && tail[0] <= 'Z' {
 		return true
 	}
-	return name != "" && name[0] >= 'A' && name[0] <= 'Z'
+	return dotted && strings.Contains(tail, "error")
 }

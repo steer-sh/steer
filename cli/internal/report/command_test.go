@@ -181,12 +181,38 @@ func TestTracebackKeysOnTheExceptionNotTheOpener(t *testing.T) {
 		t.Errorf("captured past the end of the block: %q", got)
 	}
 
+	// A runner's status marker at the opener's own depth is not an exception:
+	// an exception type is CamelCase, and a compiler diagnostic's dotted head
+	// names a file extension rather than a module.
+	for _, banner := range []string{
+		"Traceback (most recent call last):\n  File \"x.py\", line 1\nFAIL: test_case (tests.TestClass)",
+		"Traceback (most recent call last):\n  File \"x.py\", line 1\nERROR: test_case",
+		"Traceback (most recent call last):\n  File \"x.py\", line 1\nFAILED",
+		"Traceback (most recent call last):\n  File \"x.py\", line 1\ntest_foo.py:10: error",
+		"Traceback (most recent call last):\n  File \"x.py\", line 1\nbuild.ninja:1: error",
+		"Traceback (most recent call last):\n  File \"x.py\", line 1\nlogger.ERROR: connection failed",
+		"Traceback (most recent call last):\n  File \"x.py\", line 1\nrunner.FAIL: test_x",
+		"Traceback (most recent call last):\n  File \"x.py\", line 1\nTestFoo.C:10: error",
+	} {
+		if got := tracebackException(banner); got != "" {
+			t.Errorf("runner marker read as an exception: %q", got)
+		}
+	}
+
 	// A lower-case standard-library exception is qualified by its module, which
 	// a runner's banner never is.
-	lower := "Traceback (most recent call last):\n  File \"x.py\", line 1\n" +
-		"re.error: bad escape \\q at position 0"
-	if got := tracebackException(lower); got != "re.error: bad escape \\q at position 0" {
-		t.Errorf("lower-case stdlib exception: %q", got)
+	for _, want := range []string{
+		"re.error: bad escape at position 0",
+		"socket.gaierror: [Errno 8] nodename nor servname provided",
+		"socket.herror: host not found",
+		"ftplib.error_perm: 550 no such file",
+		"_InternalError: failed",
+		"_ssl._SSLError: certificate verify failed",
+	} {
+		text := "Traceback (most recent call last):\n  File \"x.py\", line 1\n" + want
+		if got := tracebackException(text); got != want {
+			t.Errorf("exception %q read as %q", want, got)
+		}
 	}
 
 	// A chain cut off before its outer exception keeps the inner one, which
