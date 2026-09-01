@@ -93,3 +93,49 @@ func TestPendingCounts(t *testing.T) {
 		t.Errorf("want 1 candidate and 2 ineffective, got %d and %d", cand, ineff)
 	}
 }
+
+// TestMasterNudgeFiresOncePerKey pins that a stale guard master is a standing
+// condition: it nudges when the key changes and stays quiet after.
+func TestMasterNudgeFiresOncePerKey(t *testing.T) {
+	dir := t.TempDir()
+
+	if ShouldNudgeMaster(dir, "") {
+		t.Error("an empty key nudged")
+	}
+	if !ShouldNudgeMaster(dir, "claude-code/global:stale:aaaaaaaa") {
+		t.Fatal("a first stale master did not nudge")
+	}
+	if err := WriteNudge(dir, LoadNudge(dir).WithMaster("claude-code/global:stale:aaaaaaaa")); err != nil {
+		t.Fatalf("WriteNudge returned error: %v", err)
+	}
+	if ShouldNudgeMaster(dir, "claude-code/global:stale:aaaaaaaa") {
+		t.Error("the same stale master nudged twice")
+	}
+	if !ShouldNudgeMaster(dir, "claude-code/global:stale:bbbbbbbb") {
+		t.Error("a different stale runtime did not nudge")
+	}
+
+	// A repaired master clears the key, so the same staleness nudges again if it
+	// comes back. The cadence hook writes this even when it emits nothing.
+	if err := WriteNudge(dir, LoadNudge(dir).WithMaster("")); err != nil {
+		t.Fatalf("WriteNudge returned error: %v", err)
+	}
+	if !ShouldNudgeMaster(dir, "claude-code/global:stale:aaaaaaaa") {
+		t.Error("a returning staleness did not nudge after the key was cleared")
+	}
+}
+
+// TestQueueNudgeCarriesTheMasterKey pins that the two nudges share one record:
+// emitting a queue line must not silently clear the master key.
+func TestQueueNudgeCarriesTheMasterKey(t *testing.T) {
+	dir := t.TempDir()
+	key := "claude-code/global:unknown:"
+	if err := WriteNudge(dir, LoadNudge(dir).WithMaster(key)); err != nil {
+		t.Fatalf("WriteNudge returned error: %v", err)
+	}
+	q := &Queue{Candidates: []Candidate{{Corpus: "transcript-friction", Pattern: "c"}}}
+	_, rec := ShouldNudge(dir, q, "hash", time.Now())
+	if rec.Master != key {
+		t.Fatalf("master key: got %q, want %q", rec.Master, key)
+	}
+}

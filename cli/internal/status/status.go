@@ -20,6 +20,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
 	"github.com/steer-sh/steer-cli/internal/gate/resolve"
+	"github.com/steer-sh/steer-cli/internal/guard"
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/presets"
 	"github.com/steer-sh/steer-cli/internal/sessions"
@@ -28,7 +29,7 @@ import (
 // StatusVersion is the schema version of the emitted snapshot. It mirrors
 // report.DigestVersion: --json is a stable agent contract, so bump this whenever
 // the shape or semantics of SystemStatus change.
-const StatusVersion = 4
+const StatusVersion = 5
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20
@@ -174,6 +175,39 @@ type ScopeArming struct {
 	Trust string `json:"trust"`
 }
 
+// Master runtime states. The stamp names the runtime spliced into a registered
+// master; the comparison is against the running binary's own runtime digest.
+const (
+	MasterCurrent       = "current"
+	MasterStale         = "stale"
+	MasterUnknown       = "unknown"
+	MasterNotRegistered = "not-registered"
+)
+
+// MasterRuntime is one harness and scope's registered master and the runtime it
+// carries. It reads the REGISTERED file, never the one the store resolves to: a
+// migrated machine holds a master at both paths, and reporting the healthy new
+// file while the stale registered one runs is the exact failure the stamp exists
+// to end.
+type MasterRuntime struct {
+	Harness string `json:"harness"`
+	Scope   string `json:"scope"`
+	Path    string `json:"path,omitempty"`
+	// Runtime is the master's runtime digest, "" when the file carries no stamp.
+	Runtime string `json:"runtime,omitempty"`
+	// Version is the CLI that wrote it, "" when unstamped.
+	Version string `json:"version,omitempty"`
+	// Expected is the running binary's runtime digest.
+	Expected string `json:"expected"`
+	State    string `json:"state"`
+}
+
+// Stale reports whether this master needs a rebuild. An unstamped master is
+// unknown rather than current: every store built before the stamp existed is
+// unstamped, so treating absence as up to date would report exactly the machines
+// that need the rebuild as healthy.
+func (m MasterRuntime) Stale() bool { return m.State == MasterStale || m.State == MasterUnknown }
+
 // Posture is the arming and instrument state — what is guarding, and with what.
 type Posture struct {
 	Instrument string        `json:"instrument"`
@@ -185,6 +219,8 @@ type Posture struct {
 	// ledger rows still owing a transcript join — evidence the scorer withholds on.
 	Resolver   []ScopeArming `json:"resolver"`
 	Unresolved int           `json:"unresolved_rows"`
+	// Masters is the runtime provenance of each registered guard master.
+	Masters []MasterRuntime `json:"masters"`
 }
 
 // AttentionQueue is the subset of the loop needing action: the cadence queue
@@ -422,6 +458,7 @@ func collectPosture(cfg gate.Config) Posture {
 		CommitGate: []ScopeArming{},
 		Denials:    []ScopeArming{},
 		Resolver:   []ScopeArming{},
+		Masters:    []MasterRuntime{},
 		Unresolved: resolve.CountUnresolved(cfg),
 	}
 	cwd, _ := os.Getwd()
@@ -471,6 +508,7 @@ func collectPosture(cfg gate.Config) Posture {
 			Timeout:    timeout,
 			Trust:      TrustNotApplicable,
 		})
+		p.Masters = append(p.Masters, masterRuntimes(scope)...)
 		codexArmed, codexTimeout := codex.ResolverArming(scope, cwd)
 		p.Resolver = append(p.Resolver, ScopeArming{
 			Harness:    codexID,
@@ -482,6 +520,58 @@ func collectPosture(cfg gate.Config) Posture {
 		})
 	}
 	return p
+}
+
+// MasterRuntimes reports each harness's registered master in the named scopes.
+// It is the cheap read — two configuration files and a header line each — for a
+// caller that needs the runtime posture without a full Collect.
+func MasterRuntimes(scopes ...string) []MasterRuntime {
+	out := []MasterRuntime{}
+	for _, scope := range scopes {
+		out = append(out, masterRuntimes(scope)...)
+	}
+	return out
+}
+
+// guardRegistrars are the harnesses a guard master can be registered in. The
+// store is shared, so the registration is per harness and so is its stamp.
+func guardRegistrars() []harness.Registrar {
+	return []harness.Registrar{claude.Registrar{}, codex.Registrar{}}
+}
+
+// masterRuntimes reads each harness's registered master in one scope and reports
+// the runtime it carries. Every read fails soft: an unreadable configuration
+// yields a not-registered row, never an error.
+func masterRuntimes(scope string) []MasterRuntime {
+	expected := guard.RuntimeDigest()
+	out := make([]MasterRuntime, 0, len(guardRegistrars()))
+	for _, registrar := range guardRegistrars() {
+		row := MasterRuntime{
+			Harness:  string(registrar.Harness().ID),
+			Scope:    scope,
+			Expected: expected,
+			State:    MasterNotRegistered,
+		}
+		path, err := registrar.RegisteredMasterPath(scope)
+		if err != nil || path == "" {
+			out = append(out, row)
+			continue
+		}
+		row.Path = path
+		stamp, ok := guard.ReadStamp(path)
+		if !ok {
+			row.State = MasterUnknown
+			out = append(out, row)
+			continue
+		}
+		row.Runtime, row.Version = stamp.Runtime, stamp.Version
+		row.State = MasterStale
+		if stamp.Runtime == expected {
+			row.State = MasterCurrent
+		}
+		out = append(out, row)
+	}
+	return out
 }
 
 // trustState reports what this machine can honestly say about a registration's trust.
@@ -553,8 +643,18 @@ func denialsCount() int {
 }
 
 // auditFirings counts the block decisions the global master hook logged. The log
-// sits beside the master hook; a missing or unreadable log reads as zero.
+// sits beside the master that wrote it, so this reads beside the REGISTERED
+// master: a migrated machine holds a log at both paths, and the one being
+// appended to is the one the harness invokes. It falls back to the resolved
+// store when no harness registers a master. A missing log reads as zero.
 func auditFirings() int {
+	for _, registrar := range guardRegistrars() {
+		path, err := registrar.RegisteredMasterPath(claude.GlobalScope)
+		if err != nil || path == "" {
+			continue
+		}
+		return countLines(filepath.Join(filepath.Dir(path), claude.AuditLogName))
+	}
 	dir, err := claude.GetHooksDir(claude.GlobalScope)
 	if err != nil {
 		return 0

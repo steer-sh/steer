@@ -20,9 +20,9 @@ GIT_COMMIT="$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo "u
 BUILD_DATE="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
 LDFLAGS="-s -w"
-LDFLAGS="$LDFLAGS -X 'github.com/steer-sh/steer-cli/cmd.Version=${VERSION}'"
-LDFLAGS="$LDFLAGS -X 'github.com/steer-sh/steer-cli/cmd.GitCommit=${GIT_COMMIT}'"
-LDFLAGS="$LDFLAGS -X 'github.com/steer-sh/steer-cli/cmd.BuildDate=${BUILD_DATE}'"
+LDFLAGS="$LDFLAGS -X 'github.com/steer-sh/steer-cli/internal/version.Version=${VERSION}'"
+LDFLAGS="$LDFLAGS -X 'github.com/steer-sh/steer-cli/internal/version.GitCommit=${GIT_COMMIT}'"
+LDFLAGS="$LDFLAGS -X 'github.com/steer-sh/steer-cli/internal/version.BuildDate=${BUILD_DATE}'"
 
 echo "Building steer ${VERSION} (${GIT_COMMIT})..."
 echo ""

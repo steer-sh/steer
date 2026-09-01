@@ -163,4 +163,9 @@ func (Registrar) MasterRegistered(scope string) (bool, error) {
 	return MasterArming(scope, ".").Registered, nil
 }
 
+// RegisteredMasterPath reads back the master path hooks.json names.
+func (Registrar) RegisteredMasterPath(scope string) (string, error) {
+	return hookstore.MasterPathFromCommand(MasterArming(scope, ".").Command), nil
+}
+
 var _ harness.Registrar = Registrar{}

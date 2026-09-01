@@ -5,6 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/presets"
 )
 
@@ -13,6 +14,9 @@ func (m *Model) presetsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "s":
 		m.syncPresets()
+		return m, nil
+	case "b":
+		m.rebuildMaster()
 		return m, nil
 	case "enter":
 		m.togglePreset()
@@ -69,6 +73,22 @@ func (m *Model) syncPresets() {
 	}
 	m.refresh()
 	m.note("sync: %d checked, %d reinstalled, %d up-to-date", res.CheckedFactory, res.Reinstalled, res.UpToDate)
+}
+
+// rebuildMaster regenerates the master hook and re-registers it, through the same
+// package function `steer hooks rebuild` calls.
+func (m *Model) rebuildMaster() {
+	res, err := claude.RebuildMaster(m.scope, m.targets...)
+	if err != nil {
+		m.note("rebuild error: %v", err)
+		return
+	}
+	m.refresh()
+	if res.Hooks == 0 {
+		m.note("rebuild: no guards in %s; the master was removed", m.scope)
+		return
+	}
+	m.note("rebuild: %d guard(s), runtime %s", res.Hooks, res.Stamp.Runtime)
 }
 
 // viewPresets renders the catalog roster and the registered hooks below it.

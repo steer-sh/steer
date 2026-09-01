@@ -1,6 +1,10 @@
 package tui
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/steer-sh/steer-cli/internal/status"
+)
 
 // viewHealth is the one read-only panel: corpora, the team lockfile, and the
 // instrument the loop measures with.
@@ -21,6 +25,20 @@ func (m *Model) viewHealth() string {
 
 	if n := m.snap.Posture.Unresolved; n > 0 {
 		out += "   " + warn(fmt.Sprintf("%d ledger row(s) owe a transcript join — the scorer withholds on them\n", n))
+	}
+
+	out += section("Guard master runtime")
+	for _, master := range m.snap.Posture.Masters {
+		phrase := status.MasterPhrase(master)
+		if phrase == "" {
+			continue
+		}
+		label := fmt.Sprintf("%s %s", master.Harness, master.Scope)
+		if master.Stale() {
+			out += fmt.Sprintf("   %-20s %s\n", label, warn(phrase))
+			continue
+		}
+		out += fmt.Sprintf("   %-20s %s\n", label, ok(phrase))
 	}
 
 	out += section("Telemetry")

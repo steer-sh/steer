@@ -166,7 +166,7 @@ func intPtr(n int) *int           { return &n }
 // so a renamed or reordered json tag fails here, the agent-contract guard.
 func TestJSONContractIsStable(t *testing.T) {
 	s := &SystemStatus{
-		StatusVersion: 4,
+		StatusVersion: 5,
 		GeneratedAt:   "2026-01-01T00:00:00Z",
 		Posture: Posture{
 			Instrument: "agy@sha", Reviewer: "gemini", Ledger: "/l.jsonl",
@@ -180,6 +180,11 @@ func TestJSONContractIsStable(t *testing.T) {
 			Resolver: []ScopeArming{
 				{Harness: "claude-code", Scope: "global", Registered: true, Effective: true, Timeout: 30, Trust: TrustNotApplicable},
 				{Harness: "codex", Scope: "global", Registered: false, Effective: false, Trust: TrustMissing},
+			},
+			Masters: []MasterRuntime{
+				{Harness: "claude-code", Scope: "global", Path: "/h/steer-hooks.py",
+					Runtime: "aaaaaaaa", Version: "0.1.0", Expected: "bbbbbbbb", State: MasterStale},
+				{Harness: "codex", Scope: "global", Expected: "bbbbbbbb", State: MasterNotRegistered},
 			},
 			Unresolved: 4,
 		},
@@ -245,7 +250,7 @@ func TestJSONContractIsStable(t *testing.T) {
 }
 
 const goldenStatusJSON = `{
-  "status_version": 4,
+  "status_version": 5,
   "generated_at": "2026-01-01T00:00:00Z",
   "posture": {
     "instrument": "agy@sha",
@@ -295,7 +300,24 @@ const goldenStatusJSON = `{
         "trust": "missing"
       }
     ],
-    "unresolved_rows": 4
+    "unresolved_rows": 4,
+    "masters": [
+      {
+        "harness": "claude-code",
+        "scope": "global",
+        "path": "/h/steer-hooks.py",
+        "runtime": "aaaaaaaa",
+        "version": "0.1.0",
+        "expected": "bbbbbbbb",
+        "state": "stale"
+      },
+      {
+        "harness": "codex",
+        "scope": "global",
+        "expected": "bbbbbbbb",
+        "state": "not-registered"
+      }
+    ]
   },
   "interventions": [
     {

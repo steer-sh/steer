@@ -1,6 +1,9 @@
 package claude
 
-import "github.com/steer-sh/steer-cli/internal/harness"
+import (
+	"github.com/steer-sh/steer-cli/internal/harness"
+	"github.com/steer-sh/steer-cli/internal/hookstore"
+)
 
 // Registrar adapts Claude Code to the guard lifecycle: settings.json for the
 // master hook, CLAUDE.md for the rules.
@@ -23,19 +26,27 @@ func (Registrar) InstructionPath(scope string) (string, error) { return GetClaud
 
 // MasterRegistered reads settings.json rather than the store, because a hook file
 // present in the store proves nothing about whether Claude Code runs it.
-func (Registrar) MasterRegistered(scope string) (bool, error) {
+func (r Registrar) MasterRegistered(scope string) (bool, error) {
+	path, err := r.RegisteredMasterPath(scope)
+	return path != "", err
+}
+
+// RegisteredMasterPath reads back the master path settings.json names. It asks
+// each command for a master path and keeps looking while the answer is empty,
+// so an unrelated entry ahead of the master never reads as "no master".
+func (Registrar) RegisteredMasterPath(scope string) (string, error) {
 	settings, err := LoadSettings(scope)
 	if err != nil {
-		return false, err
+		return "", err
 	}
 	for _, entry := range settings.Hooks.PreToolUse {
 		for _, hook := range entry.Hooks {
-			if IsSteerCommand(hook.Command) {
-				return true, nil
+			if path := hookstore.MasterPathFromCommand(hook.Command); path != "" {
+				return path, nil
 			}
 		}
 	}
-	return false, nil
+	return "", nil
 }
 
 var _ harness.Registrar = Registrar{}

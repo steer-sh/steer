@@ -202,3 +202,17 @@ func writeWhole(path string, content []byte, mode os.FileMode) error {
 	}
 	return os.Rename(tmpPath, path)
 }
+
+// MasterPathFromCommand reads the master's path out of a registered hook command
+// (`python3 <path> [flags]`). A registration is the only record of which master a
+// harness actually runs, and on a migrated machine that is not always the one
+// Resolve answers: the legacy files are left in place for older binaries, so both
+// paths can hold a master. The result is "" when the command runs no master.
+func MasterPathFromCommand(command string) string {
+	for _, field := range strings.Fields(command) {
+		if strings.HasSuffix(field, MasterName) {
+			return field
+		}
+	}
+	return ""
+}

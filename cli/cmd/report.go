@@ -6,14 +6,17 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/cadence"
+	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/evidence"
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/report"
+	"github.com/steer-sh/steer-cli/internal/status"
 	"github.com/steer-sh/steer-cli/internal/transcript"
 )
 
@@ -243,25 +246,44 @@ func runCadence() {
 		spawnRefresh()
 	}
 
-	queueBytes, err := os.ReadFile(cadence.QueuePath(dir))
-	if err != nil {
-		return // no queue yet, or unreadable — nothing to nudge about
+	rec := cadence.LoadNudge(dir)
+	lines := []string{}
+
+	if queueBytes, err := os.ReadFile(cadence.QueuePath(dir)); err == nil {
+		if q, err := cadence.ReadQueue(dir); err == nil {
+			hash := cadence.QueueHash(queueBytes)
+			emit, next := cadence.ShouldNudge(dir, q, hash, cadence.LastRefresh(dir))
+			if emit {
+				candidates, ineffective := cadence.PendingCounts(q)
+				lines = append(lines, fmt.Sprintf(
+					"steer: %d candidate(s) and %d ineffective hook(s) pending — run /steer-report",
+					candidates, ineffective))
+				rec = next
+			}
+		}
 	}
-	q, err := cadence.ReadQueue(dir)
-	if err != nil {
+
+	// A stale guard master is a standing condition, not a queue change: the store
+	// keeps whatever runtime it was last built with, and upgrading the CLI
+	// repairs nothing until something rebuilds it.
+	key, labels, scope := staleMasters()
+	if cadence.ShouldNudgeMaster(dir, key) {
+		lines = append(lines, fmt.Sprintf(
+			"steer: the guard master runs an older runtime (%s) — run: steer hooks rebuild --scope %s",
+			strings.Join(labels, ", "), scope))
+	}
+	if len(lines) == 0 {
+		// Nothing to say, but a repaired master still has to clear its key: a
+		// record left behind would suppress the nudge if that same staleness
+		// came back.
+		if cadence.LoadNudge(dir).Master != key {
+			_ = cadence.WriteNudge(dir, rec.WithMaster(key))
+		}
 		return
 	}
-	refresh := cadence.LastRefresh(dir)
-	hash := cadence.QueueHash(queueBytes)
+	rec = rec.WithMaster(key)
 
-	emit, rec := cadence.ShouldNudge(dir, q, hash, refresh)
-	if !emit {
-		return
-	}
-
-	candidates, ineffective := cadence.PendingCounts(q)
-	msg := fmt.Sprintf("steer: %d candidate(s) and %d ineffective hook(s) pending — run /steer-report",
-		candidates, ineffective)
+	msg := strings.Join(lines, "\n")
 	out, err := json.Marshal(sessionStartOutput{
 		SystemMessage: msg,
 		HookSpecificOutput: sessionStartHookOutput{
@@ -275,6 +297,29 @@ func runCadence() {
 	fmt.Println(string(out))
 	// Persist only after a successful emit, so a failed print re-nudges next time.
 	_ = cadence.WriteNudge(dir, rec)
+}
+
+// staleMasters names the scopes whose registered guard master carries a runtime
+// other than this binary's, and a key that changes with them. An empty key means
+// nothing is stale. Every read fails soft: an unreadable configuration reports no
+// master rather than a false alarm.
+func staleMasters() (key string, labels []string, scope string) {
+	parts := []string{}
+	for _, m := range status.MasterRuntimes(claude.GlobalScope, claude.ProjectScope) {
+		if !m.Stale() {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s/%s:%s:%s", m.Harness, m.Scope, m.State, m.Runtime))
+		labels = append(labels, fmt.Sprintf("%s %s scope", m.Harness, m.Scope))
+		if scope == "" {
+			scope = m.Scope
+		}
+	}
+	if len(parts) == 0 {
+		return "", nil, ""
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, "|"), labels, scope
 }
 
 // spawnRefresh starts 'steer report refresh' detached, so a stale queue refreshes

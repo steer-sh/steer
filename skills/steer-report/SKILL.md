@@ -138,7 +138,7 @@ Digest schema (`digest_version: 2`):
 
 The digest is size-capped: the CLI evicts the lowest-scoring clusters to fit, and reports honesty in `stats`.
 
-### The `steer status --json` contract (`status_version: 4`)
+### The `steer status --json` contract (`status_version: 5`)
 
 Step 1 reads this snapshot for posture and the full class inventory. The unit is
 the failure class and its verdict, not the hook count. This schema is byte-shared
@@ -158,6 +158,16 @@ Fields:
   joins ledger rows to transcripts; it arms with the commit gate on the same
   scope. `unresolved_rows` counts the rows still owing that join — the scorer
   withholds on them, and `steer commit-gate backfill --apply` clears them.
+  `masters[]` is the guard master's runtime provenance, one row per harness per
+  scope: `path`, `runtime` (the digest of the Python runtime spliced into it),
+  `version` (the steer that wrote it), `expected` (this binary's runtime digest)
+  and `state`. `state` is `current`, `stale` (an older runtime, so a firing
+  writes fewer audit fields than the scorer joins on), `unknown` (an unstamped
+  master — every store built before the stamp existed, which never reads as
+  current) or `not-registered`. The row reads the REGISTERED master, not the one
+  the store resolves to: a migrated machine holds a master at both paths. **Act
+  on `stale` or `unknown`:** run `steer hooks rebuild --scope <scope>`, which
+  regenerates the master AND re-registers it in one operation.
 - `interventions[]` — the **full** scored inventory. It carries every live
   class, `effective` ones included. Each row: `id`, `class`, `match` (the regex
   that defines the class), `tier`, `target`, `status` (`active` or `rejected`),

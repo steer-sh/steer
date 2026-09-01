@@ -133,3 +133,19 @@ func TrustPhrase(trust string) string {
 	}
 	return ""
 }
+
+// MasterPhrase names one registered master's runtime state in one clause. The
+// empty string means the harness registers no master, which the caller renders
+// as its own row or omits.
+func MasterPhrase(m MasterRuntime) string {
+	switch m.State {
+	case MasterCurrent:
+		return fmt.Sprintf("runtime %s, steer %s", m.Runtime, m.Version)
+	case MasterStale:
+		return fmt.Sprintf("runtime %s is older than this binary's %s — run: steer hooks rebuild --scope %s",
+			m.Runtime, m.Expected, m.Scope)
+	case MasterUnknown:
+		return fmt.Sprintf("runtime unknown (unstamped master) — run: steer hooks rebuild --scope %s", m.Scope)
+	}
+	return ""
+}

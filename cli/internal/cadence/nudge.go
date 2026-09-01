@@ -24,6 +24,10 @@ func NudgePath(dir string) string { return filepath.Join(dir, "last_nudge") }
 type nudgeRecord struct {
 	Hash    string `json:"hash"`
 	Refresh string `json:"refresh"`
+	// Master is the guard-master staleness key the last nudge named. A stale
+	// master is a standing condition, not a queue change, so it nudges once per
+	// distinct key and stays quiet until the key changes.
+	Master string `json:"master,omitempty"`
 }
 
 // QueueHash is the change key of the queue file: the sha256 of its bytes. The queue
@@ -51,7 +55,8 @@ func hasPending(q *Queue) bool {
 // It re-emits when the queue hash changed OR a newer refresh cycle ran since the
 // last nudge — weekly re-surface for a still-pending queue, no per-session nag.
 func ShouldNudge(dir string, q *Queue, queueHash string, refresh time.Time) (bool, nudgeRecord) {
-	rec := nudgeRecord{Hash: queueHash, Refresh: refresh.UTC().Format(time.RFC3339)}
+	prevMaster := readNudge(dir).Master
+	rec := nudgeRecord{Hash: queueHash, Refresh: refresh.UTC().Format(time.RFC3339), Master: prevMaster}
 	if !hasPending(q) {
 		return false, rec
 	}
@@ -66,6 +71,27 @@ func ShouldNudge(dir string, q *Queue, queueHash string, refresh time.Time) (boo
 	// The persisted record is RFC3339 (second precision), so compare at that
 	// resolution — otherwise sub-second jitter reads as a new cycle every session.
 	return refresh.UTC().Truncate(time.Second).After(prevRefresh), rec
+}
+
+// LoadNudge returns the persisted record, so a caller composing more than one
+// nudge line writes both halves back in one record.
+func LoadNudge(dir string) nudgeRecord { return readNudge(dir) }
+
+// ShouldNudgeMaster decides whether to name a stale guard master. An empty key
+// means every registered master carries this binary's runtime, which nudges
+// nothing and clears the record so a later staleness nudges again.
+func ShouldNudgeMaster(dir, key string) bool {
+	if key == "" {
+		return false
+	}
+	return readNudge(dir).Master != key
+}
+
+// WithMaster returns the record carrying a master key, so one write persists both
+// halves of a nudge.
+func (r nudgeRecord) WithMaster(key string) nudgeRecord {
+	r.Master = key
+	return r
 }
 
 // WriteNudge persists the last-nudged record. A write failure is non-fatal: the

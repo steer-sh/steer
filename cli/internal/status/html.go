@@ -91,6 +91,7 @@ func (s *SystemStatus) RenderHTML(w io.Writer) error {
 		"reasons": ConfoundPhrases,
 		"attrib":  AttributionPhrase,
 		"trust":   TrustPhrase,
+		"master":  MasterPhrase,
 	}).ParseFS(templateFS, "templates/dashboard.html.tmpl")
 	if err != nil {
 		return fmt.Errorf("failed to parse the dashboard template: %w", err)

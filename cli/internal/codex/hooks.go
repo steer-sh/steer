@@ -48,6 +48,9 @@ type Arming struct {
 	TrustRecordPresent bool
 	TrustStateKnown    bool
 	Path               string
+	// Command is the registered hook command verbatim, so a reader can name the
+	// file this harness actually invokes rather than the one a store resolves to.
+	Command string
 }
 
 func (a Arming) Effective() bool { return a.Registered && a.Matcher == CommitGateMatcher }
@@ -331,7 +334,7 @@ func armingFor(scope, cwd string, owns func(string) bool) Arming {
 			if !owns(command) {
 				continue
 			}
-			a.Registered, a.Matcher = true, matcher
+			a.Registered, a.Matcher, a.Command = true, matcher, command
 			if timeout, ok := hook["timeout"].(float64); ok {
 				a.Timeout = int(timeout)
 			}

@@ -112,6 +112,11 @@ type Registrar interface {
 	// MasterRegistered reports whether this harness's configuration currently
 	// invokes the master guard hook.
 	MasterRegistered(scope string) (bool, error)
+	// RegisteredMasterPath names the master file this harness's configuration
+	// invokes, or "" when it invokes none. A migrated machine can hold a master
+	// at both the legacy and the neutral path, so a reader asking about the
+	// runtime in force has to ask the registration, never the store.
+	RegisteredMasterPath(scope string) (string, error)
 }
 
 // Targets resolves a lifecycle target list. An empty list means the caller named

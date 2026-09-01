@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/steer-sh/steer-cli/internal/guard"
+	"github.com/steer-sh/steer-cli/internal/version"
 )
 
 // HookFile describes an individual (non-master) hook file on disk.
@@ -578,8 +579,12 @@ func generateMasterHook(hookFunctions []HookFunction, importLines []string, hook
 Master steer hook - consolidated from individual hooks.
 Generated automatically - do not edit manually.
 """
-
 `)
+	// The provenance line names the runtime spliced in below and the CLI that
+	// spliced it, so a reader can tell a master built by this binary from one
+	// left behind by an older install.
+	builder.WriteString(guard.StampLine(version.Version))
+	builder.WriteString("\n")
 
 	for _, imp := range importLines {
 		builder.WriteString(imp)

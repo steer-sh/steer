@@ -13,7 +13,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/presets"
 )
 
-const guard = `#!/usr/bin/env python3
+const guardSource = `#!/usr/bin/env python3
 import json
 import sys
 
@@ -38,7 +38,7 @@ func installGuard(t *testing.T, targets ...harness.Registrar) {
 		HookName: "no-var-hook",
 		FileName: "no-var-hook.py",
 		Rule:     "never use var",
-		Content:  []byte(guard),
+		Content:  []byte(guardSource),
 		Metadata: claude.HookInstallMetadata{Source: claude.SourceManual},
 	}, targets...); err != nil {
 		t.Fatalf("InstallManagedHook returned error: %v", err)
@@ -200,7 +200,7 @@ func TestDriftCountsAHarnessThatCarriesNoRegistration(t *testing.T) {
 		HookName: "no-var-hook",
 		FileName: "no-var-hook.py",
 		Rule:     "never use var",
-		Content:  claude.ApplyMetadataHeader([]byte(guard), entry.Source, entry.PromptVersion, entry.HookVersion),
+		Content:  claude.ApplyMetadataHeader([]byte(guardSource), entry.Source, entry.PromptVersion, entry.HookVersion),
 		Metadata: claude.HookInstallMetadata{Source: claude.SourceManual},
 	}
 

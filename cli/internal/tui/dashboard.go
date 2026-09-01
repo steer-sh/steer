@@ -253,7 +253,7 @@ func (m *Model) legend() string {
 	case panelClasses:
 		return "x retire · " + common
 	case panelPresets:
-		return "enter enable/disable · s sync · " + common
+		return "enter enable/disable · s sync · b rebuild master · " + common
 	}
 	return common
 }

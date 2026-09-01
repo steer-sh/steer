@@ -123,6 +123,17 @@ func renderPosture(s *status.SystemStatus) {
 	for _, a := range s.Posture.Resolver {
 		fmt.Printf("  Resolver     %s\n", armingRow(a))
 	}
+	for _, m := range s.Posture.Masters {
+		phrase := status.MasterPhrase(m)
+		if phrase == "" {
+			continue
+		}
+		row := fmt.Sprintf("%s, %s scope: %s", m.Harness, m.Scope, phrase)
+		if m.Stale() {
+			row = fmt.Sprintf("%s, %s scope: %s", m.Harness, m.Scope, styles.WarningText.Render(phrase))
+		}
+		fmt.Printf("  Guard master %s\n", row)
+	}
 	if s.Posture.Unresolved > 0 {
 		fmt.Printf("  Unresolved   %s\n", styles.WarningText.Render(
 			fmt.Sprintf("%d row(s) owe a ledger — run: steer commit-gate backfill --apply", s.Posture.Unresolved)))

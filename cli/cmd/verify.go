@@ -83,15 +83,16 @@ global hooks after project hooks.`,
 				continue
 			}
 
-			if err := claude.ConsolidateHooks(verifyScope); err != nil {
-				return err
-			}
+			// Verifying files is a read. Regenerating here migrated a legacy
+			// store as a side effect and left the harness registered on the
+			// legacy master, so the repaired file sat unused.
 			masterHookPath, err := claude.GetMasterHookPath(verifyScope)
 			if err != nil {
 				return err
 			}
 			if _, err := os.Stat(masterHookPath); err != nil {
-				return fmt.Errorf("scope %s has managed hooks but missing master hook at %s", verifyScope, masterHookPath)
+				return fmt.Errorf("scope %s has managed hooks but missing master hook at %s (run `steer hooks rebuild --scope %s`)",
+					verifyScope, masterHookPath, verifyScope)
 			}
 
 			verifiedScopes++
