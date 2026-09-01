@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/steer-sh/steer-cli/internal/guard"
 )
 
 // HookFile describes an individual (non-master) hook file on disk.
@@ -154,12 +156,9 @@ func ConsolidateHooks(scope string) error {
 	}
 
 	hookFunctions := make([]HookFunction, 0, len(hooks))
-	importSet := map[string]struct{}{
-		"import datetime": {},
-		"import io":       {},
-		"import json":     {},
-		"import os":       {},
-		"import sys":      {},
+	importSet := map[string]struct{}{}
+	for _, line := range guard.RequiredImports() {
+		importSet[line] = struct{}{}
 	}
 
 	hookMeta := make(map[string]map[string]string, len(hooks))
@@ -546,85 +545,6 @@ func isTopLevel(line string) bool {
 	return len(line) == len(strings.TrimLeft(line, " \t"))
 }
 
-// auditHelperSource is embedded in the generated master hook. It appends one
-// JSON line per block decision to steer-audit.jsonl next to the master hook.
-// Auditing must never break or weaken the block decision, so every failure
-// path is swallowed.
-const auditHelperSource = `def steer_audit_log(hook_func_name, stdin_data):
-    try:
-        meta = STEER_HOOK_META.get(hook_func_name, {})
-        try:
-            payload = json.loads(stdin_data)
-        except Exception:
-            payload = {}
-        if not isinstance(payload, dict):
-            payload = {}
-        tool_input = payload.get("tool_input")
-        if not isinstance(tool_input, dict):
-            tool_input = {}
-        snippet = ""
-        for key in ("command", "content", "new_string"):
-            value = tool_input.get(key)
-            if isinstance(value, str) and value.strip():
-                snippet = value[:200]
-                break
-        file_path = tool_input.get("file_path")
-        if not isinstance(file_path, str):
-            file_path = ""
-        tool_name = payload.get("tool_name")
-        if not isinstance(tool_name, str):
-            tool_name = ""
-        entry = {
-            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            "rule": meta.get("rule", ""),
-            "hook_name": meta.get("hook_name", hook_func_name),
-            "enforcement": "block",
-            "file_path": file_path,
-            "tool_name": tool_name,
-            "snippet": snippet,
-        }
-        audit_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "steer-audit.jsonl")
-        with open(audit_path, "a", encoding="utf-8") as handle:
-            handle.write(json.dumps(entry) + "\n")
-    except Exception:
-        pass
-`
-
-// footerHelperSource is embedded in the generated master hook. It appends a
-// provenance footer to a blocked reply's stopReason: the hook name and the
-// command that removes it. The command reads the manifest source — a factory
-// preset is disabled, a user rule is removed — and a hook with no manifest
-// entry gets its name only.
-const footerHelperSource = `def steer_removal_footer(hook_func_name):
-    meta = STEER_HOOK_META.get(hook_func_name, {})
-    hook_name = meta.get("hook_name", hook_func_name)
-    source = meta.get("source", "")
-    source_id = meta.get("source_id", "")
-    if not source:
-        return "\n\n— steer hook: " + hook_name
-    if source == "factory":
-        cmd = "steer preset disable " + (source_id or hook_name)
-    else:
-        cmd = "steer remove " + hook_name
-    return "\n\n— steer hook: " + hook_name + " · remove: " + cmd
-
-
-def steer_append_footer(output, hook_func_name):
-    try:
-        result = json.loads(output)
-    except Exception:
-        return output
-    if not isinstance(result, dict):
-        return output
-    footer = steer_removal_footer(hook_func_name)
-    reason = result.get("stopReason")
-    if isinstance(reason, str):
-        result["stopReason"] = reason + footer
-    else:
-        result["stopReason"] = footer.lstrip()
-    return json.dumps(result)
-`
-
 func generateMasterHook(hookFunctions []HookFunction, importLines []string, hookMeta map[string]map[string]string) string {
 	var builder strings.Builder
 
@@ -650,9 +570,7 @@ Generated automatically - do not edit manually.
 	builder.WriteString("STEER_HOOK_META = ")
 	builder.Write(metaJSON)
 	builder.WriteString("\n\n")
-	builder.WriteString(auditHelperSource)
-	builder.WriteString("\n")
-	builder.WriteString(footerHelperSource)
+	builder.WriteString(guard.RuntimeSource())
 	builder.WriteString("\n")
 
 	for _, hookFunc := range hookFunctions {
@@ -688,42 +606,11 @@ Generated automatically - do not edit manually.
 	}
 
 	builder.WriteString("def main():\n")
-	builder.WriteString("    stdin_data = sys.stdin.read()\n\n")
-	builder.WriteString("    hooks_to_run = [\n")
+	builder.WriteString("    steer_run([\n")
 	for _, hookFunc := range hookFunctions {
 		builder.WriteString(fmt.Sprintf("        %s,\n", hookFunc.Name))
 	}
-	builder.WriteString("    ]\n\n")
-	builder.WriteString("    for hook_func in hooks_to_run:\n")
-	builder.WriteString("        captured = io.StringIO()\n")
-	builder.WriteString("        old_stdout = sys.stdout\n")
-	builder.WriteString("        old_stdin = sys.stdin\n")
-	builder.WriteString("        sys.stdout = captured\n")
-	builder.WriteString("        sys.stdin = io.StringIO(stdin_data)\n\n")
-	builder.WriteString("        try:\n")
-	builder.WriteString("            hook_func()\n")
-	builder.WriteString("        except SystemExit:\n")
-	builder.WriteString("            pass\n")
-	builder.WriteString("        except Exception:\n")
-	builder.WriteString("            pass\n")
-	builder.WriteString("        finally:\n")
-	builder.WriteString("            sys.stdout = old_stdout\n")
-	builder.WriteString("            sys.stdin = old_stdin\n\n")
-	builder.WriteString("        output = captured.getvalue().strip()\n")
-	builder.WriteString("        if output:\n")
-	builder.WriteString("            blocked = False\n")
-	builder.WriteString("            try:\n")
-	builder.WriteString("                result = json.loads(output)\n")
-	builder.WriteString("                blocked = isinstance(result, dict) and result.get(\"decision\") == \"block\"\n")
-	builder.WriteString("            except json.JSONDecodeError:\n")
-	builder.WriteString("                compact_output = \"\".join(output.split())\n")
-	builder.WriteString("                blocked = \"\\\"decision\\\":\\\"block\\\"\" in compact_output\n\n")
-	builder.WriteString("            if blocked:\n")
-	builder.WriteString("                steer_audit_log(hook_func.__name__, stdin_data)\n")
-	builder.WriteString("                output = steer_append_footer(output, hook_func.__name__)\n")
-	builder.WriteString("                print(output)\n")
-	builder.WriteString("                sys.exit(0)\n\n")
-	builder.WriteString("    sys.exit(0)\n\n")
+	builder.WriteString("    ])\n\n")
 	builder.WriteString("if __name__ == \"__main__\":\n")
 	builder.WriteString("    main()\n")
 
