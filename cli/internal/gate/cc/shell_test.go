@@ -188,3 +188,50 @@ func TestExtractMessage(t *testing.T) {
 		}
 	}
 }
+
+// A documentation heredoc is text. The body of a quoted heredoc that only writes a
+// file leaves the span scan, so prose quoting `git commit` no longer fires the gate —
+// but a body piped to an interpreter stays in the scan, or the cut is a bypass.
+func TestDocumentHeredocBodiesAreNotCommands(t *testing.T) {
+	cases := []struct {
+		cmd  string
+		want bool
+		why  string
+	}{
+		{"cat > doc.md <<'EOF'\nRun git " + c + " -m x\nEOF", false, "prose written to a file"},
+		{"cat <<\"EOF\" > doc.md\ngit " + c + "\nEOF", false, "redirect before the tag"},
+		{"tee doc.md <<'EOF'\ngit " + c + "\nEOF", false, "tee names the file"},
+		{"cat > doc.md <<EOF\ngit " + c + "\nEOF", true, "unquoted tag expands, so the body is not inert"},
+		{"bash <<'EOF' > log.txt\ngit " + c + " -m x\nEOF", true, "the interpreter runs the body"},
+		{"python3 - <<'PY'\ngit " + c + "\nPY", true, "not a document writer"},
+		{"cat > doc.md <<'EOF'\ngit " + c + "\nEOF\ngit " + c + " -m real", true, "the real invocation follows the body"},
+		{"cat 1> doc.md <<'EOF'\ngit " + c + "\nEOF", false, "the redirect written with its descriptor"},
+		{"cat << 'EOF' | bash\ngit " + c + " -m x\nEOF", true, "a space before the tag, then a pipe to a shell"},
+		{"cat <<'EOF' | bash\ngit " + c + " -m x\nEOF", true, "piped to a shell, so the body runs"},
+		{"tee log.txt <<'EOF' | bash\ngit " + c + " -m x\nEOF", true, "tee mirrors stdin to the pipe"},
+		{"cat header.txt <<'EOF'\ngit " + c + " -m x\nEOF", true, "cat's own argument is a file it reads"},
+		{"VAR=v tee <<'EOF'\ngit " + c + " -m x\nEOF", true, "the command word is not the file tee writes"},
+		{"cat > doc.md <<'EOF'\ngit " + c + "\nEOF\n# done || true", false, "an or-list after the body is not a pipe"},
+	}
+	for _, tc := range cases {
+		if got := IsCommitCommand(tc.cmd); got != tc.want {
+			t.Errorf("IsCommitCommand(%q) = %v, want %v — %s", tc.cmd, got, tc.want, tc.why)
+		}
+	}
+}
+
+// A `cd` quoted inside a document body must not move the repo the gate reviews.
+func TestDocumentHeredocBodiesDoNotMoveTheRepo(t *testing.T) {
+	cmd := "cat > doc.md <<'EOF'\ncd /elsewhere\nEOF\ngit " + c + " -m x"
+	if got := RepoDir(cmd, "/cwd"); got != "/cwd" {
+		t.Errorf("RepoDir = %q, want /cwd", got)
+	}
+}
+
+// The message reader keeps the whole body: masking serves the span scan alone.
+func TestDocumentMaskingLeavesTheMessageIntact(t *testing.T) {
+	cmd := "cat > m.txt <<'MSG'\nsubject line\nMSG\ngit " + c + " -F m.txt"
+	if got := ExtractMessage(cmd, t.TempDir()); got != "subject line" {
+		t.Errorf("ExtractMessage = %q", got)
+	}
+}

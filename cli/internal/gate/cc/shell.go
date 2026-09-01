@@ -44,6 +44,7 @@ type Span struct{ Start, End int }
 // option tokens before it may not contain `;`, `&` or `|`. The `git` must sit at a
 // command boundary — start of text, whitespace, or one of those three operators.
 func commitSpans(cmd string) []Span {
+	cmd = maskDocumentHeredocs(cmd)
 	var spans []Span
 	for i := 0; i+3 <= len(cmd); i++ {
 		if cmd[i:i+3] != "git" || !atCommandBoundary(cmd, i) {
@@ -165,10 +166,11 @@ func IsCommitCommand(cmd string) bool {
 func RepoDir(cmd, cwd string) string {
 	span := CommitSpan(cmd)
 	base := cwd
-	for _, m := range cdRe.FindAllStringSubmatch(cmd[:span.Start], -1) {
+	scan := maskDocumentHeredocs(cmd)
+	for _, m := range cdRe.FindAllStringSubmatch(scan[:span.Start], -1) {
 		base = resolveDir(m[1], base) // last cd wins, as the shell does
 	}
-	if m := dashCRe.FindStringSubmatch(cmd[span.Start:span.End]); m != nil {
+	if m := dashCRe.FindStringSubmatch(scan[span.Start:span.End]); m != nil {
 		return resolveDir(m[1], base)
 	}
 	return base
@@ -271,8 +273,11 @@ func redirectPrevOK(cmd string, i int) bool {
 
 // heredoc is one `<<TAG ... TAG` block found in the command text.
 type heredoc struct {
-	start int // index of the `<<`
-	body  string
+	start  int // index of the `<<`
+	body   string
+	quoted bool // the tag was written `'TAG'` or `"TAG"`, so the body does not expand
+	from   int  // body start index in the command text
+	to     int  // body end index, exclusive
 }
 
 // findHeredocs is a hand-rolled lexer, because matching a closing tag needs a
@@ -310,7 +315,13 @@ func findHeredocs(cmd string) []heredoc {
 		if closer < 0 {
 			continue
 		}
-		out = append(out, heredoc{start: i, body: cmd[bodyStart:closer]})
+		out = append(out, heredoc{
+			start:  i,
+			body:   cmd[bodyStart:closer],
+			quoted: quote != "",
+			from:   bodyStart,
+			to:     closer,
+		})
 		// Matches are non-overlapping, as the regex engine's scan was: resume past
 		// this heredoc's closing tag.
 		i = closer + 1 + len(tag) - 1
@@ -358,6 +369,13 @@ var segmentOpRe = regexp.MustCompile(`&&|\|\||;|\|`)
 
 // segment is the one shell command around `pos`, cut at the operators bounding it.
 func segment(cmd string, pos int) string {
+	start, end := segmentBounds(cmd, pos)
+	return cmd[start:end]
+}
+
+// segmentBounds is that same command as a byte range, so a caller can also read the
+// operator the segment was cut at.
+func segmentBounds(cmd string, pos int) (int, int) {
 	lineStart := strings.LastIndexByte(cmd[:pos], '\n') + 1
 	lineEnd := len(cmd)
 	if nl := strings.IndexByte(cmd[pos:], '\n'); nl >= 0 {
@@ -374,7 +392,7 @@ func segment(cmd string, pos int) string {
 			break
 		}
 	}
-	return line[start:end]
+	return lineStart + start, lineStart + end
 }
 
 const messageNotFound = "(not recoverable from the command line — judge the diff alone)"
@@ -442,4 +460,111 @@ func dashMMessage(cmd string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// docSinkRe is a `>`/`>>` redirect to a path. The excluded previous bytes drop `2>&1`
+// and the `->` an ordinary prose message contains; `1>` is the same redirect written
+// with its descriptor, so it is admitted by name. The target may not open with `&`,
+// which names a file descriptor rather than a file.
+var docSinkRe = regexp.MustCompile(`(?:^|[^0-9<>&=-]|(?:^|[\s;&|(])1)>>?[ \t]*[^\s&;|<>]`)
+
+// maskDocumentHeredocs blanks the bodies of heredocs that only write a file, so a
+// `git commit` quoted inside documentation is text rather than an invocation. The body
+// is replaced byte for byte, so every index into the result still names the same byte
+// of the original command.
+//
+// Three conditions, and all of them are needed. The tag must be quoted, or the shell
+// expands the body and the text is no longer inert. The segment's stdout may not be
+// piped, because `cat <<TAG | bash` runs the body. And the segment must be a document
+// write: an interpreter reading a heredoc is running code, and `bash <<TAG > log.txt`
+// redirects to a file while still executing, so the redirect alone would open a gate
+// bypass.
+func maskDocumentHeredocs(cmd string) string {
+	var out []byte
+	for _, doc := range findHeredocs(cmd) {
+		start, end := segmentBounds(cmd, doc.start)
+		if !doc.quoted || pipedOnward(cmd, end) || !writesDocument(cmd[start:end]) {
+			continue
+		}
+		if out == nil {
+			out = []byte(cmd)
+		}
+		for i := doc.from; i < doc.to; i++ {
+			if out[i] != '\n' {
+				out[i] = ' '
+			}
+		}
+	}
+	if out == nil {
+		return cmd
+	}
+	return string(out)
+}
+
+// pipedOnward reports that the segment ending at `end` feeds its stdout to another
+// command. `tee` mirrors its stdin to stdout and `cat` emits it, so a piped segment
+// can hand the body to an interpreter and is never a document write. `||` is an
+// or-list, not a pipe.
+func pipedOnward(cmd string, end int) bool {
+	if end >= len(cmd) || cmd[end] != '|' {
+		return false
+	}
+	return end+1 >= len(cmd) || cmd[end+1] != '|'
+}
+
+// writesDocument reports that this one command segment writes its stdin to a file.
+//
+// `cat` needs the redirect, because its own arguments are files it READS. `tee` names
+// the file it writes as an argument, so either form counts there.
+func writesDocument(seg string) bool {
+	fields := strings.Fields(seg)
+	at := -1
+	for i, f := range fields {
+		if strings.ContainsRune(f, '=') && !strings.HasPrefix(f, "-") {
+			continue // a leading `VAR=value` assignment
+		}
+		at = i
+		break
+	}
+	if at < 0 {
+		return false
+	}
+	switch filepath.Base(strings.Trim(fields[at], `'"`)) {
+	case "cat":
+		return docSinkRe.MatchString(seg)
+	case "tee":
+		return docSinkRe.MatchString(seg) || namesAPath(fields[at+1:])
+	}
+	return false
+}
+
+// namesAPath reports a non-option argument among `args`. A redirect operator and the
+// heredoc tag standing beside it are syntax, not arguments.
+func namesAPath(args []string) bool {
+	skip := false
+	for _, f := range args {
+		if skip {
+			skip = false
+			continue
+		}
+		if isRedirectOp(f) {
+			skip = true
+			continue
+		}
+		if strings.HasPrefix(f, "-") || strings.ContainsAny(f, "<>") {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+// isRedirectOp reports a bare redirect operator, whose following token is its target
+// or its heredoc tag rather than an argument to the command.
+func isRedirectOp(f string) bool {
+	switch f {
+	case "<", "<<", "<<-", ">", ">>", "1>", "1>>", "2>", "2>>":
+		return true
+	}
+	return false
 }
