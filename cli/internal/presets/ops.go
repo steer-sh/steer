@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/steer-sh/steer-cli/internal/claude"
+	"github.com/steer-sh/steer-cli/internal/harness"
 )
 
 // SyncOptions controls how SyncFactoryPresets reconciles the manifest.
@@ -50,7 +51,7 @@ func FindVisiblePreset(catalog *Catalog, name string) (CatalogItem, bool) {
 }
 
 // EnablePreset installs one factory preset into the scope's managed hooks.
-func EnablePreset(scope string, catalog *Catalog, item CatalogItem, force bool) (string, error) {
+func EnablePreset(scope string, catalog *Catalog, item CatalogItem, force bool, targets ...harness.Registrar) (string, error) {
 	hookName := strings.TrimSuffix(item.HookFile, ".py")
 	if hookName == "" {
 		return "", fmt.Errorf("invalid preset hook_file for %s", item.Name)
@@ -70,16 +71,26 @@ func EnablePreset(scope string, catalog *Catalog, item CatalogItem, force bool) 
 
 	if existing, ok := manifest.Hooks[hookName]; ok {
 		isFactoryMatch := strings.EqualFold(strings.TrimSpace(existing.Source), claude.SourceFactory) && strings.TrimSpace(existing.SourceID) == item.Name
-		if isFactoryMatch {
-			if _, err := os.Stat(targetPath); err == nil {
-				return "already enabled", nil
-			} else if !os.IsNotExist(err) {
+		if !isFactoryMatch {
+			if !force {
+				return "", fmt.Errorf("conflict: hook %s already exists with source=%s source_id=%s (use --force to overwrite)", hookName, existing.Source, existing.SourceID)
+			}
+		} else {
+			if _, err := os.Stat(targetPath); err != nil && !os.IsNotExist(err) {
 				return "", fmt.Errorf("failed to check hook file %s: %w", targetPath, err)
+			} else if err == nil {
+				// The store already holds this preset, and the store is shared. A
+				// target harness that never got the registration or the rule still
+				// needs the install to run for it.
+				drifted, _, driftErr := claude.TargetDrift(scope, existing.Rule, targets)
+				if driftErr != nil {
+					return "", driftErr
+				}
+				if !drifted {
+					return "already enabled", nil
+				}
 			}
 			installForce = true
-		}
-		if !force {
-			return "", fmt.Errorf("conflict: hook %s already exists with source=%s source_id=%s (use --force to overwrite)", hookName, existing.Source, existing.SourceID)
 		}
 	}
 
@@ -91,7 +102,7 @@ func EnablePreset(scope string, catalog *Catalog, item CatalogItem, force bool) 
 		return "", fmt.Errorf("failed to check hook file %s: %w", targetPath, err)
 	}
 
-	result, err := InstallFactoryPreset(scope, catalog, item, installForce)
+	result, err := InstallFactoryPreset(scope, catalog, item, installForce, targets...)
 	if err != nil {
 		return "", err
 	}
@@ -130,7 +141,7 @@ func DesiredHookFromCatalogItem(catalog *Catalog, item CatalogItem) (claude.Desi
 }
 
 // InstallFactoryPreset writes one factory preset through the managed lifecycle.
-func InstallFactoryPreset(scope string, catalog *Catalog, item CatalogItem, force bool) (*claude.InstallManagedHookResult, error) {
+func InstallFactoryPreset(scope string, catalog *Catalog, item CatalogItem, force bool, targets ...harness.Registrar) (*claude.InstallManagedHookResult, error) {
 	desired, err := DesiredHookFromCatalogItem(catalog, item)
 	if err != nil {
 		return nil, err
@@ -142,7 +153,7 @@ func InstallFactoryPreset(scope string, catalog *Catalog, item CatalogItem, forc
 		Rule:     desired.Rule,
 		Content:  desired.Content,
 		Metadata: desired.Metadata,
-	})
+	}, targets...)
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +161,7 @@ func InstallFactoryPreset(scope string, catalog *Catalog, item CatalogItem, forc
 }
 
 // DisablePreset removes one factory preset from the scope's managed hooks.
-func DisablePreset(scope string, item CatalogItem, force bool) (string, error) {
+func DisablePreset(scope string, item CatalogItem, force bool, targets ...harness.Registrar) (string, error) {
 	hookName := strings.TrimSuffix(item.HookFile, ".py")
 	if hookName == "" {
 		return "", fmt.Errorf("invalid preset hook_file for %s", item.Name)
@@ -185,14 +196,14 @@ func DisablePreset(scope string, item CatalogItem, force bool) (string, error) {
 		}
 	}
 
-	if _, err := claude.RemoveManagedHook(scope, hookName); err != nil {
+	if _, err := claude.RemoveManagedHook(scope, hookName, targets...); err != nil {
 		return "", err
 	}
 	return "disabled", nil
 }
 
 // EnsureAutoManagedFactoryPresets reinstalls internal auto-enabled presets that drifted.
-func EnsureAutoManagedFactoryPresets(scope string, catalog *Catalog, dryRun bool) (int, error) {
+func EnsureAutoManagedFactoryPresets(scope string, catalog *Catalog, dryRun bool, targets ...harness.Registrar) (int, error) {
 	manifest, err := claude.LoadManifest(scope)
 	if err != nil {
 		return 0, err
@@ -209,7 +220,7 @@ func EnsureAutoManagedFactoryPresets(scope string, catalog *Catalog, dryRun bool
 		needsInstall := true
 		if hasEntry && strings.EqualFold(strings.TrimSpace(entry.Source), claude.SourceFactory) && strings.TrimSpace(entry.SourceID) == item.Name {
 			var reason string
-			needsInstall, reason, err = FactoryPresetNeedsReinstall(scope, catalog, item, hookName, entry)
+			needsInstall, reason, err = FactoryPresetNeedsReinstall(scope, catalog, item, hookName, entry, targets...)
 			if err != nil {
 				return ensuredCount, err
 			}
@@ -225,7 +236,7 @@ func EnsureAutoManagedFactoryPresets(scope string, catalog *Catalog, dryRun bool
 			continue
 		}
 
-		if _, err := InstallFactoryPreset(scope, catalog, item, true); err != nil {
+		if _, err := InstallFactoryPreset(scope, catalog, item, true, targets...); err != nil {
 			return ensuredCount, err
 		}
 
@@ -239,7 +250,7 @@ func EnsureAutoManagedFactoryPresets(scope string, catalog *Catalog, dryRun bool
 }
 
 // SyncFactoryPresets reconciles enabled factory presets with the embedded catalog.
-func SyncFactoryPresets(scope string, catalog *Catalog, options SyncOptions) (*SyncResult, error) {
+func SyncFactoryPresets(scope string, catalog *Catalog, options SyncOptions, targets ...harness.Registrar) (*SyncResult, error) {
 	result := &SyncResult{}
 
 	manifest, err := claude.LoadManifest(scope)
@@ -273,7 +284,7 @@ func SyncFactoryPresets(scope string, catalog *Catalog, options SyncOptions) (*S
 					result.OrphansPruned++
 					result.DryRunPlanned++
 				} else {
-					if _, err := claude.RemoveManagedHook(scope, hookName); err != nil {
+					if _, err := claude.RemoveManagedHook(scope, hookName, targets...); err != nil {
 						return result, err
 					}
 					result.OrphansPruned++
@@ -289,7 +300,7 @@ func SyncFactoryPresets(scope string, catalog *Catalog, options SyncOptions) (*S
 		}
 
 		result.CheckedFactory++
-		needsInstall, driftReason, err := FactoryPresetNeedsReinstall(scope, catalog, item, hookName, entry)
+		needsInstall, driftReason, err := FactoryPresetNeedsReinstall(scope, catalog, item, hookName, entry, targets...)
 		if err != nil {
 			return result, err
 		}
@@ -312,7 +323,7 @@ func SyncFactoryPresets(scope string, catalog *Catalog, options SyncOptions) (*S
 			result.DryRunPlanned++
 			continue
 		}
-		if _, err := InstallFactoryPreset(scope, catalog, item, true); err != nil {
+		if _, err := InstallFactoryPreset(scope, catalog, item, true, targets...); err != nil {
 			return result, err
 		}
 		result.Reinstalled++
@@ -328,7 +339,7 @@ func SyncFactoryPresets(scope string, catalog *Catalog, options SyncOptions) (*S
 			result.DryRunPlanned++
 			continue
 		}
-		if _, err := InstallFactoryPreset(scope, catalog, item, true); err != nil {
+		if _, err := InstallFactoryPreset(scope, catalog, item, true, targets...); err != nil {
 			return result, err
 		}
 		result.Reinstalled++
@@ -342,7 +353,7 @@ func SyncFactoryPresets(scope string, catalog *Catalog, options SyncOptions) (*S
 }
 
 // FactoryPresetNeedsReinstall reports whether a factory preset drifted from the catalog.
-func FactoryPresetNeedsReinstall(scope string, catalog *Catalog, item CatalogItem, hookName string, entry claude.ManifestEntry) (bool, string, error) {
+func FactoryPresetNeedsReinstall(scope string, catalog *Catalog, item CatalogItem, hookName string, entry claude.ManifestEntry, targets ...harness.Registrar) (bool, string, error) {
 	desired, err := DesiredHookFromCatalogItem(catalog, item)
 	if err != nil {
 		return false, "", err
@@ -352,7 +363,7 @@ func FactoryPresetNeedsReinstall(scope string, catalog *Catalog, item CatalogIte
 		return true, claude.DriftMetadata, nil
 	}
 
-	drifted, reason, err := claude.DesiredHookDrift(scope, desired, entry, true)
+	drifted, reason, err := claude.DesiredHookDrift(scope, desired, entry, true, targets...)
 	if err != nil {
 		return false, "", err
 	}

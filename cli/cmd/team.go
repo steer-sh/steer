@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/claude"
+	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/presets"
 	"github.com/steer-sh/steer-cli/internal/styles"
 )
@@ -118,8 +119,13 @@ lockfile are untouched: team policy is a floor, not a ceiling.
 			return err
 		}
 
+		targets, err := currentRegistrars()
+		if err != nil {
+			return err
+		}
+
 		desired := desiredHooksFromLockfile(lockfile)
-		result, err := applyTeamLockfile(scope, lockfile, teamApplyDryRun, teamApplyForce)
+		result, err := applyTeamLockfile(scope, lockfile, teamApplyDryRun, teamApplyForce, targets...)
 		if result == nil {
 			result = &claude.ReconcileResult{}
 		}
@@ -188,7 +194,12 @@ var teamVerifyCmd = &cobra.Command{
 			return err
 		}
 
-		findings, err := verifyAgainstLockfile(scope, lockfile)
+		targets, err := currentRegistrars()
+		if err != nil {
+			return err
+		}
+
+		findings, err := verifyAgainstLockfile(scope, lockfile, targets...)
 		if err != nil {
 			return err
 		}
@@ -365,7 +376,7 @@ func desiredHooksFromLockfile(lockfile *teamLockfile) []claude.DesiredHook {
 	return desired
 }
 
-func applyTeamLockfile(scope string, lockfile *teamLockfile, dryRun, force bool) (*claude.ReconcileResult, error) {
+func applyTeamLockfile(scope string, lockfile *teamLockfile, dryRun, force bool, targets ...harness.Registrar) (*claude.ReconcileResult, error) {
 	return claude.Reconcile(scope, desiredHooksFromLockfile(lockfile), claude.ReconcileOptions{
 		DryRun: dryRun,
 		RemoveExtra: func(hookName string, entry claude.ManifestEntry) bool {
@@ -374,10 +385,10 @@ func applyTeamLockfile(scope string, lockfile *teamLockfile, dryRun, force bool)
 			}
 			return strings.EqualFold(strings.TrimSpace(entry.Source), claude.SourceFactory)
 		},
-	})
+	}, targets...)
 }
 
-func verifyAgainstLockfile(scope string, lockfile *teamLockfile) ([]string, error) {
+func verifyAgainstLockfile(scope string, lockfile *teamLockfile, targets ...harness.Registrar) ([]string, error) {
 	findings := make([]string, 0)
 
 	manifest, err := claude.LoadManifest(scope)
@@ -393,7 +404,7 @@ func verifyAgainstLockfile(scope string, lockfile *teamLockfile) ([]string, erro
 
 	for _, hook := range desired {
 		entry, hasEntry := manifest.Hooks[hook.HookName]
-		drifted, reason, err := claude.DesiredHookDrift(scope, hook, entry, hasEntry)
+		drifted, reason, err := claude.DesiredHookDrift(scope, hook, entry, hasEntry, targets...)
 		if err != nil {
 			return nil, err
 		}
@@ -416,30 +427,33 @@ func verifyAgainstLockfile(scope string, lockfile *teamLockfile) ([]string, erro
 		findings = append(findings, fmt.Sprintf("extra hook=%s source=factory", name))
 	}
 
-	claudeMDPath, err := claude.GetClaudeMDFile(scope)
-	if err != nil {
-		return nil, err
-	}
-	claudeMD, err := os.ReadFile(claudeMDPath)
-	if err != nil && !os.IsNotExist(err) {
-		return nil, fmt.Errorf("failed to read CLAUDE.md: %w", err)
-	}
-	for _, hook := range lockfile.Hooks {
-		if !strings.Contains(string(claudeMD), strings.TrimSpace(hook.Rule)) {
-			findings = append(findings, fmt.Sprintf("claude_md missing rule hook=%s", strings.TrimSpace(hook.Name)))
-		}
-	}
+	// One store, one lockfile, but each target harness carries its own rules
+	// document and its own registration, so both are checked per harness.
+	for _, target := range harness.Targets(targets, claude.Registrar{}) {
+		entry := target.Harness()
 
-	settingsPath, err := claude.GetSettingsFile(scope)
-	if err != nil {
-		return nil, err
-	}
-	settingsData, err := os.ReadFile(settingsPath)
-	if err != nil && !os.IsNotExist(err) {
-		return nil, fmt.Errorf("failed to read settings: %w", err)
-	}
-	if !strings.Contains(string(settingsData), claude.MasterHookName) {
-		findings = append(findings, "settings master hook not registered")
+		docPath, err := target.InstructionPath(scope)
+		if err != nil {
+			return nil, err
+		}
+		doc, err := os.ReadFile(docPath)
+		if err != nil && !os.IsNotExist(err) {
+			return nil, fmt.Errorf("failed to read %s: %w", entry.InstructionFile, err)
+		}
+		for _, hook := range lockfile.Hooks {
+			if !strings.Contains(string(doc), strings.TrimSpace(hook.Rule)) {
+				findings = append(findings, fmt.Sprintf("%s missing rule hook=%s harness=%s",
+					entry.InstructionFile, strings.TrimSpace(hook.Name), entry.ID))
+			}
+		}
+
+		registered, err := target.MasterRegistered(scope)
+		if err != nil {
+			return nil, err
+		}
+		if !registered {
+			findings = append(findings, fmt.Sprintf("master hook not registered harness=%s", entry.ID))
+		}
 	}
 
 	return findings, nil

@@ -304,6 +304,14 @@ func ResolverArming(scope, cwd string) (bool, int) {
 // CommitGateArming reads registration and checks whether config.toml has a trust
 // record at the handler's current index. It does not interpret trusted_hash.
 func CommitGateArming(scope, cwd string) Arming {
+	return armingFor(scope, cwd, isGate)
+}
+
+// armingFor finds the first PreToolUse handler this channel owns and reports its
+// matcher, its timeout, and whether config.toml carries a trust record at the
+// handler's current event/entry/handler index. Codex's handler hash algorithm is
+// internal, so record presence is all Steer can honestly report.
+func armingFor(scope, cwd string, owns func(string) bool) Arming {
 	path, err := hooksPath(scope, cwd)
 	if err != nil {
 		return Arming{}
@@ -320,7 +328,7 @@ func CommitGateArming(scope, cwd string) Arming {
 		for j, rawHook := range hooks {
 			hook, _ := rawHook.(map[string]any)
 			command, _ := hook["command"].(string)
-			if !isGate(command) {
+			if !owns(command) {
 				continue
 			}
 			a.Registered, a.Matcher = true, matcher

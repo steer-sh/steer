@@ -342,11 +342,11 @@ func GetSettingsFile(scope string) (string, error) {
 
 // GetMasterHookPath returns the scope-specific master hook file path.
 func GetMasterHookPath(scope string) (string, error) {
-	hooksDir, err := GetHooksDir(scope)
-	if err != nil {
+	scope = normalizeScope(scope)
+	if err := ValidateScope(scope); err != nil {
 		return "", err
 	}
-	return filepath.Join(hooksDir, MasterHookName), nil
+	return hookstore.MasterPath(scope)
 }
 
 // GetMasterHookCommand returns the settings.json command value for the master hook.
@@ -474,7 +474,7 @@ func createBackup(settingsPath string) error {
 
 // IsSteerCommand checks whether a hook command references steer-hooks.py.
 func IsSteerCommand(command string) bool {
-	return strings.Contains(command, MasterHookName)
+	return hookstore.IsMasterCommand(command)
 }
 
 // RegisterMasterHook upserts the steer master hook while preserving non-steer hooks.

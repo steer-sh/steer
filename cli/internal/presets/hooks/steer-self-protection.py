@@ -339,10 +339,12 @@ def main():
     # beside the store's root rather than above the store itself.
     project_root = os.path.dirname(os.path.dirname(hooks_dir))
     settings_path = os.path.join(project_root, ".claude", "settings.json")
+    codex_hooks_path = os.path.join(project_root, ".codex", "hooks.json")
     protected_paths = {
         canonicalize_path(os.path.join(hooks_dir, "steer-hooks.py")),
         canonicalize_path(manifest_path),
         canonicalize_path(settings_path),
+        canonicalize_path(codex_hooks_path),
         canonicalize_path(os.path.join(hooks_dir, "steer-audit.jsonl")),
         canonicalize_path(os.path.join(project_root, "steer-team.lock.json")),
         # Also resolve the lockfile against the working directory so a
@@ -356,6 +358,8 @@ def main():
         "steer-audit.jsonl",
         "steer-team.lock.json",
     }
+    # hooks.json is Codex's registration file. It is matched by full path only:
+    # the basename is generic enough that another tool may own one elsewhere.
 
     manifest_hooks = load_manifest(manifest_path)
     factory_names, factory_files, factory_paths = collect_factory_targets(hooks_dir, manifest_hooks)

@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/steer-sh/steer-cli/internal/steerpath"
 )
@@ -29,6 +30,20 @@ func Dir(scope string) (string, error) { return steerpath.HooksDir(scope) }
 
 // LegacyDir returns the guard directory Steer wrote before the store moved.
 func LegacyDir(scope string) (string, error) { return steerpath.LegacyHooksDir(scope) }
+
+// MasterPath names the generated master hook inside the resolved store. Project
+// scope stays relative, which is how a project registration names it.
+func MasterPath(scope string) (string, error) {
+	dir, err := Resolve(scope)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, MasterName), nil
+}
+
+// IsMasterCommand reports whether a registered hook command runs Steer's master.
+// Both harnesses' registrations are recognized by the one file they invoke.
+func IsMasterCommand(command string) bool { return strings.Contains(command, MasterName) }
 
 // Resolve names the directory a reader should read. It is the legacy directory
 // only while that one holds a store and the neutral one does not, so a machine

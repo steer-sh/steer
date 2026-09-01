@@ -77,6 +77,11 @@ Optional provenance flags can be used to persist generation metadata.`,
 			return err
 		}
 
+		targets, err := currentRegistrars()
+		if err != nil {
+			return err
+		}
+
 		fileName := filepath.Base(sourceAbs)
 		hookName := strings.TrimSuffix(fileName, ".py")
 		utils.Registering("Installing hook and syncing managed artifacts...")
@@ -94,17 +99,18 @@ Optional provenance flags can be used to persist generation metadata.`,
 				SkillVersion:  registerSkillVersion,
 				SelfTest:      selfTest,
 			},
-		})
+		}, targets...)
 		if err != nil {
 			return err
 		}
 
 		fmt.Println()
 		fmt.Println(styles.SuccessBox.Render(fmt.Sprintf(
-			"Registered hook: %s\nPath: %s\nScope: %s",
+			"Registered hook: %s\nPath: %s\nScope: %s\nHarness: %s",
 			hookName,
 			result.HookPath,
 			scope,
+			harnessNames(targets),
 		)))
 		return nil
 	},

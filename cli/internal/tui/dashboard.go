@@ -14,6 +14,7 @@ import (
 
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
+	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/status"
 	"github.com/steer-sh/steer-cli/internal/styles"
 )
@@ -35,10 +36,14 @@ var panelNames = [panelCount]string{"Channels", "Candidates", "Classes", "Hooks 
 // Model is the dashboard's whole state: the composed snapshot, the active panel,
 // a per-panel cursor, and the candidate regex editor.
 type Model struct {
-	cfg    gate.Config
-	scope  string
-	snap   *status.SystemStatus
-	chains []mine.Chain
+	cfg gate.Config
+	// targets are the harnesses a preset toggle registers into. The dashboard
+	// takes them from the same flags the CLI reads, so a toggle here and a
+	// `steer preset enable` write the same registrations.
+	targets []harness.Registrar
+	scope   string
+	snap    *status.SystemStatus
+	chains  []mine.Chain
 
 	active  panel
 	cursor  [panelCount]int
@@ -56,20 +61,20 @@ type Model struct {
 	quitting bool
 }
 
-// New builds a dashboard model over one scope and gate config.
-func New(cfg gate.Config, scope string) *Model {
+// New builds a dashboard model over one scope, gate config and harness target set.
+func New(cfg gate.Config, scope string, targets ...harness.Registrar) *Model {
 	in := textinput.New()
 	in.Placeholder = "regex for this class"
 	in.CharLimit = 200
 	in.Prompt = "match /"
-	m := &Model{cfg: cfg, scope: scope, input: in}
+	m := &Model{cfg: cfg, scope: scope, targets: targets, input: in}
 	m.refresh()
 	return m
 }
 
 // Run starts the dashboard event loop.
-func Run(cfg gate.Config, scope string) error {
-	p := tea.NewProgram(New(cfg, scope), tea.WithAltScreen())
+func Run(cfg gate.Config, scope string, targets ...harness.Registrar) error {
+	p := tea.NewProgram(New(cfg, scope, targets...), tea.WithAltScreen())
 	_, err := p.Run()
 	return err
 }

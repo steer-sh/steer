@@ -91,6 +91,40 @@ var registry = map[ID]Harness{
 	},
 }
 
+// Registrar is what an adapter offers the guard lifecycle: it registers the one
+// master hook in its harness's own configuration, and it owns that harness's
+// instruction document. The guard store itself is neutral and shared, so nothing
+// here names a file inside it.
+type Registrar interface {
+	// Harness names the registry entry this adapter serves.
+	Harness() Harness
+	// RegisterMaster upserts the master guard hook, leaving unrelated hooks alone.
+	RegisterMaster(scope string) error
+	// RemoveMaster takes the master guard hook back out.
+	RemoveMaster(scope string) error
+	// AppendRule adds a rule to the harness's instruction document.
+	AppendRule(rule, scope string) error
+	// RemoveRule takes one rule line back out.
+	RemoveRule(rule, scope string) error
+	// InstructionPath names the document AppendRule writes to, so a verifier can
+	// read back what was written.
+	InstructionPath(scope string) (string, error)
+	// MasterRegistered reports whether this harness's configuration currently
+	// invokes the master guard hook.
+	MasterRegistered(scope string) (bool, error)
+}
+
+// Targets resolves a lifecycle target list. An empty list means the caller named
+// no harness, and the answer is the fallback rather than nothing: a call that
+// registered into Claude Code before Steer installed into a second harness must
+// keep doing so.
+func Targets(targets []Registrar, fallback Registrar) []Registrar {
+	if len(targets) == 0 {
+		return []Registrar{fallback}
+	}
+	return targets
+}
+
 // order fixes the iteration order of All, so every listing renders the same way.
 var order = []ID{ClaudeCode, Codex}
 

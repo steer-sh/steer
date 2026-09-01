@@ -2,8 +2,8 @@
 name: steer
 description: Generates and installs PreToolUse Python hooks from natural language rules. Use when enforcing coding standards, blocking insecure patterns, managing hook lifecycle, or running steer CLI commands (register, remove, list, test, preset, verify, git-hooks).
 user-invocable: true
-prompt_version: 5
-compatibility: Requires Claude Code with hooks support (PreToolUse). Hooks are installed into .steer/hooks/ and registered in settings.json. steer CLI must be available on PATH or bundled under scripts/.
+prompt_version: 6
+compatibility: Requires Claude Code or Codex with PreToolUse hook support. Hooks are installed into .steer/hooks/ and registered in the invoking harness (settings.json for Claude Code, hooks.json for Codex). steer CLI must be available on PATH or bundled under scripts/.
 allowed-tools: Bash(steer *), Bash(python3 *), Bash(echo *), Read, Write
 ---
 
@@ -287,8 +287,14 @@ STEER_BIN="${STEER_BIN:-steer}"
 
 This atomically:
 - Consolidates all individual hooks into a single `steer-hooks.py` master hook
-- Registers only the master hook in settings.json (preserving non-steer hooks)
-- Adds the rule to the matching CLAUDE.md under `## Steer Rules`
+- Registers only the master hook with the harness (preserving non-steer hooks)
+- Adds the rule to that harness's instruction file under `## Steer Rules`
+
+The store is shared between harnesses; the registration is not. `register` writes
+to the harness it is running under, and reports which one on the last line of its
+output. Add `--harness claude-code` or `--harness codex` to name a different one,
+or `--all-harnesses` to register in both. From a plain shell, with no harness
+running, `register` writes to Claude Code.
 
 The `--prompt-version` value MUST come from this file's YAML frontmatter — do not guess or hallucinate a version number. For generated hooks, when `--hook-version` is omitted the CLI automatically derives it from `--prompt-version`. If other optional metadata is unavailable, omit those flags and let CLI defaults apply.
 

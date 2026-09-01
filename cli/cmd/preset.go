@@ -137,6 +137,10 @@ var presetEnableCmd = &cobra.Command{
 	Short: "Enable one factory preset",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		targets, err := currentRegistrars()
+		if err != nil {
+			return err
+		}
 		fmt.Println()
 		fmt.Println(styles.MainHeader.Render("✅ Enable Preset"))
 		fmt.Println()
@@ -154,12 +158,12 @@ var presetEnableCmd = &cobra.Command{
 			return fmt.Errorf("preset not found: %s", name)
 		}
 
-		status, err := presets.EnablePreset(scope, catalog, item, force)
+		status, err := presets.EnablePreset(scope, catalog, item, force, targets...)
 		if err != nil {
 			return err
 		}
 
-		ensuredCount, err := presets.EnsureAutoManagedFactoryPresets(scope, catalog, false)
+		ensuredCount, err := presets.EnsureAutoManagedFactoryPresets(scope, catalog, false, targets...)
 		if err != nil {
 			return fmt.Errorf("enabled preset %s but failed to ensure internal factory presets: %w", name, err)
 		}
@@ -178,6 +182,10 @@ var presetDisableCmd = &cobra.Command{
 	Short: "Disable one factory preset",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		targets, err := currentRegistrars()
+		if err != nil {
+			return err
+		}
 		fmt.Println()
 		fmt.Println(styles.MainHeader.Render("🗑️  Disable Preset"))
 		fmt.Println()
@@ -195,7 +203,7 @@ var presetDisableCmd = &cobra.Command{
 			return fmt.Errorf("preset not found: %s", name)
 		}
 
-		status, err := presets.DisablePreset(scope, item, force)
+		status, err := presets.DisablePreset(scope, item, force, targets...)
 		if err != nil {
 			return err
 		}
@@ -211,6 +219,10 @@ var presetEnableBundleCmd = &cobra.Command{
 	Short: "Enable all presets in a bundle",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		targets, err := currentRegistrars()
+		if err != nil {
+			return err
+		}
 		scope := currentScope()
 		force, _ := cmd.Flags().GetBool("force")
 		bundle := strings.TrimSpace(args[0])
@@ -241,7 +253,7 @@ var presetEnableBundleCmd = &cobra.Command{
 				continue
 			}
 			utils.Working(fmt.Sprintf("Enabling %s...", name))
-			status, err := presets.EnablePreset(scope, catalog, item, force)
+			status, err := presets.EnablePreset(scope, catalog, item, force, targets...)
 			if err != nil {
 				failureCount++
 				fmt.Println(styles.ErrorText.Render(fmt.Sprintf("✗ %s: %s", name, err)))
@@ -255,7 +267,7 @@ var presetEnableBundleCmd = &cobra.Command{
 			fmt.Println(styles.SuccessText.Render(fmt.Sprintf("✓ %s: %s", name, status)))
 		}
 
-		internalEnsured, err := presets.EnsureAutoManagedFactoryPresets(scope, catalog, false)
+		internalEnsured, err := presets.EnsureAutoManagedFactoryPresets(scope, catalog, false, targets...)
 		if err != nil {
 			failureCount++
 			fmt.Println(styles.ErrorText.Render(fmt.Sprintf("✗ internal auto-managed ensure failed: %s", err)))
@@ -283,6 +295,10 @@ var presetDisableBundleCmd = &cobra.Command{
 	Short: "Disable all presets in a bundle",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		targets, err := currentRegistrars()
+		if err != nil {
+			return err
+		}
 		scope := currentScope()
 		force, _ := cmd.Flags().GetBool("force")
 		bundle := strings.TrimSpace(args[0])
@@ -313,7 +329,7 @@ var presetDisableBundleCmd = &cobra.Command{
 				continue
 			}
 			utils.Working(fmt.Sprintf("Disabling %s...", name))
-			status, err := presets.DisablePreset(scope, item, force)
+			status, err := presets.DisablePreset(scope, item, force, targets...)
 			if err != nil {
 				failureCount++
 				fmt.Println(styles.ErrorText.Render(fmt.Sprintf("✗ %s: %s", name, err)))
@@ -351,6 +367,10 @@ var presetSyncCmd = &cobra.Command{
   steer preset sync --strict
   steer preset sync --prune-orphans`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		targets, err := currentRegistrars()
+		if err != nil {
+			return err
+		}
 		fmt.Println()
 		fmt.Println(styles.MainHeader.Render("🔄 Sync Presets"))
 		fmt.Println()
@@ -366,7 +386,7 @@ var presetSyncCmd = &cobra.Command{
 			DryRun:       presetSyncDryRun,
 			Strict:       presetSyncStrict,
 			PruneOrphans: presetSyncPruneOrphans,
-		})
+		}, targets...)
 		if result == nil {
 			result = &presets.SyncResult{}
 		}

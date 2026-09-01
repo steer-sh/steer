@@ -40,11 +40,11 @@ func (m *Model) togglePreset() {
 		return
 	}
 	if sel.Enabled {
-		_, err = presets.DisablePreset(m.scope, item, false)
+		_, err = presets.DisablePreset(m.scope, item, false, m.targets...)
 	} else {
-		_, err = presets.EnablePreset(m.scope, catalog, item, false)
+		_, err = presets.EnablePreset(m.scope, catalog, item, false, m.targets...)
 		if err == nil {
-			_, err = presets.EnsureAutoManagedFactoryPresets(m.scope, catalog, false)
+			_, err = presets.EnsureAutoManagedFactoryPresets(m.scope, catalog, false, m.targets...)
 		}
 	}
 	if err != nil {
@@ -62,7 +62,7 @@ func (m *Model) syncPresets() {
 		m.note("error: %v", err)
 		return
 	}
-	res, err := presets.SyncFactoryPresets(m.scope, catalog, presets.SyncOptions{})
+	res, err := presets.SyncFactoryPresets(m.scope, catalog, presets.SyncOptions{}, m.targets...)
 	if err != nil {
 		m.note("sync error: %v", err)
 		return

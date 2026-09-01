@@ -16,7 +16,11 @@ and health — each acting through the same package functions the equivalent CLI
 commands call. The read model is the same snapshot 'steer status' renders,
 recomposed after every write.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return tui.Run(gateConfig(), currentScope())
+		targets, err := currentRegistrars()
+		if err != nil {
+			return err
+		}
+		return tui.Run(gateConfig(), currentScope(), targets...)
 	},
 }
 

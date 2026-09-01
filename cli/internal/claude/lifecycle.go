@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/steer-sh/steer-cli/internal/harness"
 )
 
 // HookInstallMetadata carries provenance and generation metadata.
@@ -134,7 +136,10 @@ func ApplyMetadataHeader(content []byte, source, promptVersion, hookVersion stri
 }
 
 // InstallManagedHook writes an individual hook and syncs all managed artifacts.
-func InstallManagedHook(scope string, input InstallManagedHookInput) (*InstallManagedHookResult, error) {
+// The guard store is shared, so the hook and the master are written once; each
+// target then registers that one master and takes the rule into its own
+// instruction document.
+func InstallManagedHook(scope string, input InstallManagedHookInput, targets ...harness.Registrar) (*InstallManagedHookResult, error) {
 	scope = strings.ToLower(strings.TrimSpace(scope))
 	if err := ValidateScope(scope); err != nil {
 		return nil, err
@@ -222,17 +227,21 @@ func InstallManagedHook(scope string, input InstallManagedHookInput) (*InstallMa
 		return nil, err
 	}
 
-	if err := RegisterMasterHook(scope); err != nil {
-		return nil, err
-	}
+	ruleReplaced := manifestExists && strings.TrimSpace(existingEntry.Rule) != "" &&
+		NormalizeRule(existingEntry.Rule) != NormalizeRule(rule)
 
-	if manifestExists && strings.TrimSpace(existingEntry.Rule) != "" && NormalizeRule(existingEntry.Rule) != NormalizeRule(rule) {
-		if err := RemoveRule(existingEntry.Rule, scope); err != nil {
+	for _, target := range harness.Targets(targets, Registrar{}) {
+		if err := target.RegisterMaster(scope); err != nil {
 			return nil, err
 		}
-	}
-	if err := AppendRule(rule, scope); err != nil {
-		return nil, err
+		if ruleReplaced {
+			if err := target.RemoveRule(existingEntry.Rule, scope); err != nil {
+				return nil, err
+			}
+		}
+		if err := target.AppendRule(rule, scope); err != nil {
+			return nil, err
+		}
 	}
 
 	return &InstallManagedHookResult{
@@ -245,7 +254,7 @@ func InstallManagedHook(scope string, input InstallManagedHookInput) (*InstallMa
 }
 
 // RemoveManagedHook deletes one hook and re-syncs all managed artifacts.
-func RemoveManagedHook(scope, identifier string) (*RemoveManagedHookResult, error) {
+func RemoveManagedHook(scope, identifier string, targets ...harness.Registrar) (*RemoveManagedHookResult, error) {
 	scope = strings.ToLower(strings.TrimSpace(scope))
 	if err := ValidateScope(scope); err != nil {
 		return nil, err
@@ -306,12 +315,6 @@ func RemoveManagedHook(scope, identifier string) (*RemoveManagedHookResult, erro
 		}
 	}
 
-	if strings.TrimSpace(rule) != "" {
-		if err := RemoveRule(rule, scope); err != nil {
-			return nil, err
-		}
-	}
-
 	if err := ConsolidateHooks(scope); err != nil {
 		return nil, err
 	}
@@ -320,12 +323,20 @@ func RemoveManagedHook(scope, identifier string) (*RemoveManagedHookResult, erro
 	if err != nil {
 		return nil, err
 	}
-	if len(remaining) == 0 {
-		if err := RemoveMasterHook(scope); err != nil {
-			return nil, err
+
+	for _, target := range harness.Targets(targets, Registrar{}) {
+		if strings.TrimSpace(rule) != "" {
+			if err := target.RemoveRule(rule, scope); err != nil {
+				return nil, err
+			}
 		}
-	} else {
-		if err := RegisterMasterHook(scope); err != nil {
+		if len(remaining) == 0 {
+			if err := target.RemoveMaster(scope); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		if err := target.RegisterMaster(scope); err != nil {
 			return nil, err
 		}
 	}

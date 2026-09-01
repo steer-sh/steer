@@ -4,6 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"github.com/steer-sh/steer-cli/internal/harness"
+	"github.com/steer-sh/steer-cli/internal/instructions"
 	"os"
 	"path/filepath"
 	"sort"
@@ -16,6 +18,10 @@ const (
 	DriftMetadata     = "metadata"
 	DriftMissingFile  = "missing_file"
 	DriftContent      = "content"
+	// DriftHarness means the store is correct but a target harness does not carry
+	// the registration or the rule. One store serves every harness, so store-only
+	// drift checks report a hook as installed that a second harness never sees.
+	DriftHarness = "harness"
 )
 
 // Per-hook reconcile outcome statuses.
@@ -84,7 +90,7 @@ func DesiredFileContent(desired DesiredHook) ([]byte, error) {
 // DesiredHookDrift reports whether local state differs from the desired hook
 // and why: manifest metadata mismatch, missing hook file, or content mismatch
 // against the desired bytes.
-func DesiredHookDrift(scope string, desired DesiredHook, entry ManifestEntry, hasEntry bool) (bool, string, error) {
+func DesiredHookDrift(scope string, desired DesiredHook, entry ManifestEntry, hasEntry bool, targets ...harness.Registrar) (bool, string, error) {
 	metadata, err := normalizeInstallMetadata(desired.Metadata)
 	if err != nil {
 		return false, "", err
@@ -136,6 +142,34 @@ func DesiredHookDrift(scope string, desired DesiredHook, entry ManifestEntry, ha
 	if ContentSHA256(actual) != ContentSHA256(expected) {
 		return true, DriftContent, nil
 	}
+
+	return TargetDrift(scope, desired.Rule, targets)
+}
+
+// TargetDrift reports whether any target harness is missing this hook's master
+// registration or its rule line. The guard store is shared, so a store that
+// matches proves nothing about a harness that was never registered into.
+func TargetDrift(scope, rule string, targets []harness.Registrar) (bool, string, error) {
+	for _, target := range harness.Targets(targets, Registrar{}) {
+		registered, err := target.MasterRegistered(scope)
+		if err != nil {
+			return false, "", err
+		}
+		if !registered {
+			return true, DriftHarness, nil
+		}
+		path, err := target.InstructionPath(scope)
+		if err != nil {
+			return false, "", err
+		}
+		present, err := instructions.HasRule(path, rule)
+		if err != nil {
+			return false, "", err
+		}
+		if !present {
+			return true, DriftHarness, nil
+		}
+	}
 	return false, "", nil
 }
 
@@ -143,7 +177,7 @@ func DesiredHookDrift(scope string, desired DesiredHook, entry ManifestEntry, ha
 // Installs go through InstallManagedHook and removals through
 // RemoveManagedHook, so master hook consolidation, settings registration, and
 // CLAUDE.md rule sync stay consistent.
-func Reconcile(scope string, desired []DesiredHook, opts ReconcileOptions) (*ReconcileResult, error) {
+func Reconcile(scope string, desired []DesiredHook, opts ReconcileOptions, targets ...harness.Registrar) (*ReconcileResult, error) {
 	result := &ReconcileResult{}
 
 	manifest, err := LoadManifest(scope)
@@ -158,7 +192,7 @@ func Reconcile(scope string, desired []DesiredHook, opts ReconcileOptions) (*Rec
 
 	for _, hook := range desired {
 		entry, hasEntry := manifest.Hooks[hook.HookName]
-		drifted, reason, err := DesiredHookDrift(scope, hook, entry, hasEntry)
+		drifted, reason, err := DesiredHookDrift(scope, hook, entry, hasEntry, targets...)
 		if err != nil {
 			return result, err
 		}
@@ -177,7 +211,7 @@ func Reconcile(scope string, desired []DesiredHook, opts ReconcileOptions) (*Rec
 			Rule:     hook.Rule,
 			Content:  hook.Content,
 			Metadata: hook.Metadata,
-		}); err != nil {
+		}, targets...); err != nil {
 			return result, err
 		}
 	}
@@ -206,7 +240,7 @@ func Reconcile(scope string, desired []DesiredHook, opts ReconcileOptions) (*Rec
 			result.Planned++
 			continue
 		}
-		if _, err := RemoveManagedHook(scope, hookName); err != nil {
+		if _, err := RemoveManagedHook(scope, hookName, targets...); err != nil {
 			return result, err
 		}
 	}
