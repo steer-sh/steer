@@ -87,19 +87,75 @@ func sortedHosts(chains []Chain) []string {
 	return hosts
 }
 
+// instrumentDrift compares the after-window's reviewer identities against the record's
+// registered one, by dimension rather than as whole strings. It returns the confound
+// and its grade, or nil when the reviewer did not move.
+//
+// Grading by dimension is what lets a row predating `instrument_fields` be compared at
+// all: the legacy string is parsed into the same dimensions, so a pair whose only
+// difference is effort reads as that one change instead of as a full mismatch.
+func instrumentDrift(before, after []Chain, authored string) (*Confound, string) {
+	base := BaselineInstrument(authored, InstrumentUses(before))
+	afterUses := InstrumentUses(after)
+
+	grade := ""
+	var drifted []string
+	dims := map[string]bool{}
+	undimensioned := false
+	for _, u := range afterUses {
+		g := gradeDrift(authored, base, u)
+		if g == "" {
+			continue
+		}
+		if g == DriftMajor {
+			grade = DriftMajor
+		} else if grade == "" {
+			grade = DriftMinor
+		}
+		drifted = appendUnique(drifted, u.Label())
+		named := DriftDims(base, u.Fields)
+		if len(named) == 0 {
+			undimensioned = true
+		}
+		for _, d := range named {
+			dims[d] = true
+		}
+	}
+	if grade == "" {
+		return nil, ""
+	}
+	// A drift no dimension explains keeps the undimensioned sentence beside the named
+	// ones. Reporting the dimensions the OTHER identities moved as the whole reason
+	// names the smaller half of a drift graded on the larger.
+	const unread = "an after-window chain was reviewed by a different instrument than the registered baseline"
+	reason := unread
+	if len(dims) > 0 {
+		names := make([]string, 0, len(dims))
+		for d := range dims {
+			names = append(names, d)
+		}
+		sort.Strings(names)
+		reason = "the reviewer's " + strings.Join(names, ", ") + " changed between the windows"
+		if undimensioned {
+			reason += ", and " + unread
+		}
+	}
+	return &Confound{
+		Category: "instrument",
+		Reason:   reason,
+		Before:   []string{InstrumentUse{ID: authored, Fields: base}.Label()},
+		After:    drifted,
+	}, grade
+}
+
 // Confounds compares the two windows' categorical supports. It returns the hard
 // confounds that withhold the verdict and the soft composition warnings that do not.
 // authored is the record's registered baseline instrument, empty when it predates the
 // field.
 func Confounds(before, after []Chain, authored string) (hard, soft []Confound) {
 	if authored != "" {
-		if drifted := differingFrom(InstrumentsIn(after), authored); len(drifted) > 0 {
-			hard = append(hard, Confound{
-				Category: "instrument",
-				Reason:   "an after-window chain was reviewed by a different instrument than the registered baseline",
-				Before:   []string{authored},
-				After:    drifted,
-			})
+		if c, _ := instrumentDrift(before, after, authored); c != nil {
+			hard = append(hard, *c)
 		}
 	}
 	categories := []struct {

@@ -256,7 +256,10 @@ func ScoreRecord(record Record, chains []Chain, minAfter int) (map[string]any, e
 
 	authored := str(record["instrument"])
 	afterInstruments := InstrumentsIn(after)
-	drift := authored != "" && anyDiffers(afterInstruments, authored)
+	// The reported flag and the confound read one computation, so a drift the
+	// confound grades by dimension can never be a drift the flag denies.
+	driftConfound, _ := instrumentDrift(before, after, authored)
+	drift := authored != "" && driftConfound != nil
 	hard, soft := Confounds(before, after, authored)
 
 	// A record predating scopes has no frozen denominator, so its windows describe
