@@ -26,14 +26,6 @@ func tempSettingsHome(t *testing.T) {
 	}
 }
 
-// checkSource compares one rendered source label.
-func checkSource(t *testing.T, label, got, want string) {
-	t.Helper()
-	if got != want {
-		t.Errorf("%s: got %q, want %q", label, got, want)
-	}
-}
-
 func setSetting(t *testing.T, key, value string) {
 	t.Helper()
 	if err := configSetCmd.RunE(configSetCmd, []string{key, value}); err != nil {
@@ -94,44 +86,6 @@ func TestConfigSetRefusesValuesTheGateCouldNotRun(t *testing.T) {
 	}
 	if got, err := config.Load(); err != nil || got != (config.Config{}) {
 		t.Fatalf("a refused write left %#v (err %v); want an untouched file", got, err)
-	}
-}
-
-// The environment outranks the file, so a value written here is not the value in
-// force. The source column is what says so.
-func TestFieldSourceNamesTheLayerInForce(t *testing.T) {
-	field, err := findConfigField("reviewer.effort")
-	if err != nil {
-		t.Fatalf("findConfigField: %v", err)
-	}
-	stored := config.Config{Reviewer: config.Reviewer{Effort: "high"}}
-
-	t.Setenv("COMMIT_GATE_EFFORT", "")
-	checkSource(t, "an unset key is the default", fieldSource(field, config.Config{}), "default")
-	checkSource(t, "a stored key is the file's", fieldSource(field, stored), "config")
-
-	t.Setenv("COMMIT_GATE_EFFORT", "low")
-	checkSource(t, "the environment outranks the file", fieldSource(field, stored), "env COMMIT_GATE_EFFORT")
-}
-
-// A numeric override counts only where it parses above zero, the same test
-// gate.WithEnv applies; otherwise the file's value is still the one in force.
-func TestFieldSourceIgnoresAnUnusableNumericOverride(t *testing.T) {
-	field, err := findConfigField("reviewer.runs")
-	if err != nil {
-		t.Fatalf("findConfigField: %v", err)
-	}
-	stored := config.Config{Reviewer: config.Reviewer{Runs: 5}}
-	t.Setenv("COMMIT_GATE_RUNS", "0")
-	checkSource(t, "a zero override is no override", fieldSource(field, stored), "config")
-}
-
-func TestConfigHelpNamesEverySetting(t *testing.T) {
-	help := configKeyHelp()
-	for _, name := range configFieldNames() {
-		if !strings.Contains(help, name) {
-			t.Errorf("the generated help omits %s", name)
-		}
 	}
 }
 

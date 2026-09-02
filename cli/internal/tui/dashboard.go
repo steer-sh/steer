@@ -16,6 +16,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
 	"github.com/steer-sh/steer-cli/internal/harness"
+	"github.com/steer-sh/steer-cli/internal/settings"
 	"github.com/steer-sh/steer-cli/internal/status"
 	"github.com/steer-sh/steer-cli/internal/styles"
 )
@@ -28,11 +29,12 @@ const (
 	panelCandidates
 	panelClasses
 	panelPresets
+	panelReviewer
 	panelHealth
 	panelCount
 )
 
-var panelNames = [panelCount]string{"Channels", "Candidates", "Classes", "Hooks & presets", "Health"}
+var panelNames = [panelCount]string{"Channels", "Candidates", "Classes", "Hooks & presets", "Reviewer", "Health"}
 
 // Model is the dashboard's whole state: the composed snapshot, the active panel,
 // a per-panel cursor, and the candidate regex editor.
@@ -59,6 +61,13 @@ type Model struct {
 	form       *formState
 	matchCount string
 
+	// reviewer is the pending settings edit, nil unless the Reviewer panel is editing.
+	reviewer *reviewerEdit
+	// impactOf grades a pending reviewer identity against the measurements still
+	// collecting. It is a field so a test can drive the confirmation step without
+	// authoring a corpus; every construction sets it to settings.Impact.
+	impactOf func(gate.Config) []mine.InstrumentImpact
+
 	quitting bool
 }
 
@@ -68,7 +77,7 @@ func New(cfg gate.Config, scope string, targets ...harness.Registrar) *Model {
 	in.Placeholder = "regex for this class"
 	in.CharLimit = 200
 	in.Prompt = "match /"
-	m := &Model{cfg: cfg, scope: scope, targets: targets, input: in}
+	m := &Model{cfg: cfg, scope: scope, targets: targets, input: in, impactOf: settings.Impact}
 	m.refresh()
 	return m
 }
@@ -136,6 +145,8 @@ func (m *Model) rowCount(p panel) int {
 		return len(m.snap.Interventions)
 	case panelPresets:
 		return len(m.snap.Presets)
+	case panelReviewer:
+		return len(settings.Fields)
 	}
 	return 0
 }
@@ -147,6 +158,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyMsg:
 		if m.editing {
+			// The two editors share one text input and answer different keys, so the
+			// active panel routes the keystroke.
+			if m.active == panelReviewer {
+				return m.reviewerEditing(msg)
+			}
 			return m.updateEditing(msg)
 		}
 		return m.updateNav(msg)
@@ -193,6 +209,8 @@ func (m *Model) panelKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.classesKey(msg)
 	case panelPresets:
 		return m.presetsKey(msg)
+	case panelReviewer:
+		return m.reviewerKey(msg)
 	}
 	return m, nil
 }
@@ -214,6 +232,8 @@ func (m *Model) View() string {
 		body = m.viewClasses()
 	case panelPresets:
 		body = m.viewPresets()
+	case panelReviewer:
+		body = m.viewReviewer()
 	case panelHealth:
 		body = m.viewHealth()
 	}
@@ -254,6 +274,11 @@ func (m *Model) legend() string {
 		return "x retire · " + common
 	case panelPresets:
 		return "enter enable/disable · s sync · b rebuild master · " + common
+	case panelReviewer:
+		if m.editing {
+			return "enter write · esc cancel"
+		}
+		return "enter edit setting · " + common
 	}
 	return common
 }

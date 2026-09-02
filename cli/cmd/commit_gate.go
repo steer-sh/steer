@@ -16,8 +16,8 @@ import (
 	gatecodex "github.com/steer-sh/steer-cli/internal/gate/codex"
 	"github.com/steer-sh/steer-cli/internal/gate/gitgate"
 	"github.com/steer-sh/steer-cli/internal/gate/resolve"
-	"github.com/steer-sh/steer-cli/internal/gate/reviewers"
 	"github.com/steer-sh/steer-cli/internal/harness"
+	"github.com/steer-sh/steer-cli/internal/settings"
 	"github.com/steer-sh/steer-cli/internal/steerbin"
 	"github.com/steer-sh/steer-cli/internal/styles"
 	"github.com/steer-sh/steer-cli/internal/utils"
@@ -70,32 +70,19 @@ Arming both channels in one repository reviews every commit twice. Use
   steer commit-gate precommit`,
 }
 
-// buildReviewer resolves the provider. An empty model means "the provider's own
-// default", which is why the agy default is not handed to Codex or Claude Code — it is
-// a Gemini pin and names nothing on either of them.
+// buildReviewer resolves the provider through the one resolver every editor shares,
+// after the --provider flag has outranked the settings file.
 func buildReviewer(cfg gate.Config) (gate.Reviewer, error) {
-	provider := cfg.ReviewerProvider
 	if commitGateProvider != "" {
-		provider = commitGateProvider
+		cfg.ReviewerProvider = commitGateProvider
 	}
-	model := strings.TrimSpace(cfg.ReviewerModelOverride)
-	effort := strings.TrimSpace(cfg.ReviewerEffort)
-	if warning := reviewers.EffortWarning(provider, effort); warning != "" {
-		effortWarnOnce.Do(func() { fmt.Fprintln(os.Stderr, "steer:", warning) })
-	}
-	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case "", "agy":
-		if model == "" {
-			model = cfg.ReviewerModel
-		}
-		return reviewers.NewAgy(model, effort), nil
-	case "codex":
-		return reviewers.NewCodex(model, effort), nil
-	case "claude", "claude-code":
-		return reviewers.NewClaudeCode(model, effort), nil
-	default:
-		return nil, fmt.Errorf("unknown reviewer provider %q: expected agy, codex or claude-code", provider)
-	}
+	return settings.BuildReviewer(cfg, warnOnce)
+}
+
+// warnOnce prints a reviewer warning once per process. One command resolves the
+// reviewer several times, and the hook paths resolve it beside gateConfig.
+func warnOnce(warning string) {
+	effortWarnOnce.Do(func() { fmt.Fprintln(os.Stderr, "steer:", warning) })
 }
 
 // configWarnOnce holds a broken settings file to one line per process. One command
@@ -137,15 +124,10 @@ func resolvedGateConfig() (gate.Config, gate.Reviewer, error) {
 // resolveReviewer is resolvedGateConfig over a configuration the caller holds, which
 // is how a preview of an unwritten settings edit names the model that edit would run.
 func resolveReviewer(cfg gate.Config) (gate.Config, gate.Reviewer, error) {
-	reviewer, err := buildReviewer(cfg)
-	if err != nil {
-		if model := strings.TrimSpace(cfg.ReviewerModelOverride); model != "" {
-			cfg.ReviewerModel = model
-		}
-		return cfg, nil, err
+	if commitGateProvider != "" {
+		cfg.ReviewerProvider = commitGateProvider
 	}
-	cfg.ReviewerModel = reviewer.ModelLabel()
-	return cfg, reviewer, nil
+	return settings.Resolve(cfg, warnOnce)
 }
 
 var commitGateReviewCmd = &cobra.Command{
@@ -367,11 +349,8 @@ func commitGateCodexCommand() string {
 	return steerHookCommand("commit-gate review-codex")
 }
 
-// reviewerFlags are the flags that name the reviewer on a command line. A flag
-// outranks ~/.steer/config.json, so one baked into a registration pins the reviewer
-// that install named: every `steer config set` and every dashboard edit then changes
-// nothing while `status` reports the new value. A registration carries none of them.
-var reviewerFlags = []string{"--provider", "--model", "--effort", "--runs"}
+// reviewerFlags is the shared list the dashboard's Reviewer panel also scans.
+var reviewerFlags = settings.ReviewerFlags
 
 // pinnedRegistration is one installed command that still names a reviewer.
 type pinnedRegistration struct {
