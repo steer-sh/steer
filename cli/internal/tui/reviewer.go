@@ -190,8 +190,9 @@ func (m *Model) viewReviewerImpact() string {
 	}
 	out := warn(fmt.Sprintf("  this change lands in %d measurement(s) already collecting:\n",
 		len(m.reviewer.impacts)))
+	width := settings.ImpactWidth(m.reviewer.impacts)
 	for _, im := range m.reviewer.impacts {
-		out += fmt.Sprintf("    %-6s %-28s %s\n", im.Grade, im.Class,
+		out += fmt.Sprintf("    %-6s %-*s %s\n", im.Grade, width, im.Class,
 			dim(settings.ImpactNote(im)))
 	}
 	return out

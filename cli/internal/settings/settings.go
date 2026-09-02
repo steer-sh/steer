@@ -246,6 +246,18 @@ func Impact(cfg gate.Config) []mine.InstrumentImpact {
 	return mine.ImpactOf(records, ev.Chains, mine.InstrumentUse{ID: cfg.InstrumentID(), Fields: fields})
 }
 
+// ImpactWidth is the class column an impact list renders over: the widest class in
+// the list, so a long class name pushes the column rather than colliding with it.
+func ImpactWidth(impacts []mine.InstrumentImpact) int {
+	width := 0
+	for _, im := range impacts {
+		if n := len([]rune(im.Class)); n > width {
+			width = n
+		}
+	}
+	return width
+}
+
 // ImpactNote says what a grade costs the reader: a major drift withholds the verdict,
 // a minor one rides beside the range.
 func ImpactNote(im mine.InstrumentImpact) string {

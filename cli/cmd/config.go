@@ -159,8 +159,10 @@ func reportReviewerImpact(next config.Config) {
 	}
 	utils.Warning(fmt.Sprintf("This reviewer change lands in %d measurement(s) already collecting:",
 		len(impacts)))
+	width := settings.ImpactWidth(impacts)
 	for _, im := range impacts {
-		fmt.Printf("    %-6s %-28s %s\n", im.Grade, im.Class, styles.MutedText.Render(settings.ImpactNote(im)))
+		fmt.Printf("    %-6s %-*s %s\n", im.Grade, width, im.Class,
+			styles.MutedText.Render(settings.ImpactNote(im)))
 	}
 	fmt.Println()
 }
