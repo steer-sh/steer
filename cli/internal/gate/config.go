@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	steerconfig "github.com/steer-sh/steer-cli/internal/config"
 	"github.com/steer-sh/steer-cli/internal/statestore"
 )
 
@@ -20,10 +21,12 @@ import (
 type Config struct {
 	StateDir string
 
-	ReviewerModel   string
-	ReviewerCommand []string
-	ReviewerRuns    int
-	ReviewTimeout   time.Duration
+	ReviewerProvider      string
+	ReviewerModel         string
+	ReviewerModelOverride string
+	ReviewerCommand       []string
+	ReviewerRuns          int
+	ReviewTimeout         time.Duration
 
 	StaleAfter   time.Duration
 	MaxFirings   int
@@ -89,11 +92,12 @@ var NonReviewPhases = map[string]bool{
 // Defaults returns the shipped configuration.
 func Defaults() Config {
 	return Config{
-		StateDir:        defaultStateDir(),
-		ReviewerModel:   defaultReviewerModel,
-		ReviewerCommand: []string{"agy", "--model", defaultReviewerModel, "--output-format", "json", "-p"},
-		ReviewerRuns:    defaultReviewerRuns,
-		ReviewTimeout:   defaultReviewTimeout,
+		StateDir:         defaultStateDir(),
+		ReviewerProvider: "agy",
+		ReviewerModel:    defaultReviewerModel,
+		ReviewerCommand:  []string{"agy", "--model", defaultReviewerModel, "--output-format", "json", "-p"},
+		ReviewerRuns:     defaultReviewerRuns,
+		ReviewTimeout:    defaultReviewTimeout,
 
 		StaleAfter:   defaultStaleAfter,
 		MaxFirings:   defaultMaxFirings,
@@ -111,9 +115,23 @@ func Defaults() Config {
 	}
 }
 
-// Load returns the shipped configuration with environment overrides applied.
+// Load returns the shipped configuration with file and environment overrides applied.
 func Load() Config {
 	c := Defaults()
+	if file, err := steerconfig.Load(); err == nil {
+		if file.Reviewer.Provider != "" {
+			c.ReviewerProvider = file.Reviewer.Provider
+		}
+		if file.Reviewer.Model != "" {
+			c.ReviewerModelOverride = file.Reviewer.Model
+		}
+		if file.Reviewer.Runs > 0 {
+			c.ReviewerRuns = file.Reviewer.Runs
+		}
+		if file.Reviewer.Timeout > 0 {
+			c.ReviewTimeout = time.Duration(file.Reviewer.Timeout) * time.Second
+		}
+	}
 	// COMMIT_GATE_STATE_DIR wins over COMMIT_REVIEW_STATE. The second is mine.py's
 	// own variable, so the miner and an existing mine.py invocation read one directory.
 	if v := os.Getenv("COMMIT_GATE_STATE_DIR"); v != "" {
@@ -132,6 +150,7 @@ func Load() Config {
 	}
 	if v := os.Getenv("COMMIT_GATE_MODEL"); v != "" {
 		c.ReviewerModel = v
+		c.ReviewerModelOverride = v
 		c.ReviewerCommand = []string{"agy", "--model", v, "--output-format", "json", "-p"}
 	}
 	return c

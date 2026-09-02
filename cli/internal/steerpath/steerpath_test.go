@@ -29,3 +29,21 @@ func TestStateDirIsUnderTheNeutralHome(t *testing.T) {
 		t.Errorf("LegacyStateDir = %q; want %q", got, want)
 	}
 }
+
+func TestConfigFileIsUnderTheNeutralHome(t *testing.T) {
+	dir := t.TempDir()
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", dir)
+	} else {
+		t.Setenv("HOME", dir)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("UserHomeDir: %v", err)
+	}
+	got := ConfigFile()
+	want := filepath.Join(home, ".steer", "config.json")
+	if got != want {
+		t.Errorf("ConfigFile = %q; want %q", got, want)
+	}
+}

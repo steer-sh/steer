@@ -17,6 +17,9 @@ import (
 // inside one harness's config directory.
 const steerHome = ".steer"
 
+// configFileName is the global, harness-neutral settings file inside steerHome.
+const configFileName = "config.json"
+
 // legacyHome is where the guard store and the corpora lived while Claude Code
 // was the only harness.
 const legacyHome = ".claude"
@@ -37,6 +40,16 @@ const (
 // resolved, it returns the same path relative to the working directory.
 func StateDir(component string) string {
 	return stateDir(steerHome, component)
+}
+
+// ConfigFile returns the global Steer settings file. When the home directory
+// cannot be resolved, it returns the same path relative to the working directory.
+func ConfigFile() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(steerHome, configFileName)
+	}
+	return filepath.Join(home, steerHome, configFileName)
 }
 
 // LegacyStateDir returns the directory Steer wrote a component's state to

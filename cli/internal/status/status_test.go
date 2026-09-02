@@ -13,11 +13,13 @@ import (
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
 )
 
-// isolate points HOME at a temp dir so the denials read, the audit-log count, and
-// the posture readers all resolve inside the sandbox, never the real machine.
+// isolate points both homes at a temp dir so the denials read, the audit-log count,
+// and every harness posture reader resolve inside the sandbox, never the real machine.
 func isolate(t *testing.T) {
 	t.Helper()
-	t.Setenv("HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
 }
 
 // seedLedger writes a ledger of `n` before-install chains carrying beforeText and

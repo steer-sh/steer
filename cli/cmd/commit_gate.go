@@ -70,33 +70,31 @@ Arming both channels in one repository reviews every commit twice. Use
 // default", which is why the agy default is not handed to Codex or Claude Code — it is
 // a Gemini pin and names nothing on either of them.
 func buildReviewer(cfg gate.Config) (gate.Reviewer, error) {
-	switch strings.ToLower(strings.TrimSpace(commitGateProvider)) {
+	provider := cfg.ReviewerProvider
+	if commitGateProvider != "" {
+		provider = commitGateProvider
+	}
+	model := strings.TrimSpace(cfg.ReviewerModelOverride)
+	switch strings.ToLower(strings.TrimSpace(provider)) {
 	case "", "agy":
-		// cfg.ReviewerModel already carries the flag and the environment override.
-		return reviewers.NewAgy(cfg.ReviewerModel), nil
+		if model == "" {
+			model = cfg.ReviewerModel
+		}
+		return reviewers.NewAgy(model), nil
 	case "codex":
-		return reviewers.NewCodex(chosenModel()), nil
+		return reviewers.NewCodex(model), nil
 	case "claude", "claude-code":
-		return reviewers.NewClaudeCode(chosenModel()), nil
+		return reviewers.NewClaudeCode(model), nil
 	default:
-		return nil, fmt.Errorf("unknown reviewer provider %q: expected agy, codex or claude-code", commitGateProvider)
+		return nil, fmt.Errorf("unknown reviewer provider %q: expected agy, codex or claude-code", provider)
 	}
-}
-
-// chosenModel is the model the operator asked for, by flag or by environment, and
-// empty when they asked for none. cfg.ReviewerModel cannot answer this: it falls back
-// to the agy pin, which is a Gemini name and selects nothing on the other providers.
-func chosenModel() string {
-	if commitGateModel != "" {
-		return commitGateModel
-	}
-	return strings.TrimSpace(os.Getenv("COMMIT_GATE_MODEL"))
 }
 
 func gateConfig() gate.Config {
 	cfg := gate.Load()
 	if commitGateModel != "" {
 		cfg.ReviewerModel = commitGateModel
+		cfg.ReviewerModelOverride = commitGateModel
 	}
 	return cfg
 }
