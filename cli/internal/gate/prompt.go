@@ -108,8 +108,37 @@ func PromptDigest() string {
 }
 
 // InstrumentID identifies the reviewer that produced a row: model, run count, prompt
-// digest, implementation. Stamped on every row so a later reading of the log can tell
-// a change in the code being reviewed from a change in the thing doing the reviewing.
+// digest, implementation, and effort when one is set. Stamped on every row so a later
+// reading of the log can tell a change in the code being reviewed from a change in the
+// thing doing the reviewing.
+//
+// No reader splits this string by position, so a fifth segment is safe to append. It
+// is appended only when effort is set, which keeps a row from an unconfigured machine
+// byte-identical to the rows it already wrote.
 func (c Config) InstrumentID() string {
-	return fmt.Sprintf("%s/%d/%s/%s", c.ReviewerModel, c.ReviewerRuns, PromptDigest(), InstrumentSuffix)
+	id := fmt.Sprintf("%s/%d/%s/%s", c.ReviewerModel, c.ReviewerRuns, PromptDigest(), InstrumentSuffix)
+	if c.ReviewerEffort != "" {
+		id += "/" + c.ReviewerEffort
+	}
+	return id
+}
+
+// InstrumentFields is the same identity by dimension. The string form collapses the
+// dimensions, so a reader comparing two of them can answer only "different"; a grader
+// that must say WHICH half of the reviewer moved reads this instead.
+//
+// Provider and model are the reviewer's own answers, so an unconfigured model arrives
+// as that reviewer's `<provider>-default` sentinel, never empty and never another
+// provider's pin. Effort has no such label: it is recorded as the operator wrote it,
+// and empty means the provider's default, because the value that default resolves to
+// lives inside the provider CLI.
+func (c Config) InstrumentFields() map[string]any {
+	return map[string]any{
+		"provider":      c.ReviewerProvider,
+		"model":         c.ReviewerModel,
+		"effort":        c.ReviewerEffort,
+		"runs":          c.ReviewerRuns,
+		"prompt_digest": PromptDigest(),
+		"engine":        InstrumentSuffix,
+	}
 }

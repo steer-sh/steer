@@ -129,6 +129,29 @@ func TestCleanPassAllows(t *testing.T) {
 	}
 }
 
+func TestRowCarriesTheInstrumentByDimension(t *testing.T) {
+	h := newHarness(t, findingReply("NO FINDINGS"))
+	h.cfg.ReviewerEffort = "high"
+	h.handle()
+	row := h.lastRow()
+	if row["instrument"] != "stub-model/2/"+PromptDigest()+"/go/high" {
+		t.Errorf("instrument = %v — a set effort is the fifth segment", row["instrument"])
+	}
+	fields, ok := row["instrument_fields"].(map[string]any)
+	if !ok {
+		t.Fatalf("instrument_fields = %v; want an object a grader can read by key", row["instrument_fields"])
+	}
+	want := map[string]any{
+		"provider": "stub", "model": "stub-model", "effort": "high",
+		"runs": float64(2), "prompt_digest": PromptDigest(), "engine": "go",
+	}
+	for key, value := range want {
+		if fields[key] != value {
+			t.Errorf("instrument_fields[%q] = %v, want %v", key, fields[key], value)
+		}
+	}
+}
+
 func TestFindingsDeny(t *testing.T) {
 	h := newHarness(t, findingReply(oneFinding))
 	d := h.handle()

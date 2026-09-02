@@ -77,6 +77,7 @@ func (l *Ledger) Errors() []string { return l.errs }
 // invocation — the carry would need the disk that just failed.
 func (l *Ledger) Log(row Row) error {
 	setDefault(row, "instrument", l.cfg.InstrumentID())
+	setDefault(row, "instrument_fields", l.cfg.InstrumentFields())
 	setDefault(row, "host", l.cfg.HostID)
 	if len(l.errs) > 0 {
 		setDefault(row, "gate_errors", l.errs)
