@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/claude"
@@ -90,8 +91,17 @@ func buildReviewer(cfg gate.Config) (gate.Reviewer, error) {
 	}
 }
 
+// configWarnOnce holds a broken settings file to one line per process. One command
+// calls gateConfig several times.
+var configWarnOnce sync.Once
+
 func gateConfig() gate.Config {
-	cfg := gate.Load()
+	cfg, err := gate.Load()
+	if err != nil {
+		configWarnOnce.Do(func() {
+			fmt.Fprintln(os.Stderr, "steer:", err, "— using the shipped defaults")
+		})
+	}
 	if commitGateModel != "" {
 		cfg.ReviewerModel = commitGateModel
 		cfg.ReviewerModelOverride = commitGateModel

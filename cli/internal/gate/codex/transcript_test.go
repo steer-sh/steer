@@ -27,7 +27,10 @@ func writeRollout(t *testing.T, body string) string {
 
 func testConfig(t *testing.T) gate.Config {
 	t.Helper()
-	cfg := gate.Load()
+	cfg, err := gate.Load()
+	if err != nil {
+		t.Fatalf("gate.Load: %v", err)
+	}
 	cfg.StateDir = t.TempDir()
 	return cfg
 }

@@ -1,11 +1,14 @@
 package gate
 
 import (
+	"os"
+	"path/filepath"
 	"runtime"
 	"testing"
 	"time"
 
 	steerconfig "github.com/steer-sh/steer-cli/internal/config"
+	"github.com/steer-sh/steer-cli/internal/steerpath"
 )
 
 func tempConfigHome(t *testing.T) {
@@ -38,7 +41,10 @@ func TestLoadAppliesFileBetweenDefaultsAndEnvironment(t *testing.T) {
 	t.Setenv("COMMIT_GATE_RUNS", "7")
 	t.Setenv("COMMIT_GATE_TIMEOUT", "240")
 
-	cfg := Load()
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
 	if cfg.ReviewerProvider != "codex" {
 		t.Errorf("ReviewerProvider = %q; want codex", cfg.ReviewerProvider)
 	}
@@ -55,7 +61,10 @@ func TestLoadAppliesFileBetweenDefaultsAndEnvironment(t *testing.T) {
 
 func TestLoadMissingFileKeepsShippedDefaults(t *testing.T) {
 	tempConfigHome(t)
-	cfg := Load()
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
 	if cfg.ReviewerProvider != "agy" || cfg.ReviewerModel != defaultReviewerModel {
 		t.Fatalf("reviewer defaults = %q/%q; want agy/%s",
 			cfg.ReviewerProvider, cfg.ReviewerModel, defaultReviewerModel)
@@ -63,5 +72,26 @@ func TestLoadMissingFileKeepsShippedDefaults(t *testing.T) {
 	if cfg.ReviewerRuns != defaultReviewerRuns || cfg.ReviewTimeout != defaultReviewTimeout {
 		t.Fatalf("panel defaults = %d/%s; want %d/%s",
 			cfg.ReviewerRuns, cfg.ReviewTimeout, defaultReviewerRuns, defaultReviewTimeout)
+	}
+}
+
+func TestLoadReportsAMalformedSettingsFile(t *testing.T) {
+	tempConfigHome(t)
+	path := steerpath.ConfigFile()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("create config dir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("{not json"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("COMMIT_GATE_RUNS", "9")
+
+	cfg, err := Load()
+	if err == nil {
+		t.Fatal("Load returned no error over a malformed settings file")
+	}
+	// The gate still has to answer, and the environment still outranks the file.
+	if cfg.ReviewerProvider != "agy" || cfg.ReviewerRuns != 9 {
+		t.Fatalf("cfg = %s/%d; want agy/9", cfg.ReviewerProvider, cfg.ReviewerRuns)
 	}
 }

@@ -116,9 +116,13 @@ func Defaults() Config {
 }
 
 // Load returns the shipped configuration with file and environment overrides applied.
-func Load() Config {
+// A settings file that cannot be read or parsed contributes no overrides and rides
+// back as the error, beside a usable configuration: the caller reports it, because a
+// gate that cannot answer must fail open.
+func Load() (Config, error) {
 	c := Defaults()
-	if file, err := steerconfig.Load(); err == nil {
+	file, fileErr := steerconfig.Load()
+	if fileErr == nil {
 		if file.Reviewer.Provider != "" {
 			c.ReviewerProvider = file.Reviewer.Provider
 		}
@@ -153,7 +157,7 @@ func Load() Config {
 		c.ReviewerModelOverride = v
 		c.ReviewerCommand = []string{"agy", "--model", v, "--output-format", "json", "-p"}
 	}
-	return c
+	return c, fileErr
 }
 
 func envInt(key string) int {
