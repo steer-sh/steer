@@ -99,6 +99,23 @@ func gateConfig() gate.Config {
 	return cfg
 }
 
+// resolvedGateConfig returns the configuration with ReviewerModel naming the model
+// that would ACTUALLY run, beside the reviewer it resolved. An unresolvable provider
+// yields the error, no reviewer, and the operator's own configured model where that
+// label would have gone.
+func resolvedGateConfig() (gate.Config, gate.Reviewer, error) {
+	cfg := gateConfig()
+	reviewer, err := buildReviewer(cfg)
+	if err != nil {
+		if model := strings.TrimSpace(cfg.ReviewerModelOverride); model != "" {
+			cfg.ReviewerModel = model
+		}
+		return cfg, nil, err
+	}
+	cfg.ReviewerModel = reviewer.ModelLabel()
+	return cfg, reviewer, nil
+}
+
 var commitGateReviewCmd = &cobra.Command{
 	Use:   "review",
 	Short: "PreToolUse hook: rule on a Bash `git commit` before it runs",
@@ -432,14 +449,12 @@ var commitGateStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Report which channels are armed and where the ledger lives",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg := gateConfig()
-		// Resolve the reviewer so status reports the model that would ACTUALLY run.
-		// Reading the config alone prints the default pin under every provider.
-		reviewer, err := buildReviewer(cfg)
+		// This view prints the provider's own name, so an unresolvable one is a
+		// refusal here rather than a dropped field.
+		cfg, reviewer, err := resolvedGateConfig()
 		if err != nil {
 			return err
 		}
-		cfg.ReviewerModel = reviewer.ModelLabel()
 		fmt.Println()
 		fmt.Println(styles.MainHeader.Render("Commit Gate"))
 		fmt.Println()

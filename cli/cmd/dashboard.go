@@ -25,7 +25,8 @@ recomposed after every write.`,
 		if err != nil {
 			return err
 		}
-		return tui.Run(gateConfig(), currentScope(), targets...)
+		cfg, _, _ := resolvedGateConfig()
+		return tui.Run(cfg, currentScope(), targets...)
 	},
 }
 

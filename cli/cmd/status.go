@@ -44,14 +44,17 @@ runtime dependency. It writes to --out, or to stdout when --out is absent.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// status never writes: it reads the stored snapshots rather than rebuilding
 		// them, so the one writer stays `steer report refresh`.
+		// A snapshot renders under an unresolvable provider: it names no provider,
+		// so the configured model is the honest value to print.
+		cfg, _, _ := resolvedGateConfig()
 		s, err := status.Collect(status.Options{
-			GateStateDir: gateConfig().StateDir,
-			Config:       gateConfig(),
+			GateStateDir: cfg.StateDir,
+			Config:       cfg,
 			WindowDays:   statusDays,
 			AllProjects:  !statusProjectOnly,
 			Scope:        currentScope(),
 			Evidence: evidence.Gather(evidence.Options{
-				GateStateDir: gateConfig().StateDir,
+				GateStateDir: cfg.StateDir,
 				AllProjects:  !statusProjectOnly,
 			}),
 		})
