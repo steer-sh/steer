@@ -20,6 +20,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/steerbin"
 	"github.com/steer-sh/steer-cli/internal/styles"
+	"github.com/steer-sh/steer-cli/internal/utils"
 )
 
 const (
@@ -271,6 +272,13 @@ func installReviewChannel(cfg gate.Config) error {
 	if err != nil {
 		return err
 	}
+	// The registration this install writes carries no reviewer flag; one written by an
+	// older steer still does, and it outranks the settings file wherever it survives.
+	if binPath, binErr := steerbin.Ensure(); binErr == nil {
+		if _, repairErr := repointRegistrations(binPath); repairErr != nil {
+			utils.Warning("could not repair the other registrations: " + repairErr.Error())
+		}
+	}
 	fmt.Println()
 	message := fmt.Sprintf("Armed the %s commit gate on PreToolUse\nScope: %s\nTimeout: %ds (reviewer timeout %ds + %ds margin)",
 		entry.DisplayName, scope, timeout, int(cfg.ReviewTimeout.Seconds()), commitGateTimeoutMargin)
@@ -321,9 +329,9 @@ func installPreCommitChannel(cfg gate.Config) error {
 
 // buildCommitGatePreCommitScript writes the wrapper git runs.
 //
-// It forwards no arguments, because git invokes a pre-commit hook with none. It DOES
-// carry the provider and model, or the installed channel would silently fall back to
-// the default reviewer while `status` reported the configured one.
+// It forwards no arguments. git invokes a pre-commit hook with none, and the reviewer
+// is read from ~/.steer/config.json at firing time: a flag written here would outrank
+// that file and pin the reviewer this install happened to name.
 func buildCommitGatePreCommitScript() string {
 	return strings.Join([]string{
 		"#!/usr/bin/env bash",
@@ -335,7 +343,7 @@ func buildCommitGatePreCommitScript() string {
 		"  exit 0",
 		"fi",
 		"",
-		"steer commit-gate precommit" + commitGateProviderArgs(),
+		"steer commit-gate precommit",
 		"",
 	}, "\n")
 }
@@ -352,23 +360,78 @@ func commandNote(registered bool, command string) string {
 }
 
 func commitGateCommand() string {
-	return steerHookCommand("commit-gate review" + commitGateProviderArgs())
+	return steerHookCommand("commit-gate review")
 }
 
 func commitGateCodexCommand() string {
-	return steerHookCommand("commit-gate review-codex" + commitGateProviderArgs())
+	return steerHookCommand("commit-gate review-codex")
 }
 
-// commitGateProviderArgs renders the reviewer selection both channels must persist.
-func commitGateProviderArgs() string {
-	var parts []string
-	if commitGateProvider != "" {
-		parts = append(parts, " --provider ", commitGateProvider)
+// reviewerFlags are the flags that name the reviewer on a command line. A flag
+// outranks ~/.steer/config.json, so one baked into a registration pins the reviewer
+// that install named: every `steer config set` and every dashboard edit then changes
+// nothing while `status` reports the new value. A registration carries none of them.
+var reviewerFlags = []string{"--provider", "--model", "--effort", "--runs"}
+
+// pinnedRegistration is one installed command that still names a reviewer.
+type pinnedRegistration struct {
+	// Label names the channel a reader would recognise it by.
+	Label string
+	// Command is the command as registered.
+	Command string
+	// Repair is the command that rewrites it.
+	Repair string
+}
+
+// pinnedRegistrations reports every installed commit-gate command still carrying a
+// reviewer flag. Steer wrote these before the reviewer moved into the settings file;
+// each one silently overrides that file until it is stripped.
+func pinnedRegistrations() []pinnedRegistration {
+	var pinned []pinnedRegistration
+	add := func(label, command, repair string) {
+		if steerbin.HasFlags(command, reviewerFlags...) {
+			pinned = append(pinned, pinnedRegistration{Label: label, Command: command, Repair: repair})
+		}
 	}
-	if commitGateModel != "" {
-		parts = append(parts, " --model ", commitGateModel)
+	for _, scope := range []string{claude.ProjectScope, claude.GlobalScope} {
+		if arming := claude.CommitGateHookArmed(scope); arming.Registered {
+			add("claude-code "+scope+" scope", arming.Command, "steer bin install")
+		}
 	}
-	return strings.Join(parts, "")
+	cwd, _ := codexProjectDir()
+	for _, scope := range []string{claude.ProjectScope, claude.GlobalScope} {
+		if arming := codexhooks.CommitGateArming(scope, cwd); arming.Registered {
+			add("codex "+scope+" scope", arming.Command, "steer bin install")
+		}
+	}
+	if armed, path := preCommitArmedHere(); armed {
+		if raw, err := os.ReadFile(path); err == nil {
+			for _, line := range strings.Split(string(raw), "\n") {
+				line = strings.TrimSpace(line)
+				if strings.HasPrefix(line, "steer commit-gate precommit") {
+					add("pre-commit "+path, line, "steer commit-gate install --precommit --force")
+				}
+			}
+		}
+	}
+	return pinned
+}
+
+// reportPinnedRegistrations names every registration that overrides the settings
+// file. A silent override is the failure this reporting exists to remove, so it is
+// never reachable without a line saying so.
+func reportPinnedRegistrations() {
+	pinned := pinnedRegistrations()
+	if len(pinned) == 0 {
+		return
+	}
+	utils.Warning(fmt.Sprintf("%d registration(s) name the reviewer on the command line, "+
+		"which outranks ~/.steer/config.json:", len(pinned)))
+	for _, row := range pinned {
+		fmt.Printf("    %-28s %s\n", row.Label, row.Command)
+		fmt.Printf("    %-28s %s\n", "", styles.MutedText.Render("repair: "+row.Repair))
+	}
+	fmt.Println()
 }
 
 func preCommitArmedHere() (bool, string) {
@@ -555,6 +618,8 @@ var commitGateStatusCmd = &cobra.Command{
 		} else {
 			fmt.Printf("  pre-commit   not armed in this repository\n")
 		}
+		fmt.Println()
+		reportPinnedRegistrations()
 		return nil
 	},
 }

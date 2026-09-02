@@ -52,18 +52,9 @@ config is stranded the moment the file it names moves.`,
 		fmt.Println()
 		utils.Success("Installed " + path)
 
-		rewritten := 0
-		for _, scope := range []string{claude.ProjectScope, claude.GlobalScope} {
-			n, err := relinkClaude(scope, path)
-			if err != nil {
-				return err
-			}
-			rewritten += n
-			n, err = relinkCodex(scope, path)
-			if err != nil {
-				return err
-			}
-			rewritten += n
+		rewritten, err := repointRegistrations(path)
+		if err != nil {
+			return err
 		}
 		if rewritten == 0 {
 			utils.Info("No registration needed rewriting.")
@@ -157,13 +148,36 @@ func relinkCodex(scope, path string) (int, error) {
 	return rewritten, nil
 }
 
+// repointRegistrations rewrites every steer-owned registration in both scopes and
+// reports how many changed. `steer bin install` and `steer commit-gate install` both
+// call it: an install repairs the registration it writes, and this repairs the ones
+// it does not.
+func repointRegistrations(path string) (int, error) {
+	rewritten := 0
+	for _, scope := range []string{claude.ProjectScope, claude.GlobalScope} {
+		n, err := relinkClaude(scope, path)
+		if err != nil {
+			return rewritten, err
+		}
+		rewritten += n
+		n, err = relinkCodex(scope, path)
+		if err != nil {
+			return rewritten, err
+		}
+		rewritten += n
+	}
+	return rewritten, nil
+}
+
 // relinked answers what a registered command becomes, and whether that differs from
-// what it is now.
+// what it is now. It names the stable executable AND drops the reviewer flags: a flag
+// outranks the settings file, so one left here makes every later `steer config set`
+// silently inert.
 func relinked(registered bool, command, path string) (string, bool) {
 	if !registered {
 		return "", false
 	}
-	next := steerbin.Relink(command, path)
+	next := steerbin.StripFlags(steerbin.Relink(command, path), reviewerFlags...)
 	return next, next != command
 }
 

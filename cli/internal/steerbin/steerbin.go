@@ -246,3 +246,85 @@ func Quote(path string) string {
 	}
 	return "'" + strings.ReplaceAll(path, "'", `'\''`) + "'"
 }
+
+// StripFlags removes the named flags, and the value each carries, from a
+// registered command. It reads both `--name value` and `--name=value`. Every name
+// it is given must be a flag that TAKES a value: the separated form always
+// consumes the following word, because a value may itself begin with a hyphen and
+// nothing in the string says whether it is a value or the next flag. A command
+// whose first word is not steer's own is returned unchanged, the same rule Relink
+// follows: a user's wrapper script is not ours to rewrite.
+//
+// A flag on a registration outranks every configuration file, so one left on disk
+// pins the setting it names forever.
+func StripFlags(command string, names ...string) string {
+	head, rest := split(command)
+	if head == "" || !isSteer(head) || rest == "" {
+		return command
+	}
+	wanted := map[string]bool{}
+	for _, name := range names {
+		wanted[name] = true
+	}
+	fields := shellFields(rest)
+	kept := make([]string, 0, len(fields))
+	dropped := false
+	for i := 0; i < len(fields); i++ {
+		field := fields[i]
+		if name, _, ok := strings.Cut(field, "="); ok && wanted[name] {
+			dropped = true
+			continue
+		}
+		if wanted[field] {
+			dropped = true
+			i++
+			continue
+		}
+		kept = append(kept, field)
+	}
+	if !dropped {
+		return command
+	}
+	return strings.TrimSpace(Quote(head) + " " + strings.Join(kept, " "))
+}
+
+// HasFlags reports whether a command carries any of the named flags.
+func HasFlags(command string, names ...string) bool {
+	return StripFlags(command, names...) != command
+}
+
+// shellFields splits a command's arguments into words, keeping a quoted run as one
+// word. strings.Fields would split `--model 'a b'` into three, and dropping the
+// flag would then leave half its value behind as an argument of its own.
+func shellFields(rest string) []string {
+	var fields []string
+	var word strings.Builder
+	var quote rune
+	started := false
+	for _, r := range rest {
+		switch {
+		case quote != 0:
+			word.WriteRune(r)
+			if r == quote {
+				quote = 0
+			}
+		case r == '\'' || r == '"':
+			quote = r
+			word.WriteRune(r)
+			started = true
+		case r == ' ' || r == '\t':
+			if started {
+				fields = append(fields, word.String())
+				word.Reset()
+				started = false
+			}
+		default:
+			word.WriteRune(r)
+			started = true
+		}
+	}
+	if started {
+		fields = append(fields, word.String())
+	}
+	return fields
+}

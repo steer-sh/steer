@@ -115,3 +115,72 @@ func TestASpacedPathSurvivesQuotingAndSplitting(t *testing.T) {
 		t.Fatalf("relink of a quoted command = %q, want %q", got, command)
 	}
 }
+
+func TestStripFlagsRemovesTheFlagAndItsValue(t *testing.T) {
+	quotedPath := Quote("/home/a b/.steer/bin/steer")
+	cases := []struct {
+		name    string
+		command string
+		want    string
+	}{
+		{
+			name:    "a flag and its value",
+			command: "steer commit-gate review --provider agy --model gemini-3.7-flash-high",
+			want:    "steer commit-gate review",
+		},
+		{
+			name:    "the equals form",
+			command: "steer commit-gate review --model=codex-5 --provider=codex",
+			want:    "steer commit-gate review",
+		},
+		{
+			name:    "an unnamed flag is kept",
+			command: "steer commit-gate review --provider agy --harness codex",
+			want:    "steer commit-gate review --harness codex",
+		},
+		{
+			name:    "a value holding a space is one word",
+			command: "steer commit-gate review --model 'a b' --harness codex",
+			want:    "steer commit-gate review --harness codex",
+		},
+		{
+			name:    "a value beginning with a hyphen is still the value",
+			command: "steer commit-gate review --model -3.7 --harness codex",
+			want:    "steer commit-gate review --harness codex",
+		},
+		{
+			name:    "a quoted path keeps its quoting",
+			command: quotedPath + " commit-gate review --model x",
+			want:    quotedPath + " commit-gate review",
+		},
+		{
+			name:    "nothing to strip is returned unchanged",
+			command: "steer commit-gate review",
+			want:    "steer commit-gate review",
+		},
+		{
+			name:    "a wrapper script is never rewritten",
+			command: "/usr/local/bin/review-wrapper commit-gate review --model x",
+			want:    "/usr/local/bin/review-wrapper commit-gate review --model x",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := StripFlags(tc.command, "--provider", "--model"); got != tc.want {
+				t.Fatalf("StripFlags = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestHasFlagsReadsWhatStripFlagsWouldRemove(t *testing.T) {
+	if !HasFlags("steer commit-gate review --model x", "--model") {
+		t.Fatal("a registration carrying --model must read as flagged")
+	}
+	if HasFlags("steer commit-gate review", "--model") {
+		t.Fatal("a bare registration must not read as flagged")
+	}
+	if HasFlags("/usr/local/bin/wrapper --model x", "--model") {
+		t.Fatal("a wrapper script is not steer's to read as flagged")
+	}
+}

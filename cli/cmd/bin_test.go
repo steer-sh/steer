@@ -13,7 +13,8 @@ import (
 
 // TestRelinkRepointsAPATHRegistration pins the repair half: a registration
 // written before the stable executable existed names the bare word, and one
-// install rewrites it to the absolute path while keeping its flags and timeout.
+// install rewrites it to the absolute path, keeping its timeout and dropping the
+// reviewer flags that outrank the settings file.
 func TestRelinkRepointsAPATHRegistration(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -38,7 +39,7 @@ func TestRelinkRepointsAPATHRegistration(t *testing.T) {
 	}
 
 	gate := claude.CommitGateHookArmed(claude.GlobalScope)
-	want := steerbin.Quote(path) + " commit-gate review --provider gemini"
+	want := steerbin.Quote(path) + " commit-gate review"
 	if gate.Command != want {
 		t.Fatalf("gate command = %q, want %q", gate.Command, want)
 	}

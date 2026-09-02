@@ -284,6 +284,11 @@ then measured across two instruments, so set names those classes before it write
 			return err
 		}
 		utils.Success(fmt.Sprintf("%s = %s", f.name, storedLabel(value)))
+		if f.identity {
+			// A registration naming the reviewer outranks this file, so the value just
+			// written is not the one that runs until that registration is stripped.
+			reportPinnedRegistrations()
+		}
 		if f.name == "reviewer.timeout" {
 			// The engine reads the new value on the next firing; the harness's own
 			// hook timeout is a registered number, and a review killed by the smaller
