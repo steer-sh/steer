@@ -22,6 +22,7 @@ func tempConfigHome(t *testing.T) {
 	for _, key := range []string{
 		"COMMIT_GATE_STATE_DIR", "COMMIT_REVIEW_STATE", "COMMIT_GATE_RUNS",
 		"COMMIT_GATE_TIMEOUT", "COMMIT_GATE_MAX_FIRINGS", "COMMIT_GATE_MODEL",
+		"COMMIT_GATE_EFFORT",
 	} {
 		t.Setenv(key, "")
 	}
@@ -32,12 +33,14 @@ func TestLoadAppliesFileBetweenDefaultsAndEnvironment(t *testing.T) {
 	if err := steerconfig.Save(steerconfig.Config{Reviewer: steerconfig.Reviewer{
 		Provider: "codex",
 		Model:    "file-model",
+		Effort:   "medium",
 		Runs:     5,
 		Timeout:  210,
 	}}); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 	t.Setenv("COMMIT_GATE_MODEL", "env-model")
+	t.Setenv("COMMIT_GATE_EFFORT", "high")
 	t.Setenv("COMMIT_GATE_RUNS", "7")
 	t.Setenv("COMMIT_GATE_TIMEOUT", "240")
 
@@ -50,6 +53,9 @@ func TestLoadAppliesFileBetweenDefaultsAndEnvironment(t *testing.T) {
 	}
 	if cfg.ReviewerModelOverride != "env-model" {
 		t.Errorf("ReviewerModelOverride = %q; want env-model", cfg.ReviewerModelOverride)
+	}
+	if cfg.ReviewerEffort != "high" {
+		t.Errorf("ReviewerEffort = %q; want high", cfg.ReviewerEffort)
 	}
 	if cfg.ReviewerRuns != 7 {
 		t.Errorf("ReviewerRuns = %d; want 7", cfg.ReviewerRuns)
@@ -68,6 +74,9 @@ func TestLoadMissingFileKeepsShippedDefaults(t *testing.T) {
 	if cfg.ReviewerProvider != "agy" || cfg.ReviewerModel != defaultReviewerModel {
 		t.Fatalf("reviewer defaults = %q/%q; want agy/%s",
 			cfg.ReviewerProvider, cfg.ReviewerModel, defaultReviewerModel)
+	}
+	if cfg.ReviewerEffort != "" {
+		t.Fatalf("ReviewerEffort = %q; want the provider's own", cfg.ReviewerEffort)
 	}
 	if cfg.ReviewerRuns != defaultReviewerRuns || cfg.ReviewTimeout != defaultReviewTimeout {
 		t.Fatalf("panel defaults = %d/%s; want %d/%s",

@@ -13,10 +13,13 @@ import (
 // agy's ERROR status.
 type ClaudeCode struct {
 	Model  string
+	Effort string
 	Binary string
 }
 
-func NewClaudeCode(model string) *ClaudeCode { return &ClaudeCode{Model: model} }
+func NewClaudeCode(model, effort string) *ClaudeCode {
+	return &ClaudeCode{Model: model, Effort: effort}
+}
 
 func (c *ClaudeCode) Name() string { return "claude-code" }
 
@@ -45,6 +48,9 @@ func (c *ClaudeCode) Review(ctx context.Context, prompt, cwd string) gate.RawRun
 	argv := []string{c.binary(), "-p", "--output-format", "json"}
 	if c.Model != "" {
 		argv = append(argv, "--model", c.Model)
+	}
+	if c.Effort != "" {
+		argv = append(argv, "--effort", c.Effort)
 	}
 	stdout, stderr, raw, failed := runProcess(ctx, cwd, argv, prompt)
 	if failed {

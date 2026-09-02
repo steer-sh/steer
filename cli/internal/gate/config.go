@@ -24,6 +24,7 @@ type Config struct {
 	ReviewerProvider      string
 	ReviewerModel         string
 	ReviewerModelOverride string
+	ReviewerEffort        string
 	ReviewerCommand       []string
 	ReviewerRuns          int
 	ReviewTimeout         time.Duration
@@ -129,6 +130,9 @@ func Load() (Config, error) {
 		if file.Reviewer.Model != "" {
 			c.ReviewerModelOverride = file.Reviewer.Model
 		}
+		if file.Reviewer.Effort != "" {
+			c.ReviewerEffort = file.Reviewer.Effort
+		}
 		if file.Reviewer.Runs > 0 {
 			c.ReviewerRuns = file.Reviewer.Runs
 		}
@@ -142,6 +146,9 @@ func Load() (Config, error) {
 		c.StateDir = v
 	} else if v := os.Getenv("COMMIT_REVIEW_STATE"); v != "" {
 		c.StateDir = v
+	}
+	if v := strings.TrimSpace(os.Getenv("COMMIT_GATE_EFFORT")); v != "" {
+		c.ReviewerEffort = v
 	}
 	if v := envInt("COMMIT_GATE_RUNS"); v > 0 {
 		c.ReviewerRuns = v

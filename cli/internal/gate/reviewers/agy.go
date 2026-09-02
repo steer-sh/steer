@@ -12,12 +12,13 @@ import (
 // It reports a denied tool call as status ERROR while still returning the review the
 // model wrote, which is why Classify salvages a body carrying findings.
 type Agy struct {
-	Model string
+	Model  string
+	Effort string
 	// Binary defaults to "agy". Overridable so a test can point at a stub.
 	Binary string
 }
 
-func NewAgy(model string) *Agy { return &Agy{Model: model} }
+func NewAgy(model, effort string) *Agy { return &Agy{Model: model, Effort: effort} }
 
 func (a *Agy) Name() string { return "agy" }
 
@@ -46,6 +47,9 @@ func (a *Agy) Review(ctx context.Context, prompt, cwd string) gate.RawRun {
 	argv := []string{a.binary()}
 	if a.Model != "" {
 		argv = append(argv, "--model", a.Model)
+	}
+	if a.Effort != "" {
+		argv = append(argv, "--effort", a.Effort)
 	}
 	argv = append(argv, "--output-format", "json", "-p", prompt)
 	stdout, stderr, raw, failed := runProcess(ctx, cwd, argv, "")

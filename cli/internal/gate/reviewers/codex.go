@@ -12,10 +12,11 @@ import (
 // non-zero exit is already classified by runProcess.
 type Codex struct {
 	Model  string
+	Effort string
 	Binary string
 }
 
-func NewCodex(model string) *Codex { return &Codex{Model: model} }
+func NewCodex(model, effort string) *Codex { return &Codex{Model: model, Effort: effort} }
 
 func (c *Codex) Name() string { return "codex" }
 
@@ -39,6 +40,10 @@ func (c *Codex) Review(ctx context.Context, prompt, cwd string) gate.RawRun {
 	argv := []string{c.binary(), "exec", "--skip-git-repo-check"}
 	if c.Model != "" {
 		argv = append(argv, "--model", c.Model)
+	}
+	// Codex spells effort as a config override, not a flag.
+	if c.Effort != "" {
+		argv = append(argv, "-c", "model_reasoning_effort="+c.Effort)
 	}
 	argv = append(argv, "-")
 	stdout, stderr, raw, failed := runProcess(ctx, cwd, argv, prompt)

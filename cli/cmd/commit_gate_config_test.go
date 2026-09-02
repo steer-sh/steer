@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/gate"
+	"github.com/steer-sh/steer-cli/internal/gate/reviewers"
 )
 
 func TestBuildReviewerDoesNotHandAgyPinToConfiguredCodex(t *testing.T) {
@@ -103,5 +104,60 @@ func TestResolvedGateConfigStampsTheConfiguredModelUnderAnUnknownProvider(t *tes
 	// never named would report a model that cannot run.
 	if cfg.ReviewerModel != "operator-model" {
 		t.Fatalf("ReviewerModel = %q; want the configured model", cfg.ReviewerModel)
+	}
+}
+
+func TestBuildReviewerCarriesEffortToEachProvider(t *testing.T) {
+	oldProvider, oldModel, oldEffort := commitGateProvider, commitGateModel, commitGateEffort
+	commitGateProvider, commitGateModel, commitGateEffort = "", "", ""
+	t.Cleanup(func() {
+		commitGateProvider, commitGateModel, commitGateEffort = oldProvider, oldModel, oldEffort
+	})
+
+	cfg := gate.Defaults()
+	cfg.ReviewerEffort = "high"
+	for provider, want := range map[string]string{"agy": "high", "codex": "high", "claude-code": "high"} {
+		cfg.ReviewerProvider = provider
+		reviewer, err := buildReviewer(cfg)
+		if err != nil {
+			t.Fatalf("buildReviewer %s: %v", provider, err)
+		}
+		var got string
+		switch r := reviewer.(type) {
+		case *reviewers.Agy:
+			got = r.Effort
+		case *reviewers.Codex:
+			got = r.Effort
+		case *reviewers.ClaudeCode:
+			got = r.Effort
+		}
+		if got != want {
+			t.Errorf("%s effort = %q; want %q", provider, got, want)
+		}
+	}
+}
+
+func TestEffortAndRunsFlagsOutrankTheSettingsFile(t *testing.T) {
+	oldEffort, oldRuns := commitGateEffort, commitGateRuns
+	commitGateEffort, commitGateRuns = "high", 2
+	t.Cleanup(func() { commitGateEffort, commitGateRuns = oldEffort, oldRuns })
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("COMMIT_GATE_MODEL", "")
+	t.Setenv("COMMIT_GATE_EFFORT", "")
+	t.Setenv("COMMIT_GATE_RUNS", "")
+	if err := os.MkdirAll(filepath.Join(home, ".steer"), 0o755); err != nil {
+		t.Fatalf("create config dir: %v", err)
+	}
+	settings := `{"reviewer":{"effort":"medium","runs":5}}`
+	if err := os.WriteFile(filepath.Join(home, ".steer", "config.json"), []byte(settings), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg := gateConfig()
+	if cfg.ReviewerEffort != "high" || cfg.ReviewerRuns != 2 {
+		t.Fatalf("cfg = %q/%d; want high/2", cfg.ReviewerEffort, cfg.ReviewerRuns)
 	}
 }

@@ -43,6 +43,8 @@ func backfillCommand() string {
 var (
 	commitGateProvider     string
 	commitGateModel        string
+	commitGateEffort       string
+	commitGateRuns         int
 	commitGateBothChannels bool
 	commitGateForce        bool
 	commitGateHarness      string
@@ -76,16 +78,20 @@ func buildReviewer(cfg gate.Config) (gate.Reviewer, error) {
 		provider = commitGateProvider
 	}
 	model := strings.TrimSpace(cfg.ReviewerModelOverride)
+	effort := strings.TrimSpace(cfg.ReviewerEffort)
+	if warning := reviewers.EffortWarning(provider, effort); warning != "" {
+		effortWarnOnce.Do(func() { fmt.Fprintln(os.Stderr, "steer:", warning) })
+	}
 	switch strings.ToLower(strings.TrimSpace(provider)) {
 	case "", "agy":
 		if model == "" {
 			model = cfg.ReviewerModel
 		}
-		return reviewers.NewAgy(model), nil
+		return reviewers.NewAgy(model, effort), nil
 	case "codex":
-		return reviewers.NewCodex(model), nil
+		return reviewers.NewCodex(model, effort), nil
 	case "claude", "claude-code":
-		return reviewers.NewClaudeCode(model), nil
+		return reviewers.NewClaudeCode(model, effort), nil
 	default:
 		return nil, fmt.Errorf("unknown reviewer provider %q: expected agy, codex or claude-code", provider)
 	}
@@ -94,6 +100,10 @@ func buildReviewer(cfg gate.Config) (gate.Reviewer, error) {
 // configWarnOnce holds a broken settings file to one line per process. One command
 // calls gateConfig several times.
 var configWarnOnce sync.Once
+
+// effortWarnOnce does the same for an effort no provider documents. buildReviewer runs
+// once per entry point, and the hook paths call it beside gateConfig.
+var effortWarnOnce sync.Once
 
 func gateConfig() gate.Config {
 	cfg, err := gate.Load()
@@ -105,6 +115,12 @@ func gateConfig() gate.Config {
 	if commitGateModel != "" {
 		cfg.ReviewerModel = commitGateModel
 		cfg.ReviewerModelOverride = commitGateModel
+	}
+	if commitGateEffort != "" {
+		cfg.ReviewerEffort = commitGateEffort
+	}
+	if commitGateRuns > 0 {
+		cfg.ReviewerRuns = commitGateRuns
 	}
 	return cfg
 }
@@ -470,8 +486,9 @@ var commitGateStatusCmd = &cobra.Command{
 		fmt.Println()
 		fmt.Printf("  Instrument   %s\n", cfg.InstrumentID())
 		fmt.Printf("  Ledger       %s\n", cfg.LogFile())
-		fmt.Printf("  Reviewers    %d x %s via %s, %s each\n",
-			cfg.ReviewerRuns, cfg.ReviewerModel, reviewer.Name(), cfg.ReviewTimeout)
+		fmt.Printf("  Reviewers    %d x %s%s via %s, %s each\n",
+			cfg.ReviewerRuns, cfg.ReviewerModel, effortNote(cfg.ReviewerEffort),
+			reviewer.Name(), cfg.ReviewTimeout)
 		fmt.Printf("  Cap          %d firings\n", cfg.MaxFirings)
 		for _, scope := range []string{claude.ProjectScope, claude.GlobalScope} {
 			arming := claude.CommitGateHookArmed(scope)
@@ -537,6 +554,15 @@ var commitGateStatusCmd = &cobra.Command{
 	},
 }
 
+// effortNote renders the effort beside the model, and nothing when it is unset —
+// an unset effort is the provider's own, which Steer cannot name.
+func effortNote(effort string) string {
+	if strings.TrimSpace(effort) == "" {
+		return ""
+	}
+	return " @ " + effort
+}
+
 func codexProjectDir() (string, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -562,6 +588,10 @@ func init() {
 		"Reviewer provider (agy|codex|claude-code); default agy")
 	commitGateCmd.PersistentFlags().StringVar(&commitGateModel, "model", "",
 		"Reviewer model; default is the provider's shipped pin")
+	commitGateCmd.PersistentFlags().StringVar(&commitGateEffort, "effort", "",
+		"Reviewer reasoning effort; default is the provider's own")
+	commitGateCmd.PersistentFlags().IntVar(&commitGateRuns, "runs", 0,
+		"Reviewers in the panel; default 3")
 
 	commitGateInstallCmd.Flags().BoolVar(&commitGatePreCommitChannel, "precommit", false,
 		"Install the git pre-commit hook instead of the PreToolUse entry")

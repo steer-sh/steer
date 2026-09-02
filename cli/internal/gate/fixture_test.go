@@ -74,7 +74,7 @@ func TestFixture(t *testing.T) {
 			"which makes repo access decorative")
 	}
 
-	panel := gate.NewPanel(cfg, reviewers.NewAgy(cfg.ReviewerModel))
+	panel := gate.NewPanel(cfg, reviewers.NewAgy(cfg.ReviewerModel, cfg.ReviewerEffort))
 	prompt := gate.BuildReviewPrompt(gate.NeutralizeTags(string(message)), gate.NeutralizeTags(diff), contextBlock)
 	result := panel.Run(context.Background(), prompt, repo)
 
