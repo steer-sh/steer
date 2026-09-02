@@ -306,3 +306,50 @@ func gradeDrift(baseID string, base InstrumentFields, use InstrumentUse) string 
 	}
 	return ""
 }
+
+// InstrumentImpact is one live record a prospective reviewer identity would drift.
+type InstrumentImpact struct {
+	ID    string
+	Class string
+	Grade string
+	// Dims names the dimensions that moved, empty when the identities differ in a
+	// way no comparable dimension explains.
+	Dims []string
+}
+
+// ImpactOf grades a prospective reviewer identity against every record the reviewer
+// is measured over, so an operator editing the settings is told which measurements
+// the edit lands in before it is written.
+//
+// It reads the scorer's own computation: each record's baseline comes from
+// BaselineInstrument over its before-window, and the grade from the same dimension
+// table Confounds reads. So a record this names as majorly drifted is a record
+// ScoreRecord will withhold, never a second opinion about it.
+//
+// Only the chain corpus is read. The session corpus stamps the transcript parser as
+// its instrument, which no reviewer setting moves.
+func ImpactOf(records []Record, chains []Chain, next InstrumentUse) []InstrumentImpact {
+	var out []InstrumentImpact
+	for _, record := range records {
+		if EngineOf(record) != EngineChain || truthy(record["retired_ts"]) {
+			continue
+		}
+		authored := str(record["instrument"])
+		if authored == "" {
+			continue
+		}
+		before, _ := SplitChains(chains, SplitTS(record))
+		base := BaselineInstrument(authored, InstrumentUses(before))
+		grade := gradeDrift(authored, base, next)
+		if grade == "" {
+			continue
+		}
+		out = append(out, InstrumentImpact{
+			ID:    str(record["id"]),
+			Class: str(record["class"]),
+			Grade: grade,
+			Dims:  DriftDims(base, next.Fields),
+		})
+	}
+	return out
+}

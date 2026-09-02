@@ -130,7 +130,12 @@ func gateConfig() gate.Config {
 // yields the error, no reviewer, and the operator's own configured model where that
 // label would have gone.
 func resolvedGateConfig() (gate.Config, gate.Reviewer, error) {
-	cfg := gateConfig()
+	return resolveReviewer(gateConfig())
+}
+
+// resolveReviewer is resolvedGateConfig over a configuration the caller holds, which
+// is how a preview of an unwritten settings edit names the model that edit would run.
+func resolveReviewer(cfg gate.Config) (gate.Config, gate.Reviewer, error) {
 	reviewer, err := buildReviewer(cfg)
 	if err != nil {
 		if model := strings.TrimSpace(cfg.ReviewerModelOverride); model != "" {

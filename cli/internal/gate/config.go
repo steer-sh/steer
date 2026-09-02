@@ -121,25 +121,38 @@ func Defaults() Config {
 // back as the error, beside a usable configuration: the caller reports it, because a
 // gate that cannot answer must fail open.
 func Load() (Config, error) {
-	c := Defaults()
 	file, fileErr := steerconfig.Load()
-	if fileErr == nil {
-		if file.Reviewer.Provider != "" {
-			c.ReviewerProvider = file.Reviewer.Provider
-		}
-		if file.Reviewer.Model != "" {
-			c.ReviewerModelOverride = file.Reviewer.Model
-		}
-		if file.Reviewer.Effort != "" {
-			c.ReviewerEffort = file.Reviewer.Effort
-		}
-		if file.Reviewer.Runs > 0 {
-			c.ReviewerRuns = file.Reviewer.Runs
-		}
-		if file.Reviewer.Timeout > 0 {
-			c.ReviewTimeout = time.Duration(file.Reviewer.Timeout) * time.Second
-		}
+	if fileErr != nil {
+		file = steerconfig.Config{}
 	}
+	return WithEnv(WithFile(Defaults(), file)), fileErr
+}
+
+// WithFile applies the operator's settings file to a configuration. It is the middle
+// step of the precedence chain — defaults, this, then the environment — and is
+// exported so a caller previewing an edit reads the one chain rather than a copy of
+// it.
+func WithFile(c Config, file steerconfig.Config) Config {
+	if file.Reviewer.Provider != "" {
+		c.ReviewerProvider = file.Reviewer.Provider
+	}
+	if file.Reviewer.Model != "" {
+		c.ReviewerModelOverride = file.Reviewer.Model
+	}
+	if file.Reviewer.Effort != "" {
+		c.ReviewerEffort = file.Reviewer.Effort
+	}
+	if file.Reviewer.Runs > 0 {
+		c.ReviewerRuns = file.Reviewer.Runs
+	}
+	if file.Reviewer.Timeout > 0 {
+		c.ReviewTimeout = time.Duration(file.Reviewer.Timeout) * time.Second
+	}
+	return c
+}
+
+// WithEnv applies the environment overrides, which outrank the settings file.
+func WithEnv(c Config) Config {
 	// COMMIT_GATE_STATE_DIR wins over COMMIT_REVIEW_STATE. The second is mine.py's
 	// own variable, so the miner and an existing mine.py invocation read one directory.
 	if v := os.Getenv("COMMIT_GATE_STATE_DIR"); v != "" {
@@ -164,7 +177,7 @@ func Load() (Config, error) {
 		c.ReviewerModelOverride = v
 		c.ReviewerCommand = []string{"agy", "--model", v, "--output-format", "json", "-p"}
 	}
-	return c, fileErr
+	return c
 }
 
 func envInt(key string) int {
