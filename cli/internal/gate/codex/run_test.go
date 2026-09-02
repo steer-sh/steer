@@ -91,7 +91,8 @@ func TestRunDeniesAndStampsCodexEvidence(t *testing.T) {
 	transcript := writeRollout(t, rollout)
 	payload := `{"hook_event_name":"PreToolUse","tool_name":"Bash","session_id":"session-1",` +
 		`"turn_id":"turn-1","model":"gpt-5.6-sol","cwd":"` + repo + `",` +
-		`"transcript_path":"` + transcript + `","tool_input":{"command":"git commit -m \"add a\""}}`
+		`"transcript_path":"` + transcript + `","tool_input":{"workdir":"` + repo + `",` +
+		`"command":"git commit -m \"add a\""}}`
 
 	out := runGate(t, cfg, payload)
 	if out.HookSpecificOutput == nil || out.HookSpecificOutput.PermissionDecision != "deny" {
@@ -118,7 +119,7 @@ func TestRunKeysASubagentChainOnItsThread(t *testing.T) {
 	repo := buildRepo(t)
 	payload := `{"hook_event_name":"PreToolUse","tool_name":"Bash","session_id":"session-1",` +
 		`"agent_id":"agent-9","agent_type":"default","cwd":"` + repo + `",` +
-		`"tool_input":{"command":"git commit -m \"add a\""}}`
+		`"tool_input":{"workdir":"` + repo + `","command":"git commit -m \"add a\""}}`
 
 	if out := runGate(t, cfg, payload); out.HookSpecificOutput == nil {
 		t.Fatalf("subagent commit was not ruled on: %#v", out)

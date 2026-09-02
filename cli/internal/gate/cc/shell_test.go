@@ -235,3 +235,34 @@ func TestDocumentMaskingLeavesTheMessageIntact(t *testing.T) {
 		t.Errorf("ExtractMessage = %q", got)
 	}
 }
+
+func TestRepoSelectedExplicitly(t *testing.T) {
+	cases := map[string]bool{
+		`git commit -m "x"`:                       false,
+		`cd sub && git commit -m "x"`:             false,
+		`cd ../other && git commit -m "x"`:        false,
+		`git -C sub commit -m "x"`:                false,
+		`git -C /r commit -m "x"`:                 true,
+		`cd /r && git commit -m "x"`:              true,
+		`(cd /r && git commit -m "x")`:            true,
+		`cd '/r with space' && git commit -m "x"`: true,
+		// The base an absolute cd set stays known, so a later relative hop is decisive.
+		`cd /r && cd sub && git commit -m "x"`: true,
+		`cd /r && git -C sub commit -m "x"`:    true,
+		// A -C after the subcommand names a commit to reuse, not a directory.
+		`git commit -C HEAD`: false,
+		// The cd follows the commit, so it moves nothing the commit reads.
+		`git commit -m "x" && cd /r`: false,
+	}
+	for cmd, want := range cases {
+		if got := RepoSelectedExplicitly(cmd); got != want {
+			t.Errorf("RepoSelectedExplicitly(%q) = %v, want %v", cmd, got, want)
+		}
+	}
+}
+
+func TestRepoSelectedExplicitlyExpandsHome(t *testing.T) {
+	if !RepoSelectedExplicitly(`cd ~/r && git commit -m "x"`) {
+		t.Error("a home-relative path resolves without a base and must count")
+	}
+}

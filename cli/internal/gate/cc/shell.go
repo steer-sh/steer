@@ -176,7 +176,30 @@ func RepoDir(cmd, cwd string) string {
 	return base
 }
 
-func resolveDir(token, base string) string {
+// RepoSelectedExplicitly reports that the command text names the repository it commits
+// to, by a path no base directory can move.
+//
+// The resolution order is RepoDir's, so a relative token is decisive once an absolute
+// one has already set the base: `cd /r && cd sub` names a repository, `cd sub` alone
+// still hangs off the caller's cwd.
+func RepoSelectedExplicitly(cmd string) bool {
+	span := CommitSpan(cmd)
+	scan := maskDocumentHeredocs(cmd)
+	known := false
+	for _, m := range cdRe.FindAllStringSubmatch(scan[:span.Start], -1) {
+		known = known || absoluteToken(m[1])
+	}
+	if m := dashCRe.FindStringSubmatch(scan[span.Start:span.End]); m != nil {
+		return known || absoluteToken(m[1])
+	}
+	return known
+}
+
+// absoluteToken reports that this path token resolves without a base directory.
+func absoluteToken(token string) bool { return filepath.IsAbs(expandToken(token)) }
+
+// expandToken strips the shell quoting and expands a leading `~`.
+func expandToken(token string) string {
 	path := strings.Trim(token, `'"`)
 	if strings.HasPrefix(path, "~") {
 		if home, err := os.UserHomeDir(); err == nil {
@@ -187,6 +210,11 @@ func resolveDir(token, base string) string {
 			}
 		}
 	}
+	return path
+}
+
+func resolveDir(token, base string) string {
+	path := expandToken(token)
 	if filepath.IsAbs(path) {
 		return path
 	}

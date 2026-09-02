@@ -52,14 +52,18 @@ type hookOutput struct {
 }
 
 type invocation struct {
-	command    string
-	cwd        string
-	actor      string
-	sessionID  string
-	threadID   string
-	agentType  string
-	model      string
-	transcript string
+	command string
+	cwd     string
+	// workdirGiven says the payload named the directory the command runs in. Codex
+	// code mode omits a nested exec_command workdir, so cwd alone is the session root
+	// and may not be where the command lands.
+	workdirGiven bool
+	actor        string
+	sessionID    string
+	threadID     string
+	agentType    string
+	model        string
+	transcript   string
 }
 
 func (i invocation) provenanceSessionID() string {
@@ -97,18 +101,20 @@ func parsePayload(raw []byte) (invocation, bool) {
 	if cwd == "" {
 		cwd = payload.ToolInput.WorkingDir
 	}
+	workdirGiven := cwd != ""
 	if cwd == "" {
 		cwd = payload.CWD
 	}
 	return invocation{
-		command:    command,
-		cwd:        cwd,
-		actor:      actor,
-		sessionID:  payload.SessionID,
-		threadID:   payload.AgentID,
-		agentType:  payload.AgentType,
-		model:      payload.Model,
-		transcript: payload.TranscriptPath,
+		command:      command,
+		cwd:          cwd,
+		workdirGiven: workdirGiven,
+		actor:        actor,
+		sessionID:    payload.SessionID,
+		threadID:     payload.AgentID,
+		agentType:    payload.AgentType,
+		model:        payload.Model,
+		transcript:   payload.TranscriptPath,
 	}, true
 }
 
@@ -166,6 +172,14 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, stdin io.
 	if !cc.IsCommitCommand(command) {
 		return
 	}
+	if ambiguousRepo(invocation) {
+		emit(stdout, Output{HookSpecificOutput: &hookOutput{
+			HookEventName:            "PreToolUse",
+			PermissionDecision:       "deny",
+			PermissionDecisionReason: ambiguousRepoReason,
+		}, SystemMessage: ambiguousRepoReceipt})
+		return
+	}
 	cwd := invocation.cwd
 	if cwd == "" {
 		cwd, _ = os.Getwd()
@@ -197,6 +211,10 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, stdin io.
 	if !ok {
 		return
 	}
+	emit(stdout, out)
+}
+
+func emit(stdout io.Writer, out Output) {
 	if encoded, err := json.Marshal(out); err == nil {
 		_, _ = stdout.Write(append(encoded, '\n'))
 	}
