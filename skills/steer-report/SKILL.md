@@ -92,7 +92,7 @@ Each record reports before/after incidence over its own unit — the fraction of
 - `inconclusive` — enough exposure, but the range still straddles the boundary. Leave it and re-score later.
 - `legacy-unscoped` — the record carries no eligibility scope, so its two windows count different opportunity sets. **Act on this:** scope it with `steer intervention scope <id>`, which restarts its after-window.
 - `evidence-incomplete` — a window has no eligible chain left and unknown chains are why: a ledger row the resolver closed as gone, or scope metadata no row carried. **Act on this:** run `steer commit-gate backfill --apply` and re-score. A window emptied only by rows still inside the resolver grace period reads `collecting` instead, and settles on its own.
-- `confounded` — a hard confound stands between the windows: the after-chains carry a different reviewer instrument, or the before/after supports for host, harness, repository, project, author model or changed-path kind are disjoint. The range is not a measurement of the fix. **Act on this:** name the `confounds[]` category in the report and re-score once the windows overlap again. A `composition[]` entry is the softer case — the category sets overlap but shifted — and warns without withholding.
+- `confounded` — a hard confound stands between the windows: the after-chains carry a reviewer whose provider, model, prompt digest or engine differs from the registered baseline, or the before/after supports for host, harness, repository, project, author model or changed-path kind are disjoint. The range is not a measurement of the fix. **Act on this:** name the `confounds[]` category in the report and re-score once the windows overlap again. A `composition[]` entry is the softer case — the category sets overlap but shifted, or the reviewer changed only its effort or run count — and warns without withholding.
 - `no-baseline` — the regex matches nothing before install. The class definition is wrong.
 - `unattributed` — a session-unit class only. The incidence fell effectively, but the guard never fired in the after-window, so something else caused the fall. **Act on this:** find the real cause before crediting the guard.
 - `not-triggered` — a session-unit class only. The class persisted while the guard stayed silent. **Act on this:** the matcher is aimed wrong, so fix the matcher rather than the rule.
@@ -138,7 +138,7 @@ Digest schema (`digest_version: 2`):
 
 The digest is size-capped: the CLI evicts the lowest-scoring clusters to fit, and reports honesty in `stats`.
 
-### The `steer status --json` contract (`status_version: 6`)
+### The `steer status --json` contract (`status_version: 7`)
 
 Step 1 reads this snapshot for posture and the full class inventory. The unit is
 the failure class and its verdict, not the hook count. This schema is byte-shared
@@ -189,8 +189,10 @@ Fields:
   class, `effective` ones included. Each row: `id`, `class`, `match` (the regex
   that defines the class), `tier`, `target`, `status` (`active` or `rejected`),
   `verdict`, `before` / `after` incidence (`hits`, `units`, `rate`), `p_value`,
-  `instrument_drift` (a measurement window spanning two reviewer prompts; the
-  verdict stands, the flag rides beside it), `firings_applicable` (true only for the `guard` tier, whose master hook writes the audit log that `audit_firings` counts; check, instruction and review write none), and for
+  `instrument_drift` (the reviewer changed between the windows, at either grade;
+  a major change — provider, model, prompt digest or engine — withholds the
+  verdict as `confounded`, a minor one — effort or run count — rides beside the
+  range as a `composition` entry), `firings_applicable` (true only for the `guard` tier, whose master hook writes the audit log that `audit_firings` counts; check, instruction and review write none), and for
   a refused class `reason`, `reopen` and `rejected_ts`. This is the dedup source
   — a class here is decided. `corpus` and `unit` name the evidence the class is
   counted over and what one denominator entry is: `review-findings` counts by
@@ -220,7 +222,9 @@ Fields:
     `{category, reason, before, after}` over `instrument`, `host`, `harness`,
     `repo`, `author_model`, `path_kind` or `project`. `composition` is the same
     shape for overlapping-but-changed category sets, which warn without
-    withholding.
+    withholding. An `instrument` entry is placed by its grade: a changed
+    provider, model, prompt digest or engine is hard, and a changed effort or run
+    count at one identity is `composition`.
   - `attribution` — the guard's audit join over the after-window:
     `{applicable, log_present, hook_id, firings, sessions}`. `applicable` is
     false for a tier that writes no audit rows and for a record naming no hook,

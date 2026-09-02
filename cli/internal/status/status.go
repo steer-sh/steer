@@ -30,7 +30,7 @@ import (
 // StatusVersion is the schema version of the emitted snapshot. It mirrors
 // report.DigestVersion: --json is a stable agent contract, so bump this whenever
 // the shape or semantics of SystemStatus change.
-const StatusVersion = 6
+const StatusVersion = 7
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20

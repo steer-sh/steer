@@ -138,3 +138,16 @@ func TestAnUnstampedHarnessIsNotAShift(t *testing.T) {
 		}
 	}
 }
+
+func TestConfoundsEffortDriftIsSoft(t *testing.T) {
+	after := []Chain{chain(t, 2000, instrument(row(2000, "deny"), "gemini/3/abc/go/high"))}
+	hard, soft := Confounds(nil, after, "gemini/3/abc/go")
+	if len(hard) != 0 {
+		t.Errorf("the same reviewer at a new effort withholds nothing, got %#v", hard)
+	}
+	if len(soft) != 1 || soft[0].Category != "instrument" {
+		t.Fatalf("the effort change is one soft warning, got %#v", soft)
+	}
+	check(t, "and it names the dimension that moved", soft[0].Reason,
+		"the reviewer's effort changed between the windows")
+}

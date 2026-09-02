@@ -179,3 +179,29 @@ func TestEvidenceVerdictReadsCausesInOrderOfPermanence(t *testing.T) {
 		check(t, "before window: "+tc.label, evidenceVerdict(tc.cov, empty), tc.want)
 	}
 }
+
+// A record whose after-window changed only the reviewer's effort still scores a range:
+// the same reviewer worked harder, which is composition beside the verdict, not a pair
+// of windows measuring different things.
+func TestScoreRecordRangesThroughAnEffortDrift(t *testing.T) {
+	authored := "gemini/3/abc/go"
+	record := withKV(scopedRecord(4000), "instrument", authored)
+	var chains []Chain
+	for i := 0; i < 6; i++ {
+		ts := 1000 + i*10
+		chains = append(chains, chain(t, ts, instrument(row(ts, "deny"), authored)))
+		ats := 5000 + i*10
+		chains = append(chains, chain(t, ats, instrument(row(ats, "deny"), authored+"/high")))
+	}
+	withClock(9_000_000, func() {
+		scored := scoreOK(t, record, chains, 0)
+		if scored["verdict"] == "confounded" {
+			t.Fatalf("an effort-only drift must not withhold, got %#v", scored["confounds"])
+		}
+		check(t, "the drift is still reported", scored["instrument_drift"], true)
+		soft := scored["composition"].([]Confound)
+		if len(soft) != 1 || soft[0].Category != "instrument" {
+			t.Fatalf("the effort change rides beside the range, got %#v", soft)
+		}
+	})
+}

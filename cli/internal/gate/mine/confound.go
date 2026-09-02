@@ -152,10 +152,21 @@ func instrumentDrift(before, after []Chain, authored string) (*Confound, string)
 // confounds that withhold the verdict and the soft composition warnings that do not.
 // authored is the record's registered baseline instrument, empty when it predates the
 // field.
+//
+// An instrument drift is placed by its grade. A major drift changes what the reviewer
+// is, so the two windows measure different things and the verdict is withheld. A minor
+// drift — effort or run count at one identity — is reported beside the range instead:
+// the same reviewer worked harder or was sampled more, which shifts the finding rate it
+// reports without making the windows incomparable, and withholding on it discards every
+// measurement that spans a settings edit.
 func Confounds(before, after []Chain, authored string) (hard, soft []Confound) {
 	if authored != "" {
-		if c, _ := instrumentDrift(before, after, authored); c != nil {
-			hard = append(hard, *c)
+		if c, grade := instrumentDrift(before, after, authored); c != nil {
+			if grade == DriftMajor {
+				hard = append(hard, *c)
+			} else {
+				soft = append(soft, *c)
+			}
 		}
 	}
 	categories := []struct {
