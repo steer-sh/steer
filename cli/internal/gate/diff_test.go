@@ -330,3 +330,52 @@ func TestUntrackedBudgetZip(t *testing.T) {
 		t.Error("the over-budget diff must still deliver real hunks for what fit")
 	}
 }
+
+// TestUntrackedPathspecsNarrowTheScan pins the defect this fixed: a `git add <path>`
+// stages one subtree, and an untracked file outside it can never land in the commit.
+func TestUntrackedPathspecsNarrowTheScan(t *testing.T) {
+	cfg := Defaults()
+	code := lines(80)
+	root := buildRepo(t, map[string]string{"old.py": code})
+	gitCmd(t, root, verb, "-qm", "init")
+	writeFileAt(t, root, "cli/new.py", code)
+	writeFileAt(t, root, "stray.md", code)
+
+	wide, ok := GetDiff(cfg, root, DiffSpec{IncludeUntracked: true})
+	if !ok {
+		t.Fatal("GetDiff failed")
+	}
+	if !strings.Contains(wide, "stray.md") {
+		t.Fatal("regression guard: an unnarrowed spec must still see every untracked file")
+	}
+
+	narrow, ok := GetDiff(cfg, root, DiffSpec{IncludeUntracked: true, UntrackedPathspecs: []string{"cli"}})
+	if !ok {
+		t.Fatal("GetDiff failed")
+	}
+	if !strings.Contains(narrow, "cli/new.py") {
+		t.Error("a file the staging step names must reach the reviewer")
+	}
+	if strings.Contains(narrow, "stray.md") {
+		t.Error("a file no `git add` names cannot land in this commit, so it is not the " +
+			"reviewer's to spend a finding on")
+	}
+}
+
+// TestUnreadablePathspecWidens: git rejects the pathspec, so the scan falls back to the
+// whole repo rather than reporting a commit with no new files.
+func TestUnreadablePathspecWidens(t *testing.T) {
+	cfg := Defaults()
+	code := lines(80)
+	root := buildRepo(t, map[string]string{"old.py": code})
+	gitCmd(t, root, verb, "-qm", "init")
+	writeFileAt(t, root, "new.py", code)
+
+	diff, ok := GetDiff(cfg, root, DiffSpec{IncludeUntracked: true, UntrackedPathspecs: []string{":(bogusmagic)x"}})
+	if !ok {
+		t.Fatal("GetDiff failed")
+	}
+	if !strings.Contains(diff, "new.py") {
+		t.Error("a pathspec git cannot read must widen to the repo, never drop the file")
+	}
+}

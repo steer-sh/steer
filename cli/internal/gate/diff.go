@@ -17,6 +17,27 @@ type DiffSpec struct {
 	StagedOnly bool
 	// IncludeUntracked adds files git has never seen, rendered as additions.
 	IncludeUntracked bool
+	// UntrackedPathspecs narrows those files to what the command's own staging step
+	// names. Empty means every untracked file in the repo.
+	UntrackedPathspecs []string
+}
+
+// Equal compares two specs by value. The pathspec list makes DiffSpec uncomparable
+// with ==, and a round that silently stopped comparing them would report every retry
+// as spec-unchanged.
+func (s DiffSpec) Equal(other DiffSpec) bool {
+	if s.StagedOnly != other.StagedOnly || s.IncludeUntracked != other.IncludeUntracked {
+		return false
+	}
+	if len(s.UntrackedPathspecs) != len(other.UntrackedPathspecs) {
+		return false
+	}
+	for i := range s.UntrackedPathspecs {
+		if s.UntrackedPathspecs[i] != other.UntrackedPathspecs[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // diffPlan owns the three argument vectors that must agree — the diff, --name-only
@@ -156,13 +177,28 @@ func (p *diffPlan) stat(newPaths []string) string {
 // subdirectory, bare `ls-files --others` lists that subtree ALONE, so a commit made
 // from `sub/` would report every new file outside sub as nonexistent.
 func (p *diffPlan) untrackedPaths() []string {
-	out, ok := Git(p.cwd, gitMedium, "ls-files", "--others", "--exclude-standard", "--full-name", "--", ":/")
+	base := []string{"ls-files", "--others", "--exclude-standard", "--full-name", "--"}
+	out, ok := Git(p.cwd, gitMedium, append(append([]string{}, base...), p.untrackedSelector()...)...)
+	if !ok {
+		// A pathspec git rejects leaves the intent unresolved, so widen rather than
+		// drop: a review missing a new file the commit lands is the worse direction.
+		out, ok = Git(p.cwd, gitMedium, append(append([]string{}, base...), ":/")...)
+	}
 	if !ok || out == "" {
 		return nil
 	}
 	paths := dropCruft(nonEmptyLines(out))
 	sort.Strings(paths)
 	return paths
+}
+
+// untrackedSelector is the pathspec list that limits the untracked scan. `:/` is the
+// whole repo, which is what an unnarrowed spec means.
+func (p *diffPlan) untrackedSelector() []string {
+	if len(p.spec.UntrackedPathspecs) == 0 {
+		return []string{":/"}
+	}
+	return p.spec.UntrackedPathspecs
 }
 
 // untrackedSections renders `paths` as additions and reports which it covered and which

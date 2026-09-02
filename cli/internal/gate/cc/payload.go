@@ -120,7 +120,7 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, stdin io.
 	repo := RepoDir(cmd, cwd)
 
 	engine := gate.NewEngine(cfg, reviewer)
-	stagedOnly, includeUntracked := DiffSources(cmd)
+	spec := DiffSpecFor(cmd)
 
 	// The author fields and the repo fields are stamped on every row this request
 	// writes. They are gathered once, because reading the transcript is the expensive
@@ -138,7 +138,7 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, stdin io.
 		Actor:     session,
 		Channel:   gate.ChannelPreToolUse,
 		SessionID: session,
-		Spec:      gate.DiffSpec{StagedOnly: stagedOnly, IncludeUntracked: includeUntracked},
+		Spec:      spec,
 		Message:   ExtractMessage(cmd, repo),
 		RerunNote: rerunNote(cmd),
 		RowExtra:  rowExtra,

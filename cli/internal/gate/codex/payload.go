@@ -171,7 +171,7 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, stdin io.
 		cwd, _ = os.Getwd()
 	}
 	repo := cc.RepoDir(command, cwd)
-	stagedOnly, includeUntracked := cc.DiffSources(command)
+	spec := cc.DiffSpecFor(command)
 
 	engine := gate.NewEngine(cfg, reviewer)
 	rowExtra := gate.Row{"client": "codex", "harness": "codex"}
@@ -189,7 +189,7 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, stdin io.
 	decision := engine.Handle(ctx, gate.Request{
 		Repo: repo, Actor: invocation.actor, Channel: gate.ChannelPreToolUse,
 		SessionID: invocation.provenanceSessionID(),
-		Spec:      gate.DiffSpec{StagedOnly: stagedOnly, IncludeUntracked: includeUntracked},
+		Spec:      spec,
 		Message:   cc.ExtractMessage(command, repo), RowExtra: rowExtra,
 		RerunNote: rerunNote(command),
 	})

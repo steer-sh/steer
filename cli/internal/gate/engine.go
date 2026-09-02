@@ -213,7 +213,7 @@ func (e *Engine) handleRetry(ctx context.Context, req Request, chain *Chain, sta
 		"finding_slots":   state.FindingSlots,
 		"diff_changed":    changed,
 		"firing":          firing,
-		"spec_changed":    state.Spec != req.Spec,
+		"spec_changed":    !state.Spec.Equal(req.Spec),
 		"stale_index":     notice != "",
 		"files":           state.Files,
 		"session_id":      req.SessionID,
