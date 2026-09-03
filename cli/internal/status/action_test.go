@@ -152,13 +152,14 @@ func TestRemovalNamesTheTierThatKeepsRunning(t *testing.T) {
 	}
 }
 
-// Harmful leads the sections and accept closes them.
+// Harmful leads the sections and settled closes them: the first asks the most of
+// the reader and the last asks nothing.
 func TestHarmfulSortsFirst(t *testing.T) {
 	if ActionOrder[0] != ActionHarmful {
 		t.Errorf("harmful must lead the sections, got %q", ActionOrder[0])
 	}
-	if ActionOrder[len(ActionOrder)-1] != ActionAccept {
-		t.Errorf("accept must close the sections, got %q", ActionOrder[len(ActionOrder)-1])
+	if ActionOrder[len(ActionOrder)-1] != ActionSettled {
+		t.Errorf("settled must close the sections, got %q", ActionOrder[len(ActionOrder)-1])
 	}
 }
 
@@ -196,5 +197,89 @@ func TestTheRateIsReadOverTheWholeCorpus(t *testing.T) {
 	}
 	if RateFrom(tail, now).Known {
 		t.Error("a truncated tail must not be mistaken for a corpus rate")
+	}
+}
+
+// A settled verdict never reads as a repair. The default arm of ActionFor sent
+// every unmapped token to repair, which headed a proven rule as a broken one.
+func TestSettledVerdictsAreNotRepairs(t *testing.T) {
+	for _, v := range []string{"effective", "class-faded", "class-steady"} {
+		if got := ActionFor(v, false); got != ActionSettled {
+			t.Errorf("ActionFor(%q) = %q, want %q", v, got, ActionSettled)
+		}
+	}
+	for _, v := range []string{"class-inconclusive", "unscored", "a-token-from-a-newer-engine"} {
+		if got := ActionFor(v, false); got == ActionRepair {
+			t.Errorf("ActionFor(%q) = repair; an uninterpretable state names no fix", v)
+		}
+	}
+	// A settled verdict stays settled whatever the window costs. Unmeasurable
+	// never returns true for one, so this pins the arm rather than the caller.
+	for _, v := range []string{"effective", "class-faded", "class-steady"} {
+		if got := ActionFor(v, true); got != ActionSettled {
+			t.Errorf("ActionFor(%q, unmeasurable) = %q, want %q", v, got, ActionSettled)
+		}
+	}
+}
+
+// An unreachable window overrides one action only: wait. A repair names a fix the
+// window length does not remove, so it keeps both its section and its sentence.
+func TestUnmeasurableOverridesOnlyAWait(t *testing.T) {
+	for _, v := range []string{"not-triggered", "unattributed", "ineffective", "legacy-unscoped", "no-baseline"} {
+		if got := ActionFor(v, true); got != ActionRepair {
+			t.Errorf("ActionFor(%q, unmeasurable) = %q, want %q", v, got, ActionRepair)
+		}
+		if got := ActionSentence(v, true); got != actionSentence[v] {
+			t.Errorf("ActionSentence(%q, unmeasurable) = %q, want its own repair", v, got)
+		}
+	}
+	if got := ActionFor("evidence-incomplete", true); got != ActionAdjudicate {
+		t.Errorf("ActionFor(evidence-incomplete, unmeasurable) = %q, want %q", got, ActionAdjudicate)
+	}
+	if got := ActionFor("collecting", true); got != ActionAccept {
+		t.Errorf("ActionFor(collecting, unmeasurable) = %q, want %q", got, ActionAccept)
+	}
+}
+
+// Every verdict in a repair section names the fix it asks for.
+func TestEveryRepairNamesItsFix(t *testing.T) {
+	for v, act := range actionFor {
+		if act == ActionRepair && actionSentence[v] == "" {
+			t.Errorf("verdict %q heads a repair but names no fix", v)
+		}
+	}
+}
+
+// Every action a verdict can ask for has a heading and a place in the order.
+func TestEveryActionIsOrderedAndHeaded(t *testing.T) {
+	seen := map[string]bool{}
+	for _, act := range ActionOrder {
+		if ActionHeading[act] == "" {
+			t.Errorf("action %q has no heading", act)
+		}
+		seen[act] = true
+	}
+	for v, act := range actionFor {
+		if !seen[act] {
+			t.Errorf("verdict %q maps to %q, which ActionOrder does not render", v, act)
+		}
+	}
+	if !seen[ActionFor("a-token-from-a-newer-engine", false)] {
+		t.Error("the default action is not in ActionOrder")
+	}
+}
+
+// An unreachable window replaces only a sentence telling the reader to wait. A
+// confounded class keeps its own reason: the windows are not comparable, which
+// is why no window decides it.
+func TestUnmeasurableKeepsAnAcceptVerdictsOwnReason(t *testing.T) {
+	if got := ActionSentence("confounded", true); got != actionSentence["confounded"] {
+		t.Errorf("ActionSentence(confounded, unmeasurable) = %q, want its own reason", got)
+	}
+	if got := ActionSentence("inconclusive", true); got != actionSentence["inconclusive"] {
+		t.Errorf("ActionSentence(inconclusive, unmeasurable) = %q, want its own reason", got)
+	}
+	if got := ActionSentence("collecting", true); got == actionSentence["collecting"] {
+		t.Error("ActionSentence(collecting, unmeasurable) still says the window is filling")
 	}
 }

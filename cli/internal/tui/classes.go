@@ -18,7 +18,8 @@ func (m *Model) classesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if len(items) == 0 {
 		return m, nil
 	}
-	it := items[m.cursor[panelClasses]]
+	ord := classOrder(items, m.snap.Rate)
+	it := items[ord[m.cursor[panelClasses]]]
 	m.form = &formState{
 		kind:  formRetire,
 		id:    it.ID,
@@ -41,38 +42,45 @@ func (m *Model) viewClasses() string {
 		return out + dim("no interventions recorded on this machine.")
 	}
 	rate := m.snap.Rate
-	// The panel groups by the action each class asks for, in status.ActionOrder,
-	// so the cursor still walks one flat inventory in the order it is shown.
-	byAction := map[string][]int{}
-	for i, it := range items {
+	section := ""
+	for pos, i := range classOrder(items, rate) {
+		it := items[i]
 		un := status.Unmeasurable(it.Verdict, it.Unit, it.RequiredAfter, rate)
-		byAction[status.ActionFor(it.Verdict, un)] = append(byAction[status.ActionFor(it.Verdict, un)], i)
-	}
-	for _, act := range status.ActionOrder {
-		idx := byAction[act]
-		if len(idx) == 0 {
-			continue
+		if act := status.ActionFor(it.Verdict, un); act != section {
+			section = act
+			out += dim(status.ActionHeading[act]) + "\n"
 		}
-		out += dim(status.ActionHeading[act]) + "\n"
-		for _, i := range idx {
-			it := items[i]
-			sel := i == m.cursor[panelClasses]
-			un := status.Unmeasurable(it.Verdict, it.Unit, it.RequiredAfter, rate)
-			badge := it.Verdict
-			if un {
-				badge = "unmeasurable"
-			}
-			line := fmt.Sprintf("%s %-22s %s %s", pointer(sel), truncate(it.Class, 22), verdictBadge(badge),
-				dim(fmt.Sprintf("%s → %s", it.Tier, it.Target)))
-			out += line + "\n"
-			out += "     " + dim(detailLine(it)) + "\n"
-			out += "     " + dim(measureLine(it, un, rate)) + "\n"
-			for _, r := range confoundLines(it) {
-				out += "     " + warn(r) + "\n"
-			}
+		badge := it.Verdict
+		if un {
+			badge = "unmeasurable"
+		}
+		line := fmt.Sprintf("%s %-22s %s %s", pointer(pos == m.cursor[panelClasses]),
+			truncate(it.Class, 22), verdictBadge(badge),
+			dim(fmt.Sprintf("%s → %s", it.Tier, it.Target)))
+		out += line + "\n"
+		out += "     " + dim(detailLine(it)) + "\n"
+		out += "     " + dim(measureLine(it, un, rate)) + "\n"
+		for _, r := range confoundLines(it) {
+			out += "     " + warn(r) + "\n"
 		}
 	}
 	return out
+}
+
+// classOrder is the order the panel renders the inventory in: grouped by the
+// action each class asks for, in status.ActionOrder. The cursor indexes this
+// order, so an arrow key walks the list down the screen.
+func classOrder(items []status.ScoredIntervention, rate status.ChainRate) []int {
+	ord := []int{}
+	for _, act := range status.ActionOrder {
+		for i, it := range items {
+			un := status.Unmeasurable(it.Verdict, it.Unit, it.RequiredAfter, rate)
+			if status.ActionFor(it.Verdict, un) == act {
+				ord = append(ord, i)
+			}
+		}
+	}
+	return ord
 }
 
 // detailLine is the second row for a class: its regex and rate columns.

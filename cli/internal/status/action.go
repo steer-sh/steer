@@ -19,11 +19,13 @@ const (
 	ActionRepair     = "repair"
 	ActionWait       = "wait"
 	ActionAccept     = "accept"
+	ActionSettled    = "settled"
 )
 
 // ActionOrder is the order the sections render in.
 var ActionOrder = []string{
 	ActionHarmful, ActionAdjudicate, ActionRepair, ActionWait, ActionAccept,
+	ActionSettled,
 }
 
 // ActionHeading is the section header for one action.
@@ -33,6 +35,7 @@ var ActionHeading = map[string]string{
 	ActionRepair:     "Repair — each of these names a fix that exists",
 	ActionWait:       "Wait — the window is still filling",
 	ActionAccept:     "Accept — no repair settles these; read the counts and decide",
+	ActionSettled:    "Settled — the measurement decided these; nothing to do",
 }
 
 // actionFor maps a verdict token to the action it asks for.
@@ -45,8 +48,14 @@ var actionFor = map[string]string{
 	"legacy-unscoped":     ActionRepair,
 	"confounded":          ActionAccept,
 	"class-grew":          ActionRepair,
+	"no-baseline":         ActionRepair,
 	"collecting":          ActionWait,
 	"inconclusive":        ActionAccept,
+	"class-inconclusive":  ActionAccept,
+	"unscored":            ActionAccept,
+	"effective":           ActionSettled,
+	"class-faded":         ActionSettled,
+	"class-steady":        ActionSettled,
 }
 
 // actionSentence translates one verdict token into what to do about it.
@@ -59,6 +68,7 @@ var actionSentence = map[string]string{
 	"legacy-unscoped":     "no eligibility rule was frozen — run: steer intervention scope",
 	"confounded":          "the windows ran under different conditions and cannot be compared — read the counts and decide",
 	"class-grew":          "the refused class grew — reconsider the refusal",
+	"no-baseline":         "the before-window carries no occurrence of the class — rework the match, or retire it",
 	"collecting":          "the window is still filling",
 	"inconclusive":        "the range cannot place the effect",
 }
@@ -73,21 +83,30 @@ func claimsAnEffect(verdict string) bool {
 	return false
 }
 
-// ActionFor names the action a verdict asks for. An unmeasurable record moves to
-// accept whatever its token says; a verdict that already claims an effect stays.
+// ActionFor names the action a verdict asks for. An unreachable window overrides
+// one action only — wait — because waiting is the one instruction it contradicts.
+// A repair stays a repair: reworking a matcher is available whatever the window
+// costs, and filing it under accept would hide a fix the reader can still make.
+// A token this binary does not know reads as accept, never as repair: repair
+// heads a fix that exists, and an uninterpretable state names no fix.
 func ActionFor(verdict string, unmeasurable bool) string {
-	if unmeasurable && !claimsAnEffect(verdict) {
+	a, ok := actionFor[verdict]
+	if !ok {
 		return ActionAccept
 	}
-	if a, ok := actionFor[verdict]; ok {
-		return a
+	if unmeasurable && a == ActionWait {
+		return ActionAccept
 	}
-	return ActionRepair
+	return a
 }
 
-// ActionSentence is the verdict translated into an instruction.
+// ActionSentence is the verdict translated into an instruction. The unreachable
+// window replaces only the sentence it contradicts — the one that tells the
+// reader to wait. Every other verdict keeps its own instruction: a repair names
+// a fix the window length does not remove, and an accept names why the windows
+// do not decide. RatePhrase states the reachability beside either.
 func ActionSentence(verdict string, unmeasurable bool) string {
-	if unmeasurable && !claimsAnEffect(verdict) {
+	if unmeasurable && actionFor[verdict] == ActionWait {
 		return "no reachable window can decide this — keep it as a rule, or retire it"
 	}
 	return actionSentence[verdict]
