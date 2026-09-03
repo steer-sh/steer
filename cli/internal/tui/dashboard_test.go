@@ -53,7 +53,9 @@ func TestPanelsCarryTheMeasurementConditions(t *testing.T) {
 	m.active = panelClasses
 	classes := m.View()
 	for _, want := range []string{
-		"confounded", "RR — [0.20, ∞] @90%", "needs 9 clean eligible chain(s)",
+		"confounded", "a clean window of 9 units",
+		// No range under a withheld verdict: the action sentence carries the row.
+		"the measurement conditions changed mid-window",
 		"scope repo=/steer/ AND path=/\\.go$/",
 		"before 12 eligible / 14 (2 out of scope)",
 		"after 5 eligible / 6 (1 without a ledger)",

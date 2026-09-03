@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -40,13 +41,19 @@ func (m *Model) viewClasses() string {
 	if len(items) == 0 {
 		return out + dim("no interventions recorded on this machine.")
 	}
+	rate := status.RateFrom(m.snap.Chains, time.Now())
 	for i, it := range items {
 		sel := i == m.cursor[panelClasses]
-		line := fmt.Sprintf("%s %-22s %s %s", pointer(sel), truncate(it.Class, 22), verdictBadge(it.Verdict),
+		un := status.Unmeasurable(it.RequiredAfter, rate)
+		badge := it.Verdict
+		if un {
+			badge = "unmeasurable"
+		}
+		line := fmt.Sprintf("%s %-22s %s %s", pointer(sel), truncate(it.Class, 22), verdictBadge(badge),
 			dim(fmt.Sprintf("%s → %s", it.Tier, it.Target)))
 		out += line + "\n"
 		out += "     " + dim(detailLine(it)) + "\n"
-		out += "     " + dim(measureLine(it)) + "\n"
+		out += "     " + dim(measureLine(it, un, rate)) + "\n"
 		for _, r := range confoundLines(it) {
 			out += "     " + warn(r) + "\n"
 		}
@@ -64,7 +71,11 @@ func detailLine(it status.ScoredIntervention) string {
 		s += " [" + it.SignalKind + "]"
 	}
 	if it.Verdict != "unscored" && it.Verdict != "" {
-		s += fmt.Sprintf("   %d/%d → %d/%d", it.Before.Hits, it.Before.Units, it.After.Hits, it.After.Units)
+		unit := it.Unit
+		if unit == "" {
+			unit = "unit"
+		}
+		s += "   " + status.RecurrencePhrase(it.Before, it.After, unit)
 		if it.PValue > 0 {
 			s += fmt.Sprintf("   p=%.3f", it.PValue)
 		}
@@ -78,14 +89,23 @@ func detailLine(it status.ScoredIntervention) string {
 	return s
 }
 
-// measureLine is the third row for a class: the effect range, the frozen scope, and
-// each window's coverage under it.
-func measureLine(it status.ScoredIntervention) string {
+// measureLine is the third row for a class: what to do about it, the range where
+// the scorer made a claim, the frozen scope, and each window's coverage under it.
+func measureLine(it status.ScoredIntervention, unmeasurable bool, rate status.ChainRate) string {
+	unit := it.Unit
+	if unit == "" {
+		unit = "unit"
+	}
 	parts := []string{}
-	if e := status.EffectPhrase(it.Effect); e != "" {
+	if s := status.ActionSentence(it.Verdict, unmeasurable); s != "" {
+		parts = append(parts, s)
+	}
+	if e := status.EffectClaimPhrase(it.Verdict, it.Effect); e != "" {
 		parts = append(parts, e)
 	}
-	if r := status.RequiredPhrase(it.RequiredAfter, it.Verdict); r != "" {
+	if r := status.RatePhrase(it.RequiredAfter, unit, rate); r != "" {
+		parts = append(parts, r)
+	} else if r := status.RequiredPhrase(it.RequiredAfter, it.Verdict); r != "" {
 		parts = append(parts, r)
 	}
 	parts = append(parts,
@@ -94,6 +114,9 @@ func measureLine(it status.ScoredIntervention) string {
 		"after "+status.CoveragePhrase(it.AfterCoverage))
 	if a := status.AttributionPhrase(it.Attribution); a != "" {
 		parts = append(parts, a)
+	}
+	if unmeasurable || it.Verdict == "harmful" {
+		parts = append(parts, status.RemovalPhrase(it.Tier, it.Target))
 	}
 	return strings.Join(parts, " · ")
 }

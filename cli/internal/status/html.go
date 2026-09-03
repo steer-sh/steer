@@ -28,10 +28,6 @@ var verdictOrder = []string{
 	"class-steady", "class-faded", "effective",
 }
 
-// attentionOrder groups the attention block the way an operator reads it. It is the
-// cadence's own list, so a queued verdict can never go unrendered here.
-var attentionOrder = cadence.AttentionVerdicts
-
 // tierOrder is the intervention ladder, cheapest tier first.
 var tierOrder = []string{"check", "guard", "instruction", "review"}
 
@@ -56,7 +52,7 @@ type group struct {
 	Items []ScoredIntervention
 }
 
-// flagged is a set of queued interventions sharing a verdict.
+// flagged is a set of queued interventions sharing one action, keyed by its heading.
 type flagged struct {
 	Key   string
 	Items []cadence.Intervention
@@ -77,9 +73,20 @@ type view struct {
 
 // RenderHTML writes the snapshot as one self-contained HTML page.
 func (s *SystemStatus) RenderHTML(w io.Writer) error {
+	rate := RateFrom(s.Chains, time.Now())
 	tmpl, err := template.New("dashboard.html.tmpl").Funcs(template.FuncMap{
-		"pct":       pct,
-		"delta":     delta,
+		"pct":   pct,
+		"delta": delta,
+		// The rate columns print only where the scorer made a claim; the counts
+		// carry their denominator in words everywhere else.
+		"pctIf":     pctFor,
+		"deltaIf":   deltaFor,
+		"claim":     EffectClaimPhrase,
+		"recur":     RecurrencePhrase,
+		"action":    ActionSentence,
+		"removal":   RemovalPhrase,
+		"unmeas":    func(required *int) bool { return Unmeasurable(required, rate) },
+		"wait":      func(required *int, unit string) string { return RatePhrase(required, unit, rate) },
 		"stamp":     stamp,
 		"slug":      slug,
 		"arming":    armingWord,
@@ -123,7 +130,7 @@ func buildView(s *SystemStatus) *view {
 		Status:    s,
 		Generated: s.GeneratedAt,
 		Ledger:    sortedLedger(s.Interventions),
-		Attention: attentionGroups(s.Attention.Interventions),
+		Attention: attentionGroups(s.Attention.Interventions, RateFrom(s.Chains, time.Now())),
 		Tiers:     tierGroups(s.Interventions),
 		Quiet: len(s.Attention.Interventions) == 0 &&
 			len(s.Attention.Candidates) == 0 && len(s.Attention.Unscored) == 0,
@@ -178,34 +185,20 @@ func verdictRank(v string) int {
 	return len(verdictOrder)
 }
 
-// attentionGroups splits the cadence queue's flagged interventions by verdict,
-// action-first. A verdict outside the known order still gets its own group.
-func attentionGroups(items []cadence.Intervention) []flagged {
-	byVerdict := map[string][]cadence.Intervention{}
+// attentionGroups splits the cadence queue by the action each row asks of the
+// reader, in ActionOrder, so the page and the terminal group and sort alike.
+func attentionGroups(items []cadence.Intervention, rate ChainRate) []flagged {
+	byAction := map[string][]cadence.Intervention{}
 	for _, it := range items {
-		byVerdict[it.Verdict] = append(byVerdict[it.Verdict], it)
+		act := ActionFor(it.Verdict, Unmeasurable(it.RequiredAfter, rate))
+		byAction[act] = append(byAction[act], it)
 	}
-	seen := map[string]bool{}
 	out := []flagged{}
-	add := func(v string) {
-		if seen[v] || len(byVerdict[v]) == 0 {
-			return
+	for _, act := range ActionOrder {
+		if len(byAction[act]) == 0 {
+			continue
 		}
-		seen[v] = true
-		out = append(out, flagged{Key: v, Items: byVerdict[v]})
-	}
-	for _, v := range attentionOrder {
-		add(v)
-	}
-	rest := make([]string, 0, len(byVerdict))
-	for v := range byVerdict {
-		if !seen[v] {
-			rest = append(rest, v)
-		}
-	}
-	sort.Strings(rest)
-	for _, v := range rest {
-		add(v)
+		out = append(out, flagged{Key: ActionHeading[act], Items: byAction[act]})
 	}
 	return out
 }
@@ -299,6 +292,22 @@ func delta(before, after float64) template.HTML {
 
 // pct renders an incidence rate as a percentage.
 func pct(rate float64) string { return fmt.Sprintf("%.1f%%", rate*100) }
+
+// pctFor prints a window's rate only under a verdict that states an effect.
+func pctFor(verdict string, in cadence.Incidence) string {
+	if verdict != "effective" && verdict != "harmful" {
+		return ""
+	}
+	return pct(in.Rate)
+}
+
+// deltaFor prints the between-window change under the same rule.
+func deltaFor(verdict string, before, after cadence.Incidence) template.HTML {
+	if verdict != "effective" && verdict != "harmful" {
+		return template.HTML(`<span class="dimtext">—</span>`)
+	}
+	return delta(before.Rate, after.Rate)
+}
 
 // stamp renders an epoch second as a readable local timestamp.
 func stamp(ts float64) string {

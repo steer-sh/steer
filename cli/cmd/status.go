@@ -6,6 +6,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/cadence"
@@ -140,10 +141,6 @@ func renderPosture(s *status.SystemStatus) {
 		}
 		fmt.Printf("  Guard master %s\n", row)
 	}
-	if s.Posture.Unresolved > 0 {
-		fmt.Printf("  Unresolved   %s\n", styles.WarningText.Render(
-			fmt.Sprintf("%d row(s) owe a ledger — run: steer commit-gate backfill --apply", s.Posture.Unresolved)))
-	}
 	fmt.Printf("  Corpora      %s\n", corporaLine(s))
 	fmt.Printf("  Audit log    %d block firing(s)\n", s.Telemetry.AuditFirings)
 }
@@ -199,38 +196,48 @@ func corporaLine(s *status.SystemStatus) string {
 	return msg
 }
 
+// renderAttention groups the queue by the action each row asks of the reader,
+// rather than by the verdict token, and renders those groups in ActionOrder.
 func renderAttention(s *status.SystemStatus) {
 	fmt.Println(styles.SectionHeader.Render("Attention Required"))
 	a := s.Attention
-	if len(a.Interventions) == 0 && len(a.Candidates) == 0 && len(a.Unscored) == 0 {
+	rate := status.RateFrom(s.Chains, time.Now())
+	buckets := map[string][]string{}
+
+	for _, iv := range a.Interventions {
+		un := status.Unmeasurable(iv.RequiredAfter, rate)
+		act := status.ActionFor(iv.Verdict, un)
+		buckets[act] = append(buckets[act], interventionBlock(iv, un, rate))
+	}
+	if s.Posture.Unresolved > 0 {
+		buckets[status.ActionAdjudicate] = append(buckets[status.ActionAdjudicate],
+			fmt.Sprintf("    %d ledger row(s) still owe an adjudication\n      %s",
+				s.Posture.Unresolved,
+				styles.MutedText.Render("steer commit-gate backfill --apply")))
+	}
+	for _, c := range a.Candidates {
+		buckets[status.ActionAdjudicate] = append(buckets[status.ActionAdjudicate],
+			"    "+candidateLine(c))
+	}
+
+	empty := true
+	for _, act := range status.ActionOrder {
+		if len(buckets[act]) > 0 {
+			empty = false
+		}
+	}
+	if empty && len(a.Unscored) == 0 {
 		fmt.Println(styles.SuccessText.Render("  nothing pending — the loop is quiet"))
 		return
 	}
-	byVerdict := map[string][]string{}
-	for _, iv := range a.Interventions {
-		line := fmt.Sprintf("    %s [%s → %s]  before %d/%d, after %d/%d   %s",
-			iv.Class, iv.Tier, iv.Target,
-			iv.Before.Hits, iv.Before.Units, iv.After.Hits, iv.After.Units,
-			status.EffectPhrase(iv.Effect))
-		for _, extra := range interventionNotes(iv) {
-			line += "\n      " + styles.MutedText.Render(extra)
-		}
-		byVerdict[iv.Verdict] = append(byVerdict[iv.Verdict], line)
-	}
-	for _, v := range cadence.AttentionVerdicts {
-		lines := byVerdict[v]
-		if len(lines) == 0 {
+	for _, act := range status.ActionOrder {
+		rows := buckets[act]
+		if len(rows) == 0 {
 			continue
 		}
-		fmt.Printf("  %s (%d)\n", styles.WarningText.Render(v), len(lines))
-		for _, l := range lines {
-			fmt.Println(l)
-		}
-	}
-	if len(a.Candidates) > 0 {
-		fmt.Printf("  %s (%d)\n", styles.InfoText.Render("candidates pending routing"), len(a.Candidates))
-		for _, c := range a.Candidates {
-			fmt.Printf("    %s\n", candidateLine(c))
+		fmt.Printf("  %s\n", actionHeader(act))
+		for _, r := range rows {
+			fmt.Println(r)
 		}
 	}
 	if len(a.Unscored) > 0 {
@@ -239,15 +246,52 @@ func renderAttention(s *status.SystemStatus) {
 	}
 }
 
-// interventionNotes are the sub-lines under a queued class: its scope, its window
-// accounting, and any confound or composition shift.
-func interventionNotes(iv cadence.Intervention) []string {
-	notes := []string{
-		"scope: " + status.ScopePhrase(iv.Scope),
-		"coverage: before " + status.CoveragePhrase(iv.BeforeCoverage) +
-			", after " + status.CoveragePhrase(iv.AfterCoverage),
+// actionHeader colors a section by whether the reader is losing ground.
+func actionHeader(act string) string {
+	head := status.ActionHeading[act]
+	switch act {
+	case status.ActionHarmful:
+		return styles.WarningText.Render(head)
+	case status.ActionAdjudicate, status.ActionRepair:
+		return styles.InfoText.Render(head)
 	}
-	if r := status.RequiredPhrase(iv.RequiredAfter, iv.Verdict); r != "" {
+	return styles.MutedText.Render(head)
+}
+
+// interventionBlock is one class: its identity line, then the sub-lines naming
+// what recurred, what to do, and where the rule lives.
+func interventionBlock(iv cadence.Intervention, unmeasurable bool, rate status.ChainRate) string {
+	verdict := iv.Verdict
+	if unmeasurable {
+		verdict = "unmeasurable"
+	}
+	line := fmt.Sprintf("    %-52s %s",
+		fmt.Sprintf("%s [%s → %s]", iv.Class, iv.Tier, iv.Target),
+		styles.MutedText.Render(verdict))
+	for _, extra := range interventionNotes(iv, unmeasurable, rate) {
+		line += "\n      " + styles.MutedText.Render(extra)
+	}
+	return line
+}
+
+// interventionNotes are the sub-lines under a queued class. The range prints only
+// where the scorer made a claim; everywhere else the counts carry the denominator
+// in words. Coverage prints only when a window holds units no ledger decided.
+func interventionNotes(iv cadence.Intervention, unmeasurable bool, rate status.ChainRate) []string {
+	unit := iv.Unit
+	if unit == "" {
+		unit = "unit"
+	}
+	notes := []string{status.RecurrencePhrase(iv.Before, iv.After, unit)}
+	if e := status.EffectClaimPhrase(iv.Verdict, iv.Effect); e != "" {
+		notes = append(notes, e)
+	}
+	if s := status.ActionSentence(iv.Verdict, unmeasurable); s != "" {
+		notes = append(notes, s)
+	}
+	if r := status.RatePhrase(iv.RequiredAfter, unit, rate); r != "" {
+		notes = append(notes, r)
+	} else if r := status.RequiredPhrase(iv.RequiredAfter, iv.Verdict); r != "" {
 		notes = append(notes, r)
 	}
 	if a := status.AttributionPhrase(iv.Attribution); a != "" {
@@ -255,8 +299,19 @@ func interventionNotes(iv cadence.Intervention) []string {
 	}
 	notes = append(notes, status.ConfoundPhrases("confound", iv.Confounds)...)
 	notes = append(notes, status.ConfoundPhrases("composition", iv.Composition)...)
+	if iv.BeforeCoverage.UnknownEvidence > 0 || iv.AfterCoverage.UnknownEvidence > 0 {
+		notes = append(notes, fmt.Sprintf("%d of the %d before-%s and %d of the %d after-%s carry no ledger row",
+			iv.BeforeCoverage.UnknownEvidence, iv.BeforeCoverage.Total, plural(unit),
+			iv.AfterCoverage.UnknownEvidence, iv.AfterCoverage.Total, plural(unit)))
+	}
+	if unmeasurable || iv.Verdict == "harmful" {
+		notes = append(notes, status.RemovalPhrase(iv.Tier, iv.Target),
+			"steer intervention retire "+iv.ID+" --reason ...")
+	}
 	return notes
 }
+
+func plural(unit string) string { return unit + "s" }
 
 func candidateLine(c cadence.Candidate) string {
 	if c.Pattern != "" {

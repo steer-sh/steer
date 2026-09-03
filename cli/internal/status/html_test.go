@@ -137,7 +137,11 @@ func TestRenderHTMLCarriesEverySection(t *testing.T) {
 		"v-effective", "v-not-triggered", "v-confounded", "v-evidence-incomplete",
 		"1 of 2 present", "agy@sha",
 		// The measurement conditions the verdict rests on, one target at a time.
-		"RR 0.00 [0.00, 0.31] @90%", "needs 9 clean eligible chain(s)",
+		"RR 0.00 [0.00, 0.31] @90%", "a clean window of 9 units",
+		// The range prints only where the scorer made a claim; a withheld verdict
+		// carries its counts in words and an action sentence instead.
+		"the measurement conditions changed mid-window",
+		"5 recurrences in the 20 units since install; 2 in the 20 before",
 		"scope repo=/steer.*/ AND path=/\\.go$/", "scope all",
 		"12 eligible / 14 (2 out of scope)", "12 eligible / 13 (1 pending)",
 		"0 eligible / 4 (4 without a ledger)",
