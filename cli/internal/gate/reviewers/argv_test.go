@@ -52,7 +52,6 @@ func TestAgyRendersModelAndEffort(t *testing.T) {
 		t.Fatalf("Review = %#v; want a parsed SUCCESS", run)
 	}
 	assertArgv(t, recordedArgv(t, argvFile), []string{
-		"--sandbox", "--dangerously-skip-permissions",
 		"--model", "gemini-3.7-flash-high", "--effort", "high",
 		"--output-format", "json", "-p", "PROMPT",
 	})
@@ -64,33 +63,22 @@ func TestAgyOmitsAnUnsetEffort(t *testing.T) {
 	reviewer.Binary = binary
 	reviewer.Review(context.Background(), "PROMPT", t.TempDir())
 	assertArgv(t, recordedArgv(t, argvFile), []string{
-		"--sandbox", "--dangerously-skip-permissions",
 		"--model", "gemini-3.7-flash-high", "--output-format", "json", "-p", "PROMPT",
 	})
 }
 
-// The sandbox boundary is what makes the auto-approval safe. A build that renders one
-// without the other hands a reviewer unrestricted tools, so the pair is pinned.
-func TestAgyNeverAutoApprovesOutsideTheSandbox(t *testing.T) {
+// The gate grants the reviewer no permissions of its own. Auto-approval turned the
+// reviewer into an explorer that answered on none of three runs, so the argv must
+// never carry it again.
+func TestAgyGrantsTheReviewerNoPermissions(t *testing.T) {
 	binary, argvFile := stubBinary(t, `{"response":"ok","status":"SUCCESS"}`)
 	reviewer := NewAgy("", "")
 	reviewer.Binary = binary
 	reviewer.Review(context.Background(), "PROMPT", t.TempDir())
-	argv := recordedArgv(t, argvFile)
-	var sandboxed, approved bool
-	for _, arg := range argv {
-		switch arg {
-		case "--sandbox":
-			sandboxed = true
-		case "--dangerously-skip-permissions":
-			approved = true
+	for _, arg := range recordedArgv(t, argvFile) {
+		if arg == "--dangerously-skip-permissions" {
+			t.Fatalf("argv auto-approves the reviewer's tool calls")
 		}
-	}
-	if approved && !sandboxed {
-		t.Fatalf("argv = %q; auto-approval without the sandbox", argv)
-	}
-	if !approved || !sandboxed {
-		t.Fatalf("argv = %q; want both the sandbox and the auto-approval", argv)
 	}
 }
 

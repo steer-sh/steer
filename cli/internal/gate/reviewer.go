@@ -79,8 +79,22 @@ func Classify(raw RawRun) ReviewRun {
 		}
 		return ReviewRun{Outcome: OutcomeEmpty, Detail: detail}
 	}
+	// A lost run is dropped whole, so its detail is the only account of what it said.
+	// A provider that reports no error leaves the body as that account.
+	lost := func() ReviewRun {
+		if detail == "" {
+			return ReviewRun{Outcome: OutcomeLost, Detail: text}
+		}
+		return ReviewRun{Outcome: OutcomeLost, Detail: detail}
+	}
 	if raw.Status == "SUCCESS" {
-		return ReviewRun{Text: text, Outcome: OutcomeOK}
+		// A success still has to be a review. A run whose tool calls were refused
+		// answers with the refusal and no findings, and counting that as a clean
+		// review is how a commit lands on evidence nobody produced.
+		if CountFindings(text) > 0 || IsNoFindings(text) {
+			return ReviewRun{Text: text, Outcome: OutcomeOK}
+		}
+		return lost()
 	}
 	if CountFindings(text) > 0 {
 		return ReviewRun{Text: text, Outcome: OutcomeSalvaged, Detail: detail}
@@ -88,7 +102,7 @@ func Classify(raw RawRun) ReviewRun {
 	if IsCleanReply(text) {
 		return ReviewRun{Text: text, Outcome: OutcomeSalvagedClean, Detail: detail}
 	}
-	return ReviewRun{Outcome: OutcomeLost, Detail: detail}
+	return lost()
 }
 
 // Panel is the reviewer panel: N concurrent runs of the same reviewer over the same

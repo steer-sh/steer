@@ -9,14 +9,12 @@ import (
 	"github.com/steer-sh/steer-cli/internal/gate"
 )
 
-// Agy is the default reviewer. It runs with its tools enabled inside agy's own
-// sandbox, so the reviewer can read the files around the diff rather than review the
-// diff alone. The sandbox flag and the auto-approval flag are one decision and are
-// never passed apart. A deny rule in the user's agy settings still wins over the
-// auto-approval, and reads back as a permission failure inside a complete review.
+// Agy is the default reviewer: `agy --model <m> --output-format json -p <prompt>`.
 //
-// It reports a denied tool call as status ERROR while still returning the review the
-// model wrote, which is why Classify salvages a body carrying findings.
+// agy calls tools on its own, and the gate grants it no permission to: the operator's
+// agy settings are the only boundary. A denial does not stop the run. It leaves either
+// status on a body that may be a full review or only the refusal, so the status names
+// the branch Classify takes and never decides on its own that a review happened.
 type Agy struct {
 	Model  string
 	Effort string
@@ -26,9 +24,6 @@ type Agy struct {
 
 // agyTimeoutMargin keeps agy's own wall clock above the panel's.
 const agyTimeoutMargin = 60 * time.Second
-
-// sandboxArgs enable the reviewer's tools behind agy's sandbox boundary.
-var sandboxArgs = []string{"--sandbox", "--dangerously-skip-permissions"}
 
 func NewAgy(model, effort string) *Agy { return &Agy{Model: model, Effort: effort} }
 
@@ -56,7 +51,7 @@ type agyReply struct {
 }
 
 func (a *Agy) Review(ctx context.Context, prompt, cwd string) gate.RawRun {
-	argv := append([]string{a.binary()}, sandboxArgs...)
+	argv := []string{a.binary()}
 	if a.Model != "" {
 		argv = append(argv, "--model", a.Model)
 	}

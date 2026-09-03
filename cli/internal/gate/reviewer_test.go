@@ -27,12 +27,28 @@ func TestClassify(t *testing.T) {
 		{"decorated clean reply", RawRun{Response: "**NO FINDINGS.**", Status: "ERROR"},
 			OutcomeSalvagedClean, true},
 		{"terminal outcome wins", RawRun{Response: oneFinding, Outcome: OutcomeTimeout}, OutcomeTimeout, false},
+		// A refusal is the shape a run takes when its tool calls were denied and it
+		// reported that instead of reviewing. Under SUCCESS it used to count as a
+		// reviewer who found nothing, which clears the commit on nobody's evidence.
+		{"refusal under success", RawRun{
+			Response: "I attempted to run `git status`, but execution was blocked by a deny rule.",
+			Status:   "SUCCESS"}, OutcomeLost, false},
+		{"clean reply under success", RawRun{Response: "NO FINDINGS", Status: "SUCCESS"}, OutcomeOK, true},
+		{"decorated clean reply under success", RawRun{Response: "**NO FINDINGS.**",
+			Status: "SUCCESS"}, OutcomeOK, true},
+		// 9eb015c's undercount hit clean commits only, so the loose reader stays: a
+		// clean reply keeps counting when the reviewer adds a closing sentence.
+		{"clean reply with a closing remark under success", RawRun{
+			Response: "NO FINDINGS. The diff is well covered.", Status: "SUCCESS"}, OutcomeOK, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			run := Classify(c.raw)
 			if run.Outcome != c.want {
 				t.Errorf("Outcome = %q, want %q", run.Outcome, c.want)
+			}
+			if run.Outcome == OutcomeLost && run.Detail == "" {
+				t.Errorf("Detail is empty; a lost run must say what it dropped")
 			}
 			if (run.Text != "") != c.text {
 				t.Errorf("Text = %q, want text: %v", run.Text, c.text)
