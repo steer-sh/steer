@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // stubBinary writes an executable that records the argv it was called with, one
@@ -51,6 +52,7 @@ func TestAgyRendersModelAndEffort(t *testing.T) {
 		t.Fatalf("Review = %#v; want a parsed SUCCESS", run)
 	}
 	assertArgv(t, recordedArgv(t, argvFile), []string{
+		"--sandbox", "--dangerously-skip-permissions",
 		"--model", "gemini-3.7-flash-high", "--effort", "high",
 		"--output-format", "json", "-p", "PROMPT",
 	})
@@ -62,8 +64,75 @@ func TestAgyOmitsAnUnsetEffort(t *testing.T) {
 	reviewer.Binary = binary
 	reviewer.Review(context.Background(), "PROMPT", t.TempDir())
 	assertArgv(t, recordedArgv(t, argvFile), []string{
+		"--sandbox", "--dangerously-skip-permissions",
 		"--model", "gemini-3.7-flash-high", "--output-format", "json", "-p", "PROMPT",
 	})
+}
+
+// The sandbox boundary is what makes the auto-approval safe. A build that renders one
+// without the other hands a reviewer unrestricted tools, so the pair is pinned.
+func TestAgyNeverAutoApprovesOutsideTheSandbox(t *testing.T) {
+	binary, argvFile := stubBinary(t, `{"response":"ok","status":"SUCCESS"}`)
+	reviewer := NewAgy("", "")
+	reviewer.Binary = binary
+	reviewer.Review(context.Background(), "PROMPT", t.TempDir())
+	argv := recordedArgv(t, argvFile)
+	var sandboxed, approved bool
+	for _, arg := range argv {
+		switch arg {
+		case "--sandbox":
+			sandboxed = true
+		case "--dangerously-skip-permissions":
+			approved = true
+		}
+	}
+	if approved && !sandboxed {
+		t.Fatalf("argv = %q; auto-approval without the sandbox", argv)
+	}
+	if !approved || !sandboxed {
+		t.Fatalf("argv = %q; want both the sandbox and the auto-approval", argv)
+	}
+}
+
+// agy's own print-timeout must sit above the panel's deadline, or agy stops first and
+// the panel's wall clock stops being the one that decides.
+func TestAgyGivesItsOwnClockRoomAboveTheDeadline(t *testing.T) {
+	binary, argvFile := stubBinary(t, `{"response":"ok","status":"SUCCESS"}`)
+	reviewer := NewAgy("", "")
+	reviewer.Binary = binary
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+	defer cancel()
+	reviewer.Review(ctx, "PROMPT", t.TempDir())
+	argv := recordedArgv(t, argvFile)
+	value := ""
+	for i, arg := range argv {
+		if arg == "--print-timeout" && i+1 < len(argv) {
+			value = argv[i+1]
+		}
+	}
+	if value == "" {
+		t.Fatalf("argv = %q; want a --print-timeout", argv)
+	}
+	budget, err := time.ParseDuration(value)
+	if err != nil {
+		t.Fatalf("ParseDuration(%q): %v", value, err)
+	}
+	if budget <= 100*time.Second {
+		t.Fatalf("--print-timeout = %s; want more than the 100s deadline", budget)
+	}
+}
+
+// A context with no deadline names no wall clock, so agy keeps its own default.
+func TestAgyOmitsPrintTimeoutWithoutADeadline(t *testing.T) {
+	binary, argvFile := stubBinary(t, `{"response":"ok","status":"SUCCESS"}`)
+	reviewer := NewAgy("", "")
+	reviewer.Binary = binary
+	reviewer.Review(context.Background(), "PROMPT", t.TempDir())
+	for _, arg := range recordedArgv(t, argvFile) {
+		if arg == "--print-timeout" {
+			t.Fatalf("argv carries --print-timeout with no deadline")
+		}
+	}
 }
 
 func TestCodexRendersEffortAsAConfigOverride(t *testing.T) {

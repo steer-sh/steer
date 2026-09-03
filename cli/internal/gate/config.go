@@ -49,8 +49,10 @@ const (
 	defaultReviewerRuns  = 3
 
 	// Per-reviewer wall clock. The reviewers run in parallel, so an adapter's own
-	// timeout must stay above this.
-	defaultReviewTimeout = 150 * time.Second
+	// timeout must stay above this. A tool-using reviewer over a large diff takes
+	// turns, and a reviewer killed mid-answer produces no review at all: the cost of
+	// waiting is a slower commit, the cost of cutting it short is an ungated one.
+	defaultReviewTimeout = 300 * time.Second
 	defaultStaleAfter    = 30 * time.Minute
 
 	// A chain re-fires while the retry diff changed and stops when it did not.
