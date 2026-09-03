@@ -55,7 +55,7 @@ func TestPanelsCarryTheMeasurementConditions(t *testing.T) {
 	for _, want := range []string{
 		"confounded", "a clean window of 9 units",
 		// No range under a withheld verdict: the action sentence carries the row.
-		"the measurement conditions changed mid-window",
+		"the windows ran under different conditions and cannot be compared",
 		"scope repo=/steer/ AND path=/\\.go$/",
 		"before 12 eligible / 14 (2 out of scope)",
 		"after 5 eligible / 6 (1 without a ledger)",

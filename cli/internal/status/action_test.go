@@ -78,7 +78,7 @@ func TestAQuietHostWithholdsTheRate(t *testing.T) {
 		t.Fatal("a 30-day-old newest chain must not yield a known rate")
 	}
 	n := 755
-	if Unmeasurable(&n, rate) {
+	if Unmeasurable("confounded", "chain", &n, rate) {
 		t.Error("an unknown rate must not read as unmeasurable")
 	}
 	got := RatePhrase(&n, "chain", rate)
@@ -102,11 +102,24 @@ func TestUnmeasurableSeparatesAWaitFromANever(t *testing.T) {
 		t.Fatal("a 60-day sample must yield a rate")
 	}
 	near, far := 5, 3000
-	if Unmeasurable(&near, rate) {
+	if Unmeasurable("collecting", "chain", &near, rate) {
 		t.Error("a short window must stay a wait")
 	}
-	if !Unmeasurable(&far, rate) {
+	if !Unmeasurable("collecting", "chain", &far, rate) {
 		t.Error("a window years away must read as unmeasurable")
+	}
+	// A settled verdict already decided; it is never regraded as unmeasurable.
+	for _, v := range []string{"effective", "harmful", "ineffective"} {
+		if Unmeasurable(v, "chain", &far, rate) {
+			t.Errorf("verdict %q must not be regraded as unmeasurable", v)
+		}
+	}
+	// The rate counts chains, so a session-unit record is never graded on it.
+	if Unmeasurable("collecting", "session", &far, rate) {
+		t.Error("a session-unit record must not be graded against a chain rate")
+	}
+	if got := RatePhrase(&far, "session", rate); !strings.Contains(got, "no accrual rate here") {
+		t.Errorf("a session window must not borrow the chain rate: %q", got)
 	}
 	if got := ActionFor("confounded", true); got != ActionAccept {
 		t.Errorf("an unmeasurable confound must move to accept, got %q", got)
@@ -123,6 +136,10 @@ func TestRemovalNamesTheTierThatKeepsRunning(t *testing.T) {
 		{"check", "check.sh", "the rule stays in check.sh"},
 		{"instruction", "CLAUDE.md", "the rule stays in CLAUDE.md"},
 		{"guard", "no-bare-python", "guard stays installed"},
+		// The CLI's own flag vocabulary, which the later names alias.
+		{"steer", "no-bare-python", "guard stays installed"},
+		{"prose", "CLAUDE.md", "the rule stays in CLAUDE.md"},
+		{"prompt", "review.md", "the rule stays in review.md"},
 		{"", "", "not installed in any tier"},
 	} {
 		got := RemovalPhrase(tc.tier, tc.target)
@@ -160,5 +177,24 @@ func TestAShortSampleProjectsNoRate(t *testing.T) {
 	got := RatePhrase(&n, "chain", rate)
 	if !strings.Contains(got, "too short to project a rate") {
 		t.Errorf("the phrase must name the short sample: %q", got)
+	}
+}
+
+// A capped chain list cannot carry the corpus rate: an active host's newest 20
+// chains span days, so the rate has to be read over every chain the corpus holds.
+func TestTheRateIsReadOverTheWholeCorpus(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	oldest := float64(now.Add(-200 * 24 * time.Hour).Unix())
+	newest := float64(now.Add(-1 * time.Hour).Unix())
+	if r := RateOver(400, oldest, newest, now); !r.Known {
+		t.Fatal("a 200-day corpus must yield a rate")
+	}
+	// The same corpus truncated to its newest 20 chains spans under two days.
+	tail := []ChainSummary{}
+	for i := 20; i > 0; i-- {
+		tail = append(tail, ChainSummary{StartTS: float64(now.Add(-time.Duration(i) * time.Hour).Unix())})
+	}
+	if RateFrom(tail, now).Known {
+		t.Error("a truncated tail must not be mistaken for a corpus rate")
 	}
 }

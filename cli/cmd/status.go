@@ -6,7 +6,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/cadence"
@@ -201,11 +200,11 @@ func corporaLine(s *status.SystemStatus) string {
 func renderAttention(s *status.SystemStatus) {
 	fmt.Println(styles.SectionHeader.Render("Attention Required"))
 	a := s.Attention
-	rate := status.RateFrom(s.Chains, time.Now())
+	rate := s.Rate
 	buckets := map[string][]string{}
 
 	for _, iv := range a.Interventions {
-		un := status.Unmeasurable(iv.RequiredAfter, rate)
+		un := status.Unmeasurable(iv.Verdict, iv.Unit, iv.RequiredAfter, rate)
 		act := status.ActionFor(iv.Verdict, un)
 		buckets[act] = append(buckets[act], interventionBlock(iv, un, rate))
 	}

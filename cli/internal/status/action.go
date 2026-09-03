@@ -32,7 +32,7 @@ var ActionHeading = map[string]string{
 	ActionAdjudicate: "Adjudicate — this is what grows the evidence",
 	ActionRepair:     "Repair — each of these names a fix that exists",
 	ActionWait:       "Wait — the window is still filling",
-	ActionAccept:     "Accept — measurement will not resolve these at your current rate",
+	ActionAccept:     "Accept — no repair settles these; read the counts and decide",
 }
 
 // actionFor maps a verdict token to the action it asks for.
@@ -43,7 +43,7 @@ var actionFor = map[string]string{
 	"unattributed":        ActionRepair,
 	"ineffective":         ActionRepair,
 	"legacy-unscoped":     ActionRepair,
-	"confounded":          ActionRepair,
+	"confounded":          ActionAccept,
 	"class-grew":          ActionRepair,
 	"collecting":          ActionWait,
 	"inconclusive":        ActionAccept,
@@ -57,16 +57,26 @@ var actionSentence = map[string]string{
 	"unattributed":        "the class fell with no firing — the rule may not be what changed",
 	"ineffective":         "the rule did not reduce the class — rework or retire it",
 	"legacy-unscoped":     "no eligibility rule was frozen — run: steer intervention scope",
-	"confounded":          "the measurement conditions changed mid-window — re-register to open a clean window",
+	"confounded":          "the windows ran under different conditions and cannot be compared — read the counts and decide",
 	"class-grew":          "the refused class grew — reconsider the refusal",
 	"collecting":          "the window is still filling",
 	"inconclusive":        "the range cannot place the effect",
 }
 
+// claimsAnEffect reports whether a verdict already states an effect. A settled
+// class is never reclassified as unmeasurable: its window did reach a decision.
+func claimsAnEffect(verdict string) bool {
+	switch verdict {
+	case "effective", "harmful", "ineffective", "class-grew", "class-faded", "class-steady":
+		return true
+	}
+	return false
+}
+
 // ActionFor names the action a verdict asks for. An unmeasurable record moves to
-// accept whatever its token says; harmful is exempt.
+// accept whatever its token says; a verdict that already claims an effect stays.
 func ActionFor(verdict string, unmeasurable bool) string {
-	if unmeasurable && verdict != "harmful" {
+	if unmeasurable && !claimsAnEffect(verdict) {
 		return ActionAccept
 	}
 	if a, ok := actionFor[verdict]; ok {
@@ -77,7 +87,7 @@ func ActionFor(verdict string, unmeasurable bool) string {
 
 // ActionSentence is the verdict translated into an instruction.
 func ActionSentence(verdict string, unmeasurable bool) string {
-	if unmeasurable && verdict != "harmful" {
+	if unmeasurable && !claimsAnEffect(verdict) {
 		return "no reachable window can decide this — keep it as a rule, or retire it"
 	}
 	return actionSentence[verdict]
@@ -97,18 +107,18 @@ const (
 // when the sample spans fewer than minSpanDays, or when the newest chain is older
 // than quietDays.
 type ChainRate struct {
-	PerDay    float64
-	Known     bool
-	QuietDays int
+	PerDay    float64 `json:"per_day"`
+	Known     bool    `json:"known"`
+	QuietDays int     `json:"quiet_days,omitempty"`
 }
 
-// RateFrom reads a chain rate off the snapshot's recent chains, newest last.
-func RateFrom(chains []ChainSummary, now time.Time) ChainRate {
-	if len(chains) < 2 {
+// RateOver reads a chain rate off a whole corpus: how many chains it holds and the
+// epoch seconds of its oldest and newest. A caller must not pass a truncated tail —
+// a capped list of an active host spans too little to clear minSpanDays.
+func RateOver(units int, oldest, newest float64, now time.Time) ChainRate {
+	if units < 2 || newest <= oldest {
 		return ChainRate{}
 	}
-	oldest := chains[0].StartTS
-	newest := chains[len(chains)-1].StartTS
 	quiet := int(now.Sub(time.Unix(int64(newest), 0)).Hours() / 24)
 	if quiet >= quietDays {
 		return ChainRate{QuietDays: quiet}
@@ -117,12 +127,25 @@ func RateFrom(chains []ChainSummary, now time.Time) ChainRate {
 	if span < minSpanDays {
 		return ChainRate{}
 	}
-	return ChainRate{PerDay: float64(len(chains)-1) / span, Known: true}
+	return ChainRate{PerDay: float64(units-1) / span, Known: true}
+}
+
+// RateFrom reads a rate off a chain list, newest last.
+func RateFrom(chains []ChainSummary, now time.Time) ChainRate {
+	if len(chains) < 2 {
+		return ChainRate{}
+	}
+	return RateOver(len(chains), chains[0].StartTS, chains[len(chains)-1].StartTS, now)
 }
 
 // Unmeasurable says a required window is more than a year away at this rate. An
-// unknown rate is not unmeasurable: it is unknown.
-func Unmeasurable(required *int, rate ChainRate) bool {
+// unknown rate is not unmeasurable: it is unknown. The rate counts chains, so a
+// record denominated in any other unit is never graded against it, and a verdict
+// that already claims an effect is never regraded at all.
+func Unmeasurable(verdict, unit string, required *int, rate ChainRate) bool {
+	if claimsAnEffect(verdict) || orUnit(unit) != "chain" {
+		return false
+	}
 	if required == nil || *required <= 0 || !rate.Known {
 		return false
 	}
@@ -137,6 +160,9 @@ func RatePhrase(required *int, unit string, rate ChainRate) string {
 	}
 	unit = orUnit(unit)
 	window := fmt.Sprintf("a clean window of %d %s", *required, plural(unit, *required))
+	if unit != "chain" {
+		return window + "; this corpus reports no accrual rate here"
+	}
 	if !rate.Known {
 		if rate.QuietDays > 0 {
 			return fmt.Sprintf("%s; no %s here in %d days, so the rate is unknown",
@@ -198,18 +224,24 @@ func magnitude(rr float64) string {
 // RemovalPhrase says what retire does and where the rule lives. Retire closes the
 // measurement and removes nothing.
 func RemovalPhrase(tier, target string) string {
+	const ends = "retire ends the measurement; "
 	switch tier {
-	case "check", "instruction":
+	// The CLI writes check|steer|prose|prompt; check|guard|instruction|review is
+	// the same ladder under its later names, and both reach a reader here.
+	case "check", "prose", "instruction", "prompt", "review":
 		if target != "" {
-			return fmt.Sprintf("retire ends the measurement; the rule stays in %s until you remove it", target)
+			return ends + fmt.Sprintf("the rule stays in %s until you remove it", target)
 		}
-	case "guard":
+	case "steer", "guard":
 		if target != "" {
-			return fmt.Sprintf("retire ends the measurement; the %s guard stays installed until you remove it", target)
+			return ends + fmt.Sprintf("the %s guard stays installed until you remove it", target)
 		}
-		return "retire ends the measurement; the guard stays installed until you remove it"
+		return ends + "the guard stays installed until you remove it"
 	}
-	return "retire ends the measurement; the rule is not installed in any tier"
+	if target != "" {
+		return ends + fmt.Sprintf("the rule stays in %s until you remove it", target)
+	}
+	return ends + "the rule is not installed in any tier"
 }
 
 // orUnit names the denominator when a record carries no unit tag.

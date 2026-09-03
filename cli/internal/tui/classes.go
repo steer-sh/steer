@@ -3,7 +3,6 @@ package tui
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -41,21 +40,36 @@ func (m *Model) viewClasses() string {
 	if len(items) == 0 {
 		return out + dim("no interventions recorded on this machine.")
 	}
-	rate := status.RateFrom(m.snap.Chains, time.Now())
+	rate := m.snap.Rate
+	// The panel groups by the action each class asks for, in status.ActionOrder,
+	// so the cursor still walks one flat inventory in the order it is shown.
+	byAction := map[string][]int{}
 	for i, it := range items {
-		sel := i == m.cursor[panelClasses]
-		un := status.Unmeasurable(it.RequiredAfter, rate)
-		badge := it.Verdict
-		if un {
-			badge = "unmeasurable"
+		un := status.Unmeasurable(it.Verdict, it.Unit, it.RequiredAfter, rate)
+		byAction[status.ActionFor(it.Verdict, un)] = append(byAction[status.ActionFor(it.Verdict, un)], i)
+	}
+	for _, act := range status.ActionOrder {
+		idx := byAction[act]
+		if len(idx) == 0 {
+			continue
 		}
-		line := fmt.Sprintf("%s %-22s %s %s", pointer(sel), truncate(it.Class, 22), verdictBadge(badge),
-			dim(fmt.Sprintf("%s → %s", it.Tier, it.Target)))
-		out += line + "\n"
-		out += "     " + dim(detailLine(it)) + "\n"
-		out += "     " + dim(measureLine(it, un, rate)) + "\n"
-		for _, r := range confoundLines(it) {
-			out += "     " + warn(r) + "\n"
+		out += dim(status.ActionHeading[act]) + "\n"
+		for _, i := range idx {
+			it := items[i]
+			sel := i == m.cursor[panelClasses]
+			un := status.Unmeasurable(it.Verdict, it.Unit, it.RequiredAfter, rate)
+			badge := it.Verdict
+			if un {
+				badge = "unmeasurable"
+			}
+			line := fmt.Sprintf("%s %-22s %s %s", pointer(sel), truncate(it.Class, 22), verdictBadge(badge),
+				dim(fmt.Sprintf("%s → %s", it.Tier, it.Target)))
+			out += line + "\n"
+			out += "     " + dim(detailLine(it)) + "\n"
+			out += "     " + dim(measureLine(it, un, rate)) + "\n"
+			for _, r := range confoundLines(it) {
+				out += "     " + warn(r) + "\n"
+			}
 		}
 	}
 	return out

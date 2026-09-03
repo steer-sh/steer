@@ -30,7 +30,7 @@ import (
 // StatusVersion is the schema version of the emitted snapshot. It mirrors
 // report.DigestVersion: --json is a stable agent contract, so bump this whenever
 // the shape or semantics of SystemStatus change.
-const StatusVersion = 7
+const StatusVersion = 8
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20
@@ -290,9 +290,12 @@ type SystemStatus struct {
 	Interventions []ScoredIntervention `json:"interventions"`
 	Summary       VerdictSummary       `json:"summary"`
 	Chains        []ChainSummary       `json:"chains"`
-	Attention     AttentionQueue       `json:"attention"`
-	Telemetry     Telemetry            `json:"telemetry"`
-	Corpora       []CorpusRow          `json:"corpora"`
+	// Rate is the chain accrual over the WHOLE corpus, not over Chains, which is
+	// capped. Renderers read it to name a required window as a calendar wait.
+	Rate      ChainRate      `json:"chain_rate"`
+	Attention AttentionQueue `json:"attention"`
+	Telemetry Telemetry      `json:"telemetry"`
+	Corpora   []CorpusRow    `json:"corpora"`
 	// Config state — what the dashboard panels mutate. Each reads fail-soft.
 	Hooks   []HookInfo   `json:"hooks"`
 	Presets []PresetInfo `json:"presets"`
@@ -329,6 +332,7 @@ func Collect(opts Options) (*SystemStatus, error) {
 	s.Interventions = scoreInventory(records, ev, opts.MinAfter)
 	s.Summary = summarize(s.Interventions)
 	s.Chains = recentChains(chains, recentChainLimit)
+	s.Rate = corpusRate(chains, time.Now())
 
 	// Attention subset, from the pure orchestrator function — no side effects.
 	q, err := cadence.Refresh(cadence.Options{
@@ -442,6 +446,14 @@ func summarize(items []ScoredIntervention) VerdictSummary {
 		counts[it.Verdict]++
 	}
 	return VerdictSummary{Total: len(items), Counts: counts}
+}
+
+// corpusRate reads the accrual rate off every chain the corpus holds.
+func corpusRate(chains []mine.Chain, now time.Time) ChainRate {
+	if len(chains) < 2 {
+		return ChainRate{}
+	}
+	return RateOver(len(chains), numFloat(chains[0].StartTS), numFloat(chains[len(chains)-1].StartTS), now)
 }
 
 // recentChains returns the last limit chains by start time, newest last, with

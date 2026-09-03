@@ -73,7 +73,7 @@ type view struct {
 
 // RenderHTML writes the snapshot as one self-contained HTML page.
 func (s *SystemStatus) RenderHTML(w io.Writer) error {
-	rate := RateFrom(s.Chains, time.Now())
+	rate := s.Rate
 	tmpl, err := template.New("dashboard.html.tmpl").Funcs(template.FuncMap{
 		"pct":   pct,
 		"delta": delta,
@@ -85,7 +85,7 @@ func (s *SystemStatus) RenderHTML(w io.Writer) error {
 		"recur":     RecurrencePhrase,
 		"action":    ActionSentence,
 		"removal":   RemovalPhrase,
-		"unmeas":    func(required *int) bool { return Unmeasurable(required, rate) },
+		"unmeas":    func(verdict, unit string, required *int) bool { return Unmeasurable(verdict, unit, required, rate) },
 		"wait":      func(required *int, unit string) string { return RatePhrase(required, unit, rate) },
 		"stamp":     stamp,
 		"slug":      slug,
@@ -130,7 +130,7 @@ func buildView(s *SystemStatus) *view {
 		Status:    s,
 		Generated: s.GeneratedAt,
 		Ledger:    sortedLedger(s.Interventions),
-		Attention: attentionGroups(s.Attention.Interventions, RateFrom(s.Chains, time.Now())),
+		Attention: attentionGroups(s.Attention.Interventions, s.Rate),
 		Tiers:     tierGroups(s.Interventions),
 		Quiet: len(s.Attention.Interventions) == 0 &&
 			len(s.Attention.Candidates) == 0 && len(s.Attention.Unscored) == 0,
@@ -190,7 +190,7 @@ func verdictRank(v string) int {
 func attentionGroups(items []cadence.Intervention, rate ChainRate) []flagged {
 	byAction := map[string][]cadence.Intervention{}
 	for _, it := range items {
-		act := ActionFor(it.Verdict, Unmeasurable(it.RequiredAfter, rate))
+		act := ActionFor(it.Verdict, Unmeasurable(it.Verdict, it.Unit, it.RequiredAfter, rate))
 		byAction[act] = append(byAction[act], it)
 	}
 	out := []flagged{}

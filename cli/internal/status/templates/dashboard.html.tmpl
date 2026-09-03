@@ -192,11 +192,11 @@ footer { color: var(--faint); font-size: 11.5px; border-top: 1px solid var(--lin
         <span class="cls">{{ .Class }}</span>
         <span class="sub">{{ .Tier }} → {{ .Target }}</span>
         <div class="sub">{{ recur .Before .After .Unit }}</div>
-        <div class="sub">{{ action .Verdict (unmeas .RequiredAfter) }}</div>
+        <div class="sub">{{ action .Verdict (unmeas .Verdict .Unit .RequiredAfter) }}</div>
         {{- with claim .Verdict .Effect }}<div class="sub mono">{{ . }}</div>{{ end }}
-        {{- with wait .RequiredAfter .Unit }}<div class="sub">{{ . }}</div>{{ end }}
+        {{- if .RequiredAfter }}{{- with wait .RequiredAfter .Unit }}<div class="sub">{{ . }}</div>{{ end }}{{ else }}{{- with needs .RequiredAfter .Verdict }}<div class="sub">{{ . }}</div>{{ end }}{{ end }}
         <div class="sub">scope {{ scope .Scope }} · before {{ cover .BeforeCoverage }} · after {{ cover .AfterCoverage }}</div>
-        {{- if or (unmeas .RequiredAfter) (eq .Verdict "harmful") }}<div class="sub">{{ removal .Tier .Target }}</div>{{ end }}
+        {{- if or (unmeas .Verdict .Unit .RequiredAfter) (eq .Verdict "harmful") }}<div class="sub">{{ removal .Tier .Target }}</div>{{ end }}
         {{- with attrib .Attribution }}<div class="sub">{{ . }}</div>{{ end }}
         {{- range reasons "confound" .Confounds }}<div class="sub">{{ . }}</div>{{ end }}
         {{- range reasons "composition" .Composition }}<div class="sub">{{ . }}</div>{{ end }}
@@ -268,9 +268,9 @@ footer { color: var(--faint); font-size: 11.5px; border-top: 1px solid var(--lin
           <td class="num">{{ .After.Hits }}/{{ .After.Units }}<div class="dimtext">{{ pctIf .Verdict .After }}</div></td>
           <td class="num">{{ deltaIf .Verdict .Before .After }}</td>
           <td>
-            <div>{{ action .Verdict (unmeas .RequiredAfter) }}</div>
+            <div>{{ action .Verdict (unmeas .Verdict .Unit .RequiredAfter) }}</div>
             {{- with claim .Verdict .Effect }}<div class="mono">{{ . }}</div>{{ end }}
-            {{- with wait .RequiredAfter .Unit }}<div class="dimtext">{{ . }}</div>{{ end }}
+            {{- if .RequiredAfter }}{{- with wait .RequiredAfter .Unit }}<div class="dimtext">{{ . }}</div>{{ end }}{{ else }}{{- with needs .RequiredAfter .Verdict }}<div class="dimtext">{{ . }}</div>{{ end }}{{ end }}
             <div class="dimtext">scope {{ scope .Scope }}</div>
             <div class="dimtext">before {{ cover .BeforeCoverage }} · after {{ cover .AfterCoverage }}</div>
             {{- with attrib .Attribution }}<div class="dimtext">{{ . }}</div>{{ end }}

@@ -515,6 +515,10 @@ const goldenStatusJSON = `{
       "terminal": "clean"
     }
   ],
+  "chain_rate": {
+    "per_day": 0,
+    "known": false
+  },
   "attention": {
     "interventions": [],
     "unscored": [],
