@@ -16,6 +16,10 @@ func TestClassify(t *testing.T) {
 		text bool
 	}{
 		{"success", RawRun{Response: oneFinding, Status: "SUCCESS"}, OutcomeOK, true},
+		{"unknown severity", RawRun{Response: "[1] SEVERITY: NONE\n    FILE: a.go\n" +
+			"    CLAIM: x.\n    FAILS WHEN: y.", Status: "SUCCESS"}, OutcomeLost, false},
+		{"missing required field", RawRun{Response: "[1] SEVERITY: BLOCKING\n" +
+			"    FILE: a.go\n    CLAIM: x.", Status: "SUCCESS"}, OutcomeLost, false},
 		{"empty", RawRun{Status: "ERROR"}, OutcomeEmpty, false},
 		{"findings under error", RawRun{Response: oneFinding, Status: "ERROR"}, OutcomeSalvaged, true},
 		{"clean reply under error", RawRun{Response: "NO FINDINGS", Status: "ERROR",

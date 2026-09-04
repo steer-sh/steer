@@ -106,6 +106,20 @@ func TestReadLedgerASCIIArrow(t *testing.T) {
 	}
 }
 
+func TestLedgerArrowRequiresDelimiterWhitespace(t *testing.T) {
+	ledger := "**Commit gate fired** — 3 reviewers.\n\n" +
+		"- **ACCEPTED** — rename A->B preserves callers → changed at rename.go:12\n"
+	led := ReadLedger(writeTranscript(t, assistantRow(t, ledger)), t0, 0)
+	if led == nil {
+		t.Fatal("ledger must parse")
+	}
+	concerns := led["concerns"].([]gate.Concern)
+	if want := "rename A->B preserves callers"; concerns[0].Concern != want {
+		t.Errorf("concern = %q, want %q — an arrow inside a token is not the delimiter",
+			concerns[0].Concern, want)
+	}
+}
+
 // The guards are the actual feature: the counts are worth less than the guarantee that
 // a recorded count was actually claimed by the agent.
 func TestReadLedgerGuards(t *testing.T) {

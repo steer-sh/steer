@@ -104,9 +104,10 @@ separatorDone:
 	return Concern{Verdict: verdict, Concern: rest}, true
 }
 
-// arrowSplit is the template's `→`, or its ASCII spelling, separating the concern from
-// what was done about it.
-var arrowSplitRe = regexp.MustCompile(`\s*(?:→|->)\s*`)
+// arrowSplit is the template's delimiter between the concern and its resolution. Both
+// sides require whitespace so an arrow inside a token such as `A->B` remains concern
+// text rather than silently changing its measurement key.
+var arrowSplitRe = regexp.MustCompile(`[ \t]+(?:→|->)[ \t]+`)
 
 // ParseLedgerText turns the verdict bullets of one ledger message into the row fields
 // they become.

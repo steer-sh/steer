@@ -7,22 +7,24 @@ import (
 	"strings"
 )
 
-// The indexed severity line the review prompt mandates. Case-insensitive, because a
-// reviewer writing `severity: blocking` was otherwise not counted at all, and an
-// uncounted finding is the one direction this log must not fail in — it flatters the
-// gate.
-var severityRe = regexp.MustCompile(`(?im)^[ \t]*\[\d+\][ \t]*SEVERITY:[ \t]*([A-Za-z]+)`)
+// reviewFindingRe is the complete four-line finding contract from the review prompt.
+// Field labels and allowed severities are case-insensitive because capitalization does
+// not change the finding; missing, reordered or empty fields do. A severity-shaped
+// line alone is prose, not a completed review finding.
+var reviewFindingRe = regexp.MustCompile(`(?im)^[ \t]*\[\d+\][ \t]*SEVERITY:[ \t]*(BLOCKING|SUBSTANTIVE|NITPICK)[ \t]*\r?\n` +
+	`[ \t]+FILE:[ \t]*([^ \t\r\n][^\r\n]*?)[ \t]*\r?\n` +
+	`[ \t]+CLAIM:[ \t]*([^ \t\r\n][^\r\n]*?)[ \t]*\r?\n` +
+	`[ \t]+FAILS WHEN:[ \t]*([^ \t\r\n][^\r\n]*?)[ \t]*\r?$`)
 
 // The loose count: any SEVERITY line, indexed or not. It rides the row for
 // measurement and NEVER drives a decision — it also matches `SEVERITY: NONE` and
 // rubric echoes, and a false count denies a clean commit.
 var severityLooseRe = regexp.MustCompile(`(?im)^[ \t]*(?:\[\d+\][ \t]*)?SEVERITY:[ \t]*([A-Za-z]+)`)
 
-var fileRe = regexp.MustCompile(`(?im)^[ \t]*FILE:[ \t]*(\S+)`)
-
-// CountFindings is the decision count: strictly indexed severity lines.
+// CountFindings is the decision count: complete findings with an indexed allowed
+// severity and all three required fields.
 func CountFindings(text string) int {
-	return len(severityRe.FindAllString(text, -1))
+	return len(reviewFindingRe.FindAllString(text, -1))
 }
 
 // The wrappers a reviewer puts around the clean reply: markdown emphasis, code
@@ -94,8 +96,11 @@ func IsPath(cited string) bool {
 // understates the number this gate is judged by rather than inflating it.
 func FindingShape(reviews []string, changed []string) Row {
 	severities := map[string]int{}
+	var findings [][]string
 	for _, review := range reviews {
-		for _, m := range severityRe.FindAllStringSubmatch(review, -1) {
+		parsed := reviewFindingRe.FindAllStringSubmatch(review, -1)
+		findings = append(findings, parsed...)
+		for _, m := range parsed {
 			severities[strings.ToUpper(m[1])]++
 		}
 	}
@@ -107,16 +112,14 @@ func FindingShape(reviews []string, changed []string) Row {
 	}
 	var files []string
 	cross := 0
-	for _, review := range reviews {
-		for _, m := range fileRe.FindAllStringSubmatch(review, -1) {
-			cited := CleanPath(m[1])
-			if !IsPath(cited) {
-				continue
-			}
-			files = append(files, cited)
-			if !changedSet[cited] && !basenames[path.Base(cited)] {
-				cross++
-			}
+	for _, finding := range findings {
+		cited := CleanPath(finding[2])
+		if !IsPath(cited) {
+			continue
+		}
+		files = append(files, cited)
+		if !changedSet[cited] && !basenames[path.Base(cited)] {
+			cross++
 		}
 	}
 	unique := sortedUnique(files)

@@ -35,6 +35,6 @@ Format each finding EXACTLY as below. Every finding opens with its own line at c
 
 SEVERITY is BLOCKING (ships broken or wrong behaviour), SUBSTANTIVE (works, but a real problem ships), or NITPICK (minor).
 
-The `[N] SEVERITY:` line is how a finding is counted. Never replace it with a heading, a title or a label of your own — `### Defect: ...`, `**Finding 1**`, `1. The parser ...`. A finding written that way is counted as no finding at all, so the defect you found ships and the record says the diff was clean.
+The complete four-line block is how a finding is counted. Use one of the three severity levels and include every field in the shown order. Never replace the opening line with a heading, title or label of your own — `### Defect: ...`, `**Finding 1**`, `1. The parser ...`. An incomplete or differently shaped finding is counted as no finding at all, so the defect you found ships and the record says the diff was clean.
 
 If the commit has no real problems, reply with exactly: NO FINDINGS

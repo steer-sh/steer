@@ -18,14 +18,18 @@ const reviewOne = `
 [2] SEVERITY: SUBSTANTIVE
     FILE: cli.py
     CLAIM: two.
+    FAILS WHEN: another thing.
 `
 
 const reviewTwo = `
 [1] severity: blocking
     FILE: ` + "`store.py`" + `
     CLAIM: same defect, lowercased and quoted.
+    FAILS WHEN: something.
 [2] SEVERITY: NITPICK
     FILE: docs/x.py
+    CLAIM: three.
+    FAILS WHEN: another thing.
 `
 
 func TestFindingShape(t *testing.T) {
@@ -76,7 +80,8 @@ func TestDecoratedCitationsAreNotCrossFile(t *testing.T) {
 		"[pkg/store.py]:86", "(pkg/store.py):86",
 	}
 	for _, c := range cited {
-		review := []string{"[1] SEVERITY: BLOCKING\n    FILE: " + c + "\n"}
+		review := []string{"[1] SEVERITY: BLOCKING\n    FILE: " + c +
+			"\n    CLAIM: one.\n    FAILS WHEN: something.\n"}
 		if got := FindingShape(review, []string{"pkg/store.py"})["cross_file_findings"]; got != 0 {
 			t.Errorf("%q: cross_file_findings = %v, want 0 — a decorated citation of a "+
 				"CHANGED file is not a cross-file finding", c, got)
@@ -96,7 +101,8 @@ func TestMarkdownLinkCitations(t *testing.T) {
 		"([pkg/store.py](file:///pkg/store.py#L86)).",
 	}
 	for _, c := range cited {
-		review := []string{"[1] SEVERITY: BLOCKING\n    FILE: " + c + "\n"}
+		review := []string{"[1] SEVERITY: BLOCKING\n    FILE: " + c +
+			"\n    CLAIM: one.\n    FAILS WHEN: something.\n"}
 		shape := FindingShape(review, []string{"pkg/store.py"})
 		files := shape["finding_files"].([]string)
 		if !equalStrings(files, []string{"pkg/store.py"}) {
@@ -110,7 +116,8 @@ func TestMarkdownLinkCitations(t *testing.T) {
 }
 
 func TestRealCrossFileSurvivesNormalisation(t *testing.T) {
-	review := []string{"[1] SEVERITY: BLOCKING\n    FILE: other/thing.py:12\n"}
+	review := []string{"[1] SEVERITY: BLOCKING\n    FILE: other/thing.py:12\n" +
+		"    CLAIM: one.\n    FAILS WHEN: something.\n"}
 	if got := FindingShape(review, []string{"pkg/store.py"})["cross_file_findings"]; got != 1 {
 		t.Errorf("cross_file_findings = %v, want 1 — normalising citations must not "+
 			"swallow the real cross-file class", got)
@@ -120,7 +127,8 @@ func TestRealCrossFileSurvivesNormalisation(t *testing.T) {
 // A reviewer that writes prose after FILE: donates its first word to the log, and a
 // word naming no file scored as cross-file moves the number this gate is judged by.
 func TestProseCitationsAreDropped(t *testing.T) {
-	review := []string{"[1] SEVERITY: BLOCKING\n    FILE: Commit message\n"}
+	review := []string{"[1] SEVERITY: BLOCKING\n    FILE: Commit message\n" +
+		"    CLAIM: one.\n    FAILS WHEN: something.\n"}
 	shape := FindingShape(review, []string{"pkg/store.py"})
 	if shape["cross_file_findings"] != 0 {
 		t.Errorf("cross_file_findings = %v, want 0 — the first word names no file",
@@ -134,7 +142,8 @@ func TestProseCitationsAreDropped(t *testing.T) {
 		t.Errorf("BLOCKING = %d, want 1 — dropping the citation must NOT drop the finding", got)
 	}
 
-	makefile := []string{"[1] SEVERITY: BLOCKING\n    FILE: Makefile\n"}
+	makefile := []string{"[1] SEVERITY: BLOCKING\n    FILE: Makefile\n" +
+		"    CLAIM: one.\n    FAILS WHEN: something.\n"}
 	if got := FindingShape(makefile, []string{"pkg/store.py"})["cross_file_findings"]; got != 0 {
 		t.Errorf("cross_file_findings = %v, want 0 — an extensionless top-level file is "+
 			"dropped too; the test errs toward understating, never inflating", got)
@@ -145,13 +154,44 @@ func TestProseCitationsAreDropped(t *testing.T) {
 // measurement only. A widened pattern also matches rubric echoes, and a false count
 // denies a clean change.
 func TestStrictAndLooseCounts(t *testing.T) {
-	text := "SEVERITY: NONE\n[1] SEVERITY: BLOCKING\n    FILE: a.py\nSEVERITY: SUBSTANTIVE\n"
+	text := "SEVERITY: NONE\n[1] SEVERITY: BLOCKING\n    FILE: a.py\n" +
+		"    CLAIM: one.\n    FAILS WHEN: something.\nSEVERITY: SUBSTANTIVE\n"
 	if got := CountFindings(text); got != 1 {
 		t.Errorf("CountFindings = %d, want 1 — only the indexed line is a finding", got)
 	}
 	if got := CountFindingsLoose(text); got != 3 {
 		t.Errorf("CountFindingsLoose = %d, want 3 — the loose count sees every SEVERITY "+
 			"line, which is why it must never drive a decision", got)
+	}
+}
+
+func TestFindingRequiresAllowedSeverityAndCompleteFields(t *testing.T) {
+	valid := "[1] SEVERITY: BLOCKING\n    FILE: a.py\n    CLAIM: one.\n    FAILS WHEN: something."
+	cases := []struct {
+		name string
+		text string
+	}{
+		{"unknown severity", strings.Replace(valid, "BLOCKING", "NONE", 1)},
+		{"missing file", strings.Replace(valid, "    FILE: a.py\n", "", 1)},
+		{"missing claim", strings.Replace(valid, "    CLAIM: one.\n", "", 1)},
+		{"missing failure condition", strings.Replace(valid, "    FAILS WHEN: something.", "", 1)},
+		{"empty file", strings.Replace(valid, "FILE: a.py", "FILE:   ", 1)},
+		{"reordered fields", "[1] SEVERITY: BLOCKING\n    CLAIM: one.\n    FILE: a.py\n    FAILS WHEN: something."},
+		{"severity line only", "[1] SEVERITY: BLOCKING"},
+	}
+
+	if got := CountFindings(valid); got != 1 {
+		t.Fatalf("valid finding count = %d, want 1", got)
+	}
+	if got := CountFindings(strings.ReplaceAll(valid, "\n", "\r\n")); got != 1 {
+		t.Fatalf("CRLF finding count = %d, want 1", got)
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := CountFindings(tc.text); got != 0 {
+				t.Errorf("CountFindings = %d, want 0 for an invalid finding", got)
+			}
+		})
 	}
 }
 

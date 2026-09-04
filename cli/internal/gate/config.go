@@ -81,8 +81,9 @@ const (
 // context selection are part of the instrument, so a Python-to-Go swap is a genuine
 // instrument change even at an identical prompt. It carries no CLI version: mine.py
 // flags any change as drift, and a per-release suffix would fire that flag on every
-// patch release. Bump it only when gate behaviour that changes reviewer inputs changes.
-const InstrumentSuffix = "go"
+// patch release. Bump it only when gate behaviour changes reviewer inputs or the
+// parser semantics that decide which reviewer findings enter the corpus.
+const InstrumentSuffix = "go-findings-v2"
 
 // Phases where no reviewer ran. They open no chain and close none, so a reader of
 // the log must not treat one as a boundary. mine.py keeps its own copy; the two must

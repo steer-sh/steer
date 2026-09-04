@@ -121,7 +121,7 @@ func TestCleanPassAllows(t *testing.T) {
 		t.Errorf("channel = %v, want %s — a reader must be able to tell an absent "+
 			"field from a lost one", row["channel"], ChannelPreToolUse)
 	}
-	if row["instrument"] != "stub-model/2/"+PromptDigest()+"/go" {
+	if row["instrument"] != "stub-model/2/"+PromptDigest()+"/go-findings-v2" {
 		t.Errorf("instrument = %v — it must name the reviewer that actually ran", row["instrument"])
 	}
 	if row["diff_file"] == nil {
@@ -134,7 +134,7 @@ func TestRowCarriesTheInstrumentByDimension(t *testing.T) {
 	h.cfg.ReviewerEffort = "high"
 	h.handle()
 	row := h.lastRow()
-	if row["instrument"] != "stub-model/2/"+PromptDigest()+"/go/high" {
+	if row["instrument"] != "stub-model/2/"+PromptDigest()+"/go-findings-v2/high" {
 		t.Errorf("instrument = %v — a set effort is the fifth segment", row["instrument"])
 	}
 	fields, ok := row["instrument_fields"].(map[string]any)
@@ -143,7 +143,7 @@ func TestRowCarriesTheInstrumentByDimension(t *testing.T) {
 	}
 	want := map[string]any{
 		"provider": "stub", "model": "stub-model", "effort": "high",
-		"runs": float64(2), "prompt_digest": PromptDigest(), "engine": "go",
+		"runs": float64(2), "prompt_digest": PromptDigest(), "engine": "go-findings-v2",
 	}
 	for key, value := range want {
 		if fields[key] != value {
