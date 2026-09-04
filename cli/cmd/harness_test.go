@@ -163,8 +163,8 @@ func TestAllHarnessesTargetsEveryHarnessThatRegistersHooks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(targets) != 2 {
-		t.Fatalf("targets = %v; want both harnesses", harnessNames(targets))
+	if len(targets) != 3 {
+		t.Fatalf("targets = %v; want all three harnesses", harnessNames(targets))
 	}
 }
 

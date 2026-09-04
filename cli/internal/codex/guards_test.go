@@ -64,7 +64,7 @@ func TestMasterRegistersUnderBothToolPaths(t *testing.T) {
 	if found == "" {
 		t.Fatal("the master was not registered")
 	}
-	// The one master file serves both harnesses and reads its reply contract
+	// The one master file serves every harness and reads its reply contract
 	// off this flag, so a Codex registration that omits it answers in Claude's.
 	if !strings.Contains(found, "--harness codex") {
 		t.Errorf("command = %q; want the codex harness flag", found)

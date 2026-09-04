@@ -28,6 +28,7 @@ def main():
                 "decision": "block",
                 "continue": True,
                 "stopReason": "forbidden in " + tool_input.get("file_path", "<no file>"),
+                "systemMessage": "marker hook blocked a change",
             }))
             sys.exit(0)
     sys.exit(0)
@@ -103,7 +104,7 @@ func readAudit(t *testing.T) []map[string]any {
 	return rows
 }
 
-// The tool shapes both harnesses can send all reach a guard written against
+// Every harness's tool shapes reach a guard written against
 // Claude's Edit / Write / Bash contract.
 func TestRuntimeNormalizesEveryToolShape(t *testing.T) {
 	withProjectTempDir(t)
@@ -233,9 +234,26 @@ func TestRuntimeRendersTheNativeDeny(t *testing.T) {
 		!strings.Contains(codexReply.HookSpecificOutput.PermissionDecisionReason, "steer hook: marker-hook") {
 		t.Fatalf("Codex reason lost the guard's reason or the footer: %s", codex)
 	}
+
+	pi := runMasterWithArgs(t, payload, "--harness", "pi")
+	var piReply struct {
+		Block         bool   `json:"block"`
+		Reason        string `json:"reason"`
+		SystemMessage string `json:"systemMessage"`
+	}
+	if err := json.Unmarshal([]byte(pi), &piReply); err != nil {
+		t.Fatalf("Pi reply is not JSON: %v\n%s", err, pi)
+	}
+	if !piReply.Block || !strings.Contains(piReply.Reason, "forbidden in") ||
+		!strings.Contains(piReply.Reason, "steer hook: marker-hook") {
+		t.Fatalf("Pi deny lost its block, reason, or footer: %s", pi)
+	}
+	if piReply.SystemMessage != "marker hook blocked a change" {
+		t.Fatalf("Pi deny lost its systemMessage: %s", pi)
+	}
 }
 
-func TestRuntimeAllowIsSilentOnBothHarnesses(t *testing.T) {
+func TestRuntimeAllowIsSilentOnEveryHarness(t *testing.T) {
 	withProjectTempDir(t)
 	requirePython3(t)
 	installGuard(t, "marker-hook", markerHookContent)
@@ -246,6 +264,9 @@ func TestRuntimeAllowIsSilentOnBothHarnesses(t *testing.T) {
 	}
 	if out := runMasterWithArgs(t, payload, "--harness", "codex"); out != "" {
 		t.Fatalf("Codex allow printed %q", out)
+	}
+	if out := runMasterWithArgs(t, payload, "--harness", "pi"); out != "" {
+		t.Fatalf("Pi allow printed %q", out)
 	}
 }
 

@@ -59,6 +59,16 @@ func TestCurrentRegistrarsDefaultsToTheInstalledHarnesses(t *testing.T) {
 	if len(targets) != 2 {
 		t.Fatalf("both installed: got %s, want two targets", harnessNames(targets))
 	}
+
+	if err := os.MkdirAll(filepath.Join(home, ".pi", "agent"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if targets, err = currentRegistrars(); err != nil {
+		t.Fatal(err)
+	}
+	if len(targets) != 3 {
+		t.Fatalf("all installed: got %s, want three targets", harnessNames(targets))
+	}
 }
 
 func TestCurrentRegistrarsHonoursAnExplicitHarness(t *testing.T) {

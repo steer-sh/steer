@@ -102,7 +102,8 @@ var registry = map[ID]Harness{
 		HomeEnv:         "PI_CODING_AGENT_DIR",
 		DetectEnv:       "PI_CODING_AGENT",
 		Capabilities: Capabilities{
-			Transcripts: true,
+			HookRegistration: true,
+			Transcripts:      true,
 			// Pi runs a project-local extension only once the operator trusts
 			// it, so a registration will not prove enforcement here either.
 			TrustReview: true,

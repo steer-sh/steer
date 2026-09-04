@@ -26,7 +26,7 @@ const MasterStatusMessage = "checking the change against your rules ..."
 func isMaster(command string) bool { return hookstore.IsMasterCommand(command) }
 
 // MasterCommand is the hooks.json command value for the guard master. The master
-// is one file serving both harnesses and reads its reply contract off this flag.
+// serves every harness and reads its reply contract off this flag.
 func MasterCommand(scope string) (string, error) {
 	master, err := hookstore.MasterPath(scope)
 	if err != nil {

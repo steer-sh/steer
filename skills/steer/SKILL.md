@@ -3,7 +3,7 @@ name: steer
 description: Generates and installs PreToolUse Python hooks from natural language rules. Use when enforcing coding standards, blocking insecure patterns, managing hook lifecycle, or running steer CLI commands (register, remove, list, test, preset, verify, git-hooks).
 user-invocable: true
 prompt_version: 10
-compatibility: Requires Claude Code or Codex with PreToolUse hook support. Hooks are installed into .steer/hooks/ and registered in every installed harness (settings.json for Claude Code, hooks.json for Codex). steer CLI must be available on PATH or bundled under scripts/.
+compatibility: Requires Claude Code, Codex, or Pi with tool-call hook support. Hooks are installed into .steer/hooks/ and registered in every installed harness (settings.json for Claude Code, hooks.json for Codex, extensions for Pi). steer CLI must be available on PATH or bundled under scripts/.
 allowed-tools: Bash(steer *), Bash(python3 *), Bash(echo *), Read, Write
 ---
 
@@ -295,11 +295,11 @@ This atomically:
 The store is shared between harnesses; the registration is not. `register` writes
 to every hook-registering harness installed on the machine — the one whose config
 directory exists — and reports which ones on the last line of its output. A guard
-is a rule about the operator's work, not about one agent, so both get it. Add
-`--harness claude-code` or `--harness codex` to write to one only, or
+is a rule about the operator's work, not about one agent, so all get it. Add
+`--harness claude-code`, `--harness codex`, or `--harness pi` to write to one only, or
 `--all-harnesses` to write to every hook-supporting harness whether or not it is
-installed here. Pi runs no hooks, so no flag registers into it.
-On a machine with no harness directory, `register` writes to Claude Code.
+installed here. On a machine with no harness directory, `register` writes to
+Claude Code.
 
 Installing is not measuring. Where the guard runs and which units get counted are
 separate decisions: install everywhere, then score each harness on its own record

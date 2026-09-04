@@ -153,6 +153,9 @@ func TestOnlyClaudeCodeReportsPermissionDenied(t *testing.T) {
 	if pi.Capabilities.PermissionDenied {
 		t.Error("Pi claims a PermissionDenied event")
 	}
+	if !pi.Capabilities.HookRegistration {
+		t.Error("Pi lost its tool-call hook registration capability")
+	}
 	if !codex.Capabilities.TrustReview || !pi.Capabilities.TrustReview ||
 		claude.Capabilities.TrustReview {
 		t.Error("trust review is the posture of every harness but Claude Code")

@@ -12,6 +12,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/codex"
 	"github.com/steer-sh/steer-cli/internal/harness"
+	"github.com/steer-sh/steer-cli/internal/pi"
 )
 
 // RegistrarFor maps a registry id to its adapter. The guard store is shared, so
@@ -22,6 +23,8 @@ func RegistrarFor(id harness.ID) (harness.Registrar, error) {
 		return claude.Registrar{}, nil
 	case harness.Codex:
 		return codex.Registrar{}, nil
+	case harness.Pi:
+		return pi.Registrar{}, nil
 	default:
 		return nil, fmt.Errorf("harness %q registers no hooks", id)
 	}

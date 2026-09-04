@@ -60,7 +60,7 @@ func harnessNames(targets []harness.Registrar) string {
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&harnessFlag, "harness", "",
-		"Harness to register into (claude-code|codex); defaults to the invoking harness")
+		"Harness to register into (claude-code|codex|pi); defaults to every installed harness")
 	rootCmd.PersistentFlags().BoolVar(&allHarnesses, "all-harnesses", false,
 		"Register into every harness that supports hooks")
 }

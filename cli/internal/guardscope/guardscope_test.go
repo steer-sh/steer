@@ -53,15 +53,20 @@ func TestHookRegistrarsFollowTheInstalledHarnesses(t *testing.T) {
 	if installed, err = HookRegistrars(true); err != nil || len(installed) != 2 {
 		t.Fatalf("both installed: got %d targets (%v)", len(installed), err)
 	}
+	if err := os.MkdirAll(filepath.Join(home, ".pi", "agent"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if installed, err = HookRegistrars(true); err != nil || len(installed) != 3 {
+		t.Fatalf("all installed: got %d targets (%v)", len(installed), err)
+	}
 
-	// The unfiltered list ignores presence and still skips a harness that
-	// registers no hooks at all.
+	// The unfiltered list ignores presence and includes every hook-capable harness.
 	all, err := HookRegistrars(false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(all) != 2 {
-		t.Fatalf("all: got %d targets, want the two that register hooks", len(all))
+	if len(all) != 3 {
+		t.Fatalf("all: got %d targets, want the three that register hooks", len(all))
 	}
 }
 
@@ -93,10 +98,9 @@ func TestCheckRefusesAWindowTheGuardDoesNotCover(t *testing.T) {
 		t.Fatalf("unregistered harness: got %v", err)
 	}
 
-	// Pi registers no hooks, so the repair is to correct the scope, never to go
-	// and register the guard there.
+	// Pi supports hooks but carries no registration in this isolated home.
 	err = Check("steer", false, []string{"pi"}, false)
-	if err == nil || !strings.Contains(err.Error(), "runs no steer guard") {
+	if err == nil || !strings.Contains(err.Error(), "does not run") {
 		t.Fatalf("pi: got %v", err)
 	}
 
