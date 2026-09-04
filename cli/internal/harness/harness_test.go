@@ -24,6 +24,7 @@ func TestParseAcceptsAliasAndRejectsUnknown(t *testing.T) {
 		"claude":      ClaudeCode,
 		"claude-code": ClaudeCode,
 		"  Codex ":    Codex,
+		"pi":          Pi,
 	} {
 		got, err := Parse(name)
 		if err != nil || got != want {
@@ -39,9 +40,20 @@ func TestDetectReadsTheSessionMarker(t *testing.T) {
 	t.Setenv("STEER_HARNESS", "")
 	t.Setenv("CLAUDECODE", "")
 	t.Setenv("CODEX_SESSION_ID", "")
+	t.Setenv("PI_CODING_AGENT", "")
 	if got := Detect(); got != Unknown {
 		t.Errorf("Detect with no marker = %q; want Unknown", got)
 	}
+	t.Setenv("PI_CODING_AGENT", "true")
+	if got := Detect(); got != Pi {
+		t.Errorf("Detect with PI_CODING_AGENT = %q; want %q", got, Pi)
+	}
+	t.Setenv("CLAUDECODE", "1")
+	if got := Detect(); got != Unknown {
+		t.Errorf("Pi inside Claude Code detected as %q; a nested session must be Unknown", got)
+	}
+	t.Setenv("CLAUDECODE", "")
+	t.Setenv("PI_CODING_AGENT", "")
 	t.Setenv("CODEX_SESSION_ID", "01a055bc-8abe-7d31-8a36-70a36665e791")
 	if got := Detect(); got != Codex {
 		t.Errorf("Detect with CODEX_SESSION_ID = %q; want %q", got, Codex)
@@ -93,6 +105,24 @@ func TestConfigDirHonorsScopeAndHomeOverride(t *testing.T) {
 	if err != nil || got != filepath.Join(home, ".claude") {
 		t.Errorf("global Claude dir = %q, %v", got, err)
 	}
+
+	// Pi is the one entry whose global directory is not its project one: the
+	// config lives under ~/.pi/agent while a repository carries .pi.
+	pi, _ := Get(Pi)
+	t.Setenv("PI_CODING_AGENT_DIR", "")
+	got, err = pi.ConfigDir(GlobalScope, "/repo")
+	if err != nil || got != filepath.Join(home, ".pi", "agent") {
+		t.Errorf("global Pi dir = %q, %v; want ~/.pi/agent", got, err)
+	}
+	got, err = pi.ConfigDir(ProjectScope, "/repo")
+	if err != nil || got != filepath.Join("/repo", ".pi") {
+		t.Errorf("project Pi dir = %q, %v", got, err)
+	}
+	t.Setenv("PI_CODING_AGENT_DIR", "/elsewhere/pi")
+	got, err = pi.ConfigDir(GlobalScope, "/repo")
+	if err != nil || got != "/elsewhere/pi" {
+		t.Errorf("global Pi dir = %q, %v; want the PI_CODING_AGENT_DIR override", got, err)
+	}
 }
 
 func TestEveryRegistryEntryIsComplete(t *testing.T) {
@@ -119,7 +149,12 @@ func TestOnlyClaudeCodeReportsPermissionDenied(t *testing.T) {
 	if !claude.Capabilities.PermissionDenied {
 		t.Error("Claude Code lost its PermissionDenied capability")
 	}
-	if !codex.Capabilities.TrustReview || claude.Capabilities.TrustReview {
-		t.Error("trust review is a Codex-only posture")
+	pi, _ := Get(Pi)
+	if pi.Capabilities.PermissionDenied {
+		t.Error("Pi claims a PermissionDenied event")
+	}
+	if !codex.Capabilities.TrustReview || !pi.Capabilities.TrustReview ||
+		claude.Capabilities.TrustReview {
+		t.Error("trust review is the posture of every harness but Claude Code")
 	}
 }

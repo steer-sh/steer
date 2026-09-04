@@ -18,6 +18,7 @@ const (
 	Unknown    ID = ""
 	ClaudeCode ID = "claude-code"
 	Codex      ID = "codex"
+	Pi         ID = "pi"
 )
 
 const (
@@ -52,6 +53,9 @@ type Harness struct {
 	// ConfigDirName is the harness config directory, relative to a repository
 	// root for project scope and to the user home for global scope.
 	ConfigDirName string
+	// GlobalDirName overrides ConfigDirName for global scope. Empty means the
+	// harness names one directory at both scopes.
+	GlobalDirName string
 	// HomeEnv overrides the global config directory when set in the
 	// environment. Empty means the harness reads no such variable.
 	HomeEnv string
@@ -87,6 +91,21 @@ var registry = map[ID]Harness{
 			Transcripts:      true,
 			SubagentThreads:  true,
 			TrustReview:      true,
+		},
+	},
+	Pi: {
+		ID:              Pi,
+		DisplayName:     "Pi",
+		InstructionFile: "AGENTS.md",
+		ConfigDirName:   ".pi",
+		GlobalDirName:   filepath.Join(".pi", "agent"),
+		HomeEnv:         "PI_CODING_AGENT_DIR",
+		DetectEnv:       "PI_CODING_AGENT",
+		Capabilities: Capabilities{
+			Transcripts: true,
+			// Pi runs a project-local extension only once the operator trusts
+			// it, so a registration will not prove enforcement here either.
+			TrustReview: true,
 		},
 	},
 }
@@ -131,7 +150,7 @@ func Targets(targets []Registrar, fallback Registrar) []Registrar {
 }
 
 // order fixes the iteration order of All, so every listing renders the same way.
-var order = []ID{ClaudeCode, Codex}
+var order = []ID{ClaudeCode, Codex, Pi}
 
 // All returns every registered harness in a stable order.
 func All() []Harness {
@@ -219,7 +238,11 @@ func (h Harness) ConfigDir(scope, cwd string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return filepath.Join(home, h.ConfigDirName), nil
+		dir := h.GlobalDirName
+		if dir == "" {
+			dir = h.ConfigDirName
+		}
+		return filepath.Join(home, dir), nil
 	default:
 		return "", fmt.Errorf("invalid scope %q: expected %q or %q", scope, ProjectScope, GlobalScope)
 	}
