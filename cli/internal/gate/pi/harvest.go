@@ -48,11 +48,17 @@ func harvestFile(path string) []resolve.LedgerMsg {
 
 	sessionID := ""
 	var out []resolve.LedgerMsg
-	scanner := bufio.NewScanner(file)
-	buffer := make([]byte, 64*1024)
-	scanner.Buffer(buffer, 4*1024*1024)
-	for scanner.Scan() {
-		line := scanner.Bytes()
+	// A capped scanner drops the rest of the file at the first oversized row, and a
+	// Pi tool result is not bounded. Read with the reader every other harvest uses.
+	reader := bufio.NewReaderSize(file, 256*1024)
+	for {
+		line, readErr := reader.ReadBytes('\n')
+		if len(line) == 0 {
+			if readErr != nil {
+				break
+			}
+			continue
+		}
 		if sessionID == "" {
 			var header struct {
 				Type string `json:"type"`
@@ -97,6 +103,9 @@ func harvestFile(path string) []resolve.LedgerMsg {
 					When: float64(when.UnixNano()) / 1e9, Key: sessionID, Path: path, Text: text,
 				})
 			}
+		}
+		if readErr != nil {
+			break
 		}
 	}
 	return out

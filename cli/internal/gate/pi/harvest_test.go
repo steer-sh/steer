@@ -114,3 +114,23 @@ func TestHarvestCountsAForkedLedgerOnItsOwnSessionOnly(t *testing.T) {
 		t.Fatalf("keys = %#v", keys)
 	}
 }
+
+func TestHarvestReadsALedgerAfterAnOversizedRow(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "session.jsonl")
+	huge, _ := json.Marshal(map[string]any{
+		"type": "message", "id": "e1", "parentId": "", "timestamp": "2026-09-03T12:00:00Z",
+		"message": json.RawMessage(`{"role":"user","content":` +
+			`"` + strings.Repeat("x", 8*1024*1024) + `"}`),
+	})
+	body := `{"type":"session","id":"pi-session"}` + "\n" +
+		string(huge) + "\n" +
+		ledgerEntry("e2", "e1", "2026-09-03T12:01:00Z", "after the oversized row")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	msgs := Harvest(root)()
+	if len(msgs) != 1 || !strings.Contains(msgs[0].Text, "after the oversized row") {
+		t.Fatalf("harvest = %#v", msgs)
+	}
+}
