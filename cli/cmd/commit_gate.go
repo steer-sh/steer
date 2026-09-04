@@ -15,11 +15,14 @@ import (
 	"github.com/steer-sh/steer-cli/internal/gate/cc"
 	gatecodex "github.com/steer-sh/steer-cli/internal/gate/codex"
 	"github.com/steer-sh/steer-cli/internal/gate/gitgate"
+	gatepi "github.com/steer-sh/steer-cli/internal/gate/pi"
 	"github.com/steer-sh/steer-cli/internal/gate/resolve"
 	"github.com/steer-sh/steer-cli/internal/harness"
+	pihooks "github.com/steer-sh/steer-cli/internal/pi"
 	"github.com/steer-sh/steer-cli/internal/settings"
 	"github.com/steer-sh/steer-cli/internal/steerbin"
 	"github.com/steer-sh/steer-cli/internal/styles"
+	transcriptpi "github.com/steer-sh/steer-cli/internal/transcript/pi"
 	"github.com/steer-sh/steer-cli/internal/utils"
 )
 
@@ -61,6 +64,7 @@ decision.
 Three channels share one review engine:
   review        PreToolUse hook for Claude Code — reads a JSON payload on stdin
   review-codex  PreToolUse hook for Codex — reads a JSON payload on stdin
+  review-pi     tool_call bridge for Pi — reads a JSON payload on stdin
   precommit  git pre-commit hook — reads the index
 
 Arming both channels in one repository reviews every commit twice. Use
@@ -203,6 +207,26 @@ native hook reply on stdout. It always exits 0 so adapter failures fail open.`,
 	},
 }
 
+var commitGatePiReviewCmd = &cobra.Command{
+	Use:   "review-pi",
+	Short: "Pi tool_call hook: rule on a Bash git commit before it runs",
+	Long: `review-pi reads the Pi bridge's PreToolUse payload on stdin and writes Pi's
+native tool_call reply on stdout. It always exits 0 so adapter failures fail open.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := prepareState(); err != nil {
+			fmt.Fprintln(os.Stderr, "steer commit-gate:", err)
+		}
+		cfg := gateConfig()
+		reviewer, err := buildReviewer(cfg)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "steer commit-gate:", err)
+			return nil
+		}
+		gatepi.Run(context.Background(), cfg, reviewer, os.Stdin, os.Stdout)
+		return nil
+	},
+}
+
 var commitGateInstallCmd = &cobra.Command{
 	Use:   "install",
 	Short: "Arm the commit gate on one channel",
@@ -238,14 +262,22 @@ func installReviewChannel(cfg gate.Config) error {
 	}
 	entry, _ := harness.Get(target)
 	var path string
-	if target == harness.Codex {
+	switch target {
+	case harness.Codex:
 		cwd, cwdErr := codexProjectDir()
 		if cwdErr != nil {
 			return cwdErr
 		}
 		path, err = codexhooks.RegisterCommitGateAndResolver(scope, cwd,
 			commitGateCodexCommand(), timeout, backfillCommand(), backfillHookTimeout)
-	} else {
+	case harness.Pi:
+		cwd, cwdErr := codexProjectDir()
+		if cwdErr != nil {
+			return cwdErr
+		}
+		path, err = pihooks.RegisterCommitGateAndResolver(scope, cwd,
+			commitGatePiCommand(), timeout, backfillCommand(), backfillHookTimeout)
+	default:
 		// The review hook and the resolver are one Claude Code installation, armed in
 		// one write: the review writes the rows the resolver later reconciles from the
 		// transcript, so a half-armed install leaves the ledger permanently unresolved.
@@ -270,6 +302,10 @@ func installReviewChannel(cfg gate.Config) error {
 	if target == harness.Codex {
 		message += "\nResolver: Stop and SubagentStop hooks armed (steer commit-gate backfill)" +
 			"\nHooks: " + path + "\nTrust: restart Codex and approve these definitions in /hooks"
+	}
+	if target == harness.Pi {
+		message += "\nResolver: turn_end handler armed (steer commit-gate backfill)" +
+			"\nExtension: " + path + "\nTrust: project extensions run after Pi trusts the project"
 	}
 	fmt.Println(styles.SuccessBox.Render(message))
 	return nil
@@ -349,6 +385,10 @@ func commitGateCodexCommand() string {
 	return steerHookCommand("commit-gate review-codex")
 }
 
+func commitGatePiCommand() string {
+	return steerHookCommand("commit-gate review-pi")
+}
+
 // reviewerFlags is the shared list the dashboard's Reviewer panel also scans.
 var reviewerFlags = settings.ReviewerFlags
 
@@ -378,6 +418,11 @@ func pinnedRegistrations() []pinnedRegistration {
 		}
 	}
 	cwd, _ := codexProjectDir()
+	for _, scope := range []string{claude.ProjectScope, claude.GlobalScope} {
+		if arming := pihooks.CommitGateArming(scope, cwd); arming.Registered {
+			add("pi "+scope+" scope", arming.Command, "steer bin install")
+		}
+	}
 	for _, scope := range []string{claude.ProjectScope, claude.GlobalScope} {
 		if arming := codexhooks.CommitGateArming(scope, cwd); arming.Registered {
 			add("codex "+scope+" scope", arming.Command, "steer bin install")
@@ -438,6 +483,11 @@ func reviewChannelArmed() (bool, string) {
 			return true, "codex " + scope
 		}
 	}
+	for _, scope := range []string{claude.ProjectScope, claude.GlobalScope} {
+		if pihooks.CommitGateArming(scope, cwd).Registered {
+			return true, "pi " + scope
+		}
+	}
 	return false, ""
 }
 
@@ -450,7 +500,8 @@ var commitGateRemoveCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if target == harness.Codex {
+		switch target {
+		case harness.Codex:
 			cwd, err := codexProjectDir()
 			if err != nil {
 				return err
@@ -458,6 +509,16 @@ var commitGateRemoveCmd = &cobra.Command{
 			path, err := codexhooks.RemoveCommitGateAndResolver(scope, cwd)
 			if err == nil {
 				fmt.Println("Removed Codex commit gate from " + path)
+			}
+			return err
+		case harness.Pi:
+			cwd, err := codexProjectDir()
+			if err != nil {
+				return err
+			}
+			path, err := pihooks.RemoveCommitGateAndResolver(scope, cwd)
+			if err == nil {
+				fmt.Println("Removed Pi commit gate from " + path)
 			}
 			return err
 		}
@@ -515,6 +576,9 @@ func ledgerHarvests() []resolve.Harvest {
 	if root, err := gatecodex.SessionsRoot(); err == nil {
 		harvests = append(harvests, gatecodex.Harvest(root))
 	}
+	if root, err := transcriptpi.New().Root(); err == nil {
+		harvests = append(harvests, gatepi.Harvest(root))
+	}
 	return harvests
 }
 
@@ -537,6 +601,7 @@ var commitGateStatusCmd = &cobra.Command{
 			cfg.ReviewerRuns, cfg.ReviewerModel, effortNote(cfg.ReviewerEffort),
 			reviewer.Name(), cfg.ReviewTimeout)
 		fmt.Printf("  Cap          %d firings\n", cfg.MaxFirings)
+		cwd, _ := codexProjectDir()
 		for _, scope := range []string{claude.ProjectScope, claude.GlobalScope} {
 			arming := claude.CommitGateHookArmed(scope)
 			state := "not armed"
@@ -553,6 +618,22 @@ var commitGateStatusCmd = &cobra.Command{
 				commandNote(arming.Registered, arming.Command))
 		}
 		for _, scope := range []string{claude.ProjectScope, claude.GlobalScope} {
+			arming := pihooks.CommitGateArming(scope, cwd)
+			state := "not armed"
+			if arming.Registered {
+				state = fmt.Sprintf("registered, timeout %ds, trust state unavailable", arming.Timeout)
+			}
+			fmt.Printf("  Pi           %s scope: %s%s\n", scope, state,
+				commandNote(arming.Registered, arming.Command))
+			resolver := pihooks.ResolverArming(scope, cwd)
+			resolverState := "not armed"
+			if resolver.Registered {
+				resolverState = fmt.Sprintf("turn_end armed, timeout %ds", resolver.Timeout)
+			}
+			fmt.Printf("  Resolver     pi %s scope: %s%s\n", scope, resolverState,
+				commandNote(resolver.Registered, resolver.Command))
+		}
+		for _, scope := range []string{claude.ProjectScope, claude.GlobalScope} {
 			resolver := claude.BackfillHookArming(scope)
 			state := "not armed"
 			if resolver.Registered {
@@ -564,7 +645,6 @@ var commitGateStatusCmd = &cobra.Command{
 		if unresolved := resolve.CountUnresolved(cfg); unresolved > 0 {
 			fmt.Printf("  Unresolved   %d row(s) owe a ledger — run: steer commit-gate backfill --apply\n", unresolved)
 		}
-		cwd, _ := codexProjectDir()
 		for _, scope := range []string{claude.ProjectScope, claude.GlobalScope} {
 			arming := codexhooks.CommitGateArming(scope, cwd)
 			state := "not armed"
@@ -625,7 +705,7 @@ func codexProjectDir() (string, error) {
 
 func init() {
 	rootCmd.AddCommand(commitGateCmd)
-	commitGateCmd.AddCommand(commitGateReviewCmd, commitGateCodexReviewCmd, commitGatePreCommitCmd,
+	commitGateCmd.AddCommand(commitGateReviewCmd, commitGateCodexReviewCmd, commitGatePiReviewCmd, commitGatePreCommitCmd,
 		commitGateInstallCmd, commitGateRemoveCmd, commitGateStatusCmd, commitGateBackfillCmd)
 
 	commitGateBackfillCmd.Flags().BoolVar(&backfillApply, "apply", false, "Write the resolved rows")
@@ -649,7 +729,7 @@ func init() {
 	commitGateInstallCmd.Flags().BoolVar(&commitGateForce, "force", false,
 		"Overwrite an existing non-steer pre-commit hook")
 	commitGateInstallCmd.Flags().StringVar(&commitGateHarness, "harness", "claude-code",
-		"PreToolUse harness (claude-code|codex)")
+		"PreToolUse harness (claude-code|codex|pi)")
 	commitGateRemoveCmd.Flags().StringVar(&commitGateHarness, "harness", "claude-code",
-		"PreToolUse harness (claude-code|codex)")
+		"PreToolUse harness (claude-code|codex|pi)")
 }

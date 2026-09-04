@@ -166,7 +166,7 @@ func readHeader(path string) header {
 func (a Adapter) Stream(s transcript.Session, f transcript.Filter, emit func(transcript.Event) error) (transcript.Counts, error) {
 	var counts transcript.Counts
 
-	active, err := activeBranch(s.Path)
+	active, err := ActiveBranch(s.Path)
 	if err != nil {
 		return counts, err
 	}
@@ -177,7 +177,7 @@ func (a Adapter) Stream(s transcript.Session, f transcript.Filter, emit func(tra
 	}
 	defer file.Close()
 
-	st := &streamState{filter: f, emit: emit, active: active, replayed: replayedIDs(s.Path)}
+	st := &streamState{filter: f, emit: emit, active: active, replayed: ReplayedIDs(s.Path)}
 	reader := bufio.NewReaderSize(file, 256*1024)
 	for {
 		line, readErr := reader.ReadBytes('\n')
@@ -196,10 +196,10 @@ func (a Adapter) Stream(s transcript.Session, f transcript.Filter, emit func(tra
 	}
 }
 
-// activeBranch returns the ids on the path from the leaf to the root. A nil set
+// ActiveBranch returns the ids on the path from the leaf to the root. A nil set
 // means the file records no tree at all, and every entry then reads as active:
 // a file Steer cannot link is better over-counted than silently emptied.
-func activeBranch(path string) (map[string]struct{}, error) {
+func ActiveBranch(path string) (map[string]struct{}, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -382,12 +382,12 @@ func callTarget(name string, raw json.RawMessage) string {
 // isSearch names the Pi tools whose subject is a pattern rather than a path.
 func isSearch(name string) bool { return name == "grep" || name == "find" }
 
-// replayedIDs returns the entry ids a forked file copied from its parent. Pi's
+// ReplayedIDs returns the entry ids a forked file copied from its parent. Pi's
 // /fork over a chosen entry writes the parent's whole branch into the new file,
 // keeping each copied entry's id, so both files hold those turns. Reading the
 // parent is what separates them; when the parent is gone the ids are dropped
 // from no corpus and counting them here is right.
-func replayedIDs(path string) map[string]struct{} {
+func ReplayedIDs(path string) map[string]struct{} {
 	parent := strings.TrimSpace(readHeader(path).ParentSession)
 	if parent == "" {
 		return nil

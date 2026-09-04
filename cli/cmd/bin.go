@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/claude"
 	codexhooks "github.com/steer-sh/steer-cli/internal/codex"
+	pihooks "github.com/steer-sh/steer-cli/internal/pi"
 	"github.com/steer-sh/steer-cli/internal/steerbin"
 	"github.com/steer-sh/steer-cli/internal/styles"
 	"github.com/steer-sh/steer-cli/internal/utils"
@@ -148,6 +149,48 @@ func relinkCodex(scope, path string) (int, error) {
 	return rewritten, nil
 }
 
+// relinkPi repoints both commands baked into Pi's one commit-gate extension. The
+// gate and the resolver live in that one file, so a resolver registered without a
+// gate is a state steer never writes and needs no repair of its own.
+func relinkPi(scope, path string) (int, error) {
+	// Only the project scope needs a working directory: the global extension lives
+	// under the Pi config directory. So an unreadable cwd skips project scope alone.
+	cwd, err := codexProjectDir()
+	if err != nil && scope != claude.GlobalScope {
+		return 0, nil
+	}
+	gate := pihooks.CommitGateArming(scope, cwd)
+	resolver := pihooks.ResolverArming(scope, cwd)
+	if !gate.Registered {
+		return 0, nil
+	}
+	nextGate, gateChanged := relinked(gate.Registered, gate.Command, path)
+	nextResolver, resolverChanged := relinked(resolver.Registered, resolver.Command, path)
+	if !gateChanged && !resolverChanged {
+		return 0, nil
+	}
+	if !gateChanged {
+		nextGate = gate.Command
+	}
+	if !resolverChanged {
+		nextResolver = resolver.Command
+	}
+	if _, err := pihooks.RegisterCommitGateAndResolver(scope, cwd,
+		nextGate, gate.Timeout, nextResolver, resolver.Timeout); err != nil {
+		return 0, err
+	}
+	rewritten := 0
+	if gateChanged {
+		reportRelink("pi", scope, "commit gate", nextGate)
+		rewritten++
+	}
+	if resolverChanged {
+		reportRelink("pi", scope, "resolver", nextResolver)
+		rewritten++
+	}
+	return rewritten, nil
+}
+
 // repointRegistrations rewrites every steer-owned registration in both scopes and
 // reports how many changed. `steer bin install` and `steer commit-gate install` both
 // call it: an install repairs the registration it writes, and this repairs the ones
@@ -161,6 +204,11 @@ func repointRegistrations(path string) (int, error) {
 		}
 		rewritten += n
 		n, err = relinkCodex(scope, path)
+		if err != nil {
+			return rewritten, err
+		}
+		rewritten += n
+		n, err = relinkPi(scope, path)
 		if err != nil {
 			return rewritten, err
 		}

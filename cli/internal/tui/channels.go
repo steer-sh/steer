@@ -2,10 +2,14 @@ package tui
 
 import (
 	"fmt"
+	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/steer-sh/steer-cli/internal/claude"
+	"github.com/steer-sh/steer-cli/internal/codex"
+	"github.com/steer-sh/steer-cli/internal/harness"
+	"github.com/steer-sh/steer-cli/internal/pi"
 	"github.com/steer-sh/steer-cli/internal/status"
 	"github.com/steer-sh/steer-cli/internal/steerbin"
 )
@@ -69,19 +73,38 @@ func (m *Model) toggleChannel(row channelRow) error {
 	on := row.armed.Effective || row.armed.Registered
 	switch row.kind {
 	case "commit-gate":
-		// The review hook and the Stop-hook resolver are one Claude Code
-		// installation, armed and removed in one write — the same pair the CLI
-		// install writes, so a toggle here can never leave the resolver behind.
-		if on {
-			return claude.RemoveCommitGateAndResolver(row.scope)
-		}
 		timeout := int(m.cfg.ReviewTimeout.Seconds()) + commitGateTimeoutMargin
 		// A failed copy of the stable executable returns the PATH form beside its
 		// error. Register that rather than nothing, exactly as the CLI does: the
 		// posture then reports whether the command resolves.
-		review, _ := steerbin.HookCommand("commit-gate review")
 		resolver, _ := steerbin.HookCommand("commit-gate backfill --if-due --apply --quiet")
-		return claude.RegisterCommitGateAndResolver(row.scope, review, timeout, resolver, backfillTimeout)
+		cwd, _ := os.Getwd()
+		switch harness.ID(row.armed.Harness) {
+		case harness.Codex:
+			if on {
+				_, err := codex.RemoveCommitGateAndResolver(row.scope, cwd)
+				return err
+			}
+			review, _ := steerbin.HookCommand("commit-gate review-codex")
+			_, err := codex.RegisterCommitGateAndResolver(row.scope, cwd,
+				review, timeout, resolver, backfillTimeout)
+			return err
+		case harness.Pi:
+			if on {
+				_, err := pi.RemoveCommitGateAndResolver(row.scope, cwd)
+				return err
+			}
+			review, _ := steerbin.HookCommand("commit-gate review-pi")
+			_, err := pi.RegisterCommitGateAndResolver(row.scope, cwd,
+				review, timeout, resolver, backfillTimeout)
+			return err
+		default:
+			if on {
+				return claude.RemoveCommitGateAndResolver(row.scope)
+			}
+			review, _ := steerbin.HookCommand("commit-gate review")
+			return claude.RegisterCommitGateAndResolver(row.scope, review, timeout, resolver, backfillTimeout)
+		}
 	case "denials":
 		if on {
 			return claude.RemoveDenialsHook(row.scope)
