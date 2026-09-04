@@ -11,6 +11,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
+	"github.com/steer-sh/steer-cli/internal/pi"
 )
 
 // isolate points both homes at a temp dir so the denials read, the audit-log count,
@@ -22,6 +23,7 @@ func isolate(t *testing.T) {
 	// os.UserHomeDir reads USERPROFILE on Windows, which is a shipped binary target.
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
+	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(home, ".pi", "agent"))
 }
 
 // seedLedger writes a ledger of `n` before-install chains carrying beforeText and
@@ -135,10 +137,10 @@ func TestCollectEmptyMachineFailsSoft(t *testing.T) {
 	if len(s.Attention.Interventions) != 0 || len(s.Attention.Candidates) != 0 {
 		t.Error("empty machine should carry an empty attention queue")
 	}
-	// Posture is harness-qualified: the commit gate and its resolver report both
-	// harnesses in both scopes, denials only Claude Code, and nothing is armed.
-	if len(s.Posture.CommitGate) != 4 || len(s.Posture.Resolver) != 4 {
-		t.Errorf("gate posture should report both harnesses in both scopes, got %+v", s.Posture)
+	// Posture is harness-qualified: the commit gate and its resolver report every
+	// enforcing harness in both scopes, denials only Claude Code, and nothing is armed.
+	if len(s.Posture.CommitGate) != 6 || len(s.Posture.Resolver) != 6 {
+		t.Errorf("gate posture should report all harnesses in both scopes, got %+v", s.Posture)
 	}
 	if len(s.Posture.Denials) != 2 {
 		t.Errorf("denials is Claude Code's alone, got %+v", s.Posture.Denials)
@@ -151,10 +153,11 @@ func TestCollectEmptyMachineFailsSoft(t *testing.T) {
 			t.Errorf("an empty machine arms nothing, got %+v", row)
 		}
 	}
-	// Codex reviews hook trust itself, so registration alone proves nothing there.
+	// Codex and Pi review hook trust, so a registration there proves no enforcement
+	// and Trust reads unknown. Effective is the registration's own shape, not trust.
 	for _, row := range s.Posture.CommitGate {
 		want := TrustNotApplicable
-		if row.Harness == "codex" {
+		if row.Harness == "codex" || row.Harness == "pi" {
 			want = TrustUnknown
 		}
 		if row.Trust != want {
@@ -659,5 +662,43 @@ func TestObservedReadsTheNewestRowPerHarness(t *testing.T) {
 	}
 	if len(observed.gate) != 2 {
 		t.Fatalf("unstamped chain credited to %v", observed.gate)
+	}
+}
+
+// TestPiPostureReadsTheRegisteredExtension pins the Pi rows over an ARMED machine:
+// the empty-machine test proves only that the rows exist. Pi writes the review and
+// the resolver into one extension file, so both rows read back from one write.
+func TestPiPostureReadsTheRegisteredExtension(t *testing.T) {
+	isolate(t)
+	if _, err := pi.RegisterCommitGateAndResolver(claude.GlobalScope, t.TempDir(),
+		"steer commit-gate review-pi", 210,
+		"steer commit-gate backfill --if-due --apply --quiet", 30); err != nil {
+		t.Fatal(err)
+	}
+
+	p := collectPosture(gate.Config{}, mine.EvidenceSet{})
+
+	var gateRow, resolverRow ScopeArming
+	for _, a := range p.CommitGate {
+		if a.Harness == "pi" && a.Scope == claude.GlobalScope {
+			gateRow = a
+		}
+	}
+	for _, a := range p.Resolver {
+		if a.Harness == "pi" && a.Scope == claude.GlobalScope {
+			resolverRow = a
+		}
+	}
+	if !gateRow.Registered || !gateRow.Effective || gateRow.Timeout != 210 ||
+		gateRow.Command != "steer commit-gate review-pi" {
+		t.Fatalf("pi gate row = %+v", gateRow)
+	}
+	if !resolverRow.Registered || !resolverRow.Effective || resolverRow.Timeout != 30 ||
+		resolverRow.Command != "steer commit-gate backfill --if-due --apply --quiet" {
+		t.Fatalf("pi resolver row = %+v", resolverRow)
+	}
+	if gateRow.Trust != TrustUnknown || resolverRow.Trust != TrustUnknown {
+		t.Fatalf("trust = %q/%q, want unknown: steer reads no Pi trust record",
+			gateRow.Trust, resolverRow.Trust)
 	}
 }

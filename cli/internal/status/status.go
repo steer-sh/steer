@@ -22,6 +22,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/gate/resolve"
 	"github.com/steer-sh/steer-cli/internal/guard"
 	"github.com/steer-sh/steer-cli/internal/harness"
+	"github.com/steer-sh/steer-cli/internal/pi"
 	"github.com/steer-sh/steer-cli/internal/presets"
 	"github.com/steer-sh/steer-cli/internal/sessions"
 	"github.com/steer-sh/steer-cli/internal/steerbin"
@@ -509,6 +510,7 @@ func collectPosture(cfg gate.Config, ev mine.EvidenceSet) Posture {
 	cwd, _ := os.Getwd()
 	claudeID := string(harness.ClaudeCode)
 	codexID := string(harness.Codex)
+	piID := string(harness.Pi)
 	for _, scope := range []string{claude.ProjectScope, claude.GlobalScope} {
 		g := claude.CommitGateHookArmed(scope)
 		p.CommitGate = append(p.CommitGate, withEvidence(ScopeArming{
@@ -530,6 +532,18 @@ func collectPosture(cfg gate.Config, ev mine.EvidenceSet) Posture {
 			Trust:      trustState(harness.Codex, cg.TrustStateKnown, cg.TrustRecordPresent),
 			Command:    cg.Command,
 		}, ledgerCorpus, observed.gate[codexID]))
+		pg := pi.CommitGateArming(scope, cwd)
+		p.CommitGate = append(p.CommitGate, withEvidence(ScopeArming{
+			Harness:    piID,
+			Scope:      scope,
+			Registered: pg.Registered,
+			Effective:  pg.Registered,
+			Timeout:    pg.Timeout,
+			// Steer reads no Pi trust record, so nothing is known: the false pair
+			// says so. trustState, not this line, turns that into a state.
+			Trust:   trustState(harness.Pi, false, false),
+			Command: pg.Command,
+		}, ledgerCorpus, observed.gate[piID]))
 		// The denials recorder rides Claude Code's PermissionDenied event. Codex
 		// declares no equivalent, so it gets no row rather than a false zero.
 		d, err := claude.DenialsHookArming(scope)
@@ -556,6 +570,16 @@ func collectPosture(cfg gate.Config, ev mine.EvidenceSet) Posture {
 			Timeout:    b.Timeout,
 			Trust:      TrustNotApplicable,
 			Command:    b.Command,
+		}, "", 0))
+		pr := pi.ResolverArming(scope, cwd)
+		p.Resolver = append(p.Resolver, withEvidence(ScopeArming{
+			Harness:    piID,
+			Scope:      scope,
+			Registered: pr.Registered,
+			Effective:  pr.Registered,
+			Timeout:    pr.Timeout,
+			Trust:      trustState(harness.Pi, false, false),
+			Command:    pr.Command,
 		}, "", 0))
 		p.Masters = append(p.Masters, masterRuntimes(scope)...)
 		cr := codex.ResolverArmingRow(scope, cwd)
@@ -642,7 +666,7 @@ func MasterRuntimes(scopes ...string) []MasterRuntime {
 // guardRegistrars are the harnesses a guard master can be registered in. The
 // store is shared, so the registration is per harness and so is its stamp.
 func guardRegistrars() []harness.Registrar {
-	return []harness.Registrar{claude.Registrar{}, codex.Registrar{}}
+	return []harness.Registrar{claude.Registrar{}, codex.Registrar{}, pi.Registrar{}}
 }
 
 // masterRuntimes reads each harness's registered master in one scope and reports
