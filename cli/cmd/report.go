@@ -36,9 +36,10 @@ lint/test failures, and hook blocks. It also diffs instruction-file directives
 (CLAUDE.md, AGENTS.md) against already-registered steer rules.
 
 Every harness with transcripts on this machine is mined — Claude Code
-(~/.claude/projects) and Codex ($CODEX_HOME/sessions). Use --harness to read one
-of them alone. A subagent thread is provenance on its root session, never a unit
-of its own, so the two harnesses' sessions count the same way.
+(~/.claude/projects), Codex ($CODEX_HOME/sessions) and Pi (~/.pi/agent/sessions).
+Use --harness to read one of them alone. A subagent thread is provenance on its
+root session, never a unit of its own, so every harness's sessions count the
+same way.
 
 All projects are scanned by default — the strongest hook candidates are habits
 that repeat across projects. Use --project-only to restrict the scan to

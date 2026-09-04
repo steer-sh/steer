@@ -10,6 +10,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/transcript"
 	"github.com/steer-sh/steer-cli/internal/transcript/cc"
 	"github.com/steer-sh/steer-cli/internal/transcript/codex"
+	"github.com/steer-sh/steer-cli/internal/transcript/pi"
 )
 
 // Adapters returns one transcript adapter per harness that writes transcripts,
@@ -26,6 +27,8 @@ func Adapters(only harness.ID) []transcript.Adapter {
 			out = append(out, cc.New())
 		case harness.Codex:
 			out = append(out, codex.New())
+		case harness.Pi:
+			out = append(out, pi.New())
 		}
 	}
 	return out
