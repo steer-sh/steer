@@ -8,6 +8,7 @@ import (
 
 	"github.com/steer-sh/steer-cli/internal/cadence"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
+	"github.com/steer-sh/steer-cli/internal/guardscope"
 	"github.com/steer-sh/steer-cli/internal/sessions"
 )
 
@@ -222,6 +223,11 @@ func (m *Model) commitForm() tea.Cmd {
 	var err error
 	switch m.form.kind {
 	case formRegister:
+		// The panel writes through the same rule the CLI enforces: a guard-tier
+		// record may not be scored over a harness its guard does not run in.
+		if err = guardscope.Check(val("tier"), scopeAll, harnesses, false); err != nil {
+			break
+		}
 		err = mine.Register(&buf, m.cfg.StateDir, mine.RegisterOpts{
 			Class:        val("class"),
 			Match:        val("match"),

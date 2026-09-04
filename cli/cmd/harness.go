@@ -1,48 +1,37 @@
 package cmd
 
 import (
-	"fmt"
 	"strings"
 
-	"github.com/steer-sh/steer-cli/internal/claude"
-	"github.com/steer-sh/steer-cli/internal/codex"
+	"github.com/steer-sh/steer-cli/internal/guardscope"
 	"github.com/steer-sh/steer-cli/internal/harness"
 )
 
 var harnessFlag string
 var allHarnesses bool
 
-// registrarFor maps a registry id to its adapter. The guard store is shared, so
-// an adapter only ever writes that harness's own registration and rules.
-func registrarFor(id harness.ID) (harness.Registrar, error) {
-	switch id {
-	case harness.ClaudeCode:
-		return claude.Registrar{}, nil
-	case harness.Codex:
-		return codex.Registrar{}, nil
-	default:
-		return nil, fmt.Errorf("harness %q registers no hooks", id)
-	}
-}
+// registrarFor maps a registry id to its adapter.
+func registrarFor(id harness.ID) (harness.Registrar, error) { return guardscope.RegistrarFor(id) }
 
 // currentRegistrars resolves the harnesses a mutation writes to: every harness
-// under --all-harnesses, the named one under --harness, and otherwise the
-// invoking harness. An ordinary shell sets no marker, and there the answer is
-// Claude Code — the default every settings.json on disk already assumes.
+// that supports hooks under --all-harnesses, the named one under --harness, and
+// otherwise every such harness installed on this machine. The guard store is
+// shared, so a guard the operator installs is meant to run in each agent they
+// actually use. A machine with no harness directory falls back to the invoking
+// harness, and an ordinary shell sets no marker, so there the answer is Claude
+// Code — the default every settings.json on disk already assumes.
 func currentRegistrars() ([]harness.Registrar, error) {
 	if allHarnesses {
-		out := make([]harness.Registrar, 0, len(harness.All()))
-		for _, entry := range harness.All() {
-			if !entry.Capabilities.HookRegistration {
-				continue
-			}
-			registrar, err := registrarFor(entry.ID)
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, registrar)
+		return guardscope.HookRegistrars(false)
+	}
+	if strings.TrimSpace(harnessFlag) == "" {
+		installed, err := guardscope.HookRegistrars(true)
+		if err != nil {
+			return nil, err
 		}
-		return out, nil
+		if len(installed) > 0 {
+			return installed, nil
+		}
 	}
 
 	id, err := harness.ParseOrDetect(harnessFlag)

@@ -2,8 +2,8 @@
 name: steer
 description: Generates and installs PreToolUse Python hooks from natural language rules. Use when enforcing coding standards, blocking insecure patterns, managing hook lifecycle, or running steer CLI commands (register, remove, list, test, preset, verify, git-hooks).
 user-invocable: true
-prompt_version: 9
-compatibility: Requires Claude Code or Codex with PreToolUse hook support. Hooks are installed into .steer/hooks/ and registered in the invoking harness (settings.json for Claude Code, hooks.json for Codex). steer CLI must be available on PATH or bundled under scripts/.
+prompt_version: 10
+compatibility: Requires Claude Code or Codex with PreToolUse hook support. Hooks are installed into .steer/hooks/ and registered in every installed harness (settings.json for Claude Code, hooks.json for Codex). steer CLI must be available on PATH or bundled under scripts/.
 allowed-tools: Bash(steer *), Bash(python3 *), Bash(echo *), Read, Write
 ---
 
@@ -293,10 +293,18 @@ This atomically:
 - Adds the rule to that harness's instruction file under `## Steer Rules`
 
 The store is shared between harnesses; the registration is not. `register` writes
-to the harness it is running under, and reports which one on the last line of its
-output. Add `--harness claude-code` or `--harness codex` to name a different one,
-or `--all-harnesses` to register in both. From a plain shell, with no harness
-running, `register` writes to Claude Code.
+to every hook-registering harness installed on the machine — the one whose config
+directory exists — and reports which ones on the last line of its output. A guard
+is a rule about the operator's work, not about one agent, so both get it. Add
+`--harness claude-code` or `--harness codex` to write to one only, or
+`--all-harnesses` to write to every hook-supporting harness whether or not it is
+installed here. Pi runs no hooks, so no flag registers into it.
+On a machine with no harness directory, `register` writes to Claude Code.
+
+Installing is not measuring. Where the guard runs and which units get counted are
+separate decisions: install everywhere, then score each harness on its own record
+with `--scope-harness`. Codex and Claude Code carry different models, so pooling
+their chains into one rate moves the number for a reason the guard did not cause.
 
 The `--prompt-version` value MUST come from this file's YAML frontmatter — do not guess or hallucinate a version number. For generated hooks, when `--hook-version` is omitted the CLI automatically derives it from `--prompt-version`. If other optional metadata is unavailable, omit those flags and let CLI defaults apply.
 

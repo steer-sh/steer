@@ -1,12 +1,14 @@
 package cmd
 
 import (
+	"fmt"
 	"io"
 	"os"
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/evidence"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
+	"github.com/steer-sh/steer-cli/internal/guardscope"
 	"github.com/steer-sh/steer-cli/internal/sessions"
 )
 
@@ -127,6 +129,10 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 		Use:   "register",
 		Short: "Record an intervention with its baseline incidence",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := guardscope.Check(v.registerTier, v.registerScopeAll,
+				v.registerScopeHrn, v.registerForce); err != nil {
+				return err
+			}
 			if err := prepareState(); err != nil {
 				return err
 			}
@@ -225,6 +231,15 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 		Short: "Install a frozen scope on a legacy, unscoped intervention",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// A legacy record names its tier already, so the scope it is about to
+			// be given answers to the same rule a fresh registration does.
+			tier, err := recordTier(args[0])
+			if err != nil {
+				return err
+			}
+			if err := guardscope.Check(tier, v.scopeAll, v.scopeHrn, v.scopeForce); err != nil {
+				return err
+			}
 			if err := prepareState(); err != nil {
 				return err
 			}
@@ -347,4 +362,20 @@ func init() {
 	interventionCmd.PersistentFlags().StringVar(&v.ledger, "ledger", "",
 		"Override the adjudication ledger path (a single file, not the shard glob)")
 	rootCmd.AddCommand(interventionCmd)
+}
+
+// recordTier reads one intervention's tier, so a scope written onto an existing
+// record is held to the rule its tier implies. An unreadable inventory yields an
+// empty tier, which is not a guard tier and adds no refusal of its own.
+func recordTier(id string) (string, error) {
+	records, err := mine.Load(gateConfig().StateDir)
+	if err != nil {
+		return "", nil
+	}
+	for _, record := range records {
+		if fmt.Sprint(record["id"]) == id {
+			return fmt.Sprint(record["tier"]), nil
+		}
+	}
+	return "", nil
 }

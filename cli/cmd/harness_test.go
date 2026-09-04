@@ -135,6 +135,12 @@ func TestRegisteringOneHarnessLeavesTheOtherUntouched(t *testing.T) {
 
 func TestNoNamedHarnessRegistersClaudeCode(t *testing.T) {
 	withCmdProjectTempDir(t)
+	// The default now follows the harnesses installed on the machine, so the
+	// fallback is only reachable from a home holding none.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
 	t.Setenv("STEER_HARNESS", "")
 	t.Setenv("CLAUDECODE", "")
 	t.Setenv("CODEX_SESSION_ID", "")

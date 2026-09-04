@@ -110,6 +110,18 @@ var registry = map[ID]Harness{
 	},
 }
 
+// Installed reports whether this harness's global configuration directory exists.
+// A harness Steer can register into but that the operator never installed is not
+// a target: writing there would create a config tree for an absent agent.
+func (h Harness) Installed() bool {
+	dir, err := h.ConfigDir(GlobalScope, "")
+	if err != nil {
+		return false
+	}
+	info, err := os.Stat(dir)
+	return err == nil && info.IsDir()
+}
+
 // Registrar is what an adapter offers the guard lifecycle: it registers the one
 // master hook in its harness's own configuration, and it owns that harness's
 // instruction document. The guard store itself is neutral and shared, so nothing
