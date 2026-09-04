@@ -217,17 +217,6 @@ func disjoint(a, b []string) bool {
 	return true
 }
 
-// differingFrom is the members of list that are not v, in order.
-func differingFrom(list []string, v string) []string {
-	var out []string
-	for _, x := range list {
-		if x != v {
-			out = append(out, x)
-		}
-	}
-	return out
-}
-
 // confoundList renders confounds for the scored record, [] rather than null when empty.
 func confoundList(c []Confound) []Confound {
 	if c == nil {

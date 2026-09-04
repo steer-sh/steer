@@ -43,7 +43,8 @@ type SessionUnit struct {
 	StartTS   float64         `json:"start_ts"`
 	EndTS     float64         `json:"end_ts"`
 	Signals   []SessionSignal `json:"signals"`
-	// Instrument is the classifier version that produced this session's signals.
+	// Instrument is the pipeline that produced this session's signals: the
+	// classifier, and the adapter that normalized this harness's transcript.
 	Instrument string `json:"instrument,omitempty"`
 }
 
@@ -310,7 +311,7 @@ func ScoreSessionRecord(record Record, ev EvidenceSet, minAfter int) (map[string
 
 	authored := str(record["instrument"])
 	afterInstruments := sessionInstruments(after)
-	drift := authored != "" && anyDiffers(afterInstruments, authored)
+	drift := authored != "" && len(driftingSessionInstruments(after, authored)) > 0
 	hard, soft := SessionConfounds(before, after, authored)
 
 	label := sessionVerdict(record, m, aTotal, minAfter, hasScope, beforeCov, afterCov, hard, attr)
@@ -447,10 +448,10 @@ func sessionProjects(units []SessionUnit) []string {
 // list, so path_kind has no analogue here.
 func SessionConfounds(before, after []SessionUnit, authored string) (hard, soft []Confound) {
 	if authored != "" {
-		if drifted := differingFrom(sessionInstruments(after), authored); len(drifted) > 0 {
+		if drifted := driftingSessionInstruments(after, authored); len(drifted) > 0 {
 			hard = append(hard, Confound{
 				Category: "instrument",
-				Reason:   "the after-window was normalized by a different parser than the registered baseline",
+				Reason:   "the after-window was normalized by a different parser or transcript adapter than the registered baseline",
 				Before:   []string{authored},
 				After:    drifted,
 			})

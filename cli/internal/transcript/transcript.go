@@ -4,6 +4,9 @@
 package transcript
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"strings"
 	"time"
 
@@ -115,6 +118,11 @@ func (c *Counts) Add(other Counts) {
 type Adapter interface {
 	// Harness names the harness this adapter reads.
 	Harness() harness.ID
+	// Instrument identifies this adapter's normalization, as "<harness>:<digest>".
+	// The adapter decides Kind, Shell, Target and IsError, which are the fields a
+	// classifier reads, so a change here moves signals the same way a classifier
+	// change does. The value is a declared constant that ReplayDigest pins.
+	Instrument() string
 	// Root is the directory holding this harness's transcripts.
 	Root() (string, error)
 	// Discover lists the sessions under root that pass the filter.
@@ -122,4 +130,27 @@ type Adapter interface {
 	// Stream normalizes one session, calling emit in file order. A parse error
 	// on one entry increments Skipped; it never ends the stream.
 	Stream(s Session, f Filter, emit func(Event) error) (Counts, error)
+}
+
+// ReplayDigest is the digest of what an adapter emits over a fixed set of
+// transcript files. An adapter's Instrument constant carries this value over its
+// committed fixtures. It replays Stream only, never Discover.
+func ReplayDigest(a Adapter, paths []string) (string, error) {
+	h := sha256.New()
+	for _, path := range paths {
+		s := Session{Harness: a.Harness(), Path: path}
+		counts, err := a.Stream(s, Filter{AllProjects: true}, func(e Event) error {
+			fmt.Fprintf(h, "%s\x1f%s\x1f%s\x1f%s\x1f%t\x1f%s\x1f%t\x1f%s\x1f%s\x1f%t\x1f%s\x1e",
+				e.Kind, e.SessionID, e.ThreadID, e.Timestamp, e.Meta,
+				e.Tool, e.Shell, e.Target, e.ToolUseID, e.IsError, e.Text)
+			return nil
+		})
+		if err != nil {
+			return "", err
+		}
+		// Entries and Skipped are the coverage a reader reports; Bytes is the
+		// fixture's size, which no behaviour of the adapter decides.
+		fmt.Fprintf(h, "counts:%d/%d\x1e", counts.Entries, counts.Skipped)
+	}
+	return hex.EncodeToString(h.Sum(nil))[:8], nil
 }

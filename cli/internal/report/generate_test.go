@@ -1,6 +1,7 @@
 package report
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/harness"
@@ -27,5 +28,21 @@ func TestEveryTranscriptHarnessHasAnAdapter(t *testing.T) {
 	if got := len(Adapters(harness.Unknown)); got != wanted {
 		t.Errorf("Adapters(Unknown) returned %d adapters; %d harnesses declare transcripts",
 			got, wanted)
+	}
+}
+
+// A unit's instrument names the adapter that produced it, so two adapters
+// sharing an instrument would hide one harness's change behind the other's.
+func TestEveryAdapterNamesItsOwnInstrument(t *testing.T) {
+	seen := map[string]harness.ID{}
+	for _, a := range Adapters(harness.Unknown) {
+		got := a.Instrument()
+		if !strings.HasPrefix(got, string(a.Harness())+":") {
+			t.Errorf("%s instrument %q does not name its harness", a.Harness(), got)
+		}
+		if other, ok := seen[got]; ok {
+			t.Errorf("%s and %s share the instrument %q", other, a.Harness(), got)
+		}
+		seen[got] = a.Harness()
 	}
 }

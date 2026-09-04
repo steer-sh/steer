@@ -22,6 +22,12 @@ func New() Adapter { return Adapter{} }
 
 func (Adapter) Harness() harness.ID { return harness.ClaudeCode }
 
+// instrument is this adapter's normalization identity, pinned by
+// TestInstrumentMatchesFixtureReplay. Bump it when that test fails.
+const instrument = "claude-code:4b7c1a39"
+
+func (Adapter) Instrument() string { return instrument }
+
 // Root returns the transcript root, ~/.claude/projects.
 func (Adapter) Root() (string, error) {
 	home, err := os.UserHomeDir()

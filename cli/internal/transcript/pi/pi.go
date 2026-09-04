@@ -21,6 +21,12 @@ func New() Adapter { return Adapter{} }
 
 func (Adapter) Harness() harness.ID { return harness.Pi }
 
+// instrument is this adapter's normalization identity, pinned by
+// TestInstrumentMatchesFixtureReplay. Bump it when that test fails.
+const instrument = "pi:cd5a0b0f"
+
+func (Adapter) Instrument() string { return instrument }
+
 // SessionDirEnv overrides the session root, ahead of the config directory Pi
 // otherwise stores sessions under.
 const SessionDirEnv = "PI_CODING_AGENT_SESSION_DIR"

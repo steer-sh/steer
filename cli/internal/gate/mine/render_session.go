@@ -94,18 +94,12 @@ func SessionOverlappingDecisions(records []Record, units []SessionUnit, pattern 
 	return out, nil
 }
 
-// sessionInstrumentValue is the classifier version the newest snapshot carries, or nil
-// so the record stores null when the corpus is empty.
+// sessionInstrumentValue is the pipeline the baseline window ran on — the newest
+// classifier plus the newest adapter per harness — or nil so the record stores null
+// when the corpus is empty.
 func sessionInstrumentValue(units []SessionUnit) any {
-	best := ""
-	bestTS := float64(-1)
-	for _, u := range units {
-		if u.Instrument != "" && u.StartTS >= bestTS {
-			best, bestTS = u.Instrument, u.StartTS
-		}
+	if best := RegisteredSessionInstrument(units); best != "" {
+		return best
 	}
-	if best == "" {
-		return nil
-	}
-	return best
+	return nil
 }

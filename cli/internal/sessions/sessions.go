@@ -55,7 +55,7 @@ func Build(opts Options) ([]mine.SessionUnit, error) {
 	}
 	since := time.Now().AddDate(0, 0, -opts.WindowDays)
 	filter := transcript.Filter{Since: since, Projects: projectPaths, AllProjects: opts.AllProjects}
-	instrument := report.ParserInstrument()
+	parser := report.ParserInstrument()
 
 	byID := map[string]*mine.SessionUnit{}
 	for _, adapter := range report.Adapters(opts.Only) {
@@ -67,6 +67,9 @@ func Build(opts Options) ([]mine.SessionUnit, error) {
 		if err != nil {
 			continue
 		}
+		// The adapter decides the fields the classifier reads, so a unit's
+		// instrument names both halves of the pipeline that produced it.
+		instrument := mine.ComposeSessionInstrument(parser, adapter.Instrument())
 		for _, session := range discovered {
 			collectSession(adapter, session, since, instrument, byID)
 		}

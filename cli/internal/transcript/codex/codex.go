@@ -22,6 +22,12 @@ func New() Adapter { return Adapter{} }
 
 func (Adapter) Harness() harness.ID { return harness.Codex }
 
+// instrument is this adapter's normalization identity, pinned by
+// TestInstrumentMatchesFixtureReplay. Bump it when that test fails.
+const instrument = "codex:1e3d4014"
+
+func (Adapter) Instrument() string { return instrument }
+
 // Root returns the rollout root under the Codex config directory.
 func (Adapter) Root() (string, error) {
 	h, ok := harness.Get(harness.Codex)

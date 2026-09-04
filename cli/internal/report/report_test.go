@@ -326,6 +326,7 @@ type fakeAdapter struct {
 
 func (f fakeAdapter) Harness() harness.ID   { return f.id }
 func (f fakeAdapter) Root() (string, error) { return "/fake", nil }
+func (f fakeAdapter) Instrument() string    { return string(f.id) + ":fake" }
 
 func (f fakeAdapter) Discover(string, transcript.Filter) ([]transcript.Session, error) {
 	return []transcript.Session{{Harness: f.id, Path: "/fake/a.jsonl", Project: "/repo/alpha"}}, nil
@@ -405,6 +406,7 @@ type emptyAdapter struct{ id harness.ID }
 
 func (e emptyAdapter) Harness() harness.ID   { return e.id }
 func (e emptyAdapter) Root() (string, error) { return "/fake", nil }
+func (e emptyAdapter) Instrument() string    { return string(e.id) + ":fake" }
 
 func (e emptyAdapter) Discover(string, transcript.Filter) ([]transcript.Session, error) {
 	return nil, nil
@@ -418,6 +420,7 @@ func (e emptyAdapter) Stream(transcript.Session, transcript.Filter, func(transcr
 type unreachableAdapter struct{ id harness.ID }
 
 func (u unreachableAdapter) Harness() harness.ID   { return u.id }
+func (u unreachableAdapter) Instrument() string    { return string(u.id) + ":fake" }
 func (u unreachableAdapter) Root() (string, error) { return "", os.ErrNotExist }
 
 func (u unreachableAdapter) Discover(string, transcript.Filter) ([]transcript.Session, error) {

@@ -401,15 +401,6 @@ func getString(record Record, key, fallback string) string {
 	return fallback
 }
 
-func anyDiffers(list []string, v string) bool {
-	for _, x := range list {
-		if x != v {
-			return true
-		}
-	}
-	return false
-}
-
 func sameStringSet(a, b []string) bool {
 	set := map[string]bool{}
 	for _, x := range a {
