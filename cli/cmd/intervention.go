@@ -39,6 +39,7 @@ type interventionFlags struct {
 	registerTier        string
 	registerTarget      string
 	registerHookID      string
+	registerHookScope   string
 	registerNote        string
 	registerSupersedes  string
 	registerInstalledTS int64
@@ -148,6 +149,7 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 				Target:       v.registerTarget,
 				Note:         v.registerNote,
 				HookID:       v.registerHookID,
+				HookScope:    v.registerHookScope,
 				Supersedes:   v.registerSupersedes,
 				InstalledTS:  v.registerInstalledTS,
 				Force:        v.registerForce,
@@ -168,6 +170,8 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 	r.StringVar(&v.registerTarget, "target", "", "file the fix landed in (required)")
 	r.StringVar(&v.registerHookID, "hook-id", "",
 		"steer-manifest key, matching the audit log's hook_name; required for --tier steer")
+	r.StringVar(&v.registerHookScope, "hook-scope", "",
+		"guard store owning --hook-id: project|global (default: whichever holds it, refusing both)")
 	r.StringVar(&v.registerNote, "note", "", "free-text note")
 	r.StringVar(&v.registerSupersedes, "supersedes", "", "id of a record this replaces")
 	r.Int64Var(&v.registerInstalledTS, "installed-ts", 0, "install timestamp (default now)")

@@ -4,12 +4,16 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/steer-sh/steer-cli/internal/hookstore"
+	"github.com/steer-sh/steer-cli/internal/steerpath"
 )
 
 // Record is one intervention-log entry. It is a map so unmodeled keys survive a
@@ -182,41 +186,112 @@ func UniqueID(base string, existing []Record) string {
 	}
 }
 
-// SteerHookFacts reads a steer hook's manifest entry: the rule text and sha256(rule).
-// Returns nil when the manifest, the entry, or the read is unavailable.
-func SteerHookFacts(hookID string) map[string]any {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil
+// hookScopes are the guard stores a lookup searches, in the order it searches them.
+var hookScopes = []string{steerpath.ProjectScope, steerpath.GlobalScope}
+
+// SteerHookFacts reads a steer hook's manifest entry: the rule text, sha256(rule),
+// the store that owns it, and the identity of the implementation that ran. The rule
+// hash names the policy text; hook_version and hook_digest name the code, and a guard
+// repaired without a rule change moves only those.
+//
+// The store is scoped. A named scope reads that store alone; an empty scope reads
+// both and refuses an id that exists in each, because the two entries can carry
+// different implementations and picking one would freeze the wrong treatment.
+// A scope holding no store, or a store whose manifest does not name the id, is
+// (nil, nil): the caller records the id and warns. An unreadable or unparseable
+// manifest is an error instead. Reading it as absence would report a corrupt store
+// as an unregistered hook, and would let one unreadable store resolve an ambiguity
+// the other half of which is real.
+func SteerHookFacts(hookID, scope string) (map[string]any, error) {
+	scopes := hookScopes
+	if scope != "" {
+		if scope != steerpath.ProjectScope && scope != steerpath.GlobalScope {
+			return nil, fmt.Errorf("invalid hook scope %s: expected %q or %q",
+				pyRepr(scope), steerpath.ProjectScope, steerpath.GlobalScope)
+		}
+		scopes = []string{scope}
 	}
-	data, err := os.ReadFile(filepath.Join(home, ".claude", "hooks", "steer-manifest.json"))
+	var found []string
+	facts := map[string]any{}
+	for _, s := range scopes {
+		f, err := hookFactsInScope(hookID, s)
+		if err != nil {
+			return nil, err
+		}
+		if f == nil {
+			continue
+		}
+		found = append(found, s)
+		facts = f
+	}
+	if len(found) > 1 {
+		return nil, fmt.Errorf("hook %s is in the %s and %s stores; name one with --hook-scope",
+			pyRepr(hookID), found[0], found[1])
+	}
+	if len(found) == 0 {
+		return nil, nil
+	}
+	return facts, nil
+}
+
+// hookFactsInScope reads one store's manifest entry, through hookstore.Resolve so a
+// migrated machine is read at the directory every other reader resolves.
+func hookFactsInScope(hookID, scope string) (map[string]any, error) {
+	dir, err := hookstore.Resolve(scope)
 	if err != nil {
-		return nil
+		return nil, err
+	}
+	data, err := os.ReadFile(filepath.Join(dir, hookstore.ManifestName))
+	if os.IsNotExist(err) {
+		return nil, nil // a scope with no store holds no hook; that is not a failure
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading the %s guard manifest: %w", scope, err)
 	}
 	var manifest struct {
 		Hooks map[string]struct {
-			Rule     string `json:"rule"`
-			RuleHash string `json:"rule_hash"`
-			File     string `json:"file"`
+			Rule        string `json:"rule"`
+			RuleHash    string `json:"rule_hash"`
+			File        string `json:"file"`
+			HookVersion string `json:"hook_version"`
 		} `json:"hooks"`
 	}
 	if err := json.Unmarshal(data, &manifest); err != nil {
-		return nil
+		return nil, fmt.Errorf("parsing the %s guard manifest: %w", scope, err)
 	}
 	entry, ok := manifest.Hooks[hookID]
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	ruleHash := entry.RuleHash
 	if ruleHash == "" {
 		sum := sha256.Sum256([]byte(entry.Rule))
 		ruleHash = hex.EncodeToString(sum[:])
 	}
-	return map[string]any{
-		"rule":      entry.Rule,
-		"rule_hash": ruleHash,
-		"hook_file": entry.File,
+	facts := map[string]any{
+		"rule":       entry.Rule,
+		"rule_hash":  ruleHash,
+		"hook_file":  entry.File,
+		"hook_scope": scope,
 	}
+	if entry.HookVersion != "" {
+		facts["hook_version"] = entry.HookVersion
+	}
+	if digest := fileDigest(filepath.Join(dir, entry.File)); digest != "" {
+		facts["hook_digest"] = digest
+	}
+	return facts, nil
+}
+
+// fileDigest is sha256 over the installed guard, truncated to 16 hex characters. An
+// unreadable file yields no digest rather than a digest of nothing.
+func fileDigest(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])[:16]
 }
 
 // ScoreRecord recomputes an intervention's before/after incidence and its verdict,

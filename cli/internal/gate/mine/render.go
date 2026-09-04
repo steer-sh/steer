@@ -283,6 +283,7 @@ type RegisterOpts struct {
 	Target       string
 	Note         string
 	HookID       string
+	HookScope    string
 	Supersedes   string
 	InstalledTS  int64
 	Force        bool
@@ -406,7 +407,11 @@ func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 	}
 	if o.HookID != "" {
 		record["hook_id"] = o.HookID
-		if facts := SteerHookFacts(o.HookID); facts != nil {
+		facts, err := SteerHookFacts(o.HookID, o.HookScope)
+		if err != nil {
+			return err
+		}
+		if facts != nil {
 			for k, v := range facts {
 				record[k] = v
 			}
