@@ -65,6 +65,13 @@ func mustHooksDir(t *testing.T) string {
 
 func consolidateFixture(t *testing.T, hookContent string) string {
 	t.Helper()
+	return consolidateFiles(t, map[string]string{"python3-not-python-hook.py": hookContent})
+}
+
+// consolidateFiles writes every named hook into a fresh project store, then
+// consolidates and returns the master hook source.
+func consolidateFiles(t *testing.T, files map[string]string) string {
+	t.Helper()
 
 	dir := t.TempDir()
 	origWd, err := os.Getwd()
@@ -80,8 +87,10 @@ func consolidateFixture(t *testing.T, hookContent string) string {
 	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(hooksDir, "python3-not-python-hook.py"), []byte(hookContent), 0o755); err != nil {
-		t.Fatal(err)
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(hooksDir, name), []byte(content), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	if err := ConsolidateHooks(ProjectScope); err != nil {
@@ -213,21 +222,15 @@ func TestBlockFooterNamesRemoval(t *testing.T) {
 func TestConsolidationCarriesModuleConstants(t *testing.T) {
 	master := consolidateFixture(t, constantHook)
 
-	if !strings.Contains(master, "python3_not_python_hook_PYTHON_TOKEN_RE = re.compile(") {
-		t.Error("master hook is missing the prefixed module constant definition")
+	if !strings.Contains(master, "PYTHON_TOKEN_RE = re.compile(") {
+		t.Error("master hook is missing the module constant definition")
 	}
-	if !strings.Contains(master, "python3_not_python_hook_SAFE_NAMES = {") {
+	if !strings.Contains(master, "SAFE_NAMES = {") {
 		t.Error("master hook is missing the second module constant")
 	}
-	if !strings.Contains(master, "if python3_not_python_hook_PYTHON_TOKEN_RE.search(checkable):") {
-		t.Error("main body does not reference the prefixed constant")
-	}
-	if strings.Contains(master, "\nPYTHON_TOKEN_RE") {
-		t.Error("unprefixed constant leaked into master hook")
-	}
-	// Docstring content must not be extracted as constants.
-	if strings.Contains(master, "Rule: never use") {
-		t.Error("docstring content leaked into master hook")
+	// A guard is loaded into its own namespace, so nothing in it is renamed.
+	if strings.Contains(master, "python3_not_python_hook_PYTHON_TOKEN_RE") {
+		t.Error("consolidation renamed an identifier inside the guard")
 	}
 }
 
@@ -266,11 +269,10 @@ func TestConsolidatedMasterBlocksLikeIndividualHook(t *testing.T) {
 }
 
 // bareCallHook ends with a top-level main() call instead of the usual
-// "if __name__" guard, and calls the module constant across a line break whose
-// continuation sits at column 0. Its allow path falls off the end of main()
-// rather than exiting, which is what makes the absorbed call reachable:
-// extraction used to pull it into the guard body, so the master recursed
-// guard -> main -> steer_run -> guard until Python raised RecursionError.
+// "if __name__" guard. Its allow path falls off the end of main() rather than
+// exiting, so the trailing call is reachable. The master loads a guard's module
+// body once on an empty stdin with its output discarded, which is what keeps
+// that call off the real payload.
 const bareCallHook = `#!/usr/bin/env python3
 """
 Hook: block bare python invocations
@@ -304,39 +306,14 @@ command
 main()
 `
 
-// guardBody returns the master's text from the named guard function up to the
-// next top-level definition.
-func guardBody(master, name string) string {
-	start := strings.Index(master, "def "+name+"():")
-	if start < 0 {
-		return ""
-	}
-	rest := master[start:]
-	if end := strings.Index(rest[1:], "\ndef "); end >= 0 {
-		return rest[:end+1]
-	}
-	return rest
-}
+// runMasterRaw executes a master hook source on one payload and returns its
+// complete stdout.
+func runMasterRaw(t *testing.T, master, input string) string {
+	t.Helper()
 
-func TestTrailingCallIsNotPartOfTheGuardBody(t *testing.T) {
 	python, err := exec.LookPath("python3")
 	if err != nil {
 		t.Skip("python3 not available")
-	}
-
-	master := consolidateFixture(t, bareCallHook)
-	body := guardBody(master, "python3_not_python_hook")
-	if body == "" {
-		t.Fatal("master hook is missing the guard function")
-	}
-	if strings.Contains(body, "main()") {
-		t.Errorf("trailing main() call was absorbed into the guard body:\n%s", body)
-	}
-	if !strings.Contains(body, "python3_not_python_hook_PYTHON_TOKEN_RE.search(") {
-		t.Error("guard body does not reference the prefixed constant")
-	}
-	if !strings.Contains(body, "command") {
-		t.Error("guard body dropped the column-0 continuation line")
 	}
 
 	dir := t.TempDir()
@@ -345,23 +322,145 @@ func TestTrailingCallIsNotPartOfTheGuardBody(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	run := func(input string) string {
-		cmd := exec.Command(python, masterPath)
-		cmd.Stdin = strings.NewReader(input)
-		out, err := cmd.Output()
-		if err != nil {
-			t.Fatalf("master hook errored on %s: %v", input, err)
-		}
-		return string(out)
+	cmd := exec.Command(python, masterPath)
+	cmd.Stdin = strings.NewReader(input)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("master hook errored on %s: %v", input, err)
 	}
+	return string(out)
+}
 
-	blocked := run(`{"tool_name":"Bash","tool_input":{"command":"python script.py"}}`)
+func TestTrailingCallDoesNotRunOnTheRealPayload(t *testing.T) {
+	master := consolidateFixture(t, bareCallHook)
+
+	blocked := runMasterRaw(t, master, `{"tool_name":"Bash","tool_input":{"command":"python script.py"}}`)
 	if !strings.Contains(blocked, `"decision": "block"`) {
 		t.Errorf("master hook failed to block bare python: %q", blocked)
 	}
+	// The module body and the per-edit call would each answer, so a second
+	// reply is how the trailing call reaching the real payload shows up.
+	if strings.Count(blocked, `"decision"`) != 1 {
+		t.Errorf("master hook answered more than once: %q", blocked)
+	}
 
-	allowed := run(`{"tool_name":"Bash","tool_input":{"command":"python3 script.py"}}`)
+	allowed := runMasterRaw(t, master, `{"tool_name":"Bash","tool_input":{"command":"python3 script.py"}}`)
 	if strings.TrimSpace(allowed) != "" {
 		t.Errorf("master hook blocked safe command: %q", allowed)
+	}
+}
+
+// selfNamingHook holds its own identifier inside a regex literal. Renaming
+// identifiers by word regex rewrote the pattern too, so the guard matched a
+// name the author never wrote.
+const selfNamingHook = `#!/usr/bin/env python3
+import json
+import sys
+import re
+
+TOKEN_RE = re.compile(r"TOKEN_RE")
+
+def main():
+    data = json.loads(sys.stdin.read())
+    command = data.get('tool_input', {}).get('command', '')
+    if TOKEN_RE.search(command):
+        print(json.dumps({"decision": "block", "continue": True, "stopReason": "matched " + TOKEN_RE.pattern}))
+    sys.exit(0)
+
+if __name__ == "__main__":
+    main()
+`
+
+func TestGuardStringsAreNotRewritten(t *testing.T) {
+	master := consolidateFixture(t, selfNamingHook)
+
+	out := runMasterRaw(t, master, `{"tool_name":"Bash","tool_input":{"command":"echo TOKEN_RE"}}`)
+	if !strings.Contains(out, "matched TOKEN_RE") {
+		t.Errorf("the guard's regex literal did not survive consolidation: %q", out)
+	}
+}
+
+// Two guards may name a constant and a helper identically. Each is loaded into
+// its own namespace, so neither definition can win over the other.
+const collidingHookA = `#!/usr/bin/env python3
+import json
+import sys
+
+PATTERN = "alpha"
+
+def verdict():
+    return "blocked by A"
+
+def main():
+    data = json.loads(sys.stdin.read())
+    if PATTERN in data.get('tool_input', {}).get('command', ''):
+        print(json.dumps({"decision": "block", "continue": True, "stopReason": verdict()}))
+    sys.exit(0)
+
+if __name__ == "__main__":
+    main()
+`
+
+const collidingHookB = `#!/usr/bin/env python3
+import json
+import sys
+
+PATTERN = "beta"
+
+def verdict():
+    return "blocked by B"
+
+def main():
+    data = json.loads(sys.stdin.read())
+    if PATTERN in data.get('tool_input', {}).get('command', ''):
+        print(json.dumps({"decision": "block", "continue": True, "stopReason": verdict()}))
+    sys.exit(0)
+
+if __name__ == "__main__":
+    main()
+`
+
+func TestGuardsWithCollidingNamesKeepTheirOwn(t *testing.T) {
+	master := consolidateFiles(t, map[string]string{
+		"a-hook.py": collidingHookA,
+		"b-hook.py": collidingHookB,
+	})
+
+	cases := []struct{ command, want string }{
+		{"echo alpha", "blocked by A"},
+		{"echo beta", "blocked by B"},
+	}
+	for _, tc := range cases {
+		out := runMasterRaw(t, master, `{"tool_name":"Bash","tool_input":{"command":"`+tc.command+`"}}`)
+		if !strings.Contains(out, tc.want) {
+			t.Errorf("%q: want %q, got %q", tc.command, tc.want, out)
+		}
+	}
+
+	allowed := runMasterRaw(t, master, `{"tool_name":"Bash","tool_input":{"command":"echo gamma"}}`)
+	if strings.TrimSpace(allowed) != "" {
+		t.Errorf("master hook blocked an unmatched command: %q", allowed)
+	}
+}
+
+func TestNonUTF8HookIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "broken-hook.py")
+	if err := os.WriteFile(path, []byte("def main():\n    return \"\xff\xfe\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readHookSource(path); err == nil {
+		t.Error("readHookSource accepted a non-UTF-8 hook")
+	}
+}
+
+func TestHookWithoutMainIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "no-main-hook.py")
+	if err := os.WriteFile(path, []byte("import sys\n\ndef check():\n    return None\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readHookSource(path); err == nil {
+		t.Error("readHookSource accepted a hook with no main()")
 	}
 }

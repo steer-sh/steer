@@ -137,14 +137,14 @@ def steer_virtual_edits(payload):
     return [payload]
 
 
-def steer_audit_log(hook_func_name, payload, edit, harness):
+def steer_audit_log(hook_name, payload, edit, harness):
     """Append one JSON line per block decision to steer-audit.jsonl.
 
     Auditing must never break or weaken the block decision, so every failure path
     is swallowed.
     """
     try:
-        meta = STEER_HOOK_META.get(hook_func_name, {})
+        meta = STEER_HOOK_META.get(hook_name, {})
         if not isinstance(payload, dict):
             payload = {}
         if not isinstance(edit, dict):
@@ -179,7 +179,7 @@ def steer_audit_log(hook_func_name, payload, edit, harness):
         entry = {
             "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "rule": meta.get("rule", ""),
-            "hook_name": meta.get("hook_name", hook_func_name),
+            "hook_name": meta.get("hook_name", hook_name),
             "enforcement": "block",
             "harness": harness,
             "session_id": session_id,
@@ -196,10 +196,10 @@ def steer_audit_log(hook_func_name, payload, edit, harness):
         pass
 
 
-def steer_removal_footer(hook_func_name):
+def steer_removal_footer(hook_name):
     """Name the hook that blocked and the command that removes it."""
-    meta = STEER_HOOK_META.get(hook_func_name, {})
-    hook_name = meta.get("hook_name", hook_func_name)
+    meta = STEER_HOOK_META.get(hook_name, {})
+    hook_name = meta.get("hook_name", hook_name)
     source = meta.get("source", "")
     source_id = meta.get("source_id", "")
     if not source:
@@ -227,9 +227,9 @@ def steer_parse_block(output):
     return False, None
 
 
-def steer_render_block(output, result, hook_func_name, harness):
+def steer_render_block(output, result, hook_name, harness):
     """Render a guard's block in the harness's native deny contract."""
-    footer = steer_removal_footer(hook_func_name)
+    footer = steer_removal_footer(hook_name)
     if harness == STEER_CODEX:
         reason = output
         if result is not None:
@@ -274,7 +274,44 @@ def steer_render_block(output, result, hook_func_name, harness):
     return json.dumps(result)
 
 
-def steer_run(hooks_to_run):
+def steer_load(hook_name):
+    """Compile one guard into its own module namespace and return its main().
+
+    A guard is a standalone script, so it is loaded rather than rewritten into
+    the master's namespace: its constants, helpers and imports keep the names its
+    author gave them, nothing inside a string or a comment is renamed, and two
+    guards cannot collide.
+
+    The module body runs once here, on an empty stdin with its output discarded,
+    because a guard may end in a bare top-level main() call rather than an
+    "if __name__" guard. Running that call on the real payload would put a guard
+    outside the virtual-edit loop and answer twice for one edit.
+    """
+    source = STEER_HOOK_SOURCES.get(hook_name)
+    if not isinstance(source, str):
+        return None
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), hook_name + ".py")
+    namespace = {"__name__": "steer_guard_" + hook_name, "__file__": path}
+    old_stdout = sys.stdout
+    old_stdin = sys.stdin
+    sys.stdout = io.StringIO()
+    sys.stdin = io.StringIO("")
+    try:
+        exec(compile(source, path, "exec"), namespace)
+    except SystemExit:
+        pass
+    except Exception:
+        return None
+    finally:
+        sys.stdout = old_stdout
+        sys.stdin = old_stdin
+    entry = namespace.get("main")
+    if not callable(entry):
+        return None
+    return entry
+
+
+def steer_run(hook_names):
     harness = steer_harness()
     stdin_data = sys.stdin.read()
     try:
@@ -289,7 +326,10 @@ def steer_run(hooks_to_run):
 
     # Guard-major: guards run in a fixed order and the first one to object wins,
     # whichever file of the call it objected to.
-    for hook_func in hooks_to_run:
+    for hook_name in hook_names:
+        hook_func = steer_load(hook_name)
+        if hook_func is None:
+            continue
         for edit, edit_json in encoded:
             captured = io.StringIO()
             old_stdout = sys.stdout
@@ -312,8 +352,8 @@ def steer_run(hooks_to_run):
             blocked, result = steer_parse_block(output)
             if not blocked:
                 continue
-            steer_audit_log(hook_func.__name__, payload, edit, harness)
-            print(steer_render_block(output, result, hook_func.__name__, harness))
+            steer_audit_log(hook_name, payload, edit, harness)
+            print(steer_render_block(output, result, hook_name, harness))
             sys.exit(0)
 
     sys.exit(0)
