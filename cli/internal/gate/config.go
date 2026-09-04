@@ -83,7 +83,7 @@ const (
 // flags any change as drift, and a per-release suffix would fire that flag on every
 // patch release. Bump it only when gate behaviour changes reviewer inputs or the
 // parser semantics that decide which reviewer findings enter the corpus.
-const InstrumentSuffix = "go-findings-v2"
+const InstrumentSuffix = "go-findings-v3-shell"
 
 // Phases where no reviewer ran. They open no chain and close none, so a reader of
 // the log must not treat one as a boundary. mine.py keeps its own copy; the two must

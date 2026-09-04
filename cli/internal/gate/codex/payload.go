@@ -184,6 +184,14 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, stdin io.
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
+	if reason := cc.AmbiguousShellReason(command, cwd); reason != "" {
+		emit(stdout, Output{HookSpecificOutput: &hookOutput{
+			HookEventName:            "PreToolUse",
+			PermissionDecision:       "deny",
+			PermissionDecisionReason: reason,
+		}, SystemMessage: cc.AmbiguousShellReceipt})
+		return
+	}
 	repo := cc.RepoDir(command, cwd)
 	spec := cc.DiffSpecFor(command)
 
@@ -204,7 +212,7 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, stdin io.
 		Repo: repo, Actor: invocation.actor, Channel: gate.ChannelPreToolUse,
 		SessionID: invocation.provenanceSessionID(),
 		Spec:      spec,
-		Message:   cc.ExtractMessage(command, repo), RowExtra: rowExtra,
+		Message:   cc.ExtractMessage(command, cwd), RowExtra: rowExtra,
 		RerunNote: rerunNote(command),
 	})
 	out, ok := Render(decision)

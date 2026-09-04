@@ -79,6 +79,14 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, stdin io.
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
+	if reason := cc.AmbiguousShellReason(command, cwd); reason != "" {
+		encoded, err := json.Marshal(Output{Block: true, Reason: reason,
+			SystemMessage: cc.AmbiguousShellReceipt})
+		if err == nil {
+			_, _ = stdout.Write(append(encoded, '\n'))
+		}
+		return
+	}
 	repo := cc.RepoDir(command, cwd)
 	rowExtra := gate.Row{"client": "pi", "harness": "pi"}
 	if payload.TranscriptPath != "" {
@@ -96,7 +104,7 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, stdin io.
 		Repo: repo, Actor: payload.SessionID, Channel: gate.ChannelPreToolUse,
 		SessionID: payload.SessionID,
 		Spec:      cc.DiffSpecFor(command),
-		Message:   cc.ExtractMessage(command, repo),
+		Message:   cc.ExtractMessage(command, cwd),
 		RerunNote: rerunNote(command),
 		RowExtra:  rowExtra,
 	})

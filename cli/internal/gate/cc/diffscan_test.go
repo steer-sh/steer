@@ -22,7 +22,7 @@ type scanCase struct {
 	Span     []int  `json:"span"`
 }
 
-func TestScannersMatchPython(t *testing.T) {
+func TestLooseCommitDetectorMatchesPython(t *testing.T) {
 	var raw []byte
 	if path := os.Getenv("COMMIT_GATE_SCAN_CORPUS"); path != "" {
 		var err error
@@ -49,26 +49,9 @@ func TestScannersMatchPython(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, tc := range cases {
-		if got := IsCommitCommand(tc.Cmd); got != tc.IsCommit {
-			t.Errorf("IsCommitCommand(%q) = %v, python %v", tc.Cmd, got, tc.IsCommit)
-		}
-		if got := RepoDir(tc.Cmd, "/cwd"); got != tc.RepoDir {
-			t.Errorf("RepoDir(%q) = %q, python %q", tc.Cmd, got, tc.RepoDir)
-		}
-		staged, untracked := DiffSources(tc.Cmd)
-		if staged != tc.Sources[0] || untracked != tc.Sources[1] {
-			t.Errorf("DiffSources(%q) = (%v,%v), python (%v,%v)", tc.Cmd, staged, untracked, tc.Sources[0], tc.Sources[1])
-		}
-		if got := WritesAFile(tc.Cmd); got != tc.Writes {
-			t.Errorf("WritesAFile(%q) = %v, python %v", tc.Cmd, got, tc.Writes)
-		}
-		if got := ExtractMessage(tc.Cmd, "/nonexistent-dir"); got != tc.Message {
-			t.Errorf("ExtractMessage(%q) = %q, python %q", tc.Cmd, got, tc.Message)
-		}
-		span := CommitSpan(tc.Cmd)
-		if span.Start != tc.Span[0] || span.End != tc.Span[1] {
-			t.Errorf("CommitSpan(%q) = (%d,%d), python (%d,%d)", tc.Cmd, span.Start, span.End, tc.Span[0], tc.Span[1])
+		if got := looseIsCommitCommand(tc.Cmd); got != tc.IsCommit {
+			t.Errorf("looseIsCommitCommand(%q) = %v, python %v", tc.Cmd, got, tc.IsCommit)
 		}
 	}
-	t.Logf("%d differential cases replayed", len(cases))
+	t.Logf("%d loose-detector cases replayed", len(cases))
 }

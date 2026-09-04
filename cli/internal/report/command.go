@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/steer-sh/steer-cli/internal/shellsyntax"
 )
 
 // runnerVerbs name the commands that EXECUTE a build, a test or a linter. The
@@ -42,118 +44,16 @@ var scriptSuffixes = []string{".sh", ".bash", ".py", ".rb", ".js", ".ts", ".pl"}
 // answer is true when ANY segment of the command line is a runner, because a
 // trailing pipe does not make `go test | tail` a read.
 func shellRunsProgram(cmd string) bool {
-	for _, seg := range shellSegments(cmd) {
-		if segmentRuns(seg) {
+	program, err := shellsyntax.ParsePartial(cmd)
+	if err != nil {
+		return false
+	}
+	for _, call := range program.Calls {
+		if callRuns(call) {
 			return true
 		}
 	}
 	return false
-}
-
-// shellSegments splits a command line on the separators that start a new
-// command: the pipe, the list operators, the newline and a substitution. A
-// heredoc body is text the command is fed, so it is removed first: its lines are
-// not commands, and one of them beginning with `go` or `python3` does not make
-// the `cat > file` that writes it a runner.
-func shellSegments(cmd string) []string {
-	cmd = strings.ReplaceAll(stripHeredocs(cmd), "$(", "\n")
-	var out []string
-	var seg strings.Builder
-	var single, double bool
-	flush := func() {
-		if strings.TrimSpace(seg.String()) != "" {
-			out = append(out, seg.String())
-		}
-		seg.Reset()
-	}
-	for i := 0; i < len(cmd); i++ {
-		c := cmd[i]
-		switch {
-		case c == '\\' && i+1 < len(cmd):
-			seg.WriteByte(c)
-			i++
-			seg.WriteByte(cmd[i])
-			continue
-		case c == '\'' && !double:
-			single = !single
-		case c == '"' && !single:
-			double = !double
-		case (single || double) == false && strings.IndexByte("|&;\n()`", c) >= 0:
-			// A separator outside quotes starts a new command. Inside them it
-			// is an argument's text: `grep "foo | go test" x.log` runs grep.
-			flush()
-			continue
-		}
-		seg.WriteByte(c)
-	}
-	flush()
-	return out
-}
-
-// heredocStart matches a heredoc redirection and captures its terminator.
-var heredocStart = regexp.MustCompile(`<<-?\s*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?`)
-
-// stripHeredocs removes every heredoc body from a command line, keeping the
-// command lines around it. A start with no terminator strips nothing: `<<` also
-// writes a shift and a stream insertion, and eating every line after one would
-// hide the runners below it.
-func stripHeredocs(cmd string) string {
-	lines := strings.Split(cmd, "\n")
-	var out []string
-	for i := 0; i < len(lines); i++ {
-		out = append(out, lines[i])
-		m := heredocStart.FindStringSubmatch(lines[i])
-		if m == nil {
-			continue
-		}
-		end := -1
-		for j := i + 1; j < len(lines); j++ {
-			if strings.TrimSpace(lines[j]) == m[1] {
-				end = j
-				break
-			}
-		}
-		if end >= 0 {
-			i = end
-		}
-	}
-	return strings.Join(out, "\n")
-}
-
-// shellFields splits a segment into tokens on whitespace OUTSIDE quotes, so a
-// quoted argument stays one token: `CFLAGS="-O2 -g" make` assigns once and runs
-// make.
-func shellFields(seg string) []string {
-	var out []string
-	var tok strings.Builder
-	var single, double bool
-	flush := func() {
-		if tok.Len() > 0 {
-			out = append(out, tok.String())
-			tok.Reset()
-		}
-	}
-	for i := 0; i < len(seg); i++ {
-		c := seg[i]
-		switch {
-		case c == '\\' && i+1 < len(seg):
-			tok.WriteByte(c)
-			i++
-			tok.WriteByte(seg[i])
-		case c == '\'' && !double:
-			single = !single
-			tok.WriteByte(c)
-		case c == '"' && !single:
-			double = !double
-			tok.WriteByte(c)
-		case !single && !double && (c == ' ' || c == '\t'):
-			flush()
-		default:
-			tok.WriteByte(c)
-		}
-	}
-	flush()
-	return out
 }
 
 // argFlags name, per wrapper, the options that take a value of their own. Only
@@ -171,15 +71,19 @@ var argFlags = map[string]map[string]bool{
 	"stdbuf":  {"-i": true, "-o": true, "-e": true},
 }
 
-// segmentRuns answers shellRunsProgram for one segment: it finds the verb, past
+// callRuns answers shellRunsProgram for one parsed call: it finds the verb, past
 // any leading variable assignment and any wrapper, and tests it. A wrapper takes
 // options of its own (`sudo -u root go test`, `xargs -I {} pytest`), so past one
 // an unrecognized token continues the search rather than answering it. Before
 // one, the first token IS the verb and answers for the segment: scanning on
 // would read the argument of `grep "go test"` as a command.
-func segmentRuns(seg string) bool {
+func callRuns(call shellsyntax.Call) bool {
 	wrapped, afterFlag, wrapper := false, false, ""
-	for _, verb := range shellFields(seg) {
+	for _, word := range call.Args {
+		if !word.Static {
+			return false
+		}
+		verb := word.Value
 		if isAssignment(verb) {
 			continue
 		}
@@ -192,10 +96,6 @@ func segmentRuns(seg string) bool {
 		if strings.HasPrefix(verb, "-") {
 			afterFlag = argFlags[wrapper][verb] && !strings.Contains(verb, "=")
 			continue
-		}
-		if strings.ContainsAny(verb, `"'`) {
-			// A quoted token is an argument's text, not a command.
-			return false
 		}
 		base := path.Base(verb)
 		if wrapperVerbs[base] {

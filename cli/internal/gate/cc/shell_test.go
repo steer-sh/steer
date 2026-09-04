@@ -53,6 +53,10 @@ func TestRepoDir(t *testing.T) {
 		{`echo "running git ` + c + `" && cd /tmp/t && git ` + c + " -m y", "/tmp/t",
 			"a literal in an earlier echo does not truncate the cd scan"},
 		{"(cd /tmp/t && git " + c + " -m y)", "/tmp/t", "subshell grouping"},
+		{"cd /tmp/outer && (cd inner && git " + c + " -m y)", "/tmp/outer/inner",
+			"a nested scope inherits the outer shell's directory"},
+		{"(cd /tmp/other) && git " + c + " -m y", testCWD,
+			"a sibling subshell cannot relocate the committing shell"},
 	}
 	for _, tc := range cases {
 		if got := RepoDir(tc.cmd, testCWD); got != tc.want {
@@ -68,7 +72,7 @@ func TestDiffSources(t *testing.T) {
 		includeUntracked bool
 		why              string
 	}{
-		{"git add engine/x.py && git " + c + " -q -F - <<EOF", true, true,
+		{"git add engine/x.py && git " + c + " -q -F - <<EOF\nsubject\nEOF", true, true,
 			"BYPASS 2026-08-01: PreToolUse fires before the add, so --cached is empty"},
 		{"git add -A && git " + c + " -m 'x'", true, true, "the most common commit idiom"},
 		{"git " + c + " -am 'x'", true, false,
@@ -99,6 +103,8 @@ func TestIsCommitCommand(t *testing.T) {
 		{"git " + c + " -q -F - <<EOF", true, "heredoc message"},
 		{"git status", false, "not a commit"},
 		{"git " + c + " --dry-run", false, "rehearsal"},
+		{"git " + c + " -m --dry-run", true, "the message value is not an option"},
+		{"git " + c + " --message=--dry-run", true, "an attached message is not an option"},
 		{"git config " + c + ".gpgsign true", false, "config key, not a commit"},
 	}
 	for _, tc := range cases {
@@ -124,7 +130,7 @@ func TestWritesAFile(t *testing.T) {
 		{"git " + c + " -m 'x' 2>&1", false, "`2>&1` writes no file"},
 		{"git " + c + " -m 'rename a->b'", false, "an arrow in the message is prose, not a redirect"},
 		{"git " + c + " -m 'x' >> out.log", true, "an append redirect writes a file"},
-		{"git " + c + " -m 'x' 2>>log", false, "a numbered append is still a dup, not a new write"},
+		{"git " + c + " -m 'x' 2>>log", true, "stderr append writes a file"},
 	}
 	for _, tc := range cases {
 		if got := WritesAFile(tc.cmd); got != tc.want {
@@ -179,8 +185,8 @@ func TestExtractMessage(t *testing.T) {
 			"python3 - <<'PY'\nprint(1)\nPY\ngit " + c + " -F - <<'MSG'\nsubject\nMSG", "subject",
 			"-F - reads the heredoc attached to the COMMIT, not the first one in the command"},
 		{"indented-closer",
-			"cat > m.txt <<-'MSG'\n\tsubject\n\tMSG\ngit " + c + " -F m.txt", messageNotFound,
-			"an indented <<- closer stays unmatched: allowing whitespace reopens the tag-prefix truncation"},
+			"cat > m.txt <<-'MSG'\n\tsubject\n\tMSG\ngit " + c + " -F m.txt", "\tsubject\n\t",
+			"the shell grammar distinguishes an indented <<- closer from a prefix line"},
 	}
 	for _, tc := range cases {
 		if got := ExtractMessage(tc.cmd, root); got != tc.want {
@@ -264,5 +270,106 @@ func TestRepoSelectedExplicitly(t *testing.T) {
 func TestRepoSelectedExplicitlyExpandsHome(t *testing.T) {
 	if !RepoSelectedExplicitly(`cd ~/r && git commit -m "x"`) {
 		t.Error("a home-relative path resolves without a base and must count")
+	}
+}
+
+func TestRepoSelectedExplicitlyIncludesOuterScope(t *testing.T) {
+	if !RepoSelectedExplicitly("cd /repo && (git " + c + " -m subject)") {
+		t.Fatal("an absolute cd in an inherited scope selects the repository")
+	}
+}
+
+func TestExactShellGrammarAdversarialCases(t *testing.T) {
+	for _, cmd := range []string{
+		"(git " + c + " -m x)",
+		"echo $(git " + c + " -m x)",
+		`git -c "x;y" ` + c + ` -m x`,
+		"command git " + c + " -m x",
+	} {
+		if !IsCommitCommand(cmd) {
+			t.Errorf("nested or wrapped commit was missed: %q", cmd)
+		}
+		if reason := AmbiguousShellReason(cmd, "/cwd"); reason != "" {
+			t.Errorf("exact commit called ambiguous: %q: %s", cmd, reason)
+		}
+	}
+
+	falseTrigger := `echo "release git ` + c + `"`
+	if !IsCommitCommand(falseTrigger) {
+		t.Fatal("the conservative detector must retain its false-positive posture")
+	}
+	if reason := AmbiguousShellReason(falseTrigger, "/cwd"); reason == "" {
+		t.Fatal("loose-only evidence must be refused before repository inference")
+	}
+	if reason := AmbiguousShellReason("command echo git "+c, "/cwd"); reason == "" {
+		t.Fatal("a wrapper's argument must remain loose-only evidence")
+	}
+	if reason := AmbiguousShellReason("git "+c+" -m one && git "+c+" -m two", "/cwd"); reason == "" {
+		t.Fatal("one gate request cannot represent two commits")
+	}
+
+	if got := RepoDir(`cd "/tmp/a;b" && git -C sub `+c+` -m x`, "/cwd"); got != "/tmp/a;b/sub" {
+		t.Errorf("quoted cd plus -C = %q", got)
+	}
+	if got := RepoDir(`git --git-dir=/meta --work-tree="/tmp/work tree" `+c+` -m x`, "/cwd"); got != "/tmp/work tree" {
+		t.Errorf("explicit work tree = %q", got)
+	}
+	if reason := AmbiguousShellReason(`git --git-dir=/meta `+c+` -m x`, "/cwd"); reason == "" {
+		t.Fatal("--git-dir alone does not establish the reviewed work tree")
+	}
+
+	if got := ExtractMessage(`echo -m 'wrong' && git `+c+` -m 'real'`, "/cwd"); got != "real" {
+		t.Errorf("message = %q", got)
+	}
+	if got := ExtractMessage("git "+c+" -F - <<'MSG-1'\nsubject\nMSG-1", "/cwd"); got != "subject" {
+		t.Errorf("punctuation heredoc message = %q", got)
+	}
+	if WritesAFile(`git ` + c + ` -m 'rename A->B'`) {
+		t.Fatal("an arrow inside a message is not a redirect")
+	}
+}
+
+func TestExtractMessageResolvesFileFromGitWorkingDirectory(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "sub")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "message.txt"), []byte("subject\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := `git -C sub ` + c + ` -F message.txt`
+	if reason := AmbiguousShellReason(cmd, root); reason != "" {
+		t.Fatalf("literal message file was called ambiguous: %s", reason)
+	}
+	if got := ExtractMessage(cmd, root); got != "subject\n" {
+		t.Errorf("message = %q", got)
+	}
+}
+
+func TestExactCommitOptionsDoNotConfuseValuesWithFlags(t *testing.T) {
+	root := t.TempDir()
+	abs := filepath.Join(root, "absolute-message.txt")
+	if err := os.WriteFile(abs, []byte("absolute\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		cmd, message string
+		all          bool
+	}{
+		{"git " + c + " -am 'subject'", "subject", true},
+		{"git " + c + " -m '-a: subject'", "-a: subject", false},
+		{"git " + c + " -- -a.txt", messageNotFound, false},
+		{"git " + c + " -F- <<'MSG'\nstdin\nMSG", "stdin", false},
+		{"git " + c + " --file=- <<'MSG'\nstdin\nMSG", "stdin", false},
+		{"git " + c + " -F " + abs, "absolute\n", false},
+	}
+	for _, tc := range cases {
+		if got := ExtractMessage(tc.cmd, root); got != tc.message {
+			t.Errorf("ExtractMessage(%q) = %q, want %q", tc.cmd, got, tc.message)
+		}
+		if got := CommitsAllTracked(tc.cmd); got != tc.all {
+			t.Errorf("CommitsAllTracked(%q) = %v, want %v", tc.cmd, got, tc.all)
+		}
 	}
 }

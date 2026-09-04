@@ -67,6 +67,24 @@ func TestRunReviewsPiPayloadWithoutAWorkdirField(t *testing.T) {
 	}
 }
 
+func TestRunRefusesLooseOnlyCommitWithoutReviewOrLedger(t *testing.T) {
+	cfg := gate.Defaults()
+	cfg.StateDir = t.TempDir()
+	payload := `{"hook_event_name":"PreToolUse","tool_name":"Bash",` +
+		`"session_id":"pi-session","cwd":"/repo",` +
+		`"tool_input":{"command":"echo 'release git commit'"}}`
+	var stdout bytes.Buffer
+	Run(context.Background(), cfg, stubReviewer{}, strings.NewReader(payload), &stdout)
+	var out Output
+	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil || !out.Block ||
+		!strings.Contains(out.Reason, "conservative detector") {
+		t.Fatalf("output = %q, err = %v", stdout.String(), err)
+	}
+	if _, err := os.Stat(cfg.LogFile()); !os.IsNotExist(err) {
+		t.Fatalf("ambiguous refusal wrote a ledger: %v", err)
+	}
+}
+
 func stagedRepo(t *testing.T) string {
 	t.Helper()
 	repo := t.TempDir()

@@ -8,31 +8,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/steer-sh/steer-cli/internal/shellsyntax"
 )
-
-// A shell path token: single-quoted, double-quoted, or bare up to whitespace or the
-// next shell operator — `cd /tmp/r; git commit` must not capture the semicolon.
-const pathToken = `(?P<path>'[^']*'|"[^"]*"|[^\s;&|]+)`
-
-// dashCRe is searched only INSIDE the matched `git ... commit` invocation, where
-// everything between `git` and the subcommand is by construction a git option. That
-// placement, not the pattern, is what excludes `git commit -C HEAD` (reuse a commit
-// message) and a -C sitting inside `-m "..."` — both fall after `commit`, outside the
-// span.
-var dashCRe = regexp.MustCompile(`(?:^|\s)-C\s+` + pathToken)
-
-// cdRe finds a `cd` that relocates the repo. `[(]` so a subshell
-// `(cd /r && git commit)` is seen; the leading-option skip is for `cd -P /r` and
-// `cd -- /r`.
-var cdRe = regexp.MustCompile(`(?:^|[;&|(]\s*)cd\s+(?:-\S+\s+)*` + pathToken)
-
-// commitsAllTracked reports `git commit -a` / --all, where the diff is not yet staged.
-var commitsAllTrackedRe = regexp.MustCompile(`\bcommit\b.*?(\s-\w*a\w*|\s--all\b)`)
-
-// stagesRe errs toward matching, like IsCommitCommand: a `git add` appearing only
-// inside a commit message flips the diff source to `git diff HEAD`, which reviews a
-// superset of what lands. Reviewing too much is the tolerable direction.
-var stagesRe = regexp.MustCompile(`(^|[;&|]\s*|\s)git\s+(?:\S+\s+)*?(?:add|stage)\b`)
 
 // Span is a half-open byte range in the command text.
 type Span struct{ Start, End int }
@@ -135,16 +113,6 @@ func skipSpace(cmd string, pos int) int {
 	return pos
 }
 
-// CommitSpan is the span of the LAST such invocation in the command, or an empty span at
-// the end. Last, not first: the real invocation is the one the chain ends on.
-func CommitSpan(cmd string) Span {
-	spans := commitSpans(cmd)
-	if len(spans) == 0 {
-		return Span{Start: len(cmd), End: len(cmd)}
-	}
-	return spans[len(spans)-1]
-}
-
 // IsCommitCommand reports whether this Bash command runs `git commit` for real.
 //
 // Deliberately permissive on shape (compound commands, heredocs, leading env) and
@@ -152,10 +120,14 @@ func CommitSpan(cmd string) Span {
 // is a commit that ships ungated, which is the failure the gate exists to prevent, so
 // it errs toward matching.
 func IsCommitCommand(cmd string) bool {
-	if len(commitSpans(cmd)) == 0 {
-		return false
+	if parsed, err := parseCommit(cmd, ""); err == nil && parsed != nil {
+		return true
 	}
-	return !strings.Contains(cmd, "--dry-run")
+	return looseIsCommitCommand(cmd)
+}
+
+func looseIsCommitCommand(cmd string) bool {
+	return len(commitSpans(cmd)) > 0 && !strings.Contains(cmd, "--dry-run")
 }
 
 // RepoDir resolves which repo this command writes to, honouring both `-C <path>` and a
@@ -164,16 +136,12 @@ func IsCommitCommand(cmd string) bool {
 // The shell's own resolution order is the spec: the LAST `cd` before the invocation sets
 // the base, and a `-C` path then resolves against that base rather than the tool's cwd.
 func RepoDir(cmd, cwd string) string {
-	span := CommitSpan(cmd)
-	base := cwd
-	scan := maskDocumentHeredocs(cmd)
-	for _, m := range cdRe.FindAllStringSubmatch(scan[:span.Start], -1) {
-		base = resolveDir(m[1], base) // last cd wins, as the shell does
+	if parsed, err := parseCommit(cmd, cwd); err == nil && parsed != nil {
+		if repo, ok := parsed.repoDir(); ok {
+			return repo
+		}
 	}
-	if m := dashCRe.FindStringSubmatch(scan[span.Start:span.End]); m != nil {
-		return resolveDir(m[1], base)
-	}
-	return base
+	return cwd
 }
 
 // RepoSelectedExplicitly reports that the command text names the repository it commits
@@ -183,20 +151,11 @@ func RepoDir(cmd, cwd string) string {
 // one has already set the base: `cd /r && cd sub` names a repository, `cd sub` alone
 // still hangs off the caller's cwd.
 func RepoSelectedExplicitly(cmd string) bool {
-	span := CommitSpan(cmd)
-	scan := maskDocumentHeredocs(cmd)
-	known := false
-	for _, m := range cdRe.FindAllStringSubmatch(scan[:span.Start], -1) {
-		known = known || absoluteToken(m[1])
+	if parsed, err := parseCommit(cmd, ""); err == nil && parsed != nil {
+		return parsed.explicitlySelectsRepo()
 	}
-	if m := dashCRe.FindStringSubmatch(scan[span.Start:span.End]); m != nil {
-		return known || absoluteToken(m[1])
-	}
-	return known
+	return false
 }
-
-// absoluteToken reports that this path token resolves without a base directory.
-func absoluteToken(token string) bool { return filepath.IsAbs(expandToken(token)) }
 
 // expandToken strips the shell quoting and expands a leading `~`.
 func expandToken(token string) string {
@@ -223,7 +182,10 @@ func resolveDir(token, base string) string {
 
 // CommitsAllTracked reports `git commit -a` / --all, where the diff is not yet staged.
 func CommitsAllTracked(cmd string) bool {
-	return commitsAllTrackedRe.MatchString(cmd)
+	if parsed, err := parseCommit(cmd, ""); err == nil && parsed != nil {
+		return parsed.commitsAllTracked()
+	}
+	return false
 }
 
 // StagesBeforeCommit reports that the command stages its own files, so the index at hook
@@ -233,7 +195,10 @@ func CommitsAllTracked(cmd string) bool {
 // an empty `--cached` diff when the gate reads it. Errs toward matching: reviewing a
 // superset of what lands is the tolerable direction.
 func StagesBeforeCommit(cmd string) bool {
-	return stagesRe.MatchString(cmd)
+	if parsed, err := parseCommit(cmd, ""); err == nil && parsed != nil {
+		return parsedStagesBefore(parsed.program, parsed)
+	}
+	return false
 }
 
 // DiffNotYetStaged reports that `git diff HEAD`, not --cached, is the honest source.
@@ -247,18 +212,17 @@ func DiffNotYetStaged(cmd string) bool {
 // stages tracked files only, so untracked paths would be code that never lands, while
 // `git add` may stage anything. Only the add form opts into untracked files.
 func DiffSources(cmd string) (stagedOnly, includeUntracked bool) {
-	stages := StagesBeforeCommit(cmd)
-	return !(CommitsAllTracked(cmd) || stages), stages
+	if parsed, err := parseCommit(cmd, ""); err == nil && parsed != nil {
+		stages := parsedStagesBefore(parsed.program, parsed)
+		return !(parsed.commitsAllTracked() || stages), stages
+	}
+	return true, false
 }
 
 // heredocStartRe matches only the fixed head of a heredoc, `<<` through the tag. The
 // closer needs a backreference to the tag, which RE2 cannot express at all, so the
 // body scan below is hand-rolled.
 var heredocStartRe = regexp.MustCompile(`^<<(-?)[ \t]*(['"]?)(\w+)`)
-
-// writesHeredocRe is the first half of WritesAFile: a heredoc operator. RE2 handles
-// this half unchanged.
-var writesHeredocRe = regexp.MustCompile(`<<-?\s*['"]?\w`)
 
 // WritesAFile reports a heredoc or a `>`/`>>` redirect in the command.
 //
@@ -267,36 +231,10 @@ var writesHeredocRe = regexp.MustCompile(`<<-?\s*['"]?\w`)
 // ordinary prose puts in a `-m` message. A false positive costs one paragraph, so the
 // scan errs toward matching.
 func WritesAFile(cmd string) bool {
-	if writesHeredocRe.MatchString(cmd) {
-		return true
-	}
-	for i := 0; i < len(cmd); i++ {
-		if cmd[i] != '>' {
-			continue
-		}
-		run := 0
-		for i+run < len(cmd) && cmd[i+run] == '>' {
-			run++
-		}
-		if !redirectPrevOK(cmd, i) {
-			i += run - 1
-			continue
-		}
-		// A run of two or more always matches: the two-char form may be blocked by a
-		// following `&`, but the one-char form then sees a `>` next, which is not `&`.
-		if run >= 2 || i+1 >= len(cmd) || cmd[i+1] != '&' {
-			return true
-		}
-		i += run - 1
+	if program, err := shellsyntax.Parse(cmd); err == nil {
+		return parsedWritesFile(program)
 	}
 	return false
-}
-
-func redirectPrevOK(cmd string, i int) bool {
-	if i == 0 {
-		return true
-	}
-	return !strings.ContainsRune("0123456789<>&=-", rune(cmd[i-1]))
 }
 
 // heredoc is one `<<TAG ... TAG` block found in the command text.
@@ -379,27 +317,7 @@ func findCloser(cmd string, from int, tag string) int {
 	return -1
 }
 
-// WrittenHeredoc returns the heredoc body this command redirects into `token`.
-//
-// The redirect must sit in the heredoc's OWN command segment, not merely on the same line:
-// in `echo x > msg.txt && python3 - <<PY ... PY` the write belongs to `echo`.
-func WrittenHeredoc(cmd, token string) (string, bool) {
-	redirect := regexp.MustCompile(`>\s*` + regexp.QuoteMeta(token) + `(\s|$)`)
-	for _, doc := range findHeredocs(cmd) {
-		if redirect.MatchString(segment(cmd, doc.start)) {
-			return doc.body, true
-		}
-	}
-	return "", false
-}
-
 var segmentOpRe = regexp.MustCompile(`&&|\|\||;|\|`)
-
-// segment is the one shell command around `pos`, cut at the operators bounding it.
-func segment(cmd string, pos int) string {
-	start, end := segmentBounds(cmd, pos)
-	return cmd[start:end]
-}
 
 // segmentBounds is that same command as a byte range, so a caller can also read the
 // operator the segment was cut at.
@@ -425,69 +343,17 @@ func segmentBounds(cmd string, pos int) (int, int) {
 
 const messageNotFound = "(not recoverable from the command line — judge the diff alone)"
 
-var (
-	dashFStdinRe = regexp.MustCompile(`-F\s+-|--file[= ]-`)
-	dashFPathRe  = regexp.MustCompile(`-F\s+(\S+)`)
-)
-
 // ExtractMessage recovers the commit message, best effort. Absence is not fatal — the
 // diff carries the review. Order matters: -F and -m may both appear, and a heredoc
 // body is the convention in this repo's own commits.
 func ExtractMessage(cmd, cwd string) string {
-	if body, ok := dashMMessage(cmd); ok {
-		return body
-	}
-	if dashFStdinRe.MatchString(cmd) {
-		// From the commit onward: an earlier `python3 - <<PY` in the same command
-		// belongs to that command, not to the message git reads from stdin.
-		from := CommitSpan(cmd).Start
-		for _, doc := range findHeredocs(cmd) {
-			if doc.start >= from {
-				return doc.body
-			}
+	if parsed, err := parseCommit(cmd, cwd); err == nil && parsed != nil {
+		if message, ok := parsed.message(); ok {
+			return message
 		}
-	}
-	if m := dashFPathRe.FindStringSubmatch(cmd); m != nil {
-		token := strings.Trim(m[1], `'"`)
-		// The heredoc beats the file: a command that writes the path it is about to
-		// commit leaves nothing on disk to read when a deny stops it.
-		if body, ok := WrittenHeredoc(cmd, token); ok {
-			return body
-		}
-		if raw, err := os.ReadFile(filepath.Join(cwd, token)); err == nil {
-			text := string(raw)
-			if len(text) > 4000 {
-				text = text[:4000]
-			}
-			return text
-		}
+		return messageNotFound
 	}
 	return messageNotFound
-}
-
-// dashMMessage is `-m\s+(['"])(.*?)\1` hand-rolled: the closing quote is a
-// backreference to the opening one, which RE2 cannot express. Leftmost `-m` whose
-// quote actually closes wins, matching the regex engine's own backtracking.
-func dashMMessage(cmd string) (string, bool) {
-	for i := 0; i+2 < len(cmd); i++ {
-		if cmd[i] != '-' || cmd[i+1] != 'm' {
-			continue
-		}
-		pos := i + 2
-		if pos >= len(cmd) || !isSpace(cmd[pos]) {
-			continue
-		}
-		pos = skipSpace(cmd, pos)
-		if pos >= len(cmd) || (cmd[pos] != '\'' && cmd[pos] != '"') {
-			continue
-		}
-		quote := cmd[pos]
-		body := cmd[pos+1:]
-		if end := strings.IndexByte(body, quote); end >= 0 {
-			return body[:end], true
-		}
-	}
-	return "", false
 }
 
 // docSinkRe is a `>`/`>>` redirect to a path. The excluded previous bytes drop `2>&1`

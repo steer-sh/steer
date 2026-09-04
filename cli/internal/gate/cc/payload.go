@@ -117,6 +117,15 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, stdin io.
 			cwd = wd
 		}
 	}
+	if reason := AmbiguousShellReason(cmd, cwd); reason != "" {
+		out, _ := Render(gate.Decision{Kind: gate.Deny, Reason: reason,
+			SystemMessage: AmbiguousShellReceipt})
+		encoded, err := json.Marshal(out)
+		if err == nil {
+			_, _ = stdout.Write(append(encoded, '\n'))
+		}
+		return
+	}
 	repo := RepoDir(cmd, cwd)
 
 	engine := gate.NewEngine(cfg, reviewer)
@@ -139,7 +148,7 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, stdin io.
 		Channel:   gate.ChannelPreToolUse,
 		SessionID: session,
 		Spec:      spec,
-		Message:   ExtractMessage(cmd, repo),
+		Message:   ExtractMessage(cmd, cwd),
 		RerunNote: rerunNote(cmd),
 		RowExtra:  rowExtra,
 		LedgerHook: func(row gate.Row, state gate.ChainState) {

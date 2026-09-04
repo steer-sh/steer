@@ -44,7 +44,14 @@ func TestShellRunsProgramSeparatesRunnersFromReaders(t *testing.T) {
 		{"nice -n 10 cat test.sh", false},
 		{"cat {a,b}/deploy.sh", false},
 		{"TEST_FILTER=\"test auth\" pytest", true},
+		{`TEST_FILTER="$1" pytest`, true},
+		{`CI=$CI_FLAG go test ./...`, true},
 		{"CFLAGS=\"-O2 -g\" make test", true},
+		{"(go test ./...)", true},
+		{"echo $(go test ./...)", true},
+		{"echo \"go test ./...\"", false},
+		{"git commit -m \"go test passes\"", false},
+		{"go test ./... | sed -n '1,20p'", true},
 		{"", false},
 	}
 	for _, c := range cases {

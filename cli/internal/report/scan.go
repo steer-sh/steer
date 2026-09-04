@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/steer-sh/steer-cli/internal/harness"
+	"github.com/steer-sh/steer-cli/internal/shellsyntax"
 	"github.com/steer-sh/steer-cli/internal/transcript"
 )
 
@@ -179,6 +180,8 @@ func hookBlockSnippet(text, lower string) string {
 // drift rather than as an effect of the intervention.
 func ParserInstrument() string {
 	h := sha256.New()
+	h.Write([]byte(shellsyntax.Instrument))
+	h.Write([]byte{0})
 	for _, p := range correctionPatterns {
 		h.Write([]byte(p.String()))
 		h.Write([]byte{0})
