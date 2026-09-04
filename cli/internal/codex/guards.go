@@ -139,20 +139,12 @@ func (Registrar) RemoveMaster(scope string) error {
 	return err
 }
 
-func (Registrar) AppendRule(rule, scope string) error {
+func (Registrar) SetRules(rules []string, scope string) error {
 	path, err := InstructionFile(scope, ".")
 	if err != nil {
 		return err
 	}
-	return instructions.AppendRule(path, rule)
-}
-
-func (Registrar) RemoveRule(rule, scope string) error {
-	path, err := InstructionFile(scope, ".")
-	if err != nil {
-		return err
-	}
-	return instructions.RemoveRule(path, rule)
+	return instructions.SetRules(path, rules)
 }
 
 func (Registrar) InstructionPath(scope string) (string, error) {

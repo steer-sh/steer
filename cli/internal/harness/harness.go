@@ -134,11 +134,11 @@ type Registrar interface {
 	RegisterMaster(scope string) error
 	// RemoveMaster takes the master guard hook back out.
 	RemoveMaster(scope string) error
-	// AppendRule adds a rule to the harness's instruction document.
-	AppendRule(rule, scope string) error
-	// RemoveRule takes one rule line back out.
-	RemoveRule(rule, scope string) error
-	// InstructionPath names the document AppendRule writes to, so a verifier can
+	// SetRules replaces the managed rules section of the harness's instruction
+	// document with exactly these rules. The lifecycle derives the set from the
+	// manifest, so no caller has to remember the text of a rule it is replacing.
+	SetRules(rules []string, scope string) error
+	// InstructionPath names the document SetRules writes to, so a verifier can
 	// read back what was written.
 	InstructionPath(scope string) (string, error)
 	// MasterRegistered reports whether this harness's configuration currently

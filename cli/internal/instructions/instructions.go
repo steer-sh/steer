@@ -16,13 +16,12 @@ const (
 	managedByComment = "<!-- managed-by-steer -->"
 )
 
-// AppendRule adds a rule under the Steer Rules section of the document at path,
-// creating the section, and the file, when either is absent.
-func AppendRule(path, rule string) error {
-	rule = strings.TrimSpace(rule)
-	if rule == "" {
-		return fmt.Errorf("rule cannot be empty")
-	}
+// SetRules replaces the Steer Rules section of the document at path with
+// exactly these rules, creating the section, and the file, when either is
+// absent. An empty set removes the section. A line written by hand inside the
+// section does not survive; the section is Steer's, as the marker says.
+func SetRules(path string, rules []string) error {
+	wanted := normalizeRules(rules)
 
 	if dir := filepath.Dir(path); dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -37,15 +36,12 @@ func AppendRule(path, rule string) error {
 		return fmt.Errorf("failed to read %s: %w", path, err)
 	}
 
-	updated, changed := appendRuleContent(content, rule)
+	updated, changed := setRulesContent(content, wanted)
 	if !changed {
 		return nil
 	}
 
-	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
-		return fmt.Errorf("failed to write %s: %w", path, err)
-	}
-	return nil
+	return writeAtomic(path, []byte(updated))
 }
 
 // HasRule reports whether the Steer Rules section of the document at path
@@ -62,38 +58,47 @@ func HasRule(path, rule string) (bool, error) {
 		}
 		return false, fmt.Errorf("failed to read %s: %w", path, err)
 	}
-	_, changed := appendRuleContent(string(data), rule)
-	return !changed, nil
-}
-
-// RemoveRule removes an exact rule line from the Steer Rules section. A missing
-// file, section or line is not an error.
-func RemoveRule(path, rule string) error {
-	rule = strings.TrimSpace(rule)
-	if rule == "" {
-		return nil
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	start, end := findSteerSection(lines)
+	if start == -1 {
+		return false, nil
 	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
+	ruleLine := "- " + rule
+	for i := start + 1; i < end; i++ {
+		if strings.TrimSpace(lines[i]) == ruleLine {
+			return true, nil
 		}
-		return fmt.Errorf("failed to read %s: %w", path, err)
 	}
-
-	updated, changed := removeRuleContent(string(data), rule)
-	if !changed {
-		return nil
-	}
-
-	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
-		return fmt.Errorf("failed to write %s: %w", path, err)
-	}
-	return nil
+	return false, nil
 }
 
-func appendRuleContent(content, rule string) (string, bool) {
+func normalizeRules(rules []string) []string {
+	out := make([]string, 0, len(rules))
+	seen := make(map[string]struct{}, len(rules))
+	for _, rule := range rules {
+		rule = strings.TrimSpace(rule)
+		if rule == "" {
+			continue
+		}
+		if _, ok := seen[rule]; ok {
+			continue
+		}
+		seen[rule] = struct{}{}
+		out = append(out, rule)
+	}
+	return out
+}
+
+func sectionLines(rules []string) []string {
+	lines := make([]string, 0, len(rules)+2)
+	lines = append(lines, steerRulesHeader, managedByComment)
+	for _, rule := range rules {
+		lines = append(lines, "- "+rule)
+	}
+	return lines
+}
+
+func setRulesContent(content string, rules []string) (string, bool) {
 	trimmed := strings.TrimRight(content, "\n")
 	lines := strings.Split(trimmed, "\n")
 	if trimmed == "" {
@@ -101,62 +106,72 @@ func appendRuleContent(content, rule string) (string, bool) {
 	}
 
 	start, end := findSteerSection(lines)
-	if start == -1 {
-		if trimmed != "" {
-			trimmed += "\n\n"
+
+	var kept []string
+	switch {
+	case start == -1 && len(rules) == 0:
+		return content, false
+	case start == -1:
+		kept = append(kept, lines...)
+		if len(kept) > 0 {
+			kept = append(kept, "")
 		}
-		trimmed += steerRulesHeader + "\n"
-		trimmed += managedByComment + "\n"
-		trimmed += "- " + rule + "\n"
-		return trimmed, true
+		kept = append(kept, sectionLines(rules)...)
+	default:
+		kept = append(kept, lines[:start]...)
+		if len(rules) > 0 {
+			kept = append(kept, sectionLines(rules)...)
+			if end < len(lines) {
+				kept = append(kept, "")
+			}
+		} else {
+			kept = trimTrailingBlanks(kept)
+			if len(kept) > 0 && end < len(lines) {
+				kept = append(kept, "")
+			}
+		}
+		kept = append(kept, lines[end:]...)
 	}
 
-	ruleLine := "- " + rule
-	for i := start + 1; i < end; i++ {
-		if strings.TrimSpace(lines[i]) == ruleLine {
-			return ensureTrailingNewline(strings.Join(lines, "\n")), false
-		}
+	updated := ensureTrailingNewline(strings.Join(kept, "\n"))
+	if updated == content {
+		return content, false
 	}
-
-	if start+1 >= len(lines) || strings.TrimSpace(lines[start+1]) != managedByComment {
-		lines = insertLine(lines, start+1, managedByComment)
-		if end >= start+1 {
-			end++
-		}
-	}
-
-	lines = insertLine(lines, end, ruleLine)
-	return ensureTrailingNewline(strings.Join(lines, "\n")), true
+	return updated, true
 }
 
-func removeRuleContent(content, rule string) (string, bool) {
-	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
-	if len(lines) == 1 && lines[0] == "" {
-		return content, false
+func trimTrailingBlanks(lines []string) []string {
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
 	}
+	return lines
+}
 
-	start, end := findSteerSection(lines)
-	if start == -1 {
-		return content, false
+// writeAtomic replaces path through a temporary file in the same directory, so a
+// failed write leaves the document's own prose whole.
+func writeAtomic(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".steer-*")
+	if err != nil {
+		return fmt.Errorf("failed to write %s: %w", path, err)
 	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
 
-	ruleLine := "- " + rule
-	kept := make([]string, 0, len(lines))
-	removed := false
-
-	for i, line := range lines {
-		if i > start && i < end && strings.TrimSpace(line) == ruleLine {
-			removed = true
-			continue
-		}
-		kept = append(kept, line)
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return fmt.Errorf("failed to write %s: %w", path, err)
 	}
-
-	if !removed {
-		return content, false
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("failed to write %s: %w", path, err)
 	}
-
-	return ensureTrailingNewline(strings.Join(kept, "\n")), true
+	if err := os.Chmod(tmpName, 0o644); err != nil {
+		return fmt.Errorf("failed to write %s: %w", path, err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("failed to write %s: %w", path, err)
+	}
+	return nil
 }
 
 func findSteerSection(lines []string) (int, int) {
@@ -181,21 +196,6 @@ func findSteerSection(lines []string) (int, int) {
 	}
 
 	return start, end
-}
-
-func insertLine(lines []string, idx int, line string) []string {
-	if idx < 0 {
-		idx = 0
-	}
-	if idx > len(lines) {
-		idx = len(lines)
-	}
-
-	out := make([]string, 0, len(lines)+1)
-	out = append(out, lines[:idx]...)
-	out = append(out, line)
-	out = append(out, lines[idx:]...)
-	return out
 }
 
 func ensureTrailingNewline(content string) string {

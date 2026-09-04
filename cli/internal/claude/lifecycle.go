@@ -227,21 +227,8 @@ func InstallManagedHook(scope string, input InstallManagedHookInput, targets ...
 		return nil, err
 	}
 
-	ruleReplaced := manifestExists && strings.TrimSpace(existingEntry.Rule) != "" &&
-		NormalizeRule(existingEntry.Rule) != NormalizeRule(rule)
-
-	for _, target := range harness.Targets(targets, Registrar{}) {
-		if err := target.RegisterMaster(scope); err != nil {
-			return nil, err
-		}
-		if ruleReplaced {
-			if err := target.RemoveRule(existingEntry.Rule, scope); err != nil {
-				return nil, err
-			}
-		}
-		if err := target.AppendRule(rule, scope); err != nil {
-			return nil, err
-		}
+	if err := SyncTargets(scope, targets...); err != nil {
+		return nil, err
 	}
 
 	return &InstallManagedHookResult{
@@ -299,6 +286,13 @@ func RemoveManagedHook(scope, identifier string, targets ...harness.Registrar) (
 			hookPath = filepath.Join(hooksDir, hookName+".py")
 		}
 		if _, statErr := os.Stat(hookPath); os.IsNotExist(statErr) && !hasEntry {
+			// The store no longer names this hook, which is also what a removal
+			// interrupted after the manifest write leaves behind. Sync first, so
+			// the retry finishes the harness half it could not reach, then report
+			// the hook as gone.
+			if syncErr := SyncTargets(scope, targets...); syncErr != nil {
+				return nil, syncErr
+			}
 			return nil, fmt.Errorf("hook not found: %s", identifier)
 		}
 	}
@@ -319,26 +313,8 @@ func RemoveManagedHook(scope, identifier string, targets ...harness.Registrar) (
 		return nil, err
 	}
 
-	remaining, err := ListIndividualHooks(scope)
-	if err != nil {
+	if err := SyncTargets(scope, targets...); err != nil {
 		return nil, err
-	}
-
-	for _, target := range harness.Targets(targets, Registrar{}) {
-		if strings.TrimSpace(rule) != "" {
-			if err := target.RemoveRule(rule, scope); err != nil {
-				return nil, err
-			}
-		}
-		if len(remaining) == 0 {
-			if err := target.RemoveMaster(scope); err != nil {
-				return nil, err
-			}
-			continue
-		}
-		if err := target.RegisterMaster(scope); err != nil {
-			return nil, err
-		}
 	}
 
 	return &RemoveManagedHookResult{

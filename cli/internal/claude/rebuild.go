@@ -108,8 +108,16 @@ func RebuildMaster(scope string, targets ...harness.Registrar) (*RebuildResult, 
 		result.Stamp = stamp
 	}
 
+	rules, err := ManifestRules(scope)
+	if err != nil {
+		return nil, err
+	}
+
 	for i, target := range list {
 		row := RebuildTarget{Harness: target.Harness(), Previous: previous[i]}
+		if err := target.SetRules(rules, scope); err != nil {
+			return nil, err
+		}
 		if len(hooks) == 0 {
 			if err := target.RemoveMaster(scope); err != nil {
 				return nil, err

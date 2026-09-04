@@ -18,9 +18,7 @@ func (Registrar) RegisterMaster(scope string) error { return RegisterMasterHook(
 
 func (Registrar) RemoveMaster(scope string) error { return RemoveMasterHook(scope) }
 
-func (Registrar) AppendRule(rule, scope string) error { return AppendRule(rule, scope) }
-
-func (Registrar) RemoveRule(rule, scope string) error { return RemoveRule(rule, scope) }
+func (Registrar) SetRules(rules []string, scope string) error { return SetRules(rules, scope) }
 
 func (Registrar) InstructionPath(scope string) (string, error) { return GetClaudeMDFile(scope) }
 

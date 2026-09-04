@@ -19,8 +19,9 @@ var hooksCmd = &cobra.Command{
 var hooksRebuildCmd = &cobra.Command{
 	Use:   "rebuild",
 	Short: "Regenerate the master hook from the installed guards and re-register it",
-	Long: `rebuild regenerates steer-hooks.py from the guards in the store and
-re-registers it in every target harness, as one operation.
+	Long: `rebuild regenerates steer-hooks.py from the guards in the store,
+re-registers it in every target harness, and rewrites each harness's managed
+rules section from the manifest, as one operation.
 
 A store keeps whatever runtime it was last built with, so a master written by an
 older steer records fewer audit fields than the guards it runs deserve. Upgrading
@@ -29,7 +30,11 @@ mutates the store.
 
 Rebuilding migrates a legacy store to the neutral one, which moves the master's
 path. Re-registration is part of this command for that reason: the harness has to
-be pointed at the file that was just written.`,
+be pointed at the file that was just written.
+
+It is also the repair for an install or a removal that stopped part way through
+the harnesses: the manifest names every rule, so the section is rewritten rather
+than patched.`,
 	Example: `  steer hooks rebuild --scope global
   steer hooks rebuild --scope global --all-harnesses`,
 	RunE: func(cmd *cobra.Command, args []string) error {
