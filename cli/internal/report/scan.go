@@ -118,8 +118,8 @@ func (c *Classifier) toolResult(e transcript.Event) (Signal, bool) {
 	case strings.Contains(lower, "doesn't want to proceed") || strings.Contains(lower, "user rejected"):
 		key := call.Name + ": " + call.Target
 		return Signal{kindRejection, key, key}, true
-	case e.IsError && strings.Contains(lower, "hook") && (strings.Contains(lower, "block") || strings.Contains(lower, "denied")):
-		snippet := matchLine(text, strings.Index(lower, "hook"))
+	case e.IsError && isHookBlock(lower):
+		snippet := hookBlockSnippet(text, lower)
 		return Signal{kindHookBlock, snippet, snippet}, true
 	// Only a command that RUNS a program can report a lint, test or compile
 	// failure of its own. A reader prints somebody else's text, and a shell call
@@ -144,6 +144,36 @@ func (c *Classifier) toolResult(e transcript.Event) (Signal, bool) {
 	return Signal{}, false
 }
 
+// steerFooter is the marker every steer guard appends to its deny reason. Only
+// Claude Code and Codex wrap that reason in a sentence of their own carrying
+// "blocked" or "denied"; Pi passes it through untouched.
+const steerFooter = "steer hook: "
+
+func isHookBlock(lower string) bool {
+	if strings.Contains(lower, steerFooter) {
+		return true
+	}
+	return strings.Contains(lower, "hook") &&
+		(strings.Contains(lower, "block") || strings.Contains(lower, "denied"))
+}
+
+// hookBlockSnippet keys on the guard's own footer where there is one. A
+// harness's wrapper sentence is the same for every guard, so keying on that
+// collapses each harness's blocks into one cluster naming no cause.
+func hookBlockSnippet(text, lower string) string {
+	i := strings.Index(lower, steerFooter)
+	if i < 0 {
+		return matchLine(text, strings.Index(lower, "hook"))
+	}
+	// The footer's own line carries the removal command, and Codex appends the
+	// blocked command to it. Both vary per call, so the key stops at the name.
+	line := matchLine(text, i)
+	if cut := strings.Index(line, " · "); cut >= 0 {
+		line = line[:cut]
+	}
+	return line
+}
+
 // ParserInstrument identifies the classifier that produced a set of signals. A record
 // stores it at registration, so a later change to these patterns reads as instrument
 // drift rather than as an effect of the intervention.
@@ -163,7 +193,7 @@ func ParserInstrument() string {
 	}
 	h.Write([]byte("rejection:doesn't want to proceed|user rejected"))
 	h.Write([]byte{0})
-	h.Write([]byte("hookblock:hook+block|denied"))
+	h.Write([]byte("hookblock:steer-footer-to-name|hook+block|denied,key-on-footer"))
 	return "scan-" + hex.EncodeToString(h.Sum(nil))[:12]
 }
 

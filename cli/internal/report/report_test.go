@@ -168,6 +168,67 @@ func TestScannerAttributesToolSignals(t *testing.T) {
 	}
 }
 
+// A harness wraps a guard's reason in a sentence of its own — Codex does, Pi
+// does not — and that sentence is the same for every guard, so it must not
+// reach the key. These are the wrappings, not one harness each: Claude Code
+// discards the reason outright and its result carries no footer to key on.
+func TestHookBlockKeyIgnoresTheHarnessWrapping(t *testing.T) {
+	const footer = "\n\n— steer hook: python3-not-python-hook · remove: steer remove python3-not-python-hook"
+	reason := "Bare `python` invocation detected in a Bash command." + footer
+
+	dir := t.TempDir()
+	tf := writeTranscript(t, dir, "s.jsonl", []string{
+		toolUseEntry("s1", "t1", "Bash", "python -c 'print(1)'"),
+		toolResultEntry("s1", "t1", "Hook PreToolUse:Bash denied this tool\n"+reason, true),
+		toolUseEntry("s1", "t2", "Bash", "python -c 'print(2)'"),
+		toolResultEntry("s1", "t2", reason, true),
+		toolUseEntry("s1", "t3", "Bash", "python -c 'print(3)'"),
+		toolResultEntry("s1", "t3", "Script failed\nScript error:\nCommand blocked by PreToolUse hook: "+reason, true),
+	})
+
+	s := NewScanner(time.Time{})
+	if err := s.ScanSession(cc.New(), tf); err != nil {
+		t.Fatal(err)
+	}
+	d := s.Finalize(30, nil, nil)
+
+	if len(d.Signals.HookBlocks) != 1 {
+		t.Fatalf("expected the three wrappings to share one cluster, got %+v", d.Signals.HookBlocks)
+	}
+	if got := d.Signals.HookBlocks[0].Count; got != 3 {
+		t.Errorf("cluster count = %d; want 3", got)
+	}
+	// The pattern is the normalized cluster key, so the guard's name reaches it
+	// with its hyphens dropped.
+	if !strings.Contains(d.Signals.HookBlocks[0].Pattern, "python3 not python hook") {
+		t.Errorf("cluster key names no guard: %q", d.Signals.HookBlocks[0].Pattern)
+	}
+}
+
+// Claude Code records a block as its wrapper sentence alone, dropping the
+// guard's reason and with it the footer. The fallback test is what keeps that
+// block a signal at all, and its key can name no guard.
+func TestHookBlockKeepsTheFooterlessClaudeWrapper(t *testing.T) {
+	dir := t.TempDir()
+	tf := writeTranscript(t, dir, "s.jsonl", []string{
+		toolUseEntry("s1", "t1", "Bash", "python -c 'print(1)'"),
+		toolResultEntry("s1", "t1", "Hook PreToolUse:Bash denied this tool", true),
+	})
+
+	s := NewScanner(time.Time{})
+	if err := s.ScanSession(cc.New(), tf); err != nil {
+		t.Fatal(err)
+	}
+	d := s.Finalize(30, nil, nil)
+
+	if len(d.Signals.HookBlocks) != 1 {
+		t.Fatalf("expected the wrapper alone to stay a hook block, got %+v", d.Signals.HookBlocks)
+	}
+	if strings.Contains(d.Signals.HookBlocks[0].Pattern, "steer hook") {
+		t.Errorf("key claims a footer the result never carried: %q", d.Signals.HookBlocks[0].Pattern)
+	}
+}
+
 func TestDigestEvictionRespectsBudget(t *testing.T) {
 	d := NewDigest(30)
 	for i := 0; i < 200; i++ {

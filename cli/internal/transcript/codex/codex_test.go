@@ -303,11 +303,18 @@ func TestFailedExitReadsTheHeaderNotTheCommandOutput(t *testing.T) {
 		// A marker that never starts a line is text, not a status line.
 		{"marker mid-line", "Command: /bin/zsh -lc 'echo'\nOutput:\nsaw Process exited with code 3 in the log", false},
 		{"no marker", "Script completed\nWall time 1.3 seconds", false},
+		// A hook block, an apply_patch rejection and a wrapper syntax error all
+		// reach no process, so Codex writes this header and no exit code.
+		{"blocked call", "Script failed\nWall time 0.1 seconds\nOutput:\nScript error:\nCommand blocked by PreToolUse hook: use python3", true},
+		{"failed marker mid-line", "Script completed\nOutput:\nthe log says Script failed once", false},
+		// A command that prints the marker is quoting it, not failing: the header
+		// opens the result, so a later line carrying it belongs to the output.
+		{"failed marker opens an output line", "Command: /bin/zsh -lc 'cat log'\nProcess exited with code 0\nOutput:\nScript failed", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := failedExit(tc.text); got != tc.want {
-				t.Errorf("failedExit = %v; want %v", got, tc.want)
+			if got := resultFailed(tc.text); got != tc.want {
+				t.Errorf("resultFailed = %v; want %v", got, tc.want)
 			}
 		})
 	}

@@ -163,6 +163,13 @@ type contentItem struct {
 // read a line of the command's own output as the process's exit status.
 const exitMarker = "Process exited with code "
 
+// failedMarker opens a result for a call that never reached a process: a hook
+// block, an apply_patch rejection, a syntax error in the exec wrapper. Codex
+// writes no exit-code line for those, so the exit code alone reads them as
+// successes. It is matched at the very start of the text, not at the start of
+// any line: a command that prints it is quoting, not failing.
+const failedMarker = "Script failed"
+
 // Stream normalizes one rollout file.
 func (a Adapter) Stream(s transcript.Session, f transcript.Filter, emit func(transcript.Event) error) (transcript.Counts, error) {
 	st := &streamState{filter: f, emit: emit}
@@ -317,7 +324,7 @@ func (st *streamState) toolCall(p payload, base transcript.Event) error {
 func (st *streamState) toolResult(p payload, base transcript.Event) error {
 	base.Kind, base.ToolUseID = transcript.KindToolResult, p.CallID
 	base.Text = outputText(p.Output)
-	base.IsError = failedExit(base.Text)
+	base.IsError = resultFailed(base.Text)
 	return st.emit(base)
 }
 
@@ -419,10 +426,12 @@ func itemText(items []contentItem) string {
 	return strings.Join(parts, "\n")
 }
 
-// failedExit reads the exit-code header Codex writes into a shell result. A
-// result carrying no header is not an error: Codex reports failure only this
-// way, so absence means the tool never ran a process.
-func failedExit(text string) bool {
+// resultFailed reads the headers Codex writes above a tool result: an exit code
+// for a call that reached a process, and failedMarker for one that did not.
+func resultFailed(text string) bool {
+	if strings.HasPrefix(text, failedMarker) {
+		return true
+	}
 	i := lineIndex(text, exitMarker)
 	if i < 0 {
 		return false
