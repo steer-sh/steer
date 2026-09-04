@@ -16,19 +16,20 @@ SAFE_VALUE_INDICATORS = [
     'fake', 'test_key', 'sample', 'changeme', 'insert', '<your',
 ]
 
-# Patterns that indicate the key is loaded from a secure source
+# Patterns that identify the exact expression loaded from a secure source. A match
+# elsewhere on the same line must still be checked (for example, a fallback literal).
 SECURE_REFERENCE_PATTERNS = [
-    r'process\.env\b',
-    r'os\.getenv\s*\(',
-    r'os\.environ\b',
-    r'env\s*\(\s*["\']',
-    r'config\.\w+',
-    r'settings\.\w+',
-    r'secrets\.get',
-    r'vault\.',
-    r'getenv\s*\(',
-    r'System\.getenv\s*\(',
-    r'ENV\s*\[',
+    r'''process\.env(?:\.\w+|\s*\[\s*["\'][^"\']+["\']\s*\])''',
+    r'''os\.getenv\s*\(\s*["\'][^"\']+["\']\s*\)''',
+    r'''os\.environ(?:\.\w+|\s*\[\s*["\'][^"\']+["\']\s*\])''',
+    r'''(?<![.\w])env\s*\(\s*["\'][^"\']+["\']\s*\)''',
+    r'''config\.\w+''',
+    r'''settings\.\w+''',
+    r'''secrets\.get\s*\(\s*["\'][^"\']+["\']\s*\)''',
+    r'''vault\.\w+''',
+    r'''(?<![.\w])getenv\s*\(\s*["\'][^"\']+["\']\s*\)''',
+    r'''System\.getenv\s*\(\s*["\'][^"\']+["\']\s*\)''',
+    r'''ENV\s*\[\s*["\'][^"\']+["\']\s*\]''',
 ]
 
 # API key patterns: (description, regex, min_entropy_length)
@@ -67,16 +68,18 @@ API_KEY_PATTERNS = [
 # Variable name patterns that suggest a secret is being assigned
 SECRET_VAR_PATTERN = re.compile(
     r'''(?:api[_-]?key|api[_-]?secret|secret[_-]?key|access[_-]?key|auth[_-]?token|'''
-    r'''private[_-]?key|password|passwd|credential)\s*[:=]\s*["\'][A-Za-z0-9+/=\-_]{16,}["\']''',
+    r'''private[_-]?key|password|passwd|credential)\s*[:=]\s*["\']'''
+    r'''(?P<value>[A-Za-z0-9+/=\-_]{16,})["\']''',
     re.IGNORECASE
 )
 
 
-def line_has_secure_reference(line):
-    """Check if the line loads the value from a secure source."""
+def match_is_secure_reference(line, match):
+    """Return whether this match is contained by a secure-reference expression."""
     for pattern in SECURE_REFERENCE_PATTERNS:
-        if re.search(pattern, line):
-            return True
+        for secure_match in re.finditer(pattern, line, re.IGNORECASE):
+            if secure_match.start() <= match.start() and match.end() <= secure_match.end():
+                return True
     return False
 
 
@@ -101,23 +104,19 @@ def check_content(content_to_check):
         if is_in_comment(line):
             continue
 
-        # Skip lines that reference secure sources
-        if line_has_secure_reference(line):
-            continue
-
         # Check each API key pattern
         for pattern, description in API_KEY_PATTERNS:
-            match = re.search(pattern, line)
-            if match and description:  # Skip patterns with None description (too generic)
+            for match in re.finditer(pattern, line):
+                if not description:  # Skip patterns with None description (too generic)
+                    continue
                 matched_text = match.group(0)
-                if not value_is_placeholder(matched_text):
+                if (not value_is_placeholder(matched_text)
+                        and not match_is_secure_reference(line, match)):
                     return True, description
 
         # Check for secret variable assignments
-        match = SECRET_VAR_PATTERN.search(line)
-        if match:
-            matched_text = match.group(0)
-            if not value_is_placeholder(matched_text) and not line_has_secure_reference(line):
+        for match in SECRET_VAR_PATTERN.finditer(line):
+            if not value_is_placeholder(match.group('value')):
                 return True, 'Hardcoded secret in variable assignment'
 
     return False, None
