@@ -52,10 +52,19 @@ type group struct {
 	Items []ScoredIntervention
 }
 
-// flagged is a set of queued interventions sharing one action, keyed by its heading.
+// note is one row of an action group that is not an intervention: a count of
+// unresolved work plus the command that clears it.
+type note struct {
+	Label string
+	Text  string
+	Fix   string
+}
+
+// flagged is a set of queued rows sharing one action, keyed by its heading.
 type flagged struct {
 	Key   string
 	Items []cadence.Intervention
+	Notes []note
 }
 
 // view is the precomputed render model. The template does layout only; every
@@ -69,10 +78,23 @@ type view struct {
 	Ledger    []ScoredIntervention
 	Tiers     []group
 	Quiet     bool
+	Readiness *Readiness
+	Host      string
+}
+
+// Export carries what the page shows beyond the snapshot. Readiness is derived from
+// THIS process at export time — the reviewer probe reads this process's PATH — so it
+// stays out of the SystemStatus contract and rides here instead, next to the host
+// that produced it. A caller that cannot answer passes the zero value.
+type Export struct {
+	// Readiness is the short answer, or nil to render no Answer section.
+	Readiness *Readiness
+	// Host names the machine that produced the answer.
+	Host string
 }
 
 // RenderHTML writes the snapshot as one self-contained HTML page.
-func (s *SystemStatus) RenderHTML(w io.Writer) error {
+func (s *SystemStatus) RenderHTML(w io.Writer, x Export) error {
 	rate := s.Rate
 	tmpl, err := template.New("dashboard.html.tmpl").Funcs(template.FuncMap{
 		"pct":   pct,
@@ -102,15 +124,16 @@ func (s *SystemStatus) RenderHTML(w io.Writer) error {
 		"resolves":  ResolvePhrase,
 		"observed":  ObservedPhrase,
 		"mobserved": MasterObservedPhrase,
+		"retire":    RetireCommand,
 	}).ParseFS(templateFS, "templates/dashboard.html.tmpl")
 	if err != nil {
 		return fmt.Errorf("failed to parse the dashboard template: %w", err)
 	}
-	return tmpl.Execute(w, buildView(s))
+	return tmpl.Execute(w, buildView(s, x))
 }
 
 // buildView precomputes every grouping and headline the page shows.
-func buildView(s *SystemStatus) *view {
+func buildView(s *SystemStatus, x Export) *view {
 	active, refused := 0, 0
 	measured := 0
 	for _, it := range s.Interventions {
@@ -130,10 +153,15 @@ func buildView(s *SystemStatus) *view {
 		Status:    s,
 		Generated: s.GeneratedAt,
 		Ledger:    sortedLedger(s.Interventions),
-		Attention: attentionGroups(s.Attention.Interventions, s.Rate),
+		Attention: attentionGroups(s.Attention.Interventions, s.Rate, s.Posture.Unresolved),
 		Tiers:     tierGroups(s.Interventions),
-		Quiet: len(s.Attention.Interventions) == 0 &&
-			len(s.Attention.Candidates) == 0 && len(s.Attention.Unscored) == 0,
+		// A row that owes an adjudication is unresolved work, and it is the reason a
+		// window reads evidence-incomplete. A page calling the loop quiet beside a
+		// chip counting those rows contradicts itself.
+		Quiet: len(s.Attention.Interventions) == 0 && len(s.Attention.Candidates) == 0 &&
+			len(s.Attention.Unscored) == 0 && s.Posture.Unresolved == 0,
+		Readiness: x.Readiness,
+		Host:      x.Host,
 	}
 	v.Stages = []stage{
 		{"Observed", s.Telemetry.ReviewChains, "adjudicated review chains", s.Telemetry.ReviewChains > 0},
@@ -187,18 +215,26 @@ func verdictRank(v string) int {
 
 // attentionGroups splits the cadence queue by the action each row asks of the
 // reader, in ActionOrder, so the page and the terminal group and sort alike.
-func attentionGroups(items []cadence.Intervention, rate ChainRate) []flagged {
+func attentionGroups(items []cadence.Intervention, rate ChainRate, unresolved int) []flagged {
 	byAction := map[string][]cadence.Intervention{}
 	for _, it := range items {
 		act := ActionFor(it.Verdict, Unmeasurable(it.Verdict, it.Unit, it.RequiredAfter, rate))
 		byAction[act] = append(byAction[act], it)
 	}
+	notes := map[string][]note{}
+	if unresolved > 0 {
+		notes[ActionAdjudicate] = append(notes[ActionAdjudicate], note{
+			Label: "unresolved",
+			Text:  fmt.Sprintf("%d ledger row(s) still owe an adjudication", unresolved),
+			Fix:   BackfillCommand,
+		})
+	}
 	out := []flagged{}
 	for _, act := range ActionOrder {
-		if len(byAction[act]) == 0 {
+		if len(byAction[act]) == 0 && len(notes[act]) == 0 {
 			continue
 		}
-		out = append(out, flagged{Key: ActionHeading[act], Items: byAction[act]})
+		out = append(out, flagged{Key: ActionHeading[act], Items: byAction[act], Notes: notes[act]})
 	}
 	return out
 }

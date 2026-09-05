@@ -7,6 +7,7 @@ import (
 
 	"github.com/steer-sh/steer-cli/internal/cadence"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
+	"github.com/steer-sh/steer-cli/internal/gate/reviewers"
 )
 
 func fptr(f float64) *float64 { return &f }
@@ -119,8 +120,13 @@ func sample() *SystemStatus {
 
 func render(t *testing.T, s *SystemStatus) string {
 	t.Helper()
+	return renderWith(t, s, Export{})
+}
+
+func renderWith(t *testing.T, s *SystemStatus, x Export) string {
+	t.Helper()
 	var buf bytes.Buffer
-	if err := s.RenderHTML(&buf); err != nil {
+	if err := s.RenderHTML(&buf, x); err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
 	return buf.String()
@@ -154,6 +160,10 @@ func TestRenderHTMLCarriesEverySection(t *testing.T) {
 		// The session corpus's own accounting and the guard's audit join.
 		"20 eligible / 22 (2 partly exposed)",
 		"attribution: no-bare-python never fired in the after-window",
+		// Unresolved rows are work, so they sit under the action that clears them,
+		// with the command — not in a posture chip alone.
+		"4 ledger row(s) still owe an adjudication",
+		"steer commit-gate backfill --apply",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("rendered page is missing %q", want)
@@ -266,6 +276,85 @@ func TestLedgerSortsUrgentVerdictsFirst(t *testing.T) {
 	for i, v := range want {
 		if got[i].Verdict != v {
 			t.Errorf("row %d: got %q, want %q", i, got[i].Verdict, v)
+		}
+	}
+}
+
+// TestUnresolvedRowsAreNotQuiet pins that a row owing an adjudication is pending
+// work. The page named the count in a posture chip and still called the loop quiet,
+// which is the contradiction a reader has to resolve for themselves.
+func TestUnresolvedRowsAreNotQuiet(t *testing.T) {
+	s := &SystemStatus{
+		StatusVersion: StatusVersion,
+		Summary:       VerdictSummary{Counts: map[string]int{}},
+		Posture:       Posture{Unresolved: 3},
+		Attention: AttentionQueue{
+			Interventions: []cadence.Intervention{},
+			Unscored:      []string{},
+			Candidates:    []cadence.Candidate{},
+		},
+	}
+	out := render(t, s)
+	if strings.Contains(out, "the loop is quiet") {
+		t.Error("3 unresolved rows are pending work, not a quiet loop")
+	}
+	for _, want := range []string{
+		ActionHeading[ActionAdjudicate],
+		"3 ledger row(s) still owe an adjudication",
+		BackfillCommand,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the unresolved row is missing %q", want)
+		}
+	}
+}
+
+// TestRemovalNamesTheRetireCommand pins that the page prints the command the
+// terminal prints beside the same prose. Removal prose with no command leaves the
+// reader to derive one from a record id they cannot see.
+func TestRemovalNamesTheRetireCommand(t *testing.T) {
+	s := sample()
+	s.Attention.Interventions[0].Verdict = "harmful"
+	out := render(t, s)
+	if want := RetireCommand("bare-python"); !strings.Contains(out, want) {
+		t.Errorf("a harmful class must name %q", want)
+	}
+}
+
+// TestReadinessRendersOnlyWhenSupplied pins that the answer is an export-time
+// value, not a snapshot field: a caller that cannot probe renders no Answer, and
+// the section that does render says which machine and moment it describes.
+func TestReadinessRendersOnlyWhenSupplied(t *testing.T) {
+	if out := render(t, sample()); strings.Contains(out, "<h2>Answer</h2>") {
+		t.Error("an empty Export must render no Answer section")
+	}
+	s := sample()
+	answer := ReadinessOf(s, reviewers.Probe{State: reviewers.ProbeAvailable, Executable: "agy"})
+	out := renderWith(t, s, Export{Readiness: &answer, Host: "mini"})
+	for _, want := range []string{
+		"<h2>Answer</h2>", answer.Headline, "mini", "saved report",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the Answer section is missing %q", want)
+		}
+	}
+}
+
+// TestReadinessStepsCarryTheirCommands pins that every step naming a fix prints it,
+// so the page never states a condition the reader cannot clear.
+func TestReadinessStepsCarryTheirCommands(t *testing.T) {
+	s := &SystemStatus{StatusVersion: StatusVersion, Summary: VerdictSummary{Counts: map[string]int{}}}
+	answer := ReadinessOf(s, reviewers.Probe{State: reviewers.ProbeAvailable})
+	out := renderWith(t, s, Export{Readiness: &answer, Host: "mini"})
+	if len(answer.Steps) == 0 {
+		t.Fatal("a machine with no gate must carry a step")
+	}
+	for _, step := range answer.Steps {
+		if step.Fix == "" {
+			continue
+		}
+		if !strings.Contains(out, step.Fix) {
+			t.Errorf("the page is missing the fix %q", step.Fix)
 		}
 	}
 }

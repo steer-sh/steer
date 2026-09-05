@@ -188,3 +188,14 @@ func MasterObservedPhrase(m MasterRuntime) string {
 	}
 	return "last block " + time.Unix(int64(m.Observed), 0).Format("2006-01-02 15:04")
 }
+
+// BackfillCommand clears the ledger rows that still owe an adjudication. Terminal
+// and HTML both name it beside the count, so it is written once.
+const BackfillCommand = "steer commit-gate backfill --apply"
+
+// RetireCommand is the repair the removal prose describes: it takes a record out of
+// the inventory. Terminal and HTML both print it under an unmeasurable or harmful
+// verdict, so neither can name a different command from the other.
+func RetireCommand(id string) string {
+	return "steer intervention retire " + id + " --reason ..."
+}
