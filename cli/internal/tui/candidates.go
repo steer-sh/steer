@@ -123,6 +123,15 @@ func (m *Model) updateEditing(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.form = nil
 		m.note("cancelled")
 		return m, nil
+	case "shift+tab":
+		// Stepping back keeps the typed value: the wizard is a form, and a reader
+		// who mistyped an earlier field would otherwise cancel and retype all of it.
+		m.form.steps[m.form.idx].value = strings.TrimSpace(m.input.Value())
+		if m.form.idx > 0 {
+			m.form.idx--
+			m.loadStep()
+		}
+		return m, nil
 	case "enter":
 		m.form.steps[m.form.idx].value = strings.TrimSpace(m.input.Value())
 		if m.form.idx < len(m.form.steps)-1 {
@@ -264,12 +273,15 @@ func (m *Model) commitForm() tea.Cmd {
 	if label == "" {
 		label = val("class")
 	}
-	m.editing = false
-	m.form = nil
 	if err != nil {
+		// The write failed, so the wizard stays open on its last step with every
+		// typed value intact. Clearing the form first cost the author the whole
+		// entry — seven fields — for a refusal they can correct in one of them.
 		m.note("error: %v", err)
 		return nil
 	}
+	m.editing = false
+	m.form = nil
 	m.refresh()
 	m.note("%q written", label)
 	return nil
@@ -308,7 +320,7 @@ func (m *Model) viewForm() string {
 	case formRetire:
 		kind = "Retire intervention " + m.form.id
 	}
-	out := header(kind + " — enter to advance, esc to cancel")
+	out := header(kind + " — enter to advance, shift+tab to go back, esc to cancel")
 	for i, s := range m.form.steps {
 		marker := "  "
 		val := s.value

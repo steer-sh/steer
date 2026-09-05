@@ -24,12 +24,23 @@ const denialsTimeout = 10
 // backfillTimeout matches cmd's Stop-hook resolver wall clock.
 const backfillTimeout = 30
 
-// channelRow is one armable channel: a commit gate or denials recorder in a scope.
+// channelRow is one armable channel: a commit gate or denials recorder in one
+// harness and scope. The harness is part of the row's identity, not decoration:
+// the posture carries one row per harness per scope, so a row naming the scope
+// alone renders identically for Claude Code, Codex and Pi while enter toggles
+// exactly one of them.
 type channelRow struct {
-	label string
-	kind  string // "commit-gate" | "denials"
-	scope string
-	armed status.ScopeArming
+	label   string
+	kind    string // "commit-gate" | "denials"
+	harness string
+	scope   string
+	armed   status.ScopeArming
+}
+
+// name is the row's identity in one phrase, used by the row and by the note the
+// toggle writes, so the confirmation names what the row named.
+func (r channelRow) name() string {
+	return fmt.Sprintf("%s · %s %s", r.label, status.HarnessLabel(r.harness), r.scope)
 }
 
 // channelRows lists the channels the panel can toggle: the commit gate and the
@@ -40,10 +51,12 @@ func (m *Model) channelRows() []channelRow {
 	}
 	var rows []channelRow
 	for _, a := range m.snap.Posture.CommitGate {
-		rows = append(rows, channelRow{label: "commit gate", kind: "commit-gate", scope: a.Scope, armed: a})
+		rows = append(rows, channelRow{label: "commit gate", kind: "commit-gate",
+			harness: a.Harness, scope: a.Scope, armed: a})
 	}
 	for _, a := range m.snap.Posture.Denials {
-		rows = append(rows, channelRow{label: "denials recorder", kind: "denials", scope: a.Scope, armed: a})
+		rows = append(rows, channelRow{label: "denials recorder", kind: "denials",
+			harness: a.Harness, scope: a.Scope, armed: a})
 	}
 	return rows
 }
@@ -63,7 +76,7 @@ func (m *Model) channelsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.refresh()
-	m.note("%s (%s) toggled", row.label, row.scope)
+	m.note("%s toggled", row.name())
 	return m, nil
 }
 
@@ -121,10 +134,12 @@ func (m *Model) viewChannels() string {
 	rows := m.channelRows()
 	out := header("Channels — arming posture")
 	for i, r := range rows {
-		out += fmt.Sprintf("%s %-16s %-8s %s\n", pointer(i == m.cursor[panelChannels]), r.label, r.scope, armingBadge(r.armed))
+		out += fmt.Sprintf("%s %-17s %-12s %-8s %s\n", pointer(i == m.cursor[panelChannels]),
+			r.label, status.HarnessLabel(r.harness), r.scope, armingBadge(r.armed))
 	}
 	for _, a := range m.snap.Posture.Resolver {
-		out += fmt.Sprintf("  %-16s %-8s %s\n", "resolver", a.Scope, armingBadge(a))
+		out += fmt.Sprintf("  %-17s %-12s %-8s %s\n", "resolver",
+			status.HarnessLabel(a.Harness), a.Scope, armingBadge(a))
 	}
 	out += dim("  the resolver arms and disarms with the commit gate on the same scope.\n")
 	if n := m.snap.Posture.Unresolved; n > 0 {

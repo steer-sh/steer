@@ -259,7 +259,25 @@ func (m *Model) chrome(body string) string {
 		msg = "\n" + styles.InfoText.Render("• "+m.message)
 	}
 	legend := styles.MutedText.Render(m.legend())
-	return fmt.Sprintf("%s\n%s\n\n%s%s\n\n%s\n", header, scope, body, msg, legend)
+	return fmt.Sprintf("%s\n%s\n\n%s%s\n\n%s\n", header, scope,
+		windowBody(body, m.bodyBudget()), msg, legend)
+}
+
+// bodyBudget is the number of body lines that fit under the chrome: the tab bar,
+// the scope line, the blank between them, the note and the key legend. It is zero
+// until the harness reports a size, and zero never windows.
+func (m *Model) bodyBudget() int {
+	if m.height <= 0 {
+		return 0
+	}
+	overhead := 6
+	if m.message != "" {
+		overhead += 2
+	}
+	if budget := m.height - overhead; budget > 0 {
+		return budget
+	}
+	return 1
 }
 
 // legend is the per-panel key hint line.
@@ -269,6 +287,9 @@ func (m *Model) legend() string {
 	case panelChannels:
 		return "enter toggle arming · " + common
 	case panelCandidates:
+		if m.editing {
+			return "enter advance/write · shift+tab back · esc cancel"
+		}
 		return "e edit regex · x reject · " + common
 	case panelClasses:
 		return "x retire · " + common

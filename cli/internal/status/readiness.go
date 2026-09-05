@@ -62,7 +62,7 @@ func TrustStep(harnessID, trust, path string) (Step, bool) {
 		return Step{}, false
 	}
 	step := Step{Title: fmt.Sprintf("%s has not confirmed it trusts this hook (%s)",
-		harnessLabel(harnessID), TrustPhrase(trust))}
+		HarnessLabel(harnessID), TrustPhrase(trust))}
 	switch harness.ID(harnessID) {
 	case harness.Codex:
 		step.Fix = "restart Codex and approve the definitions in /hooks"
@@ -75,9 +75,10 @@ func TrustStep(harnessID, trust, path string) (Step, bool) {
 	return step, true
 }
 
-// harnessLabel is the display name, falling back to the id an unregistered harness
-// carries so a step never names an empty harness.
-func harnessLabel(id string) string {
+// HarnessLabel is the display name, falling back to the id an unregistered harness
+// carries so a label never names an empty harness. Exported because the dashboard
+// names a harness on every channel row and must spell it the way a step does.
+func HarnessLabel(id string) string {
 	if entry, ok := harness.Get(harness.ID(id)); ok {
 		return entry.DisplayName
 	}
@@ -123,7 +124,7 @@ func ReadinessOf(s *SystemStatus, probe reviewers.Probe) Readiness {
 		if !a.Effective {
 			r.Steps = append(r.Steps, Step{
 				Title: fmt.Sprintf("the %s %s-scope registration is inert — its matcher fires on nothing",
-					harnessLabel(a.Harness), a.Scope),
+					HarnessLabel(a.Harness), a.Scope),
 				Fix: fmt.Sprintf("steer commit-gate install --harness %s --scope %s", a.Harness, a.Scope),
 			})
 			open = true
@@ -139,7 +140,7 @@ func ReadinessOf(s *SystemStatus, probe reviewers.Probe) Readiness {
 		if open {
 			continue
 		}
-		enforcing = append(enforcing, fmt.Sprintf("%s %s", harnessLabel(a.Harness), a.Scope))
+		enforcing = append(enforcing, fmt.Sprintf("%s %s", HarnessLabel(a.Harness), a.Scope))
 		if a.Observed > 0 {
 			observed = true
 		}
@@ -171,6 +172,6 @@ func ReadinessOf(s *SystemStatus, probe reviewers.Probe) Readiness {
 // prefixHarness names the registration a step belongs to. One store serves several
 // harnesses, so a bare step reads as the whole gate being broken.
 func prefixHarness(step Step, a ScopeArming) Step {
-	step.Title = fmt.Sprintf("%s %s scope: %s", harnessLabel(a.Harness), a.Scope, step.Title)
+	step.Title = fmt.Sprintf("%s %s scope: %s", HarnessLabel(a.Harness), a.Scope, step.Title)
 	return step
 }
