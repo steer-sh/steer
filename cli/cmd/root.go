@@ -15,23 +15,26 @@ var scope string
 
 var rootCmd = &cobra.Command{
 	Use:   "steer",
-	Short: "AI Coding Memory System - Never make the same mistake twice",
-	Long: `steer is a CLI tool that consolidates and manages Claude Code hooks generated
-from steer rules.
+	Short: "Review your agent's commits, then measure the fixes",
+	Long: `steer reviews your agent's code before it commits, then helps you
+prevent recurring mistakes.
 
-Workflow:
-  1. steer register <hook.py> --rule "your rule"   # Register hook + consolidate
-  2. steer test <hook-name> --code "sample code"   # Test locally (optional)
-  3. steer list                                     # Review active hooks
-  4. steer verify --staged                          # Verify staged changes before commit
-  5. steer git-hooks install                        # Install pre-commit enforcement
-  6. steer remove <hook-name>                       # Remove when no longer needed`,
-	Example: `  steer register .steer/hooks/no-var-hook.py --rule "never use var | use const or let"
-  steer test no-var-hook --code "var x = 1"
-  steer list
-  steer verify --staged
-  steer git-hooks install
-  steer remove no-var-hook --force`,
+Set up the commit gate:
+  1. steer config set reviewer.provider claude-code   # claude-code | codex | agy
+  2. steer commit-gate install --harness claude-code --scope global
+  3. steer commit-gate status                         # what is armed, and what is missing
+
+Then read what the reviews taught you:
+  steer status            # posture, attention, measured verdicts
+  steer dashboard         # the same loop, interactive
+
+Steer supports Claude Code, Codex and Pi, plus a Git pre-commit channel
+(steer commit-gate install --precommit) for other workflows.`,
+	Example: `  steer config set reviewer.provider claude-code
+  steer commit-gate install --harness codex --scope global
+  steer commit-gate status
+  steer status
+  steer dashboard`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		scope = strings.ToLower(strings.TrimSpace(scope))
 		return claude.ValidateScope(scope)
@@ -42,10 +45,21 @@ func Execute() error {
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, styles.ErrorBox.Render(fmt.Sprintf("Error: %s", err.Error())))
-		fmt.Fprintln(os.Stderr, styles.InfoText.Render("Run `steer --help` for usage."))
+		fmt.Fprintln(os.Stderr, styles.InfoText.Render(helpHint(os.Args[1:])))
 		return err
 	}
 	return nil
+}
+
+// helpHint names the help of the subcommand the arguments select, so an error on
+// a deep subcommand does not send the reader to the root command's help. An
+// unresolvable argument list falls back to the root.
+func helpHint(args []string) string {
+	path := rootCmd.CommandPath()
+	if cmd, _, err := rootCmd.Find(args); err == nil && cmd != nil {
+		path = cmd.CommandPath()
+	}
+	return fmt.Sprintf("Run `%s --help` for usage.", path)
 }
 
 // prepareState migrates the evidence corpora into the neutral root. A writing
@@ -112,7 +126,7 @@ func renderHelp(cmd *cobra.Command) {
 }
 
 func printExamples(cmd *cobra.Command) {
-	examples := strings.TrimSpace(cmd.Example)
+	examples := dedent(cmd.Example)
 	if examples == "" {
 		return
 	}
@@ -170,4 +184,39 @@ func helpUsageLine(cmd *cobra.Command) string {
 		return "steer [command]"
 	}
 	return cmd.UseLine()
+}
+
+// blankLine reports a line that holds nothing but whitespace.
+func blankLine(s string) bool { return strings.TrimSpace(s) == "" }
+
+// dedent drops the blank lines around an example block and removes the indent its
+// remaining lines share. Trimming the block as a whole stripped the first line's
+// indent only, which left the first example flush left and the rest indented.
+func dedent(block string) string {
+	lines := strings.Split(block, "\n")
+	for len(lines) > 0 && blankLine(lines[0]) {
+		lines = lines[1:]
+	}
+	for len(lines) > 0 && blankLine(lines[len(lines)-1]) {
+		lines = lines[:len(lines)-1]
+	}
+	indent := -1
+	for _, line := range lines {
+		if blankLine(line) {
+			continue
+		}
+		n := len(line) - len(strings.TrimLeft(line, " \t"))
+		if indent < 0 || n < indent {
+			indent = n
+		}
+	}
+	for i, line := range lines {
+		switch {
+		case blankLine(line):
+			lines[i] = ""
+		case indent > 0 && len(line) >= indent:
+			lines[i] = line[indent:]
+		}
+	}
+	return strings.Join(lines, "\n")
 }
