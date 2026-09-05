@@ -6,7 +6,6 @@ package statusline
 import (
 	"fmt"
 	"os"
-	"regexp"
 	"strings"
 
 	"github.com/steer-sh/steer-cli/internal/cadence"
@@ -70,49 +69,15 @@ func decisionsPhrase(n int) string {
 	return fmt.Sprintf("%d decisions", n)
 }
 
+// reviewerLabel names the reviewer the row reports. The model is printed as it is
+// configured: the version is what distinguishes one reviewer from the next, and it
+// is the half a shortening rule drops first.
 func reviewerLabel(model string, runs int) string {
-	short := ShortModel(model)
-	if short == "" || runs <= 0 {
-		return ""
-	}
-	return fmt.Sprintf("%d×%s", runs, short)
-}
-
-var (
-	versionSegment = regexp.MustCompile(`^v?[0-9]+(\.[0-9]+)*$`)
-	vendorSegments = map[string]bool{
-		"claude": true, "anthropic": true, "gemini": true,
-		"google": true, "gpt": true, "openai": true,
-	}
-	effortSegments = map[string]bool{
-		"low": true, "medium": true, "high": true, "xhigh": true, "max": true,
-	}
-)
-
-// ShortModel reduces a model id to the segment that distinguishes it, so the row
-// stays inside the status bar's width. It drops a leading vendor, every version-like
-// segment and a trailing effort word: gemini-3.7-flash-high becomes flash. A model
-// whose every segment would be dropped is returned whole.
-func ShortModel(model string) string {
 	model = strings.TrimSpace(model)
-	if model == "" {
+	if model == "" || runs <= 0 {
 		return ""
 	}
-	segments := strings.Split(strings.ToLower(model), "-")
-	kept := []string{}
-	for i, segment := range segments {
-		if i == 0 && vendorSegments[segment] {
-			continue
-		}
-		if versionSegment.MatchString(segment) || effortSegments[segment] {
-			continue
-		}
-		kept = append(kept, segment)
-	}
-	if len(kept) == 0 {
-		return model
-	}
-	return strings.Join(kept, "-")
+	return fmt.Sprintf("%d×%s", runs, model)
 }
 
 // Collect reads the row's facts. Every read fails soft: a missing settings.json,

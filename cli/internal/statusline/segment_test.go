@@ -19,22 +19,22 @@ func TestRenderNamesTheMostUrgentItem(t *testing.T) {
 		{
 			name: "decisions outrank the status word",
 			in:   Inputs{Armed: true, Model: "gemini-3.7-flash-high", Runs: 3, Decisions: 2, Observed: true},
-			want: "steer ⏻ 3×flash · 2 decisions → /steer-report",
+			want: "steer ⏻ 3×gemini-3.7-flash-high · 2 decisions → /steer-report",
 		},
 		{
 			name: "one decision carries the singular noun",
 			in:   Inputs{Armed: true, Model: "claude-opus-5", Runs: 1, Decisions: 1, Observed: true},
-			want: "steer ⏻ 1×opus · 1 decision → /steer-report",
+			want: "steer ⏻ 1×claude-opus-5 · 1 decision → /steer-report",
 		},
 		{
 			name: "an armed gate with no ledger row has never fired",
 			in:   Inputs{Armed: true, Model: "gemini-3.7-flash-high", Runs: 3, Observed: false},
-			want: "steer ⏻ 3×flash · never fired",
+			want: "steer ⏻ 3×gemini-3.7-flash-high · never fired",
 		},
 		{
 			name: "healthy needs an observed row",
 			in:   Inputs{Armed: true, Model: "gemini-3.7-flash-high", Runs: 3, Observed: true},
-			want: "steer ⏻ 3×flash · healthy",
+			want: "steer ⏻ 3×gemini-3.7-flash-high · healthy",
 		},
 		{
 			name: "an unknown reviewer leaves the label off rather than guessing",
@@ -61,20 +61,30 @@ func TestHealthyIsWithheldUntilTheLedgerHoldsARow(t *testing.T) {
 	}
 }
 
-func TestShortModelKeepsTheDistinguishingSegment(t *testing.T) {
-	cases := map[string]string{
-		"gemini-3.7-flash-high":     "flash",
-		"claude-opus-5":             "opus",
-		"claude-haiku-4-5-20251001": "haiku",
-		"gpt-5.2-codex":             "codex",
-		"agy":                       "agy",
-		"":                          "",
-		// Every segment drops, so the id is returned whole rather than empty.
-		"claude-5": "claude-5",
+// The version is what distinguishes one reviewer from the next — 3.5 flash and 3.8
+// flash are different instruments — so the model is printed as configured.
+func TestTheReviewerLabelKeepsTheWholeModelID(t *testing.T) {
+	for _, model := range []string{
+		"gemini-3.7-flash-high",
+		"claude-opus-5",
+		"claude-haiku-4-5-20251001",
+		"my-org/fine-tuned-review-model-v2",
+	} {
+		row := Render(Inputs{Armed: true, Model: model, Runs: 3, Observed: true})
+		if !strings.Contains(row, "3×"+model) {
+			t.Errorf("Render() = %q, want it to carry 3×%s", row, model)
+		}
 	}
-	for model, want := range cases {
-		if got := ShortModel(model); got != want {
-			t.Errorf("ShortModel(%q) = %q, want %q", model, got, want)
+}
+
+func TestTheReviewerLabelIsOmittedWhenItIsUnknown(t *testing.T) {
+	for _, in := range []Inputs{
+		{Armed: true, Runs: 3, Observed: true},
+		{Armed: true, Model: "claude-opus-5", Observed: true},
+		{Armed: true, Model: "   ", Runs: 3, Observed: true},
+	} {
+		if got := Render(in); got != "steer ⏻ healthy" {
+			t.Errorf("Render(%+v) = %q, want the reviewer omitted", in, got)
 		}
 	}
 }
