@@ -206,7 +206,11 @@ func TestJSONContractIsStable(t *testing.T) {
 			Unresolved: 4,
 		},
 		Interventions: []ScoredIntervention{{
-			ID: "widget-flag", Class: "widget flag loss", Match: "widget.*flag", Tier: "guard", Target: "guard.py",
+			ID: "widget-flag", Class: "widget flag loss",
+			Problem:      "the parser drops a flag and the reviewer catches it after the fact",
+			Intervention: "a guard refuses a parser branch that drops a flag",
+			LegacyNote:   "guard tier 2",
+			Match:        "widget.*flag", Tier: "guard", Target: "guard.py",
 			Status: "active", HookID: "no-widget-flag", Verdict: "effective",
 			Corpus: mine.CorpusReviewFindings, Unit: mine.UnitChain,
 			Attribution: cadence.Attribution{
@@ -225,7 +229,10 @@ func TestJSONContractIsStable(t *testing.T) {
 			Confounds:     []mine.Confound{},
 			Composition:   []mine.Confound{{Category: "host", Reason: "host set changed", Before: []string{"a"}, After: []string{"a", "b"}}},
 		}, {
-			ID: "taste-nit", Class: "taste nit", Match: "nit", Tier: "check", Target: "check.sh",
+			ID: "taste-nit", Class: "taste nit",
+			Problem:      "the reviewer raises a wording preference with no defect behind it",
+			Intervention: "no suitable intervention was identified",
+			Match:        "nit", Tier: "check", Target: "check.sh",
 			Status: "rejected", Verdict: "class-steady",
 			Corpus: mine.CorpusTranscript, Unit: mine.UnitSession, SignalKind: mine.SignalCorrection,
 			Reason: "not mechanizable", Reopen: "incidence doubles", RejectedTS: 1700,
@@ -355,6 +362,9 @@ const goldenStatusJSON = `{
     {
       "id": "widget-flag",
       "class": "widget flag loss",
+      "problem": "the parser drops a flag and the reviewer catches it after the fact",
+      "intervention": "a guard refuses a parser branch that drops a flag",
+      "legacy_note": "guard tier 2",
       "match": "widget.*flag",
       "tier": "guard",
       "target": "guard.py",
@@ -434,6 +444,8 @@ const goldenStatusJSON = `{
     {
       "id": "taste-nit",
       "class": "taste nit",
+      "problem": "the reviewer raises a wording preference with no defect behind it",
+      "intervention": "no suitable intervention was identified",
       "match": "nit",
       "tier": "check",
       "target": "check.sh",

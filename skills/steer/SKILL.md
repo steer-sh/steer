@@ -383,7 +383,7 @@ The `|` pipe splits a rule into a detection part and an optional suggestion (see
 
 Never invent suggestions. Only include them when explicitly provided after `|`.
 
-## The `steer status --json` contract (`status_version: 7`)
+## The `steer status --json` contract (`status_version: 9`)
 
 `steer status` composes one read-only snapshot of the whole loop. The unit is the
 failure class and its verdict, not the hook count. The Pre-flight step reads it to
@@ -432,14 +432,21 @@ Contracts). Fields:
   on `stale` or `unknown`:** run `steer hooks rebuild --scope <scope>`, which
   regenerates the master AND re-registers it in one operation.
 - `interventions[]` — the **full** scored inventory. It carries every live
-  class, `effective` ones included. Each row: `id`, `class`, `match` (the regex
+  class, `effective` ones included. Each row: `id`, `class`, `problem`,
+  `intervention`, `legacy_note`, `match` (the regex
   that defines the class), `tier`, `target`, `status` (`active` or `rejected`),
   `verdict`, `before` / `after` incidence (`hits`, `units`, `rate`), `p_value`,
   `instrument_drift` (the reviewer changed between the windows, at either grade;
   a major change — provider, model, prompt digest or engine — withholds the
   verdict as `confounded`, a minor one — effort or run count — rides beside the
   range as a `composition` entry), `firings_applicable` (true only for the `guard` tier, whose master hook writes the audit log that `audit_firings` counts; check, instruction and review write none), and for
-  a refused class `reason`, `reopen` and `rejected_ts`. This is the dedup source
+  a refused class `reason`, `reopen` and `rejected_ts`. `problem` and `intervention` are the record's own explanation, authored when the
+  evidence was in hand: what goes wrong, and what this record does about it. Lead
+  with them — a `class` is a label and a `match` is a regex, and neither says what
+  the class is. On a `rejected` row the `intervention` is the one that was
+  considered, or the sentence `no suitable intervention was identified`.
+  `legacy_note` is present only on a record written before those fields existed;
+  it holds implementation detail, so never read it as either. This is the dedup source
   — a class here is decided. `corpus` and `unit` name the evidence the class is
   counted over and what one denominator entry is: `review-findings` counts by
   `chain`, `transcript-friction` by `session`. Never compare a chain rate to a

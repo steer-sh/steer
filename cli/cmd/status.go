@@ -303,7 +303,7 @@ func interventionBlock(iv cadence.Intervention, unmeasurable bool, rate status.C
 		verdict = "unmeasurable"
 	}
 	line := fmt.Sprintf("    %-52s %s",
-		fmt.Sprintf("%s [%s → %s]", iv.Class, iv.Tier, iv.Target),
+		fmt.Sprintf("%s [%s]", iv.Class, status.TierPhrase(iv.Tier, iv.Target)),
 		styles.MutedText.Render(verdict))
 	for _, extra := range interventionNotes(iv, unmeasurable, rate) {
 		line += "\n      " + styles.MutedText.Render(extra)
@@ -319,7 +319,8 @@ func interventionNotes(iv cadence.Intervention, unmeasurable bool, rate status.C
 	if unit == "" {
 		unit = "unit"
 	}
-	notes := []string{status.RecurrencePhrase(iv.Before, iv.After, unit)}
+	notes := status.ProsePhrases(iv.Problem, iv.Intervention, iv.Tier == "" || iv.Tier == "none")
+	notes = append(notes, status.RecurrencePhrase(iv.Before, iv.After, unit))
 	if e := status.EffectClaimPhrase(iv.Verdict, iv.Effect); e != "" {
 		notes = append(notes, e)
 	}

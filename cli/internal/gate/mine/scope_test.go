@@ -181,6 +181,7 @@ func TestScopedBaselineAndMigration(t *testing.T) {
 
 	// A path-scoped register counts only the Go chains in its baseline.
 	if err := Register(io.Discard, stateDir, RegisterOpts{
+		Prose:  testProse,
 		Ledger: ledger, Class: "widget flag", Match: "widget parser",
 		Tier: "check", Target: "check.sh", InstalledTS: int64(install),
 		ScopeRepo: "steer", ScopePath: `\.go$`,
@@ -279,6 +280,7 @@ func TestCoverCorpusPreviewsWhatTheWriteFreezes(t *testing.T) {
 		check(t, "no scope excluded anything under an all-scope", cov.UnknownScope, 0)
 
 		if err := Register(io.Discard, stateDir, RegisterOpts{
+			Prose:    testProse,
 			ScopeAll: true, Ledger: ledger, Class: "widget parser flag loss", Match: "widget parser",
 			Kind: "defect", Tier: "check", Target: "check.sh", InstalledTS: int64(install),
 		}); err != nil {

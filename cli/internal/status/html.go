@@ -105,6 +105,8 @@ func (s *SystemStatus) RenderHTML(w io.Writer, x Export) error {
 		"deltaIf":   deltaFor,
 		"claim":     EffectClaimPhrase,
 		"recur":     RecurrencePhrase,
+		"prose":     ProsePhrases,
+		"tierWord":  TierPhrase,
 		"action":    ActionSentence,
 		"removal":   RemovalPhrase,
 		"unmeas":    func(verdict, unit string, required *int) bool { return Unmeasurable(verdict, unit, required, rate) },

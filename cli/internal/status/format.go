@@ -199,3 +199,53 @@ const BackfillCommand = "steer commit-gate backfill --apply"
 func RetireCommand(id string) string {
 	return "steer intervention retire " + id + " --reason ..."
 }
+
+// The labels the prose lines carry. A rejection installed nothing, so what it
+// describes is the intervention it considered, not one that runs.
+const (
+	ProblemLabel            = "Problem"
+	InterventionLabel       = "Intervention"
+	ProposedInterventionLbl = "Proposed intervention"
+)
+
+// ProsePhrases are the two reader-facing lines under a class: what goes wrong, then
+// what the record does about it. A record carrying neither yields nothing, so its
+// legacy note is the caller's to render under its own heading.
+func ProsePhrases(problem, intervention string, rejected bool) []string {
+	label := InterventionLabel
+	if rejected {
+		label = ProposedInterventionLbl
+	}
+	var out []string
+	if problem != "" {
+		out = append(out, ProblemLabel+": "+problem)
+	}
+	if intervention != "" {
+		out = append(out, label+": "+intervention)
+	}
+	return out
+}
+
+// TierPhrase names what kind of intervention a record installed, in the reader's
+// words rather than the flag's. A tier is a type and never a behavior, so it stands
+// beside the intervention line rather than in place of it.
+func TierPhrase(tier, target string) string {
+	name := map[string]string{
+		"check":       "repository check",
+		"guard":       "pre-tool guard",
+		"steer":       "pre-tool guard",
+		"instruction": "instruction rule",
+		"prose":       "instruction rule",
+		"prompt":      "review prompt",
+	}[tier]
+	if tier == "" || tier == "none" {
+		return "no intervention installed"
+	}
+	if name == "" {
+		name = tier
+	}
+	if target == "" {
+		return name
+	}
+	return name + " → " + target
+}

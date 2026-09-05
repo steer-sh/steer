@@ -282,6 +282,7 @@ type RegisterOpts struct {
 	Tier         string
 	Target       string
 	Note         string
+	Prose        Prose
 	HookID       string
 	HookScope    string
 	Supersedes   string
@@ -297,6 +298,9 @@ type RegisterOpts struct {
 func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 	if o.Kind == "" {
 		o.Kind = "defect"
+	}
+	if err := o.Prose.Validate(o.Class); err != nil {
+		return err
 	}
 	spec, err := writableCorpus(o.Corpus)
 	if err != nil {
@@ -398,6 +402,7 @@ func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 		"baseline":       baselineMap(bHits, bTotal, bRate),
 		"instrument":     instrument,
 	}
+	o.Prose.writeInto(record)
 	if spec.Engine == EngineSession {
 		if o.SignalKind != "" {
 			record["signal_kind"] = o.SignalKind
@@ -454,6 +459,7 @@ type RejectOpts struct {
 	Reason       string
 	Reopen       string
 	Note         string
+	Prose        Prose
 	RejectedTS   int64
 	Force        bool
 	ScopeAll     bool
@@ -466,6 +472,9 @@ type RejectOpts struct {
 func Reject(w io.Writer, stateDir string, o RejectOpts) error {
 	if o.Kind == "" {
 		o.Kind = "defect"
+	}
+	if err := o.Prose.Validate(o.Class); err != nil {
+		return err
 	}
 	spec, err := writableCorpus(o.Corpus)
 	if err != nil {
@@ -548,6 +557,7 @@ func Reject(w io.Writer, stateDir string, o RejectOpts) error {
 		"baseline":      baselineMap(bHits, bTotal, bRate),
 		"instrument":    instrument,
 	}
+	o.Prose.writeInto(record)
 	if spec.Engine == EngineSession {
 		if o.SignalKind != "" {
 			record["signal_kind"] = o.SignalKind

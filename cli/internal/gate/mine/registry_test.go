@@ -47,6 +47,7 @@ func TestTheSessionCorpusIsScoredByItsOwnEngine(t *testing.T) {
 func TestRegisterRefusesOnlyACorpusItCannotBaseline(t *testing.T) {
 	dir := t.TempDir()
 	err := Register(discard{}, dir, RegisterOpts{
+		Prose: testProse,
 		Class: "c", Match: "bare python", Corpus: CorpusTranscript,
 		Sessions: []SessionUnit{friction(1000, "claude-code", "proj", "bare python here")},
 		Tier:     "check",
@@ -56,6 +57,7 @@ func TestRegisterRefusesOnlyACorpusItCannotBaseline(t *testing.T) {
 		t.Fatalf("the session corpus can freeze a baseline: %v", err)
 	}
 	if err := Register(discard{}, dir, RegisterOpts{
+		Prose: testProse,
 		Class: "c", Match: "x", Corpus: "made-up",
 		Tier: "check", Target: "check.sh", ScopeAll: true, Force: true,
 	}); err == nil {
@@ -63,6 +65,7 @@ func TestRegisterRefusesOnlyACorpusItCannotBaseline(t *testing.T) {
 	}
 	// A session carries no changed-path list, so a path predicate cannot be decided.
 	if err := Register(discard{}, dir, RegisterOpts{
+		Prose: testProse,
 		Class: "c", Match: "bare python", Corpus: CorpusTranscript,
 		Sessions: []SessionUnit{friction(1000, "claude-code", "proj", "bare python here")},
 		Tier:     "check", Target: "check.sh", ScopePath: "cli/", InstalledTS: 2000,

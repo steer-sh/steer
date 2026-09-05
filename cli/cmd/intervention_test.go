@@ -46,7 +46,7 @@ func find(t *testing.T, parent *cobra.Command, name string) *cobra.Command {
 // permitted difference is `findings`, which reads the review corpus rather than
 // managing an intervention.
 func TestBothInterventionTreesCarryTheSameSurface(t *testing.T) {
-	want := []string{"list", "match", "register", "reject", "retire", "scope", "score"}
+	want := []string{"describe", "list", "match", "register", "reject", "retire", "scope", "score"}
 	if got := subcommandNames(interventionCmd); !equalStrings(got, want) {
 		t.Errorf("steer intervention subcommands = %v, want %v", got, want)
 	}

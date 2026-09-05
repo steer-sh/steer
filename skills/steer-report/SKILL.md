@@ -65,9 +65,9 @@ A deterministic tier runs this loop's mechanical half — scoring, corpus sweeps
 steer report refresh --days 30
 ```
 
-Then Read the queue **once**: `~/.steer/state/steer-report/queue.json` (`version: 3`). It holds:
+Then Read the queue **once**: `~/.steer/state/steer-report/queue.json` (`version: 4`). It holds:
 
-- `interventions[]` — full contract records the tier already scored and flagged as **needing attention** (verdict `harmful`, `ineffective`, `not-triggered`, `unattributed`, `class-grew`, `legacy-unscoped`, `evidence-incomplete` or `confounded`). These carry a `match`; they are the audit's action list, pre-filtered. Each also carries the measurement conditions the verdict rests on: `corpus` and `unit` (`review-findings` counts by `chain`, `transcript-friction` by `session` — never compare the two rates), `signal_kind` on a session-unit record, `scope` (the frozen eligibility rule, `null` on a legacy record), `before_coverage` / `after_coverage` (`total`, `eligible`, `ineligible`, `unknown`, `unknown_scope`, `unknown_evidence`, `pending`, `partial_exposure`), the `effect` range, `required_after`, `confounds` / `composition`, and `attribution` — the guard's audit join over the after-window (`applicable`, `log_present`, `hook_id`, `firings`, `sessions`).
+- `interventions[]` — full contract records the tier already scored and flagged as **needing attention** (verdict `harmful`, `ineffective`, `not-triggered`, `unattributed`, `class-grew`, `legacy-unscoped`, `evidence-incomplete` or `confounded`). These carry a `match`; they are the audit's action list, pre-filtered. Each carries `problem` and `intervention` — the record's own explanation of what goes wrong and what it does about it, authored when the class was found. Lead your report with those rather than with the class name or the regex, and correct one that no longer describes the evidence with `steer intervention describe ID`, which changes no window. Each also carries the measurement conditions the verdict rests on: `corpus` and `unit` (`review-findings` counts by `chain`, `transcript-friction` by `session` — never compare the two rates), `signal_kind` on a session-unit record, `scope` (the frozen eligibility rule, `null` on a legacy record), `before_coverage` / `after_coverage` (`total`, `eligible`, `ineligible`, `unknown`, `unknown_scope`, `unknown_evidence`, `pending`, `partial_exposure`), the `effect` range, `required_after`, `confounds` / `composition`, and `attribution` — the guard's audit join over the after-window (`applicable`, `log_present`, `hook_id`, `firings`, `sessions`).
 - `unscored[]` — ids of records no engine reads. Report their existence; do not read a verdict into them.
 - `candidates[]` — pointers to new clusters. Transcript rows carry `pattern`/`count`/`sessions`; the review row carries `undecided_chains` and a `dump` command. These carry **no** `match` — authoring the regex is your job, below.
 - `corpora[]` — one row per corpus (`review-findings`, `transcript-friction`, `auto-denials`) with `present` and `size`. Relay this sweep to the user in one sentence.
@@ -138,7 +138,7 @@ Digest schema (`digest_version: 2`):
 
 The digest is size-capped: the CLI evicts the lowest-scoring clusters to fit, and reports honesty in `stats`.
 
-### The `steer status --json` contract (`status_version: 7`)
+### The `steer status --json` contract (`status_version: 9`)
 
 Step 1 reads this snapshot for posture and the full class inventory. The unit is
 the failure class and its verdict, not the hook count. This schema is byte-shared
@@ -186,14 +186,21 @@ Fields:
   on `stale` or `unknown`:** run `steer hooks rebuild --scope <scope>`, which
   regenerates the master AND re-registers it in one operation.
 - `interventions[]` — the **full** scored inventory. It carries every live
-  class, `effective` ones included. Each row: `id`, `class`, `match` (the regex
+  class, `effective` ones included. Each row: `id`, `class`, `problem`,
+  `intervention`, `legacy_note`, `match` (the regex
   that defines the class), `tier`, `target`, `status` (`active` or `rejected`),
   `verdict`, `before` / `after` incidence (`hits`, `units`, `rate`), `p_value`,
   `instrument_drift` (the reviewer changed between the windows, at either grade;
   a major change — provider, model, prompt digest or engine — withholds the
   verdict as `confounded`, a minor one — effort or run count — rides beside the
   range as a `composition` entry), `firings_applicable` (true only for the `guard` tier, whose master hook writes the audit log that `audit_firings` counts; check, instruction and review write none), and for
-  a refused class `reason`, `reopen` and `rejected_ts`. This is the dedup source
+  a refused class `reason`, `reopen` and `rejected_ts`. `problem` and `intervention` are the record's own explanation, authored when the
+  evidence was in hand: what goes wrong, and what this record does about it. Lead
+  with them — a `class` is a label and a `match` is a regex, and neither says what
+  the class is. On a `rejected` row the `intervention` is the one that was
+  considered, or the sentence `no suitable intervention was identified`.
+  `legacy_note` is present only on a record written before those fields existed;
+  it holds implementation detail, so never read it as either. This is the dedup source
   — a class here is decided. `corpus` and `unit` name the evidence the class is
   counted over and what one denominator entry is: `review-findings` counts by
   `chain`, `transcript-friction` by `session`. Never compare a chain rate to a
@@ -323,6 +330,29 @@ Show each candidate with:
 
 Then ask which candidates to act on (multi-select). Create nothing unasked.
 
+### Every record explains itself
+
+`--problem` and `--intervention` are required on `register` and on `reject`, and the
+CLI refuses a blank or a value that only repeats the class name. Author both **now**,
+while the evidence is on screen. You are the last reader who has it: months later the
+record is read from a status page by someone with the class name, the regex and
+nothing else, and neither of those says what the class is.
+
+- **`--problem`** — what goes wrong, in one sentence, in the vocabulary of the defect.
+  Write it for a reader who was not in this session. "The reviewer raises a concern an
+  earlier round of the same review already settled", not "within-chain re-raised finding".
+- **`--intervention`** — what this record does about it, as concrete behavior. "check.sh
+  refuses a printed literal count", not "added a check". On a `reject`, describe the
+  intervention you considered; if you found none worth installing, say exactly
+  `no suitable intervention was identified`. `--reason` still explains the decision;
+  these two explain the class.
+- **`--note`** stays optional and is for implementation detail that fits neither.
+
+To correct a description on an existing record, use `steer intervention describe ID
+--problem … --intervention …`. It writes the prose and nothing else — the id, the
+match, the scope, the baseline, the instrument and both windows are untouched, so a
+clearer sentence never restarts the measurement. Omit a flag to keep that half.
+
 ### Transcript candidates — hand off to steer
 
 For each accepted transcript candidate, follow the steer skill's generation protocol (the root `SKILL.md` of this plugin) with the phrased rule — specialist prompt selection, hook generation, registration via `steer register`, and mandatory self-testing all apply unchanged. Do not duplicate or shortcut that protocol here.
@@ -338,6 +368,8 @@ steer intervention register \
   --corpus transcript-friction --signal-kind user_corrections \
   --tier steer --target hooks/no-bare-python.py --hook-id no-bare-python \
   --scope-harness claude-code,codex \
+  --problem "the session runs bare python and the interpreter is missing" \
+  --intervention "a pre-tool guard refuses a bare python invocation" \
   --note "why this tell was chosen"
 ```
 
@@ -370,6 +402,8 @@ For each accepted review candidate:
      --kind defect \
      --tier check --target check.sh \
      --scope-repo 'steer' --scope-path '\.go$' \
+     --problem "a check prints a literal test count and the number goes stale" \
+     --intervention "check.sh refuses a printed literal count" \
      --note "why this tell was chosen"
    ```
 
@@ -390,6 +424,8 @@ steer intervention reject \
   --class "within-chain repeat finding" \
   --match 'YOUR REGEX' \
   --scope-all \
+  --problem "the reviewer raises a concern an earlier round of the same review already settled" \
+  --intervention "no suitable intervention was identified" \
   --reason "why no gate was installed" \
   --reopen "the observation that would change this answer"
 ```

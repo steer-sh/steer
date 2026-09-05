@@ -31,7 +31,7 @@ import (
 // StatusVersion is the schema version of the emitted snapshot. It mirrors
 // report.DigestVersion: --json is a stable agent contract, so bump this whenever
 // the shape or semantics of SystemStatus change.
-const StatusVersion = 8
+const StatusVersion = 9
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20
@@ -56,16 +56,24 @@ type Options struct {
 // already-decided class and skip re-proposing it. Before/After reuse
 // cadence.Incidence, so one payload keys chain counts one way: units.
 type ScoredIntervention struct {
-	ID      string            `json:"id"`
-	Class   string            `json:"class"`
-	Match   string            `json:"match,omitempty"`
-	Tier    string            `json:"tier"`
-	Target  string            `json:"target"`
-	Status  string            `json:"status"`
-	HookID  string            `json:"hook_id,omitempty"`
-	Verdict string            `json:"verdict"`
-	Before  cadence.Incidence `json:"before"`
-	After   cadence.Incidence `json:"after"`
+	ID    string `json:"id"`
+	Class string `json:"class"`
+	// Problem and Intervention are the record's own explanation, authored when the
+	// evidence was in hand: what goes wrong, and what this record does about it. A
+	// class name is a label and cannot carry either, so every reader leads with
+	// these. LegacyNote is the single free-text field that preceded them; it holds
+	// implementation detail on the records that carry one and is never promoted.
+	Problem      string            `json:"problem"`
+	Intervention string            `json:"intervention"`
+	LegacyNote   string            `json:"legacy_note,omitempty"`
+	Match        string            `json:"match,omitempty"`
+	Tier         string            `json:"tier"`
+	Target       string            `json:"target"`
+	Status       string            `json:"status"`
+	HookID       string            `json:"hook_id,omitempty"`
+	Verdict      string            `json:"verdict"`
+	Before       cadence.Incidence `json:"before"`
+	After        cadence.Incidence `json:"after"`
 	// PValue is the Fisher one-sided p from the score, 0 when unscored.
 	PValue float64 `json:"p_value,omitempty"`
 	// InstrumentDrift flags a measurement window spanning two reviewer prompts.
@@ -380,9 +388,13 @@ func scoreInventory(records []mine.Record, ev mine.EvidenceSet, minAfter int) []
 		}
 		tier := str(r["tier"])
 		if !mine.Scorable(r) {
+			prose := mine.ProseOf(r)
 			out = append(out, ScoredIntervention{
 				ID:                str(r["id"]),
 				Class:             str(r["class"]),
+				Problem:           prose.Problem,
+				Intervention:      prose.Intervention,
+				LegacyNote:        prose.LegacyNote,
 				Match:             str(r["match"]),
 				Tier:              tier,
 				Target:            str(r["target"]),
@@ -405,9 +417,15 @@ func scoreInventory(records []mine.Record, ev mine.EvidenceSet, minAfter int) []
 			continue
 		}
 		scoredTier := str(scored["tier"])
+		// The prose is read off the stored record, never off the scored copy: an
+		// explanation is not a measurement output.
+		prose := mine.ProseOf(r)
 		out = append(out, ScoredIntervention{
 			ID:                str(scored["id"]),
 			Class:             str(scored["class"]),
+			Problem:           prose.Problem,
+			Intervention:      prose.Intervention,
+			LegacyNote:        prose.LegacyNote,
 			Match:             str(r["match"]),
 			Tier:              scoredTier,
 			Target:            str(scored["target"]),

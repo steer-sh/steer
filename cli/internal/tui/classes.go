@@ -56,8 +56,13 @@ func (m *Model) viewClasses() string {
 		}
 		line := fmt.Sprintf("%s %-22s %s %s", pointer(pos == m.cursor[panelClasses]),
 			truncate(it.Class, 22), verdictBadge(badge),
-			dim(fmt.Sprintf("%s → %s", it.Tier, it.Target)))
+			dim(status.TierPhrase(it.Tier, it.Target)))
 		out += line + "\n"
+		// The explanation leads: the regex and the range below it both measure
+		// something the reader has to understand first.
+		for _, p := range status.ProsePhrases(it.Problem, it.Intervention, it.Status == "rejected") {
+			out += "     " + p + "\n"
+		}
 		out += "     " + dim(detailLine(it)) + "\n"
 		out += "     " + dim(measureLine(it, un, rate)) + "\n"
 		for _, r := range confoundLines(it) {

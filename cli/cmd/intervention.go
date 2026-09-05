@@ -41,6 +41,8 @@ type interventionFlags struct {
 	registerHookID      string
 	registerHookScope   string
 	registerNote        string
+	registerProblem     string
+	registerIntervent   string
 	registerSupersedes  string
 	registerInstalledTS int64
 	registerForce       bool
@@ -57,6 +59,8 @@ type interventionFlags struct {
 	rejectReason     string
 	rejectReopen     string
 	rejectNote       string
+	rejectProblem    string
+	rejectIntervent  string
 	rejectRejectedTS int64
 	rejectForce      bool
 	rejectScopeAll   bool
@@ -78,11 +82,22 @@ type interventionFlags struct {
 
 	listJSON bool
 
-	retireReason string
-	retireStatus string
+	describeProblem   string
+	describeIntervent string
+	retireReason      string
+	retireStatus      string
 }
 
 const scopeHarnessUsage = "eligibility scope: harness ids the class is measured on (repeatable or comma-separated)"
+
+// The prose flags are required because a class name is a label, not an explanation.
+// A reader arriving at a record months later has neither the evidence nor the session
+// that produced it, so the record carries both halves in its own words.
+const problemUsage = "one sentence naming what goes wrong, readable without the session that found it (required)"
+
+const interventionUsage = "one sentence naming what this intervention does about it (required)"
+
+const rejectInterventionUsage = "one sentence naming the intervention considered, or that none was found (required)"
 
 const corpusUsage = "evidence corpus the class is counted over: review-findings (by chain) or transcript-friction (by session)"
 
@@ -138,16 +153,20 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 				return err
 			}
 			return mine.Register(out(), gateConfig().StateDir, mine.RegisterOpts{
-				Ledger:       v.ledger,
-				Class:        v.registerClass,
-				Match:        v.registerMatch,
-				Kind:         v.registerKind,
-				Corpus:       v.registerCorpus,
-				SignalKind:   v.registerSignalKind,
-				Sessions:     storedSessions(),
-				Tier:         v.registerTier,
-				Target:       v.registerTarget,
-				Note:         v.registerNote,
+				Ledger:     v.ledger,
+				Class:      v.registerClass,
+				Match:      v.registerMatch,
+				Kind:       v.registerKind,
+				Corpus:     v.registerCorpus,
+				SignalKind: v.registerSignalKind,
+				Sessions:   storedSessions(),
+				Tier:       v.registerTier,
+				Target:     v.registerTarget,
+				Note:       v.registerNote,
+				Prose: mine.Prose{
+					Problem:      v.registerProblem,
+					Intervention: v.registerIntervent,
+				},
 				HookID:       v.registerHookID,
 				HookScope:    v.registerHookScope,
 				Supersedes:   v.registerSupersedes,
@@ -173,6 +192,8 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 	r.StringVar(&v.registerHookScope, "hook-scope", "",
 		"guard store owning --hook-id: project|global (default: whichever holds it, refusing both)")
 	r.StringVar(&v.registerNote, "note", "", "free-text note")
+	r.StringVar(&v.registerProblem, "problem", "", problemUsage)
+	r.StringVar(&v.registerIntervent, "intervention", "", interventionUsage)
 	r.StringVar(&v.registerSupersedes, "supersedes", "", "id of a record this replaces")
 	r.Int64Var(&v.registerInstalledTS, "installed-ts", 0, "install timestamp (default now)")
 	r.BoolVar(&v.registerForce, "force", false, "record despite a zero baseline or a blocking rejection")
@@ -180,7 +201,7 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 	r.StringSliceVar(&v.registerScopeHrn, "scope-harness", nil, scopeHarnessUsage)
 	r.StringVar(&v.registerScopeRepo, "scope-repo", "", "eligibility scope: regex on the repository root basename")
 	r.StringVar(&v.registerScopePath, "scope-path", "", "eligibility scope: regex on a repo-relative changed path")
-	for _, name := range []string{"class", "match", "tier", "target"} {
+	for _, name := range []string{"class", "match", "tier", "target", "problem", "intervention"} {
 		_ = register.MarkFlagRequired(name)
 	}
 
@@ -192,16 +213,20 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 				return err
 			}
 			return mine.Reject(out(), gateConfig().StateDir, mine.RejectOpts{
-				Ledger:       v.ledger,
-				Class:        v.rejectClass,
-				Match:        v.rejectMatch,
-				Kind:         v.rejectKind,
-				Corpus:       v.rejectCorpus,
-				SignalKind:   v.rejectSignalKind,
-				Sessions:     storedSessions(),
-				Reason:       v.rejectReason,
-				Reopen:       v.rejectReopen,
-				Note:         v.rejectNote,
+				Ledger:     v.ledger,
+				Class:      v.rejectClass,
+				Match:      v.rejectMatch,
+				Kind:       v.rejectKind,
+				Corpus:     v.rejectCorpus,
+				SignalKind: v.rejectSignalKind,
+				Sessions:   storedSessions(),
+				Reason:     v.rejectReason,
+				Reopen:     v.rejectReopen,
+				Note:       v.rejectNote,
+				Prose: mine.Prose{
+					Problem:      v.rejectProblem,
+					Intervention: v.rejectIntervent,
+				},
 				RejectedTS:   v.rejectRejectedTS,
 				Force:        v.rejectForce,
 				ScopeAll:     v.rejectScopeAll,
@@ -220,13 +245,15 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 	rj.StringVar(&v.rejectReason, "reason", "", "why no gate was installed (required)")
 	rj.StringVar(&v.rejectReopen, "reopen", "", "the observation that would make this worth reconsidering (required)")
 	rj.StringVar(&v.rejectNote, "note", "", "free-text note")
+	rj.StringVar(&v.rejectProblem, "problem", "", problemUsage)
+	rj.StringVar(&v.rejectIntervent, "intervention", "", rejectInterventionUsage)
 	rj.Int64Var(&v.rejectRejectedTS, "rejected-ts", 0, "rejection timestamp (default now)")
 	rj.BoolVar(&v.rejectForce, "force", false, "record despite a zero baseline")
 	rj.BoolVar(&v.rejectScopeAll, "scope-all", false, "eligibility scope: every unit (exclusive with the scope predicates)")
 	rj.StringSliceVar(&v.rejectScopeHrn, "scope-harness", nil, scopeHarnessUsage)
 	rj.StringVar(&v.rejectScopeRepo, "scope-repo", "", "eligibility scope: regex on the repository root basename")
 	rj.StringVar(&v.rejectScopePath, "scope-path", "", "eligibility scope: regex on a repo-relative changed path")
-	for _, name := range []string{"class", "match", "reason", "reopen"} {
+	for _, name := range []string{"class", "match", "reason", "reopen", "problem", "intervention"} {
 		_ = reject.MarkFlagRequired(name)
 	}
 
@@ -302,6 +329,28 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 	}
 	list.Flags().BoolVar(&v.listJSON, "json", false, "emit JSON")
 
+	describe := &cobra.Command{
+		Use:   "describe ID",
+		Short: "Rewrite an intervention's explanation, and nothing else",
+		Long: "Rewrite an intervention's explanation, and nothing else.\n\n" +
+			"Wording is not evidence, so this writes the two prose fields and leaves the\n" +
+			"id, the match, the scope, the baseline, the instrument and both windows\n" +
+			"exactly as they were. Correcting a description never restarts a measurement.\n" +
+			"An omitted flag keeps the value the record already carries.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := prepareState(); err != nil {
+				return err
+			}
+			return mine.Describe(out(), gateConfig().StateDir, args[0], mine.DescribeOpts{
+				Problem:      v.describeProblem,
+				Intervention: v.describeIntervent,
+			})
+		},
+	}
+	describe.Flags().StringVar(&v.describeProblem, "problem", "", problemUsage)
+	describe.Flags().StringVar(&v.describeIntervent, "intervention", "", interventionUsage)
+
 	retire := &cobra.Command{
 		Use:   "retire ID",
 		Short: "Mark an intervention reworked or removed",
@@ -318,7 +367,7 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 	retire.Flags().StringVar(&v.retireStatus, "status", "removed", "reworked|removed")
 	_ = retire.MarkFlagRequired("reason")
 
-	cmds := []*cobra.Command{match, register, reject, scope, score, list, retire}
+	cmds := []*cobra.Command{match, register, reject, scope, score, list, describe, retire}
 
 	if withFindings {
 		findings := &cobra.Command{

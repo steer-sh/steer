@@ -16,7 +16,7 @@ import (
 )
 
 // QueueVersion is the schema version of the queue file the skill reads.
-const QueueVersion = 3
+const QueueVersion = 4
 
 // minCandidateSessions is the deterministic threshold on transcript clusters: a
 // correction pattern must repeat across this many sessions to become a candidate.
@@ -48,17 +48,23 @@ type Incidence struct {
 // Intervention is a full contract record the deterministic tier already scored and
 // flagged as needing attention. It carries a match, produced by register.
 type Intervention struct {
-	ID      string    `json:"id"`
-	Class   string    `json:"class"`
-	Match   string    `json:"match"`
-	Corpus  string    `json:"corpus"`
-	Unit    string    `json:"unit"`
-	Tier    string    `json:"tier"`
-	Target  string    `json:"target"`
-	HookID  string    `json:"hook_id,omitempty"`
-	Verdict string    `json:"verdict"`
-	Before  Incidence `json:"before"`
-	After   Incidence `json:"after"`
+	ID    string `json:"id"`
+	Class string `json:"class"`
+	// Problem and Intervention are the record's own explanation: what goes wrong,
+	// and what this record does about it. The queue is read by a skill that was
+	// not in the session that authored the class, so the explanation travels with
+	// the work rather than being re-derived from the regex.
+	Problem      string    `json:"problem"`
+	Intervention string    `json:"intervention"`
+	Match        string    `json:"match"`
+	Corpus       string    `json:"corpus"`
+	Unit         string    `json:"unit"`
+	Tier         string    `json:"tier"`
+	Target       string    `json:"target"`
+	HookID       string    `json:"hook_id,omitempty"`
+	Verdict      string    `json:"verdict"`
+	Before       Incidence `json:"before"`
+	After        Incidence `json:"after"`
 	// Scope is the frozen eligibility rule, null on a legacy record.
 	Scope *Scope `json:"scope"`
 	// BeforeCoverage and AfterCoverage account for each window under that scope.
@@ -166,18 +172,21 @@ func Refresh(opts Options) (*Queue, error) {
 		if !needsAttention(verdict) {
 			continue
 		}
+		prose := mine.ProseOf(r)
 		q.Interventions = append(q.Interventions, Intervention{
-			ID:      str(scored["id"]),
-			Class:   str(scored["class"]),
-			Match:   str(r["match"]),
-			Corpus:  mine.CorpusOf(r),
-			Unit:    mine.UnitOf(r),
-			Tier:    str(scored["tier"]),
-			Target:  str(scored["target"]),
-			HookID:  str(scored["hook_id"]),
-			Verdict: verdict,
-			Before:  incidenceOf(scored["before"]),
-			After:   incidenceOf(scored["after"]),
+			ID:           str(scored["id"]),
+			Class:        str(scored["class"]),
+			Problem:      prose.Problem,
+			Intervention: prose.Intervention,
+			Match:        str(r["match"]),
+			Corpus:       mine.CorpusOf(r),
+			Unit:         mine.UnitOf(r),
+			Tier:         str(scored["tier"]),
+			Target:       str(scored["target"]),
+			HookID:       str(scored["hook_id"]),
+			Verdict:      verdict,
+			Before:       incidenceOf(scored["before"]),
+			After:        incidenceOf(scored["after"]),
 
 			Scope:          ScopeOf(scored["scope"]),
 			BeforeCoverage: CoverageOf(scored["before_coverage"]),

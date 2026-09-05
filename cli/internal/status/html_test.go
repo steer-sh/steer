@@ -39,6 +39,9 @@ func sample() *SystemStatus {
 		Interventions: []ScoredIntervention{
 			{ID: "widget-flag", Class: "widget flag loss", Tier: "check", Target: "check.sh",
 				Status: "active", HookID: "h1", Verdict: "effective",
+				Problem:        "the parser drops a flag and the reviewer catches it after the fact",
+				Intervention:   "check.sh refuses a parser branch that drops a flag",
+				LegacyNote:     "check.sh tier 6",
 				Before:         cadence.Incidence{Hits: 12, Units: 12, Rate: 1},
 				After:          cadence.Incidence{Hits: 0, Units: 12, Rate: 0},
 				Scope:          &cadence.Scope{Version: 1, Repo: "steer.*", Path: `\.go$`},
@@ -152,6 +155,12 @@ func TestRenderHTMLCarriesEverySection(t *testing.T) {
 		"12 eligible / 14 (2 out of scope)", "12 eligible / 13 (1 pending)",
 		"0 eligible / 4 (4 without a ledger)",
 		"confound (instrument): after-window reviewed by another instrument",
+		// The record's own explanation leads every measurement line, and a tier
+		// reads as a type rather than as a flag value.
+		"Problem: the parser drops a flag and the reviewer catches it after the fact",
+		"Intervention: check.sh refuses a parser branch that drops a flag",
+		"Legacy note: check.sh tier 6",
+		"repository check \u2192 check.sh",
 		"composition (host): host set changed",
 		// Resolver posture: the arming row and the unresolved backlog.
 		"resolver claude-code global", "4 row(s) owe a ledger",

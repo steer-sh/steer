@@ -88,7 +88,15 @@ func (m *Model) startForm(kind formKind, cand cadence.Candidate) {
 			{label: "scope-repo", value: ""},
 		}
 	}
-	steps := []formStep{{label: "class", value: class}, {label: "match", value: cand.Pattern}}
+	// The explanation is authored here, while the evidence that produced the
+	// candidate is still on screen. The writers refuse a blank, so the same two
+	// steps stand in front of a registration and a rejection.
+	steps := []formStep{
+		{label: "class", value: class},
+		{label: "problem", value: ""},
+		{label: "intervention", value: ""},
+		{label: "match", value: cand.Pattern},
+	}
 	steps = append(steps, scopeSteps...)
 	if kind == formRegister {
 		steps = append(steps,
@@ -105,10 +113,22 @@ func (m *Model) startForm(kind formKind, cand cadence.Candidate) {
 	m.loadStep()
 }
 
+// stepHint is what a wizard step asks for, shown as the input's placeholder. The
+// prose steps carry one because a label named "problem" does not say who the
+// sentence is for: someone reading the record without this session's evidence.
+var stepHint = map[string]string{
+	"problem":      "what goes wrong, in one sentence, for a reader who was not here",
+	"intervention": "what this does about it — or that no intervention was found",
+	"match":        "regex for this class",
+	"reason":       "why no gate was installed",
+	"reopen":       "the observation that would make this worth reconsidering",
+}
+
 // loadStep binds the text input to the current wizard step.
 func (m *Model) loadStep() {
 	step := m.form.steps[m.form.idx]
 	m.input.Prompt = step.label + ": "
+	m.input.Placeholder = stepHint[step.label]
 	m.input.SetValue(step.value)
 	m.input.CursorEnd()
 	m.input.Focus()
@@ -238,14 +258,18 @@ func (m *Model) commitForm() tea.Cmd {
 			break
 		}
 		err = mine.Register(&buf, m.cfg.StateDir, mine.RegisterOpts{
-			Class:        val("class"),
-			Match:        val("match"),
-			Kind:         "accepted",
-			Corpus:       m.form.corpus(),
-			SignalKind:   val("signal-kind"),
-			Sessions:     storedSessions(),
-			Tier:         val("tier"),
-			Target:       val("target"),
+			Class:      val("class"),
+			Match:      val("match"),
+			Kind:       "accepted",
+			Corpus:     m.form.corpus(),
+			SignalKind: val("signal-kind"),
+			Sessions:   storedSessions(),
+			Tier:       val("tier"),
+			Target:     val("target"),
+			Prose: mine.Prose{
+				Problem:      val("problem"),
+				Intervention: val("intervention"),
+			},
 			ScopeAll:     scopeAll,
 			ScopeHarness: harnesses,
 			ScopeRepo:    repo,
@@ -253,14 +277,18 @@ func (m *Model) commitForm() tea.Cmd {
 		})
 	case formReject:
 		err = mine.Reject(&buf, m.cfg.StateDir, mine.RejectOpts{
-			Class:        val("class"),
-			Match:        val("match"),
-			Kind:         "accepted",
-			Corpus:       m.form.corpus(),
-			SignalKind:   val("signal-kind"),
-			Sessions:     storedSessions(),
-			Reason:       val("reason"),
-			Reopen:       val("reopen"),
+			Class:      val("class"),
+			Match:      val("match"),
+			Kind:       "accepted",
+			Corpus:     m.form.corpus(),
+			SignalKind: val("signal-kind"),
+			Sessions:   storedSessions(),
+			Reason:     val("reason"),
+			Reopen:     val("reopen"),
+			Prose: mine.Prose{
+				Problem:      val("problem"),
+				Intervention: val("intervention"),
+			},
 			ScopeAll:     scopeAll,
 			ScopeHarness: harnesses,
 			ScopeRepo:    repo,

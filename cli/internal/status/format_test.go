@@ -1,9 +1,12 @@
 package status
 
 import (
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/cadence"
+	"github.com/steer-sh/steer-cli/internal/gate/mine"
 )
 
 func TestEffectPhraseNamesTheOpenBounds(t *testing.T) {
@@ -76,5 +79,48 @@ func TestCoveragePhraseAccountsForEveryChain(t *testing.T) {
 	}
 	if got := CoveragePhrase(cadence.Coverage{Total: 8, Eligible: 8}); got != "8 eligible / 8" {
 		t.Errorf("a clean window carries no parenthetical, got %q", got)
+	}
+}
+
+// The prose lines lead, and a rejection's are labelled as what it considered rather
+// than as something that runs.
+func TestProsePhrasesLabelARejectionAsProposed(t *testing.T) {
+	got := ProsePhrases("the count goes stale", "check.sh refuses a literal count", false)
+	want := []string{
+		"Problem: the count goes stale",
+		"Intervention: check.sh refuses a literal count",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("installed = %v, want %v", got, want)
+	}
+	got = ProsePhrases("the reviewer repeats itself", mine.NoInterventionFound, true)
+	if len(got) != 2 || !strings.HasPrefix(got[1], "Proposed intervention: ") {
+		t.Errorf("rejected = %v, want a proposed-intervention label", got)
+	}
+}
+
+// A record written before the fields existed prints nothing rather than empty labels.
+func TestProsePhrasesSayNothingForALegacyRecord(t *testing.T) {
+	if got := ProsePhrases("", "", false); len(got) != 0 {
+		t.Errorf("want no lines for an unexplained record, got %v", got)
+	}
+}
+
+// A tier is a type. The empty state says so in words, because "none → " is the
+// reading the page gave a rejection and it names nothing the reader can act on.
+func TestTierPhraseNamesTheTypeAndTheEmptyState(t *testing.T) {
+	cases := []struct{ tier, target, want string }{
+		{"check", "check.sh", "repository check → check.sh"},
+		{"steer", "/h/guard.py", "pre-tool guard → /h/guard.py"},
+		{"guard", "", "pre-tool guard"},
+		{"prose", "CLAUDE.md", "instruction rule → CLAUDE.md"},
+		{"none", "", "no intervention installed"},
+		{"", "", "no intervention installed"},
+		{"future-tier", "x", "future-tier → x"},
+	}
+	for _, tc := range cases {
+		if got := TierPhrase(tc.tier, tc.target); got != tc.want {
+			t.Errorf("TierPhrase(%q, %q) = %q, want %q", tc.tier, tc.target, got, tc.want)
+		}
 	}
 }
