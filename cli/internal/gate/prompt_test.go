@@ -7,9 +7,9 @@ import (
 	"testing"
 )
 
-// The digests of the five templates. Four are still byte-identical to what
-// commit-review.py shipped; review.md is not, and its digest is the instrument's
-// prompt half, so rows written after that change are a different instrument.
+// The digests of the five templates. review.md's digest is the instrument's prompt
+// half, so a change there makes every row written afterwards a different instrument;
+// deny.md and cap.md are read by the agent alone and move no instrument.
 // These are golden values, not a checksum of convenience. Regenerate one only
 // when the prompt change is the intended change.
 var promptDigests = map[string]struct {
@@ -17,8 +17,8 @@ var promptDigests = map[string]struct {
 	want string
 }{
 	"review":     {reviewPrompt, "956536885eab8804f8029edc29953336a7c4664e09a0a09a58f59cf48df00b2c"},
-	"deny":       {denyTemplate, "0d59cc3099d745f60df34ade4c059c8e4e1e2993663df5ae1e56f64a11582dbb"},
-	"cap":        {capTemplate, "2879eff9c450d4a1469208c0f2037addcc74f62f3dfcb82345508add0fd592d8"},
+	"deny":       {denyTemplate, "4326b7ff2a5443355c41f1428f44903d13c4530f2fb15853e6c364388b32f101"},
+	"cap":        {capTemplate, "dd38783f70c5a67a23653efec829cda089ea1777c41c4a7f040891864c89e542"},
 	"round-note": {roundNote, "f40acabd50e95481f309c08ccacf4cac025835d79e8e265601170f7c4a4d34c3"},
 	"rerun-note": {rerunNoteText, "e3e48ce9edf1a6b74b2fd347234805b8c26decd553b2549d582918d00922b4e8"},
 }
@@ -43,12 +43,13 @@ func TestInstrumentID(t *testing.T) {
 // reaches the agent.
 func TestNoPlaceholderSurvivesFill(t *testing.T) {
 	prompt := BuildReviewPrompt("msg", "diff", "ctx")
-	deny := BuildDeny(3, "reviews", 2, 4, rerunNoteText, "feat: a subject")
-	capped := BuildCap(3, "reviews", 5, 4, "feat: a subject")
+	deny := BuildDeny(3, "reviews", 2, 4, rerunNoteText, "feat: a subject", "a reviewer")
+	capped := BuildCap(3, "reviews", 5, 4, "feat: a subject", "a reviewer")
 	for name, out := range map[string]string{"review": prompt, "deny": deny, "cap": capped} {
 		for _, placeholder := range []string{
 			"{message}", "{diff}", "{context}", "{count}", "{review}",
 			"{firing}", "{cap}", "{round_note}", "{rerun_note}", "{subject}",
+			"{reviewer}",
 		} {
 			if strings.Contains(out, placeholder) {
 				t.Errorf("%s output still carries %s", name, placeholder)
@@ -83,22 +84,22 @@ func TestCommitSubject(t *testing.T) {
 // The subject the row stores and the subject the agent is handed must be one string.
 func TestSubjectReachesTheHeader(t *testing.T) {
 	const subject = "fix(resolver): chain join — one ledger per chain"
-	if !strings.Contains(BuildDeny(3, "r", 2, 4, "", subject), "chain ledger, "+subject+"**") {
+	if !strings.Contains(BuildDeny(3, "r", 2, 4, "", subject, "a reviewer"), "chain ledger, "+subject+"**") {
 		t.Error("the deny header must carry the subject verbatim")
 	}
-	if !strings.Contains(BuildCap(3, "r", 5, 4, subject), "chain ledger, "+subject+"**") {
+	if !strings.Contains(BuildCap(3, "r", 5, 4, subject, "a reviewer"), "chain ledger, "+subject+"**") {
 		t.Error("the terminal header must carry it too")
 	}
-	if !strings.Contains(BuildDeny(3, "r", 2, 4, "", ""), "chain ledger, "+NoSubject+"**") {
+	if !strings.Contains(BuildDeny(3, "r", 2, 4, "", "", "a reviewer"), "chain ledger, "+NoSubject+"**") {
 		t.Error("an unread commit message still renders a header, matching no row")
 	}
 }
 
 func TestFiringOneHasNoRoundNote(t *testing.T) {
-	if strings.Contains(BuildDeny(3, "r", 1, 4, "", "s"), "This is firing") {
+	if strings.Contains(BuildDeny(3, "r", 1, 4, "", "s", "a reviewer"), "This is firing") {
 		t.Error("firing 1 must not carry the round note")
 	}
-	if !strings.Contains(BuildDeny(3, "r", 2, 4, "", "s"), "This is firing 2 of at most 4") {
+	if !strings.Contains(BuildDeny(3, "r", 2, 4, "", "s", "a reviewer"), "This is firing 2 of at most 4") {
 		t.Error("firing 2 must carry the round note")
 	}
 }
@@ -112,5 +113,33 @@ func TestReviewPromptExampleParsesAsFindings(t *testing.T) {
 	}
 	if !strings.Contains(reviewPrompt, "NO FINDINGS") {
 		t.Error("prompt no longer names the clean reply")
+	}
+}
+
+// The deny and cap templates tell the agent who wrote the reviews, and that name
+// comes from the reviewer that ran. A provider or model spelled into the template
+// would name the wrong panel on every machine configured differently.
+func TestTemplatesNameNoReviewer(t *testing.T) {
+	for name, tmpl := range map[string]string{"deny": denyTemplate, "cap": capTemplate, "review": reviewPrompt} {
+		for _, word := range []string{"gemini", "agy", "codex", "claude", "anthropic"} {
+			if strings.Contains(strings.ToLower(tmpl), word) {
+				t.Errorf("%s.md names %q; the reviewer is a placeholder", name, word)
+			}
+		}
+	}
+}
+
+func TestReviewerLabel(t *testing.T) {
+	cases := []struct{ provider, model, want string }{
+		{"agy", "gemini-3.7-flash-high", "gemini-3.7-flash-high, via `agy`"},
+		{"codex", "codex-default", "via `codex`"},
+		{"claude-code", "", "via `claude-code`"},
+		{"", "anything", "the configured reviewer"},
+	}
+	for _, tc := range cases {
+		c := Config{ReviewerProvider: tc.provider, ReviewerModel: tc.model}
+		if got := c.ReviewerLabel(); got != tc.want {
+			t.Errorf("ReviewerLabel(%q, %q) = %q, want %q", tc.provider, tc.model, got, tc.want)
+		}
 	}
 }

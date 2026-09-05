@@ -1,8 +1,8 @@
-{round_note}{count} independent reviewers (Gemini 3.7 Flash, via `agy`, with read access to this repo) red-teamed this commit before it landed. Every reviewer's raw output is below, unfiltered. They ran under identical instructions, so the same defect often appears more than once — adjudicate each distinct concern exactly once, and adjudicate every distinct concern.
+{round_note}{count} independent reviewers ({reviewer}) red-teamed this commit before it landed. Every reviewer's raw output is below, unfiltered. They ran under identical instructions, so the same defect often appears more than once — adjudicate each distinct concern exactly once, and adjudicate every distinct concern.
 
 They have LESS context than you: they saw the diff, the commit message, and whatever they chose to read — not this conversation, and not the constraints you already resolved while writing the change.
 
-Independent reviewers miss different things, which is why every run is shown rather than voted on. A concern raised by one reviewer is not weaker than one raised by all three, and one raised by all three is not stronger — adjudicate each on its merits.
+Independent reviewers miss different things, which is why every run is shown rather than voted on. A concern raised by one reviewer is not weaker than one raised by every reviewer, and one raised by every reviewer is not stronger — adjudicate each on its merits.
 
 If two findings cannot both be true, at least one of them is false. Say so and rule on the pair explicitly rather than accepting both.
 
@@ -16,13 +16,13 @@ For each finding: state its load-bearing premise in one sentence, then test THAT
 
 Reporting — this is not optional
 --------------------------------
-JEREMY CANNOT SEE ANY OF THIS. The reviews above went to you alone; they are not in his transcript and he has no way to read them. To him, a commit simply took longer. So this chain MUST end with the ledger below, written to be understood by someone who has read NONE of the review text.
+THE USER CANNOT SEE ANY OF THIS. The reviews above went to you alone; the user gets no review text and has no way to read it. To the user, a commit simply took longer. So this chain MUST end with the ledger below, written to be understood by someone who has read NONE of the review text.
 
 ONE LEDGER PER CHAIN, and it is the last thing the chain produces. Do not write it now. Write it in the reply where the commit SUCCEEDS, with one section per round the chain fired, in order. Round {firing} is a section of that ledger, never a ledger of its own.
 
 Keep your round-{firing} verdicts where you can find them again. A round reconstructed from memory two rounds later is how a section ends up under the wrong number.
 
-Each line is SELF-CONTAINED. Never refer to a finding by a bare label — "E2", "the third finding", "R1.2" alone — because those identifiers exist only in text he does not have. Say what the finding CLAIMED, in your own words, before ruling on it.
+Each line is SELF-CONTAINED. Never refer to a finding by a bare label — "E2", "the third finding", "R1.2" alone — because those identifiers exist only in text the user does not have. Say what the finding CLAIMED, in your own words, before ruling on it.
 
 Emit exactly this shape, ahead of your other commentary. Copy the header line as it stands, subject included — it is what files this ledger against THIS commit, and one turn often commits more than once to the same repo. Every round that fired then gets a section, and its round number is not optional either — that is what files the section against the round it answers:
 
@@ -44,6 +44,6 @@ A round with no section reads as a round you never adjudicated, so the number of
 
 Do NOT put this ledger in the commit message.
 
-This gate re-fires on your next `git commit` if the diff CHANGED, because the reviewers then read code none of them has seen — your fixes. It stops the moment a retry's diff is identical to the one already reviewed, and after {cap} firings in any case. So rejecting every finding ends the chain immediately: it costs you nothing and buys you nothing, and the only reader of that decision is Jeremy.
+This gate re-fires on your next `git commit` if the diff CHANGED, because the reviewers then read code none of them has seen — your fixes. It stops the moment a retry's diff is identical to the one already reviewed, and after {cap} firings in any case. So rejecting every finding ends the chain immediately: it costs you nothing and buys you nothing, and the only reader of that decision is the user.
 
 Ending the chain at the {cap}-firing cap does not skip the review of your last fixes. That round gets one final review which cannot block the commit, and which you must adjudicate and report in the same way.

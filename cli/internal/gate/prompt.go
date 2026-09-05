@@ -8,9 +8,8 @@ import (
 	"strings"
 )
 
-// The five prompts, byte-identical to the Python hook's templates. Byte identity is
-// load-bearing twice over: the instrument digest is a hash of reviewPrompt, and a
-// drifting template silently reclassifies every row that follows.
+// The five prompts. Their digests are pinned: the instrument digest is a hash of
+// reviewPrompt, so a drift there silently reclassifies every row that follows.
 var (
 	//go:embed prompts/review.md
 	reviewPrompt string
@@ -64,7 +63,7 @@ func BuildReviewPrompt(message, diff, context string) string {
 }
 
 // BuildDeny renders the blocking message the agent reads on a fired gate.
-func BuildDeny(count int, review string, firing, cap int, rerun, subject string) string {
+func BuildDeny(count int, review string, firing, cap int, rerun, subject, reviewer string) string {
 	round := ""
 	if firing != 1 {
 		round = fill(roundNote, map[string]string{
@@ -77,19 +76,19 @@ func BuildDeny(count int, review string, firing, cap int, rerun, subject string)
 	return fill(denyTemplate, map[string]string{
 		"count": fmt.Sprint(count), "review": review, "cap": fmt.Sprint(cap),
 		"firing": fmt.Sprint(firing), "round_note": round, "rerun_note": rerun,
-		"subject": subject,
+		"subject": subject, "reviewer": reviewer,
 	})
 }
 
 // BuildCap renders the capped chain's terminal, non-blocking review message.
-func BuildCap(count int, review string, firing, cap int, subject string) string {
+func BuildCap(count int, review string, firing, cap int, subject, reviewer string) string {
 	if subject == "" {
 		subject = NoSubject
 	}
 	return fill(capTemplate, map[string]string{
 		"count": fmt.Sprint(count), "review": review,
 		"firing": fmt.Sprint(firing), "cap": fmt.Sprint(cap),
-		"subject": subject,
+		"subject": subject, "reviewer": reviewer,
 	})
 }
 
@@ -141,4 +140,20 @@ func (c Config) InstrumentFields() map[string]any {
 		"prompt_digest": PromptDigest(),
 		"engine":        InstrumentSuffix,
 	}
+}
+
+// ReviewerLabel names the panel that ran, for the templates that tell the agent who
+// wrote the reviews. It is built from the reviewer's own answers, which NewEngine
+// fills, so the label can never name a provider that did not run. A `<provider>-default`
+// model is the sentinel for "the CLI's own default", which names no model to a reader.
+func (c Config) ReviewerLabel() string {
+	provider := strings.TrimSpace(c.ReviewerProvider)
+	model := strings.TrimSpace(c.ReviewerModel)
+	if provider == "" {
+		return "the configured reviewer"
+	}
+	if model == "" || model == provider+"-default" {
+		return "via `" + provider + "`"
+	}
+	return model + ", via `" + provider + "`"
 }

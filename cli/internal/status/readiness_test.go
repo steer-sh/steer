@@ -1,0 +1,137 @@
+package status
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/steer-sh/steer-cli/internal/gate/reviewers"
+	"github.com/steer-sh/steer-cli/internal/harness"
+)
+
+func armed(h string) ScopeArming {
+	return ScopeArming{
+		Harness: h, Scope: "global", Registered: true, Effective: true,
+		Trust: TrustNotApplicable, Resolvable: ResolveResolvable, Observed: 1,
+	}
+}
+
+func available() reviewers.Probe {
+	return reviewers.Probe{Provider: "agy", Executable: "agy", State: reviewers.ProbeAvailable}
+}
+
+func snapshot(rows ...ScopeArming) *SystemStatus {
+	return &SystemStatus{Posture: Posture{CommitGate: rows}}
+}
+
+// An empty machine gets the answer, not an inventory it has to read a verdict out of.
+func TestNoRegistrationSaysCommitsAreNotReviewed(t *testing.T) {
+	r := ReadinessOf(snapshot(), available())
+	if r.Reviewing {
+		t.Fatal("Reviewing is true with no registration")
+	}
+	if len(r.Steps) != 1 || !strings.Contains(r.Steps[0].Fix, "commit-gate install") {
+		t.Fatalf("steps = %+v; want one naming the install", r.Steps)
+	}
+}
+
+func TestAnArmedResolvableGateWithAnAvailableReviewerIsReviewing(t *testing.T) {
+	r := ReadinessOf(snapshot(armed(string(harness.ClaudeCode))), available())
+	if !r.Reviewing || len(r.Steps) != 0 {
+		t.Fatalf("Readiness = %+v; want reviewing with no steps", r)
+	}
+	if r.Note != "" {
+		t.Errorf("Note = %q; an observed channel needs none", r.Note)
+	}
+}
+
+// The four states are distinct, and registration is the weakest of them. A machine
+// that registered a gate it cannot run must not read as reviewing.
+func TestEachOpenStateWithholdsTheReviewingAnswer(t *testing.T) {
+	missingReviewer := reviewers.Probe{Provider: "agy", Executable: "agy", State: reviewers.ProbeMissing}
+	inert := armed(string(harness.ClaudeCode))
+	inert.Effective = false
+	unresolvable := armed(string(harness.ClaudeCode))
+	unresolvable.Resolvable = ResolveMissing
+	untrusted := armed(string(harness.Codex))
+	untrusted.Trust = TrustUnknown
+
+	cases := map[string]Readiness{
+		"reviewer missing": ReadinessOf(snapshot(armed(string(harness.ClaudeCode))), missingReviewer),
+		"inert matcher":    ReadinessOf(snapshot(inert), available()),
+		"command missing":  ReadinessOf(snapshot(unresolvable), available()),
+		"trust pending":    ReadinessOf(snapshot(untrusted), available()),
+	}
+	for name, r := range cases {
+		if r.Reviewing {
+			t.Errorf("%s: Reviewing is true", name)
+		}
+		if len(r.Steps) == 0 {
+			t.Errorf("%s: no step names what remains", name)
+		}
+	}
+}
+
+// A step with no command leaves the reader where the old success box did.
+func TestEveryStepNamesItsRepair(t *testing.T) {
+	untrusted := armed(string(harness.Codex))
+	untrusted.Trust = TrustRecordPresent
+	untrusted.Resolvable = ResolveMissing
+	r := ReadinessOf(snapshot(untrusted), reviewers.Probe{Provider: "nope", State: reviewers.ProbeMissing})
+	if len(r.Steps) != 3 {
+		t.Fatalf("steps = %d; want reviewer, command and trust", len(r.Steps))
+	}
+	for _, step := range r.Steps {
+		if step.Title == "" || step.Fix == "" {
+			t.Errorf("step %+v is missing a title or a repair", step)
+		}
+	}
+}
+
+// Never observed is not proof of breakage, so it rides as a note beside the answer
+// rather than as a step the reader is asked to clear.
+func TestNeverObservedIsANoteAndNotAStep(t *testing.T) {
+	fresh := armed(string(harness.ClaudeCode))
+	fresh.Observed = 0
+	r := ReadinessOf(snapshot(fresh), available())
+	if !r.Reviewing || len(r.Steps) != 0 {
+		t.Fatalf("Readiness = %+v; want reviewing", r)
+	}
+	if !strings.Contains(r.Note, "no review observed") {
+		t.Errorf("Note = %q", r.Note)
+	}
+}
+
+// An unknown provider checked nothing, so it must not be reported as absent.
+func TestAnUnknownProbeRaisesNoStep(t *testing.T) {
+	if _, ok := ReviewerStep(reviewers.Probe{State: reviewers.ProbeUnknown}); ok {
+		t.Error("an unknown probe raised a step")
+	}
+}
+
+// One enforcing channel answers the question. A second harness that registered and
+// does not enforce is a step the reader may want; it is not a reason to tell them
+// their commits go unreviewed.
+func TestASecondHarnessNotEnforcingDoesNotFlipTheAnswer(t *testing.T) {
+	untrusted := armed(string(harness.Codex))
+	untrusted.Trust = TrustRecordPresent
+	r := ReadinessOf(snapshot(armed(string(harness.ClaudeCode)), untrusted), available())
+	if !r.Reviewing {
+		t.Fatalf("Readiness = %+v; want reviewing on the enforcing channel", r)
+	}
+	if len(r.Steps) != 1 || !strings.Contains(r.Steps[0].Title, "Codex") {
+		t.Fatalf("steps = %+v; want the Codex trust step alone", r.Steps)
+	}
+	if !strings.Contains(r.Headline, "Claude Code global") {
+		t.Errorf("Headline = %q; want the enforcing channel named", r.Headline)
+	}
+}
+
+// The reviewer is not per harness: every channel runs it, so a reviewer that cannot
+// run leaves no channel enforcing however many registrations exist.
+func TestAMissingReviewerWithholdsTheAnswerOnEveryChannel(t *testing.T) {
+	missing := reviewers.Probe{Provider: "agy", Executable: "agy", State: reviewers.ProbeMissing}
+	r := ReadinessOf(snapshot(armed(string(harness.ClaudeCode)), armed(string(harness.Codex))), missing)
+	if r.Reviewing {
+		t.Fatalf("Readiness = %+v; want the answer withheld", r)
+	}
+}

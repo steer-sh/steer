@@ -17,9 +17,11 @@ import (
 	"github.com/steer-sh/steer-cli/internal/gate/gitgate"
 	gatepi "github.com/steer-sh/steer-cli/internal/gate/pi"
 	"github.com/steer-sh/steer-cli/internal/gate/resolve"
+	"github.com/steer-sh/steer-cli/internal/gate/reviewers"
 	"github.com/steer-sh/steer-cli/internal/harness"
 	pihooks "github.com/steer-sh/steer-cli/internal/pi"
 	"github.com/steer-sh/steer-cli/internal/settings"
+	"github.com/steer-sh/steer-cli/internal/status"
 	"github.com/steer-sh/steer-cli/internal/steerbin"
 	"github.com/steer-sh/steer-cli/internal/styles"
 	transcriptpi "github.com/steer-sh/steer-cli/internal/transcript/pi"
@@ -261,27 +263,30 @@ func installReviewChannel(cfg gate.Config) error {
 		return err
 	}
 	entry, _ := harness.Get(target)
-	var path string
+	var path, hookCommand string
 	switch target {
 	case harness.Codex:
 		cwd, cwdErr := codexProjectDir()
 		if cwdErr != nil {
 			return cwdErr
 		}
+		hookCommand = commitGateCodexCommand()
 		path, err = codexhooks.RegisterCommitGateAndResolver(scope, cwd,
-			commitGateCodexCommand(), timeout, backfillCommand(), backfillHookTimeout)
+			hookCommand, timeout, backfillCommand(), backfillHookTimeout)
 	case harness.Pi:
 		cwd, cwdErr := codexProjectDir()
 		if cwdErr != nil {
 			return cwdErr
 		}
+		hookCommand = commitGatePiCommand()
 		path, err = pihooks.RegisterCommitGateAndResolver(scope, cwd,
-			commitGatePiCommand(), timeout, backfillCommand(), backfillHookTimeout)
+			hookCommand, timeout, backfillCommand(), backfillHookTimeout)
 	default:
 		// The review hook and the resolver are one Claude Code installation, armed in
 		// one write: the review writes the rows the resolver later reconciles from the
 		// transcript, so a half-armed install leaves the ledger permanently unresolved.
-		err = claude.RegisterCommitGateAndResolver(scope, commitGateCommand(), timeout, backfillCommand(), backfillHookTimeout)
+		hookCommand = commitGateCommand()
+		err = claude.RegisterCommitGateAndResolver(scope, hookCommand, timeout, backfillCommand(), backfillHookTimeout)
 	}
 	if err != nil {
 		return err
@@ -293,22 +298,62 @@ func installReviewChannel(cfg gate.Config) error {
 			utils.Warning("could not repair the other registrations: " + repairErr.Error())
 		}
 	}
-	fmt.Println()
-	message := fmt.Sprintf("Armed the %s commit gate on PreToolUse\nScope: %s\nTimeout: %ds (reviewer timeout %ds + %ds margin)",
+	registered := fmt.Sprintf("Registered: the %s commit gate on PreToolUse\nScope: %s\nTimeout: %ds (reviewer timeout %ds + %ds margin)",
 		entry.DisplayName, scope, timeout, int(cfg.ReviewTimeout.Seconds()), commitGateTimeoutMargin)
-	if target == harness.ClaudeCode {
-		message += "\nResolver: Stop hook armed (steer commit-gate backfill)"
+	switch target {
+	case harness.ClaudeCode:
+		registered += "\nResolver: Stop hook registered (steer commit-gate backfill)"
+	case harness.Codex:
+		registered += "\nResolver: Stop and SubagentStop hooks registered (steer commit-gate backfill)" +
+			"\nHooks: " + path
+	case harness.Pi:
+		registered += "\nResolver: turn_end handler registered (steer commit-gate backfill)" +
+			"\nExtension: " + path
 	}
-	if target == harness.Codex {
-		message += "\nResolver: Stop and SubagentStop hooks armed (steer commit-gate backfill)" +
-			"\nHooks: " + path + "\nTrust: restart Codex and approve these definitions in /hooks"
-	}
-	if target == harness.Pi {
-		message += "\nResolver: turn_end handler armed (steer commit-gate backfill)" +
-			"\nExtension: " + path + "\nTrust: project extensions run after Pi trusts the project"
-	}
-	fmt.Println(styles.SuccessBox.Render(message))
+	fmt.Println()
+	fmt.Println(renderInstallReadiness(installSteps(cfg, target, hookCommand), registered))
 	return nil
+}
+
+// installSteps is what still stands between this registration and the first review.
+// Registration is one of four states, and it is the only one the write itself proves:
+// the harness must trust the hook, the hook command must resolve, and the reviewer CLI
+// must exist. Reporting "armed" on the write alone names the weakest of the four.
+func installSteps(cfg gate.Config, target harness.ID, command string) []status.Step {
+	var steps []status.Step
+	_, _, resolveErr := resolveReviewer(cfg)
+	if step, ok := status.ReviewerStep(reviewerProbe(cfg, resolveErr)); ok {
+		steps = append(steps, step)
+	}
+	if step, ok := status.CommandStep(steerbin.Resolve(command)); ok {
+		steps = append(steps, step)
+	}
+	entry, _ := harness.Get(target)
+	if entry.Capabilities.TrustReview {
+		// The registration block below names the file, so the step does not repeat it.
+		if step, ok := status.TrustStep(string(target), status.TrustUnknown, ""); ok {
+			steps = append(steps, step)
+		}
+	}
+	return steps
+}
+
+// renderInstallReadiness leads with whatever remains before the first review can
+// happen, and puts the registration facts beneath it. A success box over an open step
+// reads as a working gate.
+func renderInstallReadiness(steps []status.Step, registered string) string {
+	if len(steps) == 0 {
+		return styles.SuccessBox.Render("Ready — the next `git commit` in scope is reviewed.\n\n" + registered)
+	}
+	lines := []string{fmt.Sprintf("Not reviewing yet — %d step(s) remain before the first review.", len(steps)), ""}
+	for _, step := range steps {
+		lines = append(lines, "· "+step.Title)
+		if step.Fix != "" {
+			lines = append(lines, "  run: "+step.Fix)
+		}
+	}
+	lines = append(lines, "", registered)
+	return styles.WarningBox.Render(strings.Join(lines, "\n"))
 }
 
 func installPreCommitChannel(cfg gate.Config) error {
@@ -732,4 +777,14 @@ func init() {
 		"PreToolUse harness (claude-code|codex|pi)")
 	commitGateRemoveCmd.Flags().StringVar(&commitGateHarness, "harness", "claude-code",
 		"PreToolUse harness (claude-code|codex|pi)")
+}
+
+// reviewerProbe reads whether the configured reviewer can actually run. An
+// unresolvable provider is reported as missing with no executable: it names no CLI,
+// so no review can run, and the repair is the setting rather than an install.
+func reviewerProbe(cfg gate.Config, err error) reviewers.Probe {
+	if err != nil {
+		return reviewers.Probe{Provider: cfg.ReviewerProvider, State: reviewers.ProbeMissing}
+	}
+	return reviewers.ProbeProvider(cfg.ReviewerProvider)
 }

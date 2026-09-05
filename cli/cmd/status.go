@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/cadence"
 	"github.com/steer-sh/steer-cli/internal/evidence"
+	"github.com/steer-sh/steer-cli/internal/gate/reviewers"
 	"github.com/steer-sh/steer-cli/internal/status"
 	"github.com/steer-sh/steer-cli/internal/styles"
 )
@@ -46,7 +47,7 @@ runtime dependency. It writes to --out, or to stdout when --out is absent.`,
 		// them, so the one writer stays `steer report refresh`.
 		// A snapshot renders under an unresolvable provider: it names no provider,
 		// so the configured model is the honest value to print.
-		cfg, _, _ := resolvedGateConfig()
+		cfg, _, resolveErr := resolvedGateConfig()
 		s, err := status.Collect(status.Options{
 			GateStateDir: cfg.StateDir,
 			Config:       cfg,
@@ -75,7 +76,7 @@ runtime dependency. It writes to --out, or to stdout when --out is absent.`,
 			fmt.Println(string(data))
 			return nil
 		}
-		renderStatus(s)
+		renderStatus(s, reviewerProbe(cfg, resolveErr))
 		return nil
 	},
 }
@@ -98,18 +99,46 @@ func writeStatusHTML(s *status.SystemStatus) error {
 	return nil
 }
 
-// renderStatus prints the loop-first human view: posture, then the attention
-// queue, then the failure-class verdict counts.
-func renderStatus(s *status.SystemStatus) {
+// renderStatus prints the loop-first human view. It leads with the one question a
+// reader arrives with — will a commit here be reviewed, and what stands in the way —
+// because the posture inventory below answers it only to a reader who already knows
+// how registration, trust and reviewer availability combine.
+func renderStatus(s *status.SystemStatus, probe reviewers.Probe) {
 	fmt.Println()
 	fmt.Println(styles.MainHeader.Render(styles.Logo() + " status"))
 	fmt.Println()
 
+	renderReadiness(status.ReadinessOf(s, probe))
+	fmt.Println()
 	renderPosture(s)
 	fmt.Println()
 	renderAttention(s)
 	fmt.Println()
 	renderSummary(s)
+}
+
+// renderReadiness prints the short answer and the steps that remain. Each step names
+// the command that clears it, so the reader never has to derive one from the
+// inventory below.
+func renderReadiness(r status.Readiness) {
+	head := styles.SuccessText.Render(r.Headline)
+	if !r.Reviewing {
+		head = styles.WarningText.Render(r.Headline)
+	}
+	fmt.Println(styles.SectionHeader.Render("Answer"))
+	fmt.Printf("  %s\n", head)
+	if len(r.Steps) > 0 && r.StepsLead != "" {
+		fmt.Printf("  %s\n", r.StepsLead)
+	}
+	for _, step := range r.Steps {
+		fmt.Printf("  · %s\n", step.Title)
+		if step.Fix != "" {
+			fmt.Printf("    run: %s\n", step.Fix)
+		}
+	}
+	if r.Note != "" {
+		fmt.Printf("  %s\n", styles.MutedText.Render(r.Note))
+	}
 }
 
 func renderPosture(s *status.SystemStatus) {

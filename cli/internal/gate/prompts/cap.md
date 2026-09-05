@@ -1,6 +1,6 @@
 The commit gate chain for this commit has ENDED at its {cap}-firing cap, and this message does not block anything — your commit is proceeding.
 
-Round {cap}'s fixes changed the diff, so they are code no reviewer had read. Rather than leave them unreviewed, {count} reviewers (Gemini 3.7 Flash, via `agy`) read the current diff one final time. Their raw output is below.
+Round {cap}'s fixes changed the diff, so they are code no reviewer had read. Rather than leave them unreviewed, {count} reviewers ({reviewer}) read the current diff one final time. Their raw output is below.
 
 Read the reviews the same way you read a fired gate: state each distinct concern's load-bearing premise, test THAT premise against the code, and rule on it. The reviewers saw the whole diff, not just round {cap}'s changes, so concerns you already adjudicated in earlier rounds can reappear — name those as repeats and move on.
 
@@ -11,7 +11,7 @@ Read the reviews the same way you read a fired gate: state each distinct concern
 Two things follow from this being terminal rather than blocking:
 
 1. There is no retry to fold fixes into. Anything BLOCKING that survives your adjudication needs a FOLLOW-UP commit. Anything that does not survive needs nothing.
-2. Jeremy sees only a one-line count of these findings, never the text. So the ledger is how he learns what they said and what you did about it, and it is mandatory here exactly as it is on a fired gate. The chain is over and this commit is proceeding, so THIS reply is where the chain ledger goes — one section per round the chain fired, in order, ending with this terminal round. Copy the header line as it stands, subject included: it is what files this ledger against THIS commit, and one turn often commits more than once to the same repo. Every line self-contained:
+2. The user sees only a one-line count of these findings, never the text. So the ledger is how the user learns what they said and what you did about it, and it is mandatory here exactly as it is on a fired gate. The chain is over and this commit is proceeding, so THIS reply is where the chain ledger goes — one section per round the chain fired, in order, ending with this terminal round. Copy the header line as it stands, subject included: it is what files this ledger against THIS commit, and one turn often commits more than once to the same repo. Every line self-contained:
 
 **Commit gate fired — chain ledger, {subject}**
 
