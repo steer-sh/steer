@@ -219,6 +219,15 @@ func split(command string) (string, string) {
 	return "", ""
 }
 
+// IsSteerCommand reports whether a command's first word is a steer executable. A
+// caller recognising one of steer's own registrations reads the head rather than
+// searching the whole command: a foreign command carrying "steer" in an argument is
+// not steer's, and treating it as steer's lets an install overwrite it unasked.
+func IsSteerCommand(command string) bool {
+	head, _ := split(command)
+	return head != "" && isSteer(head)
+}
+
 // isSteer reports whether a command's first word is a steer executable. It
 // compares the name without an extension, so a Windows registration naming
 // steer.exe and a Unix one naming steer are both recognised on either platform.
