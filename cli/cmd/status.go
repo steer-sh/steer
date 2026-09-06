@@ -298,13 +298,9 @@ func actionHeader(act string) string {
 // interventionBlock is one class: its identity line, then the sub-lines naming
 // what recurred, what to do, and where the rule lives.
 func interventionBlock(iv cadence.Intervention, unmeasurable bool, rate status.ChainRate) string {
-	verdict := iv.Verdict
-	if unmeasurable {
-		verdict = "unmeasurable"
-	}
 	line := fmt.Sprintf("    %-52s %s",
 		fmt.Sprintf("%s [%s]", iv.Class, status.TierPhrase(iv.Tier, iv.Target)),
-		styles.MutedText.Render(verdict))
+		styles.MutedText.Render(status.VerdictLabel(iv.Verdict, unmeasurable)))
 	for _, extra := range interventionNotes(iv, unmeasurable, rate) {
 		line += "\n      " + styles.MutedText.Render(extra)
 	}
@@ -374,7 +370,7 @@ func renderSummary(s *status.SystemStatus) {
 	}
 	sort.Strings(verdicts)
 	for _, v := range verdicts {
-		fmt.Printf("    %-18s %d\n", v, s.Summary.Counts[v])
+		fmt.Printf("    %-30s %d\n", status.VerdictLabel(v, false), s.Summary.Counts[v])
 	}
 }
 

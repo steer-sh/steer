@@ -28,49 +28,87 @@ var ActionOrder = []string{
 	ActionSettled,
 }
 
-// ActionHeading is the section header for one action.
+// ActionHeading is the section header for one action. Each heading names the
+// object the reader acts on: a bare verb ("Accept") names nothing to hold, and
+// these six headings organize the whole screen.
 var ActionHeading = map[string]string{
-	ActionHarmful:    "Harmful — the class grew after install",
-	ActionAdjudicate: "Adjudicate — this is what grows the evidence",
-	ActionRepair:     "Repair — each of these names a fix that exists",
-	ActionWait:       "Wait — the window is still filling",
-	ActionAccept:     "Accept — no repair settles these; read the counts and decide",
-	ActionSettled:    "Settled — the measurement decided these; nothing to do",
+	ActionHarmful:    "Problems that grew after a fix went in — review the fix",
+	ActionAdjudicate: "Findings the coding agent still owes a decision — these grow the evidence",
+	ActionRepair:     "Fixes to rework — each one names a change you can make",
+	ActionWait:       "Fixes still collecting evidence — no result yet",
+	ActionAccept:     "Results no fix settles — read the counts and decide",
+	ActionSettled:    "Results that are decided — nothing to do",
 }
 
-// actionFor maps a verdict token to the action it asks for.
-var actionFor = map[string]string{
-	"harmful":             ActionHarmful,
-	"evidence-incomplete": ActionAdjudicate,
-	"not-triggered":       ActionRepair,
-	"unattributed":        ActionRepair,
-	"ineffective":         ActionRepair,
-	"legacy-unscoped":     ActionRepair,
-	"confounded":          ActionAccept,
-	"class-grew":          ActionRepair,
-	"no-baseline":         ActionRepair,
-	"collecting":          ActionWait,
-	"inconclusive":        ActionAccept,
-	"class-inconclusive":  ActionAccept,
-	"unscored":            ActionAccept,
-	"effective":           ActionSettled,
-	"class-faded":         ActionSettled,
-	"class-steady":        ActionSettled,
+// meaning is one verdict token's whole presentation: the compact label a badge
+// shows, the action the token asks of its reader, and the sentence that names
+// that action. One entry per token, so a token cannot carry a label with no
+// sentence, or an action with no label.
+//
+// A label names a STATE, never an action — the action sentence names what the
+// reader does. A label states a direction only under the four tokens where the
+// scorer crossed a bound and claimed one: effective, harmful, class-grew and
+// class-faded. Anywhere else a directional word states the point claim the
+// scorer withheld.
+type meaning struct {
+	Label    string
+	Action   string
+	Sentence string
 }
 
-// actionSentence translates one verdict token into what to do about it.
-var actionSentence = map[string]string{
-	"harmful":             "the class grew after install — remove the rule, then retire the record",
-	"evidence-incomplete": "chains inside the windows still owe an adjudication",
-	"not-triggered":       "the matcher never matched a unit in the after-window — rework the match",
-	"unattributed":        "the class fell with no firing — the rule may not be what changed",
-	"ineffective":         "the rule did not reduce the class — rework or retire it",
-	"legacy-unscoped":     "no eligibility rule was frozen — run: steer intervention scope",
-	"confounded":          "the windows ran under different conditions and cannot be compared — read the counts and decide",
-	"class-grew":          "the refused class grew — reconsider the refusal",
-	"no-baseline":         "the before-window carries no occurrence of the class — rework the match, or retire it",
-	"collecting":          "the window is still filling",
-	"inconclusive":        "the range cannot place the effect",
+// meanings is the one table Terminal, HTML and TUI read. Nothing else names a
+// label, and no surface prints the raw token.
+var meanings = map[string]meaning{
+	"harmful": {"More with fix", ActionHarmful,
+		"the problem grew after this fix went in — remove the rule, then stop tracking it"},
+	"evidence-incomplete": {"Missing evidence", ActionAdjudicate,
+		"review sequences inside the compared periods still owe a decision"},
+	"not-triggered": {"No blocks recorded", ActionRepair,
+		"nothing matched this problem in the work since install — rework how it is identified"},
+	"unattributed": {"Benefit unconfirmed", ActionRepair,
+		"the problem became less frequent, but this guard blocked nothing — the fix may not be what changed"},
+	"ineffective": {"Target not met", ActionRepair,
+		"this fix did not reduce the problem to the target — rework it, or stop tracking it"},
+	"legacy-unscoped": {"Comparison undefined", ActionRepair,
+		"no rule was saved for which work counts — run: steer intervention scope"},
+	"no-baseline": {"No earlier examples", ActionRepair,
+		"the earlier period holds no example of this problem — rework how it is identified, or stop tracking it"},
+	"class-grew": {"Grew, fix declined", ActionRepair,
+		"the problem grew after the suggestion was declined — reconsider that decision"},
+	"collecting": {"Too early to tell", ActionWait,
+		"more comparable work is needed before this can be decided"},
+	"confounded": {"Not comparable", ActionAccept,
+		"the two periods ran under different conditions and cannot be compared — read the counts and decide"},
+	"inconclusive": {"No clear result", ActionAccept,
+		"the range cannot place the effect"},
+	"class-inconclusive": {"No clear trend, fix declined", ActionAccept,
+		"the evidence does not show how the problem changed"},
+	"unscored": {"Not assessed", ActionAccept,
+		"no result is available for this fix on this machine"},
+	"effective":    {"Fewer with fix", ActionSettled, ""},
+	"class-faded":  {"Fewer, fix declined", ActionSettled, ""},
+	"class-steady": {"Steady, fix declined", ActionSettled, ""},
+}
+
+// LabelUnknown is what a token this binary cannot interpret reads as. The token
+// itself stays in --json, where a reader can chase it.
+const LabelUnknown = "Unknown result"
+
+// LabelUnmeasurable is the badge for a window no reachable amount of work closes.
+// It is a reading of required_after, never a state the scorer wrote.
+const LabelUnmeasurable = "Window unreachable"
+
+// VerdictLabel is the compact label a badge shows for one verdict. Every surface
+// reads it; none prints the token.
+func VerdictLabel(verdict string, unmeasurable bool) string {
+	if unmeasurable && meanings[verdict].Action == ActionWait {
+		return LabelUnmeasurable
+	}
+	m, ok := meanings[verdict]
+	if !ok || m.Label == "" {
+		return LabelUnknown
+	}
+	return m.Label
 }
 
 // claimsAnEffect reports whether a verdict already states an effect. A settled
@@ -90,26 +128,30 @@ func claimsAnEffect(verdict string) bool {
 // A token this binary does not know reads as accept, never as repair: repair
 // heads a fix that exists, and an uninterpretable state names no fix.
 func ActionFor(verdict string, unmeasurable bool) string {
-	a, ok := actionFor[verdict]
+	m, ok := meanings[verdict]
 	if !ok {
 		return ActionAccept
 	}
-	if unmeasurable && a == ActionWait {
+	if unmeasurable && m.Action == ActionWait {
 		return ActionAccept
 	}
-	return a
+	return m.Action
 }
 
 // ActionSentence is the verdict translated into an instruction. The unreachable
 // window replaces only the sentence it contradicts — the one that tells the
 // reader to wait. Every other verdict keeps its own instruction: a repair names
-// a fix the window length does not remove, and an accept names why the windows
+// a fix the window length does not remove, and an accept names why the periods
 // do not decide. RatePhrase states the reachability beside either.
 func ActionSentence(verdict string, unmeasurable bool) string {
-	if unmeasurable && actionFor[verdict] == ActionWait {
-		return "no reachable window can decide this — keep it as a rule, or retire it"
+	m, ok := meanings[verdict]
+	if unmeasurable && m.Action == ActionWait {
+		return "no reachable window can decide this — keep it as a rule, or stop tracking it"
 	}
-	return actionSentence[verdict]
+	if !ok {
+		return "this version of Steer cannot interpret this result — read the token in the JSON snapshot"
+	}
+	return m.Sentence
 }
 
 // unmeasurableYears is the wait past which a required window stops being a wait.

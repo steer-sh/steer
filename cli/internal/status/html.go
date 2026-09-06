@@ -108,6 +108,7 @@ func (s *SystemStatus) RenderHTML(w io.Writer, x Export) error {
 		"prose":     ProsePhrases,
 		"tierWord":  TierPhrase,
 		"action":    ActionSentence,
+		"label":     VerdictLabel,
 		"removal":   RemovalPhrase,
 		"unmeas":    func(verdict, unit string, required *int) bool { return Unmeasurable(verdict, unit, required, rate) },
 		"wait":      func(required *int, unit string) string { return RatePhrase(required, unit, rate) },

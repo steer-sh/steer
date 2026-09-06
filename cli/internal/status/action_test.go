@@ -12,7 +12,7 @@ import (
 // queued class renders with no instruction under it.
 func TestEveryAttentionVerdictNamesAnAction(t *testing.T) {
 	for _, v := range cadence.AttentionVerdicts {
-		if _, ok := actionFor[v]; !ok {
+		if _, ok := meanings[v]; !ok {
 			t.Errorf("verdict %q maps to no action", v)
 		}
 		if ActionSentence(v, false) == "" {
@@ -24,6 +24,127 @@ func TestEveryAttentionVerdictNamesAnAction(t *testing.T) {
 			t.Errorf("action %q renders no heading", a)
 		}
 	}
+}
+
+// tokenVocabulary is every verdict token a surface may be handed. The label test
+// walks it, which is what pins that the tokens did not move: TestJSONContractIsStable
+// pins one fixture and carries one token.
+var tokenVocabulary = []string{
+	"effective", "harmful", "ineffective", "collecting", "inconclusive",
+	"confounded", "unattributed", "not-triggered", "evidence-incomplete",
+	"no-baseline", "legacy-unscoped", "class-grew", "class-faded",
+	"class-steady", "class-inconclusive", "unscored",
+}
+
+// directionalWords are the words that state which way a rate moved. A label may
+// carry one only under a token where the scorer crossed a bound and claimed a
+// direction; anywhere else the word states the point claim the scorer withheld.
+// A false positive costs a word choice, a miss costs a lie on screen, so the list
+// stays and matches on word boundaries.
+var directionalWords = []string{
+	"less", "more", "fewer", "grew", "faded", "rose", "fell", "up", "down",
+}
+
+// claimsADirection is the four tokens where the scorer crossed a bound.
+func claimsADirection(token string) bool {
+	switch token {
+	case "effective", "harmful", "class-grew", "class-faded":
+		return true
+	}
+	return false
+}
+
+// The label table is the one thing every surface reads, so its invariants are
+// mechanical: one label per token, no shared labels, an instruction under every
+// unsettled token, and no direction claimed where the scorer withheld one.
+func TestTheLabelTableHoldsItsInvariants(t *testing.T) {
+	seen := map[string]string{}
+	for _, token := range tokenVocabulary {
+		m, ok := meanings[token]
+		if !ok {
+			t.Errorf("token %q left the table", token)
+			continue
+		}
+		if m.Label == "" {
+			t.Errorf("token %q carries no label", token)
+		}
+		if prev, dup := seen[m.Label]; dup {
+			t.Errorf("tokens %q and %q share the label %q", prev, token, m.Label)
+		}
+		seen[m.Label] = token
+		if m.Action != ActionSettled && m.Sentence == "" {
+			t.Errorf("token %q asks for %q with no sentence", token, m.Action)
+		}
+		if claimsADirection(token) {
+			continue
+		}
+		for _, w := range directionalWords {
+			if wordIn(m.Label, w) {
+				t.Errorf("token %q claims a direction the scorer withheld: %q", token, m.Label)
+			}
+		}
+	}
+	if len(meanings) != len(tokenVocabulary) {
+		t.Errorf("the table holds %d tokens, the vocabulary %d", len(meanings), len(tokenVocabulary))
+	}
+}
+
+// objectWords are the nouns a section heading may name. A heading is what
+// organizes the whole screen, so it names the object the reader acts on.
+var objectWords = []string{
+	"fix", "fixes", "problem", "problems", "result", "results",
+	"finding", "findings", "evidence", "decision", "decisions",
+}
+
+func TestEveryHeadingNamesAnObject(t *testing.T) {
+	for _, a := range ActionOrder {
+		head := ActionHeading[a]
+		named := false
+		for _, w := range objectWords {
+			if wordIn(head, w) {
+				named = true
+			}
+		}
+		if !named {
+			t.Errorf("action %q heads a section naming no object: %q", a, head)
+		}
+	}
+}
+
+// A token this binary cannot interpret still reads as something.
+func TestAnUnknownTokenStillReads(t *testing.T) {
+	if got := VerdictLabel("verdict-from-the-future", false); got != LabelUnknown {
+		t.Errorf("an unknown token read as %q", got)
+	}
+	if ActionSentence("verdict-from-the-future", false) == "" {
+		t.Error("an unknown token renders no sentence")
+	}
+	if got := ActionFor("verdict-from-the-future", false); got != ActionAccept {
+		t.Errorf("an unknown token asks for %q", got)
+	}
+}
+
+// wordIn reports whether word appears in s on both word boundaries, so that
+// "up" does not match "supported".
+func wordIn(s, word string) bool {
+	low := strings.ToLower(s)
+	for i := 0; i+len(word) <= len(low); i++ {
+		if low[i:i+len(word)] != word {
+			continue
+		}
+		if i > 0 && isWordByte(low[i-1]) {
+			continue
+		}
+		if j := i + len(word); j < len(low) && isWordByte(low[j]) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func isWordByte(b byte) bool {
+	return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9'
 }
 
 // The range is the scorer's claim, so it prints only where a claim was made.
@@ -229,7 +350,7 @@ func TestUnmeasurableOverridesOnlyAWait(t *testing.T) {
 		if got := ActionFor(v, true); got != ActionRepair {
 			t.Errorf("ActionFor(%q, unmeasurable) = %q, want %q", v, got, ActionRepair)
 		}
-		if got := ActionSentence(v, true); got != actionSentence[v] {
+		if got := ActionSentence(v, true); got != meanings[v].Sentence {
 			t.Errorf("ActionSentence(%q, unmeasurable) = %q, want its own repair", v, got)
 		}
 	}
@@ -243,8 +364,8 @@ func TestUnmeasurableOverridesOnlyAWait(t *testing.T) {
 
 // Every verdict in a repair section names the fix it asks for.
 func TestEveryRepairNamesItsFix(t *testing.T) {
-	for v, act := range actionFor {
-		if act == ActionRepair && actionSentence[v] == "" {
+	for v, m := range meanings {
+		if m.Action == ActionRepair && m.Sentence == "" {
 			t.Errorf("verdict %q heads a repair but names no fix", v)
 		}
 	}
@@ -259,9 +380,9 @@ func TestEveryActionIsOrderedAndHeaded(t *testing.T) {
 		}
 		seen[act] = true
 	}
-	for v, act := range actionFor {
-		if !seen[act] {
-			t.Errorf("verdict %q maps to %q, which ActionOrder does not render", v, act)
+	for v, m := range meanings {
+		if !seen[m.Action] {
+			t.Errorf("verdict %q maps to %q, which ActionOrder does not render", v, m.Action)
 		}
 	}
 	if !seen[ActionFor("a-token-from-a-newer-engine", false)] {
@@ -273,13 +394,13 @@ func TestEveryActionIsOrderedAndHeaded(t *testing.T) {
 // confounded class keeps its own reason: the windows are not comparable, which
 // is why no window decides it.
 func TestUnmeasurableKeepsAnAcceptVerdictsOwnReason(t *testing.T) {
-	if got := ActionSentence("confounded", true); got != actionSentence["confounded"] {
+	if got := ActionSentence("confounded", true); got != meanings["confounded"].Sentence {
 		t.Errorf("ActionSentence(confounded, unmeasurable) = %q, want its own reason", got)
 	}
-	if got := ActionSentence("inconclusive", true); got != actionSentence["inconclusive"] {
+	if got := ActionSentence("inconclusive", true); got != meanings["inconclusive"].Sentence {
 		t.Errorf("ActionSentence(inconclusive, unmeasurable) = %q, want its own reason", got)
 	}
-	if got := ActionSentence("collecting", true); got == actionSentence["collecting"] {
+	if got := ActionSentence("collecting", true); got == meanings["collecting"].Sentence {
 		t.Error("ActionSentence(collecting, unmeasurable) still says the window is filling")
 	}
 }

@@ -149,7 +149,7 @@ func TestRenderHTMLCarriesEverySection(t *testing.T) {
 		"RR 0.00 [0.00, 0.31] @90%", "a clean window of 9 units",
 		// The range prints only where the scorer made a claim; a withheld verdict
 		// carries its counts in words and an action sentence instead.
-		"the windows ran under different conditions and cannot be compared",
+		"the two periods ran under different conditions and cannot be compared",
 		"5 recurrences in the 20 units since install; 2 in the 20 before",
 		"scope repo=/steer.*/ AND path=/\\.go$/", "scope all",
 		"12 eligible / 14 (2 out of scope)", "12 eligible / 13 (1 pending)",

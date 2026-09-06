@@ -50,12 +50,8 @@ func (m *Model) viewClasses() string {
 			section = act
 			out += dim(status.ActionHeading[act]) + "\n"
 		}
-		badge := it.Verdict
-		if un {
-			badge = "unmeasurable"
-		}
 		line := fmt.Sprintf("%s %-22s %s %s", pointer(pos == m.cursor[panelClasses]),
-			truncate(it.Class, 22), verdictBadge(badge),
+			truncate(it.Class, 22), verdictBadge(it.Verdict, un),
 			dim(status.TierPhrase(it.Tier, it.Target)))
 		out += line + "\n"
 		// The explanation leads: the regex and the range below it both measure
@@ -154,16 +150,18 @@ func confoundLines(it status.ScoredIntervention) []string {
 	return append(out, status.ConfoundPhrases("composition", it.Composition)...)
 }
 
-// verdictBadge colors a verdict by whether it demands action. The abstentions the
-// cadence queues read as warnings; the abstentions it leaves quiet read as dim.
-func verdictBadge(v string) string {
+// verdictBadge colors a verdict by whether it demands action, and prints the
+// label rather than the token. The abstentions the cadence queues read as
+// warnings; the abstentions it leaves quiet read as dim.
+func verdictBadge(v string, unmeasurable bool) string {
+	label := status.VerdictLabel(v, unmeasurable)
 	switch v {
 	case "effective", "class-faded":
-		return ok(v)
+		return ok(label)
 	case "harmful", "ineffective", "class-grew", "not-triggered":
-		return errText(v)
+		return errText(label)
 	case "class-steady", "confounded", "evidence-incomplete", "legacy-unscoped", "unattributed":
-		return warn(v)
+		return warn(label)
 	}
-	return dim(v)
+	return dim(label)
 }
