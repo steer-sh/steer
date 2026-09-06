@@ -119,7 +119,7 @@ func (m *Model) startForm(kind formKind, cand cadence.Candidate) {
 var stepHint = map[string]string{
 	"problem":      "what goes wrong, in one sentence, for a reader who was not here",
 	"intervention": "what this fix does about it — or that no fix was found",
-	"match":        "regex for this class",
+	"match":        "regex that identifies this problem",
 	"reason":       "why no gate was installed",
 	"reopen":       "the observation that would make this worth reconsidering",
 }
@@ -214,7 +214,7 @@ func (m *Model) updateMatchPreview() {
 		}
 		// Split the unknown column by cause: a chain the scope cannot classify is a
 		// regex problem the author can fix here; one with no adjudication is not.
-		m.matchCount = fmt.Sprintf("scope: %d eligible · %d ineligible · %d unknown scope · %d without a ledger, of %d chains",
+		m.matchCount = fmt.Sprintf("scope: %d eligible · %d ineligible · %d unknown scope · %d with no decision recorded, of %d reviewed",
 			cov.Eligible, cov.Ineligible, cov.UnknownScope, cov.UnknownEvidence, cov.Total)
 	default:
 		m.matchCount = ""
@@ -332,7 +332,7 @@ func (m *Model) viewCandidates() string {
 				dim(fmt.Sprintf("%d hits · %d sessions · %s", c.Count, c.Sessions, c.Corpus)))
 		} else {
 			out += fmt.Sprintf("%s %-30s %s\n", pointer(sel), "("+c.Corpus+" dump)",
-				dim(fmt.Sprintf("%d undecided chains · %s", c.UndecidedChains, c.Dump)))
+				dim(fmt.Sprintf("%d review(s) carry a finding no problem covers yet · %s", c.UndecidedChains, c.Dump)))
 		}
 	}
 	return out
@@ -341,10 +341,10 @@ func (m *Model) viewCandidates() string {
 // viewForm renders the running register or reject wizard with the live match
 // count under the match step.
 func (m *Model) viewForm() string {
-	kind := "Register class"
+	kind := "Register a fix"
 	switch m.form.kind {
 	case formReject:
-		kind = "Reject class"
+		kind = "Decline a suggestion"
 	case formRetire:
 		kind = "Stop tracking " + m.form.id
 	}

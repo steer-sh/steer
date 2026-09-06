@@ -131,7 +131,7 @@ func (m *Model) closeReviewerEdit() {
 	m.reviewer = nil
 	m.input.SetValue("")
 	m.input.Prompt = "match /"
-	m.input.Placeholder = "regex for this class"
+	m.input.Placeholder = "regex that identifies this problem"
 }
 
 // reloadReviewer recomposes the snapshot under the configuration just written, so the

@@ -221,19 +221,19 @@ func RatePhrase(required *int, unit string, rate ChainRate) string {
 		return ""
 	}
 	unit = orUnit(unit)
-	window := fmt.Sprintf("a clean window of %d %s", *required, plural(unit, *required))
+	window := fmt.Sprintf("a clean window of %d %s", *required, UnitName(unit, *required))
 	if unit != "chain" {
-		return window + "; this corpus reports no accrual rate here"
+		return window + "; how fast those accrue here is not measured"
 	}
 	if !rate.Known {
 		if rate.QuietDays > 0 {
-			return fmt.Sprintf("%s; no %s here in %d days, so the rate is unknown",
-				window, plural(unit, 2), rate.QuietDays)
+			return fmt.Sprintf("%s; none here in %d days, so the rate is unknown",
+				window, rate.QuietDays)
 		}
 		return window + "; the recent sample here is too short to project a rate"
 	}
-	return fmt.Sprintf("%s is about %s away at your recent %s rate",
-		window, humanDays(float64(*required)/rate.PerDay), unit)
+	return fmt.Sprintf("%s is about %s away at your recent rate",
+		window, humanDays(float64(*required)/rate.PerDay))
 }
 
 // humanDays renders a wait in the largest unit that keeps it a small number.
@@ -254,7 +254,7 @@ func humanDays(days float64) string {
 func RecurrencePhrase(before, after cadence.Incidence, unit string) string {
 	unit = orUnit(unit)
 	s := fmt.Sprintf("%d %s in the %d %s since install",
-		after.Hits, plural("recurrence", after.Hits), after.Units, plural(unit, after.Units))
+		after.Hits, plural("recurrence", after.Hits), after.Units, UnitName(unit, after.Units))
 	if before.Units > 0 {
 		s += fmt.Sprintf("; %d in the %d before", before.Hits, before.Units)
 	}
@@ -309,7 +309,22 @@ func RemovalPhrase(t, target string) string {
 	return ends + "no fix is installed in any tier"
 }
 
-// orUnit names the denominator when a record carries no unit tag.
+// UnitName is the counted item in the reader's words. The stored unit is "chain"
+// or "session", and a reader has neither word. The vocabulary lint cannot catch
+// this one: here the machine word arrives as data rather than as a literal, so
+// every caller that puts a unit in a sentence has to come through here. It is
+// exported for exactly that reason — cmd and the TUI render units too.
+func UnitName(unit string, n int) string {
+	switch orUnit(unit) {
+	case "chain":
+		return plural("review sequence", n)
+	case "session":
+		return plural("agent session", n)
+	}
+	return plural("item", n)
+}
+
+// orUnit names the counted item when a record carries no unit tag.
 func orUnit(unit string) string {
 	if unit == "" {
 		return "unit"

@@ -9,9 +9,9 @@ import (
 // viewHealth is the one read-only panel: corpora, the team lockfile, and the
 // instrument the loop measures with.
 func (m *Model) viewHealth() string {
-	out := header("Health — corpora, lockfile, instrument (read-only)")
+	out := header("Health — evidence, lockfile, instrument (read-only)")
 
-	out += section("Evidence corpora")
+	out += section("Evidence on this machine")
 	for _, c := range m.snap.Corpora {
 		state := dim("absent")
 		if c.Present {
@@ -24,7 +24,7 @@ func (m *Model) viewHealth() string {
 	}
 
 	if n := m.snap.Posture.Unresolved; n > 0 {
-		out += "   " + warn(fmt.Sprintf("%d ledger row(s) owe a transcript join — the scorer withholds on them\n", n))
+		out += "   " + warn(fmt.Sprintf("%d review(s) still owe a decision — the scorer withholds on them\n", n))
 	}
 
 	out += section("Guard master runtime")
@@ -42,7 +42,7 @@ func (m *Model) viewHealth() string {
 	}
 
 	out += section("Telemetry")
-	out += fmt.Sprintf("   review chains %d · denials %d · audit firings %d\n",
+	out += fmt.Sprintf("   reviews %d · denials %d · guard blocks %d\n",
 		m.snap.Telemetry.ReviewChains, m.snap.Telemetry.DenialsRows, m.snap.Telemetry.AuditFirings)
 
 	out += section("Team lockfile")
@@ -55,6 +55,6 @@ func (m *Model) viewHealth() string {
 
 	out += section("Instrument")
 	out += fmt.Sprintf("   reviewer %s · instrument %s\n", m.snap.Posture.Reviewer, m.snap.Posture.Instrument)
-	out += "   " + dim("ledger "+m.snap.Posture.Ledger) + "\n"
+	out += "   " + dim("review log "+m.snap.Posture.Ledger) + "\n"
 	return out
 }

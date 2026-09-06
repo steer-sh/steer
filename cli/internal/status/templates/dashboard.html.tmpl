@@ -155,7 +155,7 @@ footer { color: var(--faint); font-size: 11.5px; border-top: 1px solid var(--lin
 
 <div class="masthead">
   <div class="mark">steer<span>·</span>status</div>
-  <div class="tagline">evidence → review → intervention → measurement</div>
+  <div class="tagline">evidence → review → fix → measurement</div>
   <div class="stamp">{{ .Generated }}</div>
 </div>
 
@@ -197,9 +197,9 @@ footer { color: var(--faint); font-size: 11.5px; border-top: 1px solid var(--lin
   {{- end }}
   {{- end }}
   {{- if .Status.Posture.Unresolved }}
-  <div class="chip"><b>unresolved</b><span class="v">{{ .Status.Posture.Unresolved }} row(s) owe a ledger</span></div>
+  <div class="chip"><b>unresolved</b><span class="v">{{ .Status.Posture.Unresolved }} review(s) owe a decision</span></div>
   {{- end }}
-  <div class="chip"><b>corpora</b><span class="v">{{ present .Status.Corpora }} of {{ len .Status.Corpora }} present</span></div>
+  <div class="chip"><b>evidence</b><span class="v">{{ present .Status.Corpora }} of {{ len .Status.Corpora }} present</span></div>
 </div>
 
 <section>
@@ -238,7 +238,7 @@ footer { color: var(--faint); font-size: 11.5px; border-top: 1px solid var(--lin
         <div class="sub">{{ gapsay $g .Verdict (unmeas .Verdict .Unit .RequiredAfter) }}</div>
         {{- if $g }}{{- with $g.Command }}<div class="sub"><code class="fix">{{ . }}</code></div>{{ end }}{{ end }}
         {{- with claim .Verdict .Effect }}<div class="sub mono">{{ . }}</div>{{ end }}
-        {{- if .RequiredAfter }}{{- with wait .RequiredAfter .Unit }}<div class="sub">{{ . }}</div>{{ end }}{{ else }}{{- with needs .RequiredAfter .Verdict }}<div class="sub">{{ . }}</div>{{ end }}{{ end }}
+        {{- if .RequiredAfter }}{{- with wait .RequiredAfter .Unit }}<div class="sub">{{ . }}</div>{{ end }}{{ else }}{{- with needs .RequiredAfter .Unit .Verdict }}<div class="sub">{{ . }}</div>{{ end }}{{ end }}
         <div class="sub">scope {{ scope .Scope }} · before {{ cover .BeforeCoverage }} · after {{ cover .AfterCoverage }}</div>
         {{- if or (unmeas .Verdict .Unit .RequiredAfter) (eq .Verdict "harmful") }}
         <div class="sub">{{ removal .Tier .Target }}<code class="fix">{{ retire .ID }}</code></div>
@@ -329,7 +329,7 @@ footer { color: var(--faint); font-size: 11.5px; border-top: 1px solid var(--lin
             <div>{{ gapsay $g .Verdict (unmeas .Verdict .Unit .RequiredAfter) }}</div>
             {{- if $g }}{{- with $g.Command }}<div class="dimtext"><code class="fix">{{ . }}</code></div>{{ end }}{{ end }}
             {{- with claim .Verdict .Effect }}<div class="mono">{{ . }}</div>{{ end }}
-            {{- if .RequiredAfter }}{{- with wait .RequiredAfter .Unit }}<div class="dimtext">{{ . }}</div>{{ end }}{{ else }}{{- with needs .RequiredAfter .Verdict }}<div class="dimtext">{{ . }}</div>{{ end }}{{ end }}
+            {{- if .RequiredAfter }}{{- with wait .RequiredAfter .Unit }}<div class="dimtext">{{ . }}</div>{{ end }}{{ else }}{{- with needs .RequiredAfter .Unit .Verdict }}<div class="dimtext">{{ . }}</div>{{ end }}{{ end }}
             <div class="dimtext">scope {{ scope .Scope }}</div>
             <div class="dimtext">before {{ cover .BeforeCoverage }} · after {{ cover .AfterCoverage }}</div>
             {{- with attrib .Attribution }}<div class="dimtext">{{ . }}</div>{{ end }}
@@ -383,7 +383,7 @@ footer { color: var(--faint); font-size: 11.5px; border-top: 1px solid var(--lin
 </section>
 
 <section>
-  <h2>Recent review chains</h2>
+  <h2>Recent reviews</h2>
   <div class="panel scroll">
     {{- if .Status.Chains }}
     <table>
@@ -416,7 +416,7 @@ footer { color: var(--faint); font-size: 11.5px; border-top: 1px solid var(--lin
   <h2>System health</h2>
   <div class="split">
     <div class="panel kv">
-      <h3>Evidence corpora</h3>
+      <h3>Evidence on this machine</h3>
       <dl>
       {{- range .Status.Corpora }}
         <dt>{{ .Corpus }}</dt>
@@ -427,7 +427,7 @@ footer { color: var(--faint); font-size: 11.5px; border-top: 1px solid var(--lin
     <div class="panel kv">
       <h3>Instrument</h3>
       <dl>
-        <dt>ledger</dt><dd>{{ .Status.Posture.Ledger }}</dd>
+        <dt>review log</dt><dd>{{ .Status.Posture.Ledger }}</dd>
         <dt>reviewer</dt><dd>{{ .Status.Posture.Reviewer }}</dd>
         <dt>instrument</dt><dd>{{ .Status.Posture.Instrument }}</dd>
         <dt>schema</dt><dd>status_version {{ .Status.StatusVersion }}</dd>

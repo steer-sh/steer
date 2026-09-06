@@ -74,7 +74,7 @@ type Model struct {
 // New builds a dashboard model over one scope, gate config and harness target set.
 func New(cfg gate.Config, scope string, targets ...harness.Registrar) *Model {
 	in := textinput.New()
-	in.Placeholder = "regex for this class"
+	in.Placeholder = "regex that identifies this problem"
 	in.CharLimit = 200
 	in.Prompt = "match /"
 	m := &Model{cfg: cfg, scope: scope, targets: targets, input: in, impactOf: settings.Impact}

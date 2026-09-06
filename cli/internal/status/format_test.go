@@ -35,17 +35,17 @@ func TestEffectPhraseNamesTheOpenBounds(t *testing.T) {
 }
 
 func TestRequiredPhraseSeparatesUnreachableFromSatisfied(t *testing.T) {
-	if got := RequiredPhrase(iptr(9), "collecting"); got != "needs 9 clean eligible chain(s)" {
+	if got := RequiredPhrase(iptr(9), "chain", "collecting"); got != "needs 9 more clean, eligible review sequences" {
 		t.Errorf("a reachable target names its count, got %q", got)
 	}
-	if got := RequiredPhrase(iptr(0), "effective"); got != "" {
+	if got := RequiredPhrase(iptr(0), "chain", "effective"); got != "" {
 		t.Errorf("a met target says nothing, got %q", got)
 	}
 	// A null required_after on an abstaining record means no window could decide it.
-	if got := RequiredPhrase(nil, "inconclusive"); got == "" {
+	if got := RequiredPhrase(nil, "chain", "inconclusive"); got == "" {
 		t.Error("an unreachable target must be named on an abstaining record")
 	}
-	if got := RequiredPhrase(nil, "effective"); got != "" {
+	if got := RequiredPhrase(nil, "chain", "effective"); got != "" {
 		t.Errorf("a decided record says nothing, got %q", got)
 	}
 }
@@ -73,7 +73,7 @@ func TestCoveragePhraseAccountsForEveryChain(t *testing.T) {
 		Total: 20, Eligible: 12, Ineligible: 3, Unknown: 5,
 		UnknownScope: 2, UnknownEvidence: 3, Pending: 1,
 	})
-	want := "12 eligible / 20 (3 out of scope, 2 unknown scope, 3 without a ledger, 1 pending)"
+	want := "12 eligible / 20 (3 out of scope, 2 unknown scope, 3 with no decision recorded, 1 pending)"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}

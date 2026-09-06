@@ -33,7 +33,7 @@ func EffectPhrase(e cadence.Effect) string {
 // RequiredPhrase names the clean eligible after-window that could still place the
 // range under the effect target. It is "" when the record needs no more exposure and
 // names the unreachable case when no window of any size could decide it.
-func RequiredPhrase(required *int, verdict string) string {
+func RequiredPhrase(required *int, unit, verdict string) string {
 	if required == nil {
 		if verdict == "collecting" || verdict == "inconclusive" {
 			return "no clean window of any size could reach the target"
@@ -43,7 +43,7 @@ func RequiredPhrase(required *int, verdict string) string {
 	if *required == 0 {
 		return ""
 	}
-	return fmt.Sprintf("needs %d clean eligible chain(s)", *required)
+	return fmt.Sprintf("needs %d more clean, eligible %s", *required, UnitName(unit, *required))
 }
 
 // ScopePhrase names a record's frozen eligibility rule in one clause.
@@ -77,10 +77,11 @@ func CoveragePhrase(c cadence.Coverage) string {
 	if c.UnknownScope > 0 {
 		extra = append(extra, fmt.Sprintf("%d unknown scope", c.UnknownScope))
 	}
-	// "no ledger" covers both a row the resolver closed as gone and one still owed;
-	// Posture.Unresolved counts only the latter, so the two must not share a word.
+	// "no decision recorded" covers both a row the resolver closed as gone and one
+	// still owed; Posture.Unresolved counts only the latter, so the two must not
+	// share a word.
 	if c.UnknownEvidence > 0 {
-		extra = append(extra, fmt.Sprintf("%d without a ledger", c.UnknownEvidence))
+		extra = append(extra, fmt.Sprintf("%d with no decision recorded", c.UnknownEvidence))
 	}
 	if c.Pending > 0 {
 		extra = append(extra, fmt.Sprintf("%d pending", c.Pending))

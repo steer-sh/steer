@@ -143,7 +143,7 @@ func (m *Model) viewChannels() string {
 	}
 	out += dim("  the resolver arms and disarms with the commit gate on the same scope.\n")
 	if n := m.snap.Posture.Unresolved; n > 0 {
-		out += warn(fmt.Sprintf("  %d ledger row(s) owe a transcript join — run: steer commit-gate backfill --apply\n", n))
+		out += warn(fmt.Sprintf("  %d review(s) still owe a decision — run: steer commit-gate backfill --apply\n", n))
 	}
 	out += "\n" + dim("git pre-commit and steer git-hooks install through the CLI: "+
 		"steer commit-gate install --precommit · steer git-hooks install")

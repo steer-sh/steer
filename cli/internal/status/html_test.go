@@ -140,20 +140,20 @@ func TestRenderHTMLCarriesEverySection(t *testing.T) {
 
 	for _, want := range []string{
 		"<!DOCTYPE html>", "steer", "Attention required", "Every problem, fix and result",
-		"Installed fixes by type", "Recent review chains", "System health",
+		"Installed fixes by type", "Recent reviews", "System health",
 		"widget flag loss", "bare python call", "naming taste",
 		"use pnpm", "taste-rule",
 		"v-effective", "v-not-triggered", "v-confounded", "v-evidence-incomplete",
 		"1 of 2 present", "agy@sha",
 		// The measurement conditions the verdict rests on, one target at a time.
-		"RR 0.00 [0.00, 0.31] @90%", "a clean window of 9 units",
+		"RR 0.00 [0.00, 0.31] @90%", "a clean window of 9 items",
 		// The range prints only where the scorer made a claim; a withheld verdict
 		// carries its counts in words and an action sentence instead.
 		"the two periods ran under different conditions and cannot be compared",
-		"5 recurrences in the 20 units since install; 2 in the 20 before",
+		"5 recurrences in the 20 items since install; 2 in the 20 before",
 		"scope repo=/steer.*/ AND path=/\\.go$/", "scope all",
 		"12 eligible / 14 (2 out of scope)", "12 eligible / 13 (1 pending)",
-		"0 eligible / 4 (4 without a ledger)",
+		"0 eligible / 4 (4 with no decision recorded)",
 		"conditions changed (instrument): after-window reviewed by another instrument",
 		// The record's own explanation leads every measurement line, and a tier
 		// reads as a type rather than as a flag value.
@@ -163,7 +163,7 @@ func TestRenderHTMLCarriesEverySection(t *testing.T) {
 		"repository check \u2192 check.sh",
 		"the mix changed (host): host set changed",
 		// Resolver posture: the arming row and the unresolved backlog.
-		"resolver claude-code global", "4 row(s) owe a ledger",
+		"resolver claude-code global", "4 review(s) owe a decision",
 		// Posture is harness-qualified, and Codex's trust is a record, not a proof.
 		"gate codex global", "trust record present, unverified",
 		// The session corpus's own accounting and the guard's audit join.

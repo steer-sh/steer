@@ -26,15 +26,16 @@ var (
 var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show the steer loop's state — setup, what needs a decision, and results",
-	Long: `status composes one read-only snapshot of the steer loop and renders it. The
-unit is the failure class and its intervention's measured verdict, not the hook
-count. It reads the scored intervention inventory, the recent review chains, the
-attention subset the deterministic tier flags, the arming posture, and the corpus
-sizes. It writes no state.
+	Long: `status composes one read-only snapshot of the steer loop and renders it. The unit
+is the recurring problem and its measured result, not the hook count. It reads
+every recorded problem and fix, the recent reviews, the work the deterministic
+tier flagged, the arming posture, and how much evidence this machine holds. It
+writes no state.
 
 --json prints the versioned SystemStatus contract on stdout, progress on stderr —
-the same discipline as 'steer report'. An agent runs 'steer status --json' before
-installing a hook to see the full class inventory and skip a class already scored.
+the same discipline as 'steer report'. That contract keeps the machine's own
+words. An agent runs 'steer status --json' before installing a hook, to read the
+full inventory and skip a problem already decided.
 
 --html renders the same snapshot as one self-contained HTML file: no server, no
 runtime dependency. It writes to --out, or to stdout when --out is absent.`,
@@ -154,7 +155,7 @@ func renderPosture(s *status.SystemStatus) {
 	fmt.Println(styles.SectionHeader.Render("Posture"))
 	fmt.Printf("  Instrument   %s\n", s.Posture.Instrument)
 	fmt.Printf("  Reviewer     %s\n", s.Posture.Reviewer)
-	fmt.Printf("  Ledger       %s\n", s.Posture.Ledger)
+	fmt.Printf("  Review log   %s\n", s.Posture.Ledger)
 	for _, a := range s.Posture.CommitGate {
 		fmt.Printf("  Commit gate  %s\n", armingRow(a))
 	}
@@ -329,7 +330,7 @@ func interventionNotes(iv cadence.Intervention, unmeasurable bool, rate status.C
 	}
 	if r := status.RatePhrase(iv.RequiredAfter, unit, rate); r != "" {
 		notes = append(notes, r)
-	} else if r := status.RequiredPhrase(iv.RequiredAfter, iv.Verdict); r != "" {
+	} else if r := status.RequiredPhrase(iv.RequiredAfter, unit, iv.Verdict); r != "" {
 		notes = append(notes, r)
 	}
 	if a := status.AttributionPhrase(iv.Attribution); a != "" {
@@ -338,9 +339,11 @@ func interventionNotes(iv cadence.Intervention, unmeasurable bool, rate status.C
 	notes = append(notes, status.ConfoundPhrases("confound", iv.Confounds)...)
 	notes = append(notes, status.ConfoundPhrases("composition", iv.Composition)...)
 	if iv.BeforeCoverage.UnknownEvidence > 0 || iv.AfterCoverage.UnknownEvidence > 0 {
-		notes = append(notes, fmt.Sprintf("%d of the %d before-%s and %d of the %d after-%s carry no ledger row",
-			iv.BeforeCoverage.UnknownEvidence, iv.BeforeCoverage.Total, plural(unit),
-			iv.AfterCoverage.UnknownEvidence, iv.AfterCoverage.Total, plural(unit)))
+		notes = append(notes, fmt.Sprintf("%d of the %d earlier %s and %d of the %d later %s carry no recorded decision",
+			iv.BeforeCoverage.UnknownEvidence, iv.BeforeCoverage.Total,
+			status.UnitName(unit, iv.BeforeCoverage.Total),
+			iv.AfterCoverage.UnknownEvidence, iv.AfterCoverage.Total,
+			status.UnitName(unit, iv.AfterCoverage.Total)))
 	}
 	if unmeasurable || iv.Verdict == "harmful" {
 		notes = append(notes, status.RemovalPhrase(iv.Tier, iv.Target),
@@ -348,8 +351,6 @@ func interventionNotes(iv cadence.Intervention, unmeasurable bool, rate status.C
 	}
 	return notes
 }
-
-func plural(unit string) string { return unit + "s" }
 
 func candidateLine(c cadence.Candidate) string {
 	if c.Pattern != "" {

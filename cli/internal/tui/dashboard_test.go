@@ -53,12 +53,12 @@ func TestPanelsCarryTheMeasurementConditions(t *testing.T) {
 	m.active = panelClasses
 	classes := m.View()
 	for _, want := range []string{
-		"Not comparable", "a clean window of 9 units",
+		"Not comparable", "a clean window of 9 items",
 		// No range under a withheld verdict: the action sentence carries the row.
 		"the two periods ran under different conditions and cannot be compared",
 		"scope repo=/steer/ AND path=/\\.go$/",
 		"before 12 eligible / 14 (2 out of scope)",
-		"after 5 eligible / 6 (1 without a ledger)",
+		"after 5 eligible / 6 (1 with no decision recorded)",
 		"conditions changed (instrument): after-window reviewed by another instrument",
 	} {
 		if !strings.Contains(classes, want) {
@@ -68,7 +68,7 @@ func TestPanelsCarryTheMeasurementConditions(t *testing.T) {
 
 	m.active = panelChannels
 	channels := m.View()
-	for _, want := range []string{"resolver", "4 ledger row(s) owe a transcript join"} {
+	for _, want := range []string{"resolver", "4 review(s) still owe a decision"} {
 		if !strings.Contains(channels, want) {
 			t.Errorf("the channels panel is missing %q", want)
 		}

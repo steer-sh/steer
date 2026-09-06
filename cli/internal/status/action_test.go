@@ -177,7 +177,7 @@ func TestRecurrenceCarriesNoFraction(t *testing.T) {
 	got := RecurrencePhrase(
 		cadence.Incidence{Hits: 4, Units: 61, Rate: 0.066},
 		cadence.Incidence{Hits: 1, Units: 39, Rate: 0.026}, "chain")
-	want := "1 recurrence in the 39 chains since install; 4 in the 61 before"
+	want := "1 recurrence in the 39 review sequences since install; 4 in the 61 before"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
@@ -239,7 +239,7 @@ func TestUnmeasurableSeparatesAWaitFromANever(t *testing.T) {
 	if Unmeasurable("collecting", "session", &far, rate) {
 		t.Error("a session-unit record must not be graded against a chain rate")
 	}
-	if got := RatePhrase(&far, "session", rate); !strings.Contains(got, "no accrual rate here") {
+	if got := RatePhrase(&far, "session", rate); !strings.Contains(got, "not measured") {
 		t.Errorf("a session window must not borrow the chain rate: %q", got)
 	}
 	if got := ActionFor("confounded", true); got != ActionAccept {

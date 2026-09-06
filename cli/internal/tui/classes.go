@@ -132,7 +132,7 @@ func measureLine(it status.ScoredIntervention, unmeasurable bool, rate status.Ch
 	}
 	if r := status.RatePhrase(it.RequiredAfter, unit, rate); r != "" {
 		parts = append(parts, r)
-	} else if r := status.RequiredPhrase(it.RequiredAfter, it.Verdict); r != "" {
+	} else if r := status.RequiredPhrase(it.RequiredAfter, unit, it.Verdict); r != "" {
 		parts = append(parts, r)
 	}
 	parts = append(parts,
