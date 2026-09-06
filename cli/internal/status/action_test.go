@@ -261,14 +261,14 @@ func TestRemovalNamesTheTierThatKeepsRunning(t *testing.T) {
 		{"steer", "no-bare-python", "guard stays installed"},
 		{"prose", "CLAUDE.md", "the rule stays in CLAUDE.md"},
 		{"prompt", "review.md", "the rule stays in review.md"},
-		{"", "", "not installed in any tier"},
+		{"", "", "no fix is installed in any tier"},
 	} {
 		got := RemovalPhrase(tc.tier, tc.target)
 		if !strings.Contains(got, tc.want) {
 			t.Errorf("tier %q: got %q, want it to contain %q", tc.tier, got, tc.want)
 		}
-		if !strings.Contains(got, "retire ends the measurement") {
-			t.Errorf("tier %q: the sentence must say what retire does: %q", tc.tier, got)
+		if !strings.Contains(got, "stopping the tracking ends the measurement") {
+			t.Errorf("tier %q: the sentence must say what stopping the tracking does: %q", tc.tier, got)
 		}
 	}
 }

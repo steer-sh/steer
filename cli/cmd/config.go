@@ -146,7 +146,7 @@ then measured across two instruments, so set names those classes before it write
 
 // reportReviewerImpact names the classes whose measurement the pending reviewer change
 // lands in. The grading is the scorer's own, so a class named here as majorly drifted
-// is one `steer intervention score` will withhold rather than a second opinion.
+// is one `steer fix score` will withhold rather than a second opinion.
 func reportReviewerImpact(next config.Config) {
 	cfg, err := settings.Preview(next, warnOnce)
 	if err != nil {

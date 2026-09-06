@@ -234,7 +234,7 @@ func Preview(next config.Config, warn func(string)) (gate.Config, error) {
 
 // Impact names the measurements a pending reviewer identity lands in. It grades the
 // prospective identity through the scorer's own computation, so a class named here as
-// majorly drifted is one `steer intervention score` will withhold rather than a
+// majorly drifted is one `steer fix score` will withhold rather than a
 // second opinion about it.
 func Impact(cfg gate.Config) []mine.InstrumentImpact {
 	records, err := mine.Load(cfg.StateDir)

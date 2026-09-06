@@ -13,6 +13,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/codex"
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/pi"
+	"github.com/steer-sh/steer-cli/internal/tier"
 )
 
 // RegistrarFor maps a registry id to its adapter. The guard store is shared, so
@@ -52,12 +53,9 @@ func HookRegistrars(onlyInstalled bool) ([]harness.Registrar, error) {
 }
 
 // IsGuardTier says the record's fix is a steer guard, whose enforcement is per
-// harness. Both spellings are live: the CLI writes "steer" and the later tier
-// vocabulary writes "guard".
-func IsGuardTier(tier string) bool {
-	t := strings.ToLower(strings.TrimSpace(tier))
-	return t == "steer" || t == "guard"
-}
+// harness. The ladder's vocabulary lives in internal/tier; both spellings of the
+// guard rung are live and this reads them both from there.
+func IsGuardTier(value string) bool { return tier.IsGuard(value) }
 
 // Guarded names every hook-registering harness whose configuration invokes the
 // master guard hook, at either scope. A guard registered at one scope runs, so

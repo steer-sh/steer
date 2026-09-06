@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/steer-sh/steer-cli/internal/tier"
 )
 
 // now is the wall clock for records that carry no explicit timestamp. A variable so a
@@ -380,8 +382,15 @@ func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 			}
 		}
 	}
-	if o.Tier == "steer" && o.HookID == "" {
-		return fmt.Errorf("--tier steer needs --hook-id (the steer-manifest key, which is " +
+	// The ladder's vocabulary is validated here, at the shared write boundary, so
+	// the CLI and the dashboard refuse the same values. A typo tier used to fall
+	// through every display and render as itself.
+	if !tier.Valid(o.Tier) {
+		return fmt.Errorf("--tier %q names no fix type. Use one of: %s",
+			o.Tier, strings.Join(tier.Accepted(), ", "))
+	}
+	if tier.IsGuard(o.Tier) && o.HookID == "" {
+		return fmt.Errorf("a guard tier needs --hook-id (the steer-manifest key, which is " +
 			"also the audit log's hook_name). Without it the audit-log join is a path search " +
 			"that breaks the moment the hook is renamed or retired")
 	}

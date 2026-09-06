@@ -11,7 +11,7 @@ var commitGateMineCmd = &cobra.Command{
 (one per commit attempt), and scores the interventions that a class's chain-level
 incidence motivates. It is the reader half of the loop the gate's review half writes.
 
-Its intervention subcommands are the review-findings alias of ` + "`steer intervention`" + `,
+Its intervention subcommands are the review-findings alias of ` + "`steer fix`" + `,
 built from one factory: the two trees carry the same flags and call the same functions.`,
 }
 

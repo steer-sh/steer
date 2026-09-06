@@ -10,6 +10,7 @@ import (
 
 	"github.com/steer-sh/steer-cli/internal/cadence"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
+	"github.com/steer-sh/steer-cli/internal/tier"
 )
 
 // EffectPhrase renders the relative-risk range. An unbounded upper bound prints as
@@ -197,7 +198,7 @@ const BackfillCommand = "steer commit-gate backfill --apply"
 // the inventory. Terminal and HTML both print it under an unmeasurable or harmful
 // verdict, so neither can name a different command from the other.
 func RetireCommand(id string) string {
-	return "steer intervention retire " + id + " --reason ..."
+	return "steer fix retire " + id + " --reason ..."
 }
 
 // The labels the prose lines carry. A rejection installed nothing, so what it
@@ -229,20 +230,14 @@ func ProsePhrases(problem, intervention string, rejected bool) []string {
 // TierPhrase names what kind of intervention a record installed, in the reader's
 // words rather than the flag's. A tier is a type and never a behavior, so it stands
 // beside the intervention line rather than in place of it.
-func TierPhrase(tier, target string) string {
-	name := map[string]string{
-		"check":       "repository check",
-		"guard":       "pre-tool guard",
-		"steer":       "pre-tool guard",
-		"instruction": "instruction rule",
-		"prose":       "instruction rule",
-		"prompt":      "review prompt",
-	}[tier]
-	if tier == "" || tier == "none" {
-		return "no intervention installed"
+func TierPhrase(t, target string) string {
+	if t == "" || t == "none" {
+		return "no fix installed"
 	}
+	kind, _ := tier.Of(t)
+	name := tier.Name(kind)
 	if name == "" {
-		name = tier
+		name = t
 	}
 	if target == "" {
 		return name

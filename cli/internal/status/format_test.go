@@ -114,8 +114,8 @@ func TestTierPhraseNamesTheTypeAndTheEmptyState(t *testing.T) {
 		{"steer", "/h/guard.py", "pre-tool guard → /h/guard.py"},
 		{"guard", "", "pre-tool guard"},
 		{"prose", "CLAUDE.md", "instruction rule → CLAUDE.md"},
-		{"none", "", "no intervention installed"},
-		{"", "", "no intervention installed"},
+		{"none", "", "no fix installed"},
+		{"", "", "no fix installed"},
 		{"future-tier", "x", "future-tier → x"},
 	}
 	for _, tc := range cases {

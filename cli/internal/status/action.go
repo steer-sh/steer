@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/steer-sh/steer-cli/internal/cadence"
+	"github.com/steer-sh/steer-cli/internal/tier"
 )
 
 // The actions a class can ask of its reader.
@@ -70,7 +71,7 @@ var meanings = map[string]meaning{
 	"ineffective": {"Target not met", ActionRepair,
 		"this fix did not reduce the problem to the target — rework it, or stop tracking it"},
 	"legacy-unscoped": {"Comparison undefined", ActionRepair,
-		"no rule was saved for which work counts — run: steer intervention scope"},
+		"no rule was saved for which work counts — run: steer fix scope"},
 	"no-baseline": {"No earlier examples", ActionRepair,
 		"the earlier period holds no example of this problem — rework how it is identified, or stop tracking it"},
 	"class-grew": {"Grew, fix declined", ActionRepair,
@@ -282,18 +283,21 @@ func magnitude(rr float64) string {
 	return fmt.Sprintf("%.1fx more frequent", rr)
 }
 
-// RemovalPhrase says what retire does and where the rule lives. Retire closes the
-// measurement and removes nothing.
-func RemovalPhrase(tier, target string) string {
-	const ends = "retire ends the measurement; "
-	switch tier {
-	// The CLI writes check|steer|prose|prompt; check|guard|instruction|review is
-	// the same ladder under its later names, and both reach a reader here.
-	case "check", "prose", "instruction", "prompt", "review":
+// RemovalPhrase says what stopping the tracking does and where the rule lives. It
+// closes the measurement and removes nothing, so it names the tier the rule keeps
+// running in. It reads BOTH ladder spellings through internal/tier: a guard
+// reported as installed in no tier would keep firing while the reader believed it
+// gone.
+func RemovalPhrase(t, target string) string {
+	const ends = "stopping the tracking ends the measurement; "
+	kind, ok := tier.Of(t)
+	if !ok {
 		if target != "" {
 			return ends + fmt.Sprintf("the rule stays in %s until you remove it", target)
 		}
-	case "steer", "guard":
+		return ends + "no fix is installed in any tier"
+	}
+	if kind == tier.Guard {
 		if target != "" {
 			return ends + fmt.Sprintf("the %s guard stays installed until you remove it", target)
 		}
@@ -302,7 +306,7 @@ func RemovalPhrase(tier, target string) string {
 	if target != "" {
 		return ends + fmt.Sprintf("the rule stays in %s until you remove it", target)
 	}
-	return ends + "the rule is not installed in any tier"
+	return ends + "no fix is installed in any tier"
 }
 
 // orUnit names the denominator when a record carries no unit tag.

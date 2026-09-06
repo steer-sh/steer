@@ -12,7 +12,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/sessions"
 )
 
-// The intervention commands exist under two parents: `steer intervention`, the
+// The intervention commands exist under two parents: `steer fix`, the
 // corpus-neutral name, and `steer commit-gate mine`, the review-findings alias every
 // existing workflow types. One factory builds both trees, so the two can never drift;
 // each tree owns its own flag storage, because cobra binds a flag to one variable and
@@ -143,7 +143,7 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 
 	register := &cobra.Command{
 		Use:   "register",
-		Short: "Record an intervention with its baseline incidence",
+		Short: "Record a fix with the baseline it is measured against",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := guardscope.Check(v.registerTier, v.registerScopeAll,
 				v.registerScopeHrn, v.registerForce); err != nil {
@@ -185,7 +185,7 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 	r.StringVar(&v.registerKind, "kind", "defect", "defect|false-positive")
 	r.StringVar(&v.registerCorpus, "corpus", mine.CorpusReviewFindings, corpusUsage)
 	r.StringVar(&v.registerSignalKind, "signal-kind", "", signalKindUsage)
-	r.StringVar(&v.registerTier, "tier", "", "check|steer|prose|prompt (required)")
+	r.StringVar(&v.registerTier, "tier", "", "type of fix: check|guard|instruction|review (required)")
 	r.StringVar(&v.registerTarget, "target", "", "file the fix landed in (required)")
 	r.StringVar(&v.registerHookID, "hook-id", "",
 		"steer-manifest key, matching the audit log's hook_name; required for --tier steer")
@@ -396,17 +396,19 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 }
 
 var interventionCmd = &cobra.Command{
-	Use:   "intervention",
-	Short: "Register, refuse and score the fixes an evidence corpus motivates",
-	Long: `intervention is the writer and scorer of the measured-fix loop: it tests a
-candidate class regex against a corpus, freezes an eligibility scope and a baseline at
+	Use:     "fix",
+	Aliases: []string{"intervention"},
+	Short:   "Register, refuse and score the fixes a recurring problem motivates",
+	Long: `fix is the writer and scorer of the measured-fix loop: it tests a candidate
+problem regex against a body of evidence, freezes an eligibility rule and a baseline at
 registration, and reports the effect range that baseline earns afterwards.
 
-A record names the corpus it is counted over and the unit that corpus counts by. This
-engine reads the commit-review ledger by chain; a record from another corpus is carried
-unscored rather than scored against evidence it was never authored over.
+A record names the evidence it is counted over and the item that evidence counts by.
+This engine reads the review history by review sequence; a record from other evidence is
+carried unscored rather than scored against evidence it was never authored over.
 
-steer commit-gate mine is the same command set under its original name.`,
+steer intervention is the same command set under its former name, and steer commit-gate
+mine is the same set under its original one.`,
 }
 
 func init() {
