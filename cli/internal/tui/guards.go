@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/hookstore"
@@ -262,10 +263,9 @@ func (m *Model) viewGuards() string {
 		if r.kind != guardInstalled {
 			continue
 		}
-		out += fmt.Sprintf("%s %-30s %s\n", pointer(i == m.cursor[panelGuards]),
-			truncate(r.name, 30), dim(r.origin))
+		out += guardTitleInColumn(r.name, r.origin, i == m.cursor[panelGuards], width, guardNameWidth(rows, width))
 	}
-	out += wrapTo(dim("This is what Steer registered here. It is not every hook your coding "+
+	out += wrapTo(secondary("This is what Steer registered here. It is not every hook your coding "+
 		"agent runs: review before commit, and any hook you set up yourself, are not listed."),
 		"  ", width)
 	out += wrapTo(dim("Stored in "+m.guardStorePath()), "  ", width)
@@ -278,8 +278,7 @@ func (m *Model) viewGuards() string {
 		if r.kind != guardAvailable {
 			continue
 		}
-		out += fmt.Sprintf("%s %-30s %s\n", pointer(i == m.cursor[panelGuards]),
-			truncate(r.name, 30), dim(r.description))
+		out += guardTitleInColumn(r.name, r.description, i == m.cursor[panelGuards], width, guardNameWidth(rows, width))
 	}
 
 	if !anyOfKind(rows, guardRepair) {
@@ -290,7 +289,7 @@ func (m *Model) viewGuards() string {
 		if r.kind != guardRepair {
 			continue
 		}
-		out += pointer(i == m.cursor[panelGuards]) + " " + warn(r.name) + "\n"
+		out += selectedRow(r.name, " "+warn("needs attention"), i == m.cursor[panelGuards], width)
 		out += wrapTo(r.issue, "    ", width)
 	}
 	return out
@@ -300,7 +299,7 @@ func (m *Model) viewGuards() string {
 // nothing about the other scope, about another machine, or about a guard a coding
 // agent runs that Steer did not register.
 func (m *Model) emptyGuardNote() string {
-	return dim("No guards recorded for " + scopeReach(m.scope) +
+	return secondary("No guards recorded for " + scopeReach(m.scope) +
 		". Guards in the other location, and on your other machines, are not read here.")
 }
 
@@ -323,4 +322,34 @@ func anyOfKind(rows []guardRow, kind string) bool {
 		}
 	}
 	return false
+}
+
+func guardTitle(name, description string, selected bool, width int) string {
+	return guardTitleInColumn(name, description, selected, width, min(lipgloss.Width(name), width/2))
+}
+
+func guardTitleInColumn(name, description string, selected bool, width, column int) string {
+	if width < 70 || lipgloss.Width(name) > column {
+		return selectedRow(name, "", selected, width) + wrapTo(secondary(description), "    ", width)
+	}
+	indent := strings.Repeat(" ", column+3)
+	lines := strings.Split(strings.TrimRight(wrapTo(secondary(description), indent, width), "\n"), "\n")
+	out := selectedRow(name+strings.Repeat(" ", column-lipgloss.Width(name)), " "+strings.TrimPrefix(lines[0], indent), selected, width)
+	for _, line := range lines[1:] {
+		if selected {
+			line = paintSurface(selectedStyle.Width(width), line)
+		}
+		out += line + "\n"
+	}
+	return out
+}
+
+func guardNameWidth(rows []guardRow, width int) int {
+	column := 0
+	for _, row := range rows {
+		if row.kind != guardRepair {
+			column = max(column, lipgloss.Width(row.name))
+		}
+	}
+	return min(column, width/2)
 }

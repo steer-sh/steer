@@ -6,11 +6,11 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/steer-sh/steer-cli/internal/cadence"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
 	"github.com/steer-sh/steer-cli/internal/status"
-	"github.com/steer-sh/steer-cli/internal/styles"
 )
 
 // The Problems panel answers two questions in one list: what problems are showing
@@ -186,7 +186,8 @@ func (m *Model) viewRetireForm() string {
 	width := m.bodyWidth()
 	out := m.title("Stop tracking " + m.form.id + " — enter to save, esc to cancel")
 	out += wrapTo("This ends the measurement only. Whatever the fix put in place stays there until you remove it yourself.", "  ", width)
-	return out + "\n" + fmt.Sprintf("%s %s\n", pointer(true), m.input.View())
+	m.input.Width = max(1, width-14)
+	return out + "\n" + inset(wrapTo(m.input.View(), "", width-3), width, true)
 }
 
 // viewProblems renders the queue and the tracked inventory as one navigable list
@@ -205,10 +206,14 @@ func (m *Model) viewProblems() string {
 	for i, r := range rows {
 		if r.heading != heading {
 			heading = r.heading
-			out += styles.Bold.Render(strings.TrimRight(wrapTo(heading, "", width), "\n")) + "\n"
+			out += headingStyle.Render(strings.TrimRight(wrapTo(heading, "", width), "\n")) + "\n"
 		}
 		selected := i == m.cursor[panelProblems]
-		out += m.problemSummary(r, selected, width)
+		summary := m.problemSummary(r, selected, width)
+		if selected && m.expanded {
+			summary = m.expandedSummary(r)
+		}
+		out += summary
 		if selected && m.expanded {
 			out += m.problemDetail(r, width)
 		}
@@ -224,11 +229,7 @@ const summaryIndent = "    "
 // problemSummary is one compact entry: the title, then labeled lines for the fix,
 // the result, and the one short reason or next step the entry needs.
 func (m *Model) problemSummary(r problemRow, selected bool, width int) string {
-	title := styles.Bold.Render(problemTitle(r))
-	if selected {
-		title = styles.BrandText.Render(problemTitle(r))
-	}
-	out := pointer(selected) + " " + title + "\n"
+	out := selectedRow(problemTitle(r), "", selected, width)
 	for _, f := range summaryFields(r) {
 		out += field(f.label, f.value, summaryIndent, width)
 	}
@@ -351,28 +352,29 @@ func summaryReason(it status.ScoredIntervention, unmeasurable bool) (why, next s
 // explanation, the fix or the declined proposal, the result, the evidence, the
 // comparison limits, the action, and the technical block behind t.
 func (m *Model) problemDetail(r problemRow, width int) string {
-	block := detailBlock(r, width)
+	width = min(width, 104)
+	block := detailBlock(r, width-3)
 	lines := strings.Split(strings.TrimRight(block, "\n"), "\n")
 	if m.technical {
 		lines = append(lines, strings.Split(strings.TrimRight(
-			technicalBlock(r, width), "\n"), "\n")...)
+			technicalBlock(r, width-3), "\n"), "\n")...)
 	}
 	m.detailLines = len(lines)
 	budget := m.detailBudget()
 	if budget <= 0 || len(lines) <= budget {
 		m.detailOffset = 0
-		return strings.Join(lines, "\n") + "\n"
+		return inset(strings.Join(lines, "\n"), width, false)
 	}
 	start := m.detailOffset
 	if max := len(lines) - budget; start > max {
 		start = max
 	}
 	out := strings.Join(lines[start:start+budget], "\n") + "\n"
-	return out + hiddenNote(start, len(lines)-start-budget) + "\n"
+	return inset(out+hiddenNote(start, len(lines)-start-budget), width, false)
 }
 
 // detailIndent is the column the detail area's own body sits in.
-const detailIndent = "      "
+const detailIndent = "  "
 
 // detailBlock is the detail's content, before any scrolling. A queue row explains
 // the handoff; a tracked row explains itself in the order a reader asks: what
@@ -409,7 +411,7 @@ func detailSection(title, body string, width int) string {
 	if strings.TrimSpace(body) == "" {
 		return ""
 	}
-	return styles.Bold.Render("    "+title) + "\n" + wrapTo(body, detailIndent, width)
+	return headingStyle.Render(title) + "\n" + wrapTo(body, detailIndent, width)
 }
 
 // candidateDetail explains a queue row: what the sweep found, and the handoff.
@@ -465,11 +467,9 @@ func evidenceDetail(it status.ScoredIntervention, width int) string {
 	if it.Verdict == "unscored" || it.Verdict == "" {
 		return ""
 	}
-	out := styles.Bold.Render("    Evidence") + "\n"
-	out += wrapTo("before   "+incidenceLine(it.Before, it.Unit)+
-		"   ("+status.CoveragePhrase(it.BeforeCoverage)+")", detailIndent, width)
-	out += wrapTo("after    "+incidenceLine(it.After, it.Unit)+
-		"   ("+status.CoveragePhrase(it.AfterCoverage)+")", detailIndent, width)
+	out := headingStyle.Render("Evidence") + "\n"
+	out += evidencePeriod("Before:", it.Before, it.Unit, it.BeforeCoverage, width)
+	out += "\n" + evidencePeriod("After:", it.After, it.Unit, it.AfterCoverage, width)
 	if a := status.AttributionPhrase(it.Attribution); a != "" {
 		out += wrapTo(a, detailIndent, width)
 	}
@@ -499,14 +499,14 @@ func incidenceLine(in cadence.Incidence, unit string) string {
 func limitsDetail(it status.ScoredIntervention, width int) string {
 	out := ""
 	if limit := status.ComparisonLimit("confound", it.Confounds); limit != "" {
-		out += styles.Bold.Render("    What stops the comparison") + "\n"
-		out += wrapTo(warn(limit), detailIndent, width)
+		out += headingStyle.Render("What stops the comparison") + "\n"
+		out += wrapTo(limit, detailIndent, width)
 		for _, cause := range status.ComparisonCauses(it.Confounds) {
 			out += wrapTo(cause, detailIndent+"  ", width)
 		}
 	}
 	if limit := status.ComparisonLimit("composition", it.Composition); limit != "" {
-		out += styles.Bold.Render("    What qualifies the result") + "\n"
+		out += headingStyle.Render("What qualifies the result") + "\n"
 		out += wrapTo(limit, detailIndent, width)
 		for _, cause := range status.ComparisonCauses(it.Composition) {
 			out += wrapTo(dim(cause), detailIndent+"  ", width)
@@ -518,7 +518,7 @@ func limitsDetail(it status.ScoredIntervention, width int) string {
 // actionDetail is the entry's action area: the step where one exists, then what
 // stopping the tracking would and would not do.
 func actionDetail(it status.ScoredIntervention, unmeasurable bool, width int) string {
-	out := styles.Bold.Render("    What you can do") + "\n"
+	out := headingStyle.Render("What you can do") + "\n"
 	if _, next := summaryReason(it, unmeasurable); next != "" {
 		out += wrapTo(next, detailIndent, width)
 	}
@@ -531,7 +531,7 @@ func actionDetail(it status.ScoredIntervention, unmeasurable bool, width int) st
 // the path, the eligibility rule, the range and the identifiers. It is behind t
 // because none of it is needed to read the result.
 func technicalBlock(r problemRow, width int) string {
-	out := styles.Bold.Render("    Technical details") + "\n"
+	out := headingStyle.Render("Technical details") + "\n"
 	if r.candidate != nil {
 		c := *r.candidate
 		out += wrapTo("source        "+c.Corpus, detailIndent, width)
@@ -607,4 +607,32 @@ func plural(word string, n int) string {
 		return "recurrences"
 	}
 	return word + "s"
+}
+
+// expandedSummary leaves space for readable detail in a short terminal.
+func (m *Model) expandedSummary(r problemRow) string {
+	summary := m.problemSummary(r, true, m.bodyWidth())
+	if m.bodyBudget() <= 0 {
+		return summary
+	}
+	lines := strings.Split(strings.TrimRight(summary, "\n"), "\n")
+	keep := max(1, (m.bodyBudget()-m.problemWindowOverhead()-2)/2)
+	if len(lines) > keep {
+		lines = lines[:keep]
+	}
+	return strings.Join(lines, "\n") + "\n"
+}
+
+func (m *Model) problemWindowOverhead() int {
+	if m.bodyBudget() < 10 {
+		return 0
+	}
+	return lipgloss.Height(strings.TrimRight(m.title("Problems — what recurs, and whether our fixes help"), "\n")) + 2
+}
+
+func evidencePeriod(label string, incidence cadence.Incidence, unit string, coverage cadence.Coverage, width int) string {
+	indent := detailIndent + "        "
+	lines := strings.Split(strings.TrimRight(wrapTo(incidenceLine(incidence, unit), indent, width), "\n"), "\n")
+	lines[0] = detailIndent + secondary(fmt.Sprintf("%-8s", label)) + strings.TrimPrefix(lines[0], indent)
+	return strings.Join(lines, "\n") + "\n" + wrapTo(secondary("Coverage: "+status.CoveragePhrase(coverage)), indent, width)
 }

@@ -45,7 +45,7 @@ func TestEveryGuardNamesItsOrigin(t *testing.T) {
 	for _, want := range []string{
 		"written for you by Steer", "built in to Steer", "written by you, registered with Steer",
 	} {
-		if !strings.Contains(view, want) {
+		if !strings.Contains(strings.Join(strings.Fields(view), " "), want) {
 			t.Errorf("the inventory is missing the origin %q:\n%s", want, view)
 		}
 	}
@@ -115,7 +115,7 @@ func TestEachIssueNamesItsOperationAndItsReach(t *testing.T) {
 		"every project on this machine",
 		"Your guard files are left alone",
 	} {
-		if !strings.Contains(view, want) {
+		if !strings.Contains(strings.Join(strings.Fields(view), " "), want) {
 			t.Errorf("an issue is missing %q:\n%s", want, view)
 		}
 	}

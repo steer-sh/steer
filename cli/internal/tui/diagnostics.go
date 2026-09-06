@@ -26,13 +26,13 @@ func (m *Model) viewDiagnostics() string {
 			"whole setup."), "  ", width)
 	}
 	for _, issue := range issues {
-		out += "  " + warn(issue.headline) + "\n"
+		out += wrapTo(warn(issue.headline), "  ", width)
 		out += wrapTo(issue.detail, "    ", width)
 	}
 
 	out += section("History on this machine")
 	for _, line := range m.historyLines() {
-		out += fmt.Sprintf("   %-34s %s\n", line.label, line.value)
+		out += wrapTo(fmt.Sprintf("%6s  %s", line.value, secondary(line.label)), "  ", width)
 	}
 	out += wrapTo(dim("These are counts of what is stored here. A count says nothing about "+
 		"whether the records are current or complete, and an empty one means nothing was "+
@@ -52,9 +52,23 @@ func (m *Model) viewDiagnostics() string {
 // diagnosticsKey answers t, which opens and closes the technical block. The panel
 // selects no row, so t is the only key it owns.
 func (m *Model) diagnosticsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if msg.String() == "t" {
+	switch msg.String() {
+	case "t":
 		m.technical = !m.technical
+	case "up", "k":
+		m.bodyOffset--
+	case "down", "j":
+		m.bodyOffset++
+	case "pgup":
+		m.bodyOffset -= max(1, m.bodyBudget()-3)
+	case "pgdown":
+		m.bodyOffset += max(1, m.bodyBudget()-3)
+	case "home":
+		m.bodyOffset = 0
+	case "end":
+		m.bodyOffset = m.bodyMax
 	}
+	m.bodyOffset = max(0, min(m.bodyOffset, m.bodyMax))
 	return m, nil
 }
 
@@ -124,7 +138,7 @@ func (m *Model) teamLines(width int) string {
 	case !team.Present:
 		return wrapTo(dim("Not configured for this project."), "  ", width)
 	case team.Error != "":
-		return wrapTo(warn("The file at "+team.Path+" could not be read: "+team.Error),
+		return wrapTo(warn("Unreadable: ")+"The file at "+team.Path+" could not be read: "+team.Error,
 			"  ", width)
 	}
 	return wrapTo(fmt.Sprintf("%d guard(s) pinned, catalog %s, from %s",

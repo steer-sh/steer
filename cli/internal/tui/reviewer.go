@@ -265,7 +265,7 @@ func (m *Model) reloadReviewer() {
 func (m *Model) viewReviewer() string {
 	width := m.bodyWidth()
 	out := m.title("Reviewer — settings for review before commit")
-	out += wrapTo(dim("These are saved for every project on this machine. An environment "+
+	out += wrapTo(secondary("These are saved for every project on this machine. An environment "+
 		"variable, or a flag left on a registration, can still outrank them."), "  ", width)
 	file, err := config.Load()
 	if err != nil {
@@ -275,24 +275,23 @@ func (m *Model) viewReviewer() string {
 	out += "\n"
 	for i, f := range settings.Fields {
 		selected := i == m.cursor[panelReviewer]
-		out += fmt.Sprintf("%s %-18s %s\n", pointer(selected),
-			settings.LabelOf(f), settings.DisplayValue(f, m.cfg))
+		out += selectedRow(reviewerLabel(settings.LabelOf(f), selected), " "+settings.DisplayValue(f, m.cfg), selected && !m.editing, width)
 		if override := overrideNote(f, file); override != "" {
-			out += wrapTo(warn(override), "    ", width)
+			out += wrapTo(warn("Override: ")+override, "    ", width)
 		}
 		if selected && !m.editing {
-			out += wrapTo(dim(f.Help), "    ", width)
+			out += wrapTo(secondary(f.Help), "    ", width)
 		}
 	}
 
 	if m.editing && m.reviewer != nil {
-		out += m.viewReviewerEditor(file, width)
+		out += inset(m.viewReviewerEditor(file, width-3), width, true)
 	}
 
 	if pinned := m.pinnedReviewerRows(); len(pinned) > 0 {
 		out += section("Registrations that outrank this file")
 		for _, row := range pinned {
-			out += warn(fmt.Sprintf("   %-22s %s\n", row.label, truncate(row.command, 60)))
+			out += wrapTo(warn(row.label)+" "+row.command, "   ", width)
 		}
 		out += wrapTo(dim("A reviewer named on a registration wins over this file, so an edit "+
 			"here changes nothing for it. Repair with: steer bin install"), "   ", width)
@@ -335,12 +334,13 @@ func (m *Model) viewReviewerEditor(file config.Config, width int) string {
 	out := section("Edit " + settings.LabelOf(ed.field))
 	if ed.field.Kind == settings.KindChoice {
 		for i, c := range ed.field.Choices() {
-			out += fmt.Sprintf("%s %s\n", pointer(i == ed.choice), c.Label)
+			out += selectedRow(c.Label, "", i == ed.choice, width)
 		}
 	} else {
-		out += "  " + m.input.View() + "\n"
+		m.input.Width = max(1, width-6)
+		out += selectedRow(m.input.View(), "", true, width)
 	}
-	out += wrapTo(dim(ed.field.Help), "  ", width)
+	out += wrapTo(secondary(ed.field.Help), "  ", width)
 	if ed.field.Suggestions != nil {
 		if levels := ed.field.Suggestions(m.cfg); len(levels) > 0 {
 			out += wrapTo(dim("This CLI documents "+strings.Join(levels, ", ")+
@@ -349,8 +349,8 @@ func (m *Model) viewReviewerEditor(file config.Config, width int) string {
 	}
 	out += wrapTo(dim(editorHint(ed.field)), "  ", width)
 	if strings.HasPrefix(settings.Source(ed.field, file), "env ") {
-		out += wrapTo(warn("This saves the file. "+ed.field.Env+
-			" is set in your environment and outranks it, so what runs will not change."),
+		out += wrapTo(warn("Override: ")+"This saves the file. "+ed.field.Env+
+			" is set in your environment and outranks it, so what runs will not change.",
 			"  ", width)
 	}
 	if ed.carry != carryUnasked {
@@ -433,4 +433,12 @@ func configPath() string {
 		return "~/.steer/config.json"
 	}
 	return home + "/.steer/config.json"
+}
+
+func reviewerLabel(label string, selected bool) string {
+	text := fmt.Sprintf("%-18s", label)
+	if selected {
+		return text
+	}
+	return secondary(text)
 }

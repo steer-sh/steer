@@ -44,7 +44,7 @@ func TestEachIssueNamesWhereItIsRepaired(t *testing.T) {
 		"The guard runner for Claude Code in this project is out of date",
 		"Open Guards",
 	} {
-		if !strings.Contains(view, want) {
+		if !strings.Contains(strings.Join(strings.Fields(view), " "), want) {
 			t.Errorf("the issue list is missing %q:\n%s", want, view)
 		}
 	}
@@ -163,7 +163,7 @@ func TestDiagnosticsTechnicalBlockHidesBehindAKey(t *testing.T) {
 	m.panelKey(keyOf("t"))
 	view := m.viewDiagnostics()
 	for _, want := range []string{"/abs/state/commit-review", "agy/gemini-3.7-flash", "agy/2/abc/v1"} {
-		if !strings.Contains(view, want) {
+		if !strings.Contains(strings.Join(strings.Fields(view), " "), want) {
 			t.Errorf("the technical block is missing %q:\n%s", want, view)
 		}
 	}

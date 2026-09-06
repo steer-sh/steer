@@ -6,10 +6,12 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/evidence"
@@ -18,7 +20,6 @@ import (
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/settings"
 	"github.com/steer-sh/steer-cli/internal/status"
-	"github.com/steer-sh/steer-cli/internal/styles"
 )
 
 // panel identifies one tab of the dashboard.
@@ -47,10 +48,12 @@ type Model struct {
 	snap    *status.SystemStatus
 	chains  []mine.Chain
 
-	active panel
-	cursor [panelCount]int
-	width  int
-	height int
+	active     panel
+	cursor     [panelCount]int
+	width      int
+	height     int
+	bodyOffset int
+	bodyMax    int
 	// message is the last action's feedback and messagePanel is the panel it
 	// belongs to. A panel renders only its own.
 	message      string
@@ -171,6 +174,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.outcomesRead(msg)
 		return m, nil
 	case tea.KeyMsg:
+		if m.tooSmall() {
+			if msg.String() == "q" || msg.String() == "ctrl+c" {
+				m.quitting = true
+				return m, tea.Quit
+			}
+			return m, nil
+		}
 		if m.editing {
 			// The two editors share one text input and answer different keys, so the
 			// active panel routes the keystroke.
@@ -186,6 +196,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // updateNav handles keys while navigating panels.
 func (m *Model) updateNav(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.active == panelDiagnostics {
+		switch msg.String() {
+		case "up", "k", "down", "j", "pgup", "pgdown", "home", "end":
+			return m.diagnosticsKey(msg)
+		}
+	}
 	switch msg.String() {
 	case "q", "ctrl+c":
 		m.quitting = true
@@ -246,7 +262,10 @@ func (m *Model) View() string {
 		return ""
 	}
 	if m.err != nil {
-		return styles.ErrorBox.Render(fmt.Sprintf("dashboard error: %v", m.err)) + "\n"
+		return wrapTo(errText("Error: ")+fmt.Sprint(m.err), "", m.bodyWidth())
+	}
+	if m.tooSmall() {
+		return ansi.Truncate("Resize terminal", max(1, m.width), "")
 	}
 	var body string
 	switch m.active {
@@ -266,24 +285,92 @@ func (m *Model) View() string {
 
 // chrome wraps a panel body in the tab bar, a configure line and the key legend.
 func (m *Model) chrome(body string) string {
+	header := m.frameHeader()
+	footer := m.frameFooter()
+	// Normalize every line before windowing so line counts match terminal cells.
+	body = strings.TrimRight(wrapTo(body, "", m.bodyWidth()), "\n")
+	body = strings.Replace(body, "\n\n\n", "\n\n", 1)
+	if m.active == panelDiagnostics {
+		body = m.scrollBody(body, m.bodyBudget())
+	} else {
+		body = windowBody(body, m.bodyBudget())
+	}
+	body = strings.TrimRight(body, "\n")
+	gap := 1
+	if m.height > 0 {
+		gap = max(1, m.height-lipgloss.Height(header)-lipgloss.Height(body)-lipgloss.Height(footer))
+	}
+	frame := header + "\n" + body + strings.Repeat("\n", gap+1) + footer
+	gutter := strings.Repeat(" ", m.gutter())
+	return gutter + strings.ReplaceAll(frame, "\n", "\n"+gutter)
+}
+
+func (m *Model) tooSmall() bool {
+	return (m.width > 0 && m.width < 32) || (m.height > 0 && m.height < 10)
+}
+
+func (m *Model) frameHeader() string {
 	tabs := make([]string, panelCount)
-	for i := 0; i < int(panelCount); i++ {
-		name := panelNames[i]
+	for i, name := range panelNames {
 		if panel(i) == m.active {
-			tabs[i] = lipgloss.NewStyle().Foreground(styles.BrandPurple).Bold(true).Render("[" + name + "]")
+			tabs[i] = activeTabStyle.Render("[" + name + "]")
 		} else {
-			tabs[i] = styles.MutedText.Render(" " + name + " ")
+			tabs[i] = secondary(" " + name + " ")
 		}
 	}
-	header := lipgloss.JoinHorizontal(lipgloss.Top, tabs...)
+	return strings.TrimRight(wrapTo(strings.Join(tabs, ""), "", m.bodyWidth()), "\n") + "\n" +
+		strings.TrimRight(wrapTo(m.reachLine(), "", m.bodyWidth()), "\n") + "\n"
+}
 
-	msg := ""
-	if m.visibleMessage() != "" {
-		msg = "\n" + styles.InfoText.Render("• "+m.visibleMessage())
+func (m *Model) frameFooter() string {
+	var lines []string
+	line := ""
+	for _, group := range strings.Split(m.legend(), " · ") {
+		parts := strings.SplitN(group, " ", 2)
+		styled := surfaceStyle.Bold(true).Render(parts[0])
+		if len(parts) == 2 {
+			styled += " " + secondary(parts[1])
+		}
+		if line != "" && lipgloss.Width(line)+3+lipgloss.Width(styled) > m.bodyWidth() {
+			lines = append(lines, line)
+			line = ""
+		}
+		if line != "" {
+			line += secondary(" · ")
+		}
+		line += styled
 	}
-	legend := styles.MutedText.Render(m.legend())
-	return fmt.Sprintf("%s\n%s\n\n%s%s\n\n%s\n", header, m.reachLine(),
-		windowBody(body, m.bodyBudget()), msg, legend)
+	lines = append(lines, line)
+	footer := paintSurface(surfaceStyle.Width(m.bodyWidth()), strings.TrimRight(wrapTo(strings.Join(lines, "\n"), "", m.bodyWidth()), "\n"))
+	if msg := m.visibleMessage(); msg != "" {
+		if strings.HasPrefix(msg, "error:") {
+			msg = errText("Error:") + strings.TrimPrefix(msg, "error:")
+		}
+		footer = wrapTo(msg, "", m.bodyWidth()) + footer
+	}
+	return footer
+}
+
+// scrollBody uses the shared frame budget for a panel with no selected rows.
+func (m *Model) scrollBody(body string, budget int) string {
+	lines := strings.Split(body, "\n")
+	if budget <= 0 || len(lines) <= budget {
+		m.bodyMax = 0
+		m.bodyOffset = 0
+		return body
+	}
+	sticky := stickyLines(lines)
+	if budget <= sticky+1 {
+		sticky = 0
+	}
+	view := max(1, budget-sticky-1)
+	m.bodyMax = max(0, len(lines)-sticky-view)
+	m.bodyOffset = max(0, min(m.bodyOffset, m.bodyMax))
+	start := sticky + m.bodyOffset
+	out := append([]string{}, lines[:sticky]...)
+	out = append(out, lines[start:start+view]...)
+	out = append(out, hiddenNote(m.bodyOffset, m.bodyMax-m.bodyOffset))
+	return strings.Join(out, "\n")
 }
 
 // reachLine says where a write on this screen lands, and only on the panels that
@@ -293,12 +380,14 @@ func (m *Model) chrome(body string) string {
 // rather than a fact about the screen, so it moved into those results.
 func (m *Model) reachLine() string {
 	switch m.active {
-	case panelChannels, panelGuards:
-		return styles.MutedText.Render("Configure: " + scopeReach(m.scope))
+	case panelChannels:
+		return secondary("Configure: project and global registrations on this machine")
+	case panelGuards:
+		return secondary("Configure: " + scopeReach(m.scope))
 	case panelReviewer:
-		return styles.MutedText.Render("Configure: every project on this machine")
+		return secondary("Configure: every project on this machine")
 	}
-	return styles.MutedText.Render("Reading evidence from every project on this machine")
+	return secondary("Reading evidence from every project on this machine")
 }
 
 // scopeReach names one installation reach in the reader's words.
@@ -325,10 +414,7 @@ func (m *Model) bodyBudget() int {
 	if m.height <= 0 {
 		return 0
 	}
-	overhead := 6
-	if m.visibleMessage() != "" {
-		overhead += 2
-	}
+	overhead := lipgloss.Height(m.frameHeader()) + lipgloss.Height(m.frameFooter()) + 1
 	if budget := m.height - overhead; budget > 0 {
 		return budget
 	}
@@ -343,19 +429,23 @@ func (m *Model) legend() string {
 	case panelChannels:
 		// Enter does two things here, and which one depends on the selected row.
 		// The hint names the action row only while it is on screen.
-		if rows := m.channelRows(); len(rows) > 0 && rows[len(rows)-1].kind == "read-outcomes" {
-			return "enter turn on/off or read outcomes · " + common
+		if rows := m.channelRows(); len(rows) > m.cursor[panelChannels] && rows[m.cursor[panelChannels]].kind == "read-outcomes" {
+			return "enter read outcomes · " + common
 		}
 		return "enter turn on/off · " + common
 	case panelProblems:
+		stop := ""
+		if rows := m.problemRows(); len(rows) > m.cursor[panelProblems] && rows[m.cursor[panelProblems]].item != nil {
+			stop = "x stop tracking · "
+		}
 		if m.editing {
 			return "enter save · esc cancel"
 		}
 		if m.expanded {
 			return "enter/esc close · t technical details · pgup/pgdn/home/end scroll · " +
-				"x stop tracking · " + common
+				stop + common
 		}
-		return "enter open · x stop tracking · " + common
+		return "enter open · " + stop + common
 	case panelGuards:
 		return m.guardsLegend() + common
 	case panelReviewer:
@@ -364,6 +454,7 @@ func (m *Model) legend() string {
 		}
 		return "enter edit setting · " + common
 	case panelDiagnostics:
+		common = "pgup/pgdn/home/end scroll · ↑↓ scroll · tab/←→ panel · r refresh · q quit"
 		if m.technical {
 			return "t hide technical details · " + common
 		}
@@ -380,14 +471,13 @@ func (m *Model) detailBudget() int {
 	if budget <= 0 {
 		return 0
 	}
-	if n := budget - 8; n > minDetailLines {
-		return n
+	rows := m.problemRows()
+	if len(rows) == 0 {
+		return max(1, budget-8)
 	}
-	return minDetailLines
+	summary := m.expandedSummary(rows[m.cursor[panelProblems]])
+	return max(1, budget-m.problemWindowOverhead()-lipgloss.Height(strings.TrimRight(summary, "\n"))-2)
 }
-
-// minDetailLines is the shortest detail area worth paging through.
-const minDetailLines = 4
 
 // note sets the feedback message and files it under the panel now active, which
 // is the panel whose action wrote it.

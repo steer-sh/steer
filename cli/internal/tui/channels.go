@@ -280,24 +280,27 @@ func (m *Model) viewChannels() string {
 	rows := m.channelRows()
 	out := m.title("Arming — what runs, and where")
 	for i, r := range rows {
-		selected := pointer(i == m.cursor[panelChannels])
+		selected := i == m.cursor[panelChannels]
+		if i > 0 && r.kind != rows[i-1].kind {
+			out += "\n"
+		}
 		if r.kind == "read-outcomes" {
 			// The row carries the in-flight state, not just the note: the reader may
 			// be on another panel when the read finishes, and comes back to a row
 			// that says whether it is still working.
-			hint := "  press enter\n"
+			hint := "  press enter"
 			if m.reading {
-				hint = "  reading…\n"
+				hint = "  reading…"
 			}
-			out += "\n" + selected + " " + warn(r.label) + dim(hint)
+			out += selectedRow(r.label, secondary(hint), selected, m.bodyWidth())
 			continue
 		}
-		out += fmt.Sprintf("%s %-17s %-12s %-8s %s%s\n", selected,
-			r.label, status.HarnessLabel(r.harness), r.scope, armingBadge(r.armed),
-			m.pairedDrift(r))
+		name := fmt.Sprintf("%-17s %-12s %-8s", r.label, status.HarnessLabel(r.harness), r.scope)
+		out += selectedRow(name, " "+armingBadge(r.armed)+m.pairedDrift(r), selected, m.bodyWidth())
 	}
-	out += "\n" + dim("git pre-commit and steer git-hooks install through the CLI: "+
-		"steer commit-gate install --precommit · steer git-hooks install")
+	out += "\n" + secondary("Install through the CLI:") + "\n"
+	out += wrapTo("steer commit-gate install --precommit", "  ", m.bodyWidth())
+	out += wrapTo("steer git-hooks install", "  ", m.bodyWidth())
 	return out
 }
 
@@ -308,11 +311,11 @@ func (m *Model) viewChannels() string {
 func armingBadge(a status.ScopeArming) string {
 	switch {
 	case a.Registered && a.Resolvable == status.ResolveMissing:
-		return warn("broken (command does not resolve — steer bin install)")
+		return warn("broken") + " (command does not resolve — steer bin install)"
 	case a.Effective:
-		return ok("armed" + dim(observedSuffix(a)))
+		return ok("armed") + dim(observedSuffix(a))
 	case a.Registered:
-		return warn("inert (registered, not effective)")
+		return warn("inert") + " (registered, not effective)"
 	default:
 		return dim("off")
 	}

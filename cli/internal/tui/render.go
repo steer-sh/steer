@@ -6,36 +6,41 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-
-	"github.com/steer-sh/steer-cli/internal/styles"
 )
 
 // title renders a panel title wrapped to the terminal, so a narrow window folds
 // the heading rather than running it past the edge.
 func (m *Model) title(s string) string {
-	wrapped := strings.TrimRight(wrapTo(s, "", m.bodyWidth()), "\n")
-	return styles.SectionHeader.Render(wrapped) + "\n\n"
+	parts := strings.SplitN(s, " — ", 2)
+	text := headingStyle.Render(parts[0])
+	if len(parts) == 2 {
+		text += secondary(" — " + parts[1])
+	}
+	return wrapTo(text, "", m.bodyWidth()) + "\n"
 }
 
 // section renders a sub-heading inside a panel.
 func section(s string) string {
-	return "\n" + styles.Bold.Render(s) + "\n"
+	return "\n" + headingStyle.Render(s) + "\n"
 }
 
 // defaultWidth is the width a panel lays out at until the harness reports one.
 // A terminal narrower than this wraps; a wider one uses what it has.
 const defaultWidth = 80
 
-// minWrapWidth is the narrowest column prose is wrapped into. Below it a long
-// path breaks into fragments too short to read, so the line is allowed to run.
-const minWrapWidth = 24
+// minWrapWidth keeps wrapping valid while the frame handles tiny terminals.
+const minWrapWidth = 1
 
 // bodyWidth is the cells a panel body may draw into.
 func (m *Model) bodyWidth() int {
 	if m.width <= 0 {
 		return defaultWidth
 	}
-	return m.width
+	limit := 120
+	if m.active == panelChannels || m.active == panelGuards {
+		limit = 160
+	}
+	return min(limit, max(1, m.width-2*m.gutter()))
 }
 
 // wrapTo breaks text to the cells left of width after indent, and puts indent in
@@ -44,6 +49,10 @@ func (m *Model) bodyWidth() int {
 // is broken rather than left to run off the screen, so nothing needs horizontal
 // scrolling to read.
 func wrapTo(text, indent string, width int) string {
+	width = max(1, width)
+	if lipgloss.Width(indent) >= width {
+		indent = strings.Repeat(" ", max(0, width-1))
+	}
 	avail := width - lipgloss.Width(indent)
 	if avail < minWrapWidth {
 		avail = minWrapWidth
@@ -61,12 +70,11 @@ const fieldLabelWidth = 9
 
 // field renders one labeled line of a compact summary: the label in its own
 // column, the value wrapped under a hanging indent so a second line lines up
-// with the first. The label carries the emphasis and the value normal contrast,
-// because the value is the information and the label only names it.
+// with the first. Secondary labels leave the values at primary contrast.
 func field(label, value, indent string, width int) string {
 	lead := indent + strings.Repeat(" ", fieldLabelWidth+1)
 	lines := strings.Split(strings.TrimRight(wrapTo(value, lead, width), "\n"), "\n")
-	head := indent + styles.Bold.Render(fmt.Sprintf("%-*s", fieldLabelWidth, label)) + " "
+	head := indent + secondaryStyle.Render(fmt.Sprintf("%-*s", fieldLabelWidth, label)) + " "
 	out := head + strings.TrimPrefix(lines[0], lead) + "\n"
 	for _, line := range lines[1:] {
 		out += line + "\n"
@@ -77,27 +85,15 @@ func field(label, value, indent string, width int) string {
 // pointer marks the selected row.
 func pointer(selected bool) string {
 	if selected {
-		return lipgloss.NewStyle().Foreground(styles.BrandPurple).Render("›")
+		return lipgloss.NewStyle().Foreground(focus).Render("›")
 	}
 	return " "
 }
 
-func dim(s string) string     { return styles.MutedText.Render(s) }
-func ok(s string) string      { return styles.SuccessText.Render(s) }
-func warn(s string) string    { return styles.WarningText.Render(s) }
-func errText(s string) string { return styles.ErrorText.Render(s) }
-
-// truncate shortens s to n runes with an ellipsis.
-func truncate(s string, n int) string {
-	r := []rune(s)
-	if len(r) <= n {
-		return s
-	}
-	if n <= 1 {
-		return string(r[:n])
-	}
-	return string(r[:n-1]) + "…"
-}
+func dim(s string) string     { return metadataStyle.Render(s) }
+func ok(s string) string      { return positiveStyle.Render(s) }
+func warn(s string) string    { return cautionStyle.Render(s) }
+func errText(s string) string { return adverseStyle.Render(s) }
 
 // stickyLines is the panel header and the blank line under it, which the window
 // holds still. A wrapped header runs to several lines, so the count is read off
@@ -132,7 +128,7 @@ func windowBody(body string, budget int) string {
 		return body
 	}
 	sticky := stickyLines(lines)
-	if len(lines) <= sticky || budget <= sticky+1 {
+	if len(lines) <= sticky || budget <= sticky+1 || budget < 10 {
 		sticky = 0
 	}
 	rest := lines[sticky:]
@@ -148,8 +144,12 @@ func windowBody(body string, budget int) string {
 	// the first line of its entry, and a Problems entry runs several lines, so
 	// putting the selection at the bottom would hide everything it says.
 	start := 0
-	if a := markerLine(rest); a > contextAbove {
-		start = a - contextAbove
+	context := contextAbove
+	if budget < 10 {
+		context = 0
+	}
+	if a := markerLine(rest); a > context {
+		start = a - context
 	}
 	if max := len(rest) - view; start > max {
 		start = max
@@ -168,9 +168,9 @@ func windowBody(body string, budget int) string {
 
 // markerLine is the index of the selected row, or -1 when the panel selects none.
 func markerLine(lines []string) int {
-	marker := pointer(true)
+	marker := "›"
 	for i, line := range lines {
-		if strings.Contains(line, marker) {
+		if strings.HasPrefix(strings.TrimLeft(ansi.Strip(line), " │"), marker+" ") {
 			return i
 		}
 	}
