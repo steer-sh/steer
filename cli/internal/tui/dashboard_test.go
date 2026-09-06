@@ -59,7 +59,7 @@ func TestPanelsCarryTheMeasurementConditions(t *testing.T) {
 		"scope repo=/steer/ AND path=/\\.go$/",
 		"before 12 eligible / 14 (2 out of scope)",
 		"after 5 eligible / 6 (1 without a ledger)",
-		"confound (instrument): after-window reviewed by another instrument",
+		"conditions changed (instrument): after-window reviewed by another instrument",
 	} {
 		if !strings.Contains(classes, want) {
 			t.Errorf("the classes panel is missing %q", want)

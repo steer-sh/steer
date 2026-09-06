@@ -25,7 +25,7 @@ var (
 
 var statusCmd = &cobra.Command{
 	Use:   "status",
-	Short: "Show the steer feedback loop's state — posture, attention, verdicts",
+	Short: "Show the steer loop's state — setup, what needs a decision, and results",
 	Long: `status composes one read-only snapshot of the steer loop and renders it. The
 unit is the failure class and its intervention's measured verdict, not the hook
 count. It reads the scored intervention inventory, the recent review chains, the
@@ -178,8 +178,8 @@ func renderPosture(s *status.SystemStatus) {
 		}
 		fmt.Printf("  Guard master %s\n", row)
 	}
-	fmt.Printf("  Corpora      %s\n", corporaLine(s))
-	fmt.Printf("  Audit log    %d block firing(s)\n", s.Telemetry.AuditFirings)
+	fmt.Printf("  Evidence     %s\n", corporaLine(s))
+	fmt.Printf("  Guard blocks %d action(s) blocked\n", s.Telemetry.AuditFirings)
 }
 
 // armingRow names the harness a registration lives in, because one store serves both
@@ -248,7 +248,7 @@ func renderAttention(s *status.SystemStatus) {
 	}
 	if s.Posture.Unresolved > 0 {
 		buckets[status.ActionAdjudicate] = append(buckets[status.ActionAdjudicate],
-			fmt.Sprintf("    %d ledger row(s) still owe an adjudication\n      %s",
+			fmt.Sprintf("    %d review(s) still owe a decision from the coding agent\n      %s",
 				s.Posture.Unresolved,
 				styles.MutedText.Render(status.BackfillCommand)))
 	}
@@ -278,7 +278,7 @@ func renderAttention(s *status.SystemStatus) {
 		}
 	}
 	if len(a.Unscored) > 0 {
-		fmt.Printf("  %s: %d intervention(s) from a corpus no engine reads\n",
+		fmt.Printf("  %s: %d record(s) from evidence no engine reads\n",
 			styles.MutedText.Render("unscored"), len(a.Unscored))
 	}
 }
@@ -356,18 +356,18 @@ func candidateLine(c cadence.Candidate) string {
 		return fmt.Sprintf("%s — %s (%d hits, %d sessions)", c.Corpus, c.Pattern, c.Count, c.Sessions)
 	}
 	if c.UndecidedChains > 0 {
-		return fmt.Sprintf("%s — %d undecided chain(s): %s", c.Corpus, c.UndecidedChains, c.Dump)
+		return fmt.Sprintf("%s — %d review sequence(s) carry a finding no problem covers yet: %s", c.Corpus, c.UndecidedChains, c.Dump)
 	}
 	return c.Corpus
 }
 
 func renderSummary(s *status.SystemStatus) {
-	fmt.Println(styles.SectionHeader.Render("Failure Classes"))
+	fmt.Println(styles.SectionHeader.Render("Recurring Problems"))
 	if s.Summary.Total == 0 {
-		fmt.Println(styles.MutedText.Render("  no interventions recorded on this machine"))
+		fmt.Println(styles.MutedText.Render("  no fixes recorded on this machine"))
 		return
 	}
-	fmt.Printf("  %d live intervention(s)\n", s.Summary.Total)
+	fmt.Printf("  %d recorded problem(s)\n", s.Summary.Total)
 	verdicts := make([]string, 0, len(s.Summary.Counts))
 	for v := range s.Summary.Counts {
 		verdicts = append(verdicts, v)

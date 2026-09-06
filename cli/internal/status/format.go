@@ -96,11 +96,23 @@ func CoveragePhrase(c cadence.Coverage) string {
 	return s
 }
 
+// confoundWord names each kind in the reader's words. A hard confound says the two
+// periods cannot be compared; a composition entry says only that the mix moved, and
+// the scorer permitted the comparison, so it must not read as the harder claim.
+var confoundWord = map[string]string{
+	"confound":    "conditions changed",
+	"composition": "the mix changed",
+}
+
 // ConfoundPhrases renders a confound list one line each, prefixed by its kind.
 func ConfoundPhrases(kind string, cs []mine.Confound) []string {
+	word := confoundWord[kind]
+	if word == "" {
+		word = kind
+	}
 	out := make([]string, 0, len(cs))
 	for _, c := range cs {
-		out = append(out, fmt.Sprintf("%s (%s): %s", kind, c.Category, c.Reason))
+		out = append(out, fmt.Sprintf("%s (%s): %s", word, c.Category, c.Reason))
 	}
 	return out
 }
@@ -113,12 +125,12 @@ func AttributionPhrase(a cadence.Attribution) string {
 		return ""
 	}
 	if !a.LogPresent {
-		return "attribution: no guard audit stream on this machine"
+		return "this machine keeps no guard audit log, so no block can be joined"
 	}
 	if a.Firings == 0 {
-		return fmt.Sprintf("attribution: %s never fired in the after-window", a.HookID)
+		return fmt.Sprintf("the %s guard blocked nothing since install", a.HookID)
 	}
-	return fmt.Sprintf("attribution: %s fired %d time(s) in %d session(s)",
+	return fmt.Sprintf("the %s guard blocked %d action(s) in %d session(s)",
 		a.HookID, a.Firings, a.Sessions)
 }
 
@@ -202,11 +214,11 @@ func RetireCommand(id string) string {
 }
 
 // The labels the prose lines carry. A rejection installed nothing, so what it
-// describes is the intervention it considered, not one that runs.
+// describes is the fix it considered, not one that runs.
 const (
 	ProblemLabel            = "Problem"
-	InterventionLabel       = "Intervention"
-	ProposedInterventionLbl = "Proposed intervention"
+	InterventionLabel       = "Fix"
+	ProposedInterventionLbl = "Fix considered"
 )
 
 // ProsePhrases are the two reader-facing lines under a class: what goes wrong, then

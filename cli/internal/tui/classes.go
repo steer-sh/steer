@@ -37,9 +37,9 @@ func (m *Model) viewClasses() string {
 		return m.viewForm()
 	}
 	items := m.snap.Interventions
-	out := header("Classes — full scored inventory")
+	out := header("Problems — every fix and refusal, with its result")
 	if len(items) == 0 {
-		return out + dim("no interventions recorded on this machine.")
+		return out + dim("no fixes recorded on this machine.")
 	}
 	rate := m.snap.Rate
 	section := ""

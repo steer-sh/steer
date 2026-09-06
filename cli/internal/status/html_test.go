@@ -139,8 +139,8 @@ func TestRenderHTMLCarriesEverySection(t *testing.T) {
 	out := render(t, sample())
 
 	for _, want := range []string{
-		"<!DOCTYPE html>", "steer", "Attention required", "Failure-class ledger",
-		"Active interventions by tier", "Recent review chains", "System health",
+		"<!DOCTYPE html>", "steer", "Attention required", "Every problem, fix and result",
+		"Installed fixes by type", "Recent review chains", "System health",
 		"widget flag loss", "bare python call", "naming taste",
 		"use pnpm", "taste-rule",
 		"v-effective", "v-not-triggered", "v-confounded", "v-evidence-incomplete",
@@ -154,24 +154,24 @@ func TestRenderHTMLCarriesEverySection(t *testing.T) {
 		"scope repo=/steer.*/ AND path=/\\.go$/", "scope all",
 		"12 eligible / 14 (2 out of scope)", "12 eligible / 13 (1 pending)",
 		"0 eligible / 4 (4 without a ledger)",
-		"confound (instrument): after-window reviewed by another instrument",
+		"conditions changed (instrument): after-window reviewed by another instrument",
 		// The record's own explanation leads every measurement line, and a tier
 		// reads as a type rather than as a flag value.
 		"Problem: the parser drops a flag and the reviewer catches it after the fact",
-		"Intervention: check.sh refuses a parser branch that drops a flag",
+		"Fix: check.sh refuses a parser branch that drops a flag",
 		"Legacy note: check.sh tier 6",
 		"repository check \u2192 check.sh",
-		"composition (host): host set changed",
+		"the mix changed (host): host set changed",
 		// Resolver posture: the arming row and the unresolved backlog.
 		"resolver claude-code global", "4 row(s) owe a ledger",
 		// Posture is harness-qualified, and Codex's trust is a record, not a proof.
 		"gate codex global", "trust record present, unverified",
 		// The session corpus's own accounting and the guard's audit join.
 		"20 eligible / 22 (2 partly exposed)",
-		"attribution: no-bare-python never fired in the after-window",
+		"the no-bare-python guard blocked nothing since install",
 		// Unresolved rows are work, so they sit under the action that clears them,
 		// with the command — not in a posture chip alone.
-		"4 ledger row(s) still owe an adjudication",
+		"4 review(s) still owe a decision from the coding agent",
 		"steer commit-gate backfill --apply",
 	} {
 		if !strings.Contains(out, want) {
@@ -199,9 +199,9 @@ func TestRenderHTMLEmptyMachine(t *testing.T) {
 	out := render(t, s)
 	for _, want := range []string{
 		"the loop is quiet",
-		"No interventions recorded on this machine.",
-		"No active interventions installed.",
-		"No adjudicated chains on this machine.",
+		"No fixes recorded on this machine.",
+		"No fixes installed.",
+		"No decided review sequences on this machine.",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("empty page is missing %q", want)
@@ -309,7 +309,7 @@ func TestUnresolvedRowsAreNotQuiet(t *testing.T) {
 	}
 	for _, want := range []string{
 		ActionHeading[ActionAdjudicate],
-		"3 ledger row(s) still owe an adjudication",
+		"3 review(s) still owe a decision from the coding agent",
 		BackfillCommand,
 	} {
 		if !strings.Contains(out, want) {

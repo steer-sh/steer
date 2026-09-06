@@ -188,7 +188,7 @@ queue, so the skill's nudge can hash the queue for change detection.`,
 			return err
 		}
 		fmt.Fprintf(os.Stderr,
-			"Wrote queue: %d intervention(s) needing attention, %d candidate(s), %d unscored, "+
+			"Wrote queue: %d fix(es) needing attention, %d candidate(s), %d unscored, "+
 				"%d session snapshot(s).\n",
 			len(q.Interventions), len(q.Candidates), len(q.Unscored), len(ev.Sessions))
 		fmt.Println(cadence.QueuePath(dir))
@@ -260,7 +260,7 @@ func runCadence() {
 			if emit {
 				candidates, ineffective := cadence.PendingCounts(q)
 				lines = append(lines, fmt.Sprintf(
-					"steer: %d candidate(s) and %d ineffective hook(s) pending — run /steer-report",
+					"steer: %d problem(s) to consider and %d tracked fix(es) need a decision — run /steer-report",
 					candidates, ineffective))
 				rec = next
 			}

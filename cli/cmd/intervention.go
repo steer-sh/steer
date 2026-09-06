@@ -95,9 +95,9 @@ const scopeHarnessUsage = "eligibility scope: harness ids the class is measured 
 // that produced it, so the record carries both halves in its own words.
 const problemUsage = "one sentence naming what goes wrong, readable without the session that found it (required)"
 
-const interventionUsage = "one sentence naming what this intervention does about it (required)"
+const interventionUsage = "one sentence naming what this fix does about it (required)"
 
-const rejectInterventionUsage = "one sentence naming the intervention considered, or that none was found (required)"
+const rejectInterventionUsage = "one sentence naming the fix considered, or that none was found (required)"
 
 const corpusUsage = "evidence corpus the class is counted over: review-findings (by chain) or transcript-friction (by session)"
 
@@ -188,7 +188,7 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 	r.StringVar(&v.registerTier, "tier", "", "type of fix: check|guard|instruction|review (required)")
 	r.StringVar(&v.registerTarget, "target", "", "file the fix landed in (required)")
 	r.StringVar(&v.registerHookID, "hook-id", "",
-		"steer-manifest key, matching the audit log's hook_name; required for --tier steer")
+		"steer-manifest key, matching the audit log's hook_name; required for a guard tier")
 	r.StringVar(&v.registerHookScope, "hook-scope", "",
 		"guard store owning --hook-id: project|global (default: whichever holds it, refusing both)")
 	r.StringVar(&v.registerNote, "note", "", "free-text note")
@@ -259,7 +259,7 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 
 	scope := &cobra.Command{
 		Use:   "scope ID",
-		Short: "Install a frozen scope on a legacy, unscoped intervention",
+		Short: "Install a frozen scope on a legacy, unscoped record",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// A legacy record names its tier already, so the scope it is about to
@@ -315,14 +315,14 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 		},
 	}
 	s := score.Flags()
-	s.StringVar(&v.scoreID, "id", "", "score only this intervention")
-	s.BoolVar(&v.scoreAll, "all", false, "include reworked and removed interventions")
+	s.StringVar(&v.scoreID, "id", "", "score only this record")
+	s.BoolVar(&v.scoreAll, "all", false, "include reworked and removed records")
 	s.IntVar(&v.scoreMinAfter, "min-after", 0, "extra floor: withhold a verdict below this many eligible after-units")
 	s.BoolVar(&v.scoreJSON, "json", false, "emit JSON")
 
 	list := &cobra.Command{
 		Use:   "list",
-		Short: "Show recorded interventions",
+		Short: "Show every recorded fix and refusal",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return mine.List(out(), gateConfig().StateDir, v.listJSON)
 		},
@@ -331,8 +331,8 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 
 	describe := &cobra.Command{
 		Use:   "describe ID",
-		Short: "Rewrite an intervention's explanation, and nothing else",
-		Long: "Rewrite an intervention's explanation, and nothing else.\n\n" +
+		Short: "Rewrite a record's explanation, and nothing else",
+		Long: "Rewrite a record's explanation, and nothing else.\n\n" +
 			"Wording is not evidence, so this writes the two prose fields and leaves the\n" +
 			"id, the match, the scope, the baseline, the instrument and both windows\n" +
 			"exactly as they were. Correcting a description never restarts a measurement.\n" +
@@ -353,7 +353,7 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 
 	retire := &cobra.Command{
 		Use:   "retire ID",
-		Short: "Mark an intervention reworked or removed",
+		Short: "Stop tracking a fix — mark it reworked or removed",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := prepareState(); err != nil {

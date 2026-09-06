@@ -59,13 +59,13 @@ Check the registration and reviewer settings:
 steer commit-gate status
 ```
 
-Then ask your agent to make a code change and commit normally. When reviewers raise concerns, the agent adjudicates them and reports its decisions. Small and prose-only changes may skip review; a skipped review is not a clean review.
+Then ask your agent to make a code change and commit normally. A reviewer raises concerns as findings; your agent decides each one against the code and reports what it accepted and what it rejected. Small and prose-only changes may skip review; a skipped review is not a clean review.
 
 For a Git pre-commit workflow, use `steer commit-gate install --precommit` in the repository instead. Choose one channel per repository to avoid reviewing commits twice.
 
 ## Learn from recurring mistakes
 
-The commit gate records reviews and adjudications locally under `~/.steer/state`. Steer can also read agent transcripts to find recurring corrections and tool failures.
+The commit gate records every review and every decision locally under `~/.steer/state`. Steer can also read your agent's session history to find recurring corrections and failed commands.
 
 Use the overview to see what is active and what needs attention:
 
@@ -74,9 +74,11 @@ steer status
 steer dashboard
 ```
 
-With the skills installed, run `/steer-report` in your agent to review the evidence and consider interventions. A recurring problem might call for a repository check, a guard, an instruction, or no change at all. Rejected proposals are worth remembering too.
+With the skills installed, run `/steer-report` in your agent to read the evidence and consider fixes. A recurring problem might call for a repository check, a guard, an instruction, or no change at all. A suggestion you decline is worth recording too — Steer watches whether that problem grows afterwards.
 
-Steer tracks interventions against their baselines. Scoring can take time, and changes in agents, reviewers, or work can make a comparison inconclusive. It reports those limits instead of treating fewer findings as proof of improvement.
+Steer measures each fix against how often the problem happened before it. That takes time, and a change of agent, reviewer or workload can make the two periods unfair to compare. Steer says so rather than treating fewer findings as proof of improvement.
+
+`steer fix` is the command set behind that measurement — register a fix, score it, list what is tracked, or stop tracking one. `steer intervention` is the same set under its former name.
 
 ## Add a rule
 
@@ -138,5 +140,5 @@ This checks Go formatting, builds the CLI, runs vet, and runs the tests. `./chec
 
 - [Project reference](CLAUDE.md): architecture, storage, configuration, builds, and test setup.
 - [Guard skill](skills/steer/SKILL.md): rule generation and installation workflow.
-- [Report skill](skills/steer-report/SKILL.md): evidence review and intervention workflow.
+- [Report skill](skills/steer-report/SKILL.md): evidence review and the fix workflow.
 - `steer <command> --help`: command options, including team policy and verification.

@@ -168,18 +168,18 @@ func buildView(s *SystemStatus, x Export) *view {
 		Host:      x.Host,
 	}
 	v.Stages = []stage{
-		{"Observed", s.Telemetry.ReviewChains, "adjudicated review chains", s.Telemetry.ReviewChains > 0},
-		{"Clustered", s.Summary.Total, "failure classes on record", s.Summary.Total > 0},
-		{"Intervened", active, "live interventions installed", active > 0},
-		{"Measured", measured, "classes with a scored verdict", measured > 0},
-		{"Effective", effective, "verdicts that hold", effective > 0},
+		{"Observed", s.Telemetry.ReviewChains, "decided review sequences", s.Telemetry.ReviewChains > 0},
+		{"Clustered", s.Summary.Total, "recurring problems on record", s.Summary.Total > 0},
+		{"Fixed", active, "fixes installed", active > 0},
+		{"Measured", measured, "problems with a result", measured > 0},
+		{"Effective", effective, "fixes with fewer recurrences", effective > 0},
 	}
 	v.Cards = []card{
-		{"Adjudicated chains", itoa(s.Telemetry.ReviewChains), chainMeta(s.Chains)},
-		{"Failure classes", itoa(s.Summary.Total), verdictMeta(s.Summary.Counts)},
-		{"Guard firings", itoa(s.Telemetry.AuditFirings), "block decisions in the global audit log"},
-		{"Recorded refusals", itoa(refused), "classes refused, kept for their reopen condition"},
-		{"Auto-mode denials", itoa(s.Telemetry.DenialsRows), "tool calls the classifier blocked"},
+		{"Decided review sequences", itoa(s.Telemetry.ReviewChains), chainMeta(s.Chains)},
+		{"Recurring problems", itoa(s.Summary.Total), verdictMeta(s.Summary.Counts)},
+		{"Guard blocks", itoa(s.Telemetry.AuditFirings), "actions blocked, in the global audit log"},
+		{"Declined suggestions", itoa(refused), "kept for their reopen condition"},
+		{"Auto-mode denials", itoa(s.Telemetry.DenialsRows), "actions Claude Code auto mode blocked"},
 	}
 	return v
 }
@@ -229,7 +229,7 @@ func attentionGroups(items []cadence.Intervention, rate ChainRate, unresolved in
 	if unresolved > 0 {
 		notes[ActionAdjudicate] = append(notes[ActionAdjudicate], note{
 			Label: "unresolved",
-			Text:  fmt.Sprintf("%d ledger row(s) still owe an adjudication", unresolved),
+			Text:  fmt.Sprintf("%d review(s) still owe a decision from the coding agent", unresolved),
 			Fix:   BackfillCommand,
 		})
 	}
@@ -297,7 +297,7 @@ func chainMeta(chains []ChainSummary) string {
 // verdictMeta lists the verdict breakdown in display order.
 func verdictMeta(counts map[string]int) string {
 	if len(counts) == 0 {
-		return "no interventions recorded on this machine"
+		return "no fixes recorded on this machine"
 	}
 	parts := []string{}
 	for _, v := range verdictOrder {

@@ -118,7 +118,7 @@ func (m *Model) startForm(kind formKind, cand cadence.Candidate) {
 // sentence is for: someone reading the record without this session's evidence.
 var stepHint = map[string]string{
 	"problem":      "what goes wrong, in one sentence, for a reader who was not here",
-	"intervention": "what this does about it — or that no intervention was found",
+	"intervention": "what this fix does about it — or that no fix was found",
 	"match":        "regex for this class",
 	"reason":       "why no gate was installed",
 	"reopen":       "the observation that would make this worth reconsidering",
@@ -346,7 +346,7 @@ func (m *Model) viewForm() string {
 	case formReject:
 		kind = "Reject class"
 	case formRetire:
-		kind = "Retire intervention " + m.form.id
+		kind = "Stop tracking " + m.form.id
 	}
 	out := header(kind + " — enter to advance, shift+tab to go back, esc to cancel")
 	for i, s := range m.form.steps {

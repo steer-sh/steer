@@ -265,7 +265,7 @@ footer { color: var(--faint); font-size: 11.5px; border-top: 1px solid var(--lin
         <span class="cls">{{ if .Pattern }}{{ .Pattern }}{{ else }}{{ .Corpus }}{{ end }}</span>
         <span class="sub">
           {{- if .Pattern }}{{ .Count }} hits across {{ .Sessions }} sessions · {{ .Corpus }}
-          {{- else }}{{ .UndecidedChains }} undecided chains · {{ .Dump }}{{ end }}</span>
+          {{- else }}{{ .UndecidedChains }} review sequence(s) carry a finding no problem covers yet · {{ .Dump }}{{ end }}</span>
         <span class="right">pending routing</span>
       </li>
       {{- end }}
@@ -275,7 +275,7 @@ footer { color: var(--faint); font-size: 11.5px; border-top: 1px solid var(--lin
     <ul>
       <li>
         <span class="pill">unscored</span>
-        <span class="sub">{{ len .Status.Attention.Unscored }} intervention(s) from a corpus no engine reads</span>
+        <span class="sub">{{ len .Status.Attention.Unscored }} record(s) from evidence no engine reads</span>
         <span class="right mono">{{ range .Status.Attention.Unscored }}{{ . }} {{ end }}</span>
       </li>
     </ul>
@@ -298,12 +298,12 @@ footer { color: var(--faint); font-size: 11.5px; border-top: 1px solid var(--lin
 </section>
 
 <section>
-  <h2>Failure-class ledger</h2>
+  <h2>Every problem, fix and result</h2>
   <div class="panel scroll">
     {{- if .Ledger }}
     <table>
       <thead><tr>
-        <th>Class</th><th>Type</th><th>Status</th>
+        <th>Problem</th><th>Type of fix</th><th>Status</th>
         <th class="num">Baseline</th><th class="num">Post-install</th><th class="num">Δ rate</th>
         <th>Effect range</th><th>Result</th>
       </tr></thead>
@@ -350,17 +350,17 @@ footer { color: var(--faint); font-size: 11.5px; border-top: 1px solid var(--lin
       </tbody>
     </table>
     {{- else }}
-    <div class="empty">No interventions recorded on this machine.</div>
+    <div class="empty">No fixes recorded on this machine.</div>
     {{- end }}
   </div>
 </section>
 
 <section>
-  <h2>Active interventions by tier</h2>
+  <h2>Installed fixes by type</h2>
   <div class="panel scroll">
     {{- if .Tiers }}
     <table>
-      <thead><tr><th>Tier</th><th>Target</th><th>Class</th><th>Hook</th><th>Result</th></tr></thead>
+      <thead><tr><th>Type of fix</th><th>Target</th><th>Problem</th><th>Hook</th><th>Result</th></tr></thead>
       <tbody>
       {{- range .Tiers }}
         {{- $tier := .Key }}
@@ -377,7 +377,7 @@ footer { color: var(--faint); font-size: 11.5px; border-top: 1px solid var(--lin
       </tbody>
     </table>
     {{- else }}
-    <div class="empty">No active interventions installed.</div>
+    <div class="empty">No fixes installed.</div>
     {{- end }}
   </div>
 </section>
@@ -407,7 +407,7 @@ footer { color: var(--faint); font-size: 11.5px; border-top: 1px solid var(--lin
       </tbody>
     </table>
     {{- else }}
-    <div class="empty">No adjudicated chains on this machine.</div>
+    <div class="empty">No decided review sequences on this machine.</div>
     {{- end }}
   </div>
 </section>

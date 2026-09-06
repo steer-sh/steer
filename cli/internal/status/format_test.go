@@ -88,14 +88,14 @@ func TestProsePhrasesLabelARejectionAsProposed(t *testing.T) {
 	got := ProsePhrases("the count goes stale", "check.sh refuses a literal count", false)
 	want := []string{
 		"Problem: the count goes stale",
-		"Intervention: check.sh refuses a literal count",
+		"Fix: check.sh refuses a literal count",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("installed = %v, want %v", got, want)
 	}
 	got = ProsePhrases("the reviewer repeats itself", mine.NoInterventionFound, true)
-	if len(got) != 2 || !strings.HasPrefix(got[1], "Proposed intervention: ") {
-		t.Errorf("rejected = %v, want a proposed-intervention label", got)
+	if len(got) != 2 || !strings.HasPrefix(got[1], "Fix considered: ") {
+		t.Errorf("rejected = %v, want a considered-fix label", got)
 	}
 }
 

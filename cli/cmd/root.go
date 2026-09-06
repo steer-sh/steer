@@ -25,7 +25,7 @@ Set up the commit gate:
   3. steer commit-gate status                         # what is armed, and what is missing
 
 Then read what the reviews taught you:
-  steer status            # posture, attention, measured verdicts
+  steer status            # setup, what needs a decision, and results
   steer dashboard         # the same loop, interactive
 
 Steer supports Claude Code, Codex and Pi, plus a Git pre-commit channel
