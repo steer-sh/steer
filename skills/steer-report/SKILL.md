@@ -170,7 +170,7 @@ Digest schema (`digest_version: 2`):
 
 The digest is size-capped: the CLI evicts the lowest-scoring clusters to fit, and reports honesty in `stats`.
 
-### The `steer status --json` contract (`status_version: 9`)
+### The `steer status --json` contract (`status_version: 10`)
 
 Step 1 reads this snapshot for posture and the full class inventory. The unit is
 the failure class and its verdict, not the hook count. This schema is byte-shared
@@ -284,7 +284,10 @@ Fields:
 - `presets[]` — the catalog roster: `name`, `bundle`, `description`, `enabled`,
   `drifted`.
 - `team` — the repo-committed team lockfile summary: `present`, `path`,
-  `hooks_locked`, `catalog_version`.
+  `hooks_locked`, `catalog_version`, and `error`. v10 adds `error`: a project with
+  no lockfile is `present: false` and is not a fault, while a lockfile that exists
+  and cannot be read is `present: true` with `error` naming why. Before v10 both
+  read as absent.
 
 ### 2b. Commit-review findings
 

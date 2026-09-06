@@ -23,26 +23,15 @@ type Probe struct {
 // of absence: nothing was checked.
 func (p Probe) Available() bool { return p.State != ProbeMissing }
 
-// executable names the CLI a provider runs. It mirrors each reviewer's own binary
-// default, which a test may override on the struct and an operator never can.
-func executable(provider string) string {
-	switch canonicalProvider(provider) {
-	case "agy":
-		return "agy"
-	case "codex":
-		return "codex"
-	case "claude-code":
-		return "claude"
-	}
-	return ""
-}
-
 // ProbeProvider reports whether the reviewer CLI a provider names resolves here.
 func ProbeProvider(provider string) Probe {
-	name := executable(provider)
-	if name == "" {
+	// The name mirrors each reviewer's own binary default, which a test may
+	// override on the struct and an operator never can.
+	p, ok := FindProvider(provider)
+	if !ok || p.Executable == "" {
 		return Probe{Provider: provider, State: ProbeUnknown}
 	}
+	name := p.Executable
 	if _, err := exec.LookPath(name); err != nil {
 		return Probe{Provider: provider, Executable: name, State: ProbeMissing}
 	}

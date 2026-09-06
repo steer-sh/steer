@@ -112,7 +112,7 @@ func TestWaitingOutcomesAreAnActionRow(t *testing.T) {
 		t.Error("the cursor cannot reach the action row")
 	}
 	view := m.View()
-	if !strings.Contains(view, "read 2 review outcomes from your transcripts") {
+	if !strings.Contains(view, "read 2 review outcomes from your session history") {
 		t.Errorf("the action row does not say what enter does:\n%s", view)
 	}
 	// The panel names no terminal command for work it can do itself.

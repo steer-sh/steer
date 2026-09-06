@@ -123,13 +123,13 @@ func scopeRank(scope string) int {
 // readOutcomesLabel says what the action row does, in the count the reader sees.
 func readOutcomesLabel(n int) string {
 	if n == 1 {
-		return "read 1 review outcome from your transcripts"
+		return "read 1 review outcome from your session history"
 	}
-	return fmt.Sprintf("read %d review outcomes from your transcripts", n)
+	return fmt.Sprintf("read %d review outcomes from your session history", n)
 }
 
 // channelsKey acts on the selected row: a channel toggles, the action row starts
-// the read. The read walks every transcript tree on the machine, so it runs as a
+// the read. The read walks every session tree on the machine, so it runs as a
 // command and the panel keeps drawing while it works.
 func (m *Model) channelsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.String() != "enter" {
@@ -147,7 +147,7 @@ func (m *Model) channelsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.reading = true
-		m.note("reading your transcripts…")
+		m.note("reading your session history…")
 		return m, m.readOutcomes(row.waiting)
 	}
 	if err := m.toggleChannel(row); err != nil {
@@ -155,7 +155,7 @@ func (m *Model) channelsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.refresh()
-	m.note("%s toggled", row.name())
+	m.note("%s changed", row.name())
 	return m, nil
 }
 
@@ -167,7 +167,7 @@ type outcomesReadMsg struct {
 	err    error
 }
 
-// readOutcomes joins the reviews owing an outcome to the harnesses' transcripts
+// readOutcomes joins the reviews owing an outcome to each agent's session history
 // and writes the result, through the same engine `steer commit-gate backfill
 // --apply` runs. A write migrates the evidence root, so it prepares it first,
 // exactly as the CLI does before the same call.
@@ -195,7 +195,9 @@ func (m *Model) outcomesRead(msg outcomesReadMsg) {
 	if m.snap != nil {
 		left = m.snap.Posture.Unresolved
 	}
-	m.note("%s", outcomeNote(msg, left))
+	// The read may finish while the reader is on another panel, so the note names
+	// the panel that started it rather than the one now active.
+	m.noteFor(panelChannels, "%s", outcomeNote(msg, left))
 }
 
 // outcomeNote is the note itself, over the run's outcome and the reviews still
@@ -276,7 +278,7 @@ func (m *Model) toggleChannel(row channelRow) error {
 // to leave for a terminal.
 func (m *Model) viewChannels() string {
 	rows := m.channelRows()
-	out := header("Arming — what runs, and where")
+	out := m.title("Arming — what runs, and where")
 	for i, r := range rows {
 		selected := pointer(i == m.cursor[panelChannels])
 		if r.kind == "read-outcomes" {

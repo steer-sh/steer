@@ -31,7 +31,7 @@ import (
 // StatusVersion is the schema version of the emitted snapshot. It mirrors
 // report.DigestVersion: --json is a stable agent contract, so bump this whenever
 // the shape or semantics of SystemStatus change.
-const StatusVersion = 9
+const StatusVersion = 10
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20
@@ -132,6 +132,11 @@ type TeamState struct {
 	Path           string `json:"path,omitempty"`
 	HooksLocked    int    `json:"hooks_locked"`
 	CatalogVersion string `json:"catalog_version,omitempty"`
+	// Error is why a file that IS there could not be read. A project with no
+	// lockfile is not configured for one and that is not a fault; a file that
+	// exists and will not parse is a fault, and reading the two as one absence
+	// told the reader nothing was there while a broken file sat at the path.
+	Error string `json:"error,omitempty"`
 }
 
 // CorpusRow is one corpus's presence, size and path on this machine. It carries
@@ -932,12 +937,18 @@ func collectPresets(scope string) []PresetInfo {
 // The read here is a minimal, decoupled decode of the file cmd/team.go writes.
 const teamLockfileName = "steer-team.lock.json"
 
-// collectTeam reads the repo-committed team lockfile summary, when one is present
-// at the project root. A missing or unreadable lockfile reads as absent.
+// collectTeam reads the repo-committed team lockfile summary at the project root.
+// A file that is not there reads as absent. A file that IS there and cannot be
+// read or parsed reads as present with its error, because the two are different
+// facts: one says the project configured none, the other says the one it
+// configured is broken.
 func collectTeam() TeamState {
 	data, err := os.ReadFile(teamLockfileName)
 	if err != nil {
-		return TeamState{Present: false}
+		if os.IsNotExist(err) {
+			return TeamState{Present: false}
+		}
+		return TeamState{Present: true, Path: teamLockfileName, Error: err.Error()}
 	}
 	var lf struct {
 		CatalogVersion string `json:"catalog_version"`
@@ -946,7 +957,7 @@ func collectTeam() TeamState {
 		} `json:"hooks"`
 	}
 	if err := json.Unmarshal(data, &lf); err != nil {
-		return TeamState{Present: false}
+		return TeamState{Present: true, Path: teamLockfileName, Error: err.Error()}
 	}
 	return TeamState{
 		Present:        true,

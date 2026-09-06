@@ -714,3 +714,27 @@ func TestPiPostureReadsTheRegisteredExtension(t *testing.T) {
 			gateRow.Trust, resolverRow.Trust)
 	}
 }
+
+// A team lockfile that is not there is not a fault. One that IS there and cannot
+// be parsed is, and reading the two as one absence told a reader nothing was
+// configured while a broken file sat at the path.
+func TestABrokenTeamLockfileIsNotAnAbsentOne(t *testing.T) {
+	t.Chdir(t.TempDir())
+	if got := collectTeam(); got.Present || got.Error != "" {
+		t.Errorf("no lockfile read as %#v, want absent with no error", got)
+	}
+
+	if err := os.WriteFile(teamLockfileName, []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := collectTeam()
+	if !got.Present {
+		t.Fatal("a broken lockfile read as absent")
+	}
+	if got.Error == "" {
+		t.Error("a broken lockfile reports no error")
+	}
+	if got.Path != teamLockfileName {
+		t.Errorf("the broken lockfile names no path: %q", got.Path)
+	}
+}

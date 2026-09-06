@@ -5,10 +5,12 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"testing"
+	"unicode"
 )
 
 // These tests refuse a machine word — intervention, class, chain, verdict,
@@ -20,45 +22,55 @@ import (
 
 // displayFiles are the files whose string literals reach a person. Each is
 // display-only, or renders through fmt and the styles package, so a literal
-// carrying a sentence in one of them is something a reader sees.
-var displayFiles = []string{
-	"action.go",
-	"format.go",
-	"evidence.go",
-	"../../cmd/status.go",
-	// Every panel of the dashboard, not just the one that renders results: the
-	// channels and health panels print sentences too, and a leak there reaches
-	// the same reader.
-	"../tui/candidates.go",
-	"../tui/channels.go",
-	"../tui/classes.go",
-	"../tui/dashboard.go",
-	"../tui/health.go",
-	"../tui/presets.go",
-	"../tui/render.go",
-	"../tui/reviewer.go",
+// carrying a sentence in one of them is something a reader sees. The dashboard's
+// panels are read off the directory, never listed, so a new panel is covered
+// without anybody remembering to add it.
+func displayFiles(t *testing.T) []string {
+	t.Helper()
+	files := []string{"action.go", "format.go", "evidence.go", "../../cmd/status.go"}
+	panels, err := filepath.Glob("../tui/*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range panels {
+		if !strings.HasSuffix(path, "_test.go") {
+			files = append(files, path)
+		}
+	}
+	return files
 }
 
 // machineWords are the words with a display replacement. Each names a thing in
 // the measurement system that a reader has no word for: say review sequence, not
 // chain; recurring problem, not class; result, not verdict; fix, not
-// intervention; decision, not adjudication.
-var machineWords = regexp.MustCompile(`(?i)\b(class|classes|intervention|interventions|adjudicate|adjudicated|adjudication|adjudications|corpus|corpora|chain|chains|verdict|verdicts|confound|confounds|matcher|matchers|incidence|denominator|ledger|ledgers|firing|firings)\b`)
+// intervention; decision, not adjudication; built-in guard, not preset.
+var machineWords = regexp.MustCompile(`(?i)\b(class|classes|intervention|interventions|adjudicate|adjudicated|adjudication|adjudications|corpus|corpora|chain|chains|verdict|verdicts|confound|confounds|matcher|matchers|incidence|denominator|ledger|ledgers|firing|firings|candidate|candidates|instrument|instruments|preset|presets)\b`)
 
 // allowedPhrases are the literals that legitimately carry a machine word. Keep
 // this list short and justified: every entry is a place a reader meets the
 // machine's vocabulary, and each one needs a reason.
-var allowedPhrases = map[string]bool{}
+var allowedPhrases = map[string]bool{
+	// Executable text. A reader who types one of these needs it spelled the way
+	// the CLI accepts, so no display rename may move it.
+	"steer commit-gate mine findings":                                   true,
+	"%s is not a built-in guard; remove it with: steer hooks remove %s": true,
+}
 
-// A literal carrying whitespace is something a reader is shown: a sentence, or a
-// fragment padded for concatenation. A literal with none is a token, a flag name
-// or a map key — a machine value by construction. The whitespace is NOT trimmed
-// first: `"ledger "` is a label built for concatenation, and trimming made it
-// read as a bare token and skipped the one leak this check exists for.
-func isPhrase(s string) bool { return strings.ContainsAny(s, " \t\n") }
+// isPhrase says a literal is something a reader is shown: one carrying
+// whitespace, and one starting with a capital. Every machine value in these files
+// is lowercase by construction — a map key, a flag name, a JSON token — so
+// "Classes" is display text and "adjudicate" is not. The whitespace is NOT
+// trimmed first: `"ledger "` is a label built for concatenation.
+func isPhrase(s string) bool {
+	if strings.ContainsAny(s, " \t\n") {
+		return true
+	}
+	r := []rune(s)
+	return len(r) > 0 && unicode.IsUpper(r[0])
+}
 
 func TestNoMachineWordReachesADisplayString(t *testing.T) {
-	for _, path := range displayFiles {
+	for _, path := range displayFiles(t) {
 		fset := token.NewFileSet()
 		file, err := parser.ParseFile(fset, path, nil, 0)
 		if err != nil {
@@ -127,6 +139,12 @@ func TestTheCheckSeesAPaddedFragment(t *testing.T) {
 	for _, s := range []string{"adjudicate", "chain", "evidence-incomplete", "scope-harness"} {
 		if isPhrase(s) {
 			t.Errorf("the check reads the machine value %q as display text", s)
+		}
+	}
+	// A one-word navigation label carries no whitespace and is still display text.
+	for _, s := range []string{"Classes", "Problems", "Diagnostics"} {
+		if !isPhrase(s) {
+			t.Errorf("the check skips the navigation label %q", s)
 		}
 	}
 }

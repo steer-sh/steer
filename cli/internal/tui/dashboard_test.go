@@ -23,11 +23,15 @@ func TestModelRendersEveryPanel(t *testing.T) {
 	}
 }
 
-// TestPanelsCarryTheMeasurementConditions pins that the panels name what the verdict
-// rests on: the effect range, the frozen scope, each window's coverage, and the
-// resolver posture behind the evidence.
+// TestPanelsCarryTheMeasurementConditions pins that the panels name what a result
+// rests on: the compact summary carries the result and why it is withheld, the
+// expanded entry carries each period's counts and what changed between them, and
+// the technical block carries the eligibility rule and the window still needed.
 func TestPanelsCarryTheMeasurementConditions(t *testing.T) {
 	m := New(gate.Defaults(), "global")
+	// A wide terminal, so an assertion reads one unwrapped line. Wrapping has its
+	// own tests.
+	m.width = 200
 	m.snap = &status.SystemStatus{
 		Posture: status.Posture{
 			CommitGate: []status.ScopeArming{{Scope: "global", Registered: true, Effective: true}},
@@ -37,7 +41,7 @@ func TestPanelsCarryTheMeasurementConditions(t *testing.T) {
 		},
 		Interventions: []status.ScoredIntervention{{
 			ID: "bare-python", Class: "bare python call", Match: "python ", Tier: "guard",
-			Target: "guard.py", Status: "active", Verdict: "confounded",
+			Target: "guard.py", Status: "active", Verdict: "confounded", Unit: "chain",
 			Scope:          &cadence.Scope{Version: 1, Repo: "steer", Path: `\.go$`},
 			BeforeCoverage: cadence.Coverage{Total: 14, Eligible: 12, Ineligible: 2},
 			AfterCoverage:  cadence.Coverage{Total: 6, Eligible: 5, Unknown: 1, UnknownEvidence: 1},
@@ -50,31 +54,46 @@ func TestPanelsCarryTheMeasurementConditions(t *testing.T) {
 		}},
 	}
 
-	m.active = panelClasses
-	classes := m.View()
+	m.active = panelProblems
+	summary := m.View()
 	for _, want := range []string{
-		"Not comparable", "a clean window of 9 items",
-		// No range under a withheld verdict: the action sentence carries the row.
-		"the two periods ran under different conditions and cannot be compared",
-		"scope repo=/steer/ AND path=/\\.go$/",
-		"before 12 eligible / 14 (2 out of scope)",
-		"after 5 eligible / 6 (1 with no decision recorded)",
-		"conditions changed (instrument): after-window reviewed by another instrument",
+		"Not comparable",
+		// No range under a withheld result: the reason carries the row.
+		"these two periods ran under different conditions and cannot be compared",
+		"how the evidence was produced",
 	} {
-		if !strings.Contains(classes, want) {
-			t.Errorf("the classes panel is missing %q", want)
+		if !strings.Contains(summary, want) {
+			t.Errorf("the compact summary is missing %q", want)
+		}
+	}
+	if strings.Contains(summary, "RR ") {
+		t.Error("a withheld result printed a range")
+	}
+
+	m.updateNav(keyOf("enter"))
+	m.panelKey(keyOf("t"))
+	expanded := m.View()
+	for _, want := range []string{
+		"12 eligible / 14 (2 out of scope)",
+		"5 eligible / 6 (1 with no decision recorded)",
+		"how the evidence was produced — after-window reviewed by another instrument",
+		"repo=/steer/ AND path=/\\.go$/",
+		"needs 9 more clean, eligible review sequences",
+	} {
+		if !strings.Contains(expanded, want) {
+			t.Errorf("the expanded entry is missing %q:\n%s", want, expanded)
 		}
 	}
 
 	m.active = panelChannels
 	channels := m.View()
-	if !strings.Contains(channels, "read 4 review outcomes from your transcripts") {
-		t.Error("the channels panel does not offer to read the waiting outcomes")
+	if !strings.Contains(channels, "read 4 review outcomes from your session history") {
+		t.Error("the arming panel does not offer to read the waiting outcomes")
 	}
 
-	m.active = panelHealth
+	m.active = panelDiagnostics
 	if !strings.Contains(m.View(), "4 reviews have no outcome yet") {
-		t.Error("the health panel does not name the unresolved backlog")
+		t.Error("diagnostics does not name the reviews still waiting")
 	}
 }
 

@@ -34,10 +34,10 @@ var ActionOrder = []string{
 // these six headings organize the whole screen.
 var ActionHeading = map[string]string{
 	ActionHarmful:    "Problems that grew after a fix went in — review the fix",
-	ActionAdjudicate: "Missing evidence — the decisions and records the measurement still needs",
+	ActionAdjudicate: "Missing evidence — these results stay on hold until the decisions are recorded",
 	ActionRepair:     "Fixes to rework — each one names a change you can make",
 	ActionWait:       "Fixes still collecting evidence — no result yet",
-	ActionAccept:     "Results no fix settles — read the counts and decide",
+	ActionAccept:     "Results with no repair available — read the counts and judge these yourself",
 	ActionSettled:    "Results that are decided — nothing to do",
 }
 

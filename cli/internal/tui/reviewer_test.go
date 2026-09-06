@@ -10,6 +10,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/config"
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
+	"github.com/steer-sh/steer-cli/internal/gate/reviewers"
 	"github.com/steer-sh/steer-cli/internal/settings"
 	"github.com/steer-sh/steer-cli/internal/status"
 )
@@ -32,19 +33,29 @@ func key(s string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyEnter}
 	case "esc":
 		return tea.KeyMsg{Type: tea.KeyEsc}
+	case "down":
+		return tea.KeyMsg{Type: tea.KeyDown}
+	case "right":
+		return tea.KeyMsg{Type: tea.KeyRight}
 	}
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
 }
 
-// The panel is the same editor as `steer config`, so it lists the same keys.
+// The panel is the same editor as `steer config`, so it lists the same keys. It
+// names each in the reader's words and keeps the stored key in the details, where
+// somebody editing the file by hand still finds it.
 func TestReviewerPanelNamesEverySetting(t *testing.T) {
 	tempSettingsHome(t)
 	m := New(gate.Defaults(), "global")
+	m.width = 200
 	m.active = panelReviewer
 	view := m.View()
-	for _, name := range settings.Names() {
-		if !strings.Contains(view, name) {
-			t.Errorf("the reviewer panel omits %s", name)
+	for _, f := range settings.Fields {
+		if !strings.Contains(view, settings.LabelOf(f)) {
+			t.Errorf("the reviewer panel omits %s", settings.LabelOf(f))
+		}
+		if !strings.Contains(view, f.Name) {
+			t.Errorf("the details omit the stored key %s", f.Name)
 		}
 	}
 }
@@ -54,11 +65,45 @@ func TestReviewerPanelNamesEverySetting(t *testing.T) {
 func TestReviewerPanelWritesTheSettingsFile(t *testing.T) {
 	tempSettingsHome(t)
 	m := New(gate.Defaults(), "global")
+	m.impactOf = func(gate.Config) []mine.InstrumentImpact { return nil }
+	m.active = panelReviewer
+	m.cursor[panelReviewer] = indexOfField(t, "reviewer.model")
+
+	m.Update(key("enter"))
+	m.input.SetValue("gemini-3.7-flash")
+	m.Update(key("enter"))
+
+	got, err := config.Load()
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if got.Reviewer.Model != "gemini-3.7-flash" {
+		t.Fatalf("stored model %q, want gemini-3.7-flash", got.Reviewer.Model)
+	}
+	if m.editing {
+		t.Error("the editor is still open after a write")
+	}
+}
+
+// The reviewer CLI is a closed set, so the editor offers the set rather than
+// asking the reader to type a name that could be a typo. The set comes from the
+// one provider definition, so the panel can never offer one the gate refuses.
+func TestReviewerPanelChoosesTheCLIFromAList(t *testing.T) {
+	tempSettingsHome(t)
+	m := New(gate.Defaults(), "global")
+	m.impactOf = func(gate.Config) []mine.InstrumentImpact { return nil }
 	m.active = panelReviewer
 	m.cursor[panelReviewer] = indexOfField(t, "reviewer.provider")
 
 	m.Update(key("enter"))
-	m.input.SetValue("codex")
+	view := m.View()
+	for _, p := range reviewers.Providers() {
+		if !strings.Contains(view, p.Label) {
+			t.Errorf("the editor omits the reviewer CLI %q", p.Label)
+		}
+	}
+
+	m.Update(key("down"))
 	m.Update(key("enter"))
 
 	got, err := config.Load()
@@ -66,30 +111,75 @@ func TestReviewerPanelWritesTheSettingsFile(t *testing.T) {
 		t.Fatalf("config.Load: %v", err)
 	}
 	if got.Reviewer.Provider != "codex" {
-		t.Fatalf("stored provider %q, want codex", got.Reviewer.Provider)
-	}
-	if m.editing {
-		t.Error("the editor is still open after a write")
+		t.Fatalf("stored provider %q, want the second row, codex", got.Reviewer.Provider)
 	}
 }
 
-// The provider set is closed, so a typo is refused at write time rather than left to
-// fail open on every commit.
-func TestReviewerPanelRefusesAnUnknownProvider(t *testing.T) {
+// A CLI change asks what happens to the model and the effort it carried. Neither
+// answer is a default: a model name is rarely one the new CLI accepts, and
+// keeping or dropping it unasked are both wrong.
+func TestChangingTheCLIAsksAboutTheModelAndTheEffort(t *testing.T) {
 	tempSettingsHome(t)
+	if err := config.Save(config.Config{Reviewer: config.Reviewer{
+		Provider: "agy", Model: "gemini-3.7-flash", Effort: "high"}}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
 	m := New(gate.Defaults(), "global")
+	m.impactOf = func(gate.Config) []mine.InstrumentImpact { return nil }
 	m.active = panelReviewer
 	m.cursor[panelReviewer] = indexOfField(t, "reviewer.provider")
 
 	m.Update(key("enter"))
-	m.input.SetValue("gpt")
+	m.Update(key("down"))
 	m.Update(key("enter"))
 
-	if !strings.Contains(m.message, "unknown reviewer provider") {
-		t.Errorf("message %q does not name the refusal", m.message)
+	if got, _ := config.Load(); got.Reviewer.Provider != "agy" {
+		t.Fatalf("the CLI changed before the question was answered: %q", got.Reviewer.Provider)
 	}
-	if got, err := config.Load(); err != nil || got != (config.Config{}) {
-		t.Fatalf("a refused write left %#v (err %v); want an untouched file", got, err)
+	if !strings.Contains(m.message, "keep the current model") {
+		t.Errorf("the panel does not ask about the model and the effort: %q", m.message)
+	}
+
+	m.Update(key("right"))
+	m.Update(key("enter"))
+	got, err := config.Load()
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if got.Reviewer.Provider != "codex" {
+		t.Fatalf("stored provider %q, want codex", got.Reviewer.Provider)
+	}
+	if got.Reviewer.Model != "" || got.Reviewer.Effort != "" {
+		t.Errorf("the new CLI kept %q / %q, want its own defaults",
+			got.Reviewer.Model, got.Reviewer.Effort)
+	}
+}
+
+// An explicit action returns a key to its default, so nobody has to learn that an
+// empty field clears it.
+func TestReviewerPanelReturnsAFieldToItsDefault(t *testing.T) {
+	tempSettingsHome(t)
+	if err := config.Save(config.Config{Reviewer: config.Reviewer{Model: "some-model"}}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	m := New(gate.Defaults(), "global")
+	m.impactOf = func(gate.Config) []mine.InstrumentImpact { return nil }
+	m.active = panelReviewer
+	m.cursor[panelReviewer] = indexOfField(t, "reviewer.model")
+
+	m.Update(key("enter"))
+	m.input.SetValue("")
+	m.Update(key("d"))
+
+	got, err := config.Load()
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if got.Reviewer.Model != "" {
+		t.Errorf("the model is still %q", got.Reviewer.Model)
+	}
+	if !strings.Contains(m.message, "Provider default") {
+		t.Errorf("the note does not name the default: %q", m.message)
 	}
 }
 
@@ -104,7 +194,8 @@ func TestReviewerPanelNamesAPinnedRegistration(t *testing.T) {
 	}}}}
 	m.active = panelReviewer
 	view := m.View()
-	for _, want := range []string{"Registrations that outrank this file", "claude-code global scope", "steer bin install"} {
+	for _, want := range []string{"Registrations that outrank this file",
+		"Claude Code, every project on this machine", "steer bin install"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("the reviewer panel is missing %q", want)
 		}
@@ -130,7 +221,7 @@ func TestReviewerPanelConfirmsAnIdentityChangeThatLandsInAMeasurement(t *testing
 		t.Fatalf("the first enter wrote %#v (err %v); want the confirmation first", got, err)
 	}
 	view := m.View()
-	for _, want := range []string{"lands in 1 measurement(s)", "bare python call", "the verdict is withheld"} {
+	for _, want := range []string{"lands in 1 measurement(s)", "bare python call", "withheld"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("the confirmation is missing %q", want)
 		}

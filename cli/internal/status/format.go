@@ -113,7 +113,58 @@ func ConfoundPhrases(kind string, cs []mine.Confound) []string {
 	}
 	out := make([]string, 0, len(cs))
 	for _, c := range cs {
-		out = append(out, fmt.Sprintf("%s (%s): %s", word, c.Category, c.Reason))
+		out = append(out, fmt.Sprintf("%s (%s): %s", word, ConditionName(c.Category), c.Reason))
+	}
+	return out
+}
+
+// conditionName names what a compared condition IS, in the reader's words.
+var conditionName = map[string]string{
+	"instrument":   "how the evidence was produced",
+	"host":         "the machine",
+	"harness":      "the coding agent",
+	"repo":         "the repository",
+	"project":      "the project",
+	"author_model": "the agent's own model",
+	"path_kind":    "the kinds of file changed",
+}
+
+// ConditionName is that table's one reader. A category the table does not name
+// prints verbatim. It is exported for the same reason UnitName is: the category
+// reaches a renderer as stored data, so the vocabulary check cannot see it.
+func ConditionName(category string) string {
+	if name := conditionName[category]; name != "" {
+		return name
+	}
+	return category
+}
+
+// ComparisonLimit is one sentence for a whole list of changed conditions: the
+// claim once, then each condition named. A hard list says the periods cannot be
+// compared; a soft list says only that the mix moved, which the scorer permitted,
+// so the two never share a sentence. It is "" for an empty list.
+func ComparisonLimit(kind string, cs []mine.Confound) string {
+	if len(cs) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(cs))
+	for _, c := range cs {
+		names = append(names, ConditionName(c.Category))
+	}
+	claim := "the mix of work changed, which qualifies this result"
+	if kind == "confound" {
+		claim = "these two periods ran under different conditions and cannot be compared"
+	}
+	return claim + " — " + strings.Join(names, "; ")
+}
+
+// ComparisonCauses lists each changed condition for the detail view: the
+// condition named, then the reason. It repeats no claim, because ComparisonLimit
+// above it made the claim once.
+func ComparisonCauses(cs []mine.Confound) []string {
+	out := make([]string, 0, len(cs))
+	for _, c := range cs {
+		out = append(out, ConditionName(c.Category)+" — "+c.Reason)
 	}
 	return out
 }

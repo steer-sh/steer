@@ -154,14 +154,14 @@ func TestRenderHTMLCarriesEverySection(t *testing.T) {
 		"scope repo=/steer.*/ AND path=/\\.go$/", "scope all",
 		"12 eligible / 14 (2 out of scope)", "12 eligible / 13 (1 pending)",
 		"0 eligible / 4 (4 with no decision recorded)",
-		"conditions changed (instrument): after-window reviewed by another instrument",
+		"how the evidence was produced — after-window reviewed by another instrument",
 		// The record's own explanation leads every measurement line, and a tier
 		// reads as a type rather than as a flag value.
 		"Problem: the parser drops a flag and the reviewer catches it after the fact",
 		"Fix: check.sh refuses a parser branch that drops a flag",
 		"Legacy note: check.sh tier 6",
 		"repository check \u2192 check.sh",
-		"the mix changed (host): host set changed",
+		"the machine — host set changed",
 		// Resolver posture: the arming row and the unresolved backlog.
 		"resolver claude-code global", "4 reviews have no outcome yet",
 		// Posture is harness-qualified, and Codex's trust is a record, not a proof.

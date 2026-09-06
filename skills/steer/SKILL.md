@@ -383,7 +383,7 @@ The `|` pipe splits a rule into a detection part and an optional suggestion (see
 
 Never invent suggestions. Only include them when explicitly provided after `|`.
 
-## The `steer status --json` contract (`status_version: 9`)
+## The `steer status --json` contract (`status_version: 10`)
 
 `steer status` composes one read-only snapshot of the whole loop. The unit is the
 failure class and its verdict, not the hook count. The Pre-flight step reads it to
@@ -498,7 +498,10 @@ Contracts). Fields:
 - `presets[]` — the catalog roster: `name`, `bundle`, `description`, `enabled`,
   `drifted`.
 - `team` — the repo-committed team lockfile summary: `present`, `path`,
-  `hooks_locked`, `catalog_version`.
+  `hooks_locked`, `catalog_version`, and `error`. v10 adds `error`: a project with
+  no lockfile is `present: false` and is not a fault, while a lockfile that exists
+  and cannot be read is `present: true` with `error` naming why. Before v10 both
+  read as absent.
 
 ### The verdict vocabulary
 

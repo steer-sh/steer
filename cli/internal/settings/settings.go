@@ -23,11 +23,28 @@ import (
 // nothing while `status` reports the new value. A registration carries none of them.
 var ReviewerFlags = []string{"--provider", "--model", "--effort", "--runs"}
 
+// The kinds of editor a key takes. Choice offers a closed set, Number takes a
+// whole number in its own unit, and Text takes anything.
+const (
+	KindChoice = "choice"
+	KindNumber = "number"
+	KindText   = "text"
+)
+
 // Field is one editable key of ~/.steer/config.json. Get and Set read and write the
 // stored value; Effective reads what the resolved configuration would actually use,
 // which is not the same value whenever an environment variable outranks the file.
 type Field struct {
 	Name string
+	// Label is the key's name in the reader's words, and Help is one sentence
+	// saying what it does and what changing it costs.
+	Label string
+	Help  string
+	// Kind is the editor this key takes; Unit names what a Number counts.
+	Kind string
+	Unit string
+	// DefaultLabel is what an unset key means, in the reader's words.
+	DefaultLabel string
 	// Env is the environment variable that outranks this key, empty when none does.
 	Env string
 	// Numeric marks a key whose environment override counts only when it parses
@@ -41,14 +58,42 @@ type Field struct {
 	Set      func(*config.Config, string) error
 	// Effective renders the value the commit gate would run with.
 	Effective func(gate.Config) string
+	// Display renders that same value for a person: a name rather than an id, and
+	// a duration rather than a count of seconds.
+	Display func(gate.Config) string
+	// Choices lists a KindChoice key's values, taken from the definition that owns
+	// the set rather than from a copy of it.
+	Choices func() []Choice
+	// Suggestions are values that assist entry without limiting it. A key with
+	// suggestions still accepts anything: a CLI can add a level before Steer knows
+	// about it, and a list Steer refuses on would reject it on release day.
+	Suggestions func(gate.Config) []string
+}
+
+// Choice is one value a KindChoice key offers: the value stored, and its name.
+type Choice struct {
+	Value string
+	Label string
 }
 
 // Fields is the whole editable surface, in the order an editor lists it.
 var Fields = []Field{
 	{
 		Name: "reviewer.provider", Identity: true,
-		Usage: "Reviewer CLI (agy|codex|claude-code); unset means agy",
-		Get:   func(c config.Config) string { return c.Reviewer.Provider },
+		Label:        "Reviewer CLI",
+		Help:         "The command Steer runs to review a change before it commits.",
+		Kind:         KindChoice,
+		DefaultLabel: "agy",
+		Choices: func() []Choice {
+			out := []Choice{}
+			for _, p := range reviewers.Providers() {
+				out = append(out, Choice{Value: p.ID, Label: p.Label})
+			}
+			return out
+		},
+		Display: func(c gate.Config) string { return reviewers.ProviderLabel(c.ReviewerProvider) },
+		Usage:   "Reviewer CLI (agy|codex|claude-code); unset means agy",
+		Get:     func(c config.Config) string { return c.Reviewer.Provider },
 		Set: func(c *config.Config, v string) error {
 			// The provider set is closed, so a typo is a write-time error rather than
 			// a hook that fails open on every commit. reviewers.Resolve is the one
@@ -65,8 +110,12 @@ var Fields = []Field{
 	},
 	{
 		Name: "reviewer.model", Env: "COMMIT_GATE_MODEL", Identity: true,
-		Usage: "Reviewer model; unset means the provider's own default",
-		Get:   func(c config.Config) string { return c.Reviewer.Model },
+		Label:        "Model",
+		Help:         "Which model that CLI reviews with. Steer keeps no model list, so type any name the CLI accepts.",
+		Kind:         KindText,
+		DefaultLabel: "Provider default",
+		Usage:        "Reviewer model; unset means the provider's own default",
+		Get:          func(c config.Config) string { return c.Reviewer.Model },
 		Set: func(c *config.Config, v string) error {
 			// No model list. A list becomes a gate that refuses the new model on the
 			// day it ships.
@@ -77,6 +126,18 @@ var Fields = []Field{
 	},
 	{
 		Name: "reviewer.effort", Env: "COMMIT_GATE_EFFORT", Identity: true,
+		Label: "Reasoning effort",
+		Help: "How hard the reviewer thinks. Any value is passed through, so a level " +
+			"the CLI added after this Steer shipped still works.",
+		Kind:         KindText,
+		DefaultLabel: "Provider default",
+		Suggestions: func(c gate.Config) []string {
+			p, ok := reviewers.FindProvider(c.ReviewerProvider)
+			if !ok {
+				return nil
+			}
+			return p.Efforts
+		},
 		Usage: "Reviewer reasoning effort; unset means the provider's own",
 		Get:   func(c config.Config) string { return c.Reviewer.Effort },
 		Set: func(c *config.Config, v string) error {
@@ -89,9 +150,20 @@ var Fields = []Field{
 			}
 			return c.ReviewerEffort
 		},
+		Display: func(c gate.Config) string {
+			if c.ReviewerEffort == "" {
+				return "Provider default"
+			}
+			return c.ReviewerEffort
+		},
 	},
 	{
 		Name: "reviewer.runs", Env: "COMMIT_GATE_RUNS", Numeric: true, Identity: true,
+		Label: "Review runs",
+		Help: "How many reviewers read each change. Steer runs them all, so raising " +
+			"this raises the work and the cost of every review.",
+		Kind:  KindNumber,
+		Unit:  "run",
 		Usage: "Reviewers in the panel",
 		Get:   func(c config.Config) string { return IntValue(c.Reviewer.Runs) },
 		Set: func(c *config.Config, v string) error {
@@ -106,6 +178,11 @@ var Fields = []Field{
 	},
 	{
 		Name: "reviewer.timeout", Env: "COMMIT_GATE_TIMEOUT", Numeric: true,
+		Label: "Timeout per run",
+		Help: "How long one reviewer may take. Your coding agent keeps its own, " +
+			"larger clock, which only a fresh install updates.",
+		Kind:  KindNumber,
+		Unit:  "second",
 		Usage: "Per-reviewer wall clock, in seconds",
 		Get:   func(c config.Config) string { return IntValue(c.Reviewer.Timeout) },
 		Set: func(c *config.Config, v string) error {
@@ -119,7 +196,56 @@ var Fields = []Field{
 		Effective: func(c gate.Config) string {
 			return strconv.Itoa(int(c.ReviewTimeout.Seconds()))
 		},
+		Display: func(c gate.Config) string {
+			return Duration(int(c.ReviewTimeout.Seconds()))
+		},
 	},
+}
+
+// Duration renders a count of seconds the way a person reads a wall clock.
+func Duration(seconds int) string {
+	switch {
+	case seconds <= 0:
+		return "no limit"
+	case seconds < 60:
+		return fmt.Sprintf("%d %s", seconds, plural("second", seconds))
+	case seconds%60 == 0:
+		mins := seconds / 60
+		return fmt.Sprintf("%d %s", mins, plural("minute", mins))
+	}
+	return fmt.Sprintf("%d minutes %d seconds", seconds/60, seconds%60)
+}
+
+// LabelOf is a key's name in the reader's words, falling back on the stored key
+// so an editor can never render a blank row.
+func LabelOf(f Field) string {
+	if f.Label != "" {
+		return f.Label
+	}
+	return f.Name
+}
+
+// DisplayValue is the value in force, in the reader's words.
+func DisplayValue(f Field, cfg gate.Config) string {
+	if f.Display != nil {
+		return f.Display(cfg)
+	}
+	value := f.Effective(cfg)
+	if value == "" && f.DefaultLabel != "" {
+		return f.DefaultLabel
+	}
+	return value
+}
+
+// StoredValue is what the file itself holds, which an override may not be in
+// force. It is the empty string when the key is unset.
+func StoredValue(f Field, file config.Config) string { return f.Get(file) }
+
+func plural(word string, n int) string {
+	if n == 1 {
+		return word
+	}
+	return word + "s"
 }
 
 // Find names the key, refusing an unknown one by listing the surface.

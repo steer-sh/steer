@@ -65,7 +65,7 @@ func TestNoPanelOverflowsTheTerminal(t *testing.T) {
 
 	for _, height := range []int{12, 18, 24} {
 		m.height = height
-		for _, p := range []panel{panelChannels, panelCandidates, panelClasses} {
+		for _, p := range []panel{panelChannels, panelProblems, panelGuards} {
 			m.active, m.cursor[p] = p, 20
 			frame := m.View()
 			if n := len(strings.Split(strings.TrimRight(frame, "\n"), "\n")); n > height {
@@ -83,7 +83,7 @@ func TestNoPanelOverflowsTheTerminal(t *testing.T) {
 // the selection would cut off everything the entry says.
 func TestWindowShowsTheSelectedEntryNotJustItsFirstLine(t *testing.T) {
 	var b strings.Builder
-	b.WriteString(header("Classes"))
+	b.WriteString(testHeader("Problems"))
 	const selected = 20
 	for i := 0; i < 30; i++ {
 		fmt.Fprintf(&b, "%s class-%02d\n", pointer(i == selected), i)
@@ -108,7 +108,7 @@ func TestWindowShowsTheSelectedEntryNotJustItsFirstLine(t *testing.T) {
 // added newline costs one line of the terminal.
 func TestWindowKeepsTheBodyEnding(t *testing.T) {
 	var b strings.Builder
-	b.WriteString(header("Panel"))
+	b.WriteString(testHeader("Panel"))
 	for i := 0; i < 30; i++ {
 		fmt.Fprintf(&b, "%s row-%02d\n", pointer(i == 0), i)
 	}
@@ -137,7 +137,7 @@ func TestUnknownHeightNeverWindows(t *testing.T) {
 func TestWindowFollowsTheSelectionBothWays(t *testing.T) {
 	build := func(sel int) string {
 		var b strings.Builder
-		b.WriteString(header("Panel"))
+		b.WriteString(testHeader("Panel"))
 		for i := 0; i < 30; i++ {
 			fmt.Fprintf(&b, "%s row-%02d\n", pointer(i == sel), i)
 		}
@@ -157,3 +157,7 @@ func TestWindowFollowsTheSelectionBothWays(t *testing.T) {
 		}
 	}
 }
+
+// testHeader is a panel header with the blank line under it, which is the shape
+// windowBody reads its sticky region off.
+func testHeader(s string) string { return s + "\n\n" }

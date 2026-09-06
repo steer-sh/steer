@@ -153,9 +153,9 @@ func renderReadiness(r status.Readiness) {
 
 func renderPosture(s *status.SystemStatus) {
 	fmt.Println(styles.SectionHeader.Render("Posture"))
-	fmt.Printf("  Instrument   %s\n", s.Posture.Instrument)
 	fmt.Printf("  Reviewer     %s\n", s.Posture.Reviewer)
 	fmt.Printf("  Review log   %s\n", s.Posture.Ledger)
+	fmt.Printf("  Evidence     %s\n", s.Posture.Instrument)
 	for _, a := range s.Posture.CommitGate {
 		fmt.Printf("  Commit gate  %s\n", armingRow(a))
 	}
@@ -336,8 +336,14 @@ func interventionNotes(iv cadence.Intervention, unmeasurable bool, rate status.C
 	if a := status.AttributionPhrase(iv.Attribution); a != "" {
 		notes = append(notes, a)
 	}
-	notes = append(notes, status.ConfoundPhrases("confound", iv.Confounds)...)
-	notes = append(notes, status.ConfoundPhrases("composition", iv.Composition)...)
+	if limit := status.ComparisonLimit("confound", iv.Confounds); limit != "" {
+		notes = append(notes, limit)
+		notes = append(notes, status.ComparisonCauses(iv.Confounds)...)
+	}
+	if limit := status.ComparisonLimit("composition", iv.Composition); limit != "" {
+		notes = append(notes, limit)
+		notes = append(notes, status.ComparisonCauses(iv.Composition)...)
+	}
 	if iv.BeforeCoverage.UnknownEvidence > 0 || iv.AfterCoverage.UnknownEvidence > 0 {
 		notes = append(notes, fmt.Sprintf("%d of the %d earlier %s and %d of the %d later %s carry no recorded decision",
 			iv.BeforeCoverage.UnknownEvidence, iv.BeforeCoverage.Total,
