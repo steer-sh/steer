@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -70,11 +71,53 @@ func (m *Model) channelRows() []channelRow {
 		rows = append(rows, channelRow{label: "denials recorder", kind: "denials",
 			harness: a.Harness, scope: a.Scope, armed: a})
 	}
+	// The kind stays the primary key: the commit gate is one block a reader
+	// compares across harnesses, which is the question readiness answers. The
+	// harness sorts above the scope because one harness's two scopes are the pair
+	// a person toggles.
+	sort.SliceStable(rows, func(i, j int) bool {
+		a, b := rows[i], rows[j]
+		if ka, kb := kindRank(a.kind), kindRank(b.kind); ka != kb {
+			return ka < kb
+		}
+		if ha, hb := harnessRank(a.harness), harnessRank(b.harness); ha != hb {
+			return ha < hb
+		}
+		return scopeRank(a.scope) < scopeRank(b.scope)
+	})
 	if n := m.snap.Posture.Unresolved; n > 0 {
 		rows = append(rows, channelRow{label: readOutcomesLabel(n),
 			kind: "read-outcomes", waiting: n})
 	}
 	return rows
+}
+
+// kindRank keeps the commit gate above the denials recorder.
+func kindRank(kind string) int {
+	if kind == "commit-gate" {
+		return 0
+	}
+	return 1
+}
+
+// harnessRank orders rows by the registry's own harness order, so the panel and
+// harness.All can never disagree.
+func harnessRank(id string) int {
+	all := harness.All()
+	for i, h := range all {
+		if string(h.ID) == id {
+			return i
+		}
+	}
+	return len(all)
+}
+
+// scopeRank puts project above global.
+func scopeRank(scope string) int {
+	if scope == claude.ProjectScope {
+		return 0
+	}
+	return 1
 }
 
 // readOutcomesLabel says what the action row does, in the count the reader sees.
@@ -233,7 +276,7 @@ func (m *Model) toggleChannel(row channelRow) error {
 // to leave for a terminal.
 func (m *Model) viewChannels() string {
 	rows := m.channelRows()
-	out := header("Channels — arming posture")
+	out := header("Arming — what runs, and where")
 	for i, r := range rows {
 		selected := pointer(i == m.cursor[panelChannels])
 		if r.kind == "read-outcomes" {

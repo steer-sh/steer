@@ -34,7 +34,7 @@ const (
 	panelCount
 )
 
-var panelNames = [panelCount]string{"Channels", "Candidates", "Classes", "Hooks & presets", "Reviewer", "Health"}
+var panelNames = [panelCount]string{"Arming", "Candidates", "Classes", "Hooks & presets", "Reviewer", "Health"}
 
 // Model is the dashboard's whole state: the composed snapshot, the active panel,
 // a per-panel cursor, and the candidate regex editor.

@@ -194,3 +194,47 @@ func TestTheOutcomeReadReportsWhatMoved(t *testing.T) {
 		t.Errorf("reading = %v, note = %q", m.reading, m.message)
 	}
 }
+
+// TestChannelRowsGroupAHarnessTogether pins the panel's sort. The posture is
+// emitted scope-major, and a harness's two scopes are the pair a person toggles,
+// so the panel sorts the harness above the scope while keeping the commit gate as
+// one block a reader compares across harnesses.
+func TestChannelRowsGroupAHarnessTogether(t *testing.T) {
+	m := New(gate.Defaults(), "global")
+	m.snap = &status.SystemStatus{
+		Posture: status.Posture{
+			CommitGate: []status.ScopeArming{
+				{Harness: "claude-code", Scope: "project"},
+				{Harness: "codex", Scope: "project"},
+				{Harness: "pi", Scope: "project"},
+				{Harness: "claude-code", Scope: "global"},
+				{Harness: "codex", Scope: "global"},
+				{Harness: "pi", Scope: "global"},
+			},
+			Denials: []status.ScopeArming{
+				{Harness: "claude-code", Scope: "project"},
+				{Harness: "claude-code", Scope: "global"},
+			},
+		},
+	}
+
+	want := []string{
+		"commit gate · Claude Code project",
+		"commit gate · Claude Code global",
+		"commit gate · Codex project",
+		"commit gate · Codex global",
+		"commit gate · Pi project",
+		"commit gate · Pi global",
+		"denials recorder · Claude Code project",
+		"denials recorder · Claude Code global",
+	}
+	rows := m.channelRows()
+	if len(rows) != len(want) {
+		t.Fatalf("got %d rows, want %d", len(rows), len(want))
+	}
+	for i, w := range want {
+		if got := rows[i].name(); got != w {
+			t.Errorf("row %d is %q, want %q", i, got, w)
+		}
+	}
+}
