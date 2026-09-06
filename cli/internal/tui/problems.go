@@ -19,7 +19,7 @@ import (
 // place; authoring and deciding stay in /steer-report.
 
 // headingToConsider heads the queue rows. They sit above the tracked inventory
-// because a problem with no answer is the one the reader has not dealt with.
+// because a problem with no fix is the one the reader has not dealt with.
 const headingToConsider = "Problems to consider — no fix is proposed yet"
 
 // retireForm is the one editor the panel opens over a record: the reason a
@@ -196,7 +196,7 @@ func (m *Model) viewProblems() string {
 		return m.viewRetireForm()
 	}
 	rows := m.problemRows()
-	out := m.title("Problems — what recurs, and whether our answers help")
+	out := m.title("Problems — what recurs, and whether our fixes help")
 	if len(rows) == 0 {
 		return out + dim("nothing recorded on this machine yet. Run /steer-report to look for problems.")
 	}
