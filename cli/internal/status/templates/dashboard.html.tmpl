@@ -234,7 +234,9 @@ footer { color: var(--faint); font-size: 11.5px; border-top: 1px solid var(--lin
         <div class="says">{{ . }}</div>
         {{- end }}
         <div class="sub">{{ recur .Before .After .Unit }}</div>
-        <div class="sub">{{ action .Verdict (unmeas .Verdict .Unit .RequiredAfter) }}</div>
+        {{- $g := gap .Verdict .Unit .BeforeCoverage .AfterCoverage .Attribution }}
+        <div class="sub">{{ gapsay $g .Verdict (unmeas .Verdict .Unit .RequiredAfter) }}</div>
+        {{- if $g }}{{- with $g.Command }}<div class="sub"><code class="fix">{{ . }}</code></div>{{ end }}{{ end }}
         {{- with claim .Verdict .Effect }}<div class="sub mono">{{ . }}</div>{{ end }}
         {{- if .RequiredAfter }}{{- with wait .RequiredAfter .Unit }}<div class="sub">{{ . }}</div>{{ end }}{{ else }}{{- with needs .RequiredAfter .Verdict }}<div class="sub">{{ . }}</div>{{ end }}{{ end }}
         <div class="sub">scope {{ scope .Scope }} · before {{ cover .BeforeCoverage }} · after {{ cover .AfterCoverage }}</div>
@@ -323,7 +325,9 @@ footer { color: var(--faint); font-size: 11.5px; border-top: 1px solid var(--lin
           <td class="num">{{ .After.Hits }}/{{ .After.Units }}<div class="dimtext">{{ pctIf .Verdict .After }}</div></td>
           <td class="num">{{ deltaIf .Verdict .Before .After }}</td>
           <td>
-            <div>{{ action .Verdict (unmeas .Verdict .Unit .RequiredAfter) }}</div>
+            {{- $g := gap .Verdict .Unit .BeforeCoverage .AfterCoverage .Attribution }}
+            <div>{{ gapsay $g .Verdict (unmeas .Verdict .Unit .RequiredAfter) }}</div>
+            {{- if $g }}{{- with $g.Command }}<div class="dimtext"><code class="fix">{{ . }}</code></div>{{ end }}{{ end }}
             {{- with claim .Verdict .Effect }}<div class="mono">{{ . }}</div>{{ end }}
             {{- if .RequiredAfter }}{{- with wait .RequiredAfter .Unit }}<div class="dimtext">{{ . }}</div>{{ end }}{{ else }}{{- with needs .RequiredAfter .Verdict }}<div class="dimtext">{{ . }}</div>{{ end }}{{ end }}
             <div class="dimtext">scope {{ scope .Scope }}</div>

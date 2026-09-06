@@ -120,8 +120,12 @@ func measureLine(it status.ScoredIntervention, unmeasurable bool, rate status.Ch
 		unit = "unit"
 	}
 	parts := []string{}
-	if s := status.ActionSentence(it.Verdict, unmeasurable); s != "" {
+	gap := status.EvidenceGap(it.Verdict, unit, it.BeforeCoverage, it.AfterCoverage, it.Attribution)
+	if s := status.GapSentence(gap, it.Verdict, unmeasurable); s != "" {
 		parts = append(parts, s)
+	}
+	if gap != nil && gap.Command != "" {
+		parts = append(parts, gap.Command)
 	}
 	if e := status.EffectClaimPhrase(it.Verdict, it.Effect); e != "" {
 		parts = append(parts, e)

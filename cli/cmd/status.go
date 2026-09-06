@@ -320,8 +320,12 @@ func interventionNotes(iv cadence.Intervention, unmeasurable bool, rate status.C
 	if e := status.EffectClaimPhrase(iv.Verdict, iv.Effect); e != "" {
 		notes = append(notes, e)
 	}
-	if s := status.ActionSentence(iv.Verdict, unmeasurable); s != "" {
+	gap := status.EvidenceGap(iv.Verdict, unit, iv.BeforeCoverage, iv.AfterCoverage, iv.Attribution)
+	if s := status.GapSentence(gap, iv.Verdict, unmeasurable); s != "" {
 		notes = append(notes, s)
+	}
+	if gap != nil && gap.Command != "" {
+		notes = append(notes, gap.Command)
 	}
 	if r := status.RatePhrase(iv.RequiredAfter, unit, rate); r != "" {
 		notes = append(notes, r)
