@@ -155,7 +155,7 @@ func renderPosture(s *status.SystemStatus) {
 	fmt.Println(styles.SectionHeader.Render("Posture"))
 	fmt.Printf("  Reviewer     %s\n", s.Posture.Reviewer)
 	fmt.Printf("  Review log   %s\n", s.Posture.Ledger)
-	fmt.Printf("  Evidence     %s\n", s.Posture.Instrument)
+	fmt.Printf("  Produced by  %s\n", s.Posture.Instrument)
 	for _, a := range s.Posture.CommitGate {
 		fmt.Printf("  Commit gate  %s\n", armingRow(a))
 	}
@@ -179,7 +179,7 @@ func renderPosture(s *status.SystemStatus) {
 		}
 		fmt.Printf("  Guard master %s\n", row)
 	}
-	fmt.Printf("  Evidence     %s\n", corporaLine(s))
+	fmt.Printf("  History      %s\n", corporaLine(s))
 	fmt.Printf("  Guard blocks %d action(s) blocked\n", s.Telemetry.AuditFirings)
 }
 
