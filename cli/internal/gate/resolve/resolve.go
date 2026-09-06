@@ -62,10 +62,33 @@ type LedgerMsg struct {
 // transcript format; the join below reads none.
 type Harvest func() []LedgerMsg
 
+// Result is what one resolve did, for a caller that is not a process. The narration
+// on `out` is the operator's account of the run; this is the same run's outcome in
+// fields, so a caller with no terminal to print to does not have to read its own
+// prose back.
+type Result struct {
+	// Changed counts the rows the resolve stamped. A dry run counts what it would
+	// have stamped and writes none.
+	Changed int
+	// Locked reports that another resolve held the lock, so this one did nothing.
+	// The turn-end hook runs the same engine, so a hand-started run meets it.
+	Locked bool
+	// Err is a write that failed. The resolve fails open: the shard is whatever it
+	// was, and the backup beside it is intact.
+	Err error
+}
+
 // RunBackfill resolves the local shard against every harvest, optionally rewriting it,
 // and returns a process exit code (always 0 — the resolver fails open). now supplies
 // the wall clock (nil uses time.Now).
 func RunBackfill(cfg gate.Config, harvests []Harvest, opts BackfillOptions, out io.Writer, now func() float64) int {
+	Backfill(cfg, harvests, opts, out, now)
+	return 0
+}
+
+// Backfill is the same run, reported in fields. RunBackfill wraps it, so the two
+// can never resolve differently.
+func Backfill(cfg gate.Config, harvests []Harvest, opts BackfillOptions, out io.Writer, now func() float64) Result {
 	r := &resolver{cfg: cfg, harvests: harvests, quiet: opts.Quiet, out: out, now: now}
 	if r.now == nil {
 		r.now = func() float64 { return float64(time.Now().Unix()) }
@@ -73,7 +96,7 @@ func RunBackfill(cfg gate.Config, harvests []Harvest, opts BackfillOptions, out 
 	log := cfg.LogFile()
 	if _, err := os.Stat(log); err != nil {
 		r.say("no log at %s", log)
-		return 0
+		return Result{}
 	}
 	lines := splitLedgerLines(log)
 	seen := len(lines)
@@ -91,11 +114,11 @@ func RunBackfill(cfg gate.Config, harvests []Harvest, opts BackfillOptions, out 
 	}
 	if opts.IfDue && !r.pending(rows) {
 		r.say("nothing due")
-		return 0
+		return Result{}
 	}
 	if !r.acquireLock() {
 		r.say("another resolver run holds the lock")
-		return 0
+		return Result{Locked: true}
 	}
 	defer r.releaseLock()
 	return r.resolveAndWrite(rows, seen, opts.Apply)
@@ -368,7 +391,7 @@ func (r *resolver) reopen(rows []resolverRow) {
 	r.say("reopened %d stamped miss(es)", n)
 }
 
-func (r *resolver) resolveAndWrite(rows []resolverRow, seenLines int, apply bool) int {
+func (r *resolver) resolveAndWrite(rows []resolverRow, seenLines int, apply bool) Result {
 	ledgers := r.allLedgers()
 	r.say("%d rows, %d ledgers found across transcripts\n", len(rows), len(ledgers))
 
@@ -443,16 +466,17 @@ func (r *resolver) resolveAndWrite(rows []resolverRow, seenLines int, apply bool
 	}
 	r.say("\n%d rows to update", changed)
 	if changed == 0 {
-		return 0
+		return Result{}
 	}
 	if !apply {
 		r.say("dry run -- pass --apply to write")
-		return 0
+		return Result{Changed: changed}
 	}
 	if err := r.writeRows(rows, seenLines); err != nil {
 		r.say("write failed: %v", err)
+		return Result{Changed: changed, Err: err}
 	}
-	return 0
+	return Result{Changed: changed}
 }
 
 // writeRows rewrites the shard, backing it up first and carrying through any rows the

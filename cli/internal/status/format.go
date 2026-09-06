@@ -207,6 +207,17 @@ func MasterObservedPhrase(m MasterRuntime) string {
 // and HTML both name it beside the count, so it is written once.
 const BackfillCommand = "steer commit-gate backfill --apply"
 
+// OutcomesWaitingPhrase names the reviews whose result is not known yet: the gate
+// wrote that it reviewed, and nothing has yet read back what the coding agent did
+// with the finding. Terminal, HTML and the dashboard all say it, so the wording
+// and the plural live here rather than in three format strings.
+func OutcomesWaitingPhrase(n int) string {
+	if n == 1 {
+		return "1 review has no outcome yet"
+	}
+	return fmt.Sprintf("%d reviews have no outcome yet", n)
+}
+
 // RetireCommand is the repair the removal prose describes: it takes a record out of
 // the inventory. Terminal and HTML both print it under an unmeasurable or harmful
 // verdict, so neither can name a different command from the other.

@@ -15,6 +15,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/gate/cc"
 	gatecodex "github.com/steer-sh/steer-cli/internal/gate/codex"
 	"github.com/steer-sh/steer-cli/internal/gate/gitgate"
+	"github.com/steer-sh/steer-cli/internal/gate/harvests"
 	gatepi "github.com/steer-sh/steer-cli/internal/gate/pi"
 	"github.com/steer-sh/steer-cli/internal/gate/resolve"
 	"github.com/steer-sh/steer-cli/internal/gate/reviewers"
@@ -24,7 +25,6 @@ import (
 	"github.com/steer-sh/steer-cli/internal/status"
 	"github.com/steer-sh/steer-cli/internal/steerbin"
 	"github.com/steer-sh/steer-cli/internal/styles"
-	transcriptpi "github.com/steer-sh/steer-cli/internal/transcript/pi"
 	"github.com/steer-sh/steer-cli/internal/utils"
 )
 
@@ -611,21 +611,9 @@ idempotent and, without --apply, writes nothing.
 	},
 }
 
-// ledgerHarvests is one harvest per harness whose transcripts are readable here. A
-// harness with no tree contributes nothing rather than failing the run.
-func ledgerHarvests() []resolve.Harvest {
-	var harvests []resolve.Harvest
-	if home, err := os.UserHomeDir(); err == nil {
-		harvests = append(harvests, cc.Harvest(filepath.Join(home, ".claude", "projects")))
-	}
-	if root, err := gatecodex.SessionsRoot(); err == nil {
-		harvests = append(harvests, gatecodex.Harvest(root))
-	}
-	if root, err := transcriptpi.New().Root(); err == nil {
-		harvests = append(harvests, gatepi.Harvest(root))
-	}
-	return harvests
-}
+// ledgerHarvests is the set both resolve callers read. It lives in its own package
+// so the dashboard's Channels panel starts the same resolve this command does.
+func ledgerHarvests() []resolve.Harvest { return harvests.All() }
 
 var commitGateStatusCmd = &cobra.Command{
 	Use:   "status",

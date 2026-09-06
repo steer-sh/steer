@@ -24,7 +24,8 @@ func (m *Model) viewHealth() string {
 	}
 
 	if n := m.snap.Posture.Unresolved; n > 0 {
-		out += "   " + warn(fmt.Sprintf("%d review(s) still owe a decision — the scorer withholds on them\n", n))
+		out += "   " + warn(status.OutcomesWaitingPhrase(n)+
+			" — results are withheld until they do (Channels: enter reads them)\n")
 	}
 
 	out += section("Guard master runtime")

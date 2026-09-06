@@ -197,7 +197,7 @@ footer { color: var(--faint); font-size: 11.5px; border-top: 1px solid var(--lin
   {{- end }}
   {{- end }}
   {{- if .Status.Posture.Unresolved }}
-  <div class="chip"><b>unresolved</b><span class="v">{{ .Status.Posture.Unresolved }} review(s) owe a decision</span></div>
+  <div class="chip"><b>unresolved</b><span class="v">{{ waiting .Status.Posture.Unresolved }}</span></div>
   {{- end }}
   <div class="chip"><b>evidence</b><span class="v">{{ present .Status.Corpora }} of {{ len .Status.Corpora }} present</span></div>
 </div>

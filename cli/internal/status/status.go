@@ -578,7 +578,8 @@ func collectPosture(cfg gate.Config, ev mine.EvidenceSet) Posture {
 			Command:    d.Command,
 		}, denialsCorpus, observed.denials))
 		// The resolver rides a turn-end event, which takes no matcher: registered is
-		// effective.
+		// effective. The rows follow the commit gate's harness order, because a
+		// reader pairs a resolver row with the gate row it arms with.
 		b := claude.BackfillHookArming(scope)
 		p.Resolver = append(p.Resolver, withEvidence(ScopeArming{
 			Harness:    claudeID,
@@ -588,6 +589,16 @@ func collectPosture(cfg gate.Config, ev mine.EvidenceSet) Posture {
 			Timeout:    b.Timeout,
 			Trust:      TrustNotApplicable,
 			Command:    b.Command,
+		}, "", 0))
+		cr := codex.ResolverArmingRow(scope, cwd)
+		p.Resolver = append(p.Resolver, withEvidence(ScopeArming{
+			Harness:    codexID,
+			Scope:      scope,
+			Registered: cr.Registered,
+			Effective:  cr.Registered,
+			Timeout:    cr.Timeout,
+			Trust:      trustState(harness.Codex, cg.TrustStateKnown, cg.TrustRecordPresent),
+			Command:    cr.Command,
 		}, "", 0))
 		pr := pi.ResolverArming(scope, cwd)
 		p.Resolver = append(p.Resolver, withEvidence(ScopeArming{
@@ -600,16 +611,6 @@ func collectPosture(cfg gate.Config, ev mine.EvidenceSet) Posture {
 			Command:    pr.Command,
 		}, "", 0))
 		p.Masters = append(p.Masters, masterRuntimes(scope)...)
-		cr := codex.ResolverArmingRow(scope, cwd)
-		p.Resolver = append(p.Resolver, withEvidence(ScopeArming{
-			Harness:    codexID,
-			Scope:      scope,
-			Registered: cr.Registered,
-			Effective:  cr.Registered,
-			Timeout:    cr.Timeout,
-			Trust:      trustState(harness.Codex, cg.TrustStateKnown, cg.TrustRecordPresent),
-			Command:    cr.Command,
-		}, "", 0))
 	}
 	return p
 }

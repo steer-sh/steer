@@ -163,7 +163,7 @@ func TestRenderHTMLCarriesEverySection(t *testing.T) {
 		"repository check \u2192 check.sh",
 		"the mix changed (host): host set changed",
 		// Resolver posture: the arming row and the unresolved backlog.
-		"resolver claude-code global", "4 review(s) owe a decision",
+		"resolver claude-code global", "4 reviews have no outcome yet",
 		// Posture is harness-qualified, and Codex's trust is a record, not a proof.
 		"gate codex global", "trust record present, unverified",
 		// The session corpus's own accounting and the guard's audit join.
@@ -171,7 +171,7 @@ func TestRenderHTMLCarriesEverySection(t *testing.T) {
 		"the no-bare-python guard blocked nothing since install",
 		// Unresolved rows are work, so they sit under the action that clears them,
 		// with the command — not in a posture chip alone.
-		"4 review(s) still owe a decision from the coding agent",
+		"4 reviews have no outcome yet — read it back from the coding agent",
 		"steer commit-gate backfill --apply",
 	} {
 		if !strings.Contains(out, want) {
@@ -309,7 +309,7 @@ func TestUnresolvedRowsAreNotQuiet(t *testing.T) {
 	}
 	for _, want := range []string{
 		ActionHeading[ActionAdjudicate],
-		"3 review(s) still owe a decision from the coding agent",
+		"3 reviews have no outcome yet",
 		BackfillCommand,
 	} {
 		if !strings.Contains(out, want) {

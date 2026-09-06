@@ -484,8 +484,8 @@ func TestResolverConcurrentAppendKept(t *testing.T) {
 
 	r := &resolver{cfg: cfg, quiet: true, now: func() float64 { return 2_000_000_000 }, harvests: []Harvest{func() []LedgerMsg { return nil }}}
 	rows := []resolverRow{copyRow(snapshot[0]), copyRow(snapshot[1])}
-	if code := r.resolveAndWrite(rows, seen, true); code != 0 {
-		t.Fatalf("resolver exit = %d, want 0", code)
+	if res := r.resolveAndWrite(rows, seen, true); res.Err != nil {
+		t.Fatalf("resolver write failed: %v", res.Err)
 	}
 	after := readShard(t, cfg.LogFile())
 	if after[1]["backfilled"] != true {

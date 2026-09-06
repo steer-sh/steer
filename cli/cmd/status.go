@@ -249,8 +249,8 @@ func renderAttention(s *status.SystemStatus) {
 	}
 	if s.Posture.Unresolved > 0 {
 		buckets[status.ActionAdjudicate] = append(buckets[status.ActionAdjudicate],
-			fmt.Sprintf("    %d review(s) still owe a decision from the coding agent\n      %s",
-				s.Posture.Unresolved,
+			fmt.Sprintf("    %s — read it back from the coding agent's transcript\n      %s",
+				status.OutcomesWaitingPhrase(s.Posture.Unresolved),
 				styles.MutedText.Render(status.BackfillCommand)))
 	}
 	for _, c := range a.Candidates {

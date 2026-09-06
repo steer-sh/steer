@@ -68,14 +68,12 @@ func TestPanelsCarryTheMeasurementConditions(t *testing.T) {
 
 	m.active = panelChannels
 	channels := m.View()
-	for _, want := range []string{"resolver", "4 review(s) still owe a decision"} {
-		if !strings.Contains(channels, want) {
-			t.Errorf("the channels panel is missing %q", want)
-		}
+	if !strings.Contains(channels, "read 4 review outcomes from your transcripts") {
+		t.Error("the channels panel does not offer to read the waiting outcomes")
 	}
 
 	m.active = panelHealth
-	if !strings.Contains(m.View(), "the scorer withholds on them") {
+	if !strings.Contains(m.View(), "4 reviews have no outcome yet") {
 		t.Error("the health panel does not name the unresolved backlog")
 	}
 }

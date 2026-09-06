@@ -61,6 +61,11 @@ type Model struct {
 	form       *formState
 	matchCount string
 
+	// reading is true while the Channels panel's outcome read is in flight. It
+	// walks every transcript tree on the machine, so it runs as a command and this
+	// flag keeps a second enter from starting a concurrent one.
+	reading bool
+
 	// reviewer is the pending settings edit, nil unless the Reviewer panel is editing.
 	reviewer *reviewerEdit
 	// impactOf grades a pending reviewer identity against the measurements still
@@ -155,6 +160,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		return m, nil
+	case outcomesReadMsg:
+		m.outcomesRead(msg)
 		return m, nil
 	case tea.KeyMsg:
 		if m.editing {
@@ -285,6 +293,11 @@ func (m *Model) legend() string {
 	common := "tab/←→ panel · ↑↓ move · r refresh · q quit"
 	switch m.active {
 	case panelChannels:
+		// Enter does two things here, and which one depends on the selected row.
+		// The hint names the action row only while it is on screen.
+		if rows := m.channelRows(); len(rows) > 0 && rows[len(rows)-1].kind == "read-outcomes" {
+			return "enter toggle arming / read outcomes · " + common
+		}
 		return "enter toggle arming · " + common
 	case panelCandidates:
 		if m.editing {

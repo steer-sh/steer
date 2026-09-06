@@ -116,6 +116,7 @@ func (s *SystemStatus) RenderHTML(w io.Writer, x Export) error {
 		"stamp":     stamp,
 		"slug":      slug,
 		"arming":    armingWord,
+		"waiting":   OutcomesWaitingPhrase,
 		"present":   presentCount,
 		"effect":    EffectPhrase,
 		"scope":     ScopePhrase,
@@ -229,7 +230,7 @@ func attentionGroups(items []cadence.Intervention, rate ChainRate, unresolved in
 	if unresolved > 0 {
 		notes[ActionAdjudicate] = append(notes[ActionAdjudicate], note{
 			Label: "unresolved",
-			Text:  fmt.Sprintf("%d review(s) still owe a decision from the coding agent", unresolved),
+			Text:  OutcomesWaitingPhrase(unresolved) + " — read it back from the coding agent's transcript",
 			Fix:   BackfillCommand,
 		})
 	}
