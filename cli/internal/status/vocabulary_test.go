@@ -11,23 +11,12 @@ import (
 	"testing"
 )
 
-// The vocabulary boundary, enforced.
+// These tests refuse a machine word — intervention, class, chain, verdict,
+// corpus, ledger — in anything a person reads. The stored records, the JSON
+// contract and the Go symbols keep those words; the display surface does not.
 //
-// Steer keeps two vocabularies on purpose. The stored records, the JSON contract
-// and the Go symbols use the measurement system's words — intervention, class,
-// chain, verdict, corpus — because those are read by machines and by the skills,
-// and moving one costs a contract version plus a legacy-read branch forever. What
-// a person reads uses ordinary words, and those are free to change precisely
-// because nothing depends on them.
-//
-// That separation only pays while the two stay apart, and it degrades silently: a
-// hand pass over the display surface missed twelve leaks the first time. This
-// test is the oracle that keeps them apart.
-//
-// Its limit: it reads string literals, so it catches a machine word an author
-// TYPED and never one that arrives as data. `unitName` in action.go is the known
-// case — the stored unit reaches the sentence as a value — and it is translated
-// at the point it is rendered instead.
+// The check reads string literals, so it sees a word an author TYPED and never
+// one that arrives as data. UnitName translates the stored unit for that reason.
 
 // displayFiles are the files whose string literals reach a person. Each is
 // display-only, or renders through fmt and the styles package, so a literal
