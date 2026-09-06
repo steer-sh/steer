@@ -4,7 +4,6 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -52,7 +51,6 @@ var machineWords = regexp.MustCompile(`(?i)\b(class|classes|intervention|interve
 var allowedPhrases = map[string]bool{
 	// Executable text. A reader who types one of these needs it spelled the way
 	// the CLI accepts, so no display rename may move it.
-	"steer commit-gate mine findings":                                   true,
 	"%s is not a built-in guard; remove it with: steer hooks remove %s": true,
 }
 
@@ -97,33 +95,6 @@ func TestNoMachineWordReachesADisplayString(t *testing.T) {
 			}
 			return true
 		})
-	}
-}
-
-// styleBlock and templateAction are the parts of the page a reader never sees.
-var (
-	styleBlock     = regexp.MustCompile(`(?s)<style>.*?</style>`)
-	templateAction = regexp.MustCompile(`(?s)\{\{.*?\}\}`)
-	textNode       = regexp.MustCompile(`>([^<>]+)<`)
-)
-
-// The HTML page is checked on its text nodes only: an attribute value and a CSS
-// class name are markup, and the verdict token legitimately survives in the
-// `v-<token>` pill class that colors the badge.
-func TestNoMachineWordReachesThePage(t *testing.T) {
-	raw, err := os.ReadFile("templates/dashboard.html.tmpl")
-	if err != nil {
-		t.Fatal(err)
-	}
-	page := templateAction.ReplaceAllString(styleBlock.ReplaceAllString(string(raw), ""), "")
-	for _, m := range textNode.FindAllStringSubmatch(page, -1) {
-		text := strings.TrimSpace(m[1])
-		if text == "" || allowedPhrases[text] {
-			continue
-		}
-		if w := machineWords.FindString(text); w != "" {
-			t.Errorf("the page shows the machine word %q: %q", w, text)
-		}
 	}
 }
 

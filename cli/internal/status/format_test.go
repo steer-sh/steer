@@ -9,6 +9,9 @@ import (
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
 )
 
+func fptr(f float64) *float64 { return &f }
+func iptr(n int) *int         { return &n }
+
 func TestEffectPhraseNamesTheOpenBounds(t *testing.T) {
 	cases := []struct {
 		label string

@@ -1,9 +1,7 @@
 package cmd
 
 import (
-	"bytes"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 
@@ -17,8 +15,6 @@ import (
 
 var (
 	statusJSON        bool
-	statusHTML        bool
-	statusOut         string
 	statusDays        int
 	statusProjectOnly bool
 )
@@ -35,13 +31,9 @@ writes no state.
 --json prints the versioned SystemStatus contract on stdout, progress on stderr —
 the same discipline as 'steer report'. That contract keeps the machine's own
 words. An agent runs 'steer status --json' before installing a hook, to read the
-full inventory and skip a problem already decided.
-
---html renders the same snapshot as one self-contained HTML file: no server, no
-runtime dependency. It writes to --out, or to stdout when --out is absent.`,
+full inventory and skip a problem already decided.`,
 	Example: `  steer status
   steer status --json
-  steer status --html --out steer-status.html
   steer status --days 7 --project-only`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// status never writes: it reads the stored snapshots rather than rebuilding
@@ -63,12 +55,6 @@ runtime dependency. It writes to --out, or to stdout when --out is absent.`,
 		if err != nil {
 			return err
 		}
-		if statusJSON && statusHTML {
-			return fmt.Errorf("--json and --html are separate render targets; pass one")
-		}
-		if statusHTML {
-			return writeStatusHTML(s, reviewerProbe(cfg, resolveErr))
-		}
 		if statusJSON {
 			data, err := s.MarshalIndent()
 			if err != nil {
@@ -80,33 +66,6 @@ runtime dependency. It writes to --out, or to stdout when --out is absent.`,
 		renderStatus(s, reviewerProbe(cfg, resolveErr))
 		return nil
 	},
-}
-
-// writeStatusHTML renders the snapshot to --out, or to stdout when --out is
-// absent. It buffers first, so a render error leaves no half-written file.
-//
-// The readiness answer is computed here rather than read from the snapshot: the
-// reviewer probe reads this process's PATH, so the page states what this machine
-// saw at export time and says so on the page.
-func writeStatusHTML(s *status.SystemStatus, probe reviewers.Probe) error {
-	answer := status.ReadinessOf(s, probe)
-	host, err := os.Hostname()
-	if err != nil {
-		host = ""
-	}
-	var buf bytes.Buffer
-	if err := s.RenderHTML(&buf, status.Export{Readiness: &answer, Host: host}); err != nil {
-		return err
-	}
-	if statusOut == "" {
-		_, err := os.Stdout.Write(buf.Bytes())
-		return err
-	}
-	if err := os.WriteFile(statusOut, buf.Bytes(), 0o644); err != nil {
-		return fmt.Errorf("failed to write %s: %w", statusOut, err)
-	}
-	fmt.Fprintf(os.Stderr, "wrote %s\n", statusOut)
-	return nil
 }
 
 // renderStatus prints the loop-first human view. It leads with the one question a
@@ -388,8 +347,6 @@ func renderSummary(s *status.SystemStatus) {
 func init() {
 	rootCmd.AddCommand(statusCmd)
 	statusCmd.Flags().BoolVar(&statusJSON, "json", false, "Emit the versioned SystemStatus JSON on stdout")
-	statusCmd.Flags().BoolVar(&statusHTML, "html", false, "Render the snapshot as one self-contained HTML file")
-	statusCmd.Flags().StringVar(&statusOut, "out", "", "Destination file for --html (default: stdout)")
 	statusCmd.Flags().IntVar(&statusDays, "days", 30, "Transcript look-back window in days for the attention refresh")
 	statusCmd.Flags().BoolVar(&statusProjectOnly, "project-only", false, "Restrict the transcript scan to the current working directory")
 }
