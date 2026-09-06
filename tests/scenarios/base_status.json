@@ -1,0 +1,393 @@
+{
+  "status_version": 9,
+  "generated_at": "2026-09-01T09:00:00Z",
+  "posture": {
+    "instrument": "gemini-3.7-flash-high/3/95653688/go-findings-v3-shell",
+    "reviewer": "gemini-3.7-flash-high",
+    "ledger": "/home/example/.steer/state/commit-review/adjudication.jeremys-mac-mini-2.jsonl",
+    "commit_gate": [
+      {
+        "harness": "claude-code",
+        "scope": "project",
+        "registered": false,
+        "effective": false,
+        "trust": "not-applicable",
+        "resolvable": "not-registered",
+        "observed": 1788663878,
+        "observed_corpus": "commit-review"
+      },
+      {
+        "harness": "codex",
+        "scope": "project",
+        "registered": false,
+        "effective": false,
+        "trust": "unknown",
+        "resolvable": "not-registered",
+        "observed": 1788557157,
+        "observed_corpus": "commit-review"
+      },
+      {
+        "harness": "pi",
+        "scope": "project",
+        "registered": false,
+        "effective": false,
+        "trust": "unknown",
+        "resolvable": "not-registered",
+        "observed": 1788538643,
+        "observed_corpus": "commit-review"
+      },
+      {
+        "harness": "claude-code",
+        "scope": "global",
+        "registered": true,
+        "effective": true,
+        "timeout": 360,
+        "trust": "not-applicable",
+        "command": "/home/example/.steer/bin/steer commit-gate review",
+        "resolvable": "resolvable",
+        "observed": 1788663878,
+        "observed_corpus": "commit-review"
+      },
+      {
+        "harness": "codex",
+        "scope": "global",
+        "registered": true,
+        "effective": true,
+        "timeout": 360,
+        "trust": "record-present-unverified",
+        "command": "/home/example/.steer/bin/steer commit-gate review-codex",
+        "resolvable": "resolvable",
+        "observed": 1788557157,
+        "observed_corpus": "commit-review"
+      },
+      {
+        "harness": "pi",
+        "scope": "global",
+        "registered": true,
+        "effective": true,
+        "timeout": 360,
+        "trust": "unknown",
+        "command": "/home/example/.steer/bin/steer commit-gate review-pi",
+        "resolvable": "resolvable",
+        "observed": 1788538643,
+        "observed_corpus": "commit-review"
+      }
+    ],
+    "denials": [
+      {
+        "harness": "claude-code",
+        "scope": "project",
+        "registered": false,
+        "effective": false,
+        "trust": "not-applicable",
+        "resolvable": "not-registered",
+        "observed": 1788539874,
+        "observed_corpus": "steer-denials"
+      },
+      {
+        "harness": "claude-code",
+        "scope": "global",
+        "registered": true,
+        "effective": true,
+        "timeout": 10,
+        "trust": "not-applicable",
+        "command": "/home/example/.steer/bin/steer denials record",
+        "resolvable": "resolvable",
+        "observed": 1788539874,
+        "observed_corpus": "steer-denials"
+      }
+    ],
+    "resolver": [
+      {
+        "harness": "claude-code",
+        "scope": "project",
+        "registered": false,
+        "effective": false,
+        "trust": "not-applicable",
+        "resolvable": "not-registered"
+      },
+      {
+        "harness": "pi",
+        "scope": "project",
+        "registered": false,
+        "effective": false,
+        "trust": "unknown",
+        "resolvable": "not-registered"
+      },
+      {
+        "harness": "codex",
+        "scope": "project",
+        "registered": false,
+        "effective": false,
+        "trust": "unknown",
+        "resolvable": "not-registered"
+      },
+      {
+        "harness": "claude-code",
+        "scope": "global",
+        "registered": true,
+        "effective": true,
+        "timeout": 30,
+        "trust": "not-applicable",
+        "command": "/home/example/.steer/bin/steer commit-gate backfill --if-due --apply --quiet",
+        "resolvable": "resolvable"
+      },
+      {
+        "harness": "pi",
+        "scope": "global",
+        "registered": true,
+        "effective": true,
+        "timeout": 30,
+        "trust": "unknown",
+        "command": "/home/example/.steer/bin/steer commit-gate backfill --if-due --apply --quiet",
+        "resolvable": "resolvable"
+      },
+      {
+        "harness": "codex",
+        "scope": "global",
+        "registered": true,
+        "effective": true,
+        "timeout": 30,
+        "trust": "record-present-unverified",
+        "command": "/home/example/.steer/bin/steer commit-gate backfill --if-due --apply --quiet",
+        "resolvable": "resolvable"
+      }
+    ],
+    "unresolved_rows": 0,
+    "masters": [
+      {
+        "harness": "claude-code",
+        "scope": "project",
+        "expected": "9cd1fde8",
+        "state": "not-registered"
+      },
+      {
+        "harness": "codex",
+        "scope": "project",
+        "expected": "9cd1fde8",
+        "state": "not-registered"
+      },
+      {
+        "harness": "pi",
+        "scope": "project",
+        "expected": "9cd1fde8",
+        "state": "not-registered"
+      },
+      {
+        "harness": "claude-code",
+        "scope": "global",
+        "path": "/home/example/.steer/hooks/steer-hooks.py",
+        "runtime": "9cd1fde8",
+        "version": "0.1.0",
+        "expected": "9cd1fde8",
+        "state": "current",
+        "observed": 1788540158
+      },
+      {
+        "harness": "codex",
+        "scope": "global",
+        "path": "/home/example/.steer/hooks/steer-hooks.py",
+        "runtime": "9cd1fde8",
+        "version": "0.1.0",
+        "expected": "9cd1fde8",
+        "state": "current",
+        "observed": 1788540158
+      },
+      {
+        "harness": "pi",
+        "scope": "global",
+        "path": "/home/example/.steer/hooks/steer-hooks.py",
+        "runtime": "9cd1fde8",
+        "version": "0.1.0",
+        "expected": "9cd1fde8",
+        "state": "current",
+        "observed": 1788540158
+      }
+    ]
+  },
+  "interventions": [],
+  "summary": {
+    "total": 0,
+    "counts": {}
+  },
+  "chains": [
+    {
+      "host": "jeremys-mac-mini-2",
+      "start_ts": 1788551824,
+      "rounds": 1,
+      "files": 8,
+      "findings": 1,
+      "accepted": 0,
+      "rejected": 1,
+      "sessions": 1
+    },
+    {
+      "host": "jeremys-mac-mini-2",
+      "start_ts": 1788552343,
+      "rounds": 2,
+      "files": 14,
+      "findings": 1,
+      "accepted": 1,
+      "rejected": 0,
+      "sessions": 1,
+      "terminal": "clean"
+    },
+    {
+      "host": "jeremys-mac-mini-2",
+      "start_ts": 1788556838,
+      "rounds": 2,
+      "files": 25,
+      "findings": 6,
+      "accepted": 5,
+      "rejected": 1,
+      "sessions": 1,
+      "terminal": "clean"
+    }
+  ],
+  "chain_rate": {
+    "per_day": 6.122267182434384,
+    "known": true
+  },
+  "attention": {
+    "interventions": [],
+    "candidates": [],
+    "unscored": []
+  },
+  "telemetry": {
+    "review_chains": 211,
+    "denials_rows": 25,
+    "audit_firings": 19,
+    "session_snapshots": 520,
+    "harnesses": [
+      {
+        "harness": "claude-code",
+        "sessions": 307,
+        "firings": 5,
+        "chains": 84
+      },
+      {
+        "harness": "codex",
+        "sessions": 158,
+        "firings": 7,
+        "chains": 7
+      },
+      {
+        "harness": "pi",
+        "sessions": 55,
+        "firings": 3,
+        "chains": 1
+      }
+    ]
+  },
+  "corpora": [
+    {
+      "corpus": "review-findings",
+      "present": true,
+      "size": 211,
+      "path": "/home/example/.steer/state/commit-review"
+    },
+    {
+      "corpus": "transcript-friction",
+      "present": true,
+      "size": 520,
+      "path": "/home/example/.steer/state/transcript-sessions"
+    },
+    {
+      "corpus": "auto-denials",
+      "present": true,
+      "size": 25,
+      "path": "/home/example/.steer/state/steer-denials"
+    }
+  ],
+  "hooks": [],
+  "presets": [
+    {
+      "name": "api-key-detection",
+      "bundle": "security",
+      "description": "Detect and block hardcoded API keys and secrets in code",
+      "enabled": false,
+      "drifted": false
+    },
+    {
+      "name": "dangerous-python-imports",
+      "bundle": "security",
+      "description": "Prevent use of dangerous Python serialization libraries",
+      "enabled": false,
+      "drifted": false
+    },
+    {
+      "name": "data-exfiltration-prevention",
+      "bundle": "security",
+      "description": "Prevent data exfiltration via piping to network tools",
+      "enabled": false,
+      "drifted": false
+    },
+    {
+      "name": "env-dump-prevention",
+      "bundle": "security",
+      "description": "Prevent environment variable enumeration and exposure",
+      "enabled": false,
+      "drifted": false
+    },
+    {
+      "name": "environment-variable-enumeration-prevention",
+      "bundle": "security",
+      "description": "Prevent enumeration of all environment variables for security",
+      "enabled": false,
+      "drifted": false
+    },
+    {
+      "name": "eval-usage-security",
+      "bundle": "security",
+      "description": "Block dangerous eval() usage for security",
+      "enabled": false,
+      "drifted": false
+    },
+    {
+      "name": "hardcoded-secret-reference-prevention",
+      "bundle": "security",
+      "description": "Prevent hardcoded references to sensitive files and crypto wallets",
+      "enabled": false,
+      "drifted": false
+    },
+    {
+      "name": "package-json-git-deps",
+      "bundle": "security",
+      "description": "Prevent git dependencies in production dependencies section",
+      "enabled": false,
+      "drifted": false
+    },
+    {
+      "name": "postinstall-script-prevention",
+      "bundle": "security",
+      "description": "Block postinstall scripts in package.json to prevent supply chain attacks",
+      "enabled": false,
+      "drifted": false
+    },
+    {
+      "name": "python-command-injection",
+      "bundle": "security",
+      "description": "Prevent command injection vulnerabilities in Python subprocess calls",
+      "enabled": false,
+      "drifted": false
+    },
+    {
+      "name": "recursive-search-prevention",
+      "bundle": "security",
+      "description": "Prevent dangerous recursive filesystem operations from home directory",
+      "enabled": false,
+      "drifted": false
+    },
+    {
+      "name": "sql-injection-prevention",
+      "bundle": "security",
+      "description": "Prevent SQL injection by blocking unsafe string formatting in SQL queries",
+      "enabled": false,
+      "drifted": false
+    }
+  ],
+  "team": {
+    "present": false,
+    "hooks_locked": 0
+  }
+}

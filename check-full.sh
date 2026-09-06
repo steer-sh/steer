@@ -13,3 +13,8 @@ else
   echo "tests/.venv missing — see CLAUDE.md for how to create it" >&2
   exit 1
 fi
+
+# Report comprehension: regenerates the /steer-report prose over six saved
+# scenarios. It has no mechanical oracle — a person reads the output — so it
+# writes the reports and never fails the run.
+"$root/tests/report_scenarios.py" --model "${MODEL:-claude-haiku-4-5-20251001}" || true

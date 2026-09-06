@@ -67,31 +67,63 @@ steer report refresh --days 30
 
 Then Read the queue **once**: `~/.steer/state/steer-report/queue.json` (`version: 4`). It holds:
 
-- `interventions[]` — full contract records the tier already scored and flagged as **needing attention** (verdict `harmful`, `ineffective`, `not-triggered`, `unattributed`, `class-grew`, `legacy-unscoped`, `evidence-incomplete` or `confounded`). These carry a `match`; they are the audit's action list, pre-filtered. Each carries `problem` and `intervention` — the record's own explanation of what goes wrong and what it does about it, authored when the class was found. Lead your report with those rather than with the class name or the regex, and correct one that no longer describes the evidence with `steer intervention describe ID`, which changes no window. Each also carries the measurement conditions the verdict rests on: `corpus` and `unit` (`review-findings` counts by `chain`, `transcript-friction` by `session` — never compare the two rates), `signal_kind` on a session-unit record, `scope` (the frozen eligibility rule, `null` on a legacy record), `before_coverage` / `after_coverage` (`total`, `eligible`, `ineligible`, `unknown`, `unknown_scope`, `unknown_evidence`, `pending`, `partial_exposure`), the `effect` range, `required_after`, `confounds` / `composition`, and `attribution` — the guard's audit join over the after-window (`applicable`, `log_present`, `hook_id`, `firings`, `sessions`).
+- `interventions[]` — full contract records the tier already scored and flagged as **needing attention** (verdict `harmful`, `ineffective`, `not-triggered`, `unattributed`, `class-grew`, `legacy-unscoped`, `evidence-incomplete` or `confounded`). These carry a `match`; they are the audit's action list, pre-filtered. Each carries `problem` and `intervention` — the record's own explanation of what goes wrong and what it does about it, authored when the class was found. Lead your report with those rather than with the class name or the regex, and correct one that no longer describes the evidence with `steer fix describe ID`, which changes no window. Each also carries the measurement conditions the verdict rests on: `corpus` and `unit` (`review-findings` counts by `chain`, `transcript-friction` by `session` — never compare the two rates), `signal_kind` on a session-unit record, `scope` (the frozen eligibility rule, `null` on a legacy record), `before_coverage` / `after_coverage` (`total`, `eligible`, `ineligible`, `unknown`, `unknown_scope`, `unknown_evidence`, `pending`, `partial_exposure`), the `effect` range, `required_after`, `confounds` / `composition`, and `attribution` — the guard's audit join over the after-window (`applicable`, `log_present`, `hook_id`, `firings`, `sessions`).
 - `unscored[]` — ids of records no engine reads. Report their existence; do not read a verdict into them.
 - `candidates[]` — pointers to new clusters. Transcript rows carry `pattern`/`count`/`sessions`; the review row carries `undecided_chains` and a `dump` command. These carry **no** `match` — authoring the regex is your job, below.
 - `corpora[]` — one row per corpus (`review-findings`, `transcript-friction`, `auto-denials`) with `present` and `size`. Relay this sweep to the user in one sentence.
 
-The queue tells you what is pending. The full dumps below are the raw material you cluster over. Score the commit-review interventions for the complete audit — the queue lists only the ones needing action, not the `effective` or abstaining ones worth showing too. If this machine has no commit-review ledger, `mine score` reports an empty corpus — say "no interventions to audit on this machine" in one line and go to Step 2.
+The queue tells you what is pending. The full dumps below are the raw material you cluster over. Score the review-history fixes for the complete audit — the queue lists only the ones needing action, not the `effective` or abstaining ones worth showing too. If this machine has no commit-review ledger, `mine score` reports an empty corpus — say "no fixes to audit on this machine" in one line and go to Step 2.
 
 ```bash
-steer intervention score
+steer fix score
 ```
 
-`steer intervention` is the intervention command set — `match`, `register`, `reject`,
-`scope`, `score`, `list`, `retire`. `steer commit-gate mine` is the same set under its
-original name and still works; `findings`, which dumps the review corpus rather than
-managing an intervention, lives only there.
+`steer fix` is the fix command set — `match`, `register`, `reject`, `scope`, `score`,
+`list`, `describe`, `retire`. `steer intervention` is the same set under its former
+name and still works, as does `steer commit-gate mine`; `findings`, which dumps the
+review corpus rather than managing a fix, lives only under the latter.
 
 Each record reports before/after incidence over its own unit — the fraction of reviewed commits on which the class appeared for a `review-findings` record, or the fraction of root sessions carrying it for a `transcript-friction` one — split at the install timestamp, and an `effect` range: the after-rate divided by the before-rate, at 90% confidence. The verdict reads that range, never the point rate. `required_after` is the clean after-window the class would need before any conclusion is available; a record below it is still collecting. The `p` field is a Fisher cross-check that no verdict reads.
+
+### Read the token, speak the label
+
+The verdict tokens below are the machine's words and they are what you read from the
+queue and the snapshot. They are NOT what you say. Every sentence you write to the user
+uses the label, and the same vocabulary the CLI prints: a **fix** rather than an
+intervention, a **recurring problem** rather than a class, a **result** rather than a
+verdict, **review history** or **session history** rather than a corpus, a **review
+sequence** rather than a chain, **stop tracking** rather than retire.
+
+| Token | Say | What it means for this problem |
+|---|---|---|
+| `effective` | Fewer with fix | The problem is measurably less frequent since the fix went in. |
+| `harmful` | More with fix | The problem became more frequent after the fix. |
+| `ineffective` | Target not met | The fix did not reduce the problem to the target; a smaller benefit may still exist. |
+| `collecting` | Too early to tell | Not enough comparable work yet. |
+| `inconclusive` | No clear result | The evidence cannot place the effect. Waiting may not resolve it. |
+| `confounded` | Not comparable | Conditions changed between the two periods, so the comparison is not fair. |
+| `unattributed` | Benefit unconfirmed | The problem fell, but the guard blocked nothing, so something else may explain it. |
+| `not-triggered` | No blocks recorded | The guard never blocked anything in the work since install. |
+| `evidence-incomplete` | Missing evidence | Name the cause; only one of the four has a command. |
+| `no-baseline` | No earlier examples | No example of the problem exists before the fix. |
+| `legacy-unscoped` | Comparison undefined | No rule was saved for which work counts. |
+| `class-grew` | Grew, fix declined | The problem grew after a suggestion was declined. |
+| `class-faded` | Fewer, fix declined | The problem fell after a suggestion was declined. Credit nothing. |
+| `class-steady` | Steady, fix declined | Within the scorer's stability bounds; not exactly unchanged. |
+| `class-inconclusive` | No clear trend, fix declined | The evidence does not show how the problem changed. |
+| `unscored` | Not assessed | No engine reads this record's evidence. |
+
+State a direction only under `effective`, `harmful`, `class-grew` and `class-faded`.
+Those are the four where the scorer crossed a bound and claimed one. Anywhere else, a
+percentage or a word like "fewer" states the claim the scorer withheld.
 
 - `effective` — the range's upper bound is at or below 0.50, so the halving is established. Leave it alone.
 - `harmful` — the lower bound is above 1.00: incidence rose. **Act on this first.**
 - `ineffective` — the lower bound is above 0.50, so a halving is ruled out. **Act on this.** Either the gate does not catch what the class actually is, or the class was never mechanizable.
 - `collecting` — the after-window has not reached `required_after` yet. Say so and move on; do not read a verdict into it.
 - `inconclusive` — enough exposure, but the range still straddles the boundary. Leave it and re-score later.
-- `legacy-unscoped` — the record carries no eligibility scope, so its two windows count different opportunity sets. **Act on this:** scope it with `steer intervention scope <id>`, which restarts its after-window.
-- `evidence-incomplete` — a window has no eligible chain left and unknown chains are why: a ledger row the resolver closed as gone, or scope metadata no row carried. **Act on this:** run `steer commit-gate backfill --apply` and re-score. A window emptied only by rows still inside the resolver grace period reads `collecting` instead, and settles on its own.
+- `legacy-unscoped` — the record carries no eligibility scope, so its two windows count different opportunity sets. **Act on this:** scope it with `steer fix scope <id>`, which restarts its after-window.
+- `evidence-incomplete` — a window kept no countable item and missing evidence is why. Four causes, and **only the first has a command**: a ledger row the resolver closed as gone (run `steer commit-gate backfill --apply` and re-score); review sequences that carried no repository or changed-path record; sessions that carried no project; a guard whose audit log is absent from this machine. Read `before_coverage` / `after_coverage` and `attribution` to tell them apart, and name the cause in the report rather than handing the user a command that changes nothing. A window emptied only by rows still inside the resolver grace period reads `collecting` instead, and settles on its own.
 - `confounded` — a hard confound stands between the windows: the after-chains carry a reviewer whose provider, model, prompt digest or engine differs from the registered baseline, or the before/after supports for host, harness, repository, project, author model or changed-path kind are disjoint. The range is not a measurement of the fix. **Act on this:** name the `confounds[]` category in the report and re-score once the windows overlap again. A `composition[]` entry is the softer case — the category sets overlap but shifted, or the reviewer changed only its effort or run count — and warns without withholding.
 - `no-baseline` — the regex matches nothing before install. The class definition is wrong.
 - `unattributed` — a session-unit class only. The incidence fell effectively, but the guard never fired in the after-window, so something else caused the fall. **Act on this:** find the real cause before crediting the guard.
@@ -309,24 +341,60 @@ Cap the whole report at the **top 5–7 candidates across both corpora**. Findin
 
 Prefer the highest tier on this ladder that can actually detect the class. Output quality converges to the oracles you can reach, and a prose rule only shifts a probability while an exit code does not.
 
-| Tier | Use when | Where it lands |
-|---|---|---|
-| `check` | A repo-local script can detect it deterministically | that repo's `check.sh`, via the `check-oracle` skill |
-| `steer` | It is detectable at edit time by regex/AST on a file or command | a PreToolUse hook, via the `steer` skill |
-| `prompt` | It is a recurring reviewer false positive | the reviewer prompt (`cli/internal/gate/prompts/review.md`) |
-| `prose` | Genuinely not mechanizable but frequent enough to earn a line | CLAUDE.md |
+The `--tier` flag takes either vocabulary — `check|steer|prose|prompt` or
+`check|guard|instruction|review` — and refuses anything else. Say the type, not the
+flag value.
 
-`prose` is the weakest tier and the easiest to reach for. Use it only after arguing why the class cannot be detected, and expect `score` to come back `ineffective` more often than not — that outcome is information, not failure.
+| `--tier` | Say | Use when | Where it lands |
+|---|---|---|---|
+| `check` | repository check | A repo-local script can detect it deterministically | that repo's `check.sh`, via the `check-oracle` skill |
+| `steer` / `guard` | pre-tool guard | It is detectable at edit time by regex/AST on a file or command | a PreToolUse hook, via the `steer` skill |
+| `prompt` / `review` | review-prompt change | It is a recurring reviewer false positive | the reviewer prompt (`cli/internal/gate/prompts/review.md`) |
+| `prose` / `instruction` | instruction rule | Genuinely not mechanizable but frequent enough to earn a line | CLAUDE.md |
+
+An instruction rule is the weakest tier and the easiest to reach for. Use it only after arguing why the class cannot be detected, and expect `score` to come back `ineffective` more often than not — that outcome is information, not failure.
 
 Transcript candidates almost always route to `steer` (edit-time regex) or `check` (a repo script). Scope each one project vs global — a rule seen across projects or from global CLAUDE.md suggests global scope. If nothing routes, say so. "No candidate qualified this pass" is a correct result.
 
 ## Step 5: Present, then act
 
-Show each candidate with:
+### How a proposal reads
 
-- The corpus tag and evidence in one plain line: `corrected 4 times across 6 sessions` (transcript) or `flagged on 5 of 40 reviewed commits` (review findings).
-- The proposed rule or class name, the proposed tier and target, and one or two verbatim example quotes.
-- For transcript candidates, the `detect | suggest` rule and the scope recommendation.
+Write each proposal as connected prose that answers five questions in order. A reader
+who has never met Steer decides from it without a glossary.
+
+1. **What problem keeps happening?** Show one representative example, in the user's own
+   words where the evidence carries them.
+2. **What supports that?** Name the source — session history or review history — the
+   amount of relevant work it was counted over, and the limit on it.
+3. **What change is proposed?** Say the behavior it affects and where it applies: which
+   projects, which coding agents, which files.
+4. **What is the tradeoff?** Name the legitimate work it could block. Every proposal has
+   one; a proposal claiming none has not been thought through.
+5. **What decision is needed?** State the action and its consequence in one question.
+
+A worked proposal:
+
+> The agent used `python` where this project requires `python3` in three recorded
+> sessions. I suggest a guard that blocks the bare command and tells the agent to use
+> `python3`. It applies in this project, to Claude Code and Codex. It could also block
+> an intentional use of `python`. Apply this guard and track whether the problem
+> becomes less frequent?
+
+Carry the same shape into the audit half. A result reads as a state, then its evidence,
+then whether anything is asked of the reader:
+
+> Too early to tell whether this guard helps. The problem appeared in three of ten
+> sessions before installation and one of four since. More comparable sessions are
+> needed. The guard stays installed; no action is needed now.
+
+Name the tier by its type, never by its flag value: a **repository check**, a **pre-tool
+guard**, an **instruction rule** or a **review-prompt change**.
+
+Say plainly which action does what. **Applying a fix** makes a change. **Stopping the
+tracking** of a fix ends its measurement and leaves the change in place — it removes
+nothing. **Removing a guard** takes the guard out and is a separate operation from
+either. A reader who conflates them removes a rule they meant to keep.
 
 Then ask which candidates to act on (multi-select). Create nothing unasked.
 
@@ -348,7 +416,7 @@ nothing else, and neither of those says what the class is.
   these two explain the class.
 - **`--note`** stays optional and is for implementation detail that fits neither.
 
-To correct a description on an existing record, use `steer intervention describe ID
+To correct a description on an existing record, use `steer fix describe ID
 --problem … --intervention …`. It writes the prose and nothing else — the id, the
 match, the scope, the baseline, the instrument and both windows are untouched, so a
 clearer sentence never restarts the measurement. Omit a flag to keep that half.
@@ -360,9 +428,9 @@ For each accepted transcript candidate, follow the steer skill's generation prot
 Then register the class over the transcript corpus, so the guard you just installed is measured rather than assumed:
 
 ```bash
-steer intervention match 'YOUR REGEX' --corpus transcript-friction --signal-kind user_corrections
+steer fix match 'YOUR REGEX' --corpus transcript-friction --signal-kind user_corrections
 
-steer intervention register \
+steer fix register \
   --class "bare python call" \
   --match 'YOUR REGEX' \
   --corpus transcript-friction --signal-kind user_corrections \
@@ -384,7 +452,7 @@ For each accepted review candidate:
 1. **Author the regex and test it before writing any fix:**
 
    ```bash
-   steer intervention match 'YOUR REGEX' --kind accepted
+   steer fix match 'YOUR REGEX' --kind accepted
    ```
 
    `match` also reports every recorded class that covers chains your candidate matches. A high share against a rejected class means you are re-proposing it: read the reason before going further.
@@ -396,7 +464,7 @@ For each accepted review candidate:
 3. **Register it**, after the fix is in:
 
    ```bash
-   steer intervention register \
+   steer fix register \
      --class "stale test-count claim" \
      --match 'YOUR REGEX' \
      --kind defect \
@@ -413,14 +481,14 @@ For each accepted review candidate:
 
    **`--tier steer` additionally requires `--hook-id`** — the steer-manifest key, which is also the `hook_name` in `hooks/steer-audit.jsonl`. That id makes the audit-log join deterministic. Reconstructing it later from `target` means searching the manifest for a path, and the manifest stops describing a hook the moment this loop renames or retires it. `register` also copies the rule text and `rule_hash` from the manifest, so the join survives a rename, plus `hook_version` and `hook_digest` — the identity of the implementation that ran. The rule hash names the policy text; a guard repaired without a rule change moves the digest alone, which is what says the treatment changed under a class still collecting. The lookup reads whichever store holds the id and refuses an id held by both; `--hook-scope project|global` names one.
 
-   The audit log is a second, independent measurement: it says whether the hook ever *fired*. A steer intervention with falling incidence and zero fires did not cause the fall, and incidence alone cannot tell you that.
+   The audit log is a second, independent measurement: it says whether the hook ever *fired*. A steer fix with falling incidence and zero fires did not cause the fall, and incidence alone cannot tell you that.
 
    `register` refuses a candidate that shares half or more of its chains with a rejected class. Two escapes, and they mean different things: `--supersedes <id>` says the refusal is overturned and marks that record `reopened`, while `--force` says the two classes only look alike. Prefer the first.
 
 For each review candidate you examine and refuse, record the refusal:
 
 ```bash
-steer intervention reject \
+steer fix reject \
   --class "within-chain repeat finding" \
   --match 'YOUR REGEX' \
   --scope-all \
@@ -432,7 +500,7 @@ steer intervention reject \
 
 Author the regex the same way as for `register`, and test it with `match` first — a rejection whose regex matches nothing cannot recognise the class when it returns, so `reject` refuses one, exactly as `register` does. A rejection also takes a frozen scope, on the same `--scope-all` / `--scope-harness` / `--scope-repo` / `--scope-path` rule as `register`: it is the window the class's growth is watched over if the refusal is ever revisited.
 
-A legacy record written before scopes existed carries no scope. `steer intervention scope <id> --scope-…` installs one: it sets the scope once, recomputes the baseline over the eligible chains, and opens a fresh after-window at the migration moment so inspecting the record's own history cannot pick a scope that flatters it. An installed scope is frozen — correct one by retiring the record and registering afresh.
+A legacy record written before scopes existed carries no scope. `steer fix scope <id> --scope-…` installs one: it sets the scope once, recomputes the baseline over the eligible chains, and opens a fresh after-window at the migration moment so inspecting the record's own history cannot pick a scope that flatters it. An installed scope is frozen — correct one by retiring the record and registering afresh.
 
 `--reason` and `--reopen` are both required, and the second is the load-bearing one. "It is not mechanizable" is a verdict on today's instrument, not a permanent property of the class. Name what would have to change: a signal that starts being persisted, a rate that triples, a tier that becomes cheap. The durable version of that reasoning belongs in a durable design note; the record here is what fires at re-proposal time.
 

@@ -516,7 +516,7 @@ Active interventions:
   decision boundary.
 - `no-baseline` — the before-window never carried the class.
 - `legacy-unscoped` — the record has no frozen scope, so its two windows describe
-  different opportunity sets. Run `steer intervention scope <id>`.
+  different opportunity sets. Run `steer fix scope <id>`.
 - `evidence-incomplete` — a window has no eligible chain left and unknown chains
   are why: a ledger the resolver closed as gone, or scope metadata no row carried.
 - `confounded` — a hard confound stands between the windows: a reviewer whose
