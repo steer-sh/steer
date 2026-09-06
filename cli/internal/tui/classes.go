@@ -6,10 +6,18 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/steer-sh/steer-cli/internal/gate/mine"
 	"github.com/steer-sh/steer-cli/internal/status"
 )
 
-// classesKey opens the retire wizard for the selected class on x.
+// retireForm is the one editor the dashboard opens over a record: the reason a
+// class stops being tracked. mine.Retire writes it and touches no hook, no
+// check.sh and no instruction file, so the rule keeps running in its tier.
+type retireForm struct {
+	id string
+}
+
+// classesKey opens the retire editor for the selected class on x.
 func (m *Model) classesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.String() != "x" {
 		return m, nil
@@ -20,21 +28,54 @@ func (m *Model) classesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	ord := classOrder(items, m.snap.Rate)
 	it := items[ord[m.cursor[panelClasses]]]
-	m.form = &formState{
-		kind:  formRetire,
-		id:    it.ID,
-		steps: []formStep{{label: "reason", value: ""}},
-	}
+	m.form = &retireForm{id: it.ID}
 	m.editing = true
-	m.matchCount = ""
-	m.loadStep()
+	m.input.Prompt = "reason: "
+	m.input.Placeholder = "why this problem no longer needs tracking"
+	m.input.SetValue("")
+	m.input.CursorEnd()
+	m.input.Focus()
 	return m, nil
+}
+
+// retireEditing drives the retire editor: enter writes, esc cancels.
+func (m *Model) retireEditing(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.editing = false
+		m.form = nil
+		m.note("cancelled")
+		return m, nil
+	case "enter":
+		var buf strings.Builder
+		id := m.form.id
+		err := mine.Retire(&buf, m.cfg.StateDir, id, strings.TrimSpace(m.input.Value()), "removed")
+		if err != nil {
+			// The write failed, so the editor stays open with the typed reason intact.
+			m.note("error: %v", err)
+			return m, nil
+		}
+		m.editing = false
+		m.form = nil
+		m.refresh()
+		m.note("%q written", id)
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	return m, cmd
+}
+
+// viewRetireForm renders the retire editor over the class the cursor selected.
+func (m *Model) viewRetireForm() string {
+	return header("Stop tracking "+m.form.id+" — enter to write, esc to cancel") +
+		fmt.Sprintf("%s %s\n", pointer(true), m.input.View())
 }
 
 // viewClasses renders the full scored inventory, verdict-first.
 func (m *Model) viewClasses() string {
 	if m.editing && m.form != nil {
-		return m.viewForm()
+		return m.viewRetireForm()
 	}
 	items := m.snap.Interventions
 	out := header("Problems — every fix and refusal, with its result")

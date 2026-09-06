@@ -44,7 +44,6 @@ func (m *Model) reviewerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.input.CursorEnd()
 	m.input.Focus()
 	m.editing = true
-	m.matchCount = ""
 	return m, nil
 }
 

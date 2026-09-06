@@ -74,3 +74,26 @@ func TestClassesDoNotHeadAnEffectiveRuleAsARepair(t *testing.T) {
 		t.Errorf("the effective class rendered under no settled heading:\n%s", out)
 	}
 }
+
+// TestRefusedRetireKeepsTheReason pins that a refused write leaves the editor open
+// with the typed reason. The panel closed the editor before it read the error, so a
+// refusal the author could correct cost them what they typed.
+func TestRefusedRetireKeepsTheReason(t *testing.T) {
+	m := New(gate.Defaults(), "global")
+	m.cfg.StateDir = t.TempDir()
+	m.form = &retireForm{id: "no-such-record"}
+	m.editing = true
+	m.input.SetValue("superseded by the check")
+
+	m.retireEditing(keyOf("enter"))
+
+	if !m.editing || m.form == nil {
+		t.Fatal("a refused write closed the retire editor")
+	}
+	if got := m.input.Value(); got != "superseded by the check" {
+		t.Errorf("the editor lost the typed reason: %q", got)
+	}
+	if !strings.Contains(m.message, "error") {
+		t.Errorf("the message does not report the refusal: %q", m.message)
+	}
+}

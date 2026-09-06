@@ -55,11 +55,10 @@ type Model struct {
 	message string
 	err     error
 
-	// candidate regex workbench + register/reject wizard
-	input      textinput.Model
-	editing    bool
-	form       *formState
-	matchCount string
+	// the retire editor: one reason field, opened from the Classes panel
+	input   textinput.Model
+	editing bool
+	form    *retireForm
 
 	// reading is true while the Channels panel's outcome read is in flight. It
 	// walks every transcript tree on the machine, so it runs as a command and this
@@ -171,7 +170,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.active == panelReviewer {
 				return m.reviewerEditing(msg)
 			}
-			return m.updateEditing(msg)
+			return m.retireEditing(msg)
 		}
 		return m.updateNav(msg)
 	}
@@ -211,8 +210,6 @@ func (m *Model) panelKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.active {
 	case panelChannels:
 		return m.channelsKey(msg)
-	case panelCandidates:
-		return m.candidatesKey(msg)
 	case panelClasses:
 		return m.classesKey(msg)
 	case panelPresets:
@@ -300,11 +297,11 @@ func (m *Model) legend() string {
 		}
 		return "enter toggle arming · " + common
 	case panelCandidates:
-		if m.editing {
-			return "enter advance/write · shift+tab back · esc cancel"
-		}
-		return "e edit regex · x reject · " + common
+		return common
 	case panelClasses:
+		if m.editing {
+			return "enter write · esc cancel"
+		}
 		return "x retire · " + common
 	case panelPresets:
 		return "enter enable/disable · s sync · b rebuild master · " + common
