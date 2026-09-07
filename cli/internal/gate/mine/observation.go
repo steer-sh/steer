@@ -350,3 +350,25 @@ func newestFiringIn(units []SessionUnit, firings []Firing, hookID string) float6
 	}
 	return newest
 }
+
+// CoverageGap reports units a window could not account for that a reader can act
+// on: the excess of `unknown_evidence` over the `pending` it contains
+// (scope.go:265), an unknown scope, and the remainder a session map writes into
+// its one bucket. It is the one predicate the scored line, the action table and
+// the cadence sweep read.
+func CoverageGap(c map[string]any) bool {
+	unknown := numInt(c["unknown"])
+	scopeGap := numInt(c["unknown_scope"])
+	evidence := numInt(c["unknown_evidence"])
+	return evidence > numInt(c["pending"]) || scopeGap > 0 ||
+		unknown-scopeGap-evidence > 0
+}
+
+// MissingCoverage adds the audit stream a guard's activity cannot be read
+// without to the two windows' own gaps.
+func MissingCoverage(obs Observation) bool {
+	if obs.Firing.Applicable && !obs.Firing.LogPresent {
+		return true
+	}
+	return CoverageGap(obs.Coverage.Before) || CoverageGap(obs.Coverage.After)
+}

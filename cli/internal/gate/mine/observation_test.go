@@ -59,7 +59,7 @@ func TestChainObservationPinsEveryField(t *testing.T) {
 	}
 	var obs Observation
 	withClock(9000, func() {
-		obs = observationOf(t, scoreOK(t, obsRecord("check", "", 2000), chains, 0))
+		obs = observationOf(t, scoreOK(t, obsRecord("check", "", 2000), chains))
 	})
 
 	check(t, "the period opens at the install", obs.Counts.SplitTS, float64(2000))
@@ -97,7 +97,7 @@ func TestAQuietWindowIsToldApartFromAnEmptyOne(t *testing.T) {
 	chains := []Chain{obsChain(t, 1000, "agy/1/aaa/v1", "widget parser drops a flag")}
 	var obs Observation
 	withClock(9000, func() {
-		obs = observationOf(t, scoreOK(t, obsRecord("check", "", 2000), chains, 0))
+		obs = observationOf(t, scoreOK(t, obsRecord("check", "", 2000), chains))
 	})
 	check(t, "no eligible unit after the install", obs.Counts.After.Eligible, 0)
 	check(t, "which the flag names", obs.Coverage.ZeroEligibleAfter, true)
@@ -130,7 +130,7 @@ func TestChainGuardActivityIsWindowLevelAndLabelled(t *testing.T) {
 	var obs Observation
 	withClock(9000, func() {
 		scored, err := ScoreRecord(obsRecord("guard", "no-widget", 2000),
-			EvidenceSet{Chains: chains, Firings: firings, AuditPresent: true}, 0)
+			EvidenceSet{Chains: chains, Firings: firings, AuditPresent: true})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -150,7 +150,7 @@ func TestAMissingAuditLogIsUnknownRatherThanZero(t *testing.T) {
 	chains := []Chain{obsChain(t, 1000, "agy/1/aaa/v1", "widget"), obsChain(t, 3000, "agy/1/aaa/v1", "widget")}
 	withClock(9000, func() {
 		scored, err := ScoreRecord(obsRecord("guard", "no-widget", 2000),
-			EvidenceSet{Chains: chains, AuditPresent: false}, 0)
+			EvidenceSet{Chains: chains, AuditPresent: false})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -171,7 +171,7 @@ func TestADeclinedRecordIsMarked(t *testing.T) {
 	delete(record, "installed_ts")
 	var obs Observation
 	withClock(9000, func() {
-		obs = observationOf(t, scoreOK(t, record, chains, 0))
+		obs = observationOf(t, scoreOK(t, record, chains))
 	})
 	check(t, "the record installed no fix", obs.Declined, true)
 	check(t, "the period opens at the refusal", obs.Counts.SplitTS, float64(2000))
@@ -193,7 +193,7 @@ func TestSessionObservationPinsEveryField(t *testing.T) {
 	var obs Observation
 	withClock(9000, func() {
 		obs = observationOf(t, scoreSession(t, r,
-			EvidenceSet{Sessions: units, Firings: firings, AuditPresent: true}, 0))
+			EvidenceSet{Sessions: units, Firings: firings, AuditPresent: true}))
 	})
 
 	check(t, "the unit is the session", obs.Counts.Unit, UnitSession)
@@ -213,4 +213,44 @@ func TestSessionObservationPinsEveryField(t *testing.T) {
 
 	check(t, "the identities are the parsers", obs.Provenance.Kind, ProvenanceParser)
 	check(t, "every after-window identity is listed", obs.Provenance.After, []string{"scan-aaa/claude-code:2"})
+}
+
+// A record with no frozen scope counted every unit as eligible, so its window was
+// never defined. The scored line has to say that rather than read as settled.
+func TestTheScoredLineNamesAMissingScopeRatherThanAQuietWindow(t *testing.T) {
+	quiet := Observation{}
+	check(t, "a scoped record with nothing to show", observationState(quiet, true), "quiet")
+	check(t, "an unscoped one names the gap", observationState(quiet, false), "no-scope")
+
+	// A recurrence is an observed fact whatever the scope says, and outranks it —
+	// the order status.ActionFor keeps.
+	recurred := Observation{Recurrence: Recurrence{Occurred: true}}
+	check(t, "recurrence outranks the scope", observationState(recurred, false), "recurred")
+}
+
+// `pending` is counted inside `unknown_evidence`, and a pending row settles on its
+// own, so a window holding only those is not a gap any reader can act on.
+func TestACoverageGapIsTheExcessOverWhatIsStillSettling(t *testing.T) {
+	settling := map[string]any{"unknown": 3, "unknown_evidence": 3, "pending": 3}
+	if CoverageGap(settling) {
+		t.Error("a window whose unknowns are all still settling is no gap")
+	}
+	excess := map[string]any{"unknown": 4, "unknown_evidence": 4, "pending": 3}
+	if !CoverageGap(excess) {
+		t.Error("a ledger the resolver closed as gone is a gap")
+	}
+	if !CoverageGap(map[string]any{"unknown": 2, "unknown_scope": 2}) {
+		t.Error("metadata no row carried is a gap")
+	}
+	// A session map writes neither name, so its whole bucket is the remainder.
+	if !CoverageGap(map[string]any{"unknown": 5}) {
+		t.Error("a session window that could not be placed is a gap")
+	}
+	// An audit log a guard's activity cannot be read without is the fourth cause.
+	if !MissingCoverage(Observation{Firing: FiringActivity{Applicable: true}}) {
+		t.Error("an unreadable audit log is missing coverage")
+	}
+	if MissingCoverage(Observation{Firing: FiringActivity{Applicable: true, LogPresent: true}}) {
+		t.Error("a present log recording no block is a reading, not a gap")
+	}
 }

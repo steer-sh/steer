@@ -87,20 +87,10 @@ func ActionSentence(obs mine.Observation, scope *cadence.Scope) string {
 	return "eligible work is present and the problem did not come back"
 }
 
-// missingCoverage reports units a window could not account for, plus the audit
-// stream a guard's activity cannot be read without.
+// missingCoverage is mine.MissingCoverage, which every reader shares: a pending
+// row settles on its own, so a window holding only those is not a repair.
 func missingCoverage(obs mine.Observation) bool {
-	if obs.Firing.Applicable && !obs.Firing.LogPresent {
-		return true
-	}
-	return coverageCause(obs.Coverage.Before) || coverageCause(obs.Coverage.After)
-}
-
-// coverageCause reads both corpora's unknown keys: the chain corpus counts a cause
-// per unknown and the session corpus counts one bucket.
-func coverageCause(c map[string]any) bool {
-	return numInt(c["unknown_scope"]) > 0 || numInt(c["unknown_evidence"]) > 0 ||
-		numInt(c["pending"]) > 0 || numInt(c["unknown"]) > 0
+	return mine.MissingCoverage(obs)
 }
 
 // quietDays is the silence past which this host's chain rate is withheld;

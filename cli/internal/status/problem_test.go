@@ -35,14 +35,26 @@ func TestFixSummaryNamesTheTypeThenTheFix(t *testing.T) {
 // Missing evidence carries a repair step, while an observed recurrence carries
 // the explanation that warrants inspection.
 func TestProblemWhyAndNextFollowObservation(t *testing.T) {
+	// `pending` is counted inside `unknown_evidence`, so a window the resolver can
+	// repair is the excess over it.
 	v := ProblemView{Scope: &cadence.Scope{Version: 1, All: true}, Unit: "chain",
-		Observation: mine.Observation{Coverage: mine.ObservationCoverage{After: map[string]any{"pending": 4}}}}
+		Observation: mine.Observation{Coverage: mine.ObservationCoverage{
+			After: map[string]any{"unknown": 6, "unknown_evidence": 6, "pending": 4}}}}
 	why, next := ProblemWhy(v), ProblemNext(v)
 	if next == "" {
 		t.Fatal("a result that asks for work carries a step")
 	}
 	if why != "" {
 		t.Errorf("both a reason %q and a step %q", why, next)
+	}
+	// A window whose unknowns are all still settling asks for nothing: those rows
+	// close on their own, so the sentence is a reason and never a step.
+	settling := ProblemView{Scope: &cadence.Scope{Version: 1, All: true}, Unit: "chain",
+		Observation: mine.Observation{Coverage: mine.ObservationCoverage{
+			After: map[string]any{"unknown": 4, "unknown_evidence": 4, "pending": 4}}}}
+	if ProblemWhy(settling) == "" || ProblemNext(settling) != "" {
+		t.Errorf("a settling window carries a reason and no step: why=%q next=%q",
+			ProblemWhy(settling), ProblemNext(settling))
 	}
 	recurrence := ProblemView{Scope: &cadence.Scope{Version: 1, All: true},
 		Observation: mine.Observation{Recurrence: mine.Recurrence{Occurred: true}}}

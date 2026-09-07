@@ -93,7 +93,7 @@ func TestRegisterScoreRoundTrip(t *testing.T) {
 	check(t, "id is slugified", str(recorded[0]["id"]), "widget-parser-flag-loss")
 
 	allRows, _ := LoadRows(stateDir, ledger)
-	scored, err := ScoreRecord(recorded[0], EvidenceSet{Chains: BuildChains(allRows, false)}, 12)
+	scored, err := ScoreRecord(recorded[0], EvidenceSet{Chains: BuildChains(allRows, false)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,15 +188,15 @@ func TestInstrumentDrift(t *testing.T) {
 
 	base := Record{"id": "d", "class": "d", "tier": "check", "target": "check.sh",
 		"match": "widget parser", "kind": "defect", "installed_ts": 1050, "installed_date": "x"}
-	drifted := scoreOK(t, withKV(base, "instrument", "modelA/3/aaaa1111"), chains, 1)
+	drifted := scoreOK(t, withKV(base, "instrument", "modelA/3/aaaa1111"), chains)
 	if len(drifted["observation"].(Observation).Provenance.After) == 0 {
 		t.Error("the after-window should retain reviewer provenance")
 	}
-	steady := scoreOK(t, withKV(base, "instrument", "modelB/3/bbbb2222"), chains, 1)
+	steady := scoreOK(t, withKV(base, "instrument", "modelB/3/bbbb2222"), chains)
 	if len(steady["observation"].(Observation).Provenance.Before) == 0 {
 		t.Error("the before-window should retain reviewer provenance")
 	}
-	unstamped := scoreOK(t, base, chains, 1)
+	unstamped := scoreOK(t, base, chains)
 	if _, ok := unstamped["observation"].(Observation); !ok {
 		t.Fatal("an unstamped record should still carry an observation")
 	}
@@ -216,19 +216,19 @@ func TestHostMixDrift(t *testing.T) {
 	}
 	rec := Record{"id": "h", "class": "h", "tier": "check", "target": "check.sh",
 		"match": "widget parser", "kind": "defect", "installed_ts": 1050, "installed_date": "x"}
-	mixed := scoreOK(t, rec, BuildChains(hostRows, false), 1)
+	mixed := scoreOK(t, rec, BuildChains(hostRows, false))
 	check(t, "before-window hosts are reported", mixed["before_hosts"], []string{"alpha"})
 	check(t, "after-window hosts are reported", mixed["after_hosts"], []string{"alpha", "beta"})
 	if _, ok := mixed["observation"].(Observation); !ok {
 		t.Fatal("host changes must not remove the observation")
 	}
 
-	single := scoreOK(t, rec, BuildChains(hostRows[:4], false), 1)
+	single := scoreOK(t, rec, BuildChains(hostRows[:4], false))
 	if _, ok := single["observation"].(Observation); !ok {
 		t.Fatal("a stable host set must still carry the observation")
 	}
 
-	emptyAfter := scoreOK(t, withKV(rec, "installed_ts", 9999), BuildChains(hostRows, false), 1)
+	emptyAfter := scoreOK(t, withKV(rec, "installed_ts", 9999), BuildChains(hostRows, false))
 	if _, ok := emptyAfter["observation"].(Observation); !ok {
 		t.Fatal("an empty after-window must still carry the observation")
 	}
@@ -294,7 +294,7 @@ func TestRejections(t *testing.T) {
 		t.Error("a re-proposed rejected class should be blocked")
 	}
 
-	scored := scoreOK(t, records[0], chains, 12)
+	scored := scoreOK(t, records[0], chains)
 	if !scored["observation"].(Observation).Declined {
 		t.Error("a rejected record should mark the observation as declined")
 	}
@@ -374,9 +374,9 @@ func loadByID(t *testing.T, stateDir string) map[string]Record {
 	return out
 }
 
-func scoreOK(t *testing.T, record Record, chains []Chain, minAfter int) map[string]any {
+func scoreOK(t *testing.T, record Record, chains []Chain) map[string]any {
 	t.Helper()
-	res, err := ScoreRecord(record, EvidenceSet{Chains: chains}, minAfter)
+	res, err := ScoreRecord(record, EvidenceSet{Chains: chains})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -432,7 +432,7 @@ func TestScoreEmitsTheObservation(t *testing.T) {
 	allRows, _ := LoadRows(stateDir, ledger)
 	chains := BuildChains(allRows, false)
 
-	scored, err := ScoreRecord(recorded[0], EvidenceSet{Chains: chains}, 0)
+	scored, err := ScoreRecord(recorded[0], EvidenceSet{Chains: chains})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -455,7 +455,7 @@ func TestScoreEmitsTheObservation(t *testing.T) {
 		legacy[k] = v
 	}
 	delete(legacy, "scope")
-	unscoped, err := ScoreRecord(legacy, EvidenceSet{Chains: chains}, 0)
+	unscoped, err := ScoreRecord(legacy, EvidenceSet{Chains: chains})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -496,7 +496,7 @@ func TestStoredBaselineMatchesTheScoredWindow(t *testing.T) {
 			numInt(stored["units"]), 8)
 
 		allRows, _ := LoadRows(stateDir, ledger)
-		scored, err := ScoreRecord(recorded[0], EvidenceSet{Chains: BuildChains(allRows, false)}, 0)
+		scored, err := ScoreRecord(recorded[0], EvidenceSet{Chains: BuildChains(allRows, false)})
 		if err != nil {
 			t.Fatal(err)
 		}

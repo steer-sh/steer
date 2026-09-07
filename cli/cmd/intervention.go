@@ -75,10 +75,9 @@ type interventionFlags struct {
 	scopeSetTS int64
 	scopeForce bool
 
-	scoreID       string
-	scoreAll      bool
-	scoreMinAfter int
-	scoreJSON     bool
+	scoreID   string
+	scoreAll  bool
+	scoreJSON bool
 
 	listJSON bool
 
@@ -296,7 +295,7 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 
 	score := &cobra.Command{
 		Use:   "score",
-		Short: "Recompute before/after incidence and verdict",
+		Short: "Recompute before/after incidence and the observation",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ev := evidence.Gather(evidence.Options{
 				GateStateDir: gateConfig().StateDir,
@@ -306,7 +305,6 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 				Ledger:       v.ledger,
 				ID:           v.scoreID,
 				All:          v.scoreAll,
-				MinAfter:     v.scoreMinAfter,
 				JSON:         v.scoreJSON,
 				Sessions:     ev.Sessions,
 				Firings:      ev.Firings,
@@ -317,7 +315,6 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 	s := score.Flags()
 	s.StringVar(&v.scoreID, "id", "", "score only this record")
 	s.BoolVar(&v.scoreAll, "all", false, "include reworked and removed records")
-	s.IntVar(&v.scoreMinAfter, "min-after", 0, "extra floor: withhold a verdict below this many eligible after-units")
 	s.BoolVar(&v.scoreJSON, "json", false, "emit JSON")
 
 	list := &cobra.Command{

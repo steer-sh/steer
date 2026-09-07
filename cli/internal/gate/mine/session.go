@@ -272,8 +272,9 @@ func SessionSignalKind(record Record) string {
 
 // ScoreSessionRecord is the session engine's scorer: it recomputes a transcript-class
 // record's before/after incidence over root sessions, joins the guard's audit firings,
-// and returns the scored shape the chain engine emits plus an attribution block.
-func ScoreSessionRecord(record Record, ev EvidenceSet, minAfter int) (map[string]any, error) {
+// and returns the scored shape the chain engine emits. The join rides in the
+// observation's firing block, which is where every reader looks for it.
+func ScoreSessionRecord(record Record, ev EvidenceSet) (map[string]any, error) {
 	pattern, err := compilePattern(str(record["match"]))
 	if err != nil {
 		return nil, err
@@ -326,7 +327,6 @@ func ScoreSessionRecord(record Record, ev EvidenceSet, minAfter int) (map[string
 		"before_coverage":   sessionCoverageMap(beforeCov),
 		"after_coverage":    sessionCoverageMap(afterCov),
 		"scope":             record["scope"],
-		"attribution":       attr,
 		"instrument":        record["instrument"],
 		"after_instruments": emptyIfNil(afterInstruments),
 		"before_hosts":      emptyIfNil(beforeHarness),

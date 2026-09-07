@@ -701,11 +701,10 @@ func findRecord(records []Record, id string) Record {
 
 // ScoreOpts are the flags of `mine score`.
 type ScoreOpts struct {
-	Ledger   string
-	ID       string
-	All      bool
-	MinAfter int
-	JSON     bool
+	Ledger string
+	ID     string
+	All    bool
+	JSON   bool
 	// Sessions is the transcript-friction corpus, and Firings the guard audit stream.
 	// A caller that reads only the ledger leaves them empty; a record scored by the
 	// session engine then reports missing evidence rather than a range.
@@ -761,7 +760,7 @@ func Score(w io.Writer, stateDir string, o ScoreOpts) error {
 			unscored = append(unscored, str(r["id"]))
 			continue
 		}
-		res, err := ScoreWith(r, ev, o.MinAfter)
+		res, err := ScoreWith(r, ev)
 		if err != nil {
 			return err
 		}
@@ -777,7 +776,7 @@ func Score(w io.Writer, stateDir string, o ScoreOpts) error {
 	for _, r := range results {
 		where := firstNonEmpty(str(r["hook_id"]), str(r["target"]), "nothing installed")
 		obs, _ := r["observation"].(Observation)
-		fmt.Fprintf(w, "%s  [%s]  %s -> %s\n", r["id"], observationState(obs), r["tier"], where)
+		fmt.Fprintf(w, "%s  [%s]  %s -> %s\n", r["id"], observationState(obs, r["scope"] != nil), r["tier"], where)
 		fmt.Fprintf(w, "    class: %s\n", r["class"])
 		writeObservation(w, obs)
 		verb := "installed"
@@ -796,25 +795,23 @@ func Score(w io.Writer, stateDir string, o ScoreOpts) error {
 
 // observationState is the bracketed state on a scored line. It names what the
 // corpus recorded and claims no effect, so no reading of it can become one.
-func observationState(obs Observation) string {
+//
+// It reads the frozen scope for the same reason status.ActionFor does: a record
+// with no rule for which work counts had every unit treated as eligible, so its
+// counts describe a window nobody defined. Reporting that as quiet would print a
+// settled state over the one fault the reader can repair.
+func observationState(obs Observation, scoped bool) string {
 	switch {
 	case obs.Recurrence.Occurred:
 		return "recurred"
-	case obs.Firing.Applicable && !obs.Firing.LogPresent:
-		return "coverage-gap"
-	case observationCoverageGap(obs.Coverage.Before) || observationCoverageGap(obs.Coverage.After):
+	case !scoped:
+		return "no-scope"
+	case MissingCoverage(obs):
 		return "coverage-gap"
 	case obs.Coverage.ZeroEligibleAfter:
 		return "no-eligible-work"
 	}
 	return "quiet"
-}
-
-// observationCoverageGap reports units a window could not account for. The two
-// corpora break their unknowns down differently, so every key is read.
-func observationCoverageGap(c map[string]any) bool {
-	return numInt(c["unknown_scope"]) > 0 || numInt(c["unknown_evidence"]) > 0 ||
-		numInt(c["pending"]) > 0 || numInt(c["unknown"]) > 0
 }
 
 // writeObservation prints the field counts under one record: the windows, the

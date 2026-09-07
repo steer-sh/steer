@@ -30,7 +30,7 @@ func TestConvertersReadObservationAndCoverage(t *testing.T) {
 		"status": "active", "installed_ts": 5000,
 		"scope": map[string]any{"version": mine.ScopeVersion, "repo": "steer", "path": `\.go$`},
 	}
-	scored, err := mine.ScoreRecord(record, mine.EvidenceSet{Chains: mine.BuildChains(rows, false)}, 0)
+	scored, err := mine.ScoreRecord(record, mine.EvidenceSet{Chains: mine.BuildChains(rows, false)})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -42,8 +42,10 @@ def _record(**kw):
         "after": {"hits": 0, "units": 0, "rate": 0.0},
         "scope": {"version": 1, "all": True},
         "before_coverage": _coverage(0, 0), "after_coverage": _coverage(0, 0),
-        "attribution": {"applicable": False, "log_present": False,
-                        "hook_id": "", "firings": 0, "sessions": 0},
+        # A build input for the observation's firing block, never a stored field:
+        # v11 and v5 carry the join inside `observation.firing`.
+        "_firing": {"applicable": False, "log_present": False,
+                    "hook_id": "", "firings": 0, "sessions": 0},
     }
     rec.update(kw)
     return rec
@@ -84,7 +86,7 @@ def _observe(rec, before_ids=None, after_ids=None):
                 "last_activity_ts": last if counts["units"] else 0}
 
     session = rec["unit"] == "session"
-    attr = rec["attribution"]
+    attr = rec["_firing"]
     hits = rec["after"]["hits"]
     rec["observation"] = {
         "counts": {"split_ts": split, "observed_ts": observed, "unit": rec["unit"],
@@ -122,7 +124,7 @@ def _action(rec):
     obs = rec["observation"]
     if obs["recurrence"]["occurred"]:
         return "inspect"
-    if rec["scope"] is None or any(c["unknown"] for c in
+    if rec["scope"] is None or any(_gap(c) for c in
                                    (rec["before_coverage"], rec["after_coverage"])):
         return "repair"
     if obs["firing"]["applicable"] and not obs["firing"]["log_present"]:
@@ -130,10 +132,18 @@ def _action(rec):
     return "observe"
 
 
+def _gap(c):
+    """status.ActionFor's coverage rule: `pending` is counted inside
+    `unknown_evidence` and settles on its own, so only the excess over it and the
+    causes no read can clear are a gap."""
+    return (c["unknown_evidence"] > c["pending"] or c["unknown_scope"] > 0
+            or c["unknown"] - c["unknown_scope"] - c["unknown_evidence"] > 0)
+
+
 def _queued(records):
     keys = ("id", "class", "problem", "intervention", "match", "corpus", "unit",
             "tier", "target", "hook_id", "before", "after", "observation", "scope",
-            "before_coverage", "after_coverage", "signal_kind", "attribution")
+            "before_coverage", "after_coverage", "signal_kind")
     return [{k: r[k] for k in keys if k in r} for r in records if _action(r) != "observe"]
 
 
@@ -154,6 +164,9 @@ def _queue(interventions=(), candidates=(), unscored=()):
 def _snapshot(records=(), candidates=(), unresolved=0):
     snap = _base()
     snap["interventions"] = [copy.deepcopy(r) for r in records]
+    # `_firing` built the observation and is no field of the contract.
+    for r in snap["interventions"]:
+        r.pop("_firing", None)
     counts = {}
     for r in snap["interventions"]:
         action = _action(r)
@@ -185,8 +198,8 @@ def _awaiting_evidence():
         after={"hits": 1, "units": 4, "rate": 0.25},
         before_coverage=_coverage(11, 10, ineligible=1),
         after_coverage=_coverage(5, 4, partial_exposure=1),
-        attribution={"applicable": True, "log_present": True,
-                     "hook_id": "no-bare-python", "firings": 2, "sessions": 2},
+        _firing={"applicable": True, "log_present": True,
+                 "hook_id": "no-bare-python", "firings": 2, "sessions": 2},
     )
     _observe(rec)
     return _snapshot([rec]), _queue([rec])
@@ -244,8 +257,8 @@ def _remove_a_guard():
         before={"hits": 2, "units": 60, "rate": 0.0333},
         after={"hits": 8, "units": 44, "rate": 0.1818},
         before_coverage=_coverage(60, 60), after_coverage=_coverage(44, 44),
-        attribution={"applicable": True, "log_present": True,
-                     "hook_id": "no-bare-python", "firings": 31, "sessions": 12},
+        _firing={"applicable": True, "log_present": True,
+                 "hook_id": "no-bare-python", "firings": 31, "sessions": 12},
     )
     _observe(rec)
     return _snapshot([rec]), _queue([rec])

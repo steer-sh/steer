@@ -777,3 +777,45 @@ func TestABrokenTeamLockfileIsNotAnAbsentOne(t *testing.T) {
 		t.Errorf("the broken lockfile names no path: %q", got.Path)
 	}
 }
+
+// A record from a corpus no engine reads stays out of the scored inventory and
+// out of the summary total, and reports by id under Unscored.
+func TestAnUnreadableCorpusIsReportedUnscoredAndNotScored(t *testing.T) {
+	isolate(t)
+	stateDir := seedLedger(t, "widget parser flag loss", "widget parser",
+		"widget parser drops a flag", "unrelated naming nit", 12)
+	records, err := mine.Load(stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records = append(records, mine.Record{
+		"id": "orphan", "class": "an orphan class", "match": "orphan",
+		"tier": "check", "target": "check.sh", "status": "active",
+		"corpus": "made-up-corpus", "unit": "made-up-unit",
+	})
+	if err := mine.Save(stateDir, records); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := Collect(Options{GateStateDir: stateDir, WindowDays: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, iv := range s.Interventions {
+		if iv.ID == "orphan" {
+			t.Fatalf("an unreadable corpus must not reach the scored inventory: %+v", iv)
+		}
+	}
+	if s.Summary.Total != 1 {
+		t.Errorf("the total counts scored records only, got %d", s.Summary.Total)
+	}
+	found := false
+	for _, id := range s.Attention.Unscored {
+		if id == "orphan" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the record must still be reported, got unscored %v", s.Attention.Unscored)
+	}
+}

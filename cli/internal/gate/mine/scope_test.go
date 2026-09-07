@@ -195,7 +195,7 @@ func TestScopedBaselineAndMigration(t *testing.T) {
 
 	allRows, _ := LoadRows(stateDir, ledger)
 	chains := BuildChains(allRows, false)
-	scored := scoreOK(t, recs[0], chains, 12)
+	scored := scoreOK(t, recs[0], chains)
 	after := scored["after"].(map[string]any)
 	check(t, "after-window is scoped to eligible chains", numInt(after["chains"]), 12)
 	check(t, "before-window is scoped to eligible chains", numInt(scored["before"].(map[string]any)["chains"]), 12)
@@ -242,7 +242,7 @@ func TestScopeSetMigration(t *testing.T) {
 
 	// The after-window opens at scope_set_ts, so every post-install chain predates it.
 	allRows, _ := LoadRows(stateDir, ledger)
-	scored := scoreOK(t, rec, BuildChains(allRows, false), 1)
+	scored := scoreOK(t, rec, BuildChains(allRows, false))
 	check(t, "migration boundary empties the after-window", numInt(scored["after"].(map[string]any)["chains"]), 0)
 
 	// A second scope on an already-scoped record is refused.

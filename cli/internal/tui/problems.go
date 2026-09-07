@@ -312,10 +312,9 @@ func problemView(it status.ScoredIntervention) status.ProblemView {
 }
 
 // summaryReason splits the entry's one explanatory sentence into the reason a
-// result is unavailable and the step the reader can take. A result the scorer
-// withheld carries a reason and no step; a result that asks for work carries a
-// step. An unreachable window is the exception: its sentence names two choices,
-// so it is a step even though the entry files under accept.
+// result is unavailable and the step the reader can take. An observation that
+// asks nothing carries a reason and no step; one that asks the reader to look at
+// something carries a step.
 func summaryReason(it status.ScoredIntervention) (why, next string) {
 	v := problemView(it)
 	return status.ProblemWhy(v), status.ProblemNext(v)
@@ -374,7 +373,6 @@ func detailBlock(r problemRow, width int) string {
 	}
 	out += detailSection("Result", resultDetail(it), width)
 	out += evidenceDetail(it, width)
-	out += limitsDetail(it, width)
 	out += actionDetail(it, width)
 	return out
 }
@@ -456,16 +454,6 @@ func evidenceDetail(it status.ScoredIntervention, width int) string {
 func incidenceLine(in cadence.Incidence, unit string) string {
 	return fmt.Sprintf("%s in %d %s", recurrences(in.Hits), in.Units,
 		status.UnitName(unit, in.Units))
-}
-
-// limitsDetail names every changed condition, separating the ones that stop a
-// comparison from the ones that only qualify a permitted result.
-func limitsDetail(it status.ScoredIntervention, width int) string {
-	out := ""
-	if gap := status.ProblemWhy(problemView(it)); gap != "" {
-		out += detailSection("Coverage", gap, width)
-	}
-	return out
 }
 
 // actionDetail is the entry's action area: the step where one exists, then what

@@ -81,7 +81,7 @@ func TestQueueRoundTrip(t *testing.T) {
 			ID: "widget-flag", Class: "widget flag loss", Match: "widget parser",
 			Corpus: corpusReviewFindings, Unit: mine.UnitChain, Tier: "check",
 			Target:      "check.sh",
-			Observation: mine.Observation{Coverage: mine.ObservationCoverage{After: map[string]any{"eligible": 2}}},
+			Observation: mine.Observation{Coverage: mine.ObservationCoverage{After: map[string]any{"eligible": float64(2)}}},
 			Before:      Incidence{Hits: 4, Units: 20, Rate: 0.2},
 			After:       Incidence{Hits: 5, Units: 20, Rate: 0.25},
 		}},
@@ -96,8 +96,12 @@ func TestQueueRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Version != q.Version || len(got.Interventions) != 1 || got.Interventions[0].Observation.Coverage.After["eligible"] != float64(2) {
-		t.Errorf("round trip changed the observation contract: want %+v got %+v", q.Interventions[0].Observation, got.Interventions[0].Observation)
+	// Every field is compared, not a spot check: a corruption of Before, Scope,
+	// Candidates or Corpora is exactly what a round-trip test is for. The coverage
+	// map is written with float64 values because JSON has one number type, so the
+	// want side already holds what a read produces.
+	if !reflect.DeepEqual(q, got) {
+		t.Errorf("round trip changed the queue:\n want %+v\n got  %+v", q, got)
 	}
 }
 
@@ -202,8 +206,15 @@ func TestNeedsAttention(t *testing.T) {
 	if !needsAttention(mine.Observation{Firing: mine.FiringActivity{Applicable: true}}, struct{}{}) {
 		t.Error("a missing applicable audit log should need attention")
 	}
-	if !needsAttention(mine.Observation{Coverage: mine.ObservationCoverage{After: map[string]any{"pending": 1}}}, struct{}{}) {
-		t.Error("pending evidence should need attention")
+	// `pending` is counted inside `unknown_evidence`, and a pending row settles on
+	// its own, so only the excess over it is a gap the reader can act on.
+	if needsAttention(mine.Observation{Coverage: mine.ObservationCoverage{
+		After: map[string]any{"unknown": 1, "unknown_evidence": 1, "pending": 1}}}, struct{}{}) {
+		t.Error("a window whose unknowns are all still settling should not need attention")
+	}
+	if !needsAttention(mine.Observation{Coverage: mine.ObservationCoverage{
+		After: map[string]any{"unknown": 2, "unknown_evidence": 2, "pending": 1}}}, struct{}{}) {
+		t.Error("evidence beyond what is still settling should need attention")
 	}
 	if needsAttention(mine.Observation{Coverage: mine.ObservationCoverage{After: map[string]any{"eligible": 2}}}, struct{}{}) {
 		t.Error("quiet eligible work should not need attention")

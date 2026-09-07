@@ -200,14 +200,14 @@ func TestDescribeLeavesASessionVerdictUnchanged(t *testing.T) {
 		window(2000, 12, "claude-code", "proj", "something else")...)
 	ev := EvidenceSet{Sessions: units}
 
-	before := scoreSession(t, loadOne(t, stateDir), ev, 0)
+	before := scoreSession(t, loadOne(t, stateDir), ev)
 	if err := Describe(io.Discard, stateDir, "friction", DescribeOpts{
 		Problem:      "a session runs bare python and the interpreter is missing",
 		Intervention: "a guard refuses a bare python invocation",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	after := scoreSession(t, loadOne(t, stateDir), ev, 0)
+	after := scoreSession(t, loadOne(t, stateDir), ev)
 	if !reflect.DeepEqual(before, after) {
 		t.Errorf("a rewording moved the session verdict:\n before: %v\n  after: %v", before, after)
 	}
@@ -230,7 +230,7 @@ func loadOne(t *testing.T, stateDir string) Record {
 func scoreOne(t *testing.T, stateDir string, chains []Chain) map[string]any {
 	t.Helper()
 	rec := loadOne(t, stateDir)
-	res, err := ScoreRecord(rec, EvidenceSet{Chains: chains}, 0)
+	res, err := ScoreRecord(rec, EvidenceSet{Chains: chains})
 	if err != nil {
 		t.Fatal(err)
 	}

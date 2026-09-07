@@ -58,9 +58,9 @@ func window(start, n int, harness, project string, texts ...string) []SessionUni
 	return out
 }
 
-func scoreSession(t *testing.T, r Record, ev EvidenceSet, minAfter int) map[string]any {
+func scoreSession(t *testing.T, r Record, ev EvidenceSet) map[string]any {
 	t.Helper()
-	res, err := ScoreSessionRecord(r, ev, minAfter)
+	res, err := ScoreSessionRecord(r, ev)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,19 +86,19 @@ func TestSessionFiringActivityRidesBesideTheCounts(t *testing.T) {
 		window(3000, 12, "claude-code", "proj", "nothing here")...)
 	r := sessionRecord(t, "bare python", "guard", "no-bare-python", 2000)
 
-	silent := observed(t, scoreSession(t, r, EvidenceSet{Sessions: units, AuditPresent: true}, 12))
+	silent := observed(t, scoreSession(t, r, EvidenceSet{Sessions: units, AuditPresent: true}))
 	check(t, "the class did not recur", silent.Recurrence.Occurred, false)
 	check(t, "the guard recorded nothing", silent.Firing.Rows, 0)
 	check(t, "and that zero is known", silent.Firing.Known(), true)
 	check(t, "the join is class-scoped", silent.Firing.ClassScoped, true)
 
 	firings := []Firing{{HookID: "no-bare-python", Harness: "claude-code", SessionID: "s3000", TS: 3000}}
-	joined := scoreSession(t, r, EvidenceSet{Sessions: units, Firings: firings, AuditPresent: true}, 12)
+	joined := scoreSession(t, r, EvidenceSet{Sessions: units, Firings: firings, AuditPresent: true})
 	check(t, "the join counts rows", observed(t, joined).Firing.Rows, 1)
 	check(t, "the join counts sessions", observed(t, joined).Firing.Units, 1)
 
 	// No readable audit stream is unknown activity, not a silent guard.
-	blind := observed(t, scoreSession(t, r, EvidenceSet{Sessions: units, AuditPresent: false}, 12))
+	blind := observed(t, scoreSession(t, r, EvidenceSet{Sessions: units, AuditPresent: false}))
 	check(t, "an absent log is not a zero", blind.Firing.Known(), false)
 }
 
@@ -114,7 +114,7 @@ func TestSessionFiringJoinIsExact(t *testing.T) {
 		{HookID: "no-bare-python", Harness: "claude-code", SessionID: "s1000"},
 		{HookID: "no-bare-python", Harness: "claude-code", SessionID: "unknown"},
 	}
-	res := scoreSession(t, r, EvidenceSet{Sessions: units, Firings: wrong, AuditPresent: true}, 12)
+	res := scoreSession(t, r, EvidenceSet{Sessions: units, Firings: wrong, AuditPresent: true})
 	check(t, "no row joins", observed(t, res).Firing.Rows, 0)
 	check(t, "and the zero is a known one", observed(t, res).Firing.Known(), true)
 }
@@ -126,13 +126,13 @@ func TestSessionRecurrenceIsReportedBesideFiring(t *testing.T) {
 	units := append(window(1000, 12, "claude-code", "proj", "bare python here"),
 		window(3000, 12, "claude-code", "proj", "bare python here")...)
 	r := sessionRecord(t, "bare python", "guard", "no-bare-python", 2000)
-	silent := observed(t, scoreSession(t, r, EvidenceSet{Sessions: units, AuditPresent: true}, 12))
+	silent := observed(t, scoreSession(t, r, EvidenceSet{Sessions: units, AuditPresent: true}))
 	check(t, "the class recurred", silent.Recurrence.Occurred, true)
 	check(t, "the guard recorded nothing", silent.Firing.Rows, 0)
 	check(t, "the example is a cluster key", silent.Recurrence.ExampleKind, ExampleClusterKey)
 
 	firings := []Firing{{HookID: "no-bare-python", Harness: "claude-code", SessionID: "s3005"}}
-	fired := observed(t, scoreSession(t, r, EvidenceSet{Sessions: units, Firings: firings, AuditPresent: true}, 12))
+	fired := observed(t, scoreSession(t, r, EvidenceSet{Sessions: units, Firings: firings, AuditPresent: true}))
 	check(t, "the class still recurred", fired.Recurrence.Occurred, true)
 	check(t, "and the guard blocked once", fired.Firing.Rows, 1)
 }
@@ -143,7 +143,7 @@ func TestSessionNonGuardTierReportsNoFiring(t *testing.T) {
 	units := append(window(1000, 12, "claude-code", "proj", "bare python here"),
 		window(3000, 12, "claude-code", "proj", "nothing here")...)
 	r := sessionRecord(t, "bare python", "check", "", 2000)
-	obs := observed(t, scoreSession(t, r, EvidenceSet{Sessions: units}, 12))
+	obs := observed(t, scoreSession(t, r, EvidenceSet{Sessions: units}))
 	check(t, "firing does not apply", obs.Firing.Applicable, false)
 	check(t, "the before-window carries the hits", obs.Counts.Before.Hits, 12)
 	check(t, "the after-window carries none", obs.Counts.After.Hits, 0)
@@ -156,7 +156,7 @@ func TestSessionThinAfterWindowReportsItsSize(t *testing.T) {
 	units := append(window(1000, 12, "claude-code", "proj", "bare python here"),
 		window(3000, 2, "claude-code", "proj", "nothing here")...)
 	r := sessionRecord(t, "bare python", "check", "", 2000)
-	obs := observed(t, scoreSession(t, r, EvidenceSet{Sessions: units}, 12))
+	obs := observed(t, scoreSession(t, r, EvidenceSet{Sessions: units}))
 	check(t, "the after-window names its eligible sessions", obs.Counts.After.Eligible, 2)
 	check(t, "and its hits", obs.Counts.After.Hits, 0)
 }
@@ -170,7 +170,7 @@ func TestSessionPartialExposureIsItsOwnCategory(t *testing.T) {
 	units = append(units, window(1000, 12, "claude-code", "proj", "bare python here")...)
 	units = append(units, window(3000, 12, "claude-code", "proj", "nothing here")...)
 	r := sessionRecord(t, "bare python", "check", "", 2000)
-	res := scoreSession(t, r, EvidenceSet{Sessions: units}, 12)
+	res := scoreSession(t, r, EvidenceSet{Sessions: units})
 	before := res["before_coverage"].(map[string]any)
 	after := res["after_coverage"].(map[string]any)
 	check(t, "the straddling session counts once before", before["partial_exposure"], 1)
@@ -182,7 +182,7 @@ func TestSessionPartialExposureIsItsOwnCategory(t *testing.T) {
 	// coverage says outright rather than through a withheld verdict.
 	only := []SessionUnit{spans(friction(1900, "claude-code", "proj", "bare python here"), 2100)}
 	thin := observed(t, scoreSession(t, sessionRecord(t, "bare python", "check", "", 2000),
-		EvidenceSet{Sessions: only}, 1))
+		EvidenceSet{Sessions: only}))
 	check(t, "no eligible session either side", thin.Counts.After.Eligible, 0)
 	check(t, "and the flag says the after-window is empty", thin.Coverage.ZeroEligibleAfter, true)
 	check(t, "the straddling session is counted as partly exposed", thin.Coverage.After["partial_exposure"], 1)
@@ -200,14 +200,14 @@ func TestSessionHarnessScopeSelectsTheDenominator(t *testing.T) {
 	units := append(window(1000, 12, "codex", "proj", "bare python here"),
 		window(1100, 6, "claude-code", "proj", "bare python here")...)
 	units = append(units, window(3000, 12, "codex", "proj", "nothing here")...)
-	res := scoreSession(t, r, EvidenceSet{Sessions: units}, 12)
+	res := scoreSession(t, r, EvidenceSet{Sessions: units})
 	before := res["before_coverage"].(map[string]any)
 	check(t, "only the scoped harness counts", before["eligible"], 12)
 	check(t, "the other harness is ineligible", before["ineligible"], 6)
 	check(t, "the counts run over codex alone", observed(t, res).Counts.Before.Eligible, 12)
 
 	unstamped := []SessionUnit{friction(1000, "", "proj", "bare python here")}
-	unknown := observed(t, scoreSession(t, r, EvidenceSet{Sessions: unstamped}, 1))
+	unknown := observed(t, scoreSession(t, r, EvidenceSet{Sessions: unstamped}))
 	check(t, "an unstamped session is unknown, not ineligible", unknown.Coverage.Before["unknown"], 1)
 	check(t, "so it enters no count", unknown.Counts.Before.Eligible, 0)
 }
@@ -218,7 +218,7 @@ func TestSessionHarnessesAreReportedPerWindow(t *testing.T) {
 	units := append(window(1000, 12, "claude-code", "proj", "bare python here"),
 		window(3000, 12, "codex", "proj", "nothing here")...)
 	r := sessionRecord(t, "bare python", "check", "", 2000)
-	res := scoreSession(t, r, EvidenceSet{Sessions: units}, 12)
+	res := scoreSession(t, r, EvidenceSet{Sessions: units})
 	checkStrings(t, "the before-window names its harness", res["before_hosts"], []string{"claude-code"})
 	checkStrings(t, "the after-window names another", res["after_hosts"], []string{"codex"})
 }

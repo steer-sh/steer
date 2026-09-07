@@ -53,7 +53,6 @@ type Options struct {
 	Config       gate.Config
 	WindowDays   int    // transcript look-back for the attention refresh
 	AllProjects  bool   // scan every project, not just the cwd
-	MinAfter     int    // optional floor on eligible after-units; 0 = no floor
 	Scope        string // active scope for the config-state read (default global)
 	// Evidence is every corpus a scoring pass reads. A caller leaving it zero gets
 	// the ledger alone, and every session-unit record reports missing evidence.
@@ -330,7 +329,7 @@ func Collect(opts Options) (*SystemStatus, error) {
 	}
 	chains := ev.Chains
 
-	s.Interventions = scoreInventory(records, ev, opts.MinAfter)
+	s.Interventions = scoreInventory(records, ev)
 	s.Summary = summarize(s.Interventions)
 	s.Chains = recentChains(chains, recentChainLimit)
 
@@ -340,7 +339,6 @@ func Collect(opts Options) (*SystemStatus, error) {
 		Ledger:       opts.Ledger,
 		WindowDays:   opts.WindowDays,
 		AllProjects:  opts.AllProjects,
-		MinAfter:     opts.MinAfter,
 		Evidence:     ev,
 	})
 	if err == nil && q != nil {
@@ -367,40 +365,20 @@ func Collect(opts Options) (*SystemStatus, error) {
 }
 
 // scoreInventory recomputes every live intervention's observation. Reworked and
-// removed records are dropped as history — the filter Refresh applies. A record
-// from a corpus no engine reads is carried with an empty observation rather than
-// counted against the wrong corpus; the registry decides which.
-func scoreInventory(records []mine.Record, ev mine.EvidenceSet, minAfter int) []ScoredIntervention {
+// removed records are dropped as history, and a record from a corpus no engine
+// reads is dropped too — Refresh reports it by id under Unscored. Both are the
+// filters Refresh applies.
+func scoreInventory(records []mine.Record, ev mine.EvidenceSet) []ScoredIntervention {
 	out := []ScoredIntervention{}
 	for _, r := range records {
 		st := str(r["status"])
 		if st != "active" && st != "rejected" {
 			continue
 		}
-		tier := str(r["tier"])
 		if !mine.Scorable(r) {
-			prose := mine.ProseOf(r)
-			out = append(out, ScoredIntervention{
-				ID:           str(r["id"]),
-				Class:        str(r["class"]),
-				Problem:      prose.Problem,
-				Intervention: prose.Intervention,
-				LegacyNote:   prose.LegacyNote,
-				Match:        str(r["match"]),
-				Tier:         tier,
-				Target:       str(r["target"]),
-				Status:       st,
-				HookID:       str(r["hook_id"]),
-				Corpus:       mine.CorpusOf(r),
-				Unit:         mine.UnitOf(r),
-				Observation:  mine.Observation{Declined: st == "rejected"},
-				Reason:       str(r["reason"]),
-				Reopen:       str(r["reopen"]),
-				RejectedTS:   numFloat(r["rejected_ts"]),
-			})
 			continue
 		}
-		scored, err := mine.ScoreWith(r, ev, minAfter)
+		scored, err := mine.ScoreWith(r, ev)
 		if err != nil {
 			continue
 		}
@@ -445,14 +423,6 @@ func summarize(items []ScoredIntervention) VerdictSummary {
 		counts[ActionFor(it.Observation, it.Scope)]++
 	}
 	return VerdictSummary{Total: len(items), Counts: counts}
-}
-
-// corpusRate reads the accrual rate off every chain the corpus holds.
-func corpusRate(chains []mine.Chain, now time.Time) ChainRate {
-	if len(chains) < 2 {
-		return ChainRate{}
-	}
-	return RateOver(len(chains), numFloat(chains[0].StartTS), numFloat(chains[len(chains)-1].StartTS), now)
 }
 
 // recentChains returns the last limit chains by start time, newest last, with

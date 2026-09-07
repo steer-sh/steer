@@ -301,7 +301,7 @@ func fileDigest(path string) string {
 // It takes the whole EvidenceSet, as ScoreSessionRecord does, and reads the chain
 // corpus plus the guard audit stream: a guard mined from review findings still
 // writes audit rows, and its observation reports them.
-func ScoreRecord(record Record, ev EvidenceSet, minAfter int) (map[string]any, error) {
+func ScoreRecord(record Record, ev EvidenceSet) (map[string]any, error) {
 	if err := requireChainCorpus(record); err != nil {
 		return nil, err
 	}
@@ -373,15 +373,15 @@ type EvidenceSet struct {
 }
 
 // ScoreWith scores one record through the engine its corpus names.
-func ScoreWith(record Record, ev EvidenceSet, minAfter int) (map[string]any, error) {
+func ScoreWith(record Record, ev EvidenceSet) (map[string]any, error) {
 	if err := requireScorable(record); err != nil {
 		return nil, err
 	}
 	switch EngineOf(record) {
 	case EngineSession:
-		return ScoreSessionRecord(record, ev, minAfter)
+		return ScoreSessionRecord(record, ev)
 	default:
-		return ScoreRecord(record, ev, minAfter)
+		return ScoreRecord(record, ev)
 	}
 }
 

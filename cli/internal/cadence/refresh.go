@@ -116,7 +116,6 @@ type Options struct {
 	Ledger       string // single-ledger override, or "" for the shard glob
 	WindowDays   int    // transcript look-back
 	AllProjects  bool   // scan every project, not just the cwd
-	MinAfter     int    // optional floor on eligible after-units; 0 = no floor
 	// Evidence is every corpus a scoring pass reads, gathered by the caller. A caller
 	// that leaves it zero scores the ledger alone; the session engine then reports
 	// missing evidence rather than a range it cannot support.
@@ -155,7 +154,7 @@ func Refresh(opts Options) (*Queue, error) {
 			q.Unscored = append(q.Unscored, str(r["id"]))
 			continue
 		}
-		scored, err := mine.ScoreWith(r, ev, opts.MinAfter)
+		scored, err := mine.ScoreWith(r, ev)
 		if err != nil {
 			continue
 		}
@@ -232,24 +231,20 @@ func Refresh(opts Options) (*Queue, error) {
 	return q, nil
 }
 
-// needsAttention is field-derived. Recurrence, a known silent guard, a coverage
-// cause, or an unfrozen scope gives the reader something to inspect; quiet eligible
-// work stays in the inventory without manufacturing a repair.
+// needsAttention is field-derived. A recurrence, an unreadable guard audit log, a
+// coverage cause, or an unfrozen scope gives the reader something to inspect;
+// quiet eligible work stays in the inventory without manufacturing a repair. A
+// guard whose audit log is present and records no block is NOT attention: the
+// zero is a reading, and the tier that writes no audit rows keeps Applicable
+// false.
 func needsAttention(obs mine.Observation, scope any) bool {
 	if obs.Recurrence.Occurred {
 		return true
 	}
-	if obs.Firing.Applicable && !obs.Firing.LogPresent {
-		return true
-	}
-	if coverageCause(obs.Coverage.Before) || coverageCause(obs.Coverage.After) {
+	if mine.MissingCoverage(obs) {
 		return true
 	}
 	return scope == nil
-}
-
-func coverageCause(c map[string]any) bool {
-	return numInt(c["unknown_scope"]) > 0 || numInt(c["unknown_evidence"]) > 0 || numInt(c["pending"]) > 0 || numInt(c["unknown"]) > 0
 }
 
 func observationOf(v any) mine.Observation {
