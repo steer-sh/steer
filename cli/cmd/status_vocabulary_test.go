@@ -21,7 +21,7 @@ func TestStatusCandidateLinesUseDashboardVocabulary(t *testing.T) {
 			name: "transcript pattern",
 			in: cadence.Candidate{Corpus: "transcript-friction", Pattern: "bare python call",
 				Count: 1, Sessions: 1},
-			want: []string{"bare python call", "a repeated pattern in your session history",
+			want: []string{"Bare python call", "a repeated pattern in your session history",
 				"1 recurrence", "1 agent session"},
 			old: []string{"transcript-friction", "hits", "session(s)"},
 		},

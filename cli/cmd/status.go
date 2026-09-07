@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/cadence"
@@ -321,7 +322,14 @@ type problemField struct {
 // problemEntry renders one entry: its title, then its stacked labels. A field
 // with nothing to say prints no label.
 func problemEntry(title string, fields []problemField, width int) string {
-	out := styles.Wrap(styles.Bold.Render(title), problemIndent, width)
+	name := []rune(title)
+	for i, r := range name {
+		if unicode.IsLetter(r) {
+			name[i] = unicode.ToUpper(r)
+			break
+		}
+	}
+	out := "\n" + styles.Wrap(styles.BrandText.Render(string(name)), problemIndent, width)
 	for _, f := range fields {
 		values := make([]string, 0, len(f.values))
 		for _, v := range f.values {
