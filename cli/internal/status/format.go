@@ -182,8 +182,9 @@ func AttributionPhrase(a cadence.Attribution) string {
 	if a.Firings == 0 {
 		return fmt.Sprintf("the %s guard blocked nothing since install", a.HookID)
 	}
-	return fmt.Sprintf("the %s guard blocked %d action(s) in %d session(s)",
-		a.HookID, a.Firings, a.Sessions)
+	return fmt.Sprintf("the %s guard blocked %d %s in %d agent %s",
+		a.HookID, a.Firings, plural("action", a.Firings),
+		a.Sessions, plural("session", a.Sessions))
 }
 
 // TrustPhrase names a harness's posture on a registration. Registration alone does not
@@ -274,32 +275,6 @@ func OutcomesWaitingPhrase(n int) string {
 // verdict, so neither can name a different command from the other.
 func RetireCommand(id string) string {
 	return "steer fix retire " + id + " --reason ..."
-}
-
-// The labels the prose lines carry. A rejection installed nothing, so what it
-// describes is the fix it considered, not one that runs.
-const (
-	ProblemLabel            = "Problem"
-	InterventionLabel       = "Fix"
-	ProposedInterventionLbl = "Fix considered"
-)
-
-// ProsePhrases are the two reader-facing lines under a class: what goes wrong, then
-// what the record does about it. A record carrying neither yields nothing, so its
-// legacy note is the caller's to render under its own heading.
-func ProsePhrases(problem, intervention string, rejected bool) []string {
-	label := InterventionLabel
-	if rejected {
-		label = ProposedInterventionLbl
-	}
-	var out []string
-	if problem != "" {
-		out = append(out, ProblemLabel+": "+problem)
-	}
-	if intervention != "" {
-		out = append(out, label+": "+intervention)
-	}
-	return out
 }
 
 // TierPhrase names what kind of intervention a record installed, in the reader's

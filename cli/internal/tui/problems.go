@@ -247,20 +247,16 @@ func summaryFields(r problemRow) []summaryField {
 	if r.candidate != nil {
 		return []summaryField{
 			{"Evidence", candidateEvidence(*r.candidate)},
-			{"Next", "run /steer-report in your coding agent to read these and decide each one"},
+			{"Next", status.CandidateNext},
 		}
 	}
 	it := *r.item
+	v := problemView(it, r.unmeasurable)
 	fields := []summaryField{
 		{fixLabel(it), fixSummary(it)},
 		{"Result", verdictBadge(it.Verdict, r.unmeasurable)},
 	}
-	why, next := summaryReason(it, r.unmeasurable)
-	// A hard limit IS the reason the result is withheld, and it names the changed
-	// conditions the generic sentence cannot, so it replaces rather than joins it.
-	if limit := status.ComparisonLimit("confound", it.Confounds); limit != "" {
-		why = limit
-	}
+	why, next := status.ProblemWhy(v), status.ProblemNext(v)
 	if why != "" {
 		fields = append(fields, summaryField{"Why", why})
 	}
@@ -282,47 +278,45 @@ func problemTitle(r problemRow) string {
 	return "Review findings not yet grouped into a problem"
 }
 
-// candidateEvidence is the queue row's own counts, in the source's words.
+// candidateEvidence is the queue row's own counts, in the source's words. The
+// terminal prints the same sentence, so the phrasing lives in status.
 func candidateEvidence(c cadence.Candidate) string {
-	if c.Pattern != "" {
-		return fmt.Sprintf("%s in your session history: %s in %d agent %s",
-			signalSource(c.Corpus), recurrences(c.Count), c.Sessions, plural("session", c.Sessions))
-	}
-	return fmt.Sprintf("%d %s carry a finding no problem covers yet",
-		c.UndecidedChains, status.UnitName("chain", c.UndecidedChains))
-}
-
-// signalSource names where a queue row's evidence came from, in the reader's
-// words. The corpus name arrives as stored data, so it is translated here.
-func signalSource(corpus string) string {
-	switch corpus {
-	case "transcript-friction":
-		return "a repeated pattern"
-	case "review-findings":
-		return "a repeated review finding"
-	}
-	return "a repeated pattern"
+	return status.CandidateEvidence(c)
 }
 
 // fixLabel distinguishes a recorded fix from a suggestion that was declined. A
 // declined record installed nothing, so what it describes is the fix it
 // considered.
 func fixLabel(it status.ScoredIntervention) string {
-	if it.Status == "rejected" {
-		return "Declined"
-	}
-	return "Fix"
+	return status.FixLabel(problemView(it, false))
 }
 
 // fixSummary describes what the fix does and what type it is. It never claims the
 // fix is installed and running: the record carries what was decided, not current
 // setup evidence, and the target path belongs in the detail area.
 func fixSummary(it status.ScoredIntervention) string {
-	kind := status.TierPhrase(it.Tier, "")
-	if it.Intervention == "" {
-		return kind
+	v := problemView(it, false)
+	// The path belongs in the detail area, so the summary names the type alone.
+	v.Target = ""
+	return status.FixSummary(v)
+}
+
+// problemView reduces a tracked record to the fields the shared phrasing reads,
+// so this panel and the terminal cannot answer one record differently.
+func problemView(it status.ScoredIntervention, unmeasurable bool) status.ProblemView {
+	return status.ProblemView{
+		Declined:       it.Status == "rejected",
+		Tier:           it.Tier,
+		Target:         it.Target,
+		Intervention:   it.Intervention,
+		Verdict:        it.Verdict,
+		Unit:           it.Unit,
+		Unmeasurable:   unmeasurable,
+		BeforeCoverage: it.BeforeCoverage,
+		AfterCoverage:  it.AfterCoverage,
+		Attribution:    it.Attribution,
+		Confounds:      it.Confounds,
 	}
-	return kind + " — " + it.Intervention
 }
 
 // summaryReason splits the entry's one explanatory sentence into the reason a
@@ -331,21 +325,8 @@ func fixSummary(it status.ScoredIntervention) string {
 // step. An unreachable window is the exception: its sentence names two choices,
 // so it is a step even though the entry files under accept.
 func summaryReason(it status.ScoredIntervention, unmeasurable bool) (why, next string) {
-	gap := status.EvidenceGap(it.Verdict, it.Unit, it.BeforeCoverage, it.AfterCoverage, it.Attribution)
-	sentence := status.GapSentence(gap, it.Verdict, unmeasurable)
-	if sentence == "" {
-		return "", ""
-	}
-	if gap != nil && gap.Command != "" {
-		sentence += " — run: " + gap.Command
-	}
-	if !unmeasurable {
-		switch status.ActionFor(it.Verdict, false) {
-		case status.ActionAccept, status.ActionSettled:
-			return sentence, ""
-		}
-	}
-	return "", sentence
+	v := problemView(it, unmeasurable)
+	return status.ProblemWhy(v), status.ProblemNext(v)
 }
 
 // problemDetail is the expanded area under the selected summary: the full

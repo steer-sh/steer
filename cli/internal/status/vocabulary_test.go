@@ -26,7 +26,7 @@ import (
 // without anybody remembering to add it.
 func displayFiles(t *testing.T) []string {
 	t.Helper()
-	files := []string{"action.go", "format.go", "evidence.go", "readiness.go", "../../cmd/status.go"}
+	files := []string{"action.go", "format.go", "evidence.go", "problem.go", "readiness.go", "../../cmd/status.go"}
 	panels, err := filepath.Glob("../tui/*.go")
 	if err != nil {
 		t.Fatal(err)

@@ -48,21 +48,22 @@ func TestStatusCandidateLinesUseDashboardVocabulary(t *testing.T) {
 		{
 			name: "empty unpatterned queue item",
 			in:   cadence.Candidate{Corpus: "auto-denials"},
-			want: []string{"0 review sequences carry a finding no problem covers yet"},
-			old:  []string{"Review findings not yet grouped into a problem", "auto-denials"},
+			want: []string{"Review findings not yet grouped into a problem",
+				"0 review sequences carry a finding no problem covers yet"},
+			old: []string{"auto-denials"},
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := candidateLine(tc.in)
+			got := candidateBlock(tc.in, 100)
 			for _, want := range tc.want {
 				if !strings.Contains(got, want) {
-					t.Errorf("candidateLine = %q; missing %q", got, want)
+					t.Errorf("candidateBlock = %q; missing %q", got, want)
 				}
 			}
 			for _, old := range tc.old {
 				if strings.Contains(got, old) {
-					t.Errorf("candidateLine = %q; still uses %q", got, old)
+					t.Errorf("candidateBlock = %q; still uses %q", got, old)
 				}
 			}
 		})
@@ -98,18 +99,18 @@ func TestStatusHumanSectionsUseDashboardVocabulary(t *testing.T) {
 		Telemetry: status.Telemetry{AuditFirings: 3},
 	}
 
-	posture := captureStdout(t, func() { renderPosture(s) })
+	posture := captureStdout(t, func() { renderPosture(s, 100) })
 	for _, want := range []string{
-		"Arming", "Claude Code", "Denials recorder", "Read outcomes", "Guard runner",
+		"Arming", "Claude Code", "Denials recorder", "Guard runner",
 		"off", "inert", "broken", "review findings", "session history",
-		"automatic denials", "Guard blocks 3",
+		"automatic denials", "Guard blocks",
 	} {
 		if !strings.Contains(posture, want) {
 			t.Errorf("posture output is missing dashboard term %q:\n%s", want, posture)
 		}
 	}
 	for _, old := range []string{
-		"Posture", "Denials      ", "Resolver     ", "Guard master", "not armed",
+		"Posture", "Denials      ", "Resolver     ", "Read outcomes", "Guard master", "not armed",
 		"registered but inert", "action(s) blocked", "review-findings",
 		"transcript-friction", "auto-denials",
 	} {
@@ -124,14 +125,14 @@ func TestStatusHumanSectionsUseDashboardVocabulary(t *testing.T) {
 	attention := captureStdout(t, func() {
 		renderAttention(&status.SystemStatus{Attention: status.AttentionQueue{
 			Candidates: []cadence.Candidate{{Corpus: "review-findings", UndecidedChains: 1}},
-		}})
+		}}, 100)
 	})
 	if !strings.Contains(attention, "Problems") || strings.Contains(attention, "Attention Required") {
 		t.Errorf("attention section does not use the Problems vocabulary:\n%s", attention)
 	}
 
 	empty := captureStdout(t, func() {
-		renderSummary(&status.SystemStatus{})
+		renderSummary(&status.SystemStatus{}, 100)
 	})
 	if !strings.Contains(empty, "no problems recorded on this machine") ||
 		strings.Contains(empty, "no fixes recorded on this machine") {

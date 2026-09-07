@@ -73,73 +73,89 @@ full inventory and skip a problem already decided.`,
 // because the posture inventory below answers it only to a reader who already knows
 // how registration, trust and reviewer availability combine.
 func renderStatus(s *status.SystemStatus, probe reviewers.Probe) {
+	width := styles.Width()
 	fmt.Println()
 	fmt.Println(styles.MainHeader.Render(styles.Logo() + " status"))
 	fmt.Println()
 
-	renderReadiness(status.ReadinessOf(s, probe))
+	renderReadiness(status.ReadinessOf(s, probe), width)
 	fmt.Println()
-	renderPosture(s)
+	renderPosture(s, width)
 	fmt.Println()
-	renderAttention(s)
+	renderAttention(s, width)
 	fmt.Println()
-	renderSummary(s)
+	renderSummary(s, width)
 }
 
 // renderReadiness prints the short answer and the steps that remain. Each step names
 // the command that clears it, so the reader never has to derive one from the
 // inventory below.
-func renderReadiness(r status.Readiness) {
+func renderReadiness(r status.Readiness, width int) {
 	head := styles.SuccessText.Render(r.Headline)
 	if !r.Reviewing {
 		head = styles.WarningText.Render(r.Headline)
 	}
 	fmt.Println(styles.SectionHeader.Render("Answer"))
-	fmt.Printf("  %s\n", head)
+	fmt.Print(styles.Wrap(head, "  ", width))
 	if len(r.Steps) > 0 && r.StepsLead != "" {
-		fmt.Printf("  %s\n", r.StepsLead)
+		fmt.Print(styles.Wrap(r.StepsLead, "  ", width))
 	}
 	for _, step := range r.Steps {
-		fmt.Printf("  · %s\n", step.Title)
+		// The bullet is the label, so a step that runs past the terminal continues
+		// under its own text rather than under the marker.
+		fmt.Print(styles.Field("·", []string{step.Title}, "  ", 1, width))
 		if step.Fix != "" {
-			fmt.Printf("    run: %s\n", step.Fix)
+			fmt.Print(styles.Wrap(styles.MutedText.Render("run: "+step.Fix), "    ", width))
 		}
 	}
 	if r.Note != "" {
-		fmt.Printf("  %s\n", styles.MutedText.Render(r.Note))
+		fmt.Print(styles.Wrap(styles.MutedText.Render(r.Note), "  ", width))
 	}
 }
 
-func renderPosture(s *status.SystemStatus) {
+// postureLabelWidth is the column the Arming labels share. Every row names its
+// label in that column, so the values line up whatever the longest label is.
+const postureLabelWidth = 16
+
+// renderPosture prints the arming inventory. It carries the same rows the
+// dashboard's Arming panel acts on — the commit gate, the denials recorder and
+// the guard runner. The resolver is not among them: install and remove write it
+// with the commit gate in one operation, so a row of its own reported a second
+// state that can never differ from the first.
+func renderPosture(s *status.SystemStatus, width int) {
 	fmt.Println(styles.SectionHeader.Render("Arming"))
-	fmt.Printf("  Reviewer     %s\n", s.Posture.Reviewer)
-	fmt.Printf("  Review log   %s\n", s.Posture.Ledger)
-	fmt.Printf("  Produced by  %s\n", s.Posture.Instrument)
+	postureRow("Reviewer", s.Posture.Reviewer, width)
+	postureRow("Review log", s.Posture.Ledger, width)
+	postureRow("Produced by", s.Posture.Instrument, width)
 	for _, a := range s.Posture.CommitGate {
-		fmt.Printf("  Commit gate  %s\n", armingRow(a))
+		postureRow("Commit gate", armingRow(a), width)
 	}
 	for _, a := range s.Posture.Denials {
-		fmt.Printf("  Denials recorder %s\n", armingRow(a))
-	}
-	for _, a := range s.Posture.Resolver {
-		fmt.Printf("  Read outcomes %s\n", armingRow(a))
+		postureRow("Denials recorder", armingRow(a), width)
 	}
 	for _, m := range s.Posture.Masters {
 		phrase := status.MasterPhrase(m)
 		if phrase == "" {
 			continue
 		}
-		row := fmt.Sprintf("%s, %s scope: %s", status.HarnessLabel(m.Harness), m.Scope, phrase)
 		if m.Stale() {
-			row = fmt.Sprintf("%s, %s scope: %s", status.HarnessLabel(m.Harness), m.Scope, styles.WarningText.Render(phrase))
+			phrase = styles.WarningText.Render(phrase)
 		}
+		row := fmt.Sprintf("%s, %s scope: %s", status.HarnessLabel(m.Harness), m.Scope, phrase)
 		if o := status.MasterObservedPhrase(m); o != "" {
 			row += styles.MutedText.Render(" · " + o)
 		}
-		fmt.Printf("  Guard runner %s\n", row)
+		postureRow("Guard runner", row, width)
 	}
-	fmt.Printf("  History      %s\n", corporaLine(s))
-	fmt.Printf("  Guard blocks %d\n", s.Telemetry.AuditFirings)
+	postureRow("History", corporaLine(s), width)
+	postureRow("Guard blocks", fmt.Sprintf("%d", s.Telemetry.AuditFirings), width)
+}
+
+// postureRow prints one label and its value. A value carrying its own newline —
+// an arming row with a warning under it — keeps that break and every line lands
+// in the value column.
+func postureRow(label, value string, width int) {
+	fmt.Print(styles.Field(label, strings.Split(value, "\n"), "  ", postureLabelWidth, width))
 }
 
 // armingRow names the harness a registration lives in, because one store serves both
@@ -153,7 +169,7 @@ func armingRow(a status.ScopeArming) string {
 		row += styles.MutedText.Render(" · " + o)
 	}
 	if r := status.ResolvePhrase(a); r != "" {
-		row += "\n" + strings.Repeat(" ", 15) + styles.WarningText.Render(r)
+		row += "\n" + styles.WarningText.Render(r)
 	}
 	return row
 }
@@ -208,9 +224,20 @@ func corpusLabel(corpus string) string {
 	}
 }
 
+// problemIndent is the column a problem's title sits in, and problemFieldIndent
+// the one its stacked labels sit in under it. They are the dashboard's own two
+// columns, so one entry reads the same in either place.
+const (
+	problemIndent      = "    "
+	problemFieldIndent = "      "
+	problemLabelWidth  = 9
+)
+
 // renderAttention groups the queue by the action each row asks of the reader,
-// rather than by the verdict token, and renders those groups in ActionOrder.
-func renderAttention(s *status.SystemStatus) {
+// rather than by the verdict token, and renders those groups in ActionOrder. Each
+// entry is a title and stacked labeled lines, the shape the dashboard's Problems
+// panel uses for the same records.
+func renderAttention(s *status.SystemStatus, width int) {
 	fmt.Println(styles.SectionHeader.Render("Problems"))
 	a := s.Attention
 	rate := s.Rate
@@ -219,17 +246,17 @@ func renderAttention(s *status.SystemStatus) {
 	for _, iv := range a.Interventions {
 		un := status.Unmeasurable(iv.Verdict, iv.Unit, iv.RequiredAfter, rate)
 		act := status.ActionFor(iv.Verdict, un)
-		buckets[act] = append(buckets[act], interventionBlock(iv, un, rate))
+		buckets[act] = append(buckets[act], interventionBlock(iv, un, rate, width))
 	}
 	if s.Posture.Unresolved > 0 {
 		buckets[status.ActionAdjudicate] = append(buckets[status.ActionAdjudicate],
-			fmt.Sprintf("    %s — read it from your session history\n      %s",
-				status.OutcomesWaitingPhrase(s.Posture.Unresolved),
-				styles.MutedText.Render(status.BackfillCommand)))
+			problemEntry(status.OutcomesWaitingPhrase(s.Posture.Unresolved), []problemField{
+				{"Next", []string{"read it from your session history — run: " + status.BackfillCommand}},
+			}, width))
 	}
 	for _, c := range a.Candidates {
 		buckets[status.ActionAdjudicate] = append(buckets[status.ActionAdjudicate],
-			"    "+candidateLine(c))
+			candidateBlock(c, width))
 	}
 
 	empty := true
@@ -239,7 +266,7 @@ func renderAttention(s *status.SystemStatus) {
 		}
 	}
 	if empty && len(a.Unscored) == 0 {
-		fmt.Println(styles.SuccessText.Render("  nothing pending — the loop is quiet"))
+		fmt.Print(styles.Wrap(styles.SuccessText.Render("nothing pending — the loop is quiet"), "  ", width))
 		return
 	}
 	for _, act := range status.ActionOrder {
@@ -247,14 +274,14 @@ func renderAttention(s *status.SystemStatus) {
 		if len(rows) == 0 {
 			continue
 		}
-		fmt.Printf("  %s\n", actionHeader(act))
+		fmt.Print(styles.Wrap(actionHeader(act), "  ", width))
 		for _, r := range rows {
-			fmt.Println(r)
+			fmt.Print(r)
 		}
 	}
 	if len(a.Unscored) > 0 {
-		fmt.Printf("  %d records are not assessed: this evidence has no reader\n",
-			len(a.Unscored))
+		fmt.Print(styles.Wrap(fmt.Sprintf("%d records are not assessed: this evidence has no reader",
+			len(a.Unscored)), "  ", width))
 	}
 }
 
@@ -270,107 +297,130 @@ func actionHeader(act string) string {
 	return styles.MutedText.Render(head)
 }
 
-// interventionBlock is one class: its identity line, then the sub-lines naming
-// what recurred, what to do, and where the rule lives.
-func interventionBlock(iv cadence.Intervention, unmeasurable bool, rate status.ChainRate) string {
-	line := fmt.Sprintf("    %-52s %s",
-		fmt.Sprintf("%s [%s]", iv.Class, status.TierPhrase(iv.Tier, iv.Target)),
-		styles.MutedText.Render(status.VerdictLabel(iv.Verdict, unmeasurable)))
-	for _, extra := range interventionNotes(iv, unmeasurable, rate) {
-		line += "\n      " + styles.MutedText.Render(extra)
-	}
-	return line
+// problemField is one labeled line of an entry, carrying every sentence that
+// files under that label.
+type problemField struct {
+	label  string
+	values []string
 }
 
-// interventionNotes are the sub-lines under a queued class. The range prints only
-// where the scorer made a claim; everywhere else the counts carry the denominator
-// in words. Coverage prints only when a window holds units no ledger decided.
-func interventionNotes(iv cadence.Intervention, unmeasurable bool, rate status.ChainRate) []string {
+// problemEntry renders one entry: its title, then its stacked labels. A field
+// with nothing to say prints no label.
+func problemEntry(title string, fields []problemField, width int) string {
+	out := styles.Wrap(title, problemIndent, width)
+	for _, f := range fields {
+		values := make([]string, 0, len(f.values))
+		for _, v := range f.values {
+			if strings.TrimSpace(v) != "" {
+				values = append(values, v)
+			}
+		}
+		if len(values) == 0 {
+			continue
+		}
+		out += styles.Field(f.label, values, problemFieldIndent, problemLabelWidth, width)
+	}
+	return out
+}
+
+// interventionBlock is one recorded problem. It reads the same fields the
+// dashboard's summary reads — what the fix is, what the result is, and one reason
+// or one step — plus the counts, which the dashboard keeps behind its detail key
+// and the terminal has nowhere else to put.
+func interventionBlock(iv cadence.Intervention, unmeasurable bool, rate status.ChainRate, width int) string {
 	unit := iv.Unit
 	if unit == "" {
 		unit = "unit"
 	}
-	notes := status.ProsePhrases(iv.Problem, iv.Intervention, iv.Tier == "" || iv.Tier == "none")
-	notes = append(notes, status.RecurrencePhrase(iv.Before, iv.After, unit))
+	v := status.ProblemView{
+		Declined:       iv.Tier == "" || iv.Tier == "none",
+		Tier:           iv.Tier,
+		Target:         iv.Target,
+		Intervention:   iv.Intervention,
+		Verdict:        iv.Verdict,
+		Unit:           unit,
+		Unmeasurable:   unmeasurable,
+		BeforeCoverage: iv.BeforeCoverage,
+		AfterCoverage:  iv.AfterCoverage,
+		Attribution:    iv.Attribution,
+		Confounds:      iv.Confounds,
+	}
+	result := []string{styles.MutedText.Render(status.ResultLabel(v))}
+	if limit := status.ComparisonLimit("composition", iv.Composition); limit != "" {
+		result = append(result, styles.MutedText.Render(limit))
+		for _, cause := range status.ComparisonCauses(iv.Composition) {
+			result = append(result, styles.MutedText.Render("· "+cause))
+		}
+	}
+
+	evidence := []string{status.RecurrencePhrase(iv.Before, iv.After, unit)}
 	if e := status.EffectClaimPhrase(iv.Verdict, iv.Effect); e != "" {
-		notes = append(notes, e)
-	}
-	gap := status.EvidenceGap(iv.Verdict, unit, iv.BeforeCoverage, iv.AfterCoverage, iv.Attribution)
-	if s := status.GapSentence(gap, iv.Verdict, unmeasurable); s != "" {
-		notes = append(notes, s)
-	}
-	if gap != nil && gap.Command != "" {
-		notes = append(notes, gap.Command)
-	}
-	if r := status.RatePhrase(iv.RequiredAfter, unit, rate); r != "" {
-		notes = append(notes, r)
-	} else if r := status.RequiredPhrase(iv.RequiredAfter, unit, iv.Verdict); r != "" {
-		notes = append(notes, r)
+		evidence = append(evidence, e)
 	}
 	if a := status.AttributionPhrase(iv.Attribution); a != "" {
-		notes = append(notes, a)
-	}
-	if limit := status.ComparisonLimit("confound", iv.Confounds); limit != "" {
-		notes = append(notes, limit)
-		notes = append(notes, status.ComparisonCauses(iv.Confounds)...)
-	}
-	if limit := status.ComparisonLimit("composition", iv.Composition); limit != "" {
-		notes = append(notes, limit)
-		notes = append(notes, status.ComparisonCauses(iv.Composition)...)
+		evidence = append(evidence, a)
 	}
 	if iv.BeforeCoverage.UnknownEvidence > 0 || iv.AfterCoverage.UnknownEvidence > 0 {
-		notes = append(notes, fmt.Sprintf("%d of the %d earlier %s and %d of the %d later %s carry no recorded decision",
+		evidence = append(evidence, fmt.Sprintf(
+			"%d of the %d earlier %s and %d of the %d later %s carry no recorded decision",
 			iv.BeforeCoverage.UnknownEvidence, iv.BeforeCoverage.Total,
 			status.UnitName(unit, iv.BeforeCoverage.Total),
 			iv.AfterCoverage.UnknownEvidence, iv.AfterCoverage.Total,
 			status.UnitName(unit, iv.AfterCoverage.Total)))
 	}
+
+	why := []string{status.ProblemWhy(v)}
+	if status.ComparisonLimit("confound", iv.Confounds) != "" {
+		for _, cause := range status.ComparisonCauses(iv.Confounds) {
+			why = append(why, "· "+cause)
+		}
+	}
+
+	next := []string{status.ProblemNext(v)}
+	if r := status.RatePhrase(iv.RequiredAfter, unit, rate); r != "" {
+		next = append(next, r)
+	} else if r := status.RequiredPhrase(iv.RequiredAfter, unit, iv.Verdict); r != "" {
+		next = append(next, r)
+	}
 	if unmeasurable || iv.Verdict == "harmful" {
-		notes = append(notes, status.RemovalPhrase(iv.Tier, iv.Target),
-			status.RetireCommand(iv.ID))
+		next = append(next, status.RemovalPhrase(iv.Tier, iv.Target),
+			styles.MutedText.Render("run: "+status.RetireCommand(iv.ID)))
 	}
-	return notes
+
+	return problemEntry(iv.Class, []problemField{
+		{"Problem", []string{iv.Problem}},
+		{status.FixLabel(v), []string{status.FixSummary(v)}},
+		{"Result", result},
+		{"Evidence", evidence},
+		{"Why", why},
+		{"Next", next},
+	}, width)
 }
 
-func candidateLine(c cadence.Candidate) string {
-	if c.Pattern != "" {
-		return fmt.Sprintf("%s — %s in your session history: %s in %d %s",
-			c.Pattern, candidateSource(c.Corpus), recurrenceCount(c.Count), c.Sessions,
-			status.UnitName("session", c.Sessions))
+// candidateBlock is one queued row: evidence nobody has decided yet. It names the
+// same handoff the dashboard names, because neither surface authors a record.
+func candidateBlock(c cadence.Candidate, width int) string {
+	title := c.Pattern
+	next := status.CandidateNext
+	if title == "" {
+		title = "Review findings not yet grouped into a problem"
+		if c.Dump != "" {
+			next = "read them with: " + c.Dump
+		}
 	}
-	line := fmt.Sprintf("%d %s carry a finding no problem covers yet",
-		c.UndecidedChains, status.UnitName("chain", c.UndecidedChains))
-	if c.Dump != "" {
-		line += ": " + c.Dump
-	}
-	return line
+	return problemEntry(title, []problemField{
+		{"Evidence", []string{status.CandidateEvidence(c)}},
+		{"Next", []string{next}},
+	}, width)
 }
 
-func candidateSource(corpus string) string {
-	switch corpus {
-	case "review-findings":
-		return "a repeated review finding"
-	case "transcript-friction":
-		return "a repeated pattern"
-	default:
-		return "a repeated pattern"
-	}
-}
-
-func recurrenceCount(n int) string {
-	if n == 1 {
-		return "1 recurrence"
-	}
-	return fmt.Sprintf("%d recurrences", n)
-}
-
-func renderSummary(s *status.SystemStatus) {
+func renderSummary(s *status.SystemStatus, width int) {
 	fmt.Println(styles.SectionHeader.Render("Recorded problems"))
 	if s.Summary.Total == 0 {
-		fmt.Println(styles.MutedText.Render("  no problems recorded on this machine"))
+		fmt.Print(styles.Wrap(styles.MutedText.Render("no problems recorded on this machine"), "  ", width))
 		return
 	}
-	fmt.Printf("  %d recorded %s\n", s.Summary.Total, problemWord(s.Summary.Total))
+	fmt.Print(styles.Wrap(fmt.Sprintf("%d recorded %s", s.Summary.Total, problemWord(s.Summary.Total)), "  ", width))
 	verdicts := make([]string, 0, len(s.Summary.Counts))
 	for v := range s.Summary.Counts {
 		verdicts = append(verdicts, v)

@@ -6,6 +6,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/steer-sh/steer-cli/internal/styles"
 )
 
 // title renders a panel title wrapped to the terminal, so a narrow window folds
@@ -28,9 +30,6 @@ func section(s string) string {
 // A terminal narrower than this wraps; a wider one uses what it has.
 const defaultWidth = 80
 
-// minWrapWidth keeps wrapping valid while the frame handles tiny terminals.
-const minWrapWidth = 1
-
 // bodyWidth is the cells a panel body may draw into.
 func (m *Model) bodyWidth() int {
 	if m.width <= 0 {
@@ -49,19 +48,7 @@ func (m *Model) bodyWidth() int {
 // is broken rather than left to run off the screen, so nothing needs horizontal
 // scrolling to read.
 func wrapTo(text, indent string, width int) string {
-	width = max(1, width)
-	if lipgloss.Width(indent) >= width {
-		indent = strings.Repeat(" ", max(0, width-1))
-	}
-	avail := width - lipgloss.Width(indent)
-	if avail < minWrapWidth {
-		avail = minWrapWidth
-	}
-	var b strings.Builder
-	for _, line := range strings.Split(ansi.Wrap(text, avail, ""), "\n") {
-		b.WriteString(indent + line + "\n")
-	}
-	return b.String()
+	return styles.Wrap(text, indent, width)
 }
 
 // fieldLabelWidth is the column the stacked labels share. A label wider than it

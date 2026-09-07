@@ -27,8 +27,8 @@ func TestEveryPostureRowCarriesItsOwnLabel(t *testing.T) {
 	}
 }
 
-// postureLabels reads the label of every row renderPosture prints: the text of
-// each format string before its first verb.
+// postureLabels reads the label of every row renderPosture prints: the first
+// argument of each postureRow call.
 func postureLabels(t *testing.T) []string {
 	t.Helper()
 	fset := token.NewFileSet()
@@ -44,18 +44,18 @@ func postureLabels(t *testing.T) []string {
 		}
 		ast.Inspect(fn.Body, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
-			if !ok || len(call.Args) == 0 || !isPrintf(call.Fun) {
+			if !ok || len(call.Args) == 0 || !isRowCall(call.Fun) {
 				return true
 			}
 			lit, ok := call.Args[0].(*ast.BasicLit)
 			if !ok || lit.Kind != token.STRING {
 				return true
 			}
-			format, err := strconv.Unquote(lit.Value)
+			label, err := strconv.Unquote(lit.Value)
 			if err != nil {
 				return true
 			}
-			if label := strings.TrimSpace(strings.SplitN(format, "%", 2)[0]); label != "" {
+			if label = strings.TrimSpace(label); label != "" {
 				labels = append(labels, label)
 			}
 			return true
@@ -64,12 +64,9 @@ func postureLabels(t *testing.T) []string {
 	return labels
 }
 
-// isPrintf reports whether a call is fmt.Printf.
-func isPrintf(fun ast.Expr) bool {
-	sel, ok := fun.(*ast.SelectorExpr)
-	if !ok || sel.Sel.Name != "Printf" {
-		return false
-	}
-	pkg, ok := sel.X.(*ast.Ident)
-	return ok && pkg.Name == "fmt"
+// isRowCall reports whether a call is postureRow, the one printer of a labeled
+// Arming row.
+func isRowCall(fun ast.Expr) bool {
+	id, ok := fun.(*ast.Ident)
+	return ok && id.Name == "postureRow"
 }

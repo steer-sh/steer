@@ -1,12 +1,9 @@
 package status
 
 import (
-	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/cadence"
-	"github.com/steer-sh/steer-cli/internal/gate/mine"
 )
 
 func fptr(f float64) *float64 { return &f }
@@ -82,30 +79,6 @@ func TestCoveragePhraseAccountsForEveryChain(t *testing.T) {
 	}
 	if got := CoveragePhrase(cadence.Coverage{Total: 8, Eligible: 8}); got != "8 eligible / 8" {
 		t.Errorf("a clean window carries no parenthetical, got %q", got)
-	}
-}
-
-// The prose lines lead, and a rejection's are labelled as what it considered rather
-// than as something that runs.
-func TestProsePhrasesLabelARejectionAsProposed(t *testing.T) {
-	got := ProsePhrases("the count goes stale", "check.sh refuses a literal count", false)
-	want := []string{
-		"Problem: the count goes stale",
-		"Fix: check.sh refuses a literal count",
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("installed = %v, want %v", got, want)
-	}
-	got = ProsePhrases("the reviewer repeats itself", mine.NoInterventionFound, true)
-	if len(got) != 2 || !strings.HasPrefix(got[1], "Fix considered: ") {
-		t.Errorf("rejected = %v, want a considered-fix label", got)
-	}
-}
-
-// A record written before the fields existed prints nothing rather than empty labels.
-func TestProsePhrasesSayNothingForALegacyRecord(t *testing.T) {
-	if got := ProsePhrases("", "", false); len(got) != 0 {
-		t.Errorf("want no lines for an unexplained record, got %v", got)
 	}
 }
 

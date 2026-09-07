@@ -76,7 +76,7 @@ var (
 )
 
 func Logo() string {
-	return BrandText.Render("🚀 steer")
+	return BrandText.Render("steer")
 }
 
 func StatusIndicator(status, message string) string {

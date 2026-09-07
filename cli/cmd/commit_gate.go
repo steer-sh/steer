@@ -345,7 +345,11 @@ func renderInstallReadiness(steps []status.Step, registered string) string {
 	if len(steps) == 0 {
 		return styles.SuccessBox.Render("Ready — the next `git commit` in scope is reviewed.\n\n" + registered)
 	}
-	lines := []string{fmt.Sprintf("Not reviewing yet — %d step(s) remain before the first review.", len(steps)), ""}
+	word := "steps remain"
+	if len(steps) == 1 {
+		word = "step remains"
+	}
+	lines := []string{fmt.Sprintf("Not reviewing yet — %d %s before the first review.", len(steps), word), ""}
 	for _, step := range steps {
 		lines = append(lines, "· "+step.Title)
 		if step.Fix != "" {
