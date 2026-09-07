@@ -18,19 +18,15 @@ import (
 type ProblemView struct {
 	// Declined is true for a fix that was considered and refused. Such a record
 	// installed nothing, so what it describes is the fix it considered.
-	Declined     bool
-	Tier         string
-	Target       string
-	Intervention string
-	Verdict      string
-	Unit         string
-	// Unmeasurable is this record's reading of the window it still needs,
-	// computed once by the caller so every field agrees.
-	Unmeasurable   bool
+	Declined       bool
+	Tier           string
+	Target         string
+	Intervention   string
+	Observation    mine.Observation
+	Scope          *cadence.Scope
+	Unit           string
 	BeforeCoverage cadence.Coverage
 	AfterCoverage  cadence.Coverage
-	Attribution    cadence.Attribution
-	Confounds      []mine.Confound
 }
 
 // FixLabel names the field the fix prints under.
@@ -54,7 +50,7 @@ func FixSummary(v ProblemView) string {
 
 // ResultLabel is the measured result in the reader's words.
 func ResultLabel(v ProblemView) string {
-	return VerdictLabel(v.Verdict, v.Unmeasurable)
+	return ObservationLabel(v.Observation)
 }
 
 // ProblemWhy is the reason a result is unavailable, and is empty where the reader
@@ -62,9 +58,6 @@ func ResultLabel(v ProblemView) string {
 // changed conditions the generic sentence cannot, so it replaces rather than
 // joins it.
 func ProblemWhy(v ProblemView) string {
-	if limit := ComparisonLimit("confound", v.Confounds); limit != "" {
-		return limit
-	}
 	why, _ := problemReason(v)
 	return why
 }
@@ -77,24 +70,20 @@ func ProblemNext(v ProblemView) string {
 }
 
 // problemReason splits the entry's one explanatory sentence into the reason a
-// result is unavailable and the step the reader can take. A result the scorer
-// withheld carries a reason and no step; a result that asks for work carries a
-// step. An unreachable window is the exception: its sentence names two choices,
-// so it is a step even though the entry asks for no repair.
+// result is unavailable and the step the reader can take. An observation that
+// asks nothing carries a reason and no step; one that asks the reader to look at
+// something carries a step.
 func problemReason(v ProblemView) (why, next string) {
-	gap := EvidenceGap(v.Verdict, v.Unit, v.BeforeCoverage, v.AfterCoverage, v.Attribution)
-	sentence := GapSentence(gap, v.Verdict, v.Unmeasurable)
+	gap := EvidenceGap(v.Observation, v.Scope)
+	sentence := GapSentence(gap, v.Observation, v.Scope)
 	if sentence == "" {
 		return "", ""
 	}
 	if gap != nil && gap.Command != "" {
 		sentence += " — run: " + gap.Command
 	}
-	if !v.Unmeasurable {
-		switch ActionFor(v.Verdict, false) {
-		case ActionAccept, ActionSettled:
-			return sentence, ""
-		}
+	if ActionFor(v.Observation, v.Scope) == ActionObserve {
+		return sentence, ""
 	}
 	return "", sentence
 }

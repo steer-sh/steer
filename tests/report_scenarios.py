@@ -47,6 +47,8 @@ refreshed queue. Skip Step 0, Step 2 and Step 3.
 Produce only the prose a user reads: the audit of the records in the snapshot,
 and the proposals for the candidates in the queue. Ask no questions, install
 nothing, and write no files. Do not emit JSON — this is the report itself.
+
+{request}
 """
 
 
@@ -63,7 +65,11 @@ def run_scenario(name: str, model: str) -> tuple[str, float]:
         env = os.environ.copy()
         env.pop("CLAUDECODE", None)  # a nested session is refused
         cmd = [
-            "claude", "-p", PROMPT.format(status=status, queue=queue),
+            "claude", "-p", PROMPT.format(
+                status=status, queue=queue,
+                request=("I have decided to remove the no-bare-python guard. Explain "
+                         "what removal changes and how it differs from stopping tracking."
+                         if name == "remove-a-guard" else "")),
             "--output-format", "json",
             "--model", model,
             "--no-session-persistence",

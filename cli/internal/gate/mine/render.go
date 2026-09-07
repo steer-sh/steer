@@ -776,19 +776,10 @@ func Score(w io.Writer, stateDir string, o ScoreOpts) error {
 	}
 	for _, r := range results {
 		where := firstNonEmpty(str(r["hook_id"]), str(r["target"]), "nothing installed")
-		fmt.Fprintf(w, "%s  [%s]  %s -> %s\n", r["id"], r["verdict"], r["tier"], where)
+		obs, _ := r["observation"].(Observation)
+		fmt.Fprintf(w, "%s  [%s]  %s -> %s\n", r["id"], observationState(obs), r["tier"], where)
 		fmt.Fprintf(w, "    class: %s\n", r["class"])
-		before, after := r["before"].(map[string]any), r["after"].(map[string]any)
-		fmt.Fprintf(w, "    before %d/%d (%s)   after %d/%d (%s)   p=%s\n",
-			before["hits"], before["chains"], pct(rateOf(before)),
-			after["hits"], after["chains"], pct(rateOf(after)),
-			r["p"].(json.Number).String())
-		fmt.Fprintf(w, "    effect %s  (%d%% range %s)%s\n",
-			effectPoint(r["effect"]), int(Confidence*100), effectRange(r["effect"]),
-			requiredSuffix(r["required_after"]))
-		if line := attributionLine(r["attribution"]); line != "" {
-			fmt.Fprintf(w, "    %s\n", line)
-		}
+		writeObservation(w, obs)
 		verb := "installed"
 		if refusalStatuses[str(r["status"])] {
 			verb = "rejected"
@@ -798,19 +789,80 @@ func Score(w io.Writer, stateDir string, o ScoreOpts) error {
 			fmt.Fprintf(w, "    reason: %s\n", r["reason"])
 			fmt.Fprintf(w, "    reopen if: %s\n", r["reopen"])
 		}
-		if r["instrument_drift"].(bool) {
-			fmt.Fprintf(w, "    INSTRUMENT DRIFT: regex authored on %s, after-window reviewed by %s — "+
-				"re-read the findings before trusting this verdict\n",
-				pyStr(r["instrument"]), strings.Join(r["after_instruments"].([]string), ", "))
-		}
-		if r["host_mix_drift"].(bool) {
-			fmt.Fprintf(w, "    HOST MIX DRIFT: before-window ran on %s, after-window on %s — "+
-				"the two windows describe different machines, so this rate compares more than the fix\n",
-				strings.Join(r["before_hosts"].([]string), ", "), strings.Join(r["after_hosts"].([]string), ", "))
-		}
 		fmt.Fprintln(w)
 	}
 	return nil
+}
+
+// observationState is the bracketed state on a scored line. It names what the
+// corpus recorded and claims no effect, so no reading of it can become one.
+func observationState(obs Observation) string {
+	switch {
+	case obs.Recurrence.Occurred:
+		return "recurred"
+	case obs.Firing.Applicable && !obs.Firing.LogPresent:
+		return "coverage-gap"
+	case observationCoverageGap(obs.Coverage.Before) || observationCoverageGap(obs.Coverage.After):
+		return "coverage-gap"
+	case obs.Coverage.ZeroEligibleAfter:
+		return "no-eligible-work"
+	}
+	return "quiet"
+}
+
+// observationCoverageGap reports units a window could not account for. The two
+// corpora break their unknowns down differently, so every key is read.
+func observationCoverageGap(c map[string]any) bool {
+	return numInt(c["unknown_scope"]) > 0 || numInt(c["unknown_evidence"]) > 0 ||
+		numInt(c["pending"]) > 0 || numInt(c["unknown"]) > 0
+}
+
+// writeObservation prints the field counts under one record: the windows, the
+// recurrence, the guard activity and the identities that counted each window.
+func writeObservation(w io.Writer, obs Observation) {
+	c := obs.Counts
+	fmt.Fprintf(w, "    window: split %s .. read %s  unit %s\n",
+		stamp(c.SplitTS), stamp(c.ObservedTS), orUnitWord(c.Unit))
+	fmt.Fprintf(w, "    before %d/%d   after %d/%d\n",
+		c.Before.Hits, c.Before.Eligible, c.After.Hits, c.After.Eligible)
+	if obs.Recurrence.Occurred {
+		fmt.Fprintf(w, "    recurrence: %d after the split (%s)\n",
+			obs.Recurrence.Matches, firstNonEmpty(obs.Recurrence.ExampleKind, "no example"))
+		if obs.Recurrence.Example != "" {
+			fmt.Fprintf(w, "      newest: %s\n", obs.Recurrence.Example)
+		}
+	} else {
+		fmt.Fprintln(w, "    recurrence: none after the split")
+	}
+	switch {
+	case !obs.Firing.Applicable:
+		fmt.Fprintln(w, "    firing: not applicable — this tier writes no audit rows")
+	case !obs.Firing.LogPresent:
+		fmt.Fprintln(w, "    firing: unknown — no guard audit log on this machine")
+	default:
+		fmt.Fprintf(w, "    firing: %d rows for %s, counted over %s (class-scoped=%t)\n",
+			obs.Firing.Rows, obs.Firing.HookID, obs.Firing.Scope, obs.Firing.ClassScoped)
+	}
+	if obs.Coverage.ZeroEligibleAfter {
+		fmt.Fprintln(w, "    coverage: no eligible work has arrived since the split")
+	}
+	fmt.Fprintf(w, "    %s: before %s  after %s\n", obs.Provenance.Kind,
+		joinOrNone(obs.Provenance.Before), joinOrNone(obs.Provenance.After))
+	fmt.Fprintln(w, "    these counts describe each period; they do not establish that the fix caused a change")
+}
+
+func orUnitWord(unit string) string {
+	if unit == "" {
+		return "unit"
+	}
+	return unit
+}
+
+func joinOrNone(v []string) string {
+	if len(v) == 0 {
+		return "none recorded"
+	}
+	return strings.Join(v, ", ")
 }
 
 func rateOf(m map[string]any) float64 {

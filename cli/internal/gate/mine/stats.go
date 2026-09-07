@@ -59,52 +59,6 @@ func Measure(bHits, bTotal int, bRate float64, afterHits []bool, aRate float64) 
 	return m
 }
 
-// VerdictFor classifies an installed intervention from its range. It abstains — with
-// collecting or inconclusive — whenever the range clears no boundary.
-func VerdictFor(m Measurement, aTotal, minAfter int) string {
-	if !m.HasBaseline {
-		return "no-baseline"
-	}
-	if aTotal < minAfter {
-		return "collecting"
-	}
-	lower, upper := m.Effect.Lower, m.Effect.Upper
-	switch {
-	case upper <= EffectiveRatio:
-		return "effective"
-	case lower > HarmfulRatio:
-		return "harmful"
-	case lower > EffectiveRatio:
-		return "ineffective"
-	case m.Required == 0 || aTotal < m.Required:
-		return "collecting"
-	default:
-		return "inconclusive"
-	}
-}
-
-// TrendFor classifies a rejected class by how its incidence moved after the refusal.
-// class-inconclusive is the abstention: the range supports no conclusion yet.
-func TrendFor(m Measurement, aTotal, minAfter int) string {
-	if !m.HasBaseline {
-		return "no-baseline"
-	}
-	if aTotal < minAfter {
-		return "class-inconclusive"
-	}
-	lower, upper := m.Effect.Lower, m.Effect.Upper
-	switch {
-	case lower >= GrowthRatio:
-		return "class-grew"
-	case upper <= EffectiveRatio:
-		return "class-faded"
-	case lower >= EffectiveRatio && upper <= GrowthRatio:
-		return "class-steady"
-	default:
-		return "class-inconclusive"
-	}
-}
-
 // effectMap renders an Effect for the scored record. An unbounded upper bound and an
 // undefined estimate are both null.
 func effectMap(e Effect) map[string]any {

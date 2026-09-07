@@ -94,10 +94,10 @@ func TestCollectFullInventoryAndTelemetry(t *testing.T) {
 		t.Fatalf("want 1 inventory row, got %d", len(s.Interventions))
 	}
 	iv := s.Interventions[0]
-	// The class was eliminated after install: its after-window carries a different
-	// finding, so the verdict is a decided one, never insufficient-data.
-	if iv.Verdict == "" || iv.Verdict == "insufficient-data" {
-		t.Errorf("class should score a decided verdict, got %q", iv.Verdict)
+	// The class was absent after install; the observation records that fact without
+	// turning it into an efficacy claim.
+	if iv.Observation.Recurrence.Occurred {
+		t.Error("class should not recur in the after window")
 	}
 	if iv.Before.Hits == 0 {
 		t.Error("the before window should carry the class")
@@ -105,8 +105,8 @@ func TestCollectFullInventoryAndTelemetry(t *testing.T) {
 	if iv.After.Hits != 0 {
 		t.Errorf("the after window eliminated the class, got %d hits", iv.After.Hits)
 	}
-	if s.Summary.Counts[iv.Verdict] != 1 {
-		t.Errorf("summary should count the verdict once, got %+v", s.Summary.Counts)
+	if s.Summary.Counts[ActionRepair] != 1 {
+		t.Errorf("summary should count the repair action once, got %+v", s.Summary.Counts)
 	}
 
 	// Telemetry: 24 chains total (12 before + 12 after), no denials, no audit log.
@@ -174,7 +174,7 @@ func intPtr(n int) *int           { return &n }
 // so a renamed or reordered json tag fails here, the agent-contract guard.
 func TestJSONContractIsStable(t *testing.T) {
 	s := &SystemStatus{
-		StatusVersion: 6,
+		StatusVersion: 11,
 		GeneratedAt:   "2026-01-01T00:00:00Z",
 		Posture: Posture{
 			Instrument: "agy@sha", Reviewer: "gemini", Ledger: "/l.jsonl",
@@ -211,36 +211,29 @@ func TestJSONContractIsStable(t *testing.T) {
 			Intervention: "a guard refuses a parser branch that drops a flag",
 			LegacyNote:   "guard tier 2",
 			Match:        "widget.*flag", Tier: "guard", Target: "guard.py",
-			Status: "active", HookID: "no-widget-flag", Verdict: "effective",
+			Status: "active", HookID: "no-widget-flag",
 			Corpus: mine.CorpusReviewFindings, Unit: mine.UnitChain,
-			Attribution: cadence.Attribution{
-				Applicable: true, LogPresent: true, HookID: "no-widget-flag", Firings: 3, Sessions: 2,
-			},
 			Before: cadence.Incidence{Hits: 12, Units: 12, Rate: 1}, After: cadence.Incidence{Hits: 0, Units: 12, Rate: 0},
-			PValue: 0.02, InstrumentDrift: true, FiringsApplicable: true,
+			Observation: mine.Observation{
+				Firing:     mine.FiringActivity{Applicable: true, LogPresent: true, HookID: "no-widget-flag", Scope: mine.FiringScopeWindowPeriod, Rows: 3, Units: 2},
+				Coverage:   mine.ObservationCoverage{Before: map[string]any{"total": 14, "eligible": 12, "ineligible": 1, "unknown": 1, "unknown_scope": 1}, After: map[string]any{"total": 13, "eligible": 12, "unknown": 1, "unknown_evidence": 1, "pending": 1}, ZeroEligibleAfter: false},
+				Provenance: mine.ObservationProvenance{Kind: mine.ProvenanceReviewer, Before: []string{"a"}, After: []string{"a", "b"}},
+			},
 			Scope:          &cadence.Scope{Version: 1, Repo: "steer.*", Path: `\.go$`},
 			BeforeCoverage: cadence.Coverage{Total: 14, Eligible: 12, Ineligible: 1, Unknown: 1, UnknownScope: 1},
 			AfterCoverage:  cadence.Coverage{Total: 13, Eligible: 12, Unknown: 1, UnknownEvidence: 1, Pending: 1, PartialExposure: 1},
-			Effect: cadence.Effect{
-				Estimate: floatPtr(0), Lower: 0, Upper: floatPtr(0.31),
-				Confidence: 0.9, Method: "clopper-pearson / mixture-cs",
-			},
-			RequiredAfter: intPtr(9),
-			Confounds:     []mine.Confound{},
-			Composition:   []mine.Confound{{Category: "host", Reason: "host set changed", Before: []string{"a"}, After: []string{"a", "b"}}},
 		}, {
 			ID: "taste-nit", Class: "taste nit",
 			Problem:      "the reviewer raises a wording preference with no defect behind it",
 			Intervention: "no suitable intervention was identified",
 			Match:        "nit", Tier: "check", Target: "check.sh",
-			Status: "rejected", Verdict: "class-steady",
+			Status: "rejected",
 			Corpus: mine.CorpusTranscript, Unit: mine.UnitSession, SignalKind: mine.SignalCorrection,
 			Reason: "not mechanizable", Reopen: "incidence doubles", RejectedTS: 1700,
 			Scope:       &cadence.Scope{Version: 1, All: true},
-			Confounds:   []mine.Confound{},
-			Composition: []mine.Confound{},
+			Observation: mine.Observation{Declined: true, Coverage: mine.ObservationCoverage{Before: map[string]any{}, After: map[string]any{}, ZeroEligibleAfter: true}, Provenance: mine.ObservationProvenance{Kind: mine.ProvenanceParser}},
 		}},
-		Summary: VerdictSummary{Total: 2, Counts: map[string]int{"effective": 1, "class-steady": 1}},
+		Summary: VerdictSummary{Total: 2, Counts: map[string]int{ActionRepair: 1, ActionObserve: 1}},
 		Chains: []ChainSummary{{
 			Host: "h", StartTS: 1000, Rounds: 2, Files: 1, Findings: 1, Accepted: 1, Sessions: 1, Terminal: "clean",
 		}},
@@ -274,7 +267,7 @@ func TestJSONContractIsStable(t *testing.T) {
 }
 
 const goldenStatusJSON = `{
-  "status_version": 6,
+  "status_version": 11,
   "generated_at": "2026-01-01T00:00:00Z",
   "posture": {
     "instrument": "agy@sha",
@@ -370,7 +363,6 @@ const goldenStatusJSON = `{
       "target": "guard.py",
       "status": "active",
       "hook_id": "no-widget-flag",
-      "verdict": "effective",
       "before": {
         "hits": 12,
         "units": 12,
@@ -381,9 +373,66 @@ const goldenStatusJSON = `{
         "units": 12,
         "rate": 0
       },
-      "p_value": 0.02,
-      "instrument_drift": true,
-      "firings_applicable": true,
+      "observation": {
+        "counts": {
+          "split_ts": 0,
+          "observed_ts": 0,
+          "unit": "",
+          "before": {
+            "hits": 0,
+            "eligible": 0,
+            "first_activity_ts": 0,
+            "last_activity_ts": 0
+          },
+          "after": {
+            "hits": 0,
+            "eligible": 0,
+            "first_activity_ts": 0,
+            "last_activity_ts": 0
+          }
+        },
+        "recurrence": {
+          "occurred": false,
+          "matches": 0
+        },
+        "firing": {
+          "applicable": true,
+          "log_present": true,
+          "hook_id": "no-widget-flag",
+          "scope": "window_period",
+          "class_scoped": false,
+          "rows": 3,
+          "units": 2
+        },
+        "coverage": {
+          "before": {
+            "eligible": 12,
+            "ineligible": 1,
+            "total": 14,
+            "unknown": 1,
+            "unknown_scope": 1
+          },
+          "after": {
+            "eligible": 12,
+            "pending": 1,
+            "total": 13,
+            "unknown": 1,
+            "unknown_evidence": 1
+          },
+          "zero_eligible_after": false
+        },
+        "provenance": {
+          "kind": "reviewer",
+          "before": [
+            "a"
+          ],
+          "after": [
+            "a",
+            "b"
+          ]
+        },
+        "declined": false
+      },
       "scope": {
         "version": 1,
         "repo": "steer.*",
@@ -409,37 +458,8 @@ const goldenStatusJSON = `{
         "pending": 1,
         "partial_exposure": 1
       },
-      "effect": {
-        "estimate": 0,
-        "lower": 0,
-        "upper": 0.31,
-        "confidence": 0.9,
-        "method": "clopper-pearson / mixture-cs"
-      },
-      "required_after": 9,
-      "confounds": [],
-      "composition": [
-        {
-          "category": "host",
-          "reason": "host set changed",
-          "before": [
-            "a"
-          ],
-          "after": [
-            "a",
-            "b"
-          ]
-        }
-      ],
       "corpus": "review-findings",
-      "unit": "chain",
-      "attribution": {
-        "applicable": true,
-        "log_present": true,
-        "hook_id": "no-widget-flag",
-        "firings": 3,
-        "sessions": 2
-      }
+      "unit": "chain"
     },
     {
       "id": "taste-nit",
@@ -450,7 +470,6 @@ const goldenStatusJSON = `{
       "tier": "check",
       "target": "check.sh",
       "status": "rejected",
-      "verdict": "class-steady",
       "before": {
         "hits": 0,
         "units": 0,
@@ -461,7 +480,47 @@ const goldenStatusJSON = `{
         "units": 0,
         "rate": 0
       },
-      "firings_applicable": false,
+      "observation": {
+        "counts": {
+          "split_ts": 0,
+          "observed_ts": 0,
+          "unit": "",
+          "before": {
+            "hits": 0,
+            "eligible": 0,
+            "first_activity_ts": 0,
+            "last_activity_ts": 0
+          },
+          "after": {
+            "hits": 0,
+            "eligible": 0,
+            "first_activity_ts": 0,
+            "last_activity_ts": 0
+          }
+        },
+        "recurrence": {
+          "occurred": false,
+          "matches": 0
+        },
+        "firing": {
+          "applicable": false,
+          "log_present": false,
+          "class_scoped": false,
+          "rows": 0,
+          "units": 0
+        },
+        "coverage": {
+          "before": {},
+          "after": {},
+          "zero_eligible_after": true
+        },
+        "provenance": {
+          "kind": "parser",
+          "before": null,
+          "after": null
+        },
+        "declined": true
+      },
       "reason": "not mechanizable",
       "reopen": "incidence doubles",
       "rejected_ts": 1700,
@@ -489,32 +548,16 @@ const goldenStatusJSON = `{
         "pending": 0,
         "partial_exposure": 0
       },
-      "effect": {
-        "estimate": null,
-        "lower": 0,
-        "upper": null,
-        "confidence": 0,
-        "method": ""
-      },
-      "required_after": null,
-      "confounds": [],
-      "composition": [],
       "corpus": "transcript-friction",
       "unit": "session",
-      "signal_kind": "user_corrections",
-      "attribution": {
-        "applicable": false,
-        "log_present": false,
-        "firings": 0,
-        "sessions": 0
-      }
+      "signal_kind": "user_corrections"
     }
   ],
   "summary": {
     "total": 2,
     "counts": {
-      "class-steady": 1,
-      "effective": 1
+      "observe": 1,
+      "repair": 1
     }
   },
   "chains": [
@@ -530,10 +573,6 @@ const goldenStatusJSON = `{
       "terminal": "clean"
     }
   ],
-  "chain_rate": {
-    "per_day": 0,
-    "known": false
-  },
   "attention": {
     "interventions": [],
     "unscored": [],

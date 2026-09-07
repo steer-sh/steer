@@ -20,7 +20,6 @@ func TestEveryWrappedLineLandsInItsOwnColumn(t *testing.T) {
 			Problem: long,
 			Tier:    "check",
 			Target:  "check.sh",
-			Verdict: "collecting",
 			Unit:    "chain",
 		}}},
 	}

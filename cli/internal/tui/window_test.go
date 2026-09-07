@@ -55,7 +55,7 @@ func TestNoPanelOverflowsTheTerminal(t *testing.T) {
 		gates = append(gates, status.ScopeArming{Harness: "claude-code", Scope: fmt.Sprint(i)})
 		cands = append(cands, cadence.Candidate{Pattern: fmt.Sprintf("p%02d", i), Corpus: "review-findings"})
 		scored = append(scored, status.ScoredIntervention{ID: fmt.Sprint(i), Class: "c", Match: "m",
-			Tier: "check", Target: "check.sh", Status: "active", Verdict: "collecting"})
+			Tier: "check", Target: "check.sh", Status: "active"})
 	}
 	m.snap = &status.SystemStatus{
 		Posture:       status.Posture{CommitGate: gates},

@@ -67,25 +67,39 @@ func scoreSession(t *testing.T, r Record, ev EvidenceSet, minAfter int) map[stri
 	return res
 }
 
-// A guard's win is only its own when the audit log says it fired inside the window.
-func TestSessionEffectiveNeedsAJoinedFiring(t *testing.T) {
+// observed reads the observation off a scored record, which is where every field
+// count now lives.
+func observed(t *testing.T, res map[string]any) Observation {
+	t.Helper()
+	obs, ok := res["observation"].(Observation)
+	if !ok {
+		t.Fatal("a scored session record must carry an observation")
+	}
+	return obs
+}
+
+// Guard activity rides beside the counts and is never folded into them. A quiet
+// window with no firing and a quiet window with one read the same on the counts and
+// differ on the firing block, which is the whole point of reporting both.
+func TestSessionFiringActivityRidesBesideTheCounts(t *testing.T) {
 	units := append(window(1000, 12, "claude-code", "proj", "bare python here"),
 		window(3000, 12, "claude-code", "proj", "nothing here")...)
 	r := sessionRecord(t, "bare python", "guard", "no-bare-python", 2000)
 
-	silent := scoreSession(t, r, EvidenceSet{Sessions: units, AuditPresent: true}, 12)
-	check(t, "a fall the guard never caused", silent["verdict"], "unattributed")
+	silent := observed(t, scoreSession(t, r, EvidenceSet{Sessions: units, AuditPresent: true}, 12))
+	check(t, "the class did not recur", silent.Recurrence.Occurred, false)
+	check(t, "the guard recorded nothing", silent.Firing.Rows, 0)
+	check(t, "and that zero is known", silent.Firing.Known(), true)
+	check(t, "the join is class-scoped", silent.Firing.ClassScoped, true)
 
 	firings := []Firing{{HookID: "no-bare-python", Harness: "claude-code", SessionID: "s3000", TS: 3000}}
 	joined := scoreSession(t, r, EvidenceSet{Sessions: units, Firings: firings, AuditPresent: true}, 12)
-	check(t, "a fall the guard caused", joined["verdict"], "effective")
-	attr := joined["attribution"].(Attribution)
-	check(t, "the join counts rows", attr.Firings, 1)
-	check(t, "the join counts sessions", attr.Sessions, 1)
+	check(t, "the join counts rows", observed(t, joined).Firing.Rows, 1)
+	check(t, "the join counts sessions", observed(t, joined).Firing.Units, 1)
 
-	// No readable audit stream is missing evidence, not a silent guard.
-	blind := scoreSession(t, r, EvidenceSet{Sessions: units, AuditPresent: false}, 12)
-	check(t, "no audit stream withholds", blind["verdict"], "evidence-incomplete")
+	// No readable audit stream is unknown activity, not a silent guard.
+	blind := observed(t, scoreSession(t, r, EvidenceSet{Sessions: units, AuditPresent: false}, 12))
+	check(t, "an absent log is not a zero", blind.Firing.Known(), false)
 }
 
 // The join is exact: a firing from another harness, another hook or another session is
@@ -101,41 +115,50 @@ func TestSessionFiringJoinIsExact(t *testing.T) {
 		{HookID: "no-bare-python", Harness: "claude-code", SessionID: "unknown"},
 	}
 	res := scoreSession(t, r, EvidenceSet{Sessions: units, Firings: wrong, AuditPresent: true}, 12)
-	check(t, "no row joins", res["attribution"].(Attribution).Firings, 0)
-	check(t, "so the fall stays unattributed", res["verdict"], "unattributed")
+	check(t, "no row joins", observed(t, res).Firing.Rows, 0)
+	check(t, "and the zero is a known one", observed(t, res).Firing.Known(), true)
 }
 
-// A class that persisted while the guard stayed silent is a mis-aimed matcher, which
-// is a different repair from a guard that fired and did not help.
-func TestSessionClassPersistingWithNoFiringIsNotTriggered(t *testing.T) {
+// A recurrence and the guard activity are two separate readings. A class that kept
+// matching while the guard recorded nothing reads differently from one that kept
+// matching while the guard blocked, and neither reading is an efficacy claim.
+func TestSessionRecurrenceIsReportedBesideFiring(t *testing.T) {
 	units := append(window(1000, 12, "claude-code", "proj", "bare python here"),
 		window(3000, 12, "claude-code", "proj", "bare python here")...)
 	r := sessionRecord(t, "bare python", "guard", "no-bare-python", 2000)
-	res := scoreSession(t, r, EvidenceSet{Sessions: units, AuditPresent: true}, 12)
-	check(t, "a silent guard over a live class", res["verdict"], "not-triggered")
+	silent := observed(t, scoreSession(t, r, EvidenceSet{Sessions: units, AuditPresent: true}, 12))
+	check(t, "the class recurred", silent.Recurrence.Occurred, true)
+	check(t, "the guard recorded nothing", silent.Firing.Rows, 0)
+	check(t, "the example is a cluster key", silent.Recurrence.ExampleKind, ExampleClusterKey)
 
 	firings := []Firing{{HookID: "no-bare-python", Harness: "claude-code", SessionID: "s3005"}}
-	fired := scoreSession(t, r, EvidenceSet{Sessions: units, Firings: firings, AuditPresent: true}, 12)
-	check(t, "a firing guard over a live class", fired["verdict"], "ineffective")
+	fired := observed(t, scoreSession(t, r, EvidenceSet{Sessions: units, Firings: firings, AuditPresent: true}, 12))
+	check(t, "the class still recurred", fired.Recurrence.Occurred, true)
+	check(t, "and the guard blocked once", fired.Firing.Rows, 1)
 }
 
-// A tier that writes no audit rows reads the range alone.
-func TestSessionNonGuardTierKeepsTheRangeVerdict(t *testing.T) {
+// A tier that writes no audit rows carries the counts with no firing block at all,
+// so a reader never mistakes "writes none" for "recorded none".
+func TestSessionNonGuardTierReportsNoFiring(t *testing.T) {
 	units := append(window(1000, 12, "claude-code", "proj", "bare python here"),
 		window(3000, 12, "claude-code", "proj", "nothing here")...)
 	r := sessionRecord(t, "bare python", "check", "", 2000)
-	res := scoreSession(t, r, EvidenceSet{Sessions: units}, 12)
-	check(t, "attribution does not apply", res["attribution"].(Attribution).Applicable, false)
-	check(t, "the range stands alone", res["verdict"], "effective")
+	obs := observed(t, scoreSession(t, r, EvidenceSet{Sessions: units}, 12))
+	check(t, "firing does not apply", obs.Firing.Applicable, false)
+	check(t, "the before-window carries the hits", obs.Counts.Before.Hits, 12)
+	check(t, "the after-window carries none", obs.Counts.After.Hits, 0)
+	check(t, "over its own eligible sessions", obs.Counts.After.Eligible, 12)
 }
 
-// A thin after-window is collecting, whatever the point estimate says.
-func TestSessionThinAfterWindowIsCollecting(t *testing.T) {
+// A thin after-window reports its own size rather than a threshold. The reader sees
+// two sessions and decides what that is worth.
+func TestSessionThinAfterWindowReportsItsSize(t *testing.T) {
 	units := append(window(1000, 12, "claude-code", "proj", "bare python here"),
 		window(3000, 2, "claude-code", "proj", "nothing here")...)
 	r := sessionRecord(t, "bare python", "check", "", 2000)
-	res := scoreSession(t, r, EvidenceSet{Sessions: units}, 12)
-	check(t, "too few sessions to decide", res["verdict"], "collecting")
+	obs := observed(t, scoreSession(t, r, EvidenceSet{Sessions: units}, 12))
+	check(t, "the after-window names its eligible sessions", obs.Counts.After.Eligible, 2)
+	check(t, "and its hits", obs.Counts.After.Hits, 0)
 }
 
 // Partial exposure is its own coverage category: a session that straddles the install
@@ -155,11 +178,14 @@ func TestSessionPartialExposureIsItsOwnCategory(t *testing.T) {
 	check(t, "it is not eligible", before["eligible"], 12)
 	check(t, "every session is accounted for", before["total"], 13)
 
-	// A window emptied only by partial exposure fills on its own, so it is collecting.
+	// A window emptied only by partial exposure holds no eligible session, which the
+	// coverage says outright rather than through a withheld verdict.
 	only := []SessionUnit{spans(friction(1900, "claude-code", "proj", "bare python here"), 2100)}
-	thin := scoreSession(t, sessionRecord(t, "bare python", "check", "", 2000),
-		EvidenceSet{Sessions: only}, 1)
-	check(t, "no eligible session either side", thin["verdict"], "collecting")
+	thin := observed(t, scoreSession(t, sessionRecord(t, "bare python", "check", "", 2000),
+		EvidenceSet{Sessions: only}, 1))
+	check(t, "no eligible session either side", thin.Counts.After.Eligible, 0)
+	check(t, "and the flag says the after-window is empty", thin.Coverage.ZeroEligibleAfter, true)
+	check(t, "the straddling session is counted as partly exposed", thin.Coverage.After["partial_exposure"], 1)
 }
 
 // A harness scope freezes the denominator: a session from another harness is
@@ -178,20 +204,32 @@ func TestSessionHarnessScopeSelectsTheDenominator(t *testing.T) {
 	before := res["before_coverage"].(map[string]any)
 	check(t, "only the scoped harness counts", before["eligible"], 12)
 	check(t, "the other harness is ineligible", before["ineligible"], 6)
-	check(t, "the elimination is measured on codex alone", res["verdict"], "effective")
+	check(t, "the counts run over codex alone", observed(t, res).Counts.Before.Eligible, 12)
 
 	unstamped := []SessionUnit{friction(1000, "", "proj", "bare python here")}
-	unknown := scoreSession(t, r, EvidenceSet{Sessions: unstamped}, 1)
-	check(t, "an unstamped session cannot be decided", unknown["verdict"], "evidence-incomplete")
+	unknown := observed(t, scoreSession(t, r, EvidenceSet{Sessions: unstamped}, 1))
+	check(t, "an unstamped session is unknown, not ineligible", unknown.Coverage.Before["unknown"], 1)
+	check(t, "so it enters no count", unknown.Counts.Before.Eligible, 0)
 }
 
-// Two windows sharing no harness measure two different populations.
-func TestSessionDisjointHarnessIsAConfound(t *testing.T) {
+// Two windows sharing no harness measure two different populations, and each window
+// reports the harnesses it held so a reader can see that for themselves.
+func TestSessionHarnessesAreReportedPerWindow(t *testing.T) {
 	units := append(window(1000, 12, "claude-code", "proj", "bare python here"),
 		window(3000, 12, "codex", "proj", "nothing here")...)
 	r := sessionRecord(t, "bare python", "check", "", 2000)
 	res := scoreSession(t, r, EvidenceSet{Sessions: units}, 12)
-	check(t, "a swapped harness withholds", res["verdict"], "confounded")
+	checkStrings(t, "the before-window names its harness", res["before_hosts"], []string{"claude-code"})
+	checkStrings(t, "the after-window names another", res["after_hosts"], []string{"codex"})
+}
+
+// checkStrings compares a scored record's string list against what the window held.
+func checkStrings(t *testing.T, what string, got any, want []string) {
+	t.Helper()
+	list, _ := got.([]string)
+	if fmt.Sprint(list) != fmt.Sprint(want) {
+		t.Errorf("%s: got %v, want %v", what, list, want)
+	}
 }
 
 // The two scopes share one store on a migrated machine, so a row read twice is one

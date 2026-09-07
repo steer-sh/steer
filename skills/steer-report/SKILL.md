@@ -11,7 +11,7 @@ allowed-tools: Bash(steer *), Read, Edit, Write
 
 This skill closes the friction loop. It decides two things, in this order:
 
-1. **Did the interventions already installed work?** Ineffective ones get reworked or removed.
+1. **Is a problem the loop already answered still happening?** A class that came back gets reworked or removed.
 2. **Which new patterns recur often enough to deserve a hook?** Both corpora feed this — transcript friction and commit-review findings.
 
 The audit comes first on purpose. Proposing new hooks is the interesting half, and skipping the audit is how a log of interventions turns into a graveyard of unmeasured good intentions.
@@ -52,12 +52,12 @@ STEER_BIN="${STEER_BIN:-steer}"
 ```
 
 Read `${TMPDIR:-/tmp}/steer-status.json` **once**. The `interventions[]` array is
-the **full** scored inventory — every live class across every tier, `effective`
-ones included. This is your dedup source: when you cluster new candidates in
-Step 3, drop any class already here scored `effective` or `ineffective`. An
-`ineffective` class is a rework, not a new hook. The schema is documented in "The
-`steer status --json` contract" below. Fail soft — if the command errors, say so
-in one line and continue; the audit below still runs.
+the **full** inventory — every live class across every tier. This is your dedup
+source: when you cluster new candidates in Step 3, drop any class already here. A
+class in this list is already decided, so a new hook for it is a rework of that
+record. The schema is documented in "The `steer status --json` contract" below.
+Fail soft — if the command errors, say so in one line and continue; the audit
+below still runs.
 
 A deterministic tier runs this loop's mechanical half — scoring, corpus sweeps, threshold checks — with no model. It may have run on a schedule already; run it again now, synchronously, so you never read a stale queue. It takes seconds and spends no tokens.
 
@@ -65,14 +65,14 @@ A deterministic tier runs this loop's mechanical half — scoring, corpus sweeps
 steer report refresh --days 30
 ```
 
-Then Read the queue **once**: `~/.steer/state/steer-report/queue.json` (`version: 4`). It holds:
+Then Read the queue **once**: `~/.steer/state/steer-report/queue.json` (`version: 5`). It holds:
 
-- `interventions[]` — full contract records the tier already scored and flagged as **needing attention** (verdict `harmful`, `ineffective`, `not-triggered`, `unattributed`, `class-grew`, `legacy-unscoped`, `evidence-incomplete` or `confounded`). These carry a `match`; they are the audit's action list, pre-filtered. Each carries `problem` and `intervention` — the record's own explanation of what goes wrong and what it does about it, authored when the class was found. Lead your report with those rather than with the class name or the regex, and correct one that no longer describes the evidence with `steer fix describe ID`, which changes no window. Each also carries the measurement conditions the verdict rests on: `corpus` and `unit` (`review-findings` counts by `chain`, `transcript-friction` by `session` — never compare the two rates), `signal_kind` on a session-unit record, `scope` (the frozen eligibility rule, `null` on a legacy record), `before_coverage` / `after_coverage` (`total`, `eligible`, `ineligible`, `unknown`, `unknown_scope`, `unknown_evidence`, `pending`, `partial_exposure`), the `effect` range, `required_after`, `confounds` / `composition`, and `attribution` — the guard's audit join over the after-window (`applicable`, `log_present`, `hook_id`, `firings`, `sessions`).
-- `unscored[]` — ids of records no engine reads. Report their existence; do not read a verdict into them.
+- `interventions[]` — full contract records the tier flagged as **asking for a reader**: the class recurred after the split, a coverage cause left the window unaccounted for, or the record carries no frozen scope. These carry a `match`; they are the audit's action list, pre-filtered. Each carries `problem` and `intervention` — the record's own explanation of what goes wrong and what it does about it, authored when the class was found. Lead your report with those rather than with the class name or the regex, and correct one that no longer describes the evidence with `steer fix describe ID`, which changes no window. Each also carries the conditions the counts were taken under: `corpus` and `unit` (`review-findings` counts by `chain`, `transcript-friction` by `session` — never compare the two rates), `signal_kind` on a session-unit record, `scope` (the frozen eligibility rule, `null` on a legacy record), `before_coverage` / `after_coverage` (`total`, `eligible`, `ineligible`, `unknown`, `unknown_scope`, `unknown_evidence`, `pending`, `partial_exposure`), and `observation` — the five field blocks documented in the status contract below.
+- `unscored[]` — ids of records no engine reads. Report their existence; do not read a result into them.
 - `candidates[]` — pointers to new clusters. Transcript rows carry `pattern`/`count`/`sessions`; the review row carries `undecided_chains` and a `dump` command. These carry **no** `match` — authoring the regex is your job, below.
 - `corpora[]` — one row per corpus (`review-findings`, `transcript-friction`, `auto-denials`) with `present` and `size`. Relay this sweep to the user in one sentence.
 
-The queue tells you what is pending. The full dumps below are the raw material you cluster over. Score the review-history fixes for the complete audit — the queue lists only the ones needing action, not the `effective` or abstaining ones worth showing too. If this machine has no commit-review ledger, `mine score` reports an empty corpus — say "no fixes to audit on this machine" in one line and go to Step 2.
+The queue tells you what is pending. The full dumps below are the raw material you cluster over. Read the review-history fixes for the complete audit — the queue lists only the ones asking for a reader, not the quiet ones worth showing too. If this machine has no commit-review ledger, `mine score` reports an empty corpus — say "no fixes to audit on this machine" in one line and go to Step 2.
 
 ```bash
 steer fix score
@@ -83,55 +83,37 @@ steer fix score
 name and still works, as does `steer commit-gate mine`; `findings`, which dumps the
 review corpus rather than managing a fix, lives only under the latter.
 
-Each record reports before/after incidence over its own unit — the fraction of reviewed commits on which the class appeared for a `review-findings` record, or the fraction of root sessions carrying it for a `transcript-friction` one — split at the install timestamp, and an `effect` range: the after-rate divided by the before-rate, at 90% confidence. The verdict reads that range, never the point rate. `required_after` is the clean after-window the class would need before any conclusion is available; a record below it is still collecting. The `p` field is a Fisher cross-check that no verdict reads.
+Each record reports before/after incidence over its own unit — the fraction of reviewed commits on which the class appeared for a `review-findings` record, or the fraction of root sessions carrying it for a `transcript-friction` one — split at the install timestamp. **The comparison is uncontrolled and the record makes no efficacy claim.** The dominant input to an agent's behaviour is its standing instruction set — CLAUDE.md, AGENTS.md, imported globals, skills, hooks — which no chain and no session records, which a person edits by hand between sessions, and which an instruction-tier fix edits directly. So a fall between the two windows is a fact about the corpus and never a fact about the fix.
 
-### Read the token, speak the label
+Behaviour is established at install instead: a guard's stored fixtures replay real cases deterministically (`steer fix mine`, `steer test <hook>`). Field counts are maintenance evidence — they say whether a class is still happening, never whether a fix is what stopped it.
 
-The verdict tokens below are the machine's words and they are what you read from the
-queue and the snapshot. They are NOT what you say. Every sentence you write to the user
-uses the label, and the same vocabulary the CLI prints: a **fix** rather than an
-intervention, a **recurring problem** rather than a class, a **result** rather than a
-verdict, **review history** or **session history** rather than a corpus, a **review
-sequence** rather than a chain, **stop tracking** rather than retire.
+### Read the fields, speak the reading
 
-| Token | Say | What it means for this problem |
+Each record carries an `observation` with five blocks. Read those; say what they
+show, in the same vocabulary the CLI prints: a **fix** rather than an
+intervention, a **recurring problem** rather than a class, a **result** rather
+than a verdict, **review history** or **session history** rather than a corpus, a
+**review sequence** rather than a chain, **stop tracking** rather than retire.
+
+| Block | What it holds | What you may say from it |
 |---|---|---|
-| `effective` | Fewer with fix | The problem is measurably less frequent since the fix went in. |
-| `harmful` | More with fix | The problem became more frequent after the fix. |
-| `ineffective` | Target not met | The fix did not reduce the problem to the target; a smaller benefit may still exist. |
-| `collecting` | Too early to tell | Not enough comparable work yet. |
-| `inconclusive` | No clear result | The evidence cannot place the effect. Waiting may not resolve it. |
-| `confounded` | Not comparable | Conditions changed between the two periods, so the comparison is not fair. |
-| `unattributed` | Benefit unconfirmed | The problem fell, but the guard blocked nothing, so something else may explain it. |
-| `not-triggered` | No blocks recorded | The guard never blocked anything in the work since install. |
-| `evidence-incomplete` | Missing evidence | Name the cause; only one of the four has a command. |
-| `no-baseline` | No earlier examples | No example of the problem exists before the fix. |
-| `legacy-unscoped` | Comparison undefined | No rule was saved for which work counts. |
-| `class-grew` | Grew, fix declined | The problem grew after a suggestion was declined. |
-| `class-faded` | Fewer, fix declined | The problem fell after a suggestion was declined. Credit nothing. |
-| `class-steady` | Steady, fix declined | Within the scorer's stability bounds; not exactly unchanged. |
-| `class-inconclusive` | No clear trend, fix declined | The evidence does not show how the problem changed. |
-| `unscored` | Not assessed | No engine reads this record's evidence. |
+| `counts` | `split_ts`, `observed_ts`, `unit`, and per window `{hits, eligible, first_activity_ts, last_activity_ts}` | The two windows' sizes and dates. Never a rate comparison. |
+| `recurrence` | `occurred`, `matches`, `example_kind`, `example`, `example_ts` | Whether the problem came back, and the newest example. |
+| `firing` | `applicable`, `log_present`, `hook_id`, `scope`, `class_scoped`, `rows`, `units` | What the guard's audit stream recorded, and over what. |
+| `coverage` | the two coverage maps plus `zero_eligible_after` | Which units the window could not account for. |
+| `provenance` | `kind` plus the identities per window | Whether one instrument or two counted these windows. |
 
-State a direction only under `effective`, `harmful`, `class-grew` and `class-faded`.
-Those are the four where the scorer crossed a bound and claimed one. Anywhere else, a
-percentage or a word like "fewer" states the claim the scorer withheld.
+There are three readings and no fourth:
 
-- `effective` — the range's upper bound is at or below 0.50, so the halving is established. Leave it alone.
-- `harmful` — the lower bound is above 1.00: incidence rose. **Act on this first.**
-- `ineffective` — the lower bound is above 0.50, so a halving is ruled out. **Act on this.** Either the gate does not catch what the class actually is, or the class was never mechanizable.
-- `collecting` — the after-window has not reached `required_after` yet. Say so and move on; do not read a verdict into it.
-- `inconclusive` — enough exposure, but the range still straddles the boundary. Leave it and re-score later.
-- `legacy-unscoped` — the record carries no eligibility scope, so its two windows count different opportunity sets. **Act on this:** scope it with `steer fix scope <id>`, which restarts its after-window.
-- `evidence-incomplete` — a window kept no countable item and missing evidence is why. Four causes, and **only the first has a command**: a ledger row the resolver closed as gone (run `steer commit-gate backfill --apply` and re-score); review sequences that carried no repository or changed-path record; sessions that carried no project; a guard whose audit log is absent from this machine. Read `before_coverage` / `after_coverage` and `attribution` to tell them apart, and name the cause in the report rather than handing the user a command that changes nothing. A window emptied only by rows still inside the resolver grace period reads `collecting` instead, and settles on its own.
-- `confounded` — a hard confound stands between the windows: the after-chains carry a reviewer whose provider, model, prompt digest or engine differs from the registered baseline, or the before/after supports for host, harness, repository, project, author model or changed-path kind are disjoint. The range is not a measurement of the fix. **Act on this:** name the `confounds[]` category in the report and re-score once the windows overlap again. A `composition[]` entry is the softer case — the category sets overlap but shifted, or the reviewer changed only its effort or run count — and warns without withholding.
-- `no-baseline` — the regex matches nothing before install. The class definition is wrong.
-- `unattributed` — a session-unit class only. The incidence fell effectively, but the guard never fired in the after-window, so something else caused the fall. **Act on this:** find the real cause before crediting the guard.
-- `not-triggered` — a session-unit class only. The class persisted while the guard stayed silent. **Act on this:** the matcher is aimed wrong, so fix the matcher rather than the rule.
+- **The problem came back.** `recurrence.occurred` is true. **Act on this first.** Open `recurrence.example` and decide whether the record still describes the problem. `example_kind` says what the example is: `adjudicated_finding` is a reviewer's confirmed concern; `cluster_key` is the text a classifier grouped a session's friction by, and is NOT a confirmed escaped failure. A recurrence beside `firing.rows: 0` on a known log points at the rule, its coverage or its registration — the guard recorded no block over work the class did match. On a record with `declined: true`, nothing was installed: the recurrence is a reason to reconsider the refusal, never a fix that failed.
+- **The accounting is incomplete.** A coverage map counts `unknown_scope`, `unknown_evidence`, `pending` or `unknown` units, or `firing.applicable` is true while `log_present` is false. The window cannot be read at all. **Act on this:** only one cause has a command — a ledger row the resolver closed as gone clears with `steer commit-gate backfill --apply`. Review sequences carrying no repository or changed-path record, sessions carrying no project, and an absent guard audit log have none; name the cause rather than handing the user a command that changes nothing. A `null` `scope` is its own case: the record has no frozen eligibility rule, so its two windows count different opportunity sets. Scope it with `steer fix scope <id>`, which restarts its after-window.
+- **The window is quiet.** Eligible work arrived and the class did not. Say that, and stop there. `zero_eligible_after` is the separate case: no eligible work has arrived at all, which is not a quiet window and is not a fault — every freshly installed record reads that way.
 
-Rejected classes are scored too, and carry their own labels — nothing was installed, so effectiveness is not the question. `class-grew` is the one to act on: the range's lower bound reached 1.50, which is usually the reopen condition arriving. `class-faded` (upper bound at or below 0.50) and `class-steady` (the whole range inside 0.50–1.50) confirm the refusal still stands. `class-inconclusive` means the range supports none of the three. Read the record's `reopen if:` line before reopening anything; the condition was written by the pass that had the evidence in front of it.
+State no direction and no percentage. "Fewer since the fix", "the fix worked", "a 60% reduction" all state a causal claim these counts cannot carry. Say what was counted: "this problem hit 4 of 37 review sequences before the fix and recurred 0 times in the 40 after."
 
-For every `ineffective` record, open the target file and decide between:
+Read `provenance` before you weigh the two windows against each other. When the `before` and `after` lists differ, two instruments counted them — a different reviewer, or a different transcript parser — and the counts describe two measurements rather than one.
+
+For every record whose problem came back, open the target file and decide between:
 
 - **Rework** — the fix was aimed at the wrong tell. Fix it, then `register --supersedes <id>` so the old record is retired with a forward pointer and the new one gets a fresh baseline.
 - **Remove** — the class is not mechanizable after all, or the defect stopped mattering. Delete the check and `retire <id> --reason "..."`.
@@ -170,12 +152,23 @@ Digest schema (`digest_version: 2`):
 
 The digest is size-capped: the CLI evicts the lowest-scoring clusters to fit, and reports honesty in `stats`.
 
-### The `steer status --json` contract (`status_version: 10`)
+### The `steer status --json` contract (`status_version: 11`)
 
 Step 1 reads this snapshot for posture and the full class inventory. The unit is
-the failure class and its verdict, not the hook count. This schema is byte-shared
-with the root `SKILL.md`; change both together (see CLAUDE.md Key Contracts).
-Fields:
+the failure class and what the corpus recorded about it, not the hook count. This
+schema is byte-shared with the root `SKILL.md`; change both together (see
+CLAUDE.md Key Contracts). Fields:
+
+**Read every count here as an observation.** The windows are uncontrolled: the
+dominant input to an agent's behaviour is its standing instruction set, which no
+chain and no session records, which a person edits by hand between sessions, and
+which an instruction-tier fix edits directly. So the snapshot reports hits,
+eligible units, window bounds, coverage, guard firings and the identities that
+counted each window, and it reports no efficacy verdict. The intervention's
+contribution to any change in these counts is unresolved. v11 removes `verdict`,
+`p_value`, `effect`, `required_after`, `confounds`, `composition`,
+`instrument_drift`, `firings_applicable`, `attribution` and `chain_rate`, and adds
+`observation`.
 
 - `status_version` — the schema version. `--json` is a stable agent contract.
 - `posture` — the arming state: `instrument` (reviewer model / runs / prompt
@@ -203,29 +196,24 @@ Fields:
   `record-present-unverified`, `missing` or `unknown` — Steer never claims to
   have verified a harness's internal hash. The resolver is the Stop hook that
   joins ledger rows to transcripts; it arms with the commit gate on the same
-  scope. `unresolved_rows` counts the rows still owing that join — the scorer
-  withholds on them, and `steer commit-gate backfill --apply` clears them.
+  scope. `unresolved_rows` counts the rows still owing that join — a window
+  cannot account for them, and `steer commit-gate backfill --apply` clears them.
   `masters[]` is the guard master's runtime provenance, one row per harness per
   scope: `path`, `runtime` (the digest of the Python runtime spliced into it),
   `version` (the steer that wrote it), `expected` (this binary's runtime digest)
   `state` and `observed` (the epoch second of the last block in the audit log
   beside this registered master; the log holds blocks only, so a master that
   allowed every call reads as 0). `state` is `current`, `stale` (an older runtime, so a firing
-  writes fewer audit fields than the scorer joins on), `unknown` (an unstamped
+  writes fewer audit fields than the join reads), `unknown` (an unstamped
   master — every store built before the stamp existed, which never reads as
   current) or `not-registered`. The row reads the REGISTERED master, not the one
   the store resolves to: a migrated machine holds a master at both paths. **Act
   on `stale` or `unknown`:** run `steer hooks rebuild --scope <scope>`, which
   regenerates the master AND re-registers it in one operation.
-- `interventions[]` — the **full** scored inventory. It carries every live
-  class, `effective` ones included. Each row: `id`, `class`, `problem`,
-  `intervention`, `legacy_note`, `match` (the regex
+- `interventions[]` — the **full** inventory. It carries every live class. Each
+  row: `id`, `class`, `problem`, `intervention`, `legacy_note`, `match` (the regex
   that defines the class), `tier`, `target`, `status` (`active` or `rejected`),
-  `verdict`, `before` / `after` incidence (`hits`, `units`, `rate`), `p_value`,
-  `instrument_drift` (the reviewer changed between the windows, at either grade;
-  a major change — provider, model, prompt digest or engine — withholds the
-  verdict as `confounded`, a minor one — effort or run count — rides beside the
-  range as a `composition` entry), `firings_applicable` (true only for the `guard` tier, whose master hook writes the audit log that `audit_firings` counts; check, instruction and review write none), and for
+  `before` / `after` incidence (`hits`, `units`, `rate`), and for
   a refused class `reason`, `reopen` and `rejected_ts`. `problem` and `intervention` are the record's own explanation, authored when the
   evidence was in hand: what goes wrong, and what this record does about it. Lead
   with them — a `class` is a label and a `match` is a regex, and neither says what
@@ -242,38 +230,52 @@ Fields:
   its measurement conditions:
   - `scope` — the frozen eligibility rule: `{version, all}`, or `{version, repo,
     path}` at version 1, plus a `harness` id list at version 2. The predicates
-    combine with AND. `null` is a legacy record, which scores `legacy-unscoped`
-    and never gets a scope inferred for it.
+    combine with AND. `null` is a legacy record: its two windows describe
+    different opportunity sets, and no scope is ever inferred for it. Run
+    `steer fix scope <id>`.
   - `before_coverage` / `after_coverage` — each window's unit accounting:
     `total`, `eligible` (the denominator), `ineligible`, `unknown`,
     `unknown_scope`, `unknown_evidence`, `pending`, `partial_exposure`. An
-    unknown unit withholds; it never shrinks the denominator. `partial_exposure`
-    is the session corpus's own category, for a session that straddled the
-    install and so ran under both regimes: `unknown` means the scope could not
-    decide, `partial_exposure` means the window could not.
-  - `effect` — the joint relative-risk range: `estimate`, `lower`, `upper`
-    (`null` when unbounded above), `confidence`, `method`. The verdict reads the
-    bounds, never the estimate.
-  - `required_after` — the smallest clean eligible after-window that could still
-    place `upper` at or below the 0.50 effect target. `null` means no window of
-    any size could, which an unmeasurably loose baseline causes.
-  - `confounds` — hard confounds that withhold the verdict; each is
-    `{category, reason, before, after}` over `instrument`, `host`, `harness`,
-    `repo`, `author_model`, `path_kind` or `project`. `composition` is the same
-    shape for overlapping-but-changed category sets, which warn without
-    withholding. An `instrument` entry is placed by its grade: a changed
-    provider, model, prompt digest or engine is hard, and a changed effort or run
-    count at one identity is `composition`.
-  - `attribution` — the guard's audit join over the after-window:
-    `{applicable, log_present, hook_id, firings, sessions}`. `applicable` is
-    false for a tier that writes no audit rows and for a record naming no hook,
-    and the verdict then reads the range alone.
-- `summary` — `total` plus `counts` by verdict.
+    unknown unit is not counted; it never shrinks the denominator.
+    `partial_exposure` is the session corpus's own category, for a session that
+    straddled the install and so ran under both regimes: `unknown` means the
+    scope could not decide, `partial_exposure` means the window could not.
+  - `observation` — what the corpus recorded. Five blocks:
+    - `counts` — `split_ts` (the boundary: the install, the refusal, or the
+      scope migration), `observed_ts` (the read's clock), `unit`, and `before` /
+      `after`, each `{hits, eligible, first_activity_ts, last_activity_ts}`. The
+      two timestamp pairs are different things: the period bounds express an
+      empty window and say how long one has been quiet, and the activity bounds
+      name the eligible work actually seen, which an empty window cannot express.
+    - `recurrence` — `{occurred, matches, example_kind, example, example_ts}`.
+      `example_kind` is `adjudicated_finding` (a reviewer's confirmed concern) or
+      `cluster_key` (the text a classifier grouped a session's friction by, which
+      is NOT a confirmed escaped failure). Read the example before acting.
+    - `firing` — the guard audit stream: `{applicable, log_present, hook_id,
+      scope, class_scoped, rows, units, newest_ts}`. `applicable` is false for a
+      tier that writes no audit rows and for a record naming no hook.
+      `log_present: false` is unknown activity, never a known zero. `scope` is
+      `eligible_units` (rows joined to this class's own eligible units, and
+      `class_scoped` is then true) or `window_period` (every row this hook wrote
+      inside the window's bounds, whatever work it landed on). A `window_period`
+      count cannot establish that the guard fired on this class's work.
+    - `coverage` — `before` / `after`, the same maps as above, plus
+      `zero_eligible_after`. That flag is a statement, not a fault: every freshly
+      installed record has zero eligible after-units, and absent opportunity is
+      not an observed quiet window.
+    - `provenance` — `{kind, before, after}`. `kind` is `reviewer` (the reviewer
+      identities that counted a chain window) or `parser` (the parser-and-adapter
+      identities that produced a session window). Labels only: no rule here
+      compares them. A window whose two lists differ was counted by two
+      instruments, which is a reason to read the examples rather than the counts.
+    - `declined` — true on a refused record. Its after-window is the period since
+      the refusal, so a recurrence there implies no fix that failed.
+- `summary` — `total` plus `counts` by action section (`inspect`, `repair`,
+  `observe`).
 - `chains[]` — recent review chains, findings split `accepted` / `rejected`.
-- `attention` — the subset needing action: `interventions[]` (verdict
-  `harmful`, `ineffective`, `not-triggered`, `unattributed`, `class-grew`,
-  `legacy-unscoped`, `evidence-incomplete` or `confounded`), `candidates[]` (no
-  `match` yet), and `unscored[]` (ids of records no engine reads).
+- `attention` — the subset asking for a reader: `interventions[]` (a recurrence,
+  a missing coverage cause, or no frozen scope), `candidates[]` (no `match` yet),
+  and `unscored[]` (ids of records no engine reads).
 - `telemetry` — corpus sizes: `review_chains`, `denials_rows`, `audit_firings`,
   `session_snapshots`, plus `harnesses[]` — one row per harness with its
   `sessions`, `firings` and `chains`, so a harness that contributed nothing reads
@@ -355,7 +357,7 @@ flag value.
 | `prompt` / `review` | review-prompt change | It is a recurring reviewer false positive | the reviewer prompt (`cli/internal/gate/prompts/review.md`) |
 | `prose` / `instruction` | instruction rule | Genuinely not mechanizable but frequent enough to earn a line | CLAUDE.md |
 
-An instruction rule is the weakest tier and the easiest to reach for. Use it only after arguing why the class cannot be detected, and expect `score` to come back `ineffective` more often than not — that outcome is information, not failure.
+An instruction rule is the weakest tier and the easiest to reach for. Use it only after arguing why the class cannot be detected, and expect the class to keep recurring more often than not — that outcome is information, not failure.
 
 Transcript candidates almost always route to `steer` (edit-time regex) or `check` (a repo script). Scope each one project vs global — a rule seen across projects or from global CLAUDE.md suggests global scope. If nothing routes, say so. "No candidate qualified this pass" is a correct result.
 
@@ -446,7 +448,7 @@ steer fix register \
 
 The unit here is the **root session**, not the chain: a class either occurred in a session or it did not, and a subagent thread is provenance on its root. `--signal-kind` names the classifier kind the regex is counted over — `any`, `user_corrections`, `user_rejections`, `tool_failures` or `hook_blocks` — and is frozen with the rest of the record. `--scope-path` is refused here, because a session carries no changed-path list; scope by harness or repo instead. The corpus lives in a snapshot store that `steer report refresh` writes, so a frozen baseline outlives the transcript the harness later rotates away.
 
-Pass `--tier steer --hook-id` for a generated guard. The audit-log join is what separates `effective` from `unattributed`: a class whose incidence fell while the guard never fired reports `unattributed`, and one that persisted while the guard stayed silent reports `not-triggered`. Both name a repair the incidence alone cannot.
+Pass `--tier steer --hook-id` for a generated guard. That is what gives the record an audit-log join, so `observation.firing` reports what the guard actually blocked over the window. A quiet window beside `firing.rows: 0` is silence the guard did not produce, and a recurrence beside `firing.rows: 0` points at the matcher. Neither reading is available from the incidence alone.
 
 ### Review candidates — author the regex, install, register
 
@@ -460,7 +462,7 @@ For each accepted review candidate:
 
    `match` also reports every recorded class that covers chains your candidate matches. A high share against a rejected class means you are re-proposing it: read the reason before going further.
 
-   Iterate until it matches the class members and nothing else. This regex is the class's permanent definition — `score` re-measures with it months from now, so an over-broad regex will report a fix as ineffective forever, and a commit-specific one will report success it did not earn. Prefer the defect's vocabulary over any single commit's identifiers.
+   Iterate until it matches the class members and nothing else. This regex is the class's permanent definition — `score` re-counts with it months from now, so an over-broad regex will report the class as recurring forever, and a commit-specific one will report a quiet window it did not earn. Prefer the defect's vocabulary over any single commit's identifiers.
 
 2. **Install the fix** via the owning skill (`check-oracle` or `steer`), or by editing the reviewer prompt. Verify it fires on the real case.
 
@@ -523,11 +525,12 @@ This rewrites the queue and its timestamp from the new state, so the SessionStar
 
 ## Reading the numbers honestly
 
-- **The adjudication is self-reported.** The review verdicts come from the agent that received the findings, so a class the agent systematically misjudges is invisible here. Treat incidence as a strong hint, never as ground truth.
-- **The instrument moves under the measurement.** Every ledger row is stamped with the reviewer that produced it (`model/runs/prompt-digest`), and `score` reports `INSTRUMENT DRIFT` when the after-window was reviewed by something other than what the regex was authored against. On a drift flag, re-read the findings before believing the verdict — a regex leaning on the reviewer's framing verbs ("hardcodes", "still advertises") is far more exposed than one leaning on code vocabulary, which is a reason to prefer the latter when authoring.
+- **The comparison is uncontrolled, so no count here credits a fix.** The standing instruction set — CLAUDE.md, AGENTS.md, imported globals, skills, hooks — is the dominant input to the agent's behaviour, no corpus records it, and a person edits it by hand between sessions. Report what recurred and what did not. Behaviour is established at install, by a guard's stored fixtures.
+- **The adjudication is self-reported.** The review outcomes come from the agent that received the findings, so a class the agent systematically misjudges is invisible here. Treat incidence as a strong hint, never as ground truth.
+- **The instrument moves under the measurement.** Every ledger row is stamped with the reviewer that produced it (`model/runs/prompt-digest`), and `observation.provenance` lists every identity that counted each window. When the two lists differ, two instruments counted these windows — re-read the findings before weighing the counts against each other. A regex leaning on the reviewer's framing verbs ("hardcodes", "still advertises") is far more exposed than one leaning on code vocabulary, which is a reason to prefer the latter when authoring.
   - The stamp cannot catch vendor-side drift. An external model alias whose behaviour changes with no local diff makes an unchanged instrument string weaker evidence than a changed one.
-- **Workload confounds the split.** A `check`-tier fix scoped to Python cannot recur in a month of shell commits, and that reads as success. Check the date span and the kind of work in the after-window before believing a clean drop.
-- **`collecting` is the normal state of a fresh intervention.** The gate reviews on the order of a few commits a week, and `required_after` is often in the hundreds of chains when the baseline is a low rate. Re-score on a cadence rather than the day after installing, and never read a fresh clean window as success.
+- **Workload moves the split.** A `check`-tier fix scoped to Python cannot recur in a month of shell commits, and that reads as silence. Read `observation.counts` for each window's date bounds and eligible size before reading anything into a quiet after-window.
+- **A fresh record has an empty after-window.** The gate reviews on the order of a few commits a week, so `zero_eligible_after` is the normal state of a new record. Re-read on a cadence rather than the day after installing, and never read a fresh quiet window as success.
 - **Never inject this history into the reviewer or the authoring session.** A reviewer handed past findings re-finds them instead of searching, and a list of old defects is a gauge rather than a directive. The output of this loop is a gate, not a reminder.
 
 ## Headless mode
@@ -541,7 +544,7 @@ When the invocation contains `--headless`: skip the gate, ask nothing, install n
   "interventions": [
     {
       "class": "stale test-count claim",
-      "verdict": "inconclusive",
+      "recurred": true,
       "before": "4/82",
       "after": "1/29"
     }

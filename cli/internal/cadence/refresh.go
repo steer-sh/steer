@@ -7,6 +7,7 @@
 package cadence
 
 import (
+	"encoding/json"
 	"regexp"
 	"sort"
 
@@ -16,7 +17,7 @@ import (
 )
 
 // QueueVersion is the schema version of the queue file the skill reads.
-const QueueVersion = 4
+const QueueVersion = 5
 
 // minCandidateSessions is the deterministic threshold on transcript clusters: a
 // correction pattern must repeat across this many sessions to become a candidate.
@@ -54,35 +55,25 @@ type Intervention struct {
 	// and what this record does about it. The queue is read by a skill that was
 	// not in the session that authored the class, so the explanation travels with
 	// the work rather than being re-derived from the regex.
-	Problem      string    `json:"problem"`
-	Intervention string    `json:"intervention"`
-	Match        string    `json:"match"`
-	Corpus       string    `json:"corpus"`
-	Unit         string    `json:"unit"`
-	Tier         string    `json:"tier"`
-	Target       string    `json:"target"`
-	HookID       string    `json:"hook_id,omitempty"`
-	Verdict      string    `json:"verdict"`
-	Before       Incidence `json:"before"`
-	After        Incidence `json:"after"`
+	Problem      string           `json:"problem"`
+	Intervention string           `json:"intervention"`
+	Match        string           `json:"match"`
+	Corpus       string           `json:"corpus"`
+	Unit         string           `json:"unit"`
+	Tier         string           `json:"tier"`
+	Target       string           `json:"target"`
+	HookID       string           `json:"hook_id,omitempty"`
+	Before       Incidence        `json:"before"`
+	After        Incidence        `json:"after"`
+	Observation  mine.Observation `json:"observation"`
 	// Scope is the frozen eligibility rule, null on a legacy record.
 	Scope *Scope `json:"scope"`
 	// BeforeCoverage and AfterCoverage account for each window under that scope.
 	BeforeCoverage Coverage `json:"before_coverage"`
 	AfterCoverage  Coverage `json:"after_coverage"`
-	// Effect is the relative-risk range; RequiredAfter is the clean eligible
-	// after-window that could still reach the effect target, null when none can.
-	Effect        Effect `json:"effect"`
-	RequiredAfter *int   `json:"required_after"`
-	// Confounds withhold the verdict; Composition only warns beside it.
-	Confounds   []mine.Confound `json:"confounds"`
-	Composition []mine.Confound `json:"composition"`
 	// SignalKind is the classifier kind a session-unit class is counted over, empty
 	// on a chain-unit record.
 	SignalKind string `json:"signal_kind,omitempty"`
-	// Attribution is the guard's audit join over the after-window. Applicable is
-	// false wherever the tier writes no audit rows, and on every chain-unit record.
-	Attribution Attribution `json:"attribution"`
 }
 
 // Candidate is a pointer to a new cluster the model must cluster, phrase, and author
@@ -168,8 +159,8 @@ func Refresh(opts Options) (*Queue, error) {
 		if err != nil {
 			continue
 		}
-		verdict := str(scored["verdict"])
-		if !needsAttention(verdict) {
+		observation := observationOf(scored["observation"])
+		if !needsAttention(observation, scored["scope"]) {
 			continue
 		}
 		prose := mine.ProseOf(r)
@@ -184,19 +175,14 @@ func Refresh(opts Options) (*Queue, error) {
 			Tier:         str(scored["tier"]),
 			Target:       str(scored["target"]),
 			HookID:       str(scored["hook_id"]),
-			Verdict:      verdict,
 			Before:       incidenceOf(scored["before"]),
 			After:        incidenceOf(scored["after"]),
+			Observation:  observation,
 
 			Scope:          ScopeOf(scored["scope"]),
 			BeforeCoverage: CoverageOf(scored["before_coverage"]),
 			AfterCoverage:  CoverageOf(scored["after_coverage"]),
-			Effect:         EffectOf(scored["effect"]),
-			RequiredAfter:  RequiredAfterOf(scored["required_after"]),
-			Confounds:      ConfoundsOf(scored["confounds"]),
-			Composition:    ConfoundsOf(scored["composition"]),
 			SignalKind:     str(scored["signal_kind"]),
-			Attribution:    AttributionOf(scored["attribution"]),
 		})
 	}
 	sort.Slice(q.Interventions, func(i, j int) bool { return q.Interventions[i].ID < q.Interventions[j].ID })
@@ -246,23 +232,39 @@ func Refresh(opts Options) (*Queue, error) {
 	return q, nil
 }
 
-// AttentionVerdicts are the scored verdicts the cadence queues for action. Every
-// consumer that groups the queue by verdict must cover this set.
-var AttentionVerdicts = []string{
-	"harmful", "ineffective", "not-triggered", "unattributed", "class-grew",
-	"legacy-unscoped", "evidence-incomplete", "confounded",
+// needsAttention is field-derived. Recurrence, a known silent guard, a coverage
+// cause, or an unfrozen scope gives the reader something to inspect; quiet eligible
+// work stays in the inventory without manufacturing a repair.
+func needsAttention(obs mine.Observation, scope any) bool {
+	if obs.Recurrence.Occurred {
+		return true
+	}
+	if obs.Firing.Applicable && !obs.Firing.LogPresent {
+		return true
+	}
+	if coverageCause(obs.Coverage.Before) || coverageCause(obs.Coverage.After) {
+		return true
+	}
+	return scope == nil
 }
 
-// needsAttention is the deterministic threshold on scored interventions: a hook that
-// did not reduce its class, a refusal a growing class overtook, or a record whose
-// measurement conditions are invalid — no scope, missing evidence, or a confound.
-func needsAttention(verdict string) bool {
-	for _, v := range AttentionVerdicts {
-		if v == verdict {
-			return true
-		}
+func coverageCause(c map[string]any) bool {
+	return numInt(c["unknown_scope"]) > 0 || numInt(c["unknown_evidence"]) > 0 || numInt(c["pending"]) > 0 || numInt(c["unknown"]) > 0
+}
+
+func observationOf(v any) mine.Observation {
+	if obs, ok := v.(mine.Observation); ok {
+		return obs
 	}
-	return false
+	data, err := json.Marshal(v)
+	if err != nil {
+		return mine.Observation{}
+	}
+	var obs mine.Observation
+	if json.Unmarshal(data, &obs) != nil {
+		return mine.Observation{}
+	}
+	return obs
 }
 
 // undecidedChains counts chains carrying an accepted finding that no live class

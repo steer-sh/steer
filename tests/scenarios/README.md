@@ -9,8 +9,8 @@ There is no mechanical oracle here. The runner regenerates; a person judges.
 | Scenario | The reader's question |
 |---|---|
 | `new-suggestion` | Should I apply this fix? |
-| `awaiting-evidence` | Is this guard working yet? |
-| `changed-comparison` | Why can't Steer tell me whether it helped? |
+| `awaiting-evidence` | What has been observed since this guard was installed? |
+| `changed-comparison` | Who counted the two windows, and what can these counts establish? |
 | `missing-decisions` | What is missing, and can I do anything about it? |
 | `declined-suggestion` | We said no to this — has that aged badly? |
 | `remove-a-guard` | How do I get rid of this, and what does that remove? |
@@ -28,3 +28,9 @@ glossary, and reading only the report, they should be able to say:
 
 Record every place they were misled, revise the copy, and regenerate. A report that
 needs a spoken explanation has failed the pass, whatever it says.
+
+The fixtures use Status v11 and Queue v5 observations. The removal scenario includes
+an explicit user decision to remove the guard; its field counts do not justify that
+decision. A report must distinguish recurrence from causal benefit, a session's
+classifier match from an adjudicated finding, and empty opportunity from a quiet
+window with eligible work. Reviewer identities name provenance without grading drift.

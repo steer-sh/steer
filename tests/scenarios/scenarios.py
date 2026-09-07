@@ -4,8 +4,8 @@
 Each scenario is one `steer status --json` snapshot plus the refreshed queue the
 skill reads beside it, built over `base_status.json` — a real snapshot with its
 inventory emptied and its paths scrubbed. The scenarios cover the six decisions a
-reader arrives with: a new suggestion, an installed guard still collecting, a
-comparison that changed under the measurement, missing review decisions, a
+reader arrives with: a new suggestion, an installed guard with observed recurrence,
+reviewer identities that changed between windows, missing review decisions, a
 suggestion that was declined, and a guard to remove.
 
 Nothing here judges the output. A person reads the reports side by side; this
@@ -33,25 +33,15 @@ def _coverage(total, eligible, **kw):
     return cov
 
 
-def _effect(estimate, lower, upper):
-    return {
-        "estimate": estimate, "lower": lower, "upper": upper, "confidence": 0.9,
-        "method": "cp-baseline/bb-mixture-cs-after",
-    }
-
-
 def _record(**kw):
     rec = {
         "id": "a-record", "class": "a class", "problem": "", "intervention": "",
         "match": "", "tier": "check", "target": "check.sh", "status": "active",
-        "verdict": "collecting", "corpus": "review-findings", "unit": "chain",
+        "corpus": "review-findings", "unit": "chain",
         "before": {"hits": 0, "units": 0, "rate": 0.0},
         "after": {"hits": 0, "units": 0, "rate": 0.0},
-        "p_value": 1.0, "instrument_drift": False, "firings_applicable": False,
         "scope": {"version": 1, "all": True},
         "before_coverage": _coverage(0, 0), "after_coverage": _coverage(0, 0),
-        "effect": _effect(None, 0.0, None), "required_after": None,
-        "confounds": [], "composition": [],
         "attribution": {"applicable": False, "log_present": False,
                         "hook_id": "", "firings": 0, "sessions": 0},
     }
@@ -83,20 +73,74 @@ STALE_COUNT = _record(
 )
 
 
-# ATTENTION is cadence.AttentionVerdicts: the verdicts the queue carries. A record
-# scored anything else is in the snapshot's inventory and in no queue, which is
-# what a machine with a fix still collecting actually looks like.
-ATTENTION = {
-    "harmful", "ineffective", "not-triggered", "unattributed", "class-grew",
-    "legacy-unscoped", "evidence-incomplete", "confounded",
-}
+def _observe(rec, before_ids=None, after_ids=None):
+    """Attach the same observation shape both field scorers emit."""
+    split = rec.get("rejected_ts", 1787500000)
+    observed = 1788253200
+
+    def side(counts, first, last):
+        return {"hits": counts["hits"], "eligible": counts["units"],
+                "first_activity_ts": first if counts["units"] else 0,
+                "last_activity_ts": last if counts["units"] else 0}
+
+    session = rec["unit"] == "session"
+    attr = rec["attribution"]
+    hits = rec["after"]["hits"]
+    rec["observation"] = {
+        "counts": {"split_ts": split, "observed_ts": observed, "unit": rec["unit"],
+                   "before": side(rec["before"], split - 864000, split - 100),
+                   "after": side(rec["after"], split + 100, observed - 100)},
+        "recurrence": {"occurred": hits > 0, "matches": hits},
+        "firing": {"applicable": attr["applicable"], "log_present": attr["log_present"],
+                   "scope": "eligible_units" if session else "window_period",
+                   "class_scoped": session, "rows": attr["firings"],
+                   "units": attr["sessions"]},
+        "coverage": {"before": rec["before_coverage"], "after": rec["after_coverage"],
+                     "zero_eligible_after": rec["after"]["units"] == 0},
+        "provenance": {"kind": "parser" if session else "reviewer",
+                       "before": before_ids or (["scan-example|codex:adapter-example"] if session
+                                                else ["reviewer-example/3/prompt-example"]),
+                       "after": (after_ids or (["scan-example|codex:adapter-example"] if session
+                                               else ["reviewer-example/3/prompt-example"]))
+                                if rec["after"]["units"] else []},
+        "declined": rec["status"] == "rejected",
+    }
+    if rec.get("hook_id"):
+        rec["observation"]["firing"]["hook_id"] = rec["hook_id"]
+    if attr["firings"]:
+        rec["observation"]["firing"]["newest_ts"] = observed - 200
+    if hits:
+        rec["observation"]["recurrence"].update(
+            example_kind="cluster_key" if session else "adjudicated_finding",
+            example="python: command not found" if session else rec["problem"],
+            example_ts=observed - 100,
+        )
+    return rec
+
+
+def _action(rec):
+    obs = rec["observation"]
+    if obs["recurrence"]["occurred"]:
+        return "inspect"
+    if rec["scope"] is None or any(c["unknown"] for c in
+                                   (rec["before_coverage"], rec["after_coverage"])):
+        return "repair"
+    if obs["firing"]["applicable"] and not obs["firing"]["log_present"]:
+        return "repair"
+    return "observe"
+
+
+def _queued(records):
+    keys = ("id", "class", "problem", "intervention", "match", "corpus", "unit",
+            "tier", "target", "hook_id", "before", "after", "observation", "scope",
+            "before_coverage", "after_coverage", "signal_kind", "attribution")
+    return [{k: r[k] for k in keys if k in r} for r in records if _action(r) != "observe"]
 
 
 def _queue(interventions=(), candidates=(), unscored=()):
     return {
-        "version": 4,
-        "generated_at": "2026-09-01T09:00:00Z",
-        "interventions": [r for r in interventions if r["verdict"] in ATTENTION],
+        "version": 5,
+        "interventions": _queued(interventions),
         "candidates": list(candidates),
         "unscored": list(unscored),
         "corpora": [
@@ -112,11 +156,11 @@ def _snapshot(records=(), candidates=(), unresolved=0):
     snap["interventions"] = [copy.deepcopy(r) for r in records]
     counts = {}
     for r in snap["interventions"]:
-        counts[r["verdict"]] = counts.get(r["verdict"], 0) + 1
+        action = _action(r)
+        counts[action] = counts.get(action, 0) + 1
     snap["summary"] = {"total": len(snap["interventions"]), "counts": counts}
     snap["attention"] = {
-        "interventions": [copy.deepcopy(r) for r in snap["interventions"]
-                          if r["verdict"] in ATTENTION],
+        "interventions": _queued(snap["interventions"]),
         "candidates": list(candidates),
         "unscored": [],
     }
@@ -137,50 +181,39 @@ def _new_suggestion():
 def _awaiting_evidence():
     rec = copy.deepcopy(BARE_PYTHON)
     rec.update(
-        verdict="collecting",
         before={"hits": 3, "units": 10, "rate": 0.3},
         after={"hits": 1, "units": 4, "rate": 0.25},
         before_coverage=_coverage(11, 10, ineligible=1),
         after_coverage=_coverage(5, 4, partial_exposure=1),
-        effect=_effect(0.83, 0.11, None), required_after=38,
-        firings_applicable=True,
         attribution={"applicable": True, "log_present": True,
                      "hook_id": "no-bare-python", "firings": 2, "sessions": 2},
     )
+    _observe(rec)
     return _snapshot([rec]), _queue([rec])
 
 
 def _changed_comparison():
     rec = copy.deepcopy(STALE_COUNT)
     rec.update(
-        verdict="confounded",
         before={"hits": 4, "units": 82, "rate": 0.0488},
         after={"hits": 1, "units": 29, "rate": 0.0345},
         before_coverage=_coverage(84, 82, ineligible=2),
         after_coverage=_coverage(30, 29, ineligible=1),
-        effect=_effect(0.71, 0.12, 4.02), required_after=310,
-        instrument_drift=True,
-        confounds=[{
-            "category": "instrument",
-            "reason": "the after-window was reviewed by a different model than the "
-                      "registered baseline",
-            "before": ["claude/opus-4.6/2 runs/prompt-6f21"],
-            "after": ["claude/opus-5/2 runs/prompt-6f21"],
-        }],
     )
+    _observe(rec, ["claude/opus-4.6/2 runs/prompt-6f21"],
+             ["claude/opus-5/2 runs/prompt-6f21"])
     return _snapshot([rec]), _queue([rec])
 
 
 def _missing_decisions():
     rec = copy.deepcopy(STALE_COUNT)
     rec.update(
-        verdict="evidence-incomplete",
         before={"hits": 4, "units": 82, "rate": 0.0488},
         after={"hits": 0, "units": 0, "rate": 0.0},
         before_coverage=_coverage(84, 82, ineligible=2),
         after_coverage=_coverage(9, 0, unknown=9, unknown_evidence=9, pending=2),
-        effect=_effect(None, 0.0, None), required_after=310,
     )
+    _observe(rec)
     return _snapshot([rec], unresolved=7), _queue([rec])
 
 
@@ -192,7 +225,7 @@ def _declined_suggestion():
                 "already settled.",
         intervention="no suitable intervention was identified",
         match=r"already (addressed|settled)",
-        tier="none", target="", status="rejected", verdict="class-grew",
+        tier="none", target="", status="rejected",
         reason="The tell is the reviewer's own framing, which changes with the model.",
         reopen="the rate of re-raised findings triples, or the reviewer stops "
                "restating settled concerns in its own words",
@@ -200,23 +233,21 @@ def _declined_suggestion():
         before={"hits": 3, "units": 60, "rate": 0.05},
         after={"hits": 9, "units": 41, "rate": 0.2195},
         before_coverage=_coverage(60, 60), after_coverage=_coverage(41, 41),
-        effect=_effect(4.39, 1.62, 13.9), required_after=None,
     )
+    _observe(rec)
     return _snapshot([rec]), _queue([rec])
 
 
 def _remove_a_guard():
     rec = copy.deepcopy(BARE_PYTHON)
     rec.update(
-        verdict="harmful",
         before={"hits": 2, "units": 60, "rate": 0.0333},
         after={"hits": 8, "units": 44, "rate": 0.1818},
         before_coverage=_coverage(60, 60), after_coverage=_coverage(44, 44),
-        effect=_effect(5.45, 1.24, 24.1), required_after=None,
-        firings_applicable=True,
         attribution={"applicable": True, "log_present": True,
                      "hook_id": "no-bare-python", "firings": 31, "sessions": 12},
     )
+    _observe(rec)
     return _snapshot([rec]), _queue([rec])
 
 

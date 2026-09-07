@@ -1,6 +1,6 @@
-// The verdict-to-action table. A verdict token names a measurement state; this
-// names what the reader does about it, and orders the sections by that action.
-// Terminal, HTML and TUI phrase and sort from here; --json keeps the token.
+// The observation-to-action table. A field observation names a measurement state;
+// this names what the reader does about it, and orders the sections by that action.
+// Terminal and TUI phrase and sort from here; --json keeps the observation.
 
 package status
 
@@ -10,153 +10,98 @@ import (
 	"time"
 
 	"github.com/steer-sh/steer-cli/internal/cadence"
+	"github.com/steer-sh/steer-cli/internal/gate/mine"
 	"github.com/steer-sh/steer-cli/internal/tier"
 )
 
-// The actions a class can ask of its reader.
+// The actions an observation can ask of its reader. No action asks for removal:
+// silence justifies no retirement.
 const (
-	ActionHarmful    = "harmful"
-	ActionAdjudicate = "adjudicate"
-	ActionRepair     = "repair"
-	ActionWait       = "wait"
-	ActionAccept     = "accept"
-	ActionSettled    = "settled"
+	ActionInspect = "inspect"
+	ActionRepair  = "repair"
+	ActionObserve = "observe"
 )
 
 // ActionOrder is the order the sections render in.
-var ActionOrder = []string{
-	ActionHarmful, ActionAdjudicate, ActionRepair, ActionWait, ActionAccept,
-	ActionSettled,
-}
+var ActionOrder = []string{ActionInspect, ActionRepair, ActionObserve}
 
 // ActionHeading is the section header for one action. Each heading names the
-// object the reader acts on: a bare verb ("Accept") names nothing to hold, and
-// these six headings organize the whole screen.
+// object the reader acts on.
 var ActionHeading = map[string]string{
-	ActionHarmful:    "Problems that grew after a fix went in — review the fix",
-	ActionAdjudicate: "Missing evidence — these results stay on hold until the decisions are recorded",
-	ActionRepair:     "Fixes to rework — each one names a change you can make",
-	ActionWait:       "Fixes still collecting evidence — no result yet",
-	ActionAccept:     "Results with no repair available — read the counts and judge these yourself",
-	ActionSettled:    "Results that are decided — nothing to do",
+	ActionInspect: "Observed problems — inspect the example",
+	ActionRepair:  "Coverage evidence — repair the accounting",
+	ActionObserve: "Quiet windows — nothing is asked of you",
 }
 
-// meaning is one verdict token's whole presentation: the compact label a badge
-// shows, the action the token asks of its reader, and the sentence that names
-// that action. One entry per token, so a token cannot carry a label with no
-// sentence, or an action with no label.
+// ActionFor is total over observations: an observation matching no branch lands
+// in a section rather than vanishing from the inventory.
 //
-// A label names a STATE, never an action — the action sentence names what the
-// reader does. A label states a direction only under the four tokens where the
-// scorer crossed a bound and claimed one: effective, harmful, class-grew and
-// class-faded. Anywhere else a directional word states the point claim the
-// scorer withheld.
-type meaning struct {
-	Label    string
-	Action   string
-	Sentence string
-}
-
-// meanings is the one table Terminal, HTML and TUI read. Nothing else names a
-// label, and no surface prints the raw token.
-var meanings = map[string]meaning{
-	"harmful": {"More with fix", ActionHarmful,
-		"the problem grew after this fix went in — remove the rule, then stop tracking it"},
-	"evidence-incomplete": {"Missing evidence", ActionAdjudicate,
-		"review sequences inside the compared periods still owe a decision"},
-	"not-triggered": {"No blocks recorded", ActionRepair,
-		"nothing matched this problem in the work since install — rework how it is identified"},
-	"unattributed": {"Benefit unconfirmed", ActionRepair,
-		"the problem became less frequent, but this guard blocked nothing — the fix may not be what changed"},
-	"ineffective": {"Target not met", ActionRepair,
-		"this fix did not reduce the problem to the target — rework it, or stop tracking it"},
-	"legacy-unscoped": {"Comparison undefined", ActionRepair,
-		"no rule was saved for which work counts — run: steer fix scope"},
-	"no-baseline": {"No earlier examples", ActionRepair,
-		"the earlier period holds no example of this problem — rework how it is identified, or stop tracking it"},
-	"class-grew": {"Grew, fix declined", ActionRepair,
-		"the problem grew after the suggestion was declined — reconsider that decision"},
-	"collecting": {"Too early to tell", ActionWait,
-		"more comparable work is needed before this can be decided"},
-	"confounded": {"Not comparable", ActionAccept,
-		"the two periods ran under different conditions and cannot be compared — read the counts and decide"},
-	"inconclusive": {"No clear result", ActionAccept,
-		"the range cannot place the effect"},
-	"class-inconclusive": {"No clear trend, fix declined", ActionAccept,
-		"the evidence does not show how the problem changed"},
-	"unscored": {"Not assessed", ActionAccept,
-		"no result is available for this fix on this machine"},
-	"effective":    {"Fewer with fix", ActionSettled, ""},
-	"class-faded":  {"Fewer, fix declined", ActionSettled, ""},
-	"class-steady": {"Steady, fix declined", ActionSettled, ""},
-}
-
-// LabelUnknown is what a token this binary cannot interpret reads as. The token
-// itself stays in --json, where a reader can chase it.
-const LabelUnknown = "Unknown result"
-
-// LabelUnmeasurable is the badge for a window no reachable amount of work closes.
-// It is a reading of required_after, never a state the scorer wrote.
-const LabelUnmeasurable = "Window unreachable"
-
-// VerdictLabel is the compact label a badge shows for one verdict. Every surface
-// reads it; none prints the token.
-func VerdictLabel(verdict string, unmeasurable bool) string {
-	if unmeasurable && meanings[verdict].Action == ActionWait {
-		return LabelUnmeasurable
+// Recurrence outranks coverage. A recurrence is an observed fact and stays true
+// whatever the coverage counts say, while coverage explains a measurement that is
+// missing; ordering coverage first would file an actively recurring class under a
+// repair to its bookkeeping and hide the escape.
+//
+// ZeroEligibleAfter is deliberately not a repair. Every freshly installed record
+// has zero eligible after-units, and prevention and absent opportunity both
+// produce silence — neither is a fault.
+func ActionFor(obs mine.Observation, scope *cadence.Scope) string {
+	switch {
+	case obs.Recurrence.Occurred:
+		return ActionInspect
+	case scope == nil || missingCoverage(obs):
+		return ActionRepair
 	}
-	m, ok := meanings[verdict]
-	if !ok || m.Label == "" {
-		return LabelUnknown
-	}
-	return m.Label
+	return ActionObserve
 }
 
-// claimsAnEffect reports whether a verdict already states an effect. A settled
-// class is never reclassified as unmeasurable: its window did reach a decision.
-func claimsAnEffect(verdict string) bool {
-	switch verdict {
-	case "effective", "harmful", "ineffective", "class-grew", "class-faded", "class-steady":
+// ObservationLabel is the compact label a badge shows. It names a STATE and
+// states no direction: the comparison behind these counts is uncontrolled, so no
+// label may read as a claim about the fix.
+func ObservationLabel(obs mine.Observation) string {
+	switch {
+	case obs.Recurrence.Occurred:
+		return "Recurrence observed"
+	case missingCoverage(obs):
+		return "Coverage incomplete"
+	case obs.Coverage.ZeroEligibleAfter:
+		return "No eligible work yet"
+	}
+	return "No recurrence observed"
+}
+
+// ActionSentence is the observation translated into an instruction. A declined
+// record installed no fix, so its recurrence is phrased with no rework implied.
+func ActionSentence(obs mine.Observation, scope *cadence.Scope) string {
+	switch {
+	case obs.Recurrence.Occurred && obs.Firing.Known() && obs.Firing.Rows == 0:
+		return "the problem returned while the guard recorded no block — inspect the rule, its coverage and its registration"
+	case obs.Recurrence.Occurred && obs.Declined:
+		return "the problem recurred since this fix was declined, and no fix is installed — inspect the newest example"
+	case obs.Recurrence.Occurred:
+		return "inspect the newest example and decide whether the fix needs reworking"
+	case scope == nil || missingCoverage(obs):
+		return "read the coverage before deciding what to change"
+	case obs.Coverage.ZeroEligibleAfter:
+		return "no eligible work has arrived since this went in"
+	}
+	return "eligible work is present and the problem did not come back"
+}
+
+// missingCoverage reports units a window could not account for, plus the audit
+// stream a guard's activity cannot be read without.
+func missingCoverage(obs mine.Observation) bool {
+	if obs.Firing.Applicable && !obs.Firing.LogPresent {
 		return true
 	}
-	return false
+	return coverageCause(obs.Coverage.Before) || coverageCause(obs.Coverage.After)
 }
 
-// ActionFor names the action a verdict asks for. An unreachable window overrides
-// one action only — wait — because waiting is the one instruction it contradicts.
-// A repair stays a repair: reworking a matcher is available whatever the window
-// costs, and filing it under accept would hide a fix the reader can still make.
-// A token this binary does not know reads as accept, never as repair: repair
-// heads a fix that exists, and an uninterpretable state names no fix.
-func ActionFor(verdict string, unmeasurable bool) string {
-	m, ok := meanings[verdict]
-	if !ok {
-		return ActionAccept
-	}
-	if unmeasurable && m.Action == ActionWait {
-		return ActionAccept
-	}
-	return m.Action
+// coverageCause reads both corpora's unknown keys: the chain corpus counts a cause
+// per unknown and the session corpus counts one bucket.
+func coverageCause(c map[string]any) bool {
+	return numInt(c["unknown_scope"]) > 0 || numInt(c["unknown_evidence"]) > 0 ||
+		numInt(c["pending"]) > 0 || numInt(c["unknown"]) > 0
 }
-
-// ActionSentence is the verdict translated into an instruction. The unreachable
-// window replaces only the sentence it contradicts — the one that tells the
-// reader to wait. Every other verdict keeps its own instruction: a repair names
-// a fix the window length does not remove, and an accept names why the periods
-// do not decide. RatePhrase states the reachability beside either.
-func ActionSentence(verdict string, unmeasurable bool) string {
-	m, ok := meanings[verdict]
-	if unmeasurable && m.Action == ActionWait {
-		return "no reachable window can decide this — keep it as a rule, or stop tracking it"
-	}
-	if !ok {
-		return "this version of Steer cannot interpret this result — read the token in the JSON snapshot"
-	}
-	return m.Sentence
-}
-
-// unmeasurableYears is the wait past which a required window stops being a wait.
-const unmeasurableYears = 1.0
 
 // quietDays is the silence past which this host's chain rate is withheld;
 // minSpanDays is the shortest sample a rate may be projected from.
@@ -200,21 +145,7 @@ func RateFrom(chains []ChainSummary, now time.Time) ChainRate {
 	return RateOver(len(chains), chains[0].StartTS, chains[len(chains)-1].StartTS, now)
 }
 
-// Unmeasurable says a required window is more than a year away at this rate. An
-// unknown rate is not unmeasurable: it is unknown. The rate counts chains, so a
-// record denominated in any other unit is never graded against it, and a verdict
-// that already claims an effect is never regraded at all.
-func Unmeasurable(verdict, unit string, required *int, rate ChainRate) bool {
-	if claimsAnEffect(verdict) || orUnit(unit) != "chain" {
-		return false
-	}
-	if required == nil || *required <= 0 || !rate.Known {
-		return false
-	}
-	return float64(*required)/rate.PerDay > unmeasurableYears*365
-}
-
-// RatePhrase names the required window in units and the wait in calendar time. It
+// RatePhrase names a required window in units and the wait in calendar time. It
 // withholds the calendar half when the rate is unknown.
 func RatePhrase(required *int, unit string, rate ChainRate) string {
 	if required == nil || *required <= 0 {
@@ -247,40 +178,6 @@ func humanDays(days float64) string {
 		return fmt.Sprintf("%d months", int(math.Round(days/30)))
 	}
 	return fmt.Sprintf("%.0f years", math.Round(days/365))
-}
-
-// RecurrencePhrase says whether the class came back since the rule went in. Each
-// count carries its denominator in words, so no fraction prints.
-func RecurrencePhrase(before, after cadence.Incidence, unit string) string {
-	unit = orUnit(unit)
-	s := fmt.Sprintf("%d %s in the %d %s since install",
-		after.Hits, plural("recurrence", after.Hits), after.Units, UnitName(unit, after.Units))
-	if before.Units > 0 {
-		s += fmt.Sprintf("; %d in the %d before", before.Hits, before.Units)
-	}
-	return s
-}
-
-// EffectClaimPhrase renders the range only under the two verdicts where the
-// scorer made a claim. It is "" everywhere else.
-func EffectClaimPhrase(verdict string, e cadence.Effect) string {
-	if verdict != "effective" && verdict != "harmful" {
-		return ""
-	}
-	rr := EffectPhrase(e)
-	if rr == "" || e.Estimate == nil {
-		return rr
-	}
-	return fmt.Sprintf("%s, %.0f%% confidence   %s",
-		magnitude(*e.Estimate), e.Confidence*100, rr)
-}
-
-// magnitude states a relative risk in the direction the reader reads it.
-func magnitude(rr float64) string {
-	if rr < 1 {
-		return fmt.Sprintf("%.0f%% fewer", (1-rr)*100)
-	}
-	return fmt.Sprintf("%.1fx more frequent", rr)
 }
 
 // RemovalPhrase says what stopping the tracking does and where the rule lives. It
@@ -340,4 +237,15 @@ func plural(word string, n int) string {
 		return "recurrences"
 	}
 	return word + "s"
+}
+
+// RecurrencePhrase says whether the class came back since the rule went in. Each
+// count carries its denominator in words, so no fraction prints.
+func RecurrencePhrase(before, after cadence.Incidence, unit string) string {
+	unit = orUnit(unit)
+	s := fmt.Sprintf("%d %s in the %d %s since install", after.Hits, plural("recurrence", after.Hits), after.Units, UnitName(unit, after.Units))
+	if before.Units > 0 {
+		s += fmt.Sprintf("; %d in the %d before", before.Hits, before.Units)
+	}
+	return s
 }

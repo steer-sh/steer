@@ -27,8 +27,8 @@ type Coverage struct {
 	PartialExposure int `json:"partial_exposure"`
 }
 
-// Effect is the joint relative-risk range the verdict reads. Estimate is null with no
-// baseline rate; Upper is null when the range is unbounded above.
+// Effect remains a legacy reader type until the claim machinery is removed in
+// the dedicated cleanup commit. New scored records no longer emit it.
 type Effect struct {
 	Estimate   *float64 `json:"estimate"`
 	Lower      float64  `json:"lower"`
@@ -77,17 +77,12 @@ func CoverageOf(v any) Coverage {
 	}
 }
 
-// EffectOf reads the relative-risk range.
 func EffectOf(v any) Effect {
 	m, _ := v.(map[string]any)
 	if m == nil {
 		return Effect{}
 	}
-	e := Effect{
-		Lower:      numFloat(m["lower"]),
-		Confidence: numFloat(m["confidence"]),
-		Method:     str(m["method"]),
-	}
+	e := Effect{Lower: numFloat(m["lower"]), Confidence: numFloat(m["confidence"]), Method: str(m["method"])}
 	if m["estimate"] != nil {
 		x := numFloat(m["estimate"])
 		e.Estimate = &x
@@ -99,8 +94,6 @@ func EffectOf(v any) Effect {
 	return e
 }
 
-// RequiredAfterOf reads the minimum clean after-window, nil when no window of any
-// size could reach the effect target.
 func RequiredAfterOf(v any) *int {
 	if v == nil {
 		return nil

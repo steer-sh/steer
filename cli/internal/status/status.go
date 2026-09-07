@@ -1,8 +1,8 @@
 // Package status composes a read-only snapshot of the steer feedback loop, keyed
-// on the failure class and its intervention's verdict rather than the hook.
-// Collect reads the scored intervention inventory and review chains (mine), the
+// on the failure class and what the corpus recorded about it rather than the hook.
+// Collect reads the intervention inventory and review chains (mine), the
 // attention subset (the pure cadence.Refresh), and the arming posture (claude).
-// It never writes state. Terminal, JSON, HTML and TUI all render this one struct.
+// It never writes state. Terminal, JSON and TUI all render this one struct.
 package status
 
 import (
@@ -31,7 +31,16 @@ import (
 // StatusVersion is the schema version of the emitted snapshot. It mirrors
 // report.DigestVersion: --json is a stable agent contract, so bump this whenever
 // the shape or semantics of SystemStatus change.
-const StatusVersion = 10
+//
+// EVERY COUNT IN THIS SNAPSHOT IS OBSERVATIONAL. The two windows are uncontrolled:
+// the dominant input to an agent's behaviour is its standing instruction set,
+// which no chain and no session records. So the snapshot reports what the corpus
+// recorded — hits, eligible units, window bounds, coverage, guard firings and the
+// identities that counted each window — and the intervention's contribution to any
+// change in those counts is unresolved. v11 removes the claim fields (verdict,
+// p_value, effect, required_after, confounds, composition, instrument_drift,
+// firings_applicable, attribution, chain_rate) and adds observation.
+const StatusVersion = 11
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20
@@ -51,10 +60,10 @@ type Options struct {
 	Evidence mine.EvidenceSet
 }
 
-// ScoredIntervention is one live intervention with its recomputed verdict. It is
-// the full inventory row — effective classes included — so an agent can see an
-// already-decided class and skip re-proposing it. Before/After reuse
-// cadence.Incidence, so one payload keys chain counts one way: units.
+// ScoredIntervention is one live intervention with its recomputed observation. It
+// is the full inventory row, so an agent can see an already-decided class and skip
+// re-proposing it. Before/After reuse cadence.Incidence, so one payload keys chain
+// counts one way: units.
 type ScoredIntervention struct {
 	ID    string `json:"id"`
 	Class string `json:"class"`
@@ -71,17 +80,9 @@ type ScoredIntervention struct {
 	Target       string            `json:"target"`
 	Status       string            `json:"status"`
 	HookID       string            `json:"hook_id,omitempty"`
-	Verdict      string            `json:"verdict"`
 	Before       cadence.Incidence `json:"before"`
 	After        cadence.Incidence `json:"after"`
-	// PValue is the Fisher one-sided p from the score, 0 when unscored.
-	PValue float64 `json:"p_value,omitempty"`
-	// InstrumentDrift flags a measurement window spanning two reviewer prompts.
-	// The verdict stands; this flag rides beside it, never rewrites it.
-	InstrumentDrift bool `json:"instrument_drift,omitempty"`
-	// FiringsApplicable is false for check and instruction tiers, which produce
-	// no audit-log firings by construction, so a reader shows n/a, not zero.
-	FiringsApplicable bool `json:"firings_applicable"`
+	Observation  mine.Observation  `json:"observation"`
 	// Reason, Reopen and RejectedTS explain a refused class: why it was refused
 	// and the condition that reopens it.
 	Reason     string  `json:"reason,omitempty"`
@@ -92,21 +93,12 @@ type ScoredIntervention struct {
 	// BeforeCoverage and AfterCoverage account for each window under that scope.
 	BeforeCoverage cadence.Coverage `json:"before_coverage"`
 	AfterCoverage  cadence.Coverage `json:"after_coverage"`
-	// Effect is the relative-risk range the verdict reads; RequiredAfter is the
-	// clean eligible after-window that could still reach the effect target.
-	Effect        cadence.Effect `json:"effect"`
-	RequiredAfter *int           `json:"required_after"`
-	// Confounds withhold the verdict; Composition only warns beside it.
-	Confounds   []mine.Confound `json:"confounds"`
-	Composition []mine.Confound `json:"composition"`
 	// Corpus and Unit name the evidence the class is counted over and what one
 	// denominator entry is, so a reader never compares a chain rate to a session rate.
 	Corpus string `json:"corpus"`
 	Unit   string `json:"unit"`
 	// SignalKind is the classifier kind a session-unit class is counted over.
 	SignalKind string `json:"signal_kind,omitempty"`
-	// Attribution is the guard's audit join over the after-window.
-	Attribution cadence.Attribution `json:"attribution"`
 }
 
 // HookInfo is one registered managed hook in a scope.
@@ -161,9 +153,7 @@ type ChainSummary struct {
 	Terminal string  `json:"terminal,omitempty"`
 }
 
-// VerdictSummary counts live interventions by verdict. The keys are the verdict
-// vocabulary VerdictFor and TrendFor emit, plus "unscored" for session-unit
-// records the chain engine cannot score.
+// VerdictSummary counts live interventions by the field-derived action section.
 type VerdictSummary struct {
 	Total  int            `json:"total"`
 	Counts map[string]int `json:"counts"`
@@ -304,12 +294,9 @@ type SystemStatus struct {
 	Interventions []ScoredIntervention `json:"interventions"`
 	Summary       VerdictSummary       `json:"summary"`
 	Chains        []ChainSummary       `json:"chains"`
-	// Rate is the chain accrual over the WHOLE corpus, not over Chains, which is
-	// capped. Renderers read it to name a required window as a calendar wait.
-	Rate      ChainRate      `json:"chain_rate"`
-	Attention AttentionQueue `json:"attention"`
-	Telemetry Telemetry      `json:"telemetry"`
-	Corpora   []CorpusRow    `json:"corpora"`
+	Attention     AttentionQueue       `json:"attention"`
+	Telemetry     Telemetry            `json:"telemetry"`
+	Corpora       []CorpusRow          `json:"corpora"`
 	// Config state — what the dashboard panels mutate. Each reads fail-soft.
 	Hooks   []HookInfo   `json:"hooks"`
 	Presets []PresetInfo `json:"presets"`
@@ -346,7 +333,6 @@ func Collect(opts Options) (*SystemStatus, error) {
 	s.Interventions = scoreInventory(records, ev, opts.MinAfter)
 	s.Summary = summarize(s.Interventions)
 	s.Chains = recentChains(chains, recentChainLimit)
-	s.Rate = corpusRate(chains, time.Now())
 
 	// Attention subset, from the pure orchestrator function — no side effects.
 	q, err := cadence.Refresh(cadence.Options{
@@ -380,10 +366,10 @@ func Collect(opts Options) (*SystemStatus, error) {
 	return s, nil
 }
 
-// scoreInventory recomputes every live intervention's verdict. Reworked and
+// scoreInventory recomputes every live intervention's observation. Reworked and
 // removed records are dropped as history — the filter Refresh applies. A record
-// from a corpus the chain engine cannot score is carried with verdict "unscored"
-// rather than scored against the wrong corpus; the registry decides which.
+// from a corpus no engine reads is carried with an empty observation rather than
+// counted against the wrong corpus; the registry decides which.
 func scoreInventory(records []mine.Record, ev mine.EvidenceSet, minAfter int) []ScoredIntervention {
 	out := []ScoredIntervention{}
 	for _, r := range records {
@@ -395,25 +381,22 @@ func scoreInventory(records []mine.Record, ev mine.EvidenceSet, minAfter int) []
 		if !mine.Scorable(r) {
 			prose := mine.ProseOf(r)
 			out = append(out, ScoredIntervention{
-				ID:                str(r["id"]),
-				Class:             str(r["class"]),
-				Problem:           prose.Problem,
-				Intervention:      prose.Intervention,
-				LegacyNote:        prose.LegacyNote,
-				Match:             str(r["match"]),
-				Tier:              tier,
-				Target:            str(r["target"]),
-				Status:            st,
-				HookID:            str(r["hook_id"]),
-				Verdict:           "unscored",
-				Corpus:            mine.CorpusOf(r),
-				Unit:              mine.UnitOf(r),
-				Confounds:         []mine.Confound{},
-				Composition:       []mine.Confound{},
-				FiringsApplicable: firingsApplicable(tier),
-				Reason:            str(r["reason"]),
-				Reopen:            str(r["reopen"]),
-				RejectedTS:        numFloat(r["rejected_ts"]),
+				ID:           str(r["id"]),
+				Class:        str(r["class"]),
+				Problem:      prose.Problem,
+				Intervention: prose.Intervention,
+				LegacyNote:   prose.LegacyNote,
+				Match:        str(r["match"]),
+				Tier:         tier,
+				Target:       str(r["target"]),
+				Status:       st,
+				HookID:       str(r["hook_id"]),
+				Corpus:       mine.CorpusOf(r),
+				Unit:         mine.UnitOf(r),
+				Observation:  mine.Observation{Declined: st == "rejected"},
+				Reason:       str(r["reason"]),
+				Reopen:       str(r["reopen"]),
+				RejectedTS:   numFloat(r["rejected_ts"]),
 			})
 			continue
 		}
@@ -426,48 +409,40 @@ func scoreInventory(records []mine.Record, ev mine.EvidenceSet, minAfter int) []
 		// explanation is not a measurement output.
 		prose := mine.ProseOf(r)
 		out = append(out, ScoredIntervention{
-			ID:                str(scored["id"]),
-			Class:             str(scored["class"]),
-			Problem:           prose.Problem,
-			Intervention:      prose.Intervention,
-			LegacyNote:        prose.LegacyNote,
-			Match:             str(r["match"]),
-			Tier:              scoredTier,
-			Target:            str(scored["target"]),
-			Status:            str(scored["status"]),
-			HookID:            str(scored["hook_id"]),
-			Verdict:           str(scored["verdict"]),
-			Before:            incidenceOf(scored["before"]),
-			After:             incidenceOf(scored["after"]),
-			PValue:            numFloat(scored["p"]),
-			InstrumentDrift:   boolOf(scored["instrument_drift"]),
-			FiringsApplicable: firingsApplicable(scoredTier),
-			Reason:            str(scored["reason"]),
-			Reopen:            str(scored["reopen"]),
-			RejectedTS:        numFloat(r["rejected_ts"]),
+			ID:           str(scored["id"]),
+			Class:        str(scored["class"]),
+			Problem:      prose.Problem,
+			Intervention: prose.Intervention,
+			LegacyNote:   prose.LegacyNote,
+			Match:        str(r["match"]),
+			Tier:         scoredTier,
+			Target:       str(scored["target"]),
+			Status:       str(scored["status"]),
+			HookID:       str(scored["hook_id"]),
+			Before:       incidenceOf(scored["before"]),
+			After:        incidenceOf(scored["after"]),
+			Observation:  observationOf(scored["observation"]),
+			Reason:       str(scored["reason"]),
+			Reopen:       str(scored["reopen"]),
+			RejectedTS:   numFloat(r["rejected_ts"]),
 
 			Scope:          cadence.ScopeOf(scored["scope"]),
 			BeforeCoverage: cadence.CoverageOf(scored["before_coverage"]),
 			AfterCoverage:  cadence.CoverageOf(scored["after_coverage"]),
-			Effect:         cadence.EffectOf(scored["effect"]),
-			RequiredAfter:  cadence.RequiredAfterOf(scored["required_after"]),
-			Confounds:      cadence.ConfoundsOf(scored["confounds"]),
-			Composition:    cadence.ConfoundsOf(scored["composition"]),
 			Corpus:         mine.CorpusOf(r),
 			Unit:           mine.UnitOf(r),
 			SignalKind:     str(scored["signal_kind"]),
-			Attribution:    cadence.AttributionOf(scored["attribution"]),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
 }
 
-// summarize counts the inventory by verdict.
+// summarize counts the inventory by the action section each observation files under.
 func summarize(items []ScoredIntervention) VerdictSummary {
 	counts := map[string]int{}
 	for _, it := range items {
-		counts[it.Verdict]++
+		counts[ActionFor(it.Observation, it.Scope)]++
 	}
 	return VerdictSummary{Total: len(items), Counts: counts}
 }

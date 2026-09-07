@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/steer-sh/steer-cli/internal/cadence"
+	"github.com/steer-sh/steer-cli/internal/gate/mine"
 )
 
 // str reads a string value, or "" when the key is absent or not a string.
@@ -45,6 +46,21 @@ func incidenceOf(v any) cadence.Incidence {
 		Units: numInt(m["chains"]),
 		Rate:  numFloat(m["rate"]),
 	}
+}
+
+func observationOf(v any) mine.Observation {
+	if obs, ok := v.(mine.Observation); ok {
+		return obs
+	}
+	data, err := json.Marshal(v)
+	if err != nil {
+		return mine.Observation{}
+	}
+	var obs mine.Observation
+	if json.Unmarshal(data, &obs) != nil {
+		return mine.Observation{}
+	}
+	return obs
 }
 
 // countLines counts non-empty lines in a file. A missing file reads as zero.

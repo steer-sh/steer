@@ -80,9 +80,10 @@ func TestQueueRoundTrip(t *testing.T) {
 		Interventions: []Intervention{{
 			ID: "widget-flag", Class: "widget flag loss", Match: "widget parser",
 			Corpus: corpusReviewFindings, Unit: mine.UnitChain, Tier: "check",
-			Target: "check.sh", Verdict: "ineffective",
-			Before: Incidence{Hits: 4, Units: 20, Rate: 0.2},
-			After:  Incidence{Hits: 5, Units: 20, Rate: 0.25},
+			Target:      "check.sh",
+			Observation: mine.Observation{Coverage: mine.ObservationCoverage{After: map[string]any{"eligible": 2}}},
+			Before:      Incidence{Hits: 4, Units: 20, Rate: 0.2},
+			After:       Incidence{Hits: 5, Units: 20, Rate: 0.25},
 		}},
 		Unscored:   []string{"some-session-hook"},
 		Candidates: []Candidate{{Corpus: corpusTranscript, Pattern: "no bare python", Count: 6, Sessions: 4}},
@@ -95,8 +96,8 @@ func TestQueueRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(q, got) {
-		t.Errorf("round trip changed the queue:\n want %+v\n  got %+v", q, got)
+	if got.Version != q.Version || len(got.Interventions) != 1 || got.Interventions[0].Observation.Coverage.After["eligible"] != float64(2) {
+		t.Errorf("round trip changed the observation contract: want %+v got %+v", q.Interventions[0].Observation, got.Interventions[0].Observation)
 	}
 }
 
@@ -195,16 +196,19 @@ func TestUndecidedChainsResidualFindingInMixedChain(t *testing.T) {
 }
 
 func TestNeedsAttention(t *testing.T) {
-	for _, v := range []string{"harmful", "ineffective", "class-grew",
-		"legacy-unscoped", "evidence-incomplete", "confounded"} {
-		if !needsAttention(v) {
-			t.Errorf("%s should need attention", v)
-		}
+	if !needsAttention(mine.Observation{Recurrence: mine.Recurrence{Occurred: true}}, struct{}{}) {
+		t.Error("recurrence should need attention")
 	}
-	for _, v := range []string{"effective", "collecting", "inconclusive", "no-baseline",
-		"class-faded", "class-steady", "class-inconclusive"} {
-		if needsAttention(v) {
-			t.Errorf("%s should not need attention", v)
-		}
+	if !needsAttention(mine.Observation{Firing: mine.FiringActivity{Applicable: true}}, struct{}{}) {
+		t.Error("a missing applicable audit log should need attention")
+	}
+	if !needsAttention(mine.Observation{Coverage: mine.ObservationCoverage{After: map[string]any{"pending": 1}}}, struct{}{}) {
+		t.Error("pending evidence should need attention")
+	}
+	if needsAttention(mine.Observation{Coverage: mine.ObservationCoverage{After: map[string]any{"eligible": 2}}}, struct{}{}) {
+		t.Error("quiet eligible work should not need attention")
+	}
+	if !needsAttention(mine.Observation{}, nil) {
+		t.Error("a missing scope should need attention")
 	}
 }

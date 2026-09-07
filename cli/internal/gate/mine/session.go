@@ -279,7 +279,7 @@ func ScoreSessionRecord(record Record, ev EvidenceSet, minAfter int) (map[string
 		return nil, err
 	}
 	signalKind := SessionSignalKind(record)
-	scope, hasScope, err := ParseScope(record)
+	scope, _, err := ParseScope(record)
 	if err != nil {
 		return nil, err
 	}
@@ -296,8 +296,6 @@ func ScoreSessionRecord(record Record, ev EvidenceSet, minAfter int) (map[string
 
 	bHits, bTotal, bRate := SessionIncidence(before, pattern, signalKind)
 	aHits, aTotal, aRate := SessionIncidence(after, pattern, signalKind)
-	m := Measure(bHits, bTotal, bRate, SessionHitSequence(after, pattern, signalKind), aRate)
-	p := FisherOneSided(bHits, bTotal-bHits, aHits, aTotal-aHits)
 
 	hookID := str(record["hook_id"])
 	attr := Attribution{
@@ -309,12 +307,7 @@ func ScoreSessionRecord(record Record, ev EvidenceSet, minAfter int) (map[string
 		attr.Firings, attr.Sessions = joinFirings(after, ev.Firings, hookID)
 	}
 
-	authored := str(record["instrument"])
 	afterInstruments := sessionInstruments(after)
-	drift := authored != "" && len(driftingSessionInstruments(after, authored)) > 0
-	hard, soft := SessionConfounds(before, after, authored)
-
-	label := sessionVerdict(record, m, aTotal, minAfter, hasScope, beforeCov, afterCov, hard, attr)
 
 	beforeHarness, afterHarness := sessionHarnesses(before), sessionHarnesses(after)
 	return map[string]any{
@@ -333,71 +326,14 @@ func ScoreSessionRecord(record Record, ev EvidenceSet, minAfter int) (map[string
 		"before_coverage":   sessionCoverageMap(beforeCov),
 		"after_coverage":    sessionCoverageMap(afterCov),
 		"scope":             record["scope"],
-		"effect":            effectMap(m.Effect),
-		"required_after":    requiredAfterValue(m),
 		"attribution":       attr,
-		"confounds":         confoundList(hard),
-		"composition":       confoundList(soft),
-		"p":                 pyFloat(round4(p)),
-		"verdict":           label,
 		"instrument":        record["instrument"],
-		"instrument_drift":  drift,
 		"after_instruments": emptyIfNil(afterInstruments),
 		"before_hosts":      emptyIfNil(beforeHarness),
 		"after_hosts":       emptyIfNil(afterHarness),
-		"host_mix_drift":    len(beforeHarness) > 0 && len(afterHarness) > 0 && !sameStringSet(beforeHarness, afterHarness),
 		"observation": sessionObservation(record, before, after, beforeCov, afterCov,
 			pattern, signalKind, attr, ev, afterStart, float64(now())),
 	}, nil
-}
-
-// sessionVerdict is the session engine's ladder: no scope, then missing evidence, then
-// a confound, then the range. Attribution refines the range's answer, never replaces a
-// withheld one.
-func sessionVerdict(record Record, m Measurement, aTotal, minAfter int, hasScope bool,
-	before, after SessionCoverage, hard []Confound, attr Attribution) string {
-	switch {
-	case !hasScope:
-		return "legacy-unscoped"
-	case sessionEvidenceVerdict(before, after) != "":
-		return sessionEvidenceVerdict(before, after)
-	case attr.Applicable && !attr.LogPresent:
-		return "evidence-incomplete"
-	case len(hard) > 0:
-		return "confounded"
-	case IsRejected(record):
-		return TrendFor(m, aTotal, minAfter)
-	}
-	label := VerdictFor(m, aTotal, minAfter)
-	if !attr.Applicable || attr.Firings > 0 {
-		return label
-	}
-	// The guard stayed silent across the window, so the range describes something else.
-	switch label {
-	case "effective":
-		return "unattributed"
-	case "ineffective", "harmful":
-		return "not-triggered"
-	}
-	return label
-}
-
-// sessionEvidenceVerdict withholds when a window kept no eligible session. Unknown
-// scope metadata is permanent; a window emptied only by partial exposure fills on its
-// own, so it is collecting.
-func sessionEvidenceVerdict(before, after SessionCoverage) string {
-	for _, c := range []SessionCoverage{before, after} {
-		if c.Eligible > 0 {
-			continue
-		}
-		switch {
-		case c.Unknown > 0:
-			return "evidence-incomplete"
-		case c.Partial > 0:
-			return "collecting"
-		}
-	}
-	return ""
 }
 
 func sessionCoverageMap(c SessionCoverage) map[string]any {

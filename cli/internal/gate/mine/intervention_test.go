@@ -1,7 +1,6 @@
 package mine
 
 import (
-	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -102,7 +101,8 @@ func TestRegisterScoreRoundTrip(t *testing.T) {
 	after := scored["after"].(map[string]any)
 	check(t, "before incidence", []int{numInt(before["hits"]), numInt(before["chains"])}, []int{12, 12})
 	check(t, "after incidence", []int{numInt(after["hits"]), numInt(after["chains"])}, []int{0, 12})
-	check(t, "a real elimination scores effective", scored["verdict"], "effective")
+	obs := scored["observation"].(Observation)
+	check(t, "an eliminated class has no recurrence", obs.Recurrence.Occurred, false)
 
 	// A regex matching nothing before install can never be scored, so registering it
 	// is refused rather than recorded with a zero baseline.
@@ -189,11 +189,17 @@ func TestInstrumentDrift(t *testing.T) {
 	base := Record{"id": "d", "class": "d", "tier": "check", "target": "check.sh",
 		"match": "widget parser", "kind": "defect", "installed_ts": 1050, "installed_date": "x"}
 	drifted := scoreOK(t, withKV(base, "instrument", "modelA/3/aaaa1111"), chains, 1)
-	check(t, "drift is flagged when the reviewer changed", drifted["instrument_drift"], true)
+	if len(drifted["observation"].(Observation).Provenance.After) == 0 {
+		t.Error("the after-window should retain reviewer provenance")
+	}
 	steady := scoreOK(t, withKV(base, "instrument", "modelB/3/bbbb2222"), chains, 1)
-	check(t, "no drift when the reviewer is unchanged", steady["instrument_drift"], false)
+	if len(steady["observation"].(Observation).Provenance.Before) == 0 {
+		t.Error("the before-window should retain reviewer provenance")
+	}
 	unstamped := scoreOK(t, base, chains, 1)
-	check(t, "an unstamped record claims no drift", unstamped["instrument_drift"], false)
+	if _, ok := unstamped["observation"].(Observation); !ok {
+		t.Fatal("an unstamped record should still carry an observation")
+	}
 
 	plain := BuildChains([]gate.Row{row(1, "deny"), concerns(row(2, "retry"), "round", c("x"))}, false)
 	check(t, "unstamped log yields no current instrument", CurrentInstrument(plain), "")
@@ -213,13 +219,19 @@ func TestHostMixDrift(t *testing.T) {
 	mixed := scoreOK(t, rec, BuildChains(hostRows, false), 1)
 	check(t, "before-window hosts are reported", mixed["before_hosts"], []string{"alpha"})
 	check(t, "after-window hosts are reported", mixed["after_hosts"], []string{"alpha", "beta"})
-	check(t, "a machine appearing mid-window is flagged", mixed["host_mix_drift"], true)
+	if _, ok := mixed["observation"].(Observation); !ok {
+		t.Fatal("host changes must not remove the observation")
+	}
 
 	single := scoreOK(t, rec, BuildChains(hostRows[:4], false), 1)
-	check(t, "one machine on both sides is no drift", single["host_mix_drift"], false)
+	if _, ok := single["observation"].(Observation); !ok {
+		t.Fatal("a stable host set must still carry the observation")
+	}
 
 	emptyAfter := scoreOK(t, withKV(rec, "installed_ts", 9999), BuildChains(hostRows, false), 1)
-	check(t, "an empty after-window claims no host drift", emptyAfter["host_mix_drift"], false)
+	if _, ok := emptyAfter["observation"].(Observation); !ok {
+		t.Fatal("an empty after-window must still carry the observation")
+	}
 }
 
 func TestRejections(t *testing.T) {
@@ -283,7 +295,9 @@ func TestRejections(t *testing.T) {
 	}
 
 	scored := scoreOK(t, records[0], chains, 12)
-	check(t, "a rejection is scored from its rejection date", scored["verdict"], "class-steady")
+	if !scored["observation"].(Observation).Declined {
+		t.Error("a rejected record should mark the observation as declined")
+	}
 
 	// Deciding to gate it after all supersedes the refusal rather than deleting it.
 	if err := Register(io.Discard, stateDir, RegisterOpts{
@@ -387,9 +401,10 @@ func containsQuestionMark(s string) bool {
 	return false
 }
 
-// TestScoreEmitsTheRange pins the measurement fields a scored record carries, and that a
-// record predating scopes abstains instead of reporting a verdict.
-func TestScoreEmitsTheRange(t *testing.T) {
+// TestScoreEmitsTheObservation pins the field counts a scored record carries, that
+// no claim field rides beside them, and that a record predating scopes emits a null
+// scope — the one signal a reader files it under a repair by.
+func TestScoreEmitsTheObservation(t *testing.T) {
 	var rows []gate.Row
 	ts := 1000
 	for i := 0; i < 20; i++ {
@@ -421,17 +436,13 @@ func TestScoreEmitsTheRange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	effect := scored["effect"].(map[string]any)
-	check(t, "the effect names its method", effect["method"], EffectMethod)
-	check(t, "the effect names its level", effect["confidence"], pyFloat(Confidence))
-	if _, ok := effect["lower"].(json.Number); !ok {
-		t.Errorf("the lower bound must always be a number, got %v", effect["lower"])
+	if _, ok := scored["observation"].(Observation); !ok {
+		t.Fatal("a scored record must carry an observation")
 	}
-	if effect["upper"] == nil {
-		t.Error("a measured baseline bounds the ratio above")
-	}
-	if n, ok := scored["required_after"].(int); !ok || n <= 0 {
-		t.Errorf("a measured baseline names its exposure floor, got %v", scored["required_after"])
+	for _, key := range []string{"verdict", "effect", "required_after", "p", "confounds", "composition", "instrument_drift", "host_mix_drift"} {
+		if _, ok := scored[key]; ok {
+			t.Errorf("the claim field %q must not be emitted", key)
+		}
 	}
 	cov := scored["before_coverage"].(map[string]any)
 	check(t, "an all-scope makes every before-chain eligible", cov["eligible"], cov["total"])
@@ -448,7 +459,9 @@ func TestScoreEmitsTheRange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	check(t, "a scopeless record abstains", unscoped["verdict"], "legacy-unscoped")
+	if unscoped["scope"] != nil {
+		t.Errorf("a scopeless record must emit a null scope, got %v", unscoped["scope"])
+	}
 }
 
 // TestStoredBaselineMatchesTheScoredWindow pins that a writer freezes its baseline

@@ -161,19 +161,22 @@ STEER_BIN="${STEER_BIN:-steer}"
 ```
 
 Read the `interventions[]` array. Each row is one live intervention with its
-`class`, `tier`, `target`, `status`, and measured `verdict`. Match the user's
-rule against the classes there:
+`class`, `tier`, `target`, `status`, and its `observation` — what the corpus
+recorded, never a claim that the fix worked. Match the user's rule against the
+classes there:
 
-- The rule matches a class scored `effective`: the class is covered. Tell the
-  user, and stop. Do not install a duplicate.
-- The rule matches a class scored `ineffective` or `harmful`: the current gate
-  does not work. Treat this as a rework of that intervention, not a new hook.
-- The rule matches a class scored `collecting` or `inconclusive`: the class is
-  installed and still under measurement. Say so, and do not install a duplicate.
-- The rule matches a class whose verdict withholds — `legacy-unscoped`,
-  `evidence-incomplete` or `confounded`: the class is installed but unmeasured.
-  Name the reason from the row, and do not install a duplicate.
+- The rule matches any class here: the class is already decided. Do not install a
+  duplicate. Say which record covers it and what its observation shows.
+- The record's `observation.recurrence.occurred` is true: the class came back
+  after the record went in. Treat the user's rule as a rework of that record
+  rather than as a new hook, and open `observation.recurrence.example` first.
+- The record has no `scope`, or its `observation.coverage` counts unknown units:
+  the class is installed and its window is not accounted for. Name that from the
+  row, and do not install a duplicate.
 - No match: continue to Step 0.
+
+An observation states no direction. Never read a quiet after-window as proof the
+fix worked: prevention and absent opportunity both produce silence.
 
 Fail soft. If the command errors, or the CLI is absent, say so in one line and
 continue. This check is an optimization, not a gate. The `status --json` schema
@@ -444,13 +447,24 @@ The `|` pipe splits a rule into a detection part and an optional suggestion (see
 
 Never invent suggestions. Only include them when explicitly provided after `|`.
 
-## The `steer status --json` contract (`status_version: 10`)
+## The `steer status --json` contract (`status_version: 11`)
 
 `steer status` composes one read-only snapshot of the whole loop. The unit is the
-failure class and its verdict, not the hook count. The Pre-flight step reads it to
-dedup a rule against classes the loop already decided. This schema is byte-shared
-with `skills/steer-report/SKILL.md`; change both together (see CLAUDE.md Key
-Contracts). Fields:
+failure class and what the corpus recorded about it, not the hook count. The
+Pre-flight step reads it to dedup a rule against classes the loop already decided.
+This schema is byte-shared with `skills/steer-report/SKILL.md`; change both
+together (see CLAUDE.md Key Contracts). Fields:
+
+**Read every count here as an observation.** The windows are uncontrolled: the
+dominant input to an agent's behaviour is its standing instruction set, which no
+chain and no session records, which a person edits by hand between sessions, and
+which an instruction-tier fix edits directly. So the snapshot reports hits,
+eligible units, window bounds, coverage, guard firings and the identities that
+counted each window, and it reports no efficacy verdict. The intervention's
+contribution to any change in these counts is unresolved. v11 removes `verdict`,
+`p_value`, `effect`, `required_after`, `confounds`, `composition`,
+`instrument_drift`, `firings_applicable`, `attribution` and `chain_rate`, and adds
+`observation`.
 
 - `status_version` — the schema version. `--json` is a stable agent contract.
 - `posture` — the arming state: `instrument` (reviewer model / runs / prompt
@@ -478,29 +492,24 @@ Contracts). Fields:
   `record-present-unverified`, `missing` or `unknown` — Steer never claims to
   have verified a harness's internal hash. The resolver is the Stop hook that
   joins ledger rows to transcripts; it arms with the commit gate on the same
-  scope. `unresolved_rows` counts the rows still owing that join — the scorer
-  withholds on them, and `steer commit-gate backfill --apply` clears them.
+  scope. `unresolved_rows` counts the rows still owing that join — a window
+  cannot account for them, and `steer commit-gate backfill --apply` clears them.
   `masters[]` is the guard master's runtime provenance, one row per harness per
   scope: `path`, `runtime` (the digest of the Python runtime spliced into it),
   `version` (the steer that wrote it), `expected` (this binary's runtime digest)
   `state` and `observed` (the epoch second of the last block in the audit log
   beside this registered master; the log holds blocks only, so a master that
   allowed every call reads as 0). `state` is `current`, `stale` (an older runtime, so a firing
-  writes fewer audit fields than the scorer joins on), `unknown` (an unstamped
+  writes fewer audit fields than the join reads), `unknown` (an unstamped
   master — every store built before the stamp existed, which never reads as
   current) or `not-registered`. The row reads the REGISTERED master, not the one
   the store resolves to: a migrated machine holds a master at both paths. **Act
   on `stale` or `unknown`:** run `steer hooks rebuild --scope <scope>`, which
   regenerates the master AND re-registers it in one operation.
-- `interventions[]` — the **full** scored inventory. It carries every live
-  class, `effective` ones included. Each row: `id`, `class`, `problem`,
-  `intervention`, `legacy_note`, `match` (the regex
+- `interventions[]` — the **full** inventory. It carries every live class. Each
+  row: `id`, `class`, `problem`, `intervention`, `legacy_note`, `match` (the regex
   that defines the class), `tier`, `target`, `status` (`active` or `rejected`),
-  `verdict`, `before` / `after` incidence (`hits`, `units`, `rate`), `p_value`,
-  `instrument_drift` (the reviewer changed between the windows, at either grade;
-  a major change — provider, model, prompt digest or engine — withholds the
-  verdict as `confounded`, a minor one — effort or run count — rides beside the
-  range as a `composition` entry), `firings_applicable` (true only for the `guard` tier, whose master hook writes the audit log that `audit_firings` counts; check, instruction and review write none), and for
+  `before` / `after` incidence (`hits`, `units`, `rate`), and for
   a refused class `reason`, `reopen` and `rejected_ts`. `problem` and `intervention` are the record's own explanation, authored when the
   evidence was in hand: what goes wrong, and what this record does about it. Lead
   with them — a `class` is a label and a `match` is a regex, and neither says what
@@ -517,38 +526,52 @@ Contracts). Fields:
   its measurement conditions:
   - `scope` — the frozen eligibility rule: `{version, all}`, or `{version, repo,
     path}` at version 1, plus a `harness` id list at version 2. The predicates
-    combine with AND. `null` is a legacy record, which scores `legacy-unscoped`
-    and never gets a scope inferred for it.
+    combine with AND. `null` is a legacy record: its two windows describe
+    different opportunity sets, and no scope is ever inferred for it. Run
+    `steer fix scope <id>`.
   - `before_coverage` / `after_coverage` — each window's unit accounting:
     `total`, `eligible` (the denominator), `ineligible`, `unknown`,
     `unknown_scope`, `unknown_evidence`, `pending`, `partial_exposure`. An
-    unknown unit withholds; it never shrinks the denominator. `partial_exposure`
-    is the session corpus's own category, for a session that straddled the
-    install and so ran under both regimes: `unknown` means the scope could not
-    decide, `partial_exposure` means the window could not.
-  - `effect` — the joint relative-risk range: `estimate`, `lower`, `upper`
-    (`null` when unbounded above), `confidence`, `method`. The verdict reads the
-    bounds, never the estimate.
-  - `required_after` — the smallest clean eligible after-window that could still
-    place `upper` at or below the 0.50 effect target. `null` means no window of
-    any size could, which an unmeasurably loose baseline causes.
-  - `confounds` — hard confounds that withhold the verdict; each is
-    `{category, reason, before, after}` over `instrument`, `host`, `harness`,
-    `repo`, `author_model`, `path_kind` or `project`. `composition` is the same
-    shape for overlapping-but-changed category sets, which warn without
-    withholding. An `instrument` entry is placed by its grade: a changed
-    provider, model, prompt digest or engine is hard, and a changed effort or run
-    count at one identity is `composition`.
-  - `attribution` — the guard's audit join over the after-window:
-    `{applicable, log_present, hook_id, firings, sessions}`. `applicable` is
-    false for a tier that writes no audit rows and for a record naming no hook,
-    and the verdict then reads the range alone.
-- `summary` — `total` plus `counts` by verdict.
+    unknown unit is not counted; it never shrinks the denominator.
+    `partial_exposure` is the session corpus's own category, for a session that
+    straddled the install and so ran under both regimes: `unknown` means the
+    scope could not decide, `partial_exposure` means the window could not.
+  - `observation` — what the corpus recorded. Five blocks:
+    - `counts` — `split_ts` (the boundary: the install, the refusal, or the
+      scope migration), `observed_ts` (the read's clock), `unit`, and `before` /
+      `after`, each `{hits, eligible, first_activity_ts, last_activity_ts}`. The
+      two timestamp pairs are different things: the period bounds express an
+      empty window and say how long one has been quiet, and the activity bounds
+      name the eligible work actually seen, which an empty window cannot express.
+    - `recurrence` — `{occurred, matches, example_kind, example, example_ts}`.
+      `example_kind` is `adjudicated_finding` (a reviewer's confirmed concern) or
+      `cluster_key` (the text a classifier grouped a session's friction by, which
+      is NOT a confirmed escaped failure). Read the example before acting.
+    - `firing` — the guard audit stream: `{applicable, log_present, hook_id,
+      scope, class_scoped, rows, units, newest_ts}`. `applicable` is false for a
+      tier that writes no audit rows and for a record naming no hook.
+      `log_present: false` is unknown activity, never a known zero. `scope` is
+      `eligible_units` (rows joined to this class's own eligible units, and
+      `class_scoped` is then true) or `window_period` (every row this hook wrote
+      inside the window's bounds, whatever work it landed on). A `window_period`
+      count cannot establish that the guard fired on this class's work.
+    - `coverage` — `before` / `after`, the same maps as above, plus
+      `zero_eligible_after`. That flag is a statement, not a fault: every freshly
+      installed record has zero eligible after-units, and absent opportunity is
+      not an observed quiet window.
+    - `provenance` — `{kind, before, after}`. `kind` is `reviewer` (the reviewer
+      identities that counted a chain window) or `parser` (the parser-and-adapter
+      identities that produced a session window). Labels only: no rule here
+      compares them. A window whose two lists differ was counted by two
+      instruments, which is a reason to read the examples rather than the counts.
+    - `declined` — true on a refused record. Its after-window is the period since
+      the refusal, so a recurrence there implies no fix that failed.
+- `summary` — `total` plus `counts` by action section (`inspect`, `repair`,
+  `observe`).
 - `chains[]` — recent review chains, findings split `accepted` / `rejected`.
-- `attention` — the subset needing action: `interventions[]` (verdict
-  `harmful`, `ineffective`, `not-triggered`, `unattributed`, `class-grew`,
-  `legacy-unscoped`, `evidence-incomplete` or `confounded`), `candidates[]` (no
-  `match` yet), and `unscored[]` (ids of records no engine reads).
+- `attention` — the subset asking for a reader: `interventions[]` (a recurrence,
+  a missing coverage cause, or no frozen scope), `candidates[]` (no `match` yet),
+  and `unscored[]` (ids of records no engine reads).
 - `telemetry` — corpus sizes: `review_chains`, `denials_rows`, `audit_firings`,
   `session_snapshots`, plus `harnesses[]` — one row per harness with its
   `sessions`, `firings` and `chains`, so a harness that contributed nothing reads
@@ -564,37 +587,18 @@ Contracts). Fields:
   and cannot be read is `present: true` with `error` naming why. Before v10 both
   read as absent.
 
-### The verdict vocabulary
+### What an observation supports, and what it does not
 
-A verdict is a claim about the range, not about the point estimate. The loop
-prefers an abstention over an unsupported conclusion.
+An observation supports three readings and no fourth:
 
-Active interventions:
+- **The class came back.** `recurrence.occurred` is a fact about the corpus.
+  Open the example and decide whether the record still describes the problem.
+- **The accounting is incomplete.** Unknown units, or an absent guard audit log,
+  mean the window cannot be read at all. Name the cause and repair it.
+- **The window is quiet.** Eligible work arrived and the class did not. That is
+  what was recorded, and it is not evidence that the fix caused the silence.
 
-- `effective` — the range's upper bound is at or below 0.50.
-- `harmful` — the lower bound is above 1.00.
-- `ineffective` — the lower bound is above 0.50.
-- `collecting` — no bound is crossed and the eligible after-window is smaller
-  than `required_after`. More evidence can still decide it.
-- `inconclusive` — the exposure is there and the range still crosses the
-  decision boundary.
-- `no-baseline` — the before-window never carried the class.
-- `legacy-unscoped` — the record has no frozen scope, so its two windows describe
-  different opportunity sets. Run `steer fix scope <id>`.
-- `evidence-incomplete` — a window has no eligible chain left and unknown chains
-  are why: a ledger the resolver closed as gone, or scope metadata no row carried.
-- `confounded` — a hard confound stands between the windows: a reviewer whose
-  provider, model, prompt digest or engine differs from the registered baseline,
-  or disjoint before/after supports. A reviewer that changed only its effort or
-  run count is a `composition` entry instead, and the verdict stands.
-- `unattributed` — the incidence fell effectively, but the guard never fired in
-  the after-window. Something else caused the fall; find it before crediting the
-  guard.
-- `not-triggered` — the class persisted while the guard stayed silent. The
-  matcher is aimed wrong. These two split what `effective` and `ineffective`
-  alone conflate, and they name two different repairs.
-
-Refused classes (`status: rejected`) use their own ladder: `class-grew` (lower
-bound at or above 1.50), `class-faded` (upper bound at or below 0.50),
-`class-steady` (the whole range sits inside 0.50–1.50), and
-`class-inconclusive` when none of those holds.
+Behaviour is established at install, not in the field: a guard's stored fixtures
+(`steer fix mine`, `steer test <hook>`) replay real cases deterministically.
+Field counts are maintenance evidence — they say whether a class is still
+happening, never whether a fix is what stopped it.

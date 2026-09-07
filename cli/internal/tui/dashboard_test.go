@@ -41,26 +41,19 @@ func TestPanelsCarryTheMeasurementConditions(t *testing.T) {
 		},
 		Interventions: []status.ScoredIntervention{{
 			ID: "bare-python", Class: "bare python call", Match: "python ", Tier: "guard",
-			Target: "guard.py", Status: "active", Verdict: "confounded", Unit: "chain",
+			Target: "guard.py", Status: "active", Unit: "chain",
 			Scope:          &cadence.Scope{Version: 1, Repo: "steer", Path: `\.go$`},
 			BeforeCoverage: cadence.Coverage{Total: 14, Eligible: 12, Ineligible: 2},
 			AfterCoverage:  cadence.Coverage{Total: 6, Eligible: 5, Unknown: 1, UnknownEvidence: 1},
-			Effect: cadence.Effect{Lower: 0.2, Confidence: 0.9,
-				Method: "clopper-pearson / mixture-cs"},
-			RequiredAfter: intPtr(9),
-			Confounds: []mine.Confound{{Category: "instrument",
-				Reason: "after-window reviewed by another instrument"}},
-			Composition: []mine.Confound{},
+			Observation:    mine.Observation{Coverage: mine.ObservationCoverage{Before: map[string]any{"total": 14, "eligible": 12, "ineligible": 2}, After: map[string]any{"total": 6, "eligible": 5, "unknown": 1, "unknown_evidence": 1}}},
 		}},
 	}
 
 	m.active = panelProblems
 	summary := m.View()
 	for _, want := range []string{
-		"Not comparable",
-		// No range under a withheld result: the reason carries the row.
-		"these two periods ran under different conditions and cannot be compared",
-		"how the evidence was produced",
+		"Coverage evidence",
+		"no recorded decision",
 	} {
 		if !strings.Contains(summary, want) {
 			t.Errorf("the compact summary is missing %q", want)
@@ -76,9 +69,9 @@ func TestPanelsCarryTheMeasurementConditions(t *testing.T) {
 	for _, want := range []string{
 		"12 eligible / 14 (2 out of scope)",
 		"5 eligible / 6 (1 with no decision recorded)",
-		"how the evidence was produced — after-window reviewed by another instrument",
+		"These counts describe the recorded evidence",
 		"repo=/steer/ AND path=/\\.go$/",
-		"needs 9 more clean, eligible review sequences",
+		"run: steer commit-gate backfill --apply",
 	} {
 		if !strings.Contains(expanded, want) {
 			t.Errorf("the expanded entry is missing %q:\n%s", want, expanded)
@@ -96,5 +89,3 @@ func TestPanelsCarryTheMeasurementConditions(t *testing.T) {
 		t.Error("diagnostics does not name the reviews still waiting")
 	}
 }
-
-func intPtr(n int) *int { return &n }

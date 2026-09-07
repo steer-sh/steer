@@ -9,7 +9,9 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
+	"github.com/steer-sh/steer-cli/internal/cadence"
 	"github.com/steer-sh/steer-cli/internal/gate"
+	"github.com/steer-sh/steer-cli/internal/gate/mine"
 	"github.com/steer-sh/steer-cli/internal/status"
 )
 
@@ -22,7 +24,7 @@ func geometryModel(t *testing.T) *Model {
 	for i := 0; i < 20; i++ {
 		m.snap.Posture.CommitGate = append(m.snap.Posture.CommitGate, status.ScopeArming{Harness: fmt.Sprintf("agent-%02d", i), Scope: "global", Registered: true, Effective: i%3 == 0, Resolvable: status.ResolveMissing})
 		m.snap.Hooks = append(m.snap.Hooks, status.HookInfo{Name: fmt.Sprintf("guard-%02d-", i) + strings.Repeat("界-long-", 12)})
-		m.snap.Interventions = append(m.snap.Interventions, status.ScoredIntervention{ID: fmt.Sprint(i), Class: fmt.Sprintf("problem-%02d", i), Status: "active", Verdict: "confounded", Tier: "guard", Problem: strings.Repeat("A detailed explanation. ", 40), Target: "last-detail-target"})
+		m.snap.Interventions = append(m.snap.Interventions, status.ScoredIntervention{ID: fmt.Sprint(i), Class: fmt.Sprintf("problem-%02d", i), Status: "active", Tier: "guard", Problem: strings.Repeat("A detailed explanation. ", 40), Target: "last-detail-target", Scope: &cadence.Scope{Version: 1, All: true}, Observation: mine.Observation{Recurrence: mine.Recurrence{Occurred: true}}})
 	}
 	m.snap.Posture.Ledger = "/long/" + strings.Repeat("path/", 30) + "last-diagnostic-content"
 	return m

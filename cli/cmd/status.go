@@ -255,22 +255,20 @@ func renderAttention(s *status.SystemStatus, width int) {
 		fmt.Print(styles.Wrap(fmt.Sprintf("%d recorded %s", s.Summary.Total, problemWord(s.Summary.Total)), "  ", width))
 	}
 	a := s.Attention
-	rate := s.Rate
 	buckets := map[string][]string{}
 
 	for _, iv := range a.Interventions {
-		un := status.Unmeasurable(iv.Verdict, iv.Unit, iv.RequiredAfter, rate)
-		act := status.ActionFor(iv.Verdict, un)
-		buckets[act] = append(buckets[act], interventionBlock(iv, un, rate, width))
+		act := status.ActionFor(iv.Observation, iv.Scope)
+		buckets[act] = append(buckets[act], interventionBlock(iv, width))
 	}
 	if s.Posture.Unresolved > 0 {
-		buckets[status.ActionAdjudicate] = append(buckets[status.ActionAdjudicate],
+		buckets[status.ActionRepair] = append(buckets[status.ActionRepair],
 			problemEntry(status.OutcomesWaitingPhrase(s.Posture.Unresolved), []problemField{
 				{"Next", []string{"read it from your session history — run: " + status.BackfillCommand}},
 			}, width))
 	}
 	for _, c := range a.Candidates {
-		buckets[status.ActionAdjudicate] = append(buckets[status.ActionAdjudicate],
+		buckets[status.ActionRepair] = append(buckets[status.ActionRepair],
 			candidateBlock(c, width))
 	}
 
@@ -304,9 +302,7 @@ func renderAttention(s *status.SystemStatus, width int) {
 func actionHeader(act string) string {
 	head := status.ActionHeading[act]
 	switch act {
-	case status.ActionHarmful:
-		return styles.WarningText.Render(head)
-	case status.ActionAdjudicate, status.ActionRepair:
+	case status.ActionRepair:
 		return styles.InfoText.Bold(true).Render(head)
 	}
 	return styles.MutedText.Bold(true).Render(head)
@@ -349,38 +345,31 @@ func problemEntry(title string, fields []problemField, width int) string {
 // dashboard's summary reads — what the fix is, what the result is, and one reason
 // or one step — plus the counts, which the dashboard keeps behind its detail key
 // and the terminal has nowhere else to put.
-func interventionBlock(iv cadence.Intervention, unmeasurable bool, rate status.ChainRate, width int) string {
+func interventionBlock(iv cadence.Intervention, width int) string {
 	unit := iv.Unit
 	if unit == "" {
 		unit = "unit"
 	}
 	v := status.ProblemView{
-		Declined:       iv.Tier == "" || iv.Tier == "none",
+		Declined:       iv.Observation.Declined,
 		Tier:           iv.Tier,
 		Target:         iv.Target,
 		Intervention:   iv.Intervention,
-		Verdict:        iv.Verdict,
+		Observation:    iv.Observation,
+		Scope:          iv.Scope,
 		Unit:           unit,
-		Unmeasurable:   unmeasurable,
 		BeforeCoverage: iv.BeforeCoverage,
 		AfterCoverage:  iv.AfterCoverage,
-		Attribution:    iv.Attribution,
-		Confounds:      iv.Confounds,
 	}
 	result := []string{styles.MutedText.Render(status.ResultLabel(v))}
-	if limit := status.ComparisonLimit("composition", iv.Composition); limit != "" {
-		result = append(result, styles.MutedText.Render(limit))
-		for _, cause := range status.ComparisonCauses(iv.Composition) {
-			result = append(result, styles.MutedText.Render("· "+cause))
-		}
-	}
 
 	evidence := []string{status.RecurrencePhrase(iv.Before, iv.After, unit)}
-	if e := status.EffectClaimPhrase(iv.Verdict, iv.Effect); e != "" {
-		evidence = append(evidence, e)
-	}
-	if a := status.AttributionPhrase(iv.Attribution); a != "" {
-		evidence = append(evidence, a)
+	if iv.Observation.Firing.Applicable {
+		if iv.Observation.Firing.LogPresent {
+			evidence = append(evidence, fmt.Sprintf("guard activity: %d blocks in the observation window (%s)", iv.Observation.Firing.Rows, iv.Observation.Firing.Scope))
+		} else {
+			evidence = append(evidence, "guard activity is unknown because the audit log is absent")
+		}
 	}
 	if iv.BeforeCoverage.UnknownEvidence > 0 || iv.AfterCoverage.UnknownEvidence > 0 {
 		evidence = append(evidence, fmt.Sprintf(
@@ -392,22 +381,8 @@ func interventionBlock(iv cadence.Intervention, unmeasurable bool, rate status.C
 	}
 
 	why := []string{status.ProblemWhy(v)}
-	if status.ComparisonLimit("confound", iv.Confounds) != "" {
-		for _, cause := range status.ComparisonCauses(iv.Confounds) {
-			why = append(why, "· "+cause)
-		}
-	}
 
 	next := []string{status.ProblemNext(v)}
-	if r := status.RatePhrase(iv.RequiredAfter, unit, rate); r != "" {
-		next = append(next, r)
-	} else if r := status.RequiredPhrase(iv.RequiredAfter, unit, iv.Verdict); r != "" {
-		next = append(next, r)
-	}
-	if unmeasurable || iv.Verdict == "harmful" {
-		next = append(next, status.RemovalPhrase(iv.Tier, iv.Target),
-			styles.MutedText.Render("run: "+status.RetireCommand(iv.ID)))
-	}
 
 	return problemEntry(iv.Class, []problemField{
 		{"Problem", []string{iv.Problem}},

@@ -32,39 +32,30 @@ func TestFixSummaryNamesTheTypeThenTheFix(t *testing.T) {
 	}
 }
 
-// A hard comparison limit IS the reason a result is withheld, and it names the
-// changed conditions the generic sentence cannot, so it replaces that sentence
-// rather than printing beside it.
-func TestProblemWhyPrefersTheComparisonLimit(t *testing.T) {
-	v := ProblemView{
-		Verdict:   "confounded",
-		Unit:      "chain",
-		Confounds: []mine.Confound{{Category: "instrument"}},
-	}
-	why := ProblemWhy(v)
-	limit := ComparisonLimit("confound", v.Confounds)
-	if limit == "" || why != limit {
-		t.Errorf("why = %q, want the comparison limit %q", why, limit)
-	}
-	if next := ProblemNext(v); next != "" {
-		t.Errorf("a withheld result asks for no step, got %q", next)
-	}
-}
-
-// A result that asks for work carries a step and no reason, so a reader is never
-// given a sentence under both labels.
-func TestProblemWhyAndNextAreExclusive(t *testing.T) {
-	v := ProblemView{
-		Verdict:        "evidence-incomplete",
-		Unit:           "chain",
-		BeforeCoverage: cadence.Coverage{Total: 10, Pending: 4},
-	}
+// Missing evidence carries a repair step, while an observed recurrence carries
+// the explanation that warrants inspection.
+func TestProblemWhyAndNextFollowObservation(t *testing.T) {
+	v := ProblemView{Scope: &cadence.Scope{Version: 1, All: true}, Unit: "chain",
+		Observation: mine.Observation{Coverage: mine.ObservationCoverage{After: map[string]any{"pending": 4}}}}
 	why, next := ProblemWhy(v), ProblemNext(v)
 	if next == "" {
 		t.Fatal("a result that asks for work carries a step")
 	}
 	if why != "" {
 		t.Errorf("both a reason %q and a step %q", why, next)
+	}
+	recurrence := ProblemView{Scope: &cadence.Scope{Version: 1, All: true},
+		Observation: mine.Observation{Recurrence: mine.Recurrence{Occurred: true}}}
+	if ProblemNext(recurrence) == "" || ProblemWhy(recurrence) != "" {
+		t.Errorf("a recurrence asks the reader to look at something, so it is a step: why=%q next=%q",
+			ProblemWhy(recurrence), ProblemNext(recurrence))
+	}
+	// A quiet window asks nothing, so its sentence is a reason and never a step.
+	quiet := ProblemView{Scope: &cadence.Scope{Version: 1, All: true},
+		Observation: mine.Observation{Coverage: mine.ObservationCoverage{After: map[string]any{"eligible": 9}}}}
+	if ProblemWhy(quiet) == "" || ProblemNext(quiet) != "" {
+		t.Errorf("a quiet window carries a reason and no step: why=%q next=%q",
+			ProblemWhy(quiet), ProblemNext(quiet))
 	}
 }
 

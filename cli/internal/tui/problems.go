@@ -35,9 +35,6 @@ type problemRow struct {
 	heading   string
 	candidate *cadence.Candidate
 	item      *status.ScoredIntervention
-	// unmeasurable is this record's reading of required_after, computed once so
-	// the summary, the detail and the section it files under cannot disagree.
-	unmeasurable bool
 }
 
 // problemRows builds the list in render order: the queue first, then the tracked
@@ -55,13 +52,11 @@ func (m *Model) problemRows() []problemRow {
 		})
 	}
 	items := m.snap.Interventions
-	for _, i := range classOrder(items, m.snap.Rate) {
+	for _, i := range classOrder(items) {
 		it := items[i]
-		un := status.Unmeasurable(it.Verdict, it.Unit, it.RequiredAfter, m.snap.Rate)
 		rows = append(rows, problemRow{
-			heading:      status.ActionHeading[status.ActionFor(it.Verdict, un)],
-			item:         &items[i],
-			unmeasurable: un,
+			heading: status.ActionHeading[status.ActionFor(it.Observation, it.Scope)],
+			item:    &items[i],
 		})
 	}
 	return rows
@@ -69,12 +64,11 @@ func (m *Model) problemRows() []problemRow {
 
 // classOrder is the order the tracked inventory renders in: grouped by the action
 // each record asks for, in status.ActionOrder.
-func classOrder(items []status.ScoredIntervention, rate status.ChainRate) []int {
+func classOrder(items []status.ScoredIntervention) []int {
 	ord := []int{}
 	for _, act := range status.ActionOrder {
 		for i, it := range items {
-			un := status.Unmeasurable(it.Verdict, it.Unit, it.RequiredAfter, rate)
-			if status.ActionFor(it.Verdict, un) == act {
+			if status.ActionFor(it.Observation, it.Scope) == act {
 				ord = append(ord, i)
 			}
 		}
@@ -251,10 +245,10 @@ func summaryFields(r problemRow) []summaryField {
 		}
 	}
 	it := *r.item
-	v := problemView(it, r.unmeasurable)
+	v := problemView(it)
 	fields := []summaryField{
 		{fixLabel(it), fixSummary(it)},
-		{"Result", verdictBadge(it.Verdict, r.unmeasurable)},
+		{"Result", verdictBadge(it.Observation)},
 	}
 	why, next := status.ProblemWhy(v), status.ProblemNext(v)
 	if why != "" {
@@ -288,14 +282,14 @@ func candidateEvidence(c cadence.Candidate) string {
 // declined record installed nothing, so what it describes is the fix it
 // considered.
 func fixLabel(it status.ScoredIntervention) string {
-	return status.FixLabel(problemView(it, false))
+	return status.FixLabel(problemView(it))
 }
 
 // fixSummary describes what the fix does and what type it is. It never claims the
 // fix is installed and running: the record carries what was decided, not current
 // setup evidence, and the target path belongs in the detail area.
 func fixSummary(it status.ScoredIntervention) string {
-	v := problemView(it, false)
+	v := problemView(it)
 	// The path belongs in the detail area, so the summary names the type alone.
 	v.Target = ""
 	return status.FixSummary(v)
@@ -303,19 +297,17 @@ func fixSummary(it status.ScoredIntervention) string {
 
 // problemView reduces a tracked record to the fields the shared phrasing reads,
 // so this panel and the terminal cannot answer one record differently.
-func problemView(it status.ScoredIntervention, unmeasurable bool) status.ProblemView {
+func problemView(it status.ScoredIntervention) status.ProblemView {
 	return status.ProblemView{
 		Declined:       it.Status == "rejected",
 		Tier:           it.Tier,
 		Target:         it.Target,
 		Intervention:   it.Intervention,
-		Verdict:        it.Verdict,
+		Observation:    it.Observation,
+		Scope:          it.Scope,
 		Unit:           it.Unit,
-		Unmeasurable:   unmeasurable,
 		BeforeCoverage: it.BeforeCoverage,
 		AfterCoverage:  it.AfterCoverage,
-		Attribution:    it.Attribution,
-		Confounds:      it.Confounds,
 	}
 }
 
@@ -324,8 +316,8 @@ func problemView(it status.ScoredIntervention, unmeasurable bool) status.Problem
 // withheld carries a reason and no step; a result that asks for work carries a
 // step. An unreachable window is the exception: its sentence names two choices,
 // so it is a step even though the entry files under accept.
-func summaryReason(it status.ScoredIntervention, unmeasurable bool) (why, next string) {
-	v := problemView(it, unmeasurable)
+func summaryReason(it status.ScoredIntervention) (why, next string) {
+	v := problemView(it)
 	return status.ProblemWhy(v), status.ProblemNext(v)
 }
 
@@ -380,10 +372,10 @@ func detailBlock(r problemRow, width int) string {
 		out += wrapTo("Declined on "+
 			time.Unix(int64(it.RejectedTS), 0).Format("2006-01-02"), detailIndent, width)
 	}
-	out += detailSection("Result", resultDetail(it, r.unmeasurable), width)
+	out += detailSection("Result", resultDetail(it), width)
 	out += evidenceDetail(it, width)
 	out += limitsDetail(it, width)
-	out += actionDetail(it, r.unmeasurable, width)
+	out += actionDetail(it, width)
 	return out
 }
 
@@ -432,9 +424,9 @@ func fixDetail(it status.ScoredIntervention) string {
 }
 
 // resultDetail is the result label with its own explanation under it.
-func resultDetail(it status.ScoredIntervention, unmeasurable bool) string {
-	label := status.VerdictLabel(it.Verdict, unmeasurable)
-	sentence := status.ActionSentence(it.Verdict, unmeasurable)
+func resultDetail(it status.ScoredIntervention) string {
+	label := status.ObservationLabel(it.Observation)
+	sentence := status.ActionSentence(it.Observation, it.Scope)
 	if sentence == "" {
 		return label + ". Nothing is asked of you here."
 	}
@@ -445,27 +437,18 @@ func resultDetail(it status.ScoredIntervention, unmeasurable bool) string {
 // denominator and the right noun. Under a withheld result the counts describe each
 // period and compare neither, so the block says so.
 func evidenceDetail(it status.ScoredIntervention, width int) string {
-	if it.Verdict == "unscored" || it.Verdict == "" {
-		return ""
-	}
 	out := headingStyle.Render("Evidence") + "\n"
 	out += evidencePeriod("Before:", it.Before, it.Unit, it.BeforeCoverage, width)
 	out += "\n" + evidencePeriod("After:", it.After, it.Unit, it.AfterCoverage, width)
-	if a := status.AttributionPhrase(it.Attribution); a != "" {
-		out += wrapTo(a, detailIndent, width)
+	if it.Observation.Firing.Applicable {
+		if it.Observation.Firing.LogPresent {
+			out += wrapTo(fmt.Sprintf("guard activity: %d blocks in the observation window (%s)", it.Observation.Firing.Rows, it.Observation.Firing.Scope), detailIndent, width)
+		} else {
+			out += wrapTo("guard activity is unknown because the audit log is absent", detailIndent, width)
+		}
 	}
-	if !claimsARange(it.Verdict) {
-		out += wrapTo("These counts describe each period. They do not compare them, so a "+
-			"smaller number after the fix is not evidence that the fix caused it.",
-			detailIndent, width)
-	}
+	out += wrapTo("These counts describe the recorded evidence. They do not establish that the fix caused the change.", detailIndent, width)
 	return out
-}
-
-// claimsARange says whether the scorer placed an effect for this result. Only
-// those two results carry a comparison; every other one carries counts alone.
-func claimsARange(verdict string) bool {
-	return verdict == "effective" || verdict == "harmful"
 }
 
 // incidenceLine is one window's occurrences over its denominator, in the noun the
@@ -479,28 +462,17 @@ func incidenceLine(in cadence.Incidence, unit string) string {
 // comparison from the ones that only qualify a permitted result.
 func limitsDetail(it status.ScoredIntervention, width int) string {
 	out := ""
-	if limit := status.ComparisonLimit("confound", it.Confounds); limit != "" {
-		out += headingStyle.Render("What stops the comparison") + "\n"
-		out += wrapTo(limit, detailIndent, width)
-		for _, cause := range status.ComparisonCauses(it.Confounds) {
-			out += wrapTo(cause, detailIndent+"  ", width)
-		}
-	}
-	if limit := status.ComparisonLimit("composition", it.Composition); limit != "" {
-		out += headingStyle.Render("What qualifies the result") + "\n"
-		out += wrapTo(limit, detailIndent, width)
-		for _, cause := range status.ComparisonCauses(it.Composition) {
-			out += wrapTo(dim(cause), detailIndent+"  ", width)
-		}
+	if gap := status.ProblemWhy(problemView(it)); gap != "" {
+		out += detailSection("Coverage", gap, width)
 	}
 	return out
 }
 
 // actionDetail is the entry's action area: the step where one exists, then what
 // stopping the tracking would and would not do.
-func actionDetail(it status.ScoredIntervention, unmeasurable bool, width int) string {
+func actionDetail(it status.ScoredIntervention, width int) string {
 	out := headingStyle.Render("What you can do") + "\n"
-	if _, next := summaryReason(it, unmeasurable); next != "" {
+	if _, next := summaryReason(it); next != "" {
 		out += wrapTo(next, detailIndent, width)
 	}
 	out += wrapTo("x — stop tracking. "+status.RemovalPhrase(it.Tier, it.Target),
@@ -538,15 +510,7 @@ func technicalBlock(r problemRow, width int) string {
 	if it.HookID != "" {
 		rows = append(rows, [2]string{"guard id", it.HookID})
 	}
-	if e := status.EffectPhrase(it.Effect); e != "" {
-		rows = append(rows, [2]string{"range", e})
-	}
-	if it.PValue > 0 {
-		rows = append(rows, [2]string{"p", fmt.Sprintf("%.3f", it.PValue)})
-	}
-	if req := status.RequiredPhrase(it.RequiredAfter, it.Unit, it.Verdict); req != "" {
-		rows = append(rows, [2]string{"still needs", req})
-	}
+	rows = append(rows, [2]string{"observation", status.ObservationLabel(it.Observation)})
 	if it.LegacyNote != "" {
 		rows = append(rows, [2]string{"older note", it.LegacyNote})
 	}
@@ -560,14 +524,9 @@ func technicalBlock(r problemRow, width int) string {
 // verdictBadge colors a result by whether it demands action, and prints the label
 // rather than the token. The results the cadence sweep queues read as warnings;
 // the ones it leaves quiet read as dim.
-func verdictBadge(v string, unmeasurable bool) string {
-	label := status.VerdictLabel(v, unmeasurable)
-	switch v {
-	case "effective", "class-faded":
-		return ok(label)
-	case "harmful", "ineffective", "class-grew", "not-triggered":
-		return errText(label)
-	case "class-steady", "confounded", "evidence-incomplete", "legacy-unscoped", "unattributed":
+func verdictBadge(obs mine.Observation) string {
+	label := status.ObservationLabel(obs)
+	if obs.Recurrence.Occurred {
 		return warn(label)
 	}
 	return dim(label)

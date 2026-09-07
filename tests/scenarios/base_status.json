@@ -1,5 +1,5 @@
 {
-  "status_version": 9,
+  "status_version": 11,
   "generated_at": "2026-09-01T09:00:00Z",
   "posture": {
     "instrument": "gemini-3.7-flash-high/3/95653688/go-findings-v3-shell",
@@ -244,10 +244,6 @@
       "terminal": "clean"
     }
   ],
-  "chain_rate": {
-    "per_day": 6.122267182434384,
-    "known": true
-  },
   "attention": {
     "interventions": [],
     "candidates": [],

@@ -37,9 +37,39 @@ func keyOf(name string) tea.KeyMsg {
 // not the render order: the first item renders last.
 func inventory() []status.ScoredIntervention {
 	return []status.ScoredIntervention{
-		{ID: "a", Class: "settled-problem", Status: "active", Verdict: "effective"},
-		{ID: "b", Class: "waiting-problem", Status: "active", Verdict: "collecting"},
-		{ID: "c", Class: "harmful-problem", Status: "active", Verdict: "harmful"},
+		{ID: "a", Class: "quiet-problem", Status: "active", Unit: "session",
+			Scope: allScope(), Observation: quietObservation()},
+		{ID: "b", Class: "coverage-problem", Status: "active", Unit: "chain",
+			Scope: allScope(), Observation: coverageObservation()},
+		{ID: "c", Class: "recurring-problem", Status: "active", Unit: "session",
+			Scope: allScope(), Observation: recurrenceObservation()},
+	}
+}
+
+// allScope is the frozen eligibility every record below carries: a record with no
+// scope files under a repair whatever else it observed.
+func allScope() *cadence.Scope { return &cadence.Scope{Version: 1, All: true} }
+
+// quietObservation is eligible work with no recurrence — the observe section.
+func quietObservation() mine.Observation {
+	return mine.Observation{
+		Coverage: mine.ObservationCoverage{After: map[string]any{"eligible": 4, "total": 4}},
+	}
+}
+
+// coverageObservation carries an unknown the accounting cannot resolve.
+func coverageObservation() mine.Observation {
+	return mine.Observation{
+		Coverage: mine.ObservationCoverage{After: map[string]any{"eligible": 4, "total": 6, "unknown_scope": 2}},
+	}
+}
+
+// recurrenceObservation is the class matching after the split.
+func recurrenceObservation() mine.Observation {
+	return mine.Observation{
+		Recurrence: mine.Recurrence{Occurred: true, Matches: 2,
+			ExampleKind: mine.ExampleClusterKey, Example: "python script.py"},
+		Coverage: mine.ObservationCoverage{After: map[string]any{"eligible": 4, "total": 4}},
 	}
 }
 
@@ -59,8 +89,8 @@ func TestProblemsHoldTheQueueAndTheInventory(t *testing.T) {
 		headingToConsider,
 		"Review findings not yet grouped into a problem",
 		"/steer-report",
-		"harmful-problem",
-		"settled-problem",
+		"recurring-problem",
+		"quiet-problem",
 	} {
 		if !strings.Contains(view, want) {
 			t.Errorf("the panel is missing %q:\n%s", want, view)
@@ -100,7 +130,7 @@ func TestProblemsCursorWalksTheRenderedOrder(t *testing.T) {
 	}}
 	m.active = panelProblems
 
-	for pos, want := range []string{"queue-row", "harmful-problem", "waiting-problem", "settled-problem"} {
+	for pos, want := range []string{"queue-row", "recurring-problem", "coverage-problem", "quiet-problem"} {
 		m.cursor[panelProblems] = pos
 		marked := ""
 		for _, line := range strings.Split(m.viewProblems(), "\n") {
@@ -119,7 +149,8 @@ func TestProblemsCursorWalksTheRenderedOrder(t *testing.T) {
 func TestEnterExpandsOneEntryAndMovingCloses(t *testing.T) {
 	m := New(gate.Defaults(), "global")
 	m.snap = &status.SystemStatus{Interventions: []status.ScoredIntervention{{
-		ID: "a", Class: "bare python call", Status: "active", Verdict: "collecting",
+		ID: "a", Class: "bare python call", Status: "active",
+		Scope: allScope(), Observation: quietObservation(),
 		Problem: "the agent runs python where this project needs python3", Tier: "guard",
 		Target: "bare-python.py", Intervention: "a guard that blocks the bare command",
 		Unit: "session",
@@ -167,7 +198,7 @@ func TestTechnicalDetailsHideBehindAKey(t *testing.T) {
 	m.snap = &status.SystemStatus{Interventions: []status.ScoredIntervention{{
 		ID: "bare-python", Class: "bare python call", Match: `\bpython\b`,
 		Tier: "guard", Target: "/abs/path/bare-python.py", Status: "active",
-		Verdict: "collecting", Unit: "session",
+		Scope: allScope(), Observation: quietObservation(), Unit: "session",
 	}}}
 	m.active = panelProblems
 	m.updateNav(keyOf("enter"))
@@ -184,40 +215,42 @@ func TestTechnicalDetailsHideBehindAKey(t *testing.T) {
 	}
 }
 
-// A result the scorer withheld carries its reason in the summary. Hiding the
-// reason behind enter leaves a bare badge that reads as a finding.
-func TestAWithheldResultKeepsItsReasonInTheSummary(t *testing.T) {
+// An observation missing coverage carries its cause in the summary. Hiding the
+// cause behind enter leaves a bare badge that reads as a finding.
+func TestAMissingCoverageCauseStaysInTheSummary(t *testing.T) {
 	m := New(gate.Defaults(), "global")
 	m.snap = &status.SystemStatus{Interventions: []status.ScoredIntervention{{
-		ID: "a", Class: "bare python call", Status: "active", Verdict: "confounded",
-		Unit: "session",
-		Confounds: []mine.Confound{{Category: "instrument",
-			Reason: "the after-window was normalized by a different parser"}},
+		ID: "a", Class: "bare python call", Status: "active", Unit: "chain",
+		Scope: allScope(), Observation: coverageObservation(),
 	}}}
 	m.active = panelProblems
 
-	view := m.viewProblems()
-	for _, want := range []string{"Not comparable", "different conditions", "how the evidence was produced"} {
+	view := strings.Join(strings.Fields(m.viewProblems()), " ")
+	for _, want := range []string{"Coverage incomplete", "no repository or changed files"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("the summary is missing %q:\n%s", want, view)
 		}
 	}
 }
 
-// A result with no repair names no next step. "read the counts and decide" is an
-// instruction that names no decision, so it belongs on the Why line.
-func TestNoNextStepWhereNoStepExists(t *testing.T) {
-	it := status.ScoredIntervention{Verdict: "confounded", Unit: "chain"}
-	why, next := summaryReason(it, false)
+// A quiet window asks nothing, so its sentence belongs on the Why line. An
+// observation that asks the reader to look at something carries a step instead.
+func TestOnlyAQuietWindowNamesNoNextStep(t *testing.T) {
+	it := status.ScoredIntervention{Observation: quietObservation(), Scope: allScope(), Unit: "session"}
+	why, next := summaryReason(it)
 	if next != "" {
-		t.Errorf("an accept named a next step: %q", next)
+		t.Errorf("a quiet window named a next step: %q", next)
 	}
 	if why == "" {
-		t.Error("an accept dropped its reason")
+		t.Error("a quiet window dropped its reason")
 	}
-	it = status.ScoredIntervention{Verdict: "ineffective", Unit: "chain"}
-	if _, next = summaryReason(it, false); next == "" {
-		t.Error("a repair named no next step")
+	it = status.ScoredIntervention{Observation: recurrenceObservation(), Scope: allScope(), Unit: "session"}
+	if _, next = summaryReason(it); next == "" {
+		t.Error("a recurrence named no next step")
+	}
+	it = status.ScoredIntervention{Observation: coverageObservation(), Scope: allScope(), Unit: "chain"}
+	if _, next = summaryReason(it); next == "" {
+		t.Error("a coverage gap named no next step")
 	}
 }
 
@@ -238,16 +271,20 @@ func TestTheSummaryClaimsNoInstallation(t *testing.T) {
 	}
 }
 
-// A proven rule is never headed as a repair.
-func TestNoEffectiveRuleIsHeadedAsARepair(t *testing.T) {
+// A quiet window is never headed as a repair: an observation asking nothing must
+// not read as broken accounting.
+func TestAQuietWindowIsNeverHeadedAsARepair(t *testing.T) {
 	m := New(gate.Defaults(), "global")
-	m.snap = &status.SystemStatus{Interventions: inventory()}
+	m.snap = &status.SystemStatus{Interventions: []status.ScoredIntervention{{
+		ID: "a", Class: "quiet-problem", Status: "active", Unit: "session",
+		Scope: allScope(), Observation: quietObservation(),
+	}}}
 	out := m.viewProblems()
 	if strings.Contains(out, status.ActionHeading[status.ActionRepair]) {
 		t.Fatalf("a repair section rendered over an inventory holding no repair:\n%s", out)
 	}
-	if !strings.Contains(out, status.ActionHeading[status.ActionSettled]) {
-		t.Errorf("the effective record rendered under no settled heading:\n%s", out)
+	if !strings.Contains(out, status.ActionHeading[status.ActionObserve]) {
+		t.Errorf("the quiet record rendered under no observe heading:\n%s", out)
 	}
 }
 
@@ -307,7 +344,7 @@ func TestProseWrapsToTheTerminal(t *testing.T) {
 	m.width = 60
 	m.snap = &status.SystemStatus{Interventions: []status.ScoredIntervention{{
 		ID: "a", Class: "a problem with a fairly long descriptive name", Status: "active",
-		Verdict: "collecting", Unit: "session", Tier: "guard",
+		Scope: allScope(), Observation: quietObservation(), Unit: "session", Tier: "guard",
 		Intervention: strings.Repeat("a long sentence about what this fix does. ", 6),
 	}}}
 	m.active = panelProblems
@@ -337,7 +374,8 @@ func TestALongDetailPages(t *testing.T) {
 	m := New(gate.Defaults(), "global")
 	m.width, m.height = 80, 20
 	m.snap = &status.SystemStatus{Interventions: []status.ScoredIntervention{{
-		ID: "a", Class: "a problem", Status: "active", Verdict: "collecting", Unit: "session",
+		ID: "a", Class: "a problem", Status: "active", Unit: "session",
+		Scope: allScope(), Observation: quietObservation(),
 		Problem: strings.Repeat("a long explanation of what goes wrong. ", 20),
 		Tier:    "guard", Target: "g.py",
 	}}}

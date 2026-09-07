@@ -1,406 +1,55 @@
 package status
 
 import (
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/steer-sh/steer-cli/internal/cadence"
+	"github.com/steer-sh/steer-cli/internal/gate/mine"
 )
 
-// Every verdict the cadence queues must name an action and a sentence, or a
-// queued class renders with no instruction under it.
-func TestEveryAttentionVerdictNamesAnAction(t *testing.T) {
-	for _, v := range cadence.AttentionVerdicts {
-		if _, ok := meanings[v]; !ok {
-			t.Errorf("verdict %q maps to no action", v)
-		}
-		if ActionSentence(v, false) == "" {
-			t.Errorf("verdict %q renders no action sentence", v)
-		}
-	}
-	for _, a := range ActionOrder {
-		if ActionHeading[a] == "" {
-			t.Errorf("action %q renders no heading", a)
-		}
+func actionObs(occurred bool, eligible int) mine.Observation {
+	return mine.Observation{
+		Recurrence: mine.Recurrence{Occurred: occurred},
+		Coverage:   mine.ObservationCoverage{After: map[string]any{"eligible": eligible}},
 	}
 }
 
-// tokenVocabulary is every verdict token a surface may be handed. The label test
-// walks it, which is what pins that the tokens did not move: TestJSONContractIsStable
-// pins one fixture and carries one token.
-var tokenVocabulary = []string{
-	"effective", "harmful", "ineffective", "collecting", "inconclusive",
-	"confounded", "unattributed", "not-triggered", "evidence-incomplete",
-	"no-baseline", "legacy-unscoped", "class-grew", "class-faded",
-	"class-steady", "class-inconclusive", "unscored",
-}
-
-// directionalWords are the words that state which way a rate moved. A label may
-// carry one only under a token where the scorer crossed a bound and claimed a
-// direction; anywhere else the word states the point claim the scorer withheld.
-// A false positive costs a word choice, a miss costs a lie on screen, so the list
-// stays and matches on word boundaries.
-var directionalWords = []string{
-	"less", "more", "fewer", "grew", "faded", "rose", "fell", "up", "down",
-}
-
-// claimsADirection is the four tokens where the scorer crossed a bound.
-func claimsADirection(token string) bool {
-	switch token {
-	case "effective", "harmful", "class-grew", "class-faded":
-		return true
+func TestActionForUsesObservationFields(t *testing.T) {
+	scope := &cadence.Scope{Version: 1, All: true}
+	if got := ActionFor(actionObs(true, 10), scope); got != ActionInspect {
+		t.Fatalf("recurrence action = %q", got)
 	}
-	return false
-}
-
-// The label table is the one thing every surface reads, so its invariants are
-// mechanical: one label per token, no shared labels, an instruction under every
-// unsettled token, and no direction claimed where the scorer withheld one.
-func TestTheLabelTableHoldsItsInvariants(t *testing.T) {
-	seen := map[string]string{}
-	for _, token := range tokenVocabulary {
-		m, ok := meanings[token]
-		if !ok {
-			t.Errorf("token %q left the table", token)
-			continue
-		}
-		if m.Label == "" {
-			t.Errorf("token %q carries no label", token)
-		}
-		if prev, dup := seen[m.Label]; dup {
-			t.Errorf("tokens %q and %q share the label %q", prev, token, m.Label)
-		}
-		seen[m.Label] = token
-		if m.Action != ActionSettled && m.Sentence == "" {
-			t.Errorf("token %q asks for %q with no sentence", token, m.Action)
-		}
-		if claimsADirection(token) {
-			continue
-		}
-		for _, w := range directionalWords {
-			if wordIn(m.Label, w) {
-				t.Errorf("token %q claims a direction the scorer withheld: %q", token, m.Label)
-			}
-		}
+	if got := ActionFor(actionObs(false, 10), scope); got != ActionObserve {
+		t.Fatalf("quiet action = %q", got)
 	}
-	if len(meanings) != len(tokenVocabulary) {
-		t.Errorf("the table holds %d tokens, the vocabulary %d", len(meanings), len(tokenVocabulary))
+	if got := ActionFor(actionObs(false, 0), scope); got != ActionObserve {
+		t.Fatalf("empty action = %q", got)
+	}
+	if got := ActionFor(actionObs(false, 10), nil); got != ActionRepair {
+		t.Fatalf("legacy scope action = %q", got)
 	}
 }
 
-// objectWords are the nouns a section heading may name. A heading is what
-// organizes the whole screen, so it names the object the reader acts on.
-var objectWords = []string{
-	"fix", "fixes", "problem", "problems", "result", "results",
-	"finding", "findings", "evidence", "decision", "decisions",
-}
-
-func TestEveryHeadingNamesAnObject(t *testing.T) {
-	for _, a := range ActionOrder {
-		head := ActionHeading[a]
-		named := false
-		for _, w := range objectWords {
-			if wordIn(head, w) {
-				named = true
-			}
-		}
-		if !named {
-			t.Errorf("action %q heads a section naming no object: %q", a, head)
-		}
+func TestRecurrenceOutranksCoverage(t *testing.T) {
+	obs := actionObs(true, 10)
+	obs.Coverage.After["unknown_evidence"] = 2
+	if got := ActionFor(obs, &cadence.Scope{Version: 1, All: true}); got != ActionInspect {
+		t.Fatalf("action = %q", got)
 	}
 }
 
-// A token this binary cannot interpret still reads as something.
-func TestAnUnknownTokenStillReads(t *testing.T) {
-	if got := VerdictLabel("verdict-from-the-future", false); got != LabelUnknown {
-		t.Errorf("an unknown token read as %q", got)
-	}
-	if ActionSentence("verdict-from-the-future", false) == "" {
-		t.Error("an unknown token renders no sentence")
-	}
-	if got := ActionFor("verdict-from-the-future", false); got != ActionAccept {
-		t.Errorf("an unknown token asks for %q", got)
+func TestMissingAuditIsRepairableCoverage(t *testing.T) {
+	obs := actionObs(false, 10)
+	obs.Firing = mine.FiringActivity{Applicable: true, LogPresent: false}
+	if got := ActionFor(obs, &cadence.Scope{Version: 1, All: true}); got != ActionRepair {
+		t.Fatalf("action = %q", got)
 	}
 }
 
-// wordIn reports whether word appears in s on both word boundaries, so that
-// "up" does not match "supported".
-func wordIn(s, word string) bool {
-	low := strings.ToLower(s)
-	for i := 0; i+len(word) <= len(low); i++ {
-		if low[i:i+len(word)] != word {
-			continue
-		}
-		if i > 0 && isWordByte(low[i-1]) {
-			continue
-		}
-		if j := i + len(word); j < len(low) && isWordByte(low[j]) {
-			continue
-		}
-		return true
-	}
-	return false
-}
-
-func isWordByte(b byte) bool {
-	return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9'
-}
-
-// The range is the scorer's claim, so it prints only where a claim was made.
-func TestRangePrintsOnlyUnderAClaim(t *testing.T) {
-	est := 0.39
-	up := 0.83
-	e := cadence.Effect{Estimate: &est, Lower: 0.11, Upper: &up,
-		Confidence: 0.9, Method: "clopper-pearson / mixture-cs"}
-	for _, v := range []string{"confounded", "collecting", "evidence-incomplete",
-		"not-triggered", "unattributed", "ineffective", "legacy-unscoped", "class-grew"} {
-		if got := EffectClaimPhrase(v, e); got != "" {
-			t.Errorf("verdict %q printed a range: %q", v, got)
-		}
-	}
-	if got := EffectClaimPhrase("effective", e); !strings.Contains(got, "61% fewer") {
-		t.Errorf("effective lost its claim: %q", got)
-	}
-	up2 := 5.18
-	est2 := 2.41
-	harm := cadence.Effect{Estimate: &est2, Lower: 1.12, Upper: &up2,
-		Confidence: 0.9, Method: "clopper-pearson / mixture-cs"}
-	if got := EffectClaimPhrase("harmful", harm); !strings.Contains(got, "2.4x more frequent") {
-		t.Errorf("harmful lost its claim: %q", got)
-	}
-}
-
-// Counts carry their denominator in words, so no fraction or rate reaches the
-// class line.
-func TestRecurrenceCarriesNoFraction(t *testing.T) {
-	got := RecurrencePhrase(
-		cadence.Incidence{Hits: 4, Units: 61, Rate: 0.066},
-		cadence.Incidence{Hits: 1, Units: 39, Rate: 0.026}, "chain")
-	want := "1 recurrence in the 39 review sequences since install; 4 in the 61 before"
-	if got != want {
-		t.Errorf("got %q, want %q", got, want)
-	}
-	if strings.Contains(got, "/") || strings.Contains(got, "%") {
-		t.Errorf("a fraction or a rate reached the class line: %q", got)
-	}
-}
-
-// A host with no recent chains reports no rate, and no rate is not unmeasurable.
-func TestAQuietHostWithholdsTheRate(t *testing.T) {
-	now := time.Unix(1_700_000_000, 0)
-	old := float64(now.Add(-30 * 24 * time.Hour).Unix())
-	chains := []ChainSummary{
-		{StartTS: old - 86400*10},
-		{StartTS: old},
-	}
-	rate := RateFrom(chains, now)
-	if rate.Known {
-		t.Fatal("a 30-day-old newest chain must not yield a known rate")
-	}
-	n := 755
-	if Unmeasurable("confounded", "chain", &n, rate) {
-		t.Error("an unknown rate must not read as unmeasurable")
-	}
-	got := RatePhrase(&n, "chain", rate)
-	if !strings.Contains(got, "the rate is unknown") {
-		t.Errorf("the phrase must withhold the calendar half: %q", got)
-	}
-	if strings.Contains(got, "unreachable") {
-		t.Errorf("the phrase must not claim unreachable: %q", got)
-	}
-}
-
-// A reachable window stays a wait; an unreachable one becomes a decision.
-func TestUnmeasurableSeparatesAWaitFromANever(t *testing.T) {
-	now := time.Unix(1_700_000_000, 0)
-	chains := []ChainSummary{}
-	for i := 60; i >= 0; i-- {
-		chains = append(chains, ChainSummary{StartTS: float64(now.Add(-time.Duration(i) * 24 * time.Hour).Unix())})
-	}
-	rate := RateFrom(chains, now)
-	if !rate.Known {
-		t.Fatal("a 60-day sample must yield a rate")
-	}
-	near, far := 5, 3000
-	if Unmeasurable("collecting", "chain", &near, rate) {
-		t.Error("a short window must stay a wait")
-	}
-	if !Unmeasurable("collecting", "chain", &far, rate) {
-		t.Error("a window years away must read as unmeasurable")
-	}
-	// A settled verdict already decided; it is never regraded as unmeasurable.
-	for _, v := range []string{"effective", "harmful", "ineffective"} {
-		if Unmeasurable(v, "chain", &far, rate) {
-			t.Errorf("verdict %q must not be regraded as unmeasurable", v)
-		}
-	}
-	// The rate counts chains, so a session-unit record is never graded on it.
-	if Unmeasurable("collecting", "session", &far, rate) {
-		t.Error("a session-unit record must not be graded against a chain rate")
-	}
-	if got := RatePhrase(&far, "session", rate); !strings.Contains(got, "not measured") {
-		t.Errorf("a session window must not borrow the chain rate: %q", got)
-	}
-	if got := ActionFor("confounded", true); got != ActionAccept {
-		t.Errorf("an unmeasurable confound must move to accept, got %q", got)
-	}
-	if got := ActionFor("harmful", true); got != ActionHarmful {
-		t.Errorf("harmful is exempt from the unmeasurable move, got %q", got)
-	}
-}
-
-// Retire closes the measurement and removes nothing, so every removal sentence
-// names where the rule still lives.
-func TestRemovalNamesTheTierThatKeepsRunning(t *testing.T) {
-	for _, tc := range []struct{ tier, target, want string }{
-		{"check", "check.sh", "the rule stays in check.sh"},
-		{"instruction", "CLAUDE.md", "the rule stays in CLAUDE.md"},
-		{"guard", "no-bare-python", "guard stays installed"},
-		// The CLI's own flag vocabulary, which the later names alias.
-		{"steer", "no-bare-python", "guard stays installed"},
-		{"prose", "CLAUDE.md", "the rule stays in CLAUDE.md"},
-		{"prompt", "review.md", "the rule stays in review.md"},
-		{"", "", "no fix is installed in any tier"},
-	} {
-		got := RemovalPhrase(tc.tier, tc.target)
-		if !strings.Contains(got, tc.want) {
-			t.Errorf("tier %q: got %q, want it to contain %q", tc.tier, got, tc.want)
-		}
-		if !strings.Contains(got, "stopping the tracking ends the measurement") {
-			t.Errorf("tier %q: the sentence must say what stopping the tracking does: %q", tc.tier, got)
-		}
-	}
-}
-
-// Harmful leads the sections and settled closes them: the first asks the most of
-// the reader and the last asks nothing.
-func TestHarmfulSortsFirst(t *testing.T) {
-	if ActionOrder[0] != ActionHarmful {
-		t.Errorf("harmful must lead the sections, got %q", ActionOrder[0])
-	}
-	if ActionOrder[len(ActionOrder)-1] != ActionSettled {
-		t.Errorf("settled must close the sections, got %q", ActionOrder[len(ActionOrder)-1])
-	}
-}
-
-// A burst is not a rate: a sample shorter than minSpanDays projects nothing.
-func TestAShortSampleProjectsNoRate(t *testing.T) {
-	now := time.Unix(1_700_000_000, 0)
-	chains := []ChainSummary{}
-	for i := 0; i < 20; i++ {
-		chains = append(chains, ChainSummary{StartTS: float64(now.Add(-time.Duration(20-i) * time.Hour).Unix())})
-	}
-	rate := RateFrom(chains, now)
-	if rate.Known {
-		t.Fatal("20 chains inside one day must not yield a rate")
-	}
-	n := 755
-	got := RatePhrase(&n, "chain", rate)
-	if !strings.Contains(got, "too short to project a rate") {
-		t.Errorf("the phrase must name the short sample: %q", got)
-	}
-}
-
-// A capped chain list cannot carry the corpus rate: an active host's newest 20
-// chains span days, so the rate has to be read over every chain the corpus holds.
-func TestTheRateIsReadOverTheWholeCorpus(t *testing.T) {
-	now := time.Unix(1_700_000_000, 0)
-	oldest := float64(now.Add(-200 * 24 * time.Hour).Unix())
-	newest := float64(now.Add(-1 * time.Hour).Unix())
-	if r := RateOver(400, oldest, newest, now); !r.Known {
-		t.Fatal("a 200-day corpus must yield a rate")
-	}
-	// The same corpus truncated to its newest 20 chains spans under two days.
-	tail := []ChainSummary{}
-	for i := 20; i > 0; i-- {
-		tail = append(tail, ChainSummary{StartTS: float64(now.Add(-time.Duration(i) * time.Hour).Unix())})
-	}
-	if RateFrom(tail, now).Known {
-		t.Error("a truncated tail must not be mistaken for a corpus rate")
-	}
-}
-
-// A settled verdict never reads as a repair. The default arm of ActionFor sent
-// every unmapped token to repair, which headed a proven rule as a broken one.
-func TestSettledVerdictsAreNotRepairs(t *testing.T) {
-	for _, v := range []string{"effective", "class-faded", "class-steady"} {
-		if got := ActionFor(v, false); got != ActionSettled {
-			t.Errorf("ActionFor(%q) = %q, want %q", v, got, ActionSettled)
-		}
-	}
-	for _, v := range []string{"class-inconclusive", "unscored", "a-token-from-a-newer-engine"} {
-		if got := ActionFor(v, false); got == ActionRepair {
-			t.Errorf("ActionFor(%q) = repair; an uninterpretable state names no fix", v)
-		}
-	}
-	// A settled verdict stays settled whatever the window costs. Unmeasurable
-	// never returns true for one, so this pins the arm rather than the caller.
-	for _, v := range []string{"effective", "class-faded", "class-steady"} {
-		if got := ActionFor(v, true); got != ActionSettled {
-			t.Errorf("ActionFor(%q, unmeasurable) = %q, want %q", v, got, ActionSettled)
-		}
-	}
-}
-
-// An unreachable window overrides one action only: wait. A repair names a fix the
-// window length does not remove, so it keeps both its section and its sentence.
-func TestUnmeasurableOverridesOnlyAWait(t *testing.T) {
-	for _, v := range []string{"not-triggered", "unattributed", "ineffective", "legacy-unscoped", "no-baseline"} {
-		if got := ActionFor(v, true); got != ActionRepair {
-			t.Errorf("ActionFor(%q, unmeasurable) = %q, want %q", v, got, ActionRepair)
-		}
-		if got := ActionSentence(v, true); got != meanings[v].Sentence {
-			t.Errorf("ActionSentence(%q, unmeasurable) = %q, want its own repair", v, got)
-		}
-	}
-	if got := ActionFor("evidence-incomplete", true); got != ActionAdjudicate {
-		t.Errorf("ActionFor(evidence-incomplete, unmeasurable) = %q, want %q", got, ActionAdjudicate)
-	}
-	if got := ActionFor("collecting", true); got != ActionAccept {
-		t.Errorf("ActionFor(collecting, unmeasurable) = %q, want %q", got, ActionAccept)
-	}
-}
-
-// Every verdict in a repair section names the fix it asks for.
-func TestEveryRepairNamesItsFix(t *testing.T) {
-	for v, m := range meanings {
-		if m.Action == ActionRepair && m.Sentence == "" {
-			t.Errorf("verdict %q heads a repair but names no fix", v)
-		}
-	}
-}
-
-// Every action a verdict can ask for has a heading and a place in the order.
-func TestEveryActionIsOrderedAndHeaded(t *testing.T) {
-	seen := map[string]bool{}
-	for _, act := range ActionOrder {
-		if ActionHeading[act] == "" {
-			t.Errorf("action %q has no heading", act)
-		}
-		seen[act] = true
-	}
-	for v, m := range meanings {
-		if !seen[m.Action] {
-			t.Errorf("verdict %q maps to %q, which ActionOrder does not render", v, m.Action)
-		}
-	}
-	if !seen[ActionFor("a-token-from-a-newer-engine", false)] {
-		t.Error("the default action is not in ActionOrder")
-	}
-}
-
-// An unreachable window replaces only a sentence telling the reader to wait. A
-// confounded class keeps its own reason: the windows are not comparable, which
-// is why no window decides it.
-func TestUnmeasurableKeepsAnAcceptVerdictsOwnReason(t *testing.T) {
-	if got := ActionSentence("confounded", true); got != meanings["confounded"].Sentence {
-		t.Errorf("ActionSentence(confounded, unmeasurable) = %q, want its own reason", got)
-	}
-	if got := ActionSentence("inconclusive", true); got != meanings["inconclusive"].Sentence {
-		t.Errorf("ActionSentence(inconclusive, unmeasurable) = %q, want its own reason", got)
-	}
-	if got := ActionSentence("collecting", true); got == meanings["collecting"].Sentence {
-		t.Error("ActionSentence(collecting, unmeasurable) still says the window is filling")
+func TestActionSentenceNamesObservationLimits(t *testing.T) {
+	obs := actionObs(true, 10)
+	obs.Firing = mine.FiringActivity{Applicable: true, LogPresent: true}
+	if got := ActionSentence(obs, &cadence.Scope{Version: 1, All: true}); got == "" {
+		t.Fatal("empty recurrence sentence")
 	}
 }
