@@ -26,7 +26,7 @@ codex plugin add steer@steer-marketplace
 
 Codex trusts no plugin hook until you review it. Approve the plugin's hook in `/hooks` to enable its reminder.
 
-Inside a Claude Code session, `/plugin marketplace add steer-sh/steer-skill` and `/plugin install steer@steer-marketplace` do the same thing. Codex manages plugins from the shell only.
+Inside a Claude Code session, `/plugin marketplace add steer-sh/steer-skill` and `/plugin install steer@steer-marketplace` do the same thing. Codex installs plugins from the shell; manage or toggle them in-session with `/plugins`.
 
 The plugin carries the CLI, the `/steer`, `/steer-report` and `/steer-setup` skills, and a session-start reminder when review work is pending.
 
