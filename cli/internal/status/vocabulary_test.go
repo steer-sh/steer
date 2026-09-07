@@ -26,7 +26,7 @@ import (
 // without anybody remembering to add it.
 func displayFiles(t *testing.T) []string {
 	t.Helper()
-	files := []string{"action.go", "format.go", "evidence.go", "../../cmd/status.go"}
+	files := []string{"action.go", "format.go", "evidence.go", "readiness.go", "../../cmd/status.go"}
 	panels, err := filepath.Glob("../tui/*.go")
 	if err != nil {
 		t.Fatal(err)
@@ -43,7 +43,7 @@ func displayFiles(t *testing.T) []string {
 // the measurement system that a reader has no word for: say review sequence, not
 // chain; recurring problem, not class; result, not verdict; fix, not
 // intervention; decision, not adjudication; built-in guard, not preset.
-var machineWords = regexp.MustCompile(`(?i)\b(class|classes|intervention|interventions|adjudicate|adjudicated|adjudication|adjudications|corpus|corpora|chain|chains|verdict|verdicts|confound|confounds|matcher|matchers|incidence|denominator|ledger|ledgers|firing|firings|candidate|candidates|instrument|instruments|preset|presets)\b`)
+var machineWords = regexp.MustCompile(`(?i)\b(class|classes|intervention|interventions|adjudicate|adjudicated|adjudication|adjudications|corpus|corpora|chain|chains|verdict|verdicts|confound|confounds|matcher|matchers|incidence|denominator|ledger|ledgers|firing|firings|candidate|candidates|instrument|instruments|preset|presets|master|masters|resolver|resolvers|posture|postures)\b`)
 
 // allowedPhrases are the literals that legitimately carry a machine word. Keep
 // this list short and justified: every entry is a place a reader meets the
@@ -67,34 +67,77 @@ func isPhrase(s string) bool {
 	return len(r) > 0 && unicode.IsUpper(r[0])
 }
 
+// sourceLiterals returns the string literals a reader could meet in one display
+// file. Struct tags name the wire contract, so they stay out of this surface.
+func sourceLiterals(t *testing.T, path string) []string {
+	t.Helper()
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, path, nil, 0)
+	if err != nil {
+		t.Fatalf("%s: %v", path, err)
+	}
+	tags := map[token.Pos]bool{}
+	ast.Inspect(file, func(n ast.Node) bool {
+		if f, ok := n.(*ast.Field); ok && f.Tag != nil {
+			tags[f.Tag.Pos()] = true
+		}
+		return true
+	})
+	var out []string
+	ast.Inspect(file, func(n ast.Node) bool {
+		lit, ok := n.(*ast.BasicLit)
+		if !ok || lit.Kind != token.STRING || tags[lit.Pos()] {
+			return true
+		}
+		text, err := strconv.Unquote(lit.Value)
+		if err == nil {
+			out = append(out, text)
+		}
+		return true
+	})
+	return out
+}
+
 func TestNoMachineWordReachesADisplayString(t *testing.T) {
 	for _, path := range displayFiles(t) {
-		fset := token.NewFileSet()
-		file, err := parser.ParseFile(fset, path, nil, 0)
-		if err != nil {
-			t.Fatalf("%s: %v", path, err)
-		}
-		// A struct tag is a string literal too, and a multi-key tag carries a
-		// space. Tags name the wire, which is where the machine's words belong.
-		tags := map[token.Pos]bool{}
-		ast.Inspect(file, func(n ast.Node) bool {
-			if f, ok := n.(*ast.Field); ok && f.Tag != nil {
-				tags[f.Tag.Pos()] = true
-			}
-			lit, ok := n.(*ast.BasicLit)
-			if !ok || lit.Kind != token.STRING {
-				return true
-			}
-			text, err := strconv.Unquote(lit.Value)
-			if err != nil || tags[lit.Pos()] || !isPhrase(text) || allowedPhrases[text] {
-				return true
+		for _, text := range sourceLiterals(t, path) {
+			if !isPhrase(text) || allowedPhrases[text] {
+				continue
 			}
 			if w := machineWords.FindString(text); w != "" {
 				t.Errorf("%s: a reader is shown the machine word %q: %q",
-					fset.Position(lit.Pos()), w, text)
+					path, w, text)
 			}
-			return true
-		})
+		}
+	}
+}
+
+// These phrases belonged to the dashboard vocabulary before its current five
+// panel contract. They are checked separately because they are ordinary English,
+// so a machine-word lint cannot identify them as stale.
+func TestStatusDoesNotUseRetiredDashboardVocabulary(t *testing.T) {
+	retired := []string{
+		"Posture",
+		"Attention Required",
+		"  Denials      ",
+		"  Resolver     ",
+		"Guard master ",
+		"not armed",
+		"registered but inert",
+		"read it back from the coding agent's transcript",
+		"action(s) blocked",
+		"no fixes recorded on this machine",
+		"review sequence(s)",
+		"hits, %d sessions",
+	}
+	for _, path := range []string{"../../cmd/status.go", "readiness.go"} {
+		for _, text := range sourceLiterals(t, path) {
+			for _, word := range retired {
+				if strings.Contains(text, word) {
+					t.Errorf("%s: status still uses retired dashboard wording %q in %q", path, word, text)
+				}
+			}
+		}
 	}
 }
 
@@ -116,6 +159,13 @@ func TestTheCheckSeesAPaddedFragment(t *testing.T) {
 	for _, s := range []string{"Classes", "Problems", "Diagnostics"} {
 		if !isPhrase(s) {
 			t.Errorf("the check skips the navigation label %q", s)
+		}
+	}
+	// Lowercase sentence fragments are display text when they carry whitespace;
+	// this pins the readiness wording that starts with "the" or "no".
+	for _, s := range []string{"the matcher runs for no commit", "no commit gate is registered"} {
+		if !isPhrase(s) {
+			t.Errorf("the check skips the lowercase display phrase %q", s)
 		}
 	}
 }

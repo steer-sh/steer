@@ -123,7 +123,7 @@ func ReadinessOf(s *SystemStatus, probe reviewers.Probe) Readiness {
 		open := false
 		if !a.Effective {
 			r.Steps = append(r.Steps, Step{
-				Title: fmt.Sprintf("the %s %s-scope registration is inert — its matcher fires on nothing",
+				Title: fmt.Sprintf("the %s %s-scope registration is inert — it runs for no commit",
 					HarnessLabel(a.Harness), a.Scope),
 				Fix: fmt.Sprintf("steer commit-gate install --harness %s --scope %s", a.Harness, a.Scope),
 			})

@@ -25,7 +25,7 @@ var statusCmd = &cobra.Command{
 	Long: `status composes one read-only snapshot of the steer loop and renders it. The unit
 is the recurring problem and its measured result, not the hook count. It reads
 every recorded problem and fix, the recent reviews, the work the deterministic
-tier flagged, the arming posture, and how much evidence this machine holds. It
+tier flagged, the arming state, and how much evidence this machine holds. It
 writes no state.
 
 --json prints the versioned SystemStatus contract on stdout, progress on stderr —
@@ -111,7 +111,7 @@ func renderReadiness(r status.Readiness) {
 }
 
 func renderPosture(s *status.SystemStatus) {
-	fmt.Println(styles.SectionHeader.Render("Posture"))
+	fmt.Println(styles.SectionHeader.Render("Arming"))
 	fmt.Printf("  Reviewer     %s\n", s.Posture.Reviewer)
 	fmt.Printf("  Review log   %s\n", s.Posture.Ledger)
 	fmt.Printf("  Produced by  %s\n", s.Posture.Instrument)
@@ -119,33 +119,33 @@ func renderPosture(s *status.SystemStatus) {
 		fmt.Printf("  Commit gate  %s\n", armingRow(a))
 	}
 	for _, a := range s.Posture.Denials {
-		fmt.Printf("  Denials      %s\n", armingRow(a))
+		fmt.Printf("  Denials recorder %s\n", armingRow(a))
 	}
 	for _, a := range s.Posture.Resolver {
-		fmt.Printf("  Resolver     %s\n", armingRow(a))
+		fmt.Printf("  Read outcomes %s\n", armingRow(a))
 	}
 	for _, m := range s.Posture.Masters {
 		phrase := status.MasterPhrase(m)
 		if phrase == "" {
 			continue
 		}
-		row := fmt.Sprintf("%s, %s scope: %s", m.Harness, m.Scope, phrase)
+		row := fmt.Sprintf("%s, %s scope: %s", status.HarnessLabel(m.Harness), m.Scope, phrase)
 		if m.Stale() {
-			row = fmt.Sprintf("%s, %s scope: %s", m.Harness, m.Scope, styles.WarningText.Render(phrase))
+			row = fmt.Sprintf("%s, %s scope: %s", status.HarnessLabel(m.Harness), m.Scope, styles.WarningText.Render(phrase))
 		}
 		if o := status.MasterObservedPhrase(m); o != "" {
 			row += styles.MutedText.Render(" · " + o)
 		}
-		fmt.Printf("  Guard master %s\n", row)
+		fmt.Printf("  Guard runner %s\n", row)
 	}
 	fmt.Printf("  History      %s\n", corporaLine(s))
-	fmt.Printf("  Guard blocks %d action(s) blocked\n", s.Telemetry.AuditFirings)
+	fmt.Printf("  Guard blocks %d\n", s.Telemetry.AuditFirings)
 }
 
 // armingRow names the harness a registration lives in, because one store serves both
 // and a scope alone no longer identifies a registration.
 func armingRow(a status.ScopeArming) string {
-	row := fmt.Sprintf("%s, %s scope: %s", a.Harness, a.Scope, armingLabel(a))
+	row := fmt.Sprintf("%s, %s scope: %s", status.HarnessLabel(a.Harness), a.Scope, armingLabel(a))
 	if t := status.TrustPhrase(a.Trust); t != "" && a.Registered {
 		row += styles.MutedText.Render(" (" + t + ")")
 	}
@@ -160,14 +160,16 @@ func armingRow(a status.ScopeArming) string {
 
 func armingLabel(a status.ScopeArming) string {
 	switch {
+	case a.Registered && a.Resolvable == status.ResolveMissing:
+		return styles.WarningText.Render("broken")
 	case a.Effective && a.Timeout > 0:
 		return styles.SuccessText.Render(fmt.Sprintf("armed, timeout %ds", a.Timeout))
 	case a.Effective:
 		return styles.SuccessText.Render("armed")
 	case a.Registered:
-		return styles.WarningText.Render("registered but inert")
+		return styles.WarningText.Render("inert") + " (registered, not effective)"
 	default:
-		return styles.MutedText.Render("not armed")
+		return styles.MutedText.Render("off")
 	}
 }
 
@@ -184,7 +186,7 @@ func corporaLine(s *status.SystemStatus) string {
 		if c.Present {
 			present++
 		}
-		parts = append(parts, fmt.Sprintf("%s %d", c.Corpus, c.Size))
+		parts = append(parts, fmt.Sprintf("%s %d", corpusLabel(c.Corpus), c.Size))
 	}
 	msg := fmt.Sprintf("%d of %d present — %s", present, len(s.Corpora), strings.Join(parts, ", "))
 	if present == 0 {
@@ -193,10 +195,23 @@ func corporaLine(s *status.SystemStatus) string {
 	return msg
 }
 
+func corpusLabel(corpus string) string {
+	switch corpus {
+	case "review-findings":
+		return "review findings"
+	case "transcript-friction":
+		return "session history"
+	case "auto-denials":
+		return "automatic denials"
+	default:
+		return "other evidence"
+	}
+}
+
 // renderAttention groups the queue by the action each row asks of the reader,
 // rather than by the verdict token, and renders those groups in ActionOrder.
 func renderAttention(s *status.SystemStatus) {
-	fmt.Println(styles.SectionHeader.Render("Attention Required"))
+	fmt.Println(styles.SectionHeader.Render("Problems"))
 	a := s.Attention
 	rate := s.Rate
 	buckets := map[string][]string{}
@@ -208,7 +223,7 @@ func renderAttention(s *status.SystemStatus) {
 	}
 	if s.Posture.Unresolved > 0 {
 		buckets[status.ActionAdjudicate] = append(buckets[status.ActionAdjudicate],
-			fmt.Sprintf("    %s — read it back from the coding agent's transcript\n      %s",
+			fmt.Sprintf("    %s — read it from your session history\n      %s",
 				status.OutcomesWaitingPhrase(s.Posture.Unresolved),
 				styles.MutedText.Render(status.BackfillCommand)))
 	}
@@ -238,8 +253,8 @@ func renderAttention(s *status.SystemStatus) {
 		}
 	}
 	if len(a.Unscored) > 0 {
-		fmt.Printf("  %s: %d record(s) from evidence no engine reads\n",
-			styles.MutedText.Render("unscored"), len(a.Unscored))
+		fmt.Printf("  %d records are not assessed: this evidence has no reader\n",
+			len(a.Unscored))
 	}
 }
 
@@ -319,21 +334,43 @@ func interventionNotes(iv cadence.Intervention, unmeasurable bool, rate status.C
 
 func candidateLine(c cadence.Candidate) string {
 	if c.Pattern != "" {
-		return fmt.Sprintf("%s — %s (%d hits, %d sessions)", c.Corpus, c.Pattern, c.Count, c.Sessions)
+		return fmt.Sprintf("%s — %s in your session history: %s in %d %s",
+			c.Pattern, candidateSource(c.Corpus), recurrenceCount(c.Count), c.Sessions,
+			status.UnitName("session", c.Sessions))
 	}
-	if c.UndecidedChains > 0 {
-		return fmt.Sprintf("%s — %d review sequence(s) carry a finding no problem covers yet: %s", c.Corpus, c.UndecidedChains, c.Dump)
+	line := fmt.Sprintf("%d %s carry a finding no problem covers yet",
+		c.UndecidedChains, status.UnitName("chain", c.UndecidedChains))
+	if c.Dump != "" {
+		line += ": " + c.Dump
 	}
-	return c.Corpus
+	return line
+}
+
+func candidateSource(corpus string) string {
+	switch corpus {
+	case "review-findings":
+		return "a repeated review finding"
+	case "transcript-friction":
+		return "a repeated pattern"
+	default:
+		return "a repeated pattern"
+	}
+}
+
+func recurrenceCount(n int) string {
+	if n == 1 {
+		return "1 recurrence"
+	}
+	return fmt.Sprintf("%d recurrences", n)
 }
 
 func renderSummary(s *status.SystemStatus) {
-	fmt.Println(styles.SectionHeader.Render("Recurring Problems"))
+	fmt.Println(styles.SectionHeader.Render("Recorded problems"))
 	if s.Summary.Total == 0 {
-		fmt.Println(styles.MutedText.Render("  no fixes recorded on this machine"))
+		fmt.Println(styles.MutedText.Render("  no problems recorded on this machine"))
 		return
 	}
-	fmt.Printf("  %d recorded problem(s)\n", s.Summary.Total)
+	fmt.Printf("  %d recorded %s\n", s.Summary.Total, problemWord(s.Summary.Total))
 	verdicts := make([]string, 0, len(s.Summary.Counts))
 	for v := range s.Summary.Counts {
 		verdicts = append(verdicts, v)
@@ -342,6 +379,13 @@ func renderSummary(s *status.SystemStatus) {
 	for _, v := range verdicts {
 		fmt.Printf("    %-30s %d\n", status.VerdictLabel(v, false), s.Summary.Counts[v])
 	}
+}
+
+func problemWord(n int) string {
+	if n == 1 {
+		return "problem"
+	}
+	return "problems"
 }
 
 func init() {
