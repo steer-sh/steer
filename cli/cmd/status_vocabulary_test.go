@@ -132,7 +132,7 @@ func TestStatusHumanSectionsUseDashboardVocabulary(t *testing.T) {
 	}
 
 	empty := captureStdout(t, func() {
-		renderSummary(&status.SystemStatus{}, 100)
+		renderAttention(&status.SystemStatus{}, 100)
 	})
 	if !strings.Contains(empty, "no problems recorded on this machine") ||
 		strings.Contains(empty, "no fixes recorded on this machine") {

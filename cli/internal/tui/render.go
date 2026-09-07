@@ -57,11 +57,11 @@ const fieldLabelWidth = 9
 
 // field renders one labeled line of a compact summary: the label in its own
 // column, the value wrapped under a hanging indent so a second line lines up
-// with the first. Secondary labels leave the values at primary contrast.
+// with the first. Labels share the terminal status style.
 func field(label, value, indent string, width int) string {
 	lead := indent + strings.Repeat(" ", fieldLabelWidth+1)
 	lines := strings.Split(strings.TrimRight(wrapTo(value, lead, width), "\n"), "\n")
-	head := indent + secondaryStyle.Render(fmt.Sprintf("%-*s", fieldLabelWidth, label)) + " "
+	head := indent + styles.FieldLabel.Render(fmt.Sprintf("%-*s", fieldLabelWidth, label)) + " "
 	out := head + strings.TrimPrefix(lines[0], lead) + "\n"
 	for _, line := range lines[1:] {
 		out += line + "\n"

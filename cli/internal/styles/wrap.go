@@ -12,8 +12,7 @@ import (
 
 // The terminal renders the same stacked labels the dashboard does, so a value
 // that runs past the terminal continues under its own label rather than falling
-// back to column zero. These helpers are the shared mechanism; each surface keeps
-// its own colours and its own column widths.
+// back to column zero. Each surface keeps its own column widths.
 
 // minWrapWidth keeps wrapping valid on a terminal too narrow for the indent the
 // caller asked for.
@@ -70,7 +69,7 @@ func Field(label string, values []string, indent string, labelWidth, width int) 
 	for i, value := range values {
 		lines := strings.Split(strings.TrimRight(Wrap(value, lead+hang(value), width), "\n"), "\n")
 		if i == 0 {
-			head := indent + MutedText.Render(fmt.Sprintf("%-*s", labelWidth, label)) + " "
+			head := indent + FieldLabel.Render(fmt.Sprintf("%-*s", labelWidth, label)) + " "
 			out += head + strings.TrimPrefix(lines[0], lead+hang(value)) + "\n"
 			lines = lines[1:]
 		} else {

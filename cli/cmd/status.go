@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -82,9 +81,9 @@ func renderStatus(s *status.SystemStatus, probe reviewers.Probe) {
 	fmt.Println()
 	renderPosture(s, width)
 	fmt.Println()
-	renderAttention(s, width)
+	renderReviewer(s, width)
 	fmt.Println()
-	renderSummary(s, width)
+	renderAttention(s, width)
 }
 
 // renderReadiness prints the short answer and the steps that remain. Each step names
@@ -95,7 +94,7 @@ func renderReadiness(r status.Readiness, width int) {
 	if !r.Reviewing {
 		head = styles.WarningText.Render(r.Headline)
 	}
-	fmt.Println(styles.SectionHeader.Render("Answer"))
+	fmt.Println(styles.SectionHeader.Render("Commit review"))
 	fmt.Print(styles.Wrap(head, "  ", width))
 	if len(r.Steps) > 0 && r.StepsLead != "" {
 		fmt.Print(styles.Wrap(r.StepsLead, "  ", width))
@@ -106,6 +105,12 @@ func renderReadiness(r status.Readiness, width int) {
 		fmt.Print(styles.Field("·", []string{step.Title}, "  ", 1, width))
 		if step.Fix != "" {
 			fmt.Print(styles.Wrap(styles.MutedText.Render("run: "+step.Fix), "    ", width))
+		}
+	}
+	if len(r.Unverified) > 0 {
+		fmt.Print(styles.Wrap(styles.Bold.Render("Trust unverified by Steer:"), "  ", width))
+		for _, note := range r.Unverified {
+			fmt.Print(styles.Field("·", []string{note}, "  ", 1, width))
 		}
 	}
 	if r.Note != "" {
@@ -124,9 +129,6 @@ const postureLabelWidth = 16
 // state that can never differ from the first.
 func renderPosture(s *status.SystemStatus, width int) {
 	fmt.Println(styles.SectionHeader.Render("Arming"))
-	postureRow("Reviewer", s.Posture.Reviewer, width)
-	postureRow("Review log", s.Posture.Ledger, width)
-	postureRow("Produced by", s.Posture.Instrument, width)
 	for _, a := range s.Posture.CommitGate {
 		postureRow("Commit gate", armingRow(a), width)
 	}
@@ -149,6 +151,13 @@ func renderPosture(s *status.SystemStatus, width int) {
 	}
 	postureRow("History", corporaLine(s), width)
 	postureRow("Guard blocks", fmt.Sprintf("%d", s.Telemetry.AuditFirings), width)
+}
+
+func renderReviewer(s *status.SystemStatus, width int) {
+	fmt.Println(styles.SectionHeader.Render("Reviewer"))
+	postureRow("Reviewer", s.Posture.Reviewer, width)
+	postureRow("Review log", s.Posture.Ledger, width)
+	postureRow("Produced by", s.Posture.Instrument, width)
 }
 
 // postureRow prints one label and its value. A value carrying its own newline —
@@ -239,6 +248,11 @@ const (
 // panel uses for the same records.
 func renderAttention(s *status.SystemStatus, width int) {
 	fmt.Println(styles.SectionHeader.Render("Problems"))
+	if s.Summary.Total == 0 {
+		fmt.Print(styles.Wrap(styles.MutedText.Render("no problems recorded on this machine"), "  ", width))
+	} else {
+		fmt.Print(styles.Wrap(fmt.Sprintf("%d recorded %s", s.Summary.Total, problemWord(s.Summary.Total)), "  ", width))
+	}
 	a := s.Attention
 	rate := s.Rate
 	buckets := map[string][]string{}
@@ -292,9 +306,9 @@ func actionHeader(act string) string {
 	case status.ActionHarmful:
 		return styles.WarningText.Render(head)
 	case status.ActionAdjudicate, status.ActionRepair:
-		return styles.InfoText.Render(head)
+		return styles.InfoText.Bold(true).Render(head)
 	}
-	return styles.MutedText.Render(head)
+	return styles.MutedText.Bold(true).Render(head)
 }
 
 // problemField is one labeled line of an entry, carrying every sentence that
@@ -307,7 +321,7 @@ type problemField struct {
 // problemEntry renders one entry: its title, then its stacked labels. A field
 // with nothing to say prints no label.
 func problemEntry(title string, fields []problemField, width int) string {
-	out := styles.Wrap(title, problemIndent, width)
+	out := styles.Wrap(styles.Bold.Render(title), problemIndent, width)
 	for _, f := range fields {
 		values := make([]string, 0, len(f.values))
 		for _, v := range f.values {
@@ -412,23 +426,6 @@ func candidateBlock(c cadence.Candidate, width int) string {
 		{"Evidence", []string{status.CandidateEvidence(c)}},
 		{"Next", []string{next}},
 	}, width)
-}
-
-func renderSummary(s *status.SystemStatus, width int) {
-	fmt.Println(styles.SectionHeader.Render("Recorded problems"))
-	if s.Summary.Total == 0 {
-		fmt.Print(styles.Wrap(styles.MutedText.Render("no problems recorded on this machine"), "  ", width))
-		return
-	}
-	fmt.Print(styles.Wrap(fmt.Sprintf("%d recorded %s", s.Summary.Total, problemWord(s.Summary.Total)), "  ", width))
-	verdicts := make([]string, 0, len(s.Summary.Counts))
-	for v := range s.Summary.Counts {
-		verdicts = append(verdicts, v)
-	}
-	sort.Strings(verdicts)
-	for _, v := range verdicts {
-		fmt.Printf("    %-30s %d\n", status.VerdictLabel(v, false), s.Summary.Counts[v])
-	}
 }
 
 func problemWord(n int) string {

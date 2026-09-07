@@ -65,7 +65,7 @@ func TestEachOpenStateWithholdsTheReviewingAnswer(t *testing.T) {
 		if r.Reviewing {
 			t.Errorf("%s: Reviewing is true", name)
 		}
-		if len(r.Steps) == 0 {
+		if len(r.Steps) == 0 && len(r.Unverified) == 0 {
 			t.Errorf("%s: no step names what remains", name)
 		}
 	}
@@ -77,8 +77,8 @@ func TestEveryStepNamesItsRepair(t *testing.T) {
 	untrusted.Trust = TrustRecordPresent
 	untrusted.Resolvable = ResolveMissing
 	r := ReadinessOf(snapshot(untrusted), reviewers.Probe{Provider: "nope", State: reviewers.ProbeMissing})
-	if len(r.Steps) != 3 {
-		t.Fatalf("steps = %d; want reviewer, command and trust", len(r.Steps))
+	if len(r.Steps) != 2 {
+		t.Fatalf("steps = %d; want reviewer and command", len(r.Steps))
 	}
 	for _, step := range r.Steps {
 		if step.Title == "" || step.Fix == "" {
@@ -118,11 +118,49 @@ func TestASecondHarnessNotEnforcingDoesNotFlipTheAnswer(t *testing.T) {
 	if !r.Reviewing {
 		t.Fatalf("Readiness = %+v; want reviewing on the enforcing channel", r)
 	}
-	if len(r.Steps) != 1 || !strings.Contains(r.Steps[0].Title, "Codex") {
-		t.Fatalf("steps = %+v; want the Codex trust step alone", r.Steps)
+	if len(r.Steps) != 0 || len(r.Unverified) != 1 || !strings.Contains(r.Unverified[0], "Codex global scope") {
+		t.Fatalf("Readiness = %+v; want a scoped Codex trust diagnostic", r)
 	}
 	if !strings.Contains(r.Headline, "Claude Code global") {
 		t.Errorf("Headline = %q; want the enforcing channel named", r.Headline)
+	}
+}
+
+func TestUnknownTrustDoesNotClaimNonEnforcement(t *testing.T) {
+	for _, trust := range []string{TrustMissing, TrustUnknown, TrustRecordPresent} {
+		for _, observed := range []int{0, 1} {
+			a := armed(string(harness.Codex))
+			a.Trust = trust
+			a.Observed = float64(observed)
+			a.ObservedCorpus = "commit-review"
+			r := ReadinessOf(snapshot(a), available())
+			if r.Reviewing || len(r.Steps) != 0 || len(r.Unverified) != 1 {
+				t.Fatalf("trust %s observed %d: %+v", trust, observed, r)
+			}
+			if !strings.Contains(r.Headline, "cannot be verified") || strings.Contains(r.Headline, "NOT reviewed") {
+				t.Fatalf("unknown trust asserted non-enforcement: %s", r.Headline)
+			}
+			if phrase := ObservedPhrase(a); phrase != "" && !strings.Contains(r.Unverified[0], phrase) {
+				t.Fatalf("observation missing: %+v", r)
+			}
+		}
+	}
+}
+
+func TestMixedTrustAndSetupFailureNamesBoth(t *testing.T) {
+	unknown := armed(string(harness.Codex))
+	unknown.Trust = TrustRecordPresent
+	for _, missingCommand := range []bool{false, true} {
+		broken := armed(string(harness.ClaudeCode))
+		if missingCommand {
+			broken.Resolvable = ResolveMissing
+		} else {
+			broken.Effective = false
+		}
+		r := ReadinessOf(snapshot(broken, unknown), available())
+		if !strings.Contains(r.Headline, "setup problems") || len(r.Steps) != 1 || len(r.Unverified) != 1 {
+			t.Fatalf("mixed setup failure and trust uncertainty: %+v", r)
+		}
 	}
 }
 

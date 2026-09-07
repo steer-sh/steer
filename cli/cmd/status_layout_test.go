@@ -25,7 +25,7 @@ func TestEveryWrappedLineLandsInItsOwnColumn(t *testing.T) {
 		}}},
 	}
 
-	posture := captureStdout(t, func() { renderPosture(s, 70) })
+	posture := captureStdout(t, func() { renderReviewer(s, 70) })
 	assertColumn(t, posture, "Reviewer", 2+postureLabelWidth+1)
 
 	problems := captureStdout(t, func() { renderAttention(s, 70) })

@@ -93,19 +93,18 @@ type Readiness struct {
 	Reviewing bool
 	// Headline is the answer in one clause.
 	Headline string
-	// StepsLead introduces the steps. It differs by answer: an open step under a
-	// reviewing gate is a second harness that is not enforcing, not a broken gate.
+	// StepsLead introduces confirmed setup problems.
 	StepsLead string
 	// Steps are what remains, in the order a reader clears them.
 	Steps []Step
+	// Unverified holds trust diagnostics, which do not establish a broken setup.
+	Unverified []string
 	// Note is one further fact, "" when there is none — that no review has been
 	// observed yet, which is not proof of breakage.
 	Note string
 }
 
-// ReadinessOf answers the snapshot's commit-gate posture. It reports Reviewing when
-// one registration enforces and the reviewer resolves, and a Step for every other
-// registered channel.
+// ReadinessOf separates setup failures from trust that the snapshot cannot verify.
 func ReadinessOf(s *SystemStatus, probe reviewers.Probe) Readiness {
 	r := Readiness{}
 	reviewerStep, reviewerMissing := ReviewerStep(probe)
@@ -115,6 +114,7 @@ func ReadinessOf(s *SystemStatus, probe reviewers.Probe) Readiness {
 	var enforcing []string
 	registered := false
 	observed := false
+	unknownTrust := false
 	for _, a := range s.Posture.CommitGate {
 		if !a.Registered {
 			continue
@@ -133,8 +133,15 @@ func ReadinessOf(s *SystemStatus, probe reviewers.Probe) Readiness {
 			r.Steps = append(r.Steps, prefixHarness(step, a))
 			open = true
 		}
-		if step, ok := TrustStep(a.Harness, a.Trust, ""); ok {
-			r.Steps = append(r.Steps, step)
+		if _, ok := TrustStep(a.Harness, a.Trust, ""); ok {
+			note := fmt.Sprintf("%s %s scope: %s; current hook trust cannot be verified", HarnessLabel(a.Harness), a.Scope, TrustPhrase(a.Trust))
+			if phrase := ObservedPhrase(a); phrase != "" {
+				note += " · harness history: " + phrase
+			}
+			r.Unverified = append(r.Unverified, note)
+			if !open {
+				unknownTrust = true
+			}
 			open = true
 		}
 		if open {
@@ -155,10 +162,13 @@ func ReadinessOf(s *SystemStatus, probe reviewers.Probe) Readiness {
 	switch {
 	case r.Reviewing:
 		r.Headline = "Commits here are reviewed before they land — " + strings.Join(enforcing, ", ") + "."
-		r.StepsLead = "Registered and not enforcing:"
+		r.StepsLead = "Setup problems:"
+	case unknownTrust && len(r.Steps) == 0:
+		r.Headline = "Commit review is configured; current hook trust cannot be verified by Steer."
+		r.StepsLead = "Setup problems:"
 	case registered:
-		r.Headline = "Commits here are NOT reviewed yet: a gate is registered, and no channel enforces."
-		r.StepsLead = "Before the first review:"
+		r.Headline = "Commit review has setup problems; no working channel is confirmed."
+		r.StepsLead = "Setup problems:"
 	default:
 		r.Headline = "Commits here are NOT reviewed."
 		r.StepsLead = "Before the first review:"

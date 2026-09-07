@@ -4,20 +4,21 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/steer-sh/steer-cli/internal/styles"
 )
 
 var (
 	focus             = lipgloss.AdaptiveColor{Dark: "#A78BFA", Light: "#6941C6"}
-	secondaryColor    = lipgloss.AdaptiveColor{Dark: "#B0B6C4", Light: "#535C6C"}
+	secondaryColor    = styles.Muted
 	surfaceColor      = lipgloss.AdaptiveColor{Dark: "#2E3340", Light: "#EDF0F5"}
 	surfaceText       = lipgloss.AdaptiveColor{Dark: "#E4E7EE", Light: "#242B36"}
 	edgeColor         = lipgloss.AdaptiveColor{Dark: "#555E70", Light: "#BDC4CE"}
-	headingStyle      = lipgloss.NewStyle().Bold(true)
+	headingStyle      = styles.Bold
 	secondaryStyle    = lipgloss.NewStyle().Foreground(secondaryColor)
 	metadataStyle     = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Dark: "#969EAE", Light: "#626C7C"})
-	positiveStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Dark: "#6FCF97", Light: "#237A49"})
-	cautionStyle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Dark: "#E8B86D", Light: "#8A5700"})
-	adverseStyle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Dark: "#F08A8A", Light: "#B4233D"})
+	positiveStyle     = styles.SuccessText
+	cautionStyle      = styles.WarningText
+	adverseStyle      = styles.ErrorText
 	activeTabStyle    = lipgloss.NewStyle().Bold(true).Background(focus).Foreground(lipgloss.AdaptiveColor{Dark: "#211A32", Light: "#FFFFFF"})
 	selectedStyle     = lipgloss.NewStyle().Background(lipgloss.AdaptiveColor{Dark: "#393249", Light: "#EDE7F6"}).Foreground(surfaceText)
 	selectedNameStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Dark: "#C4B5FD", Light: "#6941C6"})

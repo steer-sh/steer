@@ -10,16 +10,17 @@ var (
 	BrandPurple = lipgloss.Color("#A78BFA")
 	White       = lipgloss.Color("#FFFFFF")
 
-	Success = lipgloss.Color("#10B981")
-	Warning = lipgloss.Color("#F59E0B")
-	Error   = lipgloss.Color("#EF4444")
+	Success = lipgloss.AdaptiveColor{Dark: "#6FCF97", Light: "#237A49"}
+	Warning = lipgloss.AdaptiveColor{Dark: "#E8B86D", Light: "#8A5700"}
+	Error   = lipgloss.AdaptiveColor{Dark: "#F08A8A", Light: "#B4233D"}
 	Info    = lipgloss.Color("#06B6D4")
-	Muted   = lipgloss.Color("#9CA3AF")
+	Muted   = lipgloss.AdaptiveColor{Dark: "#B0B6C4", Light: "#535C6C"}
 )
 
 var (
-	Bold = lipgloss.NewStyle().Bold(true)
-	Dim  = lipgloss.NewStyle().Foreground(Muted)
+	Bold       = lipgloss.NewStyle().Bold(true)
+	FieldLabel = Bold
+	Dim        = lipgloss.NewStyle().Foreground(Muted)
 
 	BrandText = lipgloss.NewStyle().
 			Foreground(BrandPurple).
@@ -41,7 +42,6 @@ var (
 			Padding(0, 1)
 
 	SectionHeader = lipgloss.NewStyle().
-			Foreground(White).
 			Bold(true).
 			UnderlineSpaces(true).
 			Underline(true)
