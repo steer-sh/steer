@@ -94,7 +94,7 @@ func TestRegisterScoreRoundTrip(t *testing.T) {
 	check(t, "id is slugified", str(recorded[0]["id"]), "widget-parser-flag-loss")
 
 	allRows, _ := LoadRows(stateDir, ledger)
-	scored, err := ScoreRecord(recorded[0], BuildChains(allRows, false), 12)
+	scored, err := ScoreRecord(recorded[0], EvidenceSet{Chains: BuildChains(allRows, false)}, 12)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -362,7 +362,7 @@ func loadByID(t *testing.T, stateDir string) map[string]Record {
 
 func scoreOK(t *testing.T, record Record, chains []Chain, minAfter int) map[string]any {
 	t.Helper()
-	res, err := ScoreRecord(record, chains, minAfter)
+	res, err := ScoreRecord(record, EvidenceSet{Chains: chains}, minAfter)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -417,7 +417,7 @@ func TestScoreEmitsTheRange(t *testing.T) {
 	allRows, _ := LoadRows(stateDir, ledger)
 	chains := BuildChains(allRows, false)
 
-	scored, err := ScoreRecord(recorded[0], chains, 0)
+	scored, err := ScoreRecord(recorded[0], EvidenceSet{Chains: chains}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -444,7 +444,7 @@ func TestScoreEmitsTheRange(t *testing.T) {
 		legacy[k] = v
 	}
 	delete(legacy, "scope")
-	unscoped, err := ScoreRecord(legacy, chains, 0)
+	unscoped, err := ScoreRecord(legacy, EvidenceSet{Chains: chains}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -483,7 +483,7 @@ func TestStoredBaselineMatchesTheScoredWindow(t *testing.T) {
 			numInt(stored["units"]), 8)
 
 		allRows, _ := LoadRows(stateDir, ledger)
-		scored, err := ScoreRecord(recorded[0], BuildChains(allRows, false), 0)
+		scored, err := ScoreRecord(recorded[0], EvidenceSet{Chains: BuildChains(allRows, false)}, 0)
 		if err != nil {
 			t.Fatal(err)
 		}

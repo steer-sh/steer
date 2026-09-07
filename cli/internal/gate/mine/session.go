@@ -346,6 +346,8 @@ func ScoreSessionRecord(record Record, ev EvidenceSet, minAfter int) (map[string
 		"before_hosts":      emptyIfNil(beforeHarness),
 		"after_hosts":       emptyIfNil(afterHarness),
 		"host_mix_drift":    len(beforeHarness) > 0 && len(afterHarness) > 0 && !sameStringSet(beforeHarness, afterHarness),
+		"observation": sessionObservation(record, before, after, beforeCov, afterCov,
+			pattern, signalKind, attr, ev, afterStart, float64(now())),
 	}, nil
 }
 

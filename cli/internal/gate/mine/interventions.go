@@ -297,10 +297,15 @@ func fileDigest(path string) string {
 // ScoreRecord recomputes an intervention's before/after incidence and its verdict,
 // producing the JSON shape mine.py emits (rate and p as Python floats; empty lists as
 // [], not null; instrument null when the record predates the field).
-func ScoreRecord(record Record, chains []Chain, minAfter int) (map[string]any, error) {
+//
+// It takes the whole EvidenceSet, as ScoreSessionRecord does, and reads the chain
+// corpus plus the guard audit stream: a guard mined from review findings still
+// writes audit rows, and its observation reports them.
+func ScoreRecord(record Record, ev EvidenceSet, minAfter int) (map[string]any, error) {
 	if err := requireChainCorpus(record); err != nil {
 		return nil, err
 	}
+	chains := ev.Chains
 	pattern, err := compilePattern(str(record["match"]))
 	if err != nil {
 		return nil, err
@@ -384,6 +389,8 @@ func ScoreRecord(record Record, chains []Chain, minAfter int) (map[string]any, e
 		"before_hosts":      emptyIfNil(beforeHosts),
 		"after_hosts":       emptyIfNil(afterHosts),
 		"host_mix_drift":    hostDrift,
+		"observation": chainObservation(record, before, after, beforeCov, afterCov,
+			pattern, kf, ev, afterStart, clock),
 	}, nil
 }
 
@@ -409,7 +416,7 @@ func ScoreWith(record Record, ev EvidenceSet, minAfter int) (map[string]any, err
 	case EngineSession:
 		return ScoreSessionRecord(record, ev, minAfter)
 	default:
-		return ScoreRecord(record, ev.Chains, minAfter)
+		return ScoreRecord(record, ev, minAfter)
 	}
 }
 

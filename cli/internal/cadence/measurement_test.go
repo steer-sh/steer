@@ -34,7 +34,7 @@ func TestConvertersReadTheScorersOwnKeys(t *testing.T) {
 		"status": "active", "installed_ts": 5000,
 		"scope": map[string]any{"version": mine.ScopeVersion, "repo": "steer", "path": `\.go$`},
 	}
-	scored, err := mine.ScoreRecord(record, mine.BuildChains(rows, false), 0)
+	scored, err := mine.ScoreRecord(record, mine.EvidenceSet{Chains: mine.BuildChains(rows, false)}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestConfoundsOfCarriesAPopulatedList(t *testing.T) {
 		"status": "active", "installed_ts": 5000, "instrument": "old-reviewer",
 		"scope": map[string]any{"version": mine.ScopeVersion, "all": true},
 	}
-	scored, err := mine.ScoreRecord(record, mine.BuildChains(rows, false), 0)
+	scored, err := mine.ScoreRecord(record, mine.EvidenceSet{Chains: mine.BuildChains(rows, false)}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

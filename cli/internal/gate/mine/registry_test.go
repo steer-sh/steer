@@ -29,7 +29,7 @@ func TestTheSessionCorpusIsScoredByItsOwnEngine(t *testing.T) {
 	}
 	check(t, "engine", EngineOf(r), EngineSession)
 	// The chain engine's own entry point still refuses it: it counts a different unit.
-	if _, err := ScoreRecord(r, nil, 0); err == nil {
+	if _, err := ScoreRecord(r, EvidenceSet{}, 0); err == nil {
 		t.Error("ScoreRecord must refuse a record the chain engine cannot count")
 	}
 	if _, err := ScoreWith(r, EvidenceSet{}, 0); err != nil {

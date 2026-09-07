@@ -230,7 +230,7 @@ func loadOne(t *testing.T, stateDir string) Record {
 func scoreOne(t *testing.T, stateDir string, chains []Chain) map[string]any {
 	t.Helper()
 	rec := loadOne(t, stateDir)
-	res, err := ScoreRecord(rec, chains, 0)
+	res, err := ScoreRecord(rec, EvidenceSet{Chains: chains}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
