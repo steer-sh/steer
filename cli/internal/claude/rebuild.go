@@ -29,6 +29,9 @@ type RebuildResult struct {
 	Hooks      int
 	Stamp      guard.Stamp
 	Targets    []RebuildTarget
+	// Verification is the fixture rerun that followed regeneration. The master
+	// is new, so every guard's tested state was cleared and this re-earns it.
+	Verification *FixtureVerification
 }
 
 // Moved reports whether any target now invokes a different file than it did.
@@ -136,6 +139,12 @@ func RebuildMaster(scope string, targets ...harness.Registrar) (*RebuildResult, 
 		row.Path = path
 		result.Targets = append(result.Targets, row)
 	}
+
+	verification, err := VerifyFixtures(scope)
+	if err != nil {
+		return result, err
+	}
+	result.Verification = verification
 
 	return result, nil
 }

@@ -62,13 +62,15 @@ artifacts:
 		}
 
 		utils.Working("Removing hook and syncing managed artifacts...")
-		if _, err := claude.RemoveManagedHook(scope, identifier, targets...); err != nil {
+		result, err := claude.RemoveManagedHook(scope, identifier, targets...)
+		if err != nil {
 			return err
 		}
 
 		fmt.Println()
 		fmt.Println(styles.SuccessBox.Render(fmt.Sprintf(
 			"Removed hook: %s\nHarness: %s", hook.Name, harnessNames(targets))))
+		printFixtureVerification(result.Verification)
 		return nil
 	},
 }

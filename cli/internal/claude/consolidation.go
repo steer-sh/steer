@@ -112,8 +112,17 @@ func ResolveHook(scope, identifier string) (HookFile, error) {
 }
 
 // ConsolidateHooks rebuilds the master steer-hooks.py from all individual hooks.
+//
+// It clears every guard's fixture state first. A guard's state is earned under
+// one master, and this call writes a new one; the rerun that follows
+// consolidation re-establishes it. Clearing before the write rather than after
+// means an interrupted run leaves no state rather than a stale one.
 func ConsolidateHooks(scope string) error {
 	if err := EnsureDirectories(scope); err != nil {
+		return err
+	}
+
+	if err := clearFixtureState(scope); err != nil {
 		return err
 	}
 

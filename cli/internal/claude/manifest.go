@@ -35,6 +35,38 @@ type SelfTestSummary struct {
 	NegativeFail int  `json:"negative_fail"`
 }
 
+// FixtureBinding records what a guard's stored fixtures were verified against.
+//
+// The binding is four values, and an edit to any one of them drops Tested. The
+// guard's own digest is not enough: rule_hash names the prose, which a code edit
+// leaves untouched, so a rule reworded around unchanged code changes what the
+// guard is meant to do while the stored cases may no longer cover it. The master
+// digest is in for the mirror reason — a master rebuilt around an untouched
+// guard can move that guard's behaviour, so a guard cannot be reported as tested
+// under a master it never ran beneath.
+type FixtureBinding struct {
+	Digest       string `json:"digest"`
+	Cases        int    `json:"cases"`
+	Tested       bool   `json:"tested"`
+	HookDigest   string `json:"hook_digest,omitempty"`
+	MasterDigest string `json:"master_digest,omitempty"`
+	RuleHash     string `json:"rule_hash,omitempty"`
+	VerifiedAt   string `json:"verified_at,omitempty"`
+	Shadowed     int    `json:"shadowed,omitempty"`
+}
+
+// Bound reports whether this state was earned under the identity given. It is
+// never inherited: an unbound state reads as untested, never as current.
+func (b *FixtureBinding) Bound(fixturesDigest, hookDigest, ruleHash, masterDigest string) bool {
+	if b == nil || !b.Tested {
+		return false
+	}
+	return b.Digest == fixturesDigest &&
+		b.HookDigest == hookDigest &&
+		b.RuleHash == ruleHash &&
+		b.MasterDigest == masterDigest
+}
+
 // Manifest stores hook metadata used for list/remove/CLAUDE.md cleanup.
 type Manifest struct {
 	Hooks map[string]ManifestEntry `json:"hooks"`
@@ -56,6 +88,7 @@ type ManifestEntry struct {
 	SkillVersion  string           `json:"skill_version,omitempty"`
 	RuleHash      string           `json:"rule_hash,omitempty"`
 	SelfTest      *SelfTestSummary `json:"self_test,omitempty"`
+	Fixtures      *FixtureBinding  `json:"fixtures,omitempty"`
 }
 
 // ManifestListEntry is a flattened view for list output.

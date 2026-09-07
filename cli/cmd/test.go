@@ -17,12 +17,14 @@ import (
 var testCmd = &cobra.Command{
 	Use:   "test <hook-name-or-path>",
 	Short: "Run an individual hook against sample code",
-	Long: `Test runs an individual hook (not the consolidated master hook) against a
-sample payload that mimics Claude Code PreToolUse JSON input.
+	Long: `Test replays a hook's stored fixtures, or runs it against an ad-hoc payload.
 
-Use this to validate block/allow behavior before relying on the hook in normal
-workflow.`,
-	Example: `  steer test no-var-hook --code "var x = 1"
+With no --code or --file, it reruns the cases stored beside the guard, against
+the guard alone and through the generated master. With either flag it runs the
+individual hook once against a payload that mimics Claude Code PreToolUse JSON
+input.`,
+	Example: `  steer test no-var-hook
+  steer test no-var-hook --code "var x = 1"
   steer test no-var-hook --file ./sample.js
   steer test no-var-hook --code "print('x')" --extension py`,
 	Args: cobra.ExactArgs(1),
@@ -37,8 +39,12 @@ workflow.`,
 		filePath, _ := cmd.Flags().GetString("file")
 		extension, _ := cmd.Flags().GetString("extension")
 
-		if (codeSnippet == "" && filePath == "") || (codeSnippet != "" && filePath != "") {
+		if codeSnippet != "" && filePath != "" {
 			return fmt.Errorf("provide exactly one of --code or --file")
+		}
+		if codeSnippet == "" && filePath == "" {
+			// With no ad-hoc payload, the stored fixtures are the test.
+			return runStoredFixtures(scope, hookIdentifier)
 		}
 
 		hook, err := claude.ResolveHook(scope, hookIdentifier)

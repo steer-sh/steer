@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/steer-sh/steer-cli/internal/guard/fixture"
 	"github.com/steer-sh/steer-cli/internal/harness"
 )
 
@@ -30,6 +31,8 @@ type InstallManagedHookInput struct {
 	Rule     string
 	Content  []byte
 	Metadata HookInstallMetadata
+	// Fixtures are the guard's replayable test cases, stored beside it.
+	Fixtures *fixture.File
 }
 
 // InstallManagedHookResult reports install outcome details.
@@ -39,6 +42,9 @@ type InstallManagedHookResult struct {
 	HookPath     string
 	Overwritten  bool
 	PreviousRule string
+	// Verification is the fixture rerun that followed consolidation. It is
+	// reported, never a gate: a failing fixture does not undo the install.
+	Verification *FixtureVerification
 }
 
 // RemoveManagedHookResult reports remove outcome details.
@@ -46,6 +52,9 @@ type RemoveManagedHookResult struct {
 	HookName string
 	HookPath string
 	Rule     string
+	// Verification is the fixture rerun that followed consolidation. A failing
+	// fixture never blocks a removal.
+	Verification *FixtureVerification
 }
 
 func normalizeInstallMetadata(metadata HookInstallMetadata) (HookInstallMetadata, error) {
@@ -223,6 +232,14 @@ func InstallManagedHook(scope string, input InstallManagedHookInput, targets ...
 		return nil, err
 	}
 
+	if input.Fixtures != nil {
+		stored := *input.Fixtures
+		stored.Hook = hookName
+		if err := fixture.Save(hooksDir, stored); err != nil {
+			return nil, err
+		}
+	}
+
 	if err := ConsolidateHooks(scope); err != nil {
 		return nil, err
 	}
@@ -231,13 +248,19 @@ func InstallManagedHook(scope string, input InstallManagedHookInput, targets ...
 		return nil, err
 	}
 
-	return &InstallManagedHookResult{
+	result := &InstallManagedHookResult{
 		HookName:     hookName,
 		FileName:     fileName,
 		HookPath:     targetPath,
 		Overwritten:  manifestExists,
 		PreviousRule: existingEntry.Rule,
-	}, nil
+	}
+	verification, err := VerifyFixtures(scope)
+	if err != nil {
+		return result, err
+	}
+	result.Verification = verification
+	return result, nil
 }
 
 // RemoveManagedHook deletes one hook and re-syncs all managed artifacts.
@@ -301,6 +324,10 @@ func RemoveManagedHook(scope, identifier string, targets ...harness.Registrar) (
 		return nil, fmt.Errorf("failed to delete hook file: %w", err)
 	}
 
+	if err := RemoveFixtures(scope, hookName); err != nil {
+		return nil, err
+	}
+
 	rule := ""
 	if hasEntry {
 		rule = manifestEntry.Rule
@@ -317,9 +344,15 @@ func RemoveManagedHook(scope, identifier string, targets ...harness.Registrar) (
 		return nil, err
 	}
 
-	return &RemoveManagedHookResult{
+	result := &RemoveManagedHookResult{
 		HookName: hookName,
 		HookPath: hookPath,
 		Rule:     rule,
-	}, nil
+	}
+	verification, err := VerifyFixtures(scope)
+	if err != nil {
+		return result, err
+	}
+	result.Verification = verification
+	return result, nil
 }

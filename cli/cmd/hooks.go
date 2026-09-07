@@ -78,6 +78,7 @@ than patched.`,
 		if result.Stamp.Runtime != guard.RuntimeDigest() || result.Stamp.Version != version.Version {
 			utils.Info("The stamp does not match this binary; report it as a bug.")
 		}
+		printFixtureVerification(result.Verification)
 		return nil
 	},
 }

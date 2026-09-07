@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/claude"
+	"github.com/steer-sh/steer-cli/internal/guard/fixture"
 	"github.com/steer-sh/steer-cli/internal/styles"
 	"github.com/steer-sh/steer-cli/internal/utils"
 )
@@ -22,6 +23,7 @@ var registerPromptModules string
 var registerModel string
 var registerSkillVersion string
 var registerSelfTest string
+var registerFixtures string
 
 var registerCmd = &cobra.Command{
 	Use:   "register <hook-path>",
@@ -76,6 +78,10 @@ Optional provenance flags can be used to persist generation metadata.`,
 		if err != nil {
 			return err
 		}
+		fixtures, err := readFixtureFile(registerFixtures, hookNameFor(sourceAbs))
+		if err != nil {
+			return err
+		}
 
 		targets, err := currentRegistrars()
 		if err != nil {
@@ -99,6 +105,7 @@ Optional provenance flags can be used to persist generation metadata.`,
 				SkillVersion:  registerSkillVersion,
 				SelfTest:      selfTest,
 			},
+			Fixtures: fixtures,
 		}, targets...)
 		if err != nil {
 			return err
@@ -112,6 +119,7 @@ Optional provenance flags can be used to persist generation metadata.`,
 			scope,
 			harnessNames(targets),
 		)))
+		printFixtureVerification(result.Verification)
 		return nil
 	},
 }
@@ -247,5 +255,59 @@ func init() {
 	registerCmd.Flags().StringVar(&registerPromptModules, "prompt-modules", "", "Comma-separated prompt module names")
 	registerCmd.Flags().StringVar(&registerModel, "model", "", "Model used for generation (if applicable)")
 	registerCmd.Flags().StringVar(&registerSkillVersion, "skill-version", "", "Skill/package version used for generation")
+	registerCmd.Flags().StringVar(&registerFixtures, "fixtures", "", "Path to a fixture file storing this guard's replayable cases")
 	registerCmd.Flags().StringVar(&registerSelfTest, "self-test", "", "Self-test summary JSON or compact form: passed,positive_pass,positive_fail,negative_pass,negative_fail")
+}
+
+// hookNameFor derives the manifest name a hook file registers under.
+func hookNameFor(path string) string {
+	return strings.TrimSuffix(filepath.Base(path), ".py")
+}
+
+// readFixtureFile loads the cases a registration stores beside the guard. The
+// document's hook name is filled from the file being registered when it names
+// none, so a mined candidate set needs no hand edit to be storable.
+func readFixtureFile(path, hook string) (*fixture.File, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read fixtures: %w", err)
+	}
+	var raw fixture.File
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("failed to parse fixtures: %w", err)
+	}
+	if raw.Version == 0 {
+		raw.Version = fixture.Version
+	}
+	if strings.TrimSpace(raw.Hook) == "" {
+		raw.Hook = hook
+	}
+	if err := raw.Validate(); err != nil {
+		return nil, err
+	}
+	return &raw, nil
+}
+
+// printFixtureVerification reports the rerun that followed consolidation. It is
+// a report and never a gate: the install already happened.
+func printFixtureVerification(v *claude.FixtureVerification) {
+	if v == nil || len(v.Reports) == 0 {
+		return
+	}
+	for _, report := range v.Reports {
+		if report.Tested() {
+			fmt.Printf("fixtures: %s — %d case(s) intercepted", report.Hook, len(report.Cases))
+			if n := report.Shadowed(); n > 0 {
+				fmt.Printf(", %d shadowed by another guard and not verified through the master", n)
+			}
+			fmt.Println()
+			continue
+		}
+		fmt.Printf("fixtures: %s — NOT verified: %d case(s) the guard answered wrongly, %d the master allowed\n",
+			report.Hook, report.IndividualFailures(), report.MasterFailures())
+	}
 }

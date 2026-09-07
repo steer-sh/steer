@@ -270,6 +270,44 @@ After determining scope:
 - The store is `.steer` for project scope and `~/.steer` for global scope. `<store>` below names it.
 - Write to `<store>/hooks/<rule-name>-hook.py` using descriptive kebab-case naming
 - Remember the scope for Step 4 (settings.json must match)
+- Write the test cases beside it, as `<rule-name>-cases.json`. Step 5 designs the
+  cases; this file is where they live, so they can be rerun.
+
+**The fixture file.** A case is a hook payload plus the outcome it asserts, so a
+stored case is rerunnable evidence. A count is not.
+
+```json
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "console.log is blocked",
+      "expect": "block",
+      "origin": "synthetic",
+      "payload": {
+        "tool_name": "Write",
+        "tool_input": {"file_path": "test.js", "content": "console.log(1)"}
+      }
+    },
+    {
+      "name": "logger.info is allowed",
+      "expect": "allow",
+      "origin": "synthetic",
+      "payload": {
+        "tool_name": "Write",
+        "tool_input": {"file_path": "test.js", "content": "logger.info(1)"}
+      }
+    }
+  ]
+}
+```
+
+- `expect` is `block` or `allow`. Store the legitimate cases beside the violations.
+- `origin` is `synthetic` for a case you wrote. A case reconstructed from a corpus
+  is `reconstructed` — see `steer fixture mine`.
+- `files` is optional: a map of relative path to content, the filesystem context a
+  guard reads. The runner writes it into a sandbox and rewrites the payload's
+  relative paths against it.
 
 ### Step 4: Register the Hook
 
@@ -284,6 +322,7 @@ STEER_BIN="${STEER_BIN:-steer}"
   --prompt-version "<prompt_version from SKILL.md frontmatter>" \
   --prompt-modules "<comma,separated,modules>" \
   --model "<your model name from system prompt>" \
+  --fixtures <store>/hooks/<rule-name>-cases.json \
   --self-test '{"passed":true,"positive_pass":2,"positive_fail":0,"negative_pass":2,"negative_fail":0}'
 ```
 
@@ -347,13 +386,35 @@ The hardest bugs to find are false positives on safe code that *looks* like the 
 
 **If the rule uses `|` suggestion syntax**, add one test that verifies the `stopReason` output contains the user's suggestion text. Pipe a positive test case and check that the JSON output includes the suggestion. The user chose those words deliberately — the stopReason must include them.
 
-**Verify the consolidated master hook (MANDATORY).** Registration (Step 4) consolidates your hook into `<store>/hooks/steer-hooks.py`, and consolidation rewrites the code — it can break a hook that passed every individual test. After registration, re-run at least one positive and one negative case through the master:
+**Verify both passes (MANDATORY).** Registration (Step 4) consolidates your hook
+into `<store>/hooks/steer-hooks.py` and reruns the stored cases. Run them again on
+demand with:
 
 ```bash
-echo '{"tool_name":"Write","tool_input":{"file_path":"test.js","content":"console.log(1)"}}' | python3 <store>/hooks/steer-hooks.py
+steer test <rule-name>-hook
 ```
 
-The positive case must produce `"decision": "block"` from the master itself. If the master allows what the individual hook blocks, the consolidated output is broken — report it as a steer CLI bug and do not report the hook as successfully installed.
+This replays every case twice, against byte-identical copies in a temporary store,
+so your audit log records no synthetic firing:
+
+- **Against the guard alone.** This is the guard's whole contract: every case,
+  block and allow. Any mismatch is a failure — fix the hook and rerun.
+- **Through the generated master.** Guards run in a fixed order and the first to
+  object wins, so an expect-block case has three outcomes. *Blocked by this guard*
+  is verified. *Blocked by another guard* is **shadowed**: reported, naming that
+  guard, and never a failure — it is simply not proof that your guard ran.
+  *Allowed* is a failure: a case that blocks alone did not block through the
+  master. Inspect the integration before blaming consolidation. An expect-allow
+  case is asserted against the guard only, because another guard may legitimately
+  block it.
+
+The state this earns says the guard intercepts its stored cases. It never says a
+field block was correct, or that what the agent did next was useful.
+
+The state is bound to four values — the guard's digest, the fixtures' digest, the
+rule's hash and the master's digest — so an edit to any one of them drops it.
+Consolidation clears it and the rerun re-establishes it; a failing case never
+blocks a removal.
 
 ### Step 6: Report to User
 
