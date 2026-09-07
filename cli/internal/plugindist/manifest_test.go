@@ -10,11 +10,19 @@ import (
 	"testing"
 )
 
-// The repository ships three manifests describing one plugin: Claude Code's
-// marketplace, Codex's marketplace and Codex's plugin manifest. Codex copies a
-// plugin root verbatim, so a field that disagrees between them installs one
+// The repository ships four manifests describing one plugin: the two
+// marketplaces and the two plugin manifests each harness reads at the plugin
+// root. Codex copies a plugin root verbatim and Claude Code installs one
+// directly from a git URL, so a field that disagrees between them installs one
 // plugin under two identities. These tests compare whole documents rather than
 // a modeled subset, because an unmodeled field is exactly the one that drifts.
+
+// pluginManifests are the per-harness manifests at the plugin root. Both are
+// read in preference to a synthesized marketplace entry, so both are pinned.
+var pluginManifests = []string{
+	filepath.Join(".codex-plugin", "plugin.json"),
+	filepath.Join(".claude-plugin", "plugin.json"),
+}
 
 // marketplaceOnlyKeys are the keys a marketplace entry carries that the plugin
 // manifest at the plugin root cannot: the root is its own source, and strictness
@@ -91,29 +99,37 @@ func TestBothMarketplacesAreTheSameDocument(t *testing.T) {
 	}
 }
 
-func TestCodexPluginManifestMatchesItsMarketplaceEntry(t *testing.T) {
+func TestEveryPluginManifestMatchesItsMarketplaceEntry(t *testing.T) {
 	root := repoRoot(t)
-	entry := soleSteerPlugin(t, filepath.Join(root, ".agents", "plugins", "marketplace.json"))
-	manifest := readJSON(t, filepath.Join(root, ".codex-plugin", "plugin.json"))
+	for _, rel := range pluginManifests {
+		entry := soleSteerPlugin(t, filepath.Join(root, ".agents", "plugins", "marketplace.json"))
+		manifest := readJSON(t, filepath.Join(root, rel))
 
-	for _, key := range marketplaceOnlyKeys {
-		if _, ok := entry[key]; !ok {
-			t.Errorf("marketplace entry is missing %q", key)
+		for _, key := range marketplaceOnlyKeys {
+			if _, ok := entry[key]; !ok {
+				t.Errorf("marketplace entry is missing %q", key)
+			}
+			if value, ok := manifest[key]; ok {
+				t.Errorf("%s carries %q = %v; that key is the marketplace's", rel, key, value)
+			}
+			delete(entry, key)
 		}
-		if value, ok := manifest[key]; ok {
-			t.Errorf(".codex-plugin/plugin.json carries %q = %v; that key is the marketplace's", key, value)
+		if !reflect.DeepEqual(entry, manifest) {
+			t.Errorf("%s differs from its marketplace entry:\n keys(manifest): %v\n keys(entry):    %v\n manifest: %s\n entry:    %s",
+				rel, keys(manifest), keys(entry), mustJSON(t, manifest), mustJSON(t, entry))
 		}
-		delete(entry, key)
-	}
-	if !reflect.DeepEqual(entry, manifest) {
-		t.Fatalf("plugin manifest differs from its marketplace entry:\n keys(manifest): %v\n keys(entry):    %v\n manifest: %s\n entry:    %s",
-			keys(manifest), keys(entry), mustJSON(t, manifest), mustJSON(t, entry))
 	}
 }
 
 func TestEveryDeclaredPluginPathExists(t *testing.T) {
 	root := repoRoot(t)
-	manifest := readJSON(t, filepath.Join(root, ".codex-plugin", "plugin.json"))
+	for _, rel := range pluginManifests {
+		assertDeclaredPathsExist(t, root, readJSON(t, filepath.Join(root, rel)))
+	}
+}
+
+func assertDeclaredPathsExist(t *testing.T, root string, manifest map[string]any) {
+	t.Helper()
 
 	hooks, ok := manifest["hooks"].(string)
 	if !ok {

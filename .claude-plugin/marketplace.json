@@ -21,7 +21,7 @@
       "repository": "https://github.com/steer-sh/steer-skill",
       "license": "MIT",
       "keywords": ["hooks", "code-quality", "security", "linting", "enforcement"],
-      "skills": ["./skills/steer", "./skills/steer-report"],
+      "skills": ["./skills/steer", "./skills/steer-report", "./skills/steer-setup"],
       "hooks": "./hooks/hooks.json"
     }
   ]

@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/config"
+	"github.com/steer-sh/steer-cli/internal/gate/reviewers"
 	"github.com/steer-sh/steer-cli/internal/settings"
 	"github.com/steer-sh/steer-cli/internal/steerpath"
 	"github.com/steer-sh/steer-cli/internal/styles"
@@ -167,6 +168,36 @@ func reportReviewerImpact(next config.Config) {
 	fmt.Println()
 }
 
+// configProvidersCmd lists the reviewer CLIs and whether each resolves here. It is
+// what an install flow offers a chooser from, so it reads the one provider set
+// rather than carrying its own copy of the names.
+var configProvidersCmd = &cobra.Command{
+	Use:   "providers",
+	Short: "List the reviewer CLIs and whether each one is installed here",
+	Long: `providers lists every reviewer Steer can run, with the executable it calls and
+whether that executable resolves on this process's PATH.
+
+The reviewer runs from the harness's environment, whose PATH may differ. So a
+"missing" reading proves the executable is absent from this process; an
+"available" one can never prove the reviewer runs.
+
+The reviewer is independent of the agent writing the code: any of these may
+review commits made from any harness.`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		fmt.Println()
+		fmt.Println(styles.MainHeader.Render("Reviewer CLIs"))
+		fmt.Println()
+		for _, p := range reviewers.Providers() {
+			probe := reviewers.ProbeProvider(p.ID)
+			fmt.Printf("  %-14s %-14s %-10s %s\n", p.ID, p.Label, probe.Executable,
+				styles.MutedText.Render(probe.State))
+		}
+		fmt.Println()
+		return nil
+	},
+}
+
 func init() {
 	// The key documentation is generated from the one table, so a key added there
 	// can never be missing from the command's help.
@@ -175,4 +206,5 @@ func init() {
 	configCmd.AddCommand(configShowCmd)
 	configCmd.AddCommand(configGetCmd)
 	configCmd.AddCommand(configSetCmd)
+	configCmd.AddCommand(configProvidersCmd)
 }

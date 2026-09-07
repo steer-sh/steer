@@ -8,56 +8,49 @@ Steer supports Claude Code, Codex, and Pi, with a Git pre-commit option for othe
 
 ## Review your next commit
 
-### 1. Install the CLI
+### 1. Install the plugin
 
-From a checkout of this repository, on macOS or Linux:
+For Claude Code, no clone and no marketplace:
 
-```bash
-bash scripts/install-prebuilt.sh
+```text
+/plugin install https://github.com/steer-sh/steer-skill
 ```
 
-This installs `steer` into `~/.local/bin`. Make sure that directory is on your `PATH`.
-
-### 2. Choose a reviewer
-
-Steer runs reviews through an installed, authenticated CLI: `claude`, `codex`, or `agy`. The reviewer can be different from the agent writing your code.
-
-For example, to review through Claude Code:
+For Codex:
 
 ```bash
+codex plugin marketplace add steer-sh/steer-skill
+codex plugin add steer@steer-marketplace
+```
+
+Codex trusts no plugin hook until you review it. Approve the plugin's hook in `/hooks` to enable its reminder.
+
+The plugin carries the CLI, the `/steer`, `/steer-report` and `/steer-setup` skills, and a session-start reminder when review work is pending.
+
+### 2. Run setup
+
+```text
+/steer-setup
+```
+
+The skill asks which reviewer CLI and model to use, suggesting from the ones installed on your machine; arms the commit gate for the agent you choose; and places `steer` at `~/.steer/bin/steer`. Add that directory to your `PATH` to run `steer` from your own shell.
+
+Setup writes only what is missing. Running it again in a second agent registers that agent and leaves your reviewer configuration alone.
+
+To do the same by hand, or to work from a checkout of this repository:
+
+```bash
+bash scripts/install-prebuilt.sh              # installs steer into ~/.local/bin
+steer config providers                        # which reviewer CLIs are installed
 steer config set reviewer.provider claude-code
-```
-
-Use `codex` or `agy` as the provider instead if you prefer. Steer defaults to `agy`; Claude Code and Codex use their own default model unless you configure one.
-
-```bash
-steer config show
-```
-
-By default, three reviewers run in parallel. Reviews take time and use your reviewer's account or API allowance.
-
-### 3. Enable the gate
-
-Choose the agent that will make your commits:
-
-```bash
-# Claude Code
+steer config set reviewer.model sonnet
 steer commit-gate install --harness claude-code --scope global
-
-# Codex
-steer commit-gate install --harness codex --scope global
-
-# Pi
-steer commit-gate install --harness pi --scope global
-```
-
-For Codex, restart and approve the hook definitions in `/hooks`. Pi project extensions require project trust. To enable the gate for one repository instead, run the command there with `--scope project`.
-
-Check the registration and reviewer settings:
-
-```bash
 steer commit-gate status
 ```
+
+Steer runs reviews through an installed, authenticated CLI: `claude`, `codex`, or `agy`. The reviewer can be different from the agent writing your code. Leave the model unset to use the reviewer CLI's own default. By default, three reviewers run in parallel. Reviews take time and use your reviewer's account or API allowance.
+
+For Codex, restart and approve the hook definitions in `/hooks`. Pi project extensions require project trust. To enable the gate for one repository instead, run the command there with `--scope project`.
 
 Then ask your agent to make a code change and commit normally. A reviewer raises concerns as findings; your agent decides each one against the code and reports what it accepted and what it rejected. Small and prose-only changes may skip review; a skipped review is not a clean review.
 
@@ -102,25 +95,14 @@ Guard commands default to project scope and register with every installed suppor
 
 To remove a custom guard, run `steer remove <hook-name>`. For a factory preset, run `steer preset disable <preset>` yourself in a terminal; factory self-protection prevents an agent from disabling its own safeguards.
 
-## Install the skills
+## Other install routes
 
-The plugin includes `/steer`, `/steer-report`, and a session-start reminder when review work is pending. The commit gate and guards are enabled separately.
-
-For Claude Code:
+Claude Code can also install through the marketplace:
 
 ```bash
 claude plugin marketplace add steer-sh/steer-skill
 claude plugin install steer@steer-marketplace
 ```
-
-For Codex:
-
-```bash
-codex plugin marketplace add steer-sh/steer-skill
-codex plugin add steer@steer-marketplace
-```
-
-Review and trust the Codex plugin's hook in `/hooks` to enable its reminder.
 
 For a skills-compatible agent:
 
