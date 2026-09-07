@@ -38,6 +38,13 @@ type Payload struct {
 	CWD            string `json:"cwd"`
 }
 
+// DenyReason is the one line Codex prints for a held commit. Codex refuses a deny
+// carrying no reason, and it shows the reason to the operator as well as to the model,
+// so the review itself rides in additionalContext and this names where it went.
+const DenyReason = "[commit-gate] this commit is held for review. The reviewers' full " +
+	"output and the reply format are in this turn's hook context: read them there, " +
+	"adjudicate every finding, then retry the commit."
+
 // Output is the hook's reply in Codex's native shape.
 type Output struct {
 	HookSpecificOutput *hookOutput `json:"hookSpecificOutput,omitempty"`
@@ -135,11 +142,15 @@ func Render(d gate.Decision) (Output, bool) {
 	}
 	switch d.Kind {
 	case gate.Deny:
+		// The review goes in additionalContext, which Codex hands the model and hides
+		// from the screen. permissionDecisionReason is printed to both, so it holds a
+		// pointer: a whole review echoed there buries the operator's own transcript.
 		return Output{
 			HookSpecificOutput: &hookOutput{
 				HookEventName:            "PreToolUse",
 				PermissionDecision:       "deny",
-				PermissionDecisionReason: d.Reason,
+				PermissionDecisionReason: DenyReason,
+				AdditionalContext:        d.Reason,
 			},
 			SystemMessage: message,
 		}, true

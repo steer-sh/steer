@@ -27,7 +27,7 @@ func TestRenderDenyUsesNativePermissionDecision(t *testing.T) {
 		t.Fatalf("render = %#v, %v", out, ok)
 	}
 	if out.HookSpecificOutput.PermissionDecision != "deny" ||
-		out.HookSpecificOutput.PermissionDecisionReason != "fix it" ||
+		out.HookSpecificOutput.PermissionDecisionReason != DenyReason ||
 		out.HookSpecificOutput.HookEventName != "PreToolUse" ||
 		out.SystemMessage != "fired" {
 		t.Fatalf("render = %#v", *out.HookSpecificOutput)
@@ -35,6 +35,23 @@ func TestRenderDenyUsesNativePermissionDecision(t *testing.T) {
 	raw, _ := json.Marshal(out)
 	if strings.Contains(string(raw), `"decision"`) {
 		t.Fatalf("legacy block field emitted: %s", raw)
+	}
+}
+
+// Codex prints permissionDecisionReason to the operator as well as to the model, and
+// hides additionalContext from the screen. So the review rides in the hidden field and
+// the printed one stays a fixed pointer to it.
+func TestRenderDenyKeepsTheReviewOffTheScreen(t *testing.T) {
+	review := "--- REVIEWS ---\n[1] SEVERITY: BLOCKING\n"
+	out, _ := Render(gate.Decision{Kind: gate.Deny, Reason: review})
+	if out.HookSpecificOutput.AdditionalContext != review {
+		t.Fatalf("review not carried to the model: %q", out.HookSpecificOutput.AdditionalContext)
+	}
+	if strings.Contains(out.HookSpecificOutput.PermissionDecisionReason, "SEVERITY") {
+		t.Fatalf("review echoed to the operator: %q", out.HookSpecificOutput.PermissionDecisionReason)
+	}
+	if out.HookSpecificOutput.PermissionDecisionReason == "" {
+		t.Fatal("Codex refuses a deny carrying no reason")
 	}
 }
 

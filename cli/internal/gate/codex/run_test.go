@@ -98,6 +98,14 @@ func TestRunDeniesAndStampsCodexEvidence(t *testing.T) {
 	if out.HookSpecificOutput == nil || out.HookSpecificOutput.PermissionDecision != "deny" {
 		t.Fatalf("output = %#v", out)
 	}
+	// Codex prints the reason and hides the context, so the whole reply the model has to
+	// act on rides in the hidden field.
+	if !strings.Contains(out.HookSpecificOutput.AdditionalContext, gate.LedgerHeader) {
+		t.Fatalf("the review did not reach the model: %#v", *out.HookSpecificOutput)
+	}
+	if out.HookSpecificOutput.PermissionDecisionReason != DenyReason {
+		t.Fatalf("reason = %q", out.HookSpecificOutput.PermissionDecisionReason)
+	}
 
 	rows := readRows(t, cfg)
 	row := rows[len(rows)-1]

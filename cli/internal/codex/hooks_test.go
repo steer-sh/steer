@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -174,5 +175,23 @@ func TestRegisterRefusesAnUnrecognisableResolver(t *testing.T) {
 	if _, err := RegisterCommitGateAndResolver("global", "",
 		"steer commit-gate review-codex", 210, "some-other-command", 30); err == nil {
 		t.Fatal("a resolver command the remover cannot find again was accepted")
+	}
+}
+
+// The review is the model's whole task, so the registration disables Codex's
+// additionalContext spill. Past its 2,500-token default Codex writes the context to a
+// temporary file and hands the model a preview, which drops most of the findings.
+func TestCommitGateRegistrationDisablesTheContextSpill(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	if _, err := RegisterCommitGate("global", "", "steer commit-gate review-codex", 210); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(home, "hooks.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"additionalContextLimit": 0`) {
+		t.Fatalf("registration does not disable the spill: %s", raw)
 	}
 }

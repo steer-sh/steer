@@ -31,7 +31,15 @@ type commandHook struct {
 	Command       string `json:"command"`
 	Timeout       int    `json:"timeout,omitempty"`
 	StatusMessage string `json:"statusMessage,omitempty"`
+	// AdditionalContextLimit is the token threshold past which Codex writes a hook's
+	// additionalContext to a temporary file and hands the model a preview instead. The
+	// gate's review is the model's whole task, so the gate registers 0, which disables
+	// the spill. It is a pointer because 0 is the value being written.
+	AdditionalContextLimit *int `json:"additionalContextLimit,omitempty"`
 }
+
+// noContextSpill is the additionalContextLimit the commit gate registers.
+var noContextSpill = new(int)
 
 type hookEntry struct {
 	Matcher string        `json:"matcher,omitempty"`
@@ -205,7 +213,8 @@ func RegisterCommitGateAndResolver(scope, cwd, review string, reviewTimeout int,
 	hooks["PreToolUse"] = append(filterBy(preToolUse(root), isSteerOwned), entryValue(hookEntry{
 		Matcher: CommitGateMatcher,
 		Hooks: []commandHook{{Type: "command", Command: review, Timeout: reviewTimeout,
-			StatusMessage: CommitGateStatusMessage}},
+			StatusMessage:          CommitGateStatusMessage,
+			AdditionalContextLimit: noContextSpill}},
 	}))
 	for _, event := range resolverEvents {
 		kept := filterBy(eventEntries(root, event), isSteerOwned)
