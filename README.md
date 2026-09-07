@@ -4,7 +4,7 @@ Steer reviews your agent's code before it commits, then helps you prevent recurr
 
 Start with the commit gate. Independent reviewers inspect a proposed change, and your agent checks their findings against the code, fixes what holds up, and explains what it accepted or rejected. The review history becomes evidence for better checks, rules, and instructions.
 
-Steer supports Claude Code, Codex, and Pi, with a Git pre-commit option for other workflows.
+Steer supports Claude Code and Codex, with a Git pre-commit option for other workflows.
 
 ## Review your next commit
 
@@ -55,7 +55,7 @@ steer commit-gate status
 
 Steer runs reviews through an installed, authenticated CLI: `claude`, `codex`, or `agy`. The reviewer can be different from the agent writing your code. Leave the model unset to use the reviewer CLI's own default. By default, three reviewers run in parallel. Reviews take time and use your reviewer's account or API allowance.
 
-For Codex, restart and approve the hook definitions in `/hooks`. Pi project extensions require project trust. To enable the gate for one repository instead, run the command there with `--scope project`.
+For Codex, restart and approve the hook definitions in `/hooks`. To enable the gate for one repository instead, run the command there with `--scope project`.
 
 Then ask your agent to make a code change and commit normally. A reviewer raises concerns as findings; your agent decides each one against the code and reports what it accepted and what it rejected. Small and prose-only changes may skip review; a skipped review is not a clean review.
 
