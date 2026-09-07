@@ -1,9 +1,11 @@
 package gate
 
 import (
+	"fmt"
 	"path"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -132,4 +134,80 @@ func FindingShape(reviews []string, changed []string) Row {
 		"cross_file_findings": cross,
 		"finding_files":       unique,
 	}
+}
+
+// ReviewFinding is one parsed finding block from a reviewer's reply.
+type ReviewFinding struct {
+	Index     int
+	Severity  string
+	File      string
+	Claim     string
+	FailsWhen string
+}
+
+// findingOpenRe matches the line that OPENS a finding: an index in brackets and
+// the severity label. It takes any severity word, so a block whose severity is
+// not one of the three is read and refused rather than skipped.
+var findingOpenRe = regexp.MustCompile(`(?i)^[ \t]*\[(\d+)\][ \t]*SEVERITY:[ \t]*(.*)$`)
+
+// findingFieldRe reads one indented field line into its label and its value.
+var findingFieldRe = regexp.MustCompile(`(?i)^[ \t]+(FILE|CLAIM|FAILS WHEN):[ \t]*(.*)$`)
+
+// findingFieldOrder is the field sequence the review prompt fixes.
+var findingFieldOrder = []string{"FILE", "CLAIM", "FAILS WHEN"}
+
+// ParseFindings reads a reviewer's reply into its findings.
+//
+// It reads the same four-line block reviewFindingRe counts, and differs in what
+// it does with a block it cannot read: CountFindings skips one, because an
+// unreadable block must never deny a commit, and ParseFindings returns an error
+// naming the line it stopped on. A caller narrows a candidate set by what a
+// finding names, so a block read wrongly is a wrong label downstream.
+//
+// An unindexed severity line is prose and is passed over.
+func ParseFindings(text string) ([]ReviewFinding, error) {
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	var out []ReviewFinding
+	for i := 0; i < len(lines); i++ {
+		open := findingOpenRe.FindStringSubmatch(lines[i])
+		if open == nil {
+			continue
+		}
+		index, err := strconv.Atoi(open[1])
+		if err != nil {
+			return nil, fmt.Errorf("line %d: %q: the finding index is not a number", i+1, strings.TrimSpace(lines[i]))
+		}
+		severity := strings.ToUpper(strings.TrimSpace(open[2]))
+		switch severity {
+		case "BLOCKING", "SUBSTANTIVE", "NITPICK":
+		default:
+			return nil, fmt.Errorf("line %d: %q: severity must be BLOCKING, SUBSTANTIVE or NITPICK", i+1, strings.TrimSpace(lines[i]))
+		}
+		finding := ReviewFinding{Index: index, Severity: severity}
+		for n, label := range findingFieldOrder {
+			row := i + 1 + n
+			if row >= len(lines) {
+				return nil, fmt.Errorf("line %d: finding [%d] ends before its %s line", row+1, index, label)
+			}
+			field := findingFieldRe.FindStringSubmatch(lines[row])
+			if field == nil || !strings.EqualFold(strings.TrimSpace(field[1]), label) {
+				return nil, fmt.Errorf("line %d: %q: finding [%d] expects an indented %s line here", row+1, strings.TrimSpace(lines[row]), index, label)
+			}
+			value := strings.TrimSpace(field[2])
+			if value == "" {
+				return nil, fmt.Errorf("line %d: finding [%d] carries an empty %s", row+1, index, label)
+			}
+			switch label {
+			case "FILE":
+				finding.File = value
+			case "CLAIM":
+				finding.Claim = value
+			case "FAILS WHEN":
+				finding.FailsWhen = value
+			}
+		}
+		out = append(out, finding)
+		i += len(findingFieldOrder)
+	}
+	return out, nil
 }

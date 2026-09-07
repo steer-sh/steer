@@ -343,3 +343,67 @@ func TestOffFormatReviewsCountsProseFindings(t *testing.T) {
 		})
 	}
 }
+
+func TestParseFindingsReadsEveryFieldOfEveryBlock(t *testing.T) {
+	text := "preamble a reviewer should not write\n" +
+		"[1] SEVERITY: BLOCKING\n    FILE: a/one.go\n    CLAIM: first.\n    FAILS WHEN: never.\n\n" +
+		"[2] SEVERITY: nitpick\n    FILE: a/two.go\n    CLAIM: second.\n    FAILS WHEN: always.\n"
+	findings, err := ParseFindings(text)
+	if err != nil {
+		t.Fatalf("ParseFindings: %v", err)
+	}
+	if len(findings) != 2 {
+		t.Fatalf("got %d findings, want 2", len(findings))
+	}
+	if findings[0] != (ReviewFinding{Index: 1, Severity: "BLOCKING", File: "a/one.go", Claim: "first.", FailsWhen: "never."}) {
+		t.Errorf("first finding = %+v", findings[0])
+	}
+	if findings[1].Severity != "NITPICK" || findings[1].File != "a/two.go" {
+		t.Errorf("second finding = %+v", findings[1])
+	}
+}
+
+func TestParseFindingsRefusesABlockItCannotRead(t *testing.T) {
+	cases := []struct{ name, text string }{
+		{"unknown severity", "[1] SEVERITY: NONE\n    FILE: a.go\n    CLAIM: one.\n    FAILS WHEN: always."},
+		{"missing field", "[1] SEVERITY: BLOCKING\n    FILE: a.go\n    CLAIM: one."},
+		{"reordered fields", "[1] SEVERITY: BLOCKING\n    CLAIM: one.\n    FILE: a.go\n    FAILS WHEN: always."},
+		{"empty value", "[1] SEVERITY: BLOCKING\n    FILE:\n    CLAIM: one.\n    FAILS WHEN: always."},
+		{"unindented field", "[1] SEVERITY: BLOCKING\nFILE: a.go\n    CLAIM: one.\n    FAILS WHEN: always."},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			findings, err := ParseFindings(c.text)
+			if err == nil {
+				t.Fatalf("got %+v, want an error naming the line", findings)
+			}
+			if !strings.Contains(err.Error(), "line ") {
+				t.Errorf("the error names no line: %v", err)
+			}
+		})
+	}
+}
+
+func TestParseFindingsPassesOverProse(t *testing.T) {
+	for _, text := range []string{"NO FINDINGS", "SEVERITY: NONE\nnothing here", ""} {
+		findings, err := ParseFindings(text)
+		if err != nil {
+			t.Errorf("%q: unexpected error %v", text, err)
+		}
+		if len(findings) != 0 {
+			t.Errorf("%q: got %d findings, want none", text, len(findings))
+		}
+	}
+}
+
+// The two readers share one format. They differ only on a block neither can
+// read, where the counter skips and the parser refuses.
+func TestParseFindingsAgreesWithTheCountOnAWellFormedReply(t *testing.T) {
+	findings, err := ParseFindings(reviewOne + reviewTwo)
+	if err != nil {
+		t.Fatalf("ParseFindings: %v", err)
+	}
+	if n := CountFindings(reviewOne + reviewTwo); n != len(findings) {
+		t.Errorf("CountFindings = %d, ParseFindings = %d", n, len(findings))
+	}
+}

@@ -34,11 +34,16 @@ const (
 	OriginReconstructed = "reconstructed"
 )
 
-// Source names the corpus row a reconstructed case came from.
+// Source names the corpus row a reconstructed case came from. The finding
+// fields name the reviewer finding the candidate was narrowed by, when the
+// reader supplied one: the index identifies the block inside the reply, and the
+// claim is what a person reads the case back by.
 type Source struct {
-	Corpus   string `json:"corpus,omitempty"`
-	ID       string `json:"id,omitempty"`
-	DiffFile string `json:"diff_file,omitempty"`
+	Corpus       string `json:"corpus,omitempty"`
+	ID           string `json:"id,omitempty"`
+	DiffFile     string `json:"diff_file,omitempty"`
+	FindingIndex int    `json:"finding_index,omitempty"`
+	FindingClaim string `json:"finding_claim,omitempty"`
 }
 
 // Case is one replayable test: the payload the guard sees, the filesystem

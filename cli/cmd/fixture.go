@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/claude"
+	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/guard/fixture"
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/report"
@@ -18,6 +19,7 @@ import (
 var fixtureMineDiff string
 var fixtureMineSession string
 var fixtureMinePath string
+var fixtureMineFinding string
 var fixtureOut string
 
 // fixtureLabelWidth is the label column for one case's stacked lines.
@@ -57,15 +59,27 @@ saw, so every candidate is a reconstruction; and a finding's filename narrows
 which hunks could be violations without making any of them one. Selecting the
 violating hunk, labelling it and writing the fixture file is the reader's work.`,
 	Example: `  steer fixture mine --diff 1737000000-abc-r1.diff --path cli/main.go
+  steer fixture mine --diff 1737000000-abc-r1.diff --finding review.txt
   steer fixture mine --session 0f2c1e4a-... -o candidates.json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		diff := strings.TrimSpace(fixtureMineDiff)
 		session := strings.TrimSpace(fixtureMineSession)
+		path := strings.TrimSpace(fixtureMinePath)
+		finding := strings.TrimSpace(fixtureMineFinding)
 		if (diff == "") == (session == "") {
 			return fmt.Errorf("provide exactly one of --diff or --session")
 		}
+		if path != "" && finding != "" {
+			return fmt.Errorf("provide --path or --finding, not both: --finding reads the file out of the finding itself")
+		}
+		if finding != "" && session != "" {
+			return fmt.Errorf("--finding narrows the hunks of a stored diff, so it needs --diff")
+		}
+		if diff != "" && finding != "" {
+			return mineDiffByFindings(diff, finding)
+		}
 		if diff != "" {
-			return mineDiff(diff, strings.TrimSpace(fixtureMinePath))
+			return mineDiff(diff, path)
 		}
 		return mineSession(session)
 	},
@@ -147,17 +161,93 @@ func masterWord(c fixture.CaseResult) string {
 	}
 }
 
-func mineDiff(name, path string) error {
+// readStoredDiff resolves a ledger row's diff_file, or a path, and parses it.
+func readStoredDiff(name string) (string, []fixture.Hunk, fixture.Truncation, error) {
 	source := name
 	if !filepath.IsAbs(source) && !strings.ContainsRune(source, filepath.Separator) {
 		source = filepath.Join(gateConfig().DiffDir(), name)
 	}
 	data, err := os.ReadFile(source)
 	if err != nil {
-		return fmt.Errorf("failed to read the stored diff: %w", err)
+		return "", nil, fixture.Truncation{}, fmt.Errorf("failed to read the stored diff: %w", err)
+	}
+	hunks, trunc, err := fixture.ParseDiff(string(data))
+	if err != nil {
+		return "", nil, fixture.Truncation{}, err
+	}
+	return source, hunks, trunc, nil
+}
+
+// readFindingText takes the flag value as a file when one exists at that path,
+// and as the finding text otherwise.
+func readFindingText(value string) (string, error) {
+	if info, err := os.Stat(value); err == nil && !info.IsDir() {
+		data, err := os.ReadFile(value)
+		if err != nil {
+			return "", fmt.Errorf("failed to read the finding: %w", err)
+		}
+		return string(data), nil
+	}
+	return value, nil
+}
+
+// mineDiffByFindings groups the candidates by the finding that narrows them.
+// Each finding is its own group: a reply holding several findings names several
+// files, and pooling them would let one finding's file answer for another.
+func mineDiffByFindings(name, findingValue string) error {
+	text, err := readFindingText(findingValue)
+	if err != nil {
+		return err
+	}
+	findings, err := gate.ParseFindings(text)
+	if err != nil {
+		return fmt.Errorf("failed to read the finding: %w", err)
+	}
+	if len(findings) == 0 {
+		return fmt.Errorf("the finding text holds no finding block, so it narrows nothing")
 	}
 
-	hunks, trunc, err := fixture.ParseDiff(string(data))
+	source, hunks, trunc, err := readStoredDiff(name)
+	if err != nil {
+		return err
+	}
+
+	groups := make([]map[string]any, 0, len(findings))
+	for _, f := range findings {
+		cited := gate.CleanPath(f.File)
+		group := map[string]any{
+			"index":      f.Index,
+			"severity":   f.Severity,
+			"file":       cited,
+			"claim":      f.Claim,
+			"fails_when": f.FailsWhen,
+		}
+		if !fixture.Complete(hunks, trunc, cited) {
+			group["complete"] = false
+			group["candidates"] = []map[string]any{}
+			group["reason"] = fmt.Sprintf("the stored diff does not carry %s: the review harness dropped it to fit its budget, so no fixture can be built from it", cited)
+		} else {
+			group["complete"] = true
+			group["candidates"] = candidateRows(fixture.HunksFor(hunks, cited), &fixture.Source{
+				Corpus:       "review-findings",
+				DiffFile:     filepath.Base(source),
+				FindingIndex: f.Index,
+				FindingClaim: f.Claim,
+			})
+		}
+		groups = append(groups, group)
+	}
+
+	return emitJSON(map[string]any{
+		"source":        source,
+		"dropped_files": trunc.DroppedFiles,
+		"stat_only":     trunc.StatOnly,
+		"findings":      groups,
+	})
+}
+
+func mineDiff(name, path string) error {
+	source, hunks, trunc, err := readStoredDiff(name)
 	if err != nil {
 		return err
 	}
@@ -173,12 +263,12 @@ func mineDiff(name, path string) error {
 		"source":        source,
 		"dropped_files": trunc.DroppedFiles,
 		"stat_only":     trunc.StatOnly,
-		"candidates":    candidateRows(selected),
+		"candidates":    candidateRows(selected, nil),
 	}
 	return emitJSON(out)
 }
 
-func candidateRows(hunks []fixture.Hunk) []map[string]any {
+func candidateRows(hunks []fixture.Hunk, src *fixture.Source) []map[string]any {
 	rows := make([]map[string]any, 0, len(hunks))
 	for _, h := range hunks {
 		row := map[string]any{
@@ -187,6 +277,9 @@ func candidateRows(hunks []fixture.Hunk) []map[string]any {
 			"header":   h.Header,
 			"new_file": h.NewFile,
 			"origin":   fixture.OriginReconstructed,
+		}
+		if src != nil {
+			row["source"] = *src
 		}
 		if h.Skip != "" {
 			row["skip"] = h.Skip
@@ -234,5 +327,6 @@ func init() {
 	fixtureMineCmd.Flags().StringVar(&fixtureMineDiff, "diff", "", "A ledger row's diff_file, or a path to a stored diff")
 	fixtureMineCmd.Flags().StringVar(&fixtureMineSession, "session", "", "A session id to re-read from the harnesses' transcripts")
 	fixtureMineCmd.Flags().StringVar(&fixtureMinePath, "path", "", "The file a finding names, narrowing the candidate hunks")
+	fixtureMineCmd.Flags().StringVar(&fixtureMineFinding, "finding", "", "A reviewer finding, as text or a file, whose FILE: narrows the candidate hunks")
 	fixtureMineCmd.Flags().StringVarP(&fixtureOut, "out", "o", "", "Write the candidates to a file instead of stdout")
 }
