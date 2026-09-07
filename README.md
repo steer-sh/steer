@@ -10,10 +10,11 @@ Steer supports Claude Code, Codex, and Pi, with a Git pre-commit option for othe
 
 ### 1. Install the plugin
 
-For Claude Code, no clone and no marketplace:
+No clone. For Claude Code:
 
-```text
-/plugin install https://github.com/steer-sh/steer-skill
+```bash
+claude plugin marketplace add steer-sh/steer-skill
+claude plugin install steer@steer-marketplace
 ```
 
 For Codex:
@@ -24,6 +25,8 @@ codex plugin add steer@steer-marketplace
 ```
 
 Codex trusts no plugin hook until you review it. Approve the plugin's hook in `/hooks` to enable its reminder.
+
+Inside a Claude Code session, `/plugin marketplace add steer-sh/steer-skill` and `/plugin install steer@steer-marketplace` do the same thing. Codex manages plugins from the shell only.
 
 The plugin carries the CLI, the `/steer`, `/steer-report` and `/steer-setup` skills, and a session-start reminder when review work is pending.
 
@@ -37,10 +40,12 @@ The skill asks which reviewer CLI and model to use, suggesting from the ones ins
 
 Setup writes only what is missing. Running it again in a second agent registers that agent and leaves your reviewer configuration alone.
 
-To do the same by hand, or to work from a checkout of this repository:
+To do the same by hand, or from a checkout of this repository, place the binary first and put it on your `PATH`. `scripts/steer` is the launcher that dispatches to the right prebuilt binary, so this needs neither Go nor `sudo`:
 
 ```bash
-bash scripts/install-prebuilt.sh              # installs steer into ~/.local/bin
+./scripts/steer bin install                   # places ~/.steer/bin/steer
+export PATH="$HOME/.steer/bin:$PATH"          # add to ~/.zshrc or ~/.bashrc
+
 steer config providers                        # which reviewer CLIs are installed
 steer config set reviewer.provider claude-code
 steer config set reviewer.model sonnet
@@ -94,21 +99,6 @@ steer verify --staged
 Guard commands default to project scope and register with every installed supported harness. Use `--scope global` or `--harness codex` to choose explicitly. Codex guard registrations also require trust review in `/hooks`.
 
 To remove a custom guard, run `steer remove <hook-name>`. For a factory preset, run `steer preset disable <preset>` yourself in a terminal; factory self-protection prevents an agent from disabling its own safeguards.
-
-## Other install routes
-
-Claude Code can also install through the marketplace:
-
-```bash
-claude plugin marketplace add steer-sh/steer-skill
-claude plugin install steer@steer-marketplace
-```
-
-For a skills-compatible agent:
-
-```bash
-npx skills add steer-sh/steer-skill
-```
 
 ## Development and reference
 
