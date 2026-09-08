@@ -362,6 +362,56 @@ func TestUntrackedPathspecsNarrowTheScan(t *testing.T) {
 	}
 }
 
+// TestTrackedPathspecsNarrowTheTrackedHalf: a `git add <path>` reads `git diff HEAD`,
+// which shows every modified tracked file. A file that add does not name and the index
+// does not hold stays in the working tree, so it is not part of this commit.
+func TestTrackedPathspecsNarrowTheTrackedHalf(t *testing.T) {
+	cfg := Defaults()
+	code := lines(80)
+	root := buildRepo(t, map[string]string{
+		"cli/code.py": code, "PLAN.md": code, "earlier.py": code,
+	})
+	gitCmd(t, root, verb, "-qm", "init")
+	writeFileAt(t, root, "cli/code.py", code+"changed = 1\n")
+	writeFileAt(t, root, "PLAN.md", code+"note = 1\n")
+	writeFileAt(t, root, "earlier.py", code+"staged = 1\n")
+	// Staged by an EARLIER command: this one's pathspec does not name it, and it lands
+	// in the commit regardless.
+	gitCmd(t, root, "add", "earlier.py")
+
+	spec := DiffSpec{
+		IncludeUntracked:   true,
+		UntrackedPathspecs: []string{"cli/code.py"},
+		TrackedPathspecs:   []string{"cli/code.py"},
+	}
+	diff, ok := GetDiff(cfg, root, spec)
+	if !ok {
+		t.Fatal("GetDiff failed")
+	}
+	if !strings.Contains(diff, "cli/code.py") {
+		t.Error("the path the staging step names must reach the reviewer")
+	}
+	if !strings.Contains(diff, "earlier.py") {
+		t.Error("a file already in the index lands in this commit, so narrowing must " +
+			"never drop it")
+	}
+	if strings.Contains(diff, "PLAN.md") {
+		t.Error("an unstaged file no `git add` names cannot land in this commit, so it " +
+			"is not the reviewer's to spend a finding on")
+	}
+
+	paths, ok := ChangedFiles(cfg, root, spec)
+	if !ok {
+		t.Fatal("ChangedFiles failed")
+	}
+	for _, path := range paths {
+		if path == "PLAN.md" {
+			t.Error("the file list is what the prose-only skip and the scope metadata " +
+				"read, so it must narrow with the diff")
+		}
+	}
+}
+
 // TestUnreadablePathspecWidens: git rejects the pathspec, so the scan falls back to the
 // whole repo rather than reporting a commit with no new files.
 func TestUnreadablePathspecWidens(t *testing.T) {
@@ -371,11 +421,24 @@ func TestUnreadablePathspecWidens(t *testing.T) {
 	gitCmd(t, root, verb, "-qm", "init")
 	writeFileAt(t, root, "new.py", code)
 
-	diff, ok := GetDiff(cfg, root, DiffSpec{IncludeUntracked: true, UntrackedPathspecs: []string{":(bogusmagic)x"}})
+	bogus := []string{":(bogusmagic)x"}
+	diff, ok := GetDiff(cfg, root, DiffSpec{IncludeUntracked: true, UntrackedPathspecs: bogus})
 	if !ok {
 		t.Fatal("GetDiff failed")
 	}
 	if !strings.Contains(diff, "new.py") {
 		t.Error("a pathspec git cannot read must widen to the repo, never drop the file")
+	}
+
+	// The tracked half fails harder: git rejects the whole vector, so an unprobed
+	// pathspec would stop the diff and the review with it.
+	writeFileAt(t, root, "old.py", code+"changed = 1\n")
+	tracked, ok := GetDiff(cfg, root, DiffSpec{IncludeUntracked: true,
+		UntrackedPathspecs: bogus, TrackedPathspecs: bogus})
+	if !ok {
+		t.Fatal("a pathspec git cannot read must widen the tracked half, never fail it")
+	}
+	if !strings.Contains(tracked, "old.py") {
+		t.Error("and the tracked change must still reach the reviewer")
 	}
 }

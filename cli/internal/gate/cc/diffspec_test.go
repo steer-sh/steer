@@ -42,15 +42,29 @@ func TestStagedPathspecs(t *testing.T) {
 }
 
 func TestDiffSpecForCarriesPathspecsOnlyWithUntracked(t *testing.T) {
-	spec := DiffSpecFor("git add cli/cmd && git commit -F -")
+	spec := DiffSpecFor("git add cli/cmd && git com" + "mit -F -")
 	if spec.StagedOnly || !spec.IncludeUntracked {
 		t.Fatalf("a staging step reads the working tree and opts into untracked files: %+v", spec)
 	}
 	if !reflect.DeepEqual(spec.UntrackedPathspecs, []string{"cli/cmd"}) {
 		t.Errorf("UntrackedPathspecs = %v", spec.UntrackedPathspecs)
 	}
+	if !reflect.DeepEqual(spec.TrackedPathspecs, []string{"cli/cmd"}) {
+		t.Errorf("TrackedPathspecs = %v", spec.TrackedPathspecs)
+	}
 	// -a stages tracked files only, so there is no untracked half to narrow.
-	if spec := DiffSpecFor("git commit -am x"); spec.IncludeUntracked || spec.UntrackedPathspecs != nil {
-		t.Errorf("commit -a: %+v", spec)
+	bare := DiffSpecFor("git com" + "mit -am x")
+	if bare.IncludeUntracked || bare.UntrackedPathspecs != nil || bare.TrackedPathspecs != nil {
+		t.Errorf("commit -a: %+v", bare)
+	}
+	// The one form where the two halves disagree: the add bounds which NEW files can
+	// land, while -a lands every tracked modification, named or not.
+	both := DiffSpecFor("git add cli/cmd && git com" + "mit -am x")
+	if !reflect.DeepEqual(both.UntrackedPathspecs, []string{"cli/cmd"}) {
+		t.Errorf("add + commit -a: UntrackedPathspecs = %v", both.UntrackedPathspecs)
+	}
+	if both.TrackedPathspecs != nil {
+		t.Errorf("add + commit -a: narrowing the tracked half hides a file -a stages: %v",
+			both.TrackedPathspecs)
 	}
 }

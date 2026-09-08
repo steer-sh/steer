@@ -20,6 +20,11 @@ type DiffSpec struct {
 	// UntrackedPathspecs narrows those files to what the command's own staging step
 	// names. Empty means every untracked file in the repo.
 	UntrackedPathspecs []string
+	// TrackedPathspecs narrows the tracked diff to the same paths, joined with the
+	// index. Empty means every tracked change. The two lists differ for a command
+	// that stages a path AND commits with -a: the add bounds what new files can land,
+	// while -a lands tracked files it never named.
+	TrackedPathspecs []string
 }
 
 // Equal compares two specs by value. The pathspec list makes DiffSpec uncomparable
@@ -29,11 +34,16 @@ func (s DiffSpec) Equal(other DiffSpec) bool {
 	if s.StagedOnly != other.StagedOnly || s.IncludeUntracked != other.IncludeUntracked {
 		return false
 	}
-	if len(s.UntrackedPathspecs) != len(other.UntrackedPathspecs) {
+	return equalPathspecs(s.UntrackedPathspecs, other.UntrackedPathspecs) &&
+		equalPathspecs(s.TrackedPathspecs, other.TrackedPathspecs)
+}
+
+func equalPathspecs(a, b []string) bool {
+	if len(a) != len(b) {
 		return false
 	}
-	for i := range s.UntrackedPathspecs {
-		if s.UntrackedPathspecs[i] != other.UntrackedPathspecs[i] {
+	for i := range a {
+		if a[i] != b[i] {
 			return false
 		}
 	}
@@ -53,6 +63,10 @@ type diffPlan struct {
 	diffArgs []string
 	nameArgs []string
 	statArgs []string
+
+	// included narrows every vector to the files this commit lands. Empty means the
+	// whole tree.
+	included []string
 
 	// excluded names what the harness dropped and TELLS the reviewer. OS cruft is
 	// dropped from the same pathspecs and deliberately absent here.
@@ -81,6 +95,7 @@ func newDiffPlan(cfg Config, cwd string, spec DiffSpec) *diffPlan {
 	base = append(base, "--function-context")
 
 	p := &diffPlan{cfg: cfg, cwd: cwd, spec: spec}
+	p.included = trackedSelector(cwd, spec)
 	excluded, specs := p.noisePathspecs(base)
 	p.excluded = excluded
 
@@ -91,13 +106,59 @@ func newDiffPlan(cfg Config, cwd string, spec DiffSpec) *diffPlan {
 	p.diffArgs = append([]string{}, base...)
 	p.statArgs = append(append([]string{}, base...), "--stat")
 	p.nameArgs = append(append([]string{}, base...), "--name-only")
-	if len(specs) > 0 {
-		tail := append([]string{"--", ":/"}, specs...)
+	if tail := pathspecTail(p.included, specs); len(tail) > 0 {
 		p.diffArgs = append(p.diffArgs, tail...)
 		p.statArgs = append(p.statArgs, tail...)
 		p.nameArgs = append(p.nameArgs, tail...)
 	}
 	return p
+}
+
+// pathspecTail assembles the `--` argument tail from the inclusions and the
+// exclusions. `:/` stands in for the inclusions when there are none, because an
+// exclusion needs a positive pathspec beside it to subtract from; with inclusions
+// present, `:/` would widen the diff back to the whole tree.
+func pathspecTail(included, excluded []string) []string {
+	if len(included) == 0 && len(excluded) == 0 {
+		return nil
+	}
+	tail := []string{"--"}
+	if len(included) > 0 {
+		tail = append(tail, included...)
+	} else {
+		tail = append(tail, ":/")
+	}
+	return append(tail, excluded...)
+}
+
+// trackedSelector returns the pathspecs that narrow the tracked diff to the files
+// this commit lands: the command's own specs, plus what the index already holds.
+// Nil means no narrowing.
+//
+// The command's specs go in verbatim — they are cwd-relative and may be globs. The
+// index names are root-relative, so they carry `top`, and `literal` because a real
+// path may contain glob metacharacters.
+func trackedSelector(cwd string, spec DiffSpec) []string {
+	if spec.StagedOnly || len(spec.TrackedPathspecs) == 0 {
+		return nil
+	}
+	out, ok := Git(cwd, gitMedium, "diff", "--cached", "--name-only", "--no-relative")
+	if !ok {
+		return nil
+	}
+	specs := append([]string{}, spec.TrackedPathspecs...)
+	for _, path := range nonEmptyLines(out) {
+		specs = append(specs, ":(top,literal)"+path)
+	}
+	// A pathspec git rejects fails the whole vector, and a diff git cannot answer
+	// stops the review rather than narrowing it. Probe once and widen on refusal, the
+	// same direction the untracked scan takes.
+	probe := append([]string{"diff", "HEAD", "--name-only", "--no-relative"},
+		pathspecTail(specs, nil)...)
+	if _, ok := Git(cwd, gitMedium, probe...); !ok {
+		return nil
+	}
+	return specs
 }
 
 // noisePathspecs returns the generated paths in this diff and the pathspecs that
@@ -107,7 +168,9 @@ func newDiffPlan(cfg Config, cwd string, spec DiffSpec) *diffPlan {
 // pathspec silently narrows the whole diff to that subtree. `literal` because a real
 // path may contain glob metacharacters, and `:!:` treats its argument as a pattern.
 func (p *diffPlan) noisePathspecs(base []string) (excluded, specs []string) {
-	out, ok := Git(p.cwd, gitMedium, append(append([]string{}, base...), "--name-only")...)
+	args := append(append([]string{}, base...), "--name-only")
+	args = append(args, pathspecTail(p.included, nil)...)
+	out, ok := Git(p.cwd, gitMedium, args...)
 	if !ok || out == "" {
 		return nil, nil
 	}
@@ -349,6 +412,7 @@ func ChangedFiles(cfg Config, cwd string, spec DiffSpec) (paths []string, ok boo
 		args = append(args, "HEAD")
 	}
 	args = append(args, "--name-only", "--no-relative")
+	args = append(args, pathspecTail(trackedSelector(cwd, spec), nil)...)
 	out, ok := Git(cwd, gitMedium, args...)
 	if !ok {
 		return nil, false
