@@ -38,6 +38,8 @@ type interventionFlags struct {
 	registerSignalKind  string
 	registerTier        string
 	registerTarget      string
+	registerRuleID      string
+	registerRuleScope   string
 	registerHookID      string
 	registerHookScope   string
 	registerNote        string
@@ -168,6 +170,8 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 				},
 				HookID:       v.registerHookID,
 				HookScope:    v.registerHookScope,
+				RuleID:       v.registerRuleID,
+				RuleScope:    v.registerRuleScope,
 				Supersedes:   v.registerSupersedes,
 				InstalledTS:  v.registerInstalledTS,
 				Force:        v.registerForce,
@@ -190,6 +194,10 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 		"steer-manifest key, matching the audit log's hook_name; required for a guard tier")
 	r.StringVar(&v.registerHookScope, "hook-scope", "",
 		"guard store owning --hook-id: project|global (default: whichever holds it, refusing both)")
+	r.StringVar(&v.registerRuleID, "rule-id", "",
+		"steer-manifest rules key naming the installed prose; required for an instruction tier")
+	r.StringVar(&v.registerRuleScope, "rule-scope", "",
+		"store owning --rule-id: project|global (default: whichever holds it, refusing both)")
 	r.StringVar(&v.registerNote, "note", "", "free-text note")
 	r.StringVar(&v.registerProblem, "problem", "", problemUsage)
 	r.StringVar(&v.registerIntervent, "intervention", "", interventionUsage)

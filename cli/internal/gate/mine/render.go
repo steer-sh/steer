@@ -287,6 +287,8 @@ type RegisterOpts struct {
 	Prose        Prose
 	HookID       string
 	HookScope    string
+	RuleID       string
+	RuleScope    string
 	Supersedes   string
 	InstalledTS  int64
 	Force        bool
@@ -394,6 +396,13 @@ func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 			"also the audit log's hook_name). Without it the audit-log join is a path search " +
 			"that breaks the moment the hook is renamed or retired")
 	}
+	// An instruction record names the rule its digest was taken over. Without it the
+	// record names a document and no text inside it, and nothing later can say which
+	// prose the decision was made about.
+	if tier.IsInstruction(o.Tier) && o.RuleID == "" {
+		return fmt.Errorf("an instruction tier needs --rule-id (the steer-manifest rules " +
+			"key). Install the rule first with `steer rules add <id> --rule \"<text>\"`")
+	}
 	record := Record{
 		"id":             UniqueID(Slugify(o.Class), records),
 		"class":          o.Class,
@@ -432,6 +441,20 @@ func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 		} else {
 			fmt.Fprintf(os.Stderr, "steer commit-gate mine: %s is not in steer-manifest.json — "+
 				"recording the id anyway, but confirm it matches the audit log's hook_name\n", pyRepr(o.HookID))
+		}
+	}
+	if o.RuleID != "" {
+		record["rule_id"] = o.RuleID
+		facts, err := SteerRuleFacts(o.RuleID, o.RuleScope)
+		if err != nil {
+			return err
+		}
+		if facts == nil {
+			return fmt.Errorf("no rule %s in the steer store. Install it first with "+
+				"`steer rules add %s --rule \"<text>\"`", pyRepr(o.RuleID), o.RuleID)
+		}
+		for k, v := range facts {
+			record[k] = v
 		}
 	}
 	if o.Supersedes != "" {

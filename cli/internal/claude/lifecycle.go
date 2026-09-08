@@ -198,6 +198,15 @@ func InstallManagedHook(scope string, input InstallManagedHookInput, targets ...
 		return nil, err
 	}
 
+	// One id names one artifact, refused on both write boundaries. Without the
+	// mirror of InstallManagedRule's check, a guard installed over a rule's id
+	// leaves the derived section carrying one of the two texts.
+	if _, taken := manifest.Rules[hookName]; taken {
+		return nil, fmt.Errorf("%q already names an instruction rule in the %s store. "+
+			"Remove it with `steer rules remove %s`, or name the guard differently",
+			hookName, scope, hookName)
+	}
+
 	existingEntry, manifestExists := manifest.Hooks[hookName]
 
 	now := time.Now().Format("2006-01-02")

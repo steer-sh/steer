@@ -67,9 +67,24 @@ func (b *FixtureBinding) Bound(fixturesDigest, hookDigest, ruleHash, masterDiges
 		b.MasterDigest == masterDigest
 }
 
-// Manifest stores hook metadata used for list/remove/CLAUDE.md cleanup.
+// RuleEntry is one instruction-tier rule: text Steer owns and writes into every
+// target's instruction document, with no guard behind it. Text is the pre-image
+// RuleHash is taken over, so a reader recomputes the digest from the store rather
+// than trusting a stamp made elsewhere.
+type RuleEntry struct {
+	Text     string `json:"text"`
+	RuleHash string `json:"rule_hash"`
+	Created  string `json:"created"`
+	Updated  string `json:"updated,omitempty"`
+}
+
+// Manifest stores hook metadata used for list/remove/CLAUDE.md cleanup, and the
+// instruction rules that carry no hook. Both are sources for the derived rules
+// section, so they share one file: two files give SetRules two sources that can
+// disagree after a partial write.
 type Manifest struct {
 	Hooks map[string]ManifestEntry `json:"hooks"`
+	Rules map[string]RuleEntry     `json:"rules,omitempty"`
 }
 
 // ManifestEntry is metadata for one registered hook.
@@ -323,6 +338,35 @@ func RemoveHook(scope, hookName string) error {
 	}
 
 	delete(manifest.Hooks, strings.TrimSpace(hookName))
+	return SaveManifest(scope, manifest)
+}
+
+// SetRuleEntry writes one instruction rule into the manifest, creating the map
+// when the store holds no rule yet.
+func SetRuleEntry(scope, ruleID string, entry RuleEntry) error {
+	manifest, err := LoadManifest(scope)
+	if err != nil {
+		return err
+	}
+	if manifest.Rules == nil {
+		manifest.Rules = map[string]RuleEntry{}
+	}
+	manifest.Rules[strings.TrimSpace(ruleID)] = entry
+	return SaveManifest(scope, manifest)
+}
+
+// RemoveRule deletes one instruction rule from the manifest. An empty map is
+// dropped, so a store that held a rule and no longer does writes the bytes it
+// wrote before any rule existed.
+func RemoveRule(scope, ruleID string) error {
+	manifest, err := LoadManifest(scope)
+	if err != nil {
+		return err
+	}
+	delete(manifest.Rules, strings.TrimSpace(ruleID))
+	if len(manifest.Rules) == 0 {
+		manifest.Rules = nil
+	}
 	return SaveManifest(scope, manifest)
 }
 

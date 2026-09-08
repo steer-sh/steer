@@ -287,6 +287,85 @@ func hookFactsInScope(hookID, scope string) (map[string]any, error) {
 	return facts, nil
 }
 
+// SteerRuleFacts freezes what an instruction-tier record's artifact says. It is the
+// instruction mirror of SteerHookFacts and resolves the scope the same way: a named
+// scope reads that store alone, an empty scope reads both and refuses an id in each.
+//
+// The digest is recomputed over the stored text rather than read from the entry's
+// own rule_hash, so a hand-edited manifest cannot make a record name text the store
+// does not hold.
+func SteerRuleFacts(ruleID, scope string) (map[string]any, error) {
+	scopes := hookScopes
+	if scope != "" {
+		if scope != steerpath.ProjectScope && scope != steerpath.GlobalScope {
+			return nil, fmt.Errorf("invalid rule scope %s: expected %q or %q",
+				pyRepr(scope), steerpath.ProjectScope, steerpath.GlobalScope)
+		}
+		scopes = []string{scope}
+	}
+	var found []string
+	facts := map[string]any{}
+	for _, s := range scopes {
+		f, err := ruleFactsInScope(ruleID, s)
+		if err != nil {
+			return nil, err
+		}
+		if f == nil {
+			continue
+		}
+		found = append(found, s)
+		facts = f
+	}
+	if len(found) > 1 {
+		return nil, fmt.Errorf("rule %s is in the %s and %s stores; name one with --rule-scope",
+			pyRepr(ruleID), found[0], found[1])
+	}
+	if len(found) == 0 {
+		return nil, nil
+	}
+	return facts, nil
+}
+
+// ruleFactsInScope reads one store's rules entry, through hookstore.Resolve so a
+// migrated machine is read at the directory every other reader resolves.
+func ruleFactsInScope(ruleID, scope string) (map[string]any, error) {
+	dir, err := hookstore.Resolve(scope)
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(filepath.Join(dir, hookstore.ManifestName))
+	if os.IsNotExist(err) {
+		return nil, nil // a scope with no store holds no rule; that is not a failure
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading the %s guard manifest: %w", scope, err)
+	}
+	var manifest struct {
+		Rules map[string]struct {
+			Text string `json:"text"`
+		} `json:"rules"`
+	}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return nil, fmt.Errorf("parsing the %s guard manifest: %w", scope, err)
+	}
+	entry, ok := manifest.Rules[ruleID]
+	if !ok {
+		return nil, nil
+	}
+	sum := sha256.Sum256([]byte(normalizeRuleText(entry.Text)))
+	return map[string]any{
+		"rule":       entry.Text,
+		"rule_hash":  hex.EncodeToString(sum[:]),
+		"rule_scope": scope,
+	}, nil
+}
+
+// normalizeRuleText is claude.NormalizeRule's pre-image, repeated here because
+// nothing under gate may import an adapter. hookfacts_test.go pins the two together.
+func normalizeRuleText(text string) string {
+	return strings.Join(strings.Fields(strings.TrimSpace(text)), " ")
+}
+
 // fileDigest is sha256 over the installed guard, truncated to 16 hex characters. An
 // unreadable file yields no digest rather than a digest of nothing.
 func fileDigest(path string) string {
