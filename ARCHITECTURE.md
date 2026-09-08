@@ -164,6 +164,14 @@ review chain while root session identity remains evidence provenance. Review tex
 is delivered in `additionalContext`; the denial reason supplies a short notice.
 Pi's bridge supplies its execution cwd and session metadata directly.
 
+Every decision that does not block carries one receipt to both the agent's context
+and the operator (`internal/gate/receipt.go`); no path lets a commit through
+silently, because absent agent-facing text is indistinguishable from an absent
+gate. Claude Code carries it beside an `allow`, so a clean review keeps its
+auto-approval; the other adapters carry it without a decision. The receipt
+identifies the commit by repository, subject and diff digest — the hook runs
+before a commit hash exists.
+
 `internal/gate/resolve/` joins adjudication rows to harness-neutral `LedgerMsg`
 values supplied by each adapter's harvest. The join uses thread id when present,
 otherwise session id. `steer commit-gate backfill` previews; `--apply` rewrites the
