@@ -89,8 +89,8 @@ func TestRemovePreservesOtherHooks(t *testing.T) {
 }
 
 func TestTrustSectionEscapesWindowsPath(t *testing.T) {
-	key := `C:\Users\Jeremy\.codex\hooks.json:pre_tool_use:0:0`
-	want := `[hooks.state."C:\\Users\\Jeremy\\.codex\\hooks.json:pre_tool_use:0:0"]`
+	key := `C:\Users\example\.codex\hooks.json:pre_tool_use:0:0`
+	want := `[hooks.state."C:\\Users\\example\\.codex\\hooks.json:pre_tool_use:0:0"]`
 	if got := trustSection(key); got != want {
 		t.Fatalf("trust section = %q, want %q", got, want)
 	}

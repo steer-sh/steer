@@ -30,7 +30,7 @@ func TestShellRunsProgramSeparatesRunnersFromReaders(t *testing.T) {
 		{"xargs -I {} pytest {}", true},
 		{"/bin/cat internal/hookstore/hookstore.go", false},
 		{"/usr/bin/grep -n failed cmd/root.go", false},
-		{"/Users/jeremy/.claude/hooks/plan-review.py < /tmp/p.json", true},
+		{"/Users/example/.claude/hooks/plan-review.py < /tmp/p.json", true},
 		{"echo 'a << b'\ncat notes.md", false},
 		{"sudo cat scripts/deploy.sh", false},
 		{"timeout 10 cat test.sh", false},

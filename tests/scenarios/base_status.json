@@ -4,7 +4,7 @@
   "posture": {
     "instrument": "gemini-3.7-flash-high/3/95653688/go-findings-v3-shell",
     "reviewer": "gemini-3.7-flash-high",
-    "ledger": "/home/example/.steer/state/commit-review/adjudication.jeremys-mac-mini-2.jsonl",
+    "ledger": "/home/example/.steer/state/commit-review/adjudication.example-host.jsonl",
     "commit_gate": [
       {
         "harness": "claude-code",
@@ -212,7 +212,7 @@
   },
   "chains": [
     {
-      "host": "jeremys-mac-mini-2",
+      "host": "example-host",
       "start_ts": 1788551824,
       "rounds": 1,
       "files": 8,
@@ -222,7 +222,7 @@
       "sessions": 1
     },
     {
-      "host": "jeremys-mac-mini-2",
+      "host": "example-host",
       "start_ts": 1788552343,
       "rounds": 2,
       "files": 14,
@@ -233,7 +233,7 @@
       "terminal": "clean"
     },
     {
-      "host": "jeremys-mac-mini-2",
+      "host": "example-host",
       "start_ts": 1788556838,
       "rounds": 2,
       "files": 25,

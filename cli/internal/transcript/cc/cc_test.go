@@ -14,8 +14,8 @@ import (
 
 func TestDiscoverMatchesProject(t *testing.T) {
 	root := t.TempDir()
-	match := filepath.Join(root, "-Users-jeremy-my-proj")
-	other := filepath.Join(root, "-Users-jeremy-other")
+	match := filepath.Join(root, "-Users-example-my-proj")
+	other := filepath.Join(root, "-Users-example-other")
 	for _, d := range []string{match, other} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatal(err)
@@ -26,11 +26,11 @@ func TestDiscoverMatchesProject(t *testing.T) {
 	}
 	a := New()
 
-	files, err := a.Discover(root, transcript.Filter{Projects: []string{"/Users/jeremy/my.proj"}})
+	files, err := a.Discover(root, transcript.Filter{Projects: []string{"/Users/example/my.proj"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(files) != 1 || files[0].Project != "-Users-jeremy-my-proj" {
+	if len(files) != 1 || files[0].Project != "-Users-example-my-proj" {
 		t.Fatalf("expected only matching project, got %+v", files)
 	}
 	if files[0].Harness != harness.ClaudeCode {
@@ -38,7 +38,7 @@ func TestDiscoverMatchesProject(t *testing.T) {
 	}
 
 	// A symlinked cwd matches via its resolved alias.
-	aliased, err := a.Discover(root, transcript.Filter{Projects: []string{"/Volumes/Ext/my.proj", "/Users/jeremy/my.proj"}})
+	aliased, err := a.Discover(root, transcript.Filter{Projects: []string{"/Volumes/Ext/my.proj", "/Users/example/my.proj"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestDiscoverMatchesProject(t *testing.T) {
 		t.Fatalf("expected alias path to match, got %+v", aliased)
 	}
 
-	all, err := a.Discover(root, transcript.Filter{Projects: []string{"/Users/jeremy/my.proj"}, AllProjects: true})
+	all, err := a.Discover(root, transcript.Filter{Projects: []string{"/Users/example/my.proj"}, AllProjects: true})
 	if err != nil {
 		t.Fatal(err)
 	}
