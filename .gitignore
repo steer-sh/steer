@@ -3,7 +3,6 @@ __pycache__/
 failures/
 skills.md
 plugins.md
-CLAUDE.md
 .claude/
 *.html
 statusline.md
