@@ -40,6 +40,7 @@ type interventionFlags struct {
 	registerTarget      string
 	registerRuleID      string
 	registerRuleScope   string
+	registerNotMech     string
 	registerHookID      string
 	registerHookScope   string
 	registerNote        string
@@ -168,17 +169,18 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 					Problem:      v.registerProblem,
 					Intervention: v.registerIntervent,
 				},
-				HookID:       v.registerHookID,
-				HookScope:    v.registerHookScope,
-				RuleID:       v.registerRuleID,
-				RuleScope:    v.registerRuleScope,
-				Supersedes:   v.registerSupersedes,
-				InstalledTS:  v.registerInstalledTS,
-				Force:        v.registerForce,
-				ScopeAll:     v.registerScopeAll,
-				ScopeHarness: v.registerScopeHrn,
-				ScopeRepo:    v.registerScopeRepo,
-				ScopePath:    v.registerScopePath,
+				HookID:          v.registerHookID,
+				HookScope:       v.registerHookScope,
+				RuleID:          v.registerRuleID,
+				RuleScope:       v.registerRuleScope,
+				NotMechanizable: v.registerNotMech,
+				Supersedes:      v.registerSupersedes,
+				InstalledTS:     v.registerInstalledTS,
+				Force:           v.registerForce,
+				ScopeAll:        v.registerScopeAll,
+				ScopeHarness:    v.registerScopeHrn,
+				ScopeRepo:       v.registerScopeRepo,
+				ScopePath:       v.registerScopePath,
 			})
 		},
 	}
@@ -198,6 +200,9 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 		"steer-manifest rules key naming the installed prose; required for an instruction tier")
 	r.StringVar(&v.registerRuleScope, "rule-scope", "",
 		"store owning --rule-id: project|global (default: whichever holds it, refusing both)")
+	r.StringVar(&v.registerNotMech, mine.NotMechanizableFlag, "",
+		"why a repository check and a pre-tool guard cannot detect this class; "+
+			"required for an instruction tier")
 	r.StringVar(&v.registerNote, "note", "", "free-text note")
 	r.StringVar(&v.registerProblem, "problem", "", problemUsage)
 	r.StringVar(&v.registerIntervent, "intervention", "", interventionUsage)

@@ -65,6 +65,21 @@ func InstallManagedRule(scope, id, text string, targets ...harness.Registrar) (*
 			"artifact, or a record naming it cannot say which text its digest was taken over", ruleID, scope)
 	}
 
+	// Identical prose under a second id is refused: two ids naming one rule give
+	// two records two digests over one instruction, and a removal then leaves the
+	// text in place under the other id. The digest is recomputed over the stored
+	// text rather than read from the entry's stamp, for the reason ListManagedRules
+	// recomputes it. Wording that differs and means the same thing is not caught
+	// here, and stays the reader's judgement.
+	hash := HashRule(text)
+	for otherID, entry := range manifest.Rules {
+		if otherID != ruleID && HashRule(entry.Text) == hash {
+			return nil, fmt.Errorf("the %s store already holds this rule as %q:\n  %s\n"+
+				"Reword %q, or edit that rule with `steer rules add %s --rule \"<text>\"`",
+				scope, otherID, entry.Text, ruleID, otherID)
+		}
+	}
+
 	existing, overwritten := manifest.Rules[ruleID]
 	now := time.Now().Format("2006-01-02")
 	created := existing.Created
@@ -74,7 +89,7 @@ func InstallManagedRule(scope, id, text string, targets ...harness.Registrar) (*
 
 	entry := RuleEntry{
 		Text:     text,
-		RuleHash: HashRule(text),
+		RuleHash: hash,
 		Created:  created,
 		Updated:  now,
 	}

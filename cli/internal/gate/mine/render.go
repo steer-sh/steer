@@ -274,28 +274,30 @@ func printDecisionIncidence(w io.Writer, record Record, chains []Chain) {
 
 // RegisterOpts are the flags of `mine register`.
 type RegisterOpts struct {
-	Ledger       string
-	Class        string
-	Match        string
-	Kind         string
-	Corpus       string
-	SignalKind   string
-	Sessions     []SessionUnit
-	Tier         string
-	Target       string
-	Note         string
-	Prose        Prose
-	HookID       string
-	HookScope    string
-	RuleID       string
-	RuleScope    string
-	Supersedes   string
-	InstalledTS  int64
-	Force        bool
-	ScopeAll     bool
-	ScopeHarness []string
-	ScopeRepo    string
-	ScopePath    string
+	Ledger     string
+	Class      string
+	Match      string
+	Kind       string
+	Corpus     string
+	SignalKind string
+	Sessions   []SessionUnit
+	Tier       string
+	Target     string
+	Note       string
+	Prose      Prose
+	HookID     string
+	HookScope  string
+	RuleID     string
+	RuleScope  string
+	// NotMechanizable is required when Tier names the instruction rung.
+	NotMechanizable string
+	Supersedes      string
+	InstalledTS     int64
+	Force           bool
+	ScopeAll        bool
+	ScopeHarness    []string
+	ScopeRepo       string
+	ScopePath       string
 }
 
 // Register records an intervention with its baseline incidence.
@@ -399,9 +401,18 @@ func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 	// An instruction record names the rule its digest was taken over. Without it the
 	// record names a document and no text inside it, and nothing later can say which
 	// prose the decision was made about.
-	if tier.IsInstruction(o.Tier) && o.RuleID == "" {
-		return fmt.Errorf("an instruction tier needs --rule-id (the steer-manifest rules " +
-			"key). Install the rule first with `steer rules add <id> --rule \"<text>\"`")
+	if tier.IsInstruction(o.Tier) {
+		if o.RuleID == "" {
+			return fmt.Errorf("an instruction tier needs --rule-id (the steer-manifest rules " +
+				"key). Install the rule first with `steer rules add <id> --rule \"<text>\"`")
+		}
+		// The instruction rung is the last one to reach for, so the record states why
+		// the two rungs above it cannot detect this class.
+		if err := ValidateArgument(NotMechanizableFlag, o.NotMechanizable,
+			"why a repository check and a pre-tool guard cannot detect this class",
+			o.Class, ""); err != nil {
+			return err
+		}
 	}
 	record := Record{
 		"id":             UniqueID(Slugify(o.Class), records),
@@ -442,6 +453,9 @@ func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 			fmt.Fprintf(os.Stderr, "steer commit-gate mine: %s is not in steer-manifest.json — "+
 				"recording the id anyway, but confirm it matches the audit log's hook_name\n", pyRepr(o.HookID))
 		}
+	}
+	if v := strings.TrimSpace(o.NotMechanizable); v != "" {
+		record[NotMechanizableKey] = v
 	}
 	if o.RuleID != "" {
 		record["rule_id"] = o.RuleID

@@ -9,6 +9,10 @@ import (
 	"github.com/steer-sh/steer-cli/internal/gate"
 )
 
+// testNotMechanizable is the argument an instruction registration carries.
+const testNotMechanizable = "the flag is dropped in prose the parser never sees, " +
+	"so no repository check and no pre-tool guard reads it"
+
 // registerRuleFixture is a ledger a class matches twelve times, so a registration
 // fails on its tier rather than on an empty baseline.
 func registerRuleFixture(t *testing.T) (stateDir, ledger string) {
@@ -68,6 +72,7 @@ func TestAnUnknownRuleIDIsRefused(t *testing.T) {
 		Prose: testProse, ScopeAll: true, Ledger: ledger,
 		Class: "widget parser flag loss", Match: "widget parser",
 		Tier: "instruction", Target: "CLAUDE.md", RuleID: "config-path",
+		NotMechanizable: testNotMechanizable,
 	})
 	if err == nil || !strings.Contains(err.Error(), "steer rules add") {
 		t.Fatalf("err = %v", err)
@@ -88,6 +93,7 @@ func TestAnInstructionRecordFreezesItsRuleText(t *testing.T) {
 		Prose: testProse, ScopeAll: true, Ledger: ledger,
 		Class: "widget parser flag loss", Match: "widget parser",
 		Tier: "instruction", Target: "CLAUDE.md", RuleID: "config-path",
+		NotMechanizable: testNotMechanizable,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -99,5 +105,60 @@ func TestAnInstructionRecordFreezesItsRuleText(t *testing.T) {
 	check(t, "rule scope", str(recorded[0]["rule_scope"]), "global")
 	if str(recorded[0]["rule_hash"]) == "" {
 		t.Fatal("no rule_hash on the record")
+	}
+}
+
+// The instruction rung is the last one to reach for, so the record states why the
+// two rungs above it cannot detect the class. The argument is made in a session
+// today and lost there, and a record carrying it is checkable later.
+func TestAnInstructionTierNeedsItsNotMechanizableArgument(t *testing.T) {
+	stateDir, ledger := registerRuleFixture(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Chdir(t.TempDir())
+	writeRuleStore(t, filepath.Join(home, ".steer", "hooks"), "config-path",
+		"resolve a config path from the repo root")
+
+	opts := RegisterOpts{
+		Prose: testProse, ScopeAll: true, Ledger: ledger,
+		Class: "widget parser flag loss", Match: "widget parser",
+		Tier: "instruction", Target: "CLAUDE.md", RuleID: "config-path",
+	}
+	for _, tc := range []struct{ name, value string }{
+		{"blank", "  "},
+		{"restates the class", "Widget Parser Flag Loss"},
+	} {
+		o := opts
+		o.NotMechanizable = tc.value
+		err := Register(io.Discard, stateDir, o)
+		if err == nil || !strings.Contains(err.Error(), "--not-mechanizable") {
+			t.Fatalf("%s: err = %v", tc.name, err)
+		}
+	}
+
+	o := opts
+	o.NotMechanizable = testNotMechanizable
+	if err := Register(io.Discard, stateDir, o); err != nil {
+		t.Fatal(err)
+	}
+	recorded, _ := Load(stateDir)
+	check(t, "the argument is stored", str(recorded[0][NotMechanizableKey]), testNotMechanizable)
+}
+
+// Every rung but the instruction one installs a mechanical check, so none of them
+// is asked to argue that a mechanical check is impossible.
+func TestOtherTiersNeedNoNotMechanizableArgument(t *testing.T) {
+	stateDir, ledger := registerRuleFixture(t)
+
+	if err := Register(io.Discard, stateDir, RegisterOpts{
+		Prose: testProse, ScopeAll: true, Ledger: ledger,
+		Class: "widget parser flag loss", Match: "widget parser",
+		Tier: "check", Target: "check.sh",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	recorded, _ := Load(stateDir)
+	if _, ok := recorded[0][NotMechanizableKey]; ok {
+		t.Fatalf("a check record carries %s", NotMechanizableKey)
 	}
 }

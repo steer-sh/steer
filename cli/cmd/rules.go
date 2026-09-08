@@ -32,6 +32,16 @@ var rulesAddCmd = &cobra.Command{
 			return err
 		}
 		scope := currentScope()
+		// The store's rules are printed before the write. Only an identical
+		// normalized duplicate is refused mechanically, so prose that already says
+		// this in other words is caught by the reader or not at all.
+		if existing, err := claude.ListManagedRules(scope); err == nil && len(existing) > 0 {
+			fmt.Printf("Rules already in the %s store:\n", scope)
+			for _, rule := range existing {
+				fmt.Printf("  %s  %s\n", rule.ID, rule.Text)
+			}
+			fmt.Println()
+		}
 		result, err := claude.InstallManagedRule(scope, args[0], text, targets...)
 		if err != nil {
 			return err

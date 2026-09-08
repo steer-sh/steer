@@ -235,3 +235,31 @@ func TestAHandEditedCollisionLosesNoText(t *testing.T) {
 		}
 	}
 }
+
+// Two ids naming one rule give two records two digests over one instruction, and
+// a removal then leaves the text standing under the other id. Rewording the id
+// that already holds the text is the one write that is not a duplicate.
+func TestADuplicateRuleUnderAnotherIDIsRefused(t *testing.T) {
+	withProjectTempDir(t)
+
+	if _, err := InstallManagedRule(ProjectScope, "config-path",
+		"resolve a config path from the repo root"); err != nil {
+		t.Fatal(err)
+	}
+
+	// The digest is over the collapsed form, so spacing alone is still a duplicate.
+	_, err := InstallManagedRule(ProjectScope, "config-root",
+		"  resolve a config   path from the repo root  ")
+	if err == nil || !strings.Contains(err.Error(), "config-path") {
+		t.Fatalf("err = %v", err)
+	}
+	rules, _ := ListManagedRules(ProjectScope)
+	if len(rules) != 1 {
+		t.Fatalf("the refused rule landed: %#v", rules)
+	}
+
+	if _, err := InstallManagedRule(ProjectScope, "config-path",
+		"resolve a config path from the repo root"); err != nil {
+		t.Fatalf("rewriting the same id with its own text: %v", err)
+	}
+}

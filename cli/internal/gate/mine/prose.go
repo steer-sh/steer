@@ -16,6 +16,17 @@ const (
 	LegacyNoteKey   = "note"
 )
 
+// NotMechanizableKey is the argument an instruction record carries: why the class
+// cannot be detected by a repository check or a pre-tool guard. Those are the two
+// rungs above the instruction tier, and the argument has to rule out both. It is
+// made in a session today and lost there, so no later reader can check it was
+// made at all.
+const NotMechanizableKey = "not_mechanizable"
+
+// NotMechanizableFlag is the same field's flag spelling, exported so the CLI and
+// the error text that names it cannot drift.
+const NotMechanizableFlag = "not-mechanizable"
+
 // NoInterventionFound is the one legitimate empty answer for a rejection's
 // intervention. A required field that a blank satisfies is not required, so the case
 // of "we looked and found nothing to install" has to be sayable in words.
@@ -41,26 +52,28 @@ func ProseOf(record Record) Prose {
 // Validate refuses a blank explanation, and one that only repeats the class name.
 // Register, Reject and Describe all call it, so every writer meets one contract.
 func (p Prose) Validate(class string) error {
-	for _, f := range []struct {
-		key, value, what string
-	}{
-		{ProblemKey, p.Problem, "what goes wrong"},
-		{InterventionKey, p.Intervention, "what this record does about it"},
-	} {
-		value := strings.TrimSpace(f.value)
-		if value == "" {
-			hint := ""
-			if f.key == InterventionKey {
-				hint = fmt.Sprintf("\n  A rejection that installed nothing says so: --%s %s",
-					f.key, pyRepr(NoInterventionFound))
-			}
-			return fmt.Errorf("--%s is required: one sentence naming %s, readable by "+
-				"someone who was not in the session that found it%s", f.key, f.what, hint)
-		}
-		if strings.EqualFold(value, strings.TrimSpace(class)) {
-			return fmt.Errorf("--%s repeats the class name %s. The class name is the "+
-				"label; this field is the explanation the label cannot carry", f.key, pyRepr(class))
-		}
+	hint := fmt.Sprintf("\n  A rejection that installed nothing says so: --%s %s",
+		InterventionKey, pyRepr(NoInterventionFound))
+	if err := ValidateArgument(ProblemKey, p.Problem, "what goes wrong", class, ""); err != nil {
+		return err
+	}
+	return ValidateArgument(InterventionKey, p.Intervention,
+		"what this record does about it", class, hint)
+}
+
+// ValidateArgument refuses a blank field and one that only restates the class name.
+// A required field a blank satisfies is not required, and the class name is the
+// filler a required field invites — it is also the one filler a machine can name.
+// Presence is what this preserves; the argument's soundness stays the reader's.
+func ValidateArgument(key, value, what, class, hint string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fmt.Errorf("--%s is required: one sentence naming %s, readable by "+
+			"someone who was not in the session that found it%s", key, what, hint)
+	}
+	if strings.EqualFold(value, strings.TrimSpace(class)) {
+		return fmt.Errorf("--%s repeats the class name %s. The class name is the "+
+			"label; this field is the explanation the label cannot carry", key, pyRepr(class))
 	}
 	return nil
 }
