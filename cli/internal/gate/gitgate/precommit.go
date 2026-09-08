@@ -88,7 +88,7 @@ func render(d gate.Decision) Result {
 	switch d.Kind {
 	case gate.Deny:
 		return Result{Block: true, AgentText: d.Reason, OperatorText: operator}
-	case gate.ContextOnly:
+	case gate.Allow, gate.ContextOnly:
 		return Result{AgentText: d.Reason, OperatorText: operator}
 	default:
 		return Result{OperatorText: operator}

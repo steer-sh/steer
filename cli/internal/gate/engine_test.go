@@ -181,12 +181,15 @@ func TestUnchangedRetryEndsChain(t *testing.T) {
 		t.Fatalf("first round Kind = %v, want Deny", d.Kind)
 	}
 	d := h.handle()
-	if d.Kind != NoteOnly {
-		t.Fatalf("retry Kind = %v, want NoteOnly — the chain end must not also start "+
-			"auto-approving", d.Kind)
+	if d.Kind != ContextOnly {
+		t.Fatalf("retry Kind = %v, want ContextOnly — the chain end must not also start "+
+			"auto-approving, and the agent must still be told the gate stopped", d.Kind)
 	}
 	if !strings.Contains(d.SystemMessage, "byte-identical") {
 		t.Errorf("the receipt must say why the chain ended: %q", d.SystemMessage)
+	}
+	if d.Reason != d.SystemMessage {
+		t.Errorf("both channels carry one receipt: %q vs %q", d.Reason, d.SystemMessage)
 	}
 	rows := h.rows()
 	retry := rows[len(rows)-1]
@@ -199,7 +202,7 @@ func TestUnchangedRetryEndsChain(t *testing.T) {
 	// A third attempt presents the same diff the gate cleared, so it must not re-enter
 	// as firing 1 and re-review adjudicated code.
 	third := h.handle()
-	if third.Kind != NoteOnly || !strings.Contains(third.SystemMessage, "already") {
+	if third.Kind != ContextOnly || !strings.Contains(third.SystemMessage, "already") {
 		t.Errorf("third attempt = %v / %q, want the cleared-diff skip", third.Kind, third.SystemMessage)
 	}
 	if got := h.lastRow()["phase"]; got != "skip-cleared" {
@@ -457,6 +460,29 @@ func TestRetryAfterStagingEverythingIsQuiet(t *testing.T) {
 	}
 }
 
+// Every path that lets a commit through tells the AGENT so. Silence in the agent's
+// context reads as a gate that never ran, and the identity has to name this commit:
+// PreToolUse fires before git, so there is no hash yet and the diff digest stands in.
+func TestACleanReviewReachesTheAgentWithItsIdentity(t *testing.T) {
+	h := newHarness(t, findingReply("NO FINDINGS"))
+	d := h.handle()
+	if d.Kind != Allow {
+		t.Fatalf("Kind = %v, want Allow — a clean review keeps its auto-approval", d.Kind)
+	}
+	if d.Reason != d.SystemMessage {
+		t.Fatalf("both channels carry one receipt: %q vs %q", d.Reason, d.SystemMessage)
+	}
+	raw := stagedDiff(t, h.cfg, h.repo)
+	for _, want := range []string{filepath.Base(h.repo), "subject", Digest(raw), "found nothing"} {
+		if !strings.Contains(d.Reason, want) {
+			t.Errorf("receipt %q is missing %q", d.Reason, want)
+		}
+	}
+	if strings.Contains(d.Reason, "correct") == false {
+		t.Error("the receipt must say the review ran, not that the change is sound")
+	}
+}
+
 // A retry that reads the WORKING TREE sees every edit the last round saw and more. It
 // hides nothing, so it earns no notice and keeps its auto-approval.
 func TestRetryReadingTheWorkingTreeIsQuiet(t *testing.T) {
@@ -468,8 +494,8 @@ func TestRetryReadingTheWorkingTreeIsQuiet(t *testing.T) {
 	writeFileAt(t, h.repo, "a.py", lines(160))
 	h.spec = DiffSpec{}
 	d := h.handle()
-	if d.Reason != "" {
-		t.Fatalf("Reason = %q, want none", d.Reason)
+	if strings.Contains(d.Reason, "REVIEWS THE INDEX") {
+		t.Fatalf("a working-tree read hides nothing, so it earns no notice: %q", d.Reason)
 	}
 	if d.Kind != Allow {
 		t.Fatalf("Kind = %v, want Allow", d.Kind)

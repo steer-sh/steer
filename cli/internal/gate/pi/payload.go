@@ -50,7 +50,8 @@ func Render(d gate.Decision) (Output, bool) {
 	switch d.Kind {
 	case gate.Deny:
 		return Output{Block: true, Reason: d.Reason, SystemMessage: message}, true
-	case gate.ContextOnly:
+	case gate.Allow, gate.ContextOnly:
+		// Pi's reply has no approval to grant, so an Allow renders as its receipt.
 		return Output{AdditionalContext: d.Reason, SystemMessage: message}, true
 	default:
 		if message == "" {

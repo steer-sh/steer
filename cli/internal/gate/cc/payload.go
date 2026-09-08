@@ -61,10 +61,13 @@ func Render(d gate.Decision) (Output, bool) {
 			SystemMessage: message,
 		}, true
 	case gate.Allow:
+		// additionalContext rides beside the decision, so a clean review reaches the
+		// agent without costing the commit its auto-approval.
 		return Output{
 			HookSpecificOutput: &hookOutput{
 				HookEventName:      "PreToolUse",
 				PermissionDecision: "allow",
+				AdditionalContext:  d.Reason,
 			},
 			SystemMessage: message,
 		}, true
@@ -78,8 +81,6 @@ func Render(d gate.Decision) (Output, bool) {
 			},
 			SystemMessage: message,
 		}, true
-	case gate.NoteOnly:
-		return Output{SystemMessage: message}, true
 	default:
 		if message == "" {
 			return Output{}, false

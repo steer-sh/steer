@@ -154,7 +154,9 @@ func Render(d gate.Decision) (Output, bool) {
 			},
 			SystemMessage: message,
 		}, true
-	case gate.ContextOnly:
+	case gate.Allow, gate.ContextOnly:
+		// An Allow still carries no decision here, for the reason above. It carries its
+		// receipt, which is the half Codex can take.
 		return Output{
 			HookSpecificOutput: &hookOutput{
 				HookEventName:     "PreToolUse",

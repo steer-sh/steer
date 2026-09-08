@@ -15,12 +15,10 @@ const (
 	Silent DecisionKind = iota
 	// Allow rules that the commit may proceed.
 	Allow
-	// NoteOnly tells the operator something WITHOUT ruling on the permission. The
+	// ContextOnly gives the agent text and the operator a receipt, without ruling. The
 	// chain-end paths use this rather than Allow: an allow decision skips the
 	// permission prompt outright, and a gate that stops reviewing must not also start
 	// auto-approving commits that would otherwise have been asked about.
-	NoteOnly
-	// ContextOnly gives the agent text and the operator a receipt, without ruling.
 	ContextOnly
 	// Deny blocks the commit and hands the agent the reviews.
 	Deny
@@ -179,13 +177,10 @@ func (e *Engine) handleFirst(ctx context.Context, req Request, chain *Chain) Dec
 			"firing": 1, "diff_sha": record.DiffSHA, "chars": len(p.raw),
 			"session_id": req.SessionID, "cleared_ts": record.TS,
 			"cleared_channel": record.Channel})
-		return Decision{
-			Kind: NoteOnly,
-			SystemMessage: "[commit-gate] this exact diff was reviewed and cleared by the gate " +
-				"already, so it was NOT re-reviewed — this commit is a retry of one " +
-				"the gate ruled on, and git rejected it for its own reasons. Commit proceeds.",
-			LedgerError: logErr,
-		}
+		return proceed(ContextOnly, req, p.raw, 1,
+			"NOT re-reviewed — this exact diff was reviewed and cleared already, and git "+
+				"rejected that attempt for its own reasons. The gate does not block it.",
+			logErr)
 	}
 	return e.reviewCommit(ctx, req, chain, p, 1)
 }
@@ -245,18 +240,10 @@ func (e *Engine) handleRetry(ctx context.Context, req Request, chain *Chain, sta
 				logErr = err
 			}
 		}
-		kind := NoteOnly
-		if notice != "" {
-			kind = ContextOnly
-		}
-		return Decision{
-			Kind:   kind,
-			Reason: notice,
-			SystemMessage: fmt.Sprintf("[commit-gate] gate chain ended after %d firing(s) — the "+
-				"retry diff is byte-identical to the one already reviewed, so a re-review "+
-				"would read no new code. Commit proceeds.%s", firing, separated(notice)),
-			LedgerError: logErr,
-		}
+		return proceed(ContextOnly, req, after.Raw, firing, fmt.Sprintf(
+			"the gate chain ended after %d firing(s) — the retry diff is byte-identical to "+
+				"the one already reviewed, so a re-review would read no new code. The gate "+
+				"does not block it.%s", firing, separated(notice)), logErr)
 	}
 
 	next := firing + 1
@@ -312,14 +299,10 @@ func (e *Engine) reviewCommit(ctx context.Context, req Request, chain *Chain, p 
 		if p.notice != "" {
 			kind = ContextOnly
 		}
-		return Decision{
-			Kind:   kind,
-			Reason: p.notice,
-			SystemMessage: fmt.Sprintf("[commit-gate] all %d reviewers unavailable — %s. "+
-				"This commit was NOT reviewed and went through ungated.%s",
-				e.cfg.ReviewerRuns, ReviewerTrouble(result.Runs), separated(p.notice)),
-			LedgerError: err,
-		}
+		return proceed(kind, req, p.raw, firing, fmt.Sprintf(
+			"all %d reviewers unavailable — %s. This commit was NOT reviewed and went "+
+				"through ungated.%s", e.cfg.ReviewerRuns, ReviewerTrouble(result.Runs),
+			separated(p.notice)), err)
 	}
 
 	if len(result.Reviews) == 0 {
@@ -343,20 +326,16 @@ func (e *Engine) reviewCommit(ctx context.Context, req Request, chain *Chain, p 
 			thin = fmt.Sprintf(" Only %d/%d answered — %s.",
 				result.Answered, e.cfg.ReviewerRuns, ReviewerTrouble(result.Runs))
 		}
+		// A notice means the reviewers may have read a tree the commit will not land, so
+		// the commit keeps its permission prompt. Both kinds carry the receipt.
 		kind := Allow
 		if p.notice != "" {
-			// ContextOnly rather than Allow: the notice is for the AGENT, and an allow
-			// carries only the operator receipt. It costs this commit its auto-approval
-			// and buys the agent the one fact the reviewers could not see.
 			kind = ContextOnly
 		}
-		return Decision{
-			Kind:   kind,
-			Reason: p.notice,
-			SystemMessage: fmt.Sprintf("[commit-gate] %d reviewers read the diff on firing %d "+
-				"and found nothing — commit proceeds.%s%s", result.Answered, firing, thin, separated(p.notice)),
-			LedgerError: err,
-		}
+		return proceed(kind, req, p.raw, firing, fmt.Sprintf(
+			"%d reviewers read this diff and found nothing — commit proceeds. The review "+
+				"ran; that is not a claim the change is correct.%s%s",
+			result.Answered, thin, separated(p.notice)), err)
 	}
 
 	review, findings := ComposeReview(result.Reviews)
@@ -403,17 +382,11 @@ func (e *Engine) reviewCommit(ctx context.Context, req Request, chain *Chain, p 
 // The commit keeps its normal permission path while the findings reach the agent as
 // context and the operator gets the count.
 func (e *Engine) terminalReview(ctx context.Context, req Request, chain *Chain, p prepared, status string, firing int) Decision {
-	capped := fmt.Sprintf("[commit-gate] gate chain hit the %d-firing cap", e.cfg.MaxFirings)
+	capped := fmt.Sprintf("the gate chain hit the %d-firing cap", e.cfg.MaxFirings)
 	if status != "" {
-		kind := NoteOnly
-		if p.notice != "" {
-			// NoteOnly speaks to the operator alone, so a Reason set beside it never
-			// reaches the agent that has to act on it.
-			kind = ContextOnly
-		}
-		return Decision{Kind: kind, Reason: p.notice, SystemMessage: fmt.Sprintf(
+		return proceed(ContextOnly, req, p.raw, firing, fmt.Sprintf(
 			"%s. The final review did not run (%s), so round %d's fixes are UNREVIEWED.%s",
-			capped, status, e.cfg.MaxFirings, separated(p.notice))}
+			capped, status, e.cfg.MaxFirings, separated(p.notice)), nil)
 	}
 	result := e.review(ctx, req, p)
 	row := mergeRows(
@@ -425,15 +398,10 @@ func (e *Engine) terminalReview(ctx context.Context, req Request, chain *Chain, 
 
 	if result.Answered == 0 {
 		err := e.log(req, row)
-		kind := NoteOnly
-		if p.notice != "" {
-			kind = ContextOnly
-		}
-		return Decision{Kind: kind, Reason: p.notice, SystemMessage: fmt.Sprintf(
+		return proceed(ContextOnly, req, p.raw, firing, fmt.Sprintf(
 			"%s and every reviewer was unavailable for the final pass, so round %d's "+
 				"fixes are UNREVIEWED — %s.%s", capped, e.cfg.MaxFirings,
-			ReviewerTrouble(result.Runs), separated(p.notice)),
-			LedgerError: err}
+			ReviewerTrouble(result.Runs), separated(p.notice)), err)
 	}
 
 	// Below this line a reviewer read the diff and the commit proceeds, which is what
@@ -451,14 +419,10 @@ func (e *Engine) terminalReview(ctx context.Context, req Request, chain *Chain, 
 		if err == nil {
 			err = clearedErr
 		}
-		kind := NoteOnly
-		if p.notice != "" {
-			kind = ContextOnly
-		}
-		return Decision{Kind: kind, Reason: p.notice, SystemMessage: fmt.Sprintf(
+		return proceed(ContextOnly, req, p.raw, firing, fmt.Sprintf(
 			"%s. The final non-blocking review read round %d's fixes and %d reviewers "+
-				"found nothing.%s", capped, e.cfg.MaxFirings, result.Answered, separated(p.notice)),
-			LedgerError: err}
+				"found nothing.%s", capped, e.cfg.MaxFirings, result.Answered,
+			separated(p.notice)), err)
 	}
 
 	review, findings := ComposeReview(result.Reviews)
@@ -475,7 +439,7 @@ func (e *Engine) terminalReview(ctx context.Context, req Request, chain *Chain, 
 	if severities, ok := shape["severities"].(map[string]int); ok {
 		blocking = severities["BLOCKING"]
 	}
-	note := fmt.Sprintf("%s — final NON-BLOCKING review of round %d's fixes: %d raw findings "+
+	note := fmt.Sprintf("[commit-gate] %s — final NON-BLOCKING review of round %d's fixes: %d raw findings "+
 		"(%d BLOCKING) from %d reviewers. This commit is NOT blocked; expect a ledger, and "+
 		"a follow-up commit if anything blocking survives.",
 		capped, e.cfg.MaxFirings, findings, blocking, result.Answered)

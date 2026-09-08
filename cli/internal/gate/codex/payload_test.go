@@ -55,10 +55,18 @@ func TestRenderDenyKeepsTheReviewOffTheScreen(t *testing.T) {
 	}
 }
 
+// An allow carries its receipt to the model and still grants no approval: approving
+// here would skip Codex's own prompt.
 func TestRenderAllowDoesNotApproveTool(t *testing.T) {
-	out, ok := Render(gate.Decision{Kind: gate.Allow, SystemMessage: "clean"})
-	if !ok || out.HookSpecificOutput != nil || out.SystemMessage != "clean" {
+	out, ok := Render(gate.Decision{Kind: gate.Allow, Reason: "receipt", SystemMessage: "clean"})
+	if !ok || out.HookSpecificOutput == nil || out.SystemMessage != "clean" {
 		t.Fatalf("render = %#v, %v", out, ok)
+	}
+	if out.HookSpecificOutput.PermissionDecision != "" {
+		t.Fatalf("permissionDecision = %q, want none", out.HookSpecificOutput.PermissionDecision)
+	}
+	if out.HookSpecificOutput.AdditionalContext != "receipt" {
+		t.Fatalf("receipt not carried to the model: %q", out.HookSpecificOutput.AdditionalContext)
 	}
 }
 
