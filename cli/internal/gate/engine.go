@@ -264,8 +264,10 @@ func (e *Engine) handleRetry(ctx context.Context, req Request, chain *Chain, sta
 			if err := chain.Save(state); err != nil && logErr == nil {
 				logErr = err
 			}
-			return Decision{Kind: ContextOnly, Reason: notice,
-				SystemMessage: notice, LedgerError: logErr}
+			// The identity is the DENIED round's, both halves. This pass read a diff
+			// under MinDiffChars, so its own digest names nothing, and the notice is
+			// about the round the chain still awaits an answer for.
+			return proceed(ContextOnly, req, state.Diff, firing, notice, logErr)
 		}
 		return Decision{Kind: Silent, LedgerError: logErr}
 	}

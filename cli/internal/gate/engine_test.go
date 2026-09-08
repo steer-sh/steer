@@ -563,9 +563,17 @@ func TestTheEmptyIndexNoticeKeepsTheChain(t *testing.T) {
 		t.Fatalf("first firing Kind = %v, want Deny", d.Kind)
 	}
 	h.spec = DiffSpec{StagedOnly: true}
-	h.handle()
+	quiet := h.handle()
 	chain := NewChain(h.cfg, ChainKey{Actor: "session-1", Repo: h.repo})
 	state := chain.Load()
+	// The receipt names the DENIED round, both halves. This pass read a diff under
+	// MinDiffChars, so its own digest would name nothing.
+	if !strings.Contains(quiet.Reason, Digest(state.Diff)) {
+		t.Errorf("receipt %q does not name the denied round's diff", quiet.Reason)
+	}
+	if !strings.Contains(quiet.Reason, "firing 1") {
+		t.Errorf("receipt %q does not name the round still awaiting an answer", quiet.Reason)
+	}
 	if !chain.Pending(state) {
 		t.Fatal("the chain was dropped — the next commit starts over at firing 1")
 	}
