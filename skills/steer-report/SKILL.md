@@ -342,9 +342,9 @@ Everything else is the irreducible cost of an independent reader. One-off findin
 
 Cap the whole report at the **top 5–7 candidates across both corpora**. Finding fewer — or none — is a valid result; say so plainly rather than padding with weak candidates.
 
-## Step 4: Route each candidate to the cheapest tier that can catch it
+## Step 4: Route each candidate to the strongest tier that can catch it
 
-Prefer the highest tier on this ladder that can actually detect the class. Output quality converges to the oracles you can reach, and a prose rule only shifts a probability while an exit code does not.
+Take the first tier on this ladder that can actually detect the class. The ladder is ordered strongest oracle first: output quality converges to the oracles you can reach, and a prose rule only shifts a probability while an exit code does not.
 
 The `--tier` flag takes either vocabulary — `check|steer|prose|prompt` or
 `check|guard|instruction|review` — and refuses anything else. Say the type, not the
@@ -357,7 +357,9 @@ flag value.
 | `prompt` / `review` | review-prompt change | It is a recurring reviewer false positive | the reviewer prompt (`cli/internal/gate/prompts/review.md`) |
 | `prose` / `instruction` | instruction rule | Genuinely not mechanizable but frequent enough to earn a line | CLAUDE.md |
 
-An instruction rule is the weakest tier and the easiest to reach for. Use it only after arguing why the class cannot be detected, and expect the class to keep recurring more often than not — that outcome is information, not failure.
+An instruction rule is the weakest tier and the last one to reach for. Use it only after arguing why the class cannot be detected by a repository check or a pre-tool guard, and expect the class to keep recurring more often than not — that outcome is information, not failure.
+
+A review-prompt change is not a rung you pass through on the way to prose. It applies to one candidate type only — a recurring reviewer false positive — and a defect class never routes there.
 
 Transcript candidates almost always route to `steer` (edit-time regex) or `check` (a repo script). Scope each one project vs global — a rule seen across projects or from global CLAUDE.md suggests global scope. If nothing routes, say so. "No candidate qualified this pass" is a correct result.
 
