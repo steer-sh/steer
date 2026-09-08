@@ -132,6 +132,15 @@ type message struct {
 	ToolCallID string          `json:"toolCallId"`
 	ToolName   string          `json:"toolName"`
 	IsError    bool            `json:"isError"`
+	Usage      *usage          `json:"usage"`
+}
+
+// usage is an assistant message's token accounting. Input excludes the cached
+// terms, so a context depth is the sum of the three.
+type usage struct {
+	Input      int `json:"input"`
+	CacheRead  int `json:"cacheRead"`
+	CacheWrite int `json:"cacheWrite"`
 }
 
 type block struct {
@@ -258,6 +267,53 @@ func ActiveBranch(path string) (map[string]struct{}, error) {
 	return active, nil
 }
 
+// ContextTokens reads the context depth of the last assistant message on the
+// session's ACTIVE branch. A Pi session file is a tree, so the last assistant
+// message in file order can sit on a branch an /undo abandoned.
+//
+// A replayed entry a /fork copied in is kept: with the parent branch gone it is
+// still this session's own newest depth.
+func ContextTokens(path string) (int, bool) {
+	active, err := ActiveBranch(path)
+	if err != nil {
+		return 0, false
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return 0, false
+	}
+	defer file.Close()
+
+	depth, found := 0, false
+	reader := bufio.NewReaderSize(file, 256*1024)
+	for {
+		line, readErr := reader.ReadBytes('\n')
+		if len(line) > 0 {
+			var e entry
+			if json.Unmarshal(line, &e) == nil && e.Message != nil &&
+				e.Message.Role == "assistant" && e.Message.Usage != nil &&
+				onBranch(active, e.ID) {
+				u := e.Message.Usage
+				depth, found = u.Input+u.CacheRead+u.CacheWrite, true
+			}
+		}
+		if readErr != nil {
+			break
+		}
+	}
+	return depth, found
+}
+
+// onBranch reports whether an id is on the active path. A nil set means the file
+// records no tree, and every entry then reads as active.
+func onBranch(active map[string]struct{}, id string) bool {
+	if active == nil {
+		return true
+	}
+	_, ok := active[id]
+	return ok
+}
+
 // streamState carries what one file's normalization needs across lines: the
 // session identity from its header, and the active branch from pass one.
 type streamState struct {
@@ -298,10 +354,8 @@ func (st *streamState) normalize(line []byte) error {
 	if e.Type != typeMessage || e.Message == nil {
 		return nil
 	}
-	if st.active != nil {
-		if _, ok := st.active[e.ID]; !ok {
-			return nil
-		}
+	if !onBranch(st.active, e.ID) {
+		return nil
 	}
 	if _, ok := st.replayed[e.ID]; ok {
 		return nil

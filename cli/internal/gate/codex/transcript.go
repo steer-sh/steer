@@ -9,9 +9,9 @@ import (
 	txcodex "github.com/steer-sh/steer-cli/internal/transcript/codex"
 )
 
-// AuthorFields is the author side of a Codex round: which model wrote the diff, from
-// what task, and the rollout the pair was read from. None survives the session, so all
-// are stamped at write time rather than reconstructed later.
+// AuthorFields is the author side of a Codex round: which model wrote the diff, under
+// how much context, from what task, and the rollout they were read from. None survives
+// the session, so all are stamped at write time rather than reconstructed later.
 func AuthorFields(ledger *gate.Ledger, cfg gate.Config, rollout, actor, model string) gate.Row {
 	fields := gate.Row{}
 	if model != "" {
@@ -21,8 +21,12 @@ func AuthorFields(ledger *gate.Ledger, cfg gate.Config, rollout, actor, model st
 		return fields
 	}
 	fields["transcript"] = rollout
-	for key, value := range ledger.SavePrefix(rollout, cc.ReadTranscript(rollout)) {
+	lines := cc.ReadTranscript(rollout)
+	for key, value := range ledger.SavePrefix(rollout, lines) {
 		fields[key] = value
+	}
+	if depth, ok := contextTokens(lines); ok {
+		fields["context_tokens"] = depth
 	}
 	turns := humanTurns(rollout)
 	if len(turns) == 0 {

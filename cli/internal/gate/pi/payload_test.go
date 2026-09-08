@@ -110,3 +110,36 @@ func strconvJSON(value string) string {
 	raw, _ := json.Marshal(value)
 	return string(raw)
 }
+
+func TestRunStampsTheContextDepthOfTheActiveBranch(t *testing.T) {
+	repo := stagedRepo(t)
+	cfg := gate.Defaults()
+	cfg.StateDir = t.TempDir()
+	cfg.ReviewerRuns = 1
+	transcript := filepath.Join(t.TempDir(), "pi.jsonl")
+	body := `{"type":"session","version":3,"id":"pi-session","cwd":"/repo"}
+{"type":"message","id":"a1","parentId":null,"timestamp":"2026-04-19T03:17:26.000Z","message":{"role":"assistant","content":[],"usage":{"input":168,"cacheRead":2241,"cacheWrite":0}}}
+{"type":"message","id":"a2","parentId":null,"timestamp":"2026-04-19T03:17:27.000Z","message":{"role":"assistant","content":[],"usage":{"input":9,"cacheRead":99990,"cacheWrite":0}}}
+{"type":"branch_summary","id":"a3","parentId":"a1","timestamp":"2026-04-19T03:17:28.000Z","fromId":"a2","summary":"abandoned"}
+`
+	if err := os.WriteFile(transcript, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	payload := `{"hook_event_name":"PreToolUse","tool_name":"Bash",` +
+		`"session_id":"pi-session","model":"model-pi","transcript_path":` + strconvJSON(transcript) +
+		`,"cwd":` + strconvJSON(repo) + `,"tool_input":{"command":"git commit -m \"add a\""}}`
+	var stdout bytes.Buffer
+	Run(context.Background(), cfg, stubReviewer{}, strings.NewReader(payload), &stdout)
+
+	raw, err := os.ReadFile(cfg.LogFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var row map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(raw), &row); err != nil {
+		t.Fatal(err)
+	}
+	if row["context_tokens"] != float64(2409) {
+		t.Fatalf("context_tokens = %v", row["context_tokens"])
+	}
+}

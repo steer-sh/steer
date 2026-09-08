@@ -9,6 +9,7 @@ import (
 
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/cc"
+	txpi "github.com/steer-sh/steer-cli/internal/transcript/pi"
 )
 
 // Payload is the Claude-shaped envelope written by Pi's commit-gate bridge.
@@ -91,6 +92,9 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, stdin io.
 	rowExtra := gate.Row{"client": "pi", "harness": "pi"}
 	if payload.TranscriptPath != "" {
 		rowExtra["transcript"] = payload.TranscriptPath
+		if depth, ok := txpi.ContextTokens(payload.TranscriptPath); ok {
+			rowExtra["context_tokens"] = depth
+		}
 	}
 	if payload.Model != "" {
 		rowExtra["author_model"] = payload.Model

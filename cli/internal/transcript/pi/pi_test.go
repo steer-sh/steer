@@ -356,3 +356,40 @@ func TestDiscoverOnAMissingRootIsEmpty(t *testing.T) {
 }
 
 var _ transcript.Adapter = Adapter{}
+
+func TestContextTokensSumsTheCacheTermsOfTheActiveLeaf(t *testing.T) {
+	// The abandoned assistant message is later in file order, so a linear read
+	// would stamp its 99999 onto the row.
+	got, ok := ContextTokens(fixturePath("usage-branch.jsonl"))
+	if !ok || got != 2409 {
+		t.Fatalf("depth = %d, ok = %v", got, ok)
+	}
+}
+
+func TestContextTokensOfASessionWithNoUsage(t *testing.T) {
+	if got, ok := ContextTokens(fixturePath("normal.jsonl")); ok || got != 0 {
+		t.Fatalf("depth = %d, ok = %v", got, ok)
+	}
+}
+
+func TestContextTokensOfAMissingSession(t *testing.T) {
+	if _, ok := ContextTokens(filepath.Join(t.TempDir(), "gone.jsonl")); ok {
+		t.Fatal("a missing session reported a depth")
+	}
+}
+
+func TestContextTokensOfAnUnlinkableSessionReadsEveryEntry(t *testing.T) {
+	// A file recording no tree reads as all-active, the same rule Stream follows.
+	body, err := os.ReadFile(fixturePath("unlinkable.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body = append(body, []byte(`{"type": "message", "id": "e0000004", "parentId": null, "timestamp": "2026-04-19T03:17:27.000Z", "message": {"role": "assistant", "content": [], "usage": {"input": 5, "cacheRead": 20, "cacheWrite": 1}}}`+"\n")...)
+	path := filepath.Join(t.TempDir(), "unlinkable.jsonl")
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := ContextTokens(path); !ok || got != 26 {
+		t.Fatalf("depth = %d, ok = %v", got, ok)
+	}
+}
