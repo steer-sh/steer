@@ -370,61 +370,6 @@ func sessionHarnesses(units []SessionUnit) []string {
 	return seen
 }
 
-func sessionProjects(units []SessionUnit) []string {
-	var seen []string
-	for _, u := range units {
-		if u.Project != "" {
-			seen = appendUnique(seen, u.Project)
-		}
-	}
-	sort.Strings(seen)
-	return seen
-}
-
-// SessionConfounds compares the two windows' categorical supports, the session corpus's
-// analogue of Confounds. A session carries a harness and a project; it changes no file
-// list, so path_kind has no analogue here.
-func SessionConfounds(before, after []SessionUnit, authored string) (hard, soft []Confound) {
-	if authored != "" {
-		if drifted := driftingSessionInstruments(after, authored); len(drifted) > 0 {
-			hard = append(hard, Confound{
-				Category: "instrument",
-				Reason:   "the after-window was normalized by a different parser or transcript adapter than the registered baseline",
-				Before:   []string{authored},
-				After:    drifted,
-			})
-		}
-	}
-	categories := []struct {
-		name string
-		of   func([]SessionUnit) []string
-	}{
-		{"harness", sessionHarnesses},
-		{"project", sessionProjects},
-	}
-	for _, cat := range categories {
-		b, a := cat.of(before), cat.of(after)
-		if len(b) == 0 || len(a) == 0 {
-			continue
-		}
-		switch {
-		case disjoint(b, a):
-			hard = append(hard, Confound{
-				Category: cat.name,
-				Reason:   "the before and after windows share no " + cat.name,
-				Before:   b, After: a,
-			})
-		case !sameStringSet(b, a):
-			soft = append(soft, Confound{
-				Category: cat.name,
-				Reason:   "the " + cat.name + " mix changed between the windows",
-				Before:   b, After: a,
-			})
-		}
-	}
-	return hard, soft
-}
-
 // firingsApplicable reports whether a tier writes guard audit rows. Only the master
 // PreToolUse hook does, under either spelling of its tier name.
 func firingsApplicable(tier string) bool { return tier == "guard" || tier == "steer" }

@@ -98,7 +98,7 @@ func (u InstrumentUse) Label() string {
 }
 
 // InstrumentUses lists the distinct reviewer identities a window's rows carry, sorted
-// so a rendered confound is stable. Two rows sharing an instrument string but naming
+// so a rendered list is stable. Two rows sharing an instrument string but naming
 // different providers are two identities: the string never held the provider, so a
 // provider swap at one model name is invisible to a comparison of strings alone.
 func InstrumentUses(windows ...[]Chain) []InstrumentUse {
@@ -321,10 +321,10 @@ type InstrumentImpact struct {
 // is measured over, so an operator editing the settings is told which measurements
 // the edit lands in before it is written.
 //
-// It reads the scorer's own computation: each record's baseline comes from
-// BaselineInstrument over its before-window, and the grade from the same dimension
-// table Confounds reads. So a record this names as majorly drifted is a record
-// ScoreRecord will withhold, never a second opinion about it.
+// Each record's baseline comes from BaselineInstrument over its before-window, and
+// the grade from the dimension table above. The field scorer makes no efficacy claim
+// and grades no drift, so this warning is the one place a reviewer change is named:
+// at the moment of action, before the edit is written.
 //
 // Only the chain corpus is read. The session corpus stamps the transcript parser as
 // its instrument, which no reviewer setting moves.

@@ -1,7 +1,5 @@
 package cadence
 
-import "github.com/steer-sh/steer-cli/internal/gate/mine"
-
 // Scope is a record's frozen eligibility rule, carried verbatim from the stored
 // record. A nil pointer is a legacy record with no scope at all.
 type Scope struct {
@@ -25,16 +23,6 @@ type Coverage struct {
 	UnknownEvidence int `json:"unknown_evidence"`
 	Pending         int `json:"pending"`
 	PartialExposure int `json:"partial_exposure"`
-}
-
-// Effect remains a legacy reader type until the claim machinery is removed in
-// the dedicated cleanup commit. New scored records no longer emit it.
-type Effect struct {
-	Estimate   *float64 `json:"estimate"`
-	Lower      float64  `json:"lower"`
-	Upper      *float64 `json:"upper"`
-	Confidence float64  `json:"confidence"`
-	Method     string   `json:"method"`
 }
 
 // ScopeOf reads a stored scope map, nil when the record carries none.
@@ -75,55 +63,6 @@ func CoverageOf(v any) Coverage {
 		Pending:         numInt(m["pending"]),
 		PartialExposure: numInt(m["partial_exposure"]),
 	}
-}
-
-func EffectOf(v any) Effect {
-	m, _ := v.(map[string]any)
-	if m == nil {
-		return Effect{}
-	}
-	e := Effect{Lower: numFloat(m["lower"]), Confidence: numFloat(m["confidence"]), Method: str(m["method"])}
-	if m["estimate"] != nil {
-		x := numFloat(m["estimate"])
-		e.Estimate = &x
-	}
-	if m["upper"] != nil {
-		x := numFloat(m["upper"])
-		e.Upper = &x
-	}
-	return e
-}
-
-func RequiredAfterOf(v any) *int {
-	if v == nil {
-		return nil
-	}
-	n := numInt(v)
-	return &n
-}
-
-// AttributionOf reads the guard audit join, zero when the record carries none.
-func AttributionOf(v any) Attribution {
-	a, ok := v.(mine.Attribution)
-	if !ok {
-		return Attribution{}
-	}
-	return Attribution{
-		Applicable: a.Applicable,
-		LogPresent: a.LogPresent,
-		HookID:     a.HookID,
-		Firings:    a.Firings,
-		Sessions:   a.Sessions,
-	}
-}
-
-// ConfoundsOf reads a scored confound list, never nil so a consumer sees [].
-func ConfoundsOf(v any) []mine.Confound {
-	c, _ := v.([]mine.Confound)
-	if c == nil {
-		return []mine.Confound{}
-	}
-	return c
 }
 
 func truthy(v any) bool {

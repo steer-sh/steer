@@ -15,6 +15,30 @@ func reviewerFields(provider, model, effort string, runs int, digest string) map
 	}
 }
 
+// windowDrift grades an after window against a record's registered instrument, the way
+// ImpactOf does over one prospective identity: the baseline folds the before window,
+// and every after identity is graded against it. It returns the worst grade, the union
+// of the named dimensions and the drifting labels.
+func windowDrift(authored string, before, after []Chain) (grade string, dims, labels []string) {
+	base := BaselineInstrument(authored, InstrumentUses(before))
+	for _, u := range InstrumentUses(after) {
+		g := gradeDrift(authored, base, u)
+		if g == "" {
+			continue
+		}
+		if g == DriftMajor {
+			grade = DriftMajor
+		} else if grade == "" {
+			grade = DriftMinor
+		}
+		labels = appendUnique(labels, u.Label())
+		for _, d := range DriftDims(base, u.Fields) {
+			dims = appendUnique(dims, d)
+		}
+	}
+	return grade, dims, labels
+}
+
 func TestParseInstrumentIDRecoversTheDimensions(t *testing.T) {
 	four := ParseInstrumentID("gemini-3.7-flash/3/aaaa1111/go")
 	check(t, "model", four.Model, "gemini-3.7-flash")
@@ -74,19 +98,14 @@ func TestLegacyStringGradesAgainstStructuredFields(t *testing.T) {
 	chains := BuildChains(rows, false)
 	before, after := SplitChains(chains, 1050)
 
-	c, grade := instrumentDrift(before, after, "gemini-3.7-flash/3/aaaa1111/go")
-	if c == nil {
-		t.Fatal("an effort change is drift")
-	}
+	grade, dims, labels := windowDrift("gemini-3.7-flash/3/aaaa1111/go", before, after)
 	check(t, "effort alone grades minor", grade, DriftMinor)
-	check(t, "the reason names the dimension", c.Reason,
-		"the reviewer's effort changed between the windows")
-	check(t, "the after side carries the provider the string lacks", c.After,
+	check(t, "the dimension is named", dims, []string{"effort"})
+	check(t, "the after side carries the provider the string lacks", labels,
 		[]string{"gemini-3.7-flash/3/aaaa1111/go/high (provider agy)"})
 
-	steady, grade := instrumentDrift(before, before, "gemini-3.7-flash/3/aaaa1111/go")
-	check(t, "an unchanged reviewer is no confound", steady, (*Confound)(nil))
-	check(t, "and no grade", grade, "")
+	steady, _, _ := windowDrift("gemini-3.7-flash/3/aaaa1111/go", before, before)
+	check(t, "an unchanged reviewer grades nothing", steady, "")
 }
 
 // The provider is the one dimension the instrument string cannot hold, so two windows
@@ -105,13 +124,9 @@ func TestProviderSwapAtOneInstrumentStringIsDrift(t *testing.T) {
 	before, after := SplitChains(chains, 1050)
 
 	check(t, "the strings alone say nothing", InstrumentsIn(after), []string{id})
-	c, grade := instrumentDrift(before, after, id)
-	if c == nil {
-		t.Fatal("a provider swap is drift")
-	}
+	grade, dims, _ := windowDrift(id, before, after)
 	check(t, "a provider swap grades major", grade, DriftMajor)
-	check(t, "the reason names the provider", c.Reason,
-		"the reviewer's provider changed between the windows")
+	check(t, "the dimension names the provider", dims, []string{"provider"})
 }
 
 // The baseline provider is read from the before window alone. Pooling both windows
@@ -130,13 +145,11 @@ func TestTheBaselineProviderComesFromTheBeforeWindow(t *testing.T) {
 	}
 	chains := BuildChains(rows, false)
 	before, after := SplitChains(chains, 1050)
-	c, grade := instrumentDrift(before, after, id)
-	if c == nil {
-		t.Fatal("a provider swap is drift whichever way the names sort")
-	}
+	grade, _, _ := windowDrift(id, before, after)
 	check(t, "the swap grades major", grade, DriftMajor)
-	check(t, "the baseline keeps the before window's provider", c.Before,
-		[]string{id + " (provider codex)"})
+	base := BaselineInstrument(id, InstrumentUses(before))
+	check(t, "the baseline keeps the before window's provider",
+		InstrumentUse{ID: id, Fields: base}.Label(), id+" (provider codex)")
 }
 
 // An instrument string neither side can parse is uncharacterized, not small.
@@ -149,13 +162,11 @@ func TestAnUnreadableInstrumentPairGradesMajor(t *testing.T) {
 	}
 	chains := BuildChains(rows, false)
 	before, after := SplitChains(chains, 1050)
-	c, grade := instrumentDrift(before, after, "modelA/3/aaaa1111")
-	if c == nil {
-		t.Fatal("a changed instrument string is drift")
-	}
+	grade, dims, _ := windowDrift("modelA/3/aaaa1111", before, after)
 	check(t, "an unreadable change grades major", grade, DriftMajor)
-	check(t, "and keeps the undimensioned reason", c.Reason,
-		"an after-window chain was reviewed by a different instrument than the registered baseline")
+	if len(dims) != 0 {
+		t.Errorf("an unreadable change names no dimension, got %#v", dims)
+	}
 }
 
 // One instrument string can be stamped by a legacy row and a newer one. The provider
@@ -178,10 +189,7 @@ func TestTheBaselineFoldsWhatTheBeforeWindowKnows(t *testing.T) {
 	base := BaselineInstrument(id, InstrumentUses(before))
 	check(t, "an unstamped row does not erase a known provider", base.Provider, "codex")
 
-	c, grade := instrumentDrift(before, after, id)
-	if c == nil {
-		t.Fatal("the swap away from the known provider is drift")
-	}
+	grade, _, _ := windowDrift(id, before, after)
 	check(t, "the swap grades major", grade, DriftMajor)
 
 	// A baseline that several providers reviewed is not one identity, so the dimension
@@ -206,9 +214,10 @@ func TestTheBaselineFoldsWhatTheBeforeWindowKnows(t *testing.T) {
 	check(t, "an unstamped dimension falls back to the string", stamped.PromptDigest, "aaaa1111")
 }
 
-// A drift no dimension explains must not be reported as the dimensions the other
-// after-window identities moved.
-func TestAnUnreadableDriftKeepsItsOwnSentence(t *testing.T) {
+// An after window holding a dimensioned change and an unreadable one reports both:
+// the grade comes from the unreadable identity, and the named dimension from the
+// other. Neither may stand in for the other.
+func TestAnUnreadableDriftIsReportedBesideADimensionedOne(t *testing.T) {
 	base := "gemini-3.7-flash/3/aaaa1111/go"
 	rows := []gate.Row{
 		instrument(row(1000, "deny"), base),
@@ -221,12 +230,9 @@ func TestAnUnreadableDriftKeepsItsOwnSentence(t *testing.T) {
 	chains := BuildChains(rows, false)
 	before, after := SplitChains(chains, 1050)
 
-	c, grade := instrumentDrift(before, after, base)
-	if c == nil {
-		t.Fatal("two changed instruments are drift")
-	}
+	grade, dims, labels := windowDrift(base, before, after)
 	check(t, "an unreadable identity carries the grade", grade, DriftMajor)
-	check(t, "and the reason reports both halves", c.Reason,
-		"the reviewer's effort changed between the windows, and an after-window chain "+
-			"was reviewed by a different instrument than the registered baseline")
+	check(t, "the dimensioned half is still named", dims, []string{"effort"})
+	check(t, "and both identities are reported", labels,
+		[]string{base + "/high", "house-reviewer-v2"})
 }

@@ -6,58 +6,33 @@ func unit(harness, instrument string, ts float64) SessionUnit {
 	return SessionUnit{Harness: harness, Instrument: instrument, StartTS: ts}
 }
 
-// A record registered before adapters were named carries a bare parser digest.
-// The adapter dimension is then unknown on one side, so it is not graded.
-func TestLegacyInstrumentDoesNotDriftAgainstAComposedUnit(t *testing.T) {
-	if SessionInstrumentDiffers("scan-aaa/codex:1111", "scan-aaa") {
-		t.Error("a composed unit drifted against a bare parser baseline")
-	}
-	if SessionInstrumentDiffers("scan-aaa", "scan-aaa/codex:1111") {
-		t.Error("a bare parser unit drifted against a composed baseline")
-	}
-}
-
-// Two harnesses in one window are two adapters, not a drift: the record
-// registers both, and each unit is compared against its own harness's entry.
-func TestOneWindowOverTwoHarnessesDoesNotDrift(t *testing.T) {
+// A window holding two harnesses registers both adapters, so the label names the
+// whole pipeline the baseline was counted over.
+func TestARegisteredInstrumentNamesEveryHarnessInTheWindow(t *testing.T) {
 	units := []SessionUnit{
 		unit("claude-code", "scan-aaa/claude-code:1111", 10),
 		unit("codex", "scan-aaa/codex:2222", 20),
 	}
-	authored := RegisteredSessionInstrument(units)
-	if authored != "scan-aaa/claude-code:1111+codex:2222" {
-		t.Fatalf("registered instrument = %q; want both adapters", authored)
-	}
-	if drifted := driftingSessionInstruments(units, authored); len(drifted) > 0 {
-		t.Errorf("drift = %v; want none", drifted)
+	if got := RegisteredSessionInstrument(units); got != "scan-aaa/claude-code:1111+codex:2222" {
+		t.Fatalf("registered instrument = %q; want both adapters", got)
 	}
 }
 
-// An adapter change drifts only the harness it changed; a class on the other
-// harness alone reads no drift.
-func TestAnAdapterChangeDriftsOnlyItsOwnHarness(t *testing.T) {
-	authored := "scan-aaa/claude-code:1111+codex:2222"
-	moved := unit("codex", "scan-aaa/codex:9999", 30)
-	steady := unit("claude-code", "scan-aaa/claude-code:1111", 30)
-
-	if !SessionInstrumentDiffers(moved.Instrument, authored) {
-		t.Error("the changed Codex adapter did not read as drift")
+// The newest unit supplies each dimension, and a unit stamped before the adapter
+// was named contributes only its parser.
+func TestARegisteredInstrumentTakesTheNewestOfEachDimension(t *testing.T) {
+	units := []SessionUnit{
+		unit("codex", "scan-aaa/codex:1111", 10),
+		unit("codex", "scan-bbb/codex:2222", 20),
 	}
-	if SessionInstrumentDiffers(steady.Instrument, authored) {
-		t.Error("the unchanged Claude Code adapter read as drift")
+	if got := RegisteredSessionInstrument(units); got != "scan-bbb/codex:2222" {
+		t.Fatalf("registered instrument = %q; want the newest parser and adapter", got)
 	}
-	drifted := driftingSessionInstruments([]SessionUnit{steady, moved}, authored)
-	if len(drifted) != 1 || drifted[0] != moved.Instrument {
-		t.Errorf("drift = %v; want only the Codex unit", drifted)
+	if got := RegisteredSessionInstrument([]SessionUnit{unit("codex", "scan-aaa", 10)}); got != "scan-aaa" {
+		t.Fatalf("registered instrument = %q; want the bare parser", got)
 	}
-}
-
-func TestAClassifierChangeDriftsEveryHarness(t *testing.T) {
-	authored := "scan-aaa/claude-code:1111+codex:2222"
-	for _, u := range []string{"scan-bbb/claude-code:1111", "scan-bbb/codex:2222"} {
-		if !SessionInstrumentDiffers(u, authored) {
-			t.Errorf("%q did not read as drift against %q", u, authored)
-		}
+	if got := RegisteredSessionInstrument(nil); got != "" {
+		t.Fatalf("an unstamped window names no instrument, got %q", got)
 	}
 }
 

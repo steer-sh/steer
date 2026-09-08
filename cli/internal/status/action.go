@@ -6,8 +6,6 @@ package status
 
 import (
 	"fmt"
-	"math"
-	"time"
 
 	"github.com/steer-sh/steer-cli/internal/cadence"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
@@ -91,83 +89,6 @@ func ActionSentence(obs mine.Observation, scope *cadence.Scope) string {
 // row settles on its own, so a window holding only those is not a repair.
 func missingCoverage(obs mine.Observation) bool {
 	return mine.MissingCoverage(obs)
-}
-
-// quietDays is the silence past which this host's chain rate is withheld;
-// minSpanDays is the shortest sample a rate may be projected from.
-const (
-	quietDays   = 14
-	minSpanDays = 14
-)
-
-// ChainRate is the recent chain accrual read off one host's shard. Known is false
-// when the sample spans fewer than minSpanDays, or when the newest chain is older
-// than quietDays.
-type ChainRate struct {
-	PerDay    float64 `json:"per_day"`
-	Known     bool    `json:"known"`
-	QuietDays int     `json:"quiet_days,omitempty"`
-}
-
-// RateOver reads a chain rate off a whole corpus: how many chains it holds and the
-// epoch seconds of its oldest and newest. A caller must not pass a truncated tail —
-// a capped list of an active host spans too little to clear minSpanDays.
-func RateOver(units int, oldest, newest float64, now time.Time) ChainRate {
-	if units < 2 || newest <= oldest {
-		return ChainRate{}
-	}
-	quiet := int(now.Sub(time.Unix(int64(newest), 0)).Hours() / 24)
-	if quiet >= quietDays {
-		return ChainRate{QuietDays: quiet}
-	}
-	span := (newest - oldest) / 86400
-	if span < minSpanDays {
-		return ChainRate{}
-	}
-	return ChainRate{PerDay: float64(units-1) / span, Known: true}
-}
-
-// RateFrom reads a rate off a chain list, newest last.
-func RateFrom(chains []ChainSummary, now time.Time) ChainRate {
-	if len(chains) < 2 {
-		return ChainRate{}
-	}
-	return RateOver(len(chains), chains[0].StartTS, chains[len(chains)-1].StartTS, now)
-}
-
-// RatePhrase names a required window in units and the wait in calendar time. It
-// withholds the calendar half when the rate is unknown.
-func RatePhrase(required *int, unit string, rate ChainRate) string {
-	if required == nil || *required <= 0 {
-		return ""
-	}
-	unit = orUnit(unit)
-	window := fmt.Sprintf("a clean window of %d %s", *required, UnitName(unit, *required))
-	if unit != "chain" {
-		return window + "; how fast those accrue here is not measured"
-	}
-	if !rate.Known {
-		if rate.QuietDays > 0 {
-			return fmt.Sprintf("%s; none here in %d days, so the rate is unknown",
-				window, rate.QuietDays)
-		}
-		return window + "; the recent sample here is too short to project a rate"
-	}
-	return fmt.Sprintf("%s is about %s away at your recent rate",
-		window, humanDays(float64(*required)/rate.PerDay))
-}
-
-// humanDays renders a wait in the largest unit that keeps it a small number.
-func humanDays(days float64) string {
-	switch {
-	case days < 21:
-		return fmt.Sprintf("%d days", int(math.Round(days)))
-	case days < 90:
-		return fmt.Sprintf("%d weeks", int(math.Round(days/7)))
-	case days < 365:
-		return fmt.Sprintf("%d months", int(math.Round(days/30)))
-	}
-	return fmt.Sprintf("%.0f years", math.Round(days/365))
 }
 
 // RemovalPhrase says what stopping the tracking does and where the rule lives. It

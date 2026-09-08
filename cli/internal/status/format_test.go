@@ -6,50 +6,6 @@ import (
 	"github.com/steer-sh/steer-cli/internal/cadence"
 )
 
-func fptr(f float64) *float64 { return &f }
-func iptr(n int) *int         { return &n }
-
-func TestEffectPhraseNamesTheOpenBounds(t *testing.T) {
-	cases := []struct {
-		label string
-		in    cadence.Effect
-		want  string
-	}{
-		{"a closed range prints both bounds",
-			cadence.Effect{Estimate: fptr(0.25), Lower: 0.05, Upper: fptr(0.4), Confidence: 0.9, Method: "m"},
-			"RR 0.25 [0.05, 0.40] @90%"},
-		{"an unbounded upper prints ∞, never a number",
-			cadence.Effect{Estimate: fptr(0.25), Lower: 0.05, Confidence: 0.9, Method: "m"},
-			"RR 0.25 [0.05, ∞] @90%"},
-		{"a missing estimate prints —, never zero",
-			cadence.Effect{Lower: 0.05, Upper: fptr(0.4), Confidence: 0.9, Method: "m"},
-			"RR — [0.05, 0.40] @90%"},
-		{"an unmeasured record prints nothing at all",
-			cadence.Effect{}, ""},
-	}
-	for _, c := range cases {
-		if got := EffectPhrase(c.in); got != c.want {
-			t.Errorf("%s: got %q, want %q", c.label, got, c.want)
-		}
-	}
-}
-
-func TestRequiredPhraseSeparatesUnreachableFromSatisfied(t *testing.T) {
-	if got := RequiredPhrase(iptr(9), "chain", "collecting"); got != "needs 9 more clean, eligible review sequences" {
-		t.Errorf("a reachable target names its count, got %q", got)
-	}
-	if got := RequiredPhrase(iptr(0), "chain", "effective"); got != "" {
-		t.Errorf("a met target says nothing, got %q", got)
-	}
-	// A null required_after on an abstaining record means no window could decide it.
-	if got := RequiredPhrase(nil, "chain", "inconclusive"); got == "" {
-		t.Error("an unreachable target must be named on an abstaining record")
-	}
-	if got := RequiredPhrase(nil, "chain", "effective"); got != "" {
-		t.Errorf("a decided record says nothing, got %q", got)
-	}
-}
-
 func TestScopePhraseCombinesPredicatesWithAnd(t *testing.T) {
 	cases := []struct {
 		in   *cadence.Scope

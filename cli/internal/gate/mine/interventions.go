@@ -103,6 +103,10 @@ func StandsRejected(record Record) bool { return str(record["status"]) == "rejec
 // IsRejected reports a record that installed nothing — a refusal, live or overturned.
 func IsRejected(record Record) bool { return refusalStatuses[str(record["status"])] }
 
+// OverlapBlock: a candidate sharing this fraction of its chains with a rejected class
+// is that class again under a new name, so register stops rather than warns.
+const OverlapBlock = 0.5
+
 // Overlap counts the chains a candidate regex and a recorded class's regex both match.
 // The prior regex is read under the verdict filter it was authored against.
 func Overlap(record Record, chains []Chain, pattern *regexp.Regexp, kind string) (shared, total int, err error) {
@@ -417,26 +421,6 @@ func getString(record Record, key, fallback string) string {
 		}
 	}
 	return fallback
-}
-
-func sameStringSet(a, b []string) bool {
-	set := map[string]bool{}
-	for _, x := range a {
-		set[x] = true
-	}
-	other := map[string]bool{}
-	for _, x := range b {
-		other[x] = true
-	}
-	if len(set) != len(other) {
-		return false
-	}
-	for x := range set {
-		if !other[x] {
-			return false
-		}
-	}
-	return true
 }
 
 func emptyIfNil(s []string) []string {

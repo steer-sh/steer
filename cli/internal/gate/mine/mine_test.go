@@ -269,20 +269,6 @@ func TestVerdictFiltering(t *testing.T) {
 	check(t, "both filter", len(ChainHits(verdicts[0], mustCompile(t, "."), "both")), 2)
 }
 
-func TestFisher(t *testing.T) {
-	check(t, "empty margin is never significant", FisherOneSided(0, 0, 0, 0), 1.0)
-	check(t, "no before-hits is never significant", FisherOneSided(0, 20, 0, 20), 1.0)
-	if !(FisherOneSided(10, 10, 0, 20) < 0.01) {
-		t.Error("clean elimination is significant")
-	}
-	if !(FisherOneSided(5, 15, 5, 15) > 0.5) {
-		t.Error("unchanged rate is not significant")
-	}
-	if !(FisherOneSided(1, 1, 1, 1) <= 1.0) {
-		t.Error("p never exceeds 1")
-	}
-}
-
 func mustJSON(t *testing.T, r gate.Row) []byte {
 	t.Helper()
 	data, err := json.Marshal(r)

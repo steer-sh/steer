@@ -30,15 +30,6 @@ const (
 	corpusDenials        = "auto-denials"
 )
 
-// Attribution is the guard audit join carried beside a session-scored verdict.
-type Attribution struct {
-	Applicable bool   `json:"applicable"`
-	LogPresent bool   `json:"log_present"`
-	HookID     string `json:"hook_id,omitempty"`
-	Firings    int    `json:"firings"`
-	Sessions   int    `json:"sessions"`
-}
-
 // Incidence is a before/after chain count in the scored contract.
 type Incidence struct {
 	Hits  int     `json:"hits"`

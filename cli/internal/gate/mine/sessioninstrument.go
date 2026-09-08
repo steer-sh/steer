@@ -15,9 +15,8 @@ const (
 	sessionAdapterHarnessCut = ":"
 )
 
-// SessionInstrument is a session instrument by dimension. A dimension absent on
-// one side of a comparison is not graded, which is what keeps a record
-// registered before adapters were named from reading as drift.
+// SessionInstrument is a session instrument by dimension: the classifier, and
+// one adapter digest per harness.
 type SessionInstrument struct {
 	// Parser is the classifier digest.
 	Parser string
@@ -50,31 +49,10 @@ func ParseSessionInstrument(s string) SessionInstrument {
 	return inst
 }
 
-// SessionInstrumentDiffers reports whether a unit's instrument names a different
-// pipeline than the record's registered one. It compares dimension by dimension:
-// a parser both sides name, and an adapter both sides name for the same harness.
-// Two units of different harnesses therefore do not differ by virtue of running
-// on different harnesses, which is what makes a record spanning both scorable.
-func SessionInstrumentDiffers(unit, authored string) bool {
-	if unit == "" || authored == "" || unit == authored {
-		return false
-	}
-	u, a := ParseSessionInstrument(unit), ParseSessionInstrument(authored)
-	if u.Parser != "" && a.Parser != "" && u.Parser != a.Parser {
-		return true
-	}
-	for harness, digest := range u.Adapters {
-		if other, ok := a.Adapters[harness]; ok && other != digest {
-			return true
-		}
-	}
-	return false
-}
-
 // RegisteredSessionInstrument is the instrument a record freezes over its
 // baseline window: the newest parser the window carries, and the newest adapter
-// per harness. A window holding two harnesses registers both, so a later change
-// to either one is graded.
+// per harness. A window holding two harnesses registers both. It is provenance —
+// the label a reader compares by eye, under no rule here.
 func RegisteredSessionInstrument(units []SessionUnit) string {
 	parser, parserTS := "", float64(-1)
 	adapters := map[string]string{}
@@ -109,16 +87,4 @@ func RegisteredSessionInstrument(units []SessionUnit) string {
 		return parser
 	}
 	return parser + sessionInstrumentSep + strings.Join(parts, sessionAdapterSep)
-}
-
-// driftingSessionInstruments is the distinct unit instruments that name a
-// different pipeline than authored, in first-seen order.
-func driftingSessionInstruments(units []SessionUnit, authored string) []string {
-	var drifted []string
-	for _, u := range units {
-		if SessionInstrumentDiffers(u.Instrument, authored) {
-			drifted = appendUnique(drifted, u.Instrument)
-		}
-	}
-	return drifted
 }
