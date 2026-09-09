@@ -118,6 +118,19 @@ type Digest struct {
 	Signals          Signals           `json:"signals"`
 }
 
+// CorrectionReserve is the number of correction clusters the digest budget
+// protects from eviction. A correction's key is the user's own sentence, so it
+// scores 1 against machine output that repeats verbatim and would otherwise be
+// evicted first every time.
+const CorrectionReserve = 15
+
+// budgeted is one evictable signal list and the number of its highest-scoring
+// entries eviction must leave alone while any unreserved entry remains.
+type budgeted struct {
+	items   *[]*Cluster
+	reserve int
+}
+
 // Marshal renders the digest within maxBytes, evicting the lowest-scoring
 // signal clusters until it fits. InstructionFiles are exempt from eviction:
 // they are small and the highest-precision source. Stats.Truncated and
@@ -127,28 +140,28 @@ func (d *Digest) Marshal(maxBytes int) ([]byte, error) {
 		maxBytes = DefaultMaxDigestBytes
 	}
 
-	lists := []*[]*Cluster{
-		&d.Signals.UserCorrections,
-		&d.Signals.UserRejections,
-		&d.Signals.ToolFailures,
-		&d.Signals.HookBlocks,
+	lists := []budgeted{
+		{&d.Signals.UserCorrections, CorrectionReserve},
+		{&d.Signals.UserRejections, 0},
+		{&d.Signals.ToolFailures, 0},
+		{&d.Signals.HookBlocks, 0},
 	}
 
 	for _, list := range lists {
-		sort.SliceStable(*list, func(i, j int) bool {
-			return (*list)[i].Score() > (*list)[j].Score()
+		sort.SliceStable(*list.items, func(i, j int) bool {
+			return (*list.items)[i].Score() > (*list.items)[j].Score()
 		})
 	}
 
 	d.Stats.ClustersFound = 0
 	for _, list := range lists {
-		d.Stats.ClustersFound += len(*list)
+		d.Stats.ClustersFound += len(*list.items)
 	}
 
 	for {
 		d.Stats.ClustersEmitted = 0
 		for _, list := range lists {
-			d.Stats.ClustersEmitted += len(*list)
+			d.Stats.ClustersEmitted += len(*list.items)
 		}
 		d.Stats.Truncated = d.Stats.ClustersEmitted < d.Stats.ClustersFound
 
@@ -167,17 +180,25 @@ func (d *Digest) Marshal(maxBytes int) ([]byte, error) {
 	}
 }
 
-// evictLowest removes the single lowest-scoring cluster across all lists.
-// Lists are already sorted descending, so the candidate is each list's tail.
-func evictLowest(lists []*[]*Cluster) bool {
+// evictLowest removes the single lowest-scoring cluster across all lists,
+// preferring entries outside a list's reserve. Lists are already sorted
+// descending, so the candidate is each list's tail. Reserved entries are
+// evictable once nothing unreserved is left, so the budget still converges.
+func evictLowest(lists []budgeted) bool {
+	if evictLowestWhere(lists, func(l budgeted) bool { return len(*l.items) > l.reserve }) {
+		return true
+	}
+	return evictLowestWhere(lists, func(l budgeted) bool { return len(*l.items) > 0 })
+}
+
+func evictLowestWhere(lists []budgeted, eligible func(budgeted) bool) bool {
 	victim := -1
 	victimScore := 0
 	for i, list := range lists {
-		n := len(*list)
-		if n == 0 {
+		if !eligible(list) {
 			continue
 		}
-		score := (*list)[n-1].Score()
+		score := (*list.items)[len(*list.items)-1].Score()
 		if victim == -1 || score < victimScore {
 			victim = i
 			victimScore = score
@@ -186,7 +207,7 @@ func evictLowest(lists []*[]*Cluster) bool {
 	if victim == -1 {
 		return false
 	}
-	l := lists[victim]
+	l := lists[victim].items
 	*l = (*l)[:len(*l)-1]
 	return true
 }

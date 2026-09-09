@@ -248,7 +248,11 @@ queue, session snapshots and freshness state under the neutral evidence root.
 `steer report cadence` is the fail-open SessionStart entry point: it launches a
 stale refresh in the background and emits deduplicated operator nudges, including
 stale-master notices. The queue carries attention records, candidate pointers,
-unscored record ids and corpus sweep summaries.
+unscored record ids and corpus sweep summaries. The tier does no semantic
+grouping: a transcript cluster key is the user's own wording, so it merges
+verbatim repeats only, and candidates are ranked by session spread and capped
+rather than filtered on a count that key cannot earn. Naming classes is the
+skill's work on both corpora.
 
 `internal/status/` composes the read-only `SystemStatus` for terminal, JSON and
 TUI. Shared problem, evidence and formatting helpers keep human summaries aligned;

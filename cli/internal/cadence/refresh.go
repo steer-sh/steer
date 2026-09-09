@@ -19,9 +19,11 @@ import (
 // QueueVersion is the schema version of the queue file the skill reads.
 const QueueVersion = 5
 
-// minCandidateSessions is the deterministic threshold on transcript clusters: a
-// correction pattern must repeat across this many sessions to become a candidate.
-const minCandidateSessions = 3
+// maxTranscriptCandidates bounds the transcript half of the queue. A cluster key
+// is the user's own wording, so it groups verbatim repeats and nothing else;
+// grouping corrections into classes is the skill's job, and the queue carries the
+// strongest rows rather than filtering on a count the key cannot earn.
+const maxTranscriptCandidates = 25
 
 // Corpus and unit tags of the contract.
 const (
@@ -191,11 +193,9 @@ func Refresh(opts Options) (*Queue, error) {
 	// --- transcript-friction candidates: mechanical clusters over threshold ---
 	digest, derr := report.Generate(opts.WindowDays, opts.AllProjects)
 	if derr == nil {
+		transcript := make([]Candidate, 0, len(digest.Signals.UserCorrections))
 		for _, c := range digest.Signals.UserCorrections {
-			if c.Sessions < minCandidateSessions {
-				continue
-			}
-			q.Candidates = append(q.Candidates, Candidate{
+			transcript = append(transcript, Candidate{
 				Corpus:   corpusTranscript,
 				Pattern:  c.Pattern,
 				Count:    c.Count,
@@ -203,6 +203,11 @@ func Refresh(opts Options) (*Queue, error) {
 				Examples: c.Examples,
 			})
 		}
+		sortByStrength(transcript)
+		if len(transcript) > maxTranscriptCandidates {
+			transcript = transcript[:maxTranscriptCandidates]
+		}
+		q.Candidates = append(q.Candidates, transcript...)
 	}
 	sortCandidates(q.Candidates)
 
@@ -322,8 +327,26 @@ func sortCandidates(cs []Candidate) {
 		if cs[i].Corpus != cs[j].Corpus {
 			return cs[i].Corpus < cs[j].Corpus
 		}
-		return cs[i].Pattern < cs[j].Pattern
+		return strongerThan(cs[i], cs[j])
 	})
+}
+
+// sortByStrength orders one corpus's candidates so a truncation drops the
+// weakest rows rather than the alphabetically last ones.
+func sortByStrength(cs []Candidate) {
+	sort.SliceStable(cs, func(i, j int) bool { return strongerThan(cs[i], cs[j]) })
+}
+
+// strongerThan ranks by spread across sessions, then by raw count, and falls
+// back to the pattern so a refresh over unchanged evidence stays byte-identical.
+func strongerThan(a, b Candidate) bool {
+	if a.Sessions != b.Sessions {
+		return a.Sessions > b.Sessions
+	}
+	if a.Count != b.Count {
+		return a.Count > b.Count
+	}
+	return a.Pattern < b.Pattern
 }
 
 func sessionsScanned(d *report.Digest, err error) int {

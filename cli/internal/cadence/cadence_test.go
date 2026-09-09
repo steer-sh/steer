@@ -223,3 +223,47 @@ func TestNeedsAttention(t *testing.T) {
 		t.Error("a missing scope should need attention")
 	}
 }
+
+func TestTranscriptCandidatesRankByStrength(t *testing.T) {
+	// Alphabetical order and strength order disagree here, so a pass that still
+	// sorts by pattern truncates the strongest row away.
+	cs := []Candidate{
+		{Corpus: corpusTranscript, Pattern: "aaa seen once", Count: 1, Sessions: 1},
+		{Corpus: corpusTranscript, Pattern: "zzz seen everywhere", Count: 9, Sessions: 4},
+		{Corpus: corpusTranscript, Pattern: "mmm seen twice", Count: 5, Sessions: 2},
+	}
+	sortByStrength(cs)
+
+	want := []string{"zzz seen everywhere", "mmm seen twice", "aaa seen once"}
+	for i, w := range want {
+		if cs[i].Pattern != w {
+			t.Fatalf("position %d: got %q, want %q", i, cs[i].Pattern, w)
+		}
+	}
+}
+
+func TestCandidateOrderIsDeterministicOnTies(t *testing.T) {
+	tie := func() []Candidate {
+		return []Candidate{
+			{Corpus: corpusTranscript, Pattern: "b same weight", Count: 2, Sessions: 2},
+			{Corpus: corpusTranscript, Pattern: "a same weight", Count: 2, Sessions: 2},
+		}
+	}
+	first, second := tie(), tie()
+	sortCandidates(first)
+	sortCandidates(second)
+	if first[0].Pattern != "a same weight" || first[0].Pattern != second[0].Pattern {
+		t.Fatalf("equal-weight rows must order by pattern: %q then %q", first[0].Pattern, first[1].Pattern)
+	}
+}
+
+func TestSortCandidatesGroupsByCorpusBeforeStrength(t *testing.T) {
+	cs := []Candidate{
+		{Corpus: corpusTranscript, Pattern: "strong", Count: 9, Sessions: 9},
+		{Corpus: corpusReviewFindings, UndecidedChains: 90},
+	}
+	sortCandidates(cs)
+	if cs[0].Corpus != corpusReviewFindings {
+		t.Errorf("corpus grouping must outrank strength: got %q first", cs[0].Corpus)
+	}
+}

@@ -472,3 +472,64 @@ func TestCoverageCountsEachHarnessOnItsOwnIDs(t *testing.T) {
 		t.Errorf("totals = %+v", d.Stats)
 	}
 }
+
+func TestDigestReservesCorrectionBudget(t *testing.T) {
+	d := NewDigest(30)
+	// Corrections are keyed on the user's wording, so each holds one occurrence
+	// and scores 1; the machine-generated kinds repeat verbatim and score high.
+	for i := 0; i < 40; i++ {
+		d.Signals.UserCorrections = append(d.Signals.UserCorrections, &Cluster{
+			Pattern:  fmt.Sprintf("do not use the bare thing %d", i),
+			Count:    1,
+			Sessions: 1,
+			Examples: []string{strings.Repeat("c", 200)},
+		})
+		d.Signals.ToolFailures = append(d.Signals.ToolFailures, &Cluster{
+			Pattern:  fmt.Sprintf("traceback number %d", i),
+			Count:    20,
+			Sessions: 20,
+			Examples: []string{strings.Repeat("f", 200)},
+		})
+	}
+
+	budget := 9000
+	data, err := d.Marshal(budget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) > budget {
+		t.Fatalf("digest %d bytes exceeds budget %d", len(data), budget)
+	}
+	// The literal 15 is deliberate: asserting against CorrectionReserve holds
+	// vacuously for a reserve of zero, where every correction is evicted.
+	if got := len(d.Signals.UserCorrections); got != 15 {
+		t.Errorf("low-scoring corrections must outlive high-scoring machine output: %d survived, want 15", got)
+	}
+	if len(d.Signals.ToolFailures) >= 40 {
+		t.Error("expected the unreserved kind to absorb the eviction")
+	}
+}
+
+func TestDigestEvictsReserveRatherThanOverflow(t *testing.T) {
+	d := NewDigest(30)
+	for i := 0; i < 40; i++ {
+		d.Signals.UserCorrections = append(d.Signals.UserCorrections, &Cluster{
+			Pattern:  fmt.Sprintf("do not use the bare thing %d", i),
+			Count:    1,
+			Sessions: 1,
+			Examples: []string{strings.Repeat("c", 300)},
+		})
+	}
+
+	budget := 2000
+	data, err := d.Marshal(budget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) > budget {
+		t.Fatalf("a reserve must not hold the digest over budget: %d > %d", len(data), budget)
+	}
+	if len(d.Signals.UserCorrections) >= CorrectionReserve {
+		t.Error("with nothing unreserved left, the reserve itself must evict")
+	}
+}

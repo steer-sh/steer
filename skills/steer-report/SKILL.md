@@ -69,7 +69,7 @@ Then Read the queue **once**: `~/.steer/state/steer-report/queue.json` (`version
 
 - `interventions[]` — full contract records the tier flagged as **asking for a reader**: the class recurred after the split, a coverage cause left the window unaccounted for, or the record carries no frozen scope. These carry a `match`; they are the audit's action list, pre-filtered. Each carries `problem` and `intervention` — the record's own explanation of what goes wrong and what it does about it, authored when the class was found. Lead your report with those rather than with the class name or the regex, and correct one that no longer describes the evidence with `steer fix describe ID`, which changes no window. Each also carries the conditions the counts were taken under: `corpus` and `unit` (`review-findings` counts by `chain`, `transcript-friction` by `session` — never compare the two rates), `signal_kind` on a session-unit record, `scope` (the frozen eligibility rule, `null` on a legacy record), `before_coverage` / `after_coverage` (`total`, `eligible`, `ineligible`, `unknown`, `unknown_scope`, `unknown_evidence`, `pending`, `partial_exposure`), and `observation` — the five field blocks documented in the status contract below.
 - `unscored[]` — ids of records no engine reads. Report their existence; do not read a result into them.
-- `candidates[]` — pointers to new clusters. Transcript rows carry `pattern`/`count`/`sessions`; the review row carries `undecided_chains` and a `dump` command. These carry **no** `match` — authoring the regex is your job, below.
+- `candidates[]` — pointers to new clusters, strongest first within each corpus. Transcript rows carry `pattern`/`count`/`sessions`; the review row carries `undecided_chains` and a `dump` command. These carry **no** `match` — authoring the regex is your job, below.
 - `corpora[]` — one row per corpus (`review-findings`, `transcript-friction`, `auto-denials`) with `present` and `size`. Relay this sweep to the user in one sentence.
 
 The queue tells you what is pending. The full dumps below are the raw material you cluster over. Read the review-history fixes for the complete audit — the queue lists only the ones asking for a reader, not the quiet ones worth showing too. If this machine has no commit-review ledger, `mine score` reports an empty corpus — say "no fixes to audit on this machine" in one line and go to Step 2.
@@ -137,7 +137,7 @@ Then Read `${TMPDIR:-/tmp}/steer-digest.json` **once**. Do not cat the file and 
 
 All projects and every harness are scanned by default (cross-project, cross-harness habits are the strongest candidates). Pass through any flags the user supplied (`--days N`, `--project-only`, `--harness claude-code|codex`, `--max-digest-bytes N`). Strip `--headless` — it is a skill flag, not a CLI flag.
 
-The queue's transcript candidates already list the correction clusters that cleared the deterministic threshold (3+ sessions). Treat that count as an upper bound: it is the mechanical grouping, not the final class. Read the full digest to refine, split, or discard those clusters and to catch anything the threshold missed.
+The queue's transcript candidates list the strongest correction clusters, most of them holding a single occurrence. A cluster key is the user's own wording, so it merges verbatim repeats and nothing else — two complaints about one habit, phrased differently, arrive as two rows. Grouping them into classes is your job, not the tier's. Read the full digest to merge, split, or discard those rows and to catch anything the queue's cap left out.
 
 Digest schema (`digest_version: 2`):
 
@@ -332,7 +332,7 @@ Then:
 
 The script does no semantic grouping by design. Read the findings and name the classes yourself. A review class qualifies only when all of these hold:
 
-- It appears on **3 or more distinct chains**. Two is a coincidence.
+- It appears on **2 or more distinct chains**, and you state the count in the proposal. Two occurrences justify showing the class to the reader; the reader decides whether to install it. Say where you drew the class boundary, because the count follows from it: one class split in half can read as 2 and 3 where the merged class reads as 5.
 - It spans **more than one commit and more than one file**. A defect that only ever hit one file is that file's bug, not a class.
 - It names a **concrete, detectable tell** — a pattern in the source or the commit message, not a quality ("insufficient error handling").
 

@@ -362,9 +362,9 @@ func (s *Scanner) addCluster(kind, keyBasis, example string, e transcript.Event)
 	}
 }
 
-// Finalize assembles the digest from accumulated clusters. Single-occurrence
-// correction clusters are kept — the model layer may still find them useful —
-// but they rank last and evict first.
+// Finalize assembles the digest from accumulated clusters. Correction clusters
+// are keyed on the user's own wording, so most hold one occurrence; Marshal
+// reserves budget for them rather than letting the score ordering evict them.
 func (s *Scanner) Finalize(windowDays int, projects []string, instructionFiles []InstructionFile) *Digest {
 	d := NewDigest(windowDays)
 	d.ProjectsScanned = projects
