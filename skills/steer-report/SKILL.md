@@ -513,6 +513,8 @@ A legacy record written before scopes existed carries no scope. `steer fix scope
 
 `--reason` and `--reopen` are both required, and the second is the load-bearing one. "It is not mechanizable" is a verdict on today's instrument, not a permanent property of the class. Name what would have to change: a signal that starts being persisted, a rate that triples, a tier that becomes cheap. The durable version of that reasoning belongs in a durable design note; the record here is what fires at re-proposal time.
 
+**If your reason cites a count for a subset of the class, store that subset's regex.** Pass `--reopen-match '<regex>' --reopen-at <n>` together; either alone is refused. Without them the record keeps only the broad class regex, and a reason reading "only the numeric sub-case is detectable, and it is one chain" names a threshold no later pass can evaluate — the subset has no stored pattern to re-count. With them, the findings dump scores the subset on every run and prints `REOPEN CONDITION MET` when it reaches the threshold, so a refusal that time has overturned announces itself instead of waiting to be re-derived by hand.
+
 Record a refusal only for a candidate you actually examined against the corpus. Every one-off finding is not a rejected class, and a log padded with them buries the four or five refusals that matter.
 
 Register only after the fix exists. The install timestamp is the split point for every future measurement, so registering early credits the fix with commits it was never present for.

@@ -61,6 +61,8 @@ type interventionFlags struct {
 	rejectSignalKind string
 	rejectReason     string
 	rejectReopen     string
+	rejectReopenMtch string
+	rejectReopenAt   int
 	rejectNote       string
 	rejectProblem    string
 	rejectIntervent  string
@@ -225,16 +227,18 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 				return err
 			}
 			return mine.Reject(out(), gateConfig().StateDir, mine.RejectOpts{
-				Ledger:     v.ledger,
-				Class:      v.rejectClass,
-				Match:      v.rejectMatch,
-				Kind:       v.rejectKind,
-				Corpus:     v.rejectCorpus,
-				SignalKind: v.rejectSignalKind,
-				Sessions:   storedSessions(),
-				Reason:     v.rejectReason,
-				Reopen:     v.rejectReopen,
-				Note:       v.rejectNote,
+				Ledger:      v.ledger,
+				Class:       v.rejectClass,
+				Match:       v.rejectMatch,
+				Kind:        v.rejectKind,
+				Corpus:      v.rejectCorpus,
+				SignalKind:  v.rejectSignalKind,
+				Sessions:    storedSessions(),
+				Reason:      v.rejectReason,
+				Reopen:      v.rejectReopen,
+				ReopenMatch: v.rejectReopenMtch,
+				ReopenAt:    v.rejectReopenAt,
+				Note:        v.rejectNote,
 				Prose: mine.Prose{
 					Problem:      v.rejectProblem,
 					Intervention: v.rejectIntervent,
@@ -256,6 +260,8 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 	rj.StringVar(&v.rejectSignalKind, "signal-kind", "", signalKindUsage)
 	rj.StringVar(&v.rejectReason, "reason", "", "why no gate was installed (required)")
 	rj.StringVar(&v.rejectReopen, "reopen", "", "the observation that would make this worth reconsidering (required)")
+	rj.StringVar(&v.rejectReopenMtch, "reopen-match", "", "regex for the subset the reopen threshold counts; required when --reopen-at is set")
+	rj.IntVar(&v.rejectReopenAt, "reopen-at", 0, "chain count at which --reopen-match reopens this refusal")
 	rj.StringVar(&v.rejectNote, "note", "", "free-text note")
 	rj.StringVar(&v.rejectProblem, "problem", "", problemUsage)
 	rj.StringVar(&v.rejectIntervent, "intervention", "", rejectInterventionUsage)

@@ -254,6 +254,31 @@ func printDecisionReopen(w io.Writer, record Record) {
 	}
 }
 
+// printReopenIncidence scores a refusal's stored reopen regex against the corpus
+// now. Without it a reason citing a subset count names a threshold no later
+// reader can evaluate.
+func printReopenIncidence(w io.Writer, record Record, chains []Chain) {
+	expr := getString(record, "reopen_match", "")
+	if expr == "" {
+		return
+	}
+	pattern, err := compilePattern(expr)
+	if err != nil {
+		return
+	}
+	hits, denom, rate := Incidence(chains, pattern, RecordKindFilter(record))
+	at := getInt(record, "reopen_at", 0)
+	state := ""
+	if at > 0 {
+		state = ", below the reopen threshold"
+		if hits >= at {
+			state = fmt.Sprintf(", REOPEN CONDITION MET (>= %d)", at)
+		}
+	}
+	fmt.Fprintf(w, "#     reopen subset %s now %d/%d chains (%s)%s\n",
+		pyRepr(expr), hits, denom, pct(rate), state)
+}
+
 func printDecisionShared(w io.Writer, record Record, shared, total int) {
 	printDecisionHead(w, record)
 	fmt.Fprintf(w, "#     shares %d/%d of the candidate's chains\n", shared, total)
@@ -268,6 +293,7 @@ func printDecisionIncidence(w io.Writer, record Record, chains []Chain) {
 		fmt.Fprintf(w, "#     now %d/%d chains (%s)\n", hits, denom, pct(rate))
 	}
 	printDecisionReopen(w, record)
+	printReopenIncidence(w, record, chains)
 }
 
 // --- register / reject ------------------------------------------------------
@@ -504,6 +530,8 @@ type RejectOpts struct {
 	Sessions     []SessionUnit
 	Reason       string
 	Reopen       string
+	ReopenMatch  string
+	ReopenAt     int
 	Note         string
 	Prose        Prose
 	RejectedTS   int64
@@ -514,12 +542,34 @@ type RejectOpts struct {
 	ScopePath    string
 }
 
+// validateReopenSubset refuses half a reopen trigger. A regex without a count
+// names no threshold, and a count without a regex names no subset to count.
+func validateReopenSubset(match string, at int) error {
+	switch {
+	case match == "" && at == 0:
+		return nil
+	case match == "":
+		return fmt.Errorf("--reopen-at needs --reopen-match: a threshold with no regex " +
+			"cannot be evaluated by a later pass")
+	case at == 0:
+		return fmt.Errorf("--reopen-match needs --reopen-at: a subset regex with no " +
+			"threshold never reports itself met")
+	}
+	if _, err := compilePattern(match); err != nil {
+		return fmt.Errorf("--reopen-match does not compile: %w", err)
+	}
+	return nil
+}
+
 // Reject records a class examined and refused, so it is not re-proposed.
 func Reject(w io.Writer, stateDir string, o RejectOpts) error {
 	if o.Kind == "" {
 		o.Kind = "defect"
 	}
 	if err := o.Prose.Validate(o.Class); err != nil {
+		return err
+	}
+	if err := validateReopenSubset(o.ReopenMatch, o.ReopenAt); err != nil {
 		return err
 	}
 	spec, err := writableCorpus(o.Corpus)
@@ -596,6 +646,8 @@ func Reject(w io.Writer, stateDir string, o RejectOpts) error {
 		"note":          o.Note,
 		"reason":        o.Reason,
 		"reopen":        o.Reopen,
+		"reopen_match":  o.ReopenMatch,
+		"reopen_at":     o.ReopenAt,
 		"rejected_ts":   int(rejected),
 		"rejected_date": stamp(float64(rejected)),
 		"status":        "rejected",

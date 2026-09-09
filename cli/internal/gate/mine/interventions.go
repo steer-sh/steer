@@ -502,6 +502,24 @@ func getString(record Record, key, fallback string) string {
 	return fallback
 }
 
+// getInt reads a numeric record field. Records round-trip through JSON with
+// UseNumber, so a stored int reads back as json.Number rather than int.
+func getInt(record Record, key string, fallback int) int {
+	switch v := record[key].(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	case json.Number:
+		if n, err := v.Int64(); err == nil {
+			return int(n)
+		}
+	}
+	return fallback
+}
+
 func emptyIfNil(s []string) []string {
 	if s == nil {
 		return []string{}

@@ -1,6 +1,7 @@
 package mine
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"path/filepath"
@@ -602,5 +603,53 @@ func TestScoreReadsASessionRecordThroughTheSessionEngine(t *testing.T) {
 	}
 	if !strings.Contains(out, "bare-python") || !strings.Contains(out, "scorable") {
 		t.Errorf("both engines' records must appear, got:\n%s", out)
+	}
+}
+
+func TestReopenSubsetIsScoredAgainstTheCorpus(t *testing.T) {
+	var rows []gate.Row
+	ts := 1000
+	for i := 0; i < 12; i++ {
+		rows = append(rows, row(ts, "deny"),
+			concerns(row(ts+1, "retry"), "round", cv("repeat of round 1", "ACCEPTED")),
+			firing(row(ts+2, "clean"), 2))
+		ts += 100
+	}
+	stateDir, ledger := writeLedger(t, rows)
+
+	// Half a trigger is refused: neither half can be evaluated alone.
+	for _, bad := range []RejectOpts{
+		{ReopenMatch: "repeat of round"},
+		{ReopenAt: 3},
+		{ReopenMatch: "([", ReopenAt: 3},
+	} {
+		bad.Prose, bad.ScopeAll, bad.Ledger = testProse, true, ledger
+		bad.Class, bad.Match, bad.Reason, bad.Reopen = "c", "repeat of round", "r", "o"
+		if err := Reject(io.Discard, stateDir, bad); err == nil {
+			t.Errorf("expected refusal for reopen-match=%q reopen-at=%d", bad.ReopenMatch, bad.ReopenAt)
+		}
+	}
+
+	if err := Reject(io.Discard, stateDir, RejectOpts{
+		Prose:    testProse,
+		ScopeAll: true, Ledger: ledger, Class: "broad class", Match: "repeat of round",
+		Reason: "the mechanizable core is below the bar", Reopen: "the subset reaches 3 chains",
+		ReopenMatch: "repeat of round 1", ReopenAt: 3, RejectedTS: int64(ts),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	records, _ := Load(stateDir)
+	allRows, _ := LoadRows(stateDir, ledger)
+	chains := BuildChains(allRows, false)
+
+	var buf bytes.Buffer
+	printDecisionIncidence(&buf, records[0], chains)
+	out := buf.String()
+	if !strings.Contains(out, "REOPEN CONDITION MET") {
+		t.Errorf("a subset at 12 chains against a threshold of 3 must report met:\n%s", out)
+	}
+	if !strings.Contains(out, "reopen subset") {
+		t.Errorf("the stored subset regex must be printed so a later pass can run it:\n%s", out)
 	}
 }
