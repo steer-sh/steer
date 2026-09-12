@@ -3,14 +3,16 @@
 
 The change is the working tree against the merge base with the upstream branch
 (HEAD when there is none). The script builds variants of the change in a copy of
-the module and runs the new top-level test functions under each one:
+the repository and runs the new top-level test functions under each one:
 
+  zero    a changed function returns the zero values of its results at once
   revert  one changed block of non-test code put back to its base version
-  panic   panic("revert-test") inserted as the first statement of a changed function
 
-A new test that fails under at least one variant notices the change. A test that
-runs under variants and never fails does not test the change: it is reported and
-the script exits 1. A test whose doc comment carries MARKER is exempt.
+A new test that fails under at least one variant notices the change. Every other
+new test is reported and the script exits 1: a test that fails before any
+variant, one that no variant built and ran, and one that passes under every
+variant. Panic variants run only for the reported tests, to say whether each one
+reaches the changed functions. A test whose doc comment carries MARKER is exempt.
 """
 
 import hashlib
@@ -27,7 +29,8 @@ MODULE = "cli"
 MARKER = "// pins existing behaviour"
 TEST_FUNC = re.compile(r"^func (Test\w+)\(\w+ \*testing\.T\)", re.MULTILINE)
 HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
-PANIC = '\tpanic("revert-test")\n'
+PANIC = 'panic("revert-test")'
+FUNCS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "revert-test-funcs.go")
 
 
 def git(*args, check=True):
@@ -100,47 +103,42 @@ def revert(lines, start, count, old):
     return lines[:at] + old + lines[at + count:]
 
 
-def code(line):
-    return re.sub(r"\s*//[^\"`]*$", "", line).rstrip()
+def functions(paths):
+    """Map each Go file to its top-level functions, as revert-test-funcs.go prints them."""
+    if not paths:
+        return {}
+    listed = subprocess.run(["go", "run", FUNCS], input="\n".join(paths),
+                            capture_output=True, text=True)
+    if listed.returncode != 0:
+        raise RuntimeError("revert-test-funcs: %s" % listed.stderr.strip())
+    return json.loads(listed.stdout)
 
 
-def changed_functions(lines, touched):
-    """Yield the opening-brace line index of each top-level function whose span holds a touched line."""
-    i = 0
-    while i < len(lines):
-        if lines[i].startswith("func "):
-            start = i
-            while i < len(lines) and not code(lines[i]).endswith("{"):
-                if code(lines[i]).endswith("}"):
-                    break
-                i += 1
-            if i < len(lines) and code(lines[i]).endswith("{"):
-                open_at = i
-                while i < len(lines) and code(lines[i]) != "}":
-                    i += 1
-                if any(start <= t <= i for t in touched):
-                    yield open_at
-        i += 1
+def insert(data, offset, statement):
+    return data[:offset] + ("\n\t%s\n" % statement).encode() + data[offset:]
 
 
 def variants(base, paths, untracked):
-    """Return (path, mutated_lines) for every variant of the change, panics first."""
-    panics, reverts = [], []
-    for path in paths:
-        if not path.endswith(".go") or is_test_side(path):
-            continue
-        with open(path, encoding="utf-8") as handle:
-            lines = handle.readlines()
-        touched = set(range(len(lines))) if path in untracked else set()
+    """Return (behavioural, panics): lists of (path, mutated bytes), zero variants first."""
+    sources = [p for p in paths if p.endswith(".go") and not is_test_side(p)]
+    funcs = functions(sources)
+    zeros, reverts, panics = [], [], []
+    for path in sources:
+        with open(path, "rb") as handle:
+            data = handle.read()
+        lines = data.decode("utf-8").splitlines(keepends=True)
+        touched = set(range(1, len(lines) + 1)) if path in untracked else set()
         if path not in untracked:
             for start, count, old, new in hunks(base, path):
                 if is_trivia(old) and is_trivia(new):
                     continue
-                touched.update(range(start - 1, start - 1 + count) if count else (start - 1, start))
-                reverts.append((path, revert(lines, start, count, old)))
-        for open_at in changed_functions(lines, touched):
-            panics.append((path, lines[:open_at + 1] + [PANIC] + lines[open_at + 1:]))
-    return panics + reverts
+                touched.update(range(start, start + count) if count else (start, start + 1))
+                reverts.append((path, "".join(revert(lines, start, count, old)).encode()))
+        for fn in funcs[path]:
+            if any(fn["first"] <= t <= fn["last"] for t in touched):
+                zeros.append((path, insert(data, fn["body"], fn["zero"])))
+                panics.append((path, insert(data, fn["body"], PANIC)))
+    return zeros + reverts, panics
 
 
 def import_path(prefix, path):
@@ -160,14 +158,24 @@ def test_deps(prefix, packages):
 
 def change_key(base, name_status, paths):
     digest = hashlib.sha256()
-    with open(__file__, "rb") as handle:
-        digest.update(handle.read())
+    for script in (__file__, FUNCS):
+        with open(script, "rb") as handle:
+            digest.update(handle.read())
     digest.update(base.encode() + name_status.encode())
     for path in paths:
         digest.update(path.encode() + b"\0")
         with open(path, "rb") as handle:
             digest.update(handle.read())
     return digest.hexdigest()
+
+
+def copy_repository(root, tmp):
+    """Copy the module into tmp and link every other top-level entry, so tests that
+    read files beside the module find them."""
+    shutil.copytree(os.path.join(root, MODULE), os.path.join(tmp, MODULE), symlinks=True)
+    for entry in os.listdir(root):
+        if entry not in (MODULE, ".git"):
+            os.symlink(os.path.join(root, entry), os.path.join(tmp, entry))
 
 
 def run_tests(module_dir, prefix, by_package):
@@ -204,6 +212,36 @@ def run_once(module_dir, prefix, by_package):
     return outcome
 
 
+def judge(tmp, module_dir, prefix, by_package, deps, changes, targets):
+    """Run targets under each variant. Return (ran, failed, built): the tests that
+    ran under a built variant, those that failed under one, and the built count."""
+    failed, ran, built = set(), set(), 0
+    for path, mutated in changes:
+        if failed >= targets:
+            break
+        imported = import_path(prefix, path)
+        reachable = {p: [n for n in ns if (p, n) in targets and (p, n) not in failed]
+                     for p, ns in by_package.items() if imported in deps[p]}
+        reachable = {p: ns for p, ns in reachable.items() if ns}
+        if not reachable:
+            continue
+        target = os.path.join(tmp, path)
+        with open(target, "rb") as handle:
+            original = handle.read()
+        with open(target, "wb") as handle:
+            handle.write(mutated)
+        outcome = run_tests(module_dir, prefix, reachable)
+        with open(target, "wb") as handle:
+            handle.write(original)
+        outcome = {k: v for k, v in outcome.items() if k in targets}
+        if not outcome:
+            continue
+        built += 1
+        ran.update(outcome)
+        failed.update(k for k, v in outcome.items() if v == "fail")
+    return ran, failed, built
+
+
 def main():
     root = git("rev-parse", "--show-toplevel").strip()
     os.chdir(root)
@@ -233,59 +271,50 @@ def main():
     with open(os.path.join(MODULE, "go.mod"), encoding="utf-8") as handle:
         prefix = re.search(r"^module (\S+)", handle.read(), re.MULTILINE).group(1)
     deps = test_deps(prefix, by_package)
+    selected = {(p, n) for p, ns in by_package.items() for n in ns}
     started = time.time()
+    reasons = {}
     with tempfile.TemporaryDirectory(prefix="revert-test-") as tmp:
+        copy_repository(root, tmp)
         module_dir = os.path.join(tmp, MODULE)
-        shutil.copytree(MODULE, module_dir, symlinks=True)
 
         baseline = run_tests(module_dir, prefix, by_package)
-        live = {k for k, v in baseline.items() if v == "pass"}
-        if not live:
-            print("revert-test: no new test passes on the change itself; nothing to judge")
-            return 0
+        for test in selected:
+            if baseline.get(test) != "pass":
+                reasons[test] = ("fails in the copy of the repository before any variant (%s)"
+                                 % baseline.get(test, "no result"))
+        live = selected - set(reasons)
 
-        changes = variants(base, paths, untracked)
-        mutated_packages = {import_path(prefix, path) for path, _ in changes}
-        unreachable = {(p, n) for p, n in live if not mutated_packages & deps[p]}
-        killed, ran, built = set(), set(), 0
-        for path, mutated in changes:
-            if killed | unreachable == live:
-                break
-            imported = import_path(prefix, path)
-            reachable = {p: [n for n in ns if (p, n) in live and (p, n) not in killed]
-                         for p, ns in by_package.items() if imported in deps[p]}
-            reachable = {p: ns for p, ns in reachable.items() if ns}
-            if not reachable:
-                continue
-            target = os.path.join(tmp, path)
-            with open(target, encoding="utf-8") as handle:
-                original = handle.read()
-            with open(target, "w", encoding="utf-8") as handle:
-                handle.writelines(mutated)
-            outcome = run_tests(module_dir, prefix, reachable)
-            with open(target, "w", encoding="utf-8") as handle:
-                handle.write(original)
-            outcome = {k: v for k, v in outcome.items() if k in live}
-            if not outcome:
-                continue
-            built += 1
-            ran.update(outcome)
-            killed.update(k for k, v in outcome.items() if v == "fail")
+        behavioural, panics = variants(base, paths, untracked)
+        mutated_packages = {import_path(prefix, path) for path, _ in behavioural + panics}
+        for test in live:
+            if not mutated_packages & deps[test[0]]:
+                reasons[test] = "its test binary links none of the changed packages"
+        targets = live - set(reasons)
+        ran, killed, built = judge(tmp, module_dir, prefix, by_package, deps, behavioural, targets)
+        survivors = targets - killed
+        if survivors:
+            _, reached, _ = judge(tmp, module_dir, prefix, by_package, deps, panics, survivors)
+            for test in survivors:
+                if test not in ran:
+                    what = "no variant of the change built and ran it"
+                elif test in reached:
+                    what = ("it calls the changed functions, but passes under every variant "
+                            "that built: each function returning zero values, each block reverted")
+                else:
+                    what = "it passes under every variant that built and never calls a changed function"
+                reasons[test] = what
 
-    blind = sorted((ran - killed) | unreachable)
-    silent = sorted(live - ran - unreachable)
     print("revert-test: base %s, %d new test(s), %d variant(s) built, %.0fs"
-          % (base[:8], len(live), built, time.time() - started))
-    for package, test in silent:
-        print("  no signal (no variant built and ran it): %s: %s" % (package, test))
-    if blind:
-        print("revert-test: these new tests pass under every variant, or link none of "
-              "the changed code, so they do not test the change:", file=sys.stderr)
-        for package, test in blind:
-            print("  %s: %s" % (package, test), file=sys.stderr)
-        print("Make each test exercise the change. If a test deliberately pins behaviour "
-              "that already existed, put `%s` in its doc comment; the commit reviewer "
-              "sees that claim." % MARKER, file=sys.stderr)
+          % (base[:8], len(selected), built, time.time() - started))
+    if reasons:
+        print("revert-test: these new tests do not show that they test the change:",
+              file=sys.stderr)
+        for (package, test), what in sorted(reasons.items()):
+            print("  %s: %s: %s" % (package, test, what), file=sys.stderr)
+        print("Make each test fail when the changed code is wrong. If a test deliberately "
+              "pins behaviour that already existed, put `%s` in its doc comment; the commit "
+              "reviewer sees that claim." % MARKER, file=sys.stderr)
         return 1
     with open(stamp, "w", encoding="utf-8") as handle:
         handle.write(key)

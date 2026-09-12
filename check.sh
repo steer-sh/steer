@@ -5,7 +5,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/cli"
 
-unformatted="$(gofmt -l .)"
+unformatted="$(gofmt -l . ../scripts)"
 if [ -n "$unformatted" ]; then
   echo "gofmt: needs formatting:" >&2
   echo "$unformatted" >&2
