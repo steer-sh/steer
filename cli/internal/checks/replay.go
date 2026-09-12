@@ -61,9 +61,13 @@ type FileDigest struct {
 }
 
 // Detector is the tracked inputs of a check and one digest over all of them.
+// Decls holds a go-test binding's tracked declarations; Unresolved names what
+// its analysis saw but could not track, so the digest does not cover it.
 type Detector struct {
-	Digest string       `json:"digest"`
-	Files  []FileDigest `json:"files"`
+	Digest     string       `json:"digest"`
+	Files      []FileDigest `json:"files"`
+	Decls      []DeclDigest `json:"decls,omitempty"`
+	Unresolved []string     `json:"unresolved,omitempty"`
 }
 
 // CaseResult is what one case observed.
@@ -77,67 +81,151 @@ type CaseResult struct {
 	Excerpt      string `json:"excerpt,omitempty"`
 }
 
-// detectorPaths lists the repository-relative files a script binding runs.
-func detectorPaths(d Declaration) []string {
-	paths := append([]string{d.Script}, d.Inputs...)
-	sort.Strings(paths)
-	return paths
-}
-
-// DetectorOf digests the tracked inputs of a script binding as they are now in
-// the repository rooted at root. A missing input is an error.
-func DetectorOf(root string, d Declaration) (Detector, error) {
-	if d.Kind != KindScript {
-		return Detector{}, fmt.Errorf("check %s: this steer replays %s bindings only", d.ID, KindScript)
-	}
-	var det Detector
-	all := sha256.New()
-	for _, p := range detectorPaths(d) {
+// inputDigests digests repository-relative files. A missing file is an error.
+func inputDigests(root, id string, paths []string) ([]FileDigest, error) {
+	sorted := append([]string(nil), paths...)
+	sort.Strings(sorted)
+	var out []FileDigest
+	for _, p := range sorted {
 		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(p)))
 		if err != nil {
-			return Detector{}, fmt.Errorf("check %s: detector input %s: %w", d.ID, p, err)
+			return nil, fmt.Errorf("check %s: detector input %s: %w", id, p, err)
 		}
 		sum := sha256.Sum256(data)
-		fd := FileDigest{Path: p, SHA256: hex.EncodeToString(sum[:])}
-		det.Files = append(det.Files, fd)
-		fmt.Fprintf(all, "%s\x00%s\n", fd.Path, fd.SHA256)
+		out = append(out, FileDigest{Path: p, SHA256: hex.EncodeToString(sum[:])})
 	}
-	det.Digest = hex.EncodeToString(all.Sum(nil))
-	return det, nil
+	return out, nil
 }
 
-// Replay runs every case of a script binding in its own temporary tree holding
-// the case's files and a copy of the detector. The repository itself is only
-// read. An error means no case could run, such as a missing detector input.
+// DetectorOf digests the tracked inputs of a check as they are now in the
+// repository rooted at root. A missing input is an error.
+func DetectorOf(root string, d Declaration) (Detector, error) {
+	if d.Kind == KindGoTest {
+		det, _, err := goDetectorOf(root, d)
+		return det, err
+	}
+	files, err := inputDigests(root, d.ID, append([]string{d.Script}, d.Inputs...))
+	if err != nil {
+		return Detector{}, err
+	}
+	all := sha256.New()
+	for _, fd := range files {
+		fmt.Fprintf(all, "%s\x00%s\n", fd.Path, fd.SHA256)
+	}
+	return Detector{Digest: hex.EncodeToString(all.Sum(nil)), Files: files}, nil
+}
+
+// caseRunner is what one binding kind adds to a case tree and how it runs there.
+type caseRunner struct {
+	// protects reports why a case may not write a path, or "" when it may.
+	protects func(p string) string
+	// install writes the detector into the tree.
+	install func(tree string) error
+	// run runs the detector in the tree and fills the observed fields of res.
+	run func(tree string, c Case, res *CaseResult) (reason string)
+}
+
+// Replay runs every case of a check in its own temporary tree holding the
+// case's files and the current detector. The repository itself is only read.
+// An error means no case could run, such as a missing detector input.
 func Replay(root string, d Declaration, cases CaseFile) (Detector, []CaseResult, error) {
-	det, err := DetectorOf(root, d)
-	if err != nil {
-		return Detector{}, nil, err
-	}
-	bash, err := exec.LookPath("bash")
-	if err != nil {
-		return det, nil, fmt.Errorf("replay needs bash: %w", err)
-	}
-	detectorFiles := map[string]bool{}
-	for _, p := range detectorPaths(d) {
-		detectorFiles[p] = true
+	bash, bashErr := exec.LookPath("bash")
+	var det Detector
+	var runner caseRunner
+	switch d.Kind {
+	case KindGoTest:
+		var gd goDetector
+		var err error
+		det, gd, err = goDetectorOf(root, d)
+		if err != nil {
+			return Detector{}, nil, err
+		}
+		if runner, err = goRunner(root, d, gd); err != nil {
+			return det, nil, err
+		}
+	default:
+		var err error
+		if det, err = DetectorOf(root, d); err != nil {
+			return Detector{}, nil, err
+		}
+		if bashErr != nil {
+			return det, nil, fmt.Errorf("replay needs bash: %w", bashErr)
+		}
+		runner = scriptRunner(root, bash, d)
 	}
 	results := make([]CaseResult, 0, len(cases.Cases))
 	for _, c := range cases.Cases {
-		results = append(results, replayCase(root, bash, d, detectorFiles, c))
+		results = append(results, replayCase(bash, runner, c))
 	}
 	return det, results, nil
 }
 
-func replayCase(root, bash string, d Declaration, detectorFiles map[string]bool, c Case) CaseResult {
+func scriptRunner(root, bash string, d Declaration) caseRunner {
+	detectorFiles := map[string]bool{d.Script: true}
+	for _, p := range d.Inputs {
+		detectorFiles[p] = true
+	}
+	return caseRunner{
+		protects: func(p string) string {
+			if detectorFiles[p] {
+				return fmt.Sprintf("the case writes detector file %s", p)
+			}
+			return ""
+		},
+		install: func(tree string) error {
+			return copyDetectorFiles(root, tree, detectorFiles)
+		},
+		run: func(tree string, c Case, res *CaseResult) string {
+			code, out, timedOut, err := runBash(tree, bash, filepath.FromSlash(d.Script))
+			if timedOut {
+				return fmt.Sprintf("the check exceeded %s", CaseTimeout)
+			}
+			if err != nil {
+				return fmt.Sprintf("the check could not run: %v", err)
+			}
+			sum := sha256.Sum256(out)
+			res.ObservedExit = &code
+			res.OutputDigest = hex.EncodeToString(sum[:])
+			res.Excerpt = excerpt(out)
+			if code == unrunnableLow || code == unrunnableTop {
+				return fmt.Sprintf("exit %d: a command the check calls could not run", code)
+			}
+			judge(res, code, out, c.Diagnostic)
+			return ""
+		},
+	}
+}
+
+// judge compares an observed exit and output with the case's expectation.
+func judge(res *CaseResult, code int, out []byte, diagnostic string) {
+	switch {
+	case code != res.ExpectedExit:
+		res.Outcome, res.Reason = OutcomeMismatched, fmt.Sprintf("exited %d, expected %d", code, res.ExpectedExit)
+	case code != 0 && !bytes.Contains(out, []byte(diagnostic)):
+		res.Outcome, res.Reason = OutcomeMismatched, fmt.Sprintf("the failure did not print %q", diagnostic)
+	default:
+		res.Outcome = OutcomeMatched
+	}
+}
+
+func copyDetectorFiles(root, tree string, files map[string]bool) error {
+	for p := range files {
+		if err := copyFile(filepath.Join(root, filepath.FromSlash(p)), filepath.Join(tree, filepath.FromSlash(p))); err != nil {
+			return fmt.Errorf("copy detector file %s: %w", p, err)
+		}
+	}
+	return nil
+}
+
+func replayCase(bash string, runner caseRunner, c Case) CaseResult {
 	res := CaseResult{Name: c.Name, ExpectedExit: *c.ExitCode}
 	invalid := func(reason string) CaseResult {
 		res.Outcome, res.Reason = OutcomeInvalid, reason
 		return res
 	}
 	for p := range c.Files {
-		if detectorFiles[p] {
-			return invalid(fmt.Sprintf("the case writes detector file %s", p))
+		if reason := runner.protects(p); reason != "" {
+			return invalid(reason)
 		}
 	}
 	tmp, err := os.MkdirTemp("", "steer-check-case-")
@@ -146,10 +234,11 @@ func replayCase(root, bash string, d Declaration, detectorFiles map[string]bool,
 	}
 	defer os.RemoveAll(tmp)
 	tree := filepath.Join(tmp, "tree")
-	for p := range detectorFiles {
-		if err := copyFile(filepath.Join(root, filepath.FromSlash(p)), filepath.Join(tree, filepath.FromSlash(p))); err != nil {
-			return invalid(fmt.Sprintf("copy detector file %s: %v", p, err))
-		}
+	if err := os.MkdirAll(tree, 0o755); err != nil {
+		return invalid(fmt.Sprintf("create case tree: %v", err))
+	}
+	if err := runner.install(tree); err != nil {
+		return invalid(err.Error())
 	}
 	for p, content := range c.Files {
 		dst := filepath.Join(tree, filepath.FromSlash(p))
@@ -161,6 +250,9 @@ func replayCase(root, bash string, d Declaration, detectorFiles map[string]bool,
 		}
 	}
 	if c.Setup != "" {
+		if bash == "" {
+			return invalid("setup needs bash")
+		}
 		code, out, timedOut, err := runBash(tree, bash, "-euo", "pipefail", "-c", c.Setup)
 		switch {
 		case timedOut:
@@ -172,26 +264,8 @@ func replayCase(root, bash string, d Declaration, detectorFiles map[string]bool,
 			return invalid(fmt.Sprintf("setup exited %d", code))
 		}
 	}
-	code, out, timedOut, err := runBash(tree, bash, filepath.FromSlash(d.Script))
-	if timedOut {
-		return invalid(fmt.Sprintf("the check exceeded %s", CaseTimeout))
-	}
-	if err != nil {
-		return invalid(fmt.Sprintf("the check could not run: %v", err))
-	}
-	sum := sha256.Sum256(out)
-	res.ObservedExit = &code
-	res.OutputDigest = hex.EncodeToString(sum[:])
-	res.Excerpt = excerpt(out)
-	switch {
-	case code == unrunnableLow || code == unrunnableTop:
-		return invalid(fmt.Sprintf("exit %d: a command the check calls could not run", code))
-	case code != res.ExpectedExit:
-		res.Outcome, res.Reason = OutcomeMismatched, fmt.Sprintf("exited %d, expected %d", code, res.ExpectedExit)
-	case code != 0 && !bytes.Contains(out, []byte(c.Diagnostic)):
-		res.Outcome, res.Reason = OutcomeMismatched, fmt.Sprintf("the failure did not print %q", c.Diagnostic)
-	default:
-		res.Outcome = OutcomeMatched
+	if reason := runner.run(tree, c, &res); reason != "" {
+		return invalid(reason)
 	}
 	return res
 }
@@ -199,11 +273,20 @@ func replayCase(root, bash string, d Declaration, detectorFiles map[string]bool,
 // runBash runs bash with args in dir under CaseTimeout and returns its exit
 // code and combined output, capped at outputCap.
 func runBash(dir, bash string, args ...string) (code int, out []byte, timedOut bool, err error) {
+	return runCommand(dir, nil, bash, args...)
+}
+
+// runCommand runs name with args in dir under CaseTimeout, with env added to
+// the inherited environment, and returns its exit code and combined output.
+func runCommand(dir string, env []string, name string, args ...string) (code int, out []byte, timedOut bool, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), CaseTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, bash, args...)
+	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
 	cmd.Stdin = nil
+	if env != nil {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	procgroup.Set(cmd)
 	buf := &cappedBuffer{limit: outputCap}
 	cmd.Stdout, cmd.Stderr = buf, buf

@@ -81,6 +81,19 @@ detector (the script and its `inputs`). `setup` is an optional Bash script run
 in the tree first, for state plain files cannot express, such as `git init`.
 The repository itself is never written.
 
+For a `go-test` binding, a case supplies the module and the production code
+(`go.mod` and the package's non-test files); `exit_code` 0 means the named test
+passes and 1 means it fails. Steer removes the package's test files from the
+tree and writes one generated test file holding the named test and the
+test-side declarations it reaches: helpers, types, variables and constants.
+Replay runs `go test -count=1` with `GOPROXY=off`, so a missing module makes the
+case invalid instead of downloading. The diagnostic must appear in the named
+test's own output.
+
+What the Go analysis sees but cannot track, such as an imported helper package
+or a `testdata` path, is listed as not tracked. Declare such files with
+`--input` so an edit to them marks the receipt stale.
+
 A defect case matches only when the check exits with its `exit_code` and prints
 its `diagnostic`. A failed setup, a command that cannot run (exit 126 or 127),
 or a timeout makes the case invalid: it proves nothing either way.
@@ -90,6 +103,8 @@ or a timeout makes the case invalid: it proves nothing either way.
 - `steer check init [repo]` creates an empty manifest. It keeps an existing one.
 - `steer check add <id> --script <path> [--input <path>]...` replays the cases
   and declares the check only when every case matched.
+- `steer check add <id> --go-package <dir> --go-test <name> [--input <path>]...`
+  does the same for a test in the Go suite.
 - `steer check test <id>` replays a declared check's cases with its current
   detector. Run it after you edit the check, its inputs or its cases.
 - `steer check list` shows each check and its validation: current, stale (what

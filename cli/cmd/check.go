@@ -61,13 +61,17 @@ var checkInitCmd = &cobra.Command{
 }
 
 var checkAddCmd = &cobra.Command{
-	Use:   "add <id> --script <path>",
+	Use:   "add <id> (--script <path> | --go-package <dir> --go-test <name>)",
 	Short: "Validate a check against its cases, then declare it",
-	Long: `Replays .steer/checks/cases/<id>.json against the script and declares the
-check in the manifest only when every case matched. The run is recorded in
-machine-local evidence whatever its verdict.`,
+	Long: `Replays .steer/checks/cases/<id>.json against the check and declares it in
+the manifest only when every case matched. The run is recorded in
+machine-local evidence whatever its verdict.
+
+A script binding runs a repository script. A go-test binding names one
+top-level test in the repository's Go suite by its package directory and name.`,
 	Example: `  steer check add no-count --script .steer/checks/no-count.sh
-  steer check add no-count --script scripts/no-count.sh --input scripts/lib.sh`,
+  steer check add no-count --script scripts/no-count.sh --input scripts/lib.sh
+  steer check add json-contract --go-package cli/internal/status --go-test TestJSONContractIsStable`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		root, err := repoRootOf(".")
@@ -75,8 +79,18 @@ machine-local evidence whatever its verdict.`,
 			return err
 		}
 		script, _ := cmd.Flags().GetString("script")
+		goPackage, _ := cmd.Flags().GetString("go-package")
+		goTest, _ := cmd.Flags().GetString("go-test")
 		inputs, _ := cmd.Flags().GetStringSlice("input")
-		d := checks.Declaration{ID: args[0], Kind: checks.KindScript, Script: script, Inputs: inputs}
+		d := checks.Declaration{ID: args[0], Inputs: inputs}
+		switch {
+		case script != "" && goPackage == "" && goTest == "":
+			d.Kind, d.Script = checks.KindScript, script
+		case script == "" && goPackage != "" && goTest != "":
+			d.Kind, d.Package, d.Test = checks.KindGoTest, goPackage, goTest
+		default:
+			return fmt.Errorf("name one binding: --script, or --go-package with --go-test")
+		}
 		run, err := checks.Add(root, d)
 		printValidation(cmd, run)
 		if err != nil {
@@ -128,6 +142,9 @@ var checkListCmd = &cobra.Command{
 			f := checks.FreshnessOf(root, d, history)
 			fmt.Fprintf(out, "%s  %s %s\n", d.ID, d.Kind, bindingTarget(d))
 			fmt.Fprintf(out, "  validation: %s\n", freshnessPhrase(f))
+			if det, err := checks.DetectorOf(root, d); err == nil && len(det.Unresolved) > 0 {
+				fmt.Fprintf(out, "  not tracked: %s\n", strings.Join(det.Unresolved, "; "))
+			}
 			if f.Latest != nil && f.Latest != f.Receipt {
 				fmt.Fprintf(out, "  latest replay: %s at %s\n", f.Latest.Verdict, f.Latest.Finished.Local().Format("2006-01-02 15:04"))
 			}
@@ -187,12 +204,15 @@ func printValidation(cmd *cobra.Command, run checks.ValidationRun) {
 	if run.Reason != "" {
 		fmt.Fprintf(out, "  %s\n", run.Reason)
 	}
+	if len(run.Detector.Unresolved) > 0 {
+		fmt.Fprintf(out, "  not tracked by the detector digest: %s\n", strings.Join(run.Detector.Unresolved, "; "))
+	}
 	for _, c := range run.Cases {
 		observed := "no exit"
 		if c.ObservedExit != nil {
 			observed = fmt.Sprintf("exit %d", *c.ObservedExit)
 		}
-		fmt.Fprintf(out, "  %-9s %s (expected exit %d, %s)", c.Outcome, c.Name, c.ExpectedExit, observed)
+		fmt.Fprintf(out, "  %-10s %s (expected exit %d, %s)", c.Outcome, c.Name, c.ExpectedExit, observed)
 		if c.Reason != "" {
 			fmt.Fprintf(out, ": %s", c.Reason)
 		}
@@ -225,7 +245,8 @@ func repoRootOf(dir string) (string, error) {
 func init() {
 	rootCmd.AddCommand(checkCmd)
 	checkCmd.AddCommand(checkGuideCmd, checkInitCmd, checkAddCmd, checkTestCmd, checkListCmd, checkRemoveCmd)
-	checkAddCmd.Flags().String("script", "", "repository-relative script the check runs (required)")
+	checkAddCmd.Flags().String("script", "", "repository-relative script the check runs")
+	checkAddCmd.Flags().String("go-package", "", "repository-relative directory of the Go test's package")
+	checkAddCmd.Flags().String("go-test", "", "exact name of the top-level Go test function")
 	checkAddCmd.Flags().StringSlice("input", nil, "further repository-relative detector file (repeatable)")
-	_ = checkAddCmd.MarkFlagRequired("script")
 }

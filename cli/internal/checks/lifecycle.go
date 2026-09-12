@@ -23,9 +23,6 @@ func Add(root string, d Declaration) (ValidationRun, error) {
 	if err := d.Validate(); err != nil {
 		return ValidationRun{}, err
 	}
-	if d.Kind != KindScript {
-		return ValidationRun{}, fmt.Errorf("check %s: this steer adds %s bindings only", d.ID, KindScript)
-	}
 	m, err := loadForMutation(root)
 	if err != nil {
 		return ValidationRun{}, err
