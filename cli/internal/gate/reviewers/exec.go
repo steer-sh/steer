@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/steer-sh/steer-cli/internal/gate"
+	"github.com/steer-sh/steer-cli/internal/procgroup"
 )
 
 // runProcess executes argv with cwd set to the repo and returns stdout, stderr and a
@@ -23,7 +24,7 @@ import (
 func runProcess(ctx context.Context, cwd string, argv []string, stdin string) (stdout, stderr string, raw gate.RawRun, failed bool) {
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = cwd
-	setProcessGroup(cmd)
+	procgroup.Set(cmd)
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
 	}
