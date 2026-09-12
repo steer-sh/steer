@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -33,7 +34,7 @@ var checkGuideCmd = &cobra.Command{
 
 var checkInitCmd = &cobra.Command{
 	Use:   "init [repo]",
-	Short: "Create the repository's check manifest, keeping an existing one",
+	Short: "Create the check manifest and a check.sh scaffold, keeping existing files",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dir := "."
@@ -48,14 +49,114 @@ var checkInitCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		rel, _ := filepath.Rel(root, checks.ManifestPath(root))
-		if created {
-			fmt.Fprintln(cmd.OutOrStdout(), styles.SuccessBox.Render(fmt.Sprintf(
-				"Created %s\nRepository: %s", rel, root)))
-			return nil
+		scaffolded, err := checks.WriteScaffold(root)
+		if err != nil {
+			return err
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "%s already exists in %s with %d checks; left unchanged.\n",
-			rel, root, len(m.Checks))
+		out := cmd.OutOrStdout()
+		rel, _ := filepath.Rel(root, checks.ManifestPath(root))
+		var made []string
+		if created {
+			made = append(made, "Created "+rel)
+		} else {
+			fmt.Fprintf(out, "%s already exists with %d checks; left unchanged.\n", rel, len(m.Checks))
+		}
+		if scaffolded {
+			made = append(made, "Created "+checks.OracleName)
+		} else if !checks.OracleRunsExec(root) {
+			fmt.Fprintf(out, "%s exists and was left unchanged. Add the managed checks to its sequence:\n  %s\nSee `steer check guide` for the full integration.\n",
+				checks.OracleName, checks.ExecInvocation)
+		}
+		if len(made) > 0 {
+			made = append(made, "Repository: "+root)
+			fmt.Fprintln(out, styles.SuccessBox.Render(strings.Join(made, "\n")))
+		}
+		return nil
+	},
+}
+
+var checkExecCmd = &cobra.Command{
+	Use:   "exec (--all | <id>...)",
+	Short: "Run managed script checks and record each outcome",
+	Long: `Runs script checks one after another from the repository root and records
+each outcome in machine-local execution evidence. A failing check does not stop
+the checks after it. Exits non-zero when any check did not pass.
+
+check.sh calls this; go-test bindings run through ` + "`steer check go-test`" + ` instead.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		all, _ := cmd.Flags().GetBool("all")
+		if all == (len(args) > 0) {
+			return fmt.Errorf("name the checks to run, or pass --all")
+		}
+		root, err := repoRootOf(".")
+		if err != nil {
+			return err
+		}
+		inv, err := checks.InvocationFromEnv()
+		if err != nil {
+			return err
+		}
+		timeout, _ := cmd.Flags().GetDuration("timeout")
+		records, err := checks.Exec(root, checks.ExecOptions{
+			IDs: args, Stdout: os.Stdout, Stderr: os.Stderr, Invocation: inv, Timeout: timeout,
+		})
+		if err != nil && records == nil {
+			return err
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "steer check exec:", err)
+		}
+		failed := 0
+		for _, r := range records {
+			if !r.Passed() {
+				failed++
+			}
+		}
+		if failed > 0 {
+			fmt.Fprintf(os.Stderr, "steer check exec: %d of %d checks did not pass\n", failed, len(records))
+			os.Exit(1)
+		}
+		return nil
+	},
+}
+
+var checkGoTestCmd = &cobra.Command{
+	Use:   "go-test [-- <go test arguments>]",
+	Short: "Run the Go suite once and record each bound test's result",
+	Long: `Runs ` + "`go test -json`" + ` with the given arguments, prints the build errors,
+failing test output and package results that plain ` + "`go test`" + ` prints, and
+exits with its status. Each go-test binding whose
+package ran is recorded from that run; no test runs a second time.
+
+check.sh calls this in place of ` + "`go test`" + `. Put go test flags after --.`,
+	Example: `  steer check go-test -- ./...
+  steer check go-test -- -race ./cli/...`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		root, err := repoRootOf(".")
+		if err != nil {
+			return err
+		}
+		inv, err := checks.InvocationFromEnv()
+		if err != nil {
+			return err
+		}
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		timeout, _ := cmd.Flags().GetDuration("timeout")
+		code, records, err := checks.RunGoSuite(root, checks.GoSuiteOptions{
+			Dir: cwd, Args: args, Stdout: os.Stdout, Stderr: os.Stderr, Invocation: inv, Timeout: timeout,
+		})
+		if err != nil && records == nil {
+			return err
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "steer check go-test:", err)
+		}
+		if code != 0 {
+			os.Exit(code)
+		}
 		return nil
 	},
 }
@@ -137,6 +238,10 @@ var checkListCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		latest, err := checks.LatestExecutions(root)
+		if err != nil {
+			return err
+		}
 		out := cmd.OutOrStdout()
 		for _, d := range m.Checks {
 			f := checks.FreshnessOf(root, d, history)
@@ -152,6 +257,11 @@ var checkListCmd = &cobra.Command{
 			}
 			if f.Latest != nil && f.Latest != f.Receipt {
 				fmt.Fprintf(out, "  latest replay: %s at %s\n", f.Latest.Verdict, f.Latest.Finished.Local().Format("2006-01-02 15:04"))
+			}
+			if e, ok := latest[d.ID]; ok {
+				fmt.Fprintf(out, "  latest execution: %s at %s (%s)\n", e.Outcome, e.Finished.Local().Format("2006-01-02 15:04"), e.Source)
+			} else {
+				fmt.Fprintln(out, "  latest execution: none recorded on this machine")
 			}
 		}
 		return nil
@@ -287,7 +397,11 @@ func repoRootOf(dir string) (string, error) {
 
 func init() {
 	rootCmd.AddCommand(checkCmd)
-	checkCmd.AddCommand(checkGuideCmd, checkInitCmd, checkAddCmd, checkTestCmd, checkListCmd, checkRemoveCmd)
+	checkCmd.AddCommand(checkGuideCmd, checkInitCmd, checkAddCmd, checkTestCmd, checkListCmd, checkRemoveCmd,
+		checkExecCmd, checkGoTestCmd)
+	checkExecCmd.Flags().Bool("all", false, "run every script check in the manifest")
+	checkExecCmd.Flags().Duration("timeout", checks.DefaultExecTimeout, "bound on this run; a parent deadline that is earlier wins")
+	checkGoTestCmd.Flags().Duration("timeout", checks.DefaultExecTimeout, "bound on this run; a parent deadline that is earlier wins")
 	checkAddCmd.Flags().String("script", "", "repository-relative script the check runs")
 	checkAddCmd.Flags().String("go-package", "", "repository-relative directory of the Go test's package")
 	checkAddCmd.Flags().String("go-test", "", "exact name of the top-level Go test function")

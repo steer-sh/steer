@@ -127,17 +127,58 @@ again. A module or toolchain that the offline replay cannot load is an
 unavailable environment. None of these satisfies an expected outcome, and the
 previous receipt stays as history.
 
+## Running checks from check.sh
+
+`steer check init` writes a `check.sh` scaffold when the repository has none.
+It never changes an existing `check.sh`: add the managed lines to its sequence
+yourself. The scaffold resolves Steer from `STEER_BIN`, then from `PATH`, and
+fails with an instruction when neither holds it; a missing Steer never skips
+the checks.
+
+- `"$steer" check exec --all` runs every `script` binding, one after another,
+  from the repository root. A failing check does not stop the checks after it.
+  It exits non-zero when any check did not pass.
+- `"$steer" check go-test -- ./...` replaces `go test ./...`. It runs the suite
+  once with `-json`, prints the build errors, failing test output and package
+  results, and exits with the suite's status. Each `go-test` binding is read
+  from that run; no test runs twice. Put go test flags after `--`.
+
+Let each line record its failure and continue, so one failing line does not
+hide the others:
+
+```bash
+status=0
+"$steer" check exec --all || status=1
+"$steer" check go-test -- ./... || status=1
+exit "$status"
+```
+
+Each run appends one record per check to machine-local execution evidence:
+passed, failed, error (the check or a command it calls could not run),
+timeout, or not executed (the deadline came first). A `go-test` binding can
+also read skipped, passed-cached (the toolchain replayed a cached pass; this
+is not a fresh run), or unavailable (its package ran but did not build, or
+reported no result for the test, for example because `-run` excluded it). A
+binding whose package the run never reached gets no record. A passing
+`check.sh` alone never shows that a particular check ran.
+
 ## Commands
 
-- `steer check init [repo]` creates an empty manifest. It keeps an existing one.
+- `steer check init [repo]` creates an empty manifest and, when absent, the
+  `check.sh` scaffold. It keeps existing files.
+- `steer check exec (--all | <id>...)` runs script checks and records each
+  outcome.
+- `steer check go-test [-- <go test arguments>]` runs the Go suite once and
+  records each bound test's result.
 - `steer check add <id> --script <path> [--input <path>]...` replays the cases
   and declares the check only when every case matched.
 - `steer check add <id> --go-package <dir> --go-test <name> [--input <path>]...`
   does the same for a test in the Go suite.
 - `steer check test <id>` replays a declared check's cases with its current
   detector. Run it after you edit the check, its inputs or its cases.
-- `steer check list` shows each check and its validation: current, stale (what
-  changed since the receipt), or never validated. A stale check keeps running.
+- `steer check list` shows each check, its validation (current, stale with what
+  changed since the receipt, or never validated) and its latest execution on
+  this machine. A stale check keeps running.
 - `steer check remove <id>` drops the declaration and keeps its cases and
   validation history.
 - `steer check guide` prints this guide.
