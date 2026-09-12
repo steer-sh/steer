@@ -93,6 +93,15 @@ func scopedDir(scope, root string) (string, error) {
 	}
 }
 
+// checksDirName is the repository check store inside a repository's steerHome.
+const checksDirName = "checks"
+
+// ChecksDir returns the check store of the repository rooted at root. Checks
+// belong to one repository, so the store has no global scope.
+func ChecksDir(root string) string {
+	return filepath.Join(root, steerHome, checksDirName)
+}
+
 // binDirName holds the stable copy of the steer executable inside the neutral
 // root. A hook registration names that path, so it must not move when the
 // binary a user runs moves.

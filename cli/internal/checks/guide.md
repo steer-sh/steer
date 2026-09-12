@@ -1,0 +1,65 @@
+# Authoring repository checks
+
+A repository check is an executable test of repository content. `check.sh` at the
+repository root is the single command that runs every blocking check; a harness
+Stop hook runs it at the end of an agent's turn and blocks the turn while it
+exits non-zero. Steer manages individual checks inside that oracle so each one
+has a stable id, replayable proof and its own execution record.
+
+## What belongs in the blocking tier
+
+Put a check in `check.sh` only when its failure is always the code's fault and
+always fixable by editing code in this turn:
+
+- build, type check, and lint with warnings as errors
+- unit and integration tests against local, deterministic fixtures
+- searches for rules a linter cannot express
+
+Keep these out. Run them by hand or in CI instead:
+
+- anything that reaches the network, a live API, credentials, a device or a simulator
+- anything that depends on the host's clock, time zone or locale
+- long end-to-end suites and anything with a known flake
+- a proxy for quality that an agent can game, such as a coverage number it reads
+
+A check that fails for environmental reasons blocks turns the agent cannot clear.
+When you are unsure whether a check is deterministic, keep it out.
+
+## Runtime cost
+
+The whole Stop run has one 300-second deadline. Order `check.sh` cheap and broad
+first, expensive and narrow last. A slow oracle pushes the agent to reason
+instead of verifying, so keep each managed check to seconds.
+
+Use `set -euo pipefail`, and never pipe a test runner: `go test ./... | tail`
+exits with the status of `tail`, so a failing suite reads as a pass.
+
+## Representative failure cases
+
+A check that has never failed is untested. Every managed check needs a
+known-good case that passes and a defect case that fails with the diagnostic the
+check exists to produce. The defect case reproduces the real defect: an
+unrelated failure, such as a missing command or a build error elsewhere, does
+not show that the check detects anything.
+
+## Binding kinds
+
+Declarations live in `.steer/checks/manifest.json`. Each has a stable `id` and
+one binding kind:
+
+- `script`: a repository-relative script that Steer runs. Use it for searches
+  and for checks that no test runner reports on.
+- `go-test`: one top-level test function in the repository's Go suite, named by
+  its package directory (repository-relative, such as `cli/internal/status`)
+  and its exact name. The test stays in the ordinary suite; Steer reads its
+  result from that run and never runs it a second time.
+
+`inputs` lists further repository-relative files that belong to the detector:
+helpers, data files and fixtures. For a Go test, list what the test reads at
+run time; for a script, list every file it sources or calls. Production code
+under test is not a detector input.
+
+## Commands
+
+- `steer check init [repo]` creates an empty manifest. It keeps an existing one.
+- `steer check guide` prints this guide.
