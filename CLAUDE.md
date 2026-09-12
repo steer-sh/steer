@@ -91,7 +91,9 @@ Read the linked architecture section before changing the corresponding boundary:
 Run `./check.sh` before reporting a change complete. It checks gofmt, builds,
 vets and runs Go tests, then `scripts/revert-test.py`: each Go test added since
 the upstream branch must fail under some variant of the change, and
-`// pins existing behaviour` in a test's doc comment exempts it. `./check-full.sh`
+`// pins existing behaviour` in a test's doc comment exempts it. Its per-test
+evidence (deciding variant, failure excerpt, diffs, full output) is written to
+`.git/revert-test/<key>.json`, and the console names the file. `./check-full.sh`
 adds the slow headless skill-generation harness and invokes `claude -p`; it is
 separate from the turn-end gate.
 
