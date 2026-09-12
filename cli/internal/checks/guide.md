@@ -59,7 +59,41 @@ helpers, data files and fixtures. For a Go test, list what the test reads at
 run time; for a script, list every file it sources or calls. Production code
 under test is not a detector input.
 
+## Cases
+
+A check's cases live in `.steer/checks/cases/<id>.json`:
+
+```json
+{
+  "version": 1,
+  "cases": [
+    {"name": "clean", "exit_code": 0, "provenance": "the fixed tree",
+     "files": {"src/run.sh": "echo \"tests passed\"\n"}},
+    {"name": "literal-count", "exit_code": 1, "diagnostic": "literal test count",
+     "provenance": "the defect from the review of commit abc123",
+     "files": {"src/run.sh": "echo \"42 tests passed\"\n"}}
+  ]
+}
+```
+
+Each case runs in its own temporary tree holding its `files` and a copy of the
+detector (the script and its `inputs`). `setup` is an optional Bash script run
+in the tree first, for state plain files cannot express, such as `git init`.
+The repository itself is never written.
+
+A defect case matches only when the check exits with its `exit_code` and prints
+its `diagnostic`. A failed setup, a command that cannot run (exit 126 or 127),
+or a timeout makes the case invalid: it proves nothing either way.
+
 ## Commands
 
 - `steer check init [repo]` creates an empty manifest. It keeps an existing one.
+- `steer check add <id> --script <path> [--input <path>]...` replays the cases
+  and declares the check only when every case matched.
+- `steer check test <id>` replays a declared check's cases with its current
+  detector. Run it after you edit the check, its inputs or its cases.
+- `steer check list` shows each check and its validation: current, stale (what
+  changed since the receipt), or never validated. A stale check keeps running.
+- `steer check remove <id>` drops the declaration and keeps its cases and
+  validation history.
 - `steer check guide` prints this guide.

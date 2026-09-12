@@ -60,6 +60,159 @@ var checkInitCmd = &cobra.Command{
 	},
 }
 
+var checkAddCmd = &cobra.Command{
+	Use:   "add <id> --script <path>",
+	Short: "Validate a check against its cases, then declare it",
+	Long: `Replays .steer/checks/cases/<id>.json against the script and declares the
+check in the manifest only when every case matched. The run is recorded in
+machine-local evidence whatever its verdict.`,
+	Example: `  steer check add no-count --script .steer/checks/no-count.sh
+  steer check add no-count --script scripts/no-count.sh --input scripts/lib.sh`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		root, err := repoRootOf(".")
+		if err != nil {
+			return err
+		}
+		script, _ := cmd.Flags().GetString("script")
+		inputs, _ := cmd.Flags().GetStringSlice("input")
+		d := checks.Declaration{ID: args[0], Kind: checks.KindScript, Script: script, Inputs: inputs}
+		run, err := checks.Add(root, d)
+		printValidation(cmd, run)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(cmd.OutOrStdout(), styles.SuccessBox.Render(fmt.Sprintf("Declared check %s", d.ID)))
+		return nil
+	},
+}
+
+var checkTestCmd = &cobra.Command{
+	Use:   "test <id>",
+	Short: "Replay a declared check's cases with its current detector",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		root, err := repoRootOf(".")
+		if err != nil {
+			return err
+		}
+		run, err := checks.Test(root, args[0])
+		printValidation(cmd, run)
+		return err
+	},
+}
+
+var checkListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List declared checks and the freshness of their validation",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		root, err := repoRootOf(".")
+		if err != nil {
+			return err
+		}
+		m, err := checks.Load(root)
+		if err != nil {
+			return err
+		}
+		if len(m.Checks) == 0 {
+			fmt.Fprintln(cmd.OutOrStdout(), "No checks declared.")
+			return nil
+		}
+		history, err := checks.History(root)
+		if err != nil {
+			return err
+		}
+		out := cmd.OutOrStdout()
+		for _, d := range m.Checks {
+			f := checks.FreshnessOf(root, d, history)
+			fmt.Fprintf(out, "%s  %s %s\n", d.ID, d.Kind, bindingTarget(d))
+			fmt.Fprintf(out, "  validation: %s\n", freshnessPhrase(f))
+			if f.Latest != nil && f.Latest != f.Receipt {
+				fmt.Fprintf(out, "  latest replay: %s at %s\n", f.Latest.Verdict, f.Latest.Finished.Local().Format("2006-01-02 15:04"))
+			}
+		}
+		return nil
+	},
+}
+
+var checkRemoveCmd = &cobra.Command{
+	Use:   "remove <id>",
+	Short: "Drop a check from the manifest, keeping its cases and evidence",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		root, err := repoRootOf(".")
+		if err != nil {
+			return err
+		}
+		d, err := checks.Remove(root, args[0])
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(root, checks.CasesPath(root, d.ID))
+		fmt.Fprintln(cmd.OutOrStdout(), styles.SuccessBox.Render(fmt.Sprintf(
+			"Removed check %s\nKept: %s and its validation history", d.ID, rel)))
+		return nil
+	},
+}
+
+func bindingTarget(d checks.Declaration) string {
+	if d.Kind == checks.KindGoTest {
+		return d.Package + " " + d.Test
+	}
+	return d.Script
+}
+
+func freshnessPhrase(f checks.Freshness) string {
+	switch f.State {
+	case checks.FreshCurrent:
+		return fmt.Sprintf("validated %s; tracked detector inputs unchanged", f.Receipt.Finished.Local().Format("2006-01-02 15:04"))
+	case checks.FreshStale:
+		phrase := fmt.Sprintf("stale since %s: %s changed", f.Receipt.Finished.Local().Format("2006-01-02 15:04"), strings.Join(f.Changed, ", "))
+		if f.Reason != "" {
+			phrase += " (" + f.Reason + ")"
+		}
+		return phrase
+	default:
+		return "never validated"
+	}
+}
+
+func printValidation(cmd *cobra.Command, run checks.ValidationRun) {
+	if run.CheckID == "" {
+		return
+	}
+	out := cmd.OutOrStdout()
+	fmt.Fprintf(out, "Validation of %s: %s\n", run.CheckID, run.Verdict)
+	if run.Reason != "" {
+		fmt.Fprintf(out, "  %s\n", run.Reason)
+	}
+	for _, c := range run.Cases {
+		observed := "no exit"
+		if c.ObservedExit != nil {
+			observed = fmt.Sprintf("exit %d", *c.ObservedExit)
+		}
+		fmt.Fprintf(out, "  %-9s %s (expected exit %d, %s)", c.Outcome, c.Name, c.ExpectedExit, observed)
+		if c.Reason != "" {
+			fmt.Fprintf(out, ": %s", c.Reason)
+		}
+		fmt.Fprintln(out)
+		if c.Outcome != checks.OutcomeMatched && strings.TrimSpace(c.Excerpt) != "" {
+			for _, line := range lastLines(c.Excerpt, 8) {
+				fmt.Fprintf(out, "      | %s\n", line)
+			}
+		}
+	}
+}
+
+func lastLines(s string, n int) []string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return lines
+}
+
 // repoRootOf returns the top level of the Git work tree containing dir.
 func repoRootOf(dir string) (string, error) {
 	out, err := exec.Command("git", "-C", dir, "rev-parse", "--show-toplevel").CombinedOutput()
@@ -71,5 +224,8 @@ func repoRootOf(dir string) (string, error) {
 
 func init() {
 	rootCmd.AddCommand(checkCmd)
-	checkCmd.AddCommand(checkGuideCmd, checkInitCmd)
+	checkCmd.AddCommand(checkGuideCmd, checkInitCmd, checkAddCmd, checkTestCmd, checkListCmd, checkRemoveCmd)
+	checkAddCmd.Flags().String("script", "", "repository-relative script the check runs (required)")
+	checkAddCmd.Flags().StringSlice("input", nil, "further repository-relative detector file (repeatable)")
+	_ = checkAddCmd.MarkFlagRequired("script")
 }
