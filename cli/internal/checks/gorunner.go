@@ -43,6 +43,7 @@ func goRunner(root string, d Declaration, gd goDetector) (caseRunner, error) {
 	}
 	src := gd.source()
 	return caseRunner{
+		detector: d.Inputs,
 		protects: func(p string) string {
 			if inputs[p] {
 				return fmt.Sprintf("the case writes detector file %s", p)
@@ -91,8 +92,14 @@ func goRunner(root string, d Declaration, gd goDetector) (caseRunner, error) {
 				res.Excerpt = excerpt(testOut)
 				return fmt.Sprintf("the named test %s skipped", d.Test)
 			default:
-				res.Excerpt = excerpt(nonTestOutput(out))
-				return fmt.Sprintf("the named test %s did not run", d.Test)
+				other := nonTestOutput(out)
+				res.Excerpt = excerpt(other)
+				if offlineRefusal(other) {
+					res.Cause = CauseEnvironment
+					return fmt.Sprintf("the named test %s did not run: this host lacks a module or toolchain the case needs", d.Test)
+				}
+				res.Cause = CauseIncompatible
+				return fmt.Sprintf("the named test %s did not run: the case does not build with the current detector", d.Test)
 			}
 		},
 	}, nil
@@ -139,6 +146,12 @@ func namedTestResult(out []byte, name string) (string, []byte) {
 		}
 	}
 	return action, testOut.Bytes()
+}
+
+// offlineRefusal reports go output that names a restriction of goReplayEnv: a
+// module the cache lacks or a toolchain other than the installed one.
+func offlineRefusal(out []byte) bool {
+	return bytes.Contains(out, []byte("GOPROXY=off")) || bytes.Contains(out, []byte("GOTOOLCHAIN=local"))
 }
 
 // nonTestOutput keeps what explains a test that never ran: build output and

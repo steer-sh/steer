@@ -142,6 +142,11 @@ var checkListCmd = &cobra.Command{
 			f := checks.FreshnessOf(root, d, history)
 			fmt.Fprintf(out, "%s  %s %s\n", d.ID, d.Kind, bindingTarget(d))
 			fmt.Fprintf(out, "  validation: %s\n", freshnessPhrase(f))
+			if f.Receipt != nil {
+				if shas := testedSnapshots(f.Receipt); len(shas) > 0 {
+					fmt.Fprintf(out, "  tested snapshot: %s\n", strings.Join(shas, ", "))
+				}
+			}
 			if det, err := checks.DetectorOf(root, d); err == nil && len(det.Unresolved) > 0 {
 				fmt.Fprintf(out, "  not tracked: %s\n", strings.Join(det.Unresolved, "; "))
 			}
@@ -213,8 +218,14 @@ func printValidation(cmd *cobra.Command, run checks.ValidationRun) {
 			observed = fmt.Sprintf("exit %d", *c.ObservedExit)
 		}
 		fmt.Fprintf(out, "  %-10s %s (expected exit %d, %s)", c.Outcome, c.Name, c.ExpectedExit, observed)
+		if c.Snapshot != "" {
+			fmt.Fprintf(out, " at snapshot %s", shortHash(c.Snapshot))
+		}
 		if c.Reason != "" {
 			fmt.Fprintf(out, ": %s", c.Reason)
+		}
+		if label := causeLabel(c.Cause); label != "" {
+			fmt.Fprintf(out, " [%s]", label)
 		}
 		fmt.Fprintln(out)
 		if c.Outcome != checks.OutcomeMatched && strings.TrimSpace(c.Excerpt) != "" {
@@ -223,6 +234,38 @@ func printValidation(cmd *cobra.Command, run checks.ValidationRun) {
 			}
 		}
 	}
+}
+
+func causeLabel(cause string) string {
+	switch cause {
+	case checks.CauseIncompatible:
+		return "incompatible case: author it again"
+	case checks.CauseEnvironment:
+		return "environment unavailable"
+	case checks.CauseSnapshotUnavailable:
+		return "snapshot unavailable"
+	}
+	return ""
+}
+
+func shortHash(sha string) string {
+	if len(sha) > 12 {
+		return sha[:12]
+	}
+	return sha
+}
+
+// testedSnapshots lists the distinct snapshot commits a run's cases started from.
+func testedSnapshots(run *checks.ValidationRun) []string {
+	var shas []string
+	seen := map[string]bool{}
+	for _, c := range run.Cases {
+		if c.Snapshot != "" && !seen[c.Snapshot] {
+			seen[c.Snapshot] = true
+			shas = append(shas, shortHash(c.Snapshot))
+		}
+	}
+	return shas
 }
 
 func lastLines(s string, n int) []string {

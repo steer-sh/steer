@@ -70,12 +70,29 @@ type Detector struct {
 	Unresolved []string     `json:"unresolved,omitempty"`
 }
 
-// CaseResult is what one case observed.
+// Causes of an invalid case, where replay can tell them apart.
+const (
+	// CauseIncompatible is a case that no longer fits the current detector,
+	// such as a patch that does not apply or code that does not build with
+	// the detector. The case needs to be authored again.
+	CauseIncompatible = "incompatible-case"
+	// CauseEnvironment is a replay host that lacks a tool, module or
+	// toolchain the case needs.
+	CauseEnvironment = "environment-unavailable"
+	// CauseSnapshotUnavailable is a snapshot commit the repository does not
+	// hold.
+	CauseSnapshotUnavailable = "snapshot-unavailable"
+)
+
+// CaseResult is what one case observed. Snapshot is the commit a snapshot case
+// started from; Cause classifies an invalid outcome when replay can tell.
 type CaseResult struct {
 	Name         string `json:"name"`
+	Snapshot     string `json:"snapshot,omitempty"`
 	ExpectedExit int    `json:"expected_exit"`
 	ObservedExit *int   `json:"observed_exit,omitempty"`
 	Outcome      string `json:"outcome"`
+	Cause        string `json:"cause,omitempty"`
 	Reason       string `json:"reason,omitempty"`
 	OutputDigest string `json:"output_digest,omitempty"`
 	Excerpt      string `json:"excerpt,omitempty"`
@@ -117,6 +134,8 @@ func DetectorOf(root string, d Declaration) (Detector, error) {
 
 // caseRunner is what one binding kind adds to a case tree and how it runs there.
 type caseRunner struct {
+	// detector lists the repository files install copies into the tree.
+	detector []string
 	// protects reports why a case may not write a path, or "" when it may.
 	protects func(p string) string
 	// install writes the detector into the tree.
@@ -126,8 +145,9 @@ type caseRunner struct {
 }
 
 // Replay runs every case of a check in its own temporary tree holding the
-// case's files and the current detector. The repository itself is only read.
-// An error means no case could run, such as a missing detector input.
+// case's files or snapshot and the current detector. The repository's work
+// tree and index are only read. An error means no case could run, such as a
+// missing detector input.
 func Replay(root string, d Declaration, cases CaseFile) (Detector, []CaseResult, error) {
 	bash, bashErr := exec.LookPath("bash")
 	var det Detector
@@ -155,7 +175,7 @@ func Replay(root string, d Declaration, cases CaseFile) (Detector, []CaseResult,
 	}
 	results := make([]CaseResult, 0, len(cases.Cases))
 	for _, c := range cases.Cases {
-		results = append(results, replayCase(bash, runner, c))
+		results = append(results, replayCase(root, bash, runner, c))
 	}
 	return det, results, nil
 }
@@ -166,6 +186,7 @@ func scriptRunner(root, bash string, d Declaration) caseRunner {
 		detectorFiles[p] = true
 	}
 	return caseRunner{
+		detector: append([]string{d.Script}, d.Inputs...),
 		protects: func(p string) string {
 			if detectorFiles[p] {
 				return fmt.Sprintf("the case writes detector file %s", p)
@@ -208,6 +229,22 @@ func judge(res *CaseResult, code int, out []byte, diagnostic string) {
 	}
 }
 
+// changedDetectorFile returns the first detector file whose copy in tree no
+// longer matches the repository, or "" when every copy matches.
+func changedDetectorFile(root, tree string, files []string) string {
+	for _, p := range files {
+		want, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(p)))
+		if err != nil {
+			return p
+		}
+		got, err := os.ReadFile(filepath.Join(tree, filepath.FromSlash(p)))
+		if err != nil || !bytes.Equal(got, want) {
+			return p
+		}
+	}
+	return ""
+}
+
 func copyDetectorFiles(root, tree string, files map[string]bool) error {
 	for p := range files {
 		if err := copyFile(filepath.Join(root, filepath.FromSlash(p)), filepath.Join(tree, filepath.FromSlash(p))); err != nil {
@@ -217,11 +254,18 @@ func copyDetectorFiles(root, tree string, files map[string]bool) error {
 	return nil
 }
 
-func replayCase(bash string, runner caseRunner, c Case) CaseResult {
-	res := CaseResult{Name: c.Name, ExpectedExit: *c.ExitCode}
+// replayCase builds one case tree and runs the check in it. A snapshot case
+// restores its commit, then the current detector is copied over it, then its
+// patch is applied; a patch that changes a detector file makes it invalid.
+func replayCase(root, bash string, runner caseRunner, c Case) CaseResult {
+	res := CaseResult{Name: c.Name, Snapshot: c.Snapshot, ExpectedExit: *c.ExitCode}
 	invalid := func(reason string) CaseResult {
 		res.Outcome, res.Reason = OutcomeInvalid, reason
 		return res
+	}
+	because := func(cause, reason string) CaseResult {
+		res.Cause = cause
+		return invalid(reason)
 	}
 	for p := range c.Files {
 		if reason := runner.protects(p); reason != "" {
@@ -237,8 +281,26 @@ func replayCase(bash string, runner caseRunner, c Case) CaseResult {
 	if err := os.MkdirAll(tree, 0o755); err != nil {
 		return invalid(fmt.Sprintf("create case tree: %v", err))
 	}
+	if c.Snapshot != "" {
+		if _, err := exec.LookPath("git"); err != nil {
+			return because(CauseEnvironment, "a snapshot case needs git")
+		}
+		if err := restoreSnapshot(root, c.Snapshot, tmp, tree); errors.Is(err, errSnapshotMissing) {
+			return because(CauseSnapshotUnavailable, fmt.Sprintf("commit %s is not in this repository", c.Snapshot))
+		} else if err != nil {
+			return invalid(fmt.Sprintf("restore snapshot: %v", err))
+		}
+	}
 	if err := runner.install(tree); err != nil {
 		return invalid(err.Error())
+	}
+	if c.Patch != "" {
+		if err := applyPatch(tmp, tree, c.patch); err != nil {
+			return because(CauseIncompatible, fmt.Sprintf("the patch %s does not apply to snapshot %s: %v", c.Patch, c.Snapshot, err))
+		}
+		if p := changedDetectorFile(root, tree, runner.detector); p != "" {
+			return invalid(fmt.Sprintf("the patch %s changes detector file %s", c.Patch, p))
+		}
 	}
 	for p, content := range c.Files {
 		dst := filepath.Join(tree, filepath.FromSlash(p))

@@ -135,7 +135,7 @@ func TestSaveWritesChecksInIDOrder(t *testing.T) {
 // The guide covers both binding kinds, the exclusions and the defect case.
 func TestTheGuideCoversBindingsExclusionsAndDefectCases(t *testing.T) {
 	g := Guide()
-	for _, want := range []string{"`script`", "`go-test`", "network", "flake", "defect case", "300-second", "pipefail"} {
+	for _, want := range []string{"`script`", "`go-test`", "network", "flake", "defect case", "300-second", "pipefail", SnapshotRefPrefix} {
 		if !strings.Contains(g, want) {
 			t.Errorf("guide lacks %q", want)
 		}

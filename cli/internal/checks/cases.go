@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 )
 
 // CasesVersion is the case-file format this binary reads.
@@ -27,14 +28,24 @@ type CaseFile struct {
 // on it. ExitCode 0 is a known-good case; a nonzero ExitCode is a defect case
 // whose output must also contain Diagnostic. Setup is a Bash script run in the
 // tree before the check, for state that plain files cannot express.
+//
+// A snapshot case starts from the repository's tree at the full commit hash
+// Snapshot instead of from Files, and Patch names a repository-relative diff
+// applied to that tree, such as the one that restores a fixed defect.
 type Case struct {
 	Name       string            `json:"name"`
 	ExitCode   *int              `json:"exit_code"`
 	Diagnostic string            `json:"diagnostic,omitempty"`
 	Files      map[string]string `json:"files,omitempty"`
+	Snapshot   string            `json:"snapshot,omitempty"`
+	Patch      string            `json:"patch,omitempty"`
 	Setup      string            `json:"setup,omitempty"`
 	Provenance string            `json:"provenance"`
+
+	patch []byte
 }
+
+var commitHash = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)
 
 // CasesPath returns the case file of one check in the repository rooted at root.
 func CasesPath(root, id string) string {
@@ -80,6 +91,22 @@ func (f CaseFile) Validate() error {
 				return fmt.Errorf("case %s: file: %w", c.Name, err)
 			}
 		}
+		if c.Snapshot != "" {
+			if !commitHash.MatchString(c.Snapshot) {
+				return fmt.Errorf("case %s: snapshot %q: use a full lowercase commit hash", c.Name, c.Snapshot)
+			}
+			if len(c.Files) > 0 {
+				return fmt.Errorf("case %s: a snapshot case changes its tree with a patch, not files", c.Name)
+			}
+		}
+		if c.Patch != "" {
+			if c.Snapshot == "" {
+				return fmt.Errorf("case %s: a patch applies to a snapshot: name the commit", c.Name)
+			}
+			if err := validRepoPath(c.Patch); err != nil {
+				return fmt.Errorf("case %s: patch: %w", c.Name, err)
+			}
+		}
 	}
 	if !good || !defect {
 		return fmt.Errorf("a case file needs a known-good case (exit_code 0) and a defect case (nonzero exit_code)")
@@ -87,8 +114,9 @@ func (f CaseFile) Validate() error {
 	return nil
 }
 
-// LoadCases reads and validates one check's case file. It returns the file and
-// the digest of its bytes, which a receipt binds.
+// LoadCases reads and validates one check's case file and the patches it names.
+// It returns the file and the digest of its bytes and those patches, which a
+// receipt binds.
 func LoadCases(root, id string) (CaseFile, string, error) {
 	path := CasesPath(root, id)
 	data, err := os.ReadFile(path)
@@ -105,6 +133,19 @@ func LoadCases(root, id string) (CaseFile, string, error) {
 	if err := f.Validate(); err != nil {
 		return CaseFile{}, "", fmt.Errorf("%s: %w", path, err)
 	}
-	sum := sha256.Sum256(data)
-	return f, hex.EncodeToString(sum[:]), nil
+	sum := sha256.New()
+	sum.Write(data)
+	for i, c := range f.Cases {
+		if c.Patch == "" {
+			continue
+		}
+		patch, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(c.Patch)))
+		if err != nil {
+			return CaseFile{}, "", fmt.Errorf("case %s: patch: %w", c.Name, err)
+		}
+		f.Cases[i].patch = patch
+		fmt.Fprintf(sum, "\x00patch\x00%s\x00%d\x00", c.Name, len(patch))
+		sum.Write(patch)
+	}
+	return f, hex.EncodeToString(sum.Sum(nil)), nil
 }

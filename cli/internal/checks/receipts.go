@@ -64,7 +64,8 @@ func validationsPath(dir, identity string) string {
 }
 
 // Validate replays one check's cases against its current detector and appends
-// the run to the repository's validation history. It returns the run whatever
+// the run to the repository's validation history. It first pins each snapshot
+// commit the cases name under SnapshotRefPrefix. It returns the run whatever
 // its verdict; err reports only a run that could not be recorded.
 func Validate(root string, d Declaration) (ValidationRun, error) {
 	identity, err := RepoIdentity(root)
@@ -83,6 +84,9 @@ func Validate(root string, d Declaration) (ValidationRun, error) {
 	}
 	cases, digest, err := LoadCases(root, d.ID)
 	if err != nil {
+		run.Verdict, run.Reason = VerdictUnavailable, err.Error()
+	} else if err := retainSnapshots(root, cases); err != nil {
+		run.CasesDigest = digest
 		run.Verdict, run.Reason = VerdictUnavailable, err.Error()
 	} else {
 		run.CasesDigest = digest

@@ -98,6 +98,35 @@ A defect case matches only when the check exits with its `exit_code` and prints
 its `diagnostic`. A failed setup, a command that cannot run (exit 126 or 127),
 or a timeout makes the case invalid: it proves nothing either way.
 
+## Snapshot cases
+
+When the defect lives in code too large to copy into `files`, such as a Go
+package and its dependencies, start the case from a commit instead:
+
+```json
+{"name": "fixed", "exit_code": 0, "snapshot": "<full commit hash of the fix>",
+ "provenance": "the fix in commit abc123"},
+{"name": "omits-id", "exit_code": 1, "diagnostic": "missing field id",
+ "snapshot": "<the same hash>",
+ "patch": ".steer/checks/cases/resp-fields/omits-id.patch",
+ "provenance": "the defect commit abc123 fixed"}
+```
+
+Replay writes the commit's tree into a temporary directory, copies the current
+detector over it, applies the case's `patch`, runs `setup`, then runs the
+check. The repository's work tree and index are never written. Make the patch
+restore the defect in production code only, for example
+`git diff <fix> <fix>^ -- <production paths>`: a patch that changes a detector
+file makes the case invalid. A snapshot case takes no `files`.
+
+Validation keeps each commit a case names under `refs/steer/snapshots/`, so
+garbage collection does not remove it. A clone that lacks the commit reports
+the case as snapshot unavailable. A patch that no longer applies, or code that
+no longer builds with the current detector, is an incompatible case: author it
+again. A module or toolchain that the offline replay cannot load is an
+unavailable environment. None of these satisfies an expected outcome, and the
+previous receipt stays as history.
+
 ## Commands
 
 - `steer check init [repo]` creates an empty manifest. It keeps an existing one.
