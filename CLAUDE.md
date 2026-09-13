@@ -77,8 +77,13 @@ Read the linked architecture section before changing the corresponding boundary:
   `skills/steer-report/SKILL.md`.
 - Status JSON: `cli/internal/status/status.go`, `skills/steer/SKILL.md` and
   `skills/steer-report/SKILL.md`; `TestJSONContractIsStable` pins the contract.
+  The check tier's share of it lives in `cli/internal/status/checks.go`.
 - Refresh queue: `cli/internal/cadence/refresh.go` and
   `skills/steer-report/SKILL.md`. Read version constants at their source.
+- Check tier readings: `cli/internal/checks/state.go` is the one reader of a
+  repository's check state, shared by the status snapshot, the refresh queue and
+  `steer check list`. Adoption, registration, validation freshness and observed
+  execution stay four separate facts.
 - Generation behavior: bump `prompt_version` in `skills/steer/SKILL.md`.
   Review templates have separate pinned digests in `cli/internal/gate/`.
 - Transcript normalization: each adapter's `Instrument` is pinned by replay of

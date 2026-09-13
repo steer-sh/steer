@@ -178,6 +178,7 @@ queue, so the skill's nudge can hash the queue for change detection.`,
 			GateStateDir: gateConfig().StateDir,
 			WindowDays:   reportDays,
 			AllProjects:  !reportProjectOnly,
+			RepoRoot:     repoRootOrNone(),
 			Evidence:     ev,
 		})
 		if err != nil {

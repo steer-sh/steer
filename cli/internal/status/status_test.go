@@ -174,7 +174,7 @@ func intPtr(n int) *int           { return &n }
 // so a renamed or reordered json tag fails here, the agent-contract guard.
 func TestJSONContractIsStable(t *testing.T) {
 	s := &SystemStatus{
-		StatusVersion: 11,
+		StatusVersion: 12,
 		GeneratedAt:   "2026-01-01T00:00:00Z",
 		Posture: Posture{
 			Instrument: "agy@sha", Reviewer: "gemini", Ledger: "/l.jsonl",
@@ -204,6 +204,23 @@ func TestJSONContractIsStable(t *testing.T) {
 				{Harness: "codex", Scope: "global", Expected: "bbbbbbbb", State: MasterNotRegistered},
 			},
 			Unresolved: 4,
+		},
+		Checks: CheckTier{
+			Repo: "/w/steer", Manifest: true, Adopted: true, AdoptedAt: 1600,
+			Runner: []ScopeArming{
+				{Harness: "claude-code", Scope: "global", Registered: true, Effective: true, Timeout: 330,
+					Trust: TrustNotApplicable, Command: "/h/.steer/bin/steer check hook --harness claude-code",
+					Resolvable: ResolveResolvable, Observed: 1710, ObservedCorpus: checkCorpus},
+				{Harness: "codex", Scope: "global", Registered: false, Effective: false,
+					Trust: TrustUnknown, Resolvable: ResolveNotRegistered, ObservedCorpus: checkCorpus},
+			},
+			Checks: []CheckRow{{
+				ID: "json-contract", Kind: "go-test", Binding: "cli/internal/status TestJSONContractIsStable",
+				Validation: CheckStale, Changed: []string{"detector"}, Receipt: "r1", ValidatedAt: 1500,
+				Execution: "passed", ExecutedAt: 1710, ExecutionRun: "run-2",
+			}},
+			LatestRun: &CheckRun{RunID: "run-2", Source: "stop", Harness: "claude-code",
+				Outcome: "passed", Disposition: "allow", Finished: 1710, RefusedAfter: 1712},
 		},
 		Interventions: []ScoredIntervention{{
 			ID: "widget-flag", Class: "widget flag loss",
@@ -241,6 +258,10 @@ func TestJSONContractIsStable(t *testing.T) {
 			Interventions: []cadence.Intervention{},
 			Unscored:      []string{},
 			Candidates:    []cadence.Candidate{},
+			Checks: []cadence.CheckWork{{
+				Kind: cadence.CheckNeverValidated, Repo: "/w/steer", CheckID: "json-contract",
+				Detail: "no replay recorded here", Fix: "steer check test json-contract",
+			}},
 		},
 		Telemetry: Telemetry{
 			ReviewChains: 24, DenialsRows: 2, AuditFirings: 3, SessionSnapshots: 40,
@@ -267,7 +288,7 @@ func TestJSONContractIsStable(t *testing.T) {
 }
 
 const goldenStatusJSON = `{
-  "status_version": 11,
+  "status_version": 12,
   "generated_at": "2026-01-01T00:00:00Z",
   "posture": {
     "instrument": "agy@sha",
@@ -350,6 +371,60 @@ const goldenStatusJSON = `{
         "state": "not-registered"
       }
     ]
+  },
+  "checks": {
+    "repo": "/w/steer",
+    "manifest": true,
+    "adopted": true,
+    "adopted_at": 1600,
+    "runner": [
+      {
+        "harness": "claude-code",
+        "scope": "global",
+        "registered": true,
+        "effective": true,
+        "timeout": 330,
+        "trust": "not-applicable",
+        "command": "/h/.steer/bin/steer check hook --harness claude-code",
+        "resolvable": "resolvable",
+        "observed": 1710,
+        "observed_corpus": "check-runs"
+      },
+      {
+        "harness": "codex",
+        "scope": "global",
+        "registered": false,
+        "effective": false,
+        "trust": "unknown",
+        "resolvable": "not-registered",
+        "observed_corpus": "check-runs"
+      }
+    ],
+    "checks": [
+      {
+        "id": "json-contract",
+        "kind": "go-test",
+        "binding": "cli/internal/status TestJSONContractIsStable",
+        "validation": "stale",
+        "changed": [
+          "detector"
+        ],
+        "receipt": "r1",
+        "validated_at": 1500,
+        "execution": "passed",
+        "executed_at": 1710,
+        "execution_run": "run-2"
+      }
+    ],
+    "latest_run": {
+      "run_id": "run-2",
+      "source": "stop",
+      "harness": "claude-code",
+      "outcome": "passed",
+      "disposition": "allow",
+      "finished": 1710,
+      "refused_after": 1712
+    }
   },
   "interventions": [
     {
@@ -576,7 +651,16 @@ const goldenStatusJSON = `{
   "attention": {
     "interventions": [],
     "unscored": [],
-    "candidates": []
+    "candidates": [],
+    "checks": [
+      {
+        "kind": "never-validated",
+        "repo": "/w/steer",
+        "check_id": "json-contract",
+        "detail": "no replay recorded here",
+        "fix": "steer check test json-contract"
+      }
+    ]
   },
   "telemetry": {
     "review_chains": 24,

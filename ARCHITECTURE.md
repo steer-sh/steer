@@ -269,11 +269,24 @@ verbatim repeats only, and candidates are ranked by session spread and capped
 rather than filtered on a count that key cannot earn. Naming classes is the
 skill's work on both corpora.
 
+The queue also carries the open steps in the repository the refresh ran in. The
+deterministic tier reads the check stores only, so no harness adapter enters it;
+the runner's registration reaches a reader through the status snapshot. A stale
+receipt is not an open step: a stale check keeps running.
+
 `internal/status/` composes the read-only `SystemStatus` for terminal, JSON and
 TUI. Shared problem, evidence and formatting helpers keep human summaries aligned;
 wire version constants and schema tests own machine compatibility.
 `vocabulary_test.go` checks display literals; dynamic stored values also need
 translation at rendering boundaries.
+
+The check tier is one section of that snapshot, read through
+`checks.StateOf`, the single reader of a repository's check state that `steer
+check list` and the queue share. A repository's declaration, this machine's
+adoption, the runner's registration and an observed execution are four separate
+readings, and none of them substitutes for another: an aggregate `check.sh`
+outcome attributes no result to a particular assertion, and a run the repository
+lock turned away never stands in for the result of the run that held it.
 
 Arming distinguishes registered configuration, command resolution from this
 process, and observed corpus activity. Resolution is a proxy for the harness's

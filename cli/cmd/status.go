@@ -47,6 +47,7 @@ full inventory and skip a problem already decided.`,
 			WindowDays:   statusDays,
 			AllProjects:  !statusProjectOnly,
 			Scope:        currentScope(),
+			RepoRoot:     repoRootOrNone(),
 			Evidence: evidence.Gather(evidence.Options{
 				GateStateDir: cfg.StateDir,
 				AllProjects:  !statusProjectOnly,
@@ -66,6 +67,17 @@ full inventory and skip a problem already decided.`,
 		renderStatus(s, reviewerProbe(cfg, resolveErr))
 		return nil
 	},
+}
+
+// repoRootOrNone resolves the repository whose check tier a read reports, "" when
+// the working directory is outside one. Steer runs everywhere; a repository is
+// the unit a check tier exists in.
+func repoRootOrNone() string {
+	root, err := repoRootOf(".")
+	if err != nil {
+		return ""
+	}
+	return root
 }
 
 // renderStatus prints the loop-first human view. It leads with the one question a
@@ -150,8 +162,45 @@ func renderPosture(s *status.SystemStatus, width int) {
 		}
 		postureRow("Guard runner", row, width)
 	}
+	postureRow("Check runner", checkRunnerLine(s), width)
+	postureRow("Checks", checksLine(s), width)
 	postureRow("History", corporaLine(s), width)
 	postureRow("Guard blocks", fmt.Sprintf("%d", s.Telemetry.AuditFirings), width)
+}
+
+// checkRunnerLine names every harness running this repository's checks at the
+// end of a turn, then what is missing when none of them does. Registration and
+// authorization are separate facts, and neither says a check passed.
+func checkRunnerLine(s *status.SystemStatus) string {
+	var rows []string
+	for _, a := range s.Checks.Runner {
+		if a.Registered {
+			rows = append(rows, armingRow(a))
+		}
+	}
+	if len(rows) == 0 {
+		return styles.MutedText.Render("off — run: steer check install --harness claude-code --scope global")
+	}
+	if s.Checks.Repo != "" && !s.Checks.Adopted {
+		rows = append(rows, styles.MutedText.Render(
+			"this repository is not authorized to run them — run: steer check adopt"))
+	}
+	return strings.Join(rows, "\n")
+}
+
+// checksLine reports the repository's own check tier: whether it is authorized
+// here, how many checks it declares, and what the last run that did any work
+// recorded.
+func checksLine(s *status.SystemStatus) string {
+	c := s.Checks
+	line := status.CheckAdoptionPhrase(c)
+	if len(c.Checks) == 0 && c.LatestRun == nil {
+		return line
+	}
+	if len(c.Checks) > 0 {
+		line += fmt.Sprintf(" · %d declared", len(c.Checks))
+	}
+	return line + "\n" + styles.MutedText.Render("last run: "+status.CheckRunPhrase(c.LatestRun))
 }
 
 func renderReviewer(s *status.SystemStatus, width int) {
@@ -271,6 +320,10 @@ func renderAttention(s *status.SystemStatus, width int) {
 		buckets[status.ActionRepair] = append(buckets[status.ActionRepair],
 			candidateBlock(c, width))
 	}
+	for _, w := range a.Checks {
+		buckets[status.ActionRepair] = append(buckets[status.ActionRepair],
+			checkWorkBlock(w, width))
+	}
 
 	empty := true
 	for _, act := range status.ActionOrder {
@@ -296,6 +349,18 @@ func renderAttention(s *status.SystemStatus, width int) {
 		fmt.Print(styles.Wrap(fmt.Sprintf("%d records are not assessed: this evidence has no reader",
 			len(a.Unscored)), "  ", width))
 	}
+}
+
+// checkWorkBlock renders one open step in the repository's check tier: what is
+// not yet true, and the command that makes it true.
+func checkWorkBlock(w cadence.CheckWork, width int) string {
+	title := w.Detail
+	if w.CheckID != "" {
+		title = w.CheckID + ": " + w.Detail
+	}
+	return problemEntry(title, []problemField{
+		{"Next", []string{"run: " + w.Fix}},
+	}, width)
 }
 
 // actionHeader colors a section by whether the reader is losing ground.

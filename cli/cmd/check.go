@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/checks"
+	"github.com/steer-sh/steer-cli/internal/status"
 	"github.com/steer-sh/steer-cli/internal/styles"
 )
 
@@ -415,28 +415,23 @@ var checkListCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		m, err := checks.Load(root)
+		// A repository with no manifest is an error here; StateOf tolerates one,
+		// because a repository is adoptable before it declares a check.
+		if _, err := checks.Load(root); err != nil {
+			return err
+		}
+		st, err := checks.StateOf(root)
 		if err != nil {
 			return err
 		}
-		if err := printRepositoryState(cmd, root); err != nil {
-			return err
-		}
-		if len(m.Checks) == 0 {
+		printRepositoryState(cmd, st)
+		if len(st.Checks) == 0 {
 			fmt.Fprintln(cmd.OutOrStdout(), "No checks declared.")
 			return nil
 		}
-		history, err := checks.History(root)
-		if err != nil {
-			return err
-		}
-		latest, err := checks.LatestExecutions(root)
-		if err != nil {
-			return err
-		}
 		out := cmd.OutOrStdout()
-		for _, d := range m.Checks {
-			f := checks.FreshnessOf(root, d, history)
+		for _, cs := range st.Checks {
+			d, f := cs.Declaration, cs.Freshness
 			fmt.Fprintf(out, "%s  %s %s\n", d.ID, d.Kind, bindingTarget(d))
 			fmt.Fprintf(out, "  validation: %s\n", freshnessPhrase(f))
 			if f.Receipt != nil {
@@ -450,7 +445,7 @@ var checkListCmd = &cobra.Command{
 			if f.Latest != nil && f.Latest != f.Receipt {
 				fmt.Fprintf(out, "  latest replay: %s at %s\n", f.Latest.Verdict, f.Latest.Finished.Local().Format("2006-01-02 15:04"))
 			}
-			if e, ok := latest[d.ID]; ok {
+			if e := cs.Execution; e != nil {
 				fmt.Fprintf(out, "  latest execution: %s at %s (%s)\n", e.Outcome, e.Finished.Local().Format("2006-01-02 15:04"), e.Source)
 			} else {
 				fmt.Fprintln(out, "  latest execution: none recorded on this machine")
@@ -481,45 +476,18 @@ var checkRemoveCmd = &cobra.Command{
 }
 
 // printRepositoryState prints the repository's adoption on this machine and
-// its latest live check.sh run.
-func printRepositoryState(cmd *cobra.Command, root string) error {
+// the latest live check.sh run that did any work.
+func printRepositoryState(cmd *cobra.Command, st checks.RepositoryState) {
 	out := cmd.OutOrStdout()
-	identity, err := checks.RepoIdentity(root)
-	if err != nil {
-		return err
-	}
-	a, adopted, err := checks.AdoptionOf(identity)
-	if err != nil {
-		return err
-	}
-	if adopted {
-		fmt.Fprintf(out, "Adoption: adopted on this machine since %s\n", a.At.Local().Format("2006-01-02 15:04"))
+	if st.Adopted {
+		fmt.Fprintf(out, "Adoption: adopted on this machine since %s\n",
+			st.Adoption.At.Local().Format("2006-01-02 15:04"))
 	} else {
 		fmt.Fprintln(out, "Adoption: not adopted on this machine (steer check adopt)")
 	}
 	printRunnerWiring(out)
-	runs, err := checks.OracleRuns(root)
-	if err != nil {
-		return err
-	}
-	if len(runs) == 0 {
-		fmt.Fprintf(out, "Latest %s run: none recorded on this machine\n", checks.OracleName)
-		return nil
-	}
-	r := runs[len(runs)-1]
-	phrase := r.Outcome
-	if r.IntegrationFailure {
-		phrase += ", integration failure: " + strings.Join(r.Missing, ", ") + " not run"
-	}
-	if r.ConcurrentWith != "" {
-		phrase += ": another run held the repository"
-	}
-	source := r.Source
-	if r.Disposition != "" {
-		source += ", " + r.Disposition
-	}
-	fmt.Fprintf(out, "Latest %s run: %s at %s (%s)\n", checks.OracleName, phrase, r.Finished.Local().Format("2006-01-02 15:04"), source)
-	return nil
+	fmt.Fprintf(out, "Latest %s run: %s\n", checks.OracleName,
+		status.CheckRunPhrase(status.CheckRunOf(st.Latest, st.Refused)))
 }
 
 func bindingTarget(d checks.Declaration) string {
@@ -621,13 +589,7 @@ func lastLines(s string, n int) []string {
 }
 
 // repoRootOf returns the top level of the Git work tree containing dir.
-func repoRootOf(dir string) (string, error) {
-	out, err := exec.Command("git", "-C", dir, "rev-parse", "--show-toplevel").CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("%s is not inside a git repository: %s", dir, strings.TrimSpace(string(out)))
-	}
-	return strings.TrimSpace(string(out)), nil
-}
+func repoRootOf(dir string) (string, error) { return checks.RepoRootOf(dir) }
 
 func init() {
 	rootCmd.AddCommand(checkCmd)

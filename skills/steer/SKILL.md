@@ -447,7 +447,7 @@ The `|` pipe splits a rule into a detection part and an optional suggestion (see
 
 Never invent suggestions. Only include them when explicitly provided after `|`.
 
-## The `steer status --json` contract (`status_version: 11`)
+## The `steer status --json` contract (`status_version: 12`)
 
 `steer status` composes one read-only snapshot of the whole loop. The unit is the
 failure class and what the corpus recorded about it, not the hook count. The
@@ -464,7 +464,8 @@ counted each window, and it reports no efficacy verdict. The intervention's
 contribution to any change in these counts is unresolved. v11 removes `verdict`,
 `p_value`, `effect`, `required_after`, `confounds`, `composition`,
 `instrument_drift`, `firings_applicable`, `attribution` and `chain_rate`, and adds
-`observation`.
+`observation`. v12 adds `checks`: the repository check tier, whose registration,
+authorization and observed execution are three readings and not one.
 
 - `status_version` — the schema version. `--json` is a stable agent contract.
 - `posture` — the arming state: `instrument` (reviewer model / runs / prompt
@@ -506,6 +507,32 @@ contribution to any change in these counts is unresolved. v11 removes `verdict`,
   the store resolves to: a migrated machine holds a master at both paths. **Act
   on `stale` or `unknown`:** run `steer hooks rebuild --scope <scope>`, which
   regenerates the master AND re-registers it in one operation.
+- `checks` — this repository's check tier on this machine, with an empty reading
+  when `steer status` ran outside a repository. `repo` is the resolved Git root,
+  `manifest` says whether it declares checks, and `adopted` / `adopted_at` say
+  whether THIS machine authorized its `check.sh` to run at the end of a turn.
+  Registration, authorization and observed execution are three separate readings,
+  and a clone carries none of the second. `runner[]` is the Stop runner's
+  registration in the same shape as a `posture` row, one per harness per scope;
+  its `observed` is the newest run that harness's runner recorded, and its
+  `trust` is `unknown` wherever a harness reviews hook trust, because Steer reads
+  no Stop trust record for that event. `checks[]` is one row per declaration:
+  `id`, `kind` (`script` or `go-test`), `binding` (the script, or the package and
+  test), `validation` (`current`, `stale` or `none`) with `changed` naming what
+  moved since the receipt in `receipt` / `validated_at`, and `execution` /
+  `executed_at` / `execution_run` from the newest execution record here. **A
+  stale check keeps running:** staleness is a label on the proof, never a repair
+  the loop demands, and `steer check test <id>` replays the cases when a fix
+  registration needs fresh proof. An absent `execution` is unobserved and never a
+  pass — an aggregate `check.sh` outcome attributes no result to one assertion.
+  `latest_run` is the newest run that did any work: `run_id`, `source`,
+  `harness`, `outcome`, `disposition`, `finished`, `missing[]`,
+  `integration_failure` and `refused_after`. A run the repository lock turned
+  away ran nothing, so it never stands in for the result of the run that held the
+  repository; `refused_after` is when such a run was turned away. **Act on
+  `integration_failure`:** a passing `check.sh` that ran no declared check is the
+  script's wiring and never a failed assertion — add the managed line naming
+  `steer check exec --all` or `steer check go-test`.
 - `interventions[]` — the **full** inventory. It carries every live class. Each
   row: `id`, `class`, `problem`, `intervention`, `legacy_note`, `match` (the regex
   that defines the class), `tier`, `target`, `status` (`active` or `rejected`),
@@ -571,7 +598,8 @@ contribution to any change in these counts is unresolved. v11 removes `verdict`,
 - `chains[]` — recent review chains, findings split `accepted` / `rejected`.
 - `attention` — the subset asking for a reader: `interventions[]` (a recurrence,
   a missing coverage cause, or no frozen scope), `candidates[]` (no `match` yet),
-  and `unscored[]` (ids of records no engine reads).
+  `unscored[]` (ids of records no engine reads), and `checks[]` — the open steps
+  in this repository's check tier, the same rows the queue carries.
 - `telemetry` — corpus sizes: `review_chains`, `denials_rows`, `audit_firings`,
   `session_snapshots`, plus `harnesses[]` — one row per harness with its
   `sessions`, `firings` and `chains`, so a harness that contributed nothing reads

@@ -16,8 +16,9 @@ import (
 	"github.com/steer-sh/steer-cli/internal/report"
 )
 
-// QueueVersion is the schema version of the queue file the skill reads.
-const QueueVersion = 5
+// QueueVersion is the schema version of the queue file the skill reads. v6 adds
+// checks: the open steps in the repository's check tier.
+const QueueVersion = 6
 
 // maxTranscriptCandidates bounds the transcript half of the queue. A cluster key
 // is the user's own wording, so it groups verbatim repeats and nothing else;
@@ -100,6 +101,9 @@ type Queue struct {
 	Unscored      []string       `json:"unscored"`
 	Candidates    []Candidate    `json:"candidates"`
 	Corpora       []CorpusStatus `json:"corpora"`
+	// Checks are the open steps in the repository the refresh ran in, empty when
+	// the caller named none.
+	Checks []CheckWork `json:"checks"`
 }
 
 // Options are the inputs to a refresh. State dirs are passed in so a test can
@@ -109,6 +113,9 @@ type Options struct {
 	Ledger       string // single-ledger override, or "" for the shard glob
 	WindowDays   int    // transcript look-back
 	AllProjects  bool   // scan every project, not just the cwd
+	// RepoRoot is the Git root whose check tier the queue reports, "" outside a
+	// repository. The caller resolves it; Refresh runs no git command.
+	RepoRoot string
 	// Evidence is every corpus a scoring pass reads, gathered by the caller. A caller
 	// that leaves it zero scores the ledger alone; the session engine then reports
 	// missing evidence rather than a range it cannot support.
@@ -125,6 +132,7 @@ func Refresh(opts Options) (*Queue, error) {
 		Unscored:      []string{},
 		Candidates:    []Candidate{},
 		Corpora:       []CorpusStatus{},
+		Checks:        checkWork(opts.RepoRoot),
 	}
 
 	// --- score every record an engine reads ----------------------------------

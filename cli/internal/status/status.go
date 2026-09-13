@@ -40,7 +40,9 @@ import (
 // change in those counts is unresolved. v11 removes the claim fields (verdict,
 // p_value, effect, required_after, confounds, composition, instrument_drift,
 // firings_applicable, attribution, chain_rate) and adds observation.
-const StatusVersion = 11
+// v12 adds checks: the repository check tier, whose adoption, runner registration
+// and observed execution are three separate readings.
+const StatusVersion = 12
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20
@@ -54,6 +56,9 @@ type Options struct {
 	WindowDays   int    // transcript look-back for the attention refresh
 	AllProjects  bool   // scan every project, not just the cwd
 	Scope        string // active scope for the config-state read (default global)
+	// RepoRoot is the Git root whose check tier the snapshot reports, "" outside
+	// a repository. The caller resolves it; Collect runs no git command.
+	RepoRoot string
 	// Evidence is every corpus a scoring pass reads. A caller leaving it zero gets
 	// the ledger alone, and every session-unit record reports missing evidence.
 	Evidence mine.EvidenceSet
@@ -264,6 +269,9 @@ type AttentionQueue struct {
 	Interventions []cadence.Intervention `json:"interventions"`
 	Unscored      []string               `json:"unscored"`
 	Candidates    []cadence.Candidate    `json:"candidates"`
+	// Checks are the open steps in the repository's check tier, the same rows the
+	// queue carries.
+	Checks []cadence.CheckWork `json:"checks"`
 }
 
 // HarnessTelemetry is one harness's share of the corpora, so a reader can tell a
@@ -290,6 +298,7 @@ type SystemStatus struct {
 	StatusVersion int                  `json:"status_version"`
 	GeneratedAt   string               `json:"generated_at"`
 	Posture       Posture              `json:"posture"`
+	Checks        CheckTier            `json:"checks"`
 	Interventions []ScoredIntervention `json:"interventions"`
 	Summary       VerdictSummary       `json:"summary"`
 	Chains        []ChainSummary       `json:"chains"`
@@ -339,6 +348,7 @@ func Collect(opts Options) (*SystemStatus, error) {
 		Ledger:       opts.Ledger,
 		WindowDays:   opts.WindowDays,
 		AllProjects:  opts.AllProjects,
+		RepoRoot:     opts.RepoRoot,
 		Evidence:     ev,
 	})
 	if err == nil && q != nil {
@@ -346,6 +356,7 @@ func Collect(opts Options) (*SystemStatus, error) {
 			Interventions: q.Interventions,
 			Unscored:      q.Unscored,
 			Candidates:    q.Candidates,
+			Checks:        q.Checks,
 		}
 		s.Corpora = corpusRows(q.Corpora, opts)
 	} else {
@@ -353,10 +364,12 @@ func Collect(opts Options) (*SystemStatus, error) {
 			Interventions: []cadence.Intervention{},
 			Unscored:      []string{},
 			Candidates:    []cadence.Candidate{},
+			Checks:        []cadence.CheckWork{},
 		}
 	}
 
 	s.Posture = collectPosture(opts.Config, ev)
+	s.Checks = collectChecks(opts.RepoRoot)
 	s.Telemetry = telemetry(ev)
 	s.Hooks = collectHooks(opts.Scope)
 	s.Presets = collectPresets(opts.Scope)

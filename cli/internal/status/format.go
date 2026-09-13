@@ -170,3 +170,74 @@ func TierPhrase(t, target string) string {
 	}
 	return name + " → " + target
 }
+
+// CheckAdoptionPhrase names whether this machine authorized the repository's
+// oracle to run at the end of a turn. Adoption is machine-local: a clone of a
+// repository that declares checks carries none of it.
+func CheckAdoptionPhrase(c CheckTier) string {
+	switch {
+	case c.Repo == "":
+		return "not inside a repository"
+	case c.Adopted && c.AdoptedAt > 0:
+		return "authorized here since " + time.Unix(int64(c.AdoptedAt), 0).Format("2006-01-02 15:04")
+	case c.Adopted:
+		return "authorized here"
+	case c.Manifest:
+		return "declares checks, not authorized to run here — run: steer check adopt"
+	default:
+		return "declares no checks"
+	}
+}
+
+// CheckRunPhrase names the last run of the repository's oracle that did any
+// work. A run turned away while another held the repository executed nothing, so
+// it is reported beside that result and never in place of it.
+func CheckRunPhrase(r *CheckRun) string {
+	if r == nil {
+		return "no run recorded on this machine"
+	}
+	phrase := r.Outcome
+	if r.IntegrationFailure {
+		phrase += ", without running " + strings.Join(r.Missing, ", ")
+	}
+	if r.Finished > 0 {
+		phrase += " at " + time.Unix(int64(r.Finished), 0).Format("2006-01-02 15:04")
+	}
+	var how []string
+	for _, part := range []string{r.Source, r.Disposition} {
+		if part != "" {
+			how = append(how, part)
+		}
+	}
+	if len(how) > 0 {
+		phrase += " (" + strings.Join(how, ", ") + ")"
+	}
+	if r.RefusedAfter > 0 {
+		phrase += "; a later run was turned away with this one still holding the repository"
+	}
+	return phrase
+}
+
+// CheckPhrase names one declared check in one clause: what it binds to, how its
+// proof stands, and what the last recorded execution was. A stale proof keeps
+// running; an unobserved check is not a pass.
+func CheckPhrase(c CheckRow) string {
+	phrase := c.ID + " (" + c.Binding + "): "
+	switch c.Validation {
+	case ValidationNone:
+		phrase += "never replayed here"
+	case CheckStale:
+		phrase += "replayed, then " + strings.Join(c.Changed, " and ") + " changed"
+	default:
+		phrase += "replayed and unchanged since"
+	}
+	if c.Execution == ExecutionUnobserved {
+		phrase += "; no execution recorded here"
+		return phrase
+	}
+	phrase += "; last " + c.Execution
+	if c.ExecutedAt > 0 {
+		phrase += " at " + time.Unix(int64(c.ExecutedAt), 0).Format("2006-01-02 15:04")
+	}
+	return phrase
+}

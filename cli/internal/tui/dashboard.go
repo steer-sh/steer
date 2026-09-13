@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/steer-sh/steer-cli/internal/checks"
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/evidence"
 	"github.com/steer-sh/steer-cli/internal/gate"
@@ -107,6 +108,16 @@ func Run(cfg gate.Config, scope string, targets ...harness.Registrar) error {
 
 func (m *Model) Init() tea.Cmd { return nil }
 
+// repoRoot is the repository the dashboard reports a check tier for, "" when it
+// was started outside one.
+func repoRoot() string {
+	root, err := checks.RepoRootOf(".")
+	if err != nil {
+		return ""
+	}
+	return root
+}
+
 // refresh recomposes the snapshot and the cached chains so panels render current
 // state. Every mutation calls it.
 func (m *Model) refresh() {
@@ -119,6 +130,7 @@ func (m *Model) refresh() {
 		WindowDays:   30,
 		AllProjects:  true,
 		Scope:        m.scope,
+		RepoRoot:     repoRoot(),
 		Evidence:     ev,
 	})
 	if err != nil {

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -22,8 +23,8 @@ func (m *Model) viewDiagnostics() string {
 	issues := m.diagnosticIssues()
 	if len(issues) == 0 {
 		out += wrapTo(dim("No issues detected by these checks. They cover the review "+
-			"outcomes still waiting and the guard runner's version; they do not read your "+
-			"whole setup."), "  ", width)
+			"outcomes still waiting, the guard runner's version and this repository's "+
+			"checks; they do not read your whole setup."), "  ", width)
 	}
 	for _, issue := range issues {
 		out += wrapTo(warn(issue.headline), "  ", width)
@@ -37,6 +38,9 @@ func (m *Model) viewDiagnostics() string {
 	out += wrapTo(dim("These are counts of what is stored here. A count says nothing about "+
 		"whether the records are current or complete, and an empty one means nothing was "+
 		"recorded on THIS machine."), "  ", width)
+
+	out += section("Repository checks")
+	out += m.checkLines(width)
 
 	out += section("Team guard configuration")
 	out += m.teamLines(width)
@@ -91,6 +95,7 @@ func (m *Model) diagnosticIssues() []diagnosticIssue {
 				"row, or run: " + status.BackfillCommand,
 		})
 	}
+	out = append(out, m.checkIssues()...)
 	for _, master := range m.snap.Posture.Masters {
 		if !master.Stale() {
 			continue
@@ -102,6 +107,81 @@ func (m *Model) diagnosticIssues() []diagnosticIssue {
 			detail: "It was written by an older Steer, or carries no version at all, so a fix " +
 				"shipped since then is not running. Open Guards and run the maintenance action " +
 				"under Maintenance needed.",
+		})
+	}
+	return out
+}
+
+// checkLines report this repository's own checks: whether they run at the end of
+// a turn here, what the last run that did any work recorded, and where each
+// declared check's proof and last execution stand. Three separate readings: a
+// registered runner is not authorization, and neither is a passing script proof
+// that a particular check ran.
+func (m *Model) checkLines(width int) string {
+	c := m.snap.Checks
+	out := wrapTo(status.CheckAdoptionPhrase(c), "  ", width)
+	if c.Repo == "" {
+		return out
+	}
+	out += wrapTo(dim("last run: "+status.CheckRunPhrase(c.LatestRun)), "  ", width)
+	for _, row := range c.Checks {
+		out += wrapTo(status.CheckPhrase(row), "  ", width)
+	}
+	return out
+}
+
+// checkIssues are the open steps in this repository's check tier. A stale proof
+// is not among them: a stale check keeps running, and its label reports what
+// moved rather than asking for a repair.
+func (m *Model) checkIssues() []diagnosticIssue {
+	c := m.snap.Checks
+	if c.Repo == "" {
+		return nil
+	}
+	var out []diagnosticIssue
+	registered := false
+	for _, a := range c.Runner {
+		registered = registered || a.Registered
+	}
+	if c.Manifest && !registered {
+		out = append(out, diagnosticIssue{
+			headline: "No agent runs this repository's checks at the end of a turn",
+			detail: "The checks declared here run only when one is registered to run them. " +
+				"Run: steer check install --harness claude-code --scope global",
+		})
+	}
+	if c.Manifest && !c.Adopted {
+		out = append(out, diagnosticIssue{
+			headline: "This machine has not authorized this repository's checks",
+			detail: "Authorization is machine-local, so a clone carries none of it, and " +
+				"nothing here runs until it is given. Run: steer check adopt",
+		})
+	}
+	for _, a := range c.Runner {
+		step, ok := status.RunnerTimeoutStep(a)
+		if !ok {
+			continue
+		}
+		out = append(out, diagnosticIssue{
+			headline: status.HarnessLabel(a.Harness) + " in " + scopeReach(a.Scope) + ": " + step.Title,
+			detail:   "A run stopped part way through reports no result at all. Run: " + step.Fix,
+		})
+	}
+	for _, row := range c.Checks {
+		if row.Validation != status.ValidationNone {
+			continue
+		}
+		out = append(out, diagnosticIssue{
+			headline: "The check " + row.ID + " was never replayed on this machine",
+			detail: "Nothing here shows it fails on the problem it names, so a passing run " +
+				"proves nothing about it. Run: steer check test " + row.ID,
+		})
+	}
+	if r := c.LatestRun; r != nil && r.IntegrationFailure {
+		out = append(out, diagnosticIssue{
+			headline: "The last run passed without running every check it declares",
+			detail: "That is the script's wiring, not a failed assertion: " +
+				strings.Join(r.Missing, ", ") + " never ran. Add the managed line to check.sh.",
 		})
 	}
 	return out
