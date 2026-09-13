@@ -794,11 +794,17 @@ func RemoveCommitGateAndResolver(scope string) error {
 // stripBackfillHooks returns the Stop groups with every resolver hook removed and any
 // group left empty dropped.
 func stripBackfillHooks(groups []StopHookEntry) []StopHookEntry {
+	return stripStopHooks(groups, IsBackfillCommand)
+}
+
+// stripStopHooks returns the Stop groups with every hook drop matches removed and any
+// group left with neither hooks nor unmodeled keys dropped.
+func stripStopHooks(groups []StopHookEntry, drop func(string) bool) []StopHookEntry {
 	out := make([]StopHookEntry, 0, len(groups))
 	for _, group := range groups {
 		hooks := make([]CommandHook, 0, len(group.Hooks))
 		for _, hook := range group.Hooks {
-			if !IsBackfillCommand(hook.Command) {
+			if !drop(hook.Command) {
 				hooks = append(hooks, hook)
 			}
 		}

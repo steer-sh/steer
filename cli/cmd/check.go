@@ -12,7 +12,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/checks"
-	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/styles"
 )
 
@@ -282,12 +281,9 @@ to the operator. Subagent Stop events are ignored. Always exits 0.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name, _ := cmd.Flags().GetString("harness")
-		target, err := harness.Parse(name)
+		target, err := blockingHarness(name)
 		if err != nil {
 			return err
-		}
-		if target != harness.ClaudeCode && target != harness.Codex {
-			return fmt.Errorf("blocking checks support claude-code and codex, not %s", target)
 		}
 		timeout, _ := cmd.Flags().GetDuration("timeout")
 		raw, err := io.ReadAll(os.Stdin)
@@ -501,6 +497,7 @@ func printRepositoryState(cmd *cobra.Command, root string) error {
 	} else {
 		fmt.Fprintln(out, "Adoption: not adopted on this machine (steer check adopt)")
 	}
+	printRunnerWiring(out)
 	runs, err := checks.OracleRuns(root)
 	if err != nil {
 		return err

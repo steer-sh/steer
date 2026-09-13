@@ -23,6 +23,16 @@ type StopReply struct {
 	SystemMessage string `json:"systemMessage,omitempty"`
 }
 
+// hookRecordingMargin is the time a Stop hook needs past the run deadline to
+// stop check.sh, record the run and save retry state.
+const hookRecordingMargin = 30 * time.Second
+
+// RegisteredHookTimeout is the harness timeout, in seconds, a Stop runner
+// registration carries. A harness that stops the hook first leaves no run record.
+func RegisteredHookTimeout() int {
+	return int((DefaultExecTimeout + hookRecordingMargin) / time.Second)
+}
+
 // StopHookOptions carries what the hook process supplies beyond the payload.
 type StopHookOptions struct {
 	Timeout  time.Duration

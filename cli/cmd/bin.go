@@ -213,6 +213,11 @@ func repointRegistrations(path string) (int, error) {
 			return rewritten, err
 		}
 		rewritten += n
+		n, err = relinkCheckRunners(scope, path)
+		if err != nil {
+			return rewritten, err
+		}
+		rewritten += n
 	}
 	return rewritten, nil
 }

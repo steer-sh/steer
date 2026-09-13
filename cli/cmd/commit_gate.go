@@ -342,14 +342,21 @@ func installSteps(cfg gate.Config, target harness.ID, command string) []status.S
 // happen, and puts the registration facts beneath it. A success box over an open step
 // reads as a working gate.
 func renderInstallReadiness(steps []status.Step, registered string) string {
+	return renderReadinessBox(steps, "Ready — the next `git commit` in scope is reviewed.",
+		"Not reviewing yet — %d %s before the first review.", registered)
+}
+
+// renderReadinessBox renders an install's readiness box. pending is a format taking
+// the step count and "step remains" or "steps remain".
+func renderReadinessBox(steps []status.Step, ready, pending, registered string) string {
 	if len(steps) == 0 {
-		return styles.SuccessBox.Render("Ready — the next `git commit` in scope is reviewed.\n\n" + registered)
+		return styles.SuccessBox.Render(ready + "\n\n" + registered)
 	}
 	word := "steps remain"
 	if len(steps) == 1 {
 		word = "step remains"
 	}
-	lines := []string{fmt.Sprintf("Not reviewing yet — %d %s before the first review.", len(steps), word), ""}
+	lines := []string{fmt.Sprintf(pending, len(steps), word), ""}
 	for _, step := range steps {
 		lines = append(lines, "· "+step.Title)
 		if step.Fix != "" {
