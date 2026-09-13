@@ -3,6 +3,7 @@ package checkscope
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -179,6 +180,67 @@ func TestBindRefusesAnUnrunnableCheck(t *testing.T) {
 	if _, err := Bind("check", root, "no-count", []harness.ID{harness.ClaudeCode}); err == nil ||
 		!strings.Contains(err.Error(), "steer check test") {
 		t.Errorf("a stale receipt: %v; want the replay step named", err)
+	}
+}
+
+const respGoMod = "module example.com/svc\n\ngo 1.21\n"
+
+// A go-test binding registers under the same contract as a script: its receipt
+// comes from replaying the named test, and the frozen digest is the Go
+// detector's.
+func TestBindFreezesAGoTestBinding(t *testing.T) {
+	cache, err := exec.Command("go", "env", "GOCACHE").Output()
+	if err != nil {
+		t.Skipf("go toolchain unavailable: %v", err)
+	}
+	modcache, _ := exec.Command("go", "env", "GOMODCACHE").Output()
+	t.Setenv("GOCACHE", strings.TrimSpace(string(cache)))
+	t.Setenv("GOMODCACHE", strings.TrimSpace(string(modcache)))
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	if _, _, err := checks.Init(root); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	fixed := "package resp\n\nfunc Response() string { return `{\"id\": 1}` }\n"
+	broken := "package resp\n\nfunc Response() string { return `{\"name\": 1}` }\n"
+	write(t, root, "svc/go.mod", respGoMod)
+	write(t, root, "svc/resp/resp.go", fixed)
+	respTest, err := os.ReadFile(filepath.Join("testdata", "resp_test.go.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, root, "svc/resp/resp_test.go", string(respTest))
+	goCase := func(name string, exit int, diagnostic, production string) checks.Case {
+		return checks.Case{Name: name, ExitCode: exitCode(exit), Diagnostic: diagnostic, Provenance: "planted",
+			Files: map[string]string{"svc/go.mod": respGoMod, "svc/resp/resp.go": production}}
+	}
+	data, err := json.Marshal(checks.CaseFile{Version: checks.CasesVersion, Cases: []checks.Case{
+		goCase("fixed", 0, "", fixed), goCase("omits-id", 1, "missing field id", broken)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, root, ".steer/checks/cases/resp-fields.json", string(data))
+	decl := checks.Declaration{ID: "resp-fields", Kind: checks.KindGoTest, Package: "svc/resp", Test: "TestResponse"}
+	if run, err := checks.Add(root, decl); err != nil {
+		t.Fatalf("Add: %v (cases %+v)", err, run.Cases)
+	}
+	adopt(t, root)
+	arm(t)
+
+	facts, err := Bind("check", root, decl.ID, []harness.ID{harness.ClaudeCode})
+	if err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	det, err := checks.DetectorOf(root, decl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if facts[mine.CheckKindKey] != checks.KindGoTest || facts[mine.CheckDigestKey] != det.Digest {
+		t.Fatalf("facts %v; want a go-test binding frozen at digest %s", facts, det.Digest)
+	}
+	history, _ := checks.History(root)
+	if len(history) == 0 || facts[mine.CheckReceiptKey] != history[len(history)-1].RunID {
+		t.Errorf("receipt %v; want the run id of the named test's replay", facts[mine.CheckReceiptKey])
 	}
 }
 

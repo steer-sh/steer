@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -274,6 +275,29 @@ func TestStopNoticesAMissingOracleOncePerSession(t *testing.T) {
 	}
 	if d := Stop(req); d.Disposition != DispositionNoOracle || d.Message != "" {
 		t.Fatalf("second stop %+v; want no second notice", d)
+	}
+}
+
+// A machine where bash cannot be found lets the turn end with a notice every
+// time and records no run, so a missing shell never reads as a pass.
+func TestStopFailsOpenWithoutBash(t *testing.T) {
+	root, req := stopRepo(t, map[string]string{"a": "exit 1\n"}, "")
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not found")
+	}
+	onlyGit := t.TempDir()
+	if err := os.Symlink(git, filepath.Join(onlyGit, "git")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", onlyGit)
+	for range 2 {
+		if d := Stop(req); d.Disposition != DispositionNoBash || d.Run != nil || !strings.Contains(d.Message, "bash was not found") {
+			t.Fatalf("stop %+v; want a no-bash notice without a run", d)
+		}
+	}
+	if runs, _ := OracleRuns(root); len(runs) != 0 {
+		t.Fatalf("a machine without bash recorded %d runs", len(runs))
 	}
 }
 
