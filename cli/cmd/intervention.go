@@ -6,10 +6,12 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/steer-sh/steer-cli/internal/checkscope"
 	"github.com/steer-sh/steer-cli/internal/evidence"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
 	"github.com/steer-sh/steer-cli/internal/guardscope"
 	"github.com/steer-sh/steer-cli/internal/sessions"
+	"github.com/steer-sh/steer-cli/internal/tier"
 )
 
 // The intervention commands exist under two parents: `steer fix`, the
@@ -43,6 +45,7 @@ type interventionFlags struct {
 	registerNotMech     string
 	registerHookID      string
 	registerHookScope   string
+	registerCheckID     string
 	registerNote        string
 	registerProblem     string
 	registerIntervent   string
@@ -52,6 +55,7 @@ type interventionFlags struct {
 	registerScopeAll    bool
 	registerScopeHrn    []string
 	registerScopeRepo   string
+	registerScopeRoot   string
 	registerScopePath   string
 
 	rejectClass      string
@@ -71,11 +75,13 @@ type interventionFlags struct {
 	rejectScopeAll   bool
 	rejectScopeHrn   []string
 	rejectScopeRepo  string
+	rejectScopeRoot  string
 	rejectScopePath  string
 
 	scopeAll   bool
 	scopeHrn   []string
 	scopeRepo  string
+	scopeRoot  string
 	scopePath  string
 	scopeSetTS int64
 	scopeForce bool
@@ -94,6 +100,9 @@ type interventionFlags struct {
 
 const scopeHarnessUsage = "eligibility scope: harness ids the class is measured on (repeatable or comma-separated)"
 
+const scopeRepoRootUsage = "eligibility scope: the exact repository root the class is measured in, " +
+	"which two checkouts sharing a basename do not share"
+
 // The prose flags are required because a class name is a label, not an explanation.
 // A reader arriving at a record months later has neither the evidence nor the session
 // that produced it, so the record carries both halves in its own words.
@@ -107,6 +116,23 @@ const corpusUsage = "evidence corpus the class is counted over: review-findings 
 
 const signalKindUsage = "transcript-friction only: the classifier kind the class is counted over " +
 	"(any|user_corrections|user_rejections|tool_failures|hook_blocks)"
+
+// bindCheckTier freezes the check a check-tier record names, from the repository the
+// command runs in. Every other rung binds nothing here and gets a nil map.
+func bindCheckTier(tierValue, checkID string, scopeHarness []string) (map[string]any, error) {
+	if !tier.IsCheck(tierValue) {
+		return nil, nil
+	}
+	root, err := repoRootOf(".")
+	if err != nil {
+		return nil, err
+	}
+	ids, err := guardscope.Normalize(scopeHarness)
+	if err != nil {
+		return nil, err
+	}
+	return checkscope.Bind(tierValue, root, checkID, ids)
+}
 
 // storedSessions reads the transcript-session snapshot store. A machine that never
 // refreshed it has none, and a session-corpus write then refuses for want of a
@@ -153,6 +179,10 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 				v.registerScopeHrn, v.registerForce); err != nil {
 				return err
 			}
+			checkFacts, err := bindCheckTier(v.registerTier, v.registerCheckID, v.registerScopeHrn)
+			if err != nil {
+				return err
+			}
 			if err := prepareState(); err != nil {
 				return err
 			}
@@ -173,6 +203,8 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 				},
 				HookID:          v.registerHookID,
 				HookScope:       v.registerHookScope,
+				CheckID:         v.registerCheckID,
+				CheckFacts:      checkFacts,
 				RuleID:          v.registerRuleID,
 				RuleScope:       v.registerRuleScope,
 				NotMechanizable: v.registerNotMech,
@@ -182,6 +214,7 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 				ScopeAll:        v.registerScopeAll,
 				ScopeHarness:    v.registerScopeHrn,
 				ScopeRepo:       v.registerScopeRepo,
+				ScopeRepoRoot:   v.registerScopeRoot,
 				ScopePath:       v.registerScopePath,
 			})
 		},
@@ -198,6 +231,8 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 		"steer-manifest key, matching the audit log's hook_name; required for a guard tier")
 	r.StringVar(&v.registerHookScope, "hook-scope", "",
 		"guard store owning --hook-id: project|global (default: whichever holds it, refusing both)")
+	r.StringVar(&v.registerCheckID, "check-id", "",
+		"id in .steer/checks/manifest.json naming the declared check; required for a check tier")
 	r.StringVar(&v.registerRuleID, "rule-id", "",
 		"steer-manifest rules key naming the installed prose; required for an instruction tier")
 	r.StringVar(&v.registerRuleScope, "rule-scope", "",
@@ -214,6 +249,7 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 	r.BoolVar(&v.registerScopeAll, "scope-all", false, "eligibility scope: every unit (exclusive with the scope predicates)")
 	r.StringSliceVar(&v.registerScopeHrn, "scope-harness", nil, scopeHarnessUsage)
 	r.StringVar(&v.registerScopeRepo, "scope-repo", "", "eligibility scope: regex on the repository root basename")
+	r.StringVar(&v.registerScopeRoot, "scope-repo-root", "", scopeRepoRootUsage)
 	r.StringVar(&v.registerScopePath, "scope-path", "", "eligibility scope: regex on a repo-relative changed path")
 	for _, name := range []string{"class", "match", "tier", "target", "problem", "intervention"} {
 		_ = register.MarkFlagRequired(name)
@@ -243,12 +279,13 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 					Problem:      v.rejectProblem,
 					Intervention: v.rejectIntervent,
 				},
-				RejectedTS:   v.rejectRejectedTS,
-				Force:        v.rejectForce,
-				ScopeAll:     v.rejectScopeAll,
-				ScopeHarness: v.rejectScopeHrn,
-				ScopeRepo:    v.rejectScopeRepo,
-				ScopePath:    v.rejectScopePath,
+				RejectedTS:    v.rejectRejectedTS,
+				Force:         v.rejectForce,
+				ScopeAll:      v.rejectScopeAll,
+				ScopeHarness:  v.rejectScopeHrn,
+				ScopeRepo:     v.rejectScopeRepo,
+				ScopeRepoRoot: v.rejectScopeRoot,
+				ScopePath:     v.rejectScopePath,
 			})
 		},
 	}
@@ -270,6 +307,7 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 	rj.BoolVar(&v.rejectScopeAll, "scope-all", false, "eligibility scope: every unit (exclusive with the scope predicates)")
 	rj.StringSliceVar(&v.rejectScopeHrn, "scope-harness", nil, scopeHarnessUsage)
 	rj.StringVar(&v.rejectScopeRepo, "scope-repo", "", "eligibility scope: regex on the repository root basename")
+	rj.StringVar(&v.rejectScopeRoot, "scope-repo-root", "", scopeRepoRootUsage)
 	rj.StringVar(&v.rejectScopePath, "scope-path", "", "eligibility scope: regex on a repo-relative changed path")
 	for _, name := range []string{"class", "match", "reason", "reopen", "problem", "intervention"} {
 		_ = reject.MarkFlagRequired(name)
@@ -293,14 +331,15 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 				return err
 			}
 			return mine.ScopeSet(out(), gateConfig().StateDir, args[0], mine.ScopeSetOpts{
-				Ledger:       v.ledger,
-				Sessions:     storedSessions(),
-				ScopeAll:     v.scopeAll,
-				ScopeHarness: v.scopeHrn,
-				ScopeRepo:    v.scopeRepo,
-				ScopePath:    v.scopePath,
-				ScopeSetTS:   v.scopeSetTS,
-				Force:        v.scopeForce,
+				Ledger:        v.ledger,
+				Sessions:      storedSessions(),
+				ScopeAll:      v.scopeAll,
+				ScopeHarness:  v.scopeHrn,
+				ScopeRepo:     v.scopeRepo,
+				ScopeRepoRoot: v.scopeRoot,
+				ScopePath:     v.scopePath,
+				ScopeSetTS:    v.scopeSetTS,
+				Force:         v.scopeForce,
 			})
 		},
 	}
@@ -308,6 +347,7 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 	sc.BoolVar(&v.scopeAll, "scope-all", false, "eligibility scope: every unit (exclusive with the scope predicates)")
 	sc.StringSliceVar(&v.scopeHrn, "scope-harness", nil, scopeHarnessUsage)
 	sc.StringVar(&v.scopeRepo, "scope-repo", "", "eligibility scope: regex on the repository root basename")
+	sc.StringVar(&v.scopeRoot, "scope-repo-root", "", scopeRepoRootUsage)
 	sc.StringVar(&v.scopePath, "scope-path", "", "eligibility scope: regex on a repo-relative changed path")
 	sc.Int64Var(&v.scopeSetTS, "scope-set-ts", 0, "migration timestamp opening the after-window (default now)")
 	sc.BoolVar(&v.scopeForce, "force", false, "record despite a zero scoped baseline")

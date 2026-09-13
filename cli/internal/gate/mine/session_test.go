@@ -32,7 +32,7 @@ func spans(u SessionUnit, end int) SessionUnit {
 // sessionRecord is one registered transcript-friction class, scoped to everything.
 func sessionRecord(t *testing.T, match, tier, hookID string, installed int) Record {
 	t.Helper()
-	scope, err := BuildScope(true, nil, "", "")
+	scope, err := BuildScope(true, nil, "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +191,7 @@ func TestSessionPartialExposureIsItsOwnCategory(t *testing.T) {
 // A harness scope freezes the denominator: a session from another harness is
 // ineligible, and one with no harness stamp is unknown rather than a shift.
 func TestSessionHarnessScopeSelectsTheDenominator(t *testing.T) {
-	scope, err := BuildScope(false, []string{"codex"}, "", "")
+	scope, err := BuildScope(false, []string{"codex"}, "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -223,6 +223,21 @@ A legacy scope migration recomputes the baseline and starts a new after-window;
 changing a frozen scope requires a new record. Baseline writers and scorers use
 the same eligibility pass.
 
+Repository scope has two predicates. The basename regex keeps its original
+semantics for existing records; the exact repository root introduced with scope
+version 3 separates checkouts that share a basename. Chains preserve the whole
+root their rows recorded beside the basename; a session carries the harness's
+munged project key, and the two compare through that key. A unit whose evidence
+names no repository stays unknown coverage.
+
+A check-tier record binds the check whose execution evidence it is read beside:
+check id, binding kind, resolved repository, detector digest, current validation
+receipt, adoption and registered harnesses. `internal/checkscope/` freezes those
+facts, because `internal/gate/mine` may import no adapter; `mine` owns the
+contract they must satisfy and the repository-root scope rule. A record written
+before the binding existed stays readable as unbound with unavailable execution
+attribution: its target names a script, and identity is never inferred from it.
+
 Both engines emit an observation: counts and window bounds, recurrence, guard
 firing activity, coverage and identity provenance. Before/after counts are
 uncontrolled observations. Standing instructions and other behavior-changing

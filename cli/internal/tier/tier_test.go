@@ -36,6 +36,18 @@ func TestAnUnknownTierIsRefused(t *testing.T) {
 	}
 }
 
+// The check rung is the one bound to a repository, and nothing else reads as it.
+func TestIsCheckNamesTheRepositoryRung(t *testing.T) {
+	if !IsCheck("check") || !IsCheck(" CHECK ") {
+		t.Error("the check rung is not read as a check")
+	}
+	for _, v := range []string{"steer", "guard", "prose", "prompt", "", "checks"} {
+		if IsCheck(v) {
+			t.Errorf("tier %q is read as a check", v)
+		}
+	}
+}
+
 // The guard rung is the one whose enforcement is per harness, under either name.
 func TestIsGuardReadsBothSpellings(t *testing.T) {
 	for _, v := range []string{"steer", "guard", " GUARD "} {

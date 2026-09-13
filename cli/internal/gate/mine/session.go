@@ -53,10 +53,12 @@ type SessionUnit struct {
 // refused at write time.
 func (u SessionUnit) Subject() Subject {
 	return Subject{
-		Harness:      u.Harness,
-		HarnessKnown: u.Harness != "",
-		Repo:         u.Project,
-		RepoKnown:    u.Project != "",
+		Harness:       u.Harness,
+		HarnessKnown:  u.Harness != "",
+		Repo:          u.Project,
+		RepoKnown:     u.Project != "",
+		RepoRoot:      u.Project,
+		RepoRootKnown: u.Project != "",
 	}
 }
 

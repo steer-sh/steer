@@ -164,7 +164,7 @@ func TestDescribeLeavesAChainVerdictUnchanged(t *testing.T) {
 	if err := Register(io.Discard, stateDir, RegisterOpts{
 		Prose: testProse, ScopeAll: true, Ledger: ledger,
 		Class: "widget parser flag loss", Match: "widget parser",
-		Kind: "defect", Tier: "check", Target: "check.sh", InstalledTS: int64(install),
+		Kind: "defect", Tier: "review", Target: "review-prompt.md", InstalledTS: int64(install),
 	}); err != nil {
 		t.Fatal(err)
 	}

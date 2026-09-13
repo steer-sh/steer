@@ -63,6 +63,8 @@ Read the linked architecture section before changing the corresponding boundary:
   [observations](ARCHITECTURE.md#interventions-and-observations).
   `cli/internal/gate/mine/` owns both corpus engines. Field counts describe
   recurrence; they cannot establish a fix's efficacy or justify retirement.
+  A check-tier record's binding is frozen by `cli/internal/checkscope/`, which
+  may read the harness adapters that `gate/mine` may not.
 - Queue, status, status line, or dashboard:
   [readers and controls](ARCHITECTURE.md#cadence-status-and-controls).
   `cli/internal/status/` owns shared phrasing; the TUI calls shared mutation

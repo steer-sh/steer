@@ -315,6 +315,11 @@ type RegisterOpts struct {
 	HookScope  string
 	RuleID     string
 	RuleScope  string
+	// CheckID names the declared check a check-tier record binds, and CheckFacts is
+	// that check's frozen state, read by the caller: the adapters that resolve a
+	// registration live outside this package.
+	CheckID    string
+	CheckFacts map[string]any
 	// NotMechanizable is required when Tier names the instruction rung.
 	NotMechanizable string
 	Supersedes      string
@@ -323,6 +328,7 @@ type RegisterOpts struct {
 	ScopeAll        bool
 	ScopeHarness    []string
 	ScopeRepo       string
+	ScopeRepoRoot   string
 	ScopePath       string
 }
 
@@ -349,7 +355,7 @@ func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 	if err := spec.ValidateSignalKind(o.SignalKind); err != nil {
 		return err
 	}
-	scopeMap, err := BuildScope(o.ScopeAll, o.ScopeHarness, o.ScopeRepo, o.ScopePath)
+	scopeMap, err := BuildScope(o.ScopeAll, o.ScopeHarness, o.ScopeRepo, o.ScopeRepoRoot, o.ScopePath)
 	if err != nil {
 		return err
 	}
@@ -424,6 +430,16 @@ func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 			"also the audit log's hook_name). Without it the audit-log join is a path search " +
 			"that breaks the moment the hook is renamed or retired")
 	}
+	// A check record binds the check whose execution evidence it is scored beside,
+	// and the repository that check runs in.
+	if tier.IsCheck(o.Tier) {
+		if err := requireCheckBinding(o.CheckID, o.CheckFacts); err != nil {
+			return err
+		}
+		if err := requireCheckScope(o.CheckID, o.CheckFacts, scopeMap); err != nil {
+			return err
+		}
+	}
 	// An instruction record names the rule its digest was taken over. Without it the
 	// record names a document and no text inside it, and nothing later can say which
 	// prose the decision was made about.
@@ -464,6 +480,9 @@ func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 		} else {
 			record["signal_kind"] = SignalAny
 		}
+	}
+	for k, v := range o.CheckFacts {
+		record[k] = v
 	}
 	if o.HookID != "" {
 		record["hook_id"] = o.HookID
@@ -521,25 +540,26 @@ func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 
 // RejectOpts are the flags of `mine reject`.
 type RejectOpts struct {
-	Ledger       string
-	Class        string
-	Match        string
-	Kind         string
-	Corpus       string
-	SignalKind   string
-	Sessions     []SessionUnit
-	Reason       string
-	Reopen       string
-	ReopenMatch  string
-	ReopenAt     int
-	Note         string
-	Prose        Prose
-	RejectedTS   int64
-	Force        bool
-	ScopeAll     bool
-	ScopeHarness []string
-	ScopeRepo    string
-	ScopePath    string
+	Ledger        string
+	Class         string
+	Match         string
+	Kind          string
+	Corpus        string
+	SignalKind    string
+	Sessions      []SessionUnit
+	Reason        string
+	Reopen        string
+	ReopenMatch   string
+	ReopenAt      int
+	Note          string
+	Prose         Prose
+	RejectedTS    int64
+	Force         bool
+	ScopeAll      bool
+	ScopeHarness  []string
+	ScopeRepo     string
+	ScopeRepoRoot string
+	ScopePath     string
 }
 
 // validateReopenSubset refuses half a reopen trigger. A regex without a count
@@ -587,7 +607,7 @@ func Reject(w io.Writer, stateDir string, o RejectOpts) error {
 	if err := spec.ValidateSignalKind(o.SignalKind); err != nil {
 		return err
 	}
-	scopeMap, err := BuildScope(o.ScopeAll, o.ScopeHarness, o.ScopeRepo, o.ScopePath)
+	scopeMap, err := BuildScope(o.ScopeAll, o.ScopeHarness, o.ScopeRepo, o.ScopeRepoRoot, o.ScopePath)
 	if err != nil {
 		return err
 	}
@@ -673,14 +693,15 @@ func Reject(w io.Writer, stateDir string, o RejectOpts) error {
 
 // ScopeSetOpts are the flags of `mine scope`.
 type ScopeSetOpts struct {
-	Ledger       string
-	Sessions     []SessionUnit
-	ScopeAll     bool
-	ScopeHarness []string
-	ScopeRepo    string
-	ScopePath    string
-	ScopeSetTS   int64
-	Force        bool
+	Ledger        string
+	Sessions      []SessionUnit
+	ScopeAll      bool
+	ScopeHarness  []string
+	ScopeRepo     string
+	ScopeRepoRoot string
+	ScopePath     string
+	ScopeSetTS    int64
+	Force         bool
 }
 
 // ScopeSet installs a scope on a legacy, unscoped record. It recomputes the scoped
@@ -704,12 +725,18 @@ func ScopeSet(w io.Writer, stateDir, id string, o ScopeSetOpts) error {
 	if err != nil {
 		return err
 	}
-	scopeMap, err := BuildScope(o.ScopeAll, o.ScopeHarness, o.ScopeRepo, o.ScopePath)
+	scopeMap, err := BuildScope(o.ScopeAll, o.ScopeHarness, o.ScopeRepo, o.ScopeRepoRoot, o.ScopePath)
 	if err != nil {
 		return err
 	}
 	if err := spec.ValidateScope(scopeMap); err != nil {
 		return err
+	}
+	if fix, bound := CheckFixOf(rec); bound {
+		facts := map[string]any{CheckRepoKey: fix.Repo}
+		if err := requireCheckScope(fix.ID, facts, scopeMap); err != nil {
+			return err
+		}
 	}
 	scope, _, err := ParseScope(Record{"scope": scopeMap})
 	if err != nil {

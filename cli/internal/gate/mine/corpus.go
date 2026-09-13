@@ -136,8 +136,9 @@ type Chain struct {
 
 	// Harness is the coding agent whose gate wrote the chain's rows; HarnessKnown is
 	// false when no row carried the stamp, which a scope reads as Unknown.
-	// Repo is the repository root basename a scope's repo predicate matches; RepoKnown
-	// is false when no row carried repo metadata. Paths is the union of changed paths
+	// Repo is the repository root basename a scope's repo predicate matches, and
+	// RepoRoot the whole root its rows recorded, which the exact-root predicate reads;
+	// RepoKnown is false when no row carried repo metadata. Paths is the union of changed paths
 	// across the chain's rounds; PathsKnown is false when no row stamped or recovered a
 	// path list, which a scope reads as Unknown rather than an empty match.
 	// AuthorModels is the set of models that authored the chain's diffs;
@@ -145,7 +146,9 @@ type Chain struct {
 	Harness          string
 	HarnessKnown     bool
 	Repo             string
+	RepoRoot         string
 	RepoKnown        bool
+	RepoRootKnown    bool
 	Paths            []string
 	PathsKnown       bool
 	AuthorModels     []string
@@ -233,7 +236,8 @@ func chainsForHost(rows []gate.Row, strictJoins bool) []Chain {
 		}
 		if repo := str(row["repo"]); repo != "" && !ch.RepoKnown {
 			ch.Repo = slashBase(repo)
-			ch.RepoKnown = true
+			ch.RepoRoot = repo
+			ch.RepoKnown, ch.RepoRootKnown = true, true
 		}
 		if model := str(row["author_model"]); model != "" {
 			ch.AuthorModels = appendUnique(ch.AuthorModels, model)

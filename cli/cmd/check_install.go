@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/checks"
+	"github.com/steer-sh/steer-cli/internal/checkscope"
 	"github.com/steer-sh/steer-cli/internal/claude"
 	codexhooks "github.com/steer-sh/steer-cli/internal/codex"
 	"github.com/steer-sh/steer-cli/internal/harness"
@@ -35,30 +36,18 @@ func checkHookCommand(target harness.ID) string {
 	return steerHookCommand("check hook --harness " + string(target))
 }
 
-// runnerArming is one harness's Stop runner registration at one scope, read back
-// from the file the harness loads.
-type runnerArming struct {
-	Registered bool
-	Timeout    int
-	Command    string
-	Path       string
-}
-
-func checkRunnerArming(target harness.ID, scope string) (runnerArming, error) {
+// checkRunnerArming reads one harness's Stop runner registration at one scope,
+// resolving the project directory Codex reads.
+func checkRunnerArming(target harness.ID, scope string) (checkscope.Arming, error) {
+	cwd := ""
 	if target == harness.Codex {
-		cwd, err := codexProjectDir()
+		dir, err := codexProjectDir()
 		if err != nil && scope != claude.GlobalScope {
-			return runnerArming{}, err
+			return checkscope.Arming{}, err
 		}
-		a := codexhooks.CheckHookArming(scope, cwd)
-		return runnerArming{Registered: a.Registered, Timeout: a.Timeout, Command: a.Command, Path: a.Path}, nil
+		cwd = dir
 	}
-	a, err := claude.CheckHookArming(scope)
-	if err != nil {
-		return runnerArming{}, err
-	}
-	path, _ := claude.GetSettingsFile(scope)
-	return runnerArming{Registered: a.Registered, Timeout: a.Timeout, Command: a.Command, Path: path}, nil
+	return checkscope.RunnerArming(target, scope, cwd)
 }
 
 var checkInstallCmd = &cobra.Command{
@@ -114,7 +103,7 @@ this machine (steer check adopt). Pi is not supported.`,
 // checkInstallSteps is what still stands between this registration and a Stop
 // that runs check.sh: a command that resolves, a harness that trusts the hook,
 // and, when the current repository has a check.sh, its adoption.
-func checkInstallSteps(target harness.ID, arming runnerArming) []status.Step {
+func checkInstallSteps(target harness.ID, arming checkscope.Arming) []status.Step {
 	var steps []status.Step
 	if step, ok := status.CommandStep(steerbin.Resolve(arming.Command)); ok {
 		steps = append(steps, step)

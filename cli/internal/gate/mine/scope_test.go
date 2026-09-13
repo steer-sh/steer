@@ -20,23 +20,23 @@ func paths(r gate.Row, ps ...string) gate.Row {
 }
 
 func TestBuildScopeValidation(t *testing.T) {
-	if _, err := BuildScope(true, nil, "steer", ""); err == nil {
+	if _, err := BuildScope(true, nil, "steer", "", ""); err == nil {
 		t.Error("all with a predicate must be refused")
 	}
-	if _, err := BuildScope(false, nil, "", ""); err == nil {
+	if _, err := BuildScope(false, nil, "", "", ""); err == nil {
 		t.Error("no scope at all must be refused")
 	}
-	if _, err := BuildScope(false, nil, "(", ""); err == nil {
+	if _, err := BuildScope(false, nil, "(", "", ""); err == nil {
 		t.Error("a bad repo regex must be refused")
 	}
-	all, err := BuildScope(true, nil, "", "")
+	all, err := BuildScope(true, nil, "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	check(t, "all scope stores the flag", all["all"], true)
 	check(t, "all scope stores the version", all["version"], ScopeVersionV1)
 
-	pred, err := BuildScope(false, nil, "steer", `cli/.*\.go`)
+	pred, err := BuildScope(false, nil, "steer", "", `cli/.*\.go`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestParseScope(t *testing.T) {
 	if _, has, err := ParseScope(Record{"id": "x"}); has || err != nil {
 		t.Errorf("a legacy record has no scope: has=%v err=%v", has, err)
 	}
-	if _, _, err := ParseScope(Record{"scope": map[string]any{"version": 3, "all": true}}); err == nil {
+	if _, _, err := ParseScope(Record{"scope": map[string]any{"version": ScopeVersionV3 + 1, "all": true}}); err == nil {
 		t.Error("a future scope version must be refused")
 	}
 	s, has, err := ParseScope(Record{"scope": map[string]any{"version": 1, "all": true}})
@@ -183,7 +183,7 @@ func TestScopedBaselineAndMigration(t *testing.T) {
 	if err := Register(io.Discard, stateDir, RegisterOpts{
 		Prose:  testProse,
 		Ledger: ledger, Class: "widget flag", Match: "widget parser",
-		Tier: "check", Target: "check.sh", InstalledTS: int64(install),
+		Tier: "review", Target: "review-prompt.md", InstalledTS: int64(install),
 		ScopeRepo: "steer", ScopePath: `\.go$`,
 	}); err != nil {
 		t.Fatal(err)
@@ -271,7 +271,7 @@ func TestCoverCorpusPreviewsWhatTheWriteFreezes(t *testing.T) {
 	stateDir, ledger := writeLedger(t, rows)
 
 	withClock(int64(install)+1_000_000, func() {
-		cov, err := CoverCorpus(stateDir, ledger, nil, "", "")
+		cov, err := CoverCorpus(stateDir, ledger, nil, "", "", "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -282,7 +282,7 @@ func TestCoverCorpusPreviewsWhatTheWriteFreezes(t *testing.T) {
 		if err := Register(io.Discard, stateDir, RegisterOpts{
 			Prose:    testProse,
 			ScopeAll: true, Ledger: ledger, Class: "widget parser flag loss", Match: "widget parser",
-			Kind: "defect", Tier: "check", Target: "check.sh", InstalledTS: int64(install),
+			Kind: "defect", Tier: "review", Target: "review-prompt.md", InstalledTS: int64(install),
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -298,13 +298,13 @@ func TestCoverCorpusPreviewsWhatTheWriteFreezes(t *testing.T) {
 func TestScopeWithNoHarnessStaysV1(t *testing.T) {
 	// v1 expresses repo and path, so an existing workflow keeps writing a v1 scope an
 	// older binary can still read. Only the new predicate costs compatibility.
-	pred, err := BuildScope(false, nil, "steer", "")
+	pred, err := BuildScope(false, nil, "steer", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	check(t, "repo-only scope version", pred["version"], ScopeVersionV1)
 
-	withHarness, err := BuildScope(false, []string{"codex"}, "steer", "")
+	withHarness, err := BuildScope(false, []string{"codex"}, "steer", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,19 +313,19 @@ func TestScopeWithNoHarnessStaysV1(t *testing.T) {
 }
 
 func TestBuildScopeNormalizesAndValidatesHarnesses(t *testing.T) {
-	m, err := BuildScope(false, []string{"codex,claude", "codex"}, "", "")
+	m, err := BuildScope(false, []string{"codex,claude", "codex"}, "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	check(t, "sorted and deduplicated", m["harness"], []any{"claude-code", "codex"})
 
-	if _, err := BuildScope(false, []string{"emacs"}, "", ""); err == nil {
+	if _, err := BuildScope(false, []string{"emacs"}, "", "", ""); err == nil {
 		t.Error("an unknown harness id must be refused at write time")
 	}
-	if _, err := BuildScope(true, []string{"codex"}, "", ""); err == nil {
+	if _, err := BuildScope(true, []string{"codex"}, "", "", ""); err == nil {
 		t.Error("--scope-all is exclusive with --scope-harness")
 	}
-	if _, err := BuildScope(false, []string{" , "}, "", ""); err == nil {
+	if _, err := BuildScope(false, []string{" , "}, "", "", ""); err == nil {
 		t.Error("a harness list of only separators names no harness")
 	}
 }

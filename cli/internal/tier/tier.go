@@ -74,6 +74,13 @@ func Accepted() []string {
 // Name is the rung in the reader's words, "" for a rung with no name.
 func Name(k Kind) string { return names[k] }
 
+// IsCheck says a record's fix is a repository check, which runs in one repository
+// and under the harnesses whose Stop runner is registered.
+func IsCheck(value string) bool {
+	k, _ := Of(value)
+	return k == Check
+}
+
 // IsGuard says a record's fix is a steer guard, whose enforcement is per harness.
 func IsGuard(value string) bool {
 	k, _ := Of(value)

@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/checks"
+	"github.com/steer-sh/steer-cli/internal/checkscope"
 	"github.com/steer-sh/steer-cli/internal/claude"
 	codexhooks "github.com/steer-sh/steer-cli/internal/codex"
 	"github.com/steer-sh/steer-cli/internal/harness"
@@ -92,7 +93,7 @@ func TestInstallNamesAdoptionOnlyWhereCheckShExists(t *testing.T) {
 		t.Fatalf("git init: %v: %s", err, out)
 	}
 	hasAdoptStep := func() bool {
-		for _, step := range checkInstallSteps(harness.ClaudeCode, runnerArming{}) {
+		for _, step := range checkInstallSteps(harness.ClaudeCode, checkscope.Arming{}) {
 			if step.Fix == "steer check adopt" {
 				return true
 			}

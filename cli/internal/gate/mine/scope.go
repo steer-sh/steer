@@ -2,6 +2,7 @@ package mine
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -10,14 +11,16 @@ import (
 )
 
 // The scope schema versions this build understands. v1 carries repo and path; v2 adds
-// the harness predicate. A scope is written at the lowest version that can express it,
-// so a scope naming no harness stays v1 and an older binary still reads it.
+// the harness predicate; v3 adds the exact repository root. A scope is written at the
+// lowest version that can express it, so a scope naming no harness stays v1 and an
+// older binary still reads it.
 const (
 	ScopeVersionV1 = 1
 	ScopeVersionV2 = 2
+	ScopeVersionV3 = 3
 
 	// ScopeVersion is the newest version this build writes.
-	ScopeVersion = ScopeVersionV2
+	ScopeVersion = ScopeVersionV3
 )
 
 // Scope is a record's frozen eligibility rule over harness, repo and path metadata. All
@@ -26,8 +29,12 @@ type Scope struct {
 	All     bool
 	Harness []string
 	Repo    *regexp.Regexp
-	Path    *regexp.Regexp
-	raw     map[string]any
+	// RepoRoot is one exact repository root. It is the predicate a repository-bound
+	// fix is scoped by: two checkouts sharing a basename are different repositories,
+	// and only one of them runs the fix.
+	RepoRoot string
+	Path     *regexp.Regexp
+	raw      map[string]any
 }
 
 // Eligibility is one chain's standing against a scope. Unknown means the chain's
@@ -48,9 +55,9 @@ func ParseScope(record Record) (*Scope, bool, error) {
 		return nil, false, nil
 	}
 	version := numInt(raw["version"])
-	if version != ScopeVersionV1 && version != ScopeVersionV2 {
-		return nil, true, fmt.Errorf("scope version %d is not %d or %d — this binary cannot score it",
-			version, ScopeVersionV1, ScopeVersionV2)
+	if version < ScopeVersionV1 || version > ScopeVersionV3 {
+		return nil, true, fmt.Errorf("scope version %d is not %d, %d or %d — this binary cannot score it",
+			version, ScopeVersionV1, ScopeVersionV2, ScopeVersionV3)
 	}
 	s := &Scope{raw: raw}
 	if truthy(raw["all"]) {
@@ -69,6 +76,9 @@ func ParseScope(record Record) (*Scope, bool, error) {
 		}
 		s.Repo = re
 	}
+	if root := str(raw["repo_root"]); root != "" {
+		s.RepoRoot = root
+	}
 	if expr := str(raw["path"]); expr != "" {
 		re, err := compilePattern(expr)
 		if err != nil {
@@ -76,33 +86,38 @@ func ParseScope(record Record) (*Scope, bool, error) {
 		}
 		s.Path = re
 	}
-	if s.Repo == nil && s.Path == nil && len(s.Harness) == 0 {
-		return nil, true, fmt.Errorf("scope has neither all, harness, repo, nor path")
+	if s.Repo == nil && s.Path == nil && s.RepoRoot == "" && len(s.Harness) == 0 {
+		return nil, true, fmt.Errorf("scope has neither all, harness, repo, repo_root, nor path")
 	}
 	return s, true, nil
 }
 
 // BuildScope assembles and validates the record's stored scope from the flags. Exactly
-// one of scopeAll or (harness|repo|path) may be set. The harness list names exact
-// harness ids, not a regex: a harness is a closed set, so a typo is a write-time error
-// rather than a predicate that silently matches nothing.
-func BuildScope(scopeAll bool, harnesses []string, repoExpr, pathExpr string) (map[string]any, error) {
-	hasPredicate := repoExpr != "" || pathExpr != "" || len(harnesses) > 0
+// one of scopeAll or (harness|repo|repo-root|path) may be set. The harness list names
+// exact harness ids, not a regex: a harness is a closed set, so a typo is a write-time
+// error rather than a predicate that silently matches nothing. repoRoot is one exact
+// repository root rather than a regex, for the same reason.
+func BuildScope(scopeAll bool, harnesses []string, repoExpr, repoRoot, pathExpr string) (map[string]any, error) {
+	hasPredicate := repoExpr != "" || repoRoot != "" || pathExpr != "" || len(harnesses) > 0
 	if scopeAll && hasPredicate {
-		return nil, fmt.Errorf("--scope-all is exclusive with --scope-harness/--scope-repo/--scope-path")
+		return nil, fmt.Errorf("--scope-all is exclusive with " +
+			"--scope-harness/--scope-repo/--scope-repo-root/--scope-path")
 	}
 	if !scopeAll && !hasPredicate {
 		return nil, fmt.Errorf("a scope is required: pass --scope-all, or at least one of " +
-			"--scope-harness/--scope-repo/--scope-path")
+			"--scope-harness/--scope-repo/--scope-repo-root/--scope-path")
 	}
 	if scopeAll {
 		return map[string]any{"version": ScopeVersionV1, "all": true}, nil
 	}
 	// v1 expresses repo and path, so a scope naming no harness is written as v1 and an
-	// older binary keeps scoring it. Only the new predicate costs compatibility.
+	// older binary keeps scoring it. Only a new predicate costs compatibility.
 	version := ScopeVersionV1
 	if len(harnesses) > 0 {
 		version = ScopeVersionV2
+	}
+	if repoRoot != "" {
+		version = ScopeVersionV3
 	}
 	out := map[string]any{"version": version}
 	if len(harnesses) > 0 {
@@ -121,6 +136,13 @@ func BuildScope(scopeAll bool, harnesses []string, repoExpr, pathExpr string) (m
 			return nil, fmt.Errorf("bad --scope-repo regex %s: %w", pyRepr(repoExpr), err)
 		}
 		out["repo"] = repoExpr
+	}
+	if repoRoot != "" {
+		root, err := normalizeRepoRoot(repoRoot)
+		if err != nil {
+			return nil, err
+		}
+		out["repo_root"] = root
 	}
 	if pathExpr != "" {
 		if _, err := compilePattern(pathExpr); err != nil {
@@ -149,19 +171,27 @@ type Subject struct {
 	HarnessKnown bool
 	Repo         string
 	RepoKnown    bool
-	Paths        []string
-	PathsKnown   bool
+	// RepoRoot is the whole repository root the unit's evidence recorded, in whatever
+	// form its corpus stores it. The root predicate compares normalized keys, so a
+	// ledger row's absolute path and a transcript's munged project directory name the
+	// same repository.
+	RepoRoot      string
+	RepoRootKnown bool
+	Paths         []string
+	PathsKnown    bool
 }
 
 // Subject reduces a chain to the metadata a scope reads.
 func (ch Chain) Subject() Subject {
 	return Subject{
-		Harness:      ch.Harness,
-		HarnessKnown: ch.HarnessKnown,
-		Repo:         ch.Repo,
-		RepoKnown:    ch.RepoKnown,
-		Paths:        ch.Paths,
-		PathsKnown:   ch.PathsKnown,
+		Harness:       ch.Harness,
+		HarnessKnown:  ch.HarnessKnown,
+		Repo:          ch.Repo,
+		RepoKnown:     ch.RepoKnown,
+		RepoRoot:      ch.RepoRoot,
+		RepoRootKnown: ch.RepoRootKnown,
+		Paths:         ch.Paths,
+		PathsKnown:    ch.PathsKnown,
 	}
 }
 
@@ -196,6 +226,17 @@ func (s *Scope) ClassifySubject(sub Subject) Eligibility {
 			repo = predNoMatch
 		}
 	}
+	root := predMatch
+	if s.RepoRoot != "" {
+		switch {
+		case !sub.RepoRootKnown:
+			root = predUnknown
+		case sameRepoRoot(s.RepoRoot, sub.RepoRoot):
+			root = predMatch
+		default:
+			root = predNoMatch
+		}
+	}
 	path := predMatch
 	if s.Path != nil {
 		switch {
@@ -207,13 +248,51 @@ func (s *Scope) ClassifySubject(sub Subject) Eligibility {
 			path = predNoMatch
 		}
 	}
-	if hrn == predNoMatch || repo == predNoMatch || path == predNoMatch {
+	if hrn == predNoMatch || repo == predNoMatch || root == predNoMatch || path == predNoMatch {
 		return Ineligible
 	}
-	if hrn == predUnknown || repo == predUnknown || path == predUnknown {
+	if hrn == predUnknown || repo == predUnknown || root == predUnknown || path == predUnknown {
 		return Unknown
 	}
 	return Eligible
+}
+
+// normalizeRepoRoot validates and canonicalizes a root a writer typed. It must be
+// absolute, because a relative path names a different repository from every other
+// directory; trailing separators are dropped.
+func normalizeRepoRoot(root string) (string, error) {
+	trimmed := strings.TrimRight(strings.ReplaceAll(strings.TrimSpace(root), "\\", "/"), "/")
+	if trimmed == "" {
+		return "", fmt.Errorf("--scope-repo-root names no path")
+	}
+	if !filepath.IsAbs(root) {
+		return "", fmt.Errorf("--scope-repo-root %s is not an absolute repository root",
+			pyRepr(root))
+	}
+	return trimmed, nil
+}
+
+// sameRepoRoot compares two repository roots through the project key both corpora can
+// produce. A ledger row stores the absolute root; a transcript stores the harness's
+// munged directory name for it, and no path survives that unchanged.
+func sameRepoRoot(a, b string) bool {
+	return projectKey(a) != "" && projectKey(a) == projectKey(b)
+}
+
+// projectKey is transcript.NormalizeProject's pre-image, repeated here because nothing
+// under gate may import a transcript adapter. scope_test.go pins the two together. It
+// is idempotent, so a key normalized once compares equal to its own path.
+func projectKey(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range strings.TrimRight(strings.ReplaceAll(s, "\\", "/"), "/") {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		} else {
+			b.WriteRune('-')
+		}
+	}
+	return b.String()
 }
 
 func matchesAnyPath(re *regexp.Regexp, paths []string) bool {
@@ -290,14 +369,14 @@ func CoverEvidence(chains []Chain, scope *Scope, now float64) Coverage {
 // It runs the evidence pass the writers run, so the preview and the baseline the write
 // freezes count one set of chains. Empty predicates preview an all-scope. A bad regex
 // is returned as an error.
-func CoverCorpus(stateDir, ledger string, harnesses []string, repoExpr, pathExpr string) (Coverage, error) {
+func CoverCorpus(stateDir, ledger string, harnesses []string, repoExpr, repoRoot, pathExpr string) (Coverage, error) {
 	rows, err := LoadRows(stateDir, ledger)
 	if err != nil {
 		return Coverage{}, err
 	}
 	chains := BuildChains(rows, false)
-	all := len(harnesses) == 0 && repoExpr == "" && pathExpr == ""
-	m, err := BuildScope(all, harnesses, repoExpr, pathExpr)
+	all := len(harnesses) == 0 && repoExpr == "" && repoRoot == "" && pathExpr == ""
+	m, err := BuildScope(all, harnesses, repoExpr, repoRoot, pathExpr)
 	if err != nil {
 		return Coverage{}, err
 	}
@@ -310,9 +389,9 @@ func CoverCorpus(stateDir, ledger string, harnesses []string, repoExpr, pathExpr
 
 // CoverCorpusSessions classifies the session corpus against the scope the predicates
 // describe, the session engine's analogue of CoverCorpus.
-func CoverCorpusSessions(units []SessionUnit, harnesses []string, repoExpr string) (SessionCoverage, error) {
-	all := len(harnesses) == 0 && repoExpr == ""
-	m, err := BuildScope(all, harnesses, repoExpr, "")
+func CoverCorpusSessions(units []SessionUnit, harnesses []string, repoExpr, repoRoot string) (SessionCoverage, error) {
+	all := len(harnesses) == 0 && repoExpr == "" && repoRoot == ""
+	m, err := BuildScope(all, harnesses, repoExpr, repoRoot, "")
 	if err != nil {
 		return SessionCoverage{}, err
 	}
