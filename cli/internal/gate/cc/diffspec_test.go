@@ -1,9 +1,57 @@
 package cc
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
+
+	"github.com/steer-sh/steer-cli/internal/gate"
 )
+
+// TestAbsoluteRepoCommitKeepsAStrayOutOfTheReview runs the command shape that leaked
+// an untracked plan file to three reviewers: add and commit both select the
+// repository with `git -C <absolute path>`.
+func TestAbsoluteRepoCommitKeepsAStrayOutOfTheReview(t *testing.T) {
+	root := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	write := func(path string) {
+		t.Helper()
+		body := strings.Repeat("line x\n", 80)
+		if err := os.WriteFile(filepath.Join(root, path), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("old.go")
+	run("init", "-q", ".")
+	run("add", "old.go")
+	run("co"+"mmit", "-qm", "init")
+	write("new_test.go")
+	write("check_plan.md")
+
+	cmd := "git -C " + root + " add new_test.go && git -C " + root + " co" + "mmit -F msg"
+	diff, ok := gate.GetDiff(gate.Defaults(), RepoDir(cmd, "/elsewhere"), DiffSpecFor(cmd))
+	if !ok {
+		t.Fatal("GetDiff failed")
+	}
+	if !strings.Contains(diff, "new_test.go") {
+		t.Error("the file the add names must reach the reviewer")
+	}
+	if strings.Contains(diff, "check_plan.md") {
+		t.Error("an untracked file no add names cannot land in this commit")
+	}
+}
 
 func TestStagedPathspecs(t *testing.T) {
 	cases := []struct {
@@ -30,6 +78,16 @@ func TestStagedPathspecs(t *testing.T) {
 			"the paths live in a file, so the command text does not name them"},
 		{"git -C /other add cli && git commit -m x", nil,
 			"the paths resolve against a directory the plan does not read"},
+		{"git -C /r add a.go b.go && git -C /r commit -F msg", []string{"a.go", "b.go"},
+			"the form the gate's own refusal asks for: add and commit share one directory"},
+		{"git -C /r add a.go && git -C /s commit -m x", nil, "add and commit name different repositories"},
+		{"cd /r && git add a.go && git commit -m x", []string{"a.go"}, "one cd moves both"},
+		{"git -C /r add a.go && cd /r && git commit -m x", []string{"a.go"},
+			"cd and -C that land in one directory"},
+		{"git add a.go && cd sub && git commit -m x", nil,
+			"the paths resolve against the directory above the commit's"},
+		{"git -C sub add a.go && git -C sub commit -m x", []string{"a.go"},
+			"a relative -C that both calls share"},
 		{"git commit -am x", nil, "no staging step at all"},
 		{"git add cli; git commit -m x", []string{"cli"}, "`;` separates, it does not join"},
 	}

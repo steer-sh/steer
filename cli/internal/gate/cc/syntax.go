@@ -522,13 +522,24 @@ func parsedStagesBefore(program *shellsyntax.Program, commit *parsedGit) bool {
 	return false
 }
 
+// parsedStagedPathspecs returns the paths the adds before the commit name. An add's
+// paths resolve against its own directory and the diff runs in the commit's, so an
+// add whose directory, after cd and -C, differs from the commit's yields nil.
 func parsedStagedPathspecs(program *shellsyntax.Program, commit *parsedGit) []string {
+	commitCWD, commitTree, ok := commit.resolvedDirs()
+	if !ok {
+		return nil
+	}
 	var out []string
 	for _, add := range parsedGitCalls(program, "", "add", "stage") {
 		if add.call.Start >= commit.call.Start {
 			continue
 		}
-		if add.gitCWD != "" || add.workTree != "" || add.gitDirOnly {
+		if add.gitDirOnly {
+			return nil
+		}
+		addCWD, addTree, ok := add.resolvedDirs()
+		if !ok || addCWD != commitCWD || addTree != commitTree {
 			return nil
 		}
 		literal := false
