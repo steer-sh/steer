@@ -51,6 +51,10 @@ Read the linked architecture section before changing the corresponding boundary:
   `cli/internal/guard/runtime.py` is embedded in generated masters. A CLI upgrade
   needs `steer hooks rebuild --scope <scope>` to update an installed master;
   fixture runs must keep synthetic firings out of the live audit log.
+- Check declarations, validation, execution, adoption or the Stop runner:
+  [repository checks](ARCHITECTURE.md#repository-checks). Start with
+  `cli/internal/checks/`. Its `guide.md` is embedded in the binary and is the
+  authoring contract the skills cite, so a change to it needs a rebuild too.
 - Commit review, reviewer settings, or outcome reconciliation:
   [commit gate](ARCHITECTURE.md#commit-gate-and-resolver). Start with
   `cli/internal/gate/`; its adapters own harness payloads and replies.

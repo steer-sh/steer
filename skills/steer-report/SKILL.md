@@ -3,7 +3,7 @@ name: steer-report
 description: Audits the interventions steer already installed, then mines Claude Code and Codex transcripts and the commit-review ledger for new hook candidates backed by evidence. Use for steer onboarding ("what hooks should I create?"), periodic review of installed hooks, or when the user asks to mine usage history for candidates.
 user-invocable: true
 digest_version: 2
-compatibility: Requires the steer CLI (report and commit-gate subcommands) on PATH or bundled under scripts/. Reads transcripts from ~/.claude/projects and $CODEX_HOME/sessions, and, when present, the commit-review ledger under ~/.steer/state/commit-review (~/.claude/state/commit-review on a machine that has not yet migrated).
+compatibility: Requires the steer CLI (report, commit-gate and check subcommands) on PATH or bundled under scripts/. Reads transcripts from ~/.claude/projects and $CODEX_HOME/sessions, and, when present, the commit-review ledger under ~/.steer/state/commit-review (~/.claude/state/commit-review on a machine that has not yet migrated).
 allowed-tools: Bash(steer *), Read, Edit, Write
 ---
 
@@ -381,7 +381,7 @@ flag value.
 
 | `--tier` | Say | Use when | Where it lands |
 |---|---|---|---|
-| `check` | repository check | A repo-local script can detect it deterministically | that repo's `check.sh`, via the `check-oracle` skill |
+| `check` | repository check | A local, deterministic test of repository content can detect it | a managed check in that repo's `check.sh`, authored from `steer check guide` |
 | `steer` / `guard` | pre-tool guard | It is detectable at edit time by regex/AST on a file or command | a PreToolUse hook, via the `steer` skill |
 | `prompt` / `review` | review-prompt change | It is a recurring reviewer false positive | the reviewer prompt (`cli/internal/gate/prompts/review.md`) |
 | `prose` / `instruction` | instruction rule | Genuinely not mechanizable but frequent enough to earn a line | CLAUDE.md |
@@ -390,7 +390,9 @@ An instruction rule is the weakest tier and the last one to reach for. Use it on
 
 A review-prompt change is not a rung you pass through on the way to prose. It applies to one candidate type only — a recurring reviewer false positive — and a defect class never routes there.
 
-Transcript candidates almost always route to `steer` (edit-time regex) or `check` (a repo script). Scope each one project vs global — a rule seen across projects or from global CLAUDE.md suggests global scope. If nothing routes, say so. "No candidate qualified this pass" is a correct result.
+Transcript candidates almost always route to `steer` (edit-time regex) or `check` (a repository check). Scope a guard project vs global — a rule seen across projects or from global CLAUDE.md suggests global scope. A repository check has no global scope: it runs in the one repository that declares it, so a class seen across repositories needs a check in each one. If nothing routes, say so. "No candidate qualified this pass" is a correct result.
+
+A detector that cannot run in the blocking tier — it needs the network, credentials or a device, it flakes, or it is slow — may still be suggested as a manual or CI check. Say plainly that Steer observes no execution of it and cannot bind a check-tier record to it, so its effect stays unmonitored here.
 
 ## Step 5: Present, then act
 
@@ -457,11 +459,13 @@ To correct a description on an existing record, use `steer fix describe ID
 match, the scope, the baseline, the instrument and both windows are untouched, so a
 clearer sentence never restarts the measurement. Omit a flag to keep that half.
 
-### Transcript candidates — hand off to steer
+### Transcript candidates — install through the tier's own workflow
 
-For each accepted transcript candidate, follow the steer skill's generation protocol (the root `SKILL.md` of this plugin) with the phrased rule — specialist prompt selection, hook generation, registration via `steer register`, and mandatory self-testing all apply unchanged. Do not duplicate or shortcut that protocol here.
+For each accepted transcript candidate routed to a pre-tool guard, follow the steer skill's generation protocol (`skills/steer/SKILL.md` in this plugin) with the phrased rule — specialist prompt selection, hook generation, registration via `steer register`, and mandatory self-testing all apply unchanged. Do not duplicate or shortcut that protocol here.
 
-Then register the class over the transcript corpus, so the guard you just installed is measured rather than assumed:
+A candidate routed to a repository check follows the check workflow in step 2 of the review candidates below, and registers with `--tier check --check-id` under the same binding and `--scope-repo-root` rules.
+
+Then register the class over the transcript corpus, so the fix you just installed is measured rather than assumed:
 
 ```bash
 steer fix match 'YOUR REGEX' --corpus transcript-friction --signal-kind user_corrections
@@ -495,7 +499,11 @@ For each accepted review candidate:
 
    Iterate until it matches the class members and nothing else. This regex is the class's permanent definition — `score` re-counts with it months from now, so an over-broad regex will report the class as recurring forever, and a commit-specific one will report a quiet window it did not earn. Prefer the defect's vocabulary over any single commit's identifiers.
 
-2. **Install the fix** via the owning skill (`check-oracle` or `steer`), or by editing the reviewer prompt. Verify it fires on the real case.
+2. **Install the fix** through its tier's workflow, and verify it fires on the real case:
+
+   - **Repository check** — read `steer check guide` first. Run `steer check init` if the repository has no `.steer/checks/manifest.json`. Write the detector and a case file with a known-good case and a defect case that reproduces the real finding, then `steer check add <id>`; it declares the check only when every case matched. The repository must be adopted (`steer check adopt`) and its Stop runner registered (`steer check install --harness <id> --scope <scope>`) before step 3 accepts the record. `steer check list` shows all three.
+   - **Pre-tool guard** — the `steer` skill.
+   - **Review-prompt change** — edit the reviewer prompt.
 
 3. **Register it**, after the fix is in:
 

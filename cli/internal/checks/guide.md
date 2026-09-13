@@ -189,7 +189,10 @@ held the repository, and never counts as a pass.
 
 ## At the end of a turn
 
-`steer check hook --harness <claude-code|codex>` is the Stop hook. In an adopted
+`steer check hook --harness <claude-code|codex>` is the Stop hook, and
+`steer check install --harness <claude-code|codex> --scope <project|global>`
+registers it. A registration authorizes nothing by itself: the hook runs
+`check.sh` only in an adopted repository. Pi is not supported. In an adopted
 repository it runs `check.sh` for the root thread's Stop event; subagent Stop
 events are ignored. A failure blocks the turn and hands you the failing checks
 and the tail of the output. An integration failure also blocks, and says that
@@ -223,6 +226,12 @@ a notice to the operator.
   declared check's result under that run.
 - `steer check adopt [repo]` and `steer check unadopt [repo]` grant and withdraw
   this machine's authorization for automatic runs.
+- `steer check install --harness <claude-code|codex> --scope <project|global>`
+  registers the Stop hook, and `steer check uninstall` with the same flags
+  removes it. Neither changes an adoption or its evidence.
 - `steer check hook --harness <claude-code|codex>` answers a Stop payload on
   stdin in that harness's reply format.
+- `steer check migrate [repo...] [--apply]` imports the approvals of a personal
+  check gate as adoptions and replaces its Stop hook with this one. Without
+  `--apply` it only reports what it would do.
 - `steer check guide` prints this guide.

@@ -1,6 +1,6 @@
 ---
 name: steer-setup
-description: Set up steer after installing the plugin — pick a reviewer CLI and model, arm the commit gate for this agent, and place the stable executable. Use for first-time steer setup, when adding a second harness (Claude Code, Codex or Pi) to an existing steer install, or when the user asks to configure, arm or repair the commit gate.
+description: Set up steer after installing the plugin — pick a reviewer CLI and model, arm the commit gate for this agent, and place the stable executable. Use for first-time steer setup, when adding a second harness (Claude Code, Codex or Pi) to an existing steer install, or when the user asks to configure, arm or repair the commit gate. Also arms repository checks at turn end and moves a personal check gate into Steer.
 user-invocable: true
 compatibility: Runs the steer CLI from PATH, or from the bundled launcher under the plugin root (PLUGIN_ROOT on Codex, CLAUDE_PLUGIN_ROOT on Claude Code). Writes ~/.steer/config.json and the invoking harness's hook registration. Needs an installed, authenticated reviewer CLI — claude, codex or agy.
 allowed-tools: Bash(steer *), Read
@@ -157,9 +157,47 @@ review proves the whole path. Tell the user to make a code change and commit
 normally, and that a small or prose-only change may skip review — a skipped review is
 not a clean review.
 
+## Step 6: Repository checks (only when the user asks)
+
+A repository check blocks the end of an agent's turn while the repository's
+`check.sh` fails. Three separate facts arm it, and none implies another:
+
+1. **The Stop runner is registered** in the harness:
+   `"${STEER_BIN}" check install --harness <claude-code|codex> --scope global`.
+   Pi has no Stop runner. In Codex, the user must approve the new Stop hook in
+   `/hooks`; Steer cannot read that trust record, so `check install` reports the
+   step as unknown.
+2. **The repository is adopted** on this machine: `"${STEER_BIN}" check adopt`
+   inside it. Adoption replays each declared check and runs `check.sh` in
+   isolation first, and it refuses on any failure. A registration alone runs
+   nothing, and a clone at another path is not adopted.
+3. **A run is observed**: `"${STEER_BIN}" check list` shows the latest `check.sh`
+   run and each check's latest execution.
+
+Relay what `check install` and `check adopt` print, as in Step 3.
+
+**If the user already runs `check.sh` from a personal Stop hook**, do not register
+the runner beside it: both would run `check.sh` at every Stop. Steer recognizes a
+personal gate by its `check-gate.py` hook script and the approval list at
+`~/.claude/check-gate-approved.txt`. Preview the move first:
+
+```bash
+"${STEER_BIN}" check migrate
+```
+
+The preview writes nothing. Show it to the user: it classifies each approval as
+already adopted, importable, without a `check.sh`, or without a repository. Run
+`"${STEER_BIN}" check migrate --apply` only after the user says yes. Apply adopts
+each importable repository the way `check adopt` does. It replaces the personal
+hook with the runner only when no approved repository with a `check.sh` stays
+unadopted, so a refused import keeps the personal hook in place. It never deletes
+the approval list or the hook script.
+
 ## What this skill does not do
 
 - It never installs guards or presets. `/steer` writes a guard from a rule.
+- It never writes a check. `steer check guide` is the authoring contract, and
+  `/steer-report` routes a recurring problem to a check.
 - It never registers an intervention or reads the evidence corpora. `/steer-report`
   does that once there is evidence to read.
 - It never changes an existing reviewer. `steer config set` is the user's own command,

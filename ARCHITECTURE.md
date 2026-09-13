@@ -149,6 +149,55 @@ skips deletion-only hunks, and checks whether required diff content survived
 truncation. `gate.ParseFindings` narrows candidates by finding file. Selection and
 allow/block labeling remain the author's work.
 
+## Repository checks
+
+`internal/checks/` owns the check tier. A repository declares its checks in
+`.steer/checks/manifest.json` and their replayable cases under
+`.steer/checks/cases/`; a clone carries the declarations and never the
+authorization to run them. A `script` binding names a repository-relative script.
+A `go-test` binding names a package directory and one top-level test that stays in
+the ordinary suite. The embedded `guide.md`, printed by `steer check guide`, is
+the authoring contract the bundled skills defer to.
+
+Validation replays a check's cases in temporary trees and appends the result to
+`validations.jsonl` under the machine-local evidence root; a validated run is a
+receipt. A receipt binds the detector digest, the cases digest and
+`ExecutorVersion`, a replay-semantics constant rather than the build version, so
+an upgrade does not stale every receipt. A Go detector is the named test plus the
+test-side declarations it statically reaches, written into one generated test
+file, so the code replayed is the code digested. Declared `inputs` cover files
+that analysis cannot track; production code is outside the detector. A snapshot
+case restores a commit pinned under `refs/steer/snapshots/`, overlays the current
+detector and applies a defect patch. An incompatible case, an unavailable
+environment or a missing snapshot is an invalid case, never an expected outcome,
+and the previous receipt stays as history. `FreshnessOf` reads a receipt as
+current or stale; stale is a label, and a stale check keeps running.
+
+Execution happens inside `check.sh`. `steer check exec --all` runs the script
+bindings in sequence; `steer check go-test` runs the Go suite once with `-json`,
+keeps its exit status and reads each bound test from that run. Both append
+per-check records to `executions.jsonl`, identified by the parent's
+`STEER_CHECK_*` environment (`execution.go`). `checks.RunOracle` is that parent
+for `check run`, adoption and Stop. It takes a non-waiting per-repository OS
+lock, runs `bash check.sh` from the root under one deadline and appends one
+aggregate record to `runs.jsonl`. A declared check with no record under the run
+ID gets a `not-executed` record, and a passing `check.sh` that omitted one is an
+integration failure rather than a failed assertion. A run the lock refused
+records `concurrent_with` and executes nothing. `STEER_CHECK_EVIDENCE_DIR`
+isolates the execution and run records of adoption; receipts ignore it.
+
+Adoption is an append-only `adoptions.jsonl`, keyed by the exact resolved root,
+where the latest event decides. `checks.Adopt` needs a current or freshly
+replayed receipt for every declared check and an isolated oracle run that passes
+with nothing missing. `checks.Stop` is the harness-neutral Stop runner and
+`checks.StopHook` its one adapter, because Claude Code and Codex share the payload
+fields and reply shape. It acts on a root Stop in an adopted repository only,
+blocks a failure once, and yields when the tree, outcome and per-check results
+repeat in the same session. Each run records its disposition. `steer check
+install` registers the runner as its own Stop entry with
+`checks.RegisteredHookTimeout()`; commit-gate writers and runner writers each keep
+the other's registration. Pi has no Stop runner.
+
 ## Commit gate and resolver
 
 `internal/gate/` is the review engine; `cc`, `codex`, `pi` and `gitgate` adapt it
@@ -241,13 +290,17 @@ root their rows recorded beside the basename; a session carries the harness's
 munged project key, and the two compare through that key. A unit whose evidence
 names no repository stays unknown coverage.
 
-A check-tier record binds the check whose execution evidence it is read beside:
-check id, binding kind, resolved repository, detector digest, current validation
-receipt, adoption and registered harnesses. `internal/checkscope/` freezes those
-facts, because `internal/gate/mine` may import no adapter; `mine` owns the
-contract they must satisfy and the repository-root scope rule. A record written
-before the binding existed stays readable as unbound with unavailable execution
-attribution: its target names a script, and identity is never inferred from it.
+A check-tier record binds one check: check id, binding kind, resolved
+repository, detector digest, current validation receipt, adoption and registered
+harnesses. `internal/checkscope/` freezes those facts, because
+`internal/gate/mine` may import no adapter; `mine` owns the contract they must
+satisfy and the repository-root scope rule. A record written before the binding
+existed stays readable as unbound with unavailable execution attribution: its
+target names a script, and identity is never inferred from it. The binding makes
+attribution possible, and no reader performs it yet: `mine.CheckAttribution`
+classifies a record, while execution evidence reaches a reader only through the
+check tier of the status snapshot, and no view puts a record beside its check's
+executions.
 
 Both engines emit an observation: counts and window bounds, recurrence, guard
 firing activity, coverage and identity provenance. Before/after counts are
