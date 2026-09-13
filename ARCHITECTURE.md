@@ -113,7 +113,9 @@ with a registered master unless forced. Instruction-tier registration binds a
 detect the class. `mine.ValidateArgument` validates the argument's presence;
 it cannot establish its soundness. Review-tier registration binds an
 `addendum_id` and requires a false-positive class: an entry that suppressed a
-defect class would read as success while hiding the defects.
+defect class would read as success while hiding the defects. A project entry must
+be at HEAD with the text the record freezes, because the gate reads project
+entries there (`mine.RequireAddendumAtHead`).
 
 ## Guard runtime and fixtures
 

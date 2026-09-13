@@ -3,6 +3,7 @@ package mine
 import (
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -19,6 +20,23 @@ func writeAddendumStore(t *testing.T, dir, id, text string) {
 	manifest := `{"hooks":{},"review_addendum":{"` + id + `":{"text":"` + text + `","text_hash":"stale"}}}`
 	if err := os.WriteFile(filepath.Join(dir, "steer-manifest.json"), []byte(manifest), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+const gitCommitVerb = "co" + "mmit"
+
+// commitProject makes dir a repository whose HEAD holds everything in it.
+func commitProject(t *testing.T, dir string) {
+	t.Helper()
+	for _, args := range [][]string{{"init", "-q"}, {"add", "-A"}, {gitCommitVerb, "-qm", "init"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s failed: %v: %s", strings.Join(args, " "), err, out)
+		}
 	}
 }
 
@@ -94,6 +112,7 @@ func TestAReviewTierRefusesAnAddendumIDInBothStores(t *testing.T) {
 	t.Chdir(project)
 	writeAddendumStore(t, filepath.Join(home, ".steer", "hooks"), "no-style", "the global wording")
 	writeAddendumStore(t, filepath.Join(project, ".steer", "hooks"), "no-style", "the project wording")
+	commitProject(t, project)
 	stateDir, ledger := registerAddendumFixture(t)
 
 	if err := Register(io.Discard, stateDir, addendumOpts(ledger)); err == nil ||
@@ -107,4 +126,33 @@ func TestAReviewTierRefusesAnAddendumIDInBothStores(t *testing.T) {
 	}
 	recorded, _ := Load(stateDir)
 	check(t, "the named store answers", str(recorded[0]["addendum"]), "the project wording")
+}
+
+// The gate reads project entries from HEAD, so a record binds a project entry only
+// once the text it freezes is the text the reviewer gets.
+func TestAReviewTierRefusesAProjectEntryTheGateDoesNotReadYet(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Chdir(project)
+	store := filepath.Join(project, ".steer", "hooks")
+	writeAddendumStore(t, store, "no-style", "style is not a finding")
+	stateDir, ledger := registerAddendumFixture(t)
+
+	if err := Register(io.Discard, stateDir, addendumOpts(ledger)); err == nil ||
+		!strings.Contains(err.Error(), "not at HEAD") {
+		t.Fatalf("an entry only on disk: err = %v", err)
+	}
+	commitProject(t, project)
+	writeAddendumStore(t, store, "no-style", "style is never a finding")
+	if err := Register(io.Discard, stateDir, addendumOpts(ledger)); err == nil ||
+		!strings.Contains(err.Error(), "differs from HEAD") {
+		t.Fatalf("a reworded entry: err = %v", err)
+	}
+	writeAddendumStore(t, store, "no-style", "style  is not\\n a finding")
+	if err := Register(io.Discard, stateDir, addendumOpts(ledger)); err != nil {
+		t.Fatalf("an entry whose normalized text is at HEAD: %v", err)
+	}
+	recorded, _ := Load(stateDir)
+	check(t, "the scope is frozen", str(recorded[0]["addendum_scope"]), "project")
 }

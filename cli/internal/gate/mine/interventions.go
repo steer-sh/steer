@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/hookstore"
 	"github.com/steer-sh/steer-cli/internal/steerpath"
 )
@@ -302,6 +303,25 @@ func SteerRuleFacts(ruleID, scope string) (map[string]any, error) {
 // SteerRuleFacts' scope resolution and recomputed digest.
 func SteerAddendumFacts(id, scope string) (map[string]any, error) {
 	return textEntryFacts(addendumTextEntry, id, scope)
+}
+
+// RequireAddendumAtHead refuses a project addendum entry whose text the commit gate
+// does not read yet. The gate reads project entries from the repository's HEAD, so
+// an entry only on disk would put reviews that never saw it in the after-window.
+func RequireAddendumAtHead(id, text string) error {
+	want := normalizeRuleText(text)
+	for _, e := range gate.LoadAddendum(gate.Toplevel(".")).Entries {
+		if e.Scope != steerpath.ProjectScope || e.ID != id {
+			continue
+		}
+		if e.Text == want {
+			return nil
+		}
+		return fmt.Errorf("project addendum entry %s differs from HEAD, and the commit gate "+
+			"reads the committed text. Commit the project steer-manifest.json, then register", pyRepr(id))
+	}
+	return fmt.Errorf("project addendum entry %s is not at HEAD, so the commit gate does not "+
+		"read it yet. Commit the project steer-manifest.json, then register", pyRepr(id))
 }
 
 // textEntry names one manifest map of text entries and the facts a record stamps

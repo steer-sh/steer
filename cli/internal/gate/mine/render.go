@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/steer-sh/steer-cli/internal/steerpath"
 	"github.com/steer-sh/steer-cli/internal/tier"
 )
 
@@ -542,6 +543,11 @@ func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 			return fmt.Errorf("no review addendum entry %s in the steer store. Install it first "+
 				"with `steer commit-gate addendum add %s --text \"<text>\"`",
 				pyRepr(o.AddendumID), o.AddendumID)
+		}
+		if facts["addendum_scope"] == steerpath.ProjectScope {
+			if err := RequireAddendumAtHead(o.AddendumID, str(facts["addendum"])); err != nil {
+				return err
+			}
 		}
 		for k, v := range facts {
 			record[k] = v
