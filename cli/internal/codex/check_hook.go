@@ -45,11 +45,18 @@ func RegisterCheckHook(scope, cwd, command string, timeout int) (string, error) 
 // RemoveCheckHook takes the Stop runner out and reports the hooks file and
 // whether a runner was registered there. A file with none is left unwritten.
 func RemoveCheckHook(scope, cwd string) (string, bool, error) {
+	return RemoveStopHooksMatching(scope, cwd, isCheckHook)
+}
+
+// RemoveStopHooksMatching drops every Stop handler whose command matches, keeping
+// the other handlers of its entry, and reports the hooks file and whether
+// anything matched.
+func RemoveStopHooksMatching(scope, cwd string, match func(string) bool) (string, bool, error) {
 	path, err := hooksPath(scope, cwd)
 	if err != nil {
 		return "", false, err
 	}
-	if !CheckHookArming(scope, cwd).Registered {
+	if !StopHookMatching(scope, cwd, match).Registered {
 		return path, false, nil
 	}
 	root, err := load(path)
@@ -57,7 +64,7 @@ func RemoveCheckHook(scope, cwd string) (string, bool, error) {
 		return path, false, err
 	}
 	hooks, _ := root["hooks"].(map[string]any)
-	setOrDrop(hooks, "Stop", filterBy(eventEntries(root, "Stop"), isCheckHook))
+	setOrDrop(hooks, "Stop", filterBy(eventEntries(root, "Stop"), match))
 	return path, true, save(path, root)
 }
 
@@ -65,6 +72,13 @@ func RemoveCheckHook(scope, cwd string) (string, bool, error) {
 // command it names. Trust is not read: Codex keys a trust record by the handler's
 // event and position, and Steer reads that key only for PreToolUse.
 func CheckHookArming(scope, cwd string) Arming {
+	return StopHookMatching(scope, cwd, isCheckHook)
+}
+
+// StopHookMatching reports the first Stop handler whose command matches, so a
+// caller can read a registration Steer does not own, such as the personal gate
+// a migration replaces.
+func StopHookMatching(scope, cwd string, match func(string) bool) Arming {
 	path, err := hooksPath(scope, cwd)
 	if err != nil {
 		return Arming{}
@@ -80,7 +94,7 @@ func CheckHookArming(scope, cwd string) Arming {
 		for _, rawHook := range hooks {
 			hook, _ := rawHook.(map[string]any)
 			command, _ := hook["command"].(string)
-			if !isCheckHook(command) {
+			if !match(command) {
 				continue
 			}
 			a.Registered, a.Command = true, command

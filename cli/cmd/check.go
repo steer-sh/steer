@@ -219,19 +219,9 @@ Nothing is recorded as live execution. A clone elsewhere is not adopted.`,
 			Timeout: timeout, Stdout: os.Stdout, Stderr: os.Stderr, SteerBin: steerBinForOracle(),
 		})
 		out := cmd.OutOrStdout()
+		printAdoption(cmd, res)
 		if res.Already {
-			fmt.Fprintf(out, "%s is already adopted on this machine since %s.\n", res.Adoption.Repo, res.Adoption.At.Local().Format("2006-01-02 15:04"))
 			return nil
-		}
-		for _, v := range res.Validations {
-			if v.Reused {
-				fmt.Fprintf(out, "Validation of %s: current receipt from %s reused\n", v.CheckID, v.Run.Finished.Local().Format("2006-01-02 15:04"))
-			} else {
-				printValidation(cmd, v.Run)
-			}
-		}
-		if res.Oracle.RunID != "" {
-			printOracleRun(cmd, res.Oracle, res.Executions)
 		}
 		if err != nil {
 			return err
@@ -328,6 +318,27 @@ func steerBinForOracle() string {
 		return ""
 	}
 	return exe
+}
+
+// printAdoption prints what an adoption attempt did: the receipt it reused or
+// replayed for each declared check, and its isolated oracle run.
+func printAdoption(cmd *cobra.Command, res checks.AdoptResult) {
+	out := cmd.OutOrStdout()
+	if res.Already {
+		fmt.Fprintf(out, "%s is already adopted on this machine since %s.\n",
+			res.Adoption.Repo, res.Adoption.At.Local().Format("2006-01-02 15:04"))
+		return
+	}
+	for _, v := range res.Validations {
+		if v.Reused {
+			fmt.Fprintf(out, "Validation of %s: current receipt from %s reused\n", v.CheckID, v.Run.Finished.Local().Format("2006-01-02 15:04"))
+			continue
+		}
+		printValidation(cmd, v.Run)
+	}
+	if res.Oracle.RunID != "" {
+		printOracleRun(cmd, res.Oracle, res.Executions)
+	}
 }
 
 func printOracleRun(cmd *cobra.Command, run checks.OracleRun, records []checks.Execution) {

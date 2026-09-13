@@ -47,7 +47,14 @@ func RegisterCheckHook(scope, command string, timeout int) error {
 // RemoveCheckHook drops the Stop runner, preserving every other Stop hook. It
 // reports whether a runner was registered; a scope with none is left unwritten.
 func RemoveCheckHook(scope string) (bool, error) {
-	arming, err := CheckHookArming(scope)
+	return RemoveStopHooksMatching(scope, IsCheckHookCommand)
+}
+
+// RemoveStopHooksMatching drops every Stop hook whose command matches, keeping
+// the rest of its group. It reports whether anything matched; a scope with no
+// match is left unwritten.
+func RemoveStopHooksMatching(scope string, match func(string) bool) (bool, error) {
+	arming, err := StopHookMatching(scope, match)
 	if err != nil || !arming.Registered {
 		return false, err
 	}
@@ -55,7 +62,7 @@ func RemoveCheckHook(scope string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	settings.Hooks.Stop = stripStopHooks(settings.Hooks.Stop, IsCheckHookCommand)
+	settings.Hooks.Stop = stripStopHooks(settings.Hooks.Stop, match)
 	return true, SaveSettings(scope, settings)
 }
 
@@ -71,13 +78,20 @@ type CheckArming struct {
 
 // CheckHookArming reads a scope's settings.json and reports the Stop runner's state.
 func CheckHookArming(scope string) (CheckArming, error) {
+	return StopHookMatching(scope, IsCheckHookCommand)
+}
+
+// StopHookMatching reports the first Stop hook in a scope whose command matches,
+// so a caller can read a registration Steer does not own, such as the personal
+// gate a migration replaces.
+func StopHookMatching(scope string, match func(string) bool) (CheckArming, error) {
 	settings, err := LoadSettings(scope)
 	if err != nil {
 		return CheckArming{}, err
 	}
 	for _, group := range settings.Hooks.Stop {
 		for _, hook := range group.Hooks {
-			if IsCheckHookCommand(hook.Command) {
+			if match(hook.Command) {
 				return CheckArming{Registered: true, Timeout: hook.Timeout, Command: hook.Command}, nil
 			}
 		}

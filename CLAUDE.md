@@ -42,6 +42,8 @@ Read the linked architecture section before changing the corresponding boundary:
 - Harness support, paths, or migrations: [harnesses and storage](ARCHITECTURE.md#harnesses-and-storage).
   Start with `cli/internal/harness/` and `cli/internal/steerpath/`; registration
   adapters and shared stores have different ownership.
+  Importing a personal check gate is `cli/cmd/check_migrate.go`: it reads the
+  operator's harness files and never rewrites one without `--apply`.
 - Guard/rule lifecycle or instruction synchronization: [guards and instructions](ARCHITECTURE.md#guards-and-instructions).
   Start with `cli/internal/claude/lifecycle.go`, `rules.go` and `sync.go`.
   `## Steer Rules` is derived from the manifest; change it through the lifecycle.

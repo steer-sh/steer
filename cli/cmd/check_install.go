@@ -67,26 +67,9 @@ this machine (steer check adopt). Pi is not supported.`,
 			return err
 		}
 		scope := currentScope()
-		command := checkHookCommand(target)
-		timeout := checks.RegisteredHookTimeout()
-		if target == harness.Codex {
-			cwd, cwdErr := codexProjectDir()
-			if cwdErr != nil {
-				return cwdErr
-			}
-			_, err = codexhooks.RegisterCheckHook(scope, cwd, command, timeout)
-		} else {
-			err = claude.RegisterCheckHook(scope, command, timeout)
-		}
+		arming, err := registerCheckRunner(target, scope)
 		if err != nil {
 			return err
-		}
-		arming, err := checkRunnerArming(target, scope)
-		if err != nil {
-			return err
-		}
-		if !arming.Registered {
-			return fmt.Errorf("wrote the Stop runner to %s, but reading it back found none", arming.Path)
 		}
 		entry, _ := harness.Get(target)
 		registered := fmt.Sprintf("Registered: the %s Stop runner on root Stop\nScope: %s\n"+
@@ -98,6 +81,34 @@ this machine (steer check adopt). Pi is not supported.`,
 			"Not running yet — %d %s before the next Stop runs check.sh.", registered))
 		return nil
 	},
+}
+
+// registerCheckRunner writes the Stop runner for one harness at one scope and
+// returns the registration it reads back.
+func registerCheckRunner(target harness.ID, scope string) (checkscope.Arming, error) {
+	command := checkHookCommand(target)
+	timeout := checks.RegisteredHookTimeout()
+	var err error
+	if target == harness.Codex {
+		cwd, cwdErr := codexProjectDir()
+		if cwdErr != nil {
+			return checkscope.Arming{}, cwdErr
+		}
+		_, err = codexhooks.RegisterCheckHook(scope, cwd, command, timeout)
+	} else {
+		err = claude.RegisterCheckHook(scope, command, timeout)
+	}
+	if err != nil {
+		return checkscope.Arming{}, err
+	}
+	arming, err := checkRunnerArming(target, scope)
+	if err != nil {
+		return arming, err
+	}
+	if !arming.Registered {
+		return arming, fmt.Errorf("wrote the Stop runner to %s, but reading it back found none", arming.Path)
+	}
+	return arming, nil
 }
 
 // checkInstallSteps is what still stands between this registration and a Stop

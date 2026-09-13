@@ -64,6 +64,17 @@ A retained legacy master can still be registered, so diagnostics read
 `Registrar.RegisteredMasterPath` and the audit log beside that master.
 Store location alone cannot identify what a harness executes.
 
+A third migration crosses harnesses instead of stores. `steer check migrate`
+imports a personal check gate: the approval list at
+`~/.claude/check-gate-approved.txt` becomes adoption, one `checks.Adopt` per
+approved root, so every import validates and runs the oracle in isolation. That
+gate's Stop registrations, found by `checks.IsPersonalGateCommand` through each
+adapter's `StopHookMatching`, are replaced by the Steer runner only once no
+approved repository with a `check.sh` is still unadopted; until then both would
+run `check.sh` at every Stop, and the personal hook is the one that must stay.
+Nothing changes without `--apply`, and neither the approval list nor the hook
+script is deleted.
+
 ## Guards and instructions
 
 One store per scope holds guards, `steer-manifest.json`, the generated
