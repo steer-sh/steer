@@ -315,6 +315,9 @@ type RegisterOpts struct {
 	HookScope  string
 	RuleID     string
 	RuleScope  string
+	// AddendumID names the review addendum entry a review-tier record binds.
+	AddendumID    string
+	AddendumScope string
 	// CheckID names the declared check a check-tier record binds, and CheckFacts is
 	// that check's frozen state, read by the caller: the adapters that resolve a
 	// registration live outside this package.
@@ -456,6 +459,19 @@ func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 			return err
 		}
 	}
+	// A review record names the addendum entry it installed, and only a reviewer false
+	// positive routes to the review prompt.
+	if tier.IsReview(o.Tier) {
+		if o.AddendumID == "" {
+			return fmt.Errorf("a review tier needs --addendum-id (the steer-manifest " +
+				"review_addendum key). Install the entry first with " +
+				"`steer commit-gate addendum add <id> --text \"<text>\"`")
+		}
+		if o.Kind != "false-positive" {
+			return fmt.Errorf("a review tier needs --kind false-positive: the review prompt " +
+				"changes what the reviewer raises, so a defect class never routes there")
+		}
+	}
 	record := Record{
 		"id":             UniqueID(Slugify(o.Class), records),
 		"class":          o.Class,
@@ -511,6 +527,21 @@ func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 		if facts == nil {
 			return fmt.Errorf("no rule %s in the steer store. Install it first with "+
 				"`steer rules add %s --rule \"<text>\"`", pyRepr(o.RuleID), o.RuleID)
+		}
+		for k, v := range facts {
+			record[k] = v
+		}
+	}
+	if o.AddendumID != "" {
+		record["addendum_id"] = o.AddendumID
+		facts, err := SteerAddendumFacts(o.AddendumID, o.AddendumScope)
+		if err != nil {
+			return err
+		}
+		if facts == nil {
+			return fmt.Errorf("no review addendum entry %s in the steer store. Install it first "+
+				"with `steer commit-gate addendum add %s --text \"<text>\"`",
+				pyRepr(o.AddendumID), o.AddendumID)
 		}
 		for k, v := range facts {
 			record[k] = v

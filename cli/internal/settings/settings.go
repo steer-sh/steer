@@ -369,6 +369,8 @@ func Impact(cfg gate.Config) []mine.InstrumentImpact {
 	}
 	ev := evidence.Gather(evidence.Options{GateStateDir: cfg.StateDir})
 	fields, _ := mine.InstrumentFieldsFrom(cfg.InstrumentFields())
+	// A settings edit has no repository, so each record keeps its own review addendum.
+	fields.AddendumKnown = false
 	return mine.ImpactOf(records, ev.Chains, mine.InstrumentUse{ID: cfg.InstrumentID(), Fields: fields})
 }
 

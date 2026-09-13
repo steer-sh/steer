@@ -153,7 +153,7 @@ func TestOtherTiersNeedNoNotMechanizableArgument(t *testing.T) {
 	if err := Register(io.Discard, stateDir, RegisterOpts{
 		Prose: testProse, ScopeAll: true, Ledger: ledger,
 		Class: "widget parser flag loss", Match: "widget parser",
-		Tier: "review", Target: "review-prompt.md",
+		Tier: "guard", HookID: "test-guard", Target: "steer-hooks.py",
 	}); err != nil {
 		t.Fatal(err)
 	}

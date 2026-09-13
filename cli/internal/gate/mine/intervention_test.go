@@ -57,6 +57,10 @@ func TestLegacyBaselineChainsRoundTrip(t *testing.T) {
 }
 
 func TestRegisterScoreRoundTrip(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Chdir(t.TempDir())
+	writeRuleStore(t, filepath.Join(home, ".steer", "hooks"), "widget-rule", "keep every parser flag")
 	var rows []gate.Row
 	ts := 1000
 	for i := 0; i < 12; i++ {
@@ -77,7 +81,8 @@ func TestRegisterScoreRoundTrip(t *testing.T) {
 	err := Register(io.Discard, stateDir, RegisterOpts{
 		Prose:    testProse,
 		ScopeAll: true, Ledger: ledger, Class: "widget parser flag loss", Match: "widget parser",
-		Kind: "defect", Tier: "review", Target: "review-prompt.md", InstalledTS: int64(install),
+		Kind: "defect", Tier: "instruction", RuleID: "widget-rule", NotMechanizable: testNotMechanizable,
+		Target: "CLAUDE.md", InstalledTS: int64(install),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -110,7 +115,7 @@ func TestRegisterScoreRoundTrip(t *testing.T) {
 	if err := Register(io.Discard, stateDir, RegisterOpts{
 		Prose:    testProse,
 		ScopeAll: true, Ledger: ledger, Class: "never seen", Match: "zzz nonexistent zzz",
-		Tier: "review", Target: "review-prompt.md", InstalledTS: int64(install),
+		Tier: "guard", HookID: "test-guard", Target: "steer-hooks.py", InstalledTS: int64(install),
 	}); err == nil {
 		t.Error("zero baseline should be refused")
 	}
@@ -134,7 +139,7 @@ func TestRegisterScoreRoundTrip(t *testing.T) {
 	if err := Register(io.Discard, stateDir, RegisterOpts{
 		Prose:    testProse,
 		ScopeAll: true, Ledger: ledger, Class: "widget parser flag loss v2", Match: "widget parser",
-		Tier: "review", Target: "review-prompt.md", InstalledTS: int64(install),
+		Tier: "guard", HookID: "test-guard", Target: "steer-hooks.py", InstalledTS: int64(install),
 		Supersedes: "widget-parser-flag-loss",
 	}); err != nil {
 		t.Fatal(err)
@@ -164,7 +169,7 @@ func TestRegisterScoreRoundTrip(t *testing.T) {
 	check(t, "an unknown hook id is still recorded",
 		str(byID["steer-class-with-an-id"]["hook_id"]), "no-such-hook-in-manifest")
 	_, hasHookID := byID["widget-parser-flag-loss"]["hook_id"]
-	check(t, "check tier needs no hook id", hasHookID, false)
+	check(t, "a non-guard tier records no hook id", hasHookID, false)
 
 	if err := Retire(io.Discard, stateDir, "widget-parser-flag-loss-2", "no signal", "removed"); err != nil {
 		t.Fatal(err)
@@ -290,7 +295,7 @@ func TestRejections(t *testing.T) {
 	if err := Register(io.Discard, stateDir, RegisterOpts{
 		Prose:    testProse,
 		ScopeAll: true, Ledger: ledger, Class: "repeat suppression", Match: "repeat of round",
-		Tier: "review", Target: "review-prompt.md", InstalledTS: int64(ts),
+		Tier: "guard", HookID: "test-guard", Target: "steer-hooks.py", InstalledTS: int64(ts),
 	}); err == nil {
 		t.Error("a re-proposed rejected class should be blocked")
 	}
@@ -304,7 +309,7 @@ func TestRejections(t *testing.T) {
 	if err := Register(io.Discard, stateDir, RegisterOpts{
 		Prose:    testProse,
 		ScopeAll: true, Ledger: ledger, Class: "repeat suppression", Match: "repeat of round",
-		Tier: "review", Target: "review-prompt.md", InstalledTS: int64(ts),
+		Tier: "guard", HookID: "test-guard", Target: "steer-hooks.py", InstalledTS: int64(ts),
 		Supersedes: "within-chain-repeat-finding",
 	}); err != nil {
 		t.Fatal(err)
@@ -319,7 +324,7 @@ func TestRejections(t *testing.T) {
 	if err := Register(io.Discard, stateDir, RegisterOpts{
 		Prose:    testProse,
 		ScopeAll: true, Ledger: ledger, Class: "repeat suppression v2", Match: "repeat of round",
-		Tier: "review", Target: "review-prompt.md", InstalledTS: int64(ts),
+		Tier: "guard", HookID: "test-guard", Target: "steer-hooks.py", InstalledTS: int64(ts),
 		Supersedes: "repeat-suppression",
 	}); err != nil {
 		t.Fatalf("a reopened refusal should block nothing: %v", err)
@@ -349,7 +354,7 @@ func TestForceBypassesOverlapBlock(t *testing.T) {
 		return Register(io.Discard, stateDir, RegisterOpts{
 			Prose:    testProse,
 			ScopeAll: true, Ledger: ledger, Class: "repeat again", Match: "repeat",
-			Tier: "review", Target: "review-prompt.md", InstalledTS: int64(ts), Force: force,
+			Tier: "guard", HookID: "test-guard", Target: "steer-hooks.py", InstalledTS: int64(ts), Force: force,
 		})
 	}
 	if err := overlapping(false); err == nil {
@@ -425,7 +430,7 @@ func TestScoreEmitsTheObservation(t *testing.T) {
 	if err := Register(io.Discard, stateDir, RegisterOpts{
 		Prose:    testProse,
 		ScopeAll: true, Ledger: ledger, Class: "widget parser flag loss", Match: "widget parser",
-		Kind: "defect", Tier: "review", Target: "review-prompt.md", InstalledTS: int64(install),
+		Kind: "defect", Tier: "guard", HookID: "test-guard", Target: "steer-hooks.py", InstalledTS: int64(install),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -487,7 +492,7 @@ func TestStoredBaselineMatchesTheScoredWindow(t *testing.T) {
 		if err := Register(io.Discard, stateDir, RegisterOpts{
 			Prose:    testProse,
 			ScopeAll: true, Ledger: ledger, Class: "widget parser flag loss", Match: "widget parser",
-			Kind: "defect", Tier: "review", Target: "review-prompt.md", InstalledTS: int64(install),
+			Kind: "defect", Tier: "guard", HookID: "test-guard", Target: "steer-hooks.py", InstalledTS: int64(install),
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -518,7 +523,7 @@ func TestDefaultRegisterStillWritesAV1Scope(t *testing.T) {
 	if err := Register(io.Discard, stateDir, RegisterOpts{
 		Prose:     testProse,
 		ScopeRepo: "steer", Ledger: ledger, Class: "c", Match: "widget parser",
-		Tier: "review", Target: "review-prompt.md", InstalledTS: 2000, Force: true,
+		Tier: "guard", HookID: "test-guard", Target: "steer-hooks.py", InstalledTS: 2000, Force: true,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -537,7 +542,7 @@ func TestScoreCarriesAnUnscorableRecordRatherThanAborting(t *testing.T) {
 	if err := Register(io.Discard, stateDir, RegisterOpts{
 		Prose:    testProse,
 		ScopeAll: true, Ledger: ledger, Class: "scorable", Match: "widget parser",
-		Tier: "review", Target: "review-prompt.md", InstalledTS: 2000,
+		Tier: "guard", HookID: "test-guard", Target: "steer-hooks.py", InstalledTS: 2000,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -575,7 +580,7 @@ func TestScoreReadsASessionRecordThroughTheSessionEngine(t *testing.T) {
 	if err := Register(io.Discard, stateDir, RegisterOpts{
 		Prose:    testProse,
 		ScopeAll: true, Ledger: ledger, Class: "scorable", Match: "widget parser",
-		Tier: "review", Target: "review-prompt.md", InstalledTS: 2000,
+		Tier: "guard", HookID: "test-guard", Target: "steer-hooks.py", InstalledTS: 2000,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -589,7 +594,7 @@ func TestScoreReadsASessionRecordThroughTheSessionEngine(t *testing.T) {
 		Prose:    testProse,
 		ScopeAll: true, Ledger: ledger, Class: "bare python", Match: "bare python",
 		Corpus: CorpusTranscript, Sessions: sessions,
-		Tier: "review", Target: "review-prompt.md", InstalledTS: 2000,
+		Tier: "guard", HookID: "test-guard", Target: "steer-hooks.py", InstalledTS: 2000,
 	}); err != nil {
 		t.Fatal(err)
 	}

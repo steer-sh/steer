@@ -12,7 +12,7 @@ import (
 // Tags structuring the review prompt. Untrusted text lands between them — the message,
 // the diff, whole unchanged files — and any of those can close a section early, turning
 // everything after it into instructions.
-var promptBoundaryTags = []string{"commit-message", "diff", "unchanged-callers"}
+var promptBoundaryTags = []string{"commit-message", "diff", "unchanged-callers", addendumTag}
 
 var boundaryTagRe = regexp.MustCompile(
 	`(?i)</?(?:` + strings.Join(promptBoundaryTags, "|") + `)(?:\s[^>]*)?>`)

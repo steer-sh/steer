@@ -21,14 +21,20 @@ const (
 // dimension is unknown and no comparison reads it. Effort is different: an empty
 // effort is the provider's own default, which is a value and not an absence, so
 // EffortKnown carries whether the identity could be read at all.
+//
+// AddendumDigest is "" when the reviewer ran with no review addendum. An absent
+// value reads as that, because no row written before the addendum existed ran with
+// one; AddendumKnown is false only where the identity could not be read.
 type InstrumentFields struct {
-	Provider     string
-	Model        string
-	Effort       string
-	EffortKnown  bool
-	Runs         int
-	PromptDigest string
-	Engine       string
+	Provider       string
+	Model          string
+	Effort         string
+	EffortKnown    bool
+	Runs           int
+	PromptDigest   string
+	Engine         string
+	AddendumDigest string
+	AddendumKnown  bool
 }
 
 // ParseInstrumentID recovers the dimensions the instrument string carries:
@@ -48,12 +54,15 @@ func ParseInstrumentID(id string) InstrumentFields {
 	if err != nil {
 		return InstrumentFields{}
 	}
+	prompt, addendum, _ := strings.Cut(parts[2], "+")
 	f := InstrumentFields{
-		Model:        parts[0],
-		Runs:         runs,
-		PromptDigest: parts[2],
-		Engine:       parts[3],
-		EffortKnown:  true,
+		Model:          parts[0],
+		Runs:           runs,
+		PromptDigest:   prompt,
+		Engine:         parts[3],
+		EffortKnown:    true,
+		AddendumDigest: addendum,
+		AddendumKnown:  true,
 	}
 	if len(parts) == 5 {
 		f.Effort = parts[4]
@@ -69,13 +78,15 @@ func InstrumentFieldsFrom(raw any) (InstrumentFields, bool) {
 		return InstrumentFields{}, false
 	}
 	return InstrumentFields{
-		Provider:     str(m["provider"]),
-		Model:        str(m["model"]),
-		Effort:       str(m["effort"]),
-		EffortKnown:  true,
-		Runs:         numInt(m["runs"]),
-		PromptDigest: str(m["prompt_digest"]),
-		Engine:       str(m["engine"]),
+		Provider:       str(m["provider"]),
+		Model:          str(m["model"]),
+		Effort:         str(m["effort"]),
+		EffortKnown:    true,
+		Runs:           numInt(m["runs"]),
+		PromptDigest:   str(m["prompt_digest"]),
+		Engine:         str(m["engine"]),
+		AddendumDigest: str(m["addendum_digest"]),
+		AddendumKnown:  true,
 	}, true
 }
 
@@ -215,6 +226,22 @@ func foldInstruments(parsed InstrumentFields, seen []InstrumentFields) Instrumen
 	default:
 		out.Runs = runs
 	}
+	out.AddendumDigest, out.AddendumKnown = parsed.AddendumDigest, parsed.AddendumKnown
+	addendumSeen := false
+	for _, f := range seen {
+		if !f.AddendumKnown {
+			continue
+		}
+		switch {
+		case !addendumSeen:
+			addendumSeen, out.AddendumDigest, out.AddendumKnown = true, f.AddendumDigest, true
+		case f.AddendumDigest != out.AddendumDigest:
+			out.AddendumDigest, out.AddendumKnown = "", false
+		}
+		if !out.AddendumKnown {
+			break
+		}
+	}
 	out.Effort, out.EffortKnown = parsed.Effort, parsed.EffortKnown
 	known := false
 	for _, f := range seen {
@@ -255,6 +282,9 @@ var driftDimensions = []driftDimension{
 	}},
 	{"engine", true, func(a, b InstrumentFields) bool {
 		return a.Engine != "" && b.Engine != "" && a.Engine != b.Engine
+	}},
+	{"review addendum", true, func(a, b InstrumentFields) bool {
+		return a.AddendumKnown && b.AddendumKnown && a.AddendumDigest != b.AddendumDigest
 	}},
 	{"effort", false, func(a, b InstrumentFields) bool {
 		return a.EffortKnown && b.EffortKnown && a.Effort != b.Effort
@@ -340,7 +370,8 @@ func ImpactOf(records []Record, chains []Chain, next InstrumentUse) []Instrument
 		}
 		before, _ := SplitChains(chains, SplitTS(record))
 		base := BaselineInstrument(authored, InstrumentUses(before))
-		grade := gradeDrift(authored, base, next)
+		use := inheritAddendum(next, authored, base)
+		grade := gradeDrift(authored, base, use)
 		if grade == "" {
 			continue
 		}
@@ -348,8 +379,35 @@ func ImpactOf(records []Record, chains []Chain, next InstrumentUse) []Instrument
 			ID:    str(record["id"]),
 			Class: str(record["class"]),
 			Grade: grade,
-			Dims:  DriftDims(base, next.Fields),
+			Dims:  DriftDims(base, use.Fields),
 		})
 	}
 	return out
+}
+
+// inheritAddendum gives a prospective identity that does not know its review
+// addendum the record's own, in both the fields and the string. A reviewer settings
+// edit has no repository, so it cannot know the addendum, and it does not move it.
+func inheritAddendum(next InstrumentUse, authored string, base InstrumentFields) InstrumentUse {
+	if next.Fields.AddendumKnown {
+		return next
+	}
+	next.Fields.AddendumDigest, next.Fields.AddendumKnown = base.AddendumDigest, base.AddendumKnown
+	next.ID = withAddendum(next.ID, ParseInstrumentID(authored).AddendumDigest)
+	return next
+}
+
+// withAddendum rewrites the addendum half of an instrument string's digest segment.
+// A string of any other shape is returned unchanged.
+func withAddendum(id, addendum string) string {
+	parts := strings.Split(id, "/")
+	if len(parts) < 4 || len(parts) > 5 {
+		return id
+	}
+	prompt, _, _ := strings.Cut(parts[2], "+")
+	if addendum != "" {
+		prompt += "+" + addendum
+	}
+	parts[2] = prompt
+	return strings.Join(parts, "/")
 }

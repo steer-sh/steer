@@ -183,7 +183,7 @@ func TestScopedBaselineAndMigration(t *testing.T) {
 	if err := Register(io.Discard, stateDir, RegisterOpts{
 		Prose:  testProse,
 		Ledger: ledger, Class: "widget flag", Match: "widget parser",
-		Tier: "review", Target: "review-prompt.md", InstalledTS: int64(install),
+		Tier: "guard", HookID: "test-guard", Target: "steer-hooks.py", InstalledTS: int64(install),
 		ScopeRepo: "steer", ScopePath: `\.go$`,
 	}); err != nil {
 		t.Fatal(err)
@@ -282,7 +282,7 @@ func TestCoverCorpusPreviewsWhatTheWriteFreezes(t *testing.T) {
 		if err := Register(io.Discard, stateDir, RegisterOpts{
 			Prose:    testProse,
 			ScopeAll: true, Ledger: ledger, Class: "widget parser flag loss", Match: "widget parser",
-			Kind: "defect", Tier: "review", Target: "review-prompt.md", InstalledTS: int64(install),
+			Kind: "defect", Tier: "guard", HookID: "test-guard", Target: "steer-hooks.py", InstalledTS: int64(install),
 		}); err != nil {
 			t.Fatal(err)
 		}

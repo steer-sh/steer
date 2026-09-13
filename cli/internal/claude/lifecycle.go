@@ -206,6 +206,11 @@ func InstallManagedHook(scope string, input InstallManagedHookInput, targets ...
 			"Remove it with `steer rules remove %s`, or name the guard differently",
 			hookName, scope, hookName)
 	}
+	if _, taken := manifest.Addendum[hookName]; taken {
+		return nil, fmt.Errorf("%q already names a review addendum entry in the %s store. "+
+			"Remove it with `steer commit-gate addendum remove %s`, or name the guard differently",
+			hookName, scope, hookName)
+	}
 
 	existingEntry, manifestExists := manifest.Hooks[hookName]
 

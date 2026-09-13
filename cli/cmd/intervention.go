@@ -33,30 +33,32 @@ type interventionFlags struct {
 	matchCorpus      string
 	matchSignalKind  string
 
-	registerClass       string
-	registerMatch       string
-	registerKind        string
-	registerCorpus      string
-	registerSignalKind  string
-	registerTier        string
-	registerTarget      string
-	registerRuleID      string
-	registerRuleScope   string
-	registerNotMech     string
-	registerHookID      string
-	registerHookScope   string
-	registerCheckID     string
-	registerNote        string
-	registerProblem     string
-	registerIntervent   string
-	registerSupersedes  string
-	registerInstalledTS int64
-	registerForce       bool
-	registerScopeAll    bool
-	registerScopeHrn    []string
-	registerScopeRepo   string
-	registerScopeRoot   string
-	registerScopePath   string
+	registerClass         string
+	registerMatch         string
+	registerKind          string
+	registerCorpus        string
+	registerSignalKind    string
+	registerTier          string
+	registerTarget        string
+	registerRuleID        string
+	registerRuleScope     string
+	registerAddendumID    string
+	registerAddendumScope string
+	registerNotMech       string
+	registerHookID        string
+	registerHookScope     string
+	registerCheckID       string
+	registerNote          string
+	registerProblem       string
+	registerIntervent     string
+	registerSupersedes    string
+	registerInstalledTS   int64
+	registerForce         bool
+	registerScopeAll      bool
+	registerScopeHrn      []string
+	registerScopeRepo     string
+	registerScopeRoot     string
+	registerScopePath     string
 
 	rejectClass      string
 	rejectMatch      string
@@ -207,6 +209,8 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 				CheckFacts:      checkFacts,
 				RuleID:          v.registerRuleID,
 				RuleScope:       v.registerRuleScope,
+				AddendumID:      v.registerAddendumID,
+				AddendumScope:   v.registerAddendumScope,
 				NotMechanizable: v.registerNotMech,
 				Supersedes:      v.registerSupersedes,
 				InstalledTS:     v.registerInstalledTS,
@@ -237,6 +241,10 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 		"steer-manifest rules key naming the installed prose; required for an instruction tier")
 	r.StringVar(&v.registerRuleScope, "rule-scope", "",
 		"store owning --rule-id: project|global (default: whichever holds it, refusing both)")
+	r.StringVar(&v.registerAddendumID, "addendum-id", "",
+		"steer-manifest review_addendum key naming the installed entry; required for a review tier")
+	r.StringVar(&v.registerAddendumScope, "addendum-scope", "",
+		"store owning --addendum-id: project|global (default: whichever holds it, refusing both)")
 	r.StringVar(&v.registerNotMech, mine.NotMechanizableFlag, "",
 		"why a repository check and a pre-tool guard cannot detect this class; "+
 			"required for an instruction tier")

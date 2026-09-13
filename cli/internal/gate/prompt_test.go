@@ -42,7 +42,7 @@ func TestInstrumentID(t *testing.T) {
 // Every placeholder the templates carry must be filled, or a literal `{firing}`
 // reaches the agent.
 func TestNoPlaceholderSurvivesFill(t *testing.T) {
-	prompt := BuildReviewPrompt("msg", "diff", "ctx")
+	prompt := BuildReviewPrompt("msg", "diff", "ctx", Addendum{})
 	deny := BuildDeny(3, "reviews", 2, 4, rerunNoteText, "feat: a subject", "a reviewer")
 	capped := BuildCap(3, "reviews", 5, 4, "feat: a subject", "a reviewer")
 	for name, out := range map[string]string{"review": prompt, "deny": deny, "cap": capped} {

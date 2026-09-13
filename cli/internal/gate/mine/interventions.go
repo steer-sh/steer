@@ -295,18 +295,40 @@ func hookFactsInScope(hookID, scope string) (map[string]any, error) {
 // own rule_hash, so a hand-edited manifest cannot make a record name text the store
 // does not hold.
 func SteerRuleFacts(ruleID, scope string) (map[string]any, error) {
+	return textEntryFacts(ruleTextEntry, ruleID, scope)
+}
+
+// SteerAddendumFacts freezes what a review-tier record's addendum entry says, under
+// SteerRuleFacts' scope resolution and recomputed digest.
+func SteerAddendumFacts(id, scope string) (map[string]any, error) {
+	return textEntryFacts(addendumTextEntry, id, scope)
+}
+
+// textEntry names one manifest map of text entries and the facts a record stamps
+// from it: <prefix>, <prefix>_hash and <prefix>_scope.
+type textEntry struct {
+	key, prefix, label, scopeFlag string
+}
+
+var (
+	ruleTextEntry     = textEntry{key: "rules", prefix: "rule", label: "rule", scopeFlag: "--rule-scope"}
+	addendumTextEntry = textEntry{key: "review_addendum", prefix: "addendum",
+		label: "addendum entry", scopeFlag: "--addendum-scope"}
+)
+
+func textEntryFacts(kind textEntry, id, scope string) (map[string]any, error) {
 	scopes := hookScopes
 	if scope != "" {
 		if scope != steerpath.ProjectScope && scope != steerpath.GlobalScope {
-			return nil, fmt.Errorf("invalid rule scope %s: expected %q or %q",
-				pyRepr(scope), steerpath.ProjectScope, steerpath.GlobalScope)
+			return nil, fmt.Errorf("invalid %s scope %s: expected %q or %q",
+				kind.label, pyRepr(scope), steerpath.ProjectScope, steerpath.GlobalScope)
 		}
 		scopes = []string{scope}
 	}
 	var found []string
 	facts := map[string]any{}
 	for _, s := range scopes {
-		f, err := ruleFactsInScope(ruleID, s)
+		f, err := textEntryFactsInScope(kind, id, s)
 		if err != nil {
 			return nil, err
 		}
@@ -317,8 +339,8 @@ func SteerRuleFacts(ruleID, scope string) (map[string]any, error) {
 		facts = f
 	}
 	if len(found) > 1 {
-		return nil, fmt.Errorf("rule %s is in the %s and %s stores; name one with --rule-scope",
-			pyRepr(ruleID), found[0], found[1])
+		return nil, fmt.Errorf("%s %s is in the %s and %s stores; name one with %s",
+			kind.label, pyRepr(id), found[0], found[1], kind.scopeFlag)
 	}
 	if len(found) == 0 {
 		return nil, nil
@@ -326,37 +348,41 @@ func SteerRuleFacts(ruleID, scope string) (map[string]any, error) {
 	return facts, nil
 }
 
-// ruleFactsInScope reads one store's rules entry, through hookstore.Resolve so a
+// textEntryFactsInScope reads one store's entry, through hookstore.Resolve so a
 // migrated machine is read at the directory every other reader resolves.
-func ruleFactsInScope(ruleID, scope string) (map[string]any, error) {
+func textEntryFactsInScope(kind textEntry, id, scope string) (map[string]any, error) {
 	dir, err := hookstore.Resolve(scope)
 	if err != nil {
 		return nil, err
 	}
 	data, err := os.ReadFile(filepath.Join(dir, hookstore.ManifestName))
 	if os.IsNotExist(err) {
-		return nil, nil // a scope with no store holds no rule; that is not a failure
+		return nil, nil // a scope with no store holds no entry; that is not a failure
 	}
 	if err != nil {
 		return nil, fmt.Errorf("reading the %s guard manifest: %w", scope, err)
 	}
-	var manifest struct {
-		Rules map[string]struct {
-			Text string `json:"text"`
-		} `json:"rules"`
-	}
+	var manifest map[string]json.RawMessage
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		return nil, fmt.Errorf("parsing the %s guard manifest: %w", scope, err)
 	}
-	entry, ok := manifest.Rules[ruleID]
+	var entries map[string]struct {
+		Text string `json:"text"`
+	}
+	if raw, ok := manifest[kind.key]; ok {
+		if err := json.Unmarshal(raw, &entries); err != nil {
+			return nil, fmt.Errorf("parsing the %s guard manifest: %w", scope, err)
+		}
+	}
+	entry, ok := entries[id]
 	if !ok {
 		return nil, nil
 	}
 	sum := sha256.Sum256([]byte(normalizeRuleText(entry.Text)))
 	return map[string]any{
-		"rule":       entry.Text,
-		"rule_hash":  hex.EncodeToString(sum[:]),
-		"rule_scope": scope,
+		kind.prefix:            entry.Text,
+		kind.prefix + "_hash":  hex.EncodeToString(sum[:]),
+		kind.prefix + "_scope": scope,
 	}, nil
 }
 

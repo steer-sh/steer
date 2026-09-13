@@ -64,6 +64,10 @@ func InstallManagedRule(scope, id, text string, targets ...harness.Registrar) (*
 		return nil, fmt.Errorf("%q already names a guard in the %s store. One id names one "+
 			"artifact, or a record naming it cannot say which text its digest was taken over", ruleID, scope)
 	}
+	if _, taken := manifest.Addendum[ruleID]; taken {
+		return nil, fmt.Errorf("%q already names a review addendum entry in the %s store. "+
+			"One id names one artifact", ruleID, scope)
+	}
 
 	// Identical prose under a second id is refused: two ids naming one rule give
 	// two records two digests over one instruction, and a removal then leaves the

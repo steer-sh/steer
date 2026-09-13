@@ -87,6 +87,13 @@ func IsGuard(value string) bool {
 	return k == Guard
 }
 
+// IsReview says a record's fix is a review addendum entry, text the commit gate adds
+// to its stock review prompt.
+func IsReview(value string) bool {
+	k, _ := Of(value)
+	return k == Review
+}
+
 // IsInstruction says a record's fix is written guidance, whose artifact is a rule
 // in the shared store rather than a guard file.
 func IsInstruction(value string) bool {

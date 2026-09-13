@@ -50,8 +50,8 @@ func TestRegisterRefusesOnlyACorpusItCannotBaseline(t *testing.T) {
 		Prose: testProse,
 		Class: "c", Match: "bare python", Corpus: CorpusTranscript,
 		Sessions: []SessionUnit{friction(1000, "claude-code", "proj", "bare python here")},
-		Tier:     "review",
-		Target:   "review-prompt.md", ScopeAll: true, InstalledTS: 2000,
+		Tier:     "guard", HookID: "test-guard",
+		Target: "steer-hooks.py", ScopeAll: true, InstalledTS: 2000,
 	})
 	if err != nil {
 		t.Fatalf("the session corpus can freeze a baseline: %v", err)
@@ -59,7 +59,7 @@ func TestRegisterRefusesOnlyACorpusItCannotBaseline(t *testing.T) {
 	if err := Register(discard{}, dir, RegisterOpts{
 		Prose: testProse,
 		Class: "c", Match: "x", Corpus: "made-up",
-		Tier: "review", Target: "review-prompt.md", ScopeAll: true, Force: true,
+		Tier: "guard", HookID: "test-guard", Target: "steer-hooks.py", ScopeAll: true, Force: true,
 	}); err == nil {
 		t.Fatal("an unknown corpus must be refused")
 	}
@@ -68,7 +68,7 @@ func TestRegisterRefusesOnlyACorpusItCannotBaseline(t *testing.T) {
 		Prose: testProse,
 		Class: "c", Match: "bare python", Corpus: CorpusTranscript,
 		Sessions: []SessionUnit{friction(1000, "claude-code", "proj", "bare python here")},
-		Tier:     "review", Target: "review-prompt.md", ScopePath: "cli/", InstalledTS: 2000,
+		Tier:     "guard", HookID: "test-guard", Target: "steer-hooks.py", ScopePath: "cli/", InstalledTS: 2000,
 	}); err == nil {
 		t.Fatal("--scope-path over the session corpus must be refused")
 	}

@@ -89,9 +89,12 @@ not one transaction; synchronization and rebuild are retry paths. `SyncTargets` 
 prose. Rebuild and removal retries also synchronize it. Handwritten lines inside
 the managed section do not survive regeneration.
 
-The manifest has `hooks` and prose-only `rules`. Their ids are mutually exclusive
-at both installation boundaries. Rule text is stored so its normalized digest can
-be recomputed; duplicate normalized text under another rule id is refused.
+The manifest has `hooks`, prose-only `rules` and `review_addendum` entries
+(`internal/claude/addendum.go`). Ids are mutually exclusive across the three at
+every installation boundary. Rule and addendum text is stored so its normalized
+digest can be recomputed; duplicate normalized text under another id of the same
+kind is refused. Addendum entries derive no harness document; the commit gate
+reads them.
 A prose edit does not consolidate the master or invalidate unrelated guard tests.
 Removing a shared artifact removes its derived rule for every target, including
 Pi and Codex's shared project document.
@@ -108,7 +111,9 @@ eligibility is distinct from installation reach, and a record must name harnesse
 with a registered master unless forced. Instruction-tier registration binds a
 `rule_id` and requires `not_mechanizable`, explaining why a check or guard cannot
 detect the class. `mine.ValidateArgument` validates the argument's presence;
-it cannot establish its soundness.
+it cannot establish its soundness. Review-tier registration binds an
+`addendum_id` and requires a false-positive class: an entry that suppressed a
+defect class would read as success while hiding the defects.
 
 ## Guard runtime and fixtures
 
@@ -205,6 +210,17 @@ to native hooks and git pre-commit. Reviewer processes live under
 `internal/gate/reviewers/`; prompts and their pinned digests live under `prompts/`.
 The review prompt digest is part of reviewer identity. Ledger rows record both a
 legacy instrument string and structured identity dimensions.
+
+The stock review prompt is embedded and fixed; the review addendum is the
+operator-writable addition to it (`internal/gate/addendum.go`). Each request
+loads global entries from disk and project entries from the repository's HEAD —
+never the index or working tree, so a commit cannot change its own review. The
+entries render into the template's context slot, leaving the prompt digest
+unchanged. The addendum's digest joins the instrument string as
+`<prompt>+<addendum>` inside the digest segment, because a fifth segment is read
+as effort, and rides `instrument_fields` as `addendum_digest`. An absent addendum
+reads as known and empty. A settings preview has no repository, so `ImpactOf`
+gives it each record's own addendum.
 
 `gate.Load` resolves defaults, `~/.steer/config.json`, then environment overrides;
 command flags override those values. `internal/settings/` shares setting metadata

@@ -380,7 +380,7 @@ The script does no semantic grouping by design. Read the findings and name the c
 - It spans **more than one commit and more than one file**. A defect that only ever hit one file is that file's bug, not a class.
 - It names a **concrete, detectable tell** — a pattern in the source or the commit message, not a quality ("insufficient error handling").
 
-Do the same pass over the rejected dump. A recurring **false-positive** class is equally actionable — it goes to the reviewer prompt as a suppression, and it answers whether the rejected fraction is a prompt problem or reviewer noise.
+Do the same pass over the rejected dump. A recurring **false-positive** class is equally actionable — it goes to the review addendum as a suppression, and it answers whether the rejected fraction is a prompt problem or reviewer noise.
 
 Everything else is the irreducible cost of an independent reader. One-off findings are the gate working as designed; do not manufacture classes to fill a report.
 
@@ -398,7 +398,7 @@ flag value.
 |---|---|---|---|
 | `check` | repository check | A local, deterministic test of repository content can detect it | a managed check in that repo's `check.sh`, authored from `steer check guide` |
 | `steer` / `guard` | pre-tool guard | It is detectable at edit time by regex/AST on a file or command | a PreToolUse hook, via the `steer` skill |
-| `prompt` / `review` | review-prompt change | It is a recurring reviewer false positive | the reviewer prompt (`cli/internal/gate/prompts/review.md`) |
+| `prompt` / `review` | review-prompt change | It is a recurring reviewer false positive | a review addendum entry, via `steer commit-gate addendum add` — the stock prompt is fixed |
 | `prose` / `instruction` | instruction rule | Genuinely not mechanizable but frequent enough to earn a line | CLAUDE.md |
 
 An instruction rule is the weakest tier and the last one to reach for. Use it only after arguing why the class cannot be detected by a repository check or a pre-tool guard, and expect the class to keep recurring more often than not — that outcome is information, not failure.
@@ -518,7 +518,7 @@ For each accepted review candidate:
 
    - **Repository check** — read `steer check guide` first. Run `steer check init` if the repository has no `.steer/checks/manifest.json`. Write the detector and a case file with a known-good case and a defect case that reproduces the real finding, then `steer check add <id>`; it declares the check only when every case matched. The repository must be adopted (`steer check adopt`) and its Stop runner registered (`steer check install --harness <id> --scope <scope>`) before step 3 accepts the record. `steer check list` shows all three.
    - **Pre-tool guard** — the `steer` skill.
-   - **Review-prompt change** — edit the reviewer prompt.
+   - **Review-prompt change** — write a review addendum entry with `steer commit-gate addendum add <id> --text "<text>"`. The stock reviewer prompt is compiled into the binary; never edit it for a fix.
 
 3. **Register it**, after the fix is in:
 
@@ -545,6 +545,8 @@ For each accepted review candidate:
    **`--tier steer` additionally requires `--hook-id`** — the steer-manifest key, which is also the `hook_name` in `hooks/steer-audit.jsonl`. That id makes the audit-log join deterministic. Reconstructing it later from `target` means searching the manifest for a path, and the manifest stops describing a hook the moment this loop renames or retires it. `register` also copies the rule text and `rule_hash` from the manifest, so the join survives a rename, plus `hook_version` and `hook_digest` — the identity of the implementation that ran. The rule hash names the policy text; a guard repaired without a rule change moves the digest alone, which is what says the treatment changed under a class still collecting. The lookup reads whichever store holds the id and refuses an id held by both; `--hook-scope project|global` names one.
 
    **`--tier prose` additionally requires `--rule-id` and `--not-mechanizable`.** The prose has to exist before a record can name it: write it with `steer rules add <id> --rule "<text>"`, which prints the scope's rules first and refuses text a second id already holds, then pass that id. `register` copies the rule text and its `rule_hash` onto the record, and refuses an id the store does not hold. `--not-mechanizable` carries the argument the routing ladder asks for — one sentence naming why a repository check and a pre-tool guard cannot detect this class. It is refused blank and refused when it only restates the class name. Today that argument is made in a session and lost there, so no later reader can check it was made at all; the flag preserves its presence, and its soundness stays the reader's.
+
+   **`--tier prompt` additionally requires `--addendum-id` and `--kind false-positive`.** The stock review prompt is compiled into the binary and fixed; a review-prompt change is an entry the commit gate adds to it. Write it with `steer commit-gate addendum add <id> --text "<text>"`, then pass that id. `register` copies the entry text and its `addendum_hash` onto the record, refuses an id the store does not hold, and refuses an id held by both stores unless `--addendum-scope project|global` names one. A defect class is refused, because an entry that stops the reviewer raising a real defect would read as a falling count. A project entry reaches the reviewer only once the store's `steer-manifest.json` is committed: the gate reads project entries from HEAD, so `steer commit-gate addendum list` names each entry's state there.
 
    The audit log is a second, independent measurement: it says whether the hook ever *fired*. A steer fix with falling incidence and zero fires did not cause the fall, and incidence alone cannot tell you that.
 

@@ -55,10 +55,12 @@ func fill(tmpl string, fields map[string]string) string {
 }
 
 // BuildReviewPrompt assembles the reviewer prompt. `context` is already a rendered
-// block (or empty); message and diff must be neutralised by the caller.
-func BuildReviewPrompt(message, diff, context string) string {
+// block (or empty); message and diff must be neutralised by the caller. The
+// addendum's block follows the context in the same slot, so the stock template and
+// its digest are unchanged.
+func BuildReviewPrompt(message, diff, context string, addendum Addendum) string {
 	return fill(reviewPrompt, map[string]string{
-		"message": message, "diff": diff, "context": context,
+		"message": message, "diff": diff, "context": context + addendum.Block(),
 	})
 }
 
@@ -112,8 +114,17 @@ func PromptDigest() string {
 // No reader splits this string by position, so a fifth segment is safe to append. It
 // is appended only when effort is set, which keeps a row from an unconfigured machine
 // byte-identical to the rows it already wrote.
-func (c Config) InstrumentID() string {
-	id := fmt.Sprintf("%s/%d/%s/%s", c.ReviewerModel, c.ReviewerRuns, PromptDigest(), InstrumentSuffix)
+func (c Config) InstrumentID() string { return c.InstrumentIDWith("") }
+
+// InstrumentIDWith is InstrumentID under a review addendum. A non-empty digest joins
+// the prompt digest as `<prompt>+<addendum>`, inside the one segment, because a
+// reader takes a fifth segment for the effort.
+func (c Config) InstrumentIDWith(addendumDigest string) string {
+	digest := PromptDigest()
+	if addendumDigest != "" {
+		digest += "+" + addendumDigest
+	}
+	id := fmt.Sprintf("%s/%d/%s/%s", c.ReviewerModel, c.ReviewerRuns, digest, InstrumentSuffix)
 	if c.ReviewerEffort != "" {
 		id += "/" + c.ReviewerEffort
 	}
@@ -129,8 +140,13 @@ func (c Config) InstrumentID() string {
 // provider's pin. Effort has no such label: it is recorded as the operator wrote it,
 // and empty means the provider's default, because the value that default resolves to
 // lives inside the provider CLI.
-func (c Config) InstrumentFields() map[string]any {
-	return map[string]any{
+func (c Config) InstrumentFields() map[string]any { return c.InstrumentFieldsWith("") }
+
+// InstrumentFieldsWith is InstrumentFields under a review addendum. The
+// `addendum_digest` key is written only when there are entries; a reader takes its
+// absence as no addendum.
+func (c Config) InstrumentFieldsWith(addendumDigest string) map[string]any {
+	fields := map[string]any{
 		"provider":      c.ReviewerProvider,
 		"model":         c.ReviewerModel,
 		"effort":        c.ReviewerEffort,
@@ -138,6 +154,10 @@ func (c Config) InstrumentFields() map[string]any {
 		"prompt_digest": PromptDigest(),
 		"engine":        InstrumentSuffix,
 	}
+	if addendumDigest != "" {
+		fields["addendum_digest"] = addendumDigest
+	}
+	return fields
 }
 
 // ReviewerLabel names the panel that ran, for the templates that tell the agent who

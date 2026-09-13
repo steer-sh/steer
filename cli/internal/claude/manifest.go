@@ -83,8 +83,18 @@ type RuleEntry struct {
 // section, so they share one file: two files give SetRules two sources that can
 // disagree after a partial write.
 type Manifest struct {
-	Hooks map[string]ManifestEntry `json:"hooks"`
-	Rules map[string]RuleEntry     `json:"rules,omitempty"`
+	Hooks    map[string]ManifestEntry `json:"hooks"`
+	Rules    map[string]RuleEntry     `json:"rules,omitempty"`
+	Addendum map[string]AddendumEntry `json:"review_addendum,omitempty"`
+}
+
+// AddendumEntry is one review-tier entry: text the commit gate appends to its
+// stock review prompt. TextHash is HashRule over Text.
+type AddendumEntry struct {
+	Text     string `json:"text"`
+	TextHash string `json:"text_hash"`
+	Created  string `json:"created"`
+	Updated  string `json:"updated,omitempty"`
 }
 
 // ManifestEntry is metadata for one registered hook.
@@ -366,6 +376,33 @@ func RemoveRule(scope, ruleID string) error {
 	delete(manifest.Rules, strings.TrimSpace(ruleID))
 	if len(manifest.Rules) == 0 {
 		manifest.Rules = nil
+	}
+	return SaveManifest(scope, manifest)
+}
+
+// SetAddendumEntry writes one review addendum entry into the manifest.
+func SetAddendumEntry(scope, id string, entry AddendumEntry) error {
+	manifest, err := LoadManifest(scope)
+	if err != nil {
+		return err
+	}
+	if manifest.Addendum == nil {
+		manifest.Addendum = map[string]AddendumEntry{}
+	}
+	manifest.Addendum[strings.TrimSpace(id)] = entry
+	return SaveManifest(scope, manifest)
+}
+
+// RemoveAddendumEntry deletes one review addendum entry. An empty map is dropped,
+// as RemoveRule drops an empty rules map.
+func RemoveAddendumEntry(scope, id string) error {
+	manifest, err := LoadManifest(scope)
+	if err != nil {
+		return err
+	}
+	delete(manifest.Addendum, strings.TrimSpace(id))
+	if len(manifest.Addendum) == 0 {
+		manifest.Addendum = nil
 	}
 	return SaveManifest(scope, manifest)
 }

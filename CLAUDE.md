@@ -90,6 +90,10 @@ Read the linked architecture section before changing the corresponding boundary:
   repository's check state, shared by the status snapshot, the refresh queue and
   `steer check list`. Adoption, registration, validation freshness and observed
   execution stay four separate facts.
+- Review addendum: the manifest key in `cli/internal/claude/manifest.go`, the
+  gate's HEAD reader `cli/internal/gate/addendum.go` and `mine.SteerAddendumFacts`
+  decode one `review_addendum` shape. The stock `prompts/review.md` is never the
+  review tier's target.
 - Generation behavior: bump `prompt_version` in `skills/steer/SKILL.md`.
   Review templates have separate pinned digests in `cli/internal/gate/`.
 - Transcript normalization: each adapter's `Instrument` is pinned by replay of

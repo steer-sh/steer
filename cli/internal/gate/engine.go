@@ -61,6 +61,9 @@ type Request struct {
 	// LedgerHook, when set, is called on the retry row so an adapter can attach the
 	// agent's self-reported ledger before the row is written.
 	LedgerHook func(row Row, state ChainState)
+
+	// addendum is loaded once by Handle, and every row and prompt of the request reads it.
+	addendum Addendum
 }
 
 // Engine is the harness-neutral review engine.
@@ -94,6 +97,9 @@ func (e *Engine) log(req Request, row Row) error {
 	for key, value := range req.RowExtra {
 		setDefault(row, key, value)
 	}
+	digest := req.addendum.Digest()
+	setDefault(row, "instrument", e.cfg.InstrumentIDWith(digest))
+	setDefault(row, "instrument_fields", e.cfg.InstrumentFieldsWith(digest))
 	return e.ledger.Log(row)
 }
 
@@ -148,12 +154,16 @@ func (e *Engine) review(ctx context.Context, req Request, p prepared) PanelResul
 	// a search term. BuildContext neutralises the files it attaches itself.
 	contextBlock := BuildContext(e.cfg, req.Repo, ChangedSymbols(p.diff, p.paths), p.paths)
 	prompt := BuildReviewPrompt(
-		NeutralizeTags(req.Message), NeutralizeTags(p.diff), contextBlock)
+		NeutralizeTags(req.Message), NeutralizeTags(p.diff), contextBlock, req.addendum)
 	return e.panel.Run(ctx, prompt, req.Repo)
 }
 
 // Handle rules on one commit.
 func (e *Engine) Handle(ctx context.Context, req Request) Decision {
+	req.addendum = LoadAddendum(req.Repo)
+	for _, msg := range req.addendum.Errors {
+		e.ledger.noteErr("%s", msg)
+	}
 	chain := NewChain(e.cfg, ChainKey{Actor: req.Actor, Repo: req.Repo})
 	state := chain.Load()
 	if chain.Pending(state) {
