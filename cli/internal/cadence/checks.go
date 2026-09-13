@@ -28,8 +28,7 @@ const (
 )
 
 // CheckWork is one open step in the repository's check tier, with the command
-// that clears it. It carries no count: these are states of a declaration, not
-// recurrence measured over a window.
+// that clears it.
 type CheckWork struct {
 	Kind    string `json:"kind"`
 	Repo    string `json:"repo"`
