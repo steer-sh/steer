@@ -64,6 +64,7 @@ func Exec(root string, opts ExecOptions) ([]Execution, error) {
 	invocation := newRunID()
 	deadline := inv.deadlineWithin(time.Now(), opts.Timeout)
 	records := make([]Execution, 0, len(selected))
+	expired := false
 	for _, d := range selected {
 		rec := Execution{
 			Version:      ExecutionVersion,
@@ -82,10 +83,11 @@ func Exec(root string, opts ExecOptions) ([]Execution, error) {
 		if det, err := DetectorOf(root, d); err == nil {
 			rec.DetectorDigest = det.Digest
 		}
-		if !deadline.IsZero() && !time.Now().Before(deadline) {
+		if expired || (!deadline.IsZero() && !time.Now().Before(deadline)) {
 			rec.Outcome, rec.Reason = OutcomeNotExecuted, "the deadline passed before the check started"
 		} else {
 			runScript(root, bash, d, deadline, stdout, stderr, &rec)
+			expired = rec.Outcome == OutcomeTimeout
 		}
 		rec.Finished = time.Now().UTC()
 		if !rec.Passed() {
@@ -97,7 +99,7 @@ func Exec(root string, opts ExecOptions) ([]Execution, error) {
 		}
 		records = append(records, rec)
 	}
-	return records, appendExecutions(identity, records)
+	return records, appendExecutions(inv.EvidenceDir, identity, records)
 }
 
 // selectScripts returns the script bindings named by ids, or all of them.

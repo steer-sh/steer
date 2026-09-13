@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/checks"
@@ -161,6 +162,158 @@ check.sh calls this in place of ` + "`go test`" + `. Put go test flags after --.
 	},
 }
 
+var checkRunCmd = &cobra.Command{
+	Use:   "run",
+	Short: "Run check.sh once under a new run ID and report each declared check",
+	Long: `Runs the repository's check.sh with bash from its root, bounded by --timeout,
+and records its outcome apart from the per-check records its executors write.
+A declared check that no executor reported under the run is recorded as not
+executed; when check.sh passed anyway, that is an integration failure.
+Exits non-zero unless check.sh passed and every declared check reported.`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		root, err := repoRootOf(".")
+		if err != nil {
+			return err
+		}
+		timeout, _ := cmd.Flags().GetDuration("timeout")
+		run, records, err := checks.RunOracle(root, checks.RunOptions{
+			Source: checks.SourceRun, Timeout: timeout, Stdout: os.Stdout, Stderr: os.Stderr, SteerBin: steerBinForOracle(),
+		})
+		if err != nil {
+			return err
+		}
+		printOracleRun(cmd, run, records)
+		if !run.Passed() {
+			code := 1
+			if run.ExitCode != nil && *run.ExitCode != 0 {
+				code = *run.ExitCode
+			}
+			os.Exit(code)
+		}
+		return nil
+	},
+}
+
+var checkAdoptCmd = &cobra.Command{
+	Use:   "adopt [repo]",
+	Short: "Authorize automatic check.sh runs for this repository on this machine",
+	Long: `Records machine-local authorization for the repository's exact resolved root.
+A declared check without a current receipt is replayed first; then check.sh runs
+with isolated evidence and must pass with every declared check reported.
+Nothing is recorded as live execution. A clone elsewhere is not adopted.`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		dir := "."
+		if len(args) == 1 {
+			dir = args[0]
+		}
+		root, err := repoRootOf(dir)
+		if err != nil {
+			return err
+		}
+		timeout, _ := cmd.Flags().GetDuration("timeout")
+		res, err := checks.Adopt(root, checks.AdoptOptions{
+			Timeout: timeout, Stdout: os.Stdout, Stderr: os.Stderr, SteerBin: steerBinForOracle(),
+		})
+		out := cmd.OutOrStdout()
+		if res.Already {
+			fmt.Fprintf(out, "%s is already adopted on this machine since %s.\n", res.Adoption.Repo, res.Adoption.At.Local().Format("2006-01-02 15:04"))
+			return nil
+		}
+		for _, v := range res.Validations {
+			if v.Reused {
+				fmt.Fprintf(out, "Validation of %s: current receipt from %s reused\n", v.CheckID, v.Run.Finished.Local().Format("2006-01-02 15:04"))
+			} else {
+				printValidation(cmd, v.Run)
+			}
+		}
+		if res.Oracle.RunID != "" {
+			printOracleRun(cmd, res.Oracle, res.Executions)
+		}
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(out, styles.SuccessBox.Render(fmt.Sprintf(
+			"Adopted %s\nAutomatic check.sh runs are authorized for this exact root on this machine.", res.Adoption.Repo)))
+		return nil
+	},
+}
+
+var checkUnadoptCmd = &cobra.Command{
+	Use:   "unadopt [repo]",
+	Short: "Withdraw automatic check.sh runs for this repository, keeping its evidence",
+	Args:  cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		dir := "."
+		if len(args) == 1 {
+			dir = args[0]
+		}
+		identity, err := adoptionIdentity(dir)
+		if err != nil {
+			return err
+		}
+		removed, err := checks.Unadopt(identity)
+		if err != nil {
+			return err
+		}
+		if !removed {
+			fmt.Fprintf(cmd.OutOrStdout(), "%s is not adopted on this machine.\n", identity)
+			return nil
+		}
+		fmt.Fprintln(cmd.OutOrStdout(), styles.SuccessBox.Render(fmt.Sprintf(
+			"Unadopted %s\nKept: its checks, validation history and execution evidence", identity)))
+		return nil
+	},
+}
+
+// adoptionIdentity resolves dir to the identity adoption keys on. A directory
+// that no longer resolves falls back to its absolute path, so a deleted
+// checkout can still be unadopted.
+func adoptionIdentity(dir string) (string, error) {
+	if root, err := repoRootOf(dir); err == nil {
+		return checks.RepoIdentity(root)
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
+	return abs, nil
+}
+
+// steerBinForOracle is the STEER_BIN that check.sh receives: an operator
+// override stays, otherwise this executable.
+func steerBinForOracle() string {
+	if os.Getenv("STEER_BIN") != "" {
+		return ""
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	return exe
+}
+
+func printOracleRun(cmd *cobra.Command, run checks.OracleRun, records []checks.Execution) {
+	out := cmd.OutOrStdout()
+	fmt.Fprintf(out, "%s %s in %s (run %s)", checks.OracleName, run.Outcome, run.Finished.Sub(run.Started).Round(time.Millisecond), run.RunID)
+	if run.Reason != "" {
+		fmt.Fprintf(out, ": %s", run.Reason)
+	}
+	fmt.Fprintln(out)
+	for _, e := range records {
+		fmt.Fprintf(out, "  %-14s %s", e.Outcome, e.CheckID)
+		if e.Reason != "" {
+			fmt.Fprintf(out, ": %s", e.Reason)
+		}
+		fmt.Fprintln(out)
+	}
+	if run.IntegrationFailure {
+		fmt.Fprintf(out, "Integration failure: %s passed without running %s. Add the managed lines to its sequence (see `steer check guide`):\n  %s\n",
+			checks.OracleName, strings.Join(run.Missing, ", "), checks.ExecInvocation)
+	}
+}
+
 var checkAddCmd = &cobra.Command{
 	Use:   "add <id> (--script <path> | --go-package <dir> --go-test <name>)",
 	Short: "Validate a check against its cases, then declare it",
@@ -230,6 +383,9 @@ var checkListCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		if err := printRepositoryState(cmd, root); err != nil {
+			return err
+		}
 		if len(m.Checks) == 0 {
 			fmt.Fprintln(cmd.OutOrStdout(), "No checks declared.")
 			return nil
@@ -286,6 +442,40 @@ var checkRemoveCmd = &cobra.Command{
 			"Removed check %s\nKept: %s and its validation history", d.ID, rel)))
 		return nil
 	},
+}
+
+// printRepositoryState prints the repository's adoption on this machine and
+// its latest live check.sh run.
+func printRepositoryState(cmd *cobra.Command, root string) error {
+	out := cmd.OutOrStdout()
+	identity, err := checks.RepoIdentity(root)
+	if err != nil {
+		return err
+	}
+	a, adopted, err := checks.AdoptionOf(identity)
+	if err != nil {
+		return err
+	}
+	if adopted {
+		fmt.Fprintf(out, "Adoption: adopted on this machine since %s\n", a.At.Local().Format("2006-01-02 15:04"))
+	} else {
+		fmt.Fprintln(out, "Adoption: not adopted on this machine (steer check adopt)")
+	}
+	runs, err := checks.OracleRuns(root)
+	if err != nil {
+		return err
+	}
+	if len(runs) == 0 {
+		fmt.Fprintf(out, "Latest %s run: none recorded on this machine\n", checks.OracleName)
+		return nil
+	}
+	r := runs[len(runs)-1]
+	phrase := r.Outcome
+	if r.IntegrationFailure {
+		phrase += ", integration failure: " + strings.Join(r.Missing, ", ") + " not run"
+	}
+	fmt.Fprintf(out, "Latest %s run: %s at %s (%s)\n", checks.OracleName, phrase, r.Finished.Local().Format("2006-01-02 15:04"), r.Source)
+	return nil
 }
 
 func bindingTarget(d checks.Declaration) string {
@@ -398,10 +588,12 @@ func repoRootOf(dir string) (string, error) {
 func init() {
 	rootCmd.AddCommand(checkCmd)
 	checkCmd.AddCommand(checkGuideCmd, checkInitCmd, checkAddCmd, checkTestCmd, checkListCmd, checkRemoveCmd,
-		checkExecCmd, checkGoTestCmd)
+		checkExecCmd, checkGoTestCmd, checkRunCmd, checkAdoptCmd, checkUnadoptCmd)
 	checkExecCmd.Flags().Bool("all", false, "run every script check in the manifest")
 	checkExecCmd.Flags().Duration("timeout", checks.DefaultExecTimeout, "bound on this run; a parent deadline that is earlier wins")
 	checkGoTestCmd.Flags().Duration("timeout", checks.DefaultExecTimeout, "bound on this run; a parent deadline that is earlier wins")
+	checkRunCmd.Flags().Duration("timeout", checks.DefaultExecTimeout, "total bound on check.sh; its process group is stopped at the deadline")
+	checkAdoptCmd.Flags().Duration("timeout", checks.DefaultExecTimeout, "total bound on the isolated check.sh run")
 	checkAddCmd.Flags().String("script", "", "repository-relative script the check runs")
 	checkAddCmd.Flags().String("go-package", "", "repository-relative directory of the Go test's package")
 	checkAddCmd.Flags().String("go-test", "", "exact name of the top-level Go test function")

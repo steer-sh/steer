@@ -29,6 +29,10 @@ const (
 	EnvHarness  = "STEER_CHECK_HARNESS"
 	EnvSession  = "STEER_CHECK_SESSION"
 	EnvDeadline = "STEER_CHECK_DEADLINE"
+	// EnvEvidenceDir, an absolute directory, replaces the live evidence root
+	// for execution and oracle-run records, so an adoption run leaves no live
+	// activity.
+	EnvEvidenceDir = "STEER_CHECK_EVIDENCE_DIR"
 )
 
 // SourceShell is the invocation source when no parent oracle names one.
@@ -63,23 +67,31 @@ const (
 
 // Invocation is what a parent oracle tells an executor about the run it
 // belongs to. RunID associates the executor's records with that run; it is
-// empty when the executor runs outside an instrumented oracle.
+// empty when the executor runs outside an instrumented oracle. EvidenceDir,
+// when set, is the root that receives the records in place of the live one.
 type Invocation struct {
-	RunID    string
-	Source   string
-	Harness  string
-	Session  string
-	Deadline time.Time
+	RunID       string
+	Source      string
+	Harness     string
+	Session     string
+	Deadline    time.Time
+	EvidenceDir string
 }
 
 // InvocationFromEnv reads the invocation a parent oracle set. A malformed
-// deadline is an error, so a bounded run never silently becomes unbounded.
+// deadline is an error, so a bounded run never silently becomes unbounded; a
+// relative evidence directory is an error, so isolated records never land
+// beside the working directory.
 func InvocationFromEnv() (Invocation, error) {
 	inv := Invocation{
-		RunID:   os.Getenv(EnvRunID),
-		Source:  os.Getenv(EnvSource),
-		Harness: os.Getenv(EnvHarness),
-		Session: os.Getenv(EnvSession),
+		RunID:       os.Getenv(EnvRunID),
+		Source:      os.Getenv(EnvSource),
+		Harness:     os.Getenv(EnvHarness),
+		Session:     os.Getenv(EnvSession),
+		EvidenceDir: os.Getenv(EnvEvidenceDir),
+	}
+	if inv.EvidenceDir != "" && !filepath.IsAbs(inv.EvidenceDir) {
+		return Invocation{}, fmt.Errorf("%s=%q: the directory must be absolute", EnvEvidenceDir, inv.EvidenceDir)
 	}
 	if inv.Source == "" {
 		inv.Source = SourceShell
@@ -140,23 +152,44 @@ func executionsPath(dir, identity string) string {
 	return filepath.Join(dir, repoKey(identity), executionsName)
 }
 
-// appendExecutions appends records to the repository's execution stream in
-// one write.
-func appendExecutions(identity string, records []Execution) error {
+// evidenceRoot returns the directory that holds execution evidence: the
+// isolated root when one is named, else the live state component.
+func evidenceRoot(isolated string) (string, error) {
+	if isolated != "" {
+		return isolated, nil
+	}
+	return statestore.Prepare(StateComponent)
+}
+
+// appendExecutions appends records to the repository's execution stream under
+// the evidence root in one write.
+func appendExecutions(isolated, identity string, records []Execution) error {
 	if len(records) == 0 {
 		return nil
 	}
-	dir, err := statestore.Prepare(StateComponent)
+	dir, err := evidenceRoot(isolated)
 	if err != nil {
 		return err
 	}
-	path := executionsPath(dir, identity)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	lines := make([]any, len(records))
+	for i, r := range records {
+		lines[i] = r
+	}
+	if err := appendJSONL(executionsPath(dir, identity), lines...); err != nil {
 		return fmt.Errorf("record execution: %w", err)
 	}
+	return nil
+}
+
+// appendJSONL appends one JSON line per value to path in one write, creating
+// its directory.
+func appendJSONL(path string, values ...any) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
 	var buf []byte
-	for _, r := range records {
-		line, err := json.Marshal(r)
+	for _, v := range values {
+		line, err := json.Marshal(v)
 		if err != nil {
 			return err
 		}
@@ -164,40 +197,53 @@ func appendExecutions(identity string, records []Execution) error {
 	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
-		return fmt.Errorf("record execution: %w", err)
+		return err
 	}
 	if _, err := f.Write(buf); err != nil {
 		f.Close()
-		return fmt.Errorf("record execution: %w", err)
+		return err
 	}
 	return f.Close()
 }
 
-// Executions returns the repository's execution records, oldest first. A line
-// that does not parse is skipped.
+// readJSONL passes each line of path to decode, oldest first. A missing file
+// has no lines.
+func readJSONL(path string, decode func([]byte)) error {
+	f, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 64*1024), 16<<20)
+	for scanner.Scan() {
+		decode(scanner.Bytes())
+	}
+	return scanner.Err()
+}
+
+// Executions returns the repository's live execution records, oldest first.
+// A line that does not parse is skipped.
 func Executions(root string) ([]Execution, error) {
 	identity, err := RepoIdentity(root)
 	if err != nil {
 		return nil, err
 	}
-	f, err := os.Open(executionsPath(statestore.Resolve(StateComponent), identity))
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
+	return executionsIn(statestore.Resolve(StateComponent), identity)
+}
+
+func executionsIn(dir, identity string) ([]Execution, error) {
 	var out []Execution
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 64*1024), 16<<20)
-	for scanner.Scan() {
+	err := readJSONL(executionsPath(dir, identity), func(line []byte) {
 		var e Execution
-		if json.Unmarshal(scanner.Bytes(), &e) == nil && e.CheckID != "" {
+		if json.Unmarshal(line, &e) == nil && e.CheckID != "" {
 			out = append(out, e)
 		}
-	}
-	return out, scanner.Err()
+	})
+	return out, err
 }
 
 // LatestExecutions returns each check's most recent execution record.

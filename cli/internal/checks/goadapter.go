@@ -118,7 +118,7 @@ func RunGoSuite(root string, opts GoSuiteOptions) (int, []Execution, error) {
 	}
 	records = append(records, reader.records(time.Now(), timedOut)...)
 	sort.Slice(records, func(i, j int) bool { return records[i].CheckID < records[j].CheckID })
-	return code, records, appendExecutions(identity, records)
+	return code, records, appendExecutions(inv.EvidenceDir, identity, records)
 }
 
 // goSuiteEvent is one line of `go test -json`, including the build events.

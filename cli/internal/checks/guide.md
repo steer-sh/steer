@@ -159,8 +159,29 @@ timeout, or not executed (the deadline came first). A `go-test` binding can
 also read skipped, passed-cached (the toolchain replayed a cached pass; this
 is not a fresh run), or unavailable (its package ran but did not build, or
 reported no result for the test, for example because `-run` excluded it). A
-binding whose package the run never reached gets no record. A passing
-`check.sh` alone never shows that a particular check ran.
+binding whose package the run never reached gets no record from the adapter.
+A passing `check.sh` alone never shows that a particular check ran.
+
+## Running the oracle and adopting the repository
+
+`steer check run` runs `check.sh` once, the way the Stop hook does: with bash
+from the repository root, under a new run ID and one deadline for the whole
+run (`--timeout`, 300 seconds by default), and records the aggregate outcome
+apart from the per-check records. It then compares the declared checks with the
+records under that run ID. A declared check with no record is recorded as not
+executed. When `check.sh` passed without running a declared check, that is an
+integration failure: the oracle does not call its executor, which says nothing
+about the check's assertion. `check run` exits non-zero unless `check.sh`
+passed and every declared check reported.
+
+Automatic runs need adoption. `steer check adopt [repo]` authorizes them for
+the repository's exact resolved root on this machine; a clone at another path
+is not adopted. Adoption replays each declared check that has no current
+receipt, then runs `check.sh` with isolated evidence that stays out of the
+live records. It is refused unless every check validated and `check.sh`
+passed with every declared check reported. Adoption survives later edits; a
+check whose detector changed keeps running with stale validation.
+`steer check unadopt [repo]` withdraws it and keeps all evidence.
 
 ## Commands
 
@@ -176,9 +197,14 @@ binding whose package the run never reached gets no record. A passing
   does the same for a test in the Go suite.
 - `steer check test <id>` replays a declared check's cases with its current
   detector. Run it after you edit the check, its inputs or its cases.
-- `steer check list` shows each check, its validation (current, stale with what
-  changed since the receipt, or never validated) and its latest execution on
-  this machine. A stale check keeps running.
+- `steer check list` shows the adoption, the latest `check.sh` run, and each
+  check with its validation (current, stale with what changed since the
+  receipt, or never validated) and its latest execution on this machine. A
+  stale check keeps running.
 - `steer check remove <id>` drops the declaration and keeps its cases and
   validation history.
+- `steer check run [--timeout <duration>]` runs `check.sh` once and reports each
+  declared check's result under that run.
+- `steer check adopt [repo]` and `steer check unadopt [repo]` grant and withdraw
+  this machine's authorization for automatic runs.
 - `steer check guide` prints this guide.
