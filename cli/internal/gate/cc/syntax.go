@@ -531,7 +531,7 @@ func parsedStagedPathspecs(program *shellsyntax.Program, commit *parsedGit) []st
 		return nil
 	}
 	var out []string
-	for _, add := range parsedGitCalls(program, "", "add", "stage") {
+	for _, add := range parsedGitCalls(program, commit.baseCWD, "add", "stage") {
 		if add.call.Start >= commit.call.Start {
 			continue
 		}

@@ -206,7 +206,7 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, stdin io.
 		return
 	}
 	repo := cc.RepoDir(command, cwd)
-	spec := cc.DiffSpecFor(command)
+	spec := cc.DiffSpecFor(command, cwd)
 
 	engine := gate.NewEngine(cfg, reviewer)
 	rowExtra := gate.Row{"client": "codex", "harness": "codex"}

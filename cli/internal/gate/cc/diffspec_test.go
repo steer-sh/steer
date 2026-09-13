@@ -41,7 +41,44 @@ func TestAbsoluteRepoCommitKeepsAStrayOutOfTheReview(t *testing.T) {
 	write("check_plan.md")
 
 	cmd := "git -C " + root + " add new_test.go && git -C " + root + " co" + "mmit -F msg"
-	diff, ok := gate.GetDiff(gate.Defaults(), RepoDir(cmd, "/elsewhere"), DiffSpecFor(cmd))
+	diff, ok := gate.GetDiff(gate.Defaults(), RepoDir(cmd, "/elsewhere"), DiffSpecFor(cmd, "/elsewhere"))
+	if !ok {
+		t.Fatal("GetDiff failed")
+	}
+	if !strings.Contains(diff, "new_test.go") {
+		t.Error("the file the add names must reach the reviewer")
+	}
+	if strings.Contains(diff, "check_plan.md") {
+		t.Error("an untracked file no add names cannot land in this commit")
+	}
+}
+
+// TestABareAddInTheShellDirectoryKeepsAStrayOutOfTheReview runs the form Claude Code
+// hands the hook when it drops a leading `cd` to its own working directory: a bare
+// add, then a commit that selects the same repository with `git -C`.
+func TestABareAddInTheShellDirectoryKeepsAStrayOutOfTheReview(t *testing.T) {
+	root := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	for _, path := range []string{"old.go", "new_test.go", "check_plan.md"} {
+		if err := os.WriteFile(filepath.Join(root, path), []byte(strings.Repeat("line x\n", 80)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run("init", "-q", ".")
+	run("add", "old.go")
+	run("co"+"mmit", "-qm", "init")
+
+	cmd := "git add new_test.go && git -C " + root + " co" + "mmit -F msg"
+	diff, ok := gate.GetDiff(gate.Defaults(), RepoDir(cmd, root), DiffSpecFor(cmd, root))
 	if !ok {
 		t.Fatal("GetDiff failed")
 	}
@@ -81,6 +118,10 @@ func TestStagedPathspecs(t *testing.T) {
 		{"git -C /r add a.go b.go && git -C /r commit -F msg", []string{"a.go", "b.go"},
 			"the form the gate's own refusal asks for: add and commit share one directory"},
 		{"git -C /r add a.go && git -C /s commit -m x", nil, "add and commit name different repositories"},
+		{"git add a.go && git -C /w commit -F msg", []string{"a.go"},
+			"a bare add runs in the shell's directory, and -C names that same directory"},
+		{"git add a.go && git -C /r commit -F msg", nil,
+			"a bare add runs in the shell's directory, and -C names another"},
 		{"cd /r && git add a.go && git commit -m x", []string{"a.go"}, "one cd moves both"},
 		{"git -C /r add a.go && cd /r && git commit -m x", []string{"a.go"},
 			"cd and -C that land in one directory"},
@@ -92,7 +133,7 @@ func TestStagedPathspecs(t *testing.T) {
 		{"git add cli; git commit -m x", []string{"cli"}, "`;` separates, it does not join"},
 	}
 	for _, tc := range cases {
-		got := StagedPathspecs(tc.cmd)
+		got := StagedPathspecs(tc.cmd, "/w")
 		if !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("StagedPathspecs(%q) = %v, want %v — %s", tc.cmd, got, tc.want, tc.why)
 		}
@@ -100,7 +141,7 @@ func TestStagedPathspecs(t *testing.T) {
 }
 
 func TestDiffSpecForCarriesPathspecsOnlyWithUntracked(t *testing.T) {
-	spec := DiffSpecFor("git add cli/cmd && git com" + "mit -F -")
+	spec := DiffSpecFor("git add cli/cmd && git com"+"mit -F -", "/w")
 	if spec.StagedOnly || !spec.IncludeUntracked {
 		t.Fatalf("a staging step reads the working tree and opts into untracked files: %+v", spec)
 	}
@@ -111,13 +152,13 @@ func TestDiffSpecForCarriesPathspecsOnlyWithUntracked(t *testing.T) {
 		t.Errorf("TrackedPathspecs = %v", spec.TrackedPathspecs)
 	}
 	// -a stages tracked files only, so there is no untracked half to narrow.
-	bare := DiffSpecFor("git com" + "mit -am x")
+	bare := DiffSpecFor("git com"+"mit -am x", "/w")
 	if bare.IncludeUntracked || bare.UntrackedPathspecs != nil || bare.TrackedPathspecs != nil {
 		t.Errorf("commit -a: %+v", bare)
 	}
 	// The one form where the two halves disagree: the add bounds which NEW files can
 	// land, while -a lands every tracked modification, named or not.
-	both := DiffSpecFor("git add cli/cmd && git com" + "mit -am x")
+	both := DiffSpecFor("git add cli/cmd && git com"+"mit -am x", "/w")
 	if !reflect.DeepEqual(both.UntrackedPathspecs, []string{"cli/cmd"}) {
 		t.Errorf("add + commit -a: UntrackedPathspecs = %v", both.UntrackedPathspecs)
 	}

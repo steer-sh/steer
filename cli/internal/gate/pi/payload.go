@@ -108,7 +108,7 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, stdin io.
 	decision := engine.Handle(ctx, gate.Request{
 		Repo: repo, Actor: payload.SessionID, Channel: gate.ChannelPreToolUse,
 		SessionID: payload.SessionID,
-		Spec:      cc.DiffSpecFor(command),
+		Spec:      cc.DiffSpecFor(command, cwd),
 		Message:   cc.ExtractMessage(command, cwd),
 		RerunNote: cc.RerunNote(command),
 		RowExtra:  rowExtra,

@@ -10,22 +10,25 @@ import "github.com/steer-sh/steer-cli/internal/gate"
 // modification: the add bounds which untracked files can land, while `-a` lands
 // tracked files the add never named. Narrowing the tracked half there would hide a
 // file the commit carries.
-func DiffSpecFor(cmd string) gate.DiffSpec {
+//
+// cwd is the directory the shell starts in, as RepoDir takes it.
+func DiffSpecFor(cmd, cwd string) gate.DiffSpec {
 	stagedOnly, includeUntracked := DiffSources(cmd)
 	spec := gate.DiffSpec{StagedOnly: stagedOnly, IncludeUntracked: includeUntracked}
 	if includeUntracked {
-		spec.UntrackedPathspecs = StagedPathspecs(cmd)
+		spec.UntrackedPathspecs = StagedPathspecs(cmd, cwd)
 	}
 	if !stagedOnly && !CommitsAllTracked(cmd) {
-		spec.TrackedPathspecs = StagedPathspecs(cmd)
+		spec.TrackedPathspecs = StagedPathspecs(cmd, cwd)
 	}
 	return spec
 }
 
-// StagedPathspecs returns the literal paths named by structurally preceding adds.
-// Nil means the command stages the whole repo or uses an unresolved path form.
-func StagedPathspecs(cmd string) []string {
-	if parsed, err := parseCommit(cmd, ""); err == nil && parsed != nil {
+// StagedPathspecs returns the literal paths named by structurally preceding adds,
+// each call's directory resolved from cwd. Nil means the command stages the whole
+// repo or uses an unresolved path form.
+func StagedPathspecs(cmd, cwd string) []string {
+	if parsed, err := parseCommit(cmd, cwd); err == nil && parsed != nil {
 		return parsedStagedPathspecs(parsed.program, parsed)
 	}
 	return nil

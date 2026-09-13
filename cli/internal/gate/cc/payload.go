@@ -130,7 +130,7 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, stdin io.
 	repo := RepoDir(cmd, cwd)
 
 	engine := gate.NewEngine(cfg, reviewer)
-	spec := DiffSpecFor(cmd)
+	spec := DiffSpecFor(cmd, cwd)
 
 	// The author fields and the repo fields are stamped on every row this request
 	// writes. They are gathered once, because reading the transcript is the expensive
