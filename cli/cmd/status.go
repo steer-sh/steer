@@ -436,6 +436,9 @@ func interventionBlock(iv cadence.Intervention, width int) string {
 			evidence = append(evidence, "guard activity is unknown because the audit log is absent")
 		}
 	}
+	if phrase := status.CheckActivityPhrase(iv.Observation); phrase != "" {
+		evidence = append(evidence, phrase)
+	}
 	if iv.BeforeCoverage.UnknownEvidence > 0 || iv.AfterCoverage.UnknownEvidence > 0 {
 		evidence = append(evidence, fmt.Sprintf(
 			"%d of the %d earlier %s and %d of the %d later %s carry no recorded decision",

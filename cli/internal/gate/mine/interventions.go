@@ -453,6 +453,10 @@ type EvidenceSet struct {
 	// readable, so a silent guard is told apart from absent evidence.
 	Firings      []Firing
 	AuditPresent bool
+	// CheckRuns is this machine's live check execution stream; CheckRepos holds
+	// each repository with any check evidence here.
+	CheckRuns  []CheckRun
+	CheckRepos map[string]bool
 }
 
 // ScoreWith scores one record through the engine its corpus names.

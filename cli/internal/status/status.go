@@ -41,8 +41,9 @@ import (
 // p_value, effect, required_after, confounds, composition, instrument_drift,
 // firings_applicable, attribution, chain_rate) and adds observation.
 // v12 adds checks: the repository check tier, whose adoption, runner registration
-// and observed execution are three separate readings.
-const StatusVersion = 12
+// and observed execution are three separate readings. v13 adds observation.checks:
+// a check-tier fix's executions in its window, counted on this machine.
+const StatusVersion = 13
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20

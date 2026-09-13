@@ -447,7 +447,7 @@ The `|` pipe splits a rule into a detection part and an optional suggestion (see
 
 Never invent suggestions. Only include them when explicitly provided after `|`.
 
-## The `steer status --json` contract (`status_version: 12`)
+## The `steer status --json` contract (`status_version: 13`)
 
 `steer status` composes one read-only snapshot of the whole loop. The unit is the
 failure class and what the corpus recorded about it, not the hook count. The
@@ -465,7 +465,9 @@ contribution to any change in these counts is unresolved. v11 removes `verdict`,
 `p_value`, `effect`, `required_after`, `confounds`, `composition`,
 `instrument_drift`, `firings_applicable`, `attribution` and `chain_rate`, and adds
 `observation`. v12 adds `checks`: the repository check tier, whose registration,
-authorization and observed execution are three readings and not one.
+authorization and observed execution are three readings and not one. v13 adds
+`observation.checks`: a check-tier fix's executions in its window, counted on
+this machine only.
 
 - `status_version` — the schema version. `--json` is a stable agent contract.
 - `posture` — the arming state: `instrument` (reviewer model / runs / prompt
@@ -582,6 +584,18 @@ authorization and observed execution are three readings and not one.
       `class_scoped` is then true) or `window_period` (every row this hook wrote
       inside the window's bounds, whatever work it landed on). A `window_period`
       count cannot establish that the guard fired on this class's work.
+    - `checks` — a check-tier fix's execution stream: `{applicable, attribution,
+      stream_present, check_id, repo, scope, class_scoped, executions, outcomes,
+      blocked, changed_detector, units, newest_ts}`. It counts executions recorded
+      on THIS machine only; review history can hold another machine's commits, so
+      a zero there can be work this machine never ran. `attribution` is
+      `unavailable` for a record that binds no check. `stream_present: false` is
+      unknown activity, never a known zero. `scope` follows `firing`: a review
+      record counts every execution in the window's bounds (`window_period`), a
+      session record counts Stop runs in its eligible sessions (`eligible_units`).
+      `outcomes` counts by execution outcome, `blocked` counts failures whose run
+      blocked a turn, and `changed_detector` counts runs of a detector other than
+      the one the record registered.
     - `coverage` — `before` / `after`, the same maps as above, plus
       `zero_eligible_after`. That flag is a statement, not a fault: every freshly
       installed record has zero eligible after-units, and absent opportunity is

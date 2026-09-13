@@ -12,6 +12,7 @@ type Observation struct {
 	Counts     ObservationCounts     `json:"counts"`
 	Recurrence Recurrence            `json:"recurrence"`
 	Firing     FiringActivity        `json:"firing"`
+	Checks     CheckActivity         `json:"checks"`
 	Coverage   ObservationCoverage   `json:"coverage"`
 	Provenance ObservationProvenance `json:"provenance"`
 	// Declined marks a record that installed no fix. Its after-window is the
@@ -160,6 +161,7 @@ func chainObservation(record Record, before, after []Chain, beforeCov, afterCov 
 		},
 		Recurrence: chainRecurrence(after, pattern, kind),
 		Firing:     firing,
+		Checks:     chainCheckActivity(record, ev, splitTS, clock),
 		Coverage: ObservationCoverage{
 			Before:            coverageMap(beforeCov),
 			After:             coverageMap(afterCov),
@@ -207,6 +209,7 @@ func sessionObservation(record Record, before, after []SessionUnit,
 		},
 		Recurrence: sessionRecurrence(after, pattern, signalKind),
 		Firing:     firing,
+		Checks:     sessionCheckActivity(record, after, ev),
 		Coverage: ObservationCoverage{
 			Before:            sessionCoverageMap(beforeCov),
 			After:             sessionCoverageMap(afterCov),
@@ -365,9 +368,13 @@ func CoverageGap(c map[string]any) bool {
 }
 
 // MissingCoverage adds the audit stream a guard's activity cannot be read
-// without to the two windows' own gaps.
+// without, and the check evidence a bound check's activity cannot be read
+// without, to the two windows' own gaps.
 func MissingCoverage(obs Observation) bool {
 	if obs.Firing.Applicable && !obs.Firing.LogPresent {
+		return true
+	}
+	if obs.Checks.Missing() {
 		return true
 	}
 	return CoverageGap(obs.Coverage.Before) || CoverageGap(obs.Coverage.After)

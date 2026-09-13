@@ -296,11 +296,7 @@ harnesses. `internal/checkscope/` freezes those facts, because
 `internal/gate/mine` may import no adapter; `mine` owns the contract they must
 satisfy and the repository-root scope rule. A record written before the binding
 existed stays readable as unbound with unavailable execution attribution: its
-target names a script, and identity is never inferred from it. The binding makes
-attribution possible, and no reader performs it yet: `mine.CheckAttribution`
-classifies a record, while execution evidence reaches a reader only through the
-check tier of the status snapshot, and no view puts a record beside its check's
-executions.
+target names a script, and identity is never inferred from it.
 
 Both engines emit an observation: counts and window bounds, recurrence, guard
 firing activity, coverage and identity provenance. Before/after counts are
@@ -312,6 +308,16 @@ Guard firing joins differ by corpus. Session scoring joins hook id, harness and
 eligible root session. Chain scoring reports firings over the window period,
 without claiming they belong to the class's eligible commits. A missing audit log
 is unknown activity; it is distinct from a known zero.
+
+A check-tier record's observation carries its check's executions the same two
+ways: `evidence.Gather` reads every repository's live check streams through
+`checks.ReadLiveEvidence`, and `mine` joins them on check id and exact root.
+Session scoring joins a Stop run's session and harness; chain scoring counts the
+window period. Each count is by outcome, with the failures whose run blocked a
+turn and the runs of a detector other than the registered one. The streams are
+this machine's only, while review history can hold other machines' commits. A
+bound record whose repository has no check evidence here is unknown activity and
+missing coverage; an unbound record's attribution is unavailable.
 
 `mine.CoverageGap` and `MissingCoverage` share coverage interpretation among
 scorers and readers. `status.ActionFor` orders actions as inspect, repair, observe:

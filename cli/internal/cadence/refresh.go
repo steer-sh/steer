@@ -17,8 +17,9 @@ import (
 )
 
 // QueueVersion is the schema version of the queue file the skill reads. v6 adds
-// checks: the open steps in the repository's check tier.
-const QueueVersion = 6
+// checks: the open steps in the repository's check tier. v7 adds observation.checks
+// to each intervention.
+const QueueVersion = 7
 
 // maxTranscriptCandidates bounds the transcript half of the queue. A cluster key
 // is the user's own wording, so it groups verbatim repeats and nothing else;

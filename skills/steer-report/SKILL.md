@@ -65,9 +65,9 @@ A deterministic tier runs this loop's mechanical half — scoring, corpus sweeps
 steer report refresh --days 30
 ```
 
-Then Read the queue **once**: `~/.steer/state/steer-report/queue.json` (`version: 6`). It holds:
+Then Read the queue **once**: `~/.steer/state/steer-report/queue.json` (`version: 7`). It holds:
 
-- `interventions[]` — full contract records the tier flagged as **asking for a reader**: the class recurred after the split, a coverage cause left the window unaccounted for, or the record carries no frozen scope. These carry a `match`; they are the audit's action list, pre-filtered. Each carries `problem` and `intervention` — the record's own explanation of what goes wrong and what it does about it, authored when the class was found. Lead your report with those rather than with the class name or the regex, and correct one that no longer describes the evidence with `steer fix describe ID`, which changes no window. Each also carries the conditions the counts were taken under: `corpus` and `unit` (`review-findings` counts by `chain`, `transcript-friction` by `session` — never compare the two rates), `signal_kind` on a session-unit record, `scope` (the frozen eligibility rule, `null` on a legacy record), `before_coverage` / `after_coverage` (`total`, `eligible`, `ineligible`, `unknown`, `unknown_scope`, `unknown_evidence`, `pending`, `partial_exposure`), and `observation` — the five field blocks documented in the status contract below.
+- `interventions[]` — full contract records the tier flagged as **asking for a reader**: the class recurred after the split, a coverage cause left the window unaccounted for, or the record carries no frozen scope. These carry a `match`; they are the audit's action list, pre-filtered. Each carries `problem` and `intervention` — the record's own explanation of what goes wrong and what it does about it, authored when the class was found. Lead your report with those rather than with the class name or the regex, and correct one that no longer describes the evidence with `steer fix describe ID`, which changes no window. Each also carries the conditions the counts were taken under: `corpus` and `unit` (`review-findings` counts by `chain`, `transcript-friction` by `session` — never compare the two rates), `signal_kind` on a session-unit record, `scope` (the frozen eligibility rule, `null` on a legacy record), `before_coverage` / `after_coverage` (`total`, `eligible`, `ineligible`, `unknown`, `unknown_scope`, `unknown_evidence`, `pending`, `partial_exposure`), and `observation` — the six field blocks documented in the status contract below.
 - `unscored[]` — ids of records no engine reads. Report their existence; do not read a result into them.
 - `candidates[]` — pointers to new clusters, strongest first within each corpus. Transcript rows carry `pattern`/`count`/`sessions`; the review row carries `undecided_chains` and a `dump` command. These carry **no** `match` — authoring the regex is your job, below.
 - `corpora[]` — one row per corpus (`review-findings`, `transcript-friction`, `auto-denials`) with `present` and `size`. Relay this sweep to the user in one sentence.
@@ -101,13 +101,14 @@ than a verdict, **review history** or **session history** rather than a corpus, 
 | `counts` | `split_ts`, `observed_ts`, `unit`, and per window `{hits, eligible, first_activity_ts, last_activity_ts}` | The two windows' sizes and dates. Never a rate comparison. |
 | `recurrence` | `occurred`, `matches`, `example_kind`, `example`, `example_ts` | Whether the problem came back, and the newest example. |
 | `firing` | `applicable`, `log_present`, `hook_id`, `scope`, `class_scoped`, `rows`, `units` | What the guard's audit stream recorded, and over what. |
+| `checks` | `applicable`, `attribution`, `stream_present`, `check_id`, `scope`, `executions`, `outcomes`, `blocked`, `changed_detector` | What a repository check's executions on this machine recorded, and over what. |
 | `coverage` | the two coverage maps plus `zero_eligible_after` | Which units the window could not account for. |
 | `provenance` | `kind` plus the identities per window | Whether one instrument or two counted these windows. |
 
 There are three readings and no fourth:
 
-- **The problem came back.** `recurrence.occurred` is true. **Act on this first.** Open `recurrence.example` and decide whether the record still describes the problem. `example_kind` says what the example is: `adjudicated_finding` is a reviewer's confirmed concern; `cluster_key` is the text a classifier grouped a session's friction by, and is NOT a confirmed escaped failure. A recurrence beside `firing.rows: 0` on a known log points at the rule, its coverage or its registration — the guard recorded no block over work the class did match. On a record with `declined: true`, nothing was installed: the recurrence is a reason to reconsider the refusal, never a fix that failed.
-- **The accounting is incomplete.** A coverage map counts `unknown_scope`, `unknown_evidence`, `pending` or `unknown` units, or `firing.applicable` is true while `log_present` is false. The window cannot be read at all. **Act on this:** only one cause has a command — a ledger row the resolver closed as gone clears with `steer commit-gate backfill --apply`. Review sequences carrying no repository or changed-path record, sessions carrying no project, and an absent guard audit log have none; name the cause rather than handing the user a command that changes nothing. A `null` `scope` is its own case: the record has no frozen eligibility rule, so its two windows count different opportunity sets. Scope it with `steer fix scope <id>`, which restarts its after-window.
+- **The problem came back.** `recurrence.occurred` is true. **Act on this first.** Open `recurrence.example` and decide whether the record still describes the problem. `example_kind` says what the example is: `adjudicated_finding` is a reviewer's confirmed concern; `cluster_key` is the text a classifier grouped a session's friction by, and is NOT a confirmed escaped failure. A recurrence beside `firing.rows: 0` on a known log points at the rule, its coverage or its registration — the guard recorded no block over work the class did match. For a repository check, `checks` separates three cases: zero `executions` on a known stream means the check never ran here — look at the adoption and the `check.sh` wiring; executions that all passed mean the check ran and did not catch the problem — look at the detector; `blocked` above zero means it stopped turns and the problem still came back — look at whether the class is wider than the check. `changed_detector` above zero means some of those runs were an edited detector, not the one registered. On a record with `declined: true`, nothing was installed: the recurrence is a reason to reconsider the refusal, never a fix that failed.
+- **The accounting is incomplete.** A coverage map counts `unknown_scope`, `unknown_evidence`, `pending` or `unknown` units, or `firing.applicable` is true while `log_present` is false, or a bound `checks` block reads `stream_present: false`. The window cannot be read at all. **Act on this:** only one cause has a command — a ledger row the resolver closed as gone clears with `steer commit-gate backfill --apply`. Review sequences carrying no repository or changed-path record, sessions carrying no project, an absent guard audit log, and a repository with no check evidence on this machine have none; name the cause rather than handing the user a command that changes nothing. A `null` `scope` is its own case: the record has no frozen eligibility rule, so its two windows count different opportunity sets. Scope it with `steer fix scope <id>`, which restarts its after-window.
 - **The window is quiet.** Eligible work arrived and the class did not. Say that, and stop there. `zero_eligible_after` is the separate case: no eligible work has arrived at all, which is not a quiet window and is not a fault — every freshly installed record reads that way.
 
 State no direction and no percentage. "Fewer since the fix", "the fix worked", "a 60% reduction" all state a causal claim these counts cannot carry. Say what was counted: "this problem hit 4 of 37 review sequences before the fix and recurred 0 times in the 40 after."
@@ -153,7 +154,7 @@ Digest schema (`digest_version: 2`):
 
 The digest is size-capped: the CLI evicts the lowest-scoring clusters to fit, and reports honesty in `stats`.
 
-### The `steer status --json` contract (`status_version: 12`)
+### The `steer status --json` contract (`status_version: 13`)
 
 Step 1 reads this snapshot for posture and the full class inventory. The unit is
 the failure class and what the corpus recorded about it, not the hook count. This
@@ -170,7 +171,9 @@ contribution to any change in these counts is unresolved. v11 removes `verdict`,
 `p_value`, `effect`, `required_after`, `confounds`, `composition`,
 `instrument_drift`, `firings_applicable`, `attribution` and `chain_rate`, and adds
 `observation`. v12 adds `checks`: the repository check tier, whose registration,
-authorization and observed execution are three readings and not one.
+authorization and observed execution are three readings and not one. v13 adds
+`observation.checks`: a check-tier fix's executions in its window, counted on
+this machine only.
 
 - `status_version` — the schema version. `--json` is a stable agent contract.
 - `posture` — the arming state: `instrument` (reviewer model / runs / prompt
@@ -287,6 +290,18 @@ authorization and observed execution are three readings and not one.
       `class_scoped` is then true) or `window_period` (every row this hook wrote
       inside the window's bounds, whatever work it landed on). A `window_period`
       count cannot establish that the guard fired on this class's work.
+    - `checks` — a check-tier fix's execution stream: `{applicable, attribution,
+      stream_present, check_id, repo, scope, class_scoped, executions, outcomes,
+      blocked, changed_detector, units, newest_ts}`. It counts executions recorded
+      on THIS machine only; review history can hold another machine's commits, so
+      a zero there can be work this machine never ran. `attribution` is
+      `unavailable` for a record that binds no check. `stream_present: false` is
+      unknown activity, never a known zero. `scope` follows `firing`: a review
+      record counts every execution in the window's bounds (`window_period`), a
+      session record counts Stop runs in its eligible sessions (`eligible_units`).
+      `outcomes` counts by execution outcome, `blocked` counts failures whose run
+      blocked a turn, and `changed_detector` counts runs of a detector other than
+      the one the record registered.
     - `coverage` — `before` / `after`, the same maps as above, plus
       `zero_eligible_after`. That flag is a statement, not a fault: every freshly
       installed record has zero eligible after-units, and absent opportunity is

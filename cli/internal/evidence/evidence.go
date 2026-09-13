@@ -5,6 +5,7 @@
 package evidence
 
 import (
+	"github.com/steer-sh/steer-cli/internal/checks"
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
@@ -27,7 +28,8 @@ type Options struct {
 	Rebuild bool
 }
 
-// Gather reads the chain corpus, the session corpus and the guard audit stream. Every
+// Gather reads the chain corpus, the session corpus, the guard audit stream and the
+// check execution stream. Every
 // source fails soft: a missing corpus yields an empty section, never an error.
 func Gather(opts Options) mine.EvidenceSet {
 	var ev mine.EvidenceSet
@@ -46,7 +48,39 @@ func Gather(opts Options) mine.EvidenceSet {
 	}
 
 	ev.Firings, ev.AuditPresent = mine.LoadFirings(GuardStores()...)
+	ev.CheckRuns, ev.CheckRepos = CheckRuns()
 	return ev
+}
+
+// CheckRuns reads this machine's live check evidence as the observation's execution
+// stream, and the repositories that hold any check evidence here. A failed execution
+// is Blocked when its oracle run's disposition was block.
+func CheckRuns() ([]mine.CheckRun, map[string]bool) {
+	live, _ := checks.ReadLiveEvidence()
+	return checkRunsOf(live), live.Repos
+}
+
+func checkRunsOf(live checks.LiveEvidence) []mine.CheckRun {
+	blocking := map[string]bool{}
+	for _, r := range live.Runs {
+		if r.Disposition == checks.DispositionBlock {
+			blocking[r.RunID] = true
+		}
+	}
+	runs := make([]mine.CheckRun, 0, len(live.Executions))
+	for _, e := range live.Executions {
+		runs = append(runs, mine.CheckRun{
+			Repo:           e.Repo,
+			CheckID:        e.CheckID,
+			Harness:        e.Harness,
+			SessionID:      e.Session,
+			Outcome:        e.Outcome,
+			DetectorDigest: e.DetectorDigest,
+			TS:             float64(e.Started.UnixNano()) / 1e9,
+			Blocked:        e.Outcome == checks.OutcomeFailed && e.RunID != "" && blocking[e.RunID],
+		})
+	}
+	return runs
 }
 
 // GuardStores names the guard store directories whose audit streams carry firings. The

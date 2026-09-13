@@ -150,6 +150,28 @@ func plural(word string, n int) string {
 	return word + "s"
 }
 
+// CheckActivityPhrase says how often a repository check ran in the observation
+// window on this machine. It is empty for a fix that is not a repository check.
+func CheckActivityPhrase(obs mine.Observation) string {
+	c := obs.Checks
+	switch {
+	case !c.Applicable:
+		return ""
+	case c.Attribution != mine.AttributionCheckID:
+		return "check runs cannot be read because this fix names no check"
+	case !c.StreamPresent:
+		return "check runs are unknown because this machine holds no check evidence for the repository"
+	}
+	s := fmt.Sprintf("check runs on this machine: %d of %s in the observation window (%s)", c.Executions, c.CheckID, c.Scope)
+	if c.Executions > 0 {
+		s += fmt.Sprintf("; %s; %d stopped a turn", mine.OutcomeCounts(c.Outcomes), c.Blocked)
+	}
+	if c.ChangedDetector > 0 {
+		s += fmt.Sprintf("; %d ran an edited check", c.ChangedDetector)
+	}
+	return s
+}
+
 // RecurrencePhrase says whether the class came back since the rule went in. Each
 // count carries its denominator in words, so no fraction prints.
 func RecurrencePhrase(before, after cadence.Incidence, unit string) string {

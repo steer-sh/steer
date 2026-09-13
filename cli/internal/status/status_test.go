@@ -174,7 +174,7 @@ func intPtr(n int) *int           { return &n }
 // so a renamed or reordered json tag fails here, the agent-contract guard.
 func TestJSONContractIsStable(t *testing.T) {
 	s := &SystemStatus{
-		StatusVersion: 12,
+		StatusVersion: 13,
 		GeneratedAt:   "2026-01-01T00:00:00Z",
 		Posture: Posture{
 			Instrument: "agy@sha", Reviewer: "gemini", Ledger: "/l.jsonl",
@@ -247,8 +247,13 @@ func TestJSONContractIsStable(t *testing.T) {
 			Status: "rejected",
 			Corpus: mine.CorpusTranscript, Unit: mine.UnitSession, SignalKind: mine.SignalCorrection,
 			Reason: "not mechanizable", Reopen: "incidence doubles", RejectedTS: 1700,
-			Scope:       &cadence.Scope{Version: 1, All: true},
-			Observation: mine.Observation{Declined: true, Coverage: mine.ObservationCoverage{Before: map[string]any{}, After: map[string]any{}, ZeroEligibleAfter: true}, Provenance: mine.ObservationProvenance{Kind: mine.ProvenanceParser}},
+			Scope: &cadence.Scope{Version: 1, All: true},
+			Observation: mine.Observation{Declined: true, Checks: mine.CheckActivity{
+				Applicable: true, Attribution: mine.AttributionCheckID, StreamPresent: true,
+				CheckID: "json-contract", Repo: "/w/steer", Scope: mine.FiringScopeEligibleUnits, ClassScoped: true,
+				Executions: 4, Outcomes: map[string]int{"failed": 1, "passed": 3}, Blocked: 1, ChangedDetector: 1,
+				Units: 2, NewestTS: 1710,
+			}, Coverage: mine.ObservationCoverage{Before: map[string]any{}, After: map[string]any{}, ZeroEligibleAfter: true}, Provenance: mine.ObservationProvenance{Kind: mine.ProvenanceParser}},
 		}},
 		Summary: VerdictSummary{Total: 2, Counts: map[string]int{ActionRepair: 1, ActionObserve: 1}},
 		Chains: []ChainSummary{{
@@ -288,7 +293,7 @@ func TestJSONContractIsStable(t *testing.T) {
 }
 
 const goldenStatusJSON = `{
-  "status_version": 12,
+  "status_version": 13,
   "generated_at": "2026-01-01T00:00:00Z",
   "posture": {
     "instrument": "agy@sha",
@@ -479,6 +484,15 @@ const goldenStatusJSON = `{
           "rows": 3,
           "units": 2
         },
+        "checks": {
+          "applicable": false,
+          "stream_present": false,
+          "class_scoped": false,
+          "executions": 0,
+          "blocked": 0,
+          "changed_detector": 0,
+          "units": 0
+        },
         "coverage": {
           "before": {
             "eligible": 12,
@@ -583,6 +597,24 @@ const goldenStatusJSON = `{
           "class_scoped": false,
           "rows": 0,
           "units": 0
+        },
+        "checks": {
+          "applicable": true,
+          "attribution": "check-id",
+          "stream_present": true,
+          "check_id": "json-contract",
+          "repo": "/w/steer",
+          "scope": "eligible_units",
+          "class_scoped": true,
+          "executions": 4,
+          "outcomes": {
+            "failed": 1,
+            "passed": 3
+          },
+          "blocked": 1,
+          "changed_detector": 1,
+          "units": 2,
+          "newest_ts": 1710
         },
         "coverage": {
           "before": {},

@@ -827,6 +827,8 @@ type ScoreOpts struct {
 	Sessions     []SessionUnit
 	Firings      []Firing
 	AuditPresent bool
+	CheckRuns    []CheckRun
+	CheckRepos   map[string]bool
 }
 
 // Score recomputes each intervention's before/after incidence and verdict.
@@ -863,6 +865,8 @@ func Score(w io.Writer, stateDir string, o ScoreOpts) error {
 		Sessions:     o.Sessions,
 		Firings:      o.Firings,
 		AuditPresent: o.AuditPresent,
+		CheckRuns:    o.CheckRuns,
+		CheckRepos:   o.CheckRepos,
 	}
 	results := make([]map[string]any, 0, len(records))
 	var unscored []string
@@ -932,6 +936,39 @@ func observationState(obs Observation, scoped bool) string {
 
 // writeObservation prints the field counts under one record: the windows, the
 // recurrence, the guard activity and the identities that counted each window.
+// writeCheckActivity prints a check-tier record's execution line. Other tiers
+// print nothing.
+func writeCheckActivity(w io.Writer, c CheckActivity) {
+	switch {
+	case !c.Applicable:
+	case c.Attribution != AttributionCheckID:
+		fmt.Fprintln(w, "    checks: unavailable — the record binds no check")
+	case !c.StreamPresent:
+		fmt.Fprintln(w, "    checks: unknown — no check evidence for this repository on this machine")
+	default:
+		fmt.Fprintf(w, "    checks: %d executions of %s on this machine, counted over %s (class-scoped=%t)\n",
+			c.Executions, c.CheckID, c.Scope, c.ClassScoped)
+		if c.Executions > 0 {
+			fmt.Fprintf(w, "      outcomes: %s; %d blocked a turn; %d ran a changed detector\n",
+				OutcomeCounts(c.Outcomes), c.Blocked, c.ChangedDetector)
+		}
+	}
+}
+
+// OutcomeCounts renders outcome counts in token order, such as "failed 2, passed 9".
+func OutcomeCounts(outcomes map[string]int) string {
+	keys := make([]string, 0, len(outcomes))
+	for k := range outcomes {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%s %d", k, outcomes[k]))
+	}
+	return strings.Join(parts, ", ")
+}
+
 func writeObservation(w io.Writer, obs Observation) {
 	c := obs.Counts
 	fmt.Fprintf(w, "    window: split %s .. read %s  unit %s\n",
@@ -956,6 +993,7 @@ func writeObservation(w io.Writer, obs Observation) {
 		fmt.Fprintf(w, "    firing: %d rows for %s, counted over %s (class-scoped=%t)\n",
 			obs.Firing.Rows, obs.Firing.HookID, obs.Firing.Scope, obs.Firing.ClassScoped)
 	}
+	writeCheckActivity(w, obs.Checks)
 	if obs.Coverage.ZeroEligibleAfter {
 		fmt.Fprintln(w, "    coverage: no eligible work has arrived since the split")
 	}

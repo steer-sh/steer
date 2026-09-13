@@ -368,6 +368,8 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 				Sessions:     ev.Sessions,
 				Firings:      ev.Firings,
 				AuditPresent: ev.AuditPresent,
+				CheckRuns:    ev.CheckRuns,
+				CheckRepos:   ev.CheckRepos,
 			})
 		},
 	}

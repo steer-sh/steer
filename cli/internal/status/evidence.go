@@ -44,6 +44,9 @@ func EvidenceGap(obs mine.Observation, scope *cadence.Scope) *Gap {
 	if obs.Firing.Applicable && !obs.Firing.LogPresent {
 		return &Gap{Sentence: "this machine keeps no guard audit log, so no block can be joined to the observation"}
 	}
+	if obs.Checks.Missing() {
+		return &Gap{Sentence: "this machine holds no check evidence for the repository, so no check run can be joined to the observation"}
+	}
 	for _, c := range windows {
 		if numInt(c["pending"]) > 0 {
 			return &Gap{Sentence: "review sequences inside the observation period still await a decision, and settle on their own"}

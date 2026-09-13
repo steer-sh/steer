@@ -50,6 +50,7 @@ func TestQueueVersionAndObservationRoundTrip(t *testing.T) {
 	iv := Intervention{
 		ID: "r", Observation: mine.Observation{
 			Recurrence: mine.Recurrence{Occurred: true, Matches: 2},
+			Checks:     mine.CheckActivity{Applicable: true, Executions: 3, Blocked: 1},
 		},
 		Scope:          &Scope{Version: 1, All: true},
 		BeforeCoverage: Coverage{Total: 8, Eligible: 8},
@@ -63,10 +64,11 @@ func TestQueueVersionAndObservationRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(data, &back); err != nil {
 		t.Fatal(err)
 	}
-	if back.Version != 6 || QueueVersion != 6 {
+	if back.Version != 7 || QueueVersion != 7 {
 		t.Fatalf("queue version drifted: %d", back.Version)
 	}
-	if len(back.Interventions) != 1 || !back.Interventions[0].Observation.Recurrence.Occurred {
+	if len(back.Interventions) != 1 || !back.Interventions[0].Observation.Recurrence.Occurred ||
+		back.Interventions[0].Observation.Checks.Blocked != 1 {
 		t.Fatalf("observation did not round-trip: %#v", back.Interventions)
 	}
 	for _, word := range []string{`"verdict"`, `"effect"`, `"required_after"`, `"confounds"`, `"composition"`} {

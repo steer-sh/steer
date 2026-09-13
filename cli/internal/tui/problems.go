@@ -445,6 +445,9 @@ func evidenceDetail(it status.ScoredIntervention, width int) string {
 			out += wrapTo("guard activity is unknown because the audit log is absent", detailIndent, width)
 		}
 	}
+	if phrase := status.CheckActivityPhrase(it.Observation); phrase != "" {
+		out += wrapTo(phrase, detailIndent, width)
+	}
 	out += wrapTo("These counts describe the recorded evidence. They do not establish that the fix caused the change.", detailIndent, width)
 	return out
 }
