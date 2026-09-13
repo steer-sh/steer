@@ -262,20 +262,26 @@ func LatestExecutions(root string) (map[string]Execution, error) {
 // outputRecorder digests every byte written to it and keeps the tail for an
 // excerpt. It is safe for concurrent writers.
 type outputRecorder struct {
-	mu   sync.Mutex
-	hash hash.Hash
-	tail []byte
+	mu    sync.Mutex
+	hash  hash.Hash
+	tail  []byte
+	limit int
 }
 
-func newOutputRecorder() *outputRecorder { return &outputRecorder{hash: sha256.New()} }
+func newOutputRecorder() *outputRecorder { return newTailRecorder(excerptBytes) }
+
+// newTailRecorder keeps the last limit bytes written to it.
+func newTailRecorder(limit int) *outputRecorder {
+	return &outputRecorder{hash: sha256.New(), limit: limit}
+}
 
 func (r *outputRecorder) Write(p []byte) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.hash.Write(p)
 	r.tail = append(r.tail, p...)
-	if len(r.tail) > excerptBytes {
-		r.tail = append([]byte(nil), r.tail[len(r.tail)-excerptBytes:]...)
+	if len(r.tail) > r.limit {
+		r.tail = append([]byte(nil), r.tail[len(r.tail)-r.limit:]...)
 	}
 	return len(p), nil
 }

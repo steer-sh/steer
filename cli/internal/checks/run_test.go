@@ -19,6 +19,9 @@ func TestMain(m *testing.M) {
 	if os.Getenv(testExecutorEnv) == "1" {
 		os.Exit(testExecutor(os.Args[1:]))
 	}
+	if identity := os.Getenv(testLockHolderEnv); identity != "" {
+		os.Exit(testLockHolder(identity))
+	}
 	os.Exit(m.Run())
 }
 

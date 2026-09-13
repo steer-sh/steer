@@ -183,6 +183,22 @@ passed with every declared check reported. Adoption survives later edits; a
 check whose detector changed keeps running with stale validation.
 `steer check unadopt [repo]` withdraws it and keeps all evidence.
 
+One `check.sh` run at a time holds a repository. A run started while another
+holds it does not execute; it is recorded as not executed, naming the run that
+held the repository, and never counts as a pass.
+
+## At the end of a turn
+
+`steer check hook --harness <claude-code|codex>` is the Stop hook. In an adopted
+repository it runs `check.sh` for the root thread's Stop event; subagent Stop
+events are ignored. A failure blocks the turn and hands you the failing checks
+and the tail of the output. An integration failure also blocks, and says that
+no assertion failed. When the tree and the failure are unchanged since the
+last block in the same session, the turn ends without another block: if the
+failure is not yours to clear, say so and change nothing. A timeout, a run
+already in progress, or a `check.sh` that could not run lets the turn end with
+a notice to the operator.
+
 ## Commands
 
 - `steer check init [repo]` creates an empty manifest and, when absent, the
@@ -207,4 +223,6 @@ check whose detector changed keeps running with stale validation.
   declared check's result under that run.
 - `steer check adopt [repo]` and `steer check unadopt [repo]` grant and withdraw
   this machine's authorization for automatic runs.
+- `steer check hook --harness <claude-code|codex>` answers a Stop payload on
+  stdin in that harness's reply format.
 - `steer check guide` prints this guide.

@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/checks"
+	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/styles"
 )
 
@@ -267,6 +270,43 @@ var checkUnadoptCmd = &cobra.Command{
 	},
 }
 
+var checkHookCmd = &cobra.Command{
+	Use:   "hook --harness <claude-code|codex>",
+	Short: "Run check.sh for a harness's root Stop event and reply in its hook format",
+	Long: `Reads a Stop payload on stdin. In an adopted repository it runs check.sh the
+way ` + "`steer check run`" + ` does, with source stop, and blocks the turn on a failure.
+The same failure on an unchanged tree for the same session then lets the turn
+end. A missing approval, check.sh or bash, a malformed payload, a timeout, a
+run already in progress, or an execution error lets the turn end with a notice
+to the operator. Subagent Stop events are ignored. Always exits 0.`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		name, _ := cmd.Flags().GetString("harness")
+		target, err := harness.Parse(name)
+		if err != nil {
+			return err
+		}
+		if target != harness.ClaudeCode && target != harness.Codex {
+			return fmt.Errorf("blocking checks support claude-code and codex, not %s", target)
+		}
+		timeout, _ := cmd.Flags().GetDuration("timeout")
+		raw, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			raw = nil
+		}
+		_, reply := checks.StopHook(string(target), raw, checks.StopHookOptions{Timeout: timeout, SteerBin: steerBinForOracle()})
+		if reply == nil {
+			return nil
+		}
+		encoded, err := json.Marshal(reply)
+		if err != nil {
+			return nil
+		}
+		fmt.Fprintln(cmd.OutOrStdout(), string(encoded))
+		return nil
+	},
+}
+
 // adoptionIdentity resolves dir to the identity adoption keys on. A directory
 // that no longer resolves falls back to its absolute path, so a deleted
 // checkout can still be unadopted.
@@ -474,7 +514,14 @@ func printRepositoryState(cmd *cobra.Command, root string) error {
 	if r.IntegrationFailure {
 		phrase += ", integration failure: " + strings.Join(r.Missing, ", ") + " not run"
 	}
-	fmt.Fprintf(out, "Latest %s run: %s at %s (%s)\n", checks.OracleName, phrase, r.Finished.Local().Format("2006-01-02 15:04"), r.Source)
+	if r.ConcurrentWith != "" {
+		phrase += ": another run held the repository"
+	}
+	source := r.Source
+	if r.Disposition != "" {
+		source += ", " + r.Disposition
+	}
+	fmt.Fprintf(out, "Latest %s run: %s at %s (%s)\n", checks.OracleName, phrase, r.Finished.Local().Format("2006-01-02 15:04"), source)
 	return nil
 }
 
@@ -588,7 +635,10 @@ func repoRootOf(dir string) (string, error) {
 func init() {
 	rootCmd.AddCommand(checkCmd)
 	checkCmd.AddCommand(checkGuideCmd, checkInitCmd, checkAddCmd, checkTestCmd, checkListCmd, checkRemoveCmd,
-		checkExecCmd, checkGoTestCmd, checkRunCmd, checkAdoptCmd, checkUnadoptCmd)
+		checkExecCmd, checkGoTestCmd, checkRunCmd, checkAdoptCmd, checkUnadoptCmd, checkHookCmd)
+	checkHookCmd.Flags().String("harness", "", "the harness sending the payload: claude-code or codex")
+	_ = checkHookCmd.MarkFlagRequired("harness")
+	checkHookCmd.Flags().Duration("timeout", checks.DefaultExecTimeout, "total bound on check.sh; its process group is stopped at the deadline")
 	checkExecCmd.Flags().Bool("all", false, "run every script check in the manifest")
 	checkExecCmd.Flags().Duration("timeout", checks.DefaultExecTimeout, "bound on this run; a parent deadline that is earlier wins")
 	checkGoTestCmd.Flags().Duration("timeout", checks.DefaultExecTimeout, "bound on this run; a parent deadline that is earlier wins")

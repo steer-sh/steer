@@ -26,6 +26,7 @@ const OracleRunVersion = 1
 const (
 	SourceRun   = "run"
 	SourceAdopt = "adopt"
+	SourceStop  = "stop"
 )
 
 // ExecutorOracle marks an execution record that the parent oracle wrote for a
@@ -41,7 +42,9 @@ var ErrNoBash = errors.New("bash was not found")
 // RunOptions configures one run of the repository's oracle. SteerBin, when
 // set, becomes STEER_BIN for check.sh. EvidenceDir, when set, isolates the
 // run: its executor records and its own record go under that root, never the
-// live one.
+// live one. Disposition, when set, is called with the finished run and its
+// records while the repository lock is held; its result is recorded as the
+// run's disposition.
 type RunOptions struct {
 	Source      string
 	Harness     string
@@ -51,12 +54,17 @@ type RunOptions struct {
 	Stderr      io.Writer
 	SteerBin    string
 	EvidenceDir string
+	Disposition func(OracleRun, []Execution) string
 }
 
 // OracleRun is the aggregate outcome of one check.sh run by a Steer parent. The
 // per-check results are execution records under the same RunID. Missing names
 // the declared checks that no executor reported; after a passing check.sh they
 // are an integration failure, otherwise checks the run never reached.
+// ConcurrentWith names the run that held the repository when this one was
+// refused; such a run is not executed and has no per-check records.
+// Disposition is what the caller did with the result, such as a Stop runner's
+// block or yield.
 type OracleRun struct {
 	Version            int       `json:"version"`
 	RunID              string    `json:"run_id"`
@@ -75,6 +83,8 @@ type OracleRun struct {
 	Declared           []string  `json:"declared,omitempty"`
 	Missing            []string  `json:"missing,omitempty"`
 	IntegrationFailure bool      `json:"integration_failure,omitempty"`
+	ConcurrentWith     string    `json:"concurrent_with,omitempty"`
+	Disposition        string    `json:"disposition,omitempty"`
 	SteerVersion       string    `json:"steer_version"`
 }
 
@@ -92,6 +102,10 @@ func runsPath(dir, identity string) string {
 // declared check with no executor record under the run ID gets a not-executed
 // record from the parent. It returns the run and every record under its ID;
 // the error reports a run that could not start or could not be recorded.
+//
+// One run at a time holds the repository. A run refused because another holds
+// it is recorded as not executed, naming the holder, and returns that record
+// with an error wrapping ErrConcurrentRun.
 func RunOracle(root string, opts RunOptions) (OracleRun, []Execution, error) {
 	identity, err := RepoIdentity(root)
 	if err != nil {
@@ -135,6 +149,29 @@ func RunOracle(root string, opts RunOptions) (OracleRun, []Execution, error) {
 	for _, d := range declared {
 		run.Declared = append(run.Declared, d.ID)
 	}
+	dir, err := evidenceRoot(opts.EvidenceDir)
+	if err != nil {
+		return run, nil, err
+	}
+
+	lock, holder, err := acquireRepoLock(identity, LockHolder{RunID: run.RunID, PID: os.Getpid(), Source: run.Source, Started: run.Started})
+	if errors.Is(err, ErrConcurrentRun) {
+		run.Finished = time.Now().UTC()
+		run.Outcome = OutcomeNotExecuted
+		run.ConcurrentWith = holder.RunID
+		run.Reason = concurrentReason(holder)
+		if opts.Disposition != nil {
+			run.Disposition = opts.Disposition(run, nil)
+		}
+		if err := appendJSONL(runsPath(dir, identity), run); err != nil {
+			return run, nil, fmt.Errorf("record oracle run: %w", err)
+		}
+		return run, nil, fmt.Errorf("%w: %s", ErrConcurrentRun, run.Reason)
+	}
+	if err != nil {
+		return run, nil, err
+	}
+	defer lock.release()
 
 	ctx, cancel := context.WithDeadline(context.Background(), deadline)
 	defer cancel()
@@ -151,10 +188,6 @@ func RunOracle(root string, opts RunOptions) (OracleRun, []Execution, error) {
 	run.OutputDigest, run.Excerpt = out.digest(), out.excerpt()
 	classifyOracle(&run, runErr, ctx.Err() != nil)
 
-	dir, err := evidenceRoot(opts.EvidenceDir)
-	if err != nil {
-		return run, nil, err
-	}
 	all, err := executionsIn(dir, identity)
 	if err != nil {
 		return run, nil, err
@@ -199,10 +232,21 @@ func RunOracle(root string, opts RunOptions) (OracleRun, []Execution, error) {
 	if err := appendExecutions(opts.EvidenceDir, identity, unreported); err != nil {
 		return run, nil, err
 	}
+	records = append(records, unreported...)
+	if opts.Disposition != nil {
+		run.Disposition = opts.Disposition(run, records)
+	}
 	if err := appendJSONL(runsPath(dir, identity), run); err != nil {
 		return run, nil, fmt.Errorf("record oracle run: %w", err)
 	}
-	return run, append(records, unreported...), nil
+	return run, records, nil
+}
+
+func concurrentReason(holder LockHolder) string {
+	if holder.RunID == "" {
+		return "another " + OracleName + " run holds the repository"
+	}
+	return fmt.Sprintf("%s run %s (source %s, pid %d) holds the repository", OracleName, holder.RunID, holder.Source, holder.PID)
 }
 
 // classifyOracle fills the outcome fields of run from how check.sh ended.
