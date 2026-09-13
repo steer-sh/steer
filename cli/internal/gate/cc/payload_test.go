@@ -81,13 +81,20 @@ type errString string
 
 func (e errString) Error() string { return string(e) }
 
-// The rerun note is added only for a command that writes a file, because the deny stops
-// the whole command and a retry of its commit half alone exits 128 on the missing path.
+// The rerun note is added only for a command whose own steps the deny discards: a file
+// it writes, or a staging step before its commit.
 func TestRerunNote(t *testing.T) {
-	if rerunNote("git "+c+" -m 'x'") != "" {
+	if RerunNote("git "+c+" -m 'x'") != "" {
 		t.Error("a command that writes nothing gets no note, so the mandate stays reachable")
 	}
-	if rerunNote("cat > m.txt <<'MSG'\nx\nMSG\ngit "+c+" -F m.txt") == "" {
+	if RerunNote("cat > m.txt <<'MSG'\nx\nMSG\ngit "+c+" -F m.txt") == "" {
 		t.Error("the heredoc that writes the message file is exactly the case")
+	}
+	if RerunNote("git -C /r add a.go && git -C /r "+c+" -m x") == "" {
+		t.Error("an add inside the denied command staged nothing, and the agent read the " +
+			"empty index as the gate unstaging its files")
+	}
+	if RerunNote("git "+c+" -m x && git add a.go") != "" {
+		t.Error("an add after the commit is not a staging step the commit depends on")
 	}
 }

@@ -226,7 +226,7 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, stdin io.
 		SessionID: invocation.provenanceSessionID(),
 		Spec:      spec,
 		Message:   cc.ExtractMessage(command, cwd), RowExtra: rowExtra,
-		RerunNote: rerunNote(command),
+		RerunNote: cc.RerunNote(command),
 	})
 	out, ok := Render(decision)
 	if !ok {
@@ -239,11 +239,4 @@ func emit(stdout io.Writer, out Output) {
 	if encoded, err := json.Marshal(out); err == nil {
 		_, _ = stdout.Write(append(encoded, '\n'))
 	}
-}
-
-func rerunNote(command string) string {
-	if cc.WritesAFile(command) {
-		return gate.RerunNoteText()
-	}
-	return ""
 }

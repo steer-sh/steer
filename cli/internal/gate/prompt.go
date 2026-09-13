@@ -92,11 +92,9 @@ func BuildCap(count int, review string, firing, cap int, subject, reviewer strin
 	})
 }
 
-// RerunNoteText is prepended to the deny only when the denied command writes a file.
-// A deny stops the whole command, so a heredoc or `>` inside it never runs and the
-// file it would have written is not on disk; a retry of the `git commit` half alone
-// then exits 128 on the missing path. Only the Claude Code adapter can tell, so it
-// decides and passes the result to BuildDeny.
+// RerunNoteText is prepended to the deny only when the denied command writes a file or
+// stages before its commit. A deny stops the whole command, so neither step ran. The
+// shell-command adapters decide through cc.RerunNote and pass the result to BuildDeny.
 func RerunNoteText() string { return rerunNoteText }
 
 // PromptDigest is the first 8 hex chars of sha256(reviewPrompt) — the instrument's

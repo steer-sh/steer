@@ -150,7 +150,7 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, stdin io.
 		SessionID: session,
 		Spec:      spec,
 		Message:   ExtractMessage(cmd, cwd),
-		RerunNote: rerunNote(cmd),
+		RerunNote: RerunNote(cmd),
 		RowExtra:  rowExtra,
 		LedgerHook: func(row gate.Row, state gate.ChainState) {
 			attachLedger(row, payload.TranscriptPath, state)
@@ -168,8 +168,10 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, stdin io.
 	stdout.Write(append(encoded, '\n'))
 }
 
-func rerunNote(cmd string) string {
-	if WritesAFile(cmd) {
+// RerunNote returns the deny's note for a command whose own steps a deny discards: a
+// file it writes, or a `git add` before its commit. Empty for any other command.
+func RerunNote(cmd string) string {
+	if WritesAFile(cmd) || StagesBeforeCommit(cmd) {
 		return gate.RerunNoteText()
 	}
 	return ""

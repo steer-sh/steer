@@ -110,7 +110,7 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, stdin io.
 		SessionID: payload.SessionID,
 		Spec:      cc.DiffSpecFor(command),
 		Message:   cc.ExtractMessage(command, cwd),
-		RerunNote: rerunNote(command),
+		RerunNote: cc.RerunNote(command),
 		RowExtra:  rowExtra,
 	})
 	out, ok := Render(decision)
@@ -120,11 +120,4 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, stdin io.
 	if encoded, err := json.Marshal(out); err == nil {
 		_, _ = stdout.Write(append(encoded, '\n'))
 	}
-}
-
-func rerunNote(command string) string {
-	if cc.WritesAFile(command) {
-		return gate.RerunNoteText()
-	}
-	return ""
 }

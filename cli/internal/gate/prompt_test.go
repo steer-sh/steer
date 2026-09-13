@@ -20,7 +20,7 @@ var promptDigests = map[string]struct {
 	"deny":       {denyTemplate, "4326b7ff2a5443355c41f1428f44903d13c4530f2fb15853e6c364388b32f101"},
 	"cap":        {capTemplate, "dd38783f70c5a67a23653efec829cda089ea1777c41c4a7f040891864c89e542"},
 	"round-note": {roundNote, "f40acabd50e95481f309c08ccacf4cac025835d79e8e265601170f7c4a4d34c3"},
-	"rerun-note": {rerunNoteText, "e3e48ce9edf1a6b74b2fd347234805b8c26decd553b2549d582918d00922b4e8"},
+	"rerun-note": {rerunNoteText, "27d14c6916336301abd551b90d82d5fc799e027ae7d95b0520ef501c0efa9f1b"},
 }
 
 func TestPromptDigestsArePinned(t *testing.T) {
