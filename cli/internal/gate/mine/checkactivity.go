@@ -1,6 +1,9 @@
 package mine
 
-import "github.com/steer-sh/steer-cli/internal/tier"
+import (
+	"github.com/steer-sh/steer-cli/internal/gate"
+	"github.com/steer-sh/steer-cli/internal/tier"
+)
 
 // CheckRun is one live execution of a repository check, reduced to the fields the
 // observation joins on.
@@ -28,12 +31,18 @@ type CheckActivity struct {
 	Attribution string `json:"attribution,omitempty"`
 	// StreamPresent reports that this machine holds any check evidence for the
 	// record's repository. Without it a zero is unknown activity.
-	StreamPresent bool   `json:"stream_present"`
-	CheckID       string `json:"check_id,omitempty"`
-	Repo          string `json:"repo,omitempty"`
-	Scope         string `json:"scope,omitempty"`
-	ClassScoped   bool   `json:"class_scoped"`
-	Executions    int    `json:"executions"`
+	StreamPresent bool `json:"stream_present"`
+	// RegisteredHost is the host that registered the fix, empty on a binding
+	// written without one.
+	RegisteredHost string `json:"registered_host,omitempty"`
+	// OtherHost reports that RegisteredHost is not this machine. Without a stream
+	// here, the executions live on that host and this machine has nothing to repair.
+	OtherHost   bool   `json:"other_host"`
+	CheckID     string `json:"check_id,omitempty"`
+	Repo        string `json:"repo,omitempty"`
+	Scope       string `json:"scope,omitempty"`
+	ClassScoped bool   `json:"class_scoped"`
+	Executions  int    `json:"executions"`
 	// Outcomes counts the executions by outcome token.
 	Outcomes map[string]int `json:"outcomes,omitempty"`
 	// Blocked counts failed executions whose run blocked a turn.
@@ -53,9 +62,16 @@ func (c CheckActivity) Known() bool {
 	return c.Applicable && c.Attribution == AttributionCheckID && c.StreamPresent
 }
 
-// Missing reports a bound record whose repository has no check evidence here.
+// Missing reports a bound record whose repository has no check evidence here,
+// registered on this machine or on an unrecorded one.
 func (c CheckActivity) Missing() bool {
-	return c.Applicable && c.Attribution == AttributionCheckID && !c.StreamPresent
+	return c.Applicable && c.Attribution == AttributionCheckID && !c.StreamPresent && !c.OtherHost
+}
+
+// Elsewhere reports a bound record registered on another host, whose repository
+// has no check evidence here.
+func (c CheckActivity) Elsewhere() bool {
+	return c.Applicable && c.Attribution == AttributionCheckID && !c.StreamPresent && c.OtherHost
 }
 
 // checkActivityBase fills the fields every scope shares, and reports the binding.
@@ -70,6 +86,8 @@ func checkActivityBase(record Record, ev EvidenceSet) (CheckActivity, CheckFix, 
 	}
 	act.CheckID, act.Repo = fix.ID, fix.Repo
 	act.StreamPresent = ev.CheckRepos[fix.Repo]
+	act.RegisteredHost = fix.Host
+	act.OtherHost = fix.Host != "" && fix.Host != gate.HostID()
 	return act, fix, true
 }
 

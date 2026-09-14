@@ -82,6 +82,7 @@ func TestSessionCheckActivityJoinsStopRunsToEligibleSessions(t *testing.T) {
 // A bound check whose repository has no check evidence on this machine is unknown
 // activity and missing coverage; an unbound record is neither.
 func TestAMissingCheckStreamIsUnknownAndAnUnboundRecordIsUnavailable(t *testing.T) {
+	t.Setenv("COMMIT_REVIEW_HOST", "host-a")
 	chains := []Chain{obsChain(t, 3000, "agy/1/aaa/v1", "widget")}
 	withClock(9000, func() {
 		scored, err := ScoreRecord(boundCheckRecord(2000), EvidenceSet{Chains: chains})
@@ -101,5 +102,43 @@ func TestAMissingCheckStreamIsUnknownAndAnUnboundRecordIsUnavailable(t *testing.
 		check(t, "a legacy record is still a check-tier record", obs.Checks.Applicable, true)
 		check(t, "whose attribution is unavailable", obs.Checks.Attribution, AttributionUnavailable)
 		check(t, "which no repair can supply", MissingCoverage(obs), false)
+	})
+}
+
+// A bound check registered on another host, with no check evidence here, is
+// unknown activity this machine cannot repair. A binding with no host keeps the
+// missing-coverage reading.
+func TestACheckRegisteredOnAnotherHostIsNotMissingCoverageHere(t *testing.T) {
+	t.Setenv("COMMIT_REVIEW_HOST", "host-b")
+	chains := []Chain{obsChain(t, 3000, "agy/1/aaa/v1", "widget")}
+	withClock(9000, func() {
+		scored, err := ScoreRecord(boundCheckRecord(2000), EvidenceSet{Chains: chains})
+		if err != nil {
+			t.Fatal(err)
+		}
+		obs := observationOf(t, scored)
+		check(t, "the binding names the registering host", obs.Checks.RegisteredHost, "host-a")
+		check(t, "which is another host", obs.Checks.Elsewhere(), true)
+		check(t, "so the zero is still unknown", obs.Checks.Known(), false)
+		check(t, "but no coverage is missing here", MissingCoverage(obs), false)
+
+		scored, err = ScoreRecord(boundCheckRecord(2000), EvidenceSet{
+			Chains: chains, CheckRepos: map[string]bool{boundRoot: true}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		obs = observationOf(t, scored)
+		check(t, "evidence here makes the count known", obs.Checks.Known(), true)
+		check(t, "and not elsewhere", obs.Checks.Elsewhere(), false)
+
+		legacy := boundCheckRecord(2000)
+		delete(legacy, CheckHostKey)
+		scored, err = ScoreRecord(legacy, EvidenceSet{Chains: chains})
+		if err != nil {
+			t.Fatal(err)
+		}
+		obs = observationOf(t, scored)
+		check(t, "a binding with no host is not elsewhere", obs.Checks.Elsewhere(), false)
+		check(t, "and its coverage is missing", MissingCoverage(obs), true)
 	})
 }

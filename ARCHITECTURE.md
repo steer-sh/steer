@@ -345,7 +345,10 @@ window period. Each count is by outcome, with the failures whose run blocked a
 turn and the runs of a detector other than the registered one. The streams are
 this machine's only, while review history can hold other machines' commits. A
 bound record whose repository has no check evidence here is unknown activity and
-missing coverage; an unbound record's attribution is unavailable.
+missing coverage; an unbound record's attribution is unavailable. The binding's
+`check_host` is the `gate.HostID` that registered the fix: when it names another
+host and this machine has no evidence, the activity is unknown but no coverage is
+missing here. A binding without it keeps the missing-coverage reading.
 
 `mine.CoverageGap` and `MissingCoverage` share coverage interpretation among
 scorers and readers. `status.ActionFor` orders actions as inspect, repair, observe:

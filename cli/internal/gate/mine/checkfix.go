@@ -18,13 +18,14 @@ const (
 	CheckReceiptKey  = "check_receipt"
 	CheckHarnessKey  = "check_harness"
 	CheckAdoptedKey  = "check_adopted"
+	CheckHostKey     = "check_host"
 	checkBindingFlag = "--check-id"
 )
 
 // CheckBindingKeys is that contract in the order an error reports it.
 var CheckBindingKeys = []string{
 	CheckIDKey, CheckKindKey, CheckRepoKey, CheckDigestKey,
-	CheckReceiptKey, CheckHarnessKey, CheckAdoptedKey,
+	CheckReceiptKey, CheckHarnessKey, CheckAdoptedKey, CheckHostKey,
 }
 
 // Execution attribution of a check-tier record: whether a check execution record can
@@ -49,6 +50,9 @@ type CheckFix struct {
 	Receipt   string
 	Harnesses []string
 	AdoptedTS float64
+	// Host is the gate.HostID of the machine that registered the fix, whose check
+	// streams hold its executions. It is empty on a binding written without it.
+	Host string
 }
 
 // CheckFixOf reads a record's binding. bound is false for a record written before
@@ -62,6 +66,7 @@ func CheckFixOf(record Record) (CheckFix, bool) {
 		Digest:    str(record[CheckDigestKey]),
 		Receipt:   str(record[CheckReceiptKey]),
 		AdoptedTS: numFloat(record[CheckAdoptedKey]),
+		Host:      str(record[CheckHostKey]),
 	}
 	for _, item := range asList(record[CheckHarnessKey]) {
 		if id := str(item); id != "" {

@@ -14,6 +14,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/checks"
 	"github.com/steer-sh/steer-cli/internal/claude"
 	codexhooks "github.com/steer-sh/steer-cli/internal/codex"
+	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/tier"
@@ -142,6 +143,7 @@ func Bind(tierValue, root, checkID string, scopeHarness []harness.ID) (map[strin
 		mine.CheckReceiptKey: fresh.Receipt.RunID,
 		mine.CheckHarnessKey: ids,
 		mine.CheckAdoptedKey: int(adoption.At.Unix()),
+		mine.CheckHostKey:    gate.HostID(),
 	}, nil
 }
 

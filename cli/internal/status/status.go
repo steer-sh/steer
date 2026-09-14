@@ -45,7 +45,9 @@ import (
 // a check-tier fix's executions in its window, counted on this machine. v14 adds
 // posture.rules: each installed harness's rules section read against the manifest.
 // v15 adds posture.masters[].trust: the harness's approval of the registered runner.
-const StatusVersion = 15
+// v16 adds observation.checks.registered_host and other_host: a fix registered on
+// another host is not missing coverage here.
+const StatusVersion = 16
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20

@@ -174,7 +174,7 @@ func intPtr(n int) *int           { return &n }
 // so a renamed or reordered json tag fails here, the agent-contract guard.
 func TestJSONContractIsStable(t *testing.T) {
 	s := &SystemStatus{
-		StatusVersion: 15,
+		StatusVersion: 16,
 		GeneratedAt:   "2026-01-01T00:00:00Z",
 		Posture: Posture{
 			Instrument: "agy@sha", Reviewer: "gemini", Ledger: "/l.jsonl",
@@ -253,7 +253,7 @@ func TestJSONContractIsStable(t *testing.T) {
 			Reason: "not mechanizable", Reopen: "incidence doubles", RejectedTS: 1700,
 			Scope: &cadence.Scope{Version: 1, All: true},
 			Observation: mine.Observation{Declined: true, Checks: mine.CheckActivity{
-				Applicable: true, Attribution: mine.AttributionCheckID, StreamPresent: true,
+				Applicable: true, Attribution: mine.AttributionCheckID, StreamPresent: true, RegisteredHost: "host-a",
 				CheckID: "json-contract", Repo: "/w/steer", Scope: mine.FiringScopeEligibleUnits, ClassScoped: true,
 				Executions: 4, Outcomes: map[string]int{"failed": 1, "passed": 3}, Blocked: 1, ChangedDetector: 1,
 				Units: 2, NewestTS: 1710,
@@ -297,7 +297,7 @@ func TestJSONContractIsStable(t *testing.T) {
 }
 
 const goldenStatusJSON = `{
-  "status_version": 15,
+  "status_version": 16,
   "generated_at": "2026-01-01T00:00:00Z",
   "posture": {
     "instrument": "agy@sha",
@@ -505,6 +505,7 @@ const goldenStatusJSON = `{
         "checks": {
           "applicable": false,
           "stream_present": false,
+          "other_host": false,
           "class_scoped": false,
           "executions": 0,
           "blocked": 0,
@@ -620,6 +621,8 @@ const goldenStatusJSON = `{
           "applicable": true,
           "attribution": "check-id",
           "stream_present": true,
+          "registered_host": "host-a",
+          "other_host": false,
           "check_id": "json-contract",
           "repo": "/w/steer",
           "scope": "eligible_units",

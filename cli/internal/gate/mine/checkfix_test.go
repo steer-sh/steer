@@ -18,6 +18,7 @@ func boundFacts() map[string]any {
 		CheckReceiptKey: "run-1",
 		CheckHarnessKey: []any{"claude-code"},
 		CheckAdoptedKey: 1000,
+		CheckHostKey:    "host-a",
 	}
 }
 

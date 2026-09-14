@@ -159,6 +159,8 @@ func CheckActivityPhrase(obs mine.Observation) string {
 		return ""
 	case c.Attribution != mine.AttributionCheckID:
 		return "check runs cannot be read because this fix names no check"
+	case c.Elsewhere():
+		return fmt.Sprintf("check runs are recorded on %s, where this fix was registered, and not on this machine", c.RegisteredHost)
 	case !c.StreamPresent:
 		return "check runs are unknown because this machine holds no check evidence for the repository"
 	}

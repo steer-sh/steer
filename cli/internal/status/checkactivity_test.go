@@ -35,3 +35,21 @@ func TestCheckActivityIsPhrasedAndItsMissingEvidenceIsTheGap(t *testing.T) {
 		t.Errorf("gap = %+v, want the missing check evidence", gap)
 	}
 }
+
+// A fix registered on another host names that host, and this machine files it
+// under neither the coverage gap nor the repair action.
+func TestACheckRegisteredOnAnotherHostIsNamedAndNotRepairedHere(t *testing.T) {
+	elsewhere := mine.CheckActivity{Applicable: true, Attribution: mine.AttributionCheckID,
+		RegisteredHost: "host-a", OtherHost: true, CheckID: "no-count", Scope: mine.FiringScopeWindowPeriod}
+	obs := mine.Observation{Checks: elsewhere}
+	scope := &cadence.Scope{Version: 1, All: true}
+	if got := CheckActivityPhrase(obs); !strings.Contains(got, "host-a") {
+		t.Errorf("phrase %q does not name the registering host", got)
+	}
+	if gap := EvidenceGap(obs, scope); gap != nil {
+		t.Errorf("gap = %+v, want none on this machine", gap)
+	}
+	if got := ActionFor(obs, scope); got != ActionObserve {
+		t.Errorf("action = %q, want %q", got, ActionObserve)
+	}
+}

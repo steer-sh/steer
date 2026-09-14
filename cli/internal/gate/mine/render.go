@@ -980,6 +980,9 @@ func writeCheckActivity(w io.Writer, c CheckActivity) {
 	case !c.Applicable:
 	case c.Attribution != AttributionCheckID:
 		fmt.Fprintln(w, "    checks: unavailable — the record binds no check")
+	case c.Elsewhere():
+		fmt.Fprintf(w, "    checks: unknown here — registered on host %s, whose check evidence this machine does not hold\n",
+			c.RegisteredHost)
 	case !c.StreamPresent:
 		fmt.Fprintln(w, "    checks: unknown — no check evidence for this repository on this machine")
 	default:

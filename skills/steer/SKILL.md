@@ -447,7 +447,7 @@ The `|` pipe splits a rule into a detection part and an optional suggestion (see
 
 Never invent suggestions. Only include them when explicitly provided after `|`.
 
-## The `steer status --json` contract (`status_version: 15`)
+## The `steer status --json` contract (`status_version: 16`)
 
 `steer status` composes one read-only snapshot of the whole loop. The unit is the
 failure class and what the corpus recorded about it, not the hook count. The
@@ -467,7 +467,8 @@ contribution to any change in these counts is unresolved. v11 removes `verdict`,
 `observation`. v12 adds `checks`: the repository check tier, whose registration,
 authorization and observed execution are three readings and not one. v13 adds
 `observation.checks`: a check-tier fix's executions in its window, counted on
-this machine only.
+this machine only. v16 adds `observation.checks.registered_host` and
+`other_host`: a fix registered on another host is not missing coverage here.
 
 - `status_version` — the schema version. `--json` is a stable agent contract.
 - `posture` — the arming state: `instrument` (reviewer model / runs / prompt
@@ -600,12 +601,14 @@ this machine only.
       inside the window's bounds, whatever work it landed on). A `window_period`
       count cannot establish that the guard fired on this class's work.
     - `checks` — a check-tier fix's execution stream: `{applicable, attribution,
-      stream_present, check_id, repo, scope, class_scoped, executions, outcomes,
+      stream_present, registered_host, other_host, check_id, repo, scope, class_scoped, executions, outcomes,
       blocked, changed_detector, units, newest_ts}`. It counts executions recorded
       on THIS machine only; review history can hold another machine's commits, so
       a zero there can be work this machine never ran. `attribution` is
       `unavailable` for a record that binds no check. `stream_present: false` is
-      unknown activity, never a known zero. `scope` follows `firing`: a review
+      unknown activity, never a known zero. `registered_host` is the host that
+      registered the fix; with `other_host: true` and no stream here, its runs are
+      on that host, and this machine has no coverage gap to repair. `scope` follows `firing`: a review
       record counts every execution in the window's bounds (`window_period`), a
       session record counts Stop runs in its eligible sessions (`eligible_units`).
       `outcomes` counts by execution outcome, `blocked` counts failures whose run

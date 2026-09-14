@@ -18,8 +18,9 @@ import (
 
 // QueueVersion is the schema version of the queue file the skill reads. v6 adds
 // checks: the open steps in the repository's check tier. v7 adds observation.checks
-// to each intervention.
-const QueueVersion = 7
+// to each intervention. v8 adds observation.checks.registered_host and other_host,
+// and leaves a fix registered on another host out of the coverage queue.
+const QueueVersion = 8
 
 // maxTranscriptCandidates bounds the transcript half of the queue. A cluster key
 // is the user's own wording, so it groups verbatim repeats and nothing else;

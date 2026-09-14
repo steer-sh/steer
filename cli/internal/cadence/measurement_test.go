@@ -64,7 +64,7 @@ func TestQueueVersionAndObservationRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(data, &back); err != nil {
 		t.Fatal(err)
 	}
-	if back.Version != 7 || QueueVersion != 7 {
+	if back.Version != 8 || QueueVersion != 8 {
 		t.Fatalf("queue version drifted: %d", back.Version)
 	}
 	if len(back.Interventions) != 1 || !back.Interventions[0].Observation.Recurrence.Occurred ||
