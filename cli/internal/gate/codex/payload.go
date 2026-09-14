@@ -197,12 +197,12 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, stdin io.
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
-	if reason := cc.AmbiguousShellReason(command, cwd); reason != "" {
+	if reason, receipt := cc.PreflightDeny(command, cwd); reason != "" {
 		emit(stdout, Output{HookSpecificOutput: &hookOutput{
 			HookEventName:            "PreToolUse",
 			PermissionDecision:       "deny",
 			PermissionDecisionReason: reason,
-		}, SystemMessage: cc.AmbiguousShellReceipt})
+		}, SystemMessage: receipt})
 		return
 	}
 	repo := cc.RepoDir(command, cwd)

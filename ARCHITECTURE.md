@@ -252,6 +252,13 @@ review chain while root session identity remains evidence provenance. Review tex
 is delivered in `additionalContext`; the denial reason supplies a short notice.
 Pi's bridge supplies its execution cwd and session metadata directly.
 
+The native adapters share one pre-review refusal, `cc.PreflightDeny`, called before
+the engine so a refusal starts no reviewer, consumes no firing and leaves a pending
+chain intact. It refuses a command whose shell form is ambiguous, and a bundled
+`git add ... && git commit` while a file holds both staged and unstaged edits: that
+form is reviewed from the working tree (`cc.DiffSpecFor`), which would show the
+reviewers edits the commit does not carry.
+
 Every decision that does not block carries one receipt to both the agent's context
 and the operator (`internal/gate/receipt.go`); no path lets a commit through
 silently, because absent agent-facing text is indistinguishable from an absent

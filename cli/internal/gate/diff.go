@@ -518,6 +518,34 @@ func HasUnstagedEdits(cfg Config, cwd string) bool {
 	return ok && strings.TrimSpace(out) != ""
 }
 
+// PartlyStagedPaths returns the root-relative paths that differ in both halves: the
+// index holds a change to them and the working tree holds a further one. A command
+// that stages other paths and commits lands their index content, while a working-tree
+// diff shows both. ok=false means git could not answer, never an empty set.
+func PartlyStagedPaths(cwd string) ([]string, bool) {
+	staged, ok := Git(cwd, gitMedium, "diff", "--cached", "--name-only", "--no-relative", "--no-renames", "-z")
+	if !ok {
+		return nil, false
+	}
+	unstaged, ok := Git(cwd, gitMedium, "diff", "--name-only", "--no-relative", "--no-renames", "-z")
+	if !ok {
+		return nil, false
+	}
+	inIndex := map[string]bool{}
+	for _, path := range strings.Split(staged, "\x00") {
+		if path != "" {
+			inIndex[path] = true
+		}
+	}
+	var out []string
+	for _, path := range strings.Split(unstaged, "\x00") {
+		if path != "" && inIndex[path] {
+			out = append(out, path)
+		}
+	}
+	return out, true
+}
+
 // StaleIndexNotice is agent-facing text for a retry that reads the index while edits
 // sit unstaged in the working tree. It names only what was observed: the round before
 // it may have read either tree.

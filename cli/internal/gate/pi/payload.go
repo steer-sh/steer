@@ -81,9 +81,9 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, stdin io.
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
-	if reason := cc.AmbiguousShellReason(command, cwd); reason != "" {
+	if reason, receipt := cc.PreflightDeny(command, cwd); reason != "" {
 		encoded, err := json.Marshal(Output{Block: true, Reason: reason,
-			SystemMessage: cc.AmbiguousShellReceipt})
+			SystemMessage: receipt})
 		if err == nil {
 			_, _ = stdout.Write(append(encoded, '\n'))
 		}
