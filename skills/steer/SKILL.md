@@ -447,7 +447,7 @@ The `|` pipe splits a rule into a detection part and an optional suggestion (see
 
 Never invent suggestions. Only include them when explicitly provided after `|`.
 
-## The `steer status --json` contract (`status_version: 14`)
+## The `steer status --json` contract (`status_version: 15`)
 
 `steer status` composes one read-only snapshot of the whole loop. The unit is the
 failure class and what the corpus recorded about it, not the hook count. The
@@ -505,7 +505,11 @@ this machine only.
   allowed every call reads as 0). `state` is `current`, `stale` (an older runtime, so a firing
   writes fewer audit fields than the join reads), `unknown` (an unstamped
   master — every store built before the stamp existed, which never reads as
-  current) or `not-registered`. The row reads the REGISTERED master, not the one
+  current) or `not-registered`. `trust` is the harness's approval of the
+  registered runner, in the same values as a `posture` row's `trust`, and is
+  absent when no runner is registered. A Codex runner reading `missing` runs no
+  guard, while the guard's rule still reaches the agent as text; approve the
+  definitions in `/hooks`. The row reads the REGISTERED master, not the one
   the store resolves to: a migrated machine holds a master at both paths. **Act
   on `stale` or `unknown`:** run `steer hooks rebuild --scope <scope>`, which
   regenerates the master AND re-registers it in one operation.

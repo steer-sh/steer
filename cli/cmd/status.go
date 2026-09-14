@@ -156,6 +156,12 @@ func renderPosture(s *status.SystemStatus, width int) {
 		if m.Stale() {
 			phrase = styles.WarningText.Render(phrase)
 		}
+		if trust := status.RunnerTrustPhrase(m); trust != "" {
+			if m.RunnerUnapproved() {
+				trust = styles.WarningText.Render(trust)
+			}
+			phrase += "; " + trust
+		}
 		row := fmt.Sprintf("%s, %s scope: %s", status.HarnessLabel(m.Harness), m.Scope, phrase)
 		if o := status.MasterObservedPhrase(m); o != "" {
 			row += styles.MutedText.Render(" · " + o)

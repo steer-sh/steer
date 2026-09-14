@@ -44,7 +44,8 @@ import (
 // and observed execution are three separate readings. v13 adds observation.checks:
 // a check-tier fix's executions in its window, counted on this machine. v14 adds
 // posture.rules: each installed harness's rules section read against the manifest.
-const StatusVersion = 14
+// v15 adds posture.masters[].trust: the harness's approval of the registered runner.
+const StatusVersion = 15
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20
@@ -239,6 +240,9 @@ type MasterRuntime struct {
 	// Expected is the running binary's runtime digest.
 	Expected string `json:"expected"`
 	State    string `json:"state"`
+	// Trust is what this machine can say about the harness's approval of the
+	// registered runner, "" when none is registered.
+	Trust string `json:"trust,omitempty"`
 	// Observed is the epoch second of the newest row in the audit log beside this
 	// registered master, 0 when the master never blocked a call.
 	Observed float64 `json:"observed,omitempty"`
@@ -746,6 +750,7 @@ func masterRuntimes(scope string) []MasterRuntime {
 			continue
 		}
 		row.Path = path
+		row.Trust = runnerTrust(registrar.Harness().ID, scope)
 		row.Observed = newestFiring(filepath.Dir(path))
 		stamp, ok := guard.ReadStamp(path)
 		if !ok {
@@ -761,6 +766,17 @@ func masterRuntimes(scope string) []MasterRuntime {
 		out = append(out, row)
 	}
 	return out
+}
+
+// runnerTrust reads a harness's approval of its registered guard runner. Codex
+// is the one harness whose approval record Steer reads; any other harness that
+// reviews hook trust reads as unknown.
+func runnerTrust(id harness.ID, scope string) string {
+	if id == harness.Codex {
+		a := codex.MasterArming(scope, ".")
+		return trustState(id, a.TrustStateKnown, a.TrustRecordPresent)
+	}
+	return trustState(id, false, false)
 }
 
 // newestFiring is the epoch second of the last block the audit log beside a

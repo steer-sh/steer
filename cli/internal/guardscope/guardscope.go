@@ -158,7 +158,45 @@ func Check(tier string, scopeAll bool, scopeHarness []string, force bool) error 
 			"register it there with `steer register --harness %s`, drop it from the scope, "+
 			"or pass --force. %s", strings.Join(missing, ", "), missing[0], where)
 	}
+	for _, id := range requested {
+		if RunnerUnapproved(id) {
+			return fmt.Errorf("--scope-harness names %s, whose guard runner is registered but "+
+				"has no approval record: %s runs no hook until the user approves it, so its "+
+				"sessions would read the rule's text with no guard behind it. Restart it and "+
+				"approve the definitions in /hooks, drop it from the scope, or pass --force",
+				id, harnessName(id))
+		}
+	}
 	return nil
+}
+
+// RunnerUnapproved reports a harness whose every registered guard runner is known
+// to lack the approval the harness needs before it runs a hook. Codex is the one
+// harness whose approval record Steer reads. A present record is not proof of
+// approval, and an unreadable one is not proof of its absence, so neither counts.
+func RunnerUnapproved(id harness.ID) bool {
+	if id != harness.Codex {
+		return false
+	}
+	registered := false
+	for _, scope := range []string{harness.ProjectScope, harness.GlobalScope} {
+		a := codex.MasterArming(scope, ".")
+		if !a.Registered {
+			continue
+		}
+		registered = true
+		if !a.TrustStateKnown || a.TrustRecordPresent {
+			return false
+		}
+	}
+	return registered
+}
+
+func harnessName(id harness.ID) string {
+	if entry, ok := harness.Get(id); ok {
+		return entry.DisplayName
+	}
+	return string(id)
 }
 
 func idStrings(ids []harness.ID) []string {

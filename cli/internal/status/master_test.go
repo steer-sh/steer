@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/claude"
+	"github.com/steer-sh/steer-cli/internal/codex"
 	"github.com/steer-sh/steer-cli/internal/guard"
 )
 
@@ -121,6 +122,26 @@ func TestAnUnregisteredHarnessReportsNoMaster(t *testing.T) {
 	}
 	if MasterPhrase(row) != "" {
 		t.Error("an unregistered harness renders a phrase")
+	}
+}
+
+// A Codex runner with no approval record is registered and runs no guard; the
+// row says so, while Claude Code, which reviews no hook trust, reads not-applicable.
+func TestACodexRunnerWithNoApprovalRecordReadsUnapproved(t *testing.T) {
+	projectDir(t)
+	t.Setenv("CODEX_HOME", t.TempDir())
+	if err := (codex.Registrar{}).RegisterMaster(claude.ProjectScope); err != nil {
+		t.Fatalf("register master: %v", err)
+	}
+	row := rowFor(t, MasterRuntimes(claude.ProjectScope), "codex")
+	if row.State == MasterNotRegistered || row.Trust != TrustMissing || !row.RunnerUnapproved() {
+		t.Fatalf("codex row = %#v", row)
+	}
+	if !strings.Contains(RunnerTrustPhrase(row), "/hooks") {
+		t.Errorf("phrase = %q", RunnerTrustPhrase(row))
+	}
+	if other := rowFor(t, MasterRuntimes(claude.ProjectScope), "claude-code"); other.RunnerUnapproved() {
+		t.Errorf("an unregistered Claude Code row reads unapproved: %#v", other)
 	}
 }
 

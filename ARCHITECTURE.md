@@ -114,7 +114,9 @@ agent loads.
 `internal/tier/` owns the current and legacy tier spellings.
 `internal/guardscope/` validates the harness scope of guard-tier records: evidence
 eligibility is distinct from installation reach, and a record must name harnesses
-with a registered master unless forced. Instruction-tier registration binds a
+with a registered master unless forced. A Codex master whose approval record is
+known to be absent counts as unregistered (`guardscope.RunnerUnapproved`): Codex
+runs no unapproved hook, while the guard's rule still reaches the agent as text. Instruction-tier registration binds a
 `rule_id` and requires `not_mechanizable`, explaining why a check or guard cannot
 detect the class. `mine.ValidateArgument` validates the argument's presence;
 it cannot establish its soundness. Review-tier registration binds an

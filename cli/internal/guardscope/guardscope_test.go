@@ -3,10 +3,12 @@ package guardscope
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/claude"
+	"github.com/steer-sh/steer-cli/internal/codex"
 	"github.com/steer-sh/steer-cli/internal/harness"
 )
 
@@ -109,6 +111,36 @@ func TestCheckRefusesAWindowTheGuardDoesNotCover(t *testing.T) {
 	}
 	if err := Check("steer", false, []string{"nope"}, false); err == nil {
 		t.Fatal("unknown harness id: want an error")
+	}
+}
+
+// Codex runs no hook it has not approved, so a runner with no approval record
+// guards nothing there. A present record passes: Steer cannot verify it, and
+// refusing it would refuse every working install.
+func TestCheckRefusesACodexRunnerWithNoApprovalRecord(t *testing.T) {
+	home := isolate(t)
+	if err := (codex.Registrar{}).RegisterMaster(harness.GlobalScope); err != nil {
+		t.Fatalf("register master: %v", err)
+	}
+	if !RunnerUnapproved(harness.Codex) {
+		t.Fatal("a runner with no config.toml read as approved")
+	}
+	err := Check("steer", false, []string{"codex"}, false)
+	if err == nil || !strings.Contains(err.Error(), "no approval record") {
+		t.Fatalf("unapproved runner: got %v", err)
+	}
+	if err := Check("steer", false, []string{"codex"}, true); err != nil {
+		t.Fatalf("--force: %v", err)
+	}
+
+	hooks := filepath.Join(home, ".codex", "hooks.json")
+	key := strconv.Quote(hooks + ":pre_tool_use:0:0")
+	config := "[hooks.state." + key + "]\nenabled = true\n"
+	if err := os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Check("steer", false, []string{"codex"}, false); err != nil {
+		t.Fatalf("runner with an approval record: %v", err)
 	}
 }
 

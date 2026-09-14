@@ -194,6 +194,21 @@ func ObservedPhrase(a ScopeArming) string {
 	return "last row " + time.Unix(int64(a.Observed), 0).Format("2006-01-02 15:04")
 }
 
+// RunnerUnapproved reports a registered runner the harness is known not to have
+// approved, so it runs no guard there while the rule's text still reaches the agent.
+func (m MasterRuntime) RunnerUnapproved() bool {
+	return m.State != MasterNotRegistered && m.Trust == TrustMissing
+}
+
+// RunnerTrustPhrase names a registered runner's approval, "" where the harness
+// reviews no hook trust.
+func RunnerTrustPhrase(m MasterRuntime) string {
+	if m.RunnerUnapproved() {
+		return "no approval record, so the harness runs no guard — approve the definitions in /hooks"
+	}
+	return TrustPhrase(m.Trust)
+}
+
 // MasterObservedPhrase names the last block a registered master recorded. The
 // audit log holds blocks only, so a master that allowed every call has none.
 func MasterObservedPhrase(m MasterRuntime) string {

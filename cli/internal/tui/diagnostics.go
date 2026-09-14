@@ -109,6 +109,18 @@ func (m *Model) diagnosticIssues() []diagnosticIssue {
 				"under Maintenance needed.",
 		})
 	}
+	for _, master := range m.snap.Posture.Masters {
+		if !master.RunnerUnapproved() {
+			continue
+		}
+		agent := status.HarnessLabel(master.Harness)
+		out = append(out, diagnosticIssue{
+			headline: agent + " has not approved the guard runner in " + scopeReach(master.Scope),
+			detail: agent + " runs no hook it has not approved, so no guard runs there, while " +
+				"the rules it reads still name them. Restart " + agent + " and approve the " +
+				"definitions in /hooks.",
+		})
+	}
 	for _, r := range m.snap.Posture.Rules {
 		if !r.NeedsSync() {
 			continue
@@ -267,7 +279,10 @@ func (m *Model) technicalLines(width int) string {
 			continue
 		}
 		label := status.HarnessLabel(master.Harness) + " " + master.Scope
-		if master.Stale() {
+		if trust := status.RunnerTrustPhrase(master); trust != "" {
+			phrase += "; " + trust
+		}
+		if master.Stale() || master.RunnerUnapproved() {
 			out += wrapTo(fmt.Sprintf("%-22s %s", label, warn(phrase)), "   ", width)
 			continue
 		}
