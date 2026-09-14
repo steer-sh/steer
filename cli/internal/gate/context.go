@@ -101,17 +101,47 @@ func wordRe(symbol string) *regexp.Regexp {
 	return regexp.MustCompile(`\b` + regexp.QuoteMeta(symbol) + `\b`)
 }
 
+// indexedReader returns a reader for a file's index content, the version a file
+// outside the diff lands with. A file whose working copy matches the index is read
+// from disk; one with unstaged edits is read from its index blob. cwd is the work-tree
+// root, so paths are root-relative, as `git grep` prints them there.
+func indexedReader(cwd string) func(path string) ([]byte, error) {
+	dirty := map[string]bool{}
+	if out, ok := Git(cwd, gitMedium, "diff", "--name-only", "--relative", "-z"); ok {
+		for _, path := range strings.Split(out, "\x00") {
+			dirty[path] = path != ""
+		}
+	}
+	return func(path string) ([]byte, error) {
+		if !dirty[path] {
+			return os.ReadFile(filepath.Join(cwd, path))
+		}
+		blob, ok := Git(cwd, gitMedium, "cat-file", "blob", ":./"+path)
+		if !ok {
+			return nil, fmt.Errorf("no index blob for %s", path)
+		}
+		return []byte(blob), nil
+	}
+}
+
 // ReferencingFiles lists tracked files that mention a changed symbol and are NOT
 // themselves in the diff.
 //
-// `git grep -w -F` over tracked files only: word-boundary so `save` does not match
+// `git grep --cached -w -F` over the index: word-boundary so `save` does not match
 // `autosave`, fixed-string so a symbol containing regex metacharacters cannot blow up
-// the search, tracked-only so build output and vendored trees stay out.
+// the search, the index so an unstaged edit that does not land cannot match. It runs
+// at the work-tree root, so its paths compare with the root-relative `changed`.
 func ReferencingFiles(cfg Config, cwd string, symbols map[string]bool, changed []string) []string {
+	top := Toplevel(cwd)
+	return referencingFiles(cfg, top, symbols, changed, indexedReader(top))
+}
+
+func referencingFiles(cfg Config, cwd string, symbols map[string]bool, changed []string,
+	read func(string) ([]byte, error)) []string {
 	if len(symbols) == 0 {
 		return nil
 	}
-	args := []string{"grep", "-l", "-w", "-F", "-I"}
+	args := []string{"grep", "--cached", "-l", "-w", "-F", "-I"}
 	for _, s := range sortedKeys(symbols) {
 		args = append(args, "-e", s)
 	}
@@ -140,7 +170,7 @@ func ReferencingFiles(cfg Config, cwd string, symbols map[string]bool, changed [
 	}
 	ranked := make([]scored, 0, len(hits))
 	for _, p := range hits {
-		text, err := os.ReadFile(filepath.Join(cwd, p))
+		text, err := read(p)
 		if err != nil {
 			ranked = append(ranked, scored{path: p})
 			continue
@@ -174,14 +204,16 @@ func ReferencingFiles(cfg Config, cwd string, symbols map[string]bool, changed [
 // the budget allows. Truncation is a budget backstop and says so in the text, so the
 // reviewer never mistakes an elision for the end of a file.
 func BuildContext(cfg Config, cwd string, symbols map[string]bool, changed []string) string {
-	files := ReferencingFiles(cfg, cwd, symbols, changed)
+	cwd = Toplevel(cwd)
+	read := indexedReader(cwd)
+	files := referencingFiles(cfg, cwd, symbols, changed, read)
 	if len(files) == 0 {
 		return ""
 	}
 	var chunks []string
 	spent := 0
 	for _, path := range files {
-		raw, err := os.ReadFile(filepath.Join(cwd, path))
+		raw, err := read(path)
 		if err != nil {
 			continue
 		}
