@@ -101,10 +101,13 @@ A prose edit does not consolidate the master or invalidate unrelated guard tests
 Removing a shared artifact removes its derived rule for every target, including
 Pi and Codex's shared project document.
 
-`RemoveManagedHook` archives a guard before it deletes it. `internal/archive/`
-writes the guard file, its fixtures and its manifest entry to
-`archive/<id>/<entry>/` in the same store, with an `archive.json` that holds the
-removal time, the reason and the parts it did not find. The entry is written to a
+A removal archives the fix before it deletes it. `internal/archive/` writes an
+entry to `archive/<id>/<entry>/` in the store that owns the fix, with an
+`archive.json` that holds the tier, the manifest entry, the removal time, the
+reason and the parts it did not find. `RemoveManagedHook` also stores the guard
+file and its fixtures; `RemoveManagedRule` and `RemoveAddendum` store only the
+manifest entry, which holds the text. One archive id can hold entries of
+different tiers over time, and the entry's tier tells them apart. The entry is written to a
 temporary directory and renamed into place, and a failed write stops the removal.
 Store readers skip subdirectories, so an archived guard never reaches the master.
 Only a caller that proves a catalog copy removes without an archive
@@ -198,6 +201,9 @@ authorization to run them. A `script` binding names a repository-relative script
 A `go-test` binding names a package directory and one top-level test that stays in
 the ordinary suite. The embedded `guide.md`, printed by `steer check guide`, is
 the authoring contract the bundled skills defer to.
+`checks.Remove` archives the declaration under `.steer/checks/archive/` and drops
+it from the manifest; the detector, the cases and the validation history stay
+where they are, so the archive keeps only the declaration.
 
 Validation replays a check's cases in temporary trees and appends the result to
 `validations.jsonl` under the machine-local evidence root; a validated run is a

@@ -65,6 +65,93 @@ func TestRemovingAGuardArchivesItsFileFixturesAndEntry(t *testing.T) {
 	}
 }
 
+// onlyEntry reads the one archive entry a removal left in the project store.
+func onlyEntry(t *testing.T) archive.Stored {
+	t.Helper()
+	dir, err := GetHooksDir(ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := archive.List(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("archive holds %d entries, want 1", len(entries))
+	}
+	return entries[0]
+}
+
+func TestRemovingARuleArchivesItsEntry(t *testing.T) {
+	withProjectTempDir(t)
+	if _, err := InstallManagedRule(ProjectScope, "config-path", "resolve a config path from the repo root"); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := RemoveManagedRule(ProjectScope, "config-path", "agents follow it without being told")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := onlyEntry(t)
+	if e.Dir != result.ArchivePath || e.Tier != "instruction" || e.ID != "config-path" || e.Reason != "agents follow it without being told" {
+		t.Fatalf("entry = %+v; result names %q", e.Entry, result.ArchivePath)
+	}
+	var entry RuleEntry
+	if err := json.Unmarshal(e.Manifest, &entry); err != nil || entry.Text != "resolve a config path from the repo root" {
+		t.Fatalf("archived rule = %+v, %v", entry, err)
+	}
+}
+
+func TestRemovingAnAddendumEntryArchivesIt(t *testing.T) {
+	withProjectTempDir(t)
+	if _, err := InstallAddendum(ProjectScope, "no-style", "style is not a finding"); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := RemoveAddendum(ProjectScope, "no-style", "hid a real defect")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := onlyEntry(t)
+	if e.Dir != result.ArchivePath || e.Tier != "review" || e.ID != "no-style" || e.Reason != "hid a real defect" {
+		t.Fatalf("entry = %+v; result names %q", e.Entry, result.ArchivePath)
+	}
+	var entry AddendumEntry
+	if err := json.Unmarshal(e.Manifest, &entry); err != nil || entry.Text != "style is not a finding" {
+		t.Fatalf("archived addendum entry = %+v, %v", entry, err)
+	}
+}
+
+func TestAFailedArchiveWriteKeepsTheRule(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes to a read-only directory")
+	}
+	withProjectTempDir(t)
+	if _, err := InstallManagedRule(ProjectScope, "config-path", "resolve a config path from the repo root"); err != nil {
+		t.Fatal(err)
+	}
+	dir, err := GetHooksDir(ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	locked := filepath.Join(dir, archive.DirName)
+	if err := os.Mkdir(locked, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+
+	if _, err := RemoveManagedRule(ProjectScope, "config-path", ""); err == nil {
+		t.Fatal("the removal went ahead without an archive")
+	}
+	manifest, err := LoadManifest(ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := manifest.Rules["config-path"]; !ok {
+		t.Fatal("the rule was deleted")
+	}
+}
+
 func TestACatalogCopyIsRemovedWithoutAnArchive(t *testing.T) {
 	dir := fixtureProject(t, map[string]string{"alpha": blockingHook("ALPHA")})
 

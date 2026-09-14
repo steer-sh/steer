@@ -66,3 +66,23 @@ func archiveHook(scope, hookName, hookPath string, entry ManifestEntry, hasEntry
 
 	return archive.Write(hooksDir, e, files)
 }
+
+// archiveTextEntry stores a rule or review addendum entry in the scope's
+// archive. The entry's text lives in its manifest entry, so no file is stored.
+func archiveTextEntry(scope string, kind tier.Kind, id string, entry any, reason string) (string, error) {
+	hooksDir, err := GetHooksDir(scope)
+	if err != nil {
+		return "", err
+	}
+	raw, err := json.Marshal(entry)
+	if err != nil {
+		return "", err
+	}
+	return archive.Write(hooksDir, archive.Entry{
+		Tier:     string(kind),
+		ID:       id,
+		Scope:    scope,
+		Reason:   reason,
+		Manifest: raw,
+	}, nil)
+}

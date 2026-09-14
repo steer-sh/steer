@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/claude"
@@ -111,11 +112,13 @@ var commitGateAddendumRemoveCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		scope := currentScope()
-		text, err := claude.RemoveAddendum(scope, args[0])
+		reason, _ := cmd.Flags().GetString("reason")
+		result, err := claude.RemoveAddendum(scope, args[0], strings.TrimSpace(reason))
 		if err != nil {
 			return err
 		}
-		fmt.Printf("Removed addendum entry %s from the %s store: %s\n", args[0], scope, text)
+		fmt.Printf("Removed addendum entry %s from the %s store: %s\n", args[0], scope, result.Text)
+		fmt.Printf("Archived: %s\n", result.ArchivePath)
 		if scope == claude.ProjectScope {
 			fmt.Printf("The commit gate reads project entries from HEAD. Commit %s for the removal to take effect.\n",
 				projectManifestPath())
@@ -137,4 +140,5 @@ func init() {
 	commitGateAddendumCmd.AddCommand(commitGateAddendumAddCmd, commitGateAddendumListCmd, commitGateAddendumRemoveCmd)
 	commitGateAddendumAddCmd.Flags().StringVar(&addendumText, "text", "", "the entry's text (required)")
 	_ = commitGateAddendumAddCmd.MarkFlagRequired("text")
+	commitGateAddendumRemoveCmd.Flags().String("reason", "", "why the entry is removed; the archive entry keeps it")
 }

@@ -20,7 +20,7 @@ func TestAnInstructionRuleReachesTheDocument(t *testing.T) {
 		t.Fatalf("document = %q", body)
 	}
 
-	if _, err := RemoveManagedRule(ProjectScope, "config-path"); err != nil {
+	if _, err := RemoveManagedRule(ProjectScope, "config-path", ""); err != nil {
 		t.Fatal(err)
 	}
 	if body := readRules(t, ProjectScope); strings.Contains(body, "resolve a config path") {
@@ -143,7 +143,7 @@ func TestRemovingAnUnknownRuleSyncsBeforeItReports(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := RemoveManagedRule(ProjectScope, "no-such-rule"); err == nil ||
+	if _, err := RemoveManagedRule(ProjectScope, "no-such-rule", ""); err == nil ||
 		!strings.Contains(err.Error(), "rule not found") {
 		t.Fatalf("err = %v", err)
 	}
@@ -166,7 +166,7 @@ func TestAStoreWithNoRulesWritesNoRulesKey(t *testing.T) {
 	if _, err := InstallManagedRule(ProjectScope, "a-rule", "prose"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := RemoveManagedRule(ProjectScope, "a-rule"); err != nil {
+	if _, err := RemoveManagedRule(ProjectScope, "a-rule", ""); err != nil {
 		t.Fatal(err)
 	}
 	after, err := os.ReadFile(mustManifestPath(t))

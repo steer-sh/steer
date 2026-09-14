@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/steer-sh/steer-cli/internal/tier"
 )
 
 // ManagedAddendumEntry is one stored review addendum entry, read back with its id.
@@ -73,28 +75,43 @@ func InstallAddendum(scope, id, text string) (*InstallAddendumResult, error) {
 	return &InstallAddendumResult{ID: entryID, Overwritten: overwritten, PreviousText: existing.Text}, nil
 }
 
-// RemoveAddendum deletes one review addendum entry and returns the text it held.
-func RemoveAddendum(scope, id string) (string, error) {
+// RemoveAddendumResult reports the text a removal took out and where it was kept.
+type RemoveAddendumResult struct {
+	Text string
+	// ArchivePath is the archive entry that holds the removed entry.
+	ArchivePath string
+}
+
+// RemoveAddendum archives one review addendum entry with reason, then deletes
+// it. A failed archive write stops the removal.
+func RemoveAddendum(scope, id, reason string) (*RemoveAddendumResult, error) {
 	scope = strings.ToLower(strings.TrimSpace(scope))
 	if err := ValidateScope(scope); err != nil {
-		return "", err
+		return nil, err
 	}
 	entryID, err := validateAddendumID(id)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	manifest, err := LoadManifest(scope)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	entry, ok := manifest.Addendum[entryID]
 	if !ok {
-		return "", fmt.Errorf("addendum entry not found: %s", id)
+		return nil, fmt.Errorf("addendum entry not found: %s", id)
+	}
+	if err := EnsureDirectories(scope); err != nil {
+		return nil, err
+	}
+	archivePath, err := archiveTextEntry(scope, tier.Review, entryID, entry, reason)
+	if err != nil {
+		return nil, fmt.Errorf("failed to archive addendum entry %s, so it was not removed: %w", entryID, err)
 	}
 	if err := RemoveAddendumEntry(scope, entryID); err != nil {
-		return "", err
+		return nil, err
 	}
-	return entry.Text, nil
+	return &RemoveAddendumResult{Text: entry.Text, ArchivePath: archivePath}, nil
 }
 
 // ListAddendum reads one store's review addendum entries, ordered by id.

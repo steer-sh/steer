@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/claude"
@@ -96,12 +97,13 @@ var rulesRemoveCmd = &cobra.Command{
 			return err
 		}
 		scope := currentScope()
-		result, err := claude.RemoveManagedRule(scope, args[0], targets...)
+		reason, _ := cmd.Flags().GetString("reason")
+		result, err := claude.RemoveManagedRule(scope, args[0], strings.TrimSpace(reason), targets...)
 		if err != nil {
 			return err
 		}
 		fmt.Println(styles.SuccessBox.Render(fmt.Sprintf(
-			"Removed rule: %s\nScope: %s\nHarness: %s", result.ID, scope, harnessNames(targets))))
+			"Removed rule: %s\nScope: %s\nHarness: %s\nArchived: %s", result.ID, scope, harnessNames(targets), result.ArchivePath)))
 		return nil
 	},
 }
@@ -111,4 +113,5 @@ func init() {
 	rulesCmd.AddCommand(rulesAddCmd, rulesListCmd, rulesRemoveCmd)
 	rulesAddCmd.Flags().String("rule", "", "the rule text the agent reads (required)")
 	_ = rulesAddCmd.MarkFlagRequired("rule")
+	rulesRemoveCmd.Flags().String("reason", "", "why the rule is removed; the archive entry keeps it")
 }

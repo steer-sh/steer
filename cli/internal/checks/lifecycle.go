@@ -1,8 +1,13 @@
 package checks
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+
+	"github.com/steer-sh/steer-cli/internal/archive"
+	"github.com/steer-sh/steer-cli/internal/steerpath"
+	"github.com/steer-sh/steer-cli/internal/tier"
 )
 
 // ErrNotValidated reports a validation run whose verdict was not validated.
@@ -64,16 +69,32 @@ func Test(root, id string) (ValidationRun, error) {
 	return run, nil
 }
 
-// Remove drops a check from the manifest. Its case file and validation history
-// stay, so evidence about the check outlives its declaration.
-func Remove(root, id string) (Declaration, error) {
+// Remove drops a check from the manifest and returns the archive entry that
+// keeps its declaration with reason. Its case file and validation history stay,
+// so evidence about the check outlives its declaration. A failed archive write
+// stops the removal.
+func Remove(root, id, reason string) (Declaration, string, error) {
 	m, err := loadForMutation(root)
 	if err != nil {
-		return Declaration{}, err
+		return Declaration{}, "", err
 	}
 	d, ok := find(m, id)
 	if !ok {
-		return Declaration{}, fmt.Errorf("no check %q is declared", id)
+		return Declaration{}, "", fmt.Errorf("no check %q is declared", id)
+	}
+	raw, err := json.Marshal(d)
+	if err != nil {
+		return Declaration{}, "", err
+	}
+	archivePath, err := archive.Write(Dir(root), archive.Entry{
+		Tier:     string(tier.Check),
+		ID:       d.ID,
+		Scope:    steerpath.ProjectScope,
+		Reason:   reason,
+		Manifest: raw,
+	}, nil)
+	if err != nil {
+		return Declaration{}, "", fmt.Errorf("failed to archive check %s, so it was not removed: %w", d.ID, err)
 	}
 	kept := make([]Declaration, 0, len(m.Checks)-1)
 	for _, c := range m.Checks {
@@ -82,7 +103,7 @@ func Remove(root, id string) (Declaration, error) {
 		}
 	}
 	m.Checks = kept
-	return d, Save(root, m)
+	return d, archivePath, Save(root, m)
 }
 
 func find(m Manifest, id string) (Declaration, bool) {

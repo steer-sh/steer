@@ -465,13 +465,15 @@ var checkRemoveCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		d, err := checks.Remove(root, args[0])
+		reason, _ := cmd.Flags().GetString("reason")
+		d, archivePath, err := checks.Remove(root, args[0], strings.TrimSpace(reason))
 		if err != nil {
 			return err
 		}
 		rel, _ := filepath.Rel(root, checks.CasesPath(root, d.ID))
+		archived, _ := filepath.Rel(root, archivePath)
 		fmt.Fprintln(cmd.OutOrStdout(), styles.SuccessBox.Render(fmt.Sprintf(
-			"Removed check %s\nKept: %s and its validation history", d.ID, rel)))
+			"Removed check %s\nKept: %s and its validation history\nArchived: %s", d.ID, rel, archived)))
 		return nil
 	},
 }
@@ -608,4 +610,5 @@ func init() {
 	checkAddCmd.Flags().String("go-package", "", "repository-relative directory of the Go test's package")
 	checkAddCmd.Flags().String("go-test", "", "exact name of the top-level Go test function")
 	checkAddCmd.Flags().StringSlice("input", nil, "further repository-relative detector file (repeatable)")
+	checkRemoveCmd.Flags().String("reason", "", "why the check is removed; the archive entry keeps it")
 }

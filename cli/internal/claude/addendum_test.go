@@ -19,9 +19,9 @@ func TestAnAddendumEntryRoundTripsThroughTheStore(t *testing.T) {
 		t.Fatalf("entry = %#v", entries[0])
 	}
 
-	text, err := RemoveAddendum(ProjectScope, "no-style")
-	if err != nil || text != "style is not a finding" {
-		t.Fatalf("text = %q, err = %v", text, err)
+	result, err := RemoveAddendum(ProjectScope, "no-style", "")
+	if err != nil || result.Text != "style is not a finding" {
+		t.Fatalf("result = %+v, err = %v", result, err)
 	}
 	if entries, _ := ListAddendum(ProjectScope); len(entries) != 0 {
 		t.Fatalf("removal left %#v", entries)

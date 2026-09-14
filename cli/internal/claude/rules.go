@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/steer-sh/steer-cli/internal/harness"
+	"github.com/steer-sh/steer-cli/internal/tier"
 )
 
 // ManagedRule is one stored instruction rule, read back with the id that names it.
@@ -27,6 +28,8 @@ type InstallManagedRuleResult struct {
 type RemoveManagedRuleResult struct {
 	ID   string
 	Text string
+	// ArchivePath is the archive entry that holds the removed rule.
+	ArchivePath string
 }
 
 // InstallManagedRule writes one instruction rule into the shared store and
@@ -119,8 +122,10 @@ func InstallManagedRule(scope, id, text string, targets ...harness.Registrar) (*
 // RemoveManagedHook removes a hook first: the store is shared, so one deletion
 // has to stop the rule reaching every harness at once. A sync over an id the
 // store no longer names is the retry for a removal that stopped part way through
-// the targets, so it runs before the not-found answer.
-func RemoveManagedRule(scope, id string, targets ...harness.Registrar) (*RemoveManagedRuleResult, error) {
+// the targets, so it runs before the not-found answer. The rule is archived with
+// reason before the manifest entry goes, and a failed archive write stops the
+// removal.
+func RemoveManagedRule(scope, id, reason string, targets ...harness.Registrar) (*RemoveManagedRuleResult, error) {
 	scope = strings.ToLower(strings.TrimSpace(scope))
 	if err := ValidateScope(scope); err != nil {
 		return nil, err
@@ -147,6 +152,10 @@ func RemoveManagedRule(scope, id string, targets ...harness.Registrar) (*RemoveM
 		return nil, fmt.Errorf("rule not found: %s", id)
 	}
 
+	archivePath, err := archiveTextEntry(scope, tier.Instruction, ruleID, entry, reason)
+	if err != nil {
+		return nil, fmt.Errorf("failed to archive rule %s, so it was not removed: %w", ruleID, err)
+	}
 	if err := RemoveRule(scope, ruleID); err != nil {
 		return nil, err
 	}
@@ -154,7 +163,7 @@ func RemoveManagedRule(scope, id string, targets ...harness.Registrar) (*RemoveM
 		return nil, err
 	}
 
-	return &RemoveManagedRuleResult{ID: ruleID, Text: entry.Text}, nil
+	return &RemoveManagedRuleResult{ID: ruleID, Text: entry.Text, ArchivePath: archivePath}, nil
 }
 
 // ListManagedRules reads one store's instruction rules, ordered by id.

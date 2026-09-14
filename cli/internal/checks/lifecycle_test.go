@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/steer-sh/steer-cli/internal/archive"
 )
 
 const noCountScript = `#!/usr/bin/env bash
@@ -242,7 +244,7 @@ func TestRemoveKeepsCasesAndHistory(t *testing.T) {
 	if _, err := Add(root, noCount); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
-	if _, err := Remove(root, "no-count"); err != nil {
+	if _, _, err := Remove(root, "no-count", ""); err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
 	if m, _ := Load(root); len(m.Checks) != 0 {
@@ -254,8 +256,61 @@ func TestRemoveKeepsCasesAndHistory(t *testing.T) {
 	if history, _ := History(root); len(history) != 1 {
 		t.Fatalf("history %+v; want the run kept", history)
 	}
-	if _, err := Remove(root, "no-count"); err == nil {
+	if _, _, err := Remove(root, "no-count", ""); err == nil {
 		t.Fatalf("removing an undeclared check succeeded")
+	}
+}
+
+// Removing a check archives its declaration with the reason.
+func TestRemoveArchivesTheDeclaration(t *testing.T) {
+	root := checkRepo(t, noCountScript)
+	writeCases(t, root, "no-count", goodCase(), defectCase("literal test count"))
+	if _, err := Add(root, noCount); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	_, archivePath, err := Remove(root, "no-count", "flaky on CI")
+	if err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	entries, err := archive.List(Dir(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Dir != archivePath {
+		t.Fatalf("archive holds %d entries; Remove named %q", len(entries), archivePath)
+	}
+	e := entries[0]
+	if e.Tier != "check" || e.ID != "no-count" || e.Scope != "project" || e.Reason != "flaky on CI" {
+		t.Fatalf("entry = %+v", e.Entry)
+	}
+	var d Declaration
+	if err := json.Unmarshal(e.Manifest, &d); err != nil || d.ID != noCount.ID || d.Script != noCount.Script {
+		t.Fatalf("archived declaration = %+v, %v", d, err)
+	}
+}
+
+// A failed archive write leaves the check declared.
+func TestAFailedArchiveWriteKeepsTheCheck(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes to a read-only directory")
+	}
+	root := checkRepo(t, noCountScript)
+	writeCases(t, root, "no-count", goodCase(), defectCase("literal test count"))
+	if _, err := Add(root, noCount); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	locked := filepath.Join(Dir(root), archive.DirName)
+	if err := os.Mkdir(locked, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+
+	if _, _, err := Remove(root, "no-count", ""); err == nil {
+		t.Fatal("the removal went ahead without an archive")
+	}
+	if m, _ := Load(root); len(m.Checks) != 1 {
+		t.Fatalf("manifest declares %+v; want the check kept", m.Checks)
 	}
 }
 
