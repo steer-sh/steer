@@ -14,6 +14,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/hookstore"
 	"github.com/steer-sh/steer-cli/internal/presets"
 	"github.com/steer-sh/steer-cli/internal/status"
+	"github.com/steer-sh/steer-cli/internal/tier"
 )
 
 // The Fixes panel is the inventory of what Steer installs to keep a problem from
@@ -410,7 +411,7 @@ func (m *Model) togglePreset(name string, on bool) {
 	}
 	item, found := presets.FindVisiblePreset(catalog, name)
 	if !found {
-		m.note("%s is not a built-in guard; remove it with: steer hooks remove %s", name, name)
+		m.note("%s is not a built-in guard; remove it with: %s", name, status.RemoveCommand(string(tier.Guard), name, m.scope))
 		return
 	}
 	if on {

@@ -98,7 +98,7 @@ func missingCoverage(obs mine.Observation) bool {
 func RemovalPhrase(t string, a *cadence.Artifact) string {
 	const ends = "stopping the tracking ends the measurement"
 	kind, _ := tier.Of(t)
-	noun, remove := artifactNoun(kind)
+	noun, _ := artifactNoun(kind)
 	if a == nil || noun == "" {
 		return ends + " and removes nothing"
 	}
@@ -106,11 +106,22 @@ func RemovalPhrase(t string, a *cadence.Artifact) string {
 	if a.ID == "" {
 		return out
 	}
-	cmd := remove + a.ID
-	if a.Scope != "" {
-		cmd += " --scope " + a.Scope
+	return out + "; to remove it, run: " + RemoveCommand(t, a.ID, a.Scope)
+}
+
+// RemoveCommand is the CLI command that removes the fix with this ID from a tier,
+// "" for a tier that binds no fix. A non-empty scope is passed as --scope.
+func RemoveCommand(t, id, scope string) string {
+	kind, _ := tier.Of(t)
+	_, remove := artifactNoun(kind)
+	if remove == "" {
+		return ""
 	}
-	return out + "; to remove it, run: " + cmd
+	cmd := remove + id
+	if scope != "" {
+		cmd += " --scope " + scope
+	}
+	return cmd
 }
 
 // artifactNoun names the fix a tier binds, in the reader's words, and the command

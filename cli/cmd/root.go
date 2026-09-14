@@ -42,6 +42,7 @@ Steer supports Claude Code, Codex and Pi, plus a Git pre-commit channel
 }
 
 func Execute() error {
+	requireKnownSubcommands(rootCmd)
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, styles.ErrorBox.Render(fmt.Sprintf("Error: %s", err.Error())))
@@ -49,6 +50,24 @@ func Execute() error {
 		return err
 	}
 	return nil
+}
+
+// requireKnownSubcommands gives every command that only groups subcommands a
+// RunE: an argument that names no subcommand is an error, and no argument shows
+// the group's help. Cobra rejects an unknown subcommand only at the root; below
+// it, a group without a RunE shows its help and exits 0.
+func requireKnownSubcommands(c *cobra.Command) {
+	if !c.Runnable() && c.HasSubCommands() {
+		c.RunE = func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 {
+				return fmt.Errorf("unknown command %q for %q", args[0], cmd.CommandPath())
+			}
+			return cmd.Help()
+		}
+	}
+	for _, sub := range c.Commands() {
+		requireKnownSubcommands(sub)
+	}
 }
 
 // helpHint names the help of the subcommand the arguments select, so an error on

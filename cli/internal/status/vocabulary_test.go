@@ -48,11 +48,7 @@ var machineWords = regexp.MustCompile(`(?i)\b(class|classes|intervention|interve
 // allowedPhrases are the literals that legitimately carry a machine word. Keep
 // this list short and justified: every entry is a place a reader meets the
 // machine's vocabulary, and each one needs a reason.
-var allowedPhrases = map[string]bool{
-	// Executable text. A reader who types one of these needs it spelled the way
-	// the CLI accepts, so no display rename may move it.
-	"%s is not a built-in guard; remove it with: steer hooks remove %s": true,
-}
+var allowedPhrases = map[string]bool{}
 
 // isPhrase says a literal is something a reader is shown: one carrying
 // whitespace, and one starting with a capital. Every machine value in these files
