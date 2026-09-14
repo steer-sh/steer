@@ -312,7 +312,13 @@ func CheckRunPhrase(r *CheckRun) string {
 // proof stands, and what the last recorded execution was. A stale proof keeps
 // running; an unobserved check is not a pass.
 func CheckPhrase(c CheckRow) string {
-	phrase := c.ID + " (" + c.Binding + "): "
+	return c.ID + " (" + c.Binding + "): " + CheckStatePhrase(c)
+}
+
+// CheckStatePhrase is CheckPhrase without the check's name: how its proof stands
+// and what the last recorded execution was.
+func CheckStatePhrase(c CheckRow) string {
+	phrase := ""
 	switch c.Validation {
 	case ValidationNone:
 		phrase += "never replayed here"

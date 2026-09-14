@@ -3,12 +3,12 @@ package cmd
 import (
 	"fmt"
 	"path/filepath"
-	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/hookstore"
+	"github.com/steer-sh/steer-cli/internal/status"
 )
 
 var addendumText string
@@ -73,19 +73,31 @@ var commitGateAddendumListCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if len(entries) == 0 {
+		onDisk := map[string]claude.ManagedAddendumEntry{}
+		for _, e := range entries {
+			onDisk[e.ID] = e
+		}
+		head := gate.LoadAddendum(gate.Toplevel("."))
+		var rows []status.AddendumInfo
+		for _, row := range status.AddendumInventory(&head) {
+			if row.Scope == scope && row.ID != "" {
+				rows = append(rows, row)
+			}
+		}
+		if len(rows) == 0 {
 			fmt.Printf("No review addendum entries in the %s store.\n", scope)
 			return nil
 		}
-		var atHead map[string]string
-		if scope == claude.ProjectScope {
-			atHead = projectEntriesAtHead()
-		}
-		for _, e := range entries {
-			fmt.Printf("%s  %s\n", e.ID, e.Text)
-			line := fmt.Sprintf("  text_hash %s  created %s", claude.HashRule(e.Text)[:16], e.Created)
-			if scope == claude.ProjectScope {
-				line += "  " + headState(atHead, e.ID, e.Text)
+		for _, row := range rows {
+			text := row.Text
+			if text == "" {
+				text = row.HeadText
+			}
+			fmt.Printf("%s  %s\n", row.ID, text)
+			line := "  " + status.AddendumPhrase(row)
+			if e, ok := onDisk[row.ID]; ok {
+				line = fmt.Sprintf("  text_hash %s  created %s  %s",
+					claude.HashRule(e.Text)[:16], e.Created, status.AddendumPhrase(row))
 			}
 			fmt.Println(line)
 		}
@@ -118,29 +130,6 @@ func projectManifestPath() string {
 		return hookstore.ManifestName
 	}
 	return filepath.Join(dir, hookstore.ManifestName)
-}
-
-// projectEntriesAtHead is the project entries the commit gate would read now, by id.
-func projectEntriesAtHead() map[string]string {
-	out := map[string]string{}
-	for _, e := range gate.LoadAddendum(gate.Toplevel(".")).Entries {
-		if e.Scope == claude.ProjectScope {
-			out[e.ID] = e.Text
-		}
-	}
-	return out
-}
-
-func headState(atHead map[string]string, id, text string) string {
-	committed, ok := atHead[id]
-	switch {
-	case !ok:
-		return "not at HEAD — the gate does not read it yet"
-	case committed != strings.Join(strings.Fields(text), " "):
-		return "differs from HEAD — the gate reads the committed text"
-	default:
-		return "live at HEAD"
-	}
 }
 
 func init() {

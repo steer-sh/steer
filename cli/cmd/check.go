@@ -307,18 +307,8 @@ func adoptionIdentity(dir string) (string, error) {
 	return abs, nil
 }
 
-// steerBinForOracle is the STEER_BIN that check.sh receives: an operator
-// override stays, otherwise this executable.
-func steerBinForOracle() string {
-	if os.Getenv("STEER_BIN") != "" {
-		return ""
-	}
-	exe, err := os.Executable()
-	if err != nil {
-		return ""
-	}
-	return exe
-}
+// steerBinForOracle is the STEER_BIN that check.sh receives.
+func steerBinForOracle() string { return checks.SelfSteerBin() }
 
 // printAdoption prints what an adoption attempt did: the receipt it reused or
 // replayed for each declared check, and its isolated oracle run.

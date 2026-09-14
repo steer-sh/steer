@@ -29,13 +29,13 @@ type panel int
 const (
 	panelChannels panel = iota
 	panelProblems
-	panelGuards
+	panelFixes
 	panelReviewer
 	panelDiagnostics
 	panelCount
 )
 
-var panelNames = [panelCount]string{"Arming", "Problems", "Guards", "Reviewer", "Diagnostics"}
+var panelNames = [panelCount]string{"Arming", "Problems", "Fixes", "Reviewer", "Diagnostics"}
 
 // Model is the dashboard's whole state: the composed snapshot, the active panel,
 // a per-panel cursor, and the one text editor the panels share.
@@ -79,6 +79,9 @@ type Model struct {
 	// walks every transcript tree on the machine, so it runs as a command and this
 	// flag keeps a second enter from starting a concurrent one.
 	reading bool
+	// checking names the check action in flight on the Fixes panel, "" when none
+	// is. One runs at a time: adoption runs check.sh under the repository lock.
+	checking string
 
 	// reviewer is the pending settings edit, nil unless the Reviewer panel is editing.
 	reviewer *reviewerEdit
@@ -172,8 +175,8 @@ func (m *Model) rowCount(p panel) int {
 		return len(m.channelRows())
 	case panelProblems:
 		return len(m.problemRows())
-	case panelGuards:
-		return len(m.guardRows())
+	case panelFixes:
+		return len(m.fixRows())
 	case panelReviewer:
 		return len(settings.Fields)
 	}
@@ -187,6 +190,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case outcomesReadMsg:
 		m.outcomesRead(msg)
+		return m, nil
+	case checkActionMsg:
+		m.checkActionDone(msg)
 		return m, nil
 	case tea.KeyMsg:
 		if m.tooSmall() {
@@ -262,8 +268,8 @@ func (m *Model) panelKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.channelsKey(msg)
 	case panelProblems:
 		return m.problemsKey(msg)
-	case panelGuards:
-		return m.guardsKey(msg)
+	case panelFixes:
+		return m.fixesKey(msg)
 	case panelReviewer:
 		return m.reviewerKey(msg)
 	case panelDiagnostics:
@@ -288,8 +294,8 @@ func (m *Model) View() string {
 		body = m.viewChannels()
 	case panelProblems:
 		body = m.viewProblems()
-	case panelGuards:
-		body = m.viewGuards()
+	case panelFixes:
+		body = m.viewFixes()
 	case panelReviewer:
 		body = m.viewReviewer()
 	case panelDiagnostics:
@@ -397,8 +403,8 @@ func (m *Model) reachLine() string {
 	switch m.active {
 	case panelChannels:
 		return secondary("Configure: project and global registrations on this machine")
-	case panelGuards:
-		return secondary("Configure: " + scopeReach(m.scope))
+	case panelFixes:
+		return secondary("Configure: guards in " + scopeReach(m.scope) + " · checks in this repository")
 	case panelReviewer:
 		return secondary("Configure: every project on this machine")
 	}
@@ -461,8 +467,8 @@ func (m *Model) legend() string {
 				stop + common
 		}
 		return "enter open · " + stop + common
-	case panelGuards:
-		return m.guardsLegend() + common
+	case panelFixes:
+		return m.fixesLegend() + common
 	case panelReviewer:
 		if m.editing {
 			return "enter save · esc cancel"

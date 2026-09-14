@@ -47,8 +47,10 @@ import (
 // v15 adds posture.masters[].trust: the harness's approval of the registered runner.
 // v16 adds observation.checks.registered_host and other_host: a fix registered on
 // another host is not missing coverage here. v17 adds interventions[].artifact: the
-// fix a record binds and where it stands now.
-const StatusVersion = 17
+// fix a record binds and where it stands now. v18 adds rules and addenda: the
+// instruction and review entries each store holds, a project addendum entry read
+// both on disk and at HEAD.
+const StatusVersion = 18
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20
@@ -351,9 +353,11 @@ type SystemStatus struct {
 	Telemetry     Telemetry            `json:"telemetry"`
 	Corpora       []CorpusRow          `json:"corpora"`
 	// Config state — what the dashboard panels mutate. Each reads fail-soft.
-	Hooks   []HookInfo   `json:"hooks"`
-	Presets []PresetInfo `json:"presets"`
-	Team    TeamState    `json:"team"`
+	Hooks   []HookInfo     `json:"hooks"`
+	Presets []PresetInfo   `json:"presets"`
+	Rules   []RuleInfo     `json:"rules"`
+	Addenda []AddendumInfo `json:"addenda"`
+	Team    TeamState      `json:"team"`
 }
 
 // Collect composes the snapshot. It never writes and every source fails soft: a
@@ -420,6 +424,8 @@ func Collect(opts Options) (*SystemStatus, error) {
 	s.Telemetry = telemetry(ev)
 	s.Hooks = collectHooks(opts.Scope)
 	s.Presets = collectPresets(opts.Scope)
+	s.Rules = collectRules()
+	s.Addenda = AddendumInventory(opts.Addendum)
 	s.Team = collectTeam()
 	return s, nil
 }

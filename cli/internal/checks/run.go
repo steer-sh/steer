@@ -39,6 +39,19 @@ var ErrNoOracle = errors.New("no " + OracleName + " at the repository root")
 // ErrNoBash reports a machine where bash cannot be found.
 var ErrNoBash = errors.New("bash was not found")
 
+// SelfSteerBin is the STEER_BIN a caller passes to check.sh: "" when the operator
+// set STEER_BIN, which then stays, otherwise the running executable.
+func SelfSteerBin() string {
+	if os.Getenv("STEER_BIN") != "" {
+		return ""
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	return exe
+}
+
 // RunOptions configures one run of the repository's oracle. SteerBin, when
 // set, becomes STEER_BIN for check.sh. EvidenceDir, when set, isolates the
 // run: its executor records and its own record go under that root, never the

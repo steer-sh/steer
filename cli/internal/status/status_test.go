@@ -174,7 +174,7 @@ func intPtr(n int) *int           { return &n }
 // so a renamed or reordered json tag fails here, the agent-contract guard.
 func TestJSONContractIsStable(t *testing.T) {
 	s := &SystemStatus{
-		StatusVersion: 17,
+		StatusVersion: 18,
 		GeneratedAt:   "2026-01-01T00:00:00Z",
 		Posture: Posture{
 			Instrument: "agy@sha", Reviewer: "gemini", Ledger: "/l.jsonl",
@@ -286,7 +286,10 @@ func TestJSONContractIsStable(t *testing.T) {
 		},
 		Hooks:   []HookInfo{{Name: "no-console", Scope: "global", Source: "generated", Rule: "no console.log"}},
 		Presets: []PresetInfo{{Name: "shell-safety", Bundle: "security", Description: "block risky shell", Enabled: true, Drifted: false}},
-		Team:    TeamState{Present: true, Path: "steer-team.lock.json", HooksLocked: 3, CatalogVersion: "v7"},
+		Rules:   []RuleInfo{{ID: "config-path", Scope: "global", Text: "resolve config from the repo root"}},
+		Addenda: []AddendumInfo{{ID: "fp-sort", Scope: "project", Text: "sorted output is fine",
+			HeadText: "sorted output is not a finding", State: AddendumUncommittedChange}},
+		Team: TeamState{Present: true, Path: "steer-team.lock.json", HooksLocked: 3, CatalogVersion: "v7"},
 	}
 	got, err := s.MarshalIndent()
 	if err != nil {
@@ -298,7 +301,7 @@ func TestJSONContractIsStable(t *testing.T) {
 }
 
 const goldenStatusJSON = `{
-  "status_version": 17,
+  "status_version": 18,
   "generated_at": "2026-01-01T00:00:00Z",
   "posture": {
     "instrument": "agy@sha",
@@ -771,6 +774,22 @@ const goldenStatusJSON = `{
       "description": "block risky shell",
       "enabled": true,
       "drifted": false
+    }
+  ],
+  "rules": [
+    {
+      "id": "config-path",
+      "scope": "global",
+      "text": "resolve config from the repo root"
+    }
+  ],
+  "addenda": [
+    {
+      "id": "fp-sort",
+      "scope": "project",
+      "text": "sorted output is fine",
+      "head_text": "sorted output is not a finding",
+      "state": "uncommitted-change"
     }
   ],
   "team": {

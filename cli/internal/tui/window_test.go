@@ -65,7 +65,7 @@ func TestNoPanelOverflowsTheTerminal(t *testing.T) {
 
 	for _, height := range []int{12, 18, 24} {
 		m.height = height
-		for _, p := range []panel{panelChannels, panelProblems, panelGuards} {
+		for _, p := range []panel{panelChannels, panelProblems, panelFixes} {
 			m.active, m.cursor[p] = p, 20
 			frame := m.View()
 			if n := len(strings.Split(strings.TrimRight(frame, "\n"), "\n")); n > height {

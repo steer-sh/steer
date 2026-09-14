@@ -42,7 +42,7 @@ func TestEachIssueNamesWhereItIsRepaired(t *testing.T) {
 		"3 reviews have no outcome yet",
 		"Open Arming",
 		"The guard runner for Claude Code in this project is out of date",
-		"Open Guards",
+		"Open Fixes",
 	} {
 		if !strings.Contains(strings.Join(strings.Fields(view), " "), want) {
 			t.Errorf("the issue list is missing %q:\n%s", want, view)

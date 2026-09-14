@@ -447,7 +447,7 @@ The `|` pipe splits a rule into a detection part and an optional suggestion (see
 
 Never invent suggestions. Only include them when explicitly provided after `|`.
 
-## The `steer status --json` contract (`status_version: 17`)
+## The `steer status --json` contract (`status_version: 18`)
 
 `steer status` composes one read-only snapshot of the whole loop. The unit is the
 failure class and what the corpus recorded about it, not the hook count. The
@@ -469,7 +469,8 @@ authorization and observed execution are three readings and not one. v13 adds
 `observation.checks`: a check-tier fix's executions in its window, counted on
 this machine only. v16 adds `observation.checks.registered_host` and
 `other_host`: a fix registered on another host is not missing coverage here.
-v17 adds `artifact`: the fix a record binds and where it stands now.
+v17 adds `artifact`: the fix a record binds and where it stands now. v18 adds
+`rules` and `addenda`: the instruction and review entries each store holds.
 
 - `status_version` — the schema version. `--json` is a stable agent contract.
 - `posture` — the arming state: `instrument` (reviewer model / runs / prompt
@@ -654,6 +655,14 @@ v17 adds `artifact`: the fix a record binds and where it stands now.
   `source`, `rule`.
 - `presets[]` — the catalog roster: `name`, `bundle`, `description`, `enabled`,
   `drifted`.
+- `rules[]` — the instruction-tier rules in both stores: `id`, `scope`, `text`.
+  Whether an agent's instructions carry one is `posture.rules[].missing`.
+- `addenda[]` — the review addendum entries in both stores: `id`, `scope`,
+  `text` (the store on disk), `head_text` (the committed text the commit gate
+  reads for a project entry) and `state`: `live`, `uncommitted` (on disk, not at
+  HEAD), `uncommitted-change` (the gate reads `head_text`), `uncommitted-removal`
+  (removed on disk, still read at HEAD) or `unreadable` with `detail`. A global
+  entry is read from disk, so it is `live` whenever the store holds it.
 - `team` — the repo-committed team lockfile summary: `present`, `path`,
   `hooks_locked`, `catalog_version`, and `error`. v10 adds `error`: a project with
   no lockfile is `present: false` and is not a fault, while a lockfile that exists

@@ -105,7 +105,7 @@ func (m *Model) diagnosticIssues() []diagnosticIssue {
 			headline: "The guard runner for " + agent + " in " + scopeReach(master.Scope) +
 				" is out of date",
 			detail: "It was written by an older Steer, or carries no version at all, so a fix " +
-				"shipped since then is not running. Open Guards and run the maintenance action " +
+				"shipped since then is not running. Open Fixes and run the maintenance action " +
 				"under Maintenance needed.",
 		})
 	}
@@ -131,9 +131,9 @@ func (m *Model) diagnosticIssues() []diagnosticIssue {
 		switch {
 		case r.State != status.RulesDrifted:
 		case r.Scope == m.scope:
-			detail += " Open Guards and run the maintenance action under Maintenance needed."
+			detail += " Open Fixes and run the maintenance action under Maintenance needed."
 		default:
-			detail += " The Guards action rebuilds this dashboard's scope only; for this one, run: " +
+			detail += " The Fixes action rebuilds this dashboard's scope only; for this one, run: " +
 				status.RulesRepairCommand(r.Scope)
 		}
 		out = append(out, diagnosticIssue{

@@ -255,7 +255,7 @@ func TestOnlyAQuietWindowNamesNoNextStep(t *testing.T) {
 }
 
 // The summary never claims the fix is installed and running: the record says it
-// was decided on, and only the Guards panel reads what is registered now.
+// was decided on, and the Fixes panel reads what is in the stores now.
 func TestTheSummaryClaimsNoInstallation(t *testing.T) {
 	it := status.ScoredIntervention{Tier: "guard", Target: "g.py", Status: "active",
 		Intervention: "blocks the bare command"}

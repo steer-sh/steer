@@ -40,7 +40,7 @@ func TestStylingPreviews(t *testing.T) {
 		dark bool
 	}{{"dark", true}, {"light", false}} {
 		lipgloss.SetHasDarkBackground(mode.dark)
-		for i, p := range []panel{panelChannels, panelProblems, panelGuards, panelReviewer, panelProblems, panelDiagnostics} {
+		for i, p := range []panel{panelChannels, panelProblems, panelFixes, panelReviewer, panelProblems, panelDiagnostics} {
 			m.active = p
 			m.expanded = i == 4
 			m.technical = i == 5

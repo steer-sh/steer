@@ -416,10 +416,15 @@ environment; activity does not identify scope or prove current trust. Readiness
 reports detectable setup problems with repairs and keeps trust uncertainty
 separate. Machine-local absence describes only the evidence available here.
 
-`internal/tui/` provides Arming, Problems, Guards, Reviewer and Diagnostics panels.
+`internal/tui/` provides Arming, Problems, Fixes, Reviewer and Diagnostics panels.
 Mutations call shared lifecycle/settings functions and recompose status afterwards.
 Problems combines candidates and tracked records; authoring goes through the
-skills. Git pre-commit installation remains CLI-only. Shared styles and geometry
+skills. Fixes lists guards, rules, review addendum entries and the repository's
+checks, each with its own state. A project addendum entry is read on disk and at
+HEAD through `status.AddendumInventory`, which `steer commit-gate addendum list`
+shares, so an entry removed on disk but still committed stays listed. Check
+adoption and replay run as background commands; the check runner's registration
+belongs to Arming. Git pre-commit installation remains CLI-only. Shared styles and geometry
 tests own wrapping and terminal layout details.
 
 `internal/statusline/` renders the Claude Code status-line row;

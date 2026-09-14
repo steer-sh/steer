@@ -36,7 +36,7 @@ func (m *Model) bodyWidth() int {
 		return defaultWidth
 	}
 	limit := 120
-	if m.active == panelChannels || m.active == panelGuards {
+	if m.active == panelChannels || m.active == panelFixes {
 		limit = 160
 	}
 	return min(limit, max(1, m.width-2*m.gutter()))
