@@ -110,6 +110,25 @@ func (m *Model) diagnosticIssues() []diagnosticIssue {
 		})
 	}
 	for _, master := range m.snap.Posture.Masters {
+		if !master.Detached() {
+			continue
+		}
+		agent := status.HarnessLabel(master.Harness)
+		detail := "The guard store holds guards, and " + agent + " registers no runner for " +
+			"them, so no guard blocks anything there while the rules still name them. This " +
+			"happens in a fresh clone of a repository whose guards were committed."
+		if master.Scope == m.scope {
+			detail += " Open Fixes and run the maintenance action under Maintenance needed."
+		} else {
+			detail += " The Fixes action syncs this dashboard's scope only; for this one, run: " +
+				status.SyncCommand(master.Scope)
+		}
+		out = append(out, diagnosticIssue{
+			headline: agent + " runs none of the guards in " + scopeReach(master.Scope),
+			detail:   detail,
+		})
+	}
+	for _, master := range m.snap.Posture.Masters {
 		if !master.RunnerUnapproved() {
 			continue
 		}
@@ -133,7 +152,7 @@ func (m *Model) diagnosticIssues() []diagnosticIssue {
 		case r.Scope == m.scope:
 			detail += " Open Fixes and run the maintenance action under Maintenance needed."
 		default:
-			detail += " The Fixes action rebuilds this dashboard's scope only; for this one, run: " +
+			detail += " The Fixes action syncs this dashboard's scope only; for this one, run: " +
 				status.RulesRepairCommand(r.Scope)
 		}
 		out = append(out, diagnosticIssue{
@@ -282,7 +301,7 @@ func (m *Model) technicalLines(width int) string {
 		if trust := status.RunnerTrustPhrase(master); trust != "" {
 			phrase += "; " + trust
 		}
-		if master.Stale() || master.RunnerUnapproved() {
+		if master.Stale() || master.Detached() || master.RunnerUnapproved() {
 			out += wrapTo(fmt.Sprintf("%-22s %s", label, warn(phrase)), "   ", width)
 			continue
 		}

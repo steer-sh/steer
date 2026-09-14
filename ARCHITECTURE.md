@@ -105,6 +105,14 @@ Target drift includes master registration and instruction text, as well as the
 store. Explicit harness flags select targets; without a flag, mutations target
 installed hook-registering harnesses, with a Claude Code fallback when none are
 found. `cmd.currentRegistrars` supplies the target list to commands and dashboard.
+
+A project store is committed with its master, and a clone carries the harness
+registrations only where the author's harness configuration was committed too.
+`claude.SyncStore` (`steer hooks sync`) registers the master a store already
+holds and rewrites drifted rules sections, writing only the targets that differ
+and never the store; it refuses a master whose embedded guard sources differ from
+the store's files. `status` reads an installed harness that runs none of a
+scope's guards as `detached`, and the SessionStart nudge names it.
 The guard master and commit gate have independent registrations. A harness
 installed after a mutation receives neither master nor rules until a rebuild, and
 a hand edit can remove a rule from a document that received it. A record binds the

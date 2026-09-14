@@ -6,6 +6,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/guard"
+	"github.com/steer-sh/steer-cli/internal/harness"
+	"github.com/steer-sh/steer-cli/internal/status"
 	"github.com/steer-sh/steer-cli/internal/styles"
 	"github.com/steer-sh/steer-cli/internal/utils"
 	"github.com/steer-sh/steer-cli/internal/version"
@@ -83,7 +85,71 @@ than patched.`,
 	},
 }
 
+var hooksSyncCmd = &cobra.Command{
+	Use:   "sync",
+	Short: "Register the store's existing master and rules in each harness, without regenerating it",
+	Long: `sync registers the master a store already holds in every target harness and
+writes each harness's managed rules section from the manifest. It writes only
+the registrations and sections that differ from the store, and it never writes
+the store: the master, the manifest and fixture state stay as they are.
+
+Use it when a store arrived without this machine's registrations — a clone of a
+repository whose guards a teammate committed, or a harness installed after the
+guards were written. A project store is shared, and rebuild would rewrite its
+master with this binary's runtime.
+
+A store with guards must hold a master that embeds exactly those guards. When it
+does not, sync refuses and names rebuild, which regenerates the master.`,
+	Example: `  steer hooks sync --scope project
+  steer hooks sync --scope project --harness codex`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		targets, err := currentRegistrars()
+		if err != nil {
+			return err
+		}
+
+		scope := currentScope()
+		result, err := claude.SyncStore(scope, targets...)
+		if err != nil {
+			return err
+		}
+
+		fmt.Println()
+		fmt.Println(styles.MainHeader.Render("Sync Guard Registrations"))
+		fmt.Println()
+
+		if result.Hooks > 0 {
+			utils.Info(fmt.Sprintf("Scope %s: %d guard(s) in %s.", scope, result.Hooks, result.MasterPath))
+		} else {
+			utils.Info(fmt.Sprintf("Scope %s holds no guards; only rules sections are synced.", scope))
+		}
+		for _, h := range result.Synced {
+			utils.Success(fmt.Sprintf("%s: synced", h.DisplayName))
+		}
+		for _, h := range result.Current {
+			utils.Info(fmt.Sprintf("%s: already in sync, nothing written", h.DisplayName))
+		}
+		for _, m := range status.MasterRuntimes(scope) {
+			if m.Stale() && contains(result.Synced, m.Harness) {
+				utils.Info(fmt.Sprintf("%s: %s", status.HarnessLabel(m.Harness), status.MasterPhrase(m)))
+			}
+		}
+		return nil
+	},
+}
+
+// contains reports whether hs holds the harness with this id.
+func contains(hs []harness.Harness, id string) bool {
+	for _, h := range hs {
+		if string(h.ID) == id {
+			return true
+		}
+	}
+	return false
+}
+
 func init() {
 	rootCmd.AddCommand(hooksCmd)
 	hooksCmd.AddCommand(hooksRebuildCmd)
+	hooksCmd.AddCommand(hooksSyncCmd)
 }

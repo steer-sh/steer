@@ -181,7 +181,7 @@ func TestEachTierNamesItsOwnState(t *testing.T) {
 	view := strings.Join(strings.Fields(fixesModel(false).viewFixes()), " ")
 	for _, want := range []string{
 		"read by Claude Code",
-		"missing from the instructions of Codex — run: steer hooks rebuild --scope global",
+		"missing from the instructions of Codex — run: steer hooks sync --scope global",
 		"fp-sort",
 		"removed but not committed; the commit gate still reads it",
 		"/w/steer",

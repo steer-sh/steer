@@ -181,6 +181,77 @@ func TestRulesPresenceCoversInstalledHarnessesOnly(t *testing.T) {
 	}
 }
 
+// A clone carries a committed store and none of this machine's registrations.
+// Every installed harness then runs none of the store's guards and reads
+// detached; a harness that is not installed stays not-registered; and a sync
+// brings the row back to the master's own runtime state.
+func TestAnInstalledHarnessWithoutTheStoresRegistrationIsDetached(t *testing.T) {
+	root := projectDir(t)
+	t.Setenv("HOME", root)
+	if err := os.MkdirAll(filepath.Join(root, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CODEX_HOME", t.TempDir())
+	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(root, "no-pi"))
+
+	content := []byte("#!/usr/bin/env python3\nimport sys\n\ndef main():\n    sys.exit(0)\n\nif __name__ == '__main__':\n    main()\n")
+	if _, err := claude.InstallManagedHook(claude.ProjectScope, claude.InstallManagedHookInput{
+		HookName: "no-bare-python", Rule: "use python3 instead", Content: content,
+		Metadata: claude.HookInstallMetadata{Source: claude.SourceGenerated},
+	}, claude.Registrar{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(".claude", "settings.json")); err != nil {
+		t.Fatal(err)
+	}
+
+	rows := MasterRuntimes(claude.ProjectScope)
+	for _, id := range []string{"claude-code", "codex"} {
+		row := rowFor(t, rows, id)
+		if !row.Detached() || row.Store == "" || row.Stale() || row.RunnerUnapproved() {
+			t.Fatalf("%s row = %#v", id, row)
+		}
+		if !strings.Contains(MasterPhrase(row), "steer hooks sync --scope project") {
+			t.Errorf("%s phrase = %q", id, MasterPhrase(row))
+		}
+	}
+	if row := rowFor(t, rows, "pi"); row.State != MasterNotRegistered {
+		t.Fatalf("pi row = %#v", row)
+	}
+	key, labels, scopes := DetachedMasters(rows)
+	if key == "" || len(labels) != 2 || strings.Join(scopes, ",") != "project" {
+		t.Fatalf("key %q, labels %q, scopes %q", key, labels, scopes)
+	}
+
+	if _, err := claude.SyncStore(claude.ProjectScope, claude.Registrar{}, codex.Registrar{}); err != nil {
+		t.Fatal(err)
+	}
+	rows = MasterRuntimes(claude.ProjectScope)
+	for _, id := range []string{"claude-code", "codex"} {
+		if row := rowFor(t, rows, id); row.State != MasterCurrent {
+			t.Errorf("%s after sync = %#v", id, row)
+		}
+	}
+	if key, _, _ := DetachedMasters(rows); key != "" {
+		t.Errorf("key after sync = %q", key)
+	}
+
+	// With the master file gone, sync cannot repair the scope, so no row reads
+	// detached; the registered row names the rebuild through its own state.
+	store := rowFor(t, rows, "claude-code").Path
+	if err := os.Remove(store); err != nil {
+		t.Fatal(err)
+	}
+	rows = MasterRuntimes(claude.ProjectScope)
+	if key, _, _ := DetachedMasters(rows); key != "" {
+		t.Errorf("a store with no master reads detached: %q", key)
+	}
+	if row := rowFor(t, rows, "claude-code"); !row.Stale() ||
+		!strings.Contains(MasterPhrase(row), "steer hooks rebuild") {
+		t.Errorf("claude-code row without a master = %#v", row)
+	}
+}
+
 // The notice names drifted sections only, rebuilds each scope once, and keys on
 // what drifted, so a different missing rule nudges again.
 func TestRulesDriftNamesOnlyDriftedSections(t *testing.T) {

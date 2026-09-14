@@ -174,7 +174,7 @@ func intPtr(n int) *int           { return &n }
 // so a renamed or reordered json tag fails here, the agent-contract guard.
 func TestJSONContractIsStable(t *testing.T) {
 	s := &SystemStatus{
-		StatusVersion: 18,
+		StatusVersion: 19,
 		GeneratedAt:   "2026-01-01T00:00:00Z",
 		Posture: Posture{
 			Instrument: "agy@sha", Reviewer: "gemini", Ledger: "/l.jsonl",
@@ -202,6 +202,8 @@ func TestJSONContractIsStable(t *testing.T) {
 				{Harness: "claude-code", Scope: "global", Path: "/h/steer-hooks.py",
 					Runtime: "aaaaaaaa", Version: "0.1.0", Expected: "bbbbbbbb", State: MasterStale, Trust: TrustNotApplicable, Observed: 1690},
 				{Harness: "codex", Scope: "global", Expected: "bbbbbbbb", State: MasterNotRegistered},
+				{Harness: "codex", Scope: "project", Expected: "bbbbbbbb", State: MasterDetached,
+					Store: ".steer/hooks/steer-hooks.py"},
 			},
 			Rules: []RulesPresence{
 				{Harness: "codex", Scope: "global", Path: "/h/.codex/AGENTS.md", Expected: 3,
@@ -301,7 +303,7 @@ func TestJSONContractIsStable(t *testing.T) {
 }
 
 const goldenStatusJSON = `{
-  "status_version": 18,
+  "status_version": 19,
   "generated_at": "2026-01-01T00:00:00Z",
   "posture": {
     "instrument": "agy@sha",
@@ -383,6 +385,13 @@ const goldenStatusJSON = `{
         "scope": "global",
         "expected": "bbbbbbbb",
         "state": "not-registered"
+      },
+      {
+        "harness": "codex",
+        "scope": "project",
+        "expected": "bbbbbbbb",
+        "state": "detached",
+        "store": ".steer/hooks/steer-hooks.py"
       }
     ],
     "rules": [

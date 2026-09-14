@@ -91,13 +91,53 @@ func MasterPhrase(m MasterRuntime) string {
 			m.Runtime, m.Expected, m.Scope)
 	case MasterUnknown:
 		return fmt.Sprintf("runtime has no version (unstamped) — run: steer hooks rebuild --scope %s", m.Scope)
+	case MasterDetached:
+		if m.Path == "" {
+			return "runs none of this scope's guards: no runner is registered — run: " + SyncCommand(m.Scope)
+		}
+		return fmt.Sprintf("runs none of this scope's guards: the registration names %s, not %s — run: %s",
+			m.Path, m.Store, SyncCommand(m.Scope))
 	}
 	return ""
 }
 
+// SyncCommand registers a scope's existing master and rules in every installed
+// harness without regenerating the master.
+func SyncCommand(scope string) string {
+	return "steer hooks sync --scope " + scope
+}
+
 // RulesRepairCommand rewrites every installed harness's rules section in a scope.
 func RulesRepairCommand(scope string) string {
-	return "steer hooks rebuild --scope " + scope
+	return SyncCommand(scope)
+}
+
+// DetachedMasters summarizes the detached rows for a one-line notice, in the shape
+// RulesDrift uses: a key that changes whenever the set does, one label per row,
+// and each scope to sync, once.
+func DetachedMasters(rows []MasterRuntime) (key string, labels, scopes []string) {
+	var parts []string
+	seen := map[string]bool{}
+	for _, m := range rows {
+		if !m.Detached() {
+			continue
+		}
+		store := m.Store
+		if abs, err := filepath.Abs(store); err == nil {
+			store = abs
+		}
+		parts = append(parts, fmt.Sprintf("%s/%s:%s:%s", m.Harness, m.Scope, store, m.Path))
+		labels = append(labels, fmt.Sprintf("%s, %s scope", HarnessLabel(m.Harness), m.Scope))
+		if !seen[m.Scope] {
+			seen[m.Scope] = true
+			scopes = append(scopes, m.Scope)
+		}
+	}
+	if len(parts) == 0 {
+		return "", nil, nil
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, "|"), labels, scopes
 }
 
 // RulesPhrase names one harness's rules section in one clause: whether it carries
@@ -197,7 +237,7 @@ func ObservedPhrase(a ScopeArming) string {
 // RunnerUnapproved reports a registered runner the harness is known not to have
 // approved, so it runs no guard there while the rule's text still reaches the agent.
 func (m MasterRuntime) RunnerUnapproved() bool {
-	return m.State != MasterNotRegistered && m.Trust == TrustMissing
+	return m.State != MasterNotRegistered && !m.Detached() && m.Trust == TrustMissing
 }
 
 // RunnerTrustPhrase names a registered runner's approval, "" where the harness
@@ -212,7 +252,7 @@ func RunnerTrustPhrase(m MasterRuntime) string {
 // MasterObservedPhrase names the last block a registered master recorded. The
 // audit log holds blocks only, so a master that allowed every call has none.
 func MasterObservedPhrase(m MasterRuntime) string {
-	if m.State == MasterNotRegistered {
+	if m.State == MasterNotRegistered || m.Detached() {
 		return ""
 	}
 	if m.Observed == 0 {

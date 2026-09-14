@@ -49,8 +49,9 @@ import (
 // another host is not missing coverage here. v17 adds interventions[].artifact: the
 // fix a record binds and where it stands now. v18 adds rules and addenda: the
 // instruction and review entries each store holds, a project addendum entry read
-// both on disk and at HEAD.
-const StatusVersion = 18
+// both on disk and at HEAD. v19 adds posture.masters[].state `detached` and
+// .store: an installed harness that runs none of a scope's guards.
+const StatusVersion = 19
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20
@@ -233,6 +234,10 @@ const (
 	MasterStale         = "stale"
 	MasterUnknown       = "unknown"
 	MasterNotRegistered = "not-registered"
+	// MasterDetached is an installed harness that runs none of a scope's guards:
+	// the store holds guards and a master, and the harness registers no master or
+	// one other than the store's.
+	MasterDetached = "detached"
 )
 
 // MasterRuntime is one harness and scope's registered master and the runtime it
@@ -251,6 +256,9 @@ type MasterRuntime struct {
 	// Expected is the running binary's runtime digest.
 	Expected string `json:"expected"`
 	State    string `json:"state"`
+	// Store is the master the scope's store holds, set on a detached row: the file
+	// the harness should run.
+	Store string `json:"store,omitempty"`
 	// Trust is what this machine can say about the harness's approval of the
 	// registered runner, "" when none is registered.
 	Trust string `json:"trust,omitempty"`
@@ -264,6 +272,9 @@ type MasterRuntime struct {
 // unstamped, so treating absence as up to date would report exactly the machines
 // that need the rebuild as healthy.
 func (m MasterRuntime) Stale() bool { return m.State == MasterStale || m.State == MasterUnknown }
+
+// Detached reports whether this harness runs none of the scope's guards.
+func (m MasterRuntime) Detached() bool { return m.State == MasterDetached }
 
 // Rules section states. The manifest is what a record binds; the section is what
 // the agent reads.
@@ -754,6 +765,7 @@ func guardRegistrars() []harness.Registrar {
 // yields a not-registered row, never an error.
 func masterRuntimes(scope string) []MasterRuntime {
 	expected := guard.RuntimeDigest()
+	store := storeMaster(scope)
 	out := make([]MasterRuntime, 0, len(guardRegistrars()))
 	for _, registrar := range guardRegistrars() {
 		row := MasterRuntime{
@@ -763,7 +775,16 @@ func masterRuntimes(scope string) []MasterRuntime {
 			State:    MasterNotRegistered,
 		}
 		path, err := registrar.RegisteredMasterPath(scope)
-		if err != nil || path == "" {
+		if err != nil {
+			out = append(out, row)
+			continue
+		}
+		if store != "" && registrar.Harness().Installed() && !claude.SamePath(path, store) {
+			row.Path, row.Store, row.State = path, store, MasterDetached
+			out = append(out, row)
+			continue
+		}
+		if path == "" {
 			out = append(out, row)
 			continue
 		}
@@ -784,6 +805,24 @@ func masterRuntimes(scope string) []MasterRuntime {
 		out = append(out, row)
 	}
 	return out
+}
+
+// storeMaster names the master a scope's store holds, "" when the store holds no
+// guards, has no master file, or cannot be read. A store with guards and no
+// master needs a rebuild, which the registered row's own state already names.
+func storeMaster(scope string) string {
+	hooks, err := claude.ListIndividualHooks(scope)
+	if err != nil || len(hooks) == 0 {
+		return ""
+	}
+	path, err := claude.GetMasterHookPath(scope)
+	if err != nil {
+		return ""
+	}
+	if _, err := os.Stat(path); err != nil {
+		return ""
+	}
+	return path
 }
 
 // runnerTrust reads a harness's approval of its registered guard runner. Codex

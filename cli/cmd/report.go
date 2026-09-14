@@ -249,9 +249,11 @@ It does two things:
      only when the queue changes or a new refresh cycle has run — never every
      session.
 
-It also names two standing conditions, each once until it changes: a registered
-guard runner older than this binary, and an installed harness whose Steer Rules
-section does not match the manifest. Both repair with 'steer hooks rebuild'.`,
+It also names three standing conditions, each once until it changes: a registered
+guard runner older than this binary, which repairs with 'steer hooks rebuild'; an
+installed harness whose Steer Rules section does not match the manifest; and an
+installed harness that runs none of a store's guards. The last two repair with
+'steer hooks sync'.`,
 	Example: `  steer report cadence`,
 	// SilenceErrors/Usage: this runs as a hook. Any failure must be silent and
 	// exit 0, never a stderr dump into the session's startup.
@@ -311,16 +313,28 @@ func runCadence() {
 			"steer: an agent's instruction file does not match Steer's rules (%s) — run: %s",
 			strings.Join(ruleLabels, "; "), strings.Join(repairs, " and ")))
 	}
+	detachedKey, detachedLabels, detachedScopes := status.DetachedMasters(
+		status.MasterRuntimes(claude.GlobalScope, claude.ProjectScope))
+	if cadence.ShouldNudgeDetached(dir, detachedKey) {
+		repairs := make([]string, 0, len(detachedScopes))
+		for _, s := range detachedScopes {
+			repairs = append(repairs, status.SyncCommand(s))
+		}
+		lines = append(lines, fmt.Sprintf(
+			"steer: an installed agent runs none of Steer's guards (%s) — run: %s",
+			strings.Join(detachedLabels, "; "), strings.Join(repairs, " and ")))
+	}
 	if len(lines) == 0 {
 		// Nothing to say, but a repaired condition still has to clear its key: a
 		// record left behind would suppress the nudge if that same condition
 		// came back.
-		if prev := cadence.LoadNudge(dir); prev.Master != key || prev.Rules != rulesKey {
-			_ = cadence.WriteNudge(dir, rec.WithMaster(key).WithRules(rulesKey))
+		if prev := cadence.LoadNudge(dir); prev.Master != key || prev.Rules != rulesKey ||
+			prev.Detached != detachedKey {
+			_ = cadence.WriteNudge(dir, rec.WithMaster(key).WithRules(rulesKey).WithDetached(detachedKey))
 		}
 		return
 	}
-	rec = rec.WithMaster(key).WithRules(rulesKey)
+	rec = rec.WithMaster(key).WithRules(rulesKey).WithDetached(detachedKey)
 
 	msg := strings.Join(lines, "\n")
 	out, err := json.Marshal(sessionStartOutput{

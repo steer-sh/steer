@@ -31,6 +31,9 @@ type nudgeRecord struct {
 	// Rules is the drifted rules-section key the last nudge named, under the same
 	// once-per-key rule as Master.
 	Rules string `json:"rules,omitempty"`
+	// Detached is the key of the harnesses that run none of a store's guards,
+	// under the same once-per-key rule as Master.
+	Detached string `json:"detached,omitempty"`
 }
 
 // QueueHash is the change key of the queue file: the sha256 of its bytes. The queue
@@ -110,6 +113,21 @@ func ShouldNudgeRules(dir, key string) bool {
 // part of a nudge.
 func (r nudgeRecord) WithRules(key string) nudgeRecord {
 	r.Rules = key
+	return r
+}
+
+// ShouldNudgeDetached decides whether to name a harness that runs none of a
+// store's guards. An empty key means every installed harness runs them.
+func ShouldNudgeDetached(dir, key string) bool {
+	if key == "" {
+		return false
+	}
+	return readNudge(dir).Detached != key
+}
+
+// WithDetached returns the record carrying a detached key.
+func (r nudgeRecord) WithDetached(key string) nudgeRecord {
+	r.Detached = key
 	return r
 }
 

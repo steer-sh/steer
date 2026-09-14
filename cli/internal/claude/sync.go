@@ -1,10 +1,15 @@
 package claude
 
 import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/steer-sh/steer-cli/internal/harness"
+	"github.com/steer-sh/steer-cli/internal/hookstore"
 	"github.com/steer-sh/steer-cli/internal/instructions"
 )
 
@@ -151,6 +156,144 @@ func SyncTargets(scope string, targets ...harness.Registrar) error {
 		if err := target.SetRules(rules, scope); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// SyncResult names each target a store sync wrote and each it left as it was.
+type SyncResult struct {
+	Scope      string
+	Hooks      int
+	MasterPath string
+	Synced     []harness.Harness
+	Current    []harness.Harness
+}
+
+// SyncStore registers the store's existing master in each target and writes each
+// target's rules section, touching only the parts that differ from the store. It
+// never writes the store itself: no master, manifest or fixture state. A store
+// holding guards must hold a master that embeds exactly those guards.
+func SyncStore(scope string, targets ...harness.Registrar) (*SyncResult, error) {
+	scope = strings.ToLower(strings.TrimSpace(scope))
+	if err := ValidateScope(scope); err != nil {
+		return nil, err
+	}
+	hooks, err := ListIndividualHooks(scope)
+	if err != nil {
+		return nil, err
+	}
+	master, err := hookstore.MasterPath(scope)
+	if err != nil {
+		return nil, err
+	}
+	result := &SyncResult{Scope: scope, Hooks: len(hooks), MasterPath: master}
+	if len(hooks) > 0 {
+		if err := MasterCovers(scope); err != nil {
+			return nil, fmt.Errorf("%w — run: steer hooks rebuild --scope %s", err, scope)
+		}
+	}
+	rules, err := ManifestRules(scope)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, target := range harness.Targets(targets, Registrar{}) {
+		registered, err := target.RegisteredMasterPath(scope)
+		if err != nil {
+			return nil, err
+		}
+		register := len(hooks) > 0 && !SamePath(registered, master)
+		deregister := len(hooks) == 0 && registered != ""
+		presence, readErr := TargetRulesPresence(scope, target)
+		rewrite := readErr != nil || presence.Drifted()
+
+		switch {
+		case register:
+			err = target.RegisterMaster(scope)
+		case deregister:
+			err = target.RemoveMaster(scope)
+		}
+		if err != nil {
+			return nil, err
+		}
+		if rewrite {
+			if err := target.SetRules(rules, scope); err != nil {
+				return nil, err
+			}
+		}
+		if register || deregister || rewrite {
+			result.Synced = append(result.Synced, target.Harness())
+		} else {
+			result.Current = append(result.Current, target.Harness())
+		}
+	}
+	return result, nil
+}
+
+// SamePath reports whether two master paths name one file. A project path is
+// relative to the repository root, so both resolve against the working directory.
+func SamePath(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	absA, errA := filepath.Abs(filepath.FromSlash(a))
+	absB, errB := filepath.Abs(filepath.FromSlash(b))
+	return errA == nil && errB == nil && absA == absB
+}
+
+// masterSourcesPrefix opens the object in which a generated master carries each
+// guard's source, keyed by guard name.
+const masterSourcesPrefix = "\nSTEER_HOOK_SOURCES = "
+
+// MasterCovers reports an error unless the store's master exists and embeds
+// every guard in the store with its current source, and no other guard.
+func MasterCovers(scope string) error {
+	path, err := hookstore.MasterPath(scope)
+	if err != nil {
+		return err
+	}
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return fmt.Errorf("the store holds guards but no master at %s", path)
+	}
+	if err != nil {
+		return err
+	}
+	start := strings.Index(string(data), masterSourcesPrefix)
+	if start < 0 {
+		return fmt.Errorf("%s carries no guard sources", path)
+	}
+	embedded := map[string]string{}
+	decoder := json.NewDecoder(strings.NewReader(string(data[start+len(masterSourcesPrefix):])))
+	if err := decoder.Decode(&embedded); err != nil {
+		return fmt.Errorf("%s: unreadable guard sources: %w", path, err)
+	}
+
+	hooks, err := ListIndividualHooks(scope)
+	if err != nil {
+		return err
+	}
+	var gaps []string
+	for _, hook := range hooks {
+		source, err := readHookSource(hook.Path)
+		if err != nil {
+			return fmt.Errorf("failed to read hook %s: %w", hook.Path, err)
+		}
+		held, ok := embedded[source.Name]
+		switch {
+		case !ok:
+			gaps = append(gaps, source.Name+" is not in it")
+		case held != source.Source:
+			gaps = append(gaps, source.Name+" differs from its file")
+		}
+		delete(embedded, source.Name)
+	}
+	for name := range embedded {
+		gaps = append(gaps, name+" has no file in the store")
+	}
+	if len(gaps) > 0 {
+		sort.Strings(gaps)
+		return fmt.Errorf("%s does not match the store's guards: %s", path, strings.Join(gaps, "; "))
 	}
 	return nil
 }

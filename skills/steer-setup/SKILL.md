@@ -135,21 +135,33 @@ entry belongs to this agent's tool calls and not to their terminal:
 export PATH="$HOME/.steer/bin:$PATH"    # add to ~/.zshrc or ~/.bashrc
 ```
 
-**When adding a harness**, carry the existing guards and rules into it. Guards and
-instruction rules are written only to the harnesses installed at the time, so a
-harness installed later has no guard runner and no `## Steer Rules` section until
-something writes them again:
+**Carry existing guards and rules into this harness, on every setup.** Guards and
+instruction rules are registered only in the harnesses installed when they were
+written. So a harness installed later has no guard runner and no `## Steer Rules`
+section. A clone of a repository whose `.steer/hooks` store a teammate committed
+is in the same state when the teammate used a different harness or did not commit
+their harness configuration. Read the two readings that name this:
 
 ```bash
-"${STEER_BIN}" hooks rebuild --scope global
+"${STEER_BIN}" status --json
 ```
 
-Also run it with `--scope project` when the current repository holds a
-`.steer/hooks` store. The rebuild registers the guard runner in every installed
-harness and rewrites each one's rules section from Steer's manifest. Lines written
-by hand inside that section are removed; the rest of the file is left alone. In
-`steer status --json`, `posture.rules` shows any harness whose section still
-differs.
+In `posture.masters`, a row whose `state` is `detached` is an installed harness
+that runs none of that scope's guards. In `posture.rules`, a row whose `state` is
+`drifted` is a harness whose rules section differs from Steer's manifest. For
+each scope with either row, name the harnesses to the user and ask before you run:
+
+```bash
+"${STEER_BIN}" hooks sync --scope <global|project>
+```
+
+Sync registers the runner the store already holds and rewrites each harness's
+rules section. Lines written by hand inside that section are removed; the rest of
+the file is left alone. In project scope these files are usually committed, so
+the user sees a diff in `.claude/settings.json`, `.codex/hooks.json`, `CLAUDE.md`
+or `AGENTS.md`. Sync never writes the store. If it refuses because the runner does
+not carry the store's guards, relay the refusal. The repair it names, `hooks
+rebuild`, rewrites the shared runner for the whole team, so it is the user's call.
 
 ## Step 5: Name the trust step, then confirm
 
@@ -211,7 +223,8 @@ the approval list or the hook script.
 
 ## What this skill does not do
 
-- It never installs guards or presets. `/steer` writes a guard from a rule.
+- It never authors guards or installs presets. `/steer` writes a guard from a rule.
+  Setup only registers the guards a store already holds.
 - It never writes a check. `steer check guide` is the authoring contract, and
   `/steer-report` routes a recurring problem to a check.
 - It never registers an intervention or reads the evidence corpora. `/steer-report`

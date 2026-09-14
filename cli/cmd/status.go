@@ -162,7 +162,7 @@ func renderPosture(s *status.SystemStatus, width int) {
 		if phrase == "" {
 			continue
 		}
-		if m.Stale() {
+		if m.Stale() || m.Detached() {
 			phrase = styles.WarningText.Render(phrase)
 		}
 		if trust := status.RunnerTrustPhrase(m); trust != "" {

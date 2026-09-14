@@ -214,14 +214,21 @@ v17 adds `artifact`: the fix a record binds and where it stands now. v18 adds
   allowed every call reads as 0). `state` is `current`, `stale` (an older runtime, so a firing
   writes fewer audit fields than the join reads), `unknown` (an unstamped
   master — every store built before the stamp existed, which never reads as
-  current) or `not-registered`. `trust` is the harness's approval of the
+  current), `detached` or `not-registered`. `detached` is an installed harness
+  that runs none of the scope's guards: the store holds guards and the harness
+  registers no runner for them, or one other than the store's. A store with guards
+  and no runner file never reads `detached`: its repair is a rebuild.
+  Its `store` names the runner the store holds. `trust` is the harness's approval of the
   registered runner, in the same values as a `posture` row's `trust`, and is
   absent when no runner is registered. A Codex runner reading `missing` runs no
   guard, while the guard's rule still reaches the agent as text; approve the
   definitions in `/hooks`. The row reads the REGISTERED master, not the one
   the store resolves to: a migrated machine holds a master at both paths. **Act
   on `stale` or `unknown`:** run `steer hooks rebuild --scope <scope>`, which
-  regenerates the master AND re-registers it in one operation.
+  regenerates the master AND re-registers it in one operation. **Act on
+  `detached`:** run `steer hooks sync --scope <scope>`, which registers the
+  runner the store already holds and writes nothing in the store; a clone of a
+  repository whose guards were committed reads `detached` until it runs.
   `rules[]` reads each installed harness's `## Steer Rules` section against the
   manifest, one row per installed harness per scope; a harness that is not
   installed gets no row. `path` is the instruction file (CLAUDE.md or AGENTS.md),
@@ -231,7 +238,7 @@ v17 adds `artifact`: the fix a record binds and where it stands now. v18 adds
   `current`, `drifted` or `unknown` (the file could not be read). A record whose
   rule is missing from a harness's file stays live while that agent never reads
   the rule: a harness installed after the rule was written, or a hand edit to the
-  file, causes it. **Act on `drifted`:** run `steer hooks rebuild --scope <scope>`,
+  file, causes it. **Act on `drifted`:** run `steer hooks sync --scope <scope>`,
   which rewrites every installed harness's section from the manifest.
 - `checks` — this repository's check tier on this machine, with an empty reading
   when `steer status` ran outside a repository. `repo` is the resolved Git root,

@@ -59,6 +59,7 @@ type fixRow struct {
 const (
 	repairPresets = "update-built-ins"
 	repairRunner  = "rebuild-runner"
+	repairSync    = "sync-registrations"
 )
 
 // fixRows lists the rows in the order the panel prints them: your guards, rules,
@@ -205,22 +206,38 @@ func (m *Model) guardRepairs() []fixRow {
 		})
 		break
 	}
-	// The rebuild also rewrites every rules section, so one row serves both issues.
-	// It acts on the dashboard's scope, so a section in the other scope gets no row.
+	// A sync registers the existing runner and rewrites every rules section, so one
+	// row serves both issues. It acts on the dashboard's scope, so the other scope
+	// gets no row.
+	for _, master := range m.snap.Posture.Masters {
+		if master.Scope != m.scope || !master.Detached() {
+			continue
+		}
+		agent := status.HarnessLabel(master.Harness)
+		rows = append(rows, fixRow{
+			kind: guardRepair, repair: repairSync,
+			name: "Run the guards in " + agent,
+			issue: "The guard store in " + scopeReach(master.Scope) + " holds guards, and " + agent +
+				" registers no runner for them, so none of them runs there. Syncing registers " +
+				"the runner the store already holds and writes the rules sections. It leaves " +
+				"the runner and your guard files as they are.",
+		})
+		break
+	}
 	for _, r := range m.snap.Posture.Rules {
-		if r.Scope != m.scope || r.State != status.RulesDrifted || hasRepair(rows, repairRunner) {
+		if r.Scope != m.scope || r.State != status.RulesDrifted ||
+			hasRepair(rows, repairRunner) || hasRepair(rows, repairSync) {
 			continue
 		}
 		agent := status.HarnessLabel(r.Harness)
 		rows = append(rows, fixRow{
-			kind: guardRepair, repair: repairRunner,
+			kind: guardRepair, repair: repairSync,
 			name: "Restore the rules " + agent + " reads",
 			issue: "The instruction file " + agent + " reads in " + scopeReach(r.Scope) +
 				" does not match the rules Steer holds: " + status.RulesPhrase(r) + ". " +
 				"The agent reads only the rules in that file. " +
-				"Rebuilding rewrites that section from Steer's rules and writes the shared " +
-				"runner again. Lines you wrote inside the section are removed; the rest of " +
-				"the file is left alone.",
+				"Syncing rewrites that section from Steer's rules. Lines you wrote inside " +
+				"the section are removed; the rest of the file is left alone.",
 		})
 		break
 	}
@@ -305,11 +322,14 @@ func (m *Model) fixesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	row := rows[m.cursor[panelFixes]]
 	switch row.kind {
 	case guardRepair:
-		if row.repair == repairPresets {
+		switch row.repair {
+		case repairPresets:
 			m.syncPresets()
-			return m, nil
+		case repairSync:
+			m.syncStore()
+		default:
+			m.rebuildMaster()
 		}
-		m.rebuildMaster()
 	case guardAvailable:
 		m.togglePreset(row.name, false)
 	case guardInstalled:
@@ -466,6 +486,18 @@ func (m *Model) rebuildMaster() {
 		return
 	}
 	m.note("the runner now carries %d guard(s), version %s", res.Hooks, res.Stamp.Runtime)
+}
+
+// syncStore registers the store's existing runner and rules in every target,
+// through the same package function `steer hooks sync` calls.
+func (m *Model) syncStore() {
+	res, err := claude.SyncStore(m.scope, m.targets...)
+	if err != nil {
+		m.note("nothing was synced: %v", err)
+		return
+	}
+	m.refresh()
+	m.note("synced %d agent(s); %d already matched the store", len(res.Synced), len(res.Current))
 }
 
 // viewFixes renders each tier's fixes, the built-in guards you can turn on, and
