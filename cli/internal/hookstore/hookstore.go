@@ -23,6 +23,7 @@ const (
 	MasterName   = "steer-hooks.py"
 	ManifestName = "steer-manifest.json"
 	AuditName    = "steer-audit.jsonl"
+	IgnoreName   = ".gitignore"
 )
 
 // Dir returns the neutral guard directory for a scope, whether or not it exists.
@@ -77,6 +78,9 @@ func Prepare(scope string) (string, error) {
 	if err := os.MkdirAll(neutral, 0o755); err != nil {
 		return "", fmt.Errorf("failed to create hooks directory: %w", err)
 	}
+	if err := ignoreAudit(neutral); err != nil {
+		return "", fmt.Errorf("failed to write %s: %w", IgnoreName, err)
+	}
 	legacy, err := LegacyDir(scope)
 	if err != nil {
 		return "", err
@@ -88,6 +92,28 @@ func Prepare(scope string) (string, error) {
 		return "", err
 	}
 	return neutral, nil
+}
+
+// ignoreAudit makes sure the store's .gitignore names the audit log. A project
+// store is committed with its manifest, while the audit log holds this machine's
+// blocked commands and sessions. An existing .gitignore keeps its lines and gains
+// the entry only when no line already names the log.
+func ignoreAudit(dir string) error {
+	path := filepath.Join(dir, IgnoreName)
+	raw, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.TrimPrefix(strings.TrimSpace(line), "/") == AuditName {
+			return nil
+		}
+	}
+	content := string(raw)
+	if content != "" && !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+	return writeWhole(path, []byte(content+AuditName+"\n"), 0o644)
 }
 
 // populated reports whether a directory holds a steer store. The manifest is the

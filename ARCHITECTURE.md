@@ -58,6 +58,8 @@ migration ownership:
   and the neutral store does not. Migration copies manifest-owned guards, the
   master and audit log, landing the manifest last. This migration does not copy
   `fixtures/`; when migrating a legacy store, check fixture availability separately.
+  `Prepare` also keeps a store `.gitignore` that names `steer-audit.jsonl`: a
+  project store is committed, and its audit log is machine-local.
 
 Both migrations retain legacy files and preserve files already in the destination.
 A retained legacy master can still be registered, so diagnostics read

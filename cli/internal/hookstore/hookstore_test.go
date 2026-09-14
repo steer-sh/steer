@@ -2,6 +2,7 @@ package hookstore
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -245,5 +246,47 @@ func TestGlobalScopeSitsUnderTheHomeDirectory(t *testing.T) {
 func TestAnInvalidScopeIsAnError(t *testing.T) {
 	if _, err := Dir("session"); err == nil {
 		t.Error("Dir accepted an unknown scope")
+	}
+}
+
+// TestPrepareKeepsTheAuditLogOutOfGit runs git itself, so the entry is tested by
+// what git ignores and not by the file's spelling.
+func TestPrepareKeepsTheAuditLogOutOfGit(t *testing.T) {
+	root := projectRoot(t)
+	if out, err := exec.Command("git", "init", "-q", root).CombinedOutput(); err != nil {
+		t.Skipf("git init: %v: %s", err, out)
+	}
+	dir, err := Prepare("project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, ignored := range map[string]bool{AuditName: true, ManifestName: false, MasterName: false} {
+		err := exec.Command("git", "-C", root, "check-ignore", "-q", filepath.Join(dir, name)).Run()
+		if got := err == nil; got != ignored {
+			t.Errorf("git ignores %s = %v; want %v", name, got, ignored)
+		}
+	}
+}
+
+func TestPrepareAddsTheAuditEntryToAnExistingGitignoreOnce(t *testing.T) {
+	projectRoot(t)
+	dir, err := Dir("project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, IgnoreName)
+	if err := os.WriteFile(path, []byte("fixtures/scratch"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := Prepare("project"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, want := read(t, path), "fixtures/scratch\n"+AuditName+"\n"; got != want {
+		t.Errorf("%s = %q; want %q", IgnoreName, got, want)
 	}
 }
