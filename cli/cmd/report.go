@@ -134,7 +134,7 @@ func collectInstructionFiles(only harness.ID) []report.InstructionFile {
 				}
 				path = filepath.Join(dir, h.InstructionFile)
 			}
-			md, err := report.ExtractInstructionFile(h.ID, path)
+			md, err := report.ExtractInstructionFile(h.ID, path, guardRuleTexts(scope))
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "warning: could not read %s: %v\n", path, err)
 				continue
@@ -144,6 +144,21 @@ func collectInstructionFiles(only harness.ID) []report.InstructionFile {
 			}
 			out = append(out, md)
 		}
+	}
+	return out
+}
+
+// guardRuleTexts are the rules the scope's guards carry, the lines of its rules
+// section a guard enforces. An unreadable manifest yields none, so every line
+// reads as unenforced rather than as enforced.
+func guardRuleTexts(scope string) []string {
+	manifest, err := claude.LoadManifest(scope)
+	if err != nil || manifest == nil {
+		return nil
+	}
+	out := make([]string, 0, len(manifest.Hooks))
+	for _, hook := range manifest.Hooks {
+		out = append(out, hook.Rule)
 	}
 	return out
 }

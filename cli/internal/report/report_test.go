@@ -294,7 +294,7 @@ func TestExtractInstructionFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	md, err := ExtractInstructionFile(harness.ClaudeCode, path)
+	md, err := ExtractInstructionFile(harness.ClaudeCode, path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,12 +308,38 @@ func TestExtractInstructionFile(t *testing.T) {
 		t.Errorf("section = %q", md.Directives[0].Section)
 	}
 
-	missing, err := ExtractInstructionFile(harness.ClaudeCode, filepath.Join(dir, "nope.md"))
+	missing, err := ExtractInstructionFile(harness.ClaudeCode, filepath.Join(dir, "nope.md"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(missing.SteerRules) != 0 || len(missing.Directives) != 0 {
 		t.Error("missing file should yield empty result")
+	}
+}
+
+// A guard and an instruction rule both write a line into the section, so only a
+// line whose text is a guard's rule reads as enforced. The same text outside the
+// section is a directive, never a guard rule.
+func TestOnlyAGuardsLineReadsAsEnforced(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "AGENTS.md")
+	content := "## Conventions\n- use python3 instead\n\n## Steer Rules\n<!-- managed-by-steer -->\n" +
+		"- resolve a config path from the repo root\n- use python3 instead\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	md, err := ExtractInstructionFile(harness.Codex, path, []string{"use python3 instead", "a guard with no line"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(md.SteerRules) != 2 {
+		t.Errorf("steer rules = %q", md.SteerRules)
+	}
+	if len(md.GuardRules) != 1 || md.GuardRules[0] != "use python3 instead" {
+		t.Errorf("guard rules = %q, want only the guard's line", md.GuardRules)
+	}
+	if len(md.Directives) != 1 {
+		t.Errorf("directives = %+v", md.Directives)
 	}
 }
 
@@ -357,8 +383,8 @@ func TestDigestReportsCoveragePerHarness(t *testing.T) {
 	scanner, projects := Scan(adapters, time.Time{}, transcript.Filter{AllProjects: true}, nil)
 	d := scanner.Finalize(30, projects, nil)
 
-	if d.DigestVersion != 2 {
-		t.Errorf("digest_version = %d; want 2", d.DigestVersion)
+	if d.DigestVersion != 3 {
+		t.Errorf("digest_version = %d; want 3", d.DigestVersion)
 	}
 	// Two root sessions and one thread: a thread is provenance, not a unit.
 	if d.Stats.SessionsScanned != 2 || d.Stats.ThreadsScanned != 1 {

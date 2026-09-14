@@ -141,12 +141,12 @@ All projects and every harness are scanned by default (cross-project, cross-harn
 
 The queue's transcript candidates list the strongest correction clusters, most of them holding a single occurrence. A cluster key is the user's own wording, so it merges verbatim repeats and nothing else — two complaints about one habit, phrased differently, arrive as two rows. Grouping them into classes is your job, not the tier's. Read the full digest to merge, split, or discard those rows and to catch anything the queue's cap left out.
 
-Digest schema (`digest_version: 2`):
+Digest schema (`digest_version: 3`):
 
 - `stats` — coverage: `sessions_scanned`, `threads_scanned`, `bytes_scanned`, `clusters_found`, `clusters_emitted`, `truncated`. **Always relay coverage to the user in one sentence.** If `truncated` is true, say so and suggest narrowing (`--days 7`) or raising `--max-digest-bytes`.
 - `stats.harnesses[]` — per harness: `harness`, `files_scanned`, `sessions_scanned`, `threads_scanned`, `bytes_scanned`, `entries_scanned`, `entries_skipped`. A harness missing from this list was never reached; a harness present with zeros has no evidence on this machine. Say which when a harness contributes nothing.
 - The session is the unit and a subagent thread is provenance under its root session. `threads_scanned` reports how many threads rode along; it is never added to `sessions_scanned`.
-- `instruction_files[]` — per instruction document (CLAUDE.md or AGENTS.md), tagged with its `harness`: `steer_rules` (already enforced by hooks) and `directives` (standing instructions with their section heading, NOT yet enforced).
+- `instruction_files[]` — per instruction document (CLAUDE.md or AGENTS.md), tagged with its `harness`: `steer_rules` (every line of the `## Steer Rules` section), `guard_rules` (the subset a guard in that scope enforces) and `directives` (standing instructions with their section heading, NOT yet enforced). A guard writes its rule into the section and so does an instruction rule, so a `steer_rules` line absent from `guard_rules` is an instruction rule: the loop decided on it, and nothing enforces it.
 - `signals.user_corrections[]` — user turns matching correction language. Each cluster: `pattern`, `count`, `sessions` (distinct sessions), `first_seen`, `last_seen`, `examples` (up to 3 raw snippets).
 - `signals.user_rejections[]` — tool calls the user declined at the permission prompt (pattern is `Tool: target`).
 - `signals.tool_failures[]` — recurring lint/test/compile failures from shell-tool output, whichever harness ran the shell.
@@ -378,7 +378,7 @@ A steer hook is a PreToolUse Python script doing regex/AST detection on file edi
 
 Then:
 
-1. **CLAUDE.md gap analysis first.** Directives are the highest-precision source: the user already wrote the rule down; it just isn't enforced. Check each hookable directive against `steer_rules` and `hook_blocks` — skip anything already covered.
+1. **CLAUDE.md gap analysis first.** Directives are the highest-precision source: the user already wrote the rule down; it just isn't enforced. Check each hookable directive against `guard_rules` and `hook_blocks` — skip anything a guard already covers. A directive that matches only an instruction rule (in `steer_rules`, not in `guard_rules`) is not enforced: propose a guard for it only with a reason why the instruction rule's `--not-mechanizable` argument no longer holds, and name the instruction rule the guard would replace.
 2. **Corrections and failures second.** Weight by `sessions` over `count` (friction across sessions beats one bad session). Read the `examples` — the pattern key is normalized and lossy; the examples carry the user's actual words.
 3. **Deduplicate across sources.** A CLAUDE.md directive corroborated by correction clusters is one candidate with stronger evidence, not two.
 4. **Phrase each candidate as a steer rule** in `detect | suggest` syntax, e.g. `never use python bare | use python3 instead`. Reuse the user's own wording where possible.
@@ -614,7 +614,7 @@ When the invocation contains `--headless`: skip the gate, ask nothing, install n
 
 ```json
 {
-  "digest_version": 2,
+  "digest_version": 3,
   "stats": { "sessions_scanned": 0, "threads_scanned": 0, "truncated": false },
   "interventions": [
     {

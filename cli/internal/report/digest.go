@@ -15,8 +15,9 @@ import (
 
 // DigestVersion is the schema version of the emitted digest. The steer-report
 // skill prompt reads this field; bump it whenever the shape or semantics of
-// the digest change.
-const DigestVersion = 2
+// the digest change. v3 adds instruction_files[].guard_rules and stops treating
+// every steer_rules line as enforced.
+const DigestVersion = 3
 
 // DefaultMaxDigestBytes caps the marshaled digest so it can be read into a
 // session without crowding the context window.
@@ -68,12 +69,18 @@ type Directive struct {
 }
 
 // InstructionFile summarizes one harness instruction document — CLAUDE.md or
-// AGENTS.md: rules already enforced by steer, and directives that are
-// candidates for enforcement.
+// AGENTS.md: the lines Steer wrote, the subset a guard enforces, and
+// directives that are candidates for enforcement.
 type InstructionFile struct {
-	Harness    harness.ID  `json:"harness"`
-	Path       string      `json:"path"`
-	SteerRules []string    `json:"steer_rules"`
+	Harness harness.ID `json:"harness"`
+	Path    string     `json:"path"`
+	// SteerRules is every line of the Steer Rules section. A guard writes its
+	// rule there and so does an instruction rule, so a line here is not proof of
+	// enforcement.
+	SteerRules []string `json:"steer_rules"`
+	// GuardRules are the SteerRules lines whose text is a guard's rule in the
+	// manifest of the document's scope.
+	GuardRules []string    `json:"guard_rules"`
 	Directives []Directive `json:"directives"`
 }
 

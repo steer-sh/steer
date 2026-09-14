@@ -14,12 +14,17 @@ const (
 )
 
 // ExtractInstructionFile parses one harness instruction document — CLAUDE.md
-// or AGENTS.md — into steer-enforced rules and unenforced directives. Bullets
-// under "## Steer Rules" are already backed by hooks; top-level bullets
-// elsewhere are candidates for enforcement. A missing file yields an empty
-// result, not an error.
-func ExtractInstructionFile(id harness.ID, path string) (InstructionFile, error) {
-	out := InstructionFile{Harness: id, Path: path, SteerRules: []string{}, Directives: []Directive{}}
+// or AGENTS.md — into the lines Steer wrote and the directives it did not.
+// Bullets under "## Steer Rules" are Steer's; the ones whose text is in
+// guardRules are also enforced by a guard, and the rest are instruction rules
+// that no guard backs. Top-level bullets elsewhere are candidates for
+// enforcement. A missing file yields an empty result, not an error.
+func ExtractInstructionFile(id harness.ID, path string, guardRules []string) (InstructionFile, error) {
+	out := InstructionFile{Harness: id, Path: path, SteerRules: []string{}, GuardRules: []string{}, Directives: []Directive{}}
+	guarded := make(map[string]bool, len(guardRules))
+	for _, rule := range guardRules {
+		guarded[strings.TrimSpace(rule)] = true
+	}
 
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -52,12 +57,16 @@ func ExtractInstructionFile(id harness.ID, path string) (InstructionFile, error)
 		if text == "" {
 			continue
 		}
+		backed := inSteerRules && guarded[text]
 		if len(text) > maxDirectiveLen {
 			text = text[:maxDirectiveLen]
 		}
 
 		if inSteerRules {
 			out.SteerRules = append(out.SteerRules, text)
+			if backed {
+				out.GuardRules = append(out.GuardRules, text)
+			}
 		} else if len(out.Directives) < maxDirectivesFile {
 			out.Directives = append(out.Directives, Directive{Section: section, Text: text})
 		}
