@@ -139,9 +139,12 @@ entries there (`mine.RequireAddendumAtHead`).
 
 `internal/guard/runtime.py` is embedded by `claude.generateMasterHook`.
 Guard sources are compiled into separate module namespaces, preserving their
-source and imports. Module initialization runs with empty stdin and discarded
-output, then the runtime calls each guard with a normalized payload.
-`guard.RequiredImports` supplies the generated runtime's import contract.
+source and imports. A final bare `main()` statement is dropped before module
+initialization, so loading never calls the guard; initialization runs with empty
+stdin and discarded output, then the runtime calls each guard with a normalized
+payload. A guard that fails to load is skipped and named on stderr, which the Pi
+bridge discards. `guard.RequiredImports` supplies the generated runtime's import
+contract.
 
 Virtual edits turn MultiEdit hunks and Codex patch file sections into Claude-shaped
 Edit/Write calls. Only added/replacement content is presented as changed content;
@@ -149,7 +152,8 @@ patch syntax is never presented as a shell command. Guards run in fixed order
 over the virtual edits, and the first objection wins. Reply rendering is specific
 to Claude Code, Codex or Pi; guards continue using the shared Claude-shaped input
 and block contract. Audit rows add harness, root session, thread and repository
-provenance. Runtime tests under `internal/guard/` pin this translation.
+provenance; the repository is the nearest directory holding a `.git` directory
+or file, so a worktree names its own root. Runtime tests under `internal/guard/` pin this translation.
 
 An installed master embeds the runtime it was built with. Its runtime digest stamp
 lets readers distinguish current, stale and unknown builds.

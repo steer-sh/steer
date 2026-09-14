@@ -20,12 +20,12 @@ const HarnessFlag = "--harness"
 var runtimeSource string
 
 // RuntimeSource is the Python the generated master embeds. It declares no
-// imports: datetime, io, json, os and sys come from the master's import block.
+// imports: ast, datetime, io, json, os and sys come from the master's import block.
 func RuntimeSource() string {
 	return strings.TrimRight(runtimeSource, "\n") + "\n"
 }
 
 // RequiredImports are the modules RuntimeSource assumes are already imported.
 func RequiredImports() []string {
-	return []string{"import datetime", "import io", "import json", "import os", "import sys"}
+	return []string{"import ast", "import datetime", "import io", "import json", "import os", "import sys"}
 }

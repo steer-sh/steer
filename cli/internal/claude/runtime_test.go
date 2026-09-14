@@ -336,3 +336,57 @@ func TestRuntimeAuditCarriesTheJoins(t *testing.T) {
 		t.Fatalf("audit row has no timestamp")
 	}
 }
+
+// A linked worktree carries .git as a file. Its audit rows name the worktree
+// root, beside the main checkout and nested inside it alike.
+func TestRuntimeAuditNamesTheWorktree(t *testing.T) {
+	tempDir := withProjectTempDir(t)
+	requirePython3(t)
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	installGuard(t, "marker-hook", markerHookContent)
+
+	git := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	checkout := filepath.Join(tempDir, "main")
+	if err := os.MkdirAll(checkout, 0o755); err != nil {
+		t.Fatalf("mkdir checkout: %v", err)
+	}
+	git(checkout, "init", "-q")
+	git(checkout, "-c", "user.email=steer@example.com", "-c", "user.name=steer",
+		"commit", "-q", "--allow-empty", "-m", "root")
+	sibling := filepath.Join(tempDir, "sibling")
+	nested := filepath.Join(checkout, ".claude", "worktrees", "nested")
+	git(checkout, "worktree", "add", "-q", sibling)
+	git(checkout, "worktree", "add", "-q", nested)
+
+	worktrees := []string{sibling, nested}
+	for _, worktree := range worktrees {
+		payload, err := json.Marshal(map[string]any{
+			"tool_name":  "Bash",
+			"tool_input": map[string]any{"command": "FORBIDDEN"},
+			"cwd":        worktree,
+		})
+		if err != nil {
+			t.Fatalf("marshal payload: %v", err)
+		}
+		runMasterWithArgs(t, string(payload))
+	}
+
+	rows := readAudit(t)
+	if len(rows) != len(worktrees) {
+		t.Fatalf("expected %d audit rows, got %d", len(worktrees), len(rows))
+	}
+	for i, worktree := range worktrees {
+		got, _ := rows[i]["repository"].(string)
+		if got != worktree {
+			t.Errorf("audit repository = %q, want the worktree %q", got, worktree)
+		}
+	}
+}

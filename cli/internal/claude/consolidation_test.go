@@ -350,6 +350,90 @@ func TestTrailingCallDoesNotRunOnTheRealPayload(t *testing.T) {
 	}
 }
 
+// raisingBareCallHook ends with a top-level main() call and reads stdin
+// without catching a decode error, so calling it on an empty stdin raises.
+const raisingBareCallHook = `#!/usr/bin/env python3
+import json
+import sys
+
+def main():
+    data = json.load(sys.stdin)
+    command = data.get("tool_input", {}).get("command", "")
+    if "FORBIDDEN" in command:
+        print(json.dumps({"decision": "block", "stopReason": "forbidden"}))
+    sys.exit(0)
+
+main()
+`
+
+func TestARaisingTrailingCallKeepsTheGuard(t *testing.T) {
+	master := consolidateFixture(t, raisingBareCallHook)
+
+	out := runMasterRaw(t, master, `{"tool_name":"Bash","tool_input":{"command":"echo FORBIDDEN"}}`)
+	if !strings.Contains(out, `"decision": "block"`) {
+		t.Errorf("a guard ending in a raising main() call was dropped: %q", out)
+	}
+}
+
+// countingBareCallHook blocks every call after its first. Standalone it runs
+// once per payload and allows, so a block means main() ran before the payload.
+const countingBareCallHook = `#!/usr/bin/env python3
+import json
+import sys
+
+CALLS = []
+
+def main():
+    CALLS.append(1)
+    try:
+        json.loads(sys.stdin.read())
+    except Exception:
+        return
+    if len(CALLS) > 1:
+        print(json.dumps({"decision": "block", "stopReason": "called twice"}))
+
+main()
+`
+
+func TestLoadingNeverCallsTheGuard(t *testing.T) {
+	master := consolidateFixture(t, countingBareCallHook)
+
+	out := runMasterRaw(t, master, `{"tool_name":"Bash","tool_input":{"command":"echo fine"}}`)
+	if strings.TrimSpace(out) != "" {
+		t.Errorf("the trailing main() call ran at load: %q", out)
+	}
+}
+
+func TestAnUnloadableGuardIsNamedOnStderr(t *testing.T) {
+	master := consolidateFiles(t, map[string]string{
+		"unloadable.py": "import json\nimport steer_no_such_module\n\ndef main():\n    pass\n",
+	})
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 not available")
+	}
+	masterPath := filepath.Join(t.TempDir(), "master.py")
+	if err := os.WriteFile(masterPath, []byte(master), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr strings.Builder
+	cmd := exec.Command(python, masterPath)
+	cmd.Stdin = strings.NewReader(`{"tool_name":"Bash","tool_input":{"command":"echo fine"}}`)
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("master hook errored: %v\nstderr: %s", err, stderr.String())
+	}
+	if stdout.String() != "" {
+		t.Errorf("a load failure reached stdout, the reply channel: %q", stdout.String())
+	}
+	want := "steer: guard unloadable not loaded: ModuleNotFoundError"
+	if !strings.Contains(stderr.String(), want) {
+		t.Errorf("stderr = %q, want it to contain %q", stderr.String(), want)
+	}
+}
+
 // selfNamingHook holds its own identifier inside a regex literal. Renaming
 // identifiers by word regex rewrote the pattern too, so the guard matched a
 // name the author never wrote.

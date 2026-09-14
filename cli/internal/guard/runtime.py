@@ -1,5 +1,5 @@
 # Steer master-hook runtime. Spliced into the generated master hook, so it
-# declares no imports and no entrypoint: datetime, io, json, os and sys are
+# declares no imports and no entrypoint: ast, datetime, io, json, os and sys are
 # guaranteed by the generated file's import block.
 
 STEER_CLAUDE = "claude-code"
@@ -19,13 +19,18 @@ def steer_harness():
 
 
 def steer_repo_root(cwd):
-    """Walk up from cwd to the directory holding .git."""
+    """Walk up from cwd to the directory holding .git.
+
+    A linked worktree or a submodule carries .git as a file naming its git
+    directory, so a file marks a root as a directory does.
+    """
     try:
         path = os.path.abspath(cwd or "")
     except Exception:
         return ""
     while True:
-        if os.path.isdir(os.path.join(path, ".git")):
+        marker = os.path.join(path, ".git")
+        if os.path.isdir(marker) or os.path.isfile(marker):
             return path
         parent = os.path.dirname(path)
         if parent == path:
@@ -274,6 +279,32 @@ def steer_render_block(output, result, hook_name, harness):
     return json.dumps(result)
 
 
+def steer_load_note(hook_name, reason):
+    """Name a guard the master could not load, on stderr: stdout is the reply."""
+    try:
+        meta = STEER_HOOK_META.get(hook_name, {})
+        name = meta.get("hook_name", hook_name)
+        sys.stderr.write("steer: guard " + name + " not loaded: " + reason + "\n")
+    except Exception:
+        pass
+
+
+def steer_without_entry_call(tree):
+    """Drop a module's final bare main() statement, the script entrypoint."""
+    if tree.body:
+        last = tree.body[-1]
+        if (
+            isinstance(last, ast.Expr)
+            and isinstance(last.value, ast.Call)
+            and isinstance(last.value.func, ast.Name)
+            and last.value.func.id == "main"
+            and not last.value.args
+            and not last.value.keywords
+        ):
+            tree.body = tree.body[:-1]
+    return tree
+
+
 def steer_load(hook_name):
     """Compile one guard into its own module namespace and return its main().
 
@@ -282,10 +313,11 @@ def steer_load(hook_name):
     author gave them, nothing inside a string or a comment is renamed, and two
     guards cannot collide.
 
-    The module body runs once here, on an empty stdin with its output discarded,
-    because a guard may end in a bare top-level main() call rather than an
-    "if __name__" guard. Running that call on the real payload would put a guard
-    outside the virtual-edit loop and answer twice for one edit.
+    A guard may end in a bare top-level main() call rather than an
+    "if __name__" guard. That one statement is dropped before the module body
+    runs, so loading never calls the guard. Any other entrypoint shape still
+    runs here, on an empty stdin with its output discarded, so that it cannot
+    answer outside the virtual-edit loop.
     """
     source = STEER_HOOK_SOURCES.get(hook_name)
     if not isinstance(source, str):
@@ -297,16 +329,19 @@ def steer_load(hook_name):
     sys.stdout = io.StringIO()
     sys.stdin = io.StringIO("")
     try:
-        exec(compile(source, path, "exec"), namespace)
+        tree = steer_without_entry_call(ast.parse(source, path))
+        exec(compile(tree, path, "exec"), namespace)
     except SystemExit:
         pass
-    except Exception:
+    except Exception as exc:
+        steer_load_note(hook_name, type(exc).__name__)
         return None
     finally:
         sys.stdout = old_stdout
         sys.stdin = old_stdin
     entry = namespace.get("main")
     if not callable(entry):
+        steer_load_note(hook_name, "no callable main")
         return None
     return entry
 
