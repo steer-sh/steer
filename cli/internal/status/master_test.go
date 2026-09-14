@@ -3,6 +3,7 @@ package status
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/claude"
@@ -156,6 +157,42 @@ func TestRulesPresenceCoversInstalledHarnessesOnly(t *testing.T) {
 		default:
 			t.Errorf("unexpected row for %s", row.Harness)
 		}
+	}
+}
+
+// The notice names drifted sections only, rebuilds each scope once, and keys on
+// what drifted, so a different missing rule nudges again.
+func TestRulesDriftNamesOnlyDriftedSections(t *testing.T) {
+	rows := []RulesPresence{
+		{Harness: "claude-code", Scope: "global", Path: "/h/CLAUDE.md", Expected: 2, State: RulesCurrent},
+		{Harness: "codex", Scope: "global", Path: "/h/AGENTS.md", Expected: 2, Missing: []string{"config-path"}, State: RulesDrifted},
+		{Harness: "pi", Scope: "global", Path: "/h/pi/AGENTS.md", State: RulesUnknown},
+		{Harness: "codex", Scope: "project", Path: "AGENTS.md", Extra: []string{"old line"}, State: RulesDrifted},
+		{Harness: "pi", Scope: "project", Path: "AGENTS.md", Extra: []string{"old line"}, State: RulesDrifted},
+	}
+	key, labels, scopes := RulesDrift(rows)
+	if len(labels) != 3 || strings.Join(scopes, ",") != "global,project" {
+		t.Fatalf("labels = %q, scopes = %q", labels, scopes)
+	}
+	if !strings.Contains(labels[0], "is missing 1 of 2") || !strings.Contains(labels[1], "1 line(s)") {
+		t.Errorf("labels = %q", labels)
+	}
+
+	rows[1].Missing = []string{"other-rule"}
+	if next, _, _ := RulesDrift(rows); next == key || next == "" {
+		t.Errorf("a different missing rule kept the key %q", key)
+	}
+	if none, _, _ := RulesDrift(rows[:1]); none != "" {
+		t.Errorf("a current section produced the key %q", none)
+	}
+
+	// The same relative project path in two repositories is two conditions.
+	project := rows[3:4]
+	projectDir(t)
+	first, _, _ := RulesDrift(project)
+	projectDir(t)
+	if second, _, _ := RulesDrift(project); second == first {
+		t.Errorf("two repositories share the key %q", first)
 	}
 }
 

@@ -612,6 +612,16 @@ func collectPosture(cfg gate.Config, ev mine.EvidenceSet) Posture {
 	return p
 }
 
+// InstalledRules reads every installed harness's rules section in the named
+// scopes. It is the cheap read for a caller that needs no full Collect.
+func InstalledRules(scopes ...string) []RulesPresence {
+	out := []RulesPresence{}
+	for _, scope := range scopes {
+		out = append(out, RulesPresences(scope, guardRegistrars())...)
+	}
+	return out
+}
+
 // RulesPresences reads each installed target's rules section in one scope. A
 // harness that is not installed gets no row: nothing reads its document, and a
 // sync writes only to installed harnesses. A read that fails yields an unknown

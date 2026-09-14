@@ -356,7 +356,7 @@ versioned queue. `Refresh` is the pure computation; the refresh command writes
 queue, session snapshots and freshness state under the neutral evidence root.
 `steer report cadence` is the fail-open SessionStart entry point: it launches a
 stale refresh in the background and emits deduplicated operator nudges, including
-stale-master notices. The queue carries attention records, candidate pointers,
+stale-master and drifted-rules notices, each once per distinct condition. The queue carries attention records, candidate pointers,
 unscored record ids and corpus sweep summaries. The tier does no semantic
 grouping: a transcript cluster key is the user's own wording, so it merges
 verbatim repeats only, and candidates are ranked by session spread and capped

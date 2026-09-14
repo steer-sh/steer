@@ -28,6 +28,9 @@ type nudgeRecord struct {
 	// master is a standing condition, not a queue change, so it nudges once per
 	// distinct key and stays quiet until the key changes.
 	Master string `json:"master,omitempty"`
+	// Rules is the drifted rules-section key the last nudge named, under the same
+	// once-per-key rule as Master.
+	Rules string `json:"rules,omitempty"`
 }
 
 // QueueHash is the change key of the queue file: the sha256 of its bytes. The queue
@@ -55,12 +58,12 @@ func hasPending(q *Queue) bool {
 // It re-emits when the queue hash changed OR a newer refresh cycle ran since the
 // last nudge — weekly re-surface for a still-pending queue, no per-session nag.
 func ShouldNudge(dir string, q *Queue, queueHash string, refresh time.Time) (bool, nudgeRecord) {
-	prevMaster := readNudge(dir).Master
-	rec := nudgeRecord{Hash: queueHash, Refresh: refresh.UTC().Format(time.RFC3339), Master: prevMaster}
+	prev := readNudge(dir)
+	rec := prev
+	rec.Hash, rec.Refresh = queueHash, refresh.UTC().Format(time.RFC3339)
 	if !hasPending(q) {
 		return false, rec
 	}
-	prev := readNudge(dir)
 	if prev.Hash != queueHash {
 		return true, rec
 	}
@@ -91,6 +94,22 @@ func ShouldNudgeMaster(dir, key string) bool {
 // halves of a nudge.
 func (r nudgeRecord) WithMaster(key string) nudgeRecord {
 	r.Master = key
+	return r
+}
+
+// ShouldNudgeRules decides whether to name a drifted rules section. An empty key
+// means every section matches the manifest, which nudges nothing.
+func ShouldNudgeRules(dir, key string) bool {
+	if key == "" {
+		return false
+	}
+	return readNudge(dir).Rules != key
+}
+
+// WithRules returns the record carrying a rules key, so one write persists every
+// part of a nudge.
+func (r nudgeRecord) WithRules(key string) nudgeRecord {
+	r.Rules = key
 	return r
 }
 

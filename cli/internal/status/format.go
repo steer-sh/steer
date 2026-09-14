@@ -5,6 +5,8 @@ package status
 
 import (
 	"fmt"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -125,6 +127,45 @@ func RulesPhrase(r RulesPresence) string {
 			lead, len(r.Extra)))
 	}
 	return strings.Join(parts, " ")
+}
+
+// RulesDrift summarizes the drifted sections for a one-line notice: a key that
+// changes whenever the drift does, one label per drifted section, and each scope
+// to rebuild, once. An empty key means no section drifted. An unreadable section
+// is left out, because a rebuild does not repair a file it cannot read.
+func RulesDrift(rows []RulesPresence) (key string, labels, scopes []string) {
+	var parts []string
+	seen := map[string]bool{}
+	for _, r := range rows {
+		if r.State != RulesDrifted {
+			continue
+		}
+		// A project path is relative to the repository, so the key resolves it:
+		// the same drift in two repositories is two conditions.
+		path := r.Path
+		if abs, err := filepath.Abs(path); err == nil {
+			path = abs
+		}
+		parts = append(parts, fmt.Sprintf("%s/%s:%s:%s:%d",
+			r.Harness, r.Scope, path, strings.Join(r.Missing, ","), len(r.Extra)))
+		label := fmt.Sprintf("%s, %s scope", HarnessLabel(r.Harness), r.Scope)
+		if len(r.Missing) > 0 {
+			label += fmt.Sprintf(", is missing %d of %d", len(r.Missing), r.Expected)
+		}
+		if len(r.Extra) > 0 {
+			label += fmt.Sprintf(", has %d line(s) Steer does not hold", len(r.Extra))
+		}
+		labels = append(labels, label)
+		if !seen[r.Scope] {
+			seen[r.Scope] = true
+			scopes = append(scopes, r.Scope)
+		}
+	}
+	if len(parts) == 0 {
+		return "", nil, nil
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, "|"), labels, scopes
 }
 
 // ResolvePhrase names what this process can say about the command a registration

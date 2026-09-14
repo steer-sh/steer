@@ -230,7 +230,11 @@ It does two things:
      documented SessionStart channel, so delivery is guaranteed; it also sets
      systemMessage for an operator line where the harness honors it. It re-emits
      only when the queue changes or a new refresh cycle has run — never every
-     session.`,
+     session.
+
+It also names two standing conditions, each once until it changes: a registered
+guard runner older than this binary, and an installed harness whose Steer Rules
+section does not match the manifest. Both repair with 'steer hooks rebuild'.`,
 	Example: `  steer report cadence`,
 	// SilenceErrors/Usage: this runs as a hook. Any failure must be silent and
 	// exit 0, never a stderr dump into the session's startup.
@@ -277,16 +281,29 @@ func runCadence() {
 			"steer: the guard master runs an older runtime (%s) — run: steer hooks rebuild --scope %s",
 			strings.Join(labels, ", "), scope))
 	}
+	// A drifted rules section is the same kind of standing condition: nothing
+	// rewrites it until a sync, and meanwhile an agent does not read the rule.
+	rulesKey, ruleLabels, ruleScopes := status.RulesDrift(
+		status.InstalledRules(claude.GlobalScope, claude.ProjectScope))
+	if cadence.ShouldNudgeRules(dir, rulesKey) {
+		repairs := make([]string, 0, len(ruleScopes))
+		for _, s := range ruleScopes {
+			repairs = append(repairs, status.RulesRepairCommand(s))
+		}
+		lines = append(lines, fmt.Sprintf(
+			"steer: an agent's instruction file does not match Steer's rules (%s) — run: %s",
+			strings.Join(ruleLabels, "; "), strings.Join(repairs, " and ")))
+	}
 	if len(lines) == 0 {
-		// Nothing to say, but a repaired master still has to clear its key: a
-		// record left behind would suppress the nudge if that same staleness
+		// Nothing to say, but a repaired condition still has to clear its key: a
+		// record left behind would suppress the nudge if that same condition
 		// came back.
-		if cadence.LoadNudge(dir).Master != key {
-			_ = cadence.WriteNudge(dir, rec.WithMaster(key))
+		if prev := cadence.LoadNudge(dir); prev.Master != key || prev.Rules != rulesKey {
+			_ = cadence.WriteNudge(dir, rec.WithMaster(key).WithRules(rulesKey))
 		}
 		return
 	}
-	rec = rec.WithMaster(key)
+	rec = rec.WithMaster(key).WithRules(rulesKey)
 
 	msg := strings.Join(lines, "\n")
 	out, err := json.Marshal(sessionStartOutput{

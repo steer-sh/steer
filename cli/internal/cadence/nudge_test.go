@@ -125,6 +125,47 @@ func TestMasterNudgeFiresOncePerKey(t *testing.T) {
 	}
 }
 
+// A drifted rules section nudges once per key, and a cleared key lets the same
+// drift nudge again when it comes back.
+func TestRulesNudgeFiresOncePerKey(t *testing.T) {
+	dir := t.TempDir()
+	key := "codex/global:/h/.codex/AGENTS.md:config-path:0"
+
+	if ShouldNudgeRules(dir, "") {
+		t.Error("an empty key nudged")
+	}
+	if !ShouldNudgeRules(dir, key) {
+		t.Fatal("a first drift did not nudge")
+	}
+	if err := WriteNudge(dir, LoadNudge(dir).WithRules(key)); err != nil {
+		t.Fatal(err)
+	}
+	if ShouldNudgeRules(dir, key) {
+		t.Error("the same drift nudged twice")
+	}
+	if err := WriteNudge(dir, LoadNudge(dir).WithRules("")); err != nil {
+		t.Fatal(err)
+	}
+	if !ShouldNudgeRules(dir, key) {
+		t.Error("a returning drift did not nudge after the key was cleared")
+	}
+}
+
+// The queue nudge rewrites the record, so it must carry the rules key through, or
+// the drift line repeats in the next session.
+func TestQueueNudgeCarriesTheRulesKey(t *testing.T) {
+	dir := t.TempDir()
+	key := "claude-code/project:CLAUDE.md::1"
+	if err := WriteNudge(dir, LoadNudge(dir).WithRules(key)); err != nil {
+		t.Fatal(err)
+	}
+	q := &Queue{Candidates: []Candidate{{Corpus: "transcript-friction", Pattern: "c"}}}
+	_, rec := ShouldNudge(dir, q, "hash", time.Now())
+	if rec.Rules != key {
+		t.Fatalf("rules key: got %q, want %q", rec.Rules, key)
+	}
+}
+
 // TestQueueNudgeCarriesTheMasterKey pins that the two nudges share one record:
 // emitting a queue line must not silently clear the master key.
 func TestQueueNudgeCarriesTheMasterKey(t *testing.T) {
