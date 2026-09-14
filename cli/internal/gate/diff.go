@@ -132,31 +132,38 @@ func pathspecTail(included, excluded []string) []string {
 }
 
 // trackedSelector returns the pathspecs that narrow the tracked diff to the files
-// this commit lands: the command's own specs, plus what the index already holds.
-// Nil means no narrowing.
+// this commit lands: the files the command's own specs select, plus what the index
+// already holds, each as a `top,literal` path. Nil means no narrowing.
 //
-// The command's specs go in verbatim — they are cwd-relative and may be globs. The
-// index names are root-relative, so they carry `top`, and `literal` because a real
-// path may contain glob metacharacters.
+// git resolves the command's specs to files first, so an exclusion among them cannot
+// drop an index path. A spec git rejects widens, like the untracked scan.
 func trackedSelector(cwd string, spec DiffSpec) []string {
 	if spec.StagedOnly || len(spec.TrackedPathspecs) == 0 {
 		return nil
 	}
-	out, ok := Git(cwd, gitMedium, "diff", "--cached", "--name-only", "--no-relative")
+	named, ok := Git(cwd, gitMedium, append([]string{"diff", "HEAD", "--name-only",
+		"--no-relative", "--no-renames", "-z", "--"}, spec.TrackedPathspecs...)...)
 	if !ok {
 		return nil
 	}
-	specs := append([]string{}, spec.TrackedPathspecs...)
-	for _, path := range nonEmptyLines(out) {
+	staged, ok := Git(cwd, gitMedium, "diff", "--cached", "--name-only", "--no-relative",
+		"--no-renames", "-z")
+	if !ok {
+		return nil
+	}
+	seen := map[string]bool{}
+	var specs []string
+	for _, path := range append(strings.Split(named, "\x00"), strings.Split(staged, "\x00")...) {
+		if path == "" || seen[path] {
+			continue
+		}
+		seen[path] = true
 		specs = append(specs, ":(top,literal)"+path)
 	}
-	// A pathspec git rejects fails the whole vector, and a diff git cannot answer
-	// stops the review rather than narrowing it. Probe once and widen on refusal, the
-	// same direction the untracked scan takes.
-	probe := append([]string{"diff", "HEAD", "--name-only", "--no-relative"},
-		pathspecTail(specs, nil)...)
-	if _, ok := Git(cwd, gitMedium, probe...); !ok {
-		return nil
+	// Nil would widen an empty selection to the whole tree; the command's own specs
+	// keep it empty.
+	if len(specs) == 0 {
+		return append([]string{}, spec.TrackedPathspecs...)
 	}
 	return specs
 }

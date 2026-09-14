@@ -412,6 +412,56 @@ func TestTrackedPathspecsNarrowTheTrackedHalf(t *testing.T) {
 	}
 }
 
+// TestAnAddExclusionKeepsAnEarlierStagedFileInTheReview: `git add . ':!keep.py'`
+// excludes keep.py from the add, and keep.py's earlier staged change lands anyway.
+func TestAnAddExclusionKeepsAnEarlierStagedFileInTheReview(t *testing.T) {
+	cfg := Defaults()
+	code := lines(80)
+	root := buildRepo(t, map[string]string{"keep.py": code, "code.py": code, "PLAN.md": code})
+	gitCmd(t, root, verb, "-qm", "init")
+	writeFileAt(t, root, "keep.py", code+"staged = 1\n")
+	gitCmd(t, root, "add", "keep.py")
+	writeFileAt(t, root, "code.py", code+"changed = 1\n")
+	writeFileAt(t, root, "PLAN.md", code+"note = 1\n")
+
+	diff, ok := GetDiff(cfg, root, DiffSpec{TrackedPathspecs: []string{"code.py", ":!keep.py"}})
+	if !ok {
+		t.Fatal("GetDiff failed")
+	}
+	if !strings.Contains(diff, "code.py") {
+		t.Error("the path the staging step selects must reach the reviewer")
+	}
+	if !strings.Contains(diff, "staged = 1") {
+		t.Error("an add exclusion bounds the add only; the index path it names still lands")
+	}
+	if strings.Contains(diff, "PLAN.md") {
+		t.Error("an unstaged file the add does not select cannot land in this commit")
+	}
+}
+
+// TestAStagedRenameKeepsItsDeletionInTheReview: the index lists a rename by its
+// destination alone, and a selector built from that list loses the source's deletion.
+func TestAStagedRenameKeepsItsDeletionInTheReview(t *testing.T) {
+	cfg := Defaults()
+	code := lines(80)
+	root := buildRepo(t, map[string]string{"old.py": code, "code.py": code, "PLAN.md": code})
+	gitCmd(t, root, verb, "-qm", "init")
+	gitCmd(t, root, "mv", "old.py", "new.py")
+	writeFileAt(t, root, "code.py", code+"changed = 1\n")
+	writeFileAt(t, root, "PLAN.md", code+"note = 1\n")
+
+	diff, ok := GetDiff(cfg, root, DiffSpec{TrackedPathspecs: []string{"code.py"}})
+	if !ok {
+		t.Fatal("GetDiff failed")
+	}
+	if !strings.Contains(diff, "old.py") {
+		t.Error("a staged rename must reach the reviewer with its source, or it reads as a copy")
+	}
+	if strings.Contains(diff, "PLAN.md") {
+		t.Error("an unstaged file the add does not select cannot land in this commit")
+	}
+}
+
 // TestUnreadablePathspecWidens: git rejects the pathspec, so the scan falls back to the
 // whole repo rather than reporting a commit with no new files.
 func TestUnreadablePathspecWidens(t *testing.T) {
