@@ -70,7 +70,10 @@ func TestRegistrarRoundTripBakesTheRegisteredMasterPath(t *testing.T) {
 	}
 }
 
-func TestProjectRegistrarResolvesTheMasterAgainstItsTarget(t *testing.T) {
+// A project bridge names the master relative to the repository root, so a bridge
+// committed in one checkout runs the master of whichever checkout Pi opens it in,
+// never the checkout that wrote it.
+func TestProjectRegistrarNamesTheMasterRelativeToTheRepository(t *testing.T) {
 	isolateHome(t)
 	target := t.TempDir()
 	path, err := RegisterMaster(harness.ProjectScope, target)
@@ -81,9 +84,12 @@ func TestProjectRegistrarResolvesTheMasterAgainstItsTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(target, ".steer", "hooks", "steer-hooks.py")
-	if got := masterFromBridge(content); got != want {
-		t.Fatalf("registered master = %q, want %q", got, want)
+	got := masterFromBridge(content)
+	if got != ".steer/hooks/steer-hooks.py" {
+		t.Fatalf("registered master = %q, want the repository-relative path", got)
+	}
+	if strings.Contains(string(content), target) {
+		t.Fatalf("the bridge names the checkout that wrote it:\n%s", content)
 	}
 }
 

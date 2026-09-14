@@ -64,17 +64,13 @@ func InstructionFile(scope, cwd string) (string, error) {
 }
 
 func bridgeContent(master string) ([]byte, error) {
-	abs, err := filepath.Abs(master)
-	if err != nil {
-		return nil, err
-	}
 	header, err := json.Marshal(stamp{
 		Bridge: GuardBridgeDigest(), Version: version.Version, Channel: "guards",
 	})
 	if err != nil {
 		return nil, err
 	}
-	masterJSON, err := json.Marshal(abs)
+	masterJSON, err := json.Marshal(master)
 	if err != nil {
 		return nil, err
 	}
@@ -139,8 +135,12 @@ func RegisterMaster(scope, cwd string) (string, error) {
 	if err != nil {
 		return path, err
 	}
-	if !filepath.IsAbs(master) && scope == harness.ProjectScope {
-		master = filepath.Join(cwd, master)
+	// A project path stays relative to the repository root: the bridge runs the
+	// master with Pi's working directory, which is the directory holding .pi/.
+	if scope == harness.ProjectScope && !filepath.IsAbs(master) {
+		master = filepath.ToSlash(master)
+	} else if master, err = filepath.Abs(master); err != nil {
+		return path, err
 	}
 	content, err := bridgeContent(master)
 	if err != nil {
