@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/cadence"
 	"github.com/steer-sh/steer-cli/internal/evidence"
+	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/reviewers"
 	"github.com/steer-sh/steer-cli/internal/status"
 	"github.com/steer-sh/steer-cli/internal/styles"
@@ -41,13 +42,15 @@ full inventory and skip a problem already decided.`,
 		// A snapshot renders under an unresolvable provider: it names no provider,
 		// so the configured model is the honest value to print.
 		cfg, _, resolveErr := resolvedGateConfig()
+		root := repoRootOrNone()
 		s, err := status.Collect(status.Options{
 			GateStateDir: cfg.StateDir,
 			Config:       cfg,
 			WindowDays:   statusDays,
 			AllProjects:  !statusProjectOnly,
 			Scope:        currentScope(),
-			RepoRoot:     repoRootOrNone(),
+			RepoRoot:     root,
+			Addendum:     gateAddendum(root),
 			Evidence: evidence.Gather(evidence.Options{
 				GateStateDir: cfg.StateDir,
 				AllProjects:  !statusProjectOnly,
@@ -72,6 +75,12 @@ full inventory and skip a problem already decided.`,
 // repoRootOrNone resolves the repository whose check tier a read reports, "" when
 // the working directory is outside one. Steer runs everywhere; a repository is
 // the unit a check tier exists in.
+// gateAddendum is the review addendum the commit gate reads in root.
+func gateAddendum(root string) *gate.Addendum {
+	a := gate.LoadAddendum(root)
+	return &a
+}
+
 func repoRootOrNone() string {
 	root, err := repoRootOf(".")
 	if err != nil {
@@ -473,7 +482,7 @@ func interventionBlock(iv cadence.Intervention, width int) string {
 
 	return problemEntry(iv.Class, []problemField{
 		{"Problem", []string{iv.Problem}},
-		{status.FixLabel(v), []string{status.FixSummary(v)}},
+		{status.FixLabel(v), []string{status.FixSummary(v), status.ArtifactPhrase(iv.Tier, iv.Artifact)}},
 		{"Result", result},
 		{"Evidence", evidence},
 		{"Why", why},

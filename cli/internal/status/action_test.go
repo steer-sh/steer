@@ -53,3 +53,55 @@ func TestActionSentenceNamesObservationLimits(t *testing.T) {
 		t.Fatal("empty recurrence sentence")
 	}
 }
+
+// Stopping the tracking removes no fix, so the phrase names the command that does,
+// for the tier the record binds, and never claims the fix is still in place.
+func TestRemovalPhraseNamesEachTiersRemovalCommand(t *testing.T) {
+	cases := []struct {
+		tier string
+		a    *cadence.Artifact
+		want string
+	}{
+		{"guard", &cadence.Artifact{ID: "no-bare-python", Scope: "global"},
+			"stopping the tracking ends the measurement and removes no guard; to remove it, run: steer remove no-bare-python --scope global"},
+		{"prose", &cadence.Artifact{ID: "config-path", Scope: "project"},
+			"stopping the tracking ends the measurement and removes no rule; to remove it, run: steer rules remove config-path --scope project"},
+		{"review", &cadence.Artifact{ID: "fp-sort", Scope: "global"},
+			"stopping the tracking ends the measurement and removes no addendum entry; to remove it, run: steer commit-gate addendum remove fp-sort --scope global"},
+		{"check", &cadence.Artifact{ID: "no-count", Repo: "/w/steer"},
+			"stopping the tracking ends the measurement and removes no check; to remove it, run: steer check remove no-count"},
+		{"check", &cadence.Artifact{State: cadence.ArtifactUnbound},
+			"stopping the tracking ends the measurement and removes no check"},
+		{"check", nil, "stopping the tracking ends the measurement and removes nothing"},
+	}
+	for _, c := range cases {
+		if got := RemovalPhrase(c.tier, c.a); got != c.want {
+			t.Errorf("RemovalPhrase(%s, %+v)\n got %q\nwant %q", c.tier, c.a, got, c.want)
+		}
+	}
+}
+
+// Each artifact state reads as its own sentence, and a project review entry that
+// left HEAD says the commit gate no longer reads it.
+func TestArtifactPhraseNamesTheState(t *testing.T) {
+	cases := []struct {
+		tier string
+		a    *cadence.Artifact
+		want string
+	}{
+		{"instruction", &cadence.Artifact{ID: "config-path", Scope: "global", State: cadence.ArtifactAbsent},
+			"the rule config-path is no longer in the global store"},
+		{"review", &cadence.Artifact{ID: "fp-sort", Scope: "project", State: cadence.ArtifactAbsent},
+			"the addendum entry fp-sort is not in the project store at HEAD, so the commit gate does not read it"},
+		{"check", &cadence.Artifact{ID: "no-count", Repo: "/w/steer", State: cadence.ArtifactChanged},
+			"the check no-count is declared, but its detector differs from the one this record registered"},
+		{"guard", &cadence.Artifact{ID: "g", Scope: "project", Repo: "/w/other", State: cadence.ArtifactElsewhere},
+			"the guard g belongs to /w/other, which this reading does not inspect"},
+		{"check", nil, ""},
+	}
+	for _, c := range cases {
+		if got := ArtifactPhrase(c.tier, c.a); got != c.want {
+			t.Errorf("ArtifactPhrase(%s, %+v)\n got %q\nwant %q", c.tier, c.a, got, c.want)
+		}
+	}
+}

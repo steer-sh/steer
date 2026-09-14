@@ -124,13 +124,16 @@ func (m *Model) refresh() {
 	// The dashboard mutates registrations, never the evidence: it reads the stored
 	// snapshots and rebuilds none.
 	ev := evidence.Gather(evidence.Options{GateStateDir: m.cfg.StateDir, AllProjects: true})
+	root := repoRoot()
+	addendum := gate.LoadAddendum(root)
 	s, err := status.Collect(status.Options{
 		GateStateDir: m.cfg.StateDir,
 		Config:       m.cfg,
 		WindowDays:   30,
 		AllProjects:  true,
 		Scope:        m.scope,
-		RepoRoot:     repoRoot(),
+		RepoRoot:     root,
+		Addendum:     &addendum,
 		Evidence:     ev,
 	})
 	if err != nil {

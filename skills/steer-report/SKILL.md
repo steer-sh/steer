@@ -65,9 +65,9 @@ A deterministic tier runs this loop's mechanical half — scoring, corpus sweeps
 steer report refresh --days 30
 ```
 
-Then Read the queue **once**: `~/.steer/state/steer-report/queue.json` (`version: 8`). It holds:
+Then Read the queue **once**: `~/.steer/state/steer-report/queue.json` (`version: 9`). It holds:
 
-- `interventions[]` — full contract records the tier flagged as **asking for a reader**: the class recurred after the split, a coverage cause left the window unaccounted for, or the record carries no frozen scope. These carry a `match`; they are the audit's action list, pre-filtered. Each carries `problem` and `intervention` — the record's own explanation of what goes wrong and what it does about it, authored when the class was found. Lead your report with those rather than with the class name or the regex, and correct one that no longer describes the evidence with `steer fix describe ID`, which changes no window. Each also carries the conditions the counts were taken under: `corpus` and `unit` (`review-findings` counts by `chain`, `transcript-friction` by `session` — never compare the two rates), `signal_kind` on a session-unit record, `scope` (the frozen eligibility rule, `null` on a legacy record), `before_coverage` / `after_coverage` (`total`, `eligible`, `ineligible`, `unknown`, `unknown_scope`, `unknown_evidence`, `pending`, `partial_exposure`), and `observation` — the six field blocks documented in the status contract below.
+- `interventions[]` — full contract records the tier flagged as **asking for a reader**: the class recurred after the split, a coverage cause left the window unaccounted for, the record carries no frozen scope, or the fix it binds is `absent` or `unreadable`. These carry a `match`; they are the audit's action list, pre-filtered. Each carries `problem` and `intervention` — the record's own explanation of what goes wrong and what it does about it, authored when the class was found. Lead your report with those rather than with the class name or the regex, and correct one that no longer describes the evidence with `steer fix describe ID`, which changes no window. Each also carries the conditions the counts were taken under: `corpus` and `unit` (`review-findings` counts by `chain`, `transcript-friction` by `session` — never compare the two rates), `signal_kind` on a session-unit record, `scope` (the frozen eligibility rule, `null` on a legacy record), `before_coverage` / `after_coverage` (`total`, `eligible`, `ineligible`, `unknown`, `unknown_scope`, `unknown_evidence`, `pending`, `partial_exposure`), `observation` — the six field blocks documented in the status contract below — and `artifact`, where the fix the record binds stands now.
 - `unscored[]` — ids of records no engine reads. Report their existence; do not read a result into them.
 - `candidates[]` — pointers to new clusters, strongest first within each corpus. Transcript rows carry `pattern`/`count`/`sessions`; the review row carries `undecided_chains` and a `dump` command. These carry **no** `match` — authoring the regex is your job, below.
 - `corpora[]` — one row per corpus (`review-findings`, `transcript-friction`, `auto-denials`) with `present` and `size`. Relay this sweep to the user in one sentence.
@@ -154,7 +154,7 @@ Digest schema (`digest_version: 3`):
 
 The digest is size-capped: the CLI evicts the lowest-scoring clusters to fit, and reports honesty in `stats`.
 
-### The `steer status --json` contract (`status_version: 16`)
+### The `steer status --json` contract (`status_version: 17`)
 
 Step 1 reads this snapshot for posture and the full class inventory. The unit is
 the failure class and what the corpus recorded about it, not the hook count. This
@@ -175,6 +175,7 @@ authorization and observed execution are three readings and not one. v13 adds
 `observation.checks`: a check-tier fix's executions in its window, counted on
 this machine only. v16 adds `observation.checks.registered_host` and
 `other_host`: a fix registered on another host is not missing coverage here.
+v17 adds `artifact`: the fix a record binds and where it stands now.
 
 - `status_version` — the schema version. `--json` is a stable agent contract.
 - `posture` — the arming state: `instrument` (reviewer model / runs / prompt
@@ -331,6 +332,18 @@ this machine only. v16 adds `observation.checks.registered_host` and
       instruments, which is a reason to read the examples rather than the counts.
     - `declined` — true on a refused record. Its after-window is the period since
       the refusal, so a recurrence there implies no fix that failed.
+  - `artifact` — the fix the record binds and where it stands now:
+    `{id, scope, repo, state, detail}`, `null` on a declined record. It is read
+    beside the observation and never enters it. `state` is `present` (the entry
+    holds the text the record froze), `changed` (the same id with other text, or
+    a check whose detector moved), `absent` (a readable store no longer holds
+    it), `unreadable` (`detail` names why), `unbound` (a legacy record that names
+    no entry), `elsewhere` (a project entry or a check in a repository other than
+    the one read) or `unplaced` (a project entry whose record names no
+    repository). A review entry is read where the commit gate reads it: the
+    global store on disk, the project store at HEAD. **An `absent` fix is not a
+    quiet window:** the record measures a fix that is no longer there, so
+    reinstall it or retire the record.
 - `summary` — `total` plus `counts` by action section (`inspect`, `repair`,
   `observe`).
 - `chains[]` — recent review chains, findings split `accepted` / `rejected`.

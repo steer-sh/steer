@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/steer-sh/steer-cli/internal/checks"
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/hookstore"
 	"github.com/steer-sh/steer-cli/internal/steerpath"
@@ -285,7 +286,24 @@ func hookFactsInScope(hookID, scope string) (map[string]any, error) {
 	if digest := fileDigest(filepath.Join(dir, entry.File)); digest != "" {
 		facts["hook_digest"] = digest
 	}
+	stampRepo(facts, "hook", scope)
 	return facts, nil
+}
+
+// stampRepo records which repository a project-scope entry was read from, as
+// <prefix>_repo. A project store is resolved from the working directory, so the
+// scope alone cannot say which checkout's store a record names.
+func stampRepo(facts map[string]any, prefix, scope string) {
+	if scope != steerpath.ProjectScope {
+		return
+	}
+	root, err := checks.RepoRootOf(".")
+	if err != nil {
+		return
+	}
+	if identity, err := checks.RepoIdentity(root); err == nil {
+		facts[prefix+"_repo"] = identity
+	}
 }
 
 // SteerRuleFacts freezes what an instruction-tier record's artifact says. It is the
@@ -399,12 +417,17 @@ func textEntryFactsInScope(kind textEntry, id, scope string) (map[string]any, er
 		return nil, nil
 	}
 	sum := sha256.Sum256([]byte(normalizeRuleText(entry.Text)))
-	return map[string]any{
+	facts := map[string]any{
 		kind.prefix:            entry.Text,
 		kind.prefix + "_hash":  hex.EncodeToString(sum[:]),
 		kind.prefix + "_scope": scope,
-	}, nil
+	}
+	stampRepo(facts, kind.prefix, scope)
+	return facts, nil
 }
+
+// NormalizeEntryText is the form a rule or addendum digest is taken over.
+func NormalizeEntryText(text string) string { return normalizeRuleText(text) }
 
 // normalizeRuleText is claude.NormalizeRule's pre-image, repeated here because
 // nothing under gate may import an adapter. hookfacts_test.go pins the two together.

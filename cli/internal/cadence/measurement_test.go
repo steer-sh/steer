@@ -55,6 +55,7 @@ func TestQueueVersionAndObservationRoundTrip(t *testing.T) {
 		Scope:          &Scope{Version: 1, All: true},
 		BeforeCoverage: Coverage{Total: 8, Eligible: 8},
 		AfterCoverage:  Coverage{Total: 6, Eligible: 6},
+		Artifact:       &Artifact{ID: "config-path", Scope: "global", State: ArtifactAbsent},
 	}
 	data, err := json.Marshal(Queue{Version: QueueVersion, Interventions: []Intervention{iv}})
 	if err != nil {
@@ -64,11 +65,12 @@ func TestQueueVersionAndObservationRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(data, &back); err != nil {
 		t.Fatal(err)
 	}
-	if back.Version != 8 || QueueVersion != 8 {
+	if back.Version != 9 || QueueVersion != 9 {
 		t.Fatalf("queue version drifted: %d", back.Version)
 	}
 	if len(back.Interventions) != 1 || !back.Interventions[0].Observation.Recurrence.Occurred ||
-		back.Interventions[0].Observation.Checks.Blocked != 1 {
+		back.Interventions[0].Observation.Checks.Blocked != 1 ||
+		back.Interventions[0].Artifact == nil || back.Interventions[0].Artifact.State != ArtifactAbsent {
 		t.Fatalf("observation did not round-trip: %#v", back.Interventions)
 	}
 	for _, word := range []string{`"verdict"`, `"effect"`, `"required_after"`, `"confounds"`, `"composition"`} {

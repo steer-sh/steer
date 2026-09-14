@@ -365,6 +365,18 @@ recurrence outranks missing scope and coverage, while a merely pending row or ze
 eligible after-units does not itself prescribe repair. Retirement ends tracking;
 `mine.Retire` removes no guard, instruction or repository check.
 
+`cadence.ArtifactOf` reads where the fix a record binds stands now, against the
+facts registration froze: a guard's or rule's text digest in its store, a review
+entry where the commit gate reads it (the global store, the project store at
+HEAD), and a check's declaration and detector digest in its bound repository. It
+sits beside the observation and never enters it. The rules presence reading
+compares a document with the current manifest, so a removed rule synced out of
+every document leaves no drift; only this reading reports it absent. A project
+store resolves from the working directory, so registration stamps the entry's
+repository (`<prefix>_repo`) and the reader never matches a project entry against
+another checkout. `status` and `cadence` run no git command: the caller loads the
+gate's addendum and passes it in.
+
 ## Cadence, status and controls
 
 `internal/cadence/` coordinates evidence scoring and transcript mining into a

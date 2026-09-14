@@ -447,7 +447,7 @@ The `|` pipe splits a rule into a detection part and an optional suggestion (see
 
 Never invent suggestions. Only include them when explicitly provided after `|`.
 
-## The `steer status --json` contract (`status_version: 16`)
+## The `steer status --json` contract (`status_version: 17`)
 
 `steer status` composes one read-only snapshot of the whole loop. The unit is the
 failure class and what the corpus recorded about it, not the hook count. The
@@ -469,6 +469,7 @@ authorization and observed execution are three readings and not one. v13 adds
 `observation.checks`: a check-tier fix's executions in its window, counted on
 this machine only. v16 adds `observation.checks.registered_host` and
 `other_host`: a fix registered on another host is not missing coverage here.
+v17 adds `artifact`: the fix a record binds and where it stands now.
 
 - `status_version` — the schema version. `--json` is a stable agent contract.
 - `posture` — the arming state: `instrument` (reviewer model / runs / prompt
@@ -625,6 +626,18 @@ this machine only. v16 adds `observation.checks.registered_host` and
       instruments, which is a reason to read the examples rather than the counts.
     - `declined` — true on a refused record. Its after-window is the period since
       the refusal, so a recurrence there implies no fix that failed.
+  - `artifact` — the fix the record binds and where it stands now:
+    `{id, scope, repo, state, detail}`, `null` on a declined record. It is read
+    beside the observation and never enters it. `state` is `present` (the entry
+    holds the text the record froze), `changed` (the same id with other text, or
+    a check whose detector moved), `absent` (a readable store no longer holds
+    it), `unreadable` (`detail` names why), `unbound` (a legacy record that names
+    no entry), `elsewhere` (a project entry or a check in a repository other than
+    the one read) or `unplaced` (a project entry whose record names no
+    repository). A review entry is read where the commit gate reads it: the
+    global store on disk, the project store at HEAD. **An `absent` fix is not a
+    quiet window:** the record measures a fix that is no longer there, so
+    reinstall it or retire the record.
 - `summary` — `total` plus `counts` by action section (`inspect`, `repair`,
   `observe`).
 - `chains[]` — recent review chains, findings split `accepted` / `rejected`.

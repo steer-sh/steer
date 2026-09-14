@@ -46,8 +46,9 @@ import (
 // posture.rules: each installed harness's rules section read against the manifest.
 // v15 adds posture.masters[].trust: the harness's approval of the registered runner.
 // v16 adds observation.checks.registered_host and other_host: a fix registered on
-// another host is not missing coverage here.
-const StatusVersion = 16
+// another host is not missing coverage here. v17 adds interventions[].artifact: the
+// fix a record binds and where it stands now.
+const StatusVersion = 17
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20
@@ -64,6 +65,9 @@ type Options struct {
 	// RepoRoot is the Git root whose check tier the snapshot reports, "" outside
 	// a repository. The caller resolves it; Collect runs no git command.
 	RepoRoot string
+	// Addendum is the review addendum the commit gate reads in RepoRoot, loaded by
+	// the caller; nil leaves every review-tier artifact unread.
+	Addendum *gate.Addendum
 	// Evidence is every corpus a scoring pass reads. A caller leaving it zero gets
 	// the ledger alone, and every session-unit record reports missing evidence.
 	Evidence mine.EvidenceSet
@@ -92,6 +96,9 @@ type ScoredIntervention struct {
 	Before       cadence.Incidence `json:"before"`
 	After        cadence.Incidence `json:"after"`
 	Observation  mine.Observation  `json:"observation"`
+	// Artifact is the fix the record binds and where it stands now, null on a
+	// declined record.
+	Artifact *cadence.Artifact `json:"artifact"`
 	// Reason, Reopen and RejectedTS explain a refused class: why it was refused
 	// and the condition that reopens it.
 	Reason     string  `json:"reason,omitempty"`
@@ -376,7 +383,8 @@ func Collect(opts Options) (*SystemStatus, error) {
 	}
 	chains := ev.Chains
 
-	s.Interventions = scoreInventory(records, ev)
+	s.Interventions = scoreInventory(records, ev,
+		cadence.ArtifactSources{RepoRoot: opts.RepoRoot, Addendum: opts.Addendum})
 	s.Summary = summarize(s.Interventions)
 	s.Chains = recentChains(chains, recentChainLimit)
 
@@ -387,6 +395,7 @@ func Collect(opts Options) (*SystemStatus, error) {
 		WindowDays:   opts.WindowDays,
 		AllProjects:  opts.AllProjects,
 		RepoRoot:     opts.RepoRoot,
+		Addendum:     opts.Addendum,
 		Evidence:     ev,
 	})
 	if err == nil && q != nil {
@@ -419,7 +428,7 @@ func Collect(opts Options) (*SystemStatus, error) {
 // removed records are dropped as history, and a record from a corpus no engine
 // reads is dropped too — Refresh reports it by id under Unscored. Both are the
 // filters Refresh applies.
-func scoreInventory(records []mine.Record, ev mine.EvidenceSet) []ScoredIntervention {
+func scoreInventory(records []mine.Record, ev mine.EvidenceSet, src cadence.ArtifactSources) []ScoredIntervention {
 	out := []ScoredIntervention{}
 	for _, r := range records {
 		st := str(r["status"])
@@ -451,6 +460,7 @@ func scoreInventory(records []mine.Record, ev mine.EvidenceSet) []ScoredInterven
 			Before:       incidenceOf(scored["before"]),
 			After:        incidenceOf(scored["after"]),
 			Observation:  observationOf(scored["observation"]),
+			Artifact:     cadence.ArtifactOf(r, src),
 			Reason:       str(scored["reason"]),
 			Reopen:       str(scored["reopen"]),
 			RejectedTS:   numFloat(r["rejected_ts"]),

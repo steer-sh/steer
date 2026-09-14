@@ -200,26 +200,26 @@ func TestUndecidedChainsResidualFindingInMixedChain(t *testing.T) {
 }
 
 func TestNeedsAttention(t *testing.T) {
-	if !needsAttention(mine.Observation{Recurrence: mine.Recurrence{Occurred: true}}, struct{}{}) {
+	if !needsAttention(mine.Observation{Recurrence: mine.Recurrence{Occurred: true}}, struct{}{}, nil) {
 		t.Error("recurrence should need attention")
 	}
-	if !needsAttention(mine.Observation{Firing: mine.FiringActivity{Applicable: true}}, struct{}{}) {
+	if !needsAttention(mine.Observation{Firing: mine.FiringActivity{Applicable: true}}, struct{}{}, nil) {
 		t.Error("a missing applicable audit log should need attention")
 	}
 	// `pending` is counted inside `unknown_evidence`, and a pending row settles on
 	// its own, so only the excess over it is a gap the reader can act on.
 	if needsAttention(mine.Observation{Coverage: mine.ObservationCoverage{
-		After: map[string]any{"unknown": 1, "unknown_evidence": 1, "pending": 1}}}, struct{}{}) {
+		After: map[string]any{"unknown": 1, "unknown_evidence": 1, "pending": 1}}}, struct{}{}, nil) {
 		t.Error("a window whose unknowns are all still settling should not need attention")
 	}
 	if !needsAttention(mine.Observation{Coverage: mine.ObservationCoverage{
-		After: map[string]any{"unknown": 2, "unknown_evidence": 2, "pending": 1}}}, struct{}{}) {
+		After: map[string]any{"unknown": 2, "unknown_evidence": 2, "pending": 1}}}, struct{}{}, nil) {
 		t.Error("evidence beyond what is still settling should need attention")
 	}
-	if needsAttention(mine.Observation{Coverage: mine.ObservationCoverage{After: map[string]any{"eligible": 2}}}, struct{}{}) {
+	if needsAttention(mine.Observation{Coverage: mine.ObservationCoverage{After: map[string]any{"eligible": 2}}}, struct{}{}, nil) {
 		t.Error("quiet eligible work should not need attention")
 	}
-	if !needsAttention(mine.Observation{}, nil) {
+	if !needsAttention(mine.Observation{}, nil, nil) {
 		t.Error("a missing scope should need attention")
 	}
 }

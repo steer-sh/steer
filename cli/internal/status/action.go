@@ -91,30 +91,80 @@ func missingCoverage(obs mine.Observation) bool {
 	return mine.MissingCoverage(obs)
 }
 
-// RemovalPhrase says what stopping the tracking does and where the rule lives. It
-// closes the measurement and removes nothing, so it names the tier the rule keeps
-// running in. It reads BOTH ladder spellings through internal/tier: a guard
-// reported as installed in no tier would keep firing while the reader believed it
-// gone.
-func RemovalPhrase(t, target string) string {
-	const ends = "stopping the tracking ends the measurement; "
-	kind, ok := tier.Of(t)
-	if !ok {
-		if target != "" {
-			return ends + fmt.Sprintf("the rule stays in %s until you remove it", target)
+// RemovalPhrase says what stopping the tracking does to the fix a record binds:
+// nothing. It names the command that removes the fix and never claims the fix is
+// still there; ArtifactPhrase says where it stands. It reads BOTH ladder spellings
+// through internal/tier.
+func RemovalPhrase(t string, a *cadence.Artifact) string {
+	const ends = "stopping the tracking ends the measurement"
+	kind, _ := tier.Of(t)
+	noun, remove := artifactNoun(kind)
+	if a == nil || noun == "" {
+		return ends + " and removes nothing"
+	}
+	out := ends + " and removes no " + noun
+	if a.ID == "" {
+		return out
+	}
+	cmd := remove + a.ID
+	if a.Scope != "" {
+		cmd += " --scope " + a.Scope
+	}
+	return out + "; to remove it, run: " + cmd
+}
+
+// artifactNoun names the fix a tier binds, in the reader's words, and the command
+// prefix that removes one.
+func artifactNoun(k tier.Kind) (noun, remove string) {
+	switch k {
+	case tier.Guard:
+		return "guard", "steer remove "
+	case tier.Instruction:
+		return "rule", "steer rules remove "
+	case tier.Review:
+		return "addendum entry", "steer commit-gate addendum remove "
+	case tier.Check:
+		return "check", "steer check remove "
+	}
+	return "", ""
+}
+
+// ArtifactPhrase says where the fix a record binds stands now, "" for a record that
+// binds none by design.
+func ArtifactPhrase(t string, a *cadence.Artifact) string {
+	kind, _ := tier.Of(t)
+	noun, _ := artifactNoun(kind)
+	if a == nil || noun == "" {
+		return ""
+	}
+	name := noun + " " + a.ID
+	switch a.State {
+	case cadence.ArtifactPresent:
+		return "the " + name + " is in place as recorded"
+	case cadence.ArtifactChanged:
+		if kind == tier.Check {
+			return "the " + name + " is declared, but its detector differs from the one this record registered"
 		}
-		return ends + "no fix is installed in any tier"
-	}
-	if kind == tier.Guard {
-		if target != "" {
-			return ends + fmt.Sprintf("the %s guard stays installed until you remove it", target)
+		return "the " + name + " is in place, but its text differs from the text this record measured"
+	case cadence.ArtifactAbsent:
+		switch {
+		case kind == tier.Check:
+			return "the " + name + " is no longer declared in " + a.Repo
+		case kind == tier.Review && a.Scope == "project":
+			return "the " + name + " is not in the project store at HEAD, so the commit gate does not read it"
 		}
-		return ends + "the guard stays installed until you remove it"
+		return fmt.Sprintf("the %s is no longer in the %s store", name, a.Scope)
+	case cadence.ArtifactUnreadable:
+		return "where the " + name + " stands is not known: " + a.Detail
+	case cadence.ArtifactUnbound:
+		return "this record names no " + noun + ", so where it stands is not known"
+	case cadence.ArtifactElsewhere:
+		return "the " + name + " belongs to " + a.Repo + ", which this reading does not inspect"
+	case cadence.ArtifactUnplaced:
+		return "this record does not name the repository whose store holds the " + name +
+			", so where it stands is not known"
 	}
-	if target != "" {
-		return ends + fmt.Sprintf("the rule stays in %s until you remove it", target)
-	}
-	return ends + "no fix is installed in any tier"
+	return "the " + name + " is in the state " + a.State
 }
 
 // UnitName is the counted item in the reader's words. The stored unit is "chain"

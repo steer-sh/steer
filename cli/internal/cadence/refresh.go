@@ -12,6 +12,7 @@ import (
 	"sort"
 
 	"github.com/steer-sh/steer-cli/internal/denials"
+	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
 	"github.com/steer-sh/steer-cli/internal/report"
 )
@@ -19,8 +20,9 @@ import (
 // QueueVersion is the schema version of the queue file the skill reads. v6 adds
 // checks: the open steps in the repository's check tier. v7 adds observation.checks
 // to each intervention. v8 adds observation.checks.registered_host and other_host,
-// and leaves a fix registered on another host out of the coverage queue.
-const QueueVersion = 8
+// and leaves a fix registered on another host out of the coverage queue. v9 adds
+// artifact to each intervention, and queues a record whose fix is absent or unreadable.
+const QueueVersion = 9
 
 // maxTranscriptCandidates bounds the transcript half of the queue. A cluster key
 // is the user's own wording, so it groups verbatim repeats and nothing else;
@@ -62,6 +64,9 @@ type Intervention struct {
 	Before       Incidence        `json:"before"`
 	After        Incidence        `json:"after"`
 	Observation  mine.Observation `json:"observation"`
+	// Artifact is the fix the record binds and where it stands now, null on a
+	// declined record.
+	Artifact *Artifact `json:"artifact"`
 	// Scope is the frozen eligibility rule, null on a legacy record.
 	Scope *Scope `json:"scope"`
 	// BeforeCoverage and AfterCoverage account for each window under that scope.
@@ -118,6 +123,9 @@ type Options struct {
 	// RepoRoot is the Git root whose check tier the queue reports, "" outside a
 	// repository. The caller resolves it; Refresh runs no git command.
 	RepoRoot string
+	// Addendum is the review addendum the commit gate reads in RepoRoot, loaded by
+	// the caller; nil leaves every review-tier artifact unread.
+	Addendum *gate.Addendum
 	// Evidence is every corpus a scoring pass reads, gathered by the caller. A caller
 	// that leaves it zero scores the ledger alone; the session engine then reports
 	// missing evidence rather than a range it cannot support.
@@ -162,7 +170,8 @@ func Refresh(opts Options) (*Queue, error) {
 			continue
 		}
 		observation := observationOf(scored["observation"])
-		if !needsAttention(observation, scored["scope"]) {
+		artifact := ArtifactOf(r, ArtifactSources{RepoRoot: opts.RepoRoot, Addendum: opts.Addendum})
+		if !needsAttention(observation, scored["scope"], artifact) {
 			continue
 		}
 		prose := mine.ProseOf(r)
@@ -180,6 +189,7 @@ func Refresh(opts Options) (*Queue, error) {
 			Before:       incidenceOf(scored["before"]),
 			After:        incidenceOf(scored["after"]),
 			Observation:  observation,
+			Artifact:     artifact,
 
 			Scope:          ScopeOf(scored["scope"]),
 			BeforeCoverage: CoverageOf(scored["before_coverage"]),
@@ -238,13 +248,14 @@ func Refresh(opts Options) (*Queue, error) {
 }
 
 // needsAttention is field-derived. A recurrence, an unreadable guard audit log, a
-// coverage cause, or an unfrozen scope gives the reader something to inspect;
+// coverage cause, an unfrozen scope, or a fix that is absent or unreadable gives
+// the reader something to inspect;
 // quiet eligible work stays in the inventory without manufacturing a repair. A
 // guard whose audit log is present and records no block is NOT attention: the
 // zero is a reading, and the tier that writes no audit rows keeps Applicable
 // false.
-func needsAttention(obs mine.Observation, scope any) bool {
-	if obs.Recurrence.Occurred {
+func needsAttention(obs mine.Observation, scope any, artifact *Artifact) bool {
+	if obs.Recurrence.Occurred || artifact.Missing() {
 		return true
 	}
 	if mine.MissingCoverage(obs) {

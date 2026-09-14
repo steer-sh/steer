@@ -174,7 +174,7 @@ func intPtr(n int) *int           { return &n }
 // so a renamed or reordered json tag fails here, the agent-contract guard.
 func TestJSONContractIsStable(t *testing.T) {
 	s := &SystemStatus{
-		StatusVersion: 16,
+		StatusVersion: 17,
 		GeneratedAt:   "2026-01-01T00:00:00Z",
 		Posture: Posture{
 			Instrument: "agy@sha", Reviewer: "gemini", Ledger: "/l.jsonl",
@@ -240,6 +240,7 @@ func TestJSONContractIsStable(t *testing.T) {
 				Coverage:   mine.ObservationCoverage{Before: map[string]any{"total": 14, "eligible": 12, "ineligible": 1, "unknown": 1, "unknown_scope": 1}, After: map[string]any{"total": 13, "eligible": 12, "unknown": 1, "unknown_evidence": 1, "pending": 1}, ZeroEligibleAfter: false},
 				Provenance: mine.ObservationProvenance{Kind: mine.ProvenanceReviewer, Before: []string{"a"}, After: []string{"a", "b"}},
 			},
+			Artifact:       &cadence.Artifact{ID: "no-widget-flag", Scope: "global", State: cadence.ArtifactPresent},
 			Scope:          &cadence.Scope{Version: 1, Repo: "steer.*", Path: `\.go$`},
 			BeforeCoverage: cadence.Coverage{Total: 14, Eligible: 12, Ineligible: 1, Unknown: 1, UnknownScope: 1},
 			AfterCoverage:  cadence.Coverage{Total: 13, Eligible: 12, Unknown: 1, UnknownEvidence: 1, Pending: 1, PartialExposure: 1},
@@ -297,7 +298,7 @@ func TestJSONContractIsStable(t *testing.T) {
 }
 
 const goldenStatusJSON = `{
-  "status_version": 16,
+  "status_version": 17,
   "generated_at": "2026-01-01T00:00:00Z",
   "posture": {
     "instrument": "agy@sha",
@@ -541,6 +542,11 @@ const goldenStatusJSON = `{
         },
         "declined": false
       },
+      "artifact": {
+        "id": "no-widget-flag",
+        "scope": "global",
+        "state": "present"
+      },
       "scope": {
         "version": 1,
         "repo": "steer.*",
@@ -649,6 +655,7 @@ const goldenStatusJSON = `{
         },
         "declined": true
       },
+      "artifact": null,
       "reason": "not mechanizable",
       "reopen": "incidence doubles",
       "rejected_ts": 1700,
@@ -954,5 +961,42 @@ func TestAnUnreadableCorpusIsReportedUnscoredAndNotScored(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("the record must still be reported, got unscored %v", s.Attention.Unscored)
+	}
+}
+
+// A record's binding survives scoring: the inventory and the attention queue both
+// carry where the fix stands, and a rule removed from its store reads as absent.
+func TestCollectCarriesTheArtifactOfEachRecord(t *testing.T) {
+	isolate(t)
+	stateDir := seedLedger(t, "widget parser flag loss", "widget parser",
+		"widget parser drops a flag", "unrelated naming nit", 3)
+	records, err := mine.Load(stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records[0]["tier"], records[0]["rule_id"], records[0]["rule_scope"] = "instruction", "config-path", "global"
+	if err := mine.Save(stateDir, records); err != nil {
+		t.Fatal(err)
+	}
+	home, _ := os.UserHomeDir()
+	store := filepath.Join(home, ".steer", "hooks")
+	if err := os.MkdirAll(store, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(store, "steer-manifest.json"), []byte(`{"rules":{}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := Collect(Options{GateStateDir: stateDir, WindowDays: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Interventions) != 1 || s.Interventions[0].Artifact == nil ||
+		s.Interventions[0].Artifact.State != cadence.ArtifactAbsent || s.Interventions[0].Artifact.ID != "config-path" {
+		t.Fatalf("inventory = %+v; want the rule read as absent", s.Interventions)
+	}
+	if len(s.Attention.Interventions) != 1 || s.Attention.Interventions[0].Artifact == nil ||
+		s.Attention.Interventions[0].Artifact.State != cadence.ArtifactAbsent {
+		t.Fatalf("attention = %+v; want the record queued with its artifact", s.Attention.Interventions)
 	}
 }

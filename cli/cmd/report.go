@@ -189,11 +189,13 @@ queue, so the skill's nudge can hash the queue for change detection.`,
 			AllProjects:  !reportProjectOnly,
 			Rebuild:      true,
 		})
+		root := repoRootOrNone()
 		q, err := cadence.Refresh(cadence.Options{
 			GateStateDir: gateConfig().StateDir,
 			WindowDays:   reportDays,
 			AllProjects:  !reportProjectOnly,
-			RepoRoot:     repoRootOrNone(),
+			RepoRoot:     root,
+			Addendum:     gateAddendum(root),
 			Evidence:     ev,
 		})
 		if err != nil {

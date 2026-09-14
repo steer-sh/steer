@@ -405,9 +405,9 @@ func candidateDetail(c cadence.Candidate, width int) string {
 			"context and asks you which fixes to apply or skip.", width)
 }
 
-// fixDetail describes the fix and says what this screen does and does not know
-// about it. A tracking record proves the fix was decided on, never that it is
-// installed and running right now.
+// fixDetail describes the fix and where it stands now. The artifact reading says
+// whether the entry the record names is still there; it says nothing about whether
+// a coding agent runs it.
 func fixDetail(it status.ScoredIntervention) string {
 	out := fixSummary(it)
 	if it.Status == "rejected" {
@@ -417,8 +417,10 @@ func fixDetail(it status.ScoredIntervention) string {
 	if it.Target != "" {
 		out += ". It was recorded against " + it.Target
 	}
-	return out + ". Steer recorded this fix; this screen does not check that it is " +
-		"still set up. The Guards panel reads what is registered now."
+	if phrase := status.ArtifactPhrase(it.Tier, it.Artifact); phrase != "" {
+		return out + ". Now " + phrase + "."
+	}
+	return out + "."
 }
 
 // resultDetail is the result label with its own explanation under it.
@@ -466,7 +468,7 @@ func actionDetail(it status.ScoredIntervention, width int) string {
 	if _, next := summaryReason(it); next != "" {
 		out += wrapTo(next, detailIndent, width)
 	}
-	out += wrapTo("x — stop tracking. "+status.RemovalPhrase(it.Tier, it.Target),
+	out += wrapTo("x — stop tracking. "+status.RemovalPhrase(it.Tier, it.Artifact),
 		detailIndent, width)
 	return out
 }
@@ -498,8 +500,17 @@ func technicalBlock(r problemRow, width int) string {
 	if it.SignalKind != "" {
 		rows = append(rows, [2]string{"signal", it.SignalKind})
 	}
-	if it.HookID != "" {
-		rows = append(rows, [2]string{"guard id", it.HookID})
+	if a := it.Artifact; a != nil {
+		if a.ID != "" {
+			rows = append(rows, [2]string{"fix id", a.ID})
+		}
+		if a.Scope != "" {
+			rows = append(rows, [2]string{"store", a.Scope})
+		}
+		if a.Repo != "" {
+			rows = append(rows, [2]string{"repository", a.Repo})
+		}
+		rows = append(rows, [2]string{"fix state", a.State})
 	}
 	rows = append(rows, [2]string{"observation", status.ObservationLabel(it.Observation)})
 	if it.LegacyNote != "" {

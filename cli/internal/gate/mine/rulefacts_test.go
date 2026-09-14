@@ -4,10 +4,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/steer-sh/steer-cli/internal/checks"
 	"github.com/steer-sh/steer-cli/internal/claude"
 )
 
@@ -78,6 +80,34 @@ func TestSteerRuleFactsRefusesAnIDInBothStores(t *testing.T) {
 	facts, err := SteerRuleFacts("config-path", "project")
 	if err != nil || facts["rule"] != "the project wording" {
 		t.Fatalf("facts = %#v, err = %v", facts, err)
+	}
+}
+
+// A project entry records the repository whose store it was read from, so a later
+// reader never matches it against another checkout's entry of the same id. A global
+// entry has one store per machine and records none.
+func TestProjectFactsRecordTheRepository(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Chdir(project)
+	if out, err := exec.Command("git", "init", "-q").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v %s", err, out)
+	}
+	writeRuleStore(t, filepath.Join(home, ".steer", "hooks"), "global-rule", "a global rule")
+	writeRuleStore(t, filepath.Join(project, ".steer", "hooks"), "config-path", "a project rule")
+	want, err := checks.RepoIdentity(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	facts, err := SteerRuleFacts("config-path", "project")
+	if err != nil || facts["rule_repo"] != want {
+		t.Fatalf("project facts = %#v, err = %v; want rule_repo %s", facts, err, want)
+	}
+	facts, err = SteerRuleFacts("global-rule", "global")
+	if _, stamped := facts["rule_repo"]; err != nil || stamped {
+		t.Fatalf("global facts = %#v, err = %v; want no rule_repo", facts, err)
 	}
 }
 
