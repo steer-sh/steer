@@ -22,7 +22,9 @@ import (
 // to each intervention. v8 adds observation.checks.registered_host and other_host,
 // and leaves a fix registered on another host out of the coverage queue. v9 adds
 // artifact to each intervention, and queues a record whose fix is absent or unreadable.
-const QueueVersion = 9
+// v10 adds artifact.removed, and queues a record whose fix the archive records as
+// removed after its split.
+const QueueVersion = 10
 
 // maxTranscriptCandidates bounds the transcript half of the queue. A cluster key
 // is the user's own wording, so it groups verbatim repeats and nothing else;
@@ -248,14 +250,15 @@ func Refresh(opts Options) (*Queue, error) {
 }
 
 // needsAttention is field-derived. A recurrence, an unreadable guard audit log, a
-// coverage cause, an unfrozen scope, or a fix that is absent or unreadable gives
-// the reader something to inspect;
+// coverage cause, an unfrozen scope, a fix that is absent or unreadable, or a fix
+// the archive records as removed after the split gives the reader something to
+// inspect;
 // quiet eligible work stays in the inventory without manufacturing a repair. A
 // guard whose audit log is present and records no block is NOT attention: the
 // zero is a reading, and the tier that writes no audit rows keeps Applicable
 // false.
 func needsAttention(obs mine.Observation, scope any, artifact *Artifact) bool {
-	if obs.Recurrence.Occurred || artifact.Missing() {
+	if obs.Recurrence.Occurred || artifact.Missing() || artifact.RemovalRecorded() {
 		return true
 	}
 	if mine.MissingCoverage(obs) {

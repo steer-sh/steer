@@ -511,6 +511,9 @@ func technicalBlock(r problemRow, width int) string {
 			rows = append(rows, [2]string{"repository", a.Repo})
 		}
 		rows = append(rows, [2]string{"fix state", a.State})
+		if a.RemovalRecorded() {
+			rows = append(rows, [2]string{"removal archived", a.Removed})
+		}
 	}
 	rows = append(rows, [2]string{"observation", status.ObservationLabel(it.Observation)})
 	if it.LegacyNote != "" {

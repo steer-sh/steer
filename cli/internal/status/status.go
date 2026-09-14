@@ -50,8 +50,10 @@ import (
 // fix a record binds and where it stands now. v18 adds rules and addenda: the
 // instruction and review entries each store holds, a project addendum entry read
 // both on disk and at HEAD. v19 adds posture.masters[].state `detached` and
-// .store: an installed harness that runs none of a scope's guards.
-const StatusVersion = 19
+// .store: an installed harness that runs none of a scope's guards. v20 adds
+// interventions[].artifact.removed: a fix in place now that the archive records
+// as removed after the record's split.
+const StatusVersion = 20
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20

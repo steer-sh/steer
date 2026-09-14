@@ -174,7 +174,7 @@ func intPtr(n int) *int           { return &n }
 // so a renamed or reordered json tag fails here, the agent-contract guard.
 func TestJSONContractIsStable(t *testing.T) {
 	s := &SystemStatus{
-		StatusVersion: 19,
+		StatusVersion: 20,
 		GeneratedAt:   "2026-01-01T00:00:00Z",
 		Posture: Posture{
 			Instrument: "agy@sha", Reviewer: "gemini", Ledger: "/l.jsonl",
@@ -242,7 +242,8 @@ func TestJSONContractIsStable(t *testing.T) {
 				Coverage:   mine.ObservationCoverage{Before: map[string]any{"total": 14, "eligible": 12, "ineligible": 1, "unknown": 1, "unknown_scope": 1}, After: map[string]any{"total": 13, "eligible": 12, "unknown": 1, "unknown_evidence": 1, "pending": 1}, ZeroEligibleAfter: false},
 				Provenance: mine.ObservationProvenance{Kind: mine.ProvenanceReviewer, Before: []string{"a"}, After: []string{"a", "b"}},
 			},
-			Artifact:       &cadence.Artifact{ID: "no-widget-flag", Scope: "global", State: cadence.ArtifactPresent},
+			Artifact: &cadence.Artifact{ID: "no-widget-flag", Scope: "global", State: cadence.ArtifactPresent,
+				Removed: "2026-01-02T03:04:05.000000000Z"},
 			Scope:          &cadence.Scope{Version: 1, Repo: "steer.*", Path: `\.go$`},
 			BeforeCoverage: cadence.Coverage{Total: 14, Eligible: 12, Ineligible: 1, Unknown: 1, UnknownScope: 1},
 			AfterCoverage:  cadence.Coverage{Total: 13, Eligible: 12, Unknown: 1, UnknownEvidence: 1, Pending: 1, PartialExposure: 1},
@@ -303,7 +304,7 @@ func TestJSONContractIsStable(t *testing.T) {
 }
 
 const goldenStatusJSON = `{
-  "status_version": 19,
+  "status_version": 20,
   "generated_at": "2026-01-01T00:00:00Z",
   "posture": {
     "instrument": "agy@sha",
@@ -557,7 +558,8 @@ const goldenStatusJSON = `{
       "artifact": {
         "id": "no-widget-flag",
         "scope": "global",
-        "state": "present"
+        "state": "present",
+        "removed": "2026-01-02T03:04:05.000000000Z"
       },
       "scope": {
         "version": 1,

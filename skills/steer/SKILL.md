@@ -447,7 +447,7 @@ The `|` pipe splits a rule into a detection part and an optional suggestion (see
 
 Never invent suggestions. Only include them when explicitly provided after `|`.
 
-## The `steer status --json` contract (`status_version: 18`)
+## The `steer status --json` contract (`status_version: 20`)
 
 `steer status` composes one read-only snapshot of the whole loop. The unit is the
 failure class and what the corpus recorded about it, not the hook count. The
@@ -471,6 +471,9 @@ this machine only. v16 adds `observation.checks.registered_host` and
 `other_host`: a fix registered on another host is not missing coverage here.
 v17 adds `artifact`: the fix a record binds and where it stands now. v18 adds
 `rules` and `addenda`: the instruction and review entries each store holds.
+v19 adds `posture.masters[].state` `detached` and `store`: an installed harness
+that runs none of a scope's guards. v20 adds `artifact.removed`: a fix in place
+now that its store's archive records as removed after the record's split.
 
 - `status_version` — the schema version. `--json` is a stable agent contract.
 - `posture` — the arming state: `instrument` (reviewer model / runs / prompt
@@ -635,7 +638,7 @@ v17 adds `artifact`: the fix a record binds and where it stands now. v18 adds
     - `declined` — true on a refused record. Its after-window is the period since
       the refusal, so a recurrence there implies no fix that failed.
   - `artifact` — the fix the record binds and where it stands now:
-    `{id, scope, repo, state, detail}`, `null` on a declined record. It is read
+    `{id, scope, repo, state, detail, removed}`, `null` on a declined record. It is read
     beside the observation and never enters it. `state` is `present` (the entry
     holds the text the record froze), `changed` (the same id with other text, or
     a check whose detector moved), `absent` (a readable store no longer holds
@@ -645,7 +648,12 @@ v17 adds `artifact`: the fix a record binds and where it stands now. v18 adds
     repository). A review entry is read where the commit gate reads it: the
     global store on disk, the project store at HEAD. **An `absent` fix is not a
     quiet window:** the record measures a fix that is no longer there, so
-    reinstall it or retire the record.
+    reinstall it or retire the record. `removed` is set on a `present` or
+    `changed` fix whose store archived a removal of it after the record's split
+    (compared in whole seconds): the fix is back, and the window may span a
+    period without it. The archive proves a removal was written, not how long the
+    fix was gone, so read the record's window against that time before trusting
+    its counts; a fresh `steer fix register --supersedes` starts a clean window.
 - `summary` — `total` plus `counts` by action section (`inspect`, `repair`,
   `observe`).
 - `chains[]` — recent review chains, findings split `accepted` / `rejected`.

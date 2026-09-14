@@ -149,6 +149,16 @@ func ArtifactPhrase(t string, a *cadence.Artifact) string {
 		return ""
 	}
 	name := noun + " " + a.ID
+	phrase := artifactStatePhrase(kind, noun, name, a)
+	if a.RemovalRecorded() {
+		phrase += "; the archive records a removal of it at " + a.Removed +
+			", after this record was registered, so check whether the " + noun +
+			" was out of place during this record's window"
+	}
+	return phrase
+}
+
+func artifactStatePhrase(kind tier.Kind, noun, name string, a *cadence.Artifact) string {
 	switch a.State {
 	case cadence.ArtifactPresent:
 		return "the " + name + " is in place as recorded"

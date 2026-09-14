@@ -134,35 +134,58 @@ func List(storeDir string) ([]Stored, error) {
 		if !id.IsDir() {
 			continue
 		}
-		entries, err := os.ReadDir(filepath.Join(root, id.Name()))
+		stored, err := ForID(storeDir, id.Name())
 		if err != nil {
 			return nil, err
 		}
-		for _, ent := range entries {
-			if !ent.IsDir() || partial(ent.Name()) {
-				continue
-			}
-			dir := filepath.Join(root, id.Name(), ent.Name())
-			s, err := Load(dir)
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, s)
-		}
+		out = append(out, stored...)
 	}
+	sortByRemoval(out)
+	return out, nil
+}
+
+// ForID reads the entries archived under one id, oldest first. An id with no
+// entries yields none.
+func ForID(storeDir, id string) ([]Stored, error) {
+	if err := checkSegment(id); err != nil {
+		return nil, err
+	}
+	idDir := filepath.Join(storeDir, DirName, id)
+	entries, err := os.ReadDir(idDir)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Stored, 0, len(entries))
+	for _, ent := range entries {
+		if !ent.IsDir() || partial(ent.Name()) {
+			continue
+		}
+		s, err := Load(filepath.Join(idDir, ent.Name()))
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	sortByRemoval(out)
+	return out, nil
+}
+
+func sortByRemoval(out []Stored) {
 	sort.SliceStable(out, func(i, j int) bool {
-		ti, tj := removedAt(out[i]), removedAt(out[j])
+		ti, tj := out[i].RemovedAt(), out[j].RemovedAt()
 		if !ti.Equal(tj) {
 			return ti.Before(tj)
 		}
 		return out[i].Dir < out[j].Dir
 	})
-	return out, nil
 }
 
-// removedAt parses an entry's removal time. A time that does not parse reads as
+// RemovedAt parses the entry's removal time. A time that does not parse reads as
 // the zero time, so the entry sorts first.
-func removedAt(s Stored) time.Time {
+func (s Stored) RemovedAt() time.Time {
 	t, err := time.Parse(time.RFC3339Nano, s.Removed)
 	if err != nil {
 		return time.Time{}

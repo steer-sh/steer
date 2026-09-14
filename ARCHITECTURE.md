@@ -406,6 +406,14 @@ repository (`<prefix>_repo`) and the reader never matches a project entry agains
 another checkout. `status` and `cadence` run no git command: the caller loads the
 gate's addendum and passes it in.
 
+A fix that reads `present` or `changed` also carries `removed` when its owning
+store's archive holds an entry of the same tier and id with a removal after the
+record's split, compared in whole seconds. The state keeps its own meaning, so a
+removal and a text change can both show. A restore turns an `absent` reading back
+into `present`; `removed` keeps the gap visible, and the queue carries the record
+as it carries an absent fix. A project review entry's archive is read on disk, not
+at HEAD, so a removal that never reached HEAD can still show.
+
 ## Cadence, status and controls
 
 `internal/cadence/` coordinates evidence scoring and transcript mining into a

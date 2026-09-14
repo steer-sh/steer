@@ -97,6 +97,9 @@ func TestArtifactPhraseNamesTheState(t *testing.T) {
 			"the check no-count is declared, but its detector differs from the one this record registered"},
 		{"guard", &cadence.Artifact{ID: "g", Scope: "project", Repo: "/w/other", State: cadence.ArtifactElsewhere},
 			"the guard g belongs to /w/other, which this reading does not inspect"},
+		{"guard", &cadence.Artifact{ID: "g", Scope: "global", State: cadence.ArtifactPresent, Removed: "2026-02-01T00:00:00.000000000Z"},
+			"the guard g is in place as recorded; the archive records a removal of it at 2026-02-01T00:00:00.000000000Z, " +
+				"after this record was registered, so check whether the guard was out of place during this record's window"},
 		{"check", nil, ""},
 	}
 	for _, c := range cases {

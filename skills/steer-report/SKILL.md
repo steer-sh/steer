@@ -65,9 +65,9 @@ A deterministic tier runs this loop's mechanical half — scoring, corpus sweeps
 steer report refresh --days 30
 ```
 
-Then Read the queue **once**: `~/.steer/state/steer-report/queue.json` (`version: 9`). It holds:
+Then Read the queue **once**: `~/.steer/state/steer-report/queue.json` (`version: 10`). It holds:
 
-- `interventions[]` — full contract records the tier flagged as **asking for a reader**: the class recurred after the split, a coverage cause left the window unaccounted for, the record carries no frozen scope, or the fix it binds is `absent` or `unreadable`. These carry a `match`; they are the audit's action list, pre-filtered. Each carries `problem` and `intervention` — the record's own explanation of what goes wrong and what it does about it, authored when the class was found. Lead your report with those rather than with the class name or the regex, and correct one that no longer describes the evidence with `steer fix describe ID`, which changes no window. Each also carries the conditions the counts were taken under: `corpus` and `unit` (`review-findings` counts by `chain`, `transcript-friction` by `session` — never compare the two rates), `signal_kind` on a session-unit record, `scope` (the frozen eligibility rule, `null` on a legacy record), `before_coverage` / `after_coverage` (`total`, `eligible`, `ineligible`, `unknown`, `unknown_scope`, `unknown_evidence`, `pending`, `partial_exposure`), `observation` — the six field blocks documented in the status contract below — and `artifact`, where the fix the record binds stands now.
+- `interventions[]` — full contract records the tier flagged as **asking for a reader**: the class recurred after the split, a coverage cause left the window unaccounted for, the record carries no frozen scope, the fix it binds is `absent` or `unreadable`, or the fix is in place but carries `artifact.removed`. These carry a `match`; they are the audit's action list, pre-filtered. Each carries `problem` and `intervention` — the record's own explanation of what goes wrong and what it does about it, authored when the class was found. Lead your report with those rather than with the class name or the regex, and correct one that no longer describes the evidence with `steer fix describe ID`, which changes no window. Each also carries the conditions the counts were taken under: `corpus` and `unit` (`review-findings` counts by `chain`, `transcript-friction` by `session` — never compare the two rates), `signal_kind` on a session-unit record, `scope` (the frozen eligibility rule, `null` on a legacy record), `before_coverage` / `after_coverage` (`total`, `eligible`, `ineligible`, `unknown`, `unknown_scope`, `unknown_evidence`, `pending`, `partial_exposure`), `observation` — the six field blocks documented in the status contract below — and `artifact`, where the fix the record binds stands now.
 - `unscored[]` — ids of records no engine reads. Report their existence; do not read a result into them.
 - `candidates[]` — pointers to new clusters, strongest first within each corpus. Transcript rows carry `pattern`/`count`/`sessions`; the review row carries `undecided_chains` and a `dump` command. These carry **no** `match` — authoring the regex is your job, below.
 - `corpora[]` — one row per corpus (`review-findings`, `transcript-friction`, `auto-denials`) with `present` and `size`. Relay this sweep to the user in one sentence.
@@ -154,7 +154,7 @@ Digest schema (`digest_version: 3`):
 
 The digest is size-capped: the CLI evicts the lowest-scoring clusters to fit, and reports honesty in `stats`.
 
-### The `steer status --json` contract (`status_version: 18`)
+### The `steer status --json` contract (`status_version: 20`)
 
 Step 1 reads this snapshot for posture and the full class inventory. The unit is
 the failure class and what the corpus recorded about it, not the hook count. This
@@ -177,6 +177,9 @@ this machine only. v16 adds `observation.checks.registered_host` and
 `other_host`: a fix registered on another host is not missing coverage here.
 v17 adds `artifact`: the fix a record binds and where it stands now. v18 adds
 `rules` and `addenda`: the instruction and review entries each store holds.
+v19 adds `posture.masters[].state` `detached` and `store`: an installed harness
+that runs none of a scope's guards. v20 adds `artifact.removed`: a fix in place
+now that its store's archive records as removed after the record's split.
 
 - `status_version` — the schema version. `--json` is a stable agent contract.
 - `posture` — the arming state: `instrument` (reviewer model / runs / prompt
@@ -341,7 +344,7 @@ v17 adds `artifact`: the fix a record binds and where it stands now. v18 adds
     - `declined` — true on a refused record. Its after-window is the period since
       the refusal, so a recurrence there implies no fix that failed.
   - `artifact` — the fix the record binds and where it stands now:
-    `{id, scope, repo, state, detail}`, `null` on a declined record. It is read
+    `{id, scope, repo, state, detail, removed}`, `null` on a declined record. It is read
     beside the observation and never enters it. `state` is `present` (the entry
     holds the text the record froze), `changed` (the same id with other text, or
     a check whose detector moved), `absent` (a readable store no longer holds
@@ -351,7 +354,12 @@ v17 adds `artifact`: the fix a record binds and where it stands now. v18 adds
     repository). A review entry is read where the commit gate reads it: the
     global store on disk, the project store at HEAD. **An `absent` fix is not a
     quiet window:** the record measures a fix that is no longer there, so
-    reinstall it or retire the record.
+    reinstall it or retire the record. `removed` is set on a `present` or
+    `changed` fix whose store archived a removal of it after the record's split
+    (compared in whole seconds): the fix is back, and the window may span a
+    period without it. The archive proves a removal was written, not how long the
+    fix was gone, so read the record's window against that time before trusting
+    its counts; a fresh `steer fix register --supersedes` starts a clean window.
 - `summary` — `total` plus `counts` by action section (`inspect`, `repair`,
   `observe`).
 - `chains[]` — recent review chains, findings split `accepted` / `rejected`.

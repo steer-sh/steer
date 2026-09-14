@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/steer-sh/steer-cli/internal/archive"
 	"github.com/steer-sh/steer-cli/internal/checks"
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
@@ -216,5 +217,146 @@ func TestRefreshQueuesARecordWhoseFixIsAbsent(t *testing.T) {
 		`{"rules":{"config-path":{"text":"resolve config from the repo root"}}}`)
 	if q, err = Refresh(Options{GateStateDir: state}); err != nil || len(q.Interventions) != 0 {
 		t.Fatalf("with the rule in place the queue holds %+v (err %v); want none", q.Interventions, err)
+	}
+}
+
+// archiveAt writes one archive entry by hand, so a test sets its removal time.
+func archiveAt(t *testing.T, store, kind, id, removed string) {
+	t.Helper()
+	dir := filepath.Join(store, archive.DirName, id, removed)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw := `{"version":1,"tier":"` + kind + `","id":"` + id + `","scope":"global","removed":"` + removed + `"}`
+	if err := os.WriteFile(filepath.Join(dir, archive.EntryName), []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// split2026 is 2026-01-01T00:00:00Z, the install time the removal tests freeze.
+const split2026 = 1767225600
+
+// A fix in place that its store archived after the record's split carries the
+// removal beside its state, whether its text is the frozen one or not. An entry
+// of another tier under the same id is not its removal.
+func TestArtifactCarriesARemovalAfterTheSplit(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	store := filepath.Join(home, ".steer", "hooks")
+	rec := ruleRecord("global")
+	rec["installed_ts"] = split2026
+
+	writeManifest(t, store, `{"rules":{"config-path":{"text":"resolve config from the repo root"}}}`)
+	archiveAt(t, store, "guard", "config-path", "2026-02-01T00:00:00.000000000Z")
+	if got := ArtifactOf(rec, ArtifactSources{}); got.RemovalRecorded() {
+		t.Fatalf("a guard's archive entry read as the rule's removal: %+v", got)
+	}
+
+	archiveAt(t, store, "instruction", "config-path", "2026-03-01T00:00:00.000000000Z")
+	got := ArtifactOf(rec, ArtifactSources{})
+	wantState(t, got, ArtifactPresent)
+	if got.Removed != "2026-03-01T00:00:00.000000000Z" {
+		t.Fatalf("removed = %q; want the rule's archived removal", got.Removed)
+	}
+
+	writeManifest(t, store, `{"rules":{"config-path":{"text":"resolve config from the cwd"}}}`)
+	got = ArtifactOf(rec, ArtifactSources{})
+	wantState(t, got, ArtifactChanged)
+	if !got.RemovalRecorded() {
+		t.Fatal("a changed rule lost its recorded removal")
+	}
+}
+
+// A removal counts only after the split, compared in whole seconds: one in the
+// split's own second predates a record registered after a restore.
+func TestARemovalInTheSplitSecondIsNotRecorded(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	store := filepath.Join(home, ".steer", "hooks")
+	rec := ruleRecord("global")
+	rec["installed_ts"] = split2026
+	writeManifest(t, store, `{"rules":{"config-path":{"text":"resolve config from the repo root"}}}`)
+
+	archiveAt(t, store, "instruction", "config-path", "2025-12-31T23:00:00.000000000Z")
+	archiveAt(t, store, "instruction", "config-path", "2026-01-01T00:00:00.500000000Z")
+	if got := ArtifactOf(rec, ArtifactSources{}); got.RemovalRecorded() {
+		t.Fatalf("a removal before or in the split second was recorded: %+v", got)
+	}
+	archiveAt(t, store, "instruction", "config-path", "2026-01-01T00:00:01.000000000Z")
+	if got := ArtifactOf(rec, ArtifactSources{}); !got.RemovalRecorded() {
+		t.Fatalf("a removal a second after the split was missed: %+v", got)
+	}
+}
+
+// A review entry and a check read their own store's archive: the global hook
+// store for a global entry, the repository's check store for a check.
+func TestArtifactReadsTheArchiveOfAnAddendumAndACheck(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	archiveAt(t, filepath.Join(home, ".steer", "hooks"), "review", "fp-sort", "2026-02-01T00:00:00.000000000Z")
+	rev := mine.Record{"tier": "review", "status": "active", "addendum_id": "fp-sort",
+		"addendum_scope": "global", "installed_ts": split2026}
+	got := ArtifactOf(rev, ArtifactSources{Addendum: &gate.Addendum{Entries: []gate.AddendumEntry{
+		{Scope: "global", ID: "fp-sort", Text: "sorted output is not a finding"}}}})
+	wantState(t, got, ArtifactPresent)
+	if !got.RemovalRecorded() {
+		t.Fatalf("the addendum entry's removal was missed: %+v", got)
+	}
+
+	root := t.TempDir()
+	if _, _, err := checks.Init(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".steer", "checks", "no-count.sh"), []byte("exit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	decl := checks.Declaration{ID: "no-count", Kind: checks.KindScript, Script: ".steer/checks/no-count.sh"}
+	m, err := checks.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Checks = append(m.Checks, decl)
+	if err := checks.Save(root, m); err != nil {
+		t.Fatal(err)
+	}
+	det, err := checks.DetectorOf(root, decl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	archiveAt(t, checks.Dir(root), "check", "no-count", "2026-02-01T00:00:00.000000000Z")
+	chk := mine.Record{"tier": "check", "status": "active", mine.CheckIDKey: "no-count",
+		mine.CheckRepoKey: identity(t, root), mine.CheckDigestKey: det.Digest, "installed_ts": split2026}
+	got = ArtifactOf(chk, ArtifactSources{RepoRoot: root})
+	wantState(t, got, ArtifactPresent)
+	if !got.RemovalRecorded() {
+		t.Fatalf("the check's removal was missed: %+v", got)
+	}
+}
+
+// A refresh queues a record whose fix is in place but was archived after the split.
+func TestRefreshQueuesARecordWhoseFixWasRemovedSinceItsSplit(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	store := filepath.Join(home, ".steer", "hooks")
+	writeManifest(t, store, `{"rules":{"config-path":{"text":"resolve config from the repo root"}}}`)
+	state := t.TempDir()
+	rec := ruleRecord("global")
+	for k, v := range map[string]any{"id": "config-path-loss", "class": "config path loss",
+		"match": "config path", "kind": "defect", "target": "CLAUDE.md",
+		"unit": mine.UnitChain, "corpus": mine.CorpusReviewFindings, "installed_ts": split2026,
+		"scope": map[string]any{"version": 1, "all": true}} {
+		rec[k] = v
+	}
+	if err := mine.Save(state, []mine.Record{rec}); err != nil {
+		t.Fatal(err)
+	}
+
+	archiveAt(t, store, "instruction", "config-path", "2026-02-01T00:00:00.000000000Z")
+	q, err := Refresh(Options{GateStateDir: state})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(q.Interventions) != 1 || !q.Interventions[0].Artifact.RemovalRecorded() {
+		t.Fatalf("queue interventions = %+v; want the record whose rule was removed and is back", q.Interventions)
 	}
 }

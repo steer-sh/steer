@@ -5,10 +5,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/steer-sh/steer-cli/internal/archive"
 	"github.com/steer-sh/steer-cli/internal/checks"
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
@@ -48,12 +50,22 @@ type Artifact struct {
 	Repo   string `json:"repo,omitempty"`
 	State  string `json:"state"`
 	Detail string `json:"detail,omitempty"`
+	// Removed is the latest removal the owning store's archive records for a
+	// present or changed fix after the record's split, in archive.TimeLayout.
+	Removed string `json:"removed,omitempty"`
 }
 
 // Missing reports a state that leaves the record measuring a fix that is not there
 // to be read.
 func (a *Artifact) Missing() bool {
 	return a != nil && (a.State == ArtifactAbsent || a.State == ArtifactUnreadable)
+}
+
+// RemovalRecorded reports a fix that is in place now but was archived by a
+// removal after the record's split, so the record's window may span a period
+// without it.
+func (a *Artifact) RemovalRecorded() bool {
+	return a != nil && a.Removed != ""
 }
 
 // ArtifactSources are the readings an artifact state compares against. Addendum is
@@ -75,9 +87,9 @@ func ArtifactOf(r mine.Record, src ArtifactSources) *Artifact {
 	}
 	switch kind {
 	case tier.Guard:
-		return storeArtifact(r, src, "hook", "hooks", hookDigest)
+		return storeArtifact(r, src, kind, "hook", "hooks", hookDigest)
 	case tier.Instruction:
-		return storeArtifact(r, src, "rule", "rules", textDigest)
+		return storeArtifact(r, src, kind, "rule", "rules", textDigest)
 	case tier.Review:
 		return addendumArtifact(r, src)
 	case tier.Check:
@@ -125,7 +137,7 @@ func textDigest(raw json.RawMessage, id string) (string, bool, error) {
 }
 
 // storeArtifact reads a guard or rule entry from the store its record names.
-func storeArtifact(r mine.Record, src ArtifactSources, prefix, section string, find entryDigest) *Artifact {
+func storeArtifact(r mine.Record, src ArtifactSources, kind tier.Kind, prefix, section string, find entryDigest) *Artifact {
 	a := &Artifact{ID: str(r[prefix+"_id"]), Scope: str(r[prefix+"_scope"])}
 	if a.ID == "" {
 		a.State = ArtifactUnbound
@@ -162,6 +174,31 @@ func storeArtifact(r mine.Record, src ArtifactSources, prefix, section string, f
 		a.State = ArtifactChanged
 	default:
 		a.State = ArtifactPresent
+	}
+	return markRemoval(a, r, dir, kind)
+}
+
+// markRemoval sets Removed on a present or changed fix whose store archived it
+// after the record's split. Both times are compared in whole seconds, because a
+// record stores its split that way: a removal in the same second as the split
+// predates a record registered after a restore. An archive that cannot be read
+// leaves where the fix stood unknown.
+func markRemoval(a *Artifact, r mine.Record, storeDir string, kind tier.Kind) *Artifact {
+	if a.State != ArtifactPresent && a.State != ArtifactChanged {
+		return a
+	}
+	entries, err := archive.ForID(storeDir, a.ID)
+	if err != nil {
+		return unreadable(a, fmt.Errorf("the archive could not be read: %w", err))
+	}
+	split := int64(mine.SplitTS(r))
+	for _, e := range entries {
+		if k, ok := tier.Of(e.Tier); !ok || k != kind {
+			continue
+		}
+		if at := e.RemovedAt(); at.Unix() > split {
+			a.Removed = e.Removed
+		}
 	}
 	return a
 }
@@ -251,7 +288,19 @@ func addendumArtifact(r mine.Record, src ArtifactSources) *Artifact {
 			a.State = ArtifactChanged
 		}
 	}
-	return a
+	if a.State == ArtifactAbsent {
+		return a
+	}
+	// A project entry's archive is read on disk, beside the working tree, though
+	// the gate reads the entry at HEAD.
+	dir := projectStore(src.RepoRoot)
+	if a.Scope == steerpath.GlobalScope {
+		var err error
+		if dir, err = hookstore.Resolve(steerpath.GlobalScope); err != nil {
+			return unreadable(a, err)
+		}
+	}
+	return markRemoval(a, r, dir, tier.Review)
 }
 
 // checkArtifact reads a check declaration from the repository its record binds.
@@ -286,7 +335,7 @@ func checkArtifact(r mine.Record, repoRoot string) *Artifact {
 		if det.Digest != fix.Digest {
 			a.State = ArtifactChanged
 		}
-		return a
+		return markRemoval(a, r, checks.Dir(repoRoot), tier.Check)
 	}
 	a.State = ArtifactAbsent
 	return a
