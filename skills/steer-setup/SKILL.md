@@ -135,6 +135,22 @@ entry belongs to this agent's tool calls and not to their terminal:
 export PATH="$HOME/.steer/bin:$PATH"    # add to ~/.zshrc or ~/.bashrc
 ```
 
+**When adding a harness**, carry the existing guards and rules into it. Guards and
+instruction rules are written only to the harnesses installed at the time, so a
+harness installed later has no guard runner and no `## Steer Rules` section until
+something writes them again:
+
+```bash
+"${STEER_BIN}" hooks rebuild --scope global
+```
+
+Also run it with `--scope project` when the current repository holds a
+`.steer/hooks` store. The rebuild registers the guard runner in every installed
+harness and rewrites each one's rules section from Steer's manifest. Lines written
+by hand inside that section are removed; the rest of the file is left alone. In
+`steer status --json`, `posture.rules` shows any harness whose section still
+differs.
+
 ## Step 5: Name the trust step, then confirm
 
 Each harness decides whether a registered hook actually runs:

@@ -123,6 +123,42 @@ func TestAnUnregisteredHarnessReportsNoMaster(t *testing.T) {
 	}
 }
 
+// A rule written while only Claude Code was installed reads as missing from the
+// Codex document, and a harness that is not installed gets no row at all.
+func TestRulesPresenceCoversInstalledHarnessesOnly(t *testing.T) {
+	root := projectDir(t)
+	t.Setenv("HOME", root)
+	if err := os.MkdirAll(filepath.Join(root, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CODEX_HOME", t.TempDir())
+	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(root, "no-pi"))
+
+	if _, err := claude.InstallManagedRule(claude.ProjectScope, "config-path",
+		"resolve a config path from the repo root", claude.Registrar{}); err != nil {
+		t.Fatal(err)
+	}
+
+	rows := RulesPresences(claude.ProjectScope, guardRegistrars())
+	if len(rows) != 2 {
+		t.Fatalf("rows = %#v, want Claude Code and Codex only", rows)
+	}
+	for _, row := range rows {
+		switch row.Harness {
+		case "claude-code":
+			if row.State != RulesCurrent || row.Expected != 1 {
+				t.Errorf("claude-code row = %#v", row)
+			}
+		case "codex":
+			if row.State != RulesDrifted || len(row.Missing) != 1 || row.Missing[0] != "config-path" || !row.NeedsSync() {
+				t.Errorf("codex row = %#v", row)
+			}
+		default:
+			t.Errorf("unexpected row for %s", row.Harness)
+		}
+	}
+}
+
 func rowFor(t *testing.T, rows []MasterRuntime, harness string) MasterRuntime {
 	t.Helper()
 	for _, row := range rows {

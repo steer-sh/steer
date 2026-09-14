@@ -109,6 +109,27 @@ func (m *Model) diagnosticIssues() []diagnosticIssue {
 				"under Maintenance needed.",
 		})
 	}
+	for _, r := range m.snap.Posture.Rules {
+		if !r.NeedsSync() {
+			continue
+		}
+		agent := status.HarnessLabel(r.Harness)
+		detail := status.RulesPhrase(r) + ". The agent reads only the rules in that file, " +
+			"so a fix that rests on a missing rule is not in effect."
+		switch {
+		case r.State != status.RulesDrifted:
+		case r.Scope == m.scope:
+			detail += " Open Guards and run the maintenance action under Maintenance needed."
+		default:
+			detail += " The Guards action rebuilds this dashboard's scope only; for this one, run: " +
+				status.RulesRepairCommand(r.Scope)
+		}
+		out = append(out, diagnosticIssue{
+			headline: "The rules " + agent + " reads in " + scopeReach(r.Scope) +
+				" do not match Steer's",
+			detail: detail,
+		})
+	}
 	return out
 }
 

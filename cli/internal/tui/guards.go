@@ -106,7 +106,36 @@ func (m *Model) guardRepairs() []guardRow {
 		})
 		break
 	}
+	// The rebuild also rewrites every rules section, so one row serves both issues.
+	// It acts on the dashboard's scope, so a section in the other scope gets no row.
+	for _, r := range m.snap.Posture.Rules {
+		if r.Scope != m.scope || r.State != status.RulesDrifted || hasRepair(rows, repairRunner) {
+			continue
+		}
+		agent := status.HarnessLabel(r.Harness)
+		rows = append(rows, guardRow{
+			kind: guardRepair, repair: repairRunner,
+			name: "Restore the rules " + agent + " reads",
+			issue: "The instruction file " + agent + " reads in " + scopeReach(r.Scope) +
+				" does not match the rules Steer holds: " + status.RulesPhrase(r) + ". " +
+				"The agent reads only the rules in that file. " +
+				"Rebuilding rewrites that section from Steer's rules and writes the shared " +
+				"runner again. Lines you wrote inside the section are removed; the rest of " +
+				"the file is left alone.",
+		})
+		break
+	}
 	return rows
+}
+
+// hasRepair reports whether a repair row for this action is already listed.
+func hasRepair(rows []guardRow, repair string) bool {
+	for _, row := range rows {
+		if row.kind == guardRepair && row.repair == repair {
+			return true
+		}
+	}
+	return false
 }
 
 // matchVerb and pronoun keep the issue sentence grammatical for one or many.

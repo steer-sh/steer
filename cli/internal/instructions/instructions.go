@@ -51,25 +51,41 @@ func HasRule(path, rule string) (bool, error) {
 	if rule == "" {
 		return true, nil
 	}
-	data, err := os.ReadFile(path)
+	carried, err := SectionRules(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return false, nil
-		}
-		return false, fmt.Errorf("failed to read %s: %w", path, err)
+		return false, err
 	}
-	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
-	start, end := findSteerSection(lines)
-	if start == -1 {
-		return false, nil
-	}
-	ruleLine := "- " + rule
-	for i := start + 1; i < end; i++ {
-		if strings.TrimSpace(lines[i]) == ruleLine {
+	for _, line := range carried {
+		if line == rule {
 			return true, nil
 		}
 	}
 	return false, nil
+}
+
+// SectionRules returns the rules the Steer Rules section of the document at path
+// carries, in document order. A missing file or section carries none. A line in
+// the section that is not a bullet is not a rule and is skipped.
+func SectionRules(path string) ([]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to read %s: %w", path, err)
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	start, end := findSteerSection(lines)
+	if start == -1 {
+		return nil, nil
+	}
+	var out []string
+	for i := start + 1; i < end; i++ {
+		if rule, ok := strings.CutPrefix(strings.TrimSpace(lines[i]), "- "); ok {
+			out = append(out, rule)
+		}
+	}
+	return out, nil
 }
 
 func normalizeRules(rules []string) []string {

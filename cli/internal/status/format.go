@@ -93,6 +93,40 @@ func MasterPhrase(m MasterRuntime) string {
 	return ""
 }
 
+// RulesRepairCommand rewrites every installed harness's rules section in a scope.
+func RulesRepairCommand(scope string) string {
+	return "steer hooks rebuild --scope " + scope
+}
+
+// RulesPhrase names one harness's rules section in one clause: whether it carries
+// every rule Steer holds for the scope. The repair is the caller's to name, since
+// the terminal names a command and the dashboard names an action.
+func RulesPhrase(r RulesPresence) string {
+	switch r.State {
+	case RulesCurrent:
+		return fmt.Sprintf("all %d rule(s) present in %s", r.Expected, r.Path)
+	case RulesUnknown:
+		if r.Path == "" {
+			return "the instruction file could not be found"
+		}
+		return "could not read " + r.Path
+	}
+	var parts []string
+	if len(r.Missing) > 0 {
+		parts = append(parts, fmt.Sprintf("%s is missing %d of %d rule(s) (%s)",
+			r.Path, len(r.Missing), r.Expected, strings.Join(r.Missing, ", ")))
+	}
+	if len(r.Extra) > 0 {
+		lead := r.Path + " carries"
+		if len(parts) > 0 {
+			lead = "and carries"
+		}
+		parts = append(parts, fmt.Sprintf("%s %d line(s) Steer does not hold, which the next sync removes",
+			lead, len(r.Extra)))
+	}
+	return strings.Join(parts, " ")
+}
+
 // ResolvePhrase names what this process can say about the command a registration
 // points at. It is a proxy for enforcement, never a proof of it: the hook runs
 // under the harness's environment, whose PATH may differ from this one's. So a

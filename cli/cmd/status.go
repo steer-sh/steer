@@ -162,6 +162,19 @@ func renderPosture(s *status.SystemStatus, width int) {
 		}
 		postureRow("Guard runner", row, width)
 	}
+	for _, r := range s.Posture.Rules {
+		if r.Expected == 0 && !r.NeedsSync() {
+			continue
+		}
+		phrase := status.RulesPhrase(r)
+		if r.State == status.RulesDrifted {
+			phrase += " — run: " + status.RulesRepairCommand(r.Scope)
+		}
+		if r.NeedsSync() {
+			phrase = styles.WarningText.Render(phrase)
+		}
+		postureRow("Rules", fmt.Sprintf("%s, %s scope: %s", status.HarnessLabel(r.Harness), r.Scope, phrase), width)
+	}
 	postureRow("Check runner", checkRunnerLine(s), width)
 	postureRow("Checks", checksLine(s), width)
 	postureRow("History", corporaLine(s), width)

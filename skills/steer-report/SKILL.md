@@ -154,7 +154,7 @@ Digest schema (`digest_version: 2`):
 
 The digest is size-capped: the CLI evicts the lowest-scoring clusters to fit, and reports honesty in `stats`.
 
-### The `steer status --json` contract (`status_version: 13`)
+### The `steer status --json` contract (`status_version: 14`)
 
 Step 1 reads this snapshot for posture and the full class inventory. The unit is
 the failure class and what the corpus recorded about it, not the hook count. This
@@ -215,6 +215,17 @@ this machine only.
   the store resolves to: a migrated machine holds a master at both paths. **Act
   on `stale` or `unknown`:** run `steer hooks rebuild --scope <scope>`, which
   regenerates the master AND re-registers it in one operation.
+  `rules[]` reads each installed harness's `## Steer Rules` section against the
+  manifest, one row per installed harness per scope; a harness that is not
+  installed gets no row. `path` is the instruction file (CLAUDE.md or AGENTS.md),
+  `expected` counts the rules the manifest names in that scope, `missing` lists
+  the rule ids whose text the section does not carry, and `extra` lists section
+  lines the manifest does not name, which the next sync removes. `state` is
+  `current`, `drifted` or `unknown` (the file could not be read). A record whose
+  rule is missing from a harness's file stays live while that agent never reads
+  the rule: a harness installed after the rule was written, or a hand edit to the
+  file, causes it. **Act on `drifted`:** run `steer hooks rebuild --scope <scope>`,
+  which rewrites every installed harness's section from the manifest.
 - `checks` — this repository's check tier on this machine, with an empty reading
   when `steer status` ran outside a repository. `repo` is the resolved Git root,
   `manifest` says whether it declares checks, and `adopted` / `adopted_at` say
@@ -399,7 +410,7 @@ flag value.
 | `check` | repository check | A local, deterministic test of repository content can detect it | a managed check in that repo's `check.sh`, authored from `steer check guide` |
 | `steer` / `guard` | pre-tool guard | It is detectable at edit time by regex/AST on a file or command | a PreToolUse hook, via the `steer` skill |
 | `prompt` / `review` | review-prompt change | It is a recurring reviewer false positive | a review addendum entry, via `steer commit-gate addendum add` — the stock prompt is fixed |
-| `prose` / `instruction` | instruction rule | Genuinely not mechanizable but frequent enough to earn a line | CLAUDE.md |
+| `prose` / `instruction` | instruction rule | Genuinely not mechanizable but frequent enough to earn a line | the `## Steer Rules` section of each installed harness's instruction file (CLAUDE.md, AGENTS.md), via `steer rules add` |
 
 An instruction rule is the weakest tier and the last one to reach for. Use it only after arguing why the class cannot be detected by a repository check or a pre-tool guard, and expect the class to keep recurring more often than not — that outcome is information, not failure.
 

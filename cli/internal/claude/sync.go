@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/steer-sh/steer-cli/internal/harness"
+	"github.com/steer-sh/steer-cli/internal/instructions"
 )
 
 // ManifestRules returns the rules the manifest names, ordered by the id that
@@ -16,18 +17,34 @@ import (
 // agent reads. An id naming both is refused when the rule is written, so sorting
 // on the id alone is total.
 func ManifestRules(scope string) ([]string, error) {
+	entries, err := manifestRuleEntries(scope)
+	if err != nil {
+		return nil, err
+	}
+	rules := make([]string, 0, len(entries))
+	for _, e := range entries {
+		rules = append(rules, e.text)
+	}
+	return rules, nil
+}
+
+// ruleEntry is one line of the derived section and the id that names it.
+type ruleEntry struct{ id, text string }
+
+// manifestRuleEntries is ManifestRules keeping each line's id, with blank text
+// dropped the same way.
+func manifestRuleEntries(scope string) ([]ruleEntry, error) {
 	manifest, err := LoadManifest(scope)
 	if err != nil {
 		return nil, err
 	}
 
-	type entry struct{ id, text string }
-	entries := make([]entry, 0, len(manifest.Hooks)+len(manifest.Rules))
+	entries := make([]ruleEntry, 0, len(manifest.Hooks)+len(manifest.Rules))
 	for id, hook := range manifest.Hooks {
-		entries = append(entries, entry{id, hook.Rule})
+		entries = append(entries, ruleEntry{id, hook.Rule})
 	}
 	for id, rule := range manifest.Rules {
-		entries = append(entries, entry{id, rule.Text})
+		entries = append(entries, ruleEntry{id, rule.Text})
 	}
 	// Sorted on the id, then the text. Both write boundaries refuse an id naming a
 	// guard and a rule, so only a hand-edited manifest reaches a collision here; it
@@ -40,13 +57,68 @@ func ManifestRules(scope string) ([]string, error) {
 		return entries[i].text < entries[j].text
 	})
 
-	rules := make([]string, 0, len(entries))
+	out := make([]ruleEntry, 0, len(entries))
 	for _, e := range entries {
 		if rule := strings.TrimSpace(e.text); rule != "" {
-			rules = append(rules, rule)
+			out = append(out, ruleEntry{e.id, rule})
 		}
 	}
-	return rules, nil
+	return out, nil
+}
+
+// RulesPresence compares one harness's rules section with the manifest. The
+// manifest is what a record binds; the section is what the agent reads. They part
+// when a person edits the document, or when a harness was installed after the
+// last sync, and nothing but a sync rewrites the section.
+type RulesPresence struct {
+	Path string
+	// Expected counts the rules the manifest names in this scope.
+	Expected int
+	// Missing are the ids whose rule text the section does not carry.
+	Missing []string
+	// Extra are section lines the manifest does not name. The next sync removes them.
+	Extra []string
+}
+
+// Drifted reports whether the section differs from the manifest in either direction.
+func (p RulesPresence) Drifted() bool { return len(p.Missing) > 0 || len(p.Extra) > 0 }
+
+// TargetRulesPresence reads one target's rules section against the scope's
+// manifest. It writes nothing.
+func TargetRulesPresence(scope string, target harness.Registrar) (RulesPresence, error) {
+	out := RulesPresence{Missing: []string{}, Extra: []string{}}
+	entries, err := manifestRuleEntries(scope)
+	if err != nil {
+		return out, err
+	}
+	path, err := target.InstructionPath(scope)
+	if err != nil {
+		return out, err
+	}
+	out.Path = path
+	carried, err := instructions.SectionRules(path)
+	if err != nil {
+		return out, err
+	}
+
+	have := make(map[string]bool, len(carried))
+	for _, line := range carried {
+		have[line] = true
+	}
+	want := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		want[e.text] = true
+		if !have[e.text] {
+			out.Missing = append(out.Missing, e.id)
+		}
+	}
+	for _, line := range carried {
+		if !want[line] {
+			out.Extra = append(out.Extra, line)
+		}
+	}
+	out.Expected = len(entries)
+	return out, nil
 }
 
 // SyncTargets brings every target harness in line with the shared store: the

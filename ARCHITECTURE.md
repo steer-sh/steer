@@ -103,7 +103,13 @@ Target drift includes master registration and instruction text, as well as the
 store. Explicit harness flags select targets; without a flag, mutations target
 installed hook-registering harnesses, with a Claude Code fallback when none are
 found. `cmd.currentRegistrars` supplies the target list to commands and dashboard.
-The guard master and commit gate have independent registrations.
+The guard master and commit gate have independent registrations. A harness
+installed after a mutation receives neither master nor rules until a rebuild, and
+a hand edit can remove a rule from a document that received it. A record binds the
+manifest text, never the document, so the status snapshot reads each installed
+harness's section against the manifest (`claude.TargetRulesPresence`): an
+instruction-tier record stays live while its rule is absent from the document the
+agent loads.
 
 `internal/tier/` owns the current and legacy tier spellings.
 `internal/guardscope/` validates the harness scope of guard-tier records: evidence

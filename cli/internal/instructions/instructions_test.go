@@ -123,6 +123,26 @@ func TestHasRuleReadsTheSectionOnly(t *testing.T) {
 	}
 }
 
+// SectionRules returns the section's bullets in order, and nothing from the
+// marker, a non-bullet line, or the sections around it.
+func TestSectionRulesReadsOnlyTheSectionsBullets(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "AGENTS.md")
+	write(t, path, "# Intro\n- outside rule\n\n## Steer Rules\n<!-- managed-by-steer -->\n- rule B\nnot a bullet\n  - rule A\n\n## Later\n- after rule\n")
+
+	got, err := SectionRules(path)
+	if err != nil {
+		t.Fatalf("SectionRules: %v", err)
+	}
+	if strings.Join(got, "|") != "rule B|rule A" {
+		t.Fatalf("got %q", got)
+	}
+
+	missing, err := SectionRules(filepath.Join(t.TempDir(), "absent.md"))
+	if err != nil || len(missing) != 0 {
+		t.Fatalf("a missing file carries no rules: %q, %v", missing, err)
+	}
+}
+
 // The temporary file writeAtomic renames from must not be left in the directory.
 func TestSetRulesLeavesNoTemporaryFile(t *testing.T) {
 	dir := t.TempDir()

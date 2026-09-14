@@ -42,8 +42,9 @@ import (
 // firings_applicable, attribution, chain_rate) and adds observation.
 // v12 adds checks: the repository check tier, whose adoption, runner registration
 // and observed execution are three separate readings. v13 adds observation.checks:
-// a check-tier fix's executions in its window, counted on this machine.
-const StatusVersion = 13
+// a check-tier fix's executions in its window, counted on this machine. v14 adds
+// posture.rules: each installed harness's rules section read against the manifest.
+const StatusVersion = 14
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20
@@ -249,6 +250,34 @@ type MasterRuntime struct {
 // that need the rebuild as healthy.
 func (m MasterRuntime) Stale() bool { return m.State == MasterStale || m.State == MasterUnknown }
 
+// Rules section states. The manifest is what a record binds; the section is what
+// the agent reads.
+const (
+	RulesCurrent = "current"
+	RulesDrifted = "drifted"
+	RulesUnknown = "unknown"
+)
+
+// RulesPresence is one installed harness and scope's rules section read against
+// the manifest. A record keeps reading as live while its rule is absent from the
+// document an agent loads, so this is the reading that says the rule reached it.
+type RulesPresence struct {
+	Harness string `json:"harness"`
+	Scope   string `json:"scope"`
+	Path    string `json:"path,omitempty"`
+	// Expected counts the rules the manifest names in this scope.
+	Expected int `json:"expected"`
+	// Missing are the rule ids whose text the section does not carry.
+	Missing []string `json:"missing"`
+	// Extra are section lines the manifest does not name; the next sync removes them.
+	Extra []string `json:"extra"`
+	State string   `json:"state"`
+}
+
+// NeedsSync reports whether a rebuild would change this section, or whether the
+// section could not be read at all.
+func (r RulesPresence) NeedsSync() bool { return r.State != RulesCurrent }
+
 // Posture is the arming and instrument state — what is guarding, and with what.
 type Posture struct {
 	Instrument string        `json:"instrument"`
@@ -262,6 +291,8 @@ type Posture struct {
 	Unresolved int           `json:"unresolved_rows"`
 	// Masters is the runtime provenance of each registered guard master.
 	Masters []MasterRuntime `json:"masters"`
+	// Rules is each installed harness's rules section against the manifest.
+	Rules []RulesPresence `json:"rules"`
 }
 
 // AttentionQueue is the subset of the loop needing action: the cadence queue
@@ -487,6 +518,7 @@ func collectPosture(cfg gate.Config, ev mine.EvidenceSet) Posture {
 		Denials:    []ScopeArming{},
 		Resolver:   []ScopeArming{},
 		Masters:    []MasterRuntime{},
+		Rules:      []RulesPresence{},
 		Unresolved: resolve.CountUnresolved(cfg),
 	}
 	cwd, _ := os.Getwd()
@@ -575,8 +607,41 @@ func collectPosture(cfg gate.Config, ev mine.EvidenceSet) Posture {
 			Command:    pr.Command,
 		}, "", 0))
 		p.Masters = append(p.Masters, masterRuntimes(scope)...)
+		p.Rules = append(p.Rules, RulesPresences(scope, guardRegistrars())...)
 	}
 	return p
+}
+
+// RulesPresences reads each installed target's rules section in one scope. A
+// harness that is not installed gets no row: nothing reads its document, and a
+// sync writes only to installed harnesses. A read that fails yields an unknown
+// row, never an error.
+func RulesPresences(scope string, targets []harness.Registrar) []RulesPresence {
+	out := []RulesPresence{}
+	for _, target := range targets {
+		if !target.Harness().Installed() {
+			continue
+		}
+		row := RulesPresence{
+			Harness: string(target.Harness().ID),
+			Scope:   scope,
+			Missing: []string{},
+			Extra:   []string{},
+			State:   RulesUnknown,
+		}
+		presence, err := claude.TargetRulesPresence(scope, target)
+		row.Path = presence.Path
+		if err == nil {
+			row.Expected = presence.Expected
+			row.Missing, row.Extra = presence.Missing, presence.Extra
+			row.State = RulesCurrent
+			if presence.Drifted() {
+				row.State = RulesDrifted
+			}
+		}
+		out = append(out, row)
+	}
+	return out
 }
 
 // Corpus names a channel writes its evidence to. A channel with no name here
