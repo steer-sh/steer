@@ -158,8 +158,8 @@ The digest is size-capped: the CLI evicts the lowest-scoring clusters to fit, an
 
 Step 1 reads this snapshot for posture and the full class inventory. The unit is
 the failure class and what the corpus recorded about it, not the hook count. This
-schema is byte-shared with the root `SKILL.md`; change both together (see
-CLAUDE.md Key Contracts). Fields:
+is the one copy of the schema in the bundled skills; change it with
+`cli/internal/status/status.go`. Fields:
 
 **Read every count here as an observation.** The windows are uncontrolled: the
 dominant input to an agent's behaviour is its standing instruction set, which no

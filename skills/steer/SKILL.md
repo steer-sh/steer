@@ -180,7 +180,7 @@ fix worked: prevention and absent opportunity both produce silence.
 
 Fail soft. If the command errors, or the CLI is absent, say so in one line and
 continue. This check is an optimization, not a gate. The `status --json` schema
-is documented in "The `steer status --json` contract" below.
+is documented once, in the contract section of `skills/steer-report/SKILL.md`.
 
 ### Step 0: Parse the Rule
 
@@ -427,6 +427,44 @@ After all tests pass, report:
 - Test results summary
 - Any known limitations or edge cases
 
+## Removing or Restoring a Guard
+
+Remove a guard through the CLI, never by deleting its file. `steer remove`
+archives the guard file, its fixtures and its manifest entry before it deletes
+them, then drops the rule line and rebuilds the master. A hand deletion keeps
+no copy and leaves the manifest entry behind.
+
+```bash
+"${STEER_BIN}" remove <hook-id> --scope <project|global> --reason "<why it goes>" --force
+```
+
+The command asks for confirmation on a terminal, and an agent's shell has none.
+Pass `--force` only after the user confirmed this removal. Always pass
+`--reason`: the archive keeps it for the next reader.
+
+To put a guard back, run `steer archive list` to find its entry, then:
+
+```bash
+"${STEER_BIN}" archive restore <hook-id> --scope <project|global>
+```
+
+Restore reinstalls the guard through `steer register`'s installer, so its
+fixtures run again. Report that result as in Step 5. Add `--tier guard` when
+the id also holds another tier's entry, and `--entry <name>` when the list shows
+more than one guard entry. Restore refuses an id that is installed now.
+
+If `steer status --json` lists a record for the guard, a removal reads as an
+`absent` fix, and the record measures nothing until the guard returns or the
+record is retired. After a restore, the record carries `artifact.removed`:
+`steer fix register --supersedes <record-id>` starts a clean window. Leave the
+choice between the two to `/steer-report`.
+
+The other tiers have their own remove commands, and each archives the same way
+and takes `--reason`: `steer rules remove <id>` for an instruction rule,
+`steer commit-gate addendum remove <id>` for a review addendum entry, and
+`steer check remove <id>` for a repository check. `steer archive restore`
+restores all of them; pass `--tier` when one id holds entries of more than one tier.
+
 ## Critical Rules
 
 1. **Never crash** - Wrap stdin parsing in try/except. Exit 0 on any error.
@@ -446,257 +484,3 @@ The `|` pipe splits a rule into a detection part and an optional suggestion (see
 - stopReason: `"Use of npm detected. Suggestion: please use yarn instead"`
 
 Never invent suggestions. Only include them when explicitly provided after `|`.
-
-## The `steer status --json` contract (`status_version: 20`)
-
-`steer status` composes one read-only snapshot of the whole loop. The unit is the
-failure class and what the corpus recorded about it, not the hook count. The
-Pre-flight step reads it to dedup a rule against classes the loop already decided.
-This schema is byte-shared with `skills/steer-report/SKILL.md`; change both
-together (see CLAUDE.md Key Contracts). Fields:
-
-**Read every count here as an observation.** The windows are uncontrolled: the
-dominant input to an agent's behaviour is its standing instruction set, which no
-chain and no session records, which a person edits by hand between sessions, and
-which an instruction-tier fix edits directly. So the snapshot reports hits,
-eligible units, window bounds, coverage, guard firings and the identities that
-counted each window, and it reports no efficacy verdict. The intervention's
-contribution to any change in these counts is unresolved. v11 removes `verdict`,
-`p_value`, `effect`, `required_after`, `confounds`, `composition`,
-`instrument_drift`, `firings_applicable`, `attribution` and `chain_rate`, and adds
-`observation`. v12 adds `checks`: the repository check tier, whose registration,
-authorization and observed execution are three readings and not one. v13 adds
-`observation.checks`: a check-tier fix's executions in its window, counted on
-this machine only. v16 adds `observation.checks.registered_host` and
-`other_host`: a fix registered on another host is not missing coverage here.
-v17 adds `artifact`: the fix a record binds and where it stands now. v18 adds
-`rules` and `addenda`: the instruction and review entries each store holds.
-v19 adds `posture.masters[].state` `detached` and `store`: an installed harness
-that runs none of a scope's guards. v20 adds `artifact.removed`: a fix in place
-now that its store's archive records as removed after the record's split.
-
-- `status_version` — the schema version. `--json` is a stable agent contract.
-- `posture` — the arming state: `instrument` (reviewer model / runs / prompt
-  digest), `reviewer`, `ledger` path, and `commit_gate[]` / `denials[]` /
-  `resolver[]`. Each row carries `harness`, `scope`, `registered`, `effective`,
-  `trust`, `command`, `resolvable`, `observed` and `observed_corpus`. A
-  registration is three separate readings, and only the first is what the
-  configuration says. `command` is the command the registration names, verbatim.
-  `resolvable` is whether that command resolves — `resolvable`, `missing`,
-  `unknown`, or `not-registered` when there is no command to test. Treat it as a
-  PROXY, never a proof: the hook runs under the harness's environment, whose
-  PATH may differ, so it can prove a command absent and never prove one runs.
-  **Act on `missing`:** neither harness reports a command it cannot resolve — the
-  tool call runs, the hook is skipped, and nothing says so — and
-  `steer bin install` repoints every registration at `~/.steer/bin/steer`.
-  `observed` is the epoch second of the newest row the channel wrote to
-  `observed_corpus`, 0 when it never wrote one, and both fields are absent when
-  the channel writes no corpus of its own (the resolver). Never observed is not
-  proof of breakage: nobody may have attempted the action the channel fires on.
-  A corpus records no scope, so both scopes of one harness report the same
-  evidence. One guard store serves both harnesses but each harness holds its
-  own registration, so a scope alone does not identify a row: `commit_gate` and
-  `resolver` report one row per harness per scope, and `denials` is Claude
-  Code's alone. `trust` is `not-applicable` (the harness reviews no hook trust),
-  `record-present-unverified`, `missing` or `unknown` — Steer never claims to
-  have verified a harness's internal hash. The resolver is the Stop hook that
-  joins ledger rows to transcripts; it arms with the commit gate on the same
-  scope. `unresolved_rows` counts the rows still owing that join — a window
-  cannot account for them, and `steer commit-gate backfill --apply` clears them.
-  `masters[]` is the guard master's runtime provenance, one row per harness per
-  scope: `path`, `runtime` (the digest of the Python runtime spliced into it),
-  `version` (the steer that wrote it), `expected` (this binary's runtime digest)
-  `state` and `observed` (the epoch second of the last block in the audit log
-  beside this registered master; the log holds blocks only, so a master that
-  allowed every call reads as 0). `state` is `current`, `stale` (an older runtime, so a firing
-  writes fewer audit fields than the join reads), `unknown` (an unstamped
-  master — every store built before the stamp existed, which never reads as
-  current), `detached` or `not-registered`. `detached` is an installed harness
-  that runs none of the scope's guards: the store holds guards and the harness
-  registers no runner for them, or one other than the store's. A store with guards
-  and no runner file never reads `detached`: its repair is a rebuild.
-  Its `store` names the runner the store holds. `trust` is the harness's approval of the
-  registered runner, in the same values as a `posture` row's `trust`, and is
-  absent when no runner is registered. A Codex runner reading `missing` runs no
-  guard, while the guard's rule still reaches the agent as text; approve the
-  definitions in `/hooks`. The row reads the REGISTERED master, not the one
-  the store resolves to: a migrated machine holds a master at both paths. **Act
-  on `stale` or `unknown`:** run `steer hooks rebuild --scope <scope>`, which
-  regenerates the master AND re-registers it in one operation. **Act on
-  `detached`:** run `steer hooks sync --scope <scope>`, which registers the
-  runner the store already holds and writes nothing in the store; a clone of a
-  repository whose guards were committed reads `detached` until it runs.
-  `rules[]` reads each installed harness's `## Steer Rules` section against the
-  manifest, one row per installed harness per scope; a harness that is not
-  installed gets no row. `path` is the instruction file (CLAUDE.md or AGENTS.md),
-  `expected` counts the rules the manifest names in that scope, `missing` lists
-  the rule ids whose text the section does not carry, and `extra` lists section
-  lines the manifest does not name, which the next sync removes. `state` is
-  `current`, `drifted` or `unknown` (the file could not be read). A record whose
-  rule is missing from a harness's file stays live while that agent never reads
-  the rule: a harness installed after the rule was written, or a hand edit to the
-  file, causes it. **Act on `drifted`:** run `steer hooks sync --scope <scope>`,
-  which rewrites every installed harness's section from the manifest.
-- `checks` — this repository's check tier on this machine, with an empty reading
-  when `steer status` ran outside a repository. `repo` is the resolved Git root,
-  `manifest` says whether it declares checks, and `adopted` / `adopted_at` say
-  whether THIS machine authorized its `check.sh` to run at the end of a turn.
-  Registration, authorization and observed execution are three separate readings,
-  and a clone carries none of the second. `runner[]` is the Stop runner's
-  registration in the same shape as a `posture` row, one per harness per scope;
-  its `observed` is the newest run that harness's runner recorded, and its
-  `trust` is `unknown` wherever a harness reviews hook trust, because Steer reads
-  no Stop trust record for that event. `checks[]` is one row per declaration:
-  `id`, `kind` (`script` or `go-test`), `binding` (the script, or the package and
-  test), `validation` (`current`, `stale` or `none`) with `changed` naming what
-  moved since the receipt in `receipt` / `validated_at`, and `execution` /
-  `executed_at` / `execution_run` from the newest execution record here. **A
-  stale check keeps running:** staleness is a label on the proof, never a repair
-  the loop demands, and `steer check test <id>` replays the cases when a fix
-  registration needs fresh proof. An absent `execution` is unobserved and never a
-  pass — an aggregate `check.sh` outcome attributes no result to one assertion.
-  `latest_run` is the newest run that did any work: `run_id`, `source`,
-  `harness`, `outcome`, `disposition`, `finished`, `missing[]`,
-  `integration_failure` and `refused_after`. A run the repository lock turned
-  away ran nothing, so it never stands in for the result of the run that held the
-  repository; `refused_after` is when such a run was turned away. **Act on
-  `integration_failure`:** a passing `check.sh` that ran no declared check is the
-  script's wiring and never a failed assertion — add the managed line naming
-  `steer check exec --all` or `steer check go-test`.
-- `interventions[]` — the **full** inventory. It carries every live class. Each
-  row: `id`, `class`, `problem`, `intervention`, `legacy_note`, `match` (the regex
-  that defines the class), `tier`, `target`, `status` (`active` or `rejected`),
-  `before` / `after` incidence (`hits`, `units`, `rate`), and for
-  a refused class `reason`, `reopen` and `rejected_ts`. `problem` and `intervention` are the record's own explanation, authored when the
-  evidence was in hand: what goes wrong, and what this record does about it. Lead
-  with them — a `class` is a label and a `match` is a regex, and neither says what
-  the class is. On a `rejected` row the `intervention` is the one that was
-  considered, or the sentence `no suitable intervention was identified`.
-  `legacy_note` is present only on a record written before those fields existed;
-  it holds implementation detail, so never read it as either. This is the dedup source
-  — a class here is decided. `corpus` and `unit` name the evidence the class is
-  counted over and what one denominator entry is: `review-findings` counts by
-  `chain`, `transcript-friction` by `session`. Never compare a chain rate to a
-  session rate. A session-unit row also carries `signal_kind` — the classifier
-  kind its regex was authored against (`any`, `user_corrections`,
-  `user_rejections`, `tool_failures` or `hook_blocks`). Each row also carries
-  its measurement conditions:
-  - `scope` — the frozen eligibility rule: `{version, all}`, or `{version, repo,
-    path}` at version 1, plus a `harness` id list at version 2. The predicates
-    combine with AND. `null` is a legacy record: its two windows describe
-    different opportunity sets, and no scope is ever inferred for it. Run
-    `steer fix scope <id>`.
-  - `before_coverage` / `after_coverage` — each window's unit accounting:
-    `total`, `eligible` (the denominator), `ineligible`, `unknown`,
-    `unknown_scope`, `unknown_evidence`, `pending`, `partial_exposure`. An
-    unknown unit is not counted; it never shrinks the denominator.
-    `partial_exposure` is the session corpus's own category, for a session that
-    straddled the install and so ran under both regimes: `unknown` means the
-    scope could not decide, `partial_exposure` means the window could not.
-  - `observation` — what the corpus recorded. Five blocks:
-    - `counts` — `split_ts` (the boundary: the install, the refusal, or the
-      scope migration), `observed_ts` (the read's clock), `unit`, and `before` /
-      `after`, each `{hits, eligible, first_activity_ts, last_activity_ts}`. The
-      two timestamp pairs are different things: the period bounds express an
-      empty window and say how long one has been quiet, and the activity bounds
-      name the eligible work actually seen, which an empty window cannot express.
-    - `recurrence` — `{occurred, matches, example_kind, example, example_ts}`.
-      `example_kind` is `adjudicated_finding` (a reviewer's confirmed concern) or
-      `cluster_key` (the text a classifier grouped a session's friction by, which
-      is NOT a confirmed escaped failure). Read the example before acting.
-    - `firing` — the guard audit stream: `{applicable, log_present, hook_id,
-      scope, class_scoped, rows, units, newest_ts}`. `applicable` is false for a
-      tier that writes no audit rows and for a record naming no hook.
-      `log_present: false` is unknown activity, never a known zero. `scope` is
-      `eligible_units` (rows joined to this class's own eligible units, and
-      `class_scoped` is then true) or `window_period` (every row this hook wrote
-      inside the window's bounds, whatever work it landed on). A `window_period`
-      count cannot establish that the guard fired on this class's work.
-    - `checks` — a check-tier fix's execution stream: `{applicable, attribution,
-      stream_present, registered_host, other_host, check_id, repo, scope, class_scoped, executions, outcomes,
-      blocked, changed_detector, units, newest_ts}`. It counts executions recorded
-      on THIS machine only; review history can hold another machine's commits, so
-      a zero there can be work this machine never ran. `attribution` is
-      `unavailable` for a record that binds no check. `stream_present: false` is
-      unknown activity, never a known zero. `registered_host` is the host that
-      registered the fix; with `other_host: true` and no stream here, its runs are
-      on that host, and this machine has no coverage gap to repair. `scope` follows `firing`: a review
-      record counts every execution in the window's bounds (`window_period`), a
-      session record counts Stop runs in its eligible sessions (`eligible_units`).
-      `outcomes` counts by execution outcome, `blocked` counts failures whose run
-      blocked a turn, and `changed_detector` counts runs of a detector other than
-      the one the record registered.
-    - `coverage` — `before` / `after`, the same maps as above, plus
-      `zero_eligible_after`. That flag is a statement, not a fault: every freshly
-      installed record has zero eligible after-units, and absent opportunity is
-      not an observed quiet window.
-    - `provenance` — `{kind, before, after}`. `kind` is `reviewer` (the reviewer
-      identities that counted a chain window) or `parser` (the parser-and-adapter
-      identities that produced a session window). Labels only: no rule here
-      compares them. A window whose two lists differ was counted by two
-      instruments, which is a reason to read the examples rather than the counts.
-    - `declined` — true on a refused record. Its after-window is the period since
-      the refusal, so a recurrence there implies no fix that failed.
-  - `artifact` — the fix the record binds and where it stands now:
-    `{id, scope, repo, state, detail, removed}`, `null` on a declined record. It is read
-    beside the observation and never enters it. `state` is `present` (the entry
-    holds the text the record froze), `changed` (the same id with other text, or
-    a check whose detector moved), `absent` (a readable store no longer holds
-    it), `unreadable` (`detail` names why), `unbound` (a legacy record that names
-    no entry), `elsewhere` (a project entry or a check in a repository other than
-    the one read) or `unplaced` (a project entry whose record names no
-    repository). A review entry is read where the commit gate reads it: the
-    global store on disk, the project store at HEAD. **An `absent` fix is not a
-    quiet window:** the record measures a fix that is no longer there, so
-    put it back with `steer archive restore <id>`, which reinstalls it from the
-    store's archive, or retire the record. `removed` is set on a `present` or
-    `changed` fix whose store archived a removal of it after the record's split
-    (compared in whole seconds): the fix is back, and the window may span a
-    period without it. The archive proves a removal was written, not how long the
-    fix was gone, so read the record's window against that time before trusting
-    its counts; a fresh `steer fix register --supersedes` starts a clean window.
-- `summary` — `total` plus `counts` by action section (`inspect`, `repair`,
-  `observe`).
-- `chains[]` — recent review chains, findings split `accepted` / `rejected`.
-- `attention` — the subset asking for a reader: `interventions[]` (a recurrence,
-  a missing coverage cause, or no frozen scope), `candidates[]` (no `match` yet),
-  `unscored[]` (ids of records no engine reads), and `checks[]` — the open steps
-  in this repository's check tier, the same rows the queue carries.
-- `telemetry` — corpus sizes: `review_chains`, `denials_rows`, `audit_firings`,
-  `session_snapshots`, plus `harnesses[]` — one row per harness with its
-  `sessions`, `firings` and `chains`, so a harness that contributed nothing reads
-  differently from one that was never mined.
-- `corpora[]` — one row per corpus with `present`, `size` and `path`.
-- `hooks[]` — the registered managed hooks in the active scope: `name`, `scope`,
-  `source`, `rule`.
-- `presets[]` — the catalog roster: `name`, `bundle`, `description`, `enabled`,
-  `drifted`.
-- `rules[]` — the instruction-tier rules in both stores: `id`, `scope`, `text`.
-  Whether an agent's instructions carry one is `posture.rules[].missing`.
-- `addenda[]` — the review addendum entries in both stores: `id`, `scope`,
-  `text` (the store on disk), `head_text` (the committed text the commit gate
-  reads for a project entry) and `state`: `live`, `uncommitted` (on disk, not at
-  HEAD), `uncommitted-change` (the gate reads `head_text`), `uncommitted-removal`
-  (removed on disk, still read at HEAD) or `unreadable` with `detail`. A global
-  entry is read from disk, so it is `live` whenever the store holds it.
-- `team` — the repo-committed team lockfile summary: `present`, `path`,
-  `hooks_locked`, `catalog_version`, and `error`. v10 adds `error`: a project with
-  no lockfile is `present: false` and is not a fault, while a lockfile that exists
-  and cannot be read is `present: true` with `error` naming why. Before v10 both
-  read as absent.
-
-### What an observation supports, and what it does not
-
-An observation supports three readings and no fourth:
-
-- **The class came back.** `recurrence.occurred` is a fact about the corpus.
-  Open the example and decide whether the record still describes the problem.
-- **The accounting is incomplete.** Unknown units, or an absent guard audit log,
-  mean the window cannot be read at all. Name the cause and repair it.
-- **The window is quiet.** Eligible work arrived and the class did not. That is
-  what was recorded, and it is not evidence that the fix caused the silence.
-
-Behaviour is established at install, not in the field: a guard's stored fixtures
-(`steer fix mine`, `steer test <hook>`) replay real cases deterministically.
-Field counts are maintenance evidence — they say whether a class is still
-happening, never whether a fix is what stopped it.

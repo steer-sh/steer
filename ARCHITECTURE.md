@@ -14,7 +14,7 @@ in commits. Read constants and wire schemas from their owning code.
 The plugin bundles skills, a launcher, platform binaries and a cadence SessionStart
 hook. Guard and commit-gate activation are explicit setup operations.
 `skills/steer-setup/SKILL.md` handles reviewer selection and installation;
-`skills/steer/SKILL.md` handles guard generation, and `skills/steer-report/SKILL.md`
+`skills/steer/SKILL.md` handles guard generation and removal, and `skills/steer-report/SKILL.md`
 reads the queue and evidence to propose interventions.
 
 The two marketplace manifests and two root plugin manifests describe one identity:

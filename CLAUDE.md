@@ -85,8 +85,9 @@ Read the linked architecture section before changing the corresponding boundary:
 
 - Report digest: `cli/internal/report/digest.go` and
   `skills/steer-report/SKILL.md`.
-- Status JSON: `cli/internal/status/status.go`, `skills/steer/SKILL.md` and
+- Status JSON: `cli/internal/status/status.go` and the one documented copy in
   `skills/steer-report/SKILL.md`; `TestJSONContractIsStable` pins the contract.
+  `skills/steer/SKILL.md` names only the fields its Pre-flight reads.
   The check tier's share of it lives in `cli/internal/status/checks.go`.
 - Refresh queue: `cli/internal/cadence/refresh.go` and
   `skills/steer-report/SKILL.md`. Read version constants at their source.
