@@ -96,7 +96,7 @@ func TestRemovingFromBothHarnessesLeavesNoRegistration(t *testing.T) {
 	withCmdProjectTempDir(t)
 	installGuard(t, bothHarnesses()...)
 
-	if _, err := claude.RemoveManagedHook(claude.ProjectScope, "no-var-hook", bothHarnesses()...); err != nil {
+	if _, err := claude.RemoveManagedHook(claude.ProjectScope, "no-var-hook", claude.RemoveOptions{}, bothHarnesses()...); err != nil {
 		t.Fatalf("RemoveManagedHook returned error: %v", err)
 	}
 

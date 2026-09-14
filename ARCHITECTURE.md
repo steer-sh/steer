@@ -101,6 +101,17 @@ A prose edit does not consolidate the master or invalidate unrelated guard tests
 Removing a shared artifact removes its derived rule for every target, including
 Pi and Codex's shared project document.
 
+`RemoveManagedHook` archives a guard before it deletes it. `internal/archive/`
+writes the guard file, its fixtures and its manifest entry to
+`archive/<id>/<entry>/` in the same store, with an `archive.json` that holds the
+removal time, the reason and the parts it did not find. The entry is written to a
+temporary directory and renamed into place, and a failed write stops the removal.
+Store readers skip subdirectories, so an archived guard never reaches the master.
+Only a caller that proves a catalog copy removes without an archive
+(`RemoveOptions.CatalogCopy`, which `presets.DisablePreset` sets for its own
+factory entry); a pruned orphan and a team-lockfile extra are archived. A project
+archive is committed with the store.
+
 Target drift includes master registration and instruction text, as well as the
 store. Explicit harness flags select targets; without a flag, mutations target
 installed hook-registering harnesses, with a Claude Code fallback when none are

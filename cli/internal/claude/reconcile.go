@@ -240,7 +240,7 @@ func Reconcile(scope string, desired []DesiredHook, opts ReconcileOptions, targe
 			result.Planned++
 			continue
 		}
-		if _, err := RemoveManagedHook(scope, hookName, targets...); err != nil {
+		if _, err := RemoveManagedHook(scope, hookName, RemoveOptions{Reason: "not in the desired hook set"}, targets...); err != nil {
 			return result, err
 		}
 	}

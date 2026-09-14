@@ -47,6 +47,8 @@ Read the linked architecture section before changing the corresponding boundary:
 - Guard/rule lifecycle or instruction synchronization: [guards and instructions](ARCHITECTURE.md#guards-and-instructions).
   Start with `cli/internal/claude/lifecycle.go`, `rules.go` and `sync.go`.
   `## Steer Rules` is derived from the manifest; change it through the lifecycle.
+  A removal archives the fix first (`cli/internal/archive/`); a new removal path
+  must pass `RemoveOptions` and archive unless the catalog holds a copy.
 - Guard execution or fixture mining: [runtime and fixtures](ARCHITECTURE.md#guard-runtime-and-fixtures).
   `cli/internal/guard/runtime.py` is embedded in generated masters. A CLI upgrade
   needs `steer hooks rebuild --scope <scope>` to update an installed master;

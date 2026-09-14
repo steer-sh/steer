@@ -173,8 +173,8 @@ func DisablePreset(scope string, item CatalogItem, force bool, targets ...harnes
 	}
 
 	entry, hasEntry := manifest.Hooks[hookName]
+	isFactoryMatch := hasEntry && strings.EqualFold(strings.TrimSpace(entry.Source), claude.SourceFactory) && strings.TrimSpace(entry.SourceID) == item.Name
 	if hasEntry {
-		isFactoryMatch := strings.EqualFold(strings.TrimSpace(entry.Source), claude.SourceFactory) && strings.TrimSpace(entry.SourceID) == item.Name
 		if !isFactoryMatch && !force {
 			return "", fmt.Errorf("conflict: hook %s is not managed by preset %s (source=%s source_id=%s). use --force to remove anyway", hookName, item.Name, entry.Source, entry.SourceID)
 		}
@@ -196,10 +196,17 @@ func DisablePreset(scope string, item CatalogItem, force bool, targets ...harnes
 		}
 	}
 
-	if _, err := claude.RemoveManagedHook(scope, hookName, targets...); err != nil {
+	if _, err := claude.RemoveManagedHook(scope, hookName, disableOptions(item, isFactoryMatch), targets...); err != nil {
 		return "", err
 	}
 	return "disabled", nil
+}
+
+// disableOptions archives the guard a preset disable removes, unless it is the
+// catalog's own entry, which the catalog can install again. A guard that --force
+// removes under the preset's name is archived like any other.
+func disableOptions(item CatalogItem, factoryMatch bool) claude.RemoveOptions {
+	return claude.RemoveOptions{CatalogCopy: factoryMatch, Reason: "removed by disabling preset " + item.Name}
 }
 
 // EnsureAutoManagedFactoryPresets reinstalls internal auto-enabled presets that drifted.
@@ -284,7 +291,8 @@ func SyncFactoryPresets(scope string, catalog *Catalog, options SyncOptions, tar
 					result.OrphansPruned++
 					result.DryRunPlanned++
 				} else {
-					if _, err := claude.RemoveManagedHook(scope, hookName, targets...); err != nil {
+					opts := claude.RemoveOptions{Reason: "its preset is no longer in the catalog"}
+					if _, err := claude.RemoveManagedHook(scope, hookName, opts, targets...); err != nil {
 						return result, err
 					}
 					result.OrphansPruned++

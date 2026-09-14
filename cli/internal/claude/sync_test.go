@@ -156,7 +156,7 @@ func TestRemovedRuleIsCleanedByTheRetry(t *testing.T) {
 	installTestHook(t, "guard", "rule A")
 
 	target := &failingRegistrar{fail: true}
-	if _, err := RemoveManagedHook(ProjectScope, "guard", target); err == nil {
+	if _, err := RemoveManagedHook(ProjectScope, "guard", RemoveOptions{}, target); err == nil {
 		t.Fatal("expected the interrupted removal to fail")
 	}
 	if got := readRules(t, ProjectScope); !strings.Contains(got, "- rule A") {
@@ -164,7 +164,7 @@ func TestRemovedRuleIsCleanedByTheRetry(t *testing.T) {
 	}
 
 	target.fail = false
-	_, err := RemoveManagedHook(ProjectScope, "guard", target)
+	_, err := RemoveManagedHook(ProjectScope, "guard", RemoveOptions{}, target)
 	if err == nil || !strings.Contains(err.Error(), "hook not found") {
 		t.Fatalf("expected a hook-not-found retry, got: %v", err)
 	}

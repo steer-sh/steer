@@ -305,7 +305,7 @@ func TestAFailingFixtureNeverBlocksARemoval(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := RemoveManagedHook(ProjectScope, "alpha")
+	result, err := RemoveManagedHook(ProjectScope, "alpha", RemoveOptions{})
 	if err != nil {
 		t.Fatalf("a failing fixture on another guard blocked the removal: %v", err)
 	}
@@ -328,7 +328,7 @@ func TestRemovingAGuardDropsItsFixtures(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := RemoveManagedHook(ProjectScope, "alpha"); err != nil {
+	if _, err := RemoveManagedHook(ProjectScope, "alpha", RemoveOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(fixture.Path(dir, "alpha")); !os.IsNotExist(err) {

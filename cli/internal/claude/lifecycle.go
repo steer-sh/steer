@@ -47,11 +47,23 @@ type InstallManagedHookResult struct {
 	Verification *FixtureVerification
 }
 
+// RemoveOptions controls what a removal keeps.
+type RemoveOptions struct {
+	// Reason is why the guard is removed. The archive entry keeps it.
+	Reason string
+	// CatalogCopy marks a guard the preset catalog can install again, so the
+	// removal writes no archive entry.
+	CatalogCopy bool
+}
+
 // RemoveManagedHookResult reports remove outcome details.
 type RemoveManagedHookResult struct {
 	HookName string
 	HookPath string
 	Rule     string
+	// ArchivePath is the archive entry that holds the removed guard; empty when
+	// the removal wrote none.
+	ArchivePath string
 	// Verification is the fixture rerun that followed consolidation. A failing
 	// fixture never blocks a removal.
 	Verification *FixtureVerification
@@ -277,8 +289,10 @@ func InstallManagedHook(scope string, input InstallManagedHookInput, targets ...
 	return result, nil
 }
 
-// RemoveManagedHook deletes one hook and re-syncs all managed artifacts.
-func RemoveManagedHook(scope, identifier string, targets ...harness.Registrar) (*RemoveManagedHookResult, error) {
+// RemoveManagedHook archives one hook, deletes it and re-syncs all managed
+// artifacts. The hook is deleted only after its archive entry is in place, so a
+// failed archive write leaves the hook installed.
+func RemoveManagedHook(scope, identifier string, opts RemoveOptions, targets ...harness.Registrar) (*RemoveManagedHookResult, error) {
 	scope = strings.ToLower(strings.TrimSpace(scope))
 	if err := ValidateScope(scope); err != nil {
 		return nil, err
@@ -334,6 +348,14 @@ func RemoveManagedHook(scope, identifier string, targets ...harness.Registrar) (
 		}
 	}
 
+	archivePath := ""
+	if !opts.CatalogCopy {
+		archivePath, err = archiveHook(scope, hookName, hookPath, manifestEntry, hasEntry, opts.Reason)
+		if err != nil {
+			return nil, fmt.Errorf("failed to archive hook %s, so it was not removed: %w", hookName, err)
+		}
+	}
+
 	if err := os.Remove(hookPath); err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("failed to delete hook file: %w", err)
 	}
@@ -359,9 +381,10 @@ func RemoveManagedHook(scope, identifier string, targets ...harness.Registrar) (
 	}
 
 	result := &RemoveManagedHookResult{
-		HookName: hookName,
-		HookPath: hookPath,
-		Rule:     rule,
+		HookName:    hookName,
+		HookPath:    hookPath,
+		Rule:        rule,
+		ArchivePath: archivePath,
 	}
 	verification, err := VerifyFixtures(scope)
 	if err != nil {

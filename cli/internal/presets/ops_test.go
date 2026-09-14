@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/steer-sh/steer-cli/internal/archive"
 	"github.com/steer-sh/steer-cli/internal/claude"
 )
 
@@ -386,5 +387,49 @@ func TestPresetSyncDryRunDoesNotMutate(t *testing.T) {
 	internalPath := filepath.Join(hooksDir, internal.HookFile)
 	if _, err := os.Stat(internalPath); !os.IsNotExist(err) {
 		t.Fatalf("expected internal auto-managed preset not to be installed during dry-run")
+	}
+}
+
+func TestDisablingAFactoryPresetWritesNoArchive(t *testing.T) {
+	withPresetProjectTempDir(t)
+	catalog, item := loadCatalogAndOneVisiblePreset(t)
+	if _, err := EnablePreset(claude.ProjectScope, catalog, item, false); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := DisablePreset(claude.ProjectScope, item, false); err != nil {
+		t.Fatal(err)
+	}
+	hooksDir, err := claude.GetHooksDir(claude.ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := archive.List(hooksDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("disabling a catalog preset archived %s", entries[0].ID)
+	}
+}
+
+func TestPruningAnOrphanArchivesIt(t *testing.T) {
+	withPresetProjectTempDir(t)
+	catalog, _ := loadCatalogAndOneVisiblePreset(t)
+	addOrphanFactoryHook(t, claude.ProjectScope, "orphan-prune", "gone-from-catalog", "orphan prune rule")
+
+	if _, err := SyncFactoryPresets(claude.ProjectScope, catalog, SyncOptions{PruneOrphans: true}); err != nil {
+		t.Fatal(err)
+	}
+	hooksDir, err := claude.GetHooksDir(claude.ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := archive.List(hooksDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].ID != "orphan-prune" {
+		t.Fatalf("the pruned orphan has no archive entry: %+v", entries)
 	}
 }
