@@ -49,6 +49,8 @@ Read the linked architecture section before changing the corresponding boundary:
   `## Steer Rules` is derived from the manifest; change it through the lifecycle.
   A removal archives the fix first (`cli/internal/archive/`); a new removal path
   must pass `RemoveOptions` and archive unless the catalog holds a copy.
+  `steer archive restore` (`cli/cmd/archive.go`) goes back through each tier's
+  installer, so a change to an installer's refusals changes restore too.
 - Guard execution or fixture mining: [runtime and fixtures](ARCHITECTURE.md#guard-runtime-and-fixtures).
   `cli/internal/guard/runtime.py` is embedded in generated masters. A CLI upgrade
   needs `steer hooks rebuild --scope <scope>` to update an installed master;

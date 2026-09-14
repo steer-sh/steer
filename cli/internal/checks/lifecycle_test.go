@@ -290,6 +290,54 @@ func TestRemoveArchivesTheDeclaration(t *testing.T) {
 	}
 }
 
+// A restored check replays its cases and is declared again; the entry stays.
+func TestRestoreDeclaresAnArchivedCheck(t *testing.T) {
+	root := checkRepo(t, noCountScript)
+	writeCases(t, root, "no-count", goodCase(), defectCase("literal test count"))
+	if _, err := Add(root, noCount); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if _, _, err := Remove(root, "no-count", "flaky on CI"); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	entries, err := archive.List(Dir(root))
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("archive = %d entries, %v", len(entries), err)
+	}
+
+	d, run, err := Restore(root, entries[0])
+	if err != nil || run.Verdict != VerdictValidated {
+		t.Fatalf("Restore: verdict %s, %v", run.Verdict, err)
+	}
+	if m, _ := Load(root); len(m.Checks) != 1 || m.Checks[0].Script != d.Script {
+		t.Fatalf("manifest declares %+v; want the archived check", m.Checks)
+	}
+	if kept, _ := archive.List(Dir(root)); len(kept) != 1 {
+		t.Fatalf("the archive holds %d entries after a restore; want the entry kept", len(kept))
+	}
+}
+
+// A restored check whose cases no longer match stays undeclared.
+func TestRestoreLeavesACheckThatFailsUndeclared(t *testing.T) {
+	root := checkRepo(t, noCountScript)
+	writeCases(t, root, "no-count", goodCase(), defectCase("literal test count"))
+	if _, err := Add(root, noCount); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if _, _, err := Remove(root, "no-count", ""); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	writeCases(t, root, "no-count", goodCase(), defectCase("not printed"))
+	entries, _ := archive.List(Dir(root))
+
+	if _, _, err := Restore(root, entries[0]); !errors.Is(err, ErrNotValidated) {
+		t.Fatalf("Restore = %v; want ErrNotValidated", err)
+	}
+	if m, _ := Load(root); len(m.Checks) != 0 {
+		t.Fatalf("manifest declares %+v; want none", m.Checks)
+	}
+}
+
 // A failed archive write leaves the check declared.
 func TestAFailedArchiveWriteKeepsTheCheck(t *testing.T) {
 	if os.Geteuid() == 0 {

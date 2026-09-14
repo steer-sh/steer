@@ -3,6 +3,7 @@ package archive
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -89,6 +90,41 @@ func TestAnInterruptedWriteReadsAsNoEntry(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("a leftover temporary entry read as %d entries", len(got))
+	}
+}
+
+func stored(kind, id, name string) Stored {
+	return Stored{Entry: Entry{Tier: kind, ID: id}, Dir: filepath.Join("archive", id, name)}
+}
+
+func TestSelectNeedsATierWhenOneIDHoldsTwo(t *testing.T) {
+	entries := []Stored{stored("guard", "alpha", "e1"), stored("instruction", "alpha", "e2"), stored("guard", "beta", "e3")}
+	if _, err := Select(entries, "alpha", "", ""); err == nil || !strings.Contains(err.Error(), "--tier") {
+		t.Fatalf("an id held by two tiers was selected without --tier: %v", err)
+	}
+	got, err := Select(entries, "alpha", "instruction", "")
+	if err != nil || got.Name() != "e2" {
+		t.Fatalf("--tier instruction selected %q, %v", got.Name(), err)
+	}
+	if _, err := Select(entries, "alpha", "check", ""); err == nil || !strings.Contains(err.Error(), "guard, instruction") {
+		t.Fatalf("a tier with no entry was not refused with the tiers it has: %v", err)
+	}
+}
+
+func TestSelectNeedsAnEntryWhenOneTierHoldsTwo(t *testing.T) {
+	entries := []Stored{stored("guard", "alpha", "e1"), stored("guard", "alpha", "e2")}
+	if _, err := Select(entries, "alpha", "guard", ""); err == nil || !strings.Contains(err.Error(), "--entry with one of: e1, e2") {
+		t.Fatalf("two entries of one tier were not refused: %v", err)
+	}
+	got, err := Select(entries, "alpha", "", "e2")
+	if err != nil || got.Name() != "e2" {
+		t.Fatalf("--entry e2 selected %q, %v", got.Name(), err)
+	}
+	if _, err := Select(entries, "alpha", "", "e9"); err == nil {
+		t.Fatal("an entry name that is not in the archive was selected")
+	}
+	if _, err := Select(entries, "gamma", "", ""); err == nil {
+		t.Fatal("an id with no entries was selected")
 	}
 }
 

@@ -106,6 +106,21 @@ func Remove(root, id, reason string) (Declaration, string, error) {
 	return d, archivePath, Save(root, m)
 }
 
+// Restore declares an archived check again through Add, so its cases replay
+// first and a check that does not validate stays undeclared. The archive entry
+// stays whatever the verdict.
+func Restore(root string, s archive.Stored) (Declaration, ValidationRun, error) {
+	if s.Tier != string(tier.Check) {
+		return Declaration{}, ValidationRun{}, fmt.Errorf("archive entry %s holds a %s fix, not a check", s.Dir, s.Tier)
+	}
+	var d Declaration
+	if err := json.Unmarshal(s.Manifest, &d); err != nil {
+		return Declaration{}, ValidationRun{}, fmt.Errorf("archive entry %s: %w", s.Dir, err)
+	}
+	run, err := Add(root, d)
+	return d, run, err
+}
+
 func find(m Manifest, id string) (Declaration, bool) {
 	for _, d := range m.Checks {
 		if d.ID == id {

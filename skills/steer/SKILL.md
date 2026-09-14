@@ -648,7 +648,8 @@ now that its store's archive records as removed after the record's split.
     repository). A review entry is read where the commit gate reads it: the
     global store on disk, the project store at HEAD. **An `absent` fix is not a
     quiet window:** the record measures a fix that is no longer there, so
-    reinstall it or retire the record. `removed` is set on a `present` or
+    put it back with `steer archive restore <id>`, which reinstalls it from the
+    store's archive, or retire the record. `removed` is set on a `present` or
     `changed` fix whose store archived a removal of it after the record's split
     (compared in whole seconds): the fix is back, and the window may span a
     period without it. The archive proves a removal was written, not how long the

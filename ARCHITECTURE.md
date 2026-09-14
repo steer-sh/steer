@@ -115,6 +115,20 @@ Only a caller that proves a catalog copy removes without an archive
 factory entry); a pruned orphan and a team-lockfile extra are archived. A project
 archive is committed with the store.
 
+`steer archive list` reads the project hook store, the global hook store and the
+project check store. `steer archive restore` selects one entry with
+`archive.Select`: `--tier` settles an id that holds more than one tier, and
+`--entry` settles a tier that holds more than one entry. `--scope` picks the hook
+store, and a project restore also reads the check store. `claude.RestoreArchived`
+sends a guard through `InstallManagedHook` with its file, manifest metadata and
+fixtures, so the fixtures run again. It sends a rule through `InstallManagedRule`
+and a review entry through `InstallAddendum`. `checks.Restore` sends a check
+through `checks.Add`, so a check that fails validation stays undeclared. Restore
+refuses an id its own tier holds now, because those installers overwrite, and a
+guard file that no manifest entry names. The installers refuse an id that another
+tier holds. The archive entry stays after a restore, so the artifact reading
+still shows the removal.
+
 Target drift includes master registration and instruction text, as well as the
 store. Explicit harness flags select targets; without a flag, mutations target
 installed hook-registering harnesses, with a Claude Code fallback when none are

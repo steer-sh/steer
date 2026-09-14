@@ -193,6 +193,61 @@ func (s Stored) RemovedAt() time.Time {
 	return t
 }
 
+// Name is the entry's directory name, which tells two entries of one id apart.
+func (s Stored) Name() string { return filepath.Base(s.Dir) }
+
+// Select picks the one entry a restore of id acts on. A non-empty kind keeps
+// the entries of that tier and a non-empty name keeps the entry of that name.
+// A choice that still matches more than one entry is refused, and the error
+// names the flag that settles it.
+func Select(entries []Stored, id, kind, name string) (Stored, error) {
+	var matched []Stored
+	tiers := map[string]bool{}
+	for _, s := range entries {
+		if s.ID != id {
+			continue
+		}
+		tiers[s.Tier] = true
+		if kind != "" && s.Tier != kind {
+			continue
+		}
+		if name != "" && s.Name() != name {
+			continue
+		}
+		matched = append(matched, s)
+	}
+	switch {
+	case len(tiers) == 0:
+		return Stored{}, fmt.Errorf("no archive entry for %q", id)
+	case len(matched) == 0 && kind != "" && !tiers[kind]:
+		return Stored{}, fmt.Errorf("no archived %s entry for %q; its entries are of tier %s",
+			kind, id, strings.Join(sortedKeys(tiers), ", "))
+	case len(matched) == 0:
+		return Stored{}, fmt.Errorf("no archive entry named %q for %q", name, id)
+	case len(matched) == 1:
+		return matched[0], nil
+	}
+	if kind == "" && len(tiers) > 1 {
+		return Stored{}, fmt.Errorf("%q holds archived entries of tiers %s; pass --tier",
+			id, strings.Join(sortedKeys(tiers), ", "))
+	}
+	names := make([]string, len(matched))
+	for i, s := range matched {
+		names[i] = s.Name()
+	}
+	return Stored{}, fmt.Errorf("%s %q has %d archived entries; pass --entry with one of: %s",
+		matched[0].Tier, id, len(matched), strings.Join(names, ", "))
+}
+
+func sortedKeys(set map[string]bool) []string {
+	out := make([]string, 0, len(set))
+	for k := range set {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // Load reads the entry stored in dir.
 func Load(dir string) (Stored, error) {
 	raw, err := os.ReadFile(filepath.Join(dir, EntryName))

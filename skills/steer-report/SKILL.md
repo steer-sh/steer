@@ -118,7 +118,7 @@ Read `provenance` before you weigh the two windows against each other. When the 
 For every record whose problem came back, open the target file and decide between:
 
 - **Rework** — the fix was aimed at the wrong tell. Fix it, then `register --supersedes <id>` so the old record is retired with a forward pointer and the new one gets a fresh baseline.
-- **Remove** — the class is not mechanizable after all, or the defect stopped mattering. Delete the check and `retire <id> --reason "..."`.
+- **Remove** — the class is not mechanizable after all, or the defect stopped mattering. Remove the fix with its tier's remove command and a `--reason` (`steer check remove`, `steer remove`, `steer rules remove`, `steer commit-gate addendum remove`), then `retire <id> --reason "..."`. Each remove command archives the fix first; `steer archive list` shows the entries, and `steer archive restore <id>` puts one back through its tier's installer. A restore refuses an id its tier holds now, and a check comes back only when its cases still validate.
 
 A gate that never fires is not free. It costs oracle runtime on every commit and, worse, it reads as coverage that does not exist.
 
@@ -354,7 +354,8 @@ now that its store's archive records as removed after the record's split.
     repository). A review entry is read where the commit gate reads it: the
     global store on disk, the project store at HEAD. **An `absent` fix is not a
     quiet window:** the record measures a fix that is no longer there, so
-    reinstall it or retire the record. `removed` is set on a `present` or
+    put it back with `steer archive restore <id>`, which reinstalls it from the
+    store's archive, or retire the record. `removed` is set on a `present` or
     `changed` fix whose store archived a removal of it after the record's split
     (compared in whole seconds): the fix is back, and the window may span a
     period without it. The archive proves a removal was written, not how long the
