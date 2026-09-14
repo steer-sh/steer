@@ -50,6 +50,33 @@ func TestEachIssueNamesWhereItIsRepaired(t *testing.T) {
 	}
 }
 
+// A check issue whose repair a panel runs names that panel. The runner hint named
+// one harness and one scope for every reader, so a Codex user was told to
+// register Claude Code.
+func TestCheckIssuesNameThePanelThatRepairsThem(t *testing.T) {
+	m := New(gate.Defaults(), "global")
+	m.width = 200
+	m.snap = &status.SystemStatus{Checks: status.CheckTier{
+		Repo: "/repo", Manifest: true,
+		Runner: []status.ScopeArming{{Harness: "codex", Scope: "project"}},
+		Checks: []status.CheckRow{{ID: "fmt", Validation: status.ValidationNone}},
+	}}
+	m.active = panelDiagnostics
+	view := strings.Join(strings.Fields(m.viewDiagnostics()), " ")
+	for _, want := range []string{
+		"Open Arming and press enter on a check runner row",
+		"Open Fixes and press enter on the repository row",
+		"Open Fixes and press enter on its row",
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("the check issues do not say %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "--harness claude-code --scope global") {
+		t.Errorf("the runner hint still names one harness and scope:\n%s", view)
+	}
+}
+
 // Each history count appears once, with the noun it counts. The review count was
 // printed twice, once as a corpus size and once as telemetry.
 func TestHistoryCountsAppearOnceWithTheirNoun(t *testing.T) {

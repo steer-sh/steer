@@ -2,11 +2,15 @@ package tui
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
+	"github.com/steer-sh/steer-cli/internal/checks"
+	"github.com/steer-sh/steer-cli/internal/checkscope"
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/resolve"
+	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/status"
 )
 
@@ -193,6 +197,70 @@ func TestTheOutcomeReadReportsWhatMoved(t *testing.T) {
 	if m.reading || m.message == "" {
 		t.Errorf("reading = %v, note = %q", m.reading, m.message)
 	}
+}
+
+// TestTheCheckRunnerIsAnArmingRow pins that the Stop runner is armed where the
+// other channels are. Without the row, a runner that was never registered could
+// be repaired only from a terminal, and a registered one could not be turned off.
+func TestTheCheckRunnerIsAnArmingRow(t *testing.T) {
+	m := New(gate.Defaults(), "global")
+	m.snap = &status.SystemStatus{
+		Posture: status.Posture{
+			CommitGate: []status.ScopeArming{{Harness: "claude-code", Scope: "global"}},
+			Denials:    []status.ScopeArming{{Harness: "claude-code", Scope: "global"}},
+		},
+		Checks: status.CheckTier{Runner: []status.ScopeArming{
+			{Harness: "claude-code", Scope: "global"},
+			{Harness: "codex", Scope: "global"},
+		}},
+	}
+	want := []string{
+		"commit gate · Claude Code global",
+		"check runner · Claude Code global",
+		"check runner · Codex global",
+		"denials recorder · Claude Code global",
+	}
+	rows := m.channelRows()
+	if len(rows) != len(want) {
+		t.Fatalf("got %d rows, want %d: %+v", len(rows), len(want), rows)
+	}
+	for i, w := range want {
+		if got := rows[i].name(); got != w {
+			t.Errorf("row %d is %q, want %q", i, got, w)
+		}
+	}
+
+	// Enter writes the runner through the same registration `steer check install`
+	// writes, and a second enter on the registered row removes it. TestMain points
+	// both harness homes at an empty directory.
+	for _, row := range rows[1:3] {
+		if err := m.toggleChannel(row); err != nil {
+			t.Fatalf("arming %s: %v", row.name(), err)
+		}
+		a := runnerAt(t, row)
+		if !a.Registered || a.Timeout != checks.RegisteredHookTimeout() ||
+			!strings.HasSuffix(a.Command, "check hook --harness "+row.harness) {
+			t.Fatalf("%s after arming = %+v", row.name(), a)
+		}
+		row.armed = status.ScopeArming{Harness: row.harness, Scope: row.scope, Registered: true}
+		if err := m.toggleChannel(row); err != nil {
+			t.Fatalf("disarming %s: %v", row.name(), err)
+		}
+		if runnerAt(t, row).Registered {
+			t.Fatalf("%s is still registered after disarming", row.name())
+		}
+	}
+}
+
+// runnerAt reads back the Stop runner registration a row names.
+func runnerAt(t *testing.T, row channelRow) checkscope.Arming {
+	t.Helper()
+	dir, _ := os.Getwd()
+	a, err := checkscope.RunnerArming(harness.ID(row.harness), row.scope, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return a
 }
 
 // TestChannelRowsGroupAHarnessTogether pins the panel's sort. The posture is

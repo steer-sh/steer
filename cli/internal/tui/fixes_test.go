@@ -96,6 +96,50 @@ func TestNoMaintenanceIsAskedForOnAHealthyScreen(t *testing.T) {
 	}
 }
 
+// Only a guard the catalog can turn back on offers "turn off". A generated or
+// hand-written guard has no copy to restore, and a guard Steer keeps for itself
+// is not a built-in the reader can switch, so the legend promised an action enter
+// then refused.
+func TestOnlyABuiltInGuardOffersTurnOff(t *testing.T) {
+	m := New(gate.Defaults(), "global")
+	m.snap = &status.SystemStatus{
+		Hooks: []status.HookInfo{
+			{Name: "bare-python", Source: claude.SourceFactory},
+			{Name: "steer-self-protection", Source: claude.SourceFactory},
+			{Name: "written-by-steer", Source: claude.SourceGenerated},
+			{Name: "hand-written", Source: claude.SourceManual},
+		},
+		Presets: []status.PresetInfo{{Name: "bare-python", Enabled: true}},
+	}
+	m.active = panelFixes
+	want := map[string]bool{"bare-python": true}
+	for i, row := range m.fixRows() {
+		if row.kind != guardInstalled {
+			continue
+		}
+		m.cursor[panelFixes] = i
+		if got := strings.Contains(m.fixesLegend(), "turn off"); got != want[row.name] {
+			t.Errorf("%s: legend offers turn off = %v, want %v", row.name, got, want[row.name])
+		}
+		if want[row.name] {
+			continue
+		}
+		m.fixesKey(tea.KeyMsg{Type: tea.KeyEnter})
+		if strings.Contains(m.message, "is off") {
+			t.Errorf("%s: enter turned a guard off: %q", row.name, m.message)
+		}
+	}
+
+	internal := noSwitchNote(fixRow{name: "steer-self-protection", source: claude.SourceFactory}, "global")
+	if strings.Contains(internal, "not a built-in") || strings.Contains(internal, "remove it") {
+		t.Errorf("a guard Steer keeps for itself is called removable: %q", internal)
+	}
+	generated := noSwitchNote(fixRow{name: "written-by-steer", source: claude.SourceGenerated}, "global")
+	if !strings.Contains(generated, "remove it with") {
+		t.Errorf("a generated guard's note names no way to remove it: %q", generated)
+	}
+}
+
 // Each detected issue names its own operation, what it changes and where. A
 // footer key called "sync" named none of the three.
 func TestEachIssueNamesItsOperationAndItsReach(t *testing.T) {

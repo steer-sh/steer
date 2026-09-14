@@ -46,6 +46,10 @@ type fixRow struct {
 	// guard's own summary, a rule's or entry's text, or a check's binding.
 	origin      string
 	description string
+	// source is an installed guard's stored source, and builtin marks one the
+	// catalog can turn off and on again.
+	source  string
+	builtin bool
 	// state is where a rule, entry, repository or check stands, and attention
 	// marks a state that asks the reader to act.
 	state     string
@@ -70,9 +74,14 @@ func (m *Model) fixRows() []fixRow {
 		return nil
 	}
 	var rows []fixRow
+	visible := map[string]bool{}
+	for _, p := range m.snap.Presets {
+		visible[p.Name] = true
+	}
 	for _, h := range m.snap.Hooks {
 		rows = append(rows, fixRow{kind: guardInstalled, name: h.Name,
-			origin: guardOrigin(h.Source)})
+			origin: guardOrigin(h.Source), source: h.Source,
+			builtin: h.Source == claude.SourceFactory && visible[h.Name]})
 	}
 	rows = append(rows, m.ruleRows()...)
 	rows = append(rows, m.addendumRows()...)
@@ -293,7 +302,9 @@ func (m *Model) fixesLegend() string {
 	case guardRepair:
 		return "enter run this repair · "
 	case guardInstalled:
-		return "enter turn off · "
+		if row.builtin {
+			return "enter turn off · "
+		}
 	case guardAvailable:
 		return "enter turn on · "
 	case fixRepo:
@@ -333,6 +344,10 @@ func (m *Model) fixesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case guardAvailable:
 		m.togglePreset(row.name, false)
 	case guardInstalled:
+		if !row.builtin {
+			m.note("%s", noSwitchNote(row, m.scope))
+			return m, nil
+		}
 		m.togglePreset(row.name, true)
 	case fixRepo:
 		if m.checking != "" || m.snap.Checks.Adopted {
@@ -346,6 +361,17 @@ func (m *Model) fixesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.startCheckAction(checkTest, row.name)
 	}
 	return m, nil
+}
+
+// noSwitchNote says why an installed guard has no switch here. A factory guard
+// the catalog hides is one Steer keeps for itself; any other guard has no catalog
+// copy to turn back on, so it is removed from the command line.
+func noSwitchNote(row fixRow, scope string) string {
+	if row.source == claude.SourceFactory {
+		return row.name + " is a guard Steer keeps for itself, so it has no switch here"
+	}
+	return row.name + " is not a built-in guard; remove it with: " +
+		status.RemoveCommand(string(tier.Guard), row.name, scope)
 }
 
 // The check actions. Both run as commands: adoption replays every check without a

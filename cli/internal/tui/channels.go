@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/steer-sh/steer-cli/internal/checks"
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/codex"
 	"github.com/steer-sh/steer-cli/internal/gate/harvests"
@@ -29,14 +30,14 @@ const denialsTimeout = 10
 // backfillTimeout matches cmd's Stop-hook resolver wall clock.
 const backfillTimeout = 30
 
-// channelRow is one armable channel: a commit gate or denials recorder in one
-// harness and scope. The harness is part of the row's identity, not decoration:
+// channelRow is one armable channel: a commit gate, check runner or denials
+// recorder in one harness and scope. The harness is part of the row's identity, not decoration:
 // the posture carries one row per harness per scope, so a row naming the scope
 // alone renders identically for Claude Code, Codex and Pi while enter toggles
 // exactly one of them.
 type channelRow struct {
 	label   string
-	kind    string // "commit-gate" | "denials" | "read-outcomes"
+	kind    string // "commit-gate" | "check-runner" | "denials" | "read-outcomes"
 	harness string
 	scope   string
 	armed   status.ScopeArming
@@ -53,8 +54,8 @@ func (r channelRow) name() string {
 	return fmt.Sprintf("%s · %s %s", r.label, status.HarnessLabel(r.harness), r.scope)
 }
 
-// channelRows lists the rows enter acts on: the commit gate and the denials
-// recorder per scope, then the one action row. The action row is last so a toggle
+// channelRows lists the rows enter acts on: the commit gate, the check runner and
+// the denials recorder per scope, then the one action row. The action row is last so a toggle
 // keeps the cursor position it had before a review's outcome arrived, and it is
 // present only while some review is waiting: a row that asks for nothing is a row
 // the reader has to read to learn it can be skipped.
@@ -65,6 +66,10 @@ func (m *Model) channelRows() []channelRow {
 	var rows []channelRow
 	for _, a := range m.snap.Posture.CommitGate {
 		rows = append(rows, channelRow{label: "commit gate", kind: "commit-gate",
+			harness: a.Harness, scope: a.Scope, armed: a})
+	}
+	for _, a := range m.snap.Checks.Runner {
+		rows = append(rows, channelRow{label: "check runner", kind: "check-runner",
 			harness: a.Harness, scope: a.Scope, armed: a})
 	}
 	for _, a := range m.snap.Posture.Denials {
@@ -92,12 +97,15 @@ func (m *Model) channelRows() []channelRow {
 	return rows
 }
 
-// kindRank keeps the commit gate above the denials recorder.
+// kindRank orders the commit gate, then the check runner, then the denials recorder.
 func kindRank(kind string) int {
-	if kind == "commit-gate" {
+	switch kind {
+	case "commit-gate":
 		return 0
+	case "check-runner":
+		return 1
 	}
-	return 1
+	return 2
 }
 
 // harnessRank orders rows by the registry's own harness order, so the panel and
@@ -261,6 +269,8 @@ func (m *Model) toggleChannel(row channelRow) error {
 			review, _ := steerbin.HookCommand("commit-gate review")
 			return claude.RegisterCommitGateAndResolver(row.scope, review, timeout, resolver, backfillTimeout)
 		}
+	case "check-runner":
+		return m.toggleCheckRunner(row, on)
 	case "denials":
 		if on {
 			return claude.RemoveDenialsHook(row.scope)
@@ -269,6 +279,31 @@ func (m *Model) toggleChannel(row channelRow) error {
 		return claude.RegisterDenialsHook(row.scope, record, denialsTimeout)
 	}
 	return nil
+}
+
+// toggleCheckRunner registers or removes the Stop runner for one harness and
+// scope, through the functions `steer check install` and `uninstall` call. Codex
+// reads its project file at the directory the snapshot read the runner from.
+func (m *Model) toggleCheckRunner(row channelRow, on bool) error {
+	command, _ := steerbin.HookCommand("check hook --harness " + row.harness)
+	timeout := checks.RegisteredHookTimeout()
+	if harness.ID(row.harness) == harness.Codex {
+		cwd := m.snap.Checks.Repo
+		if cwd == "" {
+			cwd, _ = os.Getwd()
+		}
+		if on {
+			_, _, err := codex.RemoveCheckHook(row.scope, cwd)
+			return err
+		}
+		_, err := codex.RegisterCheckHook(row.scope, cwd, command, timeout)
+		return err
+	}
+	if on {
+		_, err := claude.RemoveCheckHook(row.scope)
+		return err
+	}
+	return claude.RegisterCheckHook(row.scope, command, timeout)
 }
 
 // viewChannels renders the armable channels, then the action row, then a

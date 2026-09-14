@@ -199,14 +199,16 @@ func (m *Model) checkIssues() []diagnosticIssue {
 		out = append(out, diagnosticIssue{
 			headline: "No agent runs this repository's checks at the end of a turn",
 			detail: "The checks declared here run only when one is registered to run them. " +
-				"Run: steer check install --harness claude-code --scope global",
+				"Open Arming and press enter on a check runner row, or run: " +
+				"steer check install --harness claude-code|codex",
 		})
 	}
 	if c.Manifest && !c.Adopted {
 		out = append(out, diagnosticIssue{
 			headline: "This machine has not authorized this repository's checks",
 			detail: "Authorization is machine-local, so a clone carries none of it, and " +
-				"nothing here runs until it is given. Run: steer check adopt",
+				"nothing here runs until it is given. Open Fixes and press enter on the " +
+				"repository row, or run: steer check adopt",
 		})
 	}
 	for _, a := range c.Runner {
@@ -226,7 +228,8 @@ func (m *Model) checkIssues() []diagnosticIssue {
 		out = append(out, diagnosticIssue{
 			headline: "The check " + row.ID + " was never replayed on this machine",
 			detail: "Nothing here shows it fails on the problem it names, so a passing run " +
-				"proves nothing about it. Run: steer check test " + row.ID,
+				"proves nothing about it. Open Fixes and press enter on its row, or run: " +
+				"steer check test " + row.ID,
 		})
 	}
 	if r := c.LatestRun; r != nil && r.IntegrationFailure {
