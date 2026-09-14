@@ -481,8 +481,8 @@ func (p *parsedGit) commitsAllTracked() bool {
 			if token[j] == 'a' {
 				return true
 			}
-			if strings.ContainsRune("mFCctS", rune(token[j])) {
-				if j+1 == len(token) && token[j] != 'S' {
+			if strings.ContainsRune("mFCctSu", rune(token[j])) {
+				if j+1 == len(token) && !strings.ContainsRune("Su", rune(token[j])) {
 					i++
 				}
 				break
@@ -490,6 +490,70 @@ func (p *parsedGit) commitsAllTracked() bool {
 		}
 	}
 	return false
+}
+
+// selectsPaths reports a commit that chooses its own paths: a pathspec, --only,
+// --include or --pathspec-from-file. A dynamic positional word counts, since it may
+// be a path.
+func (p *parsedGit) selectsPaths() bool {
+	args := p.call.Args[p.subcommand+1:]
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		// A dynamic word is judged by its literal option text, and any value in it
+		// is attached.
+		token, whole := arg.Value, arg.Static
+		if !whole {
+			token = literalOptionPrefix(arg.Raw)
+			if strings.TrimLeft(token, "-") == "" {
+				return true
+			}
+		}
+		if whole && token == "--" {
+			return i+1 < len(args)
+		}
+		if !strings.HasPrefix(token, "-") || token == "-" {
+			return true
+		}
+		if strings.HasPrefix(token, "--") {
+			name, _, attached := strings.Cut(token, "=")
+			switch name {
+			case "--only", "--include", "--pathspec-from-file":
+				return true
+			}
+			if commitOptionTakesValue(name) && !attached && whole {
+				i++
+			}
+			continue
+		}
+		for j := 1; j < len(token); j++ {
+			if token[j] == 'o' || token[j] == 'i' {
+				return true
+			}
+			if strings.ContainsRune("mFCctSu", rune(token[j])) {
+				if j+1 == len(token) && whole && !strings.ContainsRune("Su", rune(token[j])) {
+					i++
+				}
+				break
+			}
+		}
+	}
+	return false
+}
+
+// literalOptionPrefix returns the option text a raw shell word starts with, up to its
+// first quote or expansion. Empty when the word does not start with a literal `-`.
+func literalOptionPrefix(raw string) string {
+	if !strings.HasPrefix(raw, "-") {
+		return ""
+	}
+	end := strings.IndexFunc(raw, func(r rune) bool {
+		return !(r == '-' || r == '=' || r == '_' ||
+			(r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9'))
+	})
+	if end < 0 {
+		return raw
+	}
+	return raw[:end]
 }
 
 func parsedGitCalls(program *shellsyntax.Program, cwd string, names ...string) []parsedGit {

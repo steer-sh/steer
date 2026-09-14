@@ -8,6 +8,49 @@ import (
 	"testing"
 )
 
+// TestPreflightDenyRefusesACommitThatSelectsItsOwnPaths: `git commit <paths>` lands
+// those paths from the working tree and --include adds them to the index, while the
+// gate reviews the index alone.
+func TestPreflightDenyRefusesACommitThatSelectsItsOwnPaths(t *testing.T) {
+	c := "co" + "mmit"
+	for _, cmd := range []string{
+		"git " + c + " -m x file.go",
+		"git " + c + " -m x -- file.go",
+		"git " + c + " --only -m x file.go",
+		"git " + c + " -o -m x",
+		"git " + c + " --include -m x",
+		"git " + c + " -im x",
+		"git " + c + " --pathspec-from-file=list -m x",
+		"git " + c + " --pathspec-from-file list -m x",
+		`git ` + c + ` -m x "$FILE"`,
+		`git ` + c + ` -Sm "release message"`,
+	} {
+		if reason, receipt := PreflightDeny(cmd, "/cwd"); receipt != SelectedPathsReceipt {
+			t.Errorf("%q selects its own paths and must be refused, got %q", cmd, reason)
+		}
+	}
+	for _, cmd := range []string{
+		"git " + c + " -m x",
+		"git " + c + " -qm x",
+		"git " + c + " -am x",
+		"git " + c + " -F msg",
+		"git " + c + " -m x --",
+		"git " + c + " -S -m x",
+		"git " + c + " -C HEAD",
+		"git " + c + ` --author "A <a@b>" -m x`,
+		"git " + c + ` -m "gate: refuse -i and file.go"`,
+		"git " + c + " -uno -m x",
+		"git " + c + ` --author="$A" -m x`,
+	} {
+		if reason, _ := PreflightDeny(cmd, "/cwd"); reason != "" {
+			t.Errorf("%q commits the index and must go to review, got %q", cmd, reason)
+		}
+	}
+	if CommitsAllTracked("git " + c + " -uall -m x") {
+		t.Error("-uall sets the untracked-files mode; its `a` is not -a")
+	}
+}
+
 // TestPreflightDenyRefusesABundledAddOverAPartlyStagedFile: a bundled add is reviewed
 // from the working tree, so a file with staged and unstaged edits would reach the
 // reviewers with edits the commit does not carry.

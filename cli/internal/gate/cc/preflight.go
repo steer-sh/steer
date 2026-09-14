@@ -15,11 +15,24 @@ func PreflightDeny(cmd, cwd string) (reason, receipt string) {
 	if reason := AmbiguousShellReason(cmd, cwd); reason != "" {
 		return reason, AmbiguousShellReceipt
 	}
+	if parsed, err := parseCommit(cmd, cwd); err == nil && parsed != nil && parsed.selectsPaths() {
+		return selectedPathsReason, SelectedPathsReceipt
+	}
 	if reason := PartlyStagedReason(cmd, cwd); reason != "" {
 		return reason, PartlyStagedReceipt
 	}
 	return "", ""
 }
+
+const selectedPathsReason = "[commit-gate] BLOCKED: this commit selects its own paths " +
+	"(`git commit <paths>`, --only, --include or --pathspec-from-file). Those forms land a " +
+	"tree the gate does not review: it reviews the index, or the working tree for a " +
+	"bundled add. NOTHING IN THE COMMAND RAN, and the index is as it was. Make the index " +
+	"hold exactly what this commit should carry, then run a plain commit with no paths."
+
+// SelectedPathsReceipt states that the path-selecting commit refusal blocked before review.
+const SelectedPathsReceipt = "[commit-gate] refused a commit that selects its own paths. " +
+	"No review ran and no adjudication row was written."
 
 // PartlyStagedReason refuses a bundled `git add ... && git commit` while a file holds
 // both staged and unstaged edits. That form is reviewed from the working tree, so the
