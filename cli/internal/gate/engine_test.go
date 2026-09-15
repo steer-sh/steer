@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -14,15 +15,19 @@ import (
 // is under test and a real panel would make it a model test instead.
 
 // stubReviewer answers from a script, one entry per call, repeating the last.
+// The panel calls it concurrently, so mu guards the script position.
 type stubReviewer struct {
 	replies []RawRun
 	calls   int
+	mu      sync.Mutex
 }
 
 func (s *stubReviewer) Name() string       { return "stub" }
 func (s *stubReviewer) ModelLabel() string { return "stub-model" }
 
 func (s *stubReviewer) Review(context.Context, string, string) RawRun {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	reply := s.replies[min(s.calls, len(s.replies)-1)]
 	s.calls++
 	return reply
