@@ -39,7 +39,12 @@ would misrepresent it.
 
 A review prompt is not a rung between a guard and an instruction. It applies
 to one case only, a recurring reviewer false positive, and a defect never goes
-there.
+there. A preference about how code is written is not a false positive, even
+when a reviewer could judge it: it is an instruction rule.
+
+An instruction rule reaches the coding agent only. The commit reviewer reads its
+review prompt and never the agent's instructions, so a rule about what the
+reviewer flags is a review prompt entry.
 
 Tell the user the tier and the reason in one sentence before you install. When
 the user asked for one tier and the enforcement point names another, say so and
@@ -55,18 +60,24 @@ rule meant for several repositories needs a check in each.
 Two different requests route here:
 
 - **Turn on verification the repository already has.** "Make sure the tests
-  pass before the turn ends" asks for no new detector. Read `check.sh` if one
-  exists, and make sure it runs the existing suite. `steer check init` writes a
-  scaffold only when `check.sh` is absent and never changes an existing one.
-  Then arm it through Step 6 of the `steer-setup` skill, which runs in the
-  order the arming needs.
+  pass before the turn ends" asks for no new detector. Read `check.sh` first.
+  When it already runs the suite the rule names, the rule needs no detector:
+  turn it on by arming the repository. When `check.sh` is absent, `steer check
+  init` writes a scaffold; it never changes an existing one.
 - **Add a detector for one property.** Run `steer check guide` and follow it:
   it is the authoring contract. The detector needs a case that passes and a
   defect case that fails with the check's diagnostic. `steer check add <id>`
   declares the check only when every case matched. Then add the managed lines to
   `check.sh` as the guide's "Running checks from check.sh" section shows: a
-  declared check that `check.sh` never calls reads as not executed. Arm the
-  repository through Step 6 of the `steer-setup` skill.
+  declared check that `check.sh` never calls reads as not executed. Then arm the
+  repository.
+
+**Arming.** Run `steer check migrate` before anything else; it writes nothing.
+When it finds a personal check gate, never run `steer check install`: the gate
+and the runner would both run `check.sh` at every Stop. Moving the gate replaces
+the user's own hook, so it needs the user's yes. Step 6 of the `steer-setup`
+skill ([../../steer-setup/SKILL.md](../../steer-setup/SKILL.md)) holds the full
+arming order.
 
 The check is done when `steer check list` shows it validated, the repository
 adopted, and a run of `check.sh` that executed it.

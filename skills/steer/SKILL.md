@@ -2,7 +2,7 @@
 name: steer
 description: Turns a natural-language rule into the fix that can enforce it — a repository check, a PreToolUse Python guard, or an instruction rule — and installs it. Use when enforcing coding standards, blocking insecure patterns, making sure checks pass before a turn ends, managing hook lifecycle, or running steer CLI commands (register, remove, list, test, preset, verify, git-hooks).
 user-invocable: true
-prompt_version: 12
+prompt_version: 13
 compatibility: Requires Claude Code, Codex, or Pi with tool-call hook support. Hooks are installed into .steer/hooks/ and registered in every installed harness (settings.json for Claude Code, hooks.json for Codex, extensions for Pi). steer CLI must be available on PATH or bundled under scripts/.
 allowed-tools: Bash(steer *), Bash(python3 *), Bash(echo *), Read, Write, Edit
 ---
@@ -38,7 +38,8 @@ Activated when the invocation contains `--headless`. Example:
 
 Headless mode is the guard-generation benchmark's interface. It skips
 [Pre-flight](#pre-flight-find-what-is-already-installed) and
-[Route the rule](#route-the-rule), and always generates a guard.
+[Route the rule](#route-the-rule), and always generates a guard, unless a
+routing flag from [Headless routing](#headless-routing) is present.
 
 In headless mode you MUST:
 - **Never ask questions** — make autonomous best-effort decisions for any ambiguity
@@ -71,6 +72,58 @@ In headless mode you MUST:
 - `model_used`: Your model name as shown in your system prompt. Report it exactly.
 
 The test harness invokes: `claude -p "/steer --headless <rule>" --output-format json --no-session-persistence` and parses this result from the response.
+
+### Headless routing
+
+Two flags make headless mode route the rule. Each still skips Pre-flight. Strip
+them, and any `--harness <id>`, from the rule text as you strip `--headless`.
+
+- `--route-only`: route the rule with [prompts/routing.md](prompts/routing.md)
+  and install nothing.
+- `--route`: route the rule, then install on the routed tier as [Route the
+  rule](#route-the-rule) says.
+
+`--harness <id>` names the harness the rule must hold in (`claude-code`,
+`codex` or `pi`). Without it, the rule must hold in every harness installed
+here. `supported` is false when the routed tier cannot enforce the rule in
+that harness, such as a repository check under Pi, which has no Stop runner.
+Keep the routed tier; never swap in a weaker one to reach `supported: true`.
+With `--route`, a rule that is not supported installs nothing.
+
+`--route` never runs a command that replaces the operator's own hooks or
+settings, such as `steer check migrate --apply`, and never passes `--force`.
+List each such step in `pending`.
+
+Output ONLY this JSON object as your final message. It replaces the guard
+result above:
+
+```json
+{
+  "mode": "route-only",
+  "rule": "<the original rule text>",
+  "tier": "check | guard | instruction | review",
+  "enforcement_point": "before-action | turn-end | review | judgment",
+  "action": "enable-existing-oracle | add-detector | generate-guard | add-instruction-rule | add-review-entry",
+  "supported": true,
+  "reason": "<one sentence: why this tier and action>",
+  "installed": [],
+  "pending": []
+}
+```
+
+- `mode` is `route-only` or `route`.
+- `tier` is one of the four words shown, never the rung's display name from the
+  routing guide's table.
+- `action` is the install path: for a repository check, `enable-existing-oracle`
+  when this repository's `check.sh` already runs the suite the rule names, and
+  `add-detector` when the rule needs a detector that `check.sh` does not run
+  yet.
+- `installed` lists what `--route` installed, each item with its path or id.
+  `route-only` leaves it empty.
+- `pending` lists each step left for the user, such as a migration or a `/hooks`
+  approval. A repository check that is not armed yet always leaves a step here:
+  name the command that arms it, or `steer check migrate --apply` when a
+  personal check gate must move first. `route-only` leaves it empty.
 
 ## Specialist Prompts
 

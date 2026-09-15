@@ -26,9 +26,9 @@ func TestRoutingGuideNamesEveryRung(t *testing.T) {
 	}
 }
 
-var siblingRef = regexp.MustCompile("\\.\\./[A-Za-z0-9_-]+/[A-Za-z0-9_./-]*[A-Za-z0-9_-]")
+var siblingRef = regexp.MustCompile("(?:\\.\\./)+[A-Za-z0-9_-]+/[A-Za-z0-9_./-]*[A-Za-z0-9_-]")
 
-// A skill that reads a sibling skill's file names a path that exists in the bundle.
+// A skill file that reads a sibling skill's file names a path that exists in the bundle.
 func TestSiblingSkillReferencesResolve(t *testing.T) {
 	root := repoRoot(t)
 	found := 0
@@ -37,14 +37,17 @@ func TestSiblingSkillReferencesResolve(t *testing.T) {
 		for _, s := range skills {
 			dir, _ := s.(string)
 			dir = strings.TrimPrefix(dir, "./")
-			raw, err := os.ReadFile(filepath.Join(root, dir, "SKILL.md"))
-			if err != nil {
-				t.Fatalf("read %s: %v", dir, err)
-			}
-			for _, ref := range siblingRef.FindAllString(string(raw), -1) {
-				found++
-				if _, err := os.Stat(filepath.Join(root, dir, ref)); err != nil {
-					t.Errorf("%s/SKILL.md names %s, which the bundle does not hold: %v", dir, ref, err)
+			prompts, _ := filepath.Glob(filepath.Join(root, dir, "prompts", "*.md"))
+			for _, file := range append([]string{filepath.Join(root, dir, "SKILL.md")}, prompts...) {
+				raw, err := os.ReadFile(file)
+				if err != nil {
+					t.Fatalf("read %s: %v", file, err)
+				}
+				for _, ref := range siblingRef.FindAllString(string(raw), -1) {
+					found++
+					if _, err := os.Stat(filepath.Join(filepath.Dir(file), ref)); err != nil {
+						t.Errorf("%s names %s, which the bundle does not hold: %v", file, ref, err)
+					}
 				}
 			}
 		}

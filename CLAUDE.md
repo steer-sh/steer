@@ -133,6 +133,11 @@ runner's help for options and select the model explicitly. Focused generation:
 `tests/.venv/bin/python3 tests/skill_test.py --test <name> --model <model>`;
 the full serial suite uses `tests/run_tests.py --model <model>` with that Python.
 
+For routing changes, `tests/routing_scenarios.py --model <model>` runs the
+`/steer --headless --route-only` and `--route` scenarios in
+`tests/test_data/routing.yaml`. The steer CLI runs under a temporary home, and
+a run fails if it changed the real Steer or harness files.
+
 For report prose changes, `tests/report_scenarios.py` copies the working-tree
 skill into saved scenarios and writes output under `tests/scenarios/out/`.
 Read `tests/scenarios/README.md` for the human assessment checklist; the runner

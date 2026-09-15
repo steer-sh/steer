@@ -1,0 +1,57 @@
+# Routing scenarios for /steer --headless --route-only and --route.
+# tests/routing_scenarios.py runs each one in a fresh git repository holding
+# `files`, with the steer CLI pointed at a temporary home.
+
+shared_files:
+  suite: &suite
+    check.sh: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      python3 -m unittest discover -s tests -q
+    tests/__init__.py: ""
+    tests/test_smoke.py: |
+      import unittest
+
+
+      class Smoke(unittest.TestCase):
+          def test_adds(self):
+              self.assertEqual(1 + 1, 2)
+
+scenarios:
+  - name: existing-suite
+    mode: route-only
+    rule: "make sure the test suite passes before you end a turn"
+    files: *suite
+    expect: {tier: check, action: enable-existing-oracle, supported: true}
+
+  - name: command-interception
+    mode: route-only
+    rule: "never run git push --force"
+    expect: {tier: guard, action: generate-guard, supported: true}
+
+  - name: subjective-preference
+    mode: route-only
+    rule: "prefer functional composition over class inheritance"
+    expect: {tier: instruction, action: add-instruction-rule, supported: true}
+
+  - name: reviewer-false-positive
+    mode: route-only
+    rule: "the commit reviewer keeps flagging missing docstrings on private test helpers; that is not a defect"
+    expect: {tier: review, action: add-review-entry, supported: true}
+
+  - name: pi-unsupported
+    mode: route-only
+    harness: pi
+    rule: "make sure the test suite passes before you end a turn"
+    files: *suite
+    expect: {tier: check, supported: false}
+
+  - name: detector-beside-personal-gate
+    mode: route
+    rule: "every JSON file under config/ must parse as valid JSON"
+    personal_gate: true
+    files:
+      <<: *suite
+      config/app.json: |
+        {"name": "app", "port": 8080}
+    expect: {tier: check, action: add-detector, supported: true}
