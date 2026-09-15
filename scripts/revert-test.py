@@ -24,11 +24,13 @@ variant, with each variant's diff and the full test output.
 """
 
 import difflib
+import fcntl
 import hashlib
 import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -41,11 +43,14 @@ HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 PANIC = 'panic("revert-test")'
 FUNCS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "revert-test-funcs.go")
 EVIDENCE = "revert-test"
+LOCK = "lock"
+WAIT = 120
 KEEP = 20
 NOISE = re.compile(r"^(=== (RUN|PAUSE|CONT|NAME)|--- (FAIL|PASS|SKIP)|\s*$)")
 FRAME = re.compile(r"^\s+(\S+\.go:\d+)")
 REPORTED = re.compile(r"^\s+\S+\.go:\d+: ")
 SCRUB = []
+HELD = []
 
 
 def git(*args, check=True):
@@ -254,6 +259,42 @@ def copy_repository(root, tmp, copied):
             shutil.copy2(source, target, follow_symlinks=False)
 
 
+def hold_lock(directory):
+    """Take the exclusive per-worktree lock in directory, waiting up to WAIT seconds.
+    Return its descriptor, or None when another holder keeps it. The lock file is
+    never removed."""
+    os.makedirs(directory, exist_ok=True)
+    fd = os.open(os.path.join(directory, LOCK), os.O_RDWR | os.O_CREAT, 0o600)
+    deadline = time.time() + WAIT
+    while True:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return fd
+        except BlockingIOError:
+            if time.time() >= deadline:
+                os.close(fd)
+                return None
+            time.sleep(1)
+
+
+def scratch_path(root):
+    """Return this worktree's copy location: outside the repository, private to this
+    user, and the same on every run, so Go reuses compiled packages across runs."""
+    digest = hashlib.sha256(os.path.realpath(root).encode()).hexdigest()[:12]
+    return os.path.join(tempfile.gettempdir(), "revert-test-%d-%s" % (os.getuid(), digest))
+
+
+def clear_scratch(path):
+    """Remove path when it is a directory this user owns; refuse any other entry."""
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        return
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid():
+        raise RuntimeError("%s is not a directory owned by this user" % path)
+    shutil.rmtree(path)
+
+
 def scrub(line):
     """Rewrite a go test output line so its paths are relative to the repository."""
     line = line.rstrip("\n")
@@ -327,7 +368,7 @@ def run_once(module_dir, prefix, by_package):
     run = subprocess.run(
         ["go", "test", "-count=1", "-vet=off", "-json", "-run", "^(%s)$" % "|".join(names)]
         + ["./" + p for p in sorted(by_package)],
-        cwd=module_dir, capture_output=True, text=True)
+        cwd=module_dir, capture_output=True, text=True, pass_fds=tuple(HELD))
     outcome, output, built = {}, {}, {}
     notes = {"build": {}, "output": {}, "stderr": [scrub(l) for l in run.stderr.splitlines()]}
     for line in run.stdout.splitlines():
@@ -514,6 +555,14 @@ def write_evidence(directory, key, base, behavioural, panics, records):
 def main():
     root = git("rev-parse", "--show-toplevel").strip()
     os.chdir(root)
+    directory = os.path.join(git("rev-parse", "--absolute-git-dir").strip(), EVIDENCE)
+    lock = hold_lock(directory)
+    if lock is None:
+        print("revert-test: another run held %s for %ds; `lsof` on it names the holder"
+              % (os.path.join(directory, LOCK), WAIT), file=sys.stderr)
+        return 1
+    # Each go test inherits the lock, so a successor cannot replace the copy under it.
+    HELD.append(lock)
     base = base_revision()
     paths, untracked = changed_paths(base)
 
@@ -529,7 +578,6 @@ def main():
         return 0
 
     data = data_paths(base)
-    directory = os.path.join(git("rev-parse", "--absolute-git-dir").strip(), EVIDENCE)
     stamp = os.path.join(directory, "pass")
     key = change_key(base, git("diff", "--name-status", "--no-ext-diff", base),
                      sorted(set(paths) | set(data)))
@@ -548,7 +596,10 @@ def main():
     deps = test_deps(prefix, by_package)
     selected = {(p, n) for p, ns in by_package.items() for n in ns}
     started = time.time()
-    with tempfile.TemporaryDirectory(prefix="revert-test-") as tmp:
+    tmp = scratch_path(root)
+    clear_scratch(tmp)
+    os.mkdir(tmp, 0o700)
+    try:
         SCRUB.extend([os.path.realpath(tmp) + "/", tmp + "/"])
         copy_repository(root, tmp, {p.split("/")[0] for p in data})
         module_dir = os.path.join(tmp, MODULE)
@@ -565,7 +616,9 @@ def main():
                      if not any(a["result"] == "fail" for a in attempts[t])}
         probes = judge(tmp, module_dir, prefix, by_package, deps, panics, survivors,
                        lambda a: a["result"] == "fail")
-    records = [assess(t, baseline, baseline_notes, t in linked, behavioural, attempts.get(t, []),
+    finally:
+        clear_scratch(tmp)
+    records =[assess(t, baseline, baseline_notes, t in linked, behavioural, attempts.get(t, []),
                       panics, probes.get(t, [])) for t in sorted(selected)]
     path = os.path.relpath(write_evidence(directory, key, base, behavioural, panics, records), root)
 
