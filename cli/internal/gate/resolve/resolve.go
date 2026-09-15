@@ -285,6 +285,83 @@ func joinKey(row resolverRow) string {
 	return pyStr(row["session_id"])
 }
 
+// chainIDs numbers the chain each row belongs to, or -1 for a non-review row. A chain
+// is a run within one thread and repository, opened by a deny or clean at firing 1;
+// the gate keys its pending state on the actor and the repository, so one thread can
+// interleave the rounds of two repositories' chains.
+func chainIDs(rows []resolverRow) []int {
+	ids := make([]int, len(rows))
+	current := map[string]int{}
+	for i, row := range rows {
+		ids[i] = -1
+		phase := pyStr(row["phase"])
+		if gate.NonReviewPhases[phase] {
+			continue
+		}
+		stream := joinKey(row) + "\x00" + pyStr(row["repo"])
+		f, _ := pyInt(row["firing"])
+		id, ok := current[stream]
+		if !ok || ((phase == "deny" || phase == "clean") && f <= 1) {
+			id = i
+			current[stream] = id
+		}
+		ids[i] = id
+	}
+	return ids
+}
+
+// chainSubjects is every subject the rows of chain id carry. Each row stamps the
+// message of its own attempt, and the header the agent copies comes from a deny, so a
+// chain whose message changed between rounds answers to each of them.
+func chainSubjects(rows []resolverRow, ids []int, id int) map[string]bool {
+	out := map[string]bool{}
+	if id < 0 {
+		return out
+	}
+	for j, row := range rows {
+		if ids[j] == id {
+			if s := pyStr(row["subject"]); s != "" {
+				out[s] = true
+			}
+		}
+	}
+	return out
+}
+
+// nameOwner returns the one chain of thread key that carries subject name and could
+// still claim a ledger written at when. ok is false when none or several do: a name
+// that two chains share identifies neither.
+func (r *resolver) nameOwner(rows []resolverRow, ids []int, key, name string, when float64) (int, bool) {
+	type span struct{ start, end float64 }
+	spans := map[int]*span{}
+	named := map[int]bool{}
+	for j, row := range rows {
+		id := ids[j]
+		if id < 0 || joinKey(row) != key {
+			continue
+		}
+		ts, ok := pyNum(row["ts"])
+		if !ok {
+			continue
+		}
+		if s := spans[id]; s == nil {
+			spans[id] = &span{ts, ts}
+		} else {
+			s.start, s.end = math.Min(s.start, ts), math.Max(s.end, ts)
+		}
+		if pyStr(row["subject"]) == name {
+			named[id] = true
+		}
+	}
+	owner, n := -1, 0
+	for id := range named {
+		if s := spans[id]; s.start <= when && when <= s.end+r.spanFor("chain") {
+			owner, n = id, n+1
+		}
+	}
+	return owner, n == 1
+}
+
 // pickLedger returns the ledger answering row i and how it was joined: "chain",
 // "round" or "window". A miss returns (nil, join).
 func (r *resolver) pickLedger(rows []resolverRow, i int, denyTS float64, ledgers []LedgerMsg) (*LedgerMsg, string) {
@@ -305,21 +382,30 @@ func (r *resolver) pickLedger(rows []resolverRow, i int, denyTS float64, ledgers
 
 	if firingTruthy && denyTS >= ledgerChainTS {
 		bound := r.chainEndTS(rows, i, session, firing)
-		subject := pyStr(row["subject"])
+		ids := chainIDs(rows)
+		subjects := chainSubjects(rows, ids, ids[i])
 		var named, bounded []LedgerMsg
 		for _, x := range inWindow(r.spanFor("chain")) {
 			for _, block := range gate.ChainBlocks(x.Text) {
 				if !gate.LedgerRounds(block)[firing] {
 					continue
 				}
+				cand := LedgerMsg{When: x.When, Key: x.Key, Path: x.Path, Text: block}
 				got := gate.BlockSubject(block)
-				if subject != "" && got != "" && got != subject {
+				switch {
+				case got == "" || len(subjects) == 0:
+				case !subjects[got]:
+					continue
+				case session != "":
+					// A name lets a block past the bound, so it must name exactly one
+					// chain. A row with no thread gets no name: its window spans every
+					// session, and the git channel stamps one subject on every commit.
+					if owner, ok := r.nameOwner(rows, ids, session, got, x.When); ok && owner == ids[i] {
+						named = append(named, cand)
+					}
 					continue
 				}
-				cand := LedgerMsg{When: x.When, Key: x.Key, Path: x.Path, Text: block}
-				if subject != "" && got == subject {
-					named = append(named, cand)
-				} else if x.When < bound {
+				if x.When < bound {
 					bounded = append(bounded, cand)
 				}
 			}

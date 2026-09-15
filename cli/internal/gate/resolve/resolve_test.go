@@ -350,6 +350,93 @@ func TestResolverTwoChainsOneRepo(t *testing.T) {
 	}
 }
 
+// subjectRows is a one-round chain whose deny and retry carry different subjects, as
+// when the agent rewrites the message before it retries.
+func subjectRows(start float64, denySubject, retrySubject string) []resolverRow {
+	rows := chainRows(start, 1, "")
+	rows[0]["subject"] = denySubject
+	rows[1]["subject"] = retrySubject
+	return rows
+}
+
+// blockHead is the header line of a picked block, or "nil" for a miss.
+func blockHead(cand *LedgerMsg) string {
+	if cand == nil {
+		return "nil"
+	}
+	return gate.BlockSubject(cand.Text)
+}
+
+func TestResolverChainAnswersToEverySubject(t *testing.T) {
+	r := testResolver()
+	rows := append(subjectRows(fixCT, "fix: 24 leaks", "fix: 25 leaks"),
+		chainRows(fixCT+1000, 1, "feat: other")...)
+	deferred := chainLedgerFix(0, []int{1}, "feat: other", 0).Text + "\n" +
+		chainLedgerFix(0, []int{1}, "fix: 24 leaks", 0).Text
+	leds := []LedgerMsg{{fixCT + 1400, fixSession, "/t.jsonl", deferred}}
+	cand, _ := r.pickLedger(rows, 1, fixCT, leds)
+	if got := blockHead(cand); got != "fix: 24 leaks" {
+		t.Fatalf("a header copied from the deny names the chain its retry changed; got %q", got)
+	}
+}
+
+func TestResolverSharedNameIdentifiesNoChain(t *testing.T) {
+	r := testResolver()
+	rows := append(subjectRows(fixCT, "fix: 24 leaks", "fix: 25 leaks"),
+		subjectRows(fixCT+1000, "fix: 25 leaks", "fix: the rest")...)
+	leds := []LedgerMsg{chainLedgerFix(fixCT+1400, []int{1}, "fix: 25 leaks", 0)}
+	for _, i := range retryIndexes(rows) {
+		if cand, _ := r.pickLedger(rows, i, pyNumOr(rows[i]["deny_ts"]), leds); cand != nil {
+			t.Fatalf("row %d claimed a block whose name two chains carry", i)
+		}
+	}
+	same := append(chainRows(fixCT, 1, "wip"), chainRows(fixCT+1000, 1, "wip")...)
+	leds = []LedgerMsg{chainLedgerFix(fixCT+1400, []int{1}, "wip", 0)}
+	if cand, _ := r.pickLedger(same, 1, fixCT, leds); cand != nil {
+		t.Fatal("a repeated subject names neither chain past its bound")
+	}
+}
+
+// pins existing behaviour
+func TestResolverRewordedNameClaimsNoOtherChain(t *testing.T) {
+	r := testResolver()
+	rows := append(chainRows(fixCT, 1, "feat: first commit"), chainRows(fixCT+1000, 1, "fix: second commit")...)
+	a := chainLedgerFix(0, []int{1}, "feat: first commit", 0).Text
+	b := chainLedgerFix(0, []int{1}, "fix: the second one", 0).Text
+	for _, text := range []string{a + "\n" + b, b + "\n" + a} {
+		leds := []LedgerMsg{{fixCT + 1400, fixSession, "/t.jsonl", text}}
+		cand, _ := r.pickLedger(rows, 1, fixCT, leds)
+		if got := blockHead(cand); got != "feat: first commit" {
+			t.Fatalf("the first chain takes its own deferred block; got %q", got)
+		}
+		cand, _ = r.pickLedger(rows, 3, fixCT+1000, leds)
+		if cand != nil {
+			t.Fatalf("a reworded block never hands the second chain the first one's; got %q", blockHead(cand))
+		}
+	}
+}
+
+func TestResolverGitRowStaysInsideItsBound(t *testing.T) {
+	r := testResolver()
+	const placeholder = "(not available to a pre-commit hook — judge the diff alone)"
+	rows := append(chainRows(fixCT, 1, placeholder), chainRows(fixCT+1000, 1, placeholder)...)
+	for _, row := range rows {
+		delete(row, "session_id")
+		row["repo"] = "/r"
+	}
+	late := chainLedgerFix(fixCT+1400, []int{1}, placeholder, 0)
+	if cand, _ := r.pickLedger(rows, 1, fixCT, []LedgerMsg{late}); cand != nil {
+		t.Fatal("a git row's shared subject lets no ledger past the chain bound")
+	}
+	if cand, _ := r.pickLedger(rows, 3, fixCT+1000, []LedgerMsg{late}); cand == nil {
+		t.Fatal("the chain the ledger landed inside still takes it")
+	}
+	early := chainLedgerFix(fixCT+400, []int{1}, placeholder, 0)
+	if cand, _ := r.pickLedger(rows, 1, fixCT, []LedgerMsg{early}); cand == nil {
+		t.Fatal("a git row keeps its bounded join")
+	}
+}
+
 func TestResolverSubjectAbsentFallsBack(t *testing.T) {
 	r := testResolver()
 	rows := chainRows(fixCT, 2, "")
