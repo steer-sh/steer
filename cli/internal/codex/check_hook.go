@@ -35,7 +35,7 @@ func RegisterCheckHook(scope, cwd, command string, timeout int) (string, error) 
 		hooks = map[string]any{}
 		root["hooks"] = hooks
 	}
-	hooks["Stop"] = append(filterBy(eventEntries(root, "Stop"), isCheckHook), entryValue(hookEntry{
+	hooks["Stop"] = upsertEntry(eventEntries(root, "Stop"), isCheckHook, entryValue(hookEntry{
 		Hooks: []commandHook{{Type: "command", Command: command, Timeout: timeout,
 			StatusMessage: CheckHookStatusMessage}},
 	}))

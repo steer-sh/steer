@@ -47,6 +47,12 @@ Concrete adapters under `internal/claude`, `internal/codex`, `internal/pi`, and
 Pi uses `.pi` in a project and `~/.pi/agent` globally; Pi and Codex share project
 `AGENTS.md` but have separate global instruction documents.
 
+Codex keys each hook approval by event, entry index and handler index, and hashes
+the handler definition, not the script it runs. A Codex registration therefore
+rewrites a Steer handler at its existing entry (`codex.upsertEntry`) and appends
+only when none is there: a handler that moves voids its own approval and that of
+the handler taking its place, and Codex then skips both until `/hooks`.
+
 `internal/steerpath/` is the common path entry point. Two stores have different
 migration ownership:
 

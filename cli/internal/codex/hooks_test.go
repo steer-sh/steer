@@ -53,7 +53,7 @@ func TestRegisterPreservesUnrelatedKeysAndIsIdempotent(t *testing.T) {
 func TestTrustRecordLookupUsesCurrentEntryIndex(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CODEX_HOME", home)
-	original := `{"hooks":{"PreToolUse":[{"matcher":"exec_command","hooks":[{"type":"command","command":"steer commit-gate review-codex"}]},{"matcher":"view_image","hooks":[{"type":"command","command":"other"}]}]}}`
+	original := `{"hooks":{"PreToolUse":[{"matcher":"exec_command","hooks":[{"type":"command","command":"steer commit-gate review-codex"},{"type":"command","command":"sibling"}]},{"matcher":"view_image","hooks":[{"type":"command","command":"other"}]}]}}`
 	path := filepath.Join(home, "hooks.json")
 	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
 		t.Fatal(err)
@@ -63,8 +63,9 @@ func TestTrustRecordLookupUsesCurrentEntryIndex(t *testing.T) {
 		"[hooks.state.\""+oldKey+"\"]\ntrusted_hash = \"sha256:stale\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Register removes the old gate and appends the current definition, moving it
-	// behind the unrelated entry. The old index record must not attach to it.
+	// The gate shares its entry with a sibling, so Register cannot rewrite that entry
+	// in place: it appends the current definition behind the unrelated entry. The old
+	// index record must not attach to it.
 	if _, err := RegisterCommitGate("global", "", "steer commit-gate review-codex", 210); err != nil {
 		t.Fatal(err)
 	}
@@ -193,5 +194,62 @@ func TestCommitGateRegistrationDisablesTheContextSpill(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), `"additionalContextLimit": 0`) {
 		t.Fatalf("registration does not disable the spill: %s", raw)
+	}
+}
+
+// entryCommands lists the first handler's command of each entry under event, in
+// file order: the entry index Codex keys a trust record by.
+func entryCommands(t *testing.T, path, event string) []string {
+	t.Helper()
+	var out []string
+	for _, raw := range readHooks(t, path)[event].([]any) {
+		hook := raw.(map[string]any)["hooks"].([]any)[0].(map[string]any)
+		out = append(out, hook["command"].(string))
+	}
+	return out
+}
+
+// Codex keys a trust record by entry index, so a re-registration that moves a Steer
+// handler voids the approval of that handler and of the one that takes its place.
+func TestReRegistrationKeepsEveryHandlerAtItsIndex(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	path := filepath.Join(home, "hooks.json")
+	const gate, resolver, check = "steer commit-gate review-codex", "steer commit-gate backfill", "steer check hook --harness codex"
+	if _, err := RegisterCommitGateAndResolver("global", "", gate, 240, resolver, 30); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RegisterMaster("global", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RegisterCheckHook("global", "", check, 330); err != nil {
+		t.Fatal(err)
+	}
+	master, err := MasterCommand("global")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPre, wantStop := []string{gate, master}, []string{resolver, check}
+
+	for _, step := range []struct {
+		name string
+		run  func() error
+	}{
+		{"commit gate", func() error {
+			_, err := RegisterCommitGateAndResolver("global", "", gate, 240, resolver, 30)
+			return err
+		}},
+		{"master", func() error { _, err := RegisterMaster("global", ""); return err }},
+		{"check hook", func() error { _, err := RegisterCheckHook("global", "", check, 330); return err }},
+	} {
+		if err := step.run(); err != nil {
+			t.Fatal(err)
+		}
+		if got := entryCommands(t, path, "PreToolUse"); strings.Join(got, "\n") != strings.Join(wantPre, "\n") {
+			t.Errorf("after re-registering the %s, PreToolUse = %q; want %q", step.name, got, wantPre)
+		}
+		if got := entryCommands(t, path, "Stop"); strings.Join(got, "\n") != strings.Join(wantStop, "\n") {
+			t.Errorf("after re-registering the %s, Stop = %q; want %q", step.name, got, wantStop)
+		}
 	}
 }

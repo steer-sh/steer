@@ -151,6 +151,44 @@ func filterBy(entries []any, drop func(string) bool) []any {
 	return out
 }
 
+// upsertEntry puts fresh at the index of the first entry whose only handler owns
+// names, and drops every other handler owns names. Codex keys a hook's trust record
+// by event, entry index and handler index, so re-registering a handler at a new
+// index voids its approval and the approval of whatever takes its old place. With
+// no such entry, fresh is appended.
+func upsertEntry(entries []any, owns func(string) bool, fresh any) []any {
+	slot := -1
+	for i, raw := range entries {
+		if soleHandlerOwned(raw, owns) {
+			slot = i
+			break
+		}
+	}
+	if slot < 0 {
+		return append(filterBy(entries, owns), fresh)
+	}
+	out := make([]any, 0, len(entries))
+	for i, raw := range entries {
+		if i == slot {
+			out = append(out, fresh)
+			continue
+		}
+		out = append(out, filterBy([]any{raw}, owns)...)
+	}
+	return out
+}
+
+func soleHandlerOwned(raw any, owns func(string) bool) bool {
+	entry, _ := raw.(map[string]any)
+	hooks, _ := entry["hooks"].([]any)
+	if len(hooks) != 1 {
+		return false
+	}
+	hook, _ := hooks[0].(map[string]any)
+	command, _ := hook["command"].(string)
+	return owns(command)
+}
+
 func save(path string, root map[string]any) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
@@ -210,21 +248,20 @@ func RegisterCommitGateAndResolver(scope, cwd, review string, reviewTimeout int,
 		hooks = map[string]any{}
 		root["hooks"] = hooks
 	}
-	hooks["PreToolUse"] = append(filterBy(preToolUse(root), isSteerOwned), entryValue(hookEntry{
+	hooks["PreToolUse"] = upsertEntry(preToolUse(root), isSteerOwned, entryValue(hookEntry{
 		Matcher: CommitGateMatcher,
 		Hooks: []commandHook{{Type: "command", Command: review, Timeout: reviewTimeout,
 			StatusMessage:          CommitGateStatusMessage,
 			AdditionalContextLimit: noContextSpill}},
 	}))
 	for _, event := range resolverEvents {
-		kept := filterBy(eventEntries(root, event), isSteerOwned)
 		if resolver == "" {
-			setOrDrop(hooks, event, kept)
+			setOrDrop(hooks, event, filterBy(eventEntries(root, event), isSteerOwned))
 			continue
 		}
 		// No matcher: Stop ignores one outright, and every subagent type owes the same
 		// reconciliation.
-		hooks[event] = append(kept, entryValue(hookEntry{
+		hooks[event] = upsertEntry(eventEntries(root, event), isSteerOwned, entryValue(hookEntry{
 			Hooks: []commandHook{{Type: "command", Command: resolver, Timeout: resolverTimeout}},
 		}))
 	}

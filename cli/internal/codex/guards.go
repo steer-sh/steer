@@ -69,7 +69,7 @@ func RegisterMaster(scope, cwd string) (string, error) {
 			}
 		}
 	}
-	hooks["PreToolUse"] = append(filterBy(preToolUse(root), isMaster), entryValue(hookEntry{
+	hooks["PreToolUse"] = upsertEntry(preToolUse(root), isMaster, entryValue(hookEntry{
 		Matcher: MasterMatcher,
 		Hooks: []commandHook{{Type: "command", Command: command, Timeout: timeout,
 			StatusMessage: MasterStatusMessage}},
