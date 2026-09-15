@@ -125,8 +125,8 @@ no manifest entry names.`,
 		fmt.Fprintln(out, styles.SuccessBox.Render(fmt.Sprintf(
 			"Restored %s %s\nScope: %s\nHarness: %s\nFrom: %s", s.Tier, s.ID, scope, harnessNames(targets), s.Dir)))
 		if s.Tier == string(tier.Review) && scope == claude.ProjectScope {
-			fmt.Fprintf(out, "The commit gate reads project entries from HEAD. Commit %s for the restored entry to take effect.\n",
-				projectManifestPath())
+			fmt.Fprintf(out, "The commit gate reads project entries from HEAD. Commit %s on its own, before the change "+
+				"the restored entry is for: a commit that carries both is reviewed without the entry.\n", projectManifestPath())
 		}
 		printRestorePointer(out)
 		return nil

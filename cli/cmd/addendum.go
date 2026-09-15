@@ -57,8 +57,8 @@ var commitGateAddendumAddCmd = &cobra.Command{
 			fmt.Printf("  was: %s\n", result.PreviousText)
 		}
 		if scope == claude.ProjectScope {
-			fmt.Printf("The commit gate reads project entries from HEAD. Commit %s for this entry to take effect.\n",
-				projectManifestPath())
+			fmt.Printf("The commit gate reads project entries from HEAD. Commit %s on its own, before the change "+
+				"this entry is for: a commit that carries both is reviewed without the entry.\n", projectManifestPath())
 		}
 		return nil
 	},

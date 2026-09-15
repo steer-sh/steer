@@ -117,4 +117,6 @@ thing in other words is a duplicate the refusal does not catch.
 
 The stock review prompt is compiled into the binary; never edit it. A project
 entry reaches the reviewer only after the store's `steer-manifest.json` is
-committed, because the gate reads project entries from HEAD.
+committed, because the gate reads project entries from HEAD. Commit the manifest
+on its own, before the change the entry is for: a commit that carries both is
+reviewed without the entry.

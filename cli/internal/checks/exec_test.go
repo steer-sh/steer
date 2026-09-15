@@ -185,3 +185,33 @@ func TestTheScaffoldRunsTheExecutorAndFailsWithoutSteer(t *testing.T) {
 		t.Fatal("an oracle without the executor was reported as integrated")
 	}
 }
+
+// A check.sh that runs a check by id is found, so a removal can say the line
+// now fails. The --all scaffold, a comment and another command do not count.
+func TestOracleNamesCheckFindsANamedExecInvocation(t *testing.T) {
+	root := t.TempDir()
+	if OracleNamesCheck(root, "no-todo") {
+		t.Fatal("a repository without check.sh names a check")
+	}
+	writeFile(t, root, OracleName, string(Scaffold(root)))
+	if OracleNamesCheck(root, "no-todo") {
+		t.Fatal("the --all scaffold was read as naming no-todo")
+	}
+	writeFile(t, root, OracleName, "# \"$steer\" check exec no-todo\necho no-todo\n"+
+		"\"$steer\" check exec --all || grep no-todo x\n\"$steer\" check exec lint; echo no-todo\n"+
+		"\"$steer\" check exec --all&& echo no-todo\necho check exec no-todo\n")
+	if OracleNamesCheck(root, "no-todo") {
+		t.Fatal("a comment, a later command or a command that is not steer was read as naming no-todo")
+	}
+	writeFile(t, root, OracleName, "\"$steer\" check exec lint \"no-todo\" || status=1\n")
+	if !OracleNamesCheck(root, "no-todo") {
+		t.Fatal("a named exec invocation was not found")
+	}
+	if OracleNamesCheck(root, "no") {
+		t.Fatal("a prefix of a named id matched")
+	}
+	writeFile(t, root, OracleName, "\"$steer\" check exec lint && \"$steer\" check exec no-todo\n")
+	if !OracleNamesCheck(root, "no-todo") {
+		t.Fatal("a second exec invocation on one line was not found")
+	}
+}

@@ -203,7 +203,11 @@ func (m *Model) archiveFix(f archiveForm, reason string) (string, error) {
 		if _, _, err := checks.Remove(m.snap.Checks.Repo, f.id, reason); err != nil {
 			return "", err
 		}
-		return "archived " + noun + " " + f.id + "; its cases and validation history stay in this repository" + restore, nil
+		wiring := ""
+		if checks.OracleNamesCheck(m.snap.Checks.Repo, f.id) {
+			wiring = "; " + checks.OracleName + " still runs it by name and now fails until you remove " + f.id + " from it"
+		}
+		return "archived " + noun + " " + f.id + "; its cases and validation history stay in this repository" + wiring + restore, nil
 	}
 	return "", fmt.Errorf("%s has no tier this panel can archive", f.id)
 }

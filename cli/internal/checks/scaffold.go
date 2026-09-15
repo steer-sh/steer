@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 )
 
 // OracleName is the repository's verification oracle at its root.
@@ -72,4 +74,36 @@ func WriteScaffold(root string) (created bool, err error) {
 func OracleRunsExec(root string) bool {
 	data, err := os.ReadFile(OraclePath(root))
 	return err == nil && bytes.Contains(data, []byte("check exec"))
+}
+
+// namedExec matches a steer executable's `check exec` and captures the rest of
+// the command.
+var namedExec = regexp.MustCompile(`(?i)\S*steer\S*\s+check\s+exec\b(.*)`)
+
+// OracleNamesCheck reports whether the repository's check.sh passes id to a
+// steer executable's `check exec` by name. It is a text search over each
+// command between shell separators, so a comment or another command that
+// mentions id does not count.
+func OracleNamesCheck(root, id string) bool {
+	data, err := os.ReadFile(OraclePath(root))
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if i := strings.Index(line, "#"); i >= 0 {
+			line = line[:i]
+		}
+		for _, command := range strings.FieldsFunc(line, func(r rune) bool { return strings.ContainsRune(";|&", r) }) {
+			m := namedExec.FindStringSubmatch(command)
+			if m == nil {
+				continue
+			}
+			for _, f := range strings.Fields(m[1]) {
+				if strings.Trim(f, `"'`) == id {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }

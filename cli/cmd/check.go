@@ -474,6 +474,10 @@ var checkRemoveCmd = &cobra.Command{
 		archived, _ := filepath.Rel(root, archivePath)
 		fmt.Fprintln(cmd.OutOrStdout(), styles.SuccessBox.Render(fmt.Sprintf(
 			"Removed check %s\nKept: %s and its validation history\nArchived: %s", d.ID, rel, archived)))
+		if checks.OracleNamesCheck(root, d.ID) {
+			fmt.Fprintf(cmd.OutOrStdout(), "%s runs `check exec %s` by name, and that line now fails. Remove %s from it.\n",
+				checks.OracleName, d.ID, d.ID)
+		}
 		return nil
 	},
 }
