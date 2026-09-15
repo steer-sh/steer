@@ -742,6 +742,50 @@ func TestResolverMissReasons(t *testing.T) {
 	}
 }
 
+// multiRoundFix is the shape of a round-era reply that answered a whole chain at once:
+// a header per round, round n carrying n bullets, then a terminal round and prose.
+func multiRoundFix(when float64) LedgerMsg {
+	text := "All four rounds, adjudicated together.\n"
+	for n := 1; n <= 4; n++ {
+		text += fmt.Sprintf("\n**Commit gate fired (round %d/4)** — 3 reviewers, %d raw findings, %d distinct concerns.\n", n, n, n)
+		for k := 0; k < n; k++ {
+			text += fmt.Sprintf("- **REJECTED** — round %d concern %d → no change\n", n, k)
+		}
+	}
+	text += "\n**Commit gate fired (round 5, terminal)** — 2 reviewers, 1 raw finding, 1 distinct concern. Commit not blocked.\n" +
+		"- **ACCEPTED** — the terminal concern → fixed\n\n**Every fix was re-verified.** The suite passes.\n"
+	return LedgerMsg{When: when, Key: fixSession, Path: "/t.jsonl", Text: text}
+}
+
+func TestResolverOneReplyAnswersEachRound(t *testing.T) {
+	r := testResolver()
+	rows := append(chainRows(fixT, 4, ""), resolverRow{"phase": "cap", "ts": fixT + 400, "firing": 5,
+		"session_id": fixSession, "finding_slots": 1})
+	led := multiRoundFix(fixT + 900)
+	for _, i := range append(retryIndexes(rows), len(rows)-1) {
+		firing, _ := pyInt(rows[i]["firing"])
+		anchor, _ := anchorTS(rows, i)
+		cand, join, _ := r.pickLedger(rows, i, anchor, []LedgerMsg{led})
+		if cand == nil || join != "round" {
+			t.Fatalf("round %d: a reply with a header per round answers it; got join=%s", firing, join)
+		}
+		parsed := gate.ParseLedgerText(cand.Text)
+		rejected, accepted := firing, 0
+		if firing == 5 {
+			rejected, accepted = 0, 1
+		}
+		if parsed["self_reported_rejected"] != rejected || parsed["self_reported_accepted"] != accepted {
+			t.Fatalf("round %d carries only its own bullets; got %v", firing, parsed)
+		}
+	}
+	twoChains := multiRoundFix(fixT + 900)
+	twoChains.Text += "\n**Commit gate fired (round 2/4)** — 3 reviewers, 1 raw finding, 1 distinct concern. *(other repo)*\n- **ACCEPTED** — x → y\n"
+	cand, _, why := r.pickLedger(rows, 3, fixT+100, []LedgerMsg{twoChains})
+	if cand != nil || why != MissRoundShared {
+		t.Fatalf("a reply naming round 2 twice answered two chains; got (cand!=nil=%v, why=%q)", cand != nil, why)
+	}
+}
+
 func TestResolverStampsTheMissReason(t *testing.T) {
 	r := testResolver()
 	r.quiet = true

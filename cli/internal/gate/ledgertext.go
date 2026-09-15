@@ -56,6 +56,22 @@ type Concern struct {
 	Concern string `json:"concern"`
 }
 
+// RoundBlocks returns each per-round ledger inside one message, header line first. An
+// agent that answered several rounds, or several chains, in one reply wrote a header
+// for each; text before the first header is dropped.
+func RoundBlocks(text string) []string {
+	locs := ledgerRoundRe.FindAllStringIndex(text, -1)
+	out := make([]string, len(locs))
+	for i, loc := range locs {
+		end := len(text)
+		if i+1 < len(locs) {
+			end = locs[i+1][0]
+		}
+		out[i] = text[loc[0]:end]
+	}
+	return out
+}
+
 // LedgerRound is the round a ledger message names, or ok=false when it names none.
 func LedgerRound(text string) (int, bool) {
 	m := ledgerRoundRe.FindStringSubmatch(text)
