@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,6 +33,9 @@ const (
 
 	// A lock older than this is a crashed run's leftover and is taken over.
 	backfillLockStale = 300 // seconds
+
+	// backupKeep is how many shard backups a rewrite leaves beside the shard.
+	backupKeep = 10
 )
 
 // BackfillOptions are the resolver's four flags, matching the Python CLI.
@@ -517,12 +521,35 @@ func (r *resolver) writeRows(rows []resolverRow, seenLines int) error {
 	if err := os.Rename(tmp, log); err != nil {
 		return err
 	}
+	pruneBackups(log, backupKeep)
 	appended := ""
 	if len(tail) > 0 {
 		appended = fmt.Sprintf("; %d row(s) appended during the run", len(tail))
 	}
 	r.say("written; backup at %s%s", filepath.Base(backup), appended)
 	return nil
+}
+
+// pruneBackups removes all but the newest keep backups of the shard, ordered by the
+// epoch in their names. A name with no epoch is left alone.
+func pruneBackups(log string, keep int) {
+	matches, _ := filepath.Glob(log + ".bak.*")
+	type backup struct {
+		path string
+		ts   int64
+	}
+	var backups []backup
+	for _, path := range matches {
+		ts, err := strconv.ParseInt(strings.TrimPrefix(path, log+".bak."), 10, 64)
+		if err != nil {
+			continue
+		}
+		backups = append(backups, backup{path, ts})
+	}
+	sort.Slice(backups, func(i, j int) bool { return backups[i].ts > backups[j].ts })
+	for i := keep; i < len(backups); i++ {
+		os.Remove(backups[i].path)
+	}
 }
 
 // CountUnresolved counts local-shard rows that owe a ledger the resolver has not yet

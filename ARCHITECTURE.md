@@ -333,10 +333,17 @@ before a commit hash exists.
 `internal/gate/resolve/` joins adjudication rows to harness-neutral `LedgerMsg`
 values supplied by each adapter's harvest. The join uses thread id when present,
 otherwise session id. `steer commit-gate backfill` previews; `--apply` rewrites the
-local host shard with backup and concurrent-append preservation. Stop hooks run
+local host shard with backup (the ten newest are kept) and concurrent-append
+preservation. Stop hooks run
 the resolver; Codex also registers SubagentStop, and Pi uses turn_end.
 The git pre-commit channel has no session resolver. Pending rows have a grace
 period before they count as missing evidence.
+
+Each row's transcript prefix is stored once per session under `prefixes/`: the
+session file grows by appended gzip members, and a row names its slice with
+`prefix_lines` and `prefix_sha`. Read it through `gate.ReadPrefix`, which also
+resolves rows written before the merge; `scripts/merge-prefixes.py` converts a
+machine's older per-firing files.
 
 ## Transcripts and session evidence
 

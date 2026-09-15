@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -139,10 +140,19 @@ func (l *Ledger) SaveTask(session string, turns []Turn) Row {
 	return Row{"task_file": name, "task_sha": Digest(sb.String())}
 }
 
+// prefixLockStale is how old a session file's lock must be before a writer takes it over.
+const prefixLockStale = 60 * time.Second
+
+// prefixContentName matches a content-addressed prefix file and captures its stem.
+var prefixContentName = regexp.MustCompile(`^(.+)-[0-9a-f]{16}\.jsonl\.gz$`)
+
 // SavePrefix stores the session's transcript as it stood when the gate fired.
 //
 // Copied rather than referenced, because the transcript expires and keeps growing.
-// Named by content, so the row's prefix_sha always describes the file the row names.
+// One file per session holds the longest prefix seen, each extension appended as a
+// further gzip member; the row's prefix_lines and prefix_sha name its slice. A
+// transcript that does not extend that file, or a file another gate holds, is
+// written to its own content-named file instead. ReadPrefix reads either form.
 func (l *Ledger) SavePrefix(transcript string, lines []string) Row {
 	if len(lines) == 0 {
 		return Row{}
@@ -150,28 +160,172 @@ func (l *Ledger) SavePrefix(transcript string, lines []string) Row {
 	text := strings.Join(lines, "\n") + "\n"
 	sha := Digest(text)
 	stem := slugOrDefault(Stem(transcript), 64)
-	if stem == "" {
-		stem = "nosession"
+	row := func(name string) Row {
+		return Row{"prefix_file": name, "prefix_lines": len(lines), "prefix_sha": sha}
 	}
-	name := fmt.Sprintf("%s-%s.jsonl.gz", stem, sha)
-	path := filepath.Join(l.cfg.PrefixDir(), name)
-	if _, err := os.Stat(path); err != nil {
-		var buf bytes.Buffer
-		zw, _ := gzip.NewWriterLevel(&buf, 6)
-		if _, err := zw.Write([]byte(text)); err != nil {
-			l.noteErr("save_prefix: compress: %v", err)
-			return Row{}
-		}
-		if err := zw.Close(); err != nil {
-			l.noteErr("save_prefix: compress: %v", err)
-			return Row{}
-		}
-		if err := writeFile(l.cfg.PrefixDir(), name, buf.Bytes()); err != nil {
-			l.noteErr("save_prefix: %v", err)
-			return Row{}
+	dir := l.cfg.PrefixDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		l.noteErr("save_prefix: %v", err)
+		return Row{}
+	}
+	name := stem + ".jsonl.gz"
+	if l.extendSessionPrefix(filepath.Join(dir, name), text) {
+		return row(name)
+	}
+	name = fmt.Sprintf("%s-%s.jsonl.gz", stem, sha)
+	if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+		return row(name)
+	}
+	member, err := gzipMember(text)
+	if err == nil {
+		err = writeFile(dir, name, member)
+	}
+	if err != nil {
+		l.noteErr("save_prefix: %v", err)
+		return Row{}
+	}
+	return row(name)
+}
+
+// extendSessionPrefix makes the session file at path hold text as a prefix, and
+// reports whether it does. It never rewrites stored bytes: the new tail becomes one
+// more gzip member, swapped in by rename under the file's lock.
+func (l *Ledger) extendSessionPrefix(path, text string) bool {
+	lock := path + ".lock"
+	if !takePrefixLock(lock) {
+		return false
+	}
+	defer os.Remove(lock)
+	raw, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return false
+	}
+	stored := ""
+	if len(raw) > 0 {
+		if stored, err = gunzipAll(raw); err != nil {
+			return false
 		}
 	}
-	return Row{"prefix_file": name, "prefix_lines": len(lines), "prefix_sha": sha}
+	if strings.HasPrefix(stored, text) {
+		return true
+	}
+	if !strings.HasPrefix(text, stored) {
+		return false
+	}
+	member, err := gzipMember(text[len(stored):])
+	if err != nil {
+		l.noteErr("save_prefix: %v", err)
+		return false
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".prefix-*")
+	if err != nil {
+		l.noteErr("save_prefix: %v", err)
+		return false
+	}
+	_, err = tmp.Write(append(raw, member...))
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Chmod(tmp.Name(), 0o644)
+	}
+	if err == nil {
+		err = os.Rename(tmp.Name(), path)
+	}
+	if err != nil {
+		os.Remove(tmp.Name())
+		l.noteErr("save_prefix: %v", err)
+		return false
+	}
+	return true
+}
+
+// takePrefixLock creates the lock file, taking over one left by a crashed writer. A
+// held lock returns false at once: the caller has a correct path that needs none.
+func takePrefixLock(lock string) bool {
+	if info, err := os.Stat(lock); err == nil && time.Since(info.ModTime()) > prefixLockStale {
+		os.Remove(lock)
+	}
+	f, err := os.OpenFile(lock, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		return false
+	}
+	f.Close()
+	return true
+}
+
+// ReadPrefix returns the transcript prefix a row recorded: the first prefix_lines
+// lines of its prefix_file, checked against prefix_sha. A content-named file that was
+// merged into its session file is read from the session file.
+func ReadPrefix(cfg Config, row Row) (string, error) {
+	name, _ := row["prefix_file"].(string)
+	sha, _ := row["prefix_sha"].(string)
+	n, ok := rowInt(row["prefix_lines"])
+	if name == "" || !ok || n <= 0 {
+		return "", fmt.Errorf("row records no prefix")
+	}
+	raw, err := os.ReadFile(filepath.Join(cfg.PrefixDir(), name))
+	if os.IsNotExist(err) {
+		if m := prefixContentName.FindStringSubmatch(name); m != nil {
+			raw, err = os.ReadFile(filepath.Join(cfg.PrefixDir(), m[1]+".jsonl.gz"))
+		}
+	}
+	if err != nil {
+		return "", err
+	}
+	stored, err := gunzipAll(raw)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", name, err)
+	}
+	end := 0
+	for i := 0; i < n; i++ {
+		k := strings.IndexByte(stored[end:], '\n')
+		if k < 0 {
+			return "", fmt.Errorf("%s holds fewer than %d lines", name, n)
+		}
+		end += k + 1
+	}
+	text := stored[:end]
+	if sha != "" && Digest(text) != sha {
+		return "", fmt.Errorf("%s: the first %d lines do not match prefix_sha", name, n)
+	}
+	return text, nil
+}
+
+func rowInt(v any) (int, bool) {
+	switch n := v.(type) {
+	case int:
+		return n, true
+	case float64:
+		return int(n), true
+	case json.Number:
+		i, err := n.Int64()
+		return int(i), err == nil
+	}
+	return 0, false
+}
+
+func gzipMember(text string) ([]byte, error) {
+	var buf bytes.Buffer
+	zw, _ := gzip.NewWriterLevel(&buf, 6)
+	if _, err := zw.Write([]byte(text)); err != nil {
+		return nil, fmt.Errorf("compress: %w", err)
+	}
+	if err := zw.Close(); err != nil {
+		return nil, fmt.Errorf("compress: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
+// gunzipAll decompresses every member of a gzip stream.
+func gunzipAll(raw []byte) (string, error) {
+	zr, err := gzip.NewReader(bytes.NewReader(raw))
+	if err != nil {
+		return "", err
+	}
+	defer zr.Close()
+	data, err := io.ReadAll(zr)
+	return string(data), err
 }
 
 func slugOrDefault(s string, n int) string {

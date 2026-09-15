@@ -505,6 +505,46 @@ func TestResolverConcurrentAppendKept(t *testing.T) {
 	}
 }
 
+func TestResolverRewriteKeepsTenNewestBackups(t *testing.T) {
+	dir := t.TempDir()
+	cfg := gate.Config{StateDir: dir, HostID: "testhost", StaleAfter: 30 * time.Minute}
+	stale := float64(ledgerRequiredTS - 1000)
+	row := resolverRow{"phase": "retry", "ts": stale + 10, "deny_ts": stale, "firing": 1}
+	line, _ := json.Marshal(row)
+	if err := os.WriteFile(cfg.LogFile(), append(line, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for ts := 1; ts <= 12; ts++ {
+		if err := os.WriteFile(fmt.Sprintf("%s.bak.%d", cfg.LogFile(), ts), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	foreign := cfg.LogFile() + ".bak.manual"
+	if err := os.WriteFile(foreign, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &resolver{cfg: cfg, quiet: true, now: func() float64 { return 2_000_000_000 }, harvests: []Harvest{func() []LedgerMsg { return nil }}}
+	if res := r.resolveAndWrite([]resolverRow{copyRow(row)}, 1, true); res.Err != nil || res.Changed == 0 {
+		t.Fatalf("resolver write: %+v", res)
+	}
+
+	backups, _ := filepath.Glob(cfg.LogFile() + ".bak.*")
+	if len(backups) != backupKeep+1 {
+		t.Fatalf("want %d dated backups plus the undated one, got %v", backupKeep, backups)
+	}
+	for _, gone := range []int{1, 2, 3} {
+		if _, err := os.Stat(fmt.Sprintf("%s.bak.%d", cfg.LogFile(), gone)); !os.IsNotExist(err) {
+			t.Fatalf("backup %d is among the oldest and must be removed", gone)
+		}
+	}
+	for _, kept := range []string{cfg.LogFile() + ".bak.2000000000", cfg.LogFile() + ".bak.12", foreign} {
+		if _, err := os.Stat(kept); err != nil {
+			t.Fatalf("%s must be kept: %v", filepath.Base(kept), err)
+		}
+	}
+}
+
 // --- test helpers ------------------------------------------------------------
 
 func pyNumOr(v any) float64 {
