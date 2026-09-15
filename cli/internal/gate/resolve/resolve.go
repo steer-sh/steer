@@ -36,6 +36,10 @@ const (
 
 	// backupKeep is how many shard backups a rewrite leaves beside the shard.
 	backupKeep = 10
+
+	// rescanAfter is how long an --if-due run waits after an applied scan before it
+	// harvests again when no row is new and no deadline has passed.
+	rescanAfter = 600 // seconds
 )
 
 // BackfillOptions are the resolver's four flags, matching the Python CLI.
@@ -102,6 +106,9 @@ func Backfill(cfg gate.Config, harvests []Harvest, opts BackfillOptions, out io.
 		r.say("no log at %s", log)
 		return Result{}
 	}
+	// Taken before the log is read, so a row appended after the read is newer than the
+	// scan the record names.
+	started := r.now()
 	lines := splitLedgerLines(log)
 	seen := len(lines)
 	rows := make([]resolverRow, 0, len(lines))
@@ -125,7 +132,35 @@ func Backfill(cfg gate.Config, harvests []Harvest, opts BackfillOptions, out io.
 		return Result{Locked: true}
 	}
 	defer r.releaseLock()
-	return r.resolveAndWrite(rows, seen, opts.Apply)
+	res := r.resolveAndWrite(rows, seen, opts.Apply)
+	if opts.Apply && res.Err == nil {
+		r.recordScan(started)
+	}
+	return res
+}
+
+func (r *resolver) scanPath() string { return filepath.Join(r.cfg.StateDir, "backfill.scanned") }
+
+// lastScan is when the last applied scan started, or ok=false when none is recorded.
+func (r *resolver) lastScan() (float64, bool) {
+	if r.cfg.StateDir == "" {
+		return 0, false
+	}
+	data, err := os.ReadFile(r.scanPath())
+	if err != nil {
+		return 0, false
+	}
+	ts, err := strconv.ParseFloat(strings.TrimSpace(string(data)), 64)
+	return ts, err == nil
+}
+
+// recordScan notes an applied scan's start. A failed write leaves --if-due scanning on
+// every due turn, as it did before the record existed.
+func (r *resolver) recordScan(ts float64) {
+	if r.cfg.StateDir == "" {
+		return
+	}
+	os.WriteFile(r.scanPath(), []byte(strconv.FormatInt(int64(ts), 10)), 0o644)
 }
 
 type resolver struct {
@@ -362,13 +397,25 @@ func (r *resolver) nameOwner(rows []resolverRow, ids []int, key, name string, wh
 	return owner, n == 1
 }
 
+// joinFor is the join a row takes by its era, and so the span its miss waits out.
+func joinFor(row resolverRow, denyTS float64) string {
+	firing, ok := pyInt(row["firing"])
+	switch {
+	case ok && firing != 0 && denyTS >= ledgerChainTS:
+		return "chain"
+	case ok && firing != 0 && denyTS >= ledgerRoundTS:
+		return "round"
+	}
+	return "window"
+}
+
 // pickLedger returns the ledger answering row i and how it was joined: "chain",
 // "round" or "window". A miss returns (nil, join).
 func (r *resolver) pickLedger(rows []resolverRow, i int, denyTS float64, ledgers []LedgerMsg) (*LedgerMsg, string) {
 	row := rows[i]
 	session := joinKey(row)
-	firing, hasFiring := pyInt(row["firing"])
-	firingTruthy := hasFiring && firing != 0
+	firing, _ := pyInt(row["firing"])
+	join := joinFor(row, denyTS)
 
 	inWindow := func(span float64) []LedgerMsg {
 		var out []LedgerMsg
@@ -380,7 +427,7 @@ func (r *resolver) pickLedger(rows []resolverRow, i int, denyTS float64, ledgers
 		return out
 	}
 
-	if firingTruthy && denyTS >= ledgerChainTS {
+	if join == "chain" {
 		bound := r.chainEndTS(rows, i, session, firing)
 		ids := chainIDs(rows)
 		subjects := chainSubjects(rows, ids, ids[i])
@@ -437,7 +484,7 @@ func (r *resolver) pickLedger(rows []resolverRow, i int, denyTS float64, ledgers
 		return nil, "chain"
 	}
 
-	if firingTruthy && denyTS >= ledgerRoundTS {
+	if join == "round" {
 		bound := r.chainEndTS(rows, i, session, firing)
 		var mine []LedgerMsg
 		for _, x := range inWindow(r.spanFor("round")) {
@@ -458,15 +505,35 @@ func (r *resolver) pickLedger(rows []resolverRow, i int, denyTS float64, ledgers
 	return nil, "window"
 }
 
-// pending reports whether some retry row is unresolved and its ledger has had time to
-// land. It reads only the log, so the transcript scan is skipped on the ordinary turn.
+// pending reports whether an --if-due run should harvest: some row is unresolved, its
+// ledger has had time to land, and the last applied scan cannot have seen what this
+// one would. That holds when no scan is recorded, when the row was written or its
+// grace ended since it, when the row's miss deadline passed since it, or when
+// rescanAfter has elapsed. It
+// reads only the log and the scan record, so the transcript scan is skipped on the
+// ordinary turn.
 func (r *resolver) pending(rows []resolverRow) bool {
 	now := r.now()
+	last, scanned := r.lastScan()
 	for i, row := range rows {
 		if !ExpectsLedger(row) || pyTruthy(row["ledger_found"]) || pyTruthy(row["backfilled"]) {
 			continue
 		}
-		if denyTS, ok := anchorTS(rows, i); ok && now >= denyTS+gate.LedgerGrace {
+		denyTS, ok := anchorTS(rows, i)
+		if !ok || now < denyTS+gate.LedgerGrace {
+			continue
+		}
+		if !scanned || now-last >= rescanAfter {
+			return true
+		}
+		if ts, ok := pyNum(row["ts"]); ok && ts >= last {
+			return true
+		}
+		// A scan inside the grace may predate the ledger, which usually lands then.
+		if last < denyTS+gate.LedgerGrace {
+			return true
+		}
+		if deadline := denyTS + r.spanFor(joinFor(row, denyTS)); last < deadline && deadline <= now {
 			return true
 		}
 	}

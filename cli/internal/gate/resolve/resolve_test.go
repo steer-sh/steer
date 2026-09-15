@@ -588,6 +588,61 @@ func TestResolverPending(t *testing.T) {
 	}
 }
 
+func TestResolverIfDueWaitsOutAnAppliedScan(t *testing.T) {
+	now := 2_000_000_000.0
+	r := testResolver()
+	r.cfg.StateDir = t.TempDir()
+	r.now = func() float64 { return now }
+	owing := func(deny, ts float64) []resolverRow {
+		return []resolverRow{
+			{"phase": "deny", "ts": deny, "firing": 1, "session_id": fixSession},
+			{"phase": "retry", "ts": ts, "deny_ts": deny, "firing": 1, "session_id": fixSession},
+		}
+	}
+	rows := owing(now-3000, now-2990)
+	if !r.pending(rows) {
+		t.Fatal("a due row with no scan recorded is scanned")
+	}
+	r.recordScan(now - 60)
+	if r.pending(rows) {
+		t.Fatal("nothing is new since the scan a minute ago")
+	}
+	if !r.pending(append(owing(now-3000, now-2990), owing(now-400, now-30)...)) {
+		t.Fatal("a row written since the scan is scanned for")
+	}
+	if !r.pending(owing(now-150, now-140)) {
+		t.Fatal("the scan ran inside the row's grace, before its ledger usually lands")
+	}
+	deadline := now - r.spanFor("chain") - 10
+	if !r.pending(owing(deadline, deadline+10)) {
+		t.Fatal("a miss deadline passed since the scan, so the miss is stamped now")
+	}
+	r.recordScan(now - rescanAfter)
+	if !r.pending(rows) {
+		t.Fatal("a late ledger is looked for once rescanAfter has passed")
+	}
+}
+
+func TestResolverOnlyAnAppliedScanIsRecorded(t *testing.T) {
+	dir := t.TempDir()
+	cfg := gate.Config{StateDir: dir, HostID: "testhost", StaleAfter: 30 * time.Minute}
+	line, _ := json.Marshal(resolverRow{"phase": "retry", "ts": fixCT + 10, "deny_ts": fixCT,
+		"firing": 1, "session_id": fixSession})
+	if err := os.WriteFile(cfg.LogFile(), append(line, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := &resolver{cfg: cfg, quiet: true, now: func() float64 { return 2_000_000_000 },
+		harvests: []Harvest{func() []LedgerMsg { return nil }}}
+	Backfill(cfg, r.harvests, BackfillOptions{Quiet: true}, nil, r.now)
+	if _, ok := r.lastScan(); ok {
+		t.Fatal("a dry run stamps no row, so it must not hold off the next automatic run")
+	}
+	Backfill(cfg, r.harvests, BackfillOptions{Apply: true, Quiet: true}, nil, r.now)
+	if ts, ok := r.lastScan(); !ok || ts != 2_000_000_000 {
+		t.Fatalf("an applied scan records its start; got (%v, %v)", ts, ok)
+	}
+}
+
 func TestResolverOpenWindowUntouched(t *testing.T) {
 	now := 2_000_000_000.0
 	r := testResolver()

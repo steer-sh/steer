@@ -344,7 +344,10 @@ local host shard with backup (the ten newest are kept) and concurrent-append
 preservation. Stop hooks run
 the resolver; Codex also registers SubagentStop, and Pi uses turn_end.
 The git pre-commit channel has no session resolver. Pending rows have a grace
-period before they count as missing evidence.
+period before they count as missing evidence. The hooks' `--if-due` form harvests
+again only when a row was written or a miss deadline passed since the last applied
+scan (recorded in `backfill.scanned`), or after `rescanAfter`; a run without it,
+including the dashboard's, always harvests.
 
 Each row's transcript prefix is stored once per session under `prefixes/`: the
 session file grows by appended gzip members, and a row names its slice with
