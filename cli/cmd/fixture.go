@@ -272,11 +272,12 @@ func candidateRows(hunks []fixture.Hunk, src *fixture.Source) []map[string]any {
 	rows := make([]map[string]any, 0, len(hunks))
 	for _, h := range hunks {
 		row := map[string]any{
-			"path":     h.Path,
-			"hunk":     h.Index,
-			"header":   h.Header,
-			"new_file": h.NewFile,
-			"origin":   fixture.OriginReconstructed,
+			"path":         h.Path,
+			"hunk":         h.Index,
+			"header":       h.Header,
+			"new_file":     h.NewFile,
+			"deleted_file": h.DeletedFile,
+			"origin":       fixture.OriginReconstructed,
 		}
 		if src != nil {
 			row["source"] = *src

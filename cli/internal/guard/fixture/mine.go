@@ -30,15 +30,19 @@ func (t Truncation) Lossy() bool { return t.DroppedFiles || t.StatOnly }
 // Hunk is one hunk of one file, rendered as the tool call a guard would have
 // seen. Per-hunk is what the runtime emits for a MultiEdit, and it avoids
 // welding an import at line 1 onto a change at line 300 into content no tool
-// call ever carried.
+// call ever carried. Added and Removed hold the hunk's + and - lines in order;
+// context lines separate them, so neither is a contiguous run of the file.
 type Hunk struct {
-	Path    string
-	Index   int
-	Header  string
-	Added   []string
-	NewFile bool
-	// Payload is the whole tool call: a Write for a new file, an Edit
-	// otherwise, each carrying file_path beside its content.
+	Path        string
+	Index       int
+	Header      string
+	Added       []string
+	Removed     []string
+	NewFile     bool
+	DeletedFile bool
+	// Payload is the whole tool call: a Write for a new file, a path-only
+	// delete Edit for a deleted file, and an Edit carrying old_string and
+	// new_string otherwise.
 	Payload map[string]any
 	// Skip names why this hunk yields no fixture, and is empty when it does.
 	Skip string
@@ -56,8 +60,8 @@ func ParseDiff(text string) ([]Hunk, Truncation, error) {
 	}
 
 	var hunks []Hunk
-	var path string
-	var newFile bool
+	var path, oldPath string
+	var newFile, deletedFile bool
 	var current *Hunk
 
 	flush := func() {
@@ -75,25 +79,39 @@ func ParseDiff(text string) ([]Hunk, Truncation, error) {
 			// hunk body carries a leading ' ', '+', '-' or '\'.
 			flush()
 			path = ""
+			oldPath = ""
 			newFile = false
-		case strings.HasPrefix(line, "--- "):
+			deletedFile = false
+		case current == nil && strings.HasPrefix(line, "--- "):
 			// The ---/+++ pair names the paths unambiguously; the diff --git
 			// header's two-path form is ambiguous for a path holding a space.
-			newFile = strings.TrimSpace(strings.TrimPrefix(line, "--- ")) == "/dev/null"
-		case strings.HasPrefix(line, "+++ "):
-			path = stripPrefix(strings.TrimSpace(strings.TrimPrefix(line, "+++ ")), "b/")
+			// Inside a hunk the same prefix is a removed line starting "-- ".
+			old := strings.TrimSpace(strings.TrimPrefix(line, "--- "))
+			newFile = old == "/dev/null"
+			oldPath = stripPrefix(old, "a/")
+		case current == nil && strings.HasPrefix(line, "+++ "):
+			target := strings.TrimSpace(strings.TrimPrefix(line, "+++ "))
+			deletedFile = target == "/dev/null"
+			if deletedFile {
+				path = oldPath
+			} else {
+				path = stripPrefix(target, "b/")
+			}
 		case strings.HasPrefix(line, "@@"):
 			flush()
-			if path == "" || path == "/dev/null" {
+			if path == "" {
 				continue
 			}
-			current = &Hunk{Path: path, Index: countFor(hunks, path) + 1, Header: line, NewFile: newFile}
+			current = &Hunk{Path: path, Index: countFor(hunks, path) + 1, Header: line,
+				NewFile: newFile, DeletedFile: deletedFile}
 		case current != nil && strings.HasPrefix(line, "+"):
 			// The marker is stripped, as the runtime does: a guard is handed
 			// the line's content, never the diff's rendering of it.
 			current.Added = append(current.Added, line[1:])
-		case current != nil && (strings.HasPrefix(line, " ") || strings.HasPrefix(line, "-") || strings.HasPrefix(line, "\\")):
-			// Context and removed lines are what the file already survived.
+		case current != nil && strings.HasPrefix(line, "-"):
+			current.Removed = append(current.Removed, line[1:])
+		case current != nil && (strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\\")):
+			// Context lines are in neither the added nor the removed text.
 		case current != nil:
 			flush()
 		}
@@ -108,26 +126,43 @@ func ParseDiff(text string) ([]Hunk, Truncation, error) {
 
 // finish decides a hunk's payload, or why it has none.
 func finish(h Hunk) Hunk {
-	if len(h.Added) == 0 {
-		// The runtime hands a guard added and replacement lines only, so a
-		// guard never saw the removed lines live. No fixture can claim it
-		// should have blocked them.
-		h.Skip = "the hunk adds no lines, and a guard is never handed removed lines"
+	if len(h.Added) == 0 && len(h.Removed) == 0 {
+		h.Skip = "the hunk adds and removes no lines"
 		return h
 	}
-	content := strings.Join(h.Added, "\n") + "\n"
+	if h.DeletedFile {
+		// The live runtime never hands a guard a deleted file's content, so
+		// neither does a candidate: the removed lines stay out of the payload.
+		h.Payload = map[string]any{
+			"tool_name": "Edit",
+			"tool_input": map[string]any{
+				"file_path": h.Path, "steer_operation": "delete", "new_string": "",
+			},
+		}
+		return h
+	}
 	if h.NewFile {
 		h.Payload = map[string]any{
 			"tool_name":  "Write",
-			"tool_input": map[string]any{"file_path": h.Path, "content": content},
+			"tool_input": map[string]any{"file_path": h.Path, "content": joinLines(h.Added)},
 		}
 		return h
 	}
 	h.Payload = map[string]any{
-		"tool_name":  "Edit",
-		"tool_input": map[string]any{"file_path": h.Path, "old_string": "", "new_string": content},
+		"tool_name": "Edit",
+		"tool_input": map[string]any{
+			"file_path": h.Path, "old_string": joinLines(h.Removed), "new_string": joinLines(h.Added),
+		},
 	}
 	return h
+}
+
+// joinLines renders diff lines as file text, each line newline-terminated.
+func joinLines(lines []string) string {
+	if len(lines) == 0 {
+		return ""
+	}
+	return strings.Join(lines, "\n") + "\n"
 }
 
 // HunksFor narrows candidates to the file a finding names. The filename narrows

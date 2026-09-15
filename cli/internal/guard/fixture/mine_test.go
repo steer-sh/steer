@@ -1,6 +1,9 @@
 package fixture
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 const multiHunkDiff = `diff --git a/cli/main.go b/cli/main.go
 index 1111111..2222222 100644
@@ -97,16 +100,9 @@ index 0000000..5555555
 	}
 }
 
-func TestADeletionOnlyHunkYieldsNoFixture(t *testing.T) {
-	diff := `diff --git a/old.py b/old.py
-index 6666666..7777777 100644
---- a/old.py
-+++ b/old.py
-@@ -1,3 +1,1 @@
- keep
--import os
--import sys
-`
+// onlyPayload parses a diff expected to hold one hunk and returns its payload.
+func onlyPayload(t *testing.T, diff string) (Hunk, string, map[string]any) {
+	t.Helper()
 	hunks, _, err := ParseDiff(diff)
 	if err != nil {
 		t.Fatalf("ParseDiff: %v", err)
@@ -114,11 +110,96 @@ index 6666666..7777777 100644
 	if len(hunks) != 1 {
 		t.Fatalf("want one hunk, got %d", len(hunks))
 	}
-	if hunks[0].Skip == "" {
-		t.Fatal("a deletion-only hunk built a payload; a guard never saw those lines live")
+	if hunks[0].Skip != "" || hunks[0].Payload == nil {
+		t.Fatalf("the hunk built no payload: %q", hunks[0].Skip)
 	}
-	if hunks[0].Payload != nil {
-		t.Fatal("a skipped hunk carries a payload")
+	name, _ := hunks[0].Payload["tool_name"].(string)
+	input, _ := hunks[0].Payload["tool_input"].(map[string]any)
+	return hunks[0], name, input
+}
+
+func TestADeletionOnlyHunkCarriesItsRemovedLines(t *testing.T) {
+	_, name, input := onlyPayload(t, `diff --git a/old.py b/old.py
+index 6666666..7777777 100644
+--- a/old.py
++++ b/old.py
+@@ -1,3 +1,1 @@
+ keep
+-import os
+-import sys
+`)
+	want := map[string]any{"file_path": "old.py", "old_string": "import os\nimport sys\n", "new_string": ""}
+	if name != "Edit" || !reflect.DeepEqual(input, want) {
+		t.Fatalf("payload is %s %v, want Edit %v", name, input, want)
+	}
+}
+
+func TestAReplacementHunkCarriesBothStrings(t *testing.T) {
+	_, name, input := onlyPayload(t, `diff --git a/a.py b/a.py
+index 1111111..2222222 100644
+--- a/a.py
++++ b/a.py
+@@ -1,3 +1,3 @@
+-a = 1
++a = 2
+ keep
+-c = 3
++c = 4
+`)
+	want := map[string]any{"file_path": "a.py", "old_string": "a = 1\nc = 3\n", "new_string": "a = 2\nc = 4\n"}
+	if name != "Edit" || !reflect.DeepEqual(input, want) {
+		t.Fatalf("payload is %s %v, want Edit %v", name, input, want)
+	}
+}
+
+// The live runtime never reads a deleted file, so the candidate carries its path
+// and the delete marker, and none of the content the diff happens to store.
+func TestADeletedFileIsAPathOnlyDelete(t *testing.T) {
+	hunk, name, input := onlyPayload(t, `diff --git a/gone.py b/gone.py
+deleted file mode 100644
+index 8888888..0000000
+--- a/gone.py
++++ /dev/null
+@@ -1,2 +0,0 @@
+-import os
+-print(os.getcwd())
+`)
+	if !hunk.DeletedFile || hunk.Path != "gone.py" {
+		t.Fatalf("deleted file read as path %q, deleted %v", hunk.Path, hunk.DeletedFile)
+	}
+	want := map[string]any{"file_path": "gone.py", "steer_operation": "delete", "new_string": ""}
+	if name != "Edit" || !reflect.DeepEqual(input, want) {
+		t.Fatalf("payload is %s %v, want Edit %v", name, input, want)
+	}
+}
+
+// Removing "-- note" renders as "--- note" and adding "++ x" as "+++ x"; inside a
+// hunk both are body lines, never the next file's header.
+func TestHeaderPrefixedBodyLinesStayInTheHunk(t *testing.T) {
+	hunks, _, err := ParseDiff(`diff --git a/q.sql b/q.sql
+index 1111111..2222222 100644
+--- a/q.sql
++++ b/q.sql
+@@ -1,2 +1,2 @@
+--- note
++++ x
+ select 1;
+@@ -9,1 +9,1 @@
+-select 2;
++select 3;
+`)
+	if err != nil {
+		t.Fatalf("ParseDiff: %v", err)
+	}
+	if len(hunks) != 2 {
+		t.Fatalf("want 2 hunks, got %d", len(hunks))
+	}
+	first := hunks[0].Payload["tool_input"].(map[string]any)
+	if first["old_string"] != "-- note\n" || first["new_string"] != "++ x\n" {
+		t.Fatalf("first hunk is %v", first)
+	}
+	if hunks[1].Path != "q.sql" || hunks[1].Index != 2 {
+		t.Fatalf("second hunk is %s #%d", hunks[1].Path, hunks[1].Index)
 	}
 }
 

@@ -209,8 +209,9 @@ fixtures afterwards and report failures without preventing removal or repair.
 
 Fixture mining reconstructs candidates from stored diffs; it does not recover a
 historical hook payload. The git unified-diff parser emits candidates per hunk,
-skips deletion-only hunks, and checks whether required diff content survived
-truncation. `gate.ParseFindings` narrows candidates by finding file. Selection and
+each Edit carrying the hunk's removed lines as `old_string` beside its added lines,
+and checks whether required diff content survived truncation. A deleted file becomes
+the runtime's path-only delete Edit: its stored content never enters the payload. `gate.ParseFindings` narrows candidates by finding file. Selection and
 allow/block labeling remain the author's work.
 
 ## Repository checks
