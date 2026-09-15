@@ -463,12 +463,14 @@ const (
 	MissSubjectUnmatched = "subject-unmatched" // the header's subject is on no row of this chain
 	MissSubjectShared    = "subject-shared"    // the header's subject does not name this chain alone
 	MissRoundShared      = "round-shared"      // one message has two blocks for this round
+	MissRoundsUnmatched  = "rounds-unmatched"  // the message names a round this chain never fired
 	MissIDConflict       = "id-conflict"       // the header's chain ID is another chain's
 )
 
 var missRank = map[string]int{
 	MissNoLedger: 0, MissNoHeader: 1, MissNoRound: 1, MissNoSection: 2, MissPastBound: 3,
-	MissSubjectUnmatched: 4, MissSubjectShared: 5, MissRoundShared: 5, MissIDConflict: 6,
+	MissSubjectUnmatched: 4, MissRoundsUnmatched: 4, MissSubjectShared: 5, MissRoundShared: 5,
+	MissIDConflict: 6,
 }
 
 type missWhy string
@@ -498,20 +500,37 @@ func (r *resolver) pickLedger(rows []resolverRow, i int, denyTS float64, ledgers
 		return out
 	}
 	// roundLedgers is every per-round block naming this round inside the bound. A message
-	// with two blocks for the round answered two chains at once and names neither.
+	// with two blocks for the round answered two chains at once, and one naming a round
+	// this chain never fired counted attempts the gate kept as separate chains: neither
+	// names this chain.
+	firings := map[int]bool{}
+	ids := chainIDs(rows)
+	for j, other := range rows {
+		if ids[j] == ids[i] {
+			n, _ := pyInt(other["firing"])
+			firings[n] = true
+		}
+	}
 	roundLedgers := func(bound float64) []LedgerMsg {
 		var mine []LedgerMsg
 		for _, x := range inWindow(r.spanFor("round")) {
 			var hits []string
+			foreign := false
 			for _, block := range gate.RoundBlocks(x.Text) {
-				if n, ok := gate.LedgerRound(block); ok && n == firing {
+				n, ok := gate.LedgerRound(block)
+				if ok && n == firing {
 					hits = append(hits, block)
+				}
+				if ok && !firings[n] {
+					foreign = true
 				}
 			}
 			switch {
 			case len(hits) == 0:
 			case len(hits) > 1:
 				why.note(MissRoundShared)
+			case foreign:
+				why.note(MissRoundsUnmatched)
 			case x.When < bound:
 				mine = append(mine, LedgerMsg{When: x.When, Key: x.Key, Path: x.Path, Text: hits[0]})
 			default:

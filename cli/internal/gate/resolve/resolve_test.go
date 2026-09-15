@@ -784,6 +784,14 @@ func TestResolverOneReplyAnswersEachRound(t *testing.T) {
 	if cand != nil || why != MissRoundShared {
 		t.Fatalf("a reply naming round 2 twice answered two chains; got (cand!=nil=%v, why=%q)", cand != nil, why)
 	}
+	var attempts []resolverRow
+	for n := 0; n < 4; n++ {
+		attempts = append(attempts, chainRows(fixT+float64(n)*300, 1, "")...)
+	}
+	cand, _, why = r.pickLedger(attempts, 7, fixT+900, []LedgerMsg{led})
+	if cand != nil || why != MissRoundsUnmatched {
+		t.Fatalf("a reply numbering four attempts the gate kept as four chains names none of them; got (cand!=nil=%v, why=%q)", cand != nil, why)
+	}
 }
 
 func TestResolverStampsTheMissReason(t *testing.T) {
