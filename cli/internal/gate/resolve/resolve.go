@@ -507,11 +507,8 @@ func (r *resolver) pickLedger(rows []resolverRow, i int, denyTS float64, ledgers
 
 // pending reports whether an --if-due run should harvest: some row is unresolved, its
 // ledger has had time to land, and the last applied scan cannot have seen what this
-// one would. That holds when no scan is recorded, when the row was written or its
-// grace ended since it, when the row's miss deadline passed since it, or when
-// rescanAfter has elapsed. It
-// reads only the log and the scan record, so the transcript scan is skipped on the
-// ordinary turn.
+// one would. It reads only the log and the scan record, so the transcript scan is
+// skipped on the ordinary turn.
 func (r *resolver) pending(rows []resolverRow) bool {
 	now := r.now()
 	last, scanned := r.lastScan()
