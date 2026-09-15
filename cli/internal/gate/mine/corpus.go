@@ -196,14 +196,25 @@ func BuildChains(rows []gate.Row, strictJoins bool) []Chain {
 	return chains
 }
 
-// chainsForHost segments one machine's rows, in timestamp order. Findings are
+// chainsForHost segments one machine's rows, in timestamp order. A row with a chain_id
+// joins that chain; one without joins the stream's open chain. Findings are
 // deduplicated by normalized text within a chain, and on (ledger_ts, text) across
 // chains: the window-based ledger join stamped one round's adjudication onto sibling
 // rows, and that write can straddle a firing-1 deny that splits two chains.
 func chainsForHost(rows []gate.Row, strictJoins bool) []Chain {
 	var chains []Chain
 	current := -1
+	byID := map[string]int{}
 	ledgerSeen := map[string]bool{}
+	open := func(row gate.Row) int {
+		chains = append(chains, Chain{
+			Host:    rowHost(row),
+			StartTS: row["ts"],
+			EndTS:   row["ts"],
+			seen:    map[string]bool{},
+		})
+		return len(chains) - 1
+	}
 
 	for _, row := range rows {
 		phase := str(row["phase"])
@@ -214,17 +225,20 @@ func chainsForHost(rows []gate.Row, strictJoins bool) []Chain {
 		if firing == 0 {
 			firing = 1
 		}
-		opens := chainOpeningPhases[phase] && firing == 1
-		if current < 0 || opens {
-			chains = append(chains, Chain{
-				Host:    rowHost(row),
-				StartTS: row["ts"],
-				EndTS:   row["ts"],
-				seen:    map[string]bool{},
-			})
-			current = len(chains) - 1
+		var idx int
+		if id := str(row["chain_id"]); id != "" {
+			var ok bool
+			if idx, ok = byID[id]; !ok {
+				idx = open(row)
+				byID[id] = idx
+			}
+		} else {
+			if current < 0 || (chainOpeningPhases[phase] && firing == 1) {
+				current = open(row)
+			}
+			idx = current
 		}
-		ch := &chains[current]
+		ch := &chains[idx]
 		ch.Rows = append(ch.Rows, row)
 		ch.EndTS = row["ts"]
 		if inst := str(row["instrument"]); inst != "" {

@@ -2,6 +2,7 @@ package mine
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -104,6 +105,38 @@ func TestHostPartitioning(t *testing.T) {
 
 	unhosted := BuildChains([]gate.Row{row(10, "deny"), concerns(row(20, "retry"), "round", c("x"))}, false)
 	check(t, "unhosted rows share one partition", len(unhosted), 1)
+}
+
+func TestChainIDKeepsInterleavedChainsApart(t *testing.T) {
+	id := func(r gate.Row, chain string) gate.Row { r["chain_id"] = chain; return r }
+	rows := []gate.Row{
+		row(90, "deny"),
+		concerns(row(95, "retry"), "round", c("legacy finding")),
+		id(row(100, "deny"), "aaaa0001"),
+		id(row(110, "deny"), "bbbb0002"),
+		id(concerns(row(120, "retry"), "round", c("a finding")), "aaaa0001"),
+		id(concerns(row(130, "retry"), "round", c("b finding")), "bbbb0002"),
+		id(firing(row(140, "clean"), 2), "aaaa0001"),
+		id(firing(row(150, "deny"), 2), "bbbb0002"),
+	}
+	chains := BuildChains(rows, false)
+	var shape []string
+	for _, ch := range chains {
+		terminal := "open"
+		if ch.Terminal != nil {
+			terminal = *ch.Terminal
+		}
+		texts := []string{}
+		for _, f := range ch.Findings {
+			texts = append(texts, f.Text)
+		}
+		shape = append(shape, fmt.Sprintf("%d rows, %s, %v", len(ch.Rows), terminal, texts))
+	}
+	check(t, "each chain keeps its own rows, terminal and findings across the interleave", shape, []string{
+		"2 rows, open, [legacy finding]",
+		"3 rows, clean, [a finding]",
+		"3 rows, open, [b finding]",
+	})
 }
 
 func TestCrossHostCollision(t *testing.T) {
