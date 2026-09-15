@@ -363,17 +363,22 @@ func chainSubjects(rows []resolverRow, ids []int, id int) map[string]bool {
 	return out
 }
 
-// nameOwner returns the one chain of thread key that carries subject name and could
-// still claim a ledger written at when. ok is false when none or several do: a name
-// that two chains share identifies neither.
+// nameOwner returns the one chain of thread key that carries subject name, was handed
+// findings, and could still claim a ledger written at when. ok is false when none or
+// several do: a name that two chains share identifies neither. A chain of clean rows
+// was handed no findings, so it owes no ledger and shares no name.
 func (r *resolver) nameOwner(rows []resolverRow, ids []int, key, name string, when float64) (int, bool) {
 	type span struct{ start, end float64 }
 	spans := map[int]*span{}
 	named := map[int]bool{}
+	handed := map[int]bool{}
 	for j, row := range rows {
 		id := ids[j]
 		if id < 0 || joinKey(row) != key {
 			continue
+		}
+		if phase := pyStr(row["phase"]); phase == "deny" || phase == "cap" {
+			handed[id] = true
 		}
 		ts, ok := pyNum(row["ts"])
 		if !ok {
@@ -390,6 +395,9 @@ func (r *resolver) nameOwner(rows []resolverRow, ids []int, key, name string, wh
 	}
 	owner, n := -1, 0
 	for id := range named {
+		if !handed[id] {
+			continue
+		}
 		if s := spans[id]; s.start <= when && when <= s.end+r.spanFor("chain") {
 			owner, n = id, n+1
 		}

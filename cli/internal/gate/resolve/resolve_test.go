@@ -397,6 +397,26 @@ func TestResolverSharedNameIdentifiesNoChain(t *testing.T) {
 	}
 }
 
+func TestResolverCleanChainSharesNoName(t *testing.T) {
+	r := testResolver()
+	clean := func(ts float64) resolverRow {
+		return resolverRow{"phase": "clean", "ts": ts, "firing": 1, "session_id": fixSession, "subject": "fix: one"}
+	}
+	late := chainLedgerFix(fixCT+400, []int{1}, "fix: one", 0)
+	after := append(chainRows(fixCT, 1, "fix: one"), clean(fixCT+300))
+	if cand, _ := r.pickLedger(after, 1, fixCT, []LedgerMsg{late}); cand == nil {
+		t.Fatal("a clean commit that repeats the subject leaves the name to the chain handed findings")
+	}
+	before := append([]resolverRow{clean(fixCT - 300)}, chainRows(fixCT, 1, "fix: one")...)
+	if cand, _ := r.pickLedger(before, 2, fixCT, []LedgerMsg{late}); cand == nil {
+		t.Fatal("an earlier clean commit with the subject owes no ledger to compete for")
+	}
+	abandoned := append(chainRows(fixCT, 1, "fix: one")[:1], chainRows(fixCT+100, 1, "fix: one")...)
+	if cand, _ := r.pickLedger(abandoned, 2, fixCT+100, []LedgerMsg{late}); cand != nil {
+		t.Fatal("a deny with no retry was handed findings, so it still shares the name")
+	}
+}
+
 // pins existing behaviour
 func TestResolverRewordedNameClaimsNoOtherChain(t *testing.T) {
 	r := testResolver()
