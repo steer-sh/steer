@@ -75,6 +75,63 @@ func TestAdoptRecordsTheResolvedRootWithoutLiveEvidence(t *testing.T) {
 	}
 }
 
+// A linked worktree of an adopted checkout is adopted with it and reads its
+// receipts against its own detector. An unadopt in the worktree withdraws the
+// worktree alone, and the main checkout's unadopt withdraws both.
+func TestALinkedWorktreeInheritsItsMainCheckoutsAdoption(t *testing.T) {
+	root, opts := adoptableRepo(t)
+	gitIn(t, root, "init", "-q")
+	commitAll(t, root, "checks")
+	tree := filepath.Join(t.TempDir(), "tree")
+	gitIn(t, root, "worktree", "add", "-q", tree)
+	main, _ := RepoIdentity(root)
+	worktree, _ := RepoIdentity(tree)
+	if got, ok := MainCheckout(worktree); !ok || got != main {
+		t.Fatalf("MainCheckout(worktree) = %q, %v; want %s", got, ok, main)
+	}
+	if _, ok := MainCheckout(main); ok {
+		t.Fatal("a main checkout reported a main checkout of its own")
+	}
+	if _, ok, _ := AdoptionOf(worktree); ok {
+		t.Fatal("the worktree of an unadopted checkout reads as adopted")
+	}
+
+	if _, err := Adopt(root, opts); err != nil {
+		t.Fatalf("Adopt: %v", err)
+	}
+	if a, ok, _ := AdoptionOf(worktree); !ok || a.Repo != main {
+		t.Fatalf("worktree adoption %+v, %v; want the main checkout's", a, ok)
+	}
+	history, _ := History(tree)
+	if f := FreshnessOf(tree, noCount, history); f.State != FreshCurrent {
+		t.Fatalf("worktree freshness %s; want the main checkout's receipt current", f.State)
+	}
+	writeFile(t, tree, ".steer/checks/no-count.sh", "exit 0\n")
+	if f := FreshnessOf(tree, noCount, history); f.State != FreshStale {
+		t.Fatalf("worktree freshness %s after a detector edit; want stale", f.State)
+	}
+
+	if removed, err := Unadopt(worktree); err != nil || !removed {
+		t.Fatalf("Unadopt(worktree): removed %v err %v", removed, err)
+	}
+	if _, ok, _ := AdoptionOf(worktree); ok {
+		t.Fatal("the worktree is still adopted after its own unadopt")
+	}
+	if _, ok, _ := AdoptionOf(main); !ok {
+		t.Fatal("the worktree's unadopt withdrew the main checkout")
+	}
+
+	other := filepath.Join(t.TempDir(), "other")
+	gitIn(t, root, "worktree", "add", "-q", other)
+	otherIdentity, _ := RepoIdentity(other)
+	if _, err := Unadopt(main); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := AdoptionOf(otherIdentity); ok {
+		t.Fatal("a worktree stays adopted after its main checkout was unadopted")
+	}
+}
+
 // Adoption refuses an oracle that passes without running a declared check.
 func TestAdoptRefusesAnOracleThatSkipsADeclaredCheck(t *testing.T) {
 	root, opts := adoptableRepo(t)

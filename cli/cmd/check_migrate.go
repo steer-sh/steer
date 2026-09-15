@@ -116,7 +116,7 @@ func applyMigration(cmd *cobra.Command, approvals []migrationApproval, gates []m
 		res, err := checks.Adopt(a.Root, checks.AdoptOptions{
 			Timeout: timeout, Stdout: os.Stdout, Stderr: os.Stderr, SteerBin: steerBinForOracle(),
 		})
-		printAdoption(cmd, res)
+		printAdoption(cmd, a.Root, res)
 		if err != nil {
 			fmt.Fprintf(out, "Not imported: %v\n", err)
 			continue
@@ -175,10 +175,6 @@ func migrationApprovals(selected []string) ([]migrationApproval, error) {
 	if err != nil {
 		return nil, err
 	}
-	adoptions, err := checks.Adoptions()
-	if err != nil {
-		return nil, err
-	}
 	approvals := make([]migrationApproval, 0, len(lines))
 	for _, line := range lines {
 		a := migrationApproval{Line: line, State: approvalNoRepo}
@@ -188,7 +184,10 @@ func migrationApprovals(selected []string) ([]migrationApproval, error) {
 			if err != nil {
 				return nil, err
 			}
-			_, isAdopted := adoptions[identity]
+			_, isAdopted, err := checks.AdoptionOf(identity)
+			if err != nil {
+				return nil, err
+			}
 			_, oracleErr := os.Stat(checks.OraclePath(identity))
 			switch {
 			case isAdopted:

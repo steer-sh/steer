@@ -9,7 +9,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/steer-sh/steer-cli/internal/statestore"
@@ -52,6 +55,41 @@ func RepoIdentity(root string) (string, error) {
 		return "", err
 	}
 	return filepath.EvalSymlinks(abs)
+}
+
+// MainCheckout returns the main working tree of the linked worktree at
+// identity, resolved like RepoIdentity. It reports false for a main checkout,
+// a submodule, a bare repository's worktree and a directory git cannot read.
+func MainCheckout(identity string) (string, bool) {
+	if fi, err := os.Lstat(filepath.Join(identity, ".git")); err != nil || fi.IsDir() {
+		return "", false
+	}
+	out, err := exec.Command("git", "-C", identity, "rev-parse", "--git-dir", "--git-common-dir").Output()
+	if err != nil {
+		return "", false
+	}
+	dirs := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(dirs) != 2 {
+		return "", false
+	}
+	for i, d := range dirs {
+		if !filepath.IsAbs(d) {
+			d = filepath.Join(identity, d)
+		}
+		if resolved, err := filepath.EvalSymlinks(d); err == nil {
+			d = resolved
+		}
+		dirs[i] = filepath.Clean(d)
+	}
+	gitDir, common := dirs[0], dirs[1]
+	if gitDir == common || filepath.Base(common) != ".git" {
+		return "", false
+	}
+	main, err := RepoIdentity(filepath.Dir(common))
+	if err != nil {
+		return "", false
+	}
+	return main, true
 }
 
 func repoKey(identity string) string {
@@ -139,13 +177,33 @@ func appendRun(identity string, run ValidationRun) error {
 	return f.Close()
 }
 
-// History returns the repository's validation runs, oldest first. A line that
-// does not parse is skipped, so one torn append cannot hide the rest.
+// History returns the repository's validation runs, oldest first. A linked
+// worktree's history includes its main checkout's runs; FreshnessOf compares
+// each receipt with the worktree's own detector and cases. A line that does not
+// parse is skipped, so one torn append cannot hide the rest.
 func History(root string) ([]ValidationRun, error) {
 	identity, err := RepoIdentity(root)
 	if err != nil {
 		return nil, err
 	}
+	runs, err := readHistory(identity)
+	if err != nil {
+		return nil, err
+	}
+	main, ok := MainCheckout(identity)
+	if !ok {
+		return runs, nil
+	}
+	inherited, err := readHistory(main)
+	if err != nil {
+		return nil, err
+	}
+	runs = append(inherited, runs...)
+	sort.SliceStable(runs, func(i, j int) bool { return runs[i].Finished.Before(runs[j].Finished) })
+	return runs, nil
+}
+
+func readHistory(identity string) ([]ValidationRun, error) {
 	f, err := os.Open(validationsPath(statestore.Resolve(StateComponent), identity))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil

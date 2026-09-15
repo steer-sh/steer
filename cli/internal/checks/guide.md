@@ -175,8 +175,9 @@ about the check's assertion. `check run` exits non-zero unless `check.sh`
 passed and every declared check reported.
 
 Automatic runs need adoption. `steer check adopt [repo]` authorizes them for
-the repository's exact resolved root on this machine; a clone at another path
-is not adopted. Adoption replays each declared check that has no current
+the repository's resolved root on this machine. A linked worktree of an
+adopted checkout is adopted with it and reads its validation receipts, unless
+the worktree was unadopted itself; a clone at another path is not adopted. Adoption replays each declared check that has no current
 receipt, then runs `check.sh` with isolated evidence that stays out of the
 live records. It is refused unless every check validated and `check.sh`
 passed with every declared check reported. Adoption survives later edits; a

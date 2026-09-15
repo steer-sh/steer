@@ -44,9 +44,8 @@ type Adoption struct {
 
 func adoptionsPath(dir string) string { return filepath.Join(dir, adoptionsName) }
 
-// Adoptions returns the adopted repositories on this machine, keyed by
-// identity, each with the event that adopted it.
-func Adoptions() (map[string]Adoption, error) {
+// latestAdoptionEvents returns the latest adopt or unadopt event per identity.
+func latestAdoptionEvents() (map[string]Adoption, error) {
 	latest := map[string]Adoption{}
 	err := readJSONL(adoptionsPath(statestore.Resolve(StateComponent)), func(line []byte) {
 		var a Adoption
@@ -54,6 +53,14 @@ func Adoptions() (map[string]Adoption, error) {
 			latest[a.Repo] = a
 		}
 	})
+	return latest, err
+}
+
+// Adoptions returns the roots adopted on this machine by their own event, keyed
+// by identity. A linked worktree that inherits its main checkout's adoption is
+// not listed; AdoptionOf reads it.
+func Adoptions() (map[string]Adoption, error) {
+	latest, err := latestAdoptionEvents()
 	if err != nil {
 		return nil, err
 	}
@@ -65,14 +72,24 @@ func Adoptions() (map[string]Adoption, error) {
 	return latest, nil
 }
 
-// AdoptionOf returns the event that adopted identity, if it is adopted.
+// AdoptionOf returns the event that adopted identity, if it is adopted. An
+// event for identity itself decides. A linked worktree with no event of its own
+// inherits its main checkout's adoption, and the returned event names that
+// checkout.
 func AdoptionOf(identity string) (Adoption, bool, error) {
-	all, err := Adoptions()
+	latest, err := latestAdoptionEvents()
 	if err != nil {
 		return Adoption{}, false, err
 	}
-	a, ok := all[identity]
-	return a, ok, nil
+	if a, ok := latest[identity]; ok {
+		return a, a.Action == ActionAdopt, nil
+	}
+	if main, ok := MainCheckout(identity); ok {
+		if a, ok := latest[main]; ok && a.Action == ActionAdopt {
+			return a, true, nil
+		}
+	}
+	return Adoption{}, false, nil
 }
 
 // AdoptOptions configures the isolated oracle run that adoption performs.
@@ -189,8 +206,10 @@ func Adopt(root string, opts AdoptOptions) (AdoptResult, error) {
 	return res, nil
 }
 
-// Unadopt withdraws the authorization for identity, an exact resolved root.
-// It reports false when the repository was not adopted. Evidence stays.
+// Unadopt withdraws the authorization for identity, a resolved root. In a
+// linked worktree that inherits its main checkout's adoption, the withdrawal
+// covers the worktree only. It reports false when the repository was not
+// adopted. Evidence stays.
 func Unadopt(identity string) (bool, error) {
 	if _, ok, err := AdoptionOf(identity); err != nil || !ok {
 		return false, err

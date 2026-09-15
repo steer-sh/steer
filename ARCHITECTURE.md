@@ -261,7 +261,11 @@ records `concurrent_with` and executes nothing. `STEER_CHECK_EVIDENCE_DIR`
 isolates the execution and run records of adoption; receipts ignore it.
 
 Adoption is an append-only `adoptions.jsonl`, keyed by the exact resolved root,
-where the latest event decides. `checks.Adopt` needs a current or freshly
+where the latest event decides. A linked worktree with no event of its own
+inherits its main checkout's adoption (`checks.MainCheckout`), and its
+`checks.History` includes the main checkout's validation runs; an unadopt in
+the worktree withdraws it alone. Every other store stays keyed by the
+worktree's own root. `checks.Adopt` needs a current or freshly
 replayed receipt for every declared check and an isolated oracle run that passes
 with nothing missing. `checks.Stop` is the harness-neutral Stop runner and
 `checks.StopHook` its one adapter, because Claude Code and Codex share the payload

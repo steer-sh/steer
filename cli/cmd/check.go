@@ -200,10 +200,12 @@ Exits non-zero unless check.sh passed and every declared check reported.`,
 var checkAdoptCmd = &cobra.Command{
 	Use:   "adopt [repo]",
 	Short: "Authorize automatic check.sh runs for this repository on this machine",
-	Long: `Records machine-local authorization for the repository's exact resolved root.
+	Long: `Records machine-local authorization for the repository's resolved root.
 A declared check without a current receipt is replayed first; then check.sh runs
 with isolated evidence and must pass with every declared check reported.
-Nothing is recorded as live execution. A clone elsewhere is not adopted.`,
+Nothing is recorded as live execution. A linked worktree of an adopted checkout
+is adopted with it unless it was unadopted itself. A clone elsewhere is not
+adopted.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dir := "."
@@ -219,7 +221,7 @@ Nothing is recorded as live execution. A clone elsewhere is not adopted.`,
 			Timeout: timeout, Stdout: os.Stdout, Stderr: os.Stderr, SteerBin: steerBinForOracle(),
 		})
 		out := cmd.OutOrStdout()
-		printAdoption(cmd, res)
+		printAdoption(cmd, root, res)
 		if res.Already {
 			return nil
 		}
@@ -227,7 +229,7 @@ Nothing is recorded as live execution. A clone elsewhere is not adopted.`,
 			return err
 		}
 		fmt.Fprintln(out, styles.SuccessBox.Render(fmt.Sprintf(
-			"Adopted %s\nAutomatic check.sh runs are authorized for this exact root on this machine.", res.Adoption.Repo)))
+			"Adopted %s\nAutomatic check.sh runs are authorized for this root and its linked worktrees on this machine.", res.Adoption.Repo)))
 		return nil
 	},
 }
@@ -255,6 +257,11 @@ var checkUnadoptCmd = &cobra.Command{
 		}
 		fmt.Fprintln(cmd.OutOrStdout(), styles.SuccessBox.Render(fmt.Sprintf(
 			"Unadopted %s\nKept: its checks, validation history and execution evidence", identity)))
+		if main, ok := checks.MainCheckout(identity); ok {
+			if _, adopted, err := checks.AdoptionOf(main); err == nil && adopted {
+				fmt.Fprintf(cmd.OutOrStdout(), "This worktree only: %s and its other worktrees keep their adoption.\n", main)
+			}
+		}
 		return nil
 	},
 }
@@ -312,11 +319,15 @@ func steerBinForOracle() string { return checks.SelfSteerBin() }
 
 // printAdoption prints what an adoption attempt did: the receipt it reused or
 // replayed for each declared check, and its isolated oracle run.
-func printAdoption(cmd *cobra.Command, res checks.AdoptResult) {
+func printAdoption(cmd *cobra.Command, root string, res checks.AdoptResult) {
 	out := cmd.OutOrStdout()
 	if res.Already {
-		fmt.Fprintf(out, "%s is already adopted on this machine since %s.\n",
-			res.Adoption.Repo, res.Adoption.At.Local().Format("2006-01-02 15:04"))
+		since := res.Adoption.At.Local().Format("2006-01-02 15:04")
+		if identity, err := checks.RepoIdentity(root); err == nil && identity != res.Adoption.Repo {
+			fmt.Fprintf(out, "%s is a worktree of %s, adopted on this machine since %s.\n", identity, res.Adoption.Repo, since)
+			return
+		}
+		fmt.Fprintf(out, "%s is already adopted on this machine since %s.\n", res.Adoption.Repo, since)
 		return
 	}
 	for _, v := range res.Validations {
