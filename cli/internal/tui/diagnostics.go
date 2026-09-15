@@ -254,7 +254,6 @@ func (m *Model) historyLines() []historyLine {
 	lines := []historyLine{
 		{"review sequences", fmt.Sprint(t.ReviewChains)},
 		{"agent sessions", fmt.Sprint(t.SessionSnapshots)},
-		{"actions blocked by auto mode", fmt.Sprint(t.DenialsRows)},
 		{"guard blocks", fmt.Sprint(t.AuditFirings)},
 	}
 	for i := range lines {

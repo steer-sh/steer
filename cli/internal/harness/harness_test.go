@@ -138,21 +138,13 @@ func TestEveryRegistryEntryIsComplete(t *testing.T) {
 	}
 }
 
-// The denials corpus records what a harness's own classifier blocked, so a
-// harness with no such event must not be reported as covered by it.
-func TestOnlyClaudeCodeReportsPermissionDenied(t *testing.T) {
+// Pi registers tool-call hooks, and every harness but Claude Code reviews hook
+// trust.
+// pins existing behaviour
+func TestHarnessCapabilities(t *testing.T) {
 	codex, _ := Get(Codex)
-	if codex.Capabilities.PermissionDenied {
-		t.Error("Codex claims a PermissionDenied event")
-	}
 	claude, _ := Get(ClaudeCode)
-	if !claude.Capabilities.PermissionDenied {
-		t.Error("Claude Code lost its PermissionDenied capability")
-	}
 	pi, _ := Get(Pi)
-	if pi.Capabilities.PermissionDenied {
-		t.Error("Pi claims a PermissionDenied event")
-	}
 	if !pi.Capabilities.HookRegistration {
 		t.Error("Pi lost its tool-call hook registration capability")
 	}

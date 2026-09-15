@@ -16,7 +16,6 @@ import (
 	"github.com/steer-sh/steer-cli/internal/cadence"
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/codex"
-	"github.com/steer-sh/steer-cli/internal/denials"
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
 	"github.com/steer-sh/steer-cli/internal/gate/resolve"
@@ -52,8 +51,9 @@ import (
 // both on disk and at HEAD. v19 adds posture.masters[].state `detached` and
 // .store: an installed harness that runs none of a scope's guards. v20 adds
 // interventions[].artifact.removed: a fix in place now that the archive records
-// as removed after the record's split.
-const StatusVersion = 20
+// as removed after the record's split. v21 removes posture.denials,
+// telemetry.denials_rows and the auto-denials corpus row.
+const StatusVersion = 21
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20
@@ -312,7 +312,6 @@ type Posture struct {
 	Reviewer   string        `json:"reviewer"`
 	Ledger     string        `json:"ledger"`
 	CommitGate []ScopeArming `json:"commit_gate"`
-	Denials    []ScopeArming `json:"denials"`
 	// Resolver is the Stop-hook backfill arming per scope. Unresolved counts the
 	// ledger rows still owing a transcript join — evidence the scorer withholds on.
 	Resolver   []ScopeArming `json:"resolver"`
@@ -346,7 +345,6 @@ type HarnessTelemetry struct {
 // Telemetry reports corpus sizes — cheap line and row counts, no model call.
 type Telemetry struct {
 	ReviewChains     int                `json:"review_chains"`
-	DenialsRows      int                `json:"denials_rows"`
 	AuditFirings     int                `json:"audit_firings"`
 	SessionSnapshots int                `json:"session_snapshots"`
 	Harnesses        []HarnessTelemetry `json:"harnesses"`
@@ -542,7 +540,7 @@ func recentChains(chains []mine.Chain, limit int) []ChainSummary {
 }
 
 // collectPosture reads the arming state both scopes report for the commit gate
-// and the denials recorder, plus the reviewer identity from the config.
+// and the resolver, plus the reviewer identity from the config.
 func collectPosture(cfg gate.Config, ev mine.EvidenceSet) Posture {
 	observed := observedChannels(ev)
 	p := Posture{
@@ -550,7 +548,6 @@ func collectPosture(cfg gate.Config, ev mine.EvidenceSet) Posture {
 		Reviewer:   cfg.ReviewerModel,
 		Ledger:     cfg.LogFile(),
 		CommitGate: []ScopeArming{},
-		Denials:    []ScopeArming{},
 		Resolver:   []ScopeArming{},
 		Masters:    []MasterRuntime{},
 		Rules:      []RulesPresence{},
@@ -593,21 +590,6 @@ func collectPosture(cfg gate.Config, ev mine.EvidenceSet) Posture {
 			Trust:   trustState(harness.Pi, false, false),
 			Command: pg.Command,
 		}, ledgerCorpus, observed.gate[piID]))
-		// The denials recorder rides Claude Code's PermissionDenied event. Codex
-		// declares no equivalent, so it gets no row rather than a false zero.
-		d, err := claude.DenialsHookArming(scope)
-		if err != nil {
-			d = claude.DenialsArming{}
-		}
-		p.Denials = append(p.Denials, withEvidence(ScopeArming{
-			Harness:    claudeID,
-			Scope:      scope,
-			Registered: d.Registered,
-			Effective:  d.Registered && d.Matcher == claude.DenialsMatcher,
-			Timeout:    d.Timeout,
-			Trust:      TrustNotApplicable,
-			Command:    d.Command,
-		}, denialsCorpus, observed.denials))
 		// The resolver rides a turn-end event, which takes no matcher: registered is
 		// effective. The rows follow the commit gate's harness order, because a
 		// reader pairs a resolver row with the gate row it arms with.
@@ -691,21 +673,15 @@ func RulesPresences(scope string, targets []harness.Registrar) []RulesPresence {
 
 // Corpus names a channel writes its evidence to. A channel with no name here
 // writes no corpus of its own, so nothing about it can be observed.
-const (
-	ledgerCorpus  = "commit-review"
-	denialsCorpus = "steer-denials"
-)
+const ledgerCorpus = "commit-review"
 
-// channelEvidence is the newest row each channel wrote, by harness where the
-// corpus carries one.
+// channelEvidence is the newest row each channel wrote, by harness.
 type channelEvidence struct {
-	gate    map[string]float64
-	denials float64
+	gate map[string]float64
 }
 
-// observedChannels reads the newest row each channel wrote. The commit gate's
-// rows carry a harness stamp; the denials recorder rides Claude Code alone. A
-// row with no harness stamp counts for no harness rather than for all of them.
+// observedChannels reads the newest row each channel wrote. A row with no
+// harness stamp counts for no harness rather than for all of them.
 func observedChannels(ev mine.EvidenceSet) channelEvidence {
 	out := channelEvidence{gate: map[string]float64{}}
 	for _, ch := range ev.Chains {
@@ -714,17 +690,6 @@ func observedChannels(ev mine.EvidenceSet) channelEvidence {
 		}
 		if ts := numFloat(ch.EndTS); ts > out.gate[ch.Harness] {
 			out.gate[ch.Harness] = ts
-		}
-	}
-	rows, err := denials.Read()
-	if err != nil {
-		return out
-	}
-	for _, row := range rows {
-		if ts, err := time.Parse(time.RFC3339, row.Timestamp); err == nil {
-			if secs := float64(ts.Unix()); secs > out.denials {
-				out.denials = secs
-			}
 		}
 	}
 	return out
@@ -877,7 +842,6 @@ func trustState(id harness.ID, known, present bool) string {
 func telemetry(ev mine.EvidenceSet) Telemetry {
 	t := Telemetry{
 		ReviewChains:     len(ev.Chains),
-		DenialsRows:      denialsCount(),
 		AuditFirings:     len(ev.Firings),
 		SessionSnapshots: len(ev.Sessions),
 		Harnesses:        []HarnessTelemetry{},
@@ -912,15 +876,6 @@ func telemetry(ev mine.EvidenceSet) Telemetry {
 		t.Harnesses = append(t.Harnesses, *row(string(h.ID)))
 	}
 	return t
-}
-
-// denialsCount is the size of the auto-mode denials corpus on this machine.
-func denialsCount() int {
-	rows, err := denials.Read()
-	if err != nil {
-		return 0
-	}
-	return len(rows)
 }
 
 // auditFirings counts the block decisions the global master hook logged. The log
@@ -962,11 +917,10 @@ func boolOf(v any) bool {
 // each corpus lives at so a reader knows where to look.
 func corpusRows(rows []cadence.CorpusStatus, opts Options) []CorpusRow {
 	// Keys match the corpus names cadence.Refresh emits. review-findings lives at
-	// the gate state dir (the ledger shards); auto-denials at the denials dir.
+	// the gate state dir (the ledger shards).
 	paths := map[string]string{
 		"review-findings":     opts.GateStateDir,
 		"transcript-friction": sessions.StateDir(),
-		"auto-denials":        denials.StateDir(),
 	}
 	out := make([]CorpusRow, 0, len(rows))
 	for _, r := range rows {

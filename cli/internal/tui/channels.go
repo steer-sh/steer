@@ -24,20 +24,17 @@ import (
 // timeout plus this, so the pair cannot drift.
 const commitGateTimeoutMargin = 60
 
-// denialsTimeout matches cmd's denials recorder settings.json wall clock.
-const denialsTimeout = 10
-
 // backfillTimeout matches cmd's Stop-hook resolver wall clock.
 const backfillTimeout = 30
 
-// channelRow is one armable channel: a commit gate, check runner or denials
-// recorder in one harness and scope. The harness is part of the row's identity, not decoration:
+// channelRow is one armable channel: a commit gate or check runner in one
+// harness and scope. The harness is part of the row's identity, not decoration:
 // the posture carries one row per harness per scope, so a row naming the scope
 // alone renders identically for Claude Code, Codex and Pi while enter toggles
 // exactly one of them.
 type channelRow struct {
 	label   string
-	kind    string // "commit-gate" | "check-runner" | "denials" | "read-outcomes"
+	kind    string // "commit-gate" | "check-runner" | "read-outcomes"
 	harness string
 	scope   string
 	armed   status.ScopeArming
@@ -54,8 +51,8 @@ func (r channelRow) name() string {
 	return fmt.Sprintf("%s · %s %s", r.label, status.HarnessLabel(r.harness), r.scope)
 }
 
-// channelRows lists the rows enter acts on: the commit gate, the check runner and
-// the denials recorder per scope, then the one action row. The action row is last so a toggle
+// channelRows lists the rows enter acts on: the commit gate and the check runner
+// per scope, then the one action row. The action row is last so a toggle
 // keeps the cursor position it had before a review's outcome arrived, and it is
 // present only while some review is waiting: a row that asks for nothing is a row
 // the reader has to read to learn it can be skipped.
@@ -70,10 +67,6 @@ func (m *Model) channelRows() []channelRow {
 	}
 	for _, a := range m.snap.Checks.Runner {
 		rows = append(rows, channelRow{label: "check runner", kind: "check-runner",
-			harness: a.Harness, scope: a.Scope, armed: a})
-	}
-	for _, a := range m.snap.Posture.Denials {
-		rows = append(rows, channelRow{label: "denials recorder", kind: "denials",
 			harness: a.Harness, scope: a.Scope, armed: a})
 	}
 	// The kind stays the primary key: the commit gate is one block a reader
@@ -97,15 +90,12 @@ func (m *Model) channelRows() []channelRow {
 	return rows
 }
 
-// kindRank orders the commit gate, then the check runner, then the denials recorder.
+// kindRank orders the commit gate before the check runner.
 func kindRank(kind string) int {
-	switch kind {
-	case "commit-gate":
+	if kind == "commit-gate" {
 		return 0
-	case "check-runner":
-		return 1
 	}
-	return 2
+	return 1
 }
 
 // harnessRank orders rows by the registry's own harness order, so the panel and
@@ -271,12 +261,6 @@ func (m *Model) toggleChannel(row channelRow) error {
 		}
 	case "check-runner":
 		return m.toggleCheckRunner(row, on)
-	case "denials":
-		if on {
-			return claude.RemoveDenialsHook(row.scope)
-		}
-		record, _ := steerbin.HookCommand("denials record")
-		return claude.RegisterDenialsHook(row.scope, record, denialsTimeout)
 	}
 	return nil
 }

@@ -184,14 +184,13 @@ func (e StopHookEntry) MarshalJSON() ([]byte, error) {
 	return json.Marshal(raw)
 }
 
-// Hooks contains the different types of hook events. Only PreToolUse, PermissionDenied
-// and Stop are modeled; every other event key (SessionStart, PostToolUse, ...) is
-// carried through extra so a settings round-trip never drops hooks steer doesn't own.
+// Hooks contains the different types of hook events. Only PreToolUse and Stop are
+// modeled; every other event key (SessionStart, PostToolUse, ...) is carried
+// through extra so a settings round-trip never drops hooks steer doesn't own.
 type Hooks struct {
-	PreToolUse       []HookEntry
-	PermissionDenied []HookEntry
-	Stop             []StopHookEntry
-	extra            map[string]json.RawMessage
+	PreToolUse []HookEntry
+	Stop       []StopHookEntry
+	extra      map[string]json.RawMessage
 }
 
 // Settings is the root object of the settings.json file. Only the hooks key
@@ -212,12 +211,6 @@ func (h *Hooks) UnmarshalJSON(data []byte) error {
 			return err
 		}
 		delete(raw, "PreToolUse")
-	}
-	if denied, ok := raw["PermissionDenied"]; ok {
-		if err := json.Unmarshal(denied, &h.PermissionDenied); err != nil {
-			return err
-		}
-		delete(raw, "PermissionDenied")
 	}
 	if stop, ok := raw["Stop"]; ok {
 		if err := json.Unmarshal(stop, &h.Stop); err != nil {
@@ -240,13 +233,6 @@ func (h Hooks) MarshalJSON() ([]byte, error) {
 			return nil, err
 		}
 		raw["PreToolUse"] = pre
-	}
-	if len(h.PermissionDenied) > 0 {
-		denied, err := json.Marshal(h.PermissionDenied)
-		if err != nil {
-			return nil, err
-		}
-		raw["PermissionDenied"] = denied
 	}
 	if len(h.Stop) > 0 {
 		stop, err := json.Marshal(h.Stop)

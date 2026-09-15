@@ -83,12 +83,12 @@ func TestHistoryCountsAppearOnceWithTheirNoun(t *testing.T) {
 	m := New(gate.Defaults(), "global")
 	m.width = 200
 	m.snap = &status.SystemStatus{Telemetry: status.Telemetry{
-		ReviewChains: 41, SessionSnapshots: 12, DenialsRows: 5, AuditFirings: 7,
+		ReviewChains: 41, SessionSnapshots: 12, AuditFirings: 7,
 	}}
 	m.active = panelDiagnostics
 	view := m.viewDiagnostics()
 	for _, want := range []string{
-		"review sequences", "agent sessions", "actions blocked by auto mode", "guard blocks",
+		"review sequences", "agent sessions", "guard blocks",
 	} {
 		if got := strings.Count(view, want); got != 1 {
 			t.Errorf("%q appears %d times, want once:\n%s", want, got, view)

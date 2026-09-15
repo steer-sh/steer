@@ -35,7 +35,6 @@ func TestPanelsCarryTheMeasurementConditions(t *testing.T) {
 	m.snap = &status.SystemStatus{
 		Posture: status.Posture{
 			CommitGate: []status.ScopeArming{{Scope: "global", Registered: true, Effective: true}},
-			Denials:    []status.ScopeArming{{Scope: "global"}},
 			Resolver:   []status.ScopeArming{{Scope: "global", Registered: true, Effective: true, Timeout: 30}},
 			Unresolved: 4,
 		},

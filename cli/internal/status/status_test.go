@@ -14,7 +14,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/pi"
 )
 
-// isolate points both homes at a temp dir so the denials read, the audit-log count,
+// isolate points both homes at a temp dir so the audit-log count
 // and every harness posture reader resolve inside the sandbox, never the real machine.
 func isolate(t *testing.T) {
 	t.Helper()
@@ -109,19 +109,19 @@ func TestCollectFullInventoryAndTelemetry(t *testing.T) {
 		t.Errorf("summary should count the repair action once, got %+v", s.Summary.Counts)
 	}
 
-	// Telemetry: 24 chains total (12 before + 12 after), no denials, no audit log.
+	// Telemetry: 24 chains total (12 before + 12 after), no audit log.
 	if s.Telemetry.ReviewChains != 24 {
 		t.Errorf("want 24 review chains, got %d", s.Telemetry.ReviewChains)
 	}
-	if s.Telemetry.DenialsRows != 0 || s.Telemetry.AuditFirings != 0 {
-		t.Errorf("an empty machine should report zero denials and firings, got %+v", s.Telemetry)
+	if s.Telemetry.AuditFirings != 0 {
+		t.Errorf("an empty machine should report zero firings, got %+v", s.Telemetry)
 	}
 	if len(s.Chains) == 0 {
 		t.Error("recent chains should not be empty")
 	}
 	// One corpus row per corpus, from the cadence sweep.
-	if len(s.Corpora) != 3 {
-		t.Errorf("want 3 corpus rows from the sweep, got %d", len(s.Corpora))
+	if len(s.Corpora) != 2 {
+		t.Errorf("want 2 corpus rows from the sweep, got %d", len(s.Corpora))
 	}
 }
 
@@ -138,14 +138,11 @@ func TestCollectEmptyMachineFailsSoft(t *testing.T) {
 		t.Error("empty machine should carry an empty attention queue")
 	}
 	// Posture is harness-qualified: the commit gate and its resolver report every
-	// enforcing harness in both scopes, denials only Claude Code, and nothing is armed.
+	// enforcing harness in both scopes, and nothing is armed.
 	if len(s.Posture.CommitGate) != 6 || len(s.Posture.Resolver) != 6 {
 		t.Errorf("gate posture should report all harnesses in both scopes, got %+v", s.Posture)
 	}
-	if len(s.Posture.Denials) != 2 {
-		t.Errorf("denials is Claude Code's alone, got %+v", s.Posture.Denials)
-	}
-	for _, row := range append(append([]ScopeArming{}, s.Posture.CommitGate...), s.Posture.Denials...) {
+	for _, row := range s.Posture.CommitGate {
 		if row.Harness == "" {
 			t.Errorf("every posture row names its harness, got %+v", row)
 		}
@@ -174,7 +171,7 @@ func intPtr(n int) *int           { return &n }
 // so a renamed or reordered json tag fails here, the agent-contract guard.
 func TestJSONContractIsStable(t *testing.T) {
 	s := &SystemStatus{
-		StatusVersion: 20,
+		StatusVersion: 21,
 		GeneratedAt:   "2026-01-01T00:00:00Z",
 		Posture: Posture{
 			Instrument: "agy@sha", Reviewer: "gemini", Ledger: "/l.jsonl",
@@ -185,11 +182,6 @@ func TestJSONContractIsStable(t *testing.T) {
 				{Harness: "codex", Scope: "global", Registered: true, Effective: true, Timeout: 90,
 					Trust: TrustRecordPresent, Command: "steer commit-gate review-codex",
 					Resolvable: ResolveMissing, ObservedCorpus: ledgerCorpus},
-			},
-			Denials: []ScopeArming{
-				{Harness: "claude-code", Scope: "global", Registered: true, Effective: true,
-					Trust: TrustNotApplicable, Command: "/h/.steer/bin/steer denials record",
-					Resolvable: ResolveResolvable, Observed: 1650, ObservedCorpus: denialsCorpus},
 			},
 			Resolver: []ScopeArming{
 				{Harness: "claude-code", Scope: "global", Registered: true, Effective: true, Timeout: 30,
@@ -277,7 +269,7 @@ func TestJSONContractIsStable(t *testing.T) {
 			}},
 		},
 		Telemetry: Telemetry{
-			ReviewChains: 24, DenialsRows: 2, AuditFirings: 3, SessionSnapshots: 40,
+			ReviewChains: 24, AuditFirings: 3, SessionSnapshots: 40,
 			Harnesses: []HarnessTelemetry{
 				{Harness: "claude-code", Sessions: 30, Firings: 3, Chains: 24},
 				{Harness: "codex", Sessions: 10},
@@ -304,7 +296,7 @@ func TestJSONContractIsStable(t *testing.T) {
 }
 
 const goldenStatusJSON = `{
-  "status_version": 20,
+  "status_version": 21,
   "generated_at": "2026-01-01T00:00:00Z",
   "posture": {
     "instrument": "agy@sha",
@@ -333,19 +325,6 @@ const goldenStatusJSON = `{
         "command": "steer commit-gate review-codex",
         "resolvable": "missing",
         "observed_corpus": "commit-review"
-      }
-    ],
-    "denials": [
-      {
-        "harness": "claude-code",
-        "scope": "global",
-        "registered": true,
-        "effective": true,
-        "trust": "not-applicable",
-        "command": "/h/.steer/bin/steer denials record",
-        "resolvable": "resolvable",
-        "observed": 1650,
-        "observed_corpus": "steer-denials"
       }
     ],
     "resolver": [
@@ -738,7 +717,6 @@ const goldenStatusJSON = `{
   },
   "telemetry": {
     "review_chains": 24,
-    "denials_rows": 2,
     "audit_firings": 3,
     "session_snapshots": 40,
     "harnesses": [
@@ -858,7 +836,7 @@ func TestAnUnregisteredChannelResolvesToNothing(t *testing.T) {
 
 	p := collectPosture(gate.Config{}, mine.EvidenceSet{})
 
-	for _, a := range append(append([]ScopeArming{}, p.CommitGate...), p.Denials...) {
+	for _, a := range p.CommitGate {
 		if a.Resolvable != ResolveNotRegistered {
 			t.Fatalf("%s %s scope: resolvable = %q, want %q", a.Harness, a.Scope, a.Resolvable, ResolveNotRegistered)
 		}

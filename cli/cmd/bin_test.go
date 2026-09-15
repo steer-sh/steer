@@ -22,9 +22,6 @@ func TestRelinkRepointsAPATHRegistration(t *testing.T) {
 		"steer commit-gate review --provider gemini", 210); err != nil {
 		t.Fatal(err)
 	}
-	if err := claude.RegisterDenialsHook(claude.GlobalScope, "steer denials record", 10); err != nil {
-		t.Fatal(err)
-	}
 	path, err := steerbin.Ensure()
 	if err != nil {
 		t.Fatal(err)
@@ -34,8 +31,8 @@ func TestRelinkRepointsAPATHRegistration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rewritten != 2 {
-		t.Fatalf("rewrote %d registration(s), want 2", rewritten)
+	if rewritten != 1 {
+		t.Fatalf("rewrote %d registration(s), want 1", rewritten)
 	}
 
 	gate := claude.CommitGateHookArmed(claude.GlobalScope)
@@ -48,13 +45,6 @@ func TestRelinkRepointsAPATHRegistration(t *testing.T) {
 	}
 	if steerbin.Resolve(gate.Command) != steerbin.Resolvable {
 		t.Fatal("the rewritten command does not resolve")
-	}
-	denials, err := claude.DenialsHookArming(claude.GlobalScope)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.HasPrefix(denials.Command, steerbin.Quote(path)) {
-		t.Fatalf("denials command = %q, want the stable path", denials.Command)
 	}
 
 	// A second install rewrites nothing: the registrations already name the path.

@@ -207,7 +207,6 @@ func TestTheCheckRunnerIsAnArmingRow(t *testing.T) {
 	m.snap = &status.SystemStatus{
 		Posture: status.Posture{
 			CommitGate: []status.ScopeArming{{Harness: "claude-code", Scope: "global"}},
-			Denials:    []status.ScopeArming{{Harness: "claude-code", Scope: "global"}},
 		},
 		Checks: status.CheckTier{Runner: []status.ScopeArming{
 			{Harness: "claude-code", Scope: "global"},
@@ -218,7 +217,6 @@ func TestTheCheckRunnerIsAnArmingRow(t *testing.T) {
 		"commit gate · Claude Code global",
 		"check runner · Claude Code global",
 		"check runner · Codex global",
-		"denials recorder · Claude Code global",
 	}
 	rows := m.channelRows()
 	if len(rows) != len(want) {
@@ -279,10 +277,6 @@ func TestChannelRowsGroupAHarnessTogether(t *testing.T) {
 				{Harness: "codex", Scope: "global"},
 				{Harness: "pi", Scope: "global"},
 			},
-			Denials: []status.ScopeArming{
-				{Harness: "claude-code", Scope: "project"},
-				{Harness: "claude-code", Scope: "global"},
-			},
 		},
 	}
 
@@ -293,8 +287,6 @@ func TestChannelRowsGroupAHarnessTogether(t *testing.T) {
 		"commit gate · Codex global",
 		"commit gate · Pi project",
 		"commit gate · Pi global",
-		"denials recorder · Claude Code project",
-		"denials recorder · Claude Code global",
 	}
 	rows := m.channelRows()
 	if len(rows) != len(want) {

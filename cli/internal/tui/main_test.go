@@ -26,7 +26,7 @@ func TestMain(m *testing.M) {
 	os.Setenv("PI_CODING_AGENT_DIR", filepath.Join(home, ".pi", "agent"))
 	os.Setenv("PI_CODING_AGENT_SESSION_DIR", filepath.Join(home, ".pi", "agent", "sessions"))
 	// An operator's own overrides would point back out of the empty home.
-	for _, key := range []string{"COMMIT_GATE_STATE_DIR", "COMMIT_REVIEW_STATE", "STEER_DENIALS_DIR"} {
+	for _, key := range []string{"COMMIT_GATE_STATE_DIR", "COMMIT_REVIEW_STATE"} {
 		os.Unsetenv(key)
 	}
 	code := m.Run()

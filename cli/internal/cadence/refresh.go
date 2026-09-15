@@ -11,7 +11,6 @@ import (
 	"regexp"
 	"sort"
 
-	"github.com/steer-sh/steer-cli/internal/denials"
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
 	"github.com/steer-sh/steer-cli/internal/report"
@@ -23,8 +22,8 @@ import (
 // and leaves a fix registered on another host out of the coverage queue. v9 adds
 // artifact to each intervention, and queues a record whose fix is absent or unreadable.
 // v10 adds artifact.removed, and queues a record whose fix the archive records as
-// removed after its split.
-const QueueVersion = 10
+// removed after its split. v11 removes the auto-denials corpus row.
+const QueueVersion = 11
 
 // maxTranscriptCandidates bounds the transcript half of the queue. A cluster key
 // is the user's own wording, so it groups verbatim repeats and nothing else;
@@ -36,7 +35,6 @@ const maxTranscriptCandidates = 25
 const (
 	corpusReviewFindings = "review-findings"
 	corpusTranscript     = "transcript-friction"
-	corpusDenials        = "auto-denials"
 )
 
 // Incidence is a before/after chain count in the scored contract.
@@ -239,11 +237,9 @@ func Refresh(opts Options) (*Queue, error) {
 	if transcriptSize == 0 {
 		transcriptSize = sessionsScanned(digest, derr)
 	}
-	denialCount := denialsSize()
 	q.Corpora = []CorpusStatus{
 		{Corpus: corpusReviewFindings, Present: len(chains) > 0, Size: len(chains)},
 		{Corpus: corpusTranscript, Present: transcriptSize > 0, Size: transcriptSize},
-		{Corpus: corpusDenials, Present: denialCount > 0, Size: denialCount},
 	}
 
 	return q, nil
@@ -378,12 +374,4 @@ func sessionsScanned(d *report.Digest, err error) int {
 		return 0
 	}
 	return d.Stats.SessionsScanned
-}
-
-func denialsSize() int {
-	rows, err := denials.Read()
-	if err != nil {
-		return 0
-	}
-	return len(rows)
 }

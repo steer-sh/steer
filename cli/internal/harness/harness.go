@@ -35,9 +35,6 @@ type Capabilities struct {
 	Transcripts bool
 	// SubagentThreads: transcripts carry subagent threads under a root session.
 	SubagentThreads bool
-	// PermissionDenied: the harness fires an event when its own classifier
-	// blocks a tool call, which is what the denials corpus records.
-	PermissionDenied bool
 	// TrustReview: a hook stays inert until the operator trusts its current
 	// definition, so registration alone does not prove enforcement.
 	TrustReview bool
@@ -76,7 +73,6 @@ var registry = map[ID]Harness{
 			HookRegistration: true,
 			Transcripts:      true,
 			SubagentThreads:  true,
-			PermissionDenied: true,
 		},
 	},
 	Codex: {

@@ -73,30 +73,6 @@
         "observed_corpus": "commit-review"
       }
     ],
-    "denials": [
-      {
-        "harness": "claude-code",
-        "scope": "project",
-        "registered": false,
-        "effective": false,
-        "trust": "not-applicable",
-        "resolvable": "not-registered",
-        "observed": 1788539874,
-        "observed_corpus": "steer-denials"
-      },
-      {
-        "harness": "claude-code",
-        "scope": "global",
-        "registered": true,
-        "effective": true,
-        "timeout": 10,
-        "trust": "not-applicable",
-        "command": "/home/example/.steer/bin/steer denials record",
-        "resolvable": "resolvable",
-        "observed": 1788539874,
-        "observed_corpus": "steer-denials"
-      }
-    ],
     "resolver": [
       {
         "harness": "claude-code",
@@ -251,7 +227,6 @@
   },
   "telemetry": {
     "review_chains": 211,
-    "denials_rows": 25,
     "audit_firings": 19,
     "session_snapshots": 520,
     "harnesses": [
@@ -287,12 +262,6 @@
       "present": true,
       "size": 520,
       "path": "/home/example/.steer/state/transcript-sessions"
-    },
-    {
-      "corpus": "auto-denials",
-      "present": true,
-      "size": 25,
-      "path": "/home/example/.steer/state/steer-denials"
     }
   ],
   "hooks": [],

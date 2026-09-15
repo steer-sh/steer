@@ -29,7 +29,6 @@ var Components = []string{
 	"commit-review",
 	"steer-report",
 	"transcript-sessions",
-	"steer-denials",
 }
 
 // Resolve names the directory a reader should read. It is the legacy directory

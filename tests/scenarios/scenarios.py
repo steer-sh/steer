@@ -156,7 +156,6 @@ def _queue(interventions=(), candidates=(), unscored=()):
         "corpora": [
             {"corpus": "review-findings", "present": True, "size": 41},
             {"corpus": "transcript-friction", "present": True, "size": 214},
-            {"corpus": "auto-denials", "present": False, "size": 0},
         ],
     }
 

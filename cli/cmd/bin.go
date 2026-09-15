@@ -87,17 +87,6 @@ func relinkClaude(scope, path string) (int, error) {
 		reportRelink("claude-code", scope, "resolver", next)
 		rewritten++
 	}
-	denials, err := claude.DenialsHookArming(scope)
-	if err != nil {
-		return rewritten, nil
-	}
-	if next, ok := relinked(denials.Registered, denials.Command, path); ok {
-		if err := claude.RegisterDenialsHook(scope, next, denials.Timeout); err != nil {
-			return rewritten, err
-		}
-		reportRelink("claude-code", scope, "denials recorder", next)
-		rewritten++
-	}
 	return rewritten, nil
 }
 

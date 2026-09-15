@@ -493,5 +493,3 @@ tests own wrapping and terminal layout details.
 `internal/claude/statusline.go` owns registration. An occupied slot requires an
 explicit wrap or replace choice. Wrapping preserves the child's command for
 removal/restoration and isolates child failures from Steer's own row.
-`steer denials` is a separate Claude Code PermissionDenied recorder: it stores
-classifier denials without granting a retry or deciding whether a denial was right.

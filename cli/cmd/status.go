@@ -145,17 +145,13 @@ func renderReadiness(r status.Readiness, width int) {
 const postureLabelWidth = 16
 
 // renderPosture prints the arming inventory. It carries the same rows the
-// dashboard's Arming panel acts on — the commit gate, the denials recorder and
-// the guard runner. The resolver is not among them: install and remove write it
+// dashboard's Arming panel acts on — the commit gate and the guard runner. The resolver is not among them: install and remove write it
 // with the commit gate in one operation, so a row of its own reported a second
 // state that can never differ from the first.
 func renderPosture(s *status.SystemStatus, width int) {
 	fmt.Println(styles.SectionHeader.Render("Arming"))
 	for _, a := range s.Posture.CommitGate {
 		postureRow("Commit gate", armingRow(a), width)
-	}
-	for _, a := range s.Posture.Denials {
-		postureRow("Denials recorder", armingRow(a), width)
 	}
 	for _, m := range s.Posture.Masters {
 		phrase := status.MasterPhrase(m)
@@ -304,8 +300,6 @@ func corpusLabel(corpus string) string {
 		return "review findings"
 	case "transcript-friction":
 		return "session history"
-	case "auto-denials":
-		return "automatic denials"
 	default:
 		return "other evidence"
 	}

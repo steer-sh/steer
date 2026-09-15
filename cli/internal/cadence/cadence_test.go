@@ -11,8 +11,8 @@ import (
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
 )
 
-// isolate points HOME at a temp dir so the transcript scan, the denials read, and
-// the output dir all resolve inside the sandbox, never the real machine.
+// isolate points HOME at a temp dir so the transcript scan and the output dir
+// resolve inside the sandbox, never the real machine.
 func isolate(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
@@ -40,8 +40,8 @@ func TestRefreshEmptyIsDeterministic(t *testing.T) {
 		t.Errorf("empty machine should yield an empty queue, got %+v", q1)
 	}
 	// Every corpus emits one row even when absent — the sweep, not an error.
-	if len(q1.Corpora) != 3 {
-		t.Fatalf("want 3 corpus rows, got %d", len(q1.Corpora))
+	if len(q1.Corpora) != 2 {
+		t.Fatalf("want 2 corpus rows, got %d", len(q1.Corpora))
 	}
 	for _, c := range q1.Corpora {
 		if c.Present || c.Size != 0 {

@@ -65,12 +65,12 @@ A deterministic tier runs this loop's mechanical half — scoring, corpus sweeps
 steer report refresh --days 30
 ```
 
-Then Read the queue **once**: `~/.steer/state/steer-report/queue.json` (`version: 10`). It holds:
+Then Read the queue **once**: `~/.steer/state/steer-report/queue.json` (`version: 11`). It holds:
 
 - `interventions[]` — full contract records the tier flagged as **asking for a reader**: the class recurred after the split, a coverage cause left the window unaccounted for, the record carries no frozen scope, the fix it binds is `absent` or `unreadable`, or the fix is in place but carries `artifact.removed`. These carry a `match`; they are the audit's action list, pre-filtered. Each carries `problem` and `intervention` — the record's own explanation of what goes wrong and what it does about it, authored when the class was found. Lead your report with those rather than with the class name or the regex, and correct one that no longer describes the evidence with `steer fix describe ID`, which changes no window. Each also carries the conditions the counts were taken under: `corpus` and `unit` (`review-findings` counts by `chain`, `transcript-friction` by `session` — never compare the two rates), `signal_kind` on a session-unit record, `scope` (the frozen eligibility rule, `null` on a legacy record), `before_coverage` / `after_coverage` (`total`, `eligible`, `ineligible`, `unknown`, `unknown_scope`, `unknown_evidence`, `pending`, `partial_exposure`), `observation` — the six field blocks documented in the status contract below — and `artifact`, where the fix the record binds stands now.
 - `unscored[]` — ids of records no engine reads. Report their existence; do not read a result into them.
 - `candidates[]` — pointers to new clusters, strongest first within each corpus. Transcript rows carry `pattern`/`count`/`sessions`; the review row carries `undecided_chains` and a `dump` command. These carry **no** `match` — authoring the regex is your job, below.
-- `corpora[]` — one row per corpus (`review-findings`, `transcript-friction`, `auto-denials`) with `present` and `size`. Relay this sweep to the user in one sentence.
+- `corpora[]` — one row per corpus (`review-findings`, `transcript-friction`) with `present` and `size`. Relay this sweep to the user in one sentence.
 - `checks[]` — the open steps in the repository the refresh ran in, each with `kind`, `repo`, an optional `check_id`, a `detail` and the `fix` command that clears it. `not-adopted` is a repository declaring checks that this machine never authorized to run at the end of a turn (`steer check adopt`). `never-validated` is a declared check whose cases were never replayed here, so nothing shows it fails on the problem it names (`steer check test <id>`). `integration-failure` is a passing `check.sh` that ran no declared check — the script's wiring, never a failed assertion (`steer check init` prints the managed line to add). A **stale** receipt is deliberately not here: a stale check keeps running, and `steer status --json` carries the label. These are states of a declaration, not recurrence measured over a window, so they carry no count and never enter a before/after reading.
 
 The queue tells you what is pending. The full dumps below are the raw material you cluster over. Read the review-history fixes for the complete audit — the queue lists only the ones asking for a reader, not the quiet ones worth showing too. If this machine has no commit-review ledger, `mine score` reports an empty corpus — say "no fixes to audit on this machine" in one line and go to Step 2.
@@ -154,7 +154,7 @@ Digest schema (`digest_version: 3`):
 
 The digest is size-capped: the CLI evicts the lowest-scoring clusters to fit, and reports honesty in `stats`.
 
-### The `steer status --json` contract (`status_version: 20`)
+### The `steer status --json` contract (`status_version: 21`)
 
 Step 1 reads this snapshot for posture and the full class inventory. The unit is
 the failure class and what the corpus recorded about it, not the hook count. This
@@ -179,12 +179,12 @@ v17 adds `artifact`: the fix a record binds and where it stands now. v18 adds
 `rules` and `addenda`: the instruction and review entries each store holds.
 v19 adds `posture.masters[].state` `detached` and `store`: an installed harness
 that runs none of a scope's guards. v20 adds `artifact.removed`: a fix in place
-now that its store's archive records as removed after the record's split.
+now that its store's archive records as removed after the record's split. v21
+removes `posture.denials`, `telemetry.denials_rows` and the `auto-denials` corpus.
 
 - `status_version` — the schema version. `--json` is a stable agent contract.
 - `posture` — the arming state: `instrument` (reviewer model / runs / prompt
-  digest), `reviewer`, `ledger` path, and `commit_gate[]` / `denials[]` /
-  `resolver[]`. Each row carries `harness`, `scope`, `registered`, `effective`,
+  digest), `reviewer`, `ledger` path, and `commit_gate[]` / `resolver[]`. Each row carries `harness`, `scope`, `registered`, `effective`,
   `trust`, `command`, `resolvable`, `observed` and `observed_corpus`. A
   registration is three separate readings, and only the first is what the
   configuration says. `command` is the command the registration names, verbatim.
@@ -202,8 +202,7 @@ now that its store's archive records as removed after the record's split.
   A corpus records no scope, so both scopes of one harness report the same
   evidence. One guard store serves both harnesses but each harness holds its
   own registration, so a scope alone does not identify a row: `commit_gate` and
-  `resolver` report one row per harness per scope, and `denials` is Claude
-  Code's alone. `trust` is `not-applicable` (the harness reviews no hook trust),
+  `resolver` report one row per harness per scope. `trust` is `not-applicable` (the harness reviews no hook trust),
   `record-present-unverified`, `missing` or `unknown` — Steer never claims to
   have verified a harness's internal hash. The resolver is the Stop hook that
   joins ledger rows to transcripts; it arms with the commit gate on the same
@@ -368,7 +367,7 @@ now that its store's archive records as removed after the record's split.
   a missing coverage cause, or no frozen scope), `candidates[]` (no `match` yet),
   `unscored[]` (ids of records no engine reads), and `checks[]` — the open steps
   in this repository's check tier, the same rows the queue carries.
-- `telemetry` — corpus sizes: `review_chains`, `denials_rows`, `audit_firings`,
+- `telemetry` — corpus sizes: `review_chains`, `audit_firings`,
   `session_snapshots`, plus `harnesses[]` — one row per harness with its
   `sessions`, `firings` and `chains`, so a harness that contributed nothing reads
   differently from one that was never mined.

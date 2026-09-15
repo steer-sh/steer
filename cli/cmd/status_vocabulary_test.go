@@ -41,16 +41,16 @@ func TestStatusCandidateLinesUseDashboardVocabulary(t *testing.T) {
 		},
 		{
 			name: "other corpus pattern",
-			in:   cadence.Candidate{Corpus: "auto-denials", Pattern: "blocked command", Count: 2, Sessions: 3},
+			in:   cadence.Candidate{Corpus: "other-corpus", Pattern: "blocked command", Count: 2, Sessions: 3},
 			want: []string{"a repeated pattern in your session history", "2 recurrences", "3 agent sessions"},
-			old:  []string{"auto-denials", "hits", "session(s)"},
+			old:  []string{"other-corpus", "hits", "session(s)"},
 		},
 		{
 			name: "empty unpatterned queue item",
-			in:   cadence.Candidate{Corpus: "auto-denials"},
+			in:   cadence.Candidate{Corpus: "other-corpus"},
 			want: []string{"Review findings not yet grouped into a problem",
 				"0 review sequences carry a finding no problem covers yet"},
-			old: []string{"auto-denials"},
+			old: []string{"other-corpus"},
 		},
 	}
 	for _, tc := range cases {
@@ -79,9 +79,8 @@ func TestStatusHumanSectionsUseDashboardVocabulary(t *testing.T) {
 			CommitGate: []status.ScopeArming{
 				{Harness: "claude-code", Scope: "global"},
 				{Harness: "codex", Scope: "global", Registered: true},
+				{Harness: "pi", Scope: "global", Registered: true, Resolvable: status.ResolveMissing},
 			},
-			Denials: []status.ScopeArming{{Harness: "claude-code", Scope: "global",
-				Registered: true, Resolvable: status.ResolveMissing}},
 			Resolver: []status.ScopeArming{{Harness: "claude-code", Scope: "global",
 				Registered: true}},
 			Masters: []status.MasterRuntime{
@@ -94,16 +93,15 @@ func TestStatusHumanSectionsUseDashboardVocabulary(t *testing.T) {
 		Corpora: []status.CorpusRow{
 			{Corpus: "review-findings", Present: true, Size: 2},
 			{Corpus: "transcript-friction", Present: true, Size: 3},
-			{Corpus: "auto-denials", Present: true, Size: 4},
 		},
 		Telemetry: status.Telemetry{AuditFirings: 3},
 	}
 
 	posture := captureStdout(t, func() { renderPosture(s, 100) })
 	for _, want := range []string{
-		"Arming", "Claude Code", "Denials recorder", "Guard runner",
+		"Arming", "Claude Code", "Guard runner",
 		"off", "inert", "broken", "review findings", "session history",
-		"automatic denials", "Guard blocks",
+		"Guard blocks",
 	} {
 		if !strings.Contains(posture, want) {
 			t.Errorf("posture output is missing dashboard term %q:\n%s", want, posture)
