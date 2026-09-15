@@ -417,6 +417,29 @@ func handedChains(rows []resolverRow, ids []int, key string) map[int]bool {
 	return out
 }
 
+// namesAHandedChain reports whether a chain of thread key that was handed findings
+// carries subject name.
+func namesAHandedChain(rows []resolverRow, ids []int, key, name string) bool {
+	handed := handedChains(rows, ids, key)
+	for j, row := range rows {
+		if ids[j] >= 0 && handed[ids[j]] && joinKey(row) == key && pyStr(row["subject"]) == name {
+			return true
+		}
+	}
+	return false
+}
+
+// placeholderOnly reports whether every subject a chain carries is a placeholder, so
+// the chain has no known subject.
+func placeholderOnly(subjects map[string]bool) bool {
+	for s := range subjects {
+		if !gate.PlaceholderSubject(s) {
+			return false
+		}
+	}
+	return len(subjects) > 0
+}
+
 // joinFor is the join a row takes by its era, and so the span its miss waits out.
 func joinFor(row resolverRow, denyTS float64) string {
 	firing, ok := pyInt(row["firing"])
@@ -519,8 +542,13 @@ func (r *resolver) pickLedger(rows []resolverRow, i int, denyTS float64, ledgers
 				switch {
 				case got == "" || len(subjects) == 0:
 				case !subjects[got]:
-					why.note(MissSubjectUnmatched)
-					continue
+					// A chain with only a placeholder has no subject to contradict, so a
+					// block naming no other chain of the thread is unnamed and takes the
+					// bound. A git row's window spans every session and keeps the refusal.
+					if session == "" || !placeholderOnly(subjects) || namesAHandedChain(rows, ids, session, got) {
+						why.note(MissSubjectUnmatched)
+						continue
+					}
 				case session != "":
 					// A name lets a block past the bound, so it must name exactly one
 					// chain. A row with no thread gets no name: its window spans every

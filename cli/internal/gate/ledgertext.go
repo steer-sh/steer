@@ -14,6 +14,18 @@ import (
 // fabricated one is not distinguishable from a real one afterwards.
 const LedgerHeader = "Commit gate fired"
 
+// The subjects an adapter records when it cannot read the commit message. A chain that
+// carries only these has no known subject.
+const (
+	SubjectNotRecoverable = "(not recoverable from the command line — judge the diff alone)"
+	SubjectUnavailable    = "(not available to a pre-commit hook — judge the diff alone)"
+)
+
+// PlaceholderSubject reports whether s is one of those subjects.
+func PlaceholderSubject(s string) bool {
+	return s == SubjectNotRecoverable || s == SubjectUnavailable
+}
+
 // ledgerRoundRe reads the round marker off the HEADER LINE, which is what files a
 // ledger against the round it answers. Optional in the pattern because ledgers written
 // before it was required carry no round; a row with a null round is one of those, not

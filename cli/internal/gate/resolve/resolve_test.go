@@ -417,6 +417,26 @@ func TestResolverCleanChainSharesNoName(t *testing.T) {
 	}
 }
 
+func TestResolverPlaceholderChainTakesAnUnnamedBlock(t *testing.T) {
+	r := testResolver()
+	real := chainLedgerFix(fixCT+400, []int{1}, "feat: the real subject", 0)
+	rows := chainRows(fixCT, 1, gate.SubjectNotRecoverable)
+	if cand, _, _ := r.pickLedger(rows, 1, fixCT, []LedgerMsg{real}); cand == nil {
+		t.Fatal("a chain whose message was unreadable has no subject for the header to contradict")
+	}
+	earlier := append(chainRows(fixCT-1000, 1, "feat: the real subject"), chainRows(fixCT, 1, gate.SubjectNotRecoverable)...)
+	if cand, _, why := r.pickLedger(earlier, 3, fixCT, []LedgerMsg{real}); cand != nil || why != MissSubjectUnmatched {
+		t.Fatalf("a subject another chain was handed findings under names that chain; got (cand!=nil=%v, why=%q)", cand != nil, why)
+	}
+	git := chainRows(fixCT, 1, gate.SubjectUnavailable)
+	for _, row := range git {
+		delete(row, "session_id")
+	}
+	if cand, _, _ := r.pickLedger(git, 1, fixCT, []LedgerMsg{real}); cand != nil {
+		t.Fatal("a git row's window spans every session, so a named block stays refused")
+	}
+}
+
 // pins existing behaviour
 func TestResolverRewordedNameClaimsNoOtherChain(t *testing.T) {
 	r := testResolver()

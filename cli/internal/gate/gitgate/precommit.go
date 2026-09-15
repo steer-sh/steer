@@ -77,7 +77,7 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, cwd strin
 // commitMessageUnavailable is what this channel can honestly say about the message: git
 // prepares it only after the hook runs, so no source on disk holds this change's text
 // yet.
-const commitMessageUnavailable = "(not available to a pre-commit hook — judge the diff alone)"
+const commitMessageUnavailable = gate.SubjectUnavailable
 
 func render(d gate.Decision) Result {
 	operator := d.SystemMessage

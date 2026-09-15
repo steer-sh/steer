@@ -339,7 +339,10 @@ bound. A chain started before IDs keeps none until it ends. Without an ID, a cha
 ledger landing after the next chain started is claimed only by the subject in its
 header, and only when exactly one chain of that
 thread that was handed findings carries the subject on any of its rows; a row
-with no thread never takes that path. A miss records why in `ledger_miss` (the
+with no thread never takes that path. A chain whose rows carry only an adapter's
+placeholder subject (`gate.PlaceholderSubject`) has no subject to contradict: for
+a row with a thread, a header naming no other chain handed findings takes the
+chain bound. A miss records why in `ledger_miss` (the
 `Miss*` constants in `resolve.go`); a recheck refreshes it and a link removes it. `steer commit-gate backfill` previews; `--apply` rewrites the
 local host shard with backup (the ten newest are kept) and concurrent-append
 preservation. Stop hooks run

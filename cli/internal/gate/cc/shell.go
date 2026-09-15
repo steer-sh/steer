@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/shellsyntax"
 )
 
@@ -341,7 +342,7 @@ func segmentBounds(cmd string, pos int) (int, int) {
 	return lineStart + start, lineStart + end
 }
 
-const messageNotFound = "(not recoverable from the command line — judge the diff alone)"
+const messageNotFound = gate.SubjectNotRecoverable
 
 // ExtractMessage recovers the commit message, best effort. Absence is not fatal — the
 // diff carries the review. Order matters: -F and -m may both appear, and a heredoc
