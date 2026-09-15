@@ -124,6 +124,14 @@ func RemoveCommand(t, id, scope string) string {
 	return cmd
 }
 
+// ArtifactNoun names the fix a tier binds, in the reader's words: guard, rule,
+// addendum entry or check. It is "" for a tier that binds no fix.
+func ArtifactNoun(t string) string {
+	kind, _ := tier.Of(t)
+	noun, _ := artifactNoun(kind)
+	return noun
+}
+
 // artifactNoun names the fix a tier binds, in the reader's words, and the command
 // prefix that removes one.
 func artifactNoun(k tier.Kind) (noun, remove string) {

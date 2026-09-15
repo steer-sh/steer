@@ -65,6 +65,12 @@ type Model struct {
 	input   textinput.Model
 	editing bool
 	form    *retireForm
+	// archiveForm is the Fixes panel's archive form over one fix, nil when closed.
+	archiveForm *archiveForm
+	// archived is every archived fix the stores hold, and archiveUnread names each
+	// store whose archive could not be read.
+	archived      []archivedEntry
+	archiveUnread []string
 
 	// expanded says the selected problem's detail area is open; technical says its
 	// technical block is open too. detailOffset is the first visible line of that
@@ -145,6 +151,7 @@ func (m *Model) refresh() {
 	}
 	m.snap = s
 	m.chains = ev.Chains
+	m.archived, m.archiveUnread = readArchived(root)
 	for i := range m.cursor {
 		m.clampCursor(panel(i))
 	}
@@ -203,10 +210,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.editing {
-			// The two editors share one text input and answer different keys, so the
+			// The three editors share one text input and answer different keys, so the
 			// active panel routes the keystroke.
-			if m.active == panelReviewer {
+			switch m.active {
+			case panelReviewer:
 				return m.reviewerEditing(msg)
+			case panelFixes:
+				return m.archiveEditing(msg)
 			}
 			return m.retireEditing(msg)
 		}
@@ -468,6 +478,9 @@ func (m *Model) legend() string {
 		}
 		return "enter open · " + stop + common
 	case panelFixes:
+		if m.editing {
+			return "enter archive · esc cancel"
+		}
 		return m.fixesLegend() + common
 	case panelReviewer:
 		if m.editing {

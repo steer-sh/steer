@@ -24,8 +24,7 @@ import (
 // that fix stands in its own terms, and each action sits on the row whose scope it
 // acts on.
 
-// The kinds of row. A rule or addendum row takes no action here; it is a row so
-// the window can reach it.
+// The kinds of row.
 const (
 	guardInstalled = "installed"
 	guardAvailable = "available"
@@ -34,11 +33,12 @@ const (
 	fixAddendum    = "addendum"
 	fixRepo        = "repository"
 	fixCheck       = "check"
+	fixArchived    = "archived"
 )
 
 // fixRow is one line of the panel: a guard in your inventory, a rule, a review
 // addendum entry, this repository or one of its checks, a built-in guard you can
-// turn on, or a maintenance action a detected issue asks for.
+// turn on, an archived fix, or a maintenance action a detected issue asks for.
 type fixRow struct {
 	kind string
 	name string
@@ -57,6 +57,11 @@ type fixRow struct {
 	// repair is the action a repair row runs and issue is what it fixes.
 	repair string
 	issue  string
+	// scope is the store a fix lives in, and removable marks one x archives.
+	scope     string
+	removable bool
+	// archived is the entry an archived row restores.
+	archived *archivedEntry
 }
 
 // The repair actions. Each names one operation and one detected issue.
@@ -68,7 +73,7 @@ const (
 
 // fixRows lists the rows in the order the panel prints them: your guards, rules,
 // addendum entries, this repository and its checks, the built-in guards not in
-// your inventory, then one row per detected issue.
+// your inventory, the archived fixes, then one row per detected issue.
 func (m *Model) fixRows() []fixRow {
 	if m.snap == nil {
 		return nil
@@ -81,7 +86,8 @@ func (m *Model) fixRows() []fixRow {
 	for _, h := range m.snap.Hooks {
 		rows = append(rows, fixRow{kind: guardInstalled, name: h.Name,
 			origin: guardOrigin(h.Source), source: h.Source,
-			builtin: h.Source == claude.SourceFactory && visible[h.Name]})
+			builtin: h.Source == claude.SourceFactory && visible[h.Name],
+			scope:   m.scope, removable: h.Source != claude.SourceFactory})
 	}
 	rows = append(rows, m.ruleRows()...)
 	rows = append(rows, m.addendumRows()...)
@@ -95,6 +101,7 @@ func (m *Model) fixRows() []fixRow {
 		rows = append(rows, fixRow{kind: guardAvailable, name: p.Name,
 			description: p.Description})
 	}
+	rows = append(rows, m.archivedRows()...)
 	return append(rows, m.guardRepairs()...)
 }
 
@@ -105,7 +112,8 @@ func (m *Model) ruleRows() []fixRow {
 	for _, r := range m.snap.Rules {
 		state, attention := m.ruleState(r)
 		rows = append(rows, fixRow{kind: fixRule, name: r.ID, description: r.Text,
-			state: r.Scope + " store; " + state, attention: attention})
+			state: r.Scope + " store; " + state, attention: attention,
+			scope: r.Scope, removable: true})
 	}
 	return rows
 }
@@ -141,7 +149,7 @@ func (m *Model) ruleState(r status.RuleInfo) (string, bool) {
 
 // addendumRows is one row per review addendum entry, read where the commit gate
 // reads it. A project entry removed on disk but still committed is listed, because
-// the gate still reads it.
+// the gate still reads it; only an entry on disk can be archived.
 func (m *Model) addendumRows() []fixRow {
 	var rows []fixRow
 	for _, a := range m.snap.Addenda {
@@ -154,7 +162,8 @@ func (m *Model) addendumRows() []fixRow {
 		}
 		rows = append(rows, fixRow{kind: fixAddendum, name: name, description: text,
 			state:     a.Scope + " store; " + status.AddendumPhrase(a),
-			attention: a.State != status.AddendumLive})
+			attention: a.State != status.AddendumLive,
+			scope:     a.Scope, removable: a.ID != "" && a.Text != ""})
 	}
 	return rows
 }
@@ -172,7 +181,8 @@ func (m *Model) checkRows() []fixRow {
 	for _, row := range c.Checks {
 		rows = append(rows, fixRow{kind: fixCheck, name: row.ID, description: row.Binding,
 			state:     status.CheckStatePhrase(row),
-			attention: row.Validation == status.ValidationNone})
+			attention: row.Validation == status.ValidationNone,
+			scope:     claude.ProjectScope, removable: true})
 	}
 	return rows
 }
@@ -298,7 +308,12 @@ func (m *Model) fixesLegend() string {
 	if len(rows) == 0 {
 		return ""
 	}
-	switch row := rows[m.cursor[panelFixes]]; row.kind {
+	archive := ""
+	row := rows[m.cursor[panelFixes]]
+	if row.removable && (row.kind != fixCheck || m.checking == "") {
+		archive = "x archive · "
+	}
+	switch row.kind {
 	case guardRepair:
 		return "enter run this repair · "
 	case guardInstalled:
@@ -313,24 +328,33 @@ func (m *Model) fixesLegend() string {
 		}
 	case fixCheck:
 		if m.checking == "" {
-			return "enter replay this one check · "
+			return "enter replay this one check · " + archive
+		}
+	case fixArchived:
+		if row.archived.stored.Tier != string(tier.Check) || m.checking == "" {
+			return "enter restore · "
 		}
 	}
-	return ""
+	return archive
 }
 
-// fixesKey acts on the selected row: a built-in guard turns on or off, a repair
-// row runs the operation its issue names, the repository row authorizes the
-// repository and a check row replays that check.
+// fixesKey acts on the selected row. Enter turns a built-in guard on or off, runs
+// a repair row's operation, authorizes the repository, replays a check or
+// restores an archived fix; x opens the archive form over any other fix.
 func (m *Model) fixesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if msg.String() != "enter" {
-		return m, nil
-	}
 	rows := m.fixRows()
 	if len(rows) == 0 {
 		return m, nil
 	}
 	row := rows[m.cursor[panelFixes]]
+	switch msg.String() {
+	case "x":
+		m.archiveKey(row)
+		return m, nil
+	case "enter":
+	default:
+		return m, nil
+	}
 	switch row.kind {
 	case guardRepair:
 		switch row.repair {
@@ -344,11 +368,11 @@ func (m *Model) fixesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case guardAvailable:
 		m.togglePreset(row.name, false)
 	case guardInstalled:
-		if !row.builtin {
-			m.note("%s", noSwitchNote(row, m.scope))
-			return m, nil
+		if row.builtin {
+			m.togglePreset(row.name, true)
+		} else if row.source == claude.SourceFactory {
+			m.note("%s is a guard Steer keeps for itself, so it has no switch here", row.name)
 		}
-		m.togglePreset(row.name, true)
 	case fixRepo:
 		if m.checking != "" || m.snap.Checks.Adopted {
 			return m, nil
@@ -359,27 +383,19 @@ func (m *Model) fixesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, m.startCheckAction(checkTest, row.name)
+	case fixArchived:
+		return m, m.restoreArchived(row.archived)
 	}
 	return m, nil
 }
 
-// noSwitchNote says why an installed guard has no switch here. A factory guard
-// the catalog hides is one Steer keeps for itself; any other guard has no catalog
-// copy to turn back on, so it is removed from the command line.
-func noSwitchNote(row fixRow, scope string) string {
-	if row.source == claude.SourceFactory {
-		return row.name + " is a guard Steer keeps for itself, so it has no switch here"
-	}
-	return row.name + " is not a built-in guard; remove it with: " +
-		status.RemoveCommand(string(tier.Guard), row.name, scope)
-}
-
-// The check actions. Both run as commands: adoption replays every check without a
-// current proof and then runs check.sh, and a replay builds and runs the check's
-// cases, so either can take minutes.
+// The check actions. Each runs as a command: adoption replays every check without
+// a current proof and then runs check.sh, and a replay or a restore builds and
+// runs the check's cases, so any of them can take minutes.
 const (
-	checkAdopt = "adopt"
-	checkTest  = "test"
+	checkAdopt   = "adopt"
+	checkTest    = "test"
+	checkRestore = "restore"
 )
 
 // checkActionMsg carries a finished check action's outcome.
@@ -448,7 +464,7 @@ func testNote(id string, run checks.ValidationRun, err error) string {
 
 // togglePreset turns a built-in guard on or off through the same presets
 // functions the CLI commands call. A guard the catalog does not hold is not a
-// built-in guard, so the panel names where it can be removed instead.
+// built-in guard, so the panel names the archive action instead.
 func (m *Model) togglePreset(name string, on bool) {
 	catalog, err := presets.LoadCatalog()
 	if err != nil {
@@ -457,7 +473,7 @@ func (m *Model) togglePreset(name string, on bool) {
 	}
 	item, found := presets.FindVisiblePreset(catalog, name)
 	if !found {
-		m.note("%s is not a built-in guard; remove it with: %s", name, status.RemoveCommand(string(tier.Guard), name, m.scope))
+		m.note("%s is not a built-in guard in this Steer; x archives it instead", name)
 		return
 	}
 	if on {
@@ -529,6 +545,9 @@ func (m *Model) syncStore() {
 // viewFixes renders each tier's fixes, the built-in guards you can turn on, and
 // any repair a detected issue asks for.
 func (m *Model) viewFixes() string {
+	if m.editing && m.archiveForm != nil {
+		return m.viewArchiveForm()
+	}
 	width := m.bodyWidth()
 	out := m.title("Fixes — what Steer installed to keep a problem from coming back")
 	rows := m.fixRows()
@@ -543,6 +562,10 @@ func (m *Model) viewFixes() string {
 			continue
 		}
 		out += guardTitleInColumn(r.name, r.origin, i == m.cursor[panelFixes], width, guardNameWidth(rows, width))
+	}
+	if anyOfKind(rows, guardInstalled) {
+		out += wrapTo(secondary("Turning a built-in guard off writes no archive: it comes back from the built-in "+
+			"guards below. Archiving any other guard keeps its file and fixtures for a restore."), "  ", width)
 	}
 	out += wrapTo(secondary("This is what Steer registered here. It is not every hook your coding "+
 		"agent runs: review before commit, and any hook you set up yourself, are not listed."),
@@ -581,6 +604,15 @@ func (m *Model) viewFixes() string {
 		}
 		out += guardTitleInColumn(r.name, r.description, i == m.cursor[panelFixes], width, guardNameWidth(rows, width))
 	}
+
+	out += section("Archived — fixes a removal took out, which enter puts back")
+	if !anyOfKind(rows, fixArchived) && len(m.archiveUnread) == 0 {
+		out += dim("  nothing archived in the project or global stores, or in this repository's checks.\n")
+	}
+	for _, line := range m.archiveUnread {
+		out += wrapTo(warn(line), "  ", width)
+	}
+	out += stateRows(rows, fixArchived, m.cursor[panelFixes], width, column)
 
 	if !anyOfKind(rows, guardRepair) {
 		return out

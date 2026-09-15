@@ -473,9 +473,12 @@ Problems combines candidates and tracked records; authoring goes through the
 skills. Fixes lists guards, rules, review addendum entries and the repository's
 checks, each with its own state. A project addendum entry is read on disk and at
 HEAD through `status.AddendumInventory`, which `steer commit-gate addendum list`
-shares, so an entry removed on disk but still committed stays listed. Check
-adoption and replay run as background commands; the check runner's registration
-belongs to Arming. Git pre-commit installation remains CLI-only. Shared styles and geometry
+shares, so an entry removed on disk but still committed stays listed. Every fix
+except a built-in guard archives through its tier's remove function; a built-in
+guard turns off, which writes no archive. The Archived section shows the newest
+entry of each tier and id per store and restores it through the same code as
+`steer archive restore`. Check adoption, replay and restore run as background
+commands; the check runner's registration belongs to Arming. Git pre-commit installation remains CLI-only. Shared styles and geometry
 tests own wrapping and terminal layout details.
 
 `internal/statusline/` renders the Claude Code status-line row;

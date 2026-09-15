@@ -2,15 +2,19 @@ package tui
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/steer-sh/steer-cli/internal/archive"
 	"github.com/steer-sh/steer-cli/internal/checks"
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/guard"
+	"github.com/steer-sh/steer-cli/internal/guard/fixture"
 	"github.com/steer-sh/steer-cli/internal/status"
 )
 
@@ -124,20 +128,205 @@ func TestOnlyABuiltInGuardOffersTurnOff(t *testing.T) {
 		if want[row.name] {
 			continue
 		}
+		m.message = ""
 		m.fixesKey(tea.KeyMsg{Type: tea.KeyEnter})
 		if strings.Contains(m.message, "is off") {
 			t.Errorf("%s: enter turned a guard off: %q", row.name, m.message)
 		}
+		if row.name == "steer-self-protection" && !strings.Contains(m.message, "keeps for itself") {
+			t.Errorf("enter on a guard Steer keeps for itself reads %q", m.message)
+		}
+	}
+}
+
+// x archives every fix except a built-in guard, which turns off and writes no
+// archive. A guard Steer keeps for itself, and a project entry already removed on
+// disk, offer neither.
+func TestArchiveIsOfferedOnEveryFixButABuiltInGuard(t *testing.T) {
+	m := fixesModel(false)
+	m.snap.Hooks = []status.HookInfo{
+		{Name: "bare-python", Source: claude.SourceFactory},
+		{Name: "steer-self-protection", Source: claude.SourceFactory},
+		{Name: "written-by-steer", Source: claude.SourceGenerated},
+		{Name: "hand-written", Source: claude.SourceManual},
+	}
+	m.snap.Presets = []status.PresetInfo{{Name: "bare-python", Enabled: true}}
+	m.snap.Addenda = append(m.snap.Addenda, status.AddendumInfo{ID: "fp-live", Scope: "global",
+		Text: "a live entry", State: status.AddendumLive})
+	want := map[string]bool{"written-by-steer": true, "hand-written": true, "config-path": true,
+		"fp-live": true, "no-count": true}
+	for i, row := range m.fixRows() {
+		m.cursor[panelFixes] = i
+		if got := strings.Contains(m.fixesLegend(), "x archive"); got != want[row.name] {
+			t.Errorf("%s (%s): legend offers archive = %v, want %v", row.name, row.kind, got, want[row.name])
+		}
+		m.fixesKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+		if m.editing != want[row.name] {
+			t.Errorf("%s (%s): x opened the archive form = %v", row.name, row.kind, m.editing)
+		}
+		if row.builtin && !strings.Contains(m.message, "writes no archive") {
+			t.Errorf("x on a built-in guard reads %q", m.message)
+		}
+		if m.editing {
+			m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		}
+	}
+}
+
+// The form says what the archive keeps before enter removes anything, and a
+// project entry's form says the removal waits for a commit.
+func TestTheArchiveFormSaysWhatItRemovesAndWhen(t *testing.T) {
+	m := fixesModel(false)
+	m.snap.Addenda = []status.AddendumInfo{{ID: "fp-live", Scope: "project",
+		Text: "a live entry", HeadText: "a live entry", State: status.AddendumLive}}
+	selectKind(t, m, fixAddendum)
+	m.fixesKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	view := strings.Join(strings.Fields(m.View()), " ")
+	for _, want := range []string{"Archive addendum entry fp-live", "the Archived section can restore it",
+		"restore it. The commit gate reads project entries at HEAD, so the removal takes effect after you commit",
+		"enter archive · esc cancel"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("the form is missing %q:\n%s", want, view)
+		}
+	}
+	if global := archiveConsequence(archiveForm{tier: "review", id: "fp", scope: "global"}); strings.Contains(global, "after you commit") {
+		t.Errorf("a global entry's form asks for a commit: %q", global)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.editing || !strings.Contains(m.message, "nothing was archived") {
+		t.Errorf("esc left editing = %v with note %q", m.editing, m.message)
+	}
+}
+
+// A rule archived from the panel lands in the store's archive with its reason,
+// and enter on its Archived row installs it again. A second restore is refused
+// while the rule is back, and the panel shows the refusal.
+func TestARuleArchivedFromThePanelIsRestoredFromIt(t *testing.T) {
+	const id = "tui-archive-round-trip"
+	if _, err := claude.InstallManagedRule("global", id, "resolve config from the repo root"); err != nil {
+		t.Fatal(err)
+	}
+	store, err := claude.GetHooksDir("global")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = claude.RemoveManagedRule("global", id, "")
+		_ = os.RemoveAll(filepath.Join(store, archive.DirName, id))
+	})
+	m := New(gate.Defaults(), "global")
+	m.width = 200
+	m.active = panelFixes
+	selectRow(t, m, fixRule, id)
+	m.fixesKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	m.input.SetValue("blocks a legitimate path")
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.editing || !strings.HasPrefix(m.message, "archived rule "+id) {
+		t.Fatalf("archive left editing = %v with note %q", m.editing, m.message)
+	}
+	entries, err := archive.ForID(store, id)
+	if err != nil || len(entries) != 1 || entries[0].Reason != "blocks a legitimate path" {
+		t.Fatalf("archive entries = %+v, %v; want one carrying the reason", entries, err)
 	}
 
-	internal := noSwitchNote(fixRow{name: "steer-self-protection", source: claude.SourceFactory}, "global")
-	if strings.Contains(internal, "not a built-in") || strings.Contains(internal, "remove it") {
-		t.Errorf("a guard Steer keeps for itself is called removable: %q", internal)
+	selectRow(t, m, fixArchived, id)
+	m.fixesKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if !strings.HasPrefix(m.message, "restored rule "+id) {
+		t.Fatalf("restore reads %q", m.message)
 	}
-	generated := noSwitchNote(fixRow{name: "written-by-steer", source: claude.SourceGenerated}, "global")
-	if !strings.Contains(generated, "remove it with") {
-		t.Errorf("a generated guard's note names no way to remove it: %q", generated)
+	rules, err := claude.ListManagedRules("global")
+	if err != nil || len(rules) == 0 {
+		t.Fatalf("the rule is not back: %+v, %v", rules, err)
 	}
+
+	selectRow(t, m, fixArchived, id)
+	m.fixesKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if !strings.Contains(m.message, "was not restored") {
+		t.Errorf("a restore over the installed rule reads %q", m.message)
+	}
+}
+
+// An id archived twice in one store is one row: the newer removal, with the
+// earlier one counted.
+func TestAnIDArchivedTwiceShowsItsNewerRemoval(t *testing.T) {
+	const id = "tui-archived-twice"
+	store, err := claude.GetHooksDir("global")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(filepath.Join(store, archive.DirName, id)) })
+	for _, reason := range []string{"first removal", "second removal"} {
+		if _, err := archive.Write(store, archive.Entry{Tier: "instruction", ID: id, Scope: "global", Reason: reason}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entries, _ := readArchived("")
+	var found []archivedEntry
+	for _, e := range entries {
+		if e.stored.ID == id {
+			found = append(found, e)
+		}
+	}
+	if len(found) != 1 || found[0].stored.Reason != "second removal" || found[0].older != 1 {
+		t.Fatalf("archived rows for %s = %+v; want one carrying the second removal and one earlier", id, found)
+	}
+}
+
+// A check restore replays cases, so it runs as a command, and only one check
+// action runs at a time.
+func TestACheckRestoreRunsAsACheckAction(t *testing.T) {
+	m := fixesModel(false)
+	m.archived = []archivedEntry{{scope: "project", root: "/w/steer",
+		stored: archive.Stored{Entry: archive.Entry{Tier: "check", ID: "old-check"}}}}
+	selectRow(t, m, fixArchived, "old-check")
+	if got := m.fixesLegend(); !strings.Contains(got, "enter restore") {
+		t.Errorf("the archived check's legend reads %q", got)
+	}
+	if _, cmd := m.fixesKey(tea.KeyMsg{Type: tea.KeyEnter}); cmd == nil || m.checking != checkRestore {
+		t.Fatalf("enter on an archived check started nothing (checking %q)", m.checking)
+	}
+	if got := m.fixesLegend(); strings.Contains(got, "restore") {
+		t.Errorf("the legend offers %q while a check action runs", got)
+	}
+	selectKind(t, m, fixCheck)
+	if strings.Contains(m.fixesLegend(), "x archive") {
+		t.Error("a check offers archive while a check action runs")
+	}
+}
+
+// A restore's note names the fixture result of the restored guard and every
+// guard the rerun could not verify.
+func TestAFixtureNoteNamesTheRestoredGuardAndEveryFailure(t *testing.T) {
+	v := &claude.FixtureVerification{Reports: []fixture.Report{
+		{Hook: "alpha", Cases: []fixture.CaseResult{{IndividualPass: true, MasterState: fixture.MasterVerified}}},
+		{Hook: "beta", Cases: []fixture.CaseResult{{IndividualPass: true, MasterState: fixture.MasterVerified}}},
+		{Hook: "gamma", Cases: []fixture.CaseResult{{IndividualPass: false, MasterState: fixture.MasterVerified}}},
+	}}
+	got := fixtureNote(v, "alpha")
+	for _, want := range []string{"alpha intercepted its 1 stored case(s)", "gamma NOT verified: 1 case(s)"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the note %q is missing %q", got, want)
+		}
+	}
+	if strings.Contains(got, "beta") {
+		t.Errorf("the note names a guard that passed and was not restored: %q", got)
+	}
+	if got := restoreCheckNote("no-count", checks.ValidationRun{Verdict: checks.VerdictFailed, Reason: "the defect case passed"},
+		errors.New("not validated")); !strings.Contains(got, "was not restored") || !strings.Contains(got, "the defect case passed") {
+		t.Errorf("a refused check restore reads %q", got)
+	}
+}
+
+// selectRow puts the cursor on the row of a kind with a name.
+func selectRow(t *testing.T, m *Model, kind, name string) {
+	t.Helper()
+	for i, r := range m.fixRows() {
+		if r.kind == kind && r.name == name {
+			m.cursor[panelFixes] = i
+			return
+		}
+	}
+	t.Fatalf("no %s row named %s", kind, name)
 }
 
 // Each detected issue names its own operation, what it changes and where. A
