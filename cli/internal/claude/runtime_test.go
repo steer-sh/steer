@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -48,6 +49,62 @@ def main():
     data = json.load(sys.stdin)
     if data.get("tool_name") == "Bash":
         print(json.dumps({"decision": "block", "stopReason": "no shell"}))
+    sys.exit(0)
+
+if __name__ == "__main__":
+    main()
+`
+
+// removalHookContent blocks on a marker in the text an edit removes.
+const removalHookContent = `#!/usr/bin/env python3
+import sys
+import json
+
+def main():
+    data = json.load(sys.stdin)
+    tool_input = data.get("tool_input", {})
+    if "FORBIDDEN" in tool_input.get("old_string", ""):
+        print(json.dumps({
+            "decision": "block",
+            "stopReason": "removes FORBIDDEN from " + tool_input.get("file_path", "<no file>"),
+        }))
+    sys.exit(0)
+
+if __name__ == "__main__":
+    main()
+`
+
+// deleteHookContent blocks on a whole-file deletion.
+const deleteHookContent = `#!/usr/bin/env python3
+import sys
+import json
+
+def main():
+    data = json.load(sys.stdin)
+    tool_input = data.get("tool_input", {})
+    if tool_input.get("steer_operation") == "delete":
+        print(json.dumps({
+            "decision": "block",
+            "stopReason": "deletes " + tool_input.get("file_path", "<no file>"),
+        }))
+    sys.exit(0)
+
+if __name__ == "__main__":
+    main()
+`
+
+// echoHookContent blocks on every Edit and returns its tool_input as the reason.
+const echoHookContent = `#!/usr/bin/env python3
+import sys
+import json
+
+def main():
+    data = json.load(sys.stdin)
+    if data.get("tool_name") == "Edit":
+        print(json.dumps({
+            "decision": "block",
+            "stopReason": json.dumps(data.get("tool_input"), sort_keys=True),
+        }))
     sys.exit(0)
 
 if __name__ == "__main__":
@@ -166,6 +223,136 @@ func TestRuntimeNormalizesEveryToolShape(t *testing.T) {
 			}
 			if got := rows[0]["file_path"]; got != tc.wantFile {
 				t.Fatalf("audit file_path = %v, want %q — %s", got, tc.wantFile, tc.why)
+			}
+		})
+	}
+}
+
+// Every edit shape hands a guard the text it removes, and a whole-file deletion
+// is marked rather than read from disk.
+func TestRuntimeCarriesRemovedText(t *testing.T) {
+	requirePython3(t)
+
+	type guard struct{ name, content string }
+	removal := []guard{{"removal-hook", removalHookContent}}
+	cases := []struct {
+		name        string
+		guards      []guard
+		payload     string
+		want        bool
+		wantFile    string
+		wantSnippet string
+		why         string
+	}{
+		{"native-edit", removal, `{"tool_name":"Edit","tool_input":{"file_path":"a.py",` +
+			`"old_string":"FORBIDDEN","new_string":"clean"}}`,
+			true, "a.py", "", "a native Edit already carries old_string"},
+		{"multiedit", removal, `{"tool_name":"MultiEdit","tool_input":{"file_path":"a.py","edits":[` +
+			`{"old_string":"fine","new_string":"fine"},{"old_string":"FORBIDDEN","new_string":""}]}}`,
+			true, "a.py", "FORBIDDEN", "each MultiEdit hunk keeps its old_string"},
+		{"patch-update-removed", removal, `{"tool_name":"apply_patch","tool_input":{"command":` +
+			`"*** Begin Patch\n*** Update File: one.py\n@@\n-FORBIDDEN\n+clean\n*** End Patch"}}`,
+			true, "one.py", "", "a patch's - lines are its removed text"},
+		{"patch-update-context", removal, `{"tool_name":"apply_patch","tool_input":{"command":` +
+			`"*** Begin Patch\n*** Update File: one.py\n@@\n context FORBIDDEN\n+clean\n*** End Patch"}}`,
+			false, "", "", "context lines are not removed text"},
+		{"patch-delete-removal-guard", removal, `{"tool_name":"apply_patch","tool_input":{"command":` +
+			`"*** Begin Patch\n*** Delete File: gone.py\n*** End Patch"}}`,
+			false, "", "", "a deletion carries no old_string for a removal guard to match"},
+		{"patch-delete-delete-guard", []guard{{"delete-hook", deleteHookContent}},
+			`{"tool_name":"apply_patch","tool_input":{"command":` +
+				`"*** Begin Patch\n*** Delete File: gone.py\n*** End Patch"}}`,
+			true, "gone.py", "", "a deletion is marked with steer_operation"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			withProjectTempDir(t)
+			for _, g := range tc.guards {
+				installGuard(t, g.name, g.content)
+			}
+
+			out := runMasterWithArgs(t, tc.payload)
+			blocked := strings.Contains(out, `"block"`)
+			if blocked != tc.want {
+				t.Fatalf("blocked = %v, want %v — %s\noutput: %s", blocked, tc.want, tc.why, out)
+			}
+			if !tc.want {
+				return
+			}
+			rows := readAudit(t)
+			if len(rows) != 1 {
+				t.Fatalf("expected 1 audit row, got %d", len(rows))
+			}
+			if got := rows[0]["file_path"]; got != tc.wantFile {
+				t.Fatalf("audit file_path = %v, want %q — %s", got, tc.wantFile, tc.why)
+			}
+			if snippet, _ := rows[0]["snippet"].(string); !strings.Contains(snippet, tc.wantSnippet) {
+				t.Fatalf("audit snippet = %q, want it to hold %q", snippet, tc.wantSnippet)
+			}
+		})
+	}
+}
+
+// echoedInput decodes the tool_input that echoHookContent returned as its reason.
+func echoedInput(t *testing.T, out string) map[string]any {
+	t.Helper()
+	var reply map[string]any
+	if err := json.Unmarshal([]byte(out), &reply); err != nil {
+		t.Fatalf("reply is not JSON: %v\n%s", err, out)
+	}
+	reason, _ := reply["stopReason"].(string)
+	reason, _, _ = strings.Cut(reason, "\n\n— steer hook:")
+	var input map[string]any
+	if err := json.Unmarshal([]byte(reason), &input); err != nil {
+		t.Fatalf("echoed tool_input is not JSON: %v\n%s", err, reason)
+	}
+	return input
+}
+
+// A virtual edit carries exactly the fields the call sent: MultiEdit flags as
+// sent or absent, and patch removals in order.
+func TestRuntimeVirtualEditFieldsAsSent(t *testing.T) {
+	withProjectTempDir(t)
+	requirePython3(t)
+	installGuard(t, "echo-hook", echoHookContent)
+
+	multiEdit := func(entry string) string {
+		return `{"tool_name":"MultiEdit","tool_input":{"file_path":"a.py","edits":[` + entry + `]}}`
+	}
+	patch := func(body string) string {
+		return `{"tool_name":"apply_patch","tool_input":{"command":"*** Begin Patch\n` + body + `\n*** End Patch"}}`
+	}
+	cases := []struct {
+		name    string
+		payload string
+		want    map[string]any
+	}{
+		{"multiedit-replace-all-true",
+			multiEdit(`{"old_string":"x","new_string":"y","replace_all":true}`),
+			map[string]any{"file_path": "a.py", "old_string": "x", "new_string": "y", "replace_all": true}},
+		{"multiedit-replace-all-false",
+			multiEdit(`{"old_string":"x","new_string":"y","replace_all":false}`),
+			map[string]any{"file_path": "a.py", "old_string": "x", "new_string": "y", "replace_all": false}},
+		{"multiedit-replace-all-absent",
+			multiEdit(`{"old_string":"x","new_string":"y"}`),
+			map[string]any{"file_path": "a.py", "old_string": "x", "new_string": "y"}},
+		{"patch-two-hunks",
+			patch(`*** Update File: one.py\n@@\n-a\n+c\n keep\n@@\n-b\n+d`),
+			map[string]any{"file_path": "one.py", "old_string": "a\nb", "new_string": "c\nd"}},
+		{"patch-adds-only",
+			patch(`*** Update File: one.py\n@@\n+c`),
+			map[string]any{"file_path": "one.py", "old_string": "", "new_string": "c"}},
+		{"patch-delete",
+			patch(`*** Delete File: gone.py`),
+			map[string]any{"file_path": "gone.py", "steer_operation": "delete", "new_string": ""}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := echoedInput(t, runMasterWithArgs(t, tc.payload))
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("tool_input = %v, want %v", got, tc.want)
 			}
 		})
 	}

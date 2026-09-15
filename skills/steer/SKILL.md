@@ -2,7 +2,7 @@
 name: steer
 description: Turns a natural-language rule into the fix that can enforce it — a repository check, a PreToolUse Python guard, or an instruction rule — and installs it. Use when enforcing coding standards, blocking insecure patterns, making sure checks pass before a turn ends, managing hook lifecycle, or running steer CLI commands (register, remove, list, test, preset, verify, git-hooks).
 user-invocable: true
-prompt_version: 13
+prompt_version: 14
 compatibility: Requires Claude Code, Codex, or Pi with tool-call hook support. Hooks are installed into .steer/hooks/ and registered in every installed harness (settings.json for Claude Code, hooks.json for Codex, extensions for Pi). steer CLI must be available on PATH or bundled under scripts/.
 allowed-tools: Bash(steer *), Bash(python3 *), Bash(echo *), Read, Write, Edit
 ---
@@ -186,10 +186,15 @@ Hooks are Python scripts that run on tool operations. They receive JSON on stdin
 ```
 
 **Tool-specific fields:**
-- **Edit**: `file_path`, `old_string`, `new_string`
-- **MultiEdit**: `file_path`, plus array of edits
+- **Edit**: `file_path`, `old_string` (removed text), `new_string` (added text). Every edit shape arrives as Edit, and each carries `old_string` except a file deletion.
 - **Write**: `file_path`, `content` (entire file)
 - **Bash**: `command`
+
+The master hook rewrites every other edit shape into these, so a guard never sees `MultiEdit` or `apply_patch`:
+- A **MultiEdit** arrives as one Edit per hunk, with that hunk's `old_string` and any `replace_all` as sent.
+- A **Codex patch** arrives as one Edit per updated file (a Write per added file). Its `old_string` joins the removed lines and its `new_string` the added lines, each in order across the file's hunks. They are ordered fragments that may not be contiguous: match text in them, never apply them as search-and-replace. A section that removes nothing has `old_string: ""`.
+- A **Codex file deletion** arrives as Edit with `steer_operation: "delete"`, `new_string: ""` and no `old_string`. A guard that needs the deleted content opens the file.
+- A **shell deletion** (`rm`, `git rm`) stays a Bash call; the guard parses the target from `command`.
 
 ### Hook Output (stdout) - To Block
 

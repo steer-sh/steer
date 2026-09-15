@@ -177,8 +177,13 @@ bridge discards. `guard.RequiredImports` supplies the generated runtime's import
 contract.
 
 Virtual edits turn MultiEdit hunks and Codex patch file sections into Claude-shaped
-Edit/Write calls. Only added/replacement content is presented as changed content;
-patch syntax is never presented as a shell command. Guards run in fixed order
+Edit/Write calls. A virtual Edit carries removed text as `old_string`; a MultiEdit
+hunk also keeps its `replace_all` as sent. A patch section's `old_string` and
+`new_string` join its `-` and `+` lines in order across hunks: they are ordered
+fragments that may not be contiguous, never search-and-replace operands. A patch
+file deletion is an Edit marked `steer_operation: "delete"` with no `old_string`;
+the runtime never reads the deleted file. Patch syntax is never presented as a
+shell command. Guards run in fixed order
 over the virtual edits, and the first objection wins. Reply rendering is specific
 to Claude Code, Codex or Pi; guards continue using the shared Claude-shaped input
 and block contract. Audit rows add harness, root session, thread and repository

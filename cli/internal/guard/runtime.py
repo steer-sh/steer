@@ -39,21 +39,22 @@ def steer_repo_root(cwd):
 
 
 def steer_patch_sections(patch_text):
-    """Split an apply_patch document into (op, path, added_content) triples.
+    """Split an apply_patch document into (op, path, added, removed) tuples.
 
     apply_patch carries its whole multi-file patch in one string, so a guard that
     reads it as a command would inspect diff syntax rather than the code landing.
-    Only the added and replacement lines are content; context and removed lines
-    are what the file already survived.
+    added joins a section's + lines and removed its - lines, each in patch order
+    across every hunk; context lines are in neither.
     """
     sections = []
     op = ""
     path = ""
     added = []
+    removed = []
 
     def flush():
         if op:
-            sections.append((op, path, "\n".join(added)))
+            sections.append((op, path, "\n".join(added), "\n".join(removed)))
 
     for line in (patch_text or "").split("\n"):
         header = None
@@ -69,6 +70,7 @@ def steer_patch_sections(patch_text):
             flush()
             op, path = header
             added = []
+            removed = []
             continue
         if line.startswith("*** Move to: "):
             # The patch renames as it edits; the target path is what lands.
@@ -78,19 +80,24 @@ def steer_patch_sections(patch_text):
             continue
         if op and line.startswith("+"):
             added.append(line[1:])
+        elif op and line.startswith("-"):
+            removed.append(line[1:])
 
     flush()
     return sections
 
 
-def steer_edit(payload, tool_name, file_path, key, value):
-    """Build one virtual edit: the payload's envelope with a rewritten tool call."""
+def steer_edit(payload, tool_name, file_path, fields):
+    """Build one virtual edit: the payload's envelope with a rewritten tool call.
+
+    fields holds the tool_input keys after file_path, which is omitted when empty.
+    """
     edit = dict(payload)
     edit["tool_name"] = tool_name
     tool_input = {}
     if file_path:
         tool_input["file_path"] = file_path
-    tool_input[key] = value
+    tool_input.update(fields)
     edit["tool_input"] = tool_input
     return edit
 
@@ -114,11 +121,18 @@ def steer_virtual_edits(payload):
         if not isinstance(command, str):
             command = ""
         edits = []
-        for op, path, added in steer_patch_sections(command):
+        for op, path, added, removed in steer_patch_sections(command):
             if op == "add":
-                edits.append(steer_edit(payload, "Write", path, "content", added))
+                fields = {"content": added}
+                edits.append(steer_edit(payload, "Write", path, fields))
+            elif op == "delete":
+                # The deleted content is never read from disk; a guard that
+                # needs it opens the file itself.
+                fields = {"steer_operation": "delete", "new_string": ""}
+                edits.append(steer_edit(payload, "Edit", path, fields))
             else:
-                edits.append(steer_edit(payload, "Edit", path, "new_string", added))
+                fields = {"old_string": removed, "new_string": added}
+                edits.append(steer_edit(payload, "Edit", path, fields))
         return edits
 
     if tool_name == "MultiEdit":
@@ -135,7 +149,12 @@ def steer_virtual_edits(payload):
             new_string = entry.get("new_string")
             if not isinstance(new_string, str):
                 new_string = ""
-            edits.append(steer_edit(payload, "Edit", file_path, "new_string", new_string))
+            fields = {}
+            for key in ("old_string", "replace_all"):
+                if key in entry:
+                    fields[key] = entry[key]
+            fields["new_string"] = new_string
+            edits.append(steer_edit(payload, "Edit", file_path, fields))
         # A guard that only ever handled Edit now sees every hunk of a MultiEdit.
         return edits
 
@@ -158,7 +177,7 @@ def steer_audit_log(hook_name, payload, edit, harness):
         if not isinstance(tool_input, dict):
             tool_input = {}
         snippet = ""
-        for key in ("command", "content", "new_string"):
+        for key in ("command", "content", "new_string", "old_string"):
             value = tool_input.get(key)
             if isinstance(value, str) and value.strip():
                 snippet = value[:200]
