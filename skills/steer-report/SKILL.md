@@ -1,13 +1,13 @@
 ---
 name: steer-report
-description: Audits the interventions steer already installed, then mines Claude Code and Codex transcripts and the commit-review ledger for new hook candidates backed by evidence. Use for steer onboarding ("what hooks should I create?"), periodic review of installed hooks, or when the user asks to mine usage history for candidates.
+description: Audits the fixes steer already installed, then mines Claude Code and Codex transcripts and the commit-review ledger for new fix candidates backed by evidence — repository checks, guards, instruction rules, or review prompt entries. Use for steer onboarding ("what hooks should I create?"), periodic review of installed hooks and fixes, or when the user asks to mine usage history for candidates.
 user-invocable: true
 digest_version: 2
 compatibility: Requires the steer CLI (report, commit-gate and check subcommands) on PATH or bundled under scripts/. Reads transcripts from ~/.claude/projects and $CODEX_HOME/sessions, and, when present, the commit-review ledger under ~/.steer/state/commit-review (~/.claude/state/commit-review on a machine that has not yet migrated).
 allowed-tools: Bash(steer *), Read, Edit, Write
 ---
 
-# Steer Report — audit installed hooks, then mine for new ones
+# Steer Report — audit installed fixes, then mine for new ones
 
 This skill closes the friction loop. It decides two things, in this order:
 
@@ -414,19 +414,22 @@ Pass `--since 60` to limit the window, `--strict-joins` to restrict to rows whos
 
 Both corpora are mechanical evidence. All semantic judgment — what is hookable, how to phrase it — happens now, in this session. Tag every candidate with the corpus it came from.
 
-### Transcript candidates — the hookability filter
+### Transcript candidates — what some tier can fix
 
-A steer hook is a PreToolUse Python script doing regex/AST detection on file edits or Bash commands. A transcript candidate is hookable only if a concrete textual pattern can detect the violation.
+A transcript candidate qualifies when some tier in the routing guide (Step 4) can address it.
 
-- Hookable: "don't use console.log", "always python3 not python", "never commit .env files", "no rm -rf".
-- Not hookable: "be more concise", "ask before refactoring", tone/judgment/workflow complaints. Discard these silently — do not pad the report.
+- A concrete pattern in an edit or a command: a pre-tool guard. "don't use console.log", "always python3 not python", "never commit .env files", "no rm -rf".
+- A property of the finished tree: a repository check. "tests must pass before the turn ends", "no literal test counts in scripts".
+- A judgment or workflow complaint with no mechanical test: an instruction rule, and only when it recurs across sessions and no instruction already says it. "ask before refactoring", "be more concise".
+
+Discard the rest silently — do not pad the report.
 
 Then:
 
-1. **CLAUDE.md gap analysis first.** Directives are the highest-precision source: the user already wrote the rule down; it just isn't enforced. Check each hookable directive against `guard_rules` and `hook_blocks` — skip anything a guard already covers. A directive that matches only an instruction rule (in `steer_rules`, not in `guard_rules`) is not enforced: propose a guard for it only with a reason why the instruction rule's `--not-mechanizable` argument no longer holds, and name the instruction rule the guard would replace.
+1. **CLAUDE.md gap analysis first.** Directives are the highest-precision source: the user already wrote the rule down; it just isn't enforced. Check each directive a check or guard could detect against `guard_rules`, `hook_blocks` and the `checks` reading — skip anything a guard or check already covers. A directive no check or guard can detect is already in its strongest place; skip it. A directive that matches only an instruction rule (in `steer_rules`, not in `guard_rules`) is not enforced: propose a guard for it only with a reason why the instruction rule's `--not-mechanizable` argument no longer holds, and name the instruction rule the guard would replace.
 2. **Corrections and failures second.** Weight by `sessions` over `count` (friction across sessions beats one bad session). Read the `examples` — the pattern key is normalized and lossy; the examples carry the user's actual words.
 3. **Deduplicate across sources.** A CLAUDE.md directive corroborated by correction clusters is one candidate with stronger evidence, not two.
-4. **Phrase each candidate as a steer rule** in `detect | suggest` syntax, e.g. `never use python bare | use python3 instead`. Reuse the user's own wording where possible.
+4. **Phrase each candidate as a rule.** A guard candidate uses `detect | suggest` syntax, e.g. `never use python bare | use python3 instead`. Reuse the user's own wording where possible.
 
 ### Review candidates — class qualification
 
@@ -444,26 +447,31 @@ Cap the whole report at the **top 5–7 candidates across both corpora**. Findin
 
 ## Step 4: Route each candidate to the strongest tier that can catch it
 
-Take the first tier on this ladder that can actually detect the class. The ladder is ordered strongest oracle first: output quality converges to the oracles you can reach, and a prose rule only shifts a probability while an exit code does not.
+The routing guide is shared with the `steer` skill. Read it from this skill's
+directory with symlinks resolved, because an installed skill directory can be a
+link:
 
-The `--tier` flag takes either vocabulary — `check|steer|prose|prompt` or
-`check|guard|instruction|review` — and refuses anything else. Say the type, not the
-flag value.
+```bash
+cat "$(cd "<this skill's base directory>" && pwd -P)/../steer/prompts/routing.md"
+```
 
-| `--tier` | Say | Use when | Where it lands |
-|---|---|---|---|
-| `check` | repository check | A local, deterministic test of repository content can detect it | a managed check in that repo's `check.sh`, authored from `steer check guide` |
-| `steer` / `guard` | pre-tool guard | It is detectable at edit time by regex/AST on a file or command | a PreToolUse hook, via the `steer` skill |
-| `prompt` / `review` | review-prompt change | It is a recurring reviewer false positive | a review addendum entry, via `steer commit-gate addendum add` — the stock prompt is fixed |
-| `prose` / `instruction` | instruction rule | Genuinely not mechanizable but frequent enough to earn a line | the `## Steer Rules` section of each installed harness's instruction file (CLAUDE.md, AGENTS.md), via `steer rules add` |
+Route each candidate with it: name the enforcement point, then take the strongest
+tier that meets it. An instruction-rule candidate also needs the recurrence Step 3
+asks for.
 
-An instruction rule is the weakest tier and the last one to reach for. Use it only after arguing why the class cannot be detected by a repository check or a pre-tool guard, and expect the class to keep recurring more often than not — that outcome is information, not failure.
+The `--tier` flag takes either vocabulary and refuses anything else. Say the type,
+not the flag value.
 
-A review-prompt change is not a rung you pass through on the way to prose. It applies to one candidate type only — a recurring reviewer false positive — and a defect class never routes there.
+| `--tier` | Say |
+|---|---|
+| `check` | repository check |
+| `steer` / `guard` | pre-tool guard |
+| `prose` / `instruction` | instruction rule |
+| `prompt` / `review` | review prompt |
 
-Transcript candidates almost always route to `steer` (edit-time regex) or `check` (a repository check). Scope a guard project vs global — a rule seen across projects or from global CLAUDE.md suggests global scope. A repository check has no global scope: it runs in the one repository that declares it, so a class seen across repositories needs a check in each one. If nothing routes, say so. "No candidate qualified this pass" is a correct result.
+Scope a guard project vs global — a rule seen across projects or from global CLAUDE.md suggests global scope. If nothing routes, say so. "No candidate qualified this pass" is a correct result.
 
-A detector that cannot run in the blocking tier — it needs the network, credentials or a device, it flakes, or it is slow — may still be suggested as a manual or CI check. Say plainly that Steer observes no execution of it and cannot bind a check-tier record to it, so its effect stays unmonitored here.
+A detector the guide keeps out of `check.sh` may still be suggested as a manual or CI check. Say plainly that Steer observes no execution of it and cannot bind a check-tier record to it, so its effect stays unmonitored here.
 
 ## Step 5: Present, then act
 
@@ -498,7 +506,7 @@ then whether anything is asked of the reader:
 > needed. The guard stays installed; no action is needed now.
 
 Name the tier by its type, never by its flag value: a **repository check**, a **pre-tool
-guard**, an **instruction rule** or a **review-prompt change**.
+guard**, an **instruction rule** or a **review prompt**.
 
 Say plainly which action does what. **Applying a fix** makes a change. **Stopping the
 tracking** of a fix ends its measurement and leaves the change in place — it removes
@@ -532,9 +540,9 @@ clearer sentence never restarts the measurement. Omit a flag to keep that half.
 
 ### Transcript candidates — install through the tier's own workflow
 
-For each accepted transcript candidate routed to a pre-tool guard, follow the steer skill's generation protocol (`skills/steer/SKILL.md` in this plugin) with the phrased rule — specialist prompt selection, hook generation, registration via `steer register`, and mandatory self-testing all apply unchanged. Do not duplicate or shortcut that protocol here.
+Install each accepted transcript candidate through its tier's section in the routing guide. A pre-tool guard goes through the steer skill's generation protocol with the phrased rule — specialist prompt selection, hook generation, registration via `steer register`, and mandatory self-testing all apply unchanged. Do not duplicate or shortcut that protocol here.
 
-A candidate routed to a repository check follows the check workflow in step 2 of the review candidates below, and registers with `--tier check --check-id` under the same binding and `--scope-repo-root` rules.
+A candidate routed to a repository check registers with `--tier check --check-id` under the same binding and `--scope-repo-root` rules as a review candidate.
 
 Then register the class over the transcript corpus, so the fix you just installed is measured rather than assumed:
 
@@ -572,9 +580,7 @@ For each accepted review candidate:
 
 2. **Install the fix** through its tier's workflow, and verify it fires on the real case:
 
-   - **Repository check** — read `steer check guide` first. Run `steer check init` if the repository has no `.steer/checks/manifest.json`. Write the detector and a case file with a known-good case and a defect case that reproduces the real finding, then `steer check add <id>`; it declares the check only when every case matched. The repository must be adopted (`steer check adopt`) and its Stop runner registered (`steer check install --harness <id> --scope <scope>`) before step 3 accepts the record. `steer check list` shows all three.
-   - **Pre-tool guard** — the `steer` skill.
-   - **Review-prompt change** — write a review addendum entry with `steer commit-gate addendum add <id> --text "<text>"`. The stock reviewer prompt is compiled into the binary; never edit it for a fix.
+   Follow the tier's section in the routing guide. For a repository check, the defect case reproduces the real finding. Step 3 accepts a check-tier record only once the check is validated, the repository adopted, and its Stop runner registered; `steer check list` shows all three.
 
 3. **Register it**, after the fix is in:
 
@@ -602,7 +608,7 @@ For each accepted review candidate:
 
    **`--tier prose` additionally requires `--rule-id` and `--not-mechanizable`.** The prose has to exist before a record can name it: write it with `steer rules add <id> --rule "<text>"`, which prints the scope's rules first and refuses text a second id already holds, then pass that id. `register` copies the rule text and its `rule_hash` onto the record, and refuses an id the store does not hold. `--not-mechanizable` carries the argument the routing ladder asks for — one sentence naming why a repository check and a pre-tool guard cannot detect this class. It is refused blank and refused when it only restates the class name. Today that argument is made in a session and lost there, so no later reader can check it was made at all; the flag preserves its presence, and its soundness stays the reader's.
 
-   **`--tier prompt` additionally requires `--addendum-id` and `--kind false-positive`.** The stock review prompt is compiled into the binary and fixed; a review-prompt change is an entry the commit gate adds to it. Write it with `steer commit-gate addendum add <id> --text "<text>"`, then pass that id. `register` copies the entry text and its `addendum_hash` onto the record, refuses an id the store does not hold, and refuses an id held by both stores unless `--addendum-scope project|global` names one. A defect class is refused, because an entry that stops the reviewer raising a real defect would read as a falling count. A project entry reaches the reviewer only once the store's `steer-manifest.json` is committed: the gate reads project entries from HEAD, so `register` refuses a project entry that HEAD does not hold with the same text. Commit the manifest first; `steer commit-gate addendum list` names each entry's state at HEAD.
+   **`--tier prompt` additionally requires `--addendum-id` and `--kind false-positive`.** The stock review prompt is compiled into the binary and fixed; a fix on this tier is an entry the commit gate adds to it. Write it with `steer commit-gate addendum add <id> --text "<text>"`, then pass that id. `register` copies the entry text and its `addendum_hash` onto the record, refuses an id the store does not hold, and refuses an id held by both stores unless `--addendum-scope project|global` names one. A defect class is refused, because an entry that stops the reviewer raising a real defect would read as a falling count. A project entry reaches the reviewer only once the store's `steer-manifest.json` is committed: the gate reads project entries from HEAD, so `register` refuses a project entry that HEAD does not hold with the same text. Commit the manifest first; `steer commit-gate addendum list` names each entry's state at HEAD.
 
    The audit log is a second, independent measurement: it says whether the hook ever *fired*. A steer fix with falling incidence and zero fires did not cause the fall, and incidence alone cannot tell you that.
 

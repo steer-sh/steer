@@ -1,15 +1,17 @@
 ---
 name: steer
-description: Generates and installs PreToolUse Python hooks from natural language rules. Use when enforcing coding standards, blocking insecure patterns, managing hook lifecycle, or running steer CLI commands (register, remove, list, test, preset, verify, git-hooks).
+description: Turns a natural-language rule into the fix that can enforce it — a repository check, a PreToolUse Python guard, or an instruction rule — and installs it. Use when enforcing coding standards, blocking insecure patterns, making sure checks pass before a turn ends, managing hook lifecycle, or running steer CLI commands (register, remove, list, test, preset, verify, git-hooks).
 user-invocable: true
-prompt_version: 10
+prompt_version: 11
 compatibility: Requires Claude Code, Codex, or Pi with tool-call hook support. Hooks are installed into .steer/hooks/ and registered in every installed harness (settings.json for Claude Code, hooks.json for Codex, extensions for Pi). steer CLI must be available on PATH or bundled under scripts/.
-allowed-tools: Bash(steer *), Bash(python3 *), Bash(echo *), Read, Write
+allowed-tools: Bash(steer *), Bash(python3 *), Bash(echo *), Read, Write, Edit
 ---
 
-# Steer - Hook Generation from Natural Language Rules
+# Steer - Fixes from Natural Language Rules
 
-When the user describes a coding rule in natural language, generate a Python hook script that enforces it in Claude Code, test it, and install it.
+When the user describes a coding rule in natural language, route it to the tier
+that can enforce it, then install the fix. Most rules that name a concrete
+pattern become a Python guard: generate it, test it, and install it.
 
 ## Example Invocations
 
@@ -33,6 +35,9 @@ Activated when the invocation contains `--headless`. Example:
 ```
 /steer --headless never use console.log
 ```
+
+Headless mode is the guard-generation benchmark's interface. It skips
+[Route the rule](#route-the-rule) and always generates a guard.
 
 In headless mode you MUST:
 - **Never ask questions** — make autonomous best-effort decisions for any ambiguity
@@ -195,6 +200,15 @@ Before anything else, split the rule on `|` if present:
 - **`suggestion`** (after `|`, if present): used **only** in the `stopReason` message to tell the developer what to do instead
 
 Everything below operates on `detection_rule` only. The suggestion is carried forward solely for use in Step 2's stopReason.
+
+### Route the rule
+
+Read [prompts/routing.md](prompts/routing.md) and route `detection_rule` to a tier.
+
+- **Pre-tool guard:** continue with Step 1. Steps 1 to 6 are the guard branch.
+- **Any other tier:** install it as that guide's section 3 says, then report the
+  tier, what was installed and where, and what still needs the user. For an
+  instruction rule, the rule text is the whole rule, suggestion included.
 
 ### Step 1: Analyze the Rule and Read Specialist Prompt
 
@@ -478,7 +492,7 @@ restores all of them; pass `--tier` when one id holds entries of more than one t
 
 ## User Suggestion Syntax
 
-The `|` pipe splits a rule into a detection part and an optional suggestion (see Step 0). The suggestion appears **only** in the `stopReason`:
+The `|` pipe splits a rule into a detection part and an optional suggestion (see Step 0). In a guard, the suggestion appears **only** in the `stopReason`:
 
 - Rule: `"never use npm | please use yarn instead"`
 - stopReason: `"Use of npm detected. Suggestion: please use yarn instead"`

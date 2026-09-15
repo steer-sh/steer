@@ -80,7 +80,7 @@ Steer measures each fix against how often the problem happened before it. That t
 
 ## Add a rule
 
-The `/steer` skill turns a concrete rule into a Python guard, tests it, and installs it. For example:
+The `/steer` skill routes a rule to the fix that can enforce it: a repository check, a guard, or an instruction. A concrete pattern becomes a Python guard, which the skill tests and installs. For example:
 
 ```text
 /steer never use bare python in shell commands | use python3 instead

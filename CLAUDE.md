@@ -100,6 +100,8 @@ Read the linked architecture section before changing the corresponding boundary:
   decode one `review_addendum` shape. The stock `prompts/review.md` is never the
   review tier's target.
 - Generation behavior: bump `prompt_version` in `skills/steer/SKILL.md`.
+  That includes `skills/steer/prompts/routing.md`, which `/steer-report` also
+  reads; its rung names are pinned to `cli/internal/tier` by a plugindist test.
   Review templates have separate pinned digests in `cli/internal/gate/`.
 - Transcript normalization: each adapter's `Instrument` is pinned by replay of
   its `testdata/instrument/` corpus. Classification changes also affect

@@ -188,10 +188,19 @@ not a clean review.
 ## Step 6: Repository checks (only when the user asks)
 
 A repository check blocks the end of an agent's turn while the repository's
-`check.sh` fails. Three separate facts arm it, and none implies another:
+`check.sh` fails. The `steer` and `steer-report` skills arm a repository through
+this step too, and pass the scope they chose; setup itself uses `global`.
+
+**First, look for a personal Stop hook that already runs `check.sh`.** Steer
+recognizes a personal gate by its `check-gate.py` hook script and the approval
+list at `~/.claude/check-gate-approved.txt`. When one exists, do not register the
+runner beside it: both would run `check.sh` at every Stop. Move it as the end of
+this step describes, instead of steps 1 and 2.
+
+Three separate facts arm a repository, and none implies another:
 
 1. **The Stop runner is registered** in the harness:
-   `"${STEER_BIN}" check install --harness <claude-code|codex> --scope global`.
+   `"${STEER_BIN}" check install --harness <claude-code|codex> --scope <project|global>`.
    Pi has no Stop runner. In Codex, the user must approve the new Stop hook in
    `/hooks`; Steer cannot read that trust record, so `check install` reports the
    step as unknown.
@@ -204,10 +213,7 @@ A repository check blocks the end of an agent's turn while the repository's
 
 Relay what `check install` and `check adopt` print, as in Step 3.
 
-**If the user already runs `check.sh` from a personal Stop hook**, do not register
-the runner beside it: both would run `check.sh` at every Stop. Steer recognizes a
-personal gate by its `check-gate.py` hook script and the approval list at
-`~/.claude/check-gate-approved.txt`. Preview the move first:
+**Moving a personal gate.** Preview the move first:
 
 ```bash
 "${STEER_BIN}" check migrate
@@ -223,10 +229,10 @@ the approval list or the hook script.
 
 ## What this skill does not do
 
-- It never authors guards or installs presets. `/steer` writes a guard from a rule.
+- It never authors guards or installs presets. `/steer` writes the fix for a rule.
   Setup only registers the guards a store already holds.
 - It never writes a check. `steer check guide` is the authoring contract, and
-  `/steer-report` routes a recurring problem to a check.
+  `/steer` or `/steer-report` routes a rule or a recurring problem to a check.
 - It never registers an intervention or reads the evidence corpora. `/steer-report`
   does that once there is evidence to read.
 - It never changes an existing reviewer. `steer config set` is the user's own command,
