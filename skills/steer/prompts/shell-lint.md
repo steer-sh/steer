@@ -39,15 +39,11 @@ def main():
     if tool_name == 'Bash':
         content_to_check = tool_input.get('command', '')
         file_path = ''
-    elif tool_name in ('Edit', 'MultiEdit', 'Write'):
+    elif tool_name in ('Edit', 'Write'):
         file_path = tool_input.get('file_path', '')
-        if tool_name == 'MultiEdit':
-            edits = tool_input.get('edits', [])
-            content_to_check = '\n'.join(e.get('new_string', '') for e in edits)
-        else:
-            new_string = tool_input.get('new_string', '')
-            content = tool_input.get('content', '')
-            content_to_check = new_string or content or ''
+        new_string = tool_input.get('new_string', '')
+        content = tool_input.get('content', '')
+        content_to_check = new_string or content or ''
     else:
         sys.exit(0)
 
@@ -82,7 +78,7 @@ if __name__ == "__main__":
 
 ## File Types for Code Analysis
 
-When checking file content (Edit/MultiEdit/Write), filter to shell-related files:
+When checking file content (Edit/Write), filter to shell-related files:
 `.sh`, `.bash`, `.zsh`, `.fish`, `Dockerfile`, `*.dockerfile`, `.yml`/`.yaml` (run: blocks), `Makefile`/`*.mk`
 
 ## Detection Strategies

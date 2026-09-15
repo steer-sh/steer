@@ -2,7 +2,7 @@
 name: steer
 description: Turns a natural-language rule into the fix that can enforce it — a repository check, a PreToolUse Python guard, or an instruction rule — and installs it. Use when enforcing coding standards, blocking insecure patterns, making sure checks pass before a turn ends, managing hook lifecycle, or running steer CLI commands (register, remove, list, test, preset, verify, git-hooks).
 user-invocable: true
-prompt_version: 14
+prompt_version: 15
 compatibility: Requires Claude Code, Codex, or Pi with tool-call hook support. Hooks are installed into .steer/hooks/ and registered in every installed harness (settings.json for Claude Code, hooks.json for Codex, extensions for Pi). steer CLI must be available on PATH or bundled under scripts/.
 allowed-tools: Bash(steer *), Bash(python3 *), Bash(echo *), Read, Write, Edit
 ---
@@ -335,20 +335,16 @@ def main():
     tool_name = data.get('tool_name', '')
     tool_input = data.get('tool_input', {})
 
-    # Filter to relevant tools - exit early for others
-    if tool_name not in ['Edit', 'MultiEdit', 'Write']:
+    # Filter to relevant tools - every edit arrives as Edit or Write
+    if tool_name not in ['Edit', 'Write']:
         sys.exit(0)
 
     file_path = tool_input.get('file_path', '')
 
-    # MultiEdit passes an array of edits, not a single new_string
-    if tool_name == 'MultiEdit':
-        edits = tool_input.get('edits', [])
-        content_to_check = '\n'.join(e.get('new_string', '') for e in edits)
-    else:
-        new_string = tool_input.get('new_string', '')
-        content = tool_input.get('content', '')
-        content_to_check = new_string or content or ''
+    # Added text. A rule about removed text reads tool_input.get('old_string', '')
+    new_string = tool_input.get('new_string', '')
+    content = tool_input.get('content', '')
+    content_to_check = new_string or content or ''
 
     if not content_to_check.strip():
         sys.exit(0)
@@ -578,7 +574,7 @@ restores all of them; pass `--tier` when one id holds entries of more than one t
 4. **Comments and strings** - A pattern inside a comment or string literal is almost never a violation. For Python, prefer AST parsing (`ast` module) over regex — it inherently ignores comments and strings. For JS/TS and other languages without convenient AST access, strip comments and string literals before running regex detection. A rule blocking `console.log` must not block `// I removed console.log`. This is the #1 cause of developer frustration with custom hooks.
 5. **Clear stopReason** - Explain WHAT was wrong and HOW to fix it.
 6. **Safe regex** - Never use nested quantifiers like `(a*)*` or `(a|b)*` inside repetition. These cause catastrophic backtracking (ReDoS).
-7. **Handle Edit, MultiEdit, and Write** - Edit provides `new_string`, Write provides `content`, MultiEdit provides `edits` (an array — concatenate all `new_string` values). See the template in Step 2.
+7. **Handle Edit and Write** - Every edit reaches a guard as one of these (see Hook Input). Edit provides `new_string` (added) and `old_string` (removed), Write provides `content`. A rule about code being added reads `new_string` or `content`; a rule about code being removed reads `old_string`; a rule about deleting files checks `steer_operation == "delete"` for Edit and parses `command` for Bash. Write test cases and stored fixture cases in these shapes, never as a raw MultiEdit or apply_patch payload. See the template in Step 2.
 8. **Multi-language rules** - When the rule mentions multiple languages, handle ALL of them with file extension routing. Don't focus on only one.
 
 ## User Suggestion Syntax
