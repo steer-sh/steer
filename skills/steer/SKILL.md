@@ -2,7 +2,7 @@
 name: steer
 description: Turns a natural-language rule into the fix that can enforce it — a repository check, a PreToolUse Python guard, or an instruction rule — and installs it. Use when enforcing coding standards, blocking insecure patterns, making sure checks pass before a turn ends, managing hook lifecycle, or running steer CLI commands (register, remove, list, test, preset, verify, git-hooks).
 user-invocable: true
-prompt_version: 11
+prompt_version: 12
 compatibility: Requires Claude Code, Codex, or Pi with tool-call hook support. Hooks are installed into .steer/hooks/ and registered in every installed harness (settings.json for Claude Code, hooks.json for Codex, extensions for Pi). steer CLI must be available on PATH or bundled under scripts/.
 allowed-tools: Bash(steer *), Bash(python3 *), Bash(echo *), Read, Write, Edit
 ---
@@ -37,7 +37,8 @@ Activated when the invocation contains `--headless`. Example:
 ```
 
 Headless mode is the guard-generation benchmark's interface. It skips
-[Route the rule](#route-the-rule) and always generates a guard.
+[Pre-flight](#pre-flight-find-what-is-already-installed) and
+[Route the rule](#route-the-rule), and always generates a guard.
 
 In headless mode you MUST:
 - **Never ask questions** — make autonomous best-effort decisions for any ambiguity
@@ -153,28 +154,49 @@ To **allow**: exit with code 0, print nothing to stdout.
 
 Follow these steps for every hook creation.
 
-### Pre-flight: Check guardrail health
+### Pre-flight: find what is already installed
 
-Before you generate anything, read the full failure-class inventory. This step
-stops you from re-proposing a class the loop already decided.
+Before you install anything, read the fixes Steer already holds and the classes
+it already decided. This step stops a duplicate fix and a re-proposed class.
 
 ```bash
 STEER_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}"
 STEER_BIN="${STEER_ROOT:+${STEER_ROOT}/scripts/steer}"
 STEER_BIN="${STEER_BIN:-steer}"
 "${STEER_BIN}" status --json
+"${STEER_BIN}" list --scope global
+"${STEER_BIN}" preset list --scope global
 ```
 
-Read the `interventions[]` array. Each row is one live intervention with its
-`class`, `tier`, `target`, `status`, and its `observation` — what the corpus
-recorded, never a claim that the fix worked. Match the user's rule against the
-classes there:
+`status --json` reads guards and presets in the project scope only; the two list
+commands add the global scope.
 
-- The rule matches any class here: the class is already decided. Do not install a
-  duplicate. Say which record covers it and what its observation shows.
+**Installed fixes.** Compare the rule with each fix, whatever its tier:
+
+- Guards: `hooks[]`, the global `list`, and each enabled preset in `presets[]`
+  and the global `preset list`.
+- Instruction rules: `rules[]`, both scopes.
+- Review prompt entries: `addenda[]`, both scopes.
+- Repository checks: `checks.checks[]`, for this repository only. For a request
+  to run the tests before a turn ends, `checks.adopted` and `checks.runner[]`
+  say whether this repository's `check.sh` already runs there.
+
+Keep each fix that covers the rule, with its tier and scope. [Route the
+rule](#route-the-rule) decides what the match means.
+
+**Decided classes.** Read the `interventions[]` array. Each row is one live
+intervention with its `class`, `tier`, `target`, `status`, and its `observation`
+— what the corpus recorded, never a claim that the fix worked. Match the user's
+rule against the classes there:
+
+- The rule matches a class: the class is already decided. A record does not show
+  that its fix stands here: read its `artifact` and `scope`. While the fix stands
+  and the scope takes in this repository and harness, do not install a duplicate;
+  say which record covers it and what its observation shows. Otherwise the
+  install may go ahead, and the record does not measure it.
 - The record's `observation.recurrence.occurred` is true: the class came back
   after the record went in. Treat the user's rule as a rework of that record
-  rather than as a new hook, and open `observation.recurrence.example` first.
+  rather than as a new fix, and open `observation.recurrence.example` first.
 - The record has no `scope`, or its `observation.coverage` counts unknown units:
   the class is installed and its window is not accounted for. Name that from the
   row, and do not install a duplicate.
@@ -183,7 +205,7 @@ classes there:
 An observation states no direction. Never read a quiet after-window as proof the
 fix worked: prevention and absent opportunity both produce silence.
 
-Fail soft. If the command errors, or the CLI is absent, say so in one line and
+Fail soft. If a command errors, or the CLI is absent, say so in one line and
 continue. This check is an optimization, not a gate. The `status --json` schema
 is documented once, in the contract section of `skills/steer-report/SKILL.md`.
 
@@ -204,6 +226,17 @@ Everything below operates on `detection_rule` only. The suggestion is carried fo
 ### Route the rule
 
 Read [prompts/routing.md](prompts/routing.md) and route `detection_rule` to a tier.
+Then compare it with the fixes Pre-flight kept:
+
+- A fix on that tier already covers the rule: install nothing. Name the fix, its
+  tier and its scope.
+- Only a weaker tier covers it, such as an instruction rule for a rule a guard
+  can decide: install the stronger fix, then offer to remove the weaker one with
+  its tier's remove command.
+- A fix covers it in the other scope only: say so, and ask whether the rule is
+  wanted in this scope too.
+
+Then install on the routed tier:
 
 - **Pre-tool guard:** continue with Step 1. Steps 1 to 6 are the guard branch.
 - **Any other tier:** install it as that guide's section 3 says, then report the
