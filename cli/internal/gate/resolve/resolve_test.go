@@ -820,6 +820,107 @@ func TestResolverStampsTheMissReason(t *testing.T) {
 	}
 }
 
+func TestResolverRejoinJudgesResolverLinksAgain(t *testing.T) {
+	dir := t.TempDir()
+	cfg := gate.Config{StateDir: dir, HostID: "testhost", StaleAfter: 30 * time.Minute}
+	reply := multiRoundFix(fixT + 400)
+	link := func(row resolverRow, text string, ts any) resolverRow {
+		for k, v := range gate.ParseLedgerText(text) {
+			row[k] = v
+		}
+		row["ledger_found"], row["backfilled"], row["ledger_join"] = true, true, "round"
+		if ts != nil {
+			row["ledger_ts"] = ts
+		}
+		return row
+	}
+	inSession := func(rows []resolverRow, session string) []resolverRow {
+		for _, row := range rows {
+			row["session_id"] = session
+		}
+		return rows
+	}
+	a := append(chainRows(fixT, 4, ""), resolverRow{"phase": "cap", "ts": fixT + 390, "firing": 5,
+		"session_id": fixSession, "finding_slots": 1})
+	blocks := gate.RoundBlocks(reply.Text)
+	link(a[1], reply.Text, int64(reply.When))
+	a[3]["ledger_found"], a[3]["backfilled"], a[3]["ledger_join"] = false, true, "round"
+	for row, block := range map[int]int{5: 2, 7: 3, 8: 4} {
+		link(a[row], blocks[block], int64(reply.When))
+	}
+	delete(a[7], "concerns_total")
+	hook := inSession(chainRows(fixT+5000, 1, ""), "s2")
+	link(hook[1], reply.Text, nil)
+	gone := inSession(chainRows(fixT+10000, 1, ""), "s3")
+	link(gone[1], reply.Text, int64(fixT+10400))
+	shared := inSession(chainRows(fixT+15000, 1, ""), "s4")
+	twoChains := "**Commit gate fired (round 1/4)** — one.\n- **ACCEPTED** — a → b\n\n" +
+		"**Commit gate fired (round 1/4)** — two.\n- **REJECTED** — c → d\n"
+	link(shared[1], twoChains, int64(fixT+15400))
+	early := inSession(chainRows(ledgerRequiredTS-1000, 1, ""), "s5")
+	link(early[1], reply.Text, int64(ledgerRequiredTS-600))
+
+	var rows []resolverRow
+	for _, chain := range [][]resolverRow{a, hook, gone, shared, early} {
+		rows = append(rows, chain...)
+	}
+	var sb strings.Builder
+	for _, row := range rows {
+		line, _ := json.Marshal(row)
+		sb.Write(line)
+		sb.WriteByte('\n')
+	}
+	if err := os.WriteFile(cfg.LogFile(), []byte(sb.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	harvest := []Harvest{func() []LedgerMsg {
+		return []LedgerMsg{reply, {When: fixT + 15400, Key: "s4", Path: "/t.jsonl", Text: twoChains}}
+	}}
+	now := func() float64 { return 2_000_000_000 }
+	opts := BackfillOptions{Apply: true, Quiet: true, Rejoin: true}
+	if res := Backfill(cfg, harvest, opts, nil, now); res.Changed != 4 {
+		t.Fatalf("a re-split link, a new link, a refused link and a stale count change; the identical ones do not; got %d", res.Changed)
+	}
+	after := readShard(t, cfg.LogFile())
+	counts := func(row resolverRow) string {
+		return fmt.Sprintf("%v %v/%v", row["ledger_found"], row["self_reported_accepted"], row["self_reported_rejected"])
+	}
+	for _, c := range []struct {
+		why  string
+		row  resolverRow
+		want string
+	}{
+		{"a stale link keeps only its round's block", after[1], "true 0/1"},
+		{"a stamped miss is re-examined too", after[3], "true 0/2"},
+		{"an unchanged link stays", after[5], "true 0/3"},
+		{"a hook-time capture is not the resolver's to re-judge", after[10], "true 1/10"},
+		{"a link with no ledger left to read is kept", after[12], "true 1/10"},
+		{"a link the current rule refuses becomes a miss", after[14], "false <nil>/<nil>"},
+		{"a link from before the mandate is kept", after[16], "true 1/10"},
+	} {
+		if got := counts(c.row); got != c.want {
+			t.Errorf("%s: got %s, want %s", c.why, got, c.want)
+		}
+	}
+	if after[7]["concerns_total"] == nil {
+		t.Error("a link whose concerns match but whose count is stale takes the current count")
+	}
+	if after[16]["ledger_expected"] != nil {
+		t.Errorf("a kept pre-mandate link is not restamped; got ledger_expected=%v", after[16]["ledger_expected"])
+	}
+	if after[14]["ledger_miss"] != MissRoundShared {
+		t.Errorf("the refused link records why; got %v", after[14]["ledger_miss"])
+	}
+	for _, row := range after {
+		if _, ok := row["_rejoin"]; ok {
+			t.Fatal("the kept link never reaches the shard")
+		}
+	}
+	if res := Backfill(cfg, harvest, opts, nil, now); res.Changed != 0 {
+		t.Fatalf("a second rejoin over current links changes nothing; got %d", res.Changed)
+	}
+}
+
 func TestResolverConcurrentAppendKept(t *testing.T) {
 	dir := t.TempDir()
 	cfg := gate.Config{StateDir: dir, HostID: "testhost", StaleAfter: 30 * time.Minute}

@@ -589,6 +589,7 @@ var (
 	backfillIfDue     bool
 	backfillQuiet     bool
 	backfillReresolve bool
+	backfillRejoin    bool
 )
 
 var commitGateBackfillCmd = &cobra.Command{
@@ -602,7 +603,10 @@ idempotent and, without --apply, writes nothing.
   --apply      write the resolved rows (default is a dry run)
   --if-due     exit early unless some row is unresolved and old enough to resolve
   --quiet      silence the report
-  --reresolve  re-examine rows already stamped as a miss (never removes a ledger)`,
+  --reresolve  re-examine rows already stamped as a miss (never removes a ledger)
+  --rejoin     also re-judge every link the resolver made under the current rules;
+               a link with no ledger left to read is kept, others may change or
+               become a miss`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// A dry run writes nothing, and migrating the corpus is a write.
 		if backfillApply {
@@ -616,6 +620,7 @@ idempotent and, without --apply, writes nothing.
 			IfDue:     backfillIfDue,
 			Quiet:     backfillQuiet,
 			Reresolve: backfillReresolve,
+			Rejoin:    backfillRejoin,
 		}
 		resolve.RunBackfill(cfg, ledgerHarvests(), opts, os.Stdout, nil)
 		return nil
@@ -756,6 +761,7 @@ func init() {
 	commitGateBackfillCmd.Flags().BoolVar(&backfillIfDue, "if-due", false, "Exit early unless a row is due")
 	commitGateBackfillCmd.Flags().BoolVar(&backfillQuiet, "quiet", false, "Silence the report")
 	commitGateBackfillCmd.Flags().BoolVar(&backfillReresolve, "reresolve", false, "Re-examine stamped misses")
+	commitGateBackfillCmd.Flags().BoolVar(&backfillRejoin, "rejoin", false, "Re-judge resolver links and stamped misses under the current rules")
 
 	commitGateCmd.PersistentFlags().StringVar(&commitGateProvider, "provider", "",
 		"Reviewer provider (agy|codex|claude-code); default agy")

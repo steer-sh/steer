@@ -42,12 +42,14 @@ const (
 	rescanAfter = 600 // seconds
 )
 
-// BackfillOptions are the resolver's four flags, matching the Python CLI.
+// BackfillOptions are the resolver's flags. Rejoin also re-judges the links the
+// resolver made, and implies Reresolve.
 type BackfillOptions struct {
 	Apply     bool
 	IfDue     bool
 	Quiet     bool
 	Reresolve bool
+	Rejoin    bool
 }
 
 // resolverRow is one adjudication row, kept as a map because the schema is append-only
@@ -120,8 +122,11 @@ func Backfill(cfg gate.Config, harvests []Harvest, opts BackfillOptions, out io.
 			rows = append(rows, row)
 		}
 	}
-	if opts.Reresolve {
+	if opts.Reresolve || opts.Rejoin {
 		r.reopen(rows)
+	}
+	if opts.Rejoin {
+		r.rejoin(rows)
 	}
 	if opts.IfDue && !r.pending(rows) {
 		r.say("nothing due")
@@ -674,6 +679,77 @@ func (r *resolver) reopen(rows []resolverRow) {
 	r.say("reopened %d stamped miss(es)", n)
 }
 
+// linkFields are the fields a resolver link writes, so the fields a rejoin clears.
+var linkFields = []string{"ledger_found", "backfilled", "ledger_join", "ledger_round", "ledger_ts",
+	"ledger_miss", "concerns", "concerns_total", "self_reported_accepted", "self_reported_rejected"}
+
+// rejoin clears every link the resolver made so the current rules judge it again. A
+// hook-time capture has no ledger_ts and is left alone. The cleared link is kept under
+// _rejoin, and restoreLink puts it back when the rerun cannot judge it.
+func (r *resolver) rejoin(rows []resolverRow) {
+	n := 0
+	for _, row := range rows {
+		if !ExpectsLedger(row) || !pyTruthy(row["ledger_found"]) {
+			continue
+		}
+		if _, ok := pyNum(row["ledger_ts"]); !ok {
+			continue
+		}
+		kept := map[string]any{}
+		for _, k := range linkFields {
+			if v, ok := row[k]; ok {
+				kept[k] = v
+				delete(row, k)
+			}
+		}
+		row["_rejoin"] = kept
+		n++
+	}
+	r.say("reopened %d resolver link(s)", n)
+}
+
+// restoreLink puts back the link rejoin cleared, verbatim. It reports false for a row
+// rejoin did not clear.
+func restoreLink(row resolverRow) bool {
+	kept, ok := row["_rejoin"].(map[string]any)
+	if !ok {
+		return false
+	}
+	for _, k := range linkFields {
+		delete(row, k)
+	}
+	for k, v := range kept {
+		row[k] = v
+	}
+	delete(row, "_rejoin")
+	return true
+}
+
+// sameLink reports whether a rejoined row carries the link rejoin cleared, field for
+// field, compared as JSON so a decoded row and a fresh parse agree.
+func sameLink(row resolverRow) bool {
+	kept, ok := row["_rejoin"].(map[string]any)
+	if !ok {
+		return false
+	}
+	pick := func(m map[string]any) string {
+		fields := make([]any, 0, len(linkFields))
+		for _, k := range linkFields {
+			v := m[k]
+			if n, ok := pyNum(v); ok {
+				v = n
+			}
+			fields = append(fields, v)
+		}
+		data, _ := json.Marshal(fields)
+		var v any
+		json.Unmarshal(data, &v)
+		canon, _ := json.Marshal(v)
+		return string(canon)
+	}
+	return pick(kept) == pick(row)
+}
+
 func (r *resolver) resolveAndWrite(rows []resolverRow, seenLines int, apply bool) Result {
 	ledgers := r.allLedgers()
 	r.say("%d rows, %d ledgers found across transcripts\n", len(rows), len(ledgers))
@@ -689,6 +765,10 @@ func (r *resolver) resolveAndWrite(rows []resolverRow, seenLines int, apply bool
 		}
 
 		if denyTS < ledgerRequiredTS {
+			// A link from before the mandate is evidence the current rule never judges.
+			if restoreLink(row) {
+				continue
+			}
 			row["ledger_expected"] = false
 			row["backfilled"] = true
 			changed++
@@ -703,9 +783,16 @@ func (r *resolver) resolveAndWrite(rows []resolverRow, seenLines int, apply bool
 				if popRecheck(row) {
 					row["backfilled"] = true
 				}
+				restoreLink(row)
 				r.say("  ts=%v deny=%d  window still open, skipping", row["ts"], int64(denyTS))
 				continue
 			}
+			// No ledger in reach is no evidence against a link: its transcript may be gone.
+			if why == MissNoLedger && restoreLink(row) {
+				r.say("  ts=%v deny=%d  link kept: no ledger left to judge it by", row["ts"], int64(denyTS))
+				continue
+			}
+			delete(row, "_rejoin")
 			// A recheck that finds the same miss changes nothing; a new reason is a stamp.
 			restamp := !popRecheck(row) || pyStr(row["ledger_miss"]) != why
 			row["ledger_found"] = false
@@ -739,6 +826,11 @@ func (r *resolver) resolveAndWrite(rows []resolverRow, seenLines int, apply bool
 		if cand.Key != "" && pyStr(row["session_id"]) == "" && pyStr(row["thread_id"]) == "" {
 			row["session_id"] = cand.Key
 		}
+		if sameLink(row) {
+			restoreLink(row)
+			continue
+		}
+		delete(row, "_rejoin")
 		changed++
 		r.say("  ts=%v deny=%d  ledger at %d join=%s: %v/%v",
 			row["ts"], int64(denyTS), int64(cand.When), join,
@@ -747,6 +839,7 @@ func (r *resolver) resolveAndWrite(rows []resolverRow, seenLines int, apply bool
 
 	for _, row := range rows {
 		delete(row, "_recheck")
+		restoreLink(row)
 	}
 	r.say("\n%d rows to update", changed)
 	if changed == 0 {

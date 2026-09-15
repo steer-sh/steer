@@ -343,9 +343,12 @@ with no thread never takes that path. A chain whose rows carry only an adapter's
 placeholder subject (`gate.PlaceholderSubject`) has no subject to contradict: for
 a row with a thread, a header naming no other chain handed findings takes the
 chain bound. A miss records why in `ledger_miss` (the
-`Miss*` constants in `resolve.go`); a recheck refreshes it and a link removes it. `steer commit-gate backfill` previews; `--apply` rewrites the
+`Miss*` constants in `resolve.go`); a recheck refreshes it and a link removes it.
+`steer commit-gate backfill` previews; `--apply` rewrites the
 local host shard with backup (the ten newest are kept) and concurrent-append
-preservation. Stop hooks run
+preservation. `--rejoin` re-judges the links the resolver made (a row with
+`ledger_ts`; a hook-time capture has none) under the current rules, and keeps a
+link with no ledger left to read. Stop hooks run
 the resolver; Codex also registers SubagentStop, and Pi uses turn_end.
 The git pre-commit channel has no session resolver. Pending rows have a grace
 period before they count as missing evidence. The hooks' `--if-due` form harvests
