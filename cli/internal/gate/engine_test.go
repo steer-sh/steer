@@ -216,6 +216,52 @@ func TestUnchangedRetryEndsChain(t *testing.T) {
 	}
 }
 
+func TestChainCarriesOneIDThroughItsRounds(t *testing.T) {
+	h := newHarness(t, findingReply(oneFinding))
+	first := h.handle()
+	writeFileAt(t, h.repo, "a.py", lines(120)+"fixed = 1\n")
+	gitCmd(t, h.repo, "add", "-A")
+	second := h.handle()
+	rows := h.rows()
+	id, _ := rows[0]["chain_id"].(string)
+	if len(id) != 8 {
+		t.Fatalf("the first deny carries no chain ID: %v", rows[0])
+	}
+	for _, row := range rows {
+		if row["chain_id"] != id {
+			t.Errorf("%v row chain_id = %v, want %s", row["phase"], row["chain_id"], id)
+		}
+	}
+	for _, d := range []Decision{first, second} {
+		if !strings.Contains(d.Reason, "chain ledger #"+id+", subject**") {
+			t.Errorf("the header the agent copies must carry the chain ID %s", id)
+		}
+	}
+}
+
+func TestChainSavedWithoutAnIDStaysWithoutOne(t *testing.T) {
+	h := newHarness(t, findingReply(oneFinding))
+	h.handle()
+	chain := NewChain(h.cfg, ChainKey{Actor: "session-1", Repo: h.repo})
+	state := chain.Load()
+	state.ChainID = ""
+	if err := chain.Save(state); err != nil {
+		t.Fatal(err)
+	}
+	writeFileAt(t, h.repo, "a.py", lines(120)+"fixed = 1\n")
+	gitCmd(t, h.repo, "add", "-A")
+	d := h.handle()
+	if !strings.Contains(d.Reason, "chain ledger, subject**") {
+		t.Error("a chain from before IDs renders its header without one")
+	}
+	rows := h.rows()
+	for _, row := range rows[1:] {
+		if _, ok := row["chain_id"]; ok {
+			t.Errorf("%v row of a legacy chain carries chain_id %v", row["phase"], row["chain_id"])
+		}
+	}
+}
+
 // A retry whose diff CHANGED reviews code no reviewer has seen, so the gate re-fires.
 func TestChangedRetryRefires(t *testing.T) {
 	h := newHarness(t, findingReply(oneFinding))

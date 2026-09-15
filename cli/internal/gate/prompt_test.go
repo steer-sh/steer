@@ -17,8 +17,8 @@ var promptDigests = map[string]struct {
 	want string
 }{
 	"review":     {reviewPrompt, "956536885eab8804f8029edc29953336a7c4664e09a0a09a58f59cf48df00b2c"},
-	"deny":       {denyTemplate, "4326b7ff2a5443355c41f1428f44903d13c4530f2fb15853e6c364388b32f101"},
-	"cap":        {capTemplate, "dd38783f70c5a67a23653efec829cda089ea1777c41c4a7f040891864c89e542"},
+	"deny":       {denyTemplate, "cb5c70a28338a73c885076836415e2a70723de4094d4a3b96d542d7dacb9b738"},
+	"cap":        {capTemplate, "513b1b7c400d8dc217688530c66bf452a8668ae01d9f345a0a92a4831bc21b54"},
 	"round-note": {roundNote, "f40acabd50e95481f309c08ccacf4cac025835d79e8e265601170f7c4a4d34c3"},
 	"rerun-note": {rerunNoteText, "27d14c6916336301abd551b90d82d5fc799e027ae7d95b0520ef501c0efa9f1b"},
 }
@@ -43,13 +43,13 @@ func TestInstrumentID(t *testing.T) {
 // reaches the agent.
 func TestNoPlaceholderSurvivesFill(t *testing.T) {
 	prompt := BuildReviewPrompt("msg", "diff", "ctx", Addendum{})
-	deny := BuildDeny(3, "reviews", 2, 4, rerunNoteText, "feat: a subject", "a reviewer")
-	capped := BuildCap(3, "reviews", 5, 4, "feat: a subject", "a reviewer")
+	deny := BuildDeny(3, "reviews", 2, 4, rerunNoteText, "feat: a subject", "", "a reviewer")
+	capped := BuildCap(3, "reviews", 5, 4, "feat: a subject", "", "a reviewer")
 	for name, out := range map[string]string{"review": prompt, "deny": deny, "cap": capped} {
 		for _, placeholder := range []string{
 			"{message}", "{diff}", "{context}", "{count}", "{review}",
 			"{firing}", "{cap}", "{round_note}", "{rerun_note}", "{subject}",
-			"{reviewer}",
+			"{chain}", "{reviewer}",
 		} {
 			if strings.Contains(out, placeholder) {
 				t.Errorf("%s output still carries %s", name, placeholder)
@@ -84,22 +84,46 @@ func TestCommitSubject(t *testing.T) {
 // The subject the row stores and the subject the agent is handed must be one string.
 func TestSubjectReachesTheHeader(t *testing.T) {
 	const subject = "fix(resolver): chain join — one ledger per chain"
-	if !strings.Contains(BuildDeny(3, "r", 2, 4, "", subject, "a reviewer"), "chain ledger, "+subject+"**") {
+	if !strings.Contains(BuildDeny(3, "r", 2, 4, "", subject, "", "a reviewer"), "chain ledger, "+subject+"**") {
 		t.Error("the deny header must carry the subject verbatim")
 	}
-	if !strings.Contains(BuildCap(3, "r", 5, 4, subject, "a reviewer"), "chain ledger, "+subject+"**") {
+	if !strings.Contains(BuildCap(3, "r", 5, 4, subject, "", "a reviewer"), "chain ledger, "+subject+"**") {
 		t.Error("the terminal header must carry it too")
 	}
-	if !strings.Contains(BuildDeny(3, "r", 2, 4, "", "", "a reviewer"), "chain ledger, "+NoSubject+"**") {
+	if !strings.Contains(BuildDeny(3, "r", 2, 4, "", "", "", "a reviewer"), "chain ledger, "+NoSubject+"**") {
 		t.Error("an unread commit message still renders a header, matching no row")
 	}
 }
 
+func TestChainIDReachesTheHeader(t *testing.T) {
+	const subject = "fix(resolver): chain join"
+	for name, out := range map[string]string{
+		"deny": BuildDeny(3, "r", 2, 4, "", subject, "7f3a2b9c", "a reviewer"),
+		"cap":  BuildCap(3, "r", 5, 4, subject, "7f3a2b9c", "a reviewer"),
+	} {
+		start := strings.Index(out, "**"+LedgerHeader+" — chain ledger")
+		if start < 0 {
+			t.Fatalf("%s renders no chain header", name)
+		}
+		header := strings.SplitN(out[start:], "\n", 2)[0]
+		if BlockChainID(header) != "7f3a2b9c" || BlockSubject(header) != subject {
+			t.Errorf("%s header %q must read back as the ID and the subject", name, header)
+		}
+	}
+	legacy := BuildDeny(3, "r", 2, 4, "", subject, "", "a reviewer")
+	if !strings.Contains(legacy, "chain ledger, "+subject+"**") {
+		t.Error("a chain with no ID renders the header it had before")
+	}
+	if BlockChainID("**Commit gate fired — chain ledger, fix: #abc123 in the parser**") != "" {
+		t.Error("a hash inside the subject is not a chain ID")
+	}
+}
+
 func TestFiringOneHasNoRoundNote(t *testing.T) {
-	if strings.Contains(BuildDeny(3, "r", 1, 4, "", "s", "a reviewer"), "This is firing") {
+	if strings.Contains(BuildDeny(3, "r", 1, 4, "", "s", "", "a reviewer"), "This is firing") {
 		t.Error("firing 1 must not carry the round note")
 	}
-	if !strings.Contains(BuildDeny(3, "r", 2, 4, "", "s", "a reviewer"), "This is firing 2 of at most 4") {
+	if !strings.Contains(BuildDeny(3, "r", 2, 4, "", "s", "", "a reviewer"), "This is firing 2 of at most 4") {
 		t.Error("firing 2 must carry the round note")
 	}
 }

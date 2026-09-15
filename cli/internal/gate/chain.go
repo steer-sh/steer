@@ -1,6 +1,7 @@
 package gate
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -35,6 +36,20 @@ type ChainState struct {
 	// stale-index notice asks the repository what is unstaged instead, because a chain
 	// that settles onto the index stops drifting while the miss stays.
 	Spec DiffSpec `json:"spec"`
+	// ChainID names the chain in the ledger header and on every row it writes. Empty
+	// for a chain saved before IDs existed, which stays without one until it ends.
+	ChainID string `json:"chain_id,omitempty"`
+}
+
+// NewChainID returns a fresh chain ID: eight hex characters, short enough for the agent
+// to copy exactly. It returns "" when the system has no randomness to give, and the
+// chain then joins by its subject alone.
+func NewChainID() string {
+	var b [4]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(b[:])
 }
 
 // ClearedRecord says the gate reviewed this exact diff in this repo and let it

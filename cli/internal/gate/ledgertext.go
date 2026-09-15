@@ -175,8 +175,12 @@ var ledgerChainRe = regexp.MustCompile(
 // ledgerSectionCapRe is ledgerSectionRe with the round number captured.
 var ledgerSectionCapRe = regexp.MustCompile(`(?im)^[ \t]*(?:[-+>]\s*)?\**\s*Round\s+(\d+)\s*[/,]`)
 
-// blockSubjectRe reads the commit subject a chain ledger's header line names.
-var blockSubjectRe = regexp.MustCompile(`(?i)chain ledger,\s*(.+?)\s*\**\s*$`)
+// blockSubjectRe reads the commit subject a chain ledger's header line names, after
+// the chain ID when the header carries one.
+var blockSubjectRe = regexp.MustCompile(`(?i)chain ledger(?:\s*#[0-9a-f]+)?\s*,\s*(.+?)\s*\**\s*$`)
+
+// blockChainIDRe reads the chain ID a chain ledger's header line carries.
+var blockChainIDRe = regexp.MustCompile(`(?i)chain ledger\s*#([0-9a-f]+)\b`)
 
 // LedgerRounds returns the rounds a chain ledger reports on. Empty for a legacy
 // per-round ledger, whose one round lives in the header LedgerRound reads.
@@ -220,6 +224,19 @@ func BlockSubject(block string) string {
 	}
 	if m := blockSubjectRe.FindStringSubmatch(first); m != nil {
 		return m[1]
+	}
+	return ""
+}
+
+// BlockChainID returns the chain ID a chain ledger's HEADER carries, lowercased, or ""
+// for a header written without one.
+func BlockChainID(block string) string {
+	first := block
+	if idx := strings.IndexByte(block, '\n'); idx >= 0 {
+		first = block[:idx]
+	}
+	if m := blockChainIDRe.FindStringSubmatch(first); m != nil {
+		return strings.ToLower(m[1])
 	}
 	return ""
 }

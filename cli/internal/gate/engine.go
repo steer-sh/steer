@@ -64,6 +64,9 @@ type Request struct {
 
 	// addendum is loaded once by Handle, and every row and prompt of the request reads it.
 	addendum Addendum
+	// chainID is the chain this request reviews in: new on a first review, carried
+	// from the chain state on a retry.
+	chainID string
 }
 
 // Engine is the harness-neutral review engine.
@@ -93,6 +96,9 @@ func (e *Engine) log(req Request, row Row) error {
 	// cross-repo ones.
 	if subject := CommitSubject(req.Message); subject != "" {
 		setDefault(row, "subject", subject)
+	}
+	if req.chainID != "" {
+		setDefault(row, "chain_id", req.chainID)
 	}
 	for key, value := range req.RowExtra {
 		setDefault(row, key, value)
@@ -192,10 +198,12 @@ func (e *Engine) handleFirst(ctx context.Context, req Request, chain *Chain) Dec
 				"rejected that attempt for its own reasons. The gate does not block it.",
 			logErr)
 	}
+	req.chainID = NewChainID()
 	return e.reviewCommit(ctx, req, chain, p, 1)
 }
 
 func (e *Engine) handleRetry(ctx context.Context, req Request, chain *Chain, state ChainState) Decision {
+	req.chainID = state.ChainID
 	// Two fields of DIFFERENT provenance, and the pair is the point: diff_changed is
 	// observed from the tree and owes the agent nothing, while the ledger counts are
 	// the agent's own account. Either alone is misleading — a changed diff says
@@ -356,6 +364,7 @@ func (e *Engine) reviewCommit(ctx context.Context, req Request, chain *Chain, p 
 	saveErr := chain.Save(ChainState{
 		AwaitingRetry: true, TS: time.Now().Unix(), FindingSlots: findings,
 		Files: len(p.paths), Diff: p.raw, Firing: firing, Spec: req.Spec,
+		ChainID: req.chainID,
 	})
 	err := e.log(req, mergeRows(
 		Row{"ts": time.Now().Unix(), "phase": "deny", "reviewers": result.Answered,
@@ -384,7 +393,7 @@ func (e *Engine) reviewCommit(ctx context.Context, req Request, chain *Chain, p 
 	}
 	return Decision{
 		Kind:          Deny,
-		Reason:        p.notice + BuildDeny(result.Answered, review, firing, e.cfg.MaxFirings, req.RerunNote, CommitSubject(req.Message), e.cfg.ReviewerLabel()),
+		Reason:        p.notice + BuildDeny(result.Answered, review, firing, e.cfg.MaxFirings, req.RerunNote, CommitSubject(req.Message), req.chainID, e.cfg.ReviewerLabel()),
 		SystemMessage: note,
 		LedgerError:   err,
 	}
@@ -457,7 +466,7 @@ func (e *Engine) terminalReview(ctx context.Context, req Request, chain *Chain, 
 		capped, e.cfg.MaxFirings, findings, blocking, result.Answered)
 	return Decision{
 		Kind:          ContextOnly,
-		Reason:        p.notice + BuildCap(result.Answered, review, firing, e.cfg.MaxFirings, CommitSubject(req.Message), e.cfg.ReviewerLabel()),
+		Reason:        p.notice + BuildCap(result.Answered, review, firing, e.cfg.MaxFirings, CommitSubject(req.Message), req.chainID, e.cfg.ReviewerLabel()),
 		SystemMessage: note,
 		LedgerError:   err,
 	}

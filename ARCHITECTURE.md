@@ -332,8 +332,12 @@ before a commit hash exists.
 
 `internal/gate/resolve/` joins adjudication rows to harness-neutral `LedgerMsg`
 values supplied by each adapter's harvest. The join uses thread id when present,
-otherwise session id. A chain ledger landing after the next chain started is
-claimed only by the subject in its header, and only when exactly one chain of that
+otherwise session id. The gate gives each chain an ID (`ChainState.ChainID`),
+stamps it as `chain_id` on the chain's rows and renders it into the ledger header;
+a header ID joins only the chain carrying it, across sessions and past the chain
+bound. A chain started before IDs keeps none until it ends. Without an ID, a chain
+ledger landing after the next chain started is claimed only by the subject in its
+header, and only when exactly one chain of that
 thread carries the subject on any of its rows; a row with no thread never takes
 that path. `steer commit-gate backfill` previews; `--apply` rewrites the
 local host shard with backup (the ten newest are kept) and concurrent-append

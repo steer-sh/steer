@@ -437,6 +437,70 @@ func TestResolverGitRowStaysInsideItsBound(t *testing.T) {
 	}
 }
 
+// withChainID gives a chain ledger's header the chain ID the gate rendered into it.
+func withChainID(led LedgerMsg, id string) LedgerMsg {
+	led.Text = strings.Replace(led.Text, "chain ledger,", "chain ledger #"+id+",", 1)
+	return led
+}
+
+func stampChainID(rows []resolverRow, id string) []resolverRow {
+	for _, row := range rows {
+		row["chain_id"] = id
+	}
+	return rows
+}
+
+func TestResolverChainIDOutranksTheSubject(t *testing.T) {
+	r := testResolver()
+	rows := append(stampChainID(chainRows(fixCT, 1, "feat: first commit"), "aaaa0001"),
+		stampChainID(chainRows(fixCT+1000, 1, "fix: second commit"), "bbbb0002")...)
+	reworded := withChainID(chainLedgerFix(fixCT+1400, []int{1}, "feat: the first one", 0), "aaaa0001")
+	cand, _ := r.pickLedger(rows, 1, fixCT, []LedgerMsg{reworded})
+	if cand == nil {
+		t.Fatal("the chain ID claims a deferred block whatever its subject says")
+	}
+	if cand, _ = r.pickLedger(rows, 3, fixCT+1000, []LedgerMsg{reworded}); cand != nil {
+		t.Fatal("another chain's ID is never this chain's, inside its bound or not")
+	}
+	wrongID := withChainID(chainLedgerFix(fixCT+400, []int{1}, "feat: first commit", 0), "cccc0003")
+	if cand, _ = r.pickLedger(rows, 1, fixCT, []LedgerMsg{wrongID}); cand != nil {
+		t.Fatal("a conflicting ID is refused even when the subject matches")
+	}
+}
+
+func TestResolverChainIDAbsentOnOneSide(t *testing.T) {
+	r := testResolver()
+	legacy := chainRows(fixCT, 1, "feat: first commit")
+	withID := withChainID(chainLedgerFix(fixCT+400, []int{1}, "feat: first commit", 0), "aaaa0001")
+	if cand, _ := r.pickLedger(legacy, 1, fixCT, []LedgerMsg{withID}); cand != nil {
+		t.Fatal("a block carrying an ID answers a chain that has one, never a legacy chain")
+	}
+	stamped := stampChainID(chainRows(fixCT, 1, "feat: first commit"), "aaaa0001")
+	dropped := chainLedgerFix(fixCT+400, []int{1}, "feat: first commit", 0)
+	if cand, _ := r.pickLedger(stamped, 1, fixCT, []LedgerMsg{dropped}); cand == nil {
+		t.Fatal("a header whose ID the agent dropped still joins by its subject")
+	}
+}
+
+func TestResolverChainIDJoinsAGitRowPastItsBound(t *testing.T) {
+	r := testResolver()
+	const placeholder = "(not available to a pre-commit hook — judge the diff alone)"
+	rows := append(stampChainID(chainRows(fixCT, 1, placeholder), "aaaa0001"),
+		stampChainID(chainRows(fixCT+1000, 1, placeholder), "bbbb0002")...)
+	for _, row := range rows {
+		delete(row, "session_id")
+		row["repo"] = "/r"
+	}
+	late := withChainID(chainLedgerFix(fixCT+1400, []int{1}, placeholder, 0), "aaaa0001")
+	late.Key = "some-session"
+	if cand, _ := r.pickLedger(rows, 1, fixCT, []LedgerMsg{late}); cand == nil {
+		t.Fatal("the ID associates a git row with the session that wrote its ledger")
+	}
+	if cand, _ := r.pickLedger(rows, 3, fixCT+1000, []LedgerMsg{late}); cand != nil {
+		t.Fatal("the git chain the ledger landed inside does not take another chain's ID")
+	}
+}
+
 func TestResolverSubjectAbsentFallsBack(t *testing.T) {
 	r := testResolver()
 	rows := chainRows(fixCT, 2, "")

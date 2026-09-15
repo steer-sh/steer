@@ -64,8 +64,17 @@ func BuildReviewPrompt(message, diff, context string, addendum Addendum) string 
 	})
 }
 
+// chainSlot renders a chain ID into the header, or nothing for a chain started before
+// IDs existed.
+func chainSlot(chainID string) string {
+	if chainID == "" {
+		return ""
+	}
+	return " #" + chainID
+}
+
 // BuildDeny renders the blocking message the agent reads on a fired gate.
-func BuildDeny(count int, review string, firing, cap int, rerun, subject, reviewer string) string {
+func BuildDeny(count int, review string, firing, cap int, rerun, subject, chainID, reviewer string) string {
 	round := ""
 	if firing != 1 {
 		round = fill(roundNote, map[string]string{
@@ -78,19 +87,19 @@ func BuildDeny(count int, review string, firing, cap int, rerun, subject, review
 	return fill(denyTemplate, map[string]string{
 		"count": fmt.Sprint(count), "review": review, "cap": fmt.Sprint(cap),
 		"firing": fmt.Sprint(firing), "round_note": round, "rerun_note": rerun,
-		"subject": subject, "reviewer": reviewer,
+		"subject": subject, "chain": chainSlot(chainID), "reviewer": reviewer,
 	})
 }
 
 // BuildCap renders the capped chain's terminal, non-blocking review message.
-func BuildCap(count int, review string, firing, cap int, subject, reviewer string) string {
+func BuildCap(count int, review string, firing, cap int, subject, chainID, reviewer string) string {
 	if subject == "" {
 		subject = NoSubject
 	}
 	return fill(capTemplate, map[string]string{
 		"count": fmt.Sprint(count), "review": review,
 		"firing": fmt.Sprint(firing), "cap": fmt.Sprint(cap),
-		"subject": subject, "reviewer": reviewer,
+		"subject": subject, "chain": chainSlot(chainID), "reviewer": reviewer,
 	})
 }
 

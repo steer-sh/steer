@@ -384,6 +384,7 @@ func (r *resolver) pickLedger(rows []resolverRow, i int, denyTS float64, ledgers
 		bound := r.chainEndTS(rows, i, session, firing)
 		ids := chainIDs(rows)
 		subjects := chainSubjects(rows, ids, ids[i])
+		chainID := strings.ToLower(pyStr(row["chain_id"]))
 		var named, bounded []LedgerMsg
 		for _, x := range inWindow(r.spanFor("chain")) {
 			for _, block := range gate.ChainBlocks(x.Text) {
@@ -391,6 +392,14 @@ func (r *resolver) pickLedger(rows []resolverRow, i int, denyTS float64, ledgers
 					continue
 				}
 				cand := LedgerMsg{When: x.When, Key: x.Key, Path: x.Path, Text: block}
+				// A chain ID names one chain outright. A header without one falls to the
+				// subject below; a header with one never answers a chain that has none.
+				if id := gate.BlockChainID(block); id != "" {
+					if id == chainID {
+						named = append(named, cand)
+					}
+					continue
+				}
 				got := gate.BlockSubject(block)
 				switch {
 				case got == "" || len(subjects) == 0:
