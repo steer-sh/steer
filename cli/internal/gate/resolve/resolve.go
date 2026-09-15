@@ -371,14 +371,11 @@ func (r *resolver) nameOwner(rows []resolverRow, ids []int, key, name string, wh
 	type span struct{ start, end float64 }
 	spans := map[int]*span{}
 	named := map[int]bool{}
-	handed := map[int]bool{}
+	handed := handedChains(rows, ids, key)
 	for j, row := range rows {
 		id := ids[j]
 		if id < 0 || joinKey(row) != key {
 			continue
-		}
-		if phase := pyStr(row["phase"]); phase == "deny" || phase == "cap" {
-			handed[id] = true
 		}
 		ts, ok := pyNum(row["ts"])
 		if !ok {
@@ -405,6 +402,21 @@ func (r *resolver) nameOwner(rows []resolverRow, ids []int, key, name string, wh
 	return owner, n == 1
 }
 
+// handedChains is the set of chains of thread key with a deny or cap row: the chains
+// that were handed findings and so owe a ledger.
+func handedChains(rows []resolverRow, ids []int, key string) map[int]bool {
+	out := map[int]bool{}
+	for j, row := range rows {
+		if ids[j] < 0 || joinKey(row) != key {
+			continue
+		}
+		if phase := pyStr(row["phase"]); phase == "deny" || phase == "cap" {
+			out[ids[j]] = true
+		}
+	}
+	return out
+}
+
 // joinFor is the join a row takes by its era, and so the span its miss waits out.
 func joinFor(row resolverRow, denyTS float64) string {
 	firing, ok := pyInt(row["firing"])
@@ -417,13 +429,40 @@ func joinFor(row resolverRow, denyTS float64) string {
 	return "window"
 }
 
+// Why a row's ledger was not found, stamped on a miss as ledger_miss. Each names the
+// furthest a candidate got: missRank orders them, and a miss keeps the highest.
+const (
+	MissNoLedger         = "no-ledger"         // no harvested ledger (header and verdict bullet) in the thread within the span
+	MissNoHeader         = "no-header"         // ledgers, but no chain-ledger header and no round header for this round
+	MissNoRound          = "no-round"          // ledgers, but none names this round
+	MissNoSection        = "no-section"        // chain ledgers, but none has a section for this round
+	MissPastBound        = "past-bound"        // this round's ledger landed after the next chain started
+	MissSubjectUnmatched = "subject-unmatched" // the header's subject is on no row of this chain
+	MissSubjectShared    = "subject-shared"    // the header's subject does not name this chain alone
+	MissIDConflict       = "id-conflict"       // the header's chain ID is another chain's
+)
+
+var missRank = map[string]int{
+	MissNoLedger: 0, MissNoHeader: 1, MissNoRound: 1, MissNoSection: 2, MissPastBound: 3,
+	MissSubjectUnmatched: 4, MissSubjectShared: 5, MissIDConflict: 6,
+}
+
+type missWhy string
+
+func (m *missWhy) note(why string) {
+	if missRank[why] > missRank[string(*m)] {
+		*m = missWhy(why)
+	}
+}
+
 // pickLedger returns the ledger answering row i and how it was joined: "chain",
-// "round" or "window". A miss returns (nil, join).
-func (r *resolver) pickLedger(rows []resolverRow, i int, denyTS float64, ledgers []LedgerMsg) (*LedgerMsg, string) {
+// "round" or "window". A miss returns (nil, join, why), why being a Miss* reason.
+func (r *resolver) pickLedger(rows []resolverRow, i int, denyTS float64, ledgers []LedgerMsg) (*LedgerMsg, string, string) {
 	row := rows[i]
 	session := joinKey(row)
 	firing, _ := pyInt(row["firing"])
 	join := joinFor(row, denyTS)
+	why := missWhy(MissNoLedger)
 
 	inWindow := func(span float64) []LedgerMsg {
 		var out []LedgerMsg
@@ -434,6 +473,20 @@ func (r *resolver) pickLedger(rows []resolverRow, i int, denyTS float64, ledgers
 		}
 		return out
 	}
+	// roundLedgers is every per-round ledger naming this round inside the bound.
+	roundLedgers := func(bound float64) []LedgerMsg {
+		var mine []LedgerMsg
+		for _, x := range inWindow(r.spanFor("round")) {
+			if n, ok := gate.LedgerRound(x.Text); ok && n == firing {
+				if x.When < bound {
+					mine = append(mine, x)
+				} else {
+					why.note(MissPastBound)
+				}
+			}
+		}
+		return mine
+	}
 
 	if join == "chain" {
 		bound := r.chainEndTS(rows, i, session, firing)
@@ -441,9 +494,14 @@ func (r *resolver) pickLedger(rows []resolverRow, i int, denyTS float64, ledgers
 		subjects := chainSubjects(rows, ids, ids[i])
 		chainID := strings.ToLower(pyStr(row["chain_id"]))
 		var named, bounded []LedgerMsg
-		for _, x := range inWindow(r.spanFor("chain")) {
+		cands := inWindow(r.spanFor("chain"))
+		if len(cands) > 0 {
+			why.note(MissNoHeader)
+		}
+		for _, x := range cands {
 			for _, block := range gate.ChainBlocks(x.Text) {
 				if !gate.LedgerRounds(block)[firing] {
+					why.note(MissNoSection)
 					continue
 				}
 				cand := LedgerMsg{When: x.When, Key: x.Key, Path: x.Path, Text: block}
@@ -452,6 +510,8 @@ func (r *resolver) pickLedger(rows []resolverRow, i int, denyTS float64, ledgers
 				if id := gate.BlockChainID(block); id != "" {
 					if id == chainID {
 						named = append(named, cand)
+					} else {
+						why.note(MissIDConflict)
 					}
 					continue
 				}
@@ -459,6 +519,7 @@ func (r *resolver) pickLedger(rows []resolverRow, i int, denyTS float64, ledgers
 				switch {
 				case got == "" || len(subjects) == 0:
 				case !subjects[got]:
+					why.note(MissSubjectUnmatched)
 					continue
 				case session != "":
 					// A name lets a block past the bound, so it must name exactly one
@@ -466,51 +527,45 @@ func (r *resolver) pickLedger(rows []resolverRow, i int, denyTS float64, ledgers
 					// session, and the git channel stamps one subject on every commit.
 					if owner, ok := r.nameOwner(rows, ids, session, got, x.When); ok && owner == ids[i] {
 						named = append(named, cand)
+					} else {
+						why.note(MissSubjectShared)
 					}
 					continue
 				}
 				if x.When < bound {
 					bounded = append(bounded, cand)
+				} else {
+					why.note(MissPastBound)
 				}
 			}
 		}
 		if len(named) > 0 {
-			return &named[len(named)-1], "chain"
+			return &named[len(named)-1], "chain", ""
 		}
 		if len(bounded) > 0 {
-			return &bounded[len(bounded)-1], "chain"
+			return &bounded[len(bounded)-1], "chain", ""
 		}
-		var mine []LedgerMsg
-		for _, x := range inWindow(r.spanFor("round")) {
-			if n, ok := gate.LedgerRound(x.Text); x.When < bound && ok && n == firing {
-				mine = append(mine, x)
-			}
+		if mine := roundLedgers(bound); len(mine) > 0 {
+			return &mine[len(mine)-1], "round", ""
 		}
-		if len(mine) > 0 {
-			return &mine[len(mine)-1], "round"
-		}
-		return nil, "chain"
+		return nil, "chain", string(why)
 	}
 
 	if join == "round" {
-		bound := r.chainEndTS(rows, i, session, firing)
-		var mine []LedgerMsg
-		for _, x := range inWindow(r.spanFor("round")) {
-			if n, ok := gate.LedgerRound(x.Text); x.When < bound && ok && n == firing {
-				mine = append(mine, x)
-			}
+		if len(inWindow(r.spanFor("round"))) > 0 {
+			why.note(MissNoRound)
 		}
-		if len(mine) > 0 {
-			return &mine[len(mine)-1], "round"
+		if mine := roundLedgers(r.chainEndTS(rows, i, session, firing)); len(mine) > 0 {
+			return &mine[len(mine)-1], "round", ""
 		}
-		return nil, "round"
+		return nil, "round", string(why)
 	}
 
 	cand := inWindow(r.spanFor("window"))
 	if len(cand) > 0 {
-		return &cand[len(cand)-1], "window"
+		return &cand[len(cand)-1], "window", ""
 	}
-	return nil, "window"
+	return nil, "window", string(why)
 }
 
 // pending reports whether an --if-due run should harvest: some row is unresolved, its
@@ -585,7 +640,7 @@ func (r *resolver) resolveAndWrite(rows []resolverRow, seenLines int, apply bool
 		}
 
 		row["ledger_expected"] = true
-		cand, join := r.pickLedger(rows, i, denyTS, ledgers)
+		cand, join, why := r.pickLedger(rows, i, denyTS, ledgers)
 		if cand == nil {
 			if r.now() < denyTS+r.spanFor(join) {
 				if popRecheck(row) {
@@ -594,20 +649,21 @@ func (r *resolver) resolveAndWrite(rows []resolverRow, seenLines int, apply bool
 				r.say("  ts=%v deny=%d  window still open, skipping", row["ts"], int64(denyTS))
 				continue
 			}
-			if popRecheck(row) {
-				row["ledger_join"] = join
-				row["backfilled"] = true
-				continue
-			}
+			// A recheck that finds the same miss changes nothing; a new reason is a stamp.
+			restamp := !popRecheck(row) || pyStr(row["ledger_miss"]) != why
 			row["ledger_found"] = false
 			row["ledger_join"] = join
+			row["ledger_miss"] = why
 			row["backfilled"] = true
-			changed++
-			r.say("  ts=%v deny=%d  EXPECTED a ledger (round %v), none found", row["ts"], int64(denyTS), row["firing"])
+			if restamp {
+				changed++
+				r.say("  ts=%v deny=%d  EXPECTED a ledger (round %v), none found: %s", row["ts"], int64(denyTS), row["firing"], why)
+			}
 			continue
 		}
 
 		delete(row, "_recheck")
+		delete(row, "ledger_miss")
 		text := cand.Text
 		firing, _ := pyInt(row["firing"])
 		if join == "chain" {
