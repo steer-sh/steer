@@ -7,6 +7,8 @@ the repository and runs the new top-level test functions under each one:
 
   zero    a changed function returns the zero values of its results at once
   revert  one changed block of non-test code put back to its base version
+  file    one changed text file outside the Go sources put back whole, or
+          removed when it is new; every new test runs under it
 
 A new test that fails under at least one variant passes the check. Every other
 new test is reported and the script exits 1: a test that fails before any
@@ -71,6 +73,24 @@ def changed_paths(base):
     return sorted(p for p in set(tracked) | set(untracked) if os.path.isfile(p)), set(untracked)
 
 
+def data_paths(base):
+    """Return changed text files that are not Go sources or test-side files,
+    anywhere in the repository: files a test can read."""
+    tracked = git("diff", "--name-only", "--no-ext-diff", base).split()
+    untracked = git("ls-files", "--others", "--exclude-standard").split()
+    paths = []
+    for path in sorted(set(tracked) | set(untracked)):
+        if path.endswith(".go") or is_test_side(path) or not os.path.isfile(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as handle:
+                handle.read()
+        except (OSError, UnicodeDecodeError):
+            continue
+        paths.append(path)
+    return paths
+
+
 def marked(source, func_start):
     lines = source[:func_start].splitlines()
     while lines and lines[-1].lstrip().startswith("//"):
@@ -132,10 +152,30 @@ def insert(data, offset, statement):
 
 
 def variant(kind, path, label, original, mutated):
+    """mutated None removes the file."""
     diff = difflib.unified_diff(original.decode("utf-8").splitlines(keepends=True),
-                                mutated.decode("utf-8").splitlines(keepends=True),
+                                (mutated or b"").decode("utf-8").splitlines(keepends=True),
                                 path, path + " (variant)", n=1)
     return {"kind": kind, "path": path, "label": label, "data": mutated, "diff": "".join(diff)}
+
+
+def in_base(base, path):
+    return subprocess.run(["git", "cat-file", "-e", "%s:%s" % (base, path)],
+                          capture_output=True).returncode == 0
+
+
+def data_variants(base, paths):
+    """One variant per data file: a new file removed, a changed one put back whole."""
+    out = []
+    for path in paths:
+        with open(path, "rb") as handle:
+            data = handle.read()
+        if not in_base(base, path):
+            out.append(variant("file", path, "file removed (%s)" % path, data, None))
+        else:
+            old = git("show", "%s:%s" % (base, path)).encode()
+            out.append(variant("file", path, "file reverted to base (%s)" % path, data, old))
+    return out
 
 
 def variants(base, paths, untracked):
@@ -198,13 +238,20 @@ def change_key(base, name_status, paths):
     return digest.hexdigest()
 
 
-def copy_repository(root, tmp):
-    """Copy the module into tmp and link every other top-level entry, so tests that
-    read files beside the module find them."""
-    shutil.copytree(os.path.join(root, MODULE), os.path.join(tmp, MODULE), symlinks=True)
+def copy_repository(root, tmp, copied):
+    """Copy the module and each top-level entry in copied into tmp, and link every
+    other top-level entry, so tests that read files beside the module find them.
+    A variant writes only into copied entries, never through a link."""
     for entry in os.listdir(root):
-        if entry not in (MODULE, ".git"):
-            os.symlink(os.path.join(root, entry), os.path.join(tmp, entry))
+        if entry == ".git":
+            continue
+        source, target = os.path.join(root, entry), os.path.join(tmp, entry)
+        if entry != MODULE and entry not in copied:
+            os.symlink(source, target)
+        elif os.path.isdir(source) and not os.path.islink(source):
+            shutil.copytree(source, target, symlinks=True)
+        else:
+            shutil.copy2(source, target, follow_symlinks=False)
 
 
 def scrub(line):
@@ -318,12 +365,12 @@ def judge(tmp, module_dir, prefix, by_package, deps, changes, targets, decisive)
     attempts = {t: [] for t in targets}
     done = set()
     for index, change in enumerate(changes):
-        imported = import_path(prefix, change["path"])
+        imported = None if change["kind"] == "file" else import_path(prefix, change["path"])
         linked = set()
         for test in targets:
             if test in done:
                 attempts[test].append({"variant": index, "result": "not run"})
-            elif imported not in deps[test[0]]:
+            elif imported and imported not in deps[test[0]]:
                 attempts[test].append({"variant": index, "result": "not linked"})
             else:
                 linked.add(test)
@@ -335,8 +382,11 @@ def judge(tmp, module_dir, prefix, by_package, deps, changes, targets, decisive)
         target = os.path.join(tmp, change["path"])
         with open(target, "rb") as handle:
             original = handle.read()
-        with open(target, "wb") as handle:
-            handle.write(change["data"])
+        if change["data"] is None:
+            os.remove(target)
+        else:
+            with open(target, "wb") as handle:
+                handle.write(change["data"])
         outcome, notes = run_tests(module_dir, prefix, reachable)
         with open(target, "wb") as handle:
             handle.write(original)
@@ -478,9 +528,11 @@ def main():
         print("revert-test: no new test functions since %s" % base[:8])
         return 0
 
+    data = data_paths(base)
     directory = os.path.join(git("rev-parse", "--absolute-git-dir").strip(), EVIDENCE)
     stamp = os.path.join(directory, "pass")
-    key = change_key(base, git("diff", "--name-status", "--no-ext-diff", base, "--", MODULE), paths)
+    key = change_key(base, git("diff", "--name-status", "--no-ext-diff", base),
+                     sorted(set(paths) | set(data)))
     evidence = os.path.join(directory, key[:16] + ".json")
     try:
         with open(stamp, encoding="utf-8") as handle:
@@ -498,14 +550,15 @@ def main():
     started = time.time()
     with tempfile.TemporaryDirectory(prefix="revert-test-") as tmp:
         SCRUB.extend([os.path.realpath(tmp) + "/", tmp + "/"])
-        copy_repository(root, tmp)
+        copy_repository(root, tmp, {p.split("/")[0] for p in data})
         module_dir = os.path.join(tmp, MODULE)
 
         baseline, baseline_notes = run_tests(module_dir, prefix, by_package)
         live = {t for t in selected if baseline.get(t, {}).get("result") == "pass"}
         behavioural, panics = variants(base, paths, untracked)
         mutated_packages = {import_path(prefix, c["path"]) for c in behavioural + panics}
-        linked = {t for t in live if mutated_packages & deps[t[0]]}
+        behavioural += data_variants(base, data)
+        linked = {t for t in live if data or mutated_packages & deps[t[0]]}
         attempts = judge(tmp, module_dir, prefix, by_package, deps, behavioural, linked,
                          lambda a: a["result"] == "fail" and a["kind"] == "assertion")
         survivors = {t for t in linked
