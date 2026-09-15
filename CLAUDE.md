@@ -117,9 +117,12 @@ vets and runs Go tests, then `scripts/revert-test.py`: each Go test added since
 the upstream branch must fail under some variant of the change, and
 `// pins existing behaviour` in a test's doc comment exempts it. Its per-test
 evidence (deciding variant, failure excerpt, diffs, full output) is written to
-`.git/revert-test/<key>.json`, and the console names the file. `./check-full.sh`
-adds the slow headless skill-generation harness and invokes `claude -p`; it is
-separate from the turn-end gate.
+`.git/revert-test/<key>.json`, and the console names the file. It copies the module
+to one scratch path per worktree and holds `.git/revert-test/lock` for the whole run,
+so two runs in one worktree are serialized and a blocked run fails naming the lock.
+`./check-full.sh` adds `scripts/revert-test-verify.py`, which checks that script's
+copy and lock over fixture repositories, then the slow headless skill-generation
+harness that invokes `claude -p`; it is separate from the turn-end gate.
 
 After CLI changes, rebuild the committed platform binaries before committing:
 

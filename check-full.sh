@@ -6,6 +6,10 @@ root="$(cd "$(dirname "$0")" && pwd)"
 
 "$root/check.sh"
 
+# revert-test's scratch copy and lock, over fixture repositories: ~2.5 minutes, and
+# one case kills a run mid-test.
+python3 "$root/scripts/revert-test-verify.py"
+
 # Headless skill-generation harness: invokes `claude -p`, costs money, ~55 min.
 if [ -x "$root/tests/.venv/bin/python3" ]; then
   "$root/tests/.venv/bin/python3" "$root/tests/run_tests.py" --model "${MODEL:-claude-haiku-4-5-20251001}"
