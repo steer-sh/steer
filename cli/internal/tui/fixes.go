@@ -209,8 +209,10 @@ func (m *Model) guardRepairs() []fixRow {
 				pronoun(len(drifted)), pronoun(len(drifted))),
 		})
 	}
+	// A rebuild writes the runner in the dashboard's scope, so a stale runner in
+	// the other scope gets no row here; Diagnostics carries its command instead.
 	for _, master := range m.snap.Posture.Masters {
-		if !master.Stale() {
+		if master.Scope != m.scope || !master.Stale() {
 			continue
 		}
 		agent := status.HarnessLabel(master.Harness)

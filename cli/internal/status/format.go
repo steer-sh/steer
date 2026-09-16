@@ -87,10 +87,10 @@ func MasterPhrase(m MasterRuntime) string {
 	case MasterCurrent:
 		return fmt.Sprintf("runtime %s, steer %s", m.Runtime, m.Version)
 	case MasterStale:
-		return fmt.Sprintf("runtime %s is older than this binary's %s — run: steer hooks rebuild --scope %s",
-			m.Runtime, m.Expected, m.Scope)
+		return fmt.Sprintf("runtime %s is older than this binary's %s — run: %s",
+			m.Runtime, m.Expected, RebuildCommand(m.Scope))
 	case MasterUnknown:
-		return fmt.Sprintf("runtime has no version (unstamped) — run: steer hooks rebuild --scope %s", m.Scope)
+		return "runtime has no version (unstamped) — run: " + RebuildCommand(m.Scope)
 	case MasterDetached:
 		if m.Path == "" {
 			return "runs none of this scope's guards: no runner is registered — run: " + SyncCommand(m.Scope)
@@ -99,6 +99,12 @@ func MasterPhrase(m MasterRuntime) string {
 			m.Path, m.Store, SyncCommand(m.Scope))
 	}
 	return ""
+}
+
+// RebuildCommand writes a scope's master again from the guards it holds, and
+// repoints every registration at it.
+func RebuildCommand(scope string) string {
+	return "steer hooks rebuild --scope " + scope
 }
 
 // SyncCommand registers a scope's existing master and rules in every installed

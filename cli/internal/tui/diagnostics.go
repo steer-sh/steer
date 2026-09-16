@@ -101,12 +101,18 @@ func (m *Model) diagnosticIssues() []diagnosticIssue {
 			continue
 		}
 		agent := status.HarnessLabel(master.Harness)
+		detail := "It was written by an older Steer, or carries no version at all, so a fix " +
+			"shipped since then is not running."
+		if master.Scope == m.scope {
+			detail += " Open Fixes and run the maintenance action under Maintenance needed."
+		} else {
+			detail += " The Fixes action rebuilds this dashboard's scope only; for this one, run: " +
+				status.RebuildCommand(master.Scope)
+		}
 		out = append(out, diagnosticIssue{
 			headline: "The guard runner for " + agent + " in " + scopeReach(master.Scope) +
 				" is out of date",
-			detail: "It was written by an older Steer, or carries no version at all, so a fix " +
-				"shipped since then is not running. Open Fixes and run the maintenance action " +
-				"under Maintenance needed.",
+			detail: detail,
 		})
 	}
 	for _, master := range m.snap.Posture.Masters {

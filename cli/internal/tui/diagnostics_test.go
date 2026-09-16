@@ -32,7 +32,7 @@ func TestEachIssueNamesWhereItIsRepaired(t *testing.T) {
 	m.snap = &status.SystemStatus{Posture: status.Posture{
 		Unresolved: 3,
 		Masters: []status.MasterRuntime{{
-			Harness: "claude-code", Scope: "project", State: status.MasterUnknown,
+			Harness: "claude-code", Scope: "global", State: status.MasterUnknown,
 			Expected: guard.RuntimeDigest(),
 		}},
 	}}
@@ -41,7 +41,7 @@ func TestEachIssueNamesWhereItIsRepaired(t *testing.T) {
 	for _, want := range []string{
 		"3 reviews have no outcome yet",
 		"Open Arming",
-		"The guard runner for Claude Code in this project is out of date",
+		"The guard runner for Claude Code in every project on this machine is out of date",
 		"Open Fixes",
 	} {
 		if !strings.Contains(strings.Join(strings.Fields(view), " "), want) {
@@ -192,6 +192,34 @@ func TestDiagnosticsTechnicalBlockHidesBehindAKey(t *testing.T) {
 	for _, want := range []string{"/abs/state/commit-review", "agy/gemini-3.7-flash", "agy/2/abc/v1"} {
 		if !strings.Contains(strings.Join(strings.Fields(view), " "), want) {
 			t.Errorf("the technical block is missing %q:\n%s", want, view)
+		}
+	}
+}
+
+// A stale runner in the other scope names the command that rebuilds that scope.
+// The Fixes action rebuilds the dashboard's scope, so sending the reader there
+// ran an operation that left the runner it named untouched.
+func TestAnOtherScopeStaleRunnerNamesItsOwnCommand(t *testing.T) {
+	m := New(gate.Defaults(), "project")
+	m.width = 200
+	m.snap = &status.SystemStatus{Posture: status.Posture{
+		Masters: []status.MasterRuntime{{
+			Harness: "codex", Scope: "global", State: status.MasterStale,
+			Runtime: "deadbeef", Expected: guard.RuntimeDigest(),
+		}},
+	}}
+	m.active = panelDiagnostics
+	view := strings.Join(strings.Fields(m.viewDiagnostics()), " ")
+	if !strings.Contains(view, status.RebuildCommand("global")) {
+		t.Errorf("the issue does not name the command for its own scope:\n%s", view)
+	}
+	if strings.Contains(view, "Open Fixes") {
+		t.Errorf("the issue sends the reader to an action in the other scope:\n%s", view)
+	}
+	m.active = panelFixes
+	for _, r := range m.fixRows() {
+		if r.kind == guardRepair {
+			t.Errorf("Fixes offers a repair for a runner in the other scope: %q", r.name)
 		}
 	}
 }
