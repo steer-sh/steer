@@ -18,35 +18,33 @@ func TestStatusCandidateLinesUseDashboardVocabulary(t *testing.T) {
 		old  []string
 	}{
 		{
-			name: "transcript pattern",
-			in: cadence.Candidate{Corpus: "transcript-friction", Pattern: "bare python call",
-				Count: 1, Sessions: 1},
-			want: []string{"Bare python call", "a repeated pattern in your session history",
-				"1 recurrence", "1 agent session"},
-			old: []string{"transcript-friction", "hits", "session(s)"},
+			name: "transcript pile",
+			in: cadence.Candidate{Corpus: "transcript-friction", UngroupedClusters: 12,
+				Examples: []string{"no let s first check the scorm file"}},
+			want: []string{"Correction snippets not yet grouped into a problem",
+				"12 correction snippets in your session history that no problem covers yet"},
+			// The title may never be an item of the pile, and a count of phrasings
+			// may never be called a recurrence: both claimed a grouping that nothing
+			// had made.
+			old: []string{"transcript-friction", "no let s first check", "recurrence", "agent session"},
+		},
+		{
+			name: "transcript pile of one",
+			in:   cadence.Candidate{Corpus: "transcript-friction", UngroupedClusters: 1},
+			want: []string{"1 correction snippet in your session history"},
+			old:  []string{"1 correction snippets", "recurrence"},
 		},
 		{
 			name: "review finding queue",
 			in: cadence.Candidate{Corpus: "review-findings", UndecidedChains: 2,
 				Dump: "steer commit-gate mine findings"},
-			want: []string{"2 review sequences carry a finding no problem covers yet",
+			want: []string{"Review findings not yet grouped into a problem",
+				"2 review sequences carry a finding no problem covers yet",
 				"steer commit-gate mine findings"},
-			old: []string{"review-findings", "review sequence(s)"},
+			old: []string{"review-findings", "review sequence(s)", "recurrence"},
 		},
 		{
-			name: "review finding pattern",
-			in:   cadence.Candidate{Corpus: "review-findings", Pattern: "missing scope", Count: 2, Sessions: 3},
-			want: []string{"a repeated review finding in your session history", "2 recurrences", "3 agent sessions"},
-			old:  []string{"review-findings", "hits", "session(s)"},
-		},
-		{
-			name: "other corpus pattern",
-			in:   cadence.Candidate{Corpus: "other-corpus", Pattern: "blocked command", Count: 2, Sessions: 3},
-			want: []string{"a repeated pattern in your session history", "2 recurrences", "3 agent sessions"},
-			old:  []string{"other-corpus", "hits", "session(s)"},
-		},
-		{
-			name: "empty unpatterned queue item",
+			name: "unknown corpus",
 			in:   cadence.Candidate{Corpus: "other-corpus"},
 			want: []string{"Review findings not yet grouped into a problem",
 				"0 review sequences carry a finding no problem covers yet"},

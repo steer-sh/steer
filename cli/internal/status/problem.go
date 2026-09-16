@@ -88,12 +88,29 @@ func problemReason(v ProblemView) (why, next string) {
 	return "", sentence
 }
 
-// CandidateEvidence is a queued row's own counts, in the source's words.
+// HeadingUngrouped heads the queued rows on both surfaces, under the tracked
+// problems rather than above them. A queued row is a pile of evidence, so the
+// heading names what the pile is instead of calling its contents problems.
+const HeadingUngrouped = "Evidence not yet grouped into problems"
+
+// CandidateTitle names one queued row. The title comes from the corpus, never
+// from an item inside the pile: an item is one phrasing or one finding, and
+// printing it as a title claims a grouping nothing has made yet.
+func CandidateTitle(c cadence.Candidate) string {
+	if c.Corpus == cadence.CorpusTranscript {
+		return "Correction snippets not yet grouped into a problem"
+	}
+	return "Review findings not yet grouped into a problem"
+}
+
+// CandidateEvidence is a queued row's own count, in the source's words. It says
+// how big the pile is and never calls the count a recurrence: a transcript row
+// counts phrasings of possibly unrelated complaints, and a review row counts
+// chains no class has decided.
 func CandidateEvidence(c cadence.Candidate) string {
-	if c.Pattern != "" {
-		return fmt.Sprintf("%s in your session history: %s in %d agent %s",
-			signalSource(c.Corpus), Recurrences(c.Count), c.Sessions,
-			plural("session", c.Sessions))
+	if c.Corpus == cadence.CorpusTranscript {
+		return fmt.Sprintf("%d %s in your session history that no problem covers yet",
+			c.UngroupedClusters, plural("correction snippet", c.UngroupedClusters))
 	}
 	return fmt.Sprintf("%d %s carry a finding no problem covers yet",
 		c.UndecidedChains, UnitName("chain", c.UndecidedChains))
@@ -102,19 +119,3 @@ func CandidateEvidence(c cadence.Candidate) string {
 // CandidateNext is the handoff every queued row shares. Nothing in the terminal
 // or the dashboard authors a record, so the text names the one thing that does.
 const CandidateNext = "run /steer-report in your coding agent to read these and decide each one"
-
-// signalSource names where a queued row's evidence came from, in the reader's
-// words. The name arrives as stored data, so it is translated here.
-func signalSource(corpus string) string {
-	switch corpus {
-	case "review-findings":
-		return "a repeated review finding"
-	}
-	return "a repeated pattern"
-}
-
-// Recurrences counts occurrences with its own noun, so no bare number reaches a
-// line without saying what it counts.
-func Recurrences(n int) string {
-	return fmt.Sprintf("%d %s", n, plural("recurrence", n))
-}

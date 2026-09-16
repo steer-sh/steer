@@ -18,9 +18,11 @@ import (
 // yet; a tracked row is a record with a result. Enter expands either kind in
 // place; authoring and deciding stay in /steer-report.
 
-// headingToConsider heads the queue rows. They sit above the tracked inventory
-// because a problem with no fix is the one the reader has not dealt with.
-const headingToConsider = "Problems to consider — no fix is proposed yet"
+// headingToConsider heads the queue rows. They sit below the tracked inventory:
+// a tracked row names a problem and offers a key that acts on it, while a queue
+// row is an undecided pile whose only step is the handoff, so putting the piles
+// first buries every row the panel can actually act on.
+var headingToConsider = status.HeadingUngrouped
 
 // retireForm is the one editor the panel opens over a record: the reason a
 // problem stops being tracked. mine.Retire writes it and touches no hook, no
@@ -37,26 +39,26 @@ type problemRow struct {
 	item      *status.ScoredIntervention
 }
 
-// problemRows builds the list in render order: the queue first, then the tracked
-// inventory grouped by the action each record asks for. The cursor indexes this
-// order, so an arrow key walks the list down the screen.
+// problemRows builds the list in render order: the tracked inventory first,
+// grouped by the action each record asks for, then the undecided queue. The
+// cursor indexes this order, so an arrow key walks the list down the screen.
 func (m *Model) problemRows() []problemRow {
 	if m.snap == nil {
 		return nil
 	}
 	var rows []problemRow
-	for i := range m.snap.Attention.Candidates {
-		rows = append(rows, problemRow{
-			heading:   headingToConsider,
-			candidate: &m.snap.Attention.Candidates[i],
-		})
-	}
 	items := m.snap.Interventions
 	for _, i := range classOrder(items) {
 		it := items[i]
 		rows = append(rows, problemRow{
 			heading: status.ActionHeading[status.ActionFor(it.Observation, it.Scope)],
 			item:    &items[i],
+		})
+	}
+	for i := range m.snap.Attention.Candidates {
+		rows = append(rows, problemRow{
+			heading:   headingToConsider,
+			candidate: &m.snap.Attention.Candidates[i],
 		})
 	}
 	return rows
@@ -260,16 +262,13 @@ func summaryFields(r problemRow) []summaryField {
 	return fields
 }
 
-// problemTitle names the entry. A queue row that points at a findings dump names
-// no problem yet, so it says so rather than inventing a title.
+// problemTitle names the entry. A queue row covers no problem yet, so it says so
+// rather than borrowing a title from one item of its pile.
 func problemTitle(r problemRow) string {
 	if r.item != nil {
 		return r.item.Class
 	}
-	if r.candidate.Pattern != "" {
-		return r.candidate.Pattern
-	}
-	return "Review findings not yet grouped into a problem"
+	return status.CandidateTitle(*r.candidate)
 }
 
 // candidateEvidence is the queue row's own counts, in the source's words. The
@@ -390,12 +389,16 @@ func detailSection(title, body string, width int) string {
 // names the one thing that does.
 func candidateDetail(c cadence.Candidate, width int) string {
 	out := detailSection("What the sweep found", candidateEvidence(c), width)
-	if c.Pattern != "" {
-		out += detailSection("How it was matched", c.Pattern, width)
-	} else {
-		out += detailSection("Not grouped yet",
-			"These findings are not sorted into problems yet, so no title and no fix exist for them. "+
-				"Read them with: "+c.Dump, width)
+	body := "This evidence is not sorted into problems yet, so no title and no fix exist for it."
+	// The claim is made only where the marked lines are: a row whose pile carries
+	// no examples renders the dump command alone, and the sentence would describe
+	// that command as an item of the pile.
+	if len(c.Examples) > 0 {
+		body += " A line marked · is one item of the pile, never a problem on its own."
+	}
+	out += detailSection("Not grouped yet", body, width)
+	if c.Dump != "" {
+		out += wrapTo("read them all with: "+c.Dump, detailIndent, width)
 	}
 	for _, ex := range c.Examples {
 		out += wrapTo("· "+ex, detailIndent, width)
@@ -481,9 +484,6 @@ func technicalBlock(r problemRow, width int) string {
 	if r.candidate != nil {
 		c := *r.candidate
 		out += wrapTo("source        "+c.Corpus, detailIndent, width)
-		if c.Pattern != "" {
-			out += wrapTo("pattern       /"+c.Pattern+"/", detailIndent, width)
-		}
 		if c.Dump != "" {
 			out += wrapTo("read them     "+c.Dump, detailIndent, width)
 		}

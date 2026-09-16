@@ -168,9 +168,10 @@ var reportRefreshCmd = &cobra.Command{
 	Short: "Run the deterministic tier of the feedback loop and write the work queue",
 	Long: `refresh is the deterministic tier of the steer feedback loop. It spends no
 model tokens and runs in seconds. It scores the review-corpus interventions the
-local engine can score, sweeps every corpus present on this machine, applies the
-thresholds each tier can compute without a model, and writes a queue of pending
-work to ~/.steer/state/steer-report/ for the /steer-report skill to finish.
+local engine can score, sweeps every corpus present on this machine, and writes a
+queue of pending work to ~/.steer/state/steer-report/ for the /steer-report skill
+to finish. It groups nothing: each corpus contributes one row sizing the evidence
+no problem covers yet, and naming the problems in it needs a model.
 
 The queue content is deterministic: a second run over the same evidence produces
 a byte-identical queue. The refresh timestamp lives in a sibling file, not the
@@ -283,9 +284,12 @@ func runCadence() {
 			emit, next := cadence.ShouldNudge(dir, q, hash, cadence.LastRefresh(dir))
 			if emit {
 				candidates, ineffective := cadence.PendingCounts(q)
+				// A queued row is one source of evidence nobody has grouped yet, so
+				// the count names sources. Calling them problems reported the size of
+				// the raw pile as the number of problems found.
 				lines = append(lines, fmt.Sprintf(
-					"steer: %d problem(s) to consider and %d tracked fix(es) need a decision — run /steer-report",
-					candidates, ineffective))
+					"steer: %d %s of ungrouped evidence and %d tracked fix(es) need a decision — run /steer-report",
+					candidates, sourceWord(candidates), ineffective))
 				rec = next
 			}
 		}
@@ -399,4 +403,13 @@ func init() {
 	reportCmd.Flags().BoolVar(&reportProjectOnly, "project-only", false, "Restrict the scan to transcripts of the current working directory")
 	reportCmd.Flags().StringVar(&reportHarness, "harness", "", "Mine one harness only: all (default), claude-code, or codex")
 	reportCmd.Flags().IntVar(&reportMaxBytes, "max-digest-bytes", report.DefaultMaxDigestBytes, "Hard cap on digest size; lowest-scoring clusters are evicted to fit")
+}
+
+// sourceWord counts the queued rows with their own noun, so no bare number
+// reaches the nudge without saying what it counts.
+func sourceWord(n int) string {
+	if n == 1 {
+		return "source"
+	}
+	return "sources"
 }

@@ -8,7 +8,7 @@ import (
 func pendingQueue() *Queue {
 	return &Queue{
 		Version:    QueueVersion,
-		Candidates: []Candidate{{Corpus: corpusTranscript, Pattern: "no bare python", Count: 6, Sessions: 4}},
+		Candidates: []Candidate{{Corpus: CorpusTranscript, UngroupedClusters: 6, Examples: []string{"no bare python"}}},
 	}
 }
 
@@ -26,7 +26,7 @@ func TestShouldNudgeFirstTimeOnPendingQueue(t *testing.T) {
 
 func TestShouldNotNudgeEmptyQueue(t *testing.T) {
 	dir := t.TempDir()
-	q := &Queue{Version: QueueVersion, Unscored: []string{"x"}, Corpora: []CorpusStatus{{Corpus: corpusTranscript}}}
+	q := &Queue{Version: QueueVersion, Unscored: []string{"x"}, Corpora: []CorpusStatus{{Corpus: CorpusTranscript}}}
 	if emit, _ := ShouldNudge(dir, q, "hash-a", time.Now()); emit {
 		t.Error("a queue with only unscored rows and a sweep must not nudge")
 	}
@@ -86,7 +86,7 @@ func TestQueueHashStableAndSensitive(t *testing.T) {
 func TestPendingCounts(t *testing.T) {
 	q := &Queue{
 		Interventions: []Intervention{{ID: "a"}, {ID: "b"}},
-		Candidates:    []Candidate{{Corpus: corpusTranscript}},
+		Candidates:    []Candidate{{Corpus: CorpusTranscript}},
 	}
 	cand, ineff := PendingCounts(q)
 	if cand != 1 || ineff != 2 {
@@ -159,7 +159,7 @@ func TestQueueNudgeCarriesTheRulesKey(t *testing.T) {
 	if err := WriteNudge(dir, LoadNudge(dir).WithRules(key)); err != nil {
 		t.Fatal(err)
 	}
-	q := &Queue{Candidates: []Candidate{{Corpus: "transcript-friction", Pattern: "c"}}}
+	q := &Queue{Candidates: []Candidate{{Corpus: "transcript-friction", UngroupedClusters: 1}}}
 	_, rec := ShouldNudge(dir, q, "hash", time.Now())
 	if rec.Rules != key {
 		t.Fatalf("rules key: got %q, want %q", rec.Rules, key)
@@ -174,7 +174,7 @@ func TestQueueNudgeCarriesTheMasterKey(t *testing.T) {
 	if err := WriteNudge(dir, LoadNudge(dir).WithMaster(key)); err != nil {
 		t.Fatalf("WriteNudge returned error: %v", err)
 	}
-	q := &Queue{Candidates: []Candidate{{Corpus: "transcript-friction", Pattern: "c"}}}
+	q := &Queue{Candidates: []Candidate{{Corpus: "transcript-friction", UngroupedClusters: 1}}}
 	_, rec := ShouldNudge(dir, q, "hash", time.Now())
 	if rec.Master != key {
 		t.Fatalf("master key: got %q, want %q", rec.Master, key)

@@ -480,9 +480,11 @@ stale refresh in the background and emits deduplicated operator nudges, includin
 stale-master and drifted-rules notices, each once per distinct condition. The queue carries attention records, candidate pointers,
 unscored record ids and corpus sweep summaries. The tier does no semantic
 grouping: a transcript cluster key is the user's own wording, so it merges
-verbatim repeats only, and candidates are ranked by session spread and capped
-rather than filtered on a count that key cannot earn. Naming classes is the
-skill's work on both corpora.
+verbatim repeats only, and a count over such a key measures phrasings rather than
+recurrences of one problem. A corpus therefore contributes one candidate pointer
+sizing its ungrouped pile, never one row per item, and carries a few
+strength-ranked examples for a reader. Naming classes is the skill's work on both
+corpora, over the full dumps.
 
 The queue also carries the open steps in the repository the refresh ran in. The
 deterministic tier reads the check stores only, so no harness adapter enters it;
@@ -511,8 +513,9 @@ separate. Machine-local absence describes only the evidence available here.
 
 `internal/tui/` provides Arming, Problems, Fixes, Reviewer and Diagnostics panels.
 Mutations call shared lifecycle/settings functions and recompose status afterwards.
-Problems combines candidates and tracked records; authoring goes through the
-skills. Fixes lists guards, rules, review addendum entries and the repository's
+Problems lists tracked records first, then the candidate pointers: a tracked row
+offers a key that acts on it and a pointer row offers only the handoff. Authoring
+goes through the skills. Fixes lists guards, rules, review addendum entries and the repository's
 checks, each with its own state. A project addendum entry is read on disk and at
 HEAD through `status.AddendumInventory`, which `steer commit-gate addendum list`
 shares, so an entry removed on disk but still committed stays listed. Every fix

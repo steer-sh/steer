@@ -53,7 +53,7 @@ func TestNoPanelOverflowsTheTerminal(t *testing.T) {
 	var scored []status.ScoredIntervention
 	for i := 0; i < 30; i++ {
 		gates = append(gates, status.ScopeArming{Harness: "claude-code", Scope: fmt.Sprint(i)})
-		cands = append(cands, cadence.Candidate{Pattern: fmt.Sprintf("p%02d", i), Corpus: "review-findings"})
+		cands = append(cands, cadence.Candidate{UndecidedChains: i, Corpus: "review-findings"})
 		scored = append(scored, status.ScoredIntervention{ID: fmt.Sprint(i), Class: "c", Match: "m",
 			Tier: "check", Target: "check.sh", Status: "active"})
 	}

@@ -338,10 +338,6 @@ func renderAttention(s *status.SystemStatus, width int) {
 				{"Next", []string{"read it from your session history — run: " + status.BackfillCommand}},
 			}, width))
 	}
-	for _, c := range a.Candidates {
-		buckets[status.ActionRepair] = append(buckets[status.ActionRepair],
-			candidateBlock(c, width))
-	}
 	for _, w := range a.Checks {
 		buckets[status.ActionRepair] = append(buckets[status.ActionRepair],
 			checkWorkBlock(w, width))
@@ -353,7 +349,7 @@ func renderAttention(s *status.SystemStatus, width int) {
 			empty = false
 		}
 	}
-	if empty && len(a.Unscored) == 0 {
+	if empty && len(a.Candidates) == 0 && len(a.Unscored) == 0 {
 		fmt.Print(styles.Wrap(styles.SuccessText.Render("nothing pending — the loop is quiet"), "  ", width))
 		return
 	}
@@ -365,6 +361,15 @@ func renderAttention(s *status.SystemStatus, width int) {
 		fmt.Print(styles.Wrap(actionHeader(act), "  ", width))
 		for _, r := range rows {
 			fmt.Print(r)
+		}
+	}
+	// The undecided queue renders last, in its own section. A pile of evidence is
+	// not a coverage repair, and it asks for no key here — filing it with the
+	// tracked rows would push the rows that do ask for something off the screen.
+	if len(a.Candidates) > 0 {
+		fmt.Print(styles.Wrap(styles.SectionHeader.Render(status.HeadingUngrouped), "  ", width))
+		for _, c := range a.Candidates {
+			fmt.Print(candidateBlock(c, width))
 		}
 	}
 	if len(a.Unscored) > 0 {
@@ -484,18 +489,16 @@ func interventionBlock(iv cadence.Intervention, width int) string {
 	}, width)
 }
 
-// candidateBlock is one queued row: evidence nobody has decided yet. It names the
-// same handoff the dashboard names, because neither surface authors a record.
+// candidateBlock is one queued row: a pile of evidence nobody has decided yet. It
+// takes its title, its count sentence and its handoff from the shared phrasing,
+// because neither surface authors a record and neither may name a problem the
+// pile has not been grouped into.
 func candidateBlock(c cadence.Candidate, width int) string {
-	title := c.Pattern
 	next := status.CandidateNext
-	if title == "" {
-		title = "Review findings not yet grouped into a problem"
-		if c.Dump != "" {
-			next = "read them with: " + c.Dump
-		}
+	if c.Dump != "" {
+		next = "read them with: " + c.Dump
 	}
-	return problemEntry(title, []problemField{
+	return problemEntry(status.CandidateTitle(c), []problemField{
 		{"Evidence", []string{status.CandidateEvidence(c)}},
 		{"Next", []string{next}},
 	}, width)

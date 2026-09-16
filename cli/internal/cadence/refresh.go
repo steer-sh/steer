@@ -22,19 +22,21 @@ import (
 // and leaves a fix registered on another host out of the coverage queue. v9 adds
 // artifact to each intervention, and queues a record whose fix is absent or unreadable.
 // v10 adds artifact.removed, and queues a record whose fix the archive records as
-// removed after its split. v11 removes the auto-denials corpus row.
-const QueueVersion = 11
+// removed after its split. v11 removes the auto-denials corpus row. v12 replaces
+// the per-cluster transcript candidates with one pointer row.
+const QueueVersion = 12
 
-// maxTranscriptCandidates bounds the transcript half of the queue. A cluster key
-// is the user's own wording, so it groups verbatim repeats and nothing else;
-// grouping corrections into classes is the skill's job, and the queue carries the
-// strongest rows rather than filtering on a count the key cannot earn.
-const maxTranscriptCandidates = 25
+// maxCandidateExamples bounds the snippets a pointer row carries. The row exists
+// to say how big the ungrouped pile is; the examples show its shape, and the
+// whole pile is the digest's to serve.
+const maxCandidateExamples = 5
 
-// Corpus and unit tags of the contract.
+// Corpus and unit tags of the contract. The display packages branch on these, so
+// a reader's sentence is chosen by the corpus that produced a row, never by which
+// of the row's fields happen to be set.
 const (
-	corpusReviewFindings = "review-findings"
-	corpusTranscript     = "transcript-friction"
+	CorpusReviewFindings = "review-findings"
+	CorpusTranscript     = "transcript-friction"
 )
 
 // Incidence is a before/after chain count in the scored contract.
@@ -77,18 +79,24 @@ type Intervention struct {
 	SignalKind string `json:"signal_kind,omitempty"`
 }
 
-// Candidate is a pointer to a new cluster the model must cluster, phrase, and author
-// a regex for. It carries no match — that is model judgment reserved for the skill.
+// Candidate points at a pile of evidence no problem covers yet — one row per
+// corpus, never one row per item in the pile. Neither corpus can name a problem
+// on its own: a review finding has no class regex until the skill authors one,
+// and a transcript cluster is keyed on the user's own wording, so it groups
+// verbatim repeats and nothing else. A row therefore carries no match and no
+// title of its own; grouping the pile is the skill's job.
 type Candidate struct {
-	Corpus   string   `json:"corpus"`
-	Pattern  string   `json:"pattern,omitempty"`
-	Count    int      `json:"count,omitempty"`
-	Sessions int      `json:"sessions,omitempty"`
+	Corpus string `json:"corpus"`
+	// Examples are the strongest few items of the pile, for a reader who wants its
+	// shape without leaving the terminal. They are evidence, never a problem name.
 	Examples []string `json:"examples,omitempty"`
-	// Review-findings pointer variant: no per-class regex exists yet, so the row
-	// points at the findings dump and counts the chains no class has decided.
+	// Review-findings pointer: the chains carrying a finding no class has decided,
+	// and the command that prints them.
 	UndecidedChains int    `json:"undecided_chains,omitempty"`
 	Dump            string `json:"dump,omitempty"`
+	// Transcript-friction pointer: the correction clusters no problem covers. A
+	// count here counts phrasings, so it is never a recurrence of one problem.
+	UngroupedClusters int `json:"ungrouped_clusters,omitempty"`
 }
 
 // CorpusStatus reports one corpus's presence and size on this machine. A corpus
@@ -204,30 +212,16 @@ func Refresh(opts Options) (*Queue, error) {
 	undecided := undecidedChains(chains, records)
 	if undecided > 0 {
 		q.Candidates = append(q.Candidates, Candidate{
-			Corpus:          corpusReviewFindings,
+			Corpus:          CorpusReviewFindings,
 			UndecidedChains: undecided,
 			Dump:            "steer commit-gate mine findings",
 		})
 	}
 
-	// --- transcript-friction candidates: mechanical clusters over threshold ---
+	// --- transcript-friction candidate pointer: ungrouped correction clusters --
 	digest, derr := report.Generate(opts.WindowDays, opts.AllProjects)
-	if derr == nil {
-		transcript := make([]Candidate, 0, len(digest.Signals.UserCorrections))
-		for _, c := range digest.Signals.UserCorrections {
-			transcript = append(transcript, Candidate{
-				Corpus:   corpusTranscript,
-				Pattern:  c.Pattern,
-				Count:    c.Count,
-				Sessions: c.Sessions,
-				Examples: c.Examples,
-			})
-		}
-		sortByStrength(transcript)
-		if len(transcript) > maxTranscriptCandidates {
-			transcript = transcript[:maxTranscriptCandidates]
-		}
-		q.Candidates = append(q.Candidates, transcript...)
+	if derr == nil && len(digest.Signals.UserCorrections) > 0 {
+		q.Candidates = append(q.Candidates, transcriptCandidate(digest.Signals.UserCorrections))
 	}
 	sortCandidates(q.Candidates)
 
@@ -238,8 +232,8 @@ func Refresh(opts Options) (*Queue, error) {
 		transcriptSize = sessionsScanned(digest, derr)
 	}
 	q.Corpora = []CorpusStatus{
-		{Corpus: corpusReviewFindings, Present: len(chains) > 0, Size: len(chains)},
-		{Corpus: corpusTranscript, Present: transcriptSize > 0, Size: transcriptSize},
+		{Corpus: CorpusReviewFindings, Present: len(chains) > 0, Size: len(chains)},
+		{Corpus: CorpusTranscript, Present: transcriptSize > 0, Size: transcriptSize},
 	}
 
 	return q, nil
@@ -343,30 +337,23 @@ func incidenceOf(v any) Incidence {
 }
 
 func sortCandidates(cs []Candidate) {
-	sort.SliceStable(cs, func(i, j int) bool {
-		if cs[i].Corpus != cs[j].Corpus {
-			return cs[i].Corpus < cs[j].Corpus
+	sort.SliceStable(cs, func(i, j int) bool { return cs[i].Corpus < cs[j].Corpus })
+}
+
+// transcriptCandidate folds every correction cluster into the one row that says
+// how many there are. It keeps the digest's order, which report.Finalize already
+// ranks by occurrences weighted by session spread and breaks ties on the key, so
+// the examples are the strongest few and a refresh over unchanged evidence stays
+// byte-identical.
+func transcriptCandidate(clusters []*report.Cluster) Candidate {
+	c := Candidate{Corpus: CorpusTranscript, UngroupedClusters: len(clusters)}
+	for _, cl := range clusters {
+		if len(c.Examples) == maxCandidateExamples {
+			break
 		}
-		return strongerThan(cs[i], cs[j])
-	})
-}
-
-// sortByStrength orders one corpus's candidates so a truncation drops the
-// weakest rows rather than the alphabetically last ones.
-func sortByStrength(cs []Candidate) {
-	sort.SliceStable(cs, func(i, j int) bool { return strongerThan(cs[i], cs[j]) })
-}
-
-// strongerThan ranks by spread across sessions, then by raw count, and falls
-// back to the pattern so a refresh over unchanged evidence stays byte-identical.
-func strongerThan(a, b Candidate) bool {
-	if a.Sessions != b.Sessions {
-		return a.Sessions > b.Sessions
+		c.Examples = append(c.Examples, cl.Pattern)
 	}
-	if a.Count != b.Count {
-		return a.Count > b.Count
-	}
-	return a.Pattern < b.Pattern
+	return c
 }
 
 func sessionsScanned(d *report.Digest, err error) int {

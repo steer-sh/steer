@@ -71,17 +71,41 @@ func TestProblemWhyAndNextFollowObservation(t *testing.T) {
 	}
 }
 
-// A queued row says where its evidence came from in the reader's words. The
-// stored name arrives as data, so no source file carries it.
+// A queued row says how big its pile is in the reader's words. The stored corpus
+// name arrives as data, so no source file carries it.
 func TestCandidateEvidenceTranslatesTheStoredSource(t *testing.T) {
-	got := CandidateEvidence(cadence.Candidate{Corpus: "review-findings",
-		Pattern: "missing scope", Count: 1, Sessions: 1})
-	for _, want := range []string{"a repeated review finding", "1 recurrence", "1 agent session"} {
+	got := CandidateEvidence(cadence.Candidate{Corpus: "review-findings", UndecidedChains: 1})
+	for _, want := range []string{"1 review sequence", "no problem covers yet"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("evidence = %q, missing %q", got, want)
 		}
 	}
 	if strings.Contains(got, "review-findings") {
 		t.Errorf("evidence prints the stored name: %q", got)
+	}
+}
+
+// A transcript row counts phrasings, so its sentence may never say recurrence: a
+// cluster key is the user's own wording, and one problem complained about five
+// ways is five keys.
+func TestTranscriptCandidateEvidenceClaimsNoRecurrence(t *testing.T) {
+	got := CandidateEvidence(cadence.Candidate{Corpus: cadence.CorpusTranscript, UngroupedClusters: 25})
+	if !strings.Contains(got, "25 correction snippets") {
+		t.Errorf("evidence = %q, missing the pile size", got)
+	}
+	for _, banned := range []string{"recurrence", "repeated", "agent session"} {
+		if strings.Contains(got, banned) {
+			t.Errorf("evidence = %q, still claims %q", got, banned)
+		}
+	}
+}
+
+// The title comes from the corpus, never from one item of the pile. Printing an
+// item as the title is what made a single user sentence read as a problem.
+func TestCandidateTitleNamesThePileNotItsContents(t *testing.T) {
+	got := CandidateTitle(cadence.Candidate{Corpus: cadence.CorpusTranscript,
+		UngroupedClusters: 3, Examples: []string{"no i don t think we need reviewer drift"}})
+	if got != "Correction snippets not yet grouped into a problem" {
+		t.Errorf("title = %q", got)
 	}
 }

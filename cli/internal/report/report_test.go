@@ -559,3 +559,25 @@ func TestDigestEvictsReserveRatherThanOverflow(t *testing.T) {
 		t.Error("with nothing unreserved left, the reserve itself must evict")
 	}
 }
+
+// The queue's transcript row takes the head of this order as its examples, so the
+// order is a contract with the cadence package and not an internal detail.
+//
+// pins existing behaviour
+func TestCollectRanksBySpreadThenKey(t *testing.T) {
+	clusters := map[string]*Cluster{
+		"aaa once":       {Pattern: "aaa once", Count: 1, Sessions: 1},
+		"zzz everywhere": {Pattern: "zzz everywhere", Count: 9, Sessions: 4},
+		"mmm twice":      {Pattern: "mmm twice", Count: 5, Sessions: 2},
+		"b tie":          {Pattern: "b tie", Count: 2, Sessions: 2},
+		"a tie":          {Pattern: "a tie", Count: 2, Sessions: 2},
+	}
+	got := collect(clusters)
+
+	want := []string{"zzz everywhere", "mmm twice", "a tie", "b tie", "aaa once"}
+	for i, w := range want {
+		if got[i].Pattern != w {
+			t.Errorf("position %d: got %q, want %q", i, got[i].Pattern, w)
+		}
+	}
+}

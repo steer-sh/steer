@@ -101,21 +101,22 @@ func TestProblemsHoldTheQueueAndTheInventory(t *testing.T) {
 	}
 }
 
-// The queue row sits above the tracked inventory: a problem nobody answered is
-// the one the reader has not dealt with.
-func TestTheQueueSitsAboveTheInventory(t *testing.T) {
+// The tracked inventory sits above the queue. A tracked row names a problem and
+// offers a key that acts on it; a queue row is an undecided pile whose only step
+// is the handoff, so a queue that renders first buries every actionable row.
+func TestTheInventorySitsAboveTheQueue(t *testing.T) {
 	m := New(gate.Defaults(), "global")
 	m.snap = &status.SystemStatus{Interventions: inventory()}
 	m.snap.Attention.Candidates = []cadence.Candidate{{
-		Corpus: "transcript-friction", Pattern: "bare python call", Count: 9, Sessions: 4,
+		Corpus: "transcript-friction", UngroupedClusters: 9,
 	}}
 	rows := m.problemRows()
-	if rows[0].candidate == nil {
-		t.Fatal("the first row is not a queue row")
+	if rows[len(rows)-1].candidate == nil {
+		t.Fatal("the last row is not a queue row")
 	}
-	for _, r := range rows[1:] {
+	for _, r := range rows[:len(rows)-1] {
 		if r.candidate != nil {
-			t.Fatal("a queue row rendered below a tracked record")
+			t.Fatal("a queue row rendered above a tracked record")
 		}
 	}
 }
@@ -126,11 +127,12 @@ func TestProblemsCursorWalksTheRenderedOrder(t *testing.T) {
 	m := New(gate.Defaults(), "global")
 	m.snap = &status.SystemStatus{Interventions: inventory()}
 	m.snap.Attention.Candidates = []cadence.Candidate{{
-		Corpus: "transcript-friction", Pattern: "queue-row", Count: 2, Sessions: 1,
+		Corpus: "transcript-friction", UngroupedClusters: 2,
 	}}
 	m.active = panelProblems
 
-	for pos, want := range []string{"queue-row", "recurring-problem", "coverage-problem", "quiet-problem"} {
+	for pos, want := range []string{"recurring-problem", "coverage-problem", "quiet-problem",
+		"Correction snippets"} {
 		m.cursor[panelProblems] = pos
 		marked := ""
 		for _, line := range strings.Split(m.viewProblems(), "\n") {
@@ -317,17 +319,17 @@ func TestStopTrackingTargetsTheSelectedRecord(t *testing.T) {
 	m.cfg.StateDir = t.TempDir()
 	m.snap = &status.SystemStatus{Interventions: inventory()}
 	m.snap.Attention.Candidates = []cadence.Candidate{{
-		Corpus: "transcript-friction", Pattern: "queue-row", Count: 1, Sessions: 1,
+		Corpus: "transcript-friction", UngroupedClusters: 1,
 	}}
 	m.active = panelProblems
 
-	m.cursor[panelProblems] = 0
+	m.cursor[panelProblems] = len(m.problemRows()) - 1
 	m.panelKey(keyOf("x"))
 	if m.editing {
 		t.Fatal("a queue row opened the stop-tracking editor")
 	}
 
-	m.cursor[panelProblems] = 1
+	m.cursor[panelProblems] = 0
 	m.panelKey(keyOf("x"))
 	if !m.editing || m.form == nil {
 		t.Fatal("the tracked record did not open the editor")
@@ -413,4 +415,27 @@ func stripANSI(s string) string {
 		}
 	}
 	return b.String()
+}
+
+// A row whose pile carries no examples renders its dump command alone, so the
+// detail must not announce that the lines below it are items of the pile.
+func TestCandidateDetailClaimsItemsOnlyWhereTheyAre(t *testing.T) {
+	review := candidateDetail(cadence.Candidate{
+		Corpus: "review-findings", UndecidedChains: 122,
+		Dump: "steer commit-gate mine findings",
+	}, 100)
+	if strings.Contains(review, "one item of the pile") {
+		t.Errorf("a row with no examples claims items below it:\n%s", review)
+	}
+	if !strings.Contains(review, "steer commit-gate mine findings") {
+		t.Errorf("the dump command is missing:\n%s", review)
+	}
+
+	transcript := candidateDetail(cadence.Candidate{
+		Corpus: "transcript-friction", UngroupedClusters: 25,
+		Examples: []string{"no bare python"},
+	}, 100)
+	if !strings.Contains(transcript, "one item of the pile") {
+		t.Errorf("a row with examples must say what they are:\n%s", transcript)
+	}
 }

@@ -2,6 +2,7 @@ package cadence
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
+	"github.com/steer-sh/steer-cli/internal/report"
 )
 
 // isolate points HOME at a temp dir so the transcript scan and the output dir
@@ -56,9 +58,9 @@ func TestWriteQueueIsByteIdentical(t *testing.T) {
 		Version:       QueueVersion,
 		Interventions: []Intervention{},
 		Candidates: []Candidate{
-			{Corpus: corpusReviewFindings, UndecidedChains: 5, Dump: "steer commit-gate mine findings"},
+			{Corpus: CorpusReviewFindings, UndecidedChains: 5, Dump: "steer commit-gate mine findings"},
 		},
-		Corpora: []CorpusStatus{{Corpus: corpusReviewFindings, Present: true, Size: 10}},
+		Corpora: []CorpusStatus{{Corpus: CorpusReviewFindings, Present: true, Size: 10}},
 	}
 	if err := WriteQueue(dir, q, time.Now()); err != nil {
 		t.Fatal(err)
@@ -79,15 +81,15 @@ func TestQueueRoundTrip(t *testing.T) {
 		Version: QueueVersion,
 		Interventions: []Intervention{{
 			ID: "widget-flag", Class: "widget flag loss", Match: "widget parser",
-			Corpus: corpusReviewFindings, Unit: mine.UnitChain, Tier: "check",
+			Corpus: CorpusReviewFindings, Unit: mine.UnitChain, Tier: "check",
 			Target:      "check.sh",
 			Observation: mine.Observation{Coverage: mine.ObservationCoverage{After: map[string]any{"eligible": float64(2)}}},
 			Before:      Incidence{Hits: 4, Units: 20, Rate: 0.2},
 			After:       Incidence{Hits: 5, Units: 20, Rate: 0.25},
 		}},
 		Unscored:   []string{"some-session-hook"},
-		Candidates: []Candidate{{Corpus: corpusTranscript, Pattern: "no bare python", Count: 6, Sessions: 4}},
-		Corpora:    []CorpusStatus{{Corpus: corpusTranscript, Present: true, Size: 12}},
+		Candidates: []Candidate{{Corpus: CorpusTranscript, UngroupedClusters: 6, Examples: []string{"no bare python"}}},
+		Corpora:    []CorpusStatus{{Corpus: CorpusTranscript, Present: true, Size: 12}},
 	}
 	if err := WriteQueue(dir, q, time.Now()); err != nil {
 		t.Fatal(err)
@@ -224,46 +226,56 @@ func TestNeedsAttention(t *testing.T) {
 	}
 }
 
-func TestTranscriptCandidatesRankByStrength(t *testing.T) {
-	// Alphabetical order and strength order disagree here, so a pass that still
-	// sorts by pattern truncates the strongest row away.
-	cs := []Candidate{
-		{Corpus: corpusTranscript, Pattern: "aaa seen once", Count: 1, Sessions: 1},
-		{Corpus: corpusTranscript, Pattern: "zzz seen everywhere", Count: 9, Sessions: 4},
-		{Corpus: corpusTranscript, Pattern: "mmm seen twice", Count: 5, Sessions: 2},
+func TestTranscriptClustersFoldIntoOnePointerRow(t *testing.T) {
+	// The count is the whole point of the row: a cluster key is one phrasing, so
+	// 30 clusters are 30 phrasings and never 30 problems. A pass that emits one
+	// row per cluster reports the size of the raw pile as the number of problems.
+	clusters := []*report.Cluster{}
+	for i := 0; i < 30; i++ {
+		clusters = append(clusters, &report.Cluster{
+			Pattern: fmt.Sprintf("phrasing %02d", i), Count: 1, Sessions: 1,
+		})
 	}
-	sortByStrength(cs)
+	c := transcriptCandidate(clusters)
 
-	want := []string{"zzz seen everywhere", "mmm seen twice", "aaa seen once"}
+	if c.Corpus != CorpusTranscript {
+		t.Errorf("corpus: got %q", c.Corpus)
+	}
+	if c.UngroupedClusters != 30 {
+		t.Errorf("the row must count every cluster: got %d, want 30", c.UngroupedClusters)
+	}
+	if len(c.Examples) != maxCandidateExamples {
+		t.Errorf("examples are capped at %d: got %d", maxCandidateExamples, len(c.Examples))
+	}
+}
+
+func TestPointerRowExamplesKeepTheDigestOrder(t *testing.T) {
+	// The row does no ranking of its own. It takes the head of the order the digest
+	// hands it, so the strongest clusters are the ones a reader sees.
+	clusters := []*report.Cluster{}
+	for _, p := range []string{"strongest", "second", "third", "fourth", "fifth", "sixth"} {
+		clusters = append(clusters, &report.Cluster{Pattern: p})
+	}
+	c := transcriptCandidate(clusters)
+
+	want := []string{"strongest", "second", "third", "fourth", "fifth"}
+	if len(c.Examples) != len(want) {
+		t.Fatalf("examples: got %d, want %d", len(c.Examples), len(want))
+	}
 	for i, w := range want {
-		if cs[i].Pattern != w {
-			t.Fatalf("position %d: got %q, want %q", i, cs[i].Pattern, w)
+		if c.Examples[i] != w {
+			t.Errorf("position %d: got %q, want %q", i, c.Examples[i], w)
 		}
 	}
 }
 
-func TestCandidateOrderIsDeterministicOnTies(t *testing.T) {
-	tie := func() []Candidate {
-		return []Candidate{
-			{Corpus: corpusTranscript, Pattern: "b same weight", Count: 2, Sessions: 2},
-			{Corpus: corpusTranscript, Pattern: "a same weight", Count: 2, Sessions: 2},
-		}
-	}
-	first, second := tie(), tie()
-	sortCandidates(first)
-	sortCandidates(second)
-	if first[0].Pattern != "a same weight" || first[0].Pattern != second[0].Pattern {
-		t.Fatalf("equal-weight rows must order by pattern: %q then %q", first[0].Pattern, first[1].Pattern)
-	}
-}
-
-func TestSortCandidatesGroupsByCorpusBeforeStrength(t *testing.T) {
+func TestSortCandidatesGroupsByCorpus(t *testing.T) {
 	cs := []Candidate{
-		{Corpus: corpusTranscript, Pattern: "strong", Count: 9, Sessions: 9},
-		{Corpus: corpusReviewFindings, UndecidedChains: 90},
+		{Corpus: CorpusTranscript, UngroupedClusters: 9},
+		{Corpus: CorpusReviewFindings, UndecidedChains: 90},
 	}
 	sortCandidates(cs)
-	if cs[0].Corpus != corpusReviewFindings {
-		t.Errorf("corpus grouping must outrank strength: got %q first", cs[0].Corpus)
+	if cs[0].Corpus != CorpusReviewFindings {
+		t.Errorf("review findings order first: got %q first", cs[0].Corpus)
 	}
 }
