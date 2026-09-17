@@ -354,29 +354,18 @@ func newestFiringIn(units []SessionUnit, firings []Firing, hookID string) float6
 	return newest
 }
 
-// CoverageGap reports units a window could not account for that a reader can act
-// on: an unknown scope, and the remainder a session map writes into its one bucket.
-// A ledger the resolver owes or closed as a miss is not one: the resolver's own
-// status entry carries that repair, so EvidenceExcluded discloses it instead. It is
-// the one predicate the scored line, the action table and the cadence sweep read.
-func CoverageGap(c map[string]any) bool {
-	unknown := numInt(c["unknown"])
-	scopeGap := numInt(c["unknown_scope"])
-	evidence := numInt(c["unknown_evidence"])
-	return scopeGap > 0 || unknown-scopeGap-evidence > 0
+// UnitsExcluded reports a window that left units out of its counts: a chain with no
+// scope metadata or no adjudication, or a session with no project. None has a
+// repair that recovers it, and the counts over the rest stand, so it qualifies a
+// reading and asks nothing of the reader.
+func UnitsExcluded(obs Observation) bool {
+	return numInt(obs.Coverage.Before["unknown"]) > 0 || numInt(obs.Coverage.After["unknown"]) > 0
 }
 
-// EvidenceExcluded reports a window that left chains out of its counts for want of an
-// adjudication. The counts over the rest stand, so it qualifies a reading and asks
-// nothing of the reader.
-func EvidenceExcluded(obs Observation) bool {
-	return numInt(obs.Coverage.Before["unknown_evidence"]) > 0 ||
-		numInt(obs.Coverage.After["unknown_evidence"]) > 0
-}
-
-// MissingCoverage adds the audit stream a guard's activity cannot be read
-// without, and the check evidence a bound check's activity cannot be read
-// without, to the two windows' own gaps.
+// MissingCoverage reports the audit stream a guard's activity cannot be read
+// without, and the check evidence a bound check's activity cannot be read without.
+// It is the one predicate the scored line, the action table and the cadence sweep
+// read.
 func MissingCoverage(obs Observation) bool {
 	if obs.Firing.Applicable && !obs.Firing.LogPresent {
 		return true
@@ -384,5 +373,5 @@ func MissingCoverage(obs Observation) bool {
 	if obs.Checks.Missing() {
 		return true
 	}
-	return CoverageGap(obs.Coverage.Before) || CoverageGap(obs.Coverage.After)
+	return false
 }

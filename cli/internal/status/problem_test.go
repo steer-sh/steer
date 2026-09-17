@@ -32,12 +32,11 @@ func TestFixSummaryNamesTheTypeThenTheFix(t *testing.T) {
 	}
 }
 
-// Missing scope metadata carries a repair step, while an observed recurrence carries
+// A missing audit log carries a repair step, while an observed recurrence carries
 // the explanation that warrants inspection.
 func TestProblemWhyAndNextFollowObservation(t *testing.T) {
 	v := ProblemView{Scope: &cadence.Scope{Version: 1, All: true}, Unit: "chain",
-		Observation: mine.Observation{Coverage: mine.ObservationCoverage{
-			After: map[string]any{"unknown": 2, "unknown_scope": 2}}}}
+		Observation: mine.Observation{Firing: mine.FiringActivity{Applicable: true}}}
 	why, next := ProblemWhy(v), ProblemNext(v)
 	if next == "" {
 		t.Fatal("a result that asks for work carries a step")
@@ -45,14 +44,19 @@ func TestProblemWhyAndNextFollowObservation(t *testing.T) {
 	if why != "" {
 		t.Errorf("both a reason %q and a step %q", why, next)
 	}
-	// A ledger the resolver closed as a miss asks for nothing: the sentence is a
-	// reason, and it names no command that would change nothing.
-	missed := ProblemView{Scope: &cadence.Scope{Version: 1, All: true}, Unit: "chain",
-		Observation: mine.Observation{Coverage: mine.ObservationCoverage{
-			After: map[string]any{"unknown": 2, "unknown_evidence": 2, "ledger_missed": 2}}}}
-	if ProblemWhy(missed) == "" || ProblemNext(missed) != "" || strings.Contains(ProblemWhy(missed), "run:") {
-		t.Errorf("a closed miss carries a reason and no step: why=%q next=%q",
-			ProblemWhy(missed), ProblemNext(missed))
+	// A unit no repair recovers asks for nothing: the sentence is a reason, and it
+	// names no command that would change nothing.
+	for _, after := range []map[string]any{
+		{"unknown": 2, "unknown_evidence": 2, "ledger_missed": 2},
+		{"unknown": 2, "unknown_scope": 2},
+		{"unknown": 2},
+	} {
+		excluded := ProblemView{Scope: &cadence.Scope{Version: 1, All: true}, Unit: "chain",
+			Observation: mine.Observation{Coverage: mine.ObservationCoverage{After: after}}}
+		if ProblemWhy(excluded) == "" || ProblemNext(excluded) != "" || strings.Contains(ProblemWhy(excluded), "run:") {
+			t.Errorf("%v: an excluded unit carries a reason and no step: why=%q next=%q",
+				after, ProblemWhy(excluded), ProblemNext(excluded))
+		}
 	}
 	// A window whose unknowns are all still settling asks for nothing: those rows
 	// close on their own, so the sentence is a reason and never a step.

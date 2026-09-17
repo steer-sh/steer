@@ -63,7 +63,7 @@ func ObservationLabel(obs mine.Observation) string {
 		return "Coverage incomplete"
 	case obs.Coverage.ZeroEligibleAfter:
 		return "No eligible work yet"
-	case mine.EvidenceExcluded(obs):
+	case mine.UnitsExcluded(obs):
 		return "No recurrence in the counted work"
 	}
 	return "No recurrence observed"
@@ -87,9 +87,9 @@ func ActionSentence(obs mine.Observation, scope *cadence.Scope) string {
 	return "eligible work is present and the problem did not come back"
 }
 
-// missingCoverage is mine.MissingCoverage, which every reader shares. A ledger the
-// resolver owes or closed as a miss is not a repair here: the resolver's status entry
-// owns that step.
+// missingCoverage is mine.MissingCoverage, which every reader shares. A unit the
+// window could not count is disclosed, not repaired: a ledger the resolver owes is
+// the resolver's own status entry, and the rest have no repair.
 func missingCoverage(obs mine.Observation) bool {
 	return mine.MissingCoverage(obs)
 }

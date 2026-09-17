@@ -444,13 +444,13 @@ missing coverage; an unbound record's attribution is unavailable. The binding's
 host and this machine has no evidence, the activity is unknown but no coverage is
 missing here. A binding without it keeps the missing-coverage reading.
 
-`mine.CoverageGap` and `MissingCoverage` share coverage interpretation among
+`mine.MissingCoverage` and `UnitsExcluded` share coverage interpretation among
 scorers and readers. `status.ActionFor` orders actions as inspect, repair, observe:
 recurrence outranks missing scope and coverage, while zero eligible after-units or a
-ledger cause does not itself prescribe repair. A ledger cause (`pending`,
-`ledger_missed`, `ledger_overdue`) leaves its chain out of the counts and is
-disclosed; the repair for overdue local rows is the status entry for
-`Posture.Unresolved`, not the record. Retirement ends tracking;
+unit the window could not count does not itself prescribe repair. An unknown scope,
+a session with no project, and a ledger cause (`pending`, `ledger_missed`,
+`ledger_overdue`) leave the unit out of the counts and are disclosed; the repair for
+overdue local rows is the status entry for `Posture.Unresolved`, not the record. Retirement ends tracking;
 `mine.Retire` removes no guard, instruction or repository check.
 
 `cadence.ArtifactOf` reads where the fix a record binds stands now, against the

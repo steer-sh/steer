@@ -60,7 +60,8 @@ func quietObservation() mine.Observation {
 // coverageObservation carries an unknown the accounting cannot resolve.
 func coverageObservation() mine.Observation {
 	return mine.Observation{
-		Coverage: mine.ObservationCoverage{After: map[string]any{"eligible": 4, "total": 6, "unknown_scope": 2}},
+		Firing:   mine.FiringActivity{Applicable: true},
+		Coverage: mine.ObservationCoverage{After: map[string]any{"eligible": 4, "total": 4}},
 	}
 }
 
@@ -228,7 +229,7 @@ func TestAMissingCoverageCauseStaysInTheSummary(t *testing.T) {
 	m.active = panelProblems
 
 	view := strings.Join(strings.Fields(m.viewProblems()), " ")
-	for _, want := range []string{"Coverage incomplete", "no repository or changed files"} {
+	for _, want := range []string{"Coverage incomplete", "no guard audit log"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("the summary is missing %q:\n%s", want, view)
 		}

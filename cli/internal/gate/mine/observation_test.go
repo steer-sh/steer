@@ -229,35 +229,28 @@ func TestTheScoredLineNamesAMissingScopeRatherThanAQuietWindow(t *testing.T) {
 	check(t, "recurrence outranks the scope", observationState(recurred, false), "recurred")
 }
 
-// A ledger cause is never a gap: a pending row settles, an overdue one is the
-// resolver's own status entry, and a closed miss has no repair.
-func TestALedgerCauseIsNeverACoverageGap(t *testing.T) {
-	settling := map[string]any{"unknown": 3, "unknown_evidence": 3, "pending": 3}
-	if CoverageGap(settling) {
-		t.Error("a window whose unknowns are all still settling is no gap")
-	}
-	missed := map[string]any{"unknown": 4, "unknown_evidence": 4, "pending": 1, "ledger_missed": 2, "ledger_overdue": 1}
-	if CoverageGap(missed) {
-		t.Error("a closed or overdue ledger is disclosed, not a gap")
-	}
-	obs := Observation{Coverage: ObservationCoverage{After: missed}}
-	if MissingCoverage(obs) {
-		t.Error("a window holding only ledger causes asks for no repair")
-	}
-	if !EvidenceExcluded(obs) {
-		t.Error("the excluded chains are still disclosed")
+// A unit the window could not count is disclosed, never a repair: its metadata does
+// not arrive later, a pending row settles, an overdue one is the resolver's own status
+// entry, and a closed miss has no repair.
+func TestAnExcludedUnitIsDisclosedAndNeverARepair(t *testing.T) {
+	for name, after := range map[string]map[string]any{
+		"settling":      {"unknown": 3, "unknown_evidence": 3, "pending": 3},
+		"missed":        {"unknown": 3, "unknown_evidence": 3, "ledger_missed": 2, "ledger_overdue": 1},
+		"unknown scope": {"unknown": 2, "unknown_scope": 2},
+		"no project":    {"unknown": 5},
+	} {
+		obs := Observation{Coverage: ObservationCoverage{After: after}}
+		if MissingCoverage(obs) {
+			t.Errorf("%s: an excluded unit asks for a repair", name)
+		}
+		if !UnitsExcluded(obs) {
+			t.Errorf("%s: the excluded units are not disclosed", name)
+		}
 	}
 	var out strings.Builder
-	writeObservation(&out, obs)
-	if !strings.Contains(out.String(), "0 before and 4 after carry no adjudication") {
-		t.Errorf("the scored line hides the excluded chains:\n%s", out.String())
-	}
-	if !CoverageGap(map[string]any{"unknown": 2, "unknown_scope": 2}) {
-		t.Error("metadata no row carried is a gap")
-	}
-	// A session map writes neither name, so its whole bucket is the remainder.
-	if !CoverageGap(map[string]any{"unknown": 5}) {
-		t.Error("a session window that could not be placed is a gap")
+	writeObservation(&out, Observation{Coverage: ObservationCoverage{After: map[string]any{"unknown": 4, "unknown_scope": 4}}})
+	if !strings.Contains(out.String(), "0 before and 4 after could not be counted") {
+		t.Errorf("the scored line hides the excluded units:\n%s", out.String())
 	}
 	// An audit log a guard's activity cannot be read without is the fourth cause.
 	if !MissingCoverage(Observation{Firing: FiringActivity{Applicable: true}}) {

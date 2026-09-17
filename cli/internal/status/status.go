@@ -54,8 +54,8 @@ import (
 // as removed after the record's split. v21 removes posture.denials,
 // telemetry.denials_rows and the auto-denials corpus row. v22 adds coverage
 // ledger_missed and ledger_overdue, and a ledger cause no longer files a record
-// under repair.
-const StatusVersion = 22
+// under repair. v23 extends that to an unknown scope and a session with no project.
+const StatusVersion = 23
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20
