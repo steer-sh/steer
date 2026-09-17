@@ -512,7 +512,8 @@ Arming distinguishes registered configuration, command resolution from this
 process, and observed corpus activity. Resolution is a proxy for the harness's
 environment; activity does not identify scope or prove current trust. Readiness
 reports detectable setup problems with repairs and keeps trust uncertainty
-separate. Machine-local absence describes only the evidence available here.
+separate. A resolver problem is a step beside the reviewing answer, never a reason
+to withhold it; one working resolver reads every harness's ledger. Machine-local absence describes only the evidence available here.
 
 `internal/tui/` provides Arming, Problems, Fixes, Reviewer and Diagnostics panels.
 Mutations call shared lifecycle/settings functions and recompose status afterwards.

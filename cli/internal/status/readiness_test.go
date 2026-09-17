@@ -20,7 +20,7 @@ func available() reviewers.Probe {
 }
 
 func snapshot(rows ...ScopeArming) *SystemStatus {
-	return &SystemStatus{Posture: Posture{CommitGate: rows}}
+	return &SystemStatus{Posture: Posture{CommitGate: rows, Resolver: []ScopeArming{armed(string(harness.ClaudeCode))}}}
 }
 
 // An empty machine gets the answer, not an inventory it has to read a verdict out of.
@@ -171,5 +171,45 @@ func TestAMissingReviewerWithholdsTheAnswerOnEveryChannel(t *testing.T) {
 	r := ReadinessOf(snapshot(armed(string(harness.ClaudeCode)), armed(string(harness.Codex))), missing)
 	if r.Reviewing {
 		t.Fatalf("Readiness = %+v; want the answer withheld", r)
+	}
+}
+
+// A resolver that cannot run leaves every review unread, but the commit is still
+// reviewed, so the step never withholds the answer.
+func TestAnUnresolvableResolverIsAStepBesideTheAnswer(t *testing.T) {
+	s := snapshot(armed(string(harness.ClaudeCode)))
+	s.Posture.Resolver[0].Resolvable = ResolveMissing
+	r := ReadinessOf(s, available())
+	if !r.Reviewing {
+		t.Fatalf("Readiness = %+v; a broken resolver withheld the reviewing answer", r)
+	}
+	if len(r.Steps) != 1 || r.Steps[0].Fix != "steer bin install" || !strings.Contains(r.Steps[0].Title, "Claude Code global scope") {
+		t.Fatalf("steps = %+v; want one scoped step naming the executable repair", r.Steps)
+	}
+}
+
+// Any working resolver reads every harness's ledger, so a harness without its own
+// registration is no step while another one works.
+func TestOneWorkingResolverCoversEveryHarness(t *testing.T) {
+	s := snapshot(armed(string(harness.ClaudeCode)), armed(string(harness.Codex)))
+	s.Posture.Resolver = append(s.Posture.Resolver, ScopeArming{Harness: string(harness.Codex), Scope: "global"})
+	if r := ReadinessOf(s, available()); len(r.Steps) != 0 {
+		t.Fatalf("steps = %+v; one working resolver serves both harnesses", r.Steps)
+	}
+	s.Posture.Resolver[0].Registered = false
+	if r := ReadinessOf(s, available()); len(r.Steps) != 1 {
+		t.Fatalf("steps = %+v; with that one gone, no resolver reads the outcomes", r.Steps)
+	}
+}
+
+func TestAGateWithNoResolverNamesTheInstall(t *testing.T) {
+	s := snapshot(armed(string(harness.Codex)))
+	s.Posture.Resolver = nil
+	r := ReadinessOf(s, available())
+	if !r.Reviewing || len(r.Steps) != 1 || r.Steps[0].Fix != "steer commit-gate install --harness codex --scope global" {
+		t.Fatalf("Readiness = %+v; want reviewing with one install step", r)
+	}
+	if r := ReadinessOf(&SystemStatus{}, available()); len(r.Steps) != 1 {
+		t.Fatalf("steps = %+v; with no gate, only the gate install is asked for", r.Steps)
 	}
 }

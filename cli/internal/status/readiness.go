@@ -152,6 +152,9 @@ func ReadinessOf(s *SystemStatus, probe reviewers.Probe) Readiness {
 			observed = true
 		}
 	}
+	if registered {
+		r.Steps = append(r.Steps, resolverSteps(s.Posture)...)
+	}
 	if !registered {
 		r.Steps = append([]Step{{
 			Title: "no commit gate is registered, so nothing reviews a commit here",
@@ -177,6 +180,38 @@ func ReadinessOf(s *SystemStatus, probe reviewers.Probe) Readiness {
 		r.Note = "no review observed yet — that is expected until the first commit in scope"
 	}
 	return r
+}
+
+// resolverSteps reports the resolver that reads review outcomes back. It never withholds
+// the reviewing answer: a commit is still reviewed, but no result can count the review.
+// Any working resolver reads every harness's ledger, so a missing one is a step only when
+// no registration here resolves.
+func resolverSteps(p Posture) []Step {
+	var steps []Step
+	working := false
+	for _, a := range p.Resolver {
+		if !a.Registered {
+			continue
+		}
+		if step, ok := CommandStep(a.Resolvable); ok {
+			step.Title = "the review-outcome reader's command does not resolve here, so no review outcome is read"
+			steps = append(steps, prefixHarness(step, a))
+			continue
+		}
+		working = true
+	}
+	if working || len(steps) > 0 {
+		return steps
+	}
+	for _, g := range p.CommitGate {
+		if g.Registered {
+			return []Step{{
+				Title: "no review-outcome reader is registered beside the commit gate here, so review outcomes are read only when one runs elsewhere",
+				Fix:   fmt.Sprintf("steer commit-gate install --harness %s --scope %s", g.Harness, g.Scope),
+			}}
+		}
+	}
+	return nil
 }
 
 // prefixHarness names the registration a step belongs to. One store serves several
