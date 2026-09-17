@@ -305,8 +305,9 @@ func matchesAnyPath(re *regexp.Regexp, paths []string) bool {
 }
 
 // Coverage is a window's chains split by standing: Total == Eligible+Ineligible+Unknown.
-// UnknownScope and UnknownEvidence break Unknown down by cause, and Pending is the
-// share of UnknownEvidence whose ledger may still arrive.
+// UnknownScope and UnknownEvidence break Unknown down by cause. UnknownEvidence is
+// Pending + LedgerMissed + LedgerOverdue: a ledger that may still arrive, one the
+// resolver closed as a miss, and one the resolver has not closed past the grace window.
 type Coverage struct {
 	Total           int `json:"total"`
 	Eligible        int `json:"eligible"`
@@ -315,6 +316,8 @@ type Coverage struct {
 	UnknownScope    int `json:"unknown_scope"`
 	UnknownEvidence int `json:"unknown_evidence"`
 	Pending         int `json:"pending"`
+	LedgerMissed    int `json:"ledger_missed"`
+	LedgerOverdue   int `json:"ledger_overdue"`
 	chains          []Chain
 }
 
@@ -345,8 +348,13 @@ func CoverEvidence(chains []Chain, scope *Scope, now float64) Coverage {
 				e = Unknown
 				cov.Pending++
 				cov.UnknownEvidence++
-			case EvidenceMissing:
+			case EvidenceMissed:
 				e = Unknown
+				cov.LedgerMissed++
+				cov.UnknownEvidence++
+			case EvidenceOverdue:
+				e = Unknown
+				cov.LedgerOverdue++
 				cov.UnknownEvidence++
 			}
 		}

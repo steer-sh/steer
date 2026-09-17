@@ -12,8 +12,8 @@ type Gap struct {
 
 // EvidenceGap names a missing coverage cause even when another part of the
 // window has eligible work. Recurrence is handled by ActionFor before this text.
-// Each pass below scans BOTH windows, so a permanent cause anywhere outranks a
-// transient one anywhere.
+// Each pass below scans BOTH windows, so a cause that asks for the reader anywhere
+// outranks a disclosure anywhere.
 func EvidenceGap(obs mine.Observation, scope *cadence.Scope) *Gap {
 	if obs.Recurrence.Occurred {
 		return nil
@@ -22,14 +22,6 @@ func EvidenceGap(obs mine.Observation, scope *cadence.Scope) *Gap {
 		return &Gap{Sentence: "no rule was saved for which work counts", Command: "steer fix scope"}
 	}
 	windows := []map[string]any{obs.Coverage.Before, obs.Coverage.After}
-	// The repairable cause runs first: of the permanent ones, only this carries a
-	// command. `pending` is counted inside `unknown_evidence` (mine/scope.go:265),
-	// so the ledgers the resolver closed as gone are the excess over it.
-	for _, c := range windows {
-		if numInt(c["unknown_evidence"]) > numInt(c["pending"]) {
-			return &Gap{Sentence: "review sequences inside the observation period carry no recorded decision, so they cannot be counted", Command: BackfillCommand}
-		}
-	}
 	for _, c := range windows {
 		if numInt(c["unknown_scope"]) > 0 {
 			return &Gap{Sentence: "review sequences inside the observation period record no repository or changed files, so no rule can say whether they count"}
@@ -46,6 +38,18 @@ func EvidenceGap(obs mine.Observation, scope *cadence.Scope) *Gap {
 	}
 	if obs.Checks.Missing() {
 		return &Gap{Sentence: "this machine holds no check evidence for the repository, so no check run can be joined to the observation"}
+	}
+	// The ledger causes carry no command: the resolver's own status entry reads an
+	// unresolved row, and a closed miss has no repair.
+	for _, c := range windows {
+		if numInt(c["ledger_overdue"]) > 0 {
+			return &Gap{Sentence: "review sequences inside the observation period have no outcome read yet, so they are left out of the counts"}
+		}
+	}
+	for _, c := range windows {
+		if numInt(c["ledger_missed"]) > 0 {
+			return &Gap{Sentence: "review sequences inside the observation period have no decision in any session history read here, so they are left out of the counts"}
+		}
 	}
 	for _, c := range windows {
 		if numInt(c["pending"]) > 0 {

@@ -26,10 +26,10 @@ func TestScopePhraseCombinesPredicatesWithAnd(t *testing.T) {
 
 func TestCoveragePhraseAccountsForEveryChain(t *testing.T) {
 	got := CoveragePhrase(cadence.Coverage{
-		Total: 20, Eligible: 12, Ineligible: 3, Unknown: 5,
-		UnknownScope: 2, UnknownEvidence: 3, Pending: 1,
+		Total: 20, Eligible: 12, Ineligible: 3, Unknown: 6,
+		UnknownScope: 2, UnknownEvidence: 4, Pending: 1, LedgerOverdue: 1, LedgerMissed: 1,
 	})
-	want := "12 eligible / 20 (3 out of scope, 2 unknown scope, 3 with no decision recorded, 1 pending)"
+	want := "12 eligible / 20 (3 out of scope, 2 unknown scope, 1 with no outcome read, 1 with no decision found, 1 with no decision recorded, 1 pending)"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}

@@ -552,6 +552,8 @@ func coverageMap(c Coverage) map[string]any {
 		"unknown_scope":    c.UnknownScope,
 		"unknown_evidence": c.UnknownEvidence,
 		"pending":          c.Pending,
+		"ledger_missed":    c.LedgerMissed,
+		"ledger_overdue":   c.LedgerOverdue,
 	}
 }
 

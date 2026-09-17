@@ -11,38 +11,48 @@ import (
 func TestEvidenceGapNamesCoverageCauseWithEligibleWork(t *testing.T) {
 	obs := mine.Observation{Coverage: mine.ObservationCoverage{
 		Before: map[string]any{"eligible": 4},
-		After:  map[string]any{"eligible": 3, "unknown_evidence": 1},
+		After:  map[string]any{"eligible": 3, "unknown": 1, "unknown_scope": 1},
 	}}
 	g := EvidenceGap(obs, &cadence.Scope{Version: 1, All: true})
-	if g == nil || !strings.Contains(g.Sentence, "no recorded decision") {
+	if g == nil || !strings.Contains(g.Sentence, "no repository or changed files") {
 		t.Fatalf("gap = %+v", g)
-	}
-	if g.Command != BackfillCommand {
-		t.Fatalf("command = %q", g.Command)
 	}
 }
 
-// A pending row is counted inside unknown_evidence (mine/scope.go:265), so the
-// two never arrive apart. A window whose unknowns are ALL pending settles on its
-// own, and naming it a missing decision hands the reader a backfill that clears
-// nothing; only the excess over pending is a row the resolver closed as gone.
-func TestPendingRowsAreNotReportedAsMissingDecisions(t *testing.T) {
-	all := mine.Observation{Coverage: mine.ObservationCoverage{
-		After: map[string]any{"eligible": 3, "unknown": 2, "unknown_evidence": 2, "pending": 2},
-	}}
-	g := EvidenceGap(all, &cadence.Scope{Version: 1, All: true})
-	if g == nil || g.Command != "" {
-		t.Fatalf("an all-pending window named a command: %+v", g)
+// A ledger cause names itself and carries no command: an overdue row is read by the
+// resolver's own status entry, and a closed miss has no repair.
+func TestALedgerCauseIsDisclosedWithNoCommand(t *testing.T) {
+	scope := &cadence.Scope{Version: 1, All: true}
+	for _, tc := range []struct {
+		name, want string
+		after      map[string]any
+	}{
+		{"overdue", "no outcome read yet", map[string]any{"unknown": 1, "unknown_evidence": 1, "ledger_overdue": 1}},
+		{"missed", "no decision in any session history", map[string]any{"unknown": 1, "unknown_evidence": 1, "ledger_missed": 1}},
+		{"pending", "await a decision", map[string]any{"unknown": 1, "unknown_evidence": 1, "pending": 1}},
+	} {
+		obs := mine.Observation{Coverage: mine.ObservationCoverage{After: tc.after}}
+		g := EvidenceGap(obs, scope)
+		if g == nil || g.Command != "" || !strings.Contains(g.Sentence, tc.want) {
+			t.Errorf("%s: gap = %+v", tc.name, g)
+		}
 	}
-	if !strings.Contains(g.Sentence, "await a decision") {
-		t.Errorf("an all-pending window is phrased as %q", g.Sentence)
-	}
-	// One unknown beyond the pending share is a ledger the resolver closed as gone.
-	excess := mine.Observation{Coverage: mine.ObservationCoverage{
-		After: map[string]any{"eligible": 3, "unknown": 3, "unknown_evidence": 3, "pending": 2},
+}
+
+// Overdue work outranks a closed miss, and a closed miss outranks pending, across
+// both windows.
+func TestLedgerCausesRankOverdueThenMissedThenPending(t *testing.T) {
+	scope := &cadence.Scope{Version: 1, All: true}
+	obs := mine.Observation{Coverage: mine.ObservationCoverage{
+		Before: map[string]any{"unknown": 2, "unknown_evidence": 2, "ledger_missed": 1, "pending": 1},
+		After:  map[string]any{"unknown": 1, "unknown_evidence": 1, "ledger_overdue": 1},
 	}}
-	if g := EvidenceGap(excess, &cadence.Scope{Version: 1, All: true}); g == nil || g.Command != BackfillCommand {
-		t.Fatalf("an unknown beyond the pending share named no backfill: %+v", g)
+	if g := EvidenceGap(obs, scope); g == nil || !strings.Contains(g.Sentence, "no outcome read yet") {
+		t.Errorf("overdue work was hidden: %+v", g)
+	}
+	obs.Coverage.After = map[string]any{"unknown": 1, "unknown_evidence": 1, "pending": 1}
+	if g := EvidenceGap(obs, scope); g == nil || !strings.Contains(g.Sentence, "no decision in any session history") {
+		t.Errorf("a miss read as settling: %+v", g)
 	}
 }
 
@@ -58,31 +68,15 @@ func TestAPermanentCauseOutranksPendingInOneWindow(t *testing.T) {
 	}
 }
 
-// Between two PERMANENT causes the one carrying a command wins, whichever window
-// holds it. Ranking by window instead would hand the reader the gap they can do
-// nothing about and hide the one they can clear.
-func TestTheRepairableCauseOutranksTheOneWithNoCommand(t *testing.T) {
+// A cause that asks for the reader outranks a ledger disclosure in the other window.
+func TestAScopeCauseOutranksALedgerCauseInTheOtherWindow(t *testing.T) {
 	obs := mine.Observation{Coverage: mine.ObservationCoverage{
-		Before: map[string]any{"eligible": 4, "unknown": 1, "unknown_scope": 1},
-		After:  map[string]any{"eligible": 3, "unknown": 2, "unknown_evidence": 2},
+		Before: map[string]any{"eligible": 4, "unknown": 1, "unknown_evidence": 1, "ledger_overdue": 1},
+		After:  map[string]any{"eligible": 3, "unknown": 1, "unknown_scope": 1},
 	}}
 	g := EvidenceGap(obs, &cadence.Scope{Version: 1, All: true})
-	if g == nil || g.Command != BackfillCommand {
-		t.Fatalf("the only repairable cause was hidden behind one with no command: %+v", g)
-	}
-}
-
-// A permanent cause outranks a transient one ACROSS the two windows. A single
-// loop returns on the first window that yields anything, so a merely-pending
-// before-window would hide the after-window's repairable one.
-func TestAPermanentCauseOutranksPendingInTheOtherWindow(t *testing.T) {
-	obs := mine.Observation{Coverage: mine.ObservationCoverage{
-		Before: map[string]any{"eligible": 4, "unknown": 1, "unknown_evidence": 1, "pending": 1},
-		After:  map[string]any{"eligible": 3, "unknown": 3, "unknown_evidence": 3},
-	}}
-	g := EvidenceGap(obs, &cadence.Scope{Version: 1, All: true})
-	if g == nil || g.Command != BackfillCommand {
-		t.Fatalf("a pending before-window hid the after-window's backfill: %+v", g)
+	if g == nil || !strings.Contains(g.Sentence, "no repository or changed files") {
+		t.Fatalf("a ledger disclosure hid a scope gap: %+v", g)
 	}
 }
 

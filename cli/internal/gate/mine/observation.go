@@ -355,16 +355,23 @@ func newestFiringIn(units []SessionUnit, firings []Firing, hookID string) float6
 }
 
 // CoverageGap reports units a window could not account for that a reader can act
-// on: the excess of `unknown_evidence` over the `pending` it contains
-// (scope.go:265), an unknown scope, and the remainder a session map writes into
-// its one bucket. It is the one predicate the scored line, the action table and
-// the cadence sweep read.
+// on: an unknown scope, and the remainder a session map writes into its one bucket.
+// A ledger the resolver owes or closed as a miss is not one: the resolver's own
+// status entry carries that repair, so EvidenceExcluded discloses it instead. It is
+// the one predicate the scored line, the action table and the cadence sweep read.
 func CoverageGap(c map[string]any) bool {
 	unknown := numInt(c["unknown"])
 	scopeGap := numInt(c["unknown_scope"])
 	evidence := numInt(c["unknown_evidence"])
-	return evidence > numInt(c["pending"]) || scopeGap > 0 ||
-		unknown-scopeGap-evidence > 0
+	return scopeGap > 0 || unknown-scopeGap-evidence > 0
+}
+
+// EvidenceExcluded reports a window that left chains out of its counts for want of an
+// adjudication. The counts over the rest stand, so it qualifies a reading and asks
+// nothing of the reader.
+func EvidenceExcluded(obs Observation) bool {
+	return numInt(obs.Coverage.Before["unknown_evidence"]) > 0 ||
+		numInt(obs.Coverage.After["unknown_evidence"]) > 0
 }
 
 // MissingCoverage adds the audit stream a guard's activity cannot be read

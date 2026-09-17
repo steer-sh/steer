@@ -52,8 +52,10 @@ import (
 // .store: an installed harness that runs none of a scope's guards. v20 adds
 // interventions[].artifact.removed: a fix in place now that the archive records
 // as removed after the record's split. v21 removes posture.denials,
-// telemetry.denials_rows and the auto-denials corpus row.
-const StatusVersion = 21
+// telemetry.denials_rows and the auto-denials corpus row. v22 adds coverage
+// ledger_missed and ledger_overdue, and a ledger cause no longer files a record
+// under repair.
+const StatusVersion = 22
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20

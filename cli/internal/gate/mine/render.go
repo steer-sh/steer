@@ -1037,6 +1037,10 @@ func writeObservation(w io.Writer, obs Observation) {
 	if obs.Coverage.ZeroEligibleAfter {
 		fmt.Fprintln(w, "    coverage: no eligible work has arrived since the split")
 	}
+	if EvidenceExcluded(obs) {
+		fmt.Fprintf(w, "    coverage: %d before and %d after carry no adjudication and are left out of the counts\n",
+			numInt(obs.Coverage.Before["unknown_evidence"]), numInt(obs.Coverage.After["unknown_evidence"]))
+	}
 	fmt.Fprintf(w, "    %s: before %s  after %s\n", obs.Provenance.Kind,
 		joinOrNone(obs.Provenance.Before), joinOrNone(obs.Provenance.After))
 	fmt.Fprintln(w, "    these counts describe each period; they do not establish that the fix caused a change")

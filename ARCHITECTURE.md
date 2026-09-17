@@ -446,8 +446,11 @@ missing here. A binding without it keeps the missing-coverage reading.
 
 `mine.CoverageGap` and `MissingCoverage` share coverage interpretation among
 scorers and readers. `status.ActionFor` orders actions as inspect, repair, observe:
-recurrence outranks missing scope and coverage, while a merely pending row or zero
-eligible after-units does not itself prescribe repair. Retirement ends tracking;
+recurrence outranks missing scope and coverage, while zero eligible after-units or a
+ledger cause does not itself prescribe repair. A ledger cause (`pending`,
+`ledger_missed`, `ledger_overdue`) leaves its chain out of the counts and is
+disclosed; the repair for overdue local rows is the status entry for
+`Posture.Unresolved`, not the record. Retirement ends tracking;
 `mine.Retire` removes no guard, instruction or repository check.
 
 `cadence.ArtifactOf` reads where the fix a record binds stands now, against the

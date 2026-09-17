@@ -32,20 +32,27 @@ func TestFixSummaryNamesTheTypeThenTheFix(t *testing.T) {
 	}
 }
 
-// Missing evidence carries a repair step, while an observed recurrence carries
+// Missing scope metadata carries a repair step, while an observed recurrence carries
 // the explanation that warrants inspection.
 func TestProblemWhyAndNextFollowObservation(t *testing.T) {
-	// `pending` is counted inside `unknown_evidence`, so a window the resolver can
-	// repair is the excess over it.
 	v := ProblemView{Scope: &cadence.Scope{Version: 1, All: true}, Unit: "chain",
 		Observation: mine.Observation{Coverage: mine.ObservationCoverage{
-			After: map[string]any{"unknown": 6, "unknown_evidence": 6, "pending": 4}}}}
+			After: map[string]any{"unknown": 2, "unknown_scope": 2}}}}
 	why, next := ProblemWhy(v), ProblemNext(v)
 	if next == "" {
 		t.Fatal("a result that asks for work carries a step")
 	}
 	if why != "" {
 		t.Errorf("both a reason %q and a step %q", why, next)
+	}
+	// A ledger the resolver closed as a miss asks for nothing: the sentence is a
+	// reason, and it names no command that would change nothing.
+	missed := ProblemView{Scope: &cadence.Scope{Version: 1, All: true}, Unit: "chain",
+		Observation: mine.Observation{Coverage: mine.ObservationCoverage{
+			After: map[string]any{"unknown": 2, "unknown_evidence": 2, "ledger_missed": 2}}}}
+	if ProblemWhy(missed) == "" || ProblemNext(missed) != "" || strings.Contains(ProblemWhy(missed), "run:") {
+		t.Errorf("a closed miss carries a reason and no step: why=%q next=%q",
+			ProblemWhy(missed), ProblemNext(missed))
 	}
 	// A window whose unknowns are all still settling asks for nothing: those rows
 	// close on their own, so the sentence is a reason and never a step.

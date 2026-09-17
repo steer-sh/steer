@@ -22,6 +22,8 @@ type Coverage struct {
 	UnknownScope    int `json:"unknown_scope"`
 	UnknownEvidence int `json:"unknown_evidence"`
 	Pending         int `json:"pending"`
+	LedgerMissed    int `json:"ledger_missed"`
+	LedgerOverdue   int `json:"ledger_overdue"`
 	PartialExposure int `json:"partial_exposure"`
 }
 
@@ -61,6 +63,8 @@ func CoverageOf(v any) Coverage {
 		UnknownScope:    numInt(m["unknown_scope"]),
 		UnknownEvidence: numInt(m["unknown_evidence"]),
 		Pending:         numInt(m["pending"]),
+		LedgerMissed:    numInt(m["ledger_missed"]),
+		LedgerOverdue:   numInt(m["ledger_overdue"]),
 		PartialExposure: numInt(m["partial_exposure"]),
 	}
 }

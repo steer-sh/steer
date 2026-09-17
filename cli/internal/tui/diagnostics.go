@@ -90,8 +90,8 @@ func (m *Model) diagnosticIssues() []diagnosticIssue {
 	if n := m.snap.Posture.Unresolved; n > 0 {
 		out = append(out, diagnosticIssue{
 			headline: status.OutcomesWaitingPhrase(n),
-			detail: "A review that has no recorded outcome cannot be counted, so every result " +
-				"resting on it is withheld. Open Arming and press enter on the read-outcomes " +
+			detail: "A review that has no recorded outcome is left out of every result it belongs " +
+				"to, and each result counts only the rest. Open Arming and press enter on the read-outcomes " +
 				"row, or run: " + status.BackfillCommand,
 		})
 	}

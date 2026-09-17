@@ -23,10 +23,10 @@ func TestChainEvidence(t *testing.T) {
 
 	owing := BuildChains([]gate.Row{row(1000, "deny"), unresolved(1010)}, false)[0]
 	check(t, "inside the grace window it is pending", ChainEvidence(owing, 1000+gate.LedgerGrace-1), EvidencePending)
-	check(t, "at the grace boundary it is missing", ChainEvidence(owing, 1000+gate.LedgerGrace), EvidenceMissing)
+	check(t, "at the grace boundary it is overdue", ChainEvidence(owing, 1000+gate.LedgerGrace), EvidenceOverdue)
 
 	missed := BuildChains([]gate.Row{row(2000, "deny"), closedMiss(2010)}, false)[0]
-	check(t, "a closed miss is missing however young", ChainEvidence(missed, 2001), EvidenceMissing)
+	check(t, "a closed miss is missed however young", ChainEvidence(missed, 2001), EvidenceMissed)
 
 	capRow := row(3010, "cap")
 	capRow["finding_slots"] = 0
@@ -37,13 +37,32 @@ func TestChainEvidence(t *testing.T) {
 	prose["finding_slots"] = 0
 	prose["reviews_off_format"] = 2
 	offFormat := BuildChains([]gate.Row{row(3500, "deny"), prose}, false)[0]
-	check(t, "an off-format cap still owes a ledger", ChainEvidence(offFormat, 9_000_000), EvidenceMissing)
+	check(t, "an off-format cap still owes a ledger", ChainEvidence(offFormat, 9_000_000), EvidenceOverdue)
 
 	mixed := BuildChains([]gate.Row{
 		row(4000, "deny"), concerns(row(4010, "retry"), "round", c("x")),
 		firing(row(4020, "deny"), 2), closedMiss(4030),
 	}, false)[0]
-	check(t, "the worst row grades the chain", ChainEvidence(mixed, 9_000_000), EvidenceMissing)
+	check(t, "the worst row grades the chain", ChainEvidence(mixed, 9_000_000), EvidenceMissed)
+
+	stampedOnly := row(5010, "retry")
+	stampedOnly["ledger_found"] = false
+	reopened := BuildChains([]gate.Row{row(5000, "deny"), stampedOnly}, false)[0]
+	check(t, "a stamp the resolver has not closed is overdue however young", ChainEvidence(reopened, 5001), EvidenceOverdue)
+}
+
+func TestAnOverdueRowOutranksAClosedMissInOneChain(t *testing.T) {
+	both := BuildChains([]gate.Row{
+		row(1000, "deny"), closedMiss(1010),
+		firing(row(1020, "deny"), 2), unresolved(1030),
+	}, false)[0]
+	check(t, "overdue work is not hidden behind a miss", ChainEvidence(both, 9_000_000), EvidenceOverdue)
+
+	young := BuildChains([]gate.Row{
+		row(2000, "deny"), closedMiss(2010),
+		firing(row(2020, "deny"), 2), unresolved(2030),
+	}, false)[0]
+	check(t, "a miss is not described as settling", ChainEvidence(young, 2031), EvidenceMissed)
 }
 
 func TestCoverEvidenceMovesUnmeasurableChainsToUnknown(t *testing.T) {
@@ -57,6 +76,12 @@ func TestCoverEvidenceMovesUnmeasurableChainsToUnknown(t *testing.T) {
 	check(t, "both unmeasurable chains are unknown", cov.Unknown, 2)
 	check(t, "both are unknown for want of evidence", cov.UnknownEvidence, 2)
 	check(t, "the young one is pending", cov.Pending, 1)
+	check(t, "the closed one is a miss", cov.LedgerMissed, 1)
+	check(t, "nothing is overdue yet", cov.LedgerOverdue, 0)
+
+	late := CoverEvidence([]Chain{good, miss, young}, all, 3010+gate.LedgerGrace)
+	check(t, "past the grace the young one is overdue", late.LedgerOverdue, 1)
+	check(t, "and no longer pending", late.Pending, 0)
 	check(t, "no scope excluded anything", cov.UnknownScope, 0)
 	check(t, "nothing is ineligible", cov.Ineligible, 0)
 

@@ -13,9 +13,11 @@ const (
 	// EvidencePending: a row still owes a ledger and is inside the resolver's grace
 	// window, so the ledger may yet arrive.
 	EvidencePending
-	// EvidenceMissing: the resolver closed a row as a miss, or the grace window shut
-	// on an unresolved row. The findings are gone.
-	EvidenceMissing
+	// EvidenceMissed: the resolver searched for a row's ledger and closed it as a miss.
+	// Nothing routine will change it, so it is disclosed rather than repaired.
+	EvidenceMissed
+	// EvidenceOverdue: the grace window shut on a row the resolver has not closed.
+	EvidenceOverdue
 )
 
 // expectsLedger reports a row whose findings were handed to the agent and therefore owe
@@ -53,7 +55,8 @@ func rowAnchorTS(rows []gate.Row, i int) (float64, bool) {
 	return 0, false
 }
 
-// ChainEvidence grades one chain, worst row wins. now is the clock the grace window is
+// ChainEvidence grades one chain, worst row wins: unresolved outranks a closed miss, so a
+// miss never hides work the resolver still owes. now is the clock the grace window is
 // measured against.
 func ChainEvidence(ch Chain, now float64) Evidence {
 	worst := EvidenceComplete
@@ -67,12 +70,15 @@ func ChainEvidence(ch Chain, now float64) Evidence {
 		if _, adjudicated := row["concerns"]; adjudicated || truthy(row["ledger_found"]) {
 			continue
 		}
-		state := EvidenceMissing
-		if _, stamped := row["ledger_found"]; !stamped && !truthy(row["backfilled"]) {
-			// Unresolved: the resolver has not reached this row. Only the grace window
-			// separates young from abandoned.
-			if anchor, ok := rowAnchorTS(ch.Rows, i); ok && now < anchor+gate.LedgerGrace {
-				state = EvidencePending
+		state := EvidenceMissed
+		if !truthy(row["backfilled"]) {
+			// The resolver has not closed this row. Only the grace window separates young
+			// from overdue.
+			state = EvidenceOverdue
+			if _, stamped := row["ledger_found"]; !stamped {
+				if anchor, ok := rowAnchorTS(ch.Rows, i); ok && now < anchor+gate.LedgerGrace {
+					state = EvidencePending
+				}
 			}
 		}
 		if state > worst {

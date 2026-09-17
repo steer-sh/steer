@@ -45,11 +45,15 @@ func CoveragePhrase(c cadence.Coverage) string {
 	if c.UnknownScope > 0 {
 		extra = append(extra, fmt.Sprintf("%d unknown scope", c.UnknownScope))
 	}
-	// "no decision recorded" covers both a row the resolver closed as gone and one
-	// still owed; Posture.Unresolved counts only the latter, so the two must not
-	// share a word.
-	if c.UnknownEvidence > 0 {
-		extra = append(extra, fmt.Sprintf("%d with no decision recorded", c.UnknownEvidence))
+	if c.LedgerOverdue > 0 {
+		extra = append(extra, fmt.Sprintf("%d with no outcome read", c.LedgerOverdue))
+	}
+	if c.LedgerMissed > 0 {
+		extra = append(extra, fmt.Sprintf("%d with no decision found", c.LedgerMissed))
+	}
+	// A map written before the split carries only the total.
+	if rest := c.UnknownEvidence - c.Pending - c.LedgerOverdue - c.LedgerMissed; rest > 0 {
+		extra = append(extra, fmt.Sprintf("%d with no decision recorded", rest))
 	}
 	if c.Pending > 0 {
 		extra = append(extra, fmt.Sprintf("%d pending", c.Pending))

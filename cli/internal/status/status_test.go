@@ -171,7 +171,7 @@ func intPtr(n int) *int           { return &n }
 // so a renamed or reordered json tag fails here, the agent-contract guard.
 func TestJSONContractIsStable(t *testing.T) {
 	s := &SystemStatus{
-		StatusVersion: 21,
+		StatusVersion: 22,
 		GeneratedAt:   "2026-01-01T00:00:00Z",
 		Posture: Posture{
 			Instrument: "agy@sha", Reviewer: "gemini", Ledger: "/l.jsonl",
@@ -238,7 +238,7 @@ func TestJSONContractIsStable(t *testing.T) {
 				Removed: "2026-01-02T03:04:05.000000000Z"},
 			Scope:          &cadence.Scope{Version: 1, Repo: "steer.*", Path: `\.go$`},
 			BeforeCoverage: cadence.Coverage{Total: 14, Eligible: 12, Ineligible: 1, Unknown: 1, UnknownScope: 1},
-			AfterCoverage:  cadence.Coverage{Total: 13, Eligible: 12, Unknown: 1, UnknownEvidence: 1, Pending: 1, PartialExposure: 1},
+			AfterCoverage:  cadence.Coverage{Total: 15, Eligible: 12, Unknown: 3, UnknownEvidence: 3, Pending: 1, LedgerMissed: 1, LedgerOverdue: 1, PartialExposure: 1},
 		}, {
 			ID: "taste-nit", Class: "taste nit",
 			Problem:      "the reviewer raises a wording preference with no defect behind it",
@@ -296,7 +296,7 @@ func TestJSONContractIsStable(t *testing.T) {
 }
 
 const goldenStatusJSON = `{
-  "status_version": 21,
+  "status_version": 22,
   "generated_at": "2026-01-01T00:00:00Z",
   "posture": {
     "instrument": "agy@sha",
@@ -553,16 +553,20 @@ const goldenStatusJSON = `{
         "unknown_scope": 1,
         "unknown_evidence": 0,
         "pending": 0,
+        "ledger_missed": 0,
+        "ledger_overdue": 0,
         "partial_exposure": 0
       },
       "after_coverage": {
-        "total": 13,
+        "total": 15,
         "eligible": 12,
         "ineligible": 0,
-        "unknown": 1,
+        "unknown": 3,
         "unknown_scope": 0,
-        "unknown_evidence": 1,
+        "unknown_evidence": 3,
         "pending": 1,
+        "ledger_missed": 1,
+        "ledger_overdue": 1,
         "partial_exposure": 1
       },
       "corpus": "review-findings",
@@ -664,6 +668,8 @@ const goldenStatusJSON = `{
         "unknown_scope": 0,
         "unknown_evidence": 0,
         "pending": 0,
+        "ledger_missed": 0,
+        "ledger_overdue": 0,
         "partial_exposure": 0
       },
       "after_coverage": {
@@ -674,6 +680,8 @@ const goldenStatusJSON = `{
         "unknown_scope": 0,
         "unknown_evidence": 0,
         "pending": 0,
+        "ledger_missed": 0,
+        "ledger_overdue": 0,
         "partial_exposure": 0
       },
       "corpus": "transcript-friction",

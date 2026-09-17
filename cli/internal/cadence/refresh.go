@@ -23,8 +23,9 @@ import (
 // artifact to each intervention, and queues a record whose fix is absent or unreadable.
 // v10 adds artifact.removed, and queues a record whose fix the archive records as
 // removed after its split. v11 removes the auto-denials corpus row. v12 replaces
-// the per-cluster transcript candidates with one pointer row.
-const QueueVersion = 12
+// the per-cluster transcript candidates with one pointer row. v13 queues no record
+// for a ledger its resolver owes or closed as a miss.
+const QueueVersion = 13
 
 // maxCandidateExamples bounds the snippets a pointer row carries. The row exists
 // to say how big the ungrouped pile is; the examples show its shape, and the

@@ -214,9 +214,11 @@ func TestNeedsAttention(t *testing.T) {
 		After: map[string]any{"unknown": 1, "unknown_evidence": 1, "pending": 1}}}, struct{}{}, nil) {
 		t.Error("a window whose unknowns are all still settling should not need attention")
 	}
-	if !needsAttention(mine.Observation{Coverage: mine.ObservationCoverage{
-		After: map[string]any{"unknown": 2, "unknown_evidence": 2, "pending": 1}}}, struct{}{}, nil) {
-		t.Error("evidence beyond what is still settling should need attention")
+	// A closed miss has no repair and an overdue row is the resolver's own status
+	// entry, so neither queues the record.
+	if needsAttention(mine.Observation{Coverage: mine.ObservationCoverage{
+		After: map[string]any{"unknown": 3, "unknown_evidence": 3, "pending": 1, "ledger_missed": 1, "ledger_overdue": 1}}}, struct{}{}, nil) {
+		t.Error("a ledger cause should not need attention")
 	}
 	if needsAttention(mine.Observation{Coverage: mine.ObservationCoverage{After: map[string]any{"eligible": 2}}}, struct{}{}, nil) {
 		t.Error("quiet eligible work should not need attention")

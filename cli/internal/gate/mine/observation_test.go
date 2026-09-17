@@ -1,6 +1,7 @@
 package mine
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/gate"
@@ -228,16 +229,28 @@ func TestTheScoredLineNamesAMissingScopeRatherThanAQuietWindow(t *testing.T) {
 	check(t, "recurrence outranks the scope", observationState(recurred, false), "recurred")
 }
 
-// `pending` is counted inside `unknown_evidence`, and a pending row settles on its
-// own, so a window holding only those is not a gap any reader can act on.
-func TestACoverageGapIsTheExcessOverWhatIsStillSettling(t *testing.T) {
+// A ledger cause is never a gap: a pending row settles, an overdue one is the
+// resolver's own status entry, and a closed miss has no repair.
+func TestALedgerCauseIsNeverACoverageGap(t *testing.T) {
 	settling := map[string]any{"unknown": 3, "unknown_evidence": 3, "pending": 3}
 	if CoverageGap(settling) {
 		t.Error("a window whose unknowns are all still settling is no gap")
 	}
-	excess := map[string]any{"unknown": 4, "unknown_evidence": 4, "pending": 3}
-	if !CoverageGap(excess) {
-		t.Error("a ledger the resolver closed as gone is a gap")
+	missed := map[string]any{"unknown": 4, "unknown_evidence": 4, "pending": 1, "ledger_missed": 2, "ledger_overdue": 1}
+	if CoverageGap(missed) {
+		t.Error("a closed or overdue ledger is disclosed, not a gap")
+	}
+	obs := Observation{Coverage: ObservationCoverage{After: missed}}
+	if MissingCoverage(obs) {
+		t.Error("a window holding only ledger causes asks for no repair")
+	}
+	if !EvidenceExcluded(obs) {
+		t.Error("the excluded chains are still disclosed")
+	}
+	var out strings.Builder
+	writeObservation(&out, obs)
+	if !strings.Contains(out.String(), "0 before and 4 after carry no adjudication") {
+		t.Errorf("the scored line hides the excluded chains:\n%s", out.String())
 	}
 	if !CoverageGap(map[string]any{"unknown": 2, "unknown_scope": 2}) {
 		t.Error("metadata no row carried is a gap")

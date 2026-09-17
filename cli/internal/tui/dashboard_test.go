@@ -43,16 +43,16 @@ func TestPanelsCarryTheMeasurementConditions(t *testing.T) {
 			Target: "guard.py", Status: "active", Unit: "chain",
 			Scope:          &cadence.Scope{Version: 1, Repo: "steer", Path: `\.go$`},
 			BeforeCoverage: cadence.Coverage{Total: 14, Eligible: 12, Ineligible: 2},
-			AfterCoverage:  cadence.Coverage{Total: 6, Eligible: 5, Unknown: 1, UnknownEvidence: 1},
-			Observation:    mine.Observation{Coverage: mine.ObservationCoverage{Before: map[string]any{"total": 14, "eligible": 12, "ineligible": 2}, After: map[string]any{"total": 6, "eligible": 5, "unknown": 1, "unknown_evidence": 1}}},
+			AfterCoverage:  cadence.Coverage{Total: 6, Eligible: 5, Unknown: 1, UnknownEvidence: 1, LedgerMissed: 1},
+			Observation:    mine.Observation{Coverage: mine.ObservationCoverage{Before: map[string]any{"total": 14, "eligible": 12, "ineligible": 2}, After: map[string]any{"total": 6, "eligible": 5, "unknown": 1, "unknown_evidence": 1, "ledger_missed": 1}}},
 		}},
 	}
 
 	m.active = panelProblems
 	summary := m.View()
 	for _, want := range []string{
-		"Coverage evidence",
-		"no recorded decision",
+		"No recurrence in the counted work",
+		"no decision in any session history",
 	} {
 		if !strings.Contains(summary, want) {
 			t.Errorf("the compact summary is missing %q", want)
@@ -67,10 +67,9 @@ func TestPanelsCarryTheMeasurementConditions(t *testing.T) {
 	expanded := m.View()
 	for _, want := range []string{
 		"12 eligible / 14 (2 out of scope)",
-		"5 eligible / 6 (1 with no decision recorded)",
+		"5 eligible / 6 (1 with no decision found)",
 		"These counts describe the recorded evidence",
 		"repo=/steer/ AND path=/\\.go$/",
-		"run: steer commit-gate backfill --apply",
 	} {
 		if !strings.Contains(expanded, want) {
 			t.Errorf("the expanded entry is missing %q:\n%s", want, expanded)

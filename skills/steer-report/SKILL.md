@@ -65,9 +65,9 @@ A deterministic tier runs this loop's mechanical half — scoring, corpus sweeps
 steer report refresh --days 30
 ```
 
-Then Read the queue **once**: `~/.steer/state/steer-report/queue.json` (`version: 12`). It holds:
+Then Read the queue **once**: `~/.steer/state/steer-report/queue.json` (`version: 13`). It holds:
 
-- `interventions[]` — full contract records the tier flagged as **asking for a reader**: the class recurred after the split, a coverage cause left the window unaccounted for, the record carries no frozen scope, the fix it binds is `absent` or `unreadable`, or the fix is in place but carries `artifact.removed`. These carry a `match`; they are the audit's action list, pre-filtered. Each carries `problem` and `intervention` — the record's own explanation of what goes wrong and what it does about it, authored when the class was found. Lead your report with those rather than with the class name or the regex, and correct one that no longer describes the evidence with `steer fix describe ID`, which changes no window. Each also carries the conditions the counts were taken under: `corpus` and `unit` (`review-findings` counts by `chain`, `transcript-friction` by `session` — never compare the two rates), `signal_kind` on a session-unit record, `scope` (the frozen eligibility rule, `null` on a legacy record), `before_coverage` / `after_coverage` (`total`, `eligible`, `ineligible`, `unknown`, `unknown_scope`, `unknown_evidence`, `pending`, `partial_exposure`), `observation` — the six field blocks documented in the status contract below — and `artifact`, where the fix the record binds stands now.
+- `interventions[]` — full contract records the tier flagged as **asking for a reader**: the class recurred after the split, a coverage cause other than a missing ledger left the window unaccounted for, the record carries no frozen scope, the fix it binds is `absent` or `unreadable`, or the fix is in place but carries `artifact.removed`. These carry a `match`; they are the audit's action list, pre-filtered. Each carries `problem` and `intervention` — the record's own explanation of what goes wrong and what it does about it, authored when the class was found. Lead your report with those rather than with the class name or the regex, and correct one that no longer describes the evidence with `steer fix describe ID`, which changes no window. Each also carries the conditions the counts were taken under: `corpus` and `unit` (`review-findings` counts by `chain`, `transcript-friction` by `session` — never compare the two rates), `signal_kind` on a session-unit record, `scope` (the frozen eligibility rule, `null` on a legacy record), `before_coverage` / `after_coverage` (`total`, `eligible`, `ineligible`, `unknown`, `unknown_scope`, `unknown_evidence`, `pending`, `ledger_missed`, `ledger_overdue`, `partial_exposure`), `observation` — the six field blocks documented in the status contract below — and `artifact`, where the fix the record binds stands now.
 - `unscored[]` — ids of records no engine reads. Report their existence; do not read a result into them.
 - `candidates[]` — **one row per corpus**, each pointing at a pile of evidence no problem covers yet. The transcript row carries `ungrouped_clusters`; the review row carries `undecided_chains` and a `dump` command. The transcript row also carries a few `examples` — the strongest cluster keys, for a reader glancing at the row, never the pile itself; the review row carries none, because its `dump` command prints the findings in full. A row has **no** `match` and no title: grouping the pile and authoring the regex are your job, below. Read the full dumps for the pile; the row only sizes it.
 - `corpora[]` — one row per corpus (`review-findings`, `transcript-friction`) with `present` and `size`. Relay this sweep to the user in one sentence.
@@ -108,7 +108,7 @@ than a verdict, **review history** or **session history** rather than a corpus, 
 There are three readings and no fourth:
 
 - **The problem came back.** `recurrence.occurred` is true. **Act on this first.** Open `recurrence.example` and decide whether the record still describes the problem. `example_kind` says what the example is: `adjudicated_finding` is a reviewer's confirmed concern; `cluster_key` is the text a classifier grouped a session's friction by, and is NOT a confirmed escaped failure. A recurrence beside `firing.rows: 0` on a known log points at the rule, its coverage or its registration — the guard recorded no block over work the class did match. For a repository check, `checks` separates three cases: zero `executions` on a known stream means the check never ran here — look at the adoption and the `check.sh` wiring; executions that all passed mean the check ran and did not catch the problem — look at the detector; `blocked` above zero means it stopped turns and the problem still came back — look at whether the class is wider than the check. `changed_detector` above zero means some of those runs were an edited detector, not the one registered. On a record with `declined: true`, nothing was installed: the recurrence is a reason to reconsider the refusal, never a fix that failed.
-- **The accounting is incomplete.** A coverage map counts `unknown_scope`, `unknown_evidence`, `pending` or `unknown` units, or `firing.applicable` is true while `log_present` is false, or a bound `checks` block reads `stream_present: false` with `other_host: false`. A block with `other_host: true` is not this case: name `registered_host` as the machine that holds the check runs. The window cannot be read at all. **Act on this:** only one cause has a command — a ledger row the resolver closed as gone clears with `steer commit-gate backfill --apply`. Review sequences carrying no repository or changed-path record, sessions carrying no project, an absent guard audit log, and a repository with no check evidence on this machine have none; name the cause rather than handing the user a command that changes nothing. A `null` `scope` is its own case: the record has no frozen eligibility rule, so its two windows count different opportunity sets. Scope it with `steer fix scope <id>`, which restarts its after-window.
+- **The accounting is incomplete.** A coverage map counts `unknown_scope` units, or `unknown` units beyond `unknown_scope` + `unknown_evidence`, or `firing.applicable` is true while `log_present` is false, or a bound `checks` block reads `stream_present: false` with `other_host: false`. A block with `other_host: true` is not this case: name `registered_host` as the machine that holds the check runs. The counts cover only the units the window could account for. **Act on this:** name the cause. Review sequences carrying no repository or changed-path record, sessions carrying no project, an absent guard audit log, and a repository with no check evidence on this machine have none; name the cause rather than handing the user a command that changes nothing. A missing ledger does not put a record in this reading: `unknown_evidence` is `pending` + `ledger_missed` + `ledger_overdue`, and those chains are left out of the counts, which stand over the rest. Say how many were left out. `ledger_missed` is a ledger the resolver searched for and did not find; nothing routine recovers it. `ledger_overdue` is a ledger the resolver has not read yet; the status entry for `unresolved_rows` owns that repair on this machine, and a row on another host's shard is read there. A `null` `scope` is its own case: the record has no frozen eligibility rule, so its two windows count different opportunity sets. Scope it with `steer fix scope <id>`, which restarts its after-window.
 - **The window is quiet.** Eligible work arrived and the class did not. Say that, and stop there. `zero_eligible_after` is the separate case: no eligible work has arrived at all, which is not a quiet window and is not a fault — every freshly installed record reads that way.
 
 State no direction and no percentage. "Fewer since the fix", "the fix worked", "a 60% reduction" all state a causal claim these counts cannot carry. Say what was counted: "this problem hit 4 of 37 review sequences before the fix and recurred 0 times in the 40 after."
@@ -154,7 +154,7 @@ Digest schema (`digest_version: 3`):
 
 The digest is size-capped: the CLI evicts the lowest-scoring clusters to fit, and reports honesty in `stats`.
 
-### The `steer status --json` contract (`status_version: 21`)
+### The `steer status --json` contract (`status_version: 22`)
 
 Step 1 reads this snapshot for posture and the full class inventory. The unit is
 the failure class and what the corpus recorded about it, not the hook count. This
@@ -181,6 +181,8 @@ v19 adds `posture.masters[].state` `detached` and `store`: an installed harness
 that runs none of a scope's guards. v20 adds `artifact.removed`: a fix in place
 now that its store's archive records as removed after the record's split. v21
 removes `posture.denials`, `telemetry.denials_rows` and the `auto-denials` corpus.
+v22 adds coverage `ledger_missed` and `ledger_overdue`: a missing ledger is
+disclosed and no longer puts a record under repair.
 
 - `status_version` — the schema version. `--json` is a stable agent contract.
 - `posture` — the arming state: `instrument` (reviewer model / runs / prompt
@@ -207,7 +209,8 @@ removes `posture.denials`, `telemetry.denials_rows` and the `auto-denials` corpu
   have verified a harness's internal hash. The resolver is the Stop hook that
   joins ledger rows to transcripts; it arms with the commit gate on the same
   scope. `unresolved_rows` counts the rows still owing that join — a window
-  cannot account for them, and `steer commit-gate backfill --apply` clears them.
+  cannot count them until the resolver reads them, and `steer commit-gate backfill --apply`
+  reads them now.
   `masters[]` is the guard master's runtime provenance, one row per harness per
   scope: `path`, `runtime` (the digest of the Python runtime spliced into it),
   `version` (the steer that wrote it), `expected` (this binary's runtime digest)
@@ -293,8 +296,10 @@ removes `posture.denials`, `telemetry.denials_rows` and the `auto-denials` corpu
     `steer fix scope <id>`.
   - `before_coverage` / `after_coverage` — each window's unit accounting:
     `total`, `eligible` (the denominator), `ineligible`, `unknown`,
-    `unknown_scope`, `unknown_evidence`, `pending`, `partial_exposure`. An
-    unknown unit is not counted; it never shrinks the denominator.
+    `unknown_scope`, `unknown_evidence`, `pending`, `ledger_missed`,
+    `ledger_overdue`, `partial_exposure`. An unknown unit is not counted; it
+    never shrinks the denominator. `unknown_evidence` is `pending` +
+    `ledger_missed` + `ledger_overdue` on a map written by this version.
     `partial_exposure` is the session corpus's own category, for a session that
     straddled the install and so ran under both regimes: `unknown` means the
     scope could not decide, `partial_exposure` means the window could not.
@@ -364,7 +369,7 @@ removes `posture.denials`, `telemetry.denials_rows` and the `auto-denials` corpu
   `observe`).
 - `chains[]` — recent review chains, findings split `accepted` / `rejected`.
 - `attention` — the subset asking for a reader: `interventions[]` (a recurrence,
-  a missing coverage cause, or no frozen scope), `candidates[]` (no `match` yet),
+  a missing coverage cause other than a ledger, or no frozen scope), `candidates[]` (no `match` yet),
   `unscored[]` (ids of records no engine reads), and `checks[]` — the open steps
   in this repository's check tier, the same rows the queue carries.
 - `telemetry` — corpus sizes: `review_chains`, `audit_firings`,
