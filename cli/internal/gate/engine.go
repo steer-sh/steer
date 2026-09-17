@@ -392,8 +392,9 @@ func (e *Engine) reviewCommit(ctx context.Context, req Request, chain *Chain, p 
 			result.Answered, ReviewerTrouble(result.Runs))
 	}
 	return Decision{
-		Kind:          Deny,
-		Reason:        p.notice + BuildDeny(result.Answered, review, firing, e.cfg.MaxFirings, req.RerunNote, CommitSubject(req.Message), req.chainID, e.cfg.ReviewerLabel()),
+		Kind: Deny,
+		Reason: p.notice + BuildDeny(result.Answered, review, firing, e.cfg.MaxFirings, req.RerunNote, CommitSubject(req.Message), req.chainID, e.cfg.ReviewerLabel()) +
+			separated(pendingProjectAddendumNotice(req.Repo, req.addendum, p.paths)),
 		SystemMessage: note,
 		LedgerError:   err,
 	}

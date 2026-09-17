@@ -696,3 +696,20 @@ func TestTheCappedPassOnAStaleIndexWarnsAndClearsNothing(t *testing.T) {
 		t.Error("a cleared record was written for a diff the agent was warned about")
 	}
 }
+
+func TestADenyCarriesThePendingAddendumNotice(t *testing.T) {
+	h := newHarness(t, findingReply(oneFinding))
+	writeFileAt(t, h.repo, ".steer/hooks/steer-manifest.json", addendumManifest(t, map[string]string{"nit": "ignore foo"}))
+	d := h.handle()
+	if d.Kind != Deny || !strings.Contains(d.Reason, `Uncommitted project review-addendum changes (added: "nit")`) {
+		t.Fatalf("Kind = %v, Reason = %q", d.Kind, d.Reason)
+	}
+}
+
+func TestAnAllowCarriesNoPendingAddendumNotice(t *testing.T) {
+	h := newHarness(t, findingReply("NO FINDINGS"))
+	writeFileAt(t, h.repo, ".steer/hooks/steer-manifest.json", addendumManifest(t, map[string]string{"nit": "ignore foo"}))
+	if d := h.handle(); d.Kind != Allow || strings.Contains(d.Reason, "review-addendum") {
+		t.Fatalf("Kind = %v, Reason = %q", d.Kind, d.Reason)
+	}
+}

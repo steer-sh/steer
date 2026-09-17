@@ -188,3 +188,89 @@ func TestNoAddendumLeavesTheInstrumentUnchanged(t *testing.T) {
 		t.Fatal("an empty addendum wrote an addendum_digest key")
 	}
 }
+
+func committedAddendumRepo(t *testing.T, entries map[string]string) string {
+	t.Helper()
+	repo := buildRepo(t, map[string]string{
+		".steer/hooks/steer-manifest.json": addendumManifest(t, entries),
+		"a.py":                             "x = 1\n",
+	})
+	gitCmd(t, repo, verb, "-qm", "init")
+	return repo
+}
+
+// A staged addendum change the review did not use is named, with the recovery order.
+func TestADenyNamesUncommittedProjectAddendumChanges(t *testing.T) {
+	repo := committedAddendumRepo(t, map[string]string{"keep": "same", "edit": "old text", "drop": "gone"})
+	writeFileAt(t, repo, ".steer/hooks/steer-manifest.json",
+		addendumManifest(t, map[string]string{"keep": "same", "edit": "new text", "new": "fresh"}))
+	gitCmd(t, repo, "add", "-A")
+
+	got := pendingProjectAddendumNotice(repo, LoadAddendum(repo), []string{"a.py", ".steer/hooks/steer-manifest.json"})
+	want := `(added: "new"; changed: "edit"; removed: "drop")`
+	if !strings.Contains(got, want) || !strings.Contains(got, "used the project entries from HEAD") {
+		t.Fatalf("notice = %q, want it to contain %s", got, want)
+	}
+	if !strings.Contains(got, "stage only the intended changes to .steer/hooks/steer-manifest.json") {
+		t.Fatalf("notice = %q, want the recovery step naming the manifest", got)
+	}
+}
+
+func TestNoNoticeWhenTheAddendumMatchesHead(t *testing.T) {
+	repo := committedAddendumRepo(t, map[string]string{"a": "same text"})
+	writeFileAt(t, repo, ".steer/hooks/steer-manifest.json",
+		`{"hooks":{"x":{}},"review_addendum":{"a":{"text":"  same\n text "}}}`)
+	if got := pendingProjectAddendumNotice(repo, LoadAddendum(repo), []string{"a.py"}); got != "" {
+		t.Fatalf("notice = %q, want none for a manifest change outside the addendum", got)
+	}
+}
+
+func TestAManifestOnlyReviewGetsNoRecoveryStep(t *testing.T) {
+	repo := committedAddendumRepo(t, map[string]string{"a": "old"})
+	writeFileAt(t, repo, ".steer/hooks/steer-manifest.json", addendumManifest(t, map[string]string{"a": "new"}))
+	got := pendingProjectAddendumNotice(repo, LoadAddendum(repo), []string{".steer/hooks/steer-manifest.json"})
+	if !strings.Contains(got, `changed: "a"`) || strings.Contains(got, "restage") {
+		t.Fatalf("notice = %q, want the change without the recovery step", got)
+	}
+}
+
+// An unreadable side is no comparison, never "every entry removed".
+func TestAnUnreadableManifestGivesNoNotice(t *testing.T) {
+	repo := committedAddendumRepo(t, map[string]string{"a": "entry"})
+	writeFileAt(t, repo, ".steer/hooks/steer-manifest.json", "{not json")
+	if got := pendingProjectAddendumNotice(repo, LoadAddendum(repo), []string{"a.py"}); got != "" {
+		t.Fatalf("working tree unreadable: notice = %q", got)
+	}
+
+	broken := buildRepo(t, map[string]string{".steer/hooks/steer-manifest.json": "{not json"})
+	gitCmd(t, broken, verb, "-qm", "init")
+	writeFileAt(t, broken, ".steer/hooks/steer-manifest.json", addendumManifest(t, map[string]string{"a": "entry"}))
+	if got := pendingProjectAddendumNotice(broken, LoadAddendum(broken), []string{"a.py"}); got != "" {
+		t.Fatalf("HEAD unreadable: notice = %q", got)
+	}
+}
+
+// The neutral manifest shadows the legacy one on disk, as it does at HEAD.
+func TestTheWorkingTreeNeutralManifestShadowsLegacy(t *testing.T) {
+	repo := buildRepo(t, map[string]string{
+		".claude/hooks/steer-manifest.json": addendumManifest(t, map[string]string{"a": "legacy"}),
+	})
+	gitCmd(t, repo, verb, "-qm", "init")
+	if got := pendingProjectAddendumNotice(repo, LoadAddendum(repo), []string{"a.py"}); got != "" {
+		t.Fatalf("legacy only, unchanged: notice = %q", got)
+	}
+	writeFileAt(t, repo, ".steer/hooks/steer-manifest.json", addendumManifest(t, map[string]string{"b": "neutral"}))
+	got := pendingProjectAddendumNotice(repo, LoadAddendum(repo), []string{"a.py"})
+	if !strings.Contains(got, `added: "b"; removed: "a"`) {
+		t.Fatalf("notice = %q, want the neutral manifest to replace the legacy entries", got)
+	}
+}
+
+// Global entries load from disk, so they are never pending.
+func TestGlobalEntriesAreNotPending(t *testing.T) {
+	writeGlobalAddendum(t, map[string]string{"g": "global entry"})
+	repo := committedAddendumRepo(t, map[string]string{"a": "entry"})
+	if got := pendingProjectAddendumNotice(repo, LoadAddendum(repo), []string{"a.py"}); got != "" {
+		t.Fatalf("notice = %q", got)
+	}
+}
