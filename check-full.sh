@@ -6,8 +6,8 @@ root="$(cd "$(dirname "$0")" && pwd)"
 
 "$root/check.sh"
 
-# revert-test's scratch copy and lock, over fixture repositories: ~2.5 minutes, and
-# one case kills a run mid-test.
+# revert-test's scratch copy, lock and variant generation, over fixture repositories;
+# two cases kill a run mid-test.
 python3 "$root/scripts/revert-test-verify.py"
 
 # Headless skill-generation harness: invokes `claude -p`, costs money, ~55 min.

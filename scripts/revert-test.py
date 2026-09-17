@@ -5,17 +5,34 @@ The change is the working tree against the merge base with the upstream branch
 (HEAD when there is none). The script builds variants of the change in a copy of
 the repository and runs the new top-level test functions under each one:
 
-  zero    a changed function returns the zero values of its results at once
-  revert  one changed block of non-test code put back to its base version
-  file    one changed text file outside the Go sources put back whole, or
-          removed when it is new; every new test runs under it
+  revert    one changed block of non-test code put back to its base version
+  copy      an added statement that copies a slice wrapped in `if false { }`
+  alias     an added `x := <copy of src>` bound to src, the copy call kept
+            in an unreachable block
+  zero      a changed function returns the zero values of its results at once
+  file      one changed text file outside the Go sources put back whole, or
+            removed when it is new; every new test runs under it
+  guard     an added if without else that ends in return, break, continue or
+            goto wrapped in `if false { }`
+  suppress  an added expression, `=` assignment, ++/--, go or defer statement
+            wrapped in `if false { }`
+
+Variants run in that order. copy, alias, guard and suppress come only from
+statements that intersect added lines; FUNCTION_CAP and RUN_CAP limit them,
+and the evidence lists each candidate a cap or a duplicate dropped.
 
 A new test that fails under at least one variant passes the check. Every other
 new test is reported and the script exits 1: a test that fails before any
 variant, one that no variant ran, and one that passes under every variant that
-ran. Panic probes run only for the reported tests, to show whether a probe in a
-changed function makes each one fail. A test whose doc comment carries MARKER is
-exempt.
+ran. A test that times out under a variant is not failed by it. Panic probes run
+only for the reported tests, to show whether a probe in a changed function makes
+each one fail. A test whose doc comment carries MARKER is exempt.
+
+Each go command runs in its own process group, and go test with -timeout
+TEST_TIMEOUT. BUDGET starts before the lock wait; when it runs out, the running
+command's group is killed, and the run writes incomplete evidence, records no
+pass and exits 1. A run that finishes every variant keeps its result however
+long it took.
 
 Each run writes one evidence record per new test to EVIDENCE/<key>.json in the
 git directory: the variant that decided it, the failure excerpt and its kind
@@ -30,6 +47,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -49,8 +67,45 @@ KEEP = 20
 NOISE = re.compile(r"^(=== (RUN|PAUSE|CONT|NAME)|--- (FAIL|PASS|SKIP)|\s*$)")
 FRAME = re.compile(r"^\s+(\S+\.go:\d+)")
 REPORTED = re.compile(r"^\s+\S+\.go:\d+: ")
+TIMED_OUT = re.compile(r"^panic: test timed out after ")
+RUNNING = re.compile(r"^\t\t(Test\w+)")
+FUNCTION_CAP = 4
+RUN_CAP = 16
+SITE_ORDER = ["copy", "alias", "guard", "suppress"]
+SITE_LABELS = {"copy": "copy statement suppressed", "alias": "copy replaced by its source",
+               "guard": "guard clause suppressed", "suppress": "statement suppressed"}
+TEST_TIMEOUT = 60
+BUDGET = 240
 SCRUB = []
 HELD = []
+EXPIRED = []
+BUDGET_REASON = "the time budget ran out before a variant decided it"
+
+
+class BudgetExpired(Exception):
+    pass
+
+
+def bounded(args, cwd, deadline, stdin=None, fds=()):
+    """Run args in its own process group and kill the group at deadline, a
+    time.monotonic() value; fds are inherited. Return (returncode, stdout, stderr);
+    raise BudgetExpired when the deadline passes first."""
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise BudgetExpired("before %s" % " ".join(args[:2]))
+    process = subprocess.Popen(args, cwd=cwd, stdin=subprocess.PIPE if stdin is not None else None,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                               pass_fds=fds, start_new_session=True)
+    try:
+        stdout, stderr = process.communicate(stdin, timeout=remaining)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.communicate()
+        raise BudgetExpired("%s killed at the time budget" % " ".join(args[:2]))
+    return process.returncode, stdout, stderr
 
 
 def git(*args, check=True):
@@ -141,15 +196,14 @@ def revert(lines, start, count, old):
     return lines[:at] + old + lines[at + count:]
 
 
-def functions(paths):
+def functions(paths, deadline):
     """Map each Go file to its top-level functions, as revert-test-funcs.go prints them."""
     if not paths:
         return {}
-    listed = subprocess.run(["go", "run", FUNCS], input="\n".join(paths),
-                            capture_output=True, text=True)
-    if listed.returncode != 0:
-        raise RuntimeError("revert-test-funcs: %s" % listed.stderr.strip())
-    return json.loads(listed.stdout)
+    code, stdout, stderr = bounded(["go", "run", FUNCS], None, deadline, "\n".join(paths))
+    if code != 0:
+        raise RuntimeError("revert-test-funcs: %s" % stderr.strip())
+    return json.loads(stdout)
 
 
 def insert(data, offset, statement):
@@ -183,26 +237,68 @@ def data_variants(base, paths):
     return out
 
 
-def variants(base, paths, untracked):
-    """Return (behavioural, panics): lists of variant dicts, block reverts first."""
+def apply_edits(data, edits):
+    for edit in sorted(edits, key=lambda e: (e["start"], e["end"]), reverse=True):
+        data = data[:edit["start"]] + edit["text"].encode() + data[edit["end"]:]
+    return data
+
+
+def added_ranges(lines, spans):
+    """Return the byte ranges of the added lines, given 1-based (start, count) spans."""
+    offsets = [0]
+    for line in lines:
+        offsets.append(offsets[-1] + len(line.encode()))
+    return [(offsets[start - 1], offsets[start - 1 + count]) for start, count in spans]
+
+
+def select_sites(candidates, seen):
+    """Apply dedup and the caps to candidates in their priority order.
+    Return (kept, omitted); seen holds (path, bytes) of earlier variants."""
+    kept, omitted, per_function = [], [], {}
+    for candidate in candidates:
+        key = (candidate["path"], candidate["data"])
+        function = (candidate["path"], candidate["function"])
+        if key in seen:
+            reason = "same bytes as an earlier variant"
+        elif per_function.get(function, 0) >= FUNCTION_CAP:
+            reason = "cap of %d per function" % FUNCTION_CAP
+        elif len(kept) >= RUN_CAP:
+            reason = "cap of %d per run" % RUN_CAP
+        else:
+            seen.add(key)
+            per_function[function] = per_function.get(function, 0) + 1
+            kept.append(candidate)
+            continue
+        omitted.append({"label": candidate["label"], "reason": reason})
+    return kept, omitted
+
+
+def variants(base, paths, untracked, deadline):
+    """Return (early, late, panics, omitted). early holds block reverts, copy
+    suppressions and aliases, then zero values; late holds guard and other statement
+    suppressions. omitted lists the site candidates that dedup or a cap dropped."""
     sources = [p for p in paths if p.endswith(".go") and not is_test_side(p)]
-    funcs = functions(sources)
-    zeros, reverts, panics = [], [], []
+    funcs = functions(sources, deadline)
+    zeros, reverts, panics, candidates = [], [], [], []
     for path in sources:
         with open(path, "rb") as handle:
             data = handle.read()
         lines = data.decode("utf-8").splitlines(keepends=True)
         touched = set(range(1, len(lines) + 1)) if path in untracked else set()
+        spans = [(1, len(lines))] if path in untracked else []
         if path not in untracked:
             for start, count, old, new in hunks(base, path):
                 if is_trivia(old) and is_trivia(new):
                     continue
                 touched.update(range(start, start + count) if count else (start, start + 1))
+                if count:
+                    spans.append((start, count))
                 where = ("%s:%d-%d" % (path, start, start + count - 1) if count
                          else "%s: after line %d" % (path, start))
                 mutated = "".join(revert(lines, start, count, old)).encode()
                 reverts.append(variant("revert", path, "block reverted to base (%s)" % where,
                                        data, mutated))
+        added = added_ranges(lines, spans)
         for fn in funcs[path]:
             if any(fn["first"] <= t <= fn["last"] for t in touched):
                 where = "%s:%d" % (path, fn["first"])
@@ -212,7 +308,23 @@ def variants(base, paths, untracked):
                 panics.append(variant("panic", path, "panic probe in func %s (%s)"
                                       % (fn["name"], where), data,
                                       insert(data, fn["body"], PANIC)))
-    return reverts + zeros, panics
+            for site in fn["sites"]:
+                if not any(site["start"] < end and start < site["end"] for start, end in added):
+                    continue
+                label = "%s in func %s (%s:%d: %s)" % (SITE_LABELS[site["kind"]], fn["name"],
+                                                      path, site["line"], site["text"][:60])
+                candidate = variant(site["kind"], path, label, data,
+                                    apply_edits(data, site["edits"]))
+                candidate["function"] = "%s:%d" % (fn["name"], fn["first"])
+                candidate["offset"] = site["start"]
+                candidates.append(candidate)
+    candidates.sort(key=lambda c: (SITE_ORDER.index(c["kind"]), c["path"], c["offset"]))
+    kept, omitted = select_sites(candidates, {(r["path"], r["data"]) for r in reverts})
+    for candidate in kept:
+        del candidate["function"], candidate["offset"]
+    early = [c for c in kept if c["kind"] in ("copy", "alias")]
+    late = [c for c in kept if c["kind"] not in ("copy", "alias")]
+    return reverts + early + zeros, late, panics, omitted
 
 
 def import_path(prefix, path):
@@ -220,13 +332,15 @@ def import_path(prefix, path):
     return prefix if package == "." else "%s/%s" % (prefix, package)
 
 
-def test_deps(prefix, packages):
+def test_deps(prefix, packages, deadline):
     """Map each package to the set of import paths linked into its test binary."""
     deps = {}
     for package in packages:
-        listed = subprocess.run(["go", "list", "-test", "-deps", "./" + package],
-                                cwd=MODULE, capture_output=True, text=True, check=True)
-        deps[package] = {line.split(" ")[0] for line in listed.stdout.splitlines()}
+        args = ["go", "list", "-test", "-deps", "./" + package]
+        code, stdout, stderr = bounded(args, MODULE, deadline)
+        if code != 0:
+            raise RuntimeError("%s: %s" % (" ".join(args), stderr.strip()))
+        deps[package] = {line.split(" ")[0] for line in stdout.splitlines()}
     return deps
 
 
@@ -259,19 +373,21 @@ def copy_repository(root, tmp, copied):
             shutil.copy2(source, target, follow_symlinks=False)
 
 
-def hold_lock(directory):
-    """Take the exclusive per-worktree lock in directory, waiting up to WAIT seconds.
-    Return its descriptor, or None when another holder keeps it. The lock file is
-    never removed."""
+def hold_lock(directory, deadline=None):
+    """Take the exclusive per-worktree lock in directory, waiting up to WAIT seconds
+    and never past deadline, a time.monotonic() value. Return its descriptor, or
+    None when another holder keeps it. The lock file is never removed."""
     os.makedirs(directory, exist_ok=True)
     fd = os.open(os.path.join(directory, LOCK), os.O_RDWR | os.O_CREAT, 0o600)
-    deadline = time.time() + WAIT
+    limit = time.monotonic() + WAIT
+    if deadline is not None:
+        limit = min(limit, deadline)
     while True:
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             return fd
         except BlockingIOError:
-            if time.time() >= deadline:
+            if time.monotonic() >= limit:
                 os.close(fd)
                 return None
             time.sleep(1)
@@ -342,15 +458,15 @@ def diagnosis(package, notes):
     return "no result", notes["output"].get(package, []) + notes["stderr"]
 
 
-def run_tests(module_dir, prefix, by_package):
+def run_tests(module_dir, prefix, by_package, deadline):
     """Return (outcome, notes). outcome maps (package, test) to {result, output}.
     notes holds "build" and "output" (lines by package) and "stderr" (lines).
     A panic ends its package's binary, so tests left without an outcome are run
-    again until none makes progress."""
+    again until none makes progress or the deadline passes."""
     outcome, notes = {}, {"build": {}, "output": {}, "stderr": []}
     pending = {p: list(ns) for p, ns in by_package.items()}
-    while pending:
-        found, found_notes = run_once(module_dir, prefix, pending)
+    while pending and not EXPIRED:
+        found, found_notes = run_once(module_dir, prefix, pending, deadline)
         for key in ("build", "output"):
             for package, lines in found_notes[key].items():
                 notes[key].setdefault(package, []).extend(lines)
@@ -363,15 +479,25 @@ def run_tests(module_dir, prefix, by_package):
     return outcome, notes
 
 
-def run_once(module_dir, prefix, by_package):
+def go_test(args, module_dir, deadline):
+    """Run go test under the deadline. Return (stdout, stderr); an expired budget
+    appends to EXPIRED and returns no output."""
+    try:
+        return bounded(args, module_dir, deadline, fds=tuple(HELD))[1:]
+    except BudgetExpired as expired:
+        EXPIRED.append(str(expired))
+        return "", ""
+
+
+def run_once(module_dir, prefix, by_package, deadline):
     names = sorted({n for ns in by_package.values() for n in ns})
-    run = subprocess.run(
-        ["go", "test", "-count=1", "-vet=off", "-json", "-run", "^(%s)$" % "|".join(names)]
-        + ["./" + p for p in sorted(by_package)],
-        cwd=module_dir, capture_output=True, text=True, pass_fds=tuple(HELD))
-    outcome, output, built = {}, {}, {}
-    notes = {"build": {}, "output": {}, "stderr": [scrub(l) for l in run.stderr.splitlines()]}
-    for line in run.stdout.splitlines():
+    stdout, stderr = go_test(
+        ["go", "test", "-count=1", "-vet=off", "-json", "-timeout", "%ds" % TEST_TIMEOUT,
+         "-run", "^(%s)$" % "|".join(names)] + ["./" + p for p in sorted(by_package)],
+        module_dir, deadline)
+    outcome, output, built, stream, started = {}, {}, {}, {}, {}
+    notes = {"build": {}, "output": {}, "stderr": [scrub(l) for l in stderr.splitlines()]}
+    for line in stdout.splitlines():
         try:
             event = json.loads(line)
         except ValueError:
@@ -384,8 +510,11 @@ def run_once(module_dir, prefix, by_package):
             continue
         package = os.path.relpath(event["Package"], prefix)
         test = event.get("Test")
+        if action == "run" and test and "/" not in test:
+            started.setdefault(package, []).append(test)
         if action == "output":
             text = scrub(event.get("Output", ""))
+            stream.setdefault(package, []).append(text)
             if test:
                 output.setdefault((package, test.split("/")[0]), []).append(text)
             else:
@@ -396,16 +525,36 @@ def run_once(module_dir, prefix, by_package):
             if test in by_package.get(package, ()):
                 outcome[(package, test)] = {"result": action,
                                             "output": output.get((package, test), [])}
+    for package, lines in stream.items():
+        at = next((i for i, l in enumerate(lines) if TIMED_OUT.match(l)), None)
+        if at is None:
+            continue
+        alarm = [lines[at]]
+        for line in lines[at + 1:]:
+            if line.strip() and not RUNNING.match(line) and line.strip() != "running tests:":
+                break
+            alarm.append(line)
+        # The alarm lists the tests still running, under whichever test its output is
+        # attributed to; without a list, every started test with no outcome was running.
+        running = {m.group(1) for m in map(RUNNING.match, alarm) if m}
+        running = running or set(started.get(package, []))
+        for name in sorted(running & set(by_package.get(package, ()))):
+            if (package, name) not in outcome:
+                outcome[(package, name)] = {"result": "timed out",
+                                            "output": output.get((package, name), []) + alarm}
     return outcome, notes
 
 
-def judge(tmp, module_dir, prefix, by_package, deps, changes, targets, decisive):
+def judge(tmp, module_dir, prefix, by_package, deps, changes, targets, decisive, deadline):
     """Run targets under each variant and return {test: [attempt]} with one attempt
-    per variant. An attempt's result is pass, fail, build failed, no result, not
-    linked, or not run (the test already had a decisive failure)."""
+    per variant. An attempt's result is pass, fail, timed out, build failed, no
+    result, not linked, not run (the test already had a decisive failure), or not
+    run: time budget (the run's deadline passed first)."""
     attempts = {t: [] for t in targets}
     done = set()
     for index, change in enumerate(changes):
+        if EXPIRED:
+            break
         imported = None if change["kind"] == "file" else import_path(prefix, change["path"])
         linked = set()
         for test in targets:
@@ -428,7 +577,7 @@ def judge(tmp, module_dir, prefix, by_package, deps, changes, targets, decisive)
         else:
             with open(target, "wb") as handle:
                 handle.write(change["data"])
-        outcome, notes = run_tests(module_dir, prefix, reachable)
+        outcome, notes = run_tests(module_dir, prefix, reachable, deadline)
         with open(target, "wb") as handle:
             handle.write(original)
         for test in linked:
@@ -438,6 +587,10 @@ def judge(tmp, module_dir, prefix, by_package, deps, changes, targets, decisive)
                 attempt["output"] = outcome[test]["output"]
                 if attempt["result"] == "fail":
                     attempt["kind"], attempt["excerpt"] = classify(attempt["output"])
+                elif attempt["result"] == "timed out":
+                    attempt["excerpt"] = timeout_excerpt(attempt["output"])
+            elif EXPIRED:
+                attempt.update(result="not run: time budget", output=lines_of(notes, test))
             else:
                 result, lines = diagnosis(test[0], notes)
                 attempt.update(result=result, output=lines, excerpt=excerpt(lines))
@@ -448,16 +601,28 @@ def judge(tmp, module_dir, prefix, by_package, deps, changes, targets, decisive)
             break
     for test in targets:
         seen = len(attempts[test])
-        attempts[test].extend({"variant": i, "result": "not run"}
-                              for i in range(seen, len(changes)))
+        rest = "not run" if test in done else "not run: time budget"
+        attempts[test].extend({"variant": i, "result": rest} for i in range(seen, len(changes)))
     return attempts
+
+
+def timeout_excerpt(lines):
+    running = [m.group(1) for m in map(RUNNING.match, lines) if m]
+    alarm = next((l.strip() for l in lines if TIMED_OUT.match(l)), "test timed out")
+    return alarm + ("; running: " + ", ".join(running) if running else "")
+
+
+def lines_of(notes, test):
+    return notes["output"].get(test[0], []) + notes["stderr"]
 
 
 def counts(attempts):
     """Summarise attempts, e.g. "1 failed, 3 passed, 2 did not build"."""
     names = [("fail", "failed"), ("pass", "passed"), ("build failed", "did not build"),
-             ("no result", "gave no result"), ("not linked", "not linked into the test binary"),
-             ("not run", "not run after the decisive failure")]
+             ("timed out", "timed out"), ("no result", "gave no result"),
+             ("not linked", "not linked into the test binary"),
+             ("not run", "not run after the decisive failure"),
+             ("not run: time budget", "not run before the time budget ran out")]
     tally = {}
     for attempt in attempts:
         tally[attempt["result"]] = tally.get(attempt["result"], 0) + 1
@@ -469,10 +634,13 @@ VERDICTS = {"assertion": "an assertion fails under a variant",
             "non-panic failure": "fails under a variant with no panic and no assertion message"}
 
 
-def assess(test, baseline, notes, linked, behavioural, attempts, panics, probes):
+def assess(test, baseline, notes, linked, behavioural, attempts, panics, probes, incomplete):
     """Build the evidence record for one new test."""
     record = {"package": test[0], "test": test[1]}
     base = baseline.get(test)
+    if not base and incomplete:
+        record.update(verdict="rejected", reason=BUDGET_REASON)
+        return record
     if base:
         record["baseline"] = {"result": base["result"], "output": base["output"]}
     else:
@@ -500,9 +668,13 @@ def assess(test, baseline, notes, linked, behavioural, attempts, panics, probes)
         return record
     record["verdict"] = "rejected"
     ran = [a for a in attempts if a["result"] == "pass"]
-    record["reason"] = ("passes under every variant that ran" if ran
-                        else "no variant of the change ran it")
-    for result, field in (("build failed", "first_build_error"), ("no result", "first_no_result")):
+    if incomplete and any(a["result"] == "not run: time budget" for a in attempts):
+        record["reason"] = BUDGET_REASON
+    else:
+        record["reason"] = ("passes under every variant that ran" if ran
+                            else "no variant of the change ran it")
+    for result, field in (("build failed", "first_build_error"), ("no result", "first_no_result"),
+                          ("timed out", "first_timeout")):
         broken = next((a for a in attempts if a["result"] == result), None)
         if broken:
             record[field] = "%s: %s" % (behavioural[broken["variant"]]["label"], broken["excerpt"])
@@ -533,18 +705,24 @@ def render(record, full):
         lines.append("    first build error: %s" % record["first_build_error"])
     if "first_no_result" in record:
         lines.append("    first no-result output: %s" % record["first_no_result"])
+    if "first_timeout" in record:
+        lines.append("    first timeout: %s" % record["first_timeout"])
     if "probe" in record:
         lines.append("    panic probes: %s" % record["probe"])
     return lines
 
 
-def write_evidence(directory, key, base, behavioural, panics, records):
+def write_evidence(directory, key, base, behavioural, panics, omitted, incomplete, records):
     os.makedirs(directory, exist_ok=True)
     path = os.path.join(directory, key[:16] + ".json")
     listed = [{k: v for k, v in change.items() if k != "data"} for change in behavioural + panics]
+    limits = {"function_cap": FUNCTION_CAP, "run_cap": RUN_CAP, "test_timeout": TEST_TIMEOUT,
+              "budget": BUDGET}
     with open(path, "w", encoding="utf-8") as handle:
-        json.dump({"base": base, "key": key, "behavioural_variants": listed[:len(behavioural)],
-                   "panic_probes": listed[len(behavioural):], "tests": records}, handle, indent=1)
+        json.dump({"base": base, "key": key, "incomplete": incomplete, "limits": limits,
+                   "behavioural_variants": listed[:len(behavioural)],
+                   "panic_probes": listed[len(behavioural):], "omitted_candidates": omitted,
+                   "tests": records}, handle, indent=1)
     old = sorted((os.path.join(directory, f) for f in os.listdir(directory) if f.endswith(".json")),
                  key=os.path.getmtime)
     for stale in old[:-KEEP]:
@@ -553,13 +731,15 @@ def write_evidence(directory, key, base, behavioural, panics, records):
 
 
 def main():
+    started = time.monotonic()
+    deadline = started + BUDGET
     root = git("rev-parse", "--show-toplevel").strip()
     os.chdir(root)
     directory = os.path.join(git("rev-parse", "--absolute-git-dir").strip(), EVIDENCE)
-    lock = hold_lock(directory)
+    lock = hold_lock(directory, deadline)
     if lock is None:
         print("revert-test: another run held %s for %ds; `lsof` on it names the holder"
-              % (os.path.join(directory, LOCK), WAIT), file=sys.stderr)
+              % (os.path.join(directory, LOCK), time.monotonic() - started), file=sys.stderr)
         return 1
     # Each go test inherits the lock, so a successor cannot replace the copy under it.
     HELD.append(lock)
@@ -593,41 +773,48 @@ def main():
 
     with open(os.path.join(MODULE, "go.mod"), encoding="utf-8") as handle:
         prefix = re.search(r"^module (\S+)", handle.read(), re.MULTILINE).group(1)
-    deps = test_deps(prefix, by_package)
     selected = {(p, n) for p, ns in by_package.items() for n in ns}
-    started = time.time()
+    baseline, baseline_notes, linked = {}, {"build": {}, "output": {}, "stderr": []}, set()
+    behavioural, panics, omitted, attempts, probes = [], [], [], {}, {}
     tmp = scratch_path(root)
     clear_scratch(tmp)
     os.mkdir(tmp, 0o700)
     try:
+        deps = test_deps(prefix, by_package, deadline)
         SCRUB.extend([os.path.realpath(tmp) + "/", tmp + "/"])
         copy_repository(root, tmp, {p.split("/")[0] for p in data})
         module_dir = os.path.join(tmp, MODULE)
 
-        baseline, baseline_notes = run_tests(module_dir, prefix, by_package)
+        baseline, baseline_notes = run_tests(module_dir, prefix, by_package, deadline)
         live = {t for t in selected if baseline.get(t, {}).get("result") == "pass"}
-        behavioural, panics = variants(base, paths, untracked)
-        mutated_packages = {import_path(prefix, c["path"]) for c in behavioural + panics}
-        behavioural += data_variants(base, data)
+        early, late, panics, omitted = variants(base, paths, untracked, deadline)
+        mutated_packages = {import_path(prefix, c["path"]) for c in early + late + panics}
+        behavioural = early + data_variants(base, data) + late
         linked = {t for t in live if data or mutated_packages & deps[t[0]]}
         attempts = judge(tmp, module_dir, prefix, by_package, deps, behavioural, linked,
-                         lambda a: a["result"] == "fail" and a["kind"] == "assertion")
+                         lambda a: a["result"] == "fail" and a["kind"] == "assertion", deadline)
         survivors = {t for t in linked
                      if not any(a["result"] == "fail" for a in attempts[t])}
         probes = judge(tmp, module_dir, prefix, by_package, deps, panics, survivors,
-                       lambda a: a["result"] == "fail")
+                       lambda a: a["result"] == "fail", deadline)
+    except BudgetExpired as expired:
+        EXPIRED.append(str(expired))
     finally:
         clear_scratch(tmp)
-    records =[assess(t, baseline, baseline_notes, t in linked, behavioural, attempts.get(t, []),
-                      panics, probes.get(t, [])) for t in sorted(selected)]
-    path = os.path.relpath(write_evidence(directory, key, base, behavioural, panics, records), root)
+    incomplete = bool(EXPIRED)
+    records = [assess(t, baseline, baseline_notes, t in linked, behavioural, attempts.get(t, []),
+                      panics, probes.get(t, []), incomplete) for t in sorted(selected)]
+    path = os.path.relpath(write_evidence(directory, key, base, behavioural, panics, omitted,
+                                          incomplete, records), root)
 
-    rejected = [r for r in records if r["verdict"] == "rejected"]
+    undecided = [r for r in records if r.get("reason") == BUDGET_REASON]
+    rejected = [r for r in records if r["verdict"] == "rejected" and r not in undecided]
     accepted = [r for r in records if r["verdict"] != "rejected"]
-    print("revert-test: base %s, %d new test(s), %d variant(s), %d panic probe(s), %.0fs; "
-          "evidence: %s" % (base[:8], len(selected), len(behavioural), len(panics),
-                            time.time() - started, path), flush=True)
-    if not rejected:
+    print("revert-test: base %s, %d new test(s), %d variant(s), %d panic probe(s), "
+          "%d omitted candidate(s), %.0fs; evidence: %s"
+          % (base[:8], len(selected), len(behavioural), len(panics), len(omitted),
+             time.monotonic() - started, path), flush=True)
+    if not rejected and not incomplete:
         for record in accepted:
             print("\n".join(render(record, full=False)))
         with open(stamp, "w", encoding="utf-8") as handle:
@@ -638,16 +825,23 @@ def main():
         out.append("revert-test: these new tests fail under a variant:")
         for record in accepted:
             out.extend(render(record, full=False))
-    out.append("revert-test: these new tests do not show that they test the change:")
-    for record in rejected:
-        out.extend(render(record, full=True))
-    out.append("Make each rejected test fail when the changed code is wrong. If a test "
-               "deliberately pins behaviour that already existed, put `%s` in its doc "
-               "comment; the commit reviewer sees that claim. The evidence file holds each "
-               "variant's diff and the full test output." % MARKER)
+    if rejected:
+        out.append("revert-test: these new tests do not show that they test the change:")
+        for record in rejected:
+            out.extend(render(record, full=True))
+        out.append("Keep each rejected test; do not delete or weaken it to pass this check. "
+                   "Read the evidence file: it holds each variant's diff and the full test "
+                   "output. If a variant breaks the property the test claims, make the test "
+                   "fail under it. If no variant can violate that property, extend the variant "
+                   "generator in scripts/revert-test.py so that one can. If a test deliberately "
+                   "pins behaviour that already existed, put `%s` in its doc comment; the "
+                   "commit reviewer sees that claim." % MARKER)
+    if incomplete:
+        out.append("revert-test: incomplete — the time budget of %ds ran out (%s); no pass is "
+                   "recorded. Undecided: %s" % (BUDGET, EXPIRED[0], ", ".join(
+                       "%s: %s" % (r["package"], r["test"]) for r in undecided) or "none"))
     print("\n".join(out), file=sys.stderr)
     return 1
-
 
 if __name__ == "__main__":
     sys.exit(main())

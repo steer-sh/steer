@@ -120,8 +120,12 @@ evidence (deciding variant, failure excerpt, diffs, full output) is written to
 `.git/revert-test/<key>.json`, and the console names the file. It copies the module
 to one scratch path per worktree and holds `.git/revert-test/lock` for the whole run,
 so two runs in one worktree are serialized and a blocked run fails naming the lock.
+The variant kinds, their caps and the time budget are in the script's docstring; a
+run that the budget stops before it finishes records no pass. When no variant can violate the
+property a correct test checks, extend the generator (`scripts/revert-test-funcs.go`
+finds statement sites) rather than the test.
 `./check-full.sh` adds `scripts/revert-test-verify.py`, which checks that script's
-copy and lock over fixture repositories, then the slow headless skill-generation
+copy, lock and variant generation over fixture repositories, then the slow headless skill-generation
 harness that invokes `claude -p`; it is separate from the turn-end gate.
 
 After CLI changes, rebuild the committed platform binaries before committing:
