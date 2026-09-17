@@ -253,3 +253,40 @@ func TestReRegistrationKeepsEveryHandlerAtItsIndex(t *testing.T) {
 		}
 	}
 }
+
+// The resolver's handlers are approved one by one, apart from the gate's, so its
+// trust is read at its own Stop and SubagentStop keys and needs both.
+func TestResolverTrustIsReadAtItsOwnHandlers(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	if _, err := RegisterCommitGateAndResolver("global", "", "steer commit-gate review-codex", 240, "steer commit-gate backfill", 30); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(home, "hooks.json")
+	approve := func(keys ...string) {
+		t.Helper()
+		config := ""
+		for _, key := range keys {
+			config += "[hooks.state.\"" + path + ":" + key + "\"]\nenabled = true\n"
+		}
+		if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(config), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	approve("pre_tool_use:0:0")
+	if a := ResolverArmingRow("global", ""); !a.Registered || !a.TrustStateKnown || a.TrustRecordPresent {
+		t.Fatalf("the gate's approval was read as the resolver's: %#v", a)
+	}
+	approve("pre_tool_use:0:0", "stop:0:0")
+	if a := ResolverArmingRow("global", ""); a.TrustRecordPresent {
+		t.Fatalf("one of the two resolver handlers read as approved for both: %#v", a)
+	}
+	approve("stop:0:0", "subagent_stop:0:0")
+	if a := ResolverArmingRow("global", ""); !a.TrustRecordPresent {
+		t.Fatalf("both resolver handlers are approved: %#v", a)
+	}
+	if a := CommitGateArming("global", ""); a.TrustRecordPresent {
+		t.Fatalf("the resolver's approval was read as the gate's: %#v", a)
+	}
+}

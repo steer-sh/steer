@@ -213,3 +213,19 @@ func TestAGateWithNoResolverNamesTheInstall(t *testing.T) {
 		t.Fatalf("steps = %+v; with no gate, only the gate install is asked for", r.Steps)
 	}
 }
+
+// A resolver with no trust record may still be skipped by its harness, so it is named
+// as unverified; it is no setup failure and no claim that nothing reads outcomes.
+func TestAnUnconfirmedResolverIsUnverifiedAndNotAStep(t *testing.T) {
+	s := snapshot(armed(string(harness.ClaudeCode)))
+	resolver := armed(string(harness.Codex))
+	resolver.Trust = TrustMissing
+	s.Posture.Resolver = []ScopeArming{resolver}
+	r := ReadinessOf(s, available())
+	if !r.Reviewing || len(r.Steps) != 0 {
+		t.Fatalf("Readiness = %+v; want reviewing with no step", r)
+	}
+	if len(r.Unverified) != 1 || !strings.Contains(r.Unverified[0], "Codex global scope: review-outcome reader: no trust record") {
+		t.Fatalf("unverified = %q; want the resolver's own trust named", r.Unverified)
+	}
+}

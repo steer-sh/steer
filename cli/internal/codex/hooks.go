@@ -26,6 +26,9 @@ const (
 // inside a subagent is adjudicated there, and only SubagentStop follows that thread.
 var resolverEvents = []string{"Stop", "SubagentStop"}
 
+// trustEvent is the event name a config.toml trust key spells.
+var trustEvent = map[string]string{"PreToolUse": "pre_tool_use", "Stop": "stop", "SubagentStop": "subagent_stop"}
+
 type commandHook struct {
 	Type          string `json:"type"`
 	Command       string `json:"command"`
@@ -64,6 +67,29 @@ type Arming struct {
 func (a Arming) Effective() bool { return a.Registered && a.Matcher == CommitGateMatcher }
 
 func trustSection(key string) string { return "[hooks.state." + strconv.Quote(key) + "]" }
+
+func trustKey(path, event string, entry, handler int) string {
+	return fmt.Sprintf("%s:%s:%d:%d", path, trustEvent[event], entry, handler)
+}
+
+// trustRecords reports whether config.toml could be read, and whether it holds a trust
+// record for every key.
+func trustRecords(keys []string) (known, present bool) {
+	home, err := codexHome()
+	if err != nil {
+		return false, false
+	}
+	raw, err := os.ReadFile(filepath.Join(home, "config.toml"))
+	if err != nil && !os.IsNotExist(err) {
+		return false, false
+	}
+	for _, key := range keys {
+		if !strings.Contains(string(raw), trustSection(key)) {
+			return true, false
+		}
+	}
+	return true, true
+}
 
 func hooksPath(scope, cwd string) (string, error) {
 	if scope == "global" {
@@ -321,8 +347,9 @@ func ResolverArming(scope, cwd string) (bool, int) {
 	return a.Registered, a.Timeout
 }
 
-// ResolverArmingRow reports the resolver's registration, its timeout and the command
-// it names. The resolver rides a turn-end event, which takes no matcher.
+// ResolverArmingRow reports the resolver's registration, its timeout, the command it
+// names, and whether config.toml holds a trust record for its handler on each event.
+// The resolver rides a turn-end event, which takes no matcher.
 func ResolverArmingRow(scope, cwd string) Arming {
 	path, err := hooksPath(scope, cwd)
 	if err != nil {
@@ -335,29 +362,32 @@ func ResolverArmingRow(scope, cwd string) Arming {
 	}
 	timeout := 0
 	command := ""
+	var keys []string
 	for _, event := range resolverEvents {
-		found := false
-		for _, raw := range eventEntries(root, event) {
+		key := ""
+		for i, raw := range eventEntries(root, event) {
 			entry, _ := raw.(map[string]any)
 			hooks, _ := entry["hooks"].([]any)
-			for _, rawHook := range hooks {
+			for j, rawHook := range hooks {
 				hook, _ := rawHook.(map[string]any)
 				cmdText, _ := hook["command"].(string)
 				if !isResolver(cmdText) {
 					continue
 				}
-				found = true
+				key = trustKey(path, event, i, j)
 				command = cmdText
 				if t, ok := hook["timeout"].(float64); ok {
 					timeout = int(t)
 				}
 			}
 		}
-		if !found {
+		if key == "" {
 			return Arming{Path: path}
 		}
+		keys = append(keys, key)
 	}
 	a.Registered, a.Timeout, a.Command = true, timeout, command
+	a.TrustStateKnown, a.TrustRecordPresent = trustRecords(keys)
 	return a
 }
 
@@ -395,17 +425,7 @@ func armingFor(scope, cwd string, owns func(string) bool) Arming {
 			if timeout, ok := hook["timeout"].(float64); ok {
 				a.Timeout = int(timeout)
 			}
-			if home, err := codexHome(); err == nil {
-				a.TrustStateKnown = true
-				config := filepath.Join(home, "config.toml")
-				configRaw, readErr := os.ReadFile(config)
-				if readErr != nil && !os.IsNotExist(readErr) {
-					a.TrustStateKnown = false
-					return a
-				}
-				key := fmt.Sprintf("%s:pre_tool_use:%d:%d", path, i, j)
-				a.TrustRecordPresent = strings.Contains(string(configRaw), trustSection(key))
-			}
+			a.TrustStateKnown, a.TrustRecordPresent = trustRecords([]string{trustKey(path, "PreToolUse", i, j)})
 			return a
 		}
 	}

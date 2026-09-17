@@ -612,7 +612,7 @@ func collectPosture(cfg gate.Config, ev mine.EvidenceSet) Posture {
 			Registered: cr.Registered,
 			Effective:  cr.Registered,
 			Timeout:    cr.Timeout,
-			Trust:      trustState(harness.Codex, cg.TrustStateKnown, cg.TrustRecordPresent),
+			Trust:      trustState(harness.Codex, cr.TrustStateKnown, cr.TrustRecordPresent),
 			Command:    cr.Command,
 		}, "", 0))
 		pr := pi.ResolverArming(scope, cwd)

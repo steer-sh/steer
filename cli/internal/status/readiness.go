@@ -153,7 +153,9 @@ func ReadinessOf(s *SystemStatus, probe reviewers.Probe) Readiness {
 		}
 	}
 	if registered {
-		r.Steps = append(r.Steps, resolverSteps(s.Posture)...)
+		steps, unverified := resolverSteps(s.Posture)
+		r.Steps = append(r.Steps, steps...)
+		r.Unverified = append(r.Unverified, unverified...)
 	}
 	if !registered {
 		r.Steps = append([]Step{{
@@ -185,10 +187,10 @@ func ReadinessOf(s *SystemStatus, probe reviewers.Probe) Readiness {
 // resolverSteps reports the resolver that reads review outcomes back. It never withholds
 // the reviewing answer: a commit is still reviewed, but no result can count the review.
 // Any working resolver reads every harness's ledger, so a missing one is a step only when
-// no registration here resolves.
-func resolverSteps(p Posture) []Step {
-	var steps []Step
-	working := false
+// no registration here resolves. A resolver whose trust is unconfirmed is a diagnostic,
+// as the gate's own is: it may run, so it is no claim that none does.
+func resolverSteps(p Posture) (steps []Step, unverified []string) {
+	candidate := false
 	for _, a := range p.Resolver {
 		if !a.Registered {
 			continue
@@ -198,20 +200,24 @@ func resolverSteps(p Posture) []Step {
 			steps = append(steps, prefixHarness(step, a))
 			continue
 		}
-		working = true
+		candidate = true
+		if _, ok := TrustStep(a.Harness, a.Trust, ""); ok {
+			unverified = append(unverified, fmt.Sprintf("%s %s scope: review-outcome reader: %s; current hook trust cannot be verified",
+				HarnessLabel(a.Harness), a.Scope, TrustPhrase(a.Trust)))
+		}
 	}
-	if working || len(steps) > 0 {
-		return steps
+	if candidate || len(steps) > 0 {
+		return steps, unverified
 	}
 	for _, g := range p.CommitGate {
 		if g.Registered {
 			return []Step{{
 				Title: "no review-outcome reader is registered beside the commit gate here, so review outcomes are read only when one runs elsewhere",
 				Fix:   fmt.Sprintf("steer commit-gate install --harness %s --scope %s", g.Harness, g.Scope),
-			}}
+			}}, nil
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 // prefixHarness names the registration a step belongs to. One store serves several
