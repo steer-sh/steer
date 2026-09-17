@@ -24,18 +24,24 @@ const (
 	maxResultScan = 4096
 )
 
-// correctionPatterns match user-turn language indicating the agent repeated
-// something the user already corrected. Precision beats recall here: a missed
-// correction costs one suggestion, a false positive pollutes the report.
+// correctionPatterns match user-turn language that can name a correction. A match
+// is a heuristic correction candidate, not a labelled correction: precision is
+// checked by hand and recall is unmeasured.
 var correctionPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\b(don'?t|do not|stop|quit|never) (use|using|add|adding|write|writing|create|creating|put|putting|make|making|do|doing|hardcode|hardcoding)\b`),
-	regexp.MustCompile(`(?i)\bi (said|told you|asked you|already (said|told))\b`),
+	regexp.MustCompile(`(?i)\bi (said|told you|asked you|already (said|told)( you)?)[,:]? (not to \w+|to (use|stop|avoid)|use|stop|avoid|don'?t|do not|never)\b`),
 	regexp.MustCompile(`(?i)\buse \S{1,40} instead\b`),
-	regexp.MustCompile(`(?i)^(no|nope|wrong|again)\b[,.!: ]`),
-	regexp.MustCompile(`(?i)\bwhy (are|do|did) you (keep|still|always)\b`),
+	regexp.MustCompile(`(?i)\bwhy (are|do|did|would) you\b`),
 	regexp.MustCompile(`(?i)\b(again|still) (using|doing|adding|writing)\b`),
 	regexp.MustCompile(`(?i)\byou (keep|always|still) (us|do|add|writ|creat|mak|forget)`),
 }
+
+// askedOpinion matches a "why do you think" question at a correction match's start.
+var askedOpinion = regexp.MustCompile(`(?i)^why (are|do|did|would) you think\b`)
+
+// steerRuleLine matches a line of Steer's own rule output quoted back into a turn:
+// the section header or a "- rule | instead" bullet.
+var steerRuleLine = regexp.MustCompile(`^(## Steer Rules$|- .+ \| .+)`)
 
 // failurePattern matches lint/test/compile failures in Bash tool output.
 var failurePattern = regexp.MustCompile(`(?i)(error TS\d+|\beslint\b|\bFAILED\b|\bFAIL:|AssertionError|SyntaxError|Traceback \(most recent call last\)|panic:|\bruff\b|\bflake8\b|\bmypy\b|npm ERR!|ERROR in |error\[E\d+\])`)
@@ -86,19 +92,20 @@ func (c *Classifier) Classify(e transcript.Event) (Signal, bool) {
 	return Signal{}, false
 }
 
-// correction matches a human turn against correction language.
+// correction matches a human turn against correction candidate language.
 func (c *Classifier) correction(text string) (Signal, bool) {
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" || strings.HasPrefix(trimmed, "<") || strings.HasPrefix(trimmed, "Caveat:") {
 		return Signal{}, false
 	}
 	for _, p := range correctionPatterns {
-		loc := p.FindStringIndex(trimmed)
-		if loc == nil {
-			continue
+		for _, loc := range p.FindAllStringIndex(trimmed, -1) {
+			snippet := matchLine(trimmed, loc[0])
+			if steerRuleLine.MatchString(snippet) || askedOpinion.MatchString(trimmed[loc[0]:]) {
+				continue
+			}
+			return Signal{kindCorrection, snippet, snippet}, true
 		}
-		snippet := matchLine(trimmed, loc[0])
-		return Signal{kindCorrection, snippet, snippet}, true
 	}
 	return Signal{}, false
 }
@@ -186,6 +193,10 @@ func ParserInstrument() string {
 		h.Write([]byte(p.String()))
 		h.Write([]byte{0})
 	}
+	h.Write([]byte("correction-skip:" + steerRuleLine.String()))
+	h.Write([]byte{0})
+	h.Write([]byte("correction-skip:" + askedOpinion.String()))
+	h.Write([]byte{0})
 	h.Write([]byte(failurePattern.String()))
 	h.Write([]byte{0})
 	h.Write([]byte("failure:runner-command+unquoted-match+traceback-exception-by-indent"))

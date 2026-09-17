@@ -581,3 +581,33 @@ func TestCollectRanksBySpreadThenKey(t *testing.T) {
 		}
 	}
 }
+
+func TestCorrectionCandidates(t *testing.T) {
+	cases := []struct {
+		text string
+		want string
+	}{
+		{"I said use the logger", "I said use the logger"},
+		{"I told you to use pnpm", "I told you to use pnpm"},
+		{"I said stop adding comments", "I said stop adding comments"},
+		{"I told you not to use mocks here", "I told you not to use mocks here"},
+		{"I said I would look at it later", ""},
+		{"I told you about this yesterday", ""},
+		{"No, the other file", ""},
+		{"nope", ""},
+		{"wrong branch, try main", ""},
+		{"again, please", ""},
+		{"STOP.  why are you editorializing the comments", "STOP.  why are you editorializing the comments"},
+		{"So why would you have written it without error handling?", "So why would you have written it without error handling?"},
+		{"why do you think auto mode works like this", ""},
+		{"## Steer Rules\n- never use bare python | use python3 instead", ""},
+		{"Rule: don't use bare python", "Rule: don't use bare python"},
+		{"- never use npm | use yarn instead\nplease don't use npm here", "please don't use npm here"},
+	}
+	for _, c := range cases {
+		sig, ok := NewClassifier().Classify(transcript.Event{Kind: transcript.KindHumanTurn, Text: c.text})
+		if got := map[bool]string{true: sig.Key}[ok]; got != c.want {
+			t.Errorf("%q: key %q, want %q", c.text, got, c.want)
+		}
+	}
+}

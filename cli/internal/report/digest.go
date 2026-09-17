@@ -49,8 +49,9 @@ func (c *Cluster) Score() int {
 
 // Signals groups clusters by extraction kind.
 type Signals struct {
-	// UserCorrections are user turns whose text matches correction language
-	// ("don't use X", "I said", "stop adding", ...).
+	// UserCorrections are heuristic correction candidates: user turns whose text
+	// matches correction language ("don't use X", "I said use Y", "stop adding", ...).
+	// Precision is checked by hand; recall is unmeasured.
 	UserCorrections []*Cluster `json:"user_corrections"`
 	// UserRejections are tool calls the user declined at the permission prompt.
 	UserRejections []*Cluster `json:"user_rejections"`
