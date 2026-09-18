@@ -3,6 +3,7 @@ package claude
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -129,5 +130,95 @@ func TestInstallManagedHookFileExistsNoManifest(t *testing.T) {
 	}
 	if result.Overwritten {
 		t.Fatal("expected Overwritten=false (no prior manifest entry)")
+	}
+}
+
+func TestInstallManagedHookRefusesFileNameOutsideStore(t *testing.T) {
+	withProjectTempDir(t)
+
+	hooksDir, err := GetHooksDir(ProjectScope)
+	if err != nil {
+		t.Fatalf("GetHooksDir error: %v", err)
+	}
+
+	for _, fileName := range []string{"../escaped.py", "../../escaped.py", "nested/escaped.py", "/tmp/escaped.py"} {
+		_, err := InstallManagedHook(ProjectScope, InstallManagedHookInput{
+			HookName: "escape-probe",
+			FileName: fileName,
+			Rule:     "probe rule | probe",
+			Content:  []byte(blockingHookContent),
+			Metadata: HookInstallMetadata{Source: SourceGenerated},
+		})
+		if err == nil {
+			t.Fatalf("InstallManagedHook accepted file name %q", fileName)
+		}
+
+		escaped := filepath.Clean(filepath.Join(hooksDir, fileName))
+		if _, statErr := os.Stat(escaped); statErr == nil {
+			t.Fatalf("file name %q wrote %s outside the store", fileName, escaped)
+		}
+
+		manifest, err := LoadManifest(ProjectScope)
+		if err != nil {
+			t.Fatalf("LoadManifest error: %v", err)
+		}
+		if _, recorded := manifest.Hooks["escape-probe"]; recorded {
+			t.Fatalf("file name %q left a manifest entry", fileName)
+		}
+	}
+}
+
+func TestInstallManagedHookRefusesFileNameOwnedByAnotherHook(t *testing.T) {
+	withProjectTempDir(t)
+
+	if _, err := InstallManagedHook(ProjectScope, InstallManagedHookInput{
+		HookName: "alpha",
+		FileName: "shared.py",
+		Rule:     "alpha rule | do alpha",
+		Content:  []byte(blockingHookContent),
+		Metadata: HookInstallMetadata{Source: SourceGenerated},
+	}); err != nil {
+		t.Fatalf("InstallManagedHook returned error for alpha: %v", err)
+	}
+
+	_, err := InstallManagedHook(ProjectScope, InstallManagedHookInput{
+		HookName: "beta",
+		FileName: "shared.py",
+		Rule:     "beta rule | do beta",
+		Content:  []byte(blockingHookContent),
+		Metadata: HookInstallMetadata{Source: SourceGenerated},
+	})
+	if err == nil {
+		t.Fatalf("InstallManagedHook let beta take the file alpha owns")
+	}
+	if !strings.Contains(err.Error(), "alpha") {
+		t.Fatalf("error does not name the owning hook: %v", err)
+	}
+
+	manifest, err := LoadManifest(ProjectScope)
+	if err != nil {
+		t.Fatalf("LoadManifest error: %v", err)
+	}
+	if _, recorded := manifest.Hooks["beta"]; recorded {
+		t.Fatalf("beta kept a manifest entry after the refusal")
+	}
+	if got := strings.TrimSpace(manifest.Hooks["alpha"].File); got != "shared.py" {
+		t.Fatalf("alpha lost its file: %q", got)
+	}
+}
+
+func TestInstallManagedHookUpdatesItsOwnFile(t *testing.T) {
+	withProjectTempDir(t)
+
+	for i := 0; i < 2; i++ {
+		if _, err := InstallManagedHook(ProjectScope, InstallManagedHookInput{
+			HookName: "alpha",
+			FileName: "alpha.py",
+			Rule:     "alpha rule | do alpha",
+			Content:  []byte(blockingHookContent),
+			Metadata: HookInstallMetadata{Source: SourceGenerated},
+		}); err != nil {
+			t.Fatalf("InstallManagedHook refused its own file on pass %d: %v", i, err)
+		}
 	}
 }

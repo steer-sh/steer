@@ -105,6 +105,18 @@ func normalizeHookName(identifier string) string {
 	return strings.TrimSpace(name)
 }
 
+// isLocalFileName reports whether name is a single path element: no separator,
+// no directory traversal, and no volume or root prefix.
+func isLocalFileName(name string) bool {
+	if name == "" || name == "." || name == ".." {
+		return false
+	}
+	if strings.ContainsAny(name, `/\`) {
+		return false
+	}
+	return filepath.Base(name) == name
+}
+
 func applyMetadataHeader(content []byte, source, promptVersion, hookVersion string) []byte {
 	source = strings.TrimSpace(source)
 	if source == "" {
@@ -178,6 +190,12 @@ func InstallManagedHook(scope string, input InstallManagedHookInput, targets ...
 	if strings.ToLower(filepath.Ext(fileName)) != ".py" {
 		return nil, fmt.Errorf("hook file must be a .py file")
 	}
+	// The store owns its own directory, so the file name is a single local
+	// basename. Joining an unchecked name reaches outside the store on write
+	// and again when a removal deletes the path the manifest recorded.
+	if !isLocalFileName(fileName) {
+		return nil, fmt.Errorf("hook file %q must be a plain file name with no path separators", fileName)
+	}
 	if fileName == MasterHookName {
 		return nil, fmt.Errorf("cannot register %s directly", MasterHookName)
 	}
@@ -222,6 +240,20 @@ func InstallManagedHook(scope string, input InstallManagedHookInput, targets ...
 		return nil, fmt.Errorf("%q already names a review addendum entry in the %s store. "+
 			"Remove it with `steer commit-gate addendum remove %s`, or name the guard differently",
 			hookName, scope, hookName)
+	}
+
+	// One file backs one id. Two ids sharing a file leave the second install's
+	// content under both names, and a removal of either deletes the file the
+	// other's manifest entry still points at.
+	for otherName, otherEntry := range manifest.Hooks {
+		if otherName == hookName {
+			continue
+		}
+		if strings.TrimSpace(otherEntry.File) == fileName {
+			return nil, fmt.Errorf("hook file %q already belongs to %q in the %s store. "+
+				"Remove it with `steer remove %s`, or name the file differently",
+				fileName, otherName, scope, otherName)
+		}
 	}
 
 	existingEntry, manifestExists := manifest.Hooks[hookName]
