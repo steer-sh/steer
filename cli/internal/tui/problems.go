@@ -51,7 +51,7 @@ func (m *Model) problemRows() []problemRow {
 	for _, i := range classOrder(items) {
 		it := items[i]
 		rows = append(rows, problemRow{
-			heading: status.ActionHeading[status.ActionFor(it.Observation, it.Scope)],
+			heading: status.ActionHeading[status.ActionFor(it.Observation, it.Scope, it.Tier, it.Artifact)],
 			item:    &items[i],
 		})
 	}
@@ -70,7 +70,7 @@ func classOrder(items []status.ScoredIntervention) []int {
 	ord := []int{}
 	for _, act := range status.ActionOrder {
 		for i, it := range items {
-			if status.ActionFor(it.Observation, it.Scope) == act {
+			if status.ActionFor(it.Observation, it.Scope, it.Tier, it.Artifact) == act {
 				ord = append(ord, i)
 			}
 		}
@@ -304,6 +304,7 @@ func problemView(it status.ScoredIntervention) status.ProblemView {
 		Intervention:   it.Intervention,
 		Observation:    it.Observation,
 		Scope:          it.Scope,
+		Artifact:       it.Artifact,
 		Unit:           it.Unit,
 		BeforeCoverage: it.BeforeCoverage,
 		AfterCoverage:  it.AfterCoverage,
@@ -429,7 +430,7 @@ func fixDetail(it status.ScoredIntervention) string {
 // resultDetail is the result label with its own explanation under it.
 func resultDetail(it status.ScoredIntervention) string {
 	label := status.ObservationLabel(it.Observation)
-	sentence := status.ActionSentence(it.Observation, it.Scope)
+	sentence := status.ActionSentence(it.Observation, it.Scope, it.Tier, it.Artifact)
 	if sentence == "" {
 		return label + ". Nothing is asked of you here."
 	}

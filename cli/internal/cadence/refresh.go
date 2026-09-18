@@ -183,7 +183,7 @@ func Refresh(opts Options) (*Queue, error) {
 		}
 		observation := observationOf(scored["observation"])
 		artifact := ArtifactOf(r, ArtifactSources{RepoRoot: opts.RepoRoot, Addendum: opts.Addendum})
-		if !needsAttention(observation, scored["scope"], artifact) {
+		if !needsAttention(observation, scored["scope"], str(scored["tier"]), artifact) {
 			continue
 		}
 		prose := mine.ProseOf(r)
@@ -244,15 +244,16 @@ func Refresh(opts Options) (*Queue, error) {
 }
 
 // needsAttention is field-derived. A recurrence, an unreadable guard audit log, a
-// coverage cause, an unfrozen scope, a fix that is absent or unreadable, or a fix
-// the archive records as removed after the split gives the reader something to
+// coverage cause, an unfrozen scope, a fix that is absent or unreadable, a fix
+// whose text drifted from the record's baseline, or a fix the archive
+// records as removed after the split gives the reader something to
 // inspect;
 // quiet eligible work stays in the inventory without manufacturing a repair. A
 // guard whose audit log is present and records no block is NOT attention: the
 // zero is a reading, and the tier that writes no audit rows keeps Applicable
 // false.
-func needsAttention(obs mine.Observation, scope any, artifact *Artifact) bool {
-	if obs.Recurrence.Occurred || artifact.Missing() || artifact.RemovalRecorded() {
+func needsAttention(obs mine.Observation, scope any, t string, artifact *Artifact) bool {
+	if obs.Recurrence.Occurred || artifact.Missing() || artifact.NeedsBaseline(t) || artifact.RemovalRecorded() {
 		return true
 	}
 	if mine.MissingCoverage(obs) {

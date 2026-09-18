@@ -1,6 +1,7 @@
 package status
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/cadence"
@@ -16,16 +17,16 @@ func actionObs(occurred bool, eligible int) mine.Observation {
 
 func TestActionForUsesObservationFields(t *testing.T) {
 	scope := &cadence.Scope{Version: 1, All: true}
-	if got := ActionFor(actionObs(true, 10), scope); got != ActionInspect {
+	if got := ActionFor(actionObs(true, 10), scope, "instruction", nil); got != ActionInspect {
 		t.Fatalf("recurrence action = %q", got)
 	}
-	if got := ActionFor(actionObs(false, 10), scope); got != ActionObserve {
+	if got := ActionFor(actionObs(false, 10), scope, "instruction", nil); got != ActionObserve {
 		t.Fatalf("quiet action = %q", got)
 	}
-	if got := ActionFor(actionObs(false, 0), scope); got != ActionObserve {
+	if got := ActionFor(actionObs(false, 0), scope, "instruction", nil); got != ActionObserve {
 		t.Fatalf("empty action = %q", got)
 	}
-	if got := ActionFor(actionObs(false, 10), nil); got != ActionRepair {
+	if got := ActionFor(actionObs(false, 10), nil, "instruction", nil); got != ActionRepair {
 		t.Fatalf("legacy scope action = %q", got)
 	}
 }
@@ -33,7 +34,7 @@ func TestActionForUsesObservationFields(t *testing.T) {
 func TestRecurrenceOutranksCoverage(t *testing.T) {
 	obs := actionObs(true, 10)
 	obs.Coverage.After["unknown_evidence"] = 2
-	if got := ActionFor(obs, &cadence.Scope{Version: 1, All: true}); got != ActionInspect {
+	if got := ActionFor(obs, &cadence.Scope{Version: 1, All: true}, "instruction", nil); got != ActionInspect {
 		t.Fatalf("action = %q", got)
 	}
 }
@@ -41,7 +42,7 @@ func TestRecurrenceOutranksCoverage(t *testing.T) {
 func TestMissingAuditIsRepairableCoverage(t *testing.T) {
 	obs := actionObs(false, 10)
 	obs.Firing = mine.FiringActivity{Applicable: true, LogPresent: false}
-	if got := ActionFor(obs, &cadence.Scope{Version: 1, All: true}); got != ActionRepair {
+	if got := ActionFor(obs, &cadence.Scope{Version: 1, All: true}, "instruction", nil); got != ActionRepair {
 		t.Fatalf("action = %q", got)
 	}
 }
@@ -49,7 +50,7 @@ func TestMissingAuditIsRepairableCoverage(t *testing.T) {
 func TestActionSentenceNamesObservationLimits(t *testing.T) {
 	obs := actionObs(true, 10)
 	obs.Firing = mine.FiringActivity{Applicable: true, LogPresent: true}
-	if got := ActionSentence(obs, &cadence.Scope{Version: 1, All: true}); got == "" {
+	if got := ActionSentence(obs, &cadence.Scope{Version: 1, All: true}, "instruction", nil); got == "" {
 		t.Fatal("empty recurrence sentence")
 	}
 }
@@ -106,5 +107,43 @@ func TestArtifactPhraseNamesTheState(t *testing.T) {
 		if got := ArtifactPhrase(c.tier, c.a); got != c.want {
 			t.Errorf("ArtifactPhrase(%s, %+v)\n got %q\nwant %q", c.tier, c.a, got, c.want)
 		}
+	}
+}
+
+// A reworded rule asks for a repair and names the re-baseline command. A check
+// whose detector was edited does not: its digest moves with the test it runs.
+func TestADriftedFixAsksForANewBaseline(t *testing.T) {
+	scope := &cadence.Scope{Version: 1, All: true}
+	obs := actionObs(false, 10)
+	drifted := &cadence.Artifact{ID: "my-fix", State: cadence.ArtifactChanged}
+
+	if got := ActionFor(obs, scope, "instruction", drifted); got != ActionRepair {
+		t.Errorf("reworded rule action = %q, want %q", got, ActionRepair)
+	}
+	if got := ActionFor(obs, scope, "check", drifted); got != ActionObserve {
+		t.Errorf("edited detector action = %q, want %q", got, ActionObserve)
+	}
+	if got := ActionFor(obs, scope, "instruction", &cadence.Artifact{ID: "my-fix", State: cadence.ArtifactPresent}); got != ActionObserve {
+		t.Errorf("present artifact action = %q, want %q", got, ActionObserve)
+	}
+	sentence := ActionSentence(obs, scope, "instruction", drifted)
+	if !strings.Contains(sentence, "steer fix register --supersedes") {
+		t.Errorf("the sentence names no re-baseline command:\n%s", sentence)
+	}
+	if !strings.Contains(sentence, "earlier text") {
+		t.Errorf("the sentence does not say which text the counts describe:\n%s", sentence)
+	}
+	if got := ActionSentence(obs, scope, "check", drifted); strings.Contains(got, "--supersedes") {
+		t.Errorf("an edited detector must not be sent to re-baseline:\n%s", got)
+	}
+}
+
+// An observed escape is a fact about the work. Filing it under a repair to the
+// record's baseline hides it, so recurrence outranks drift.
+func TestRecurrenceOutranksDrift(t *testing.T) {
+	drifted := &cadence.Artifact{ID: "my-fix", State: cadence.ArtifactChanged}
+	got := ActionFor(actionObs(true, 10), &cadence.Scope{Version: 1, All: true}, "instruction", drifted)
+	if got != ActionInspect {
+		t.Fatalf("action = %q, want %q", got, ActionInspect)
 	}
 }

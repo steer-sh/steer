@@ -59,9 +59,9 @@ func EvidenceGap(obs mine.Observation, scope *cadence.Scope) *Gap {
 	return nil
 }
 
-func GapSentence(g *Gap, obs mine.Observation, scope *cadence.Scope) string {
+func GapSentence(g *Gap, obs mine.Observation, scope *cadence.Scope, t string, artifact *cadence.Artifact) string {
 	if g != nil {
 		return g.Sentence
 	}
-	return ActionSentence(obs, scope)
+	return ActionSentence(obs, scope, t, artifact)
 }

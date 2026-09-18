@@ -18,12 +18,15 @@ import (
 type ProblemView struct {
 	// Declined is true for a fix that was considered and refused. Such a record
 	// installed nothing, so what it describes is the fix it considered.
-	Declined       bool
-	Tier           string
-	Target         string
-	Intervention   string
-	Observation    mine.Observation
-	Scope          *cadence.Scope
+	Declined     bool
+	Tier         string
+	Target       string
+	Intervention string
+	Observation  mine.Observation
+	Scope        *cadence.Scope
+	// Artifact is where the fix stands now, nil for a record that binds none. The
+	// action table reads it beside Tier.
+	Artifact       *cadence.Artifact
 	Unit           string
 	BeforeCoverage cadence.Coverage
 	AfterCoverage  cadence.Coverage
@@ -75,14 +78,14 @@ func ProblemNext(v ProblemView) string {
 // something carries a step.
 func problemReason(v ProblemView) (why, next string) {
 	gap := EvidenceGap(v.Observation, v.Scope)
-	sentence := GapSentence(gap, v.Observation, v.Scope)
+	sentence := GapSentence(gap, v.Observation, v.Scope, v.Tier, v.Artifact)
 	if sentence == "" {
 		return "", ""
 	}
 	if gap != nil && gap.Command != "" {
 		sentence += " — run: " + gap.Command
 	}
-	if ActionFor(v.Observation, v.Scope) == ActionObserve {
+	if ActionFor(v.Observation, v.Scope, v.Tier, v.Artifact) == ActionObserve {
 		return sentence, ""
 	}
 	return "", sentence

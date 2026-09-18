@@ -43,10 +43,16 @@ var ActionHeading = map[string]string{
 // ZeroEligibleAfter is deliberately not a repair. Every freshly installed record
 // has zero eligible after-units, and prevention and absent opportunity both
 // produce silence — neither is a fault.
-func ActionFor(obs mine.Observation, scope *cadence.Scope) string {
+//
+// A drifted artifact IS a repair: the record counts work against text the fix no
+// longer carries, so its silence is a reading of the old text. Artifact.NeedsBaseline
+// holds which tiers that covers.
+func ActionFor(obs mine.Observation, scope *cadence.Scope, t string, artifact *cadence.Artifact) string {
 	switch {
 	case obs.Recurrence.Occurred:
 		return ActionInspect
+	case artifact.NeedsBaseline(t):
+		return ActionRepair
 	case scope == nil || missingCoverage(obs):
 		return ActionRepair
 	}
@@ -72,7 +78,7 @@ func ObservationLabel(obs mine.Observation) string {
 
 // ActionSentence is the observation translated into an instruction. A declined
 // record installed no fix, so its recurrence is phrased with no rework implied.
-func ActionSentence(obs mine.Observation, scope *cadence.Scope) string {
+func ActionSentence(obs mine.Observation, scope *cadence.Scope, t string, artifact *cadence.Artifact) string {
 	switch {
 	case obs.Recurrence.Occurred && obs.Firing.Known() && obs.Firing.Rows == 0:
 		return "the problem returned while the guard recorded no block — inspect the rule, its coverage and its registration"
@@ -80,6 +86,10 @@ func ActionSentence(obs mine.Observation, scope *cadence.Scope) string {
 		return "the problem recurred since this fix was declined, and no fix is installed — inspect the newest example"
 	case obs.Recurrence.Occurred:
 		return "inspect the newest example and decide whether the fix needs reworking"
+	case artifact.NeedsBaseline(t):
+		return "the fix's text differs from the text this record measured, so these counts " +
+			"describe the earlier text — `steer fix register --supersedes <record-id>` " +
+			"starts a clean window"
 	case scope == nil || missingCoverage(obs):
 		return "read the coverage before deciding what to change"
 	case obs.Coverage.ZeroEligibleAfter:

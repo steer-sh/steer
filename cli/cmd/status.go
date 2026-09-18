@@ -335,7 +335,7 @@ func renderAttention(s *status.SystemStatus, width int) {
 	buckets := map[string][]string{}
 
 	for _, iv := range a.Interventions {
-		act := status.ActionFor(iv.Observation, iv.Scope)
+		act := status.ActionFor(iv.Observation, iv.Scope, iv.Tier, iv.Artifact)
 		buckets[act] = append(buckets[act], interventionBlock(iv, width))
 	}
 	if s.Posture.Unresolved > 0 {
@@ -455,6 +455,7 @@ func interventionBlock(iv cadence.Intervention, width int) string {
 		Intervention:   iv.Intervention,
 		Observation:    iv.Observation,
 		Scope:          iv.Scope,
+		Artifact:       iv.Artifact,
 		Unit:           unit,
 		BeforeCoverage: iv.BeforeCoverage,
 		AfterCoverage:  iv.AfterCoverage,

@@ -503,7 +503,7 @@ func scoreInventory(records []mine.Record, ev mine.EvidenceSet, src cadence.Arti
 func summarize(items []ScoredIntervention) VerdictSummary {
 	counts := map[string]int{}
 	for _, it := range items {
-		counts[ActionFor(it.Observation, it.Scope)]++
+		counts[ActionFor(it.Observation, it.Scope, it.Tier, it.Artifact)]++
 	}
 	return VerdictSummary{Total: len(items), Counts: counts}
 }

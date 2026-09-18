@@ -49,7 +49,7 @@ func TestACheckRegisteredOnAnotherHostIsNamedAndNotRepairedHere(t *testing.T) {
 	if gap := EvidenceGap(obs, scope); gap != nil {
 		t.Errorf("gap = %+v, want none on this machine", gap)
 	}
-	if got := ActionFor(obs, scope); got != ActionObserve {
+	if got := ActionFor(obs, scope, "check", nil); got != ActionObserve {
 		t.Errorf("action = %q, want %q", got, ActionObserve)
 	}
 }

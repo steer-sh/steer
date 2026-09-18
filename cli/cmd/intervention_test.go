@@ -4,6 +4,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -100,4 +101,29 @@ func equalStrings(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// `steer fix score` reads a stored snapshot and rebuilds nothing, so its note says
+// how old that snapshot is and names the one command that refreshes it. Without the
+// age, an unread window reads as a quiet one.
+func TestSnapshotFreshnessNoteDatesTheSnapshotAndNamesTheRefresh(t *testing.T) {
+	now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+	note := snapshotFreshnessNote(now.Add(-72*time.Hour), now)
+	if !strings.Contains(note, "3 days ago") {
+		t.Errorf("the note does not state the snapshot's age:\n%s", note)
+	}
+	if !strings.Contains(note, "2026-09-15T12:00:00Z") {
+		t.Errorf("the note does not date the snapshot:\n%s", note)
+	}
+	if !strings.Contains(note, "steer report refresh") {
+		t.Errorf("the note names no refresh command:\n%s", note)
+	}
+
+	unknown := snapshotFreshnessNote(time.Time{}, now)
+	if strings.Contains(unknown, "days ago") {
+		t.Errorf("an unrecorded refresh must not print an age:\n%s", unknown)
+	}
+	if !strings.Contains(unknown, "steer report refresh") {
+		t.Errorf("the note names no refresh command:\n%s", unknown)
+	}
 }

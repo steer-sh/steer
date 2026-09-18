@@ -202,33 +202,46 @@ func TestUndecidedChainsResidualFindingInMixedChain(t *testing.T) {
 }
 
 func TestNeedsAttention(t *testing.T) {
-	if !needsAttention(mine.Observation{Recurrence: mine.Recurrence{Occurred: true}}, struct{}{}, nil) {
+	if !needsAttention(mine.Observation{Recurrence: mine.Recurrence{Occurred: true}}, struct{}{}, "instruction", nil) {
 		t.Error("recurrence should need attention")
 	}
-	if !needsAttention(mine.Observation{Firing: mine.FiringActivity{Applicable: true}}, struct{}{}, nil) {
+	if !needsAttention(mine.Observation{Firing: mine.FiringActivity{Applicable: true}}, struct{}{}, "instruction", nil) {
 		t.Error("a missing applicable audit log should need attention")
 	}
 	// `pending` is counted inside `unknown_evidence`, and a pending row settles on
 	// its own, so only the excess over it is a gap the reader can act on.
 	if needsAttention(mine.Observation{Coverage: mine.ObservationCoverage{
-		After: map[string]any{"unknown": 1, "unknown_evidence": 1, "pending": 1}}}, struct{}{}, nil) {
+		After: map[string]any{"unknown": 1, "unknown_evidence": 1, "pending": 1}}}, struct{}{}, "instruction", nil) {
 		t.Error("a window whose unknowns are all still settling should not need attention")
 	}
 	// A closed miss has no repair and an overdue row is the resolver's own status
 	// entry, so neither queues the record.
 	if needsAttention(mine.Observation{Coverage: mine.ObservationCoverage{
-		After: map[string]any{"unknown": 3, "unknown_evidence": 3, "pending": 1, "ledger_missed": 1, "ledger_overdue": 1}}}, struct{}{}, nil) {
+		After: map[string]any{"unknown": 3, "unknown_evidence": 3, "pending": 1, "ledger_missed": 1, "ledger_overdue": 1}}}, struct{}{}, "instruction", nil) {
 		t.Error("a ledger cause should not need attention")
 	}
 	if needsAttention(mine.Observation{Coverage: mine.ObservationCoverage{
-		After: map[string]any{"unknown": 3, "unknown_scope": 2}}}, struct{}{}, nil) {
+		After: map[string]any{"unknown": 3, "unknown_scope": 2}}}, struct{}{}, "instruction", nil) {
 		t.Error("an unknown scope or a projectless session should not need attention")
 	}
-	if needsAttention(mine.Observation{Coverage: mine.ObservationCoverage{After: map[string]any{"eligible": 2}}}, struct{}{}, nil) {
+	if needsAttention(mine.Observation{Coverage: mine.ObservationCoverage{After: map[string]any{"eligible": 2}}}, struct{}{}, "instruction", nil) {
 		t.Error("quiet eligible work should not need attention")
 	}
-	if !needsAttention(mine.Observation{}, nil, nil) {
+	if !needsAttention(mine.Observation{}, nil, "instruction", nil) {
 		t.Error("a missing scope should need attention")
+	}
+	// A rule reworded under its own id leaves the record counting against text
+	// nobody carries, and a check's detector digest moves with the test it runs.
+	quiet := mine.Observation{Coverage: mine.ObservationCoverage{After: map[string]any{"eligible": 2}}}
+	drifted := &Artifact{ID: "my-fix", State: ArtifactChanged}
+	if !needsAttention(quiet, struct{}{}, "instruction", drifted) {
+		t.Error("a reworded rule should need attention")
+	}
+	if needsAttention(quiet, struct{}{}, "check", drifted) {
+		t.Error("an edited detector should not need attention")
+	}
+	if needsAttention(quiet, struct{}{}, "instruction", &Artifact{ID: "my-fix", State: ArtifactPresent}) {
+		t.Error("a fix in place as recorded should not need attention")
 	}
 }
 

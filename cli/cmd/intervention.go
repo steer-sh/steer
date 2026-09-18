@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steer-sh/steer-cli/internal/cadence"
 	"github.com/steer-sh/steer-cli/internal/checkscope"
 	"github.com/steer-sh/steer-cli/internal/evidence"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
@@ -13,6 +15,21 @@ import (
 	"github.com/steer-sh/steer-cli/internal/sessions"
 	"github.com/steer-sh/steer-cli/internal/tier"
 )
+
+// snapshotFreshnessNote says how old the transcript snapshot these counts read is.
+// score never rebuilds it: `steer report refresh` is the one writer of the snapshot
+// store, so this names that command rather than re-reading the harnesses here. A
+// reader who does not know the snapshot's age cannot tell a quiet window from an
+// unread one.
+func snapshotFreshnessNote(last, now time.Time) string {
+	const how = "; `steer report refresh` re-reads the harnesses' transcripts"
+	if last.IsZero() {
+		return "# these counts read the stored transcript snapshot, whose last refresh " +
+			"this machine does not record" + how
+	}
+	return fmt.Sprintf("# these counts read the transcript snapshot refreshed %s, %d days ago%s",
+		last.Format(time.RFC3339), int(now.Sub(last).Hours()/24), how)
+}
 
 // The intervention commands exist under two parents: `steer fix`, the
 // corpus-neutral name, and `steer commit-gate mine`, the review-findings alias every
@@ -368,6 +385,10 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 				GateStateDir: gateConfig().StateDir,
 				Ledger:       v.ledger,
 			})
+			if !v.scoreJSON {
+				fmt.Fprintln(out(), snapshotFreshnessNote(
+					cadence.LastRefresh(cadence.StateDir()), time.Now()))
+			}
 			return mine.Score(out(), gateConfig().StateDir, mine.ScoreOpts{
 				Ledger:       v.ledger,
 				ID:           v.scoreID,

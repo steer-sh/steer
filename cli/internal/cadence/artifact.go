@@ -61,6 +61,20 @@ func (a *Artifact) Missing() bool {
 	return a != nil && (a.State == ArtifactAbsent || a.State == ArtifactUnreadable)
 }
 
+// Changed reports a fix in place under its recorded id, whose text or detector
+// differs from the one the record froze.
+func (a *Artifact) Changed() bool {
+	return a != nil && a.State == ArtifactChanged
+}
+
+// NeedsBaseline reports a changed fix whose tier changes text only by an author's
+// edit, so the record's counts describe text nobody carries now. A check is never
+// one: its detector digest moves with every edit to the test it runs.
+func (a *Artifact) NeedsBaseline(t string) bool {
+	kind, ok := tier.Of(t)
+	return ok && kind != tier.Check && a.Changed()
+}
+
 // RemovalRecorded reports a fix that is in place now but was archived by a
 // removal after the record's split, so the record's window may span a period
 // without it.
