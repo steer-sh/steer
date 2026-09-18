@@ -293,8 +293,11 @@ func denyTSFor(rows []resolverRow, i int) (float64, bool) {
 }
 
 // chainEndTS is when this row's chain stops being the live one. A non-review or clean
-// phase is not a chain start and bounds nothing.
+// phase is not a chain start and bounds nothing. One thread can interleave two
+// repositories' chains, so a row of another named repository bounds nothing either; an
+// unnamed repository on either side still bounds.
 func (r *resolver) chainEndTS(rows []resolverRow, i int, session string, firing int) float64 {
+	repo := pyStr(rows[i]["repo"])
 	for j := i + 1; j < len(rows); j++ {
 		row := rows[j]
 		phase := pyStr(row["phase"])
@@ -302,6 +305,9 @@ func (r *resolver) chainEndTS(rows []resolverRow, i int, session string, firing 
 			continue
 		}
 		if session != "" && joinKey(row) != session {
+			continue
+		}
+		if other := pyStr(row["repo"]); repo != "" && other != "" && other != repo {
 			continue
 		}
 		f, _ := pyInt(row["firing"])

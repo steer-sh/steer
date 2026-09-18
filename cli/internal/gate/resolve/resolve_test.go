@@ -477,6 +477,37 @@ func TestResolverGitRowStaysInsideItsBound(t *testing.T) {
 	}
 }
 
+// stampRepo names the repository every row was written under. An empty name leaves the
+// field off, as a legacy row and a row whose repository git could not read both have it.
+func stampRepo(rows []resolverRow, repo string) []resolverRow {
+	if repo != "" {
+		for _, row := range rows {
+			row["repo"] = repo
+		}
+	}
+	return rows
+}
+
+func TestResolverInterleavedRepoBoundsNoOtherChain(t *testing.T) {
+	r := testResolver()
+	late := chainLedgerFix(fixCT+1400, []int{1}, "", 0)
+	pair := func(first, second string) []resolverRow {
+		return append(stampRepo(chainRows(fixCT, 1, ""), first),
+			stampRepo(chainRows(fixCT+1000, 1, ""), second)...)
+	}
+	if cand, _, why := r.pickLedger(pair("/a", "/b"), 1, fixCT, []LedgerMsg{late}); cand == nil {
+		t.Fatalf("another repository's chain does not end this one; got why=%q", why)
+	}
+	if cand, _, _ := r.pickLedger(pair("/a", "/a"), 1, fixCT, []LedgerMsg{late}); cand != nil {
+		t.Fatal("the next chain of the same repository still ends this one")
+	}
+	for _, names := range [][2]string{{"", "/b"}, {"/a", ""}} {
+		if cand, _, _ := r.pickLedger(pair(names[0], names[1]), 1, fixCT, []LedgerMsg{late}); cand != nil {
+			t.Fatalf("an unnamed repository keeps the bound; got a ledger for %q then %q", names[0], names[1])
+		}
+	}
+}
+
 // withChainID gives a chain ledger's header the chain ID the gate rendered into it.
 func withChainID(led LedgerMsg, id string) LedgerMsg {
 	led.Text = strings.Replace(led.Text, "chain ledger,", "chain ledger #"+id+",", 1)
