@@ -9,6 +9,7 @@ import (
 
 	"github.com/steer-sh/steer-cli/internal/guard/fixture"
 	"github.com/steer-sh/steer-cli/internal/harness"
+	"github.com/steer-sh/steer-cli/internal/hookstore"
 )
 
 // HookInstallMetadata carries provenance and generation metadata.
@@ -105,18 +106,6 @@ func normalizeHookName(identifier string) string {
 	return strings.TrimSpace(name)
 }
 
-// isLocalFileName reports whether name is a single path element: no separator,
-// no directory traversal, and no volume or root prefix.
-func isLocalFileName(name string) bool {
-	if name == "" || name == "." || name == ".." {
-		return false
-	}
-	if strings.ContainsAny(name, `/\`) {
-		return false
-	}
-	return filepath.Base(name) == name
-}
-
 func applyMetadataHeader(content []byte, source, promptVersion, hookVersion string) []byte {
 	source = strings.TrimSpace(source)
 	if source == "" {
@@ -193,7 +182,7 @@ func InstallManagedHook(scope string, input InstallManagedHookInput, targets ...
 	// The store owns its own directory, so the file name is a single local
 	// basename. Joining an unchecked name reaches outside the store on write
 	// and again when a removal deletes the path the manifest recorded.
-	if !isLocalFileName(fileName) {
+	if !hookstore.LocalFileName(fileName) {
 		return nil, fmt.Errorf("hook file %q must be a plain file name with no path separators", fileName)
 	}
 	if fileName == MasterHookName {
@@ -344,12 +333,13 @@ func RemoveManagedHook(scope, identifier string, opts RemoveOptions, targets ...
 		return nil, err
 	}
 
-	var hookName, hookPath string
+	var hookName, hookFile, hookPath string
 	var manifestEntry ManifestEntry
 	var hasEntry bool
 
 	if resolved, err := ResolveHook(scope, trimmedID); err == nil {
 		hookName = resolved.Name
+		hookFile = resolved.FileName
 		hookPath = resolved.Path
 		manifestEntry, hasEntry = manifest.Hooks[hookName]
 	} else {
@@ -363,11 +353,23 @@ func RemoveManagedHook(scope, identifier string, opts RemoveOptions, targets ...
 		if dirErr != nil {
 			return nil, dirErr
 		}
-		if hasEntry && strings.TrimSpace(manifestEntry.File) != "" {
-			hookPath = filepath.Join(hooksDir, manifestEntry.File)
-		} else {
-			hookPath = filepath.Join(hooksDir, hookName+".py")
+		manifestFile, manifestErr := GetManifestFile(scope)
+		if manifestErr != nil {
+			return nil, manifestErr
 		}
+		entryFile := ""
+		if hasEntry {
+			entryFile = manifestEntry.File
+		}
+		// The manifest names what this removal archives and deletes, so the name
+		// is checked before it becomes a path. A repaired name would delete a
+		// file the manifest never named.
+		fileName, nameErr := hookstore.EntryFileName(manifestFile, hookName, entryFile)
+		if nameErr != nil {
+			return nil, nameErr
+		}
+		hookFile = fileName
+		hookPath = filepath.Join(hooksDir, fileName)
 		if _, statErr := os.Stat(hookPath); os.IsNotExist(statErr) && !hasEntry {
 			// The store no longer names this hook, which is also what a removal
 			// interrupted after the manifest write leaves behind. Sync first, so
@@ -382,7 +384,7 @@ func RemoveManagedHook(scope, identifier string, opts RemoveOptions, targets ...
 
 	archivePath := ""
 	if !opts.CatalogCopy {
-		archivePath, err = archiveHook(scope, hookName, hookPath, manifestEntry, hasEntry, opts.Reason)
+		archivePath, err = archiveHook(scope, hookName, hookFile, manifestEntry, hasEntry, opts.Reason)
 		if err != nil {
 			return nil, fmt.Errorf("failed to archive hook %s, so it was not removed: %w", hookName, err)
 		}

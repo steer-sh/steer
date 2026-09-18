@@ -56,7 +56,7 @@ import (
 // telemetry.denials_rows and the auto-denials corpus row. v22 adds coverage
 // ledger_missed and ledger_overdue, and a ledger cause no longer files a record
 // under repair. v23 extends that to an unknown scope and a session with no project.
-const StatusVersion = 23
+const StatusVersion = 24
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20
@@ -374,6 +374,18 @@ type SystemStatus struct {
 	Rules   []RuleInfo     `json:"rules"`
 	Addenda []AddendumInfo `json:"addenda"`
 	Team    TeamState      `json:"team"`
+	// Stores a reader refused. Every config section above fails soft, so an
+	// unreadable store would otherwise read as an empty inventory — the same
+	// snapshot a machine with no guards produces, while the installed guards
+	// still run.
+	StoreProblems []StoreProblem `json:"store_problems"`
+}
+
+// StoreProblem names a guard store whose manifest a reader refused, with the
+// refusal. It states that the sections below it are incomplete, not empty.
+type StoreProblem struct {
+	Scope string `json:"scope"`
+	Error string `json:"error"`
 }
 
 // Collect composes the snapshot. It never writes and every source fails soft: a
@@ -438,9 +450,14 @@ func Collect(opts Options) (*SystemStatus, error) {
 	s.Posture = collectPosture(opts.Config, ev)
 	s.Checks = collectChecks(opts.RepoRoot)
 	s.Telemetry = telemetry(ev)
-	s.Hooks = collectHooks(opts.Scope)
-	s.Presets = collectPresets(opts.Scope)
-	s.Rules = collectRules()
+	var problems []StoreProblem
+	s.Hooks, problems = collectHooks(opts.Scope)
+	s.StoreProblems = append(s.StoreProblems, problems...)
+	s.Presets, problems = collectPresets(opts.Scope)
+	s.StoreProblems = append(s.StoreProblems, problems...)
+	s.Rules, problems = collectRules()
+	s.StoreProblems = append(s.StoreProblems, problems...)
+	s.StoreProblems = dedupeStoreProblems(s.StoreProblems)
 	s.Addenda = AddendumInventory(opts.Addendum)
 	s.Team = collectTeam()
 	return s, nil
@@ -939,12 +956,32 @@ func corpusRows(rows []cadence.CorpusStatus, opts Options) []CorpusRow {
 	return out
 }
 
+// dedupeStoreProblems keeps one row per scope, in scope order. Several readers
+// open the same store, and one bad manifest is one problem.
+func dedupeStoreProblems(in []StoreProblem) []StoreProblem {
+	out := make([]StoreProblem, 0, len(in))
+	seen := map[string]struct{}{}
+	for _, p := range in {
+		if _, ok := seen[p.Scope]; ok {
+			continue
+		}
+		seen[p.Scope] = struct{}{}
+		out = append(out, p)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Scope < out[j].Scope })
+	return out
+}
+
 // collectHooks reads the registered managed hooks in a scope. A missing manifest
-// yields an empty list, never an error.
-func collectHooks(scope string) []HookInfo {
+// yields an empty list; a manifest the reader refuses yields a store problem, so
+// a refused store never reads as a store with no guards.
+func collectHooks(scope string) ([]HookInfo, []StoreProblem) {
 	manifest, err := claude.LoadManifest(scope)
-	if err != nil || manifest == nil {
-		return []HookInfo{}
+	if err != nil {
+		return []HookInfo{}, []StoreProblem{{Scope: scope, Error: err.Error()}}
+	}
+	if manifest == nil {
+		return []HookInfo{}, nil
 	}
 	out := make([]HookInfo, 0, len(manifest.Hooks))
 	for name, entry := range manifest.Hooks {
@@ -960,22 +997,28 @@ func collectHooks(scope string) []HookInfo {
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out
+	return out, nil
 }
 
 // collectPresets reads the catalog roster with each preset's enable and drift
-// state in a scope. A missing catalog or manifest yields an empty list.
-func collectPresets(scope string) []PresetInfo {
+// state in a scope. A missing catalog or manifest yields an empty list; a
+// manifest the reader refuses yields a store problem beside the roster, whose
+// enable state is then unknown rather than false.
+func collectPresets(scope string) ([]PresetInfo, []StoreProblem) {
 	catalog, err := presets.LoadCatalog()
 	if err != nil {
-		return []PresetInfo{}
+		return []PresetInfo{}, nil
 	}
 	items, err := catalog.ListVisible("")
 	if err != nil {
-		return []PresetInfo{}
+		return []PresetInfo{}, nil
 	}
+	var problems []StoreProblem
 	manifest, err := claude.LoadManifest(scope)
 	if err != nil || manifest == nil {
+		if err != nil {
+			problems = append(problems, StoreProblem{Scope: scope, Error: err.Error()})
+		}
 		manifest = &claude.Manifest{Hooks: map[string]claude.ManifestEntry{}}
 	}
 	out := make([]PresetInfo, 0, len(items))
@@ -998,7 +1041,7 @@ func collectPresets(scope string) []PresetInfo {
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out
+	return out, problems
 }
 
 // teamLockfileName is the repo-committed team policy lockfile at project root.

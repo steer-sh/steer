@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/harness"
+	"github.com/steer-sh/steer-cli/internal/hookstore"
 	"github.com/steer-sh/steer-cli/internal/presets"
 	"github.com/steer-sh/steer-cli/internal/styles"
 )
@@ -252,6 +253,10 @@ func buildTeamLockfile(scope string, catalog *presets.Catalog) (*teamLockfile, e
 	if err != nil {
 		return nil, err
 	}
+	manifestFile, err := claude.GetManifestFile(scope)
+	if err != nil {
+		return nil, err
+	}
 
 	names := make([]string, 0, len(manifest.Hooks))
 	for name := range manifest.Hooks {
@@ -263,9 +268,9 @@ func buildTeamLockfile(scope string, catalog *presets.Catalog) (*teamLockfile, e
 	for _, name := range names {
 		entry := manifest.Hooks[name]
 
-		fileName := strings.TrimSpace(entry.File)
-		if fileName == "" {
-			fileName = name + ".py"
+		fileName, err := hookstore.EntryFileName(manifestFile, name, entry.File)
+		if err != nil {
+			return nil, err
 		}
 		content, err := os.ReadFile(filepath.Join(hooksDir, fileName))
 		if err != nil {

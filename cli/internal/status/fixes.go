@@ -51,12 +51,19 @@ type AddendumInfo struct {
 	Detail   string `json:"detail,omitempty"`
 }
 
-// collectRules reads the rules in both stores. An unreadable store yields no rows.
-func collectRules() []RuleInfo {
+// collectRules reads the rules in both stores. A store the reader refuses yields
+// no rows and one store problem, so a refused store is not read as a store with
+// no rules.
+func collectRules() ([]RuleInfo, []StoreProblem) {
 	out := []RuleInfo{}
+	var problems []StoreProblem
 	for _, scope := range []string{claude.ProjectScope, claude.GlobalScope} {
 		manifest, err := claude.LoadManifest(scope)
-		if err != nil || manifest == nil {
+		if err != nil {
+			problems = append(problems, StoreProblem{Scope: scope, Error: err.Error()})
+			continue
+		}
+		if manifest == nil {
 			continue
 		}
 		for id, r := range manifest.Rules {
@@ -69,7 +76,7 @@ func collectRules() []RuleInfo {
 		}
 		return out[i].ID < out[j].ID
 	})
-	return out
+	return out, problems
 }
 
 // AddendumInventory joins the addendum entries on disk with what the commit gate

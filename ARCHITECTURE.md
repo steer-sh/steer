@@ -111,6 +111,17 @@ not one transaction; synchronization and rebuild are retry paths. `SyncTargets` 
 prose. Rebuild and removal retries also synchronize it. Handwritten lines inside
 the managed section do not survive regeneration.
 
+A project manifest is a file a repository carries, so the guard names in it are
+untrusted input to every reader that joins one to the store directory.
+`hookstore.EntryFileName` is the one validator: a key or a `file` value that is
+not a single path element is refused, never repaired, and `LoadManifest` refuses
+the whole file rather than dropping the entry. The readers that decode a manifest
+or an archived entry without `LoadManifest` — `internal/hookstore`'s migration,
+`gate/mine`, `claude.restoreGuard` — call it directly. Reads that copy a guard
+into the archive go through the store root, because a plain name can still be a
+link out of the store. Status reports a refused store in `store_problems` instead
+of an empty inventory.
+
 The manifest has `hooks`, prose-only `rules` and `review_addendum` entries
 (`internal/claude/addendum.go`). Ids are mutually exclusive across the three at
 every installation boundary. Rule and addendum text is stored so its normalized

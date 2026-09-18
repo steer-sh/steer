@@ -111,7 +111,27 @@ func renderStatus(s *status.SystemStatus, probe reviewers.Probe) {
 	fmt.Println()
 	renderReviewer(s, width)
 	fmt.Println()
+	renderStoreProblems(s, width)
 	renderAttention(s, width)
+}
+
+// renderStoreProblems prints the stores Steer refused to read. Nothing else in
+// this report would say so: every inventory below fails soft, so a refused store
+// reads exactly like a store holding nothing while its guards still run.
+func renderStoreProblems(s *status.SystemStatus, width int) {
+	if len(s.StoreProblems) == 0 {
+		return
+	}
+	fmt.Println(styles.SectionHeader.Render("Guard store"))
+	for _, p := range s.StoreProblems {
+		fmt.Print(problemEntry(
+			styles.WarningText.Render("Steer cannot read the "+p.Scope+" guard list"),
+			[]problemField{
+				{"Why", []string{p.Error}},
+				{"Next", []string{"edit the entry named above; the guards already installed keep running"}},
+			}, width))
+	}
+	fmt.Println()
 }
 
 // renderReadiness prints the short answer and the steps that remain. Each step names

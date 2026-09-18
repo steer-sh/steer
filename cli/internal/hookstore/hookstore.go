@@ -185,11 +185,14 @@ func ownedFiles(dir string) ([]string, error) {
 		return nil, fmt.Errorf("failed to parse %s: %w", ManifestName, err)
 	}
 	for name, entry := range manifest.Hooks {
-		file := entry.File
-		if file == "" {
-			file = name + ".py"
+		// Migration runs before any reader validates the manifest, and it copies
+		// what these names address. A basename repair would move a file the
+		// manifest never named, so a malformed name stops the migration instead.
+		file, err := EntryFileName(filepath.Join(dir, ManifestName), name, entry.File)
+		if err != nil {
+			return nil, err
 		}
-		names = append(names, filepath.Base(file))
+		names = append(names, file)
 	}
 	return names, nil
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/steer-sh/steer-cli/internal/guard/fixture"
+	"github.com/steer-sh/steer-cli/internal/hookstore"
 )
 
 // FixtureVerification is one store-wide rerun.
@@ -76,7 +77,15 @@ func VerifyHookFixtures(scope, hook string) (*fixture.Report, error) {
 		return nil, fmt.Errorf("hook not registered: %s", hook)
 	}
 
-	guardPath := filepath.Join(dir, entry.File)
+	manifestFile, err := GetManifestFile(scope)
+	if err != nil {
+		return nil, err
+	}
+	fileName, err := hookstore.EntryFileName(manifestFile, hook, entry.File)
+	if err != nil {
+		return nil, err
+	}
+	guardPath := filepath.Join(dir, fileName)
 	masterPath, err := GetMasterHookPath(scope)
 	if err != nil {
 		return nil, err

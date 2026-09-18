@@ -2,6 +2,7 @@ package claude
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -22,10 +23,21 @@ const ArchivedFixturesName = "fixtures.json"
 // archiveHook stores a guard's file, fixtures and manifest entry in the scope's
 // archive and returns the entry's directory. Each part is copied as raw bytes,
 // so a guard whose fixtures no longer parse is still archived whole.
-func archiveHook(scope, hookName, hookPath string, entry ManifestEntry, hasEntry bool, reason string) (string, error) {
+// archiveHook copies a guard, its fixtures and its manifest entry into the
+// archive before a removal deletes them. hookFile is a name inside the store,
+// never a path: both reads go through the store root, so a symlink that leaves
+// the store cannot put another file's contents in the archive.
+func archiveHook(scope, hookName, hookFile string, entry ManifestEntry, hasEntry bool, reason string) (string, error) {
 	hooksDir, err := GetHooksDir(scope)
 	if err != nil {
 		return "", err
+	}
+	store, err := os.OpenRoot(hooksDir)
+	if err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+	if store != nil {
+		defer store.Close()
 	}
 
 	e := archive.Entry{
@@ -36,17 +48,21 @@ func archiveHook(scope, hookName, hookPath string, entry ManifestEntry, hasEntry
 	}
 	files := map[string][]byte{}
 
-	content, err := os.ReadFile(hookPath)
+	content, err := readInStore(store, hookFile)
 	switch {
 	case err == nil:
-		files[filepath.Base(hookPath)] = content
+		files[hookFile] = content
 	case os.IsNotExist(err):
 		e.Missing = append(e.Missing, ArchiveMissingGuardFile)
 	default:
 		return "", err
 	}
 
-	fixtures, err := os.ReadFile(fixture.Path(hooksDir, hookName))
+	fixturesRel, err := filepath.Rel(hooksDir, fixture.Path(hooksDir, hookName))
+	if err != nil {
+		return "", err
+	}
+	fixtures, err := readInStore(store, fixturesRel)
 	switch {
 	case err == nil:
 		files[ArchivedFixturesName] = fixtures
@@ -85,4 +101,18 @@ func archiveTextEntry(scope string, kind tier.Kind, id string, entry any, reason
 		Reason:   reason,
 		Manifest: raw,
 	}, nil)
+}
+
+// readInStore reads one file named relative to an open store root. A nil root is
+// a store that does not exist, which reads as a missing file.
+func readInStore(store *os.Root, name string) ([]byte, error) {
+	if store == nil {
+		return nil, os.ErrNotExist
+	}
+	f, err := store.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return io.ReadAll(f)
 }

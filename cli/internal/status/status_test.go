@@ -171,7 +171,7 @@ func intPtr(n int) *int           { return &n }
 // so a renamed or reordered json tag fails here, the agent-contract guard.
 func TestJSONContractIsStable(t *testing.T) {
 	s := &SystemStatus{
-		StatusVersion: 23,
+		StatusVersion: 24,
 		GeneratedAt:   "2026-01-01T00:00:00Z",
 		Posture: Posture{
 			Instrument: "agy@sha", Reviewer: "gemini", Ledger: "/l.jsonl",
@@ -284,7 +284,8 @@ func TestJSONContractIsStable(t *testing.T) {
 		Rules:   []RuleInfo{{ID: "config-path", Scope: "global", Text: "resolve config from the repo root"}},
 		Addenda: []AddendumInfo{{ID: "fp-sort", Scope: "project", Text: "sorted output is fine",
 			HeadText: "sorted output is not a finding", State: AddendumUncommittedChange}},
-		Team: TeamState{Present: true, Path: "steer-team.lock.json", HooksLocked: 3, CatalogVersion: "v7"},
+		Team:          TeamState{Present: true, Path: "steer-team.lock.json", HooksLocked: 3, CatalogVersion: "v7"},
+		StoreProblems: []StoreProblem{{Scope: "project", Error: "guard manifest /w/.steer/hooks/steer-manifest.json gives entry \"x\" the file \"../y\", which is not a plain file name; edit the manifest entry"}},
 	}
 	got, err := s.MarshalIndent()
 	if err != nil {
@@ -296,7 +297,7 @@ func TestJSONContractIsStable(t *testing.T) {
 }
 
 const goldenStatusJSON = `{
-  "status_version": 23,
+  "status_version": 24,
   "generated_at": "2026-01-01T00:00:00Z",
   "posture": {
     "instrument": "agy@sha",
@@ -794,7 +795,13 @@ const goldenStatusJSON = `{
     "path": "steer-team.lock.json",
     "hooks_locked": 3,
     "catalog_version": "v7"
-  }
+  },
+  "store_problems": [
+    {
+      "scope": "project",
+      "error": "guard manifest /w/.steer/hooks/steer-manifest.json gives entry \"x\" the file \"../y\", which is not a plain file name; edit the manifest entry"
+    }
+  ]
 }`
 
 // TestABrokenRegistrationIsNotArmed pins the reading item 14 measured: a gate

@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/steer-sh/steer-cli/internal/hookstore"
 )
 
 const (
@@ -200,6 +202,20 @@ func LoadManifest(scope string) (*Manifest, error) {
 	}
 	if manifest.Hooks == nil {
 		manifest.Hooks = map[string]ManifestEntry{}
+	}
+	// A repository carries its own project manifest, so these names are
+	// untrusted input that every reader joins to the store directory. One bad
+	// entry rejects the whole file: dropping it would lose the evidence, and the
+	// next save would erase it.
+	names := make([]string, 0, len(manifest.Hooks))
+	for name := range manifest.Hooks {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if _, err := hookstore.EntryFileName(manifestPath, name, manifest.Hooks[name].File); err != nil {
+			return nil, err
+		}
 	}
 
 	return manifest, nil

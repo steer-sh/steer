@@ -155,7 +155,7 @@ Digest schema (`digest_version: 3`):
 
 The digest is size-capped: the CLI evicts the lowest-scoring clusters to fit, and reports honesty in `stats`.
 
-### The `steer status --json` contract (`status_version: 23`)
+### The `steer status --json` contract (`status_version: 24`)
 
 Step 1 reads this snapshot for posture and the full class inventory. The unit is
 the failure class and what the corpus recorded about it, not the hook count. This
@@ -184,7 +184,9 @@ now that its store's archive records as removed after the record's split. v21
 removes `posture.denials`, `telemetry.denials_rows` and the `auto-denials` corpus.
 v22 adds coverage `ledger_missed` and `ledger_overdue`: a missing ledger is
 disclosed and no longer puts a record under repair. v23 does the same for an
-`unknown_scope` unit and a session with no project.
+`unknown_scope` unit and a session with no project. v24 adds `store_problems`:
+a guard store whose manifest a reader refused, so an unreadable store no longer
+reads as a store holding nothing.
 
 - `status_version` — the schema version. `--json` is a stable agent contract.
 - `posture` — the arming state: `instrument` (reviewer model / runs / prompt
@@ -391,6 +393,11 @@ disclosed and no longer puts a record under repair. v23 does the same for an
   HEAD), `uncommitted-change` (the gate reads `head_text`), `uncommitted-removal`
   (removed on disk, still read at HEAD) or `unreadable` with `detail`. A global
   entry is read from disk, so it is `live` whenever the store holds it.
+- `store_problems[]` — the guard stores a reader refused, each `scope` with the
+  `error`. A row says `hooks`, `presets` and `rules` are INCOMPLETE for that
+  scope, not empty: the guards the store registered still run. A manifest naming
+  a file outside its store is refused this way, and an operator repairs it by
+  editing the named entry.
 - `team` — the repo-committed team lockfile summary: `present`, `path`,
   `hooks_locked`, `catalog_version`, and `error`. v10 adds `error`: a project with
   no lockfile is `present: false` and is not a fault, while a lockfile that exists

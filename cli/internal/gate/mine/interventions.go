@@ -283,7 +283,12 @@ func hookFactsInScope(hookID, scope string) (map[string]any, error) {
 	if entry.HookVersion != "" {
 		facts["hook_version"] = entry.HookVersion
 	}
-	if digest := fileDigest(filepath.Join(dir, entry.File)); digest != "" {
+	manifestFile := filepath.Join(dir, hookstore.ManifestName)
+	fileName, err := hookstore.EntryFileName(manifestFile, hookID, entry.File)
+	if err != nil {
+		return nil, err
+	}
+	if digest := fileDigest(filepath.Join(dir, fileName)); digest != "" {
 		facts["hook_digest"] = digest
 	}
 	stampRepo(facts, "hook", scope)

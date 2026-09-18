@@ -10,6 +10,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/archive"
 	"github.com/steer-sh/steer-cli/internal/guard/fixture"
 	"github.com/steer-sh/steer-cli/internal/harness"
+	"github.com/steer-sh/steer-cli/internal/hookstore"
 	"github.com/steer-sh/steer-cli/internal/tier"
 )
 
@@ -85,11 +86,14 @@ func restoreGuard(scope string, s archive.Stored, targets ...harness.Registrar) 
 	if err := decodeArchived(s, &entry); err != nil {
 		return nil, err
 	}
-	fileName := strings.TrimSpace(entry.File)
-	if fileName == "" {
-		fileName = s.ID + ".py"
+	// The archived metadata is decoded here, not read through LoadManifest, so
+	// the name it carries is checked before it addresses either the archive or
+	// the store.
+	fileName, err := hookstore.EntryFileName(s.Dir, s.ID, entry.File)
+	if err != nil {
+		return nil, err
 	}
-	content, err := os.ReadFile(filepath.Join(s.Dir, filepath.Base(fileName)))
+	content, err := os.ReadFile(filepath.Join(s.Dir, fileName))
 	if os.IsNotExist(err) {
 		return nil, fmt.Errorf("archive entry %s is missing the %s, so the guard cannot be restored whole", s.Dir, ArchiveMissingGuardFile)
 	}
