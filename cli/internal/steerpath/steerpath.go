@@ -101,14 +101,9 @@ func ProjectRoot() (string, error) { return ProjectRootOf("") }
 
 // ProjectRootOf returns the directory project scope resolves against for dir,
 // which is "" for the working directory: the repository containing dir, or dir
-// itself when it is in none. A project store belongs to a repository, so a
-// command run from a subdirectory reads and writes the same store as one run
-// from the root.
-//
-// dir is resolved through EvalSymlinks first, because git reports the physical
-// path and a caller comparing the two would otherwise find no common parent. The
-// root is git's own answer, not a canonical identity: it anchors filesystem
-// access, and nothing compares it to a stored root.
+// itself when it is in none. The answer is git's own, in the physical form
+// PhysicalDir returns, and it is an anchor for filesystem access rather than an
+// identity to compare against a stored root.
 func ProjectRootOf(dir string) (string, error) {
 	abs, err := PhysicalDir(dir)
 	if err != nil {

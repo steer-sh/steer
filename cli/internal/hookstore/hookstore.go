@@ -56,15 +56,9 @@ func MasterPathIn(scope, dir string) (string, error) {
 }
 
 // MasterRegistration names the master as a registration must name it: under
-// project scope a path relative to the working directory, under global scope the
-// absolute path. A registration travels with the repository, so it cannot carry
-// this machine's absolute path.
-//
-// configDir is the directory holding the harness config that will carry this
-// path, because a harness resolves a project registration against that directory
-// and not against the repository. Passing "" uses the working directory. A
-// registration written at the repository root, which is the ordinary case, is the
-// same `.steer/hooks` path it always was.
+// project scope a path relative to configDir, the directory holding the harness
+// config that carries it, and under global scope the absolute path. configDir is
+// "" for the working directory.
 func MasterRegistration(scope, configDir string) (string, error) {
 	path, err := MasterPathIn(scope, configDir)
 	if err != nil {
