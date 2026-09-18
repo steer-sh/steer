@@ -372,3 +372,58 @@ func TestAV1ScopeIgnoresHarnessAltogether(t *testing.T) {
 		}
 	}
 }
+
+// TestScopeRepoRootResolvesAliasOfCheckout covers the two sides of one comparison:
+// evidence stamps checks.RepoIdentity, which resolves symlinks, while the root is
+// typed by an operator who may reach the checkout through an alias.
+func TestScopeRepoRootResolvesAliasOfCheckout(t *testing.T) {
+	base := t.TempDir()
+	real, err := filepath.EvalSymlinks(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonical := filepath.Join(real, "checkout")
+	if err := os.MkdirAll(canonical, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(real, "alias")
+	if err := os.Symlink(canonical, alias); err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := BuildScope(false, nil, "", alias, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(t, "an alias of a checkout stores the canonical root",
+		m["repo_root"], filepath.ToSlash(canonical))
+
+	scope, _, err := ParseScope(Record{"scope": m})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub := Subject{RepoRoot: canonical, RepoRootKnown: true}
+	check(t, "evidence under the canonical root stays eligible",
+		scope.ClassifySubject(sub), Eligible)
+
+	if err := requireCheckScope("c1", map[string]any{CheckRepoKey: canonical}, m); err != nil {
+		t.Errorf("a check declared at the canonical root must accept its alias: %v", err)
+	}
+
+	toFSRoot := filepath.Join(real, "fsroot")
+	if err := os.Symlink("/", toFSRoot); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := BuildScope(false, nil, "", toFSRoot, ""); err == nil {
+		t.Error("a root that resolves to the filesystem root must be refused, " +
+			"because an empty stored root matches every repository")
+	}
+
+	absent := filepath.Join(real, "not-checked-out-here")
+	m2, err := BuildScope(false, nil, "", absent, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(t, "a root this machine cannot resolve keeps its typed form",
+		m2["repo_root"], filepath.ToSlash(absent))
+}

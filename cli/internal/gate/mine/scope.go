@@ -259,9 +259,14 @@ func (s *Scope) ClassifySubject(sub Subject) Eligibility {
 
 // normalizeRepoRoot validates and canonicalizes a root a writer typed. It must be
 // absolute, because a relative path names a different repository from every other
-// directory; trailing separators are dropped.
+// directory; trailing separators are dropped. Symlinks are resolved, because the
+// evidence side stamps checks.RepoIdentity, and an alias of a checkout must select
+// the same rows as the path git reports. A root this machine cannot resolve keeps
+// its typed form: a scope may name a repository that is not checked out here. A
+// root that resolves to a filesystem root is refused, because trimming its
+// separator leaves the empty root that reads as no root predicate at all.
 func normalizeRepoRoot(root string) (string, error) {
-	trimmed := strings.TrimRight(strings.ReplaceAll(strings.TrimSpace(root), "\\", "/"), "/")
+	trimmed := trimRoot(root)
 	if trimmed == "" {
 		return "", fmt.Errorf("--scope-repo-root names no path")
 	}
@@ -269,7 +274,25 @@ func normalizeRepoRoot(root string) (string, error) {
 		return "", fmt.Errorf("--scope-repo-root %s is not an absolute repository root",
 			pyRepr(root))
 	}
-	return trimmed, nil
+	// EvalSymlinks splits on the platform separator and a backslash is a legal
+	// character in a POSIX name, so it reads the typed path, never trimRoot's form.
+	resolved, err := filepath.EvalSymlinks(strings.TrimSpace(root))
+	if err != nil {
+		return trimmed, nil
+	}
+	out := trimRoot(resolved)
+	if out != "" && out != trimRoot(filepath.VolumeName(resolved)) {
+		return out, nil
+	}
+	return "", fmt.Errorf("--scope-repo-root %s resolves to a filesystem root, "+
+		"which is not a repository", pyRepr(root))
+}
+
+// trimRoot puts one path in the stored form: separators are slashes and no trailing
+// separator remains. Both sides of normalizeRepoRoot pass through it, so a resolved
+// root and an unresolved one are stored the same way.
+func trimRoot(s string) string {
+	return strings.TrimRight(strings.ReplaceAll(strings.TrimSpace(s), "\\", "/"), "/")
 }
 
 // sameRepoRoot compares two repository roots through the project key both corpora can
