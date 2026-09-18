@@ -2,6 +2,7 @@ package cadence
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -359,4 +360,85 @@ func TestRefreshQueuesARecordWhoseFixWasRemovedSinceItsSplit(t *testing.T) {
 	if len(q.Interventions) != 1 || !q.Interventions[0].Artifact.RemovalRecorded() {
 		t.Fatalf("queue interventions = %+v; want the record whose rule was removed and is back", q.Interventions)
 	}
+}
+
+// git runs one command in a repository, failing the test on error.
+func git(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
+	}
+}
+
+// A check registered in the main checkout is read from its own store when the
+// reading sits in a linked worktree, so the worktree's branch-local copy never
+// decides what the record's repository is reported to hold.
+func TestArtifactReadsTheBoundCheckoutFromALinkedWorktree(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	if out, err := exec.Command("git", "-C", root, "init").CombinedOutput(); err != nil {
+		t.Skipf("git init unavailable: %s", out)
+	}
+	git(t, root, "config", "user.email", "test@example.com")
+	git(t, root, "config", "user.name", "test")
+
+	if _, _, err := checks.Init(root); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(root, ".steer", "checks", "no-count.sh")
+	if err := os.WriteFile(script, []byte("exit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	decl := checks.Declaration{ID: "no-count", Kind: checks.KindScript, Script: ".steer/checks/no-count.sh"}
+	m, err := checks.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Checks = append(m.Checks, decl)
+	if err := checks.Save(root, m); err != nil {
+		t.Fatal(err)
+	}
+	det, err := checks.DetectorOf(root, decl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-m", "checks")
+
+	tree := filepath.Join(t.TempDir(), "wt")
+	git(t, root, "worktree", "add", "-b", "side", tree)
+
+	bound := identity(t, root)
+	rec := mine.Record{"tier": "check", "status": "active", mine.CheckIDKey: "no-count",
+		mine.CheckRepoKey: bound, mine.CheckDigestKey: det.Digest}
+
+	got := ArtifactOf(rec, ArtifactSources{RepoRoot: tree})
+	wantState(t, got, ArtifactPresent)
+	if got.Repo != bound {
+		t.Errorf("artifact repository = %q; want the bound checkout %q", got.Repo, bound)
+	}
+
+	// The worktree drops the declaration on its own branch. The bound checkout
+	// still holds it, so the reading must not turn absent.
+	side, err := checks.Load(tree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	side.Checks = nil
+	if err := checks.Save(tree, side); err != nil {
+		t.Fatal(err)
+	}
+	wantState(t, ArtifactOf(rec, ArtifactSources{RepoRoot: tree}), ArtifactPresent)
+
+	// A review entry is compared against the caller's HEAD read of the inspected
+	// repository, so it stays bound to the exact checkout.
+	review := mine.Record{"tier": "review", "status": "active", "addendum_id": "no-count",
+		"addendum_scope": "project", "addendum_repo": bound}
+	wantState(t, ArtifactOf(review, ArtifactSources{RepoRoot: tree,
+		Addendum: &gate.Addendum{}}), ArtifactElsewhere)
+
+	// An unrelated repository is neither the bound checkout nor a worktree of it.
+	other := t.TempDir()
+	wantState(t, ArtifactOf(rec, ArtifactSources{RepoRoot: other}), ArtifactElsewhere)
 }

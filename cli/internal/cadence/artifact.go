@@ -216,27 +216,34 @@ func storeDir(r mine.Record, repoRoot, prefix string, a *Artifact) (string, bool
 		}
 		return dir, true
 	case steerpath.ProjectScope:
-		if !placeProject(r, repoRoot, prefix, a) {
+		readRoot, ok := placeProject(r, repoRoot, prefix, a)
+		if !ok {
 			return "", false
 		}
-		return projectStore(repoRoot), true
+		return projectStore(readRoot), true
 	}
 	a.State = ArtifactUnplaced
 	return "", false
 }
 
-// placeProject decides whether a project entry belongs to the repository read here.
-func placeProject(r mine.Record, repoRoot, prefix string, a *Artifact) bool {
+// placeProject resolves the checkout holding a project entry's store, or says on a
+// why nothing was read.
+func placeProject(r mine.Record, repoRoot, prefix string, a *Artifact) (string, bool) {
 	a.Repo = str(r[prefix+"_repo"])
 	if a.Repo == "" {
 		a.State = ArtifactUnplaced
-		return false
+		return "", false
 	}
-	if !sameRepo(repoRoot, a.Repo) {
+	readRoot, ok, err := boundRoot(repoRoot, a.Repo)
+	if err != nil {
+		unreadable(a, err)
+		return "", false
+	}
+	if !ok {
 		a.State = ArtifactElsewhere
-		return false
+		return "", false
 	}
-	return true
+	return readRoot, true
 }
 
 // projectStore is the project store under a repository root: the neutral directory,
@@ -261,7 +268,16 @@ func addendumArtifact(r mine.Record, src ArtifactSources) *Artifact {
 		a.State = ArtifactUnbound
 		return a
 	case a.Scope == steerpath.ProjectScope:
-		if !placeProject(r, src.RepoRoot, "addendum", a) {
+		// Strict, where a store-backed tier reads across to the bound checkout:
+		// src.Addendum is the caller's HEAD read of the inspected repository, and
+		// a linked worktree's HEAD is not the bound checkout's.
+		a.Repo = str(r["addendum_repo"])
+		switch {
+		case a.Repo == "":
+			a.State = ArtifactUnplaced
+			return a
+		case !sameRepo(src.RepoRoot, a.Repo):
+			a.State = ArtifactElsewhere
 			return a
 		}
 	case a.Scope != steerpath.GlobalScope:
@@ -311,11 +327,15 @@ func checkArtifact(r mine.Record, repoRoot string) *Artifact {
 		a.State = ArtifactUnbound
 		return a
 	}
-	if !sameRepo(repoRoot, fix.Repo) {
+	readRoot, ok, err := boundRoot(repoRoot, fix.Repo)
+	if err != nil {
+		return unreadable(a, err)
+	}
+	if !ok {
 		a.State = ArtifactElsewhere
 		return a
 	}
-	m, err := checks.Load(repoRoot)
+	m, err := checks.Load(readRoot)
 	if errors.Is(err, checks.ErrNoManifest) {
 		a.State = ArtifactAbsent
 		return a
@@ -327,7 +347,7 @@ func checkArtifact(r mine.Record, repoRoot string) *Artifact {
 		if d.ID != fix.ID {
 			continue
 		}
-		det, err := checks.DetectorOf(repoRoot, d)
+		det, err := checks.DetectorOf(readRoot, d)
 		if err != nil {
 			return unreadable(a, err)
 		}
@@ -335,10 +355,34 @@ func checkArtifact(r mine.Record, repoRoot string) *Artifact {
 		if det.Digest != fix.Digest {
 			a.State = ArtifactChanged
 		}
-		return markRemoval(a, r, checks.Dir(repoRoot), tier.Check)
+		return markRemoval(a, r, checks.Dir(readRoot), tier.Check)
 	}
 	a.State = ArtifactAbsent
 	return a
+}
+
+// boundRoot picks the checkout to read for a fix bound to identity: the inspected
+// root when that is the bound checkout, and the bound checkout itself when the
+// inspected root is one of its linked worktrees. It never reads a worktree's own
+// copy of the store. ok is false when neither relation holds, which is
+// ArtifactElsewhere; err is a bound checkout git names but nothing can read.
+func boundRoot(readRoot, identity string) (root string, ok bool, err error) {
+	if readRoot == "" || identity == "" {
+		return "", false, nil
+	}
+	if got, idErr := checks.RepoIdentity(readRoot); idErr == nil && got == identity {
+		return readRoot, true, nil
+	}
+	main, linked := checks.MainCheckout(readRoot)
+	if !linked || main != identity {
+		return "", false, nil
+	}
+	// checks.Load reports a gone checkout as a missing manifest, so check the
+	// directory before a caller reads that as an absent declaration.
+	if _, statErr := os.Stat(main); statErr != nil {
+		return "", false, fmt.Errorf("the bound checkout could not be read: %w", statErr)
+	}
+	return main, true, nil
 }
 
 // sameRepo compares a repository root with a stored identity, both resolved the way
