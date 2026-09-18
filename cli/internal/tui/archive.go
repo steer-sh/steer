@@ -133,6 +133,9 @@ func (m *Model) archiveKey(row fixRow) {
 	case row.kind == guardInstalled && row.source == claude.SourceFactory:
 		m.note("%s is a guard Steer keeps for itself, so it has no switch here", row.name)
 	case !row.removable:
+		if row.unremovable != "" {
+			m.note("%s", row.unremovable)
+		}
 	case row.kind == fixCheck && m.checking != "":
 		m.note("a check action is running; archive %s after it finishes", row.name)
 	default:

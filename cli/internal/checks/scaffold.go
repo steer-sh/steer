@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -80,15 +81,15 @@ func OracleRunsExec(root string) bool {
 // the command.
 var namedExec = regexp.MustCompile(`(?i)\S*steer\S*\s+check\s+exec\b(.*)`)
 
-// OracleNamesCheck reports whether the repository's check.sh passes id to a
-// steer executable's `check exec` by name. It is a text search over each
-// command between shell separators, so a comment or another command that
-// mentions id does not count.
-func OracleNamesCheck(root, id string) bool {
+// oracleExecArgs is the arguments after `check exec` in each of the oracle's
+// commands. It is a text search over each command between shell separators, so a
+// comment or another command that mentions an id does not count.
+func oracleExecArgs(root string) [][]string {
 	data, err := os.ReadFile(OraclePath(root))
 	if err != nil {
-		return false
+		return nil
 	}
+	var out [][]string
 	for _, line := range strings.Split(string(data), "\n") {
 		if i := strings.Index(line, "#"); i >= 0 {
 			line = line[:i]
@@ -98,11 +99,34 @@ func OracleNamesCheck(root, id string) bool {
 			if m == nil {
 				continue
 			}
-			for _, f := range strings.Fields(m[1]) {
-				if strings.Trim(f, `"'`) == id {
-					return true
-				}
+			args := strings.Fields(m[1])
+			for i, f := range args {
+				args[i] = strings.Trim(f, `"'`)
 			}
+			out = append(out, args)
+		}
+	}
+	return out
+}
+
+// OracleNamesCheck reports whether the repository's check.sh passes id to a
+// steer executable's `check exec` by name.
+func OracleNamesCheck(root, id string) bool {
+	for _, args := range oracleExecArgs(root) {
+		if slices.Contains(args, id) {
+			return true
+		}
+	}
+	return false
+}
+
+// OracleRunsEveryCheck reports whether the repository's check.sh passes --all to a
+// steer executable's `check exec`, so a check the manifest gains runs without an
+// edit to the oracle.
+func OracleRunsEveryCheck(root string) bool {
+	for _, args := range oracleExecArgs(root) {
+		if slices.Contains(args, "--all") {
+			return true
 		}
 	}
 	return false

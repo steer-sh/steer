@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -117,5 +118,38 @@ func TestArchiveRestoreSelectsAcrossTheHookAndCheckStores(t *testing.T) {
 	}
 	if !strings.Contains(out, "steer fix register --supersedes <record-id>") {
 		t.Fatalf("restore output lacks the record pointer:\n%s", out)
+	}
+}
+
+// A restored check is declared, and the declaration runs only where check.sh
+// reaches it. The pointer appears when the oracle neither runs every check nor
+// names this one, which is what a removal that took the check's own line out
+// leaves behind.
+func TestACheckRestorePointsAtTheOracleThatDoesNotRunIt(t *testing.T) {
+	root := archiveRepo(t)
+	oracle := func(body string) string {
+		if err := os.WriteFile(checks.OraclePath(root), []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		var out bytes.Buffer
+		printOracleWiring(&out, root, "no-todo")
+		return out.String()
+	}
+	silent := []string{string(checks.Scaffold(root)), "\"$steer\" check exec no-todo || status=1\n"}
+	for _, body := range silent {
+		if got := oracle(body); got != "" {
+			t.Errorf("an oracle that runs the check still got a pointer: %q", got)
+		}
+	}
+	got := oracle("#!/usr/bin/env bash\nmake test\n")
+	for _, want := range []string{checks.OracleName, "check exec no-todo", "never executes"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the pointer lacks %q: %q", want, got)
+		}
+	}
+	var out bytes.Buffer
+	printOracleWiring(&out, "", "no-todo")
+	if out.String() != "" {
+		t.Errorf("a restore outside a repository got a pointer: %q", out.String())
 	}
 }

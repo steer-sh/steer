@@ -215,3 +215,22 @@ func TestOracleNamesCheckFindsANamedExecInvocation(t *testing.T) {
 		t.Fatal("a second exec invocation on one line was not found")
 	}
 }
+
+// The oracle's --all invocation is what makes a check the manifest gains run
+// without an edit to check.sh. A comment, a named id and a command that is not
+// steer do not count.
+func TestOracleRunsEveryCheckFindsTheAllInvocation(t *testing.T) {
+	root := t.TempDir()
+	if OracleRunsEveryCheck(root) {
+		t.Fatal("a repository without check.sh runs every check")
+	}
+	writeFile(t, root, OracleName, "# \"$steer\" check exec --all\n"+
+		"\"$steer\" check exec no-todo || status=1\necho check exec --all\n")
+	if OracleRunsEveryCheck(root) {
+		t.Fatal("a comment, a named id or a command that is not steer was read as --all")
+	}
+	writeFile(t, root, OracleName, string(Scaffold(root)))
+	if !OracleRunsEveryCheck(root) {
+		t.Fatal("the scaffold's --all invocation was not found")
+	}
+}

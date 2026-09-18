@@ -107,6 +107,7 @@ no manifest entry names.`,
 				return fmt.Errorf("check %s was not restored, and its archive entry stays: %w", s.ID, err)
 			}
 			fmt.Fprintln(out, styles.SuccessBox.Render(fmt.Sprintf("Restored check %s\nFrom: %s", d.ID, s.Dir)))
+			printOracleWiring(out, checkRoot, d.ID)
 			printRestorePointer(out)
 			return nil
 		}
@@ -196,6 +197,18 @@ func printArchiveEntry(out io.Writer, e archive.Stored) {
 	if len(e.Missing) > 0 {
 		fmt.Fprintf(out, "    missing: %s\n", strings.Join(e.Missing, ", "))
 	}
+}
+
+// printOracleWiring says when a restored check is declared but the oracle does not
+// run it. A removal that took the check's own `check exec <id>` line out of
+// check.sh leaves the declaration with nothing to execute it, and a declared check
+// that never runs is not a passing check.
+func printOracleWiring(out io.Writer, root, id string) {
+	if root == "" || checks.OracleRunsEveryCheck(root) || checks.OracleNamesCheck(root, id) {
+		return
+	}
+	fmt.Fprintf(out, "%s runs neither `%s` nor `check exec %s`, so %s is declared and never executes. "+
+		"Add one of those lines to %s.\n", checks.OracleName, checks.ExecInvocation, id, id, checks.OracleName)
 }
 
 func printRestorePointer(out io.Writer) {

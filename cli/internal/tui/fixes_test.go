@@ -476,3 +476,30 @@ func TestCheckActionNotesNameTheOutcome(t *testing.T) {
 		t.Errorf("a validated replay reads %q", got)
 	}
 }
+
+// x on a row whose tier the panel does archive says why it cannot archive this one,
+// so the key is never silent on a row marked for attention. An entry the working
+// tree no longer holds has nothing left to archive, and a row standing for a store
+// names no entry at all.
+func TestXSaysWhyAnEntryOffDiskCannotBeArchived(t *testing.T) {
+	m := fixesModel(false)
+	selectRow(t, m, fixAddendum, "fp-sort")
+	m.message = ""
+	m.fixesKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	if m.editing {
+		t.Fatal("x opened the archive form over an entry the working tree does not hold")
+	}
+	for _, want := range []string{"fp-sort", "nothing left to archive", "after you commit"} {
+		if !strings.Contains(m.message, want) {
+			t.Errorf("x on an entry removed on disk lacks %q: %q", want, m.message)
+		}
+	}
+
+	m.snap.Addenda = []status.AddendumInfo{{Scope: "project", State: status.AddendumUnreadable, Detail: "boom"}}
+	selectRow(t, m, fixAddendum, "the project store")
+	m.message = ""
+	m.fixesKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	if m.editing || !strings.Contains(m.message, "not one entry") {
+		t.Errorf("x on a row standing for a store: editing %v, note %q", m.editing, m.message)
+	}
+}

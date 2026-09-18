@@ -1,12 +1,14 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/styles"
+	"github.com/steer-sh/steer-cli/internal/tier"
 )
 
 var rulesCmd = &cobra.Command{
@@ -99,6 +101,9 @@ var rulesRemoveCmd = &cobra.Command{
 		scope := currentScope()
 		reason, _ := cmd.Flags().GetString("reason")
 		result, err := claude.RemoveManagedRule(scope, args[0], strings.TrimSpace(reason), targets...)
+		if errors.Is(err, claude.ErrRuleNotFound) {
+			return fmt.Errorf("%w\n%s", err, otherTierRemoveHint(tier.Instruction, args[0], scope))
+		}
 		if err != nil {
 			return err
 		}

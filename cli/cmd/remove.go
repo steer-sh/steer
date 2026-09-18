@@ -41,7 +41,7 @@ artifacts:
 
 		hook, err := claude.ResolveHook(scope, identifier)
 		if err != nil {
-			return fmt.Errorf("%w\n%s", err, otherTierRemoveHint(identifier, scope))
+			return fmt.Errorf("%w\n%s", err, otherTierRemoveHint(tier.Guard, identifier, scope))
 		}
 
 		if !force {
@@ -80,20 +80,28 @@ artifacts:
 	},
 }
 
-// otherTierRemoveHint names the remove command of each tier but the guard's, with
-// this identifier. A guard is all `steer remove` resolves, so an ID of another tier
-// arrives here as a missing guard. Checks are archived and removed per repository,
-// so the check line carries no scope.
-func otherTierRemoveHint(identifier, scope string) string {
+// otherTierRemoveHint names the remove command of each tier but own, with this
+// identifier. Each remove command resolves its own tier only, so the identifier of
+// another tier arrives as a missing fix and the bare not-found answer names no
+// other place to look. Checks are archived and removed per repository, so the
+// check line carries no scope.
+func otherTierRemoveHint(own tier.Kind, identifier, scope string) string {
 	hintScope := ""
 	if scope == claude.GlobalScope {
 		hintScope = scope
 	}
-	lines := []string{"steer remove takes a guard. Each other tier has its own remove command:"}
-	for _, t := range []tier.Kind{tier.Instruction, tier.Review} {
-		lines = append(lines, "  "+status.RemoveCommand(string(t), identifier, hintScope))
+	lines := []string{fmt.Sprintf("%s takes a %s. Each other tier has its own remove command:",
+		status.RemoveCommandName(string(own)), status.ArtifactNoun(string(own)))}
+	for _, t := range []tier.Kind{tier.Guard, tier.Instruction, tier.Review, tier.Check} {
+		if t == own {
+			continue
+		}
+		lineScope := hintScope
+		if t == tier.Check {
+			lineScope = ""
+		}
+		lines = append(lines, "  "+status.RemoveCommand(string(t), identifier, lineScope))
 	}
-	lines = append(lines, "  "+status.RemoveCommand(string(tier.Check), identifier, ""))
 	return strings.Join(lines, "\n")
 }
 

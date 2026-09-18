@@ -13,6 +13,11 @@ import (
 // ErrNotValidated reports a validation run whose verdict was not validated.
 var ErrNotValidated = errors.New("check did not validate")
 
+// ErrNotDeclared is an id the manifest does not declare. A removal wraps it so the
+// command layer can tell a miss from a removal that failed, and name the tiers that
+// do declare the id.
+var ErrNotDeclared = errors.New("no check is declared with this id")
+
 func loadForMutation(root string) (Manifest, error) {
 	m, err := Load(root)
 	if errors.Is(err, ErrNoManifest) {
@@ -80,7 +85,7 @@ func Remove(root, id, reason string) (Declaration, string, error) {
 	}
 	d, ok := find(m, id)
 	if !ok {
-		return Declaration{}, "", fmt.Errorf("no check %q is declared", id)
+		return Declaration{}, "", fmt.Errorf("%w: %s", ErrNotDeclared, id)
 	}
 	raw, err := json.Marshal(d)
 	if err != nil {

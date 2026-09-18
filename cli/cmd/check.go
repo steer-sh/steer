@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/checks"
 	"github.com/steer-sh/steer-cli/internal/status"
 	"github.com/steer-sh/steer-cli/internal/styles"
+	"github.com/steer-sh/steer-cli/internal/tier"
 )
 
 var checkCmd = &cobra.Command{
@@ -478,6 +480,9 @@ var checkRemoveCmd = &cobra.Command{
 		}
 		reason, _ := cmd.Flags().GetString("reason")
 		d, archivePath, err := checks.Remove(root, args[0], strings.TrimSpace(reason))
+		if errors.Is(err, checks.ErrNotDeclared) {
+			return fmt.Errorf("%w\n%s", err, otherTierRemoveHint(tier.Check, args[0], currentScope()))
+		}
 		if err != nil {
 			return err
 		}

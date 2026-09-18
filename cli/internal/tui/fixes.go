@@ -60,6 +60,8 @@ type fixRow struct {
 	// scope is the store a fix lives in, and removable marks one x archives.
 	scope     string
 	removable bool
+	// unremovable is why x cannot archive a fix of a tier it otherwise archives.
+	unremovable string
 	// archived is the entry an archived row restores.
 	archived *archivedEntry
 }
@@ -161,11 +163,28 @@ func (m *Model) addendumRows() []fixRow {
 			text = a.HeadText
 		}
 		rows = append(rows, fixRow{kind: fixAddendum, name: name, description: text,
-			state:     a.Scope + " store; " + status.AddendumPhrase(a),
-			attention: a.State != status.AddendumLive,
-			scope:     a.Scope, removable: a.ID != "" && a.Text != ""})
+			state:       a.Scope + " store; " + status.AddendumPhrase(a),
+			attention:   a.State != status.AddendumLive,
+			scope:       a.Scope,
+			removable:   a.ID != "" && a.Text != "",
+			unremovable: addendumUnremovable(a)})
 	}
 	return rows
+}
+
+// addendumUnremovable is why x cannot archive one addendum row, "" for an entry it
+// can. An entry the working-tree store no longer holds has nothing left to archive,
+// and the gate stops reading it when the removal is committed. A row that names no
+// entry stands for a store the reader could not read.
+func addendumUnremovable(a status.AddendumInfo) string {
+	switch {
+	case a.ID == "":
+		return "this row stands for the " + a.Scope + " store, not one entry, so there is nothing to archive"
+	case a.Text == "":
+		return a.ID + " is not in the working tree's " + a.Scope + " store, so there is nothing left to archive; " +
+			commitStep("removal")
+	}
+	return ""
 }
 
 // checkRows are this repository, whose row authorizes the whole repository, and

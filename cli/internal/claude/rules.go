@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -23,6 +24,10 @@ type InstallManagedRuleResult struct {
 	Overwritten  bool
 	PreviousText string
 }
+
+// ErrRuleNotFound is a removal of a rule the store does not name. A caller
+// distinguishes it from a removal that failed, and names the other tiers.
+var ErrRuleNotFound = errors.New("rule not found")
 
 // RemoveManagedRuleResult carries the text a removal took out of the document.
 type RemoveManagedRuleResult struct {
@@ -149,7 +154,7 @@ func RemoveManagedRule(scope, id, reason string, targets ...harness.Registrar) (
 		if syncErr := SyncTargets(scope, targets...); syncErr != nil {
 			return nil, syncErr
 		}
-		return nil, fmt.Errorf("rule not found: %s", id)
+		return nil, fmt.Errorf("%w: %s", ErrRuleNotFound, id)
 	}
 
 	archivePath, err := archiveTextEntry(scope, tier.Instruction, ruleID, entry, reason)

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/hookstore"
 	"github.com/steer-sh/steer-cli/internal/status"
+	"github.com/steer-sh/steer-cli/internal/tier"
 )
 
 var addendumText string
@@ -114,6 +116,9 @@ var commitGateAddendumRemoveCmd = &cobra.Command{
 		scope := currentScope()
 		reason, _ := cmd.Flags().GetString("reason")
 		result, err := claude.RemoveAddendum(scope, args[0], strings.TrimSpace(reason))
+		if errors.Is(err, claude.ErrAddendumNotFound) {
+			return fmt.Errorf("%w\n%s", err, otherTierRemoveHint(tier.Review, args[0], scope))
+		}
 		if err != nil {
 			return err
 		}

@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -75,6 +76,10 @@ func InstallAddendum(scope, id, text string) (*InstallAddendumResult, error) {
 	return &InstallAddendumResult{ID: entryID, Overwritten: overwritten, PreviousText: existing.Text}, nil
 }
 
+// ErrAddendumNotFound is a removal of an entry the store does not name. A caller
+// distinguishes it from a removal that failed, and names the other tiers.
+var ErrAddendumNotFound = errors.New("addendum entry not found")
+
 // RemoveAddendumResult reports the text a removal took out and where it was kept.
 type RemoveAddendumResult struct {
 	Text string
@@ -99,7 +104,7 @@ func RemoveAddendum(scope, id, reason string) (*RemoveAddendumResult, error) {
 	}
 	entry, ok := manifest.Addendum[entryID]
 	if !ok {
-		return nil, fmt.Errorf("addendum entry not found: %s", id)
+		return nil, fmt.Errorf("%w: %s", ErrAddendumNotFound, id)
 	}
 	if err := EnsureDirectories(scope); err != nil {
 		return nil, err

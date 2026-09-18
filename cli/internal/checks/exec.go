@@ -117,7 +117,7 @@ func selectScripts(m Manifest, ids []string) ([]Declaration, error) {
 	for _, id := range ids {
 		d, ok := find(m, id)
 		if !ok {
-			return nil, fmt.Errorf("no check %q is declared", id)
+			return nil, fmt.Errorf("%w: %s", ErrNotDeclared, id)
 		}
 		if d.Kind != KindScript {
 			return nil, fmt.Errorf("check %s is a %s binding: it runs through `steer check go-test`", id, d.Kind)

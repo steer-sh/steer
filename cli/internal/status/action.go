@@ -6,6 +6,7 @@ package status
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/steer-sh/steer-cli/internal/cadence"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
@@ -110,6 +111,14 @@ func RemovalPhrase(t string, a *cadence.Artifact) string {
 		return out
 	}
 	return out + "; to remove it, run: " + RemoveCommand(t, a.ID, a.Scope)
+}
+
+// RemoveCommandName is the CLI command that removes a fix of this tier, without
+// the fix's ID, "" for a tier that binds no fix.
+func RemoveCommandName(t string) string {
+	kind, _ := tier.Of(t)
+	_, remove := artifactNoun(kind)
+	return strings.TrimSpace(remove)
 }
 
 // RemoveCommand is the CLI command that removes the fix with this ID from a tier,
