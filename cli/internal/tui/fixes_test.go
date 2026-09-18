@@ -477,6 +477,87 @@ func TestCheckActionNotesNameTheOutcome(t *testing.T) {
 	}
 }
 
+// A refused adoption carries the facts the attempt returned: check.sh's own ending,
+// the checks that did not pass worst first, and the last lines it printed when
+// nothing structured explains the failure. The note is the only place these reach a
+// reader, because the adoption's evidence directory does not outlive the call.
+func TestARefusedAdoptionNamesTheOracleAndTheChecksThatDidNotPass(t *testing.T) {
+	exit := 1
+	res := checks.AdoptResult{
+		Oracle: checks.OracleRun{RunID: "r1", Outcome: checks.OutcomeFailed, ExitCode: &exit,
+			Excerpt: "go test ./...\n\n--- FAIL: TestThing\n"},
+		Executions: []checks.Execution{
+			{CheckID: "unreached", Outcome: checks.OutcomeNotExecuted, Reason: "check.sh stopped before this check reported"},
+			{CheckID: "ok", Outcome: checks.OutcomePassed},
+			{CheckID: "no-count", Outcome: checks.OutcomeFailed},
+		},
+	}
+	got := adoptNote("/w/steer", res, errors.New("adoption refused: check.sh failed"))
+	for _, want := range []string{"not authorized: ", "steer check adopt /w/steer",
+		"check.sh failed with exit 1", "no-count failed", "| --- FAIL: TestThing"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the note misses %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "ok passed") {
+		t.Errorf("the note lists a check that passed:\n%s", got)
+	}
+	if strings.Index(got, "unreached") < strings.Index(got, "no-count") {
+		t.Errorf("a check the oracle never reached sorts before a failure:\n%s", got)
+	}
+}
+
+// The note stays bounded whatever the repository holds: it counts the rows it drops,
+// and it leaves the excerpt out where a reason already explains the failure. The
+// rows themselves are never conditional on that reason.
+func TestARefusedAdoptionNoteStaysBounded(t *testing.T) {
+	var many []checks.Execution
+	for _, id := range []string{"a", "b", "c", "d", "e"} {
+		many = append(many, checks.Execution{CheckID: id, Outcome: checks.OutcomeFailed})
+	}
+	got := adoptNote("/w/steer", checks.AdoptResult{
+		Oracle:     checks.OracleRun{RunID: "r1", Outcome: checks.OutcomeFailed},
+		Executions: many,
+	}, errors.New("adoption refused"))
+	if !strings.Contains(got, "and 2 more") {
+		t.Errorf("five failures are not counted down to three:\n%s", got)
+	}
+
+	got = adoptNote("/w/steer", checks.AdoptResult{
+		Oracle: checks.OracleRun{RunID: "r1", Outcome: checks.OutcomeTimeout,
+			Reason: "the deadline stopped check.sh", Excerpt: "still running\n"},
+	}, errors.New("adoption refused"))
+	if !strings.Contains(got, "the deadline stopped check.sh") || strings.Contains(got, "still running") {
+		t.Errorf("an explained failure carries its excerpt anyway:\n%s", got)
+	}
+}
+
+// An adoption stopped by a check's own cases never reaches check.sh, so the note
+// names the verdict instead. An integration failure names the remedy.
+func TestARefusedAdoptionNamesAValidationVerdictAndTheIntegrationRemedy(t *testing.T) {
+	got := adoptNote("/w/steer", checks.AdoptResult{
+		Validations: []checks.AdoptValidation{
+			{CheckID: "reused", Reused: true, Run: checks.ValidationRun{CheckID: "reused", Verdict: checks.VerdictValidated}},
+			{CheckID: "no-count", Run: checks.ValidationRun{CheckID: "no-count",
+				Verdict: checks.VerdictUnavailable, Reason: "the case file is missing"}},
+		},
+	}, errors.New("adoption refused: no-count did not validate"))
+	if !strings.Contains(got, "no-count unavailable: the case file is missing") {
+		t.Errorf("the note misses the validation verdict:\n%s", got)
+	}
+	if strings.Contains(got, "reused") {
+		t.Errorf("the note lists a reused receipt:\n%s", got)
+	}
+
+	got = adoptNote("/w/steer", checks.AdoptResult{
+		Oracle: checks.OracleRun{RunID: "r1", Outcome: checks.OutcomePassed,
+			Missing: []string{"no-count"}, IntegrationFailure: true},
+	}, errors.New("adoption refused: check.sh passed without running no-count"))
+	if !strings.Contains(got, checks.ExecInvocation) || !strings.Contains(got, "steer check guide") {
+		t.Errorf("an integration failure names no remedy:\n%s", got)
+	}
+}
+
 // x on a row whose tier the panel does archive says why it cannot archive this one,
 // so the key is never silent on a row marked for attention. An entry the working
 // tree no longer holds has nothing left to archive, and a row standing for a store

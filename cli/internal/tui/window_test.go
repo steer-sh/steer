@@ -42,6 +42,35 @@ func TestShortTerminalKeepsTheSelectionAndTheLegend(t *testing.T) {
 	}
 }
 
+// A long note keeps the panel readable: bodyBudget subtracts the note from the body,
+// so a multi-line note over a short terminal leaves nothing to report on. The note
+// is cut from the tail, which the note orders to be the part a reader can do without.
+func TestALongNoteLeavesTheBodyRoomAndMarksTheCut(t *testing.T) {
+	m := New(gate.Defaults(), "global")
+	m.snap = &status.SystemStatus{}
+	m.active = panelFixes
+	m.width, m.height = 80, 24
+
+	var lines []string
+	for i := 0; i < 30; i++ {
+		lines = append(lines, fmt.Sprintf("note line %02d", i))
+	}
+	m.noteFor(panelFixes, "%s", strings.Join(lines, "\n"))
+
+	if !strings.Contains(m.View(), "note line 00") {
+		t.Error("the note's first line is cut")
+	}
+	if !strings.Contains(m.View(), "…") {
+		t.Error("the cut is not marked")
+	}
+	if got := m.bodyBudget(); got < 2 {
+		t.Errorf("the note leaves %d body lines", got)
+	}
+	if n := strings.Count(m.View(), "\n"); n > m.height {
+		t.Errorf("the frame is %d lines, over the %d-line terminal", n, m.height)
+	}
+}
+
 // TestNoPanelOverflowsTheTerminal pins the budget against every panel at several
 // heights. A panel body may or may not end with a newline, and the chrome adds its
 // own separator, so the arithmetic is checked by measurement rather than by

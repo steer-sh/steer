@@ -378,9 +378,29 @@ func (m *Model) frameFooter() string {
 		if strings.HasPrefix(msg, "error:") {
 			msg = errText("Error:") + strings.TrimPrefix(msg, "error:")
 		}
-		footer = wrapTo(msg, "", m.bodyWidth()) + footer
+		footer = m.clampNote(wrapTo(msg, "", m.bodyWidth())) + footer
 	}
 	return footer
+}
+
+// noteShare is the largest share of the height a note may take. bodyBudget
+// subtracts the note from the panel, so an unbounded note starves what it reports
+// on.
+const noteShare = 3
+
+// clampNote keeps a wrapped note inside its share of the height, and marks the cut.
+// A note leads with its result and the command that carries the rest, so the tail
+// is what a cut costs. A harness that has not reported a size cuts nothing.
+func (m *Model) clampNote(note string) string {
+	if m.height <= 0 {
+		return note
+	}
+	limit := max(1, m.height/noteShare)
+	lines := strings.Split(strings.TrimRight(note, "\n"), "\n")
+	if len(lines) <= limit {
+		return note
+	}
+	return strings.Join(append(lines[:max(1, limit-1)], "…"), "\n") + "\n"
 }
 
 // scrollBody uses the shared frame budget for a panel with no selected rows.

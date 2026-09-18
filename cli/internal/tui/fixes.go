@@ -457,15 +457,120 @@ func (m *Model) checkActionDone(msg checkActionMsg) {
 	m.noteFor(panelFixes, "%s", msg.note)
 }
 
-// adoptNote says what an adoption attempt did, in one line.
+// The adopt note's bounds. The note shares the frame with the panel it reports
+// to, so each part names a count rather than growing with the repository.
+const (
+	adoptNoteRows    = 3
+	adoptNoteExcerpt = 3
+)
+
+// adoptNote says what an adoption attempt did. The result leads, then the command
+// that prints the whole run, then the facts the attempt already returned: the
+// oracle's own ending, the checks that did not pass, and an excerpt where nothing
+// else explains the failure.
 func adoptNote(root string, res checks.AdoptResult, err error) string {
-	switch {
-	case res.Already:
+	if res.Already {
 		return root + " was already authorized on this machine"
-	case err != nil:
-		return "not authorized: " + err.Error()
 	}
-	return "authorized " + root + " on this machine; check.sh runs at turn end only where the check runner is registered"
+	if err == nil {
+		return "authorized " + root + " on this machine; check.sh runs at turn end only where the check runner is registered"
+	}
+	lines := []string{
+		"not authorized: " + err.Error(),
+		"steer check adopt " + root + " runs the adoption again and prints the whole run",
+	}
+	lines = append(lines, oracleOutcomeLine(res.Oracle)...)
+	lines = append(lines, adoptFailureRows(res)...)
+	if res.Oracle.IntegrationFailure {
+		lines = append(lines, "Add "+checks.ExecInvocation+" to its sequence: steer check guide")
+	}
+	return strings.Join(append(lines, adoptExcerptLines(res)...), "\n")
+}
+
+// oracleOutcomeLine reports check.sh's own ending where the refusal does not
+// already carry it. Adopt's error names the outcome, so the line earns its place
+// through a reason or an exit code.
+func oracleOutcomeLine(run checks.OracleRun) []string {
+	switch {
+	case run.RunID == "":
+		return nil
+	case run.Reason != "":
+		return []string{checks.OracleName + " " + run.Outcome + ": " + run.Reason}
+	case run.ExitCode != nil && *run.ExitCode != 0:
+		return []string{fmt.Sprintf("%s %s with exit %d", checks.OracleName, run.Outcome, *run.ExitCode)}
+	}
+	return nil
+}
+
+// adoptFailureRows names what did not pass, bounded and worst first. Cases that do
+// not validate stop the adoption before check.sh runs; a check the oracle never
+// reached explains nothing about the failure, so it sorts last.
+func adoptFailureRows(res checks.AdoptResult) []string {
+	var rows, unreached []string
+	for _, v := range res.Validations {
+		if !v.Reused && v.Run.Verdict != checks.VerdictValidated {
+			rows = append(rows, withReason(v.Run.CheckID+" "+v.Run.Verdict, v.Run.Reason))
+		}
+	}
+	for _, e := range res.Executions {
+		if e.Passed() {
+			continue
+		}
+		row := withReason(e.CheckID+" "+e.Outcome, e.Reason)
+		if e.Outcome == checks.OutcomeNotExecuted {
+			unreached = append(unreached, row)
+			continue
+		}
+		rows = append(rows, row)
+	}
+	rows = append(rows, unreached...)
+	if len(rows) > adoptNoteRows {
+		return append(rows[:adoptNoteRows], fmt.Sprintf("and %d more", len(rows)-adoptNoteRows))
+	}
+	return rows
+}
+
+// withReason joins a row to its reason, and leaves a row without one alone.
+func withReason(head, reason string) string {
+	if reason == "" {
+		return head
+	}
+	return head + ": " + reason
+}
+
+// adoptExcerptLines are the last lines check.sh printed, for a failure no
+// structured reason explains: an ordinary non-zero exit leaves the run without a
+// reason, and a check that simply failed leaves its row without one. A check the
+// oracle never reached carries a reason about the oracle, not about the failure, so
+// it does not answer for one.
+func adoptExcerptLines(res checks.AdoptResult) []string {
+	if res.Oracle.Reason != "" || strings.TrimSpace(res.Oracle.Excerpt) == "" {
+		return nil
+	}
+	for _, e := range res.Executions {
+		if !e.Passed() && e.Outcome != checks.OutcomeNotExecuted && e.Reason != "" {
+			return nil
+		}
+	}
+	var out []string
+	for _, line := range lastNonEmptyLines(res.Oracle.Excerpt, adoptNoteExcerpt) {
+		out = append(out, "| "+line)
+	}
+	return out
+}
+
+// lastNonEmptyLines is the tail of s, up to n lines, without its blank lines.
+func lastNonEmptyLines(s string, n int) []string {
+	var kept []string
+	for _, line := range strings.Split(s, "\n") {
+		if strings.TrimSpace(line) != "" {
+			kept = append(kept, strings.TrimRight(line, " \t"))
+		}
+	}
+	if len(kept) > n {
+		kept = kept[len(kept)-n:]
+	}
+	return kept
 }
 
 // testNote says what a replay found, in one line.
