@@ -95,6 +95,10 @@ func TestDiscoverWalksTheDateTreeAndReadsProject(t *testing.T) {
 	if len(scoped) != 1 || scoped[0].Project != "/repo/alpha" {
 		t.Fatalf("expected only /repo/alpha, got %+v", scoped)
 	}
+	// The header cwd is the launch directory, which a repository scope resolves.
+	if scoped[0].Cwd != "/repo/alpha" {
+		t.Errorf("Cwd = %q; want the header cwd", scoped[0].Cwd)
+	}
 
 	future, err := a.Discover(root, transcript.Filter{Since: time.Now().Add(time.Hour), AllProjects: true})
 	if err != nil {

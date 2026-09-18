@@ -377,6 +377,17 @@ commands. Forked history is deduplicated against the parent when it is available
 Adapter behavior tests cover these rules; fixture replay separately pins each
 adapter's declared `Instrument` digest.
 
+`internal/report/scope.go` owns transcript selection for every scan: all projects,
+the working directory, or one checkout. `Scope.Filter` builds the `transcript.Filter`
+and `Filter.Selector` applies it inside each adapter's `Discover`, so a report and the
+session corpus never select different sessions. A repository scope resolves a
+session's launch directory through `checks.RepoRootOf` then `checks.RepoIdentity` and
+compares canonical roots exactly, which excludes a sibling worktree, a nested
+repository and a submodule under the selected checkout. An adapter reads the launch
+directory at discovery, before the time window applies: Codex and Pi take it from the
+header, and Claude Code reads the first entry of the file because its directory name
+is munged.
+
 `internal/report/scan.go` owns the shared friction classifier. `command.go`
 distinguishes executed programs from source-printing commands and extracts causal
 failure keys, including traceback exception lines. Parser identity includes these

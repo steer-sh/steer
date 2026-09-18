@@ -219,3 +219,90 @@ func TestEventsCarryTheRowsWorkingDirectory(t *testing.T) {
 		}
 	}
 }
+
+// The launch directory is read before any time window applies: a session whose
+// first entries fall outside the window was still launched where it says.
+func TestDiscoverReadsTheLaunchDirectoryBeforeTheWindow(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "-Users-example-proj")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Join([]string{
+		`{"type":"user","timestamp":"2020-01-01T00:00:00Z","sessionId":"s1","cwd":"/repo/one","message":{"content":"old"}}`,
+		`{"type":"user","timestamp":"2030-01-01T00:00:00Z","sessionId":"s1","cwd":"/repo/two","message":{"content":"new"}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "a.jsonl"), []byte(lines), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	since := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	files, err := New().Discover(root, transcript.Filter{AllProjects: true, Since: since})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(files))
+	}
+	if files[0].Cwd != "/repo/one" {
+		t.Errorf("launch cwd = %q; want the first entry's /repo/one", files[0].Cwd)
+	}
+}
+
+// A sidechain entry is a subagent's, so it never decides where the root session
+// was launched.
+func TestDiscoverSkipsASidechainEntryForTheLaunchDirectory(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "-Users-example-proj")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Join([]string{
+		`{"type":"user","isSidechain":true,"timestamp":"2030-01-01T00:00:00Z","sessionId":"s1","cwd":"/repo/sub","message":{"content":"a"}}`,
+		`{"type":"user","timestamp":"2030-01-01T00:00:01Z","sessionId":"s1","cwd":"/repo/root","message":{"content":"b"}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "a.jsonl"), []byte(lines), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := New().Discover(root, transcript.Filter{AllProjects: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0].Cwd != "/repo/root" {
+		t.Fatalf("launch cwd = %+v; want /repo/root", files)
+	}
+}
+
+// A repository scope reads the file, not the munged directory name: the name
+// cannot tell a path separator from a hyphen in a directory's own name.
+func TestDiscoverInRepositoryScopeReadsTheFileNotTheDirectoryName(t *testing.T) {
+	root := t.TempDir()
+	write := func(name, cwd string) {
+		dir := filepath.Join(root, name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		line := `{"type":"user","timestamp":"2030-01-01T00:00:00Z","sessionId":"s","cwd":"` + cwd + `","message":{"content":"x"}}` + "\n"
+		if err := os.WriteFile(filepath.Join(dir, "a.jsonl"), []byte(line), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Both directories munge to the same key; only the file distinguishes them.
+	write("-repo-demo-sub", "/repo/demo/sub")
+	write("-repo-demo-sub-2", "/repo/demo-sub")
+
+	resolve := func(cwd string) string {
+		if strings.HasPrefix(cwd, "/repo/demo/") || cwd == "/repo/demo" {
+			return "/repo/demo"
+		}
+		return cwd
+	}
+	files, err := New().Discover(root, transcript.Filter{RepoRoot: "/repo/demo", ResolveRoot: resolve})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0].Cwd != "/repo/demo/sub" {
+		t.Fatalf("repository scope selected %+v; want only the session inside /repo/demo", files)
+	}
+}

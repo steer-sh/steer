@@ -29,6 +29,7 @@ An empty corpus produces one line, never an error. An adopter with no commit-rev
 /steer-report
 /steer-report --days 7
 /steer-report --project-only
+/steer-report --repo-only
 /steer-report --headless
 ```
 
@@ -137,7 +138,7 @@ STEER_BIN="${STEER_BIN:-steer}"
 
 Then Read `${TMPDIR:-/tmp}/steer-digest.json` **once**. Do not cat the file and do not re-read it later — everything needed for analysis is in that single read.
 
-All projects and every harness are scanned by default (cross-project, cross-harness habits are the strongest candidates). Pass through any flags the user supplied (`--days N`, `--project-only`, `--harness claude-code|codex`, `--max-digest-bytes N`). Strip `--headless` — it is a skill flag, not a CLI flag.
+All projects and every harness are scanned by default (cross-project, cross-harness habits are the strongest candidates). Pass through any flags the user supplied (`--days N`, `--project-only`, `--repo-only`, `--harness claude-code|codex`, `--max-digest-bytes N`). `--project-only` reads the working directory alone; `--repo-only` reads every session launched anywhere inside the current checkout, and the two are mutually exclusive. Strip `--headless` — it is a skill flag, not a CLI flag.
 
 The digest — not the queue — is the transcript corpus. The queue carries one row saying how many correction clusters are ungrouped; the clusters themselves are here. Most hold a single occurrence, because a cluster key is the user's own wording and merges verbatim repeats and nothing else: two complaints about one habit, phrased differently, arrive as two clusters. A cluster is therefore never a problem and its `count` is never a recurrence. Merging them into classes is your job, not the tier's.
 

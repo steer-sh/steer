@@ -53,10 +53,7 @@ func (Adapter) Root() (string, error) {
 // and wraps the result in '--', while NormalizeProject replaces every
 // non-alphanumeric byte, so the two forms do not compare equal.
 func (a Adapter) Discover(root string, f transcript.Filter) ([]transcript.Session, error) {
-	want := map[string]struct{}{}
-	for _, p := range f.Projects {
-		want[transcript.NormalizeProject(p)] = struct{}{}
-	}
+	keep := f.Selector()
 
 	var sessions []transcript.Session
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
@@ -70,17 +67,18 @@ func (a Adapter) Discover(root string, f transcript.Filter) ([]transcript.Sessio
 		if err != nil || info.ModTime().Before(f.Since) {
 			return nil
 		}
+		// The header cwd is both the project key and the launch directory.
 		project := readHeader(path).Cwd
-		if !f.AllProjects {
-			if _, ok := want[transcript.NormalizeProject(project)]; !ok {
-				return nil
-			}
-		}
-		sessions = append(sessions, transcript.Session{
+		session := transcript.Session{
 			Harness: harness.Pi,
 			Path:    path,
 			Project: project,
-		})
+			Cwd:     project,
+		}
+		if !keep(session) {
+			return nil
+		}
+		sessions = append(sessions, session)
 		return nil
 	})
 	if err != nil {

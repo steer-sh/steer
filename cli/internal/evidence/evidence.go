@@ -9,6 +9,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
+	"github.com/steer-sh/steer-cli/internal/report"
 	"github.com/steer-sh/steer-cli/internal/sessions"
 )
 
@@ -21,8 +22,9 @@ type Options struct {
 	// WindowDays bounds a transcript rebuild; 0 skips the rebuild and reads the
 	// stored snapshots alone.
 	WindowDays int
-	// AllProjects scans every project rather than the working directory's.
-	AllProjects bool
+	// ScanScope selects which sessions a rebuild reads. The zero value reads
+	// every project.
+	ScanScope report.Scope
 	// Rebuild re-reads the harnesses' transcripts and merges the result into the
 	// snapshot store. A read-only caller leaves it false.
 	Rebuild bool
@@ -40,8 +42,8 @@ func Gather(opts Options) mine.EvidenceSet {
 	dir := sessions.StateDir()
 	if opts.Rebuild {
 		ev.Sessions, _ = sessions.Refresh(dir, gate.HostID(), sessions.Options{
-			WindowDays:  opts.WindowDays,
-			AllProjects: opts.AllProjects,
+			WindowDays: opts.WindowDays,
+			Scope:      opts.ScanScope,
 		})
 	} else {
 		ev.Sessions, _ = sessions.Load(dir)

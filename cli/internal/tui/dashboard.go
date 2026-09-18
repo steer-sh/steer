@@ -19,6 +19,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
 	"github.com/steer-sh/steer-cli/internal/harness"
+	"github.com/steer-sh/steer-cli/internal/report"
 	"github.com/steer-sh/steer-cli/internal/settings"
 	"github.com/steer-sh/steer-cli/internal/status"
 )
@@ -132,15 +133,15 @@ func repoRoot() string {
 func (m *Model) refresh() {
 	// The dashboard mutates registrations, never the evidence: it reads the stored
 	// snapshots and rebuilds none.
-	ev := evidence.Gather(evidence.Options{GateStateDir: m.cfg.StateDir, AllProjects: true})
+	ev := evidence.Gather(evidence.Options{GateStateDir: m.cfg.StateDir, ScanScope: report.ScopeAll})
 	root := repoRoot()
 	addendum := gate.LoadAddendum(root)
 	s, err := status.Collect(status.Options{
 		GateStateDir: m.cfg.StateDir,
 		Config:       m.cfg,
 		WindowDays:   30,
-		AllProjects:  true,
 		Scope:        m.scope,
+		ScanScope:    report.ScopeAll,
 		RepoRoot:     root,
 		Addendum:     &addendum,
 		Evidence:     ev,

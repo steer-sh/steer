@@ -37,6 +37,12 @@ type Session struct {
 	// Project groups sessions by the repository or directory they ran in, in
 	// whatever form the harness names it on disk.
 	Project string
+	// Cwd is the working directory the session was launched from, absolute and
+	// in the harness's own form. An adapter reads it at discovery, before any
+	// time window applies, so it names where the session started rather than
+	// where it stood when the window opened. A harness that records none, or a
+	// transcript whose header cannot be read, leaves it empty.
+	Cwd string
 }
 
 // Event is one normalized transcript entry.
@@ -91,6 +97,10 @@ func NormalizeProject(s string) string {
 
 // Filter narrows both discovery and streaming. Since drops sessions last
 // modified before it and events recorded before it.
+//
+// Three scopes are mutually exclusive, in the order Selector tests them:
+// RepoRoot selects one checkout, AllProjects selects everything, and Projects
+// selects the listed directories.
 type Filter struct {
 	Since time.Time
 	// Projects lists the project paths to keep. An empty list with AllProjects
@@ -98,7 +108,46 @@ type Filter struct {
 	Projects []string
 	// AllProjects ignores Projects and keeps every session.
 	AllProjects bool
+	// RepoRoot is one canonical repository root. When it is set, a session is
+	// kept only when ResolveRoot maps its launch directory to exactly this
+	// root, which excludes a sibling worktree, a nested repository and a
+	// submodule even when their paths sit under it.
+	RepoRoot string
+	// ResolveRoot maps a launch directory to its canonical repository root, and
+	// returns "" when the directory is in no repository. RepoRoot needs it; the
+	// caller owns it so this package stays free of git.
+	ResolveRoot func(cwd string) string
 }
+
+// Selector returns this filter's scope as one predicate, with the project key
+// set built once. Every adapter calls it rather than testing the scope itself,
+// so discovery for a report and for the session corpus select the same sessions.
+func (f Filter) Selector() func(Session) bool {
+	if f.RepoRoot != "" {
+		resolve := f.ResolveRoot
+		return func(s Session) bool {
+			if s.Cwd == "" || resolve == nil {
+				return false
+			}
+			return resolve(s.Cwd) == f.RepoRoot
+		}
+	}
+	if f.AllProjects {
+		return func(Session) bool { return true }
+	}
+	want := map[string]struct{}{}
+	for _, p := range f.Projects {
+		want[NormalizeProject(p)] = struct{}{}
+	}
+	return func(s Session) bool {
+		_, ok := want[NormalizeProject(s.Project)]
+		return ok
+	}
+}
+
+// ScopesRepo reports that this filter selects one checkout. An adapter reads it
+// to decide whether a session's launch directory is worth the read it costs.
+func (f Filter) ScopesRepo() bool { return f.RepoRoot != "" }
 
 // Counts is one session's scan coverage, reported by the adapter because only
 // it knows how many raw entries a normalized event stood for.

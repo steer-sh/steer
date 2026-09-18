@@ -23,9 +23,27 @@ import (
 var (
 	reportDays        int
 	reportProjectOnly bool
+	reportRepoOnly    bool
 	reportMaxBytes    int
 	reportHarness     string
 )
+
+// scanScope maps the two scope flags to the shared transcript scope. It refuses
+// both at once, and it resolves the repository here rather than inside the scan:
+// evidence gathering fails soft, so an unresolved root would print an empty
+// machine instead of naming the missing repository.
+func scanScope(repoOnly, projectOnly bool) (report.Scope, error) {
+	if repoOnly && projectOnly {
+		return report.ScopeAll, fmt.Errorf("--repo-only and --project-only select different scopes; pass one")
+	}
+	scope := report.ScopeOf(repoOnly, projectOnly)
+	if scope == report.ScopeRepo {
+		if _, err := scope.Filter(time.Now()); err != nil {
+			return scope, fmt.Errorf("--repo-only needs a repository: %w", err)
+		}
+	}
+	return scope, nil
+}
 
 var reportCmd = &cobra.Command{
 	Use:   "report",
@@ -43,7 +61,9 @@ same way.
 
 All projects are scanned by default — the strongest hook candidates are habits
 that repeat across projects. Use --project-only to restrict the scan to
-transcripts of the current working directory.
+transcripts of the current working directory, or --repo-only to read every
+session launched anywhere inside the current checkout. A sibling worktree, a
+nested repository and a submodule each have a root of their own and stay out.
 
 The digest is mechanical evidence only — deciding which signals deserve hooks
 is the job of the /steer-report skill, which reads this output. Stdout carries
@@ -54,6 +74,7 @@ stats.truncated.`,
   steer report --days 7
   steer report --harness codex
   steer report --project-only
+  steer report --repo-only
   steer report --max-digest-bytes 20000`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if reportDays <= 0 {
@@ -64,14 +85,15 @@ stats.truncated.`,
 			return err
 		}
 
-		projectPaths, err := report.ProjectPaths()
+		scope, err := scanScope(reportRepoOnly, reportProjectOnly)
 		if err != nil {
-			return fmt.Errorf("failed to resolve working directory: %w", err)
+			return err
 		}
 
 		since := time.Now().AddDate(0, 0, -reportDays)
-		filter := transcript.Filter{
-			Since: since, Projects: projectPaths, AllProjects: !reportProjectOnly,
+		filter, err := scope.Filter(since)
+		if err != nil {
+			return fmt.Errorf("failed to resolve the scan scope: %w", err)
 		}
 		adapters := report.Adapters(only)
 
@@ -177,24 +199,28 @@ The queue content is deterministic: a second run over the same evidence produces
 a byte-identical queue. The refresh timestamp lives in a sibling file, not the
 queue, so the skill's nudge can hash the queue for change detection.`,
 	Example: `  steer report refresh
-  steer report refresh --days 7 --project-only`,
+  steer report refresh --days 7 --repo-only`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := prepareState(); err != nil {
 			return err
 		}
 		// refresh is the one writer of the snapshot store: it rebuilds the session
 		// corpus from the harnesses' transcripts before scoring over it.
+		scope, err := scanScope(reportRepoOnly, reportProjectOnly)
+		if err != nil {
+			return err
+		}
 		ev := evidence.Gather(evidence.Options{
 			GateStateDir: gateConfig().StateDir,
 			WindowDays:   reportDays,
-			AllProjects:  !reportProjectOnly,
+			ScanScope:    scope,
 			Rebuild:      true,
 		})
 		root := repoRootOrNone()
 		q, err := cadence.Refresh(cadence.Options{
 			GateStateDir: gateConfig().StateDir,
 			WindowDays:   reportDays,
-			AllProjects:  !reportProjectOnly,
+			ScanScope:    scope,
 			RepoRoot:     root,
 			Addendum:     gateAddendum(root),
 			Evidence:     ev,
@@ -399,8 +425,10 @@ func init() {
 	reportCmd.AddCommand(reportCadenceCmd)
 	reportRefreshCmd.Flags().IntVar(&reportDays, "days", 30, "Transcript look-back window in days")
 	reportRefreshCmd.Flags().BoolVar(&reportProjectOnly, "project-only", false, "Restrict the transcript scan to the current working directory")
+	reportRefreshCmd.Flags().BoolVar(&reportRepoOnly, "repo-only", false, "Restrict the transcript scan to the current checkout")
 	reportCmd.Flags().IntVar(&reportDays, "days", 30, "Look-back window in days")
 	reportCmd.Flags().BoolVar(&reportProjectOnly, "project-only", false, "Restrict the scan to transcripts of the current working directory")
+	reportCmd.Flags().BoolVar(&reportRepoOnly, "repo-only", false, "Restrict the scan to transcripts of the current checkout")
 	reportCmd.Flags().StringVar(&reportHarness, "harness", "", "Mine one harness only: all (default), claude-code, or codex")
 	reportCmd.Flags().IntVar(&reportMaxBytes, "max-digest-bytes", report.DefaultMaxDigestBytes, "Hard cap on digest size; lowest-scoring clusters are evicted to fit")
 }

@@ -50,20 +50,18 @@ func (a Adapter) Discover(root string, f transcript.Filter) ([]transcript.Sessio
 		return nil, fmt.Errorf("failed to read %s: %w", root, err)
 	}
 
-	want := map[string]struct{}{}
-	for _, p := range f.Projects {
-		want[transcript.NormalizeProject(p)] = struct{}{}
-	}
+	keep := f.Selector()
 
 	var sessions []transcript.Session
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
-		if !f.AllProjects {
-			if _, ok := want[transcript.NormalizeProject(entry.Name())]; !ok {
-				continue
-			}
+		// A project scope reads the directory name alone, so a whole directory
+		// is skipped before any file in it is opened. A repository scope cannot:
+		// the name is munged, and only the file carries the launch directory.
+		if !f.ScopesRepo() && !keep(transcript.Session{Project: entry.Name()}) {
+			continue
 		}
 
 		dir := filepath.Join(root, entry.Name())
@@ -82,14 +80,46 @@ func (a Adapter) Discover(root string, f transcript.Filter) ([]transcript.Sessio
 			if info.ModTime().Before(f.Since) {
 				continue
 			}
-			sessions = append(sessions, transcript.Session{
+			path := filepath.Join(dir, item.Name())
+			session := transcript.Session{
 				Harness: harness.ClaudeCode,
-				Path:    filepath.Join(dir, item.Name()),
+				Path:    path,
 				Project: entry.Name(),
-			})
+				Cwd:     readLaunchCwd(path),
+			}
+			if !keep(session) {
+				continue
+			}
+			sessions = append(sessions, session)
 		}
 	}
 	return sessions, nil
+}
+
+// readLaunchCwd returns the working directory the session started in: the cwd
+// of the first entry that records one. It reads no time window, because a
+// session whose early entries fall outside the window was still launched where
+// its first entry says. An unreadable file yields "".
+func readLaunchCwd(path string) string {
+	file, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+
+	reader := bufio.NewReaderSize(file, 256*1024)
+	for {
+		line, readErr := reader.ReadBytes('\n')
+		if len(line) > 0 {
+			var r row
+			if err := json.Unmarshal(line, &r); err == nil && !r.IsSidechain && r.Cwd != "" {
+				return r.Cwd
+			}
+		}
+		if readErr != nil {
+			return ""
+		}
+	}
 }
 
 // row is the subset of a transcript line this adapter reads.

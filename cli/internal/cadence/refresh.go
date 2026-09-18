@@ -129,7 +129,9 @@ type Options struct {
 	GateStateDir string // commit-review state: interventions.jsonl + ledger shards
 	Ledger       string // single-ledger override, or "" for the shard glob
 	WindowDays   int    // transcript look-back
-	AllProjects  bool   // scan every project, not just the cwd
+	// ScanScope selects which sessions the transcript scan reads. The zero
+	// value reads every project.
+	ScanScope report.Scope
 	// RepoRoot is the Git root whose check tier the queue reports, "" outside a
 	// repository. The caller resolves it; Refresh runs no git command.
 	RepoRoot string
@@ -221,7 +223,7 @@ func Refresh(opts Options) (*Queue, error) {
 	}
 
 	// --- transcript-friction candidate pointer: ungrouped correction clusters --
-	digest, derr := report.Generate(opts.WindowDays, opts.AllProjects)
+	digest, derr := report.Generate(opts.WindowDays, opts.ScanScope)
 	if derr == nil && len(digest.Signals.UserCorrections) > 0 {
 		q.Candidates = append(q.Candidates, transcriptCandidate(digest.Signals.UserCorrections))
 	}

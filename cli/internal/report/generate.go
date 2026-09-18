@@ -94,14 +94,12 @@ func Scan(adapters []transcript.Adapter, since time.Time, filter transcript.Filt
 // the `steer report` command keeps its own scan because it also folds in
 // instruction-file directives, which Generate omits — the cadence runner draws
 // candidates from the transcript signal clusters, not from standing rules.
-func Generate(windowDays int, allProjects bool) (*Digest, error) {
-	projectPaths, err := ProjectPaths()
+func Generate(windowDays int, scope Scope) (*Digest, error) {
+	since := time.Now().AddDate(0, 0, -windowDays)
+	filter, err := scope.Filter(since)
 	if err != nil {
 		return nil, err
 	}
-
-	since := time.Now().AddDate(0, 0, -windowDays)
-	filter := transcript.Filter{Since: since, Projects: projectPaths, AllProjects: allProjects}
 	scanner, names := Scan(Adapters(harness.Unknown), since, filter, nil)
 	return scanner.Finalize(windowDays, names, nil), nil
 }

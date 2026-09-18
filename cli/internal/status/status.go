@@ -23,6 +23,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/pi"
 	"github.com/steer-sh/steer-cli/internal/presets"
+	"github.com/steer-sh/steer-cli/internal/report"
 	"github.com/steer-sh/steer-cli/internal/sessions"
 	"github.com/steer-sh/steer-cli/internal/steerbin"
 )
@@ -67,8 +68,10 @@ type Options struct {
 	Ledger       string // single-ledger override, or "" for the shard glob
 	Config       gate.Config
 	WindowDays   int    // transcript look-back for the attention refresh
-	AllProjects  bool   // scan every project, not just the cwd
 	Scope        string // active scope for the config-state read (default global)
+	// ScanScope selects which sessions the transcript scan reads. The zero
+	// value reads every project.
+	ScanScope report.Scope
 	// RepoRoot is the Git root whose check tier the snapshot reports, "" outside
 	// a repository. The caller resolves it; Collect runs no git command.
 	RepoRoot string
@@ -410,7 +413,7 @@ func Collect(opts Options) (*SystemStatus, error) {
 		GateStateDir: opts.GateStateDir,
 		Ledger:       opts.Ledger,
 		WindowDays:   opts.WindowDays,
-		AllProjects:  opts.AllProjects,
+		ScanScope:    opts.ScanScope,
 		RepoRoot:     opts.RepoRoot,
 		Addendum:     opts.Addendum,
 		Evidence:     ev,

@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/steer-sh/steer-cli/internal/checks"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/report"
@@ -40,8 +39,9 @@ type Options struct {
 	// WindowDays bounds the transcript look-back. A session older than this is not
 	// re-read; the snapshot already stored for it stands.
 	WindowDays int
-	// AllProjects scans every project rather than the working directory's.
-	AllProjects bool
+	// Scope selects which sessions the scan reads. The zero value reads every
+	// project, which is what a cross-project mining read wants.
+	Scope report.Scope
 	// Only restricts the scan to one harness. Unknown scans every harness.
 	Only harness.ID
 }
@@ -50,16 +50,17 @@ type Options struct {
 // sorted. A harness whose transcript root is unreadable contributes nothing and never
 // fails the build.
 func Build(opts Options) ([]mine.SessionUnit, error) {
-	projectPaths, err := report.ProjectPaths()
+	since := time.Now().AddDate(0, 0, -opts.WindowDays)
+	// One resolver serves both the scope predicate and each session's stored
+	// root, so a directory is resolved once however the scan selects.
+	resolve := report.RootResolver()
+	filter, err := opts.Scope.FilterWith(since, resolve)
 	if err != nil {
 		return nil, err
 	}
-	since := time.Now().AddDate(0, 0, -opts.WindowDays)
-	filter := transcript.Filter{Since: since, Projects: projectPaths, AllProjects: opts.AllProjects}
 	parser := report.ParserInstrument()
 
 	byID := map[string]*mine.SessionUnit{}
-	roots := rootCache{}
 	// seeded marks the sessions whose launch directory has already been read. A
 	// session's entries can span several files, so it outlives one collectSession.
 	seeded := map[string]bool{}
@@ -76,40 +77,24 @@ func Build(opts Options) ([]mine.SessionUnit, error) {
 		// instrument names both halves of the pipeline that produced it.
 		instrument := mine.ComposeSessionInstrument(parser, adapter.Instrument())
 		for _, session := range discovered {
-			collectSession(adapter, session, since, instrument, roots, seeded, byID)
+			collectSession(adapter, session, since, instrument, resolve, seeded, byID)
 		}
 	}
 	return sorted(byID), nil
 }
 
-// rootCache resolves a working directory to its git root, once per directory. A
-// harness records a directory on every entry, so an uncached lookup would fork git
-// for each one; a failure is cached as the empty root, which reads as unknown.
-type rootCache map[string]string
-
-func (c rootCache) rootOf(cwd string) string {
-	if cwd == "" {
-		return ""
-	}
-	if root, ok := c[cwd]; ok {
-		return root
-	}
-	root, err := checks.RepoRootOf(cwd)
-	if err != nil {
-		root = ""
-	}
-	c[cwd] = root
-	return root
-}
-
 // collectSession streams one transcript into the snapshot for its root session. A
 // subagent thread is provenance, so its signals land on the root's snapshot.
 func collectSession(a transcript.Adapter, s transcript.Session, since time.Time,
-	instrument string, roots rootCache, seeded map[string]bool,
+	instrument string, resolve func(string) string, seeded map[string]bool,
 	byID map[string]*mine.SessionUnit) {
 	c := report.NewClassifier()
 	project := transcript.NormalizeProject(s.Project)
 	harnessID := string(a.Harness())
+	// The adapter read the launch directory at discovery, before the time
+	// window applied, so a session whose first entries fall outside the window
+	// still resolves to where it started.
+	root := resolve(s.Cwd)
 
 	_, _ = a.Stream(s, transcript.Filter{Since: since}, func(e transcript.Event) error {
 		if e.SessionID == "" {
@@ -126,13 +111,12 @@ func collectSession(a transcript.Adapter, s transcript.Session, since time.Time,
 			}
 			byID[key] = u
 		}
-		// The first directory the session recorded is where it was launched, and it
-		// decides the root even when it resolves to none: a harness that records
-		// the live shell directory moves it afterwards, so a later entry would
-		// attribute the session to whichever repository it happened to visit.
-		if e.Cwd != "" && !seeded[key] {
+		// The launch directory decides the root even when it resolves to none: a
+		// session that started outside every repository must stay unresolved
+		// rather than adopt the first repository it visits.
+		if s.Cwd != "" && !seeded[key] {
 			seeded[key] = true
-			u.RepoRoot = roots.rootOf(e.Cwd)
+			u.RepoRoot = root
 		}
 		ts := parseTS(e.Timestamp)
 		if ts > 0 {

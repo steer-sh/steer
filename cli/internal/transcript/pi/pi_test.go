@@ -322,6 +322,10 @@ func TestDiscoverReadsTheProjectFromTheHeader(t *testing.T) {
 	if sessions[0].Harness != harness.Pi {
 		t.Errorf("Harness = %q", sessions[0].Harness)
 	}
+	// The header cwd is the launch directory, which a repository scope resolves.
+	if sessions[0].Cwd != "/repo/demo" {
+		t.Errorf("Cwd = %q; want the header cwd", sessions[0].Cwd)
+	}
 
 	scoped, err := Adapter{}.Discover(root, transcript.Filter{Projects: []string{"/repo/demo"}})
 	if err != nil || len(scoped) != 1 {

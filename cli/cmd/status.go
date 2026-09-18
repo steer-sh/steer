@@ -18,6 +18,7 @@ var (
 	statusJSON        bool
 	statusDays        int
 	statusProjectOnly bool
+	statusRepoOnly    bool
 )
 
 var statusCmd = &cobra.Command{
@@ -35,25 +36,30 @@ words. An agent runs 'steer status --json' before installing a hook, to read the
 full inventory and skip a problem already decided.`,
 	Example: `  steer status
   steer status --json
-  steer status --days 7 --project-only`,
+  steer status --days 7 --project-only
+  steer status --repo-only`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// status never writes: it reads the stored snapshots rather than rebuilding
 		// them, so the one writer stays `steer report refresh`.
 		// A snapshot renders under an unresolvable provider: it names no provider,
 		// so the configured model is the honest value to print.
+		scope, err := scanScope(statusRepoOnly, statusProjectOnly)
+		if err != nil {
+			return err
+		}
 		cfg, _, resolveErr := resolvedGateConfig()
 		root := repoRootOrNone()
 		s, err := status.Collect(status.Options{
 			GateStateDir: cfg.StateDir,
 			Config:       cfg,
 			WindowDays:   statusDays,
-			AllProjects:  !statusProjectOnly,
 			Scope:        currentScope(),
+			ScanScope:    scope,
 			RepoRoot:     root,
 			Addendum:     gateAddendum(root),
 			Evidence: evidence.Gather(evidence.Options{
 				GateStateDir: cfg.StateDir,
-				AllProjects:  !statusProjectOnly,
+				ScanScope:    scope,
 			}),
 		})
 		if err != nil {
@@ -516,4 +522,5 @@ func init() {
 	statusCmd.Flags().BoolVar(&statusJSON, "json", false, "Emit the versioned SystemStatus JSON on stdout")
 	statusCmd.Flags().IntVar(&statusDays, "days", 30, "Transcript look-back window in days for the attention refresh")
 	statusCmd.Flags().BoolVar(&statusProjectOnly, "project-only", false, "Restrict the transcript scan to the current working directory")
+	statusCmd.Flags().BoolVar(&statusRepoOnly, "repo-only", false, "Restrict the transcript scan to the current checkout")
 }

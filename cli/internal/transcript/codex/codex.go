@@ -45,10 +45,7 @@ func (Adapter) Root() (string, error) {
 // its own rollout file, so one root session can appear as several files here;
 // they rejoin through the session id the events carry.
 func (a Adapter) Discover(root string, f transcript.Filter) ([]transcript.Session, error) {
-	want := map[string]struct{}{}
-	for _, p := range f.Projects {
-		want[transcript.NormalizeProject(p)] = struct{}{}
-	}
+	keep := f.Selector()
 
 	var sessions []transcript.Session
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
@@ -62,17 +59,19 @@ func (a Adapter) Discover(root string, f transcript.Filter) ([]transcript.Sessio
 		if err != nil || info.ModTime().Before(f.Since) {
 			return nil
 		}
+		// The header cwd is both the project key and the launch directory: a
+		// rollout records the directory once, at the top of the file.
 		project := readProject(path)
-		if !f.AllProjects {
-			if _, ok := want[transcript.NormalizeProject(project)]; !ok {
-				return nil
-			}
-		}
-		sessions = append(sessions, transcript.Session{
+		session := transcript.Session{
 			Harness: harness.Codex,
 			Path:    path,
 			Project: project,
-		})
+			Cwd:     project,
+		}
+		if !keep(session) {
+			return nil
+		}
+		sessions = append(sessions, session)
 		return nil
 	})
 	if err != nil {
