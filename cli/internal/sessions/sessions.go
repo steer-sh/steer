@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/steer-sh/steer-cli/internal/checks"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/report"
@@ -58,6 +59,10 @@ func Build(opts Options) ([]mine.SessionUnit, error) {
 	parser := report.ParserInstrument()
 
 	byID := map[string]*mine.SessionUnit{}
+	roots := rootCache{}
+	// seeded marks the sessions whose launch directory has already been read. A
+	// session's entries can span several files, so it outlives one collectSession.
+	seeded := map[string]bool{}
 	for _, adapter := range report.Adapters(opts.Only) {
 		root, err := adapter.Root()
 		if err != nil {
@@ -71,16 +76,37 @@ func Build(opts Options) ([]mine.SessionUnit, error) {
 		// instrument names both halves of the pipeline that produced it.
 		instrument := mine.ComposeSessionInstrument(parser, adapter.Instrument())
 		for _, session := range discovered {
-			collectSession(adapter, session, since, instrument, byID)
+			collectSession(adapter, session, since, instrument, roots, seeded, byID)
 		}
 	}
 	return sorted(byID), nil
 }
 
+// rootCache resolves a working directory to its git root, once per directory. A
+// harness records a directory on every entry, so an uncached lookup would fork git
+// for each one; a failure is cached as the empty root, which reads as unknown.
+type rootCache map[string]string
+
+func (c rootCache) rootOf(cwd string) string {
+	if cwd == "" {
+		return ""
+	}
+	if root, ok := c[cwd]; ok {
+		return root
+	}
+	root, err := checks.RepoRootOf(cwd)
+	if err != nil {
+		root = ""
+	}
+	c[cwd] = root
+	return root
+}
+
 // collectSession streams one transcript into the snapshot for its root session. A
 // subagent thread is provenance, so its signals land on the root's snapshot.
 func collectSession(a transcript.Adapter, s transcript.Session, since time.Time,
-	instrument string, byID map[string]*mine.SessionUnit) {
+	instrument string, roots rootCache, seeded map[string]bool,
+	byID map[string]*mine.SessionUnit) {
 	c := report.NewClassifier()
 	project := transcript.NormalizeProject(s.Project)
 	harnessID := string(a.Harness())
@@ -99,6 +125,14 @@ func collectSession(a transcript.Adapter, s transcript.Session, since time.Time,
 				Instrument: instrument,
 			}
 			byID[key] = u
+		}
+		// The first directory the session recorded is where it was launched, and it
+		// decides the root even when it resolves to none: a harness that records
+		// the live shell directory moves it afterwards, so a later entry would
+		// attribute the session to whichever repository it happened to visit.
+		if e.Cwd != "" && !seeded[key] {
+			seeded[key] = true
+			u.RepoRoot = roots.rootOf(e.Cwd)
 		}
 		ts := parseTS(e.Timestamp)
 		if ts > 0 {
@@ -167,7 +201,13 @@ func Merge(stored, fresh []mine.SessionUnit) []mine.SessionUnit {
 	for _, list := range [][]mine.SessionUnit{stored, fresh} {
 		for i := range list {
 			u := list[i]
-			byID[u.Harness+"\x1f"+u.SessionID] = &u
+			key := u.Harness + "\x1f" + u.SessionID
+			// A root resolved once is kept when a later build cannot resolve it,
+			// because the directory a rebuild reads may no longer exist.
+			if prev, ok := byID[key]; ok && u.RepoRoot == "" {
+				u.RepoRoot = prev.RepoRoot
+			}
+			byID[key] = &u
 		}
 	}
 	return sorted(byID)

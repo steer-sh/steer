@@ -2,10 +2,14 @@ package sessions
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
+	"github.com/steer-sh/steer-cli/internal/harness"
+	"github.com/steer-sh/steer-cli/internal/transcript"
 )
 
 func unit(harness, id string, start, end float64, texts ...string) mine.SessionUnit {
@@ -148,5 +152,116 @@ func TestRefreshNeverRewritesAnotherHostsSessions(t *testing.T) {
 	}
 	if len(own) != 1 || own[0].SessionID != "mine" {
 		t.Errorf("our shard must hold only our sessions, got %+v", own)
+	}
+}
+
+func TestMergeKeepsARootTheRebuildCouldNotResolve(t *testing.T) {
+	withRoot := func(u mine.SessionUnit, root string) mine.SessionUnit {
+		u.RepoRoot = root
+		return u
+	}
+	stored := []mine.SessionUnit{
+		withRoot(unit("claude-code", "live", 2000, 2100), "/repo/demo"),
+		withRoot(unit("claude-code", "moved", 2000, 2100), "/repo/demo"),
+	}
+	fresh := []mine.SessionUnit{
+		unit("claude-code", "live", 2000, 2200),
+		withRoot(unit("claude-code", "moved", 2000, 2200), "/repo/elsewhere"),
+	}
+	byID := map[string]mine.SessionUnit{}
+	for _, u := range Merge(stored, fresh) {
+		byID[u.SessionID] = u
+	}
+	if got := byID["live"].RepoRoot; got != "/repo/demo" {
+		t.Errorf("an unresolved rebuild dropped the stored root: got %q", got)
+	}
+	if got := byID["moved"].RepoRoot; got != "/repo/elsewhere" {
+		t.Errorf("a resolved rebuild must win: got %q", got)
+	}
+}
+
+func TestRootCacheResolvesADirectoryToItsRepositoryRoot(t *testing.T) {
+	root := t.TempDir()
+	if out, err := exec.Command("git", "-C", root, "init").CombinedOutput(); err != nil {
+		t.Skipf("git init unavailable: %s", out)
+	}
+	sub := filepath.Join(root, "cli")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c := rootCache{}
+	if got := c.rootOf(sub); got != resolved {
+		t.Errorf("rootOf(subdirectory) = %q; want %q", got, resolved)
+	}
+	if got := c.rootOf(root); got != resolved {
+		t.Errorf("rootOf(root) = %q; want %q", got, resolved)
+	}
+	if got := c.rootOf(""); got != "" {
+		t.Errorf("rootOf(no directory) = %q; want empty", got)
+	}
+	outside := t.TempDir()
+	if got := c.rootOf(outside); got != "" {
+		t.Errorf("rootOf(outside a repository) = %q; want empty", got)
+	}
+}
+
+// stubAdapter emits a fixed event list, so a test can decide what working
+// directories a session recorded and in what order.
+type stubAdapter struct{ events []transcript.Event }
+
+func (stubAdapter) Harness() harness.ID   { return harness.ClaudeCode }
+func (stubAdapter) Instrument() string    { return "claude-code:test" }
+func (stubAdapter) Root() (string, error) { return "", nil }
+func (stubAdapter) Discover(string, transcript.Filter) ([]transcript.Session, error) {
+	return nil, nil
+}
+
+func (a stubAdapter) Stream(_ transcript.Session, _ transcript.Filter,
+	emit func(transcript.Event) error) (transcript.Counts, error) {
+	for _, e := range a.events {
+		if err := emit(e); err != nil {
+			return transcript.Counts{}, err
+		}
+	}
+	return transcript.Counts{}, nil
+}
+
+// A session's root is its launch directory's. A harness records the live shell
+// directory, so a session that visits a repository must not be attributed to it.
+func TestTheLaunchDirectoryDecidesTheRootEvenWhenItResolvesToNone(t *testing.T) {
+	repo := t.TempDir()
+	if out, err := exec.Command("git", "-C", repo, "init").CombinedOutput(); err != nil {
+		t.Skipf("git init unavailable: %s", out)
+	}
+	outside := t.TempDir()
+
+	collect := func(cwds ...string) mine.SessionUnit {
+		var events []transcript.Event
+		for i, cwd := range cwds {
+			events = append(events, transcript.Event{
+				Kind: transcript.KindHumanTurn, SessionID: "s1",
+				Timestamp: "2026-07-10T00:00:0" + string(rune('0'+i)) + "Z", Cwd: cwd,
+			})
+		}
+		byID := map[string]*mine.SessionUnit{}
+		collectSession(stubAdapter{events}, transcript.Session{}, time.Time{},
+			"parser/1", rootCache{}, map[string]bool{}, byID)
+		return *byID["claude-code\x1fs1"]
+	}
+
+	if got := collect(outside, repo).RepoRoot; got != "" {
+		t.Errorf("a session launched outside a repository took the root it visited: %q", got)
+	}
+	resolved, err := filepath.EvalSymlinks(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := collect("", repo, outside).RepoRoot; got != resolved {
+		t.Errorf("the first recorded directory must decide the root: got %q, want %q", got, resolved)
 	}
 }

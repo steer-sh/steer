@@ -37,12 +37,17 @@ type SessionSignal struct {
 // normalizes both harnesses into this before the engine sees it. Project is the
 // normalized project key, which a scope's repo predicate matches.
 type SessionUnit struct {
-	Harness   string          `json:"harness"`
-	SessionID string          `json:"session_id"`
-	Project   string          `json:"project"`
-	StartTS   float64         `json:"start_ts"`
-	EndTS     float64         `json:"end_ts"`
-	Signals   []SessionSignal `json:"signals"`
+	Harness   string `json:"harness"`
+	SessionID string `json:"session_id"`
+	Project   string `json:"project"`
+	// RepoRoot is the absolute git root of the directory this session ran in,
+	// resolved at ingestion. It is empty for a session ingested before this field
+	// existed and for one that ran outside a repository, which the scope reads as
+	// unknown rather than as a mismatch.
+	RepoRoot string          `json:"repo_root,omitempty"`
+	StartTS  float64         `json:"start_ts"`
+	EndTS    float64         `json:"end_ts"`
+	Signals  []SessionSignal `json:"signals"`
 	// Instrument is the pipeline that produced this session's signals: the
 	// classifier, and the adapter that normalized this harness's transcript.
 	Instrument string `json:"instrument,omitempty"`
@@ -57,8 +62,8 @@ func (u SessionUnit) Subject() Subject {
 		HarnessKnown:  u.Harness != "",
 		Repo:          u.Project,
 		RepoKnown:     u.Project != "",
-		RepoRoot:      u.Project,
-		RepoRootKnown: u.Project != "",
+		RepoRoot:      u.RepoRoot,
+		RepoRootKnown: u.RepoRoot != "",
 	}
 }
 

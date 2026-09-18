@@ -253,3 +253,26 @@ func TestLoadFiringsDeduplicatesAcrossStores(t *testing.T) {
 	check(t, "no store is not an empty store", absent, false)
 	check(t, "and yields no firings", len(none), 0)
 }
+
+// A session launched below the repository root is the exact-root defect's widest
+// trigger: its subject must carry the resolved git root, not the launch directory.
+func TestSessionSubjectReadsTheResolvedRepositoryRoot(t *testing.T) {
+	scope := &Scope{RepoRoot: "/repo/demo"}
+
+	below := SessionUnit{Harness: "claude-code", SessionID: "s1",
+		Project: "-repo-demo-cli", RepoRoot: "/repo/demo"}
+	if got := scope.ClassifySubject(below.Subject()); got != Eligible {
+		t.Errorf("a session launched in a subdirectory = %v; want Eligible", got)
+	}
+
+	elsewhere := SessionUnit{Harness: "claude-code", SessionID: "s2",
+		Project: "-repo-other", RepoRoot: "/repo/other"}
+	if got := scope.ClassifySubject(elsewhere.Subject()); got != Ineligible {
+		t.Errorf("a session in another repository = %v; want Ineligible", got)
+	}
+
+	legacy := SessionUnit{Harness: "claude-code", SessionID: "s3", Project: "-repo-demo"}
+	if got := scope.ClassifySubject(legacy.Subject()); got != Unknown {
+		t.Errorf("a session stored before the root was captured = %v; want Unknown", got)
+	}
+}
