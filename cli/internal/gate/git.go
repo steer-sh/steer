@@ -35,18 +35,27 @@ const (
 // Toplevel is the git work-tree root for dir, or its resolved path when git cannot
 // answer. The fallback keeps a path git rejects — a fixture repo the command is about
 // to create — in a slot of its own rather than merging it into the real chain.
+// Both paths canonicalize, so a root reaches evidence in one spelling whenever the
+// resolution succeeds; Canonical states what a failed step leaves.
 func Toplevel(dir string) string {
 	if dir == "" {
 		dir = "."
 	}
 	if out, ok := Git(dir, gitShort, "rev-parse", "--show-toplevel"); ok {
 		if top := strings.TrimSpace(out); top != "" {
-			return top
+			return Canonical(top)
 		}
 	}
-	abs, err := filepath.Abs(dir)
+	return Canonical(dir)
+}
+
+// Canonical is path as absolute and symlink-free: the one spelling of a repository
+// root that evidence carries. It returns the best form it reached when a step fails,
+// because a caller that needs a path to open must still get one.
+func Canonical(path string) string {
+	abs, err := filepath.Abs(path)
 	if err != nil {
-		return dir
+		return path
 	}
 	resolved, err := filepath.EvalSymlinks(abs)
 	if err != nil {

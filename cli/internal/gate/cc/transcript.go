@@ -210,8 +210,13 @@ func RepoFields(cwd string) gate.Row {
 		return gate.Row{}
 	}
 	fields := gate.Row{}
+	// Canonical, because a session subject's root is canonical and one eligibility
+	// predicate compares the two. An absent repo stays absent: a cwd git rejects is
+	// not a repository, and the fallback path is not evidence of one.
 	if top, ok := gate.Git(cwd, 5*time.Second, "rev-parse", "--show-toplevel"); ok {
-		fields["repo"] = strings.TrimSpace(top)
+		if trimmed := strings.TrimSpace(top); trimmed != "" {
+			fields["repo"] = gate.Canonical(trimmed)
+		}
 	}
 	if head, ok := gate.Git(cwd, 5*time.Second, "rev-parse", "HEAD"); ok {
 		sha := strings.TrimSpace(head)
