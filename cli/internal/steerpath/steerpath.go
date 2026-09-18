@@ -6,9 +6,11 @@ package steerpath
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 )
 
 // steerHome is the neutral root holding everything Steer owns: the guard store
@@ -66,22 +68,105 @@ func stateDir(root, component string) string {
 	return filepath.Join(home, root, stateDirName, component)
 }
 
-// HooksDir returns the neutral guard directory for a scope. Project scope is
-// relative to the working directory, matching how a project registration names
-// its master hook.
-func HooksDir(scope string) (string, error) {
-	return scopedDir(scope, steerHome)
+// projectRoots caches a resolved repository root by the directory it was
+// resolved from. Only a success is cached: a directory that is not a repository
+// yet can become one inside one process, and a check-tier command creates
+// repositories.
+var projectRoots sync.Map
+
+// PhysicalDir returns dir as an absolute path with its symlinks resolved, and
+// the working directory for "". A caller comparing a path to a git answer needs
+// this form, because git reports the physical path.
+func PhysicalDir(dir string) (string, error) {
+	if dir == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return "", err
+		}
+		dir = cwd
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		return resolved, nil
+	}
+	return abs, nil
+}
+
+// ProjectRoot returns the directory project scope resolves against for the
+// working directory. See ProjectRootOf.
+func ProjectRoot() (string, error) { return ProjectRootOf("") }
+
+// ProjectRootOf returns the directory project scope resolves against for dir,
+// which is "" for the working directory: the repository containing dir, or dir
+// itself when it is in none. A project store belongs to a repository, so a
+// command run from a subdirectory reads and writes the same store as one run
+// from the root.
+//
+// dir is resolved through EvalSymlinks first, because git reports the physical
+// path and a caller comparing the two would otherwise find no common parent. The
+// root is git's own answer, not a canonical identity: it anchors filesystem
+// access, and nothing compares it to a stored root.
+func ProjectRootOf(dir string) (string, error) {
+	abs, err := PhysicalDir(dir)
+	if err != nil {
+		return "", err
+	}
+	if root, ok := projectRoots.Load(abs); ok {
+		return root.(string), nil
+	}
+	out, err := exec.Command("git", "-C", abs, "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		return abs, nil
+	}
+	root := strings.TrimSpace(string(out))
+	if root == "" {
+		return abs, nil
+	}
+	projectRoots.Store(abs, root)
+	return root, nil
+}
+
+// HooksDir returns the neutral guard directory for a scope, for the working
+// directory's repository. See HooksDirIn.
+func HooksDir(scope string) (string, error) { return HooksDirIn(scope, "") }
+
+// HooksDirIn returns the neutral guard directory of the repository holding dir,
+// which is "" for the working directory. It is a filesystem path; the path a
+// registration names is hookstore.MasterRegistration, and the path a git object
+// read uses is ProjectHooksRel.
+func HooksDirIn(scope, dir string) (string, error) {
+	return scopedDir(scope, steerHome, dir)
+}
+
+// ProjectHooksRel returns the guard store's path relative to the repository root,
+// neutral store first and legacy second. A git object path is repository-relative
+// by definition, so a reader of a committed store uses this rather than HooksDir.
+func ProjectHooksRel() []string {
+	return []string{
+		filepath.Join(steerHome, hooksDirName),
+		filepath.Join(legacyHome, hooksDirName),
+	}
 }
 
 // LegacyHooksDir returns the guard directory Steer wrote before the store moved.
-func LegacyHooksDir(scope string) (string, error) {
-	return scopedDir(scope, legacyHome)
+func LegacyHooksDir(scope string) (string, error) { return LegacyHooksDirIn(scope, "") }
+
+// LegacyHooksDirIn is LegacyHooksDir for the repository holding dir.
+func LegacyHooksDirIn(scope, dir string) (string, error) {
+	return scopedDir(scope, legacyHome, dir)
 }
 
-func scopedDir(scope, root string) (string, error) {
+func scopedDir(scope, root, dir string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(scope)) {
 	case ProjectScope:
-		return filepath.Join(root, hooksDirName), nil
+		project, err := ProjectRootOf(dir)
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(project, root, hooksDirName), nil
 	case GlobalScope:
 		home, err := os.UserHomeDir()
 		if err != nil {

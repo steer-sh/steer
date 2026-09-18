@@ -186,6 +186,13 @@ func SyncStore(scope string, targets ...harness.Registrar) (*SyncResult, error) 
 	if err != nil {
 		return nil, err
 	}
+	// A target reports the path its registration names, which under project scope
+	// is relative to the config it was read from. Comparing that to the store's own
+	// path would re-register on every sync run outside the repository root.
+	registration, err := hookstore.MasterRegistration(scope, "")
+	if err != nil {
+		return nil, err
+	}
 	result := &SyncResult{Scope: scope, Hooks: len(hooks), MasterPath: master}
 	if len(hooks) > 0 {
 		if err := MasterCovers(scope); err != nil {
@@ -202,7 +209,7 @@ func SyncStore(scope string, targets ...harness.Registrar) (*SyncResult, error) 
 		if err != nil {
 			return nil, err
 		}
-		register := len(hooks) > 0 && !SamePath(registered, master)
+		register := len(hooks) > 0 && !SamePath(registered, registration)
 		deregister := len(hooks) == 0 && registered != ""
 		presence, readErr := TargetRulesPresence(scope, target)
 		rewrite := readErr != nil || presence.Drifted()
@@ -231,7 +238,8 @@ func SyncStore(scope string, targets ...harness.Registrar) (*SyncResult, error) 
 }
 
 // SamePath reports whether two master paths name one file. A project path is
-// relative to the repository root, so both resolve against the working directory.
+// relative to the harness config that carries it, and a caller reads that config
+// at the working directory, so both resolve against the working directory.
 func SamePath(a, b string) bool {
 	if a == "" || b == "" {
 		return false

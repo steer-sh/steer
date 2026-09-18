@@ -25,10 +25,11 @@ const MasterStatusMessage = "checking the change against your rules ..."
 // must leave the other registered.
 func isMaster(command string) bool { return hookstore.IsMasterCommand(command) }
 
-// MasterCommand is the hooks.json command value for the guard master. The master
-// serves every harness and reads its reply contract off this flag.
-func MasterCommand(scope string) (string, error) {
-	master, err := hookstore.MasterPath(scope)
+// MasterCommand is the hooks.json command value for the guard master, for the
+// hooks.json under cwd. The master serves every harness and reads its reply
+// contract off this flag.
+func MasterCommand(scope, cwd string) (string, error) {
+	master, err := hookstore.MasterRegistration(scope, cwd)
 	if err != nil {
 		return "", err
 	}
@@ -38,7 +39,7 @@ func MasterCommand(scope string) (string, error) {
 // RegisterMaster upserts the guard master's PreToolUse handler, preserving every
 // other key and every other steer channel.
 func RegisterMaster(scope, cwd string) (string, error) {
-	command, err := MasterCommand(scope)
+	command, err := MasterCommand(scope, cwd)
 	if err != nil {
 		return "", err
 	}
@@ -102,7 +103,8 @@ func MasterArming(scope, cwd string) Arming {
 }
 
 // InstructionFile names the AGENTS.md this scope's rules are written to. Project
-// scope stays relative, matching how the guard store names a project path.
+// scope resolves against the working directory, which the guard store no longer
+// does: the store anchors at the repository root.
 func InstructionFile(scope, cwd string) (string, error) {
 	entry, _ := harness.Get(harness.Codex)
 	switch strings.ToLower(strings.TrimSpace(scope)) {
@@ -120,8 +122,9 @@ func InstructionFile(scope, cwd string) (string, error) {
 }
 
 // Registrar adapts Codex to the guard lifecycle: hooks.json for the master hook,
-// AGENTS.md for the rules. Project paths resolve against the working directory,
-// which is the repository root every steer command runs from.
+// AGENTS.md for the rules. Project paths resolve against the working directory;
+// the guard store resolves against the repository root, so the two differ when a
+// command runs from a subdirectory.
 type Registrar struct{}
 
 func (Registrar) Harness() harness.Harness {

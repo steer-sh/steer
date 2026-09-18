@@ -62,7 +62,19 @@ migration ownership:
   `PrepareAll` prepares all components. Writing entry points call `prepareState`
   before resolving paths. Reads leave migration to writers.
 - `internal/hookstore/`: project/global guard stores under `.steer/hooks` and
-  `~/.steer/hooks`. Legacy `.claude/hooks` is eligible while it has the manifest
+  `~/.steer/hooks`. A project store belongs to a repository: `steerpath.ProjectRoot`
+  anchors it at the repository containing the working directory, so a command run
+  from a subdirectory reads and writes the same store as one run from the root.
+  Three forms of that path are distinct. `HooksDir` is the filesystem path.
+  `hookstore.MasterRegistration` is what a registration names: relative to the
+  directory holding the harness config, because a harness resolves a project
+  registration against that directory. A comparison against a registered value uses
+  it on both sides. Each resolver has an `…In`/`…Of` form taking that directory, so
+  a registrar handed another checkout resolves that checkout's store rather than
+  the process's.
+  `steerpath.ProjectHooksRel` is the repository-relative path a git object read or
+  another checkout's store is addressed by; it never depends on the working
+  directory. Legacy `.claude/hooks` is eligible while it has the manifest
   and the neutral store does not. Migration copies manifest-owned guards, the
   master and audit log, landing the manifest last. This migration does not copy
   `fixtures/`; when migrating a legacy store, check fixture availability separately.

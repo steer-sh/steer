@@ -83,7 +83,8 @@ func consolidateFiles(t *testing.T, files map[string]string) string {
 	}
 	t.Cleanup(func() { _ = os.Chdir(origWd) })
 
-	hooksDir := filepath.Join(dir, mustHooksDir(t))
+	// The store resolves against the repository root, which is this chdir target.
+	hooksDir := mustHooksDir(t)
 	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +120,8 @@ func consolidateWithManifest(t *testing.T, hookContent string, entry ManifestEnt
 	}
 	t.Cleanup(func() { _ = os.Chdir(origWd) })
 
-	hooksDir := filepath.Join(dir, mustHooksDir(t))
+	// The store resolves against the repository root, which is this chdir target.
+	hooksDir := mustHooksDir(t)
 	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
 		t.Fatal(err)
 	}

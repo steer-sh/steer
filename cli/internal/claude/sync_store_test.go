@@ -76,7 +76,7 @@ func storeBytes(t *testing.T) map[string]string {
 func TestSyncStoreRegistersTheCommittedMasterAsItIs(t *testing.T) {
 	withProjectTempDir(t)
 	installTestHook(t, "no-bare-python", "use python3 instead")
-	master := ageMaster(t)
+	ageMaster(t)
 	asCommittedClone(t)
 	before := storeBytes(t)
 
@@ -87,9 +87,15 @@ func TestSyncStoreRegistersTheCommittedMasterAsItIs(t *testing.T) {
 	if len(result.Synced) != 1 || result.Hooks != 1 {
 		t.Fatalf("result = %#v", result)
 	}
+	// The registration names the master relative to the repository root; ageMaster
+	// returned the store path that names the same file.
+	want, err := hookstore.MasterRegistration(ProjectScope, "")
+	if err != nil {
+		t.Fatalf("MasterRegistration returned error: %v", err)
+	}
 	registered, err := Registrar{}.RegisteredMasterPath(ProjectScope)
-	if err != nil || registered != master {
-		t.Fatalf("registered %q (%v), want %q", registered, err, master)
+	if err != nil || registered != want {
+		t.Fatalf("registered %q (%v), want %q", registered, err, want)
 	}
 	if !strings.Contains(readRules(t, ProjectScope), "- use python3 instead") {
 		t.Fatal("the rules section was not written")

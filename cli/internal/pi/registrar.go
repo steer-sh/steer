@@ -131,12 +131,13 @@ func RegisterMaster(scope, cwd string) (string, error) {
 	} else if !os.IsNotExist(readErr) {
 		return path, readErr
 	}
-	master, err := hookstore.MasterPath(scope)
+	master, err := hookstore.MasterRegistration(scope, cwd)
 	if err != nil {
 		return path, err
 	}
-	// A project path stays relative to the repository root: the bridge runs the
-	// master with Pi's working directory, which is the directory holding .pi/.
+	// A project path stays relative: the bridge runs the master with Pi's working
+	// directory, which is the directory holding .pi/, and MasterRegistration
+	// anchors at that same directory.
 	if scope == harness.ProjectScope && !filepath.IsAbs(master) {
 		master = filepath.ToSlash(master)
 	} else if master, err = filepath.Abs(master); err != nil {

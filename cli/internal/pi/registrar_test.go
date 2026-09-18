@@ -75,6 +75,8 @@ func TestRegistrarRoundTripBakesTheRegisteredMasterPath(t *testing.T) {
 // never the checkout that wrote it.
 func TestProjectRegistrarNamesTheMasterRelativeToTheRepository(t *testing.T) {
 	isolateHome(t)
+	// The target decides both the bridge's directory and the store's repository,
+	// so a registration written for one checkout never names another.
 	target := t.TempDir()
 	path, err := RegisterMaster(harness.ProjectScope, target)
 	if err != nil {

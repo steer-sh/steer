@@ -73,10 +73,8 @@ func projectManifestAtHead(repo string) ([]byte, bool) {
 // neutral store first.
 func projectManifestPaths() []string {
 	var paths []string
-	for _, dirOf := range []func(string) (string, error){steerpath.HooksDir, steerpath.LegacyHooksDir} {
-		if dir, err := dirOf(steerpath.ProjectScope); err == nil {
-			paths = append(paths, filepath.ToSlash(filepath.Join(dir, hookstore.ManifestName)))
-		}
+	for _, dir := range steerpath.ProjectHooksRel() {
+		paths = append(paths, filepath.ToSlash(filepath.Join(dir, hookstore.ManifestName)))
 	}
 	return paths
 }

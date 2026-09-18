@@ -27,19 +27,63 @@ const (
 )
 
 // Dir returns the neutral guard directory for a scope, whether or not it exists.
-func Dir(scope string) (string, error) { return steerpath.HooksDir(scope) }
+func Dir(scope string) (string, error) { return DirIn(scope, "") }
+
+// DirIn is Dir for the repository holding dir, which is "" for the working
+// directory.
+func DirIn(scope, dir string) (string, error) { return steerpath.HooksDirIn(scope, dir) }
 
 // LegacyDir returns the guard directory Steer wrote before the store moved.
-func LegacyDir(scope string) (string, error) { return steerpath.LegacyHooksDir(scope) }
+func LegacyDir(scope string) (string, error) { return LegacyDirIn(scope, "") }
 
-// MasterPath names the generated master hook inside the resolved store. Project
-// scope stays relative, which is how a project registration names it.
-func MasterPath(scope string) (string, error) {
-	dir, err := Resolve(scope)
+// LegacyDirIn is LegacyDir for the repository holding dir.
+func LegacyDirIn(scope, dir string) (string, error) {
+	return steerpath.LegacyHooksDirIn(scope, dir)
+}
+
+// MasterPath names the generated master hook inside the resolved store. It is a
+// filesystem path, absolute under project scope; MasterRegistration renders the
+// form a registration names.
+func MasterPath(scope string) (string, error) { return MasterPathIn(scope, "") }
+
+// MasterPathIn is MasterPath for the repository holding dir.
+func MasterPathIn(scope, dir string) (string, error) {
+	store, err := ResolveIn(scope, dir)
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, MasterName), nil
+	return filepath.Join(store, MasterName), nil
+}
+
+// MasterRegistration names the master as a registration must name it: under
+// project scope a path relative to the working directory, under global scope the
+// absolute path. A registration travels with the repository, so it cannot carry
+// this machine's absolute path.
+//
+// configDir is the directory holding the harness config that will carry this
+// path, because a harness resolves a project registration against that directory
+// and not against the repository. Passing "" uses the working directory. A
+// registration written at the repository root, which is the ordinary case, is the
+// same `.steer/hooks` path it always was.
+func MasterRegistration(scope, configDir string) (string, error) {
+	path, err := MasterPathIn(scope, configDir)
+	if err != nil {
+		return "", err
+	}
+	if !strings.EqualFold(strings.TrimSpace(scope), steerpath.ProjectScope) {
+		return path, nil
+	}
+	// The store was resolved for configDir's own repository, so both sides are
+	// the physical path and Rel finds the common parent.
+	anchor, err := steerpath.PhysicalDir(configDir)
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(anchor, path)
+	if err != nil {
+		return path, nil
+	}
+	return rel, nil
 }
 
 // IsMasterCommand reports whether a registered hook command runs Steer's master.
@@ -49,15 +93,19 @@ func IsMasterCommand(command string) bool { return strings.Contains(command, Mas
 // Resolve names the directory a reader should read. It is the legacy directory
 // only while that one holds a store and the neutral one does not, so a machine
 // that has never migrated keeps working and a migrated machine never reads back.
-func Resolve(scope string) (string, error) {
-	neutral, err := Dir(scope)
+func Resolve(scope string) (string, error) { return ResolveIn(scope, "") }
+
+// ResolveIn is Resolve for the repository holding dir, which is "" for the
+// working directory.
+func ResolveIn(scope, dir string) (string, error) {
+	neutral, err := DirIn(scope, dir)
 	if err != nil {
 		return "", err
 	}
 	if populated(neutral) {
 		return neutral, nil
 	}
-	legacy, err := LegacyDir(scope)
+	legacy, err := LegacyDirIn(scope, dir)
 	if err != nil {
 		return "", err
 	}

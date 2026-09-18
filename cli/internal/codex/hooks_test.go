@@ -225,7 +225,7 @@ func TestReRegistrationKeepsEveryHandlerAtItsIndex(t *testing.T) {
 	if _, err := RegisterCheckHook("global", "", check, 330); err != nil {
 		t.Fatal(err)
 	}
-	master, err := MasterCommand("global")
+	master, err := MasterCommand("global", ".")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -58,30 +59,30 @@ func read(t *testing.T, path string) string {
 }
 
 func TestResolveIsNeutralOnAnEmptyMachine(t *testing.T) {
-	projectRoot(t)
+	root := projectRoot(t)
 	got, err := Resolve("project")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := filepath.Join(".steer", "hooks"); got != want {
+	if want := filepath.Join(root, ".steer", "hooks"); got != want {
 		t.Errorf("Resolve = %q; want %q", got, want)
 	}
 }
 
 func TestResolveReadsALegacyStoreThatNeverMigrated(t *testing.T) {
-	projectRoot(t)
+	root := projectRoot(t)
 	writeLegacy(t, map[string]string{ManifestName: manifest})
 	got, err := Resolve("project")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := filepath.Join(".claude", "hooks"); got != want {
+	if want := filepath.Join(root, ".claude", "hooks"); got != want {
 		t.Errorf("Resolve = %q; want %q", got, want)
 	}
 }
 
 func TestPrepareMovesTheStoreAndLeavesEveryOtherHookAlone(t *testing.T) {
-	projectRoot(t)
+	root := projectRoot(t)
 	writeLegacy(t, map[string]string{
 		ManifestName:     manifest,
 		MasterName:       "print('master')\n",
@@ -95,7 +96,7 @@ func TestPrepareMovesTheStoreAndLeavesEveryOtherHookAlone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := filepath.Join(".steer", "hooks"); dir != want {
+	if want := filepath.Join(root, ".steer", "hooks"); dir != want {
 		t.Fatalf("Prepare = %q; want %q", dir, want)
 	}
 	for name, want := range map[string]string{
@@ -288,5 +289,159 @@ func TestPrepareAddsTheAuditEntryToAnExistingGitignoreOnce(t *testing.T) {
 	}
 	if got, want := read(t, path), "fixtures/scratch\n"+AuditName+"\n"; got != want {
 		t.Errorf("%s = %q; want %q", IgnoreName, got, want)
+	}
+}
+
+// repoWithSub builds a repository with one subdirectory, both resolved.
+func repoWithSub(t *testing.T) (root, sub string) {
+	t.Helper()
+	dir := t.TempDir()
+	if out, err := exec.Command("git", "-C", dir, "init").CombinedOutput(); err != nil {
+		t.Skipf("git init unavailable: %s", out)
+	}
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub = filepath.Join(resolved, "cli")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return resolved, sub
+}
+
+// A mutation from a subdirectory writes the repository's store, and a read from
+// the root finds it. The two directories held separate stores before.
+func TestPrepareFromASubdirectoryWritesTheRepositorysStore(t *testing.T) {
+	root, sub := repoWithSub(t)
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+
+	if err := os.Chdir(sub); err != nil {
+		t.Fatal(err)
+	}
+	dir, err := Prepare("project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(root, ".steer", "hooks"); dir != want {
+		t.Fatalf("Prepare from a subdirectory = %q; want %q", dir, want)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ManifestName), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Resolve("project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != dir {
+		t.Fatalf("Resolve from the root = %q; want the store the subdirectory wrote %q", got, dir)
+	}
+}
+
+// A registration must resolve against the directory holding the harness config,
+// which every harness still writes at the working directory. From the repository
+// root that is the store's own path; from a subdirectory it climbs to it.
+func TestMasterRegistrationResolvesFromTheDirectoryItIsWrittenIn(t *testing.T) {
+	root, sub := repoWithSub(t)
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	fromRoot, err := MasterRegistration("project", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(".steer", "hooks", MasterName); fromRoot != want {
+		t.Fatalf("MasterRegistration at the root = %q; want %q", fromRoot, want)
+	}
+
+	if err := os.Chdir(sub); err != nil {
+		t.Fatal(err)
+	}
+	fromSub, err := MasterRegistration("project", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join("..", ".steer", "hooks", MasterName); fromSub != want {
+		t.Fatalf("MasterRegistration in a subdirectory = %q; want %q", fromSub, want)
+	}
+	// Both name the one master the store holds.
+	store, err := MasterPath("project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	abs, err := filepath.Abs(fromSub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if abs != store {
+		t.Errorf("the registration resolves to %q; want the store's master %q", abs, store)
+	}
+
+	global, err := MasterRegistration("global", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !filepath.IsAbs(global) {
+		t.Errorf("a global registration = %q; want an absolute path", global)
+	}
+}
+
+// A registration is computed for the repository holding the config directory,
+// not for the one the process stands in. A caller that names another checkout,
+// such as a harness registrar handed a project directory, gets that checkout's
+// master.
+func TestMasterRegistrationUsesTheConfigDirectorysRepository(t *testing.T) {
+	other, _ := repoWithSub(t)
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+	here, _ := repoWithSub(t)
+	if err := os.Chdir(here); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := MasterRegistration("project", other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(".steer", "hooks", MasterName); got != want {
+		t.Fatalf("MasterRegistration for another checkout = %q; want %q", got, want)
+	}
+	if filepath.IsAbs(got) || strings.HasPrefix(got, "..") {
+		t.Errorf("the registration escapes its own checkout: %q", got)
+	}
+}
+
+// A config directory named through a symlink still resolves against the physical
+// root git reports, so the registration does not climb to the filesystem root.
+func TestMasterRegistrationResolvesASymlinkedConfigDirectory(t *testing.T) {
+	root, _ := repoWithSub(t)
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(root, alias); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	got, err := MasterRegistration("project", alias)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(".steer", "hooks", MasterName); got != want {
+		t.Fatalf("MasterRegistration through an alias = %q; want %q", got, want)
 	}
 }

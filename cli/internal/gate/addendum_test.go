@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -272,5 +273,24 @@ func TestGlobalEntriesAreNotPending(t *testing.T) {
 	repo := committedAddendumRepo(t, map[string]string{"a": "entry"})
 	if got := pendingProjectAddendumNotice(repo, LoadAddendum(repo), []string{"a.py"}); got != "" {
 		t.Fatalf("notice = %q", got)
+	}
+}
+
+// The gate reads the project manifest by its repository-relative path, so a
+// reviewer sees the same entry wherever the command that reads it stands.
+func TestTheProjectAddendumIsReadFromASubdirectory(t *testing.T) {
+	repo := buildRepo(t, map[string]string{
+		".steer/hooks/steer-manifest.json": addendumManifest(t, map[string]string{"a": "committed entry"}),
+	})
+	gitCmd(t, repo, verb, "-qm", "init")
+	sub := filepath.Join(repo, "cli")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(sub)
+
+	got := entryTexts(LoadAddendum(repo))
+	if len(got) != 1 || got[0] != "project:a:committed entry" {
+		t.Fatalf("entries = %v, want the committed entry", got)
 	}
 }

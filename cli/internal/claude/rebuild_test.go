@@ -69,12 +69,16 @@ func TestRebuildRegistersTheFileItJustWrote(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RegisteredMasterPath returned error: %v", err)
 	}
-	if registered == legacyMaster {
+	// The registration is relative and legacyMaster is absolute, so they are
+	// compared as paths rather than as strings.
+	if SamePath(registered, legacyMaster) {
 		t.Fatal("settings.json still invokes the legacy master")
 	}
-	neutral, err := hookstore.MasterPath(ProjectScope)
+	// A registration names the master relative to the repository root, which is
+	// the form MasterRegistration renders.
+	neutral, err := hookstore.MasterRegistration(ProjectScope, "")
 	if err != nil {
-		t.Fatalf("MasterPath returned error: %v", err)
+		t.Fatalf("MasterRegistration returned error: %v", err)
 	}
 	if registered != neutral {
 		t.Fatalf("registered master: got %q, want %q", registered, neutral)

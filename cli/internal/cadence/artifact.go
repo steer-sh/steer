@@ -249,8 +249,11 @@ func placeProject(r mine.Record, repoRoot, prefix string, a *Artifact) (string, 
 // projectStore is the project store under a repository root: the neutral directory,
 // or the legacy one while only it holds a manifest, the order hookstore.Resolve reads.
 func projectStore(root string) string {
-	neutral, _ := steerpath.HooksDir(steerpath.ProjectScope)
-	legacy, _ := steerpath.LegacyHooksDir(steerpath.ProjectScope)
+	// The store of a named repository is read by its repository-relative path:
+	// HooksDir resolves against the working directory's repository, which is a
+	// different checkout whenever a reader inspects one it does not stand in.
+	rel := steerpath.ProjectHooksRel()
+	neutral, legacy := rel[0], rel[1]
 	if _, err := os.Stat(filepath.Join(root, neutral, hookstore.ManifestName)); err != nil {
 		if _, err := os.Stat(filepath.Join(root, legacy, hookstore.ManifestName)); err == nil {
 			return filepath.Join(root, legacy)

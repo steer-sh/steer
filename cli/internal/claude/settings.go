@@ -336,14 +336,17 @@ func GetMasterHookPath(scope string) (string, error) {
 }
 
 // GetMasterHookCommand returns the settings.json command value for the master hook.
-// Project scope intentionally uses a relative path.
+// Project scope names the master relative to the settings.json that carries it,
+// which Claude Code reads at the working directory, so the registration carries no
+// absolute path of this machine.
 func GetMasterHookCommand(scope string) (string, error) {
 	scope = normalizeScope(scope)
 	if err := ValidateScope(scope); err != nil {
 		return "", err
 	}
 
-	masterPath, err := GetMasterHookPath(scope)
+	// Claude Code reads a project settings.json at the working directory.
+	masterPath, err := hookstore.MasterRegistration(scope, "")
 	if err != nil {
 		return "", err
 	}
