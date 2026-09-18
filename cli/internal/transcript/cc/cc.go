@@ -99,6 +99,7 @@ type row struct {
 	IsSidechain bool     `json:"isSidechain"`
 	Timestamp   string   `json:"timestamp"`
 	SessionID   string   `json:"sessionId"`
+	Cwd         string   `json:"cwd"`
 	Message     *message `json:"message"`
 }
 
@@ -170,7 +171,9 @@ func (a Adapter) normalize(line []byte, f transcript.Filter, counts *transcript.
 	}
 	counts.Entries++
 
-	base := transcript.Event{SessionID: r.SessionID, Timestamp: r.Timestamp, Meta: r.IsMeta}
+	// Claude Code records the live shell working directory on each row, so Cwd
+	// moves within one session as the agent changes directory.
+	base := transcript.Event{SessionID: r.SessionID, Timestamp: r.Timestamp, Meta: r.IsMeta, Cwd: r.Cwd}
 
 	if r.Type == "assistant" {
 		return a.emitToolCalls(r.Message.Content, base, emit)

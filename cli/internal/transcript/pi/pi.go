@@ -326,6 +326,7 @@ type streamState struct {
 	replayed map[string]struct{}
 
 	sessionID string
+	cwd       string
 }
 
 // normalize reads one line. Skipped is reserved for a line Steer cannot read at
@@ -347,7 +348,7 @@ func (st *streamState) normalize(line []byte) error {
 	if e.Type == typeSession {
 		var h header
 		if err := json.Unmarshal(line, &h); err == nil {
-			st.sessionID = h.ID
+			st.sessionID, st.cwd = h.ID, h.Cwd
 		}
 		return nil
 	}
@@ -366,7 +367,7 @@ func (st *streamState) normalize(line []byte) error {
 
 	// ThreadID stays empty: Pi's id/parentId tree is in-file branching, not a
 	// subagent thread, and a fork writes its own file with its own header id.
-	base := transcript.Event{SessionID: st.sessionID, Timestamp: e.Timestamp}
+	base := transcript.Event{SessionID: st.sessionID, Timestamp: e.Timestamp, Cwd: st.cwd}
 	switch e.Message.Role {
 	case roleUser:
 		base.Kind, base.Text = transcript.KindHumanTurn, contentText(e.Message.Content)

@@ -319,3 +319,18 @@ func TestFailedExitReadsTheHeaderNotTheCommandOutput(t *testing.T) {
 		})
 	}
 }
+
+func TestEventsCarryTheHeadersWorkingDirectory(t *testing.T) {
+	root := t.TempDir()
+	path := writeRollout(t, root, "2026/08/29", "rollout-alpha.jsonl", rootRollout)
+
+	events, _ := collect(t, transcript.Session{Harness: harness.Codex, Path: path}, transcript.Filter{})
+	if len(events) == 0 {
+		t.Fatal("the rollout emitted no events")
+	}
+	for i, e := range events {
+		if e.Cwd != "/repo/alpha" {
+			t.Errorf("event %d Cwd = %q; want %q", i, e.Cwd, "/repo/alpha")
+		}
+	}
+}

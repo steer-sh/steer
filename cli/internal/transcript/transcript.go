@@ -65,6 +65,11 @@ type Event struct {
 	ToolUseID string
 	// IsError reports a failed tool result.
 	IsError bool
+	// Cwd is the working directory the harness recorded for this entry, absolute
+	// and in the harness's own form. It is session metadata rather than a
+	// classifier input, so ReplayDigest does not hash it and stamping it moves no
+	// adapter's instrument. A harness that records none leaves it empty.
+	Cwd string
 }
 
 // NormalizeProject collapses a path or a harness's munged form of one to a

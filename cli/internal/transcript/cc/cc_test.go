@@ -197,3 +197,25 @@ func TestStreamOnMissingFileReportsTheError(t *testing.T) {
 		t.Error("Stream on a missing transcript returned no error")
 	}
 }
+
+func TestEventsCarryTheRowsWorkingDirectory(t *testing.T) {
+	session := write(t, []string{
+		line(map[string]any{"type": "user", "sessionId": "s1", "timestamp": "2026-07-10T00:00:00Z",
+			"cwd": "/repo/demo", "message": map[string]any{"content": "first"}}),
+		line(map[string]any{"type": "user", "sessionId": "s1", "timestamp": "2026-07-10T00:00:01Z",
+			"cwd": "/repo/demo/cli", "message": map[string]any{"content": "second"}}),
+		line(map[string]any{"type": "user", "sessionId": "s1", "timestamp": "2026-07-10T00:00:02Z",
+			"message": map[string]any{"content": "third"}}),
+	})
+
+	events, _ := stream(t, session, transcript.Filter{})
+	want := []string{"/repo/demo", "/repo/demo/cli", ""}
+	if len(events) != len(want) {
+		t.Fatalf("got %d events; want %d", len(events), len(want))
+	}
+	for i, w := range want {
+		if events[i].Cwd != w {
+			t.Errorf("event %d Cwd = %q; want %q", i, events[i].Cwd, w)
+		}
+	}
+}

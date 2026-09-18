@@ -393,3 +393,15 @@ func TestContextTokensOfAnUnlinkableSessionReadsEveryEntry(t *testing.T) {
 		t.Fatalf("depth = %d, ok = %v", got, ok)
 	}
 }
+
+func TestEventsCarryTheHeadersWorkingDirectory(t *testing.T) {
+	events, _ := scan(t, "normal.jsonl")
+	if len(events) == 0 {
+		t.Fatal("the fixture emitted no events")
+	}
+	for i, e := range events {
+		if e.Cwd != "/repo/demo" {
+			t.Errorf("event %d Cwd = %q; want %q", i, e.Cwd, "/repo/demo")
+		}
+	}
+}

@@ -214,6 +214,7 @@ type streamState struct {
 
 	sessionID    string
 	threadID     string
+	cwd          string
 	historyStart int
 
 	sawPrimaryTurn bool
@@ -253,6 +254,7 @@ func (st *streamState) normalize(line []byte) error {
 		SessionID: st.sessionID,
 		ThreadID:  st.threadID,
 		Timestamp: r.Timestamp,
+		Cwd:       st.cwd,
 	}
 
 	switch {
@@ -281,6 +283,7 @@ func (st *streamState) readMeta(raw json.RawMessage) {
 	if st.sessionID == "" {
 		st.sessionID = meta.ID
 	}
+	st.cwd = meta.Cwd
 	if meta.ID != "" && meta.ID != st.sessionID {
 		st.threadID = meta.ID
 		st.historyStart = meta.SubagentHistoryStart
