@@ -8,7 +8,9 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/claude"
+	"github.com/steer-sh/steer-cli/internal/status"
 	"github.com/steer-sh/steer-cli/internal/styles"
+	"github.com/steer-sh/steer-cli/internal/tier"
 	"github.com/steer-sh/steer-cli/internal/utils"
 )
 
@@ -39,7 +41,7 @@ artifacts:
 
 		hook, err := claude.ResolveHook(scope, identifier)
 		if err != nil {
-			return err
+			return fmt.Errorf("%w\n%s", err, otherTierRemoveHint(identifier, scope))
 		}
 
 		if !force {
@@ -76,6 +78,23 @@ artifacts:
 		printFixtureVerification(result.Verification)
 		return nil
 	},
+}
+
+// otherTierRemoveHint names the remove command of each tier but the guard's, with
+// this identifier. A guard is all `steer remove` resolves, so an ID of another tier
+// arrives here as a missing guard. Checks are archived and removed per repository,
+// so the check line carries no scope.
+func otherTierRemoveHint(identifier, scope string) string {
+	hintScope := ""
+	if scope == claude.GlobalScope {
+		hintScope = scope
+	}
+	lines := []string{"steer remove takes a guard. Each other tier has its own remove command:"}
+	for _, t := range []tier.Kind{tier.Instruction, tier.Review} {
+		lines = append(lines, "  "+status.RemoveCommand(string(t), identifier, hintScope))
+	}
+	lines = append(lines, "  "+status.RemoveCommand(string(tier.Check), identifier, ""))
+	return strings.Join(lines, "\n")
 }
 
 func init() {

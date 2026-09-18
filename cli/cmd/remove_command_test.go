@@ -53,6 +53,45 @@ func TestRemoveCommandResolvesForEveryTier(t *testing.T) {
 	}
 }
 
+// TestRemoveHintNamesEveryOtherTiersCommand pins that a `steer remove` miss points
+// at the three other tiers' remove commands, each runnable with the identifier the
+// operator passed. The identifier of another tier reaches remove as a missing guard,
+// and the bare "hook not found" answers nothing.
+func TestRemoveHintNamesEveryOtherTiersCommand(t *testing.T) {
+	t.Cleanup(func() {
+		scope = claude.ProjectScope
+		rootCmd.PersistentFlags().Lookup("scope").Changed = false
+	})
+	for _, s := range []string{claude.ProjectScope, claude.GlobalScope} {
+		hint := otherTierRemoveHint("my-fix", s)
+		if strings.Contains(hint, "steer remove my-fix") {
+			t.Errorf("%s: the hint repeats the guard command it follows:\n%s", s, hint)
+		}
+		for _, k := range []tier.Kind{tier.Instruction, tier.Review, tier.Check} {
+			hintScope := ""
+			if s == claude.GlobalScope && k != tier.Check {
+				hintScope = s
+			}
+			want := status.RemoveCommand(string(k), "my-fix", hintScope)
+			if !strings.Contains(hint, want) {
+				t.Errorf("%s: the hint does not offer %q:\n%s", s, want, hint)
+			}
+			scope = claude.ProjectScope
+			fields := strings.Fields(want)
+			found, rest, err := rootCmd.Find(fields[1:])
+			if err != nil || !found.Runnable() {
+				t.Fatalf("%s: %q resolves to %q (err %v)", s, want, found.CommandPath(), err)
+			}
+			if err := found.ParseFlags(rest); err != nil {
+				t.Fatalf("%s: %q: %v", s, want, err)
+			}
+			if args := found.Flags().Args(); !slices.Equal(args, []string{"my-fix"}) {
+				t.Errorf("%s: %q passes arguments %q, want [my-fix]", s, want, args)
+			}
+		}
+	}
+}
+
 // TestGroupCommandRejectsUnknownSubcommand pins that a group command fails on a
 // subcommand it does not have, and still shows its help with no argument.
 func TestGroupCommandRejectsUnknownSubcommand(t *testing.T) {
