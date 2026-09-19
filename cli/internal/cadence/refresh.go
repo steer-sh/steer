@@ -281,8 +281,11 @@ func observationOf(v any) mine.Observation {
 // decision covers. Only a defect class (kind accepted) can decide an accepted
 // finding — a false-positive class decides rejected findings and leaves the
 // accepted defect undecided. Only a live decision counts: active or rejected, not
-// a removed or reworked record whose class no longer stands. It is an upper bound
-// the skill refines by clustering the dump.
+// a removed or reworked record whose class no longer stands. Only a decision
+// authored over this corpus counts: a class mined from session transcripts names
+// a pattern in a transcript, and its regex meeting a review finding's text is a
+// coincidence, not a classification. It is an upper bound the skill refines by
+// clustering the dump.
 func undecidedChains(chains []mine.Chain, records []mine.Record) int {
 	matchAll := regexp.MustCompile("")
 	var deciding []*regexp.Regexp
@@ -292,6 +295,9 @@ func undecidedChains(chains []mine.Chain, records []mine.Record) int {
 			continue
 		}
 		if mine.RecordKindFilter(r) != "accepted" {
+			continue
+		}
+		if mine.CorpusOf(r) != mine.CorpusReviewFindings || mine.UnitOf(r) != mine.UnitChain {
 			continue
 		}
 		re, err := regexp.Compile("(?i)" + str(r["match"]))

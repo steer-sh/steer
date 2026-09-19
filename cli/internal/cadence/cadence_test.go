@@ -201,6 +201,37 @@ func TestUndecidedChainsResidualFindingInMixedChain(t *testing.T) {
 	}
 }
 
+func TestUndecidedChainsIgnoresAnotherCorpusDecision(t *testing.T) {
+	// A transcript-friction class names a pattern in a session transcript. Its regex
+	// meeting a review finding's text decides nothing: the class was never authored
+	// over this corpus, so the finding stays undecided.
+	chains := []mine.Chain{{Findings: []mine.Finding{
+		{Verdict: "ACCEPTED", Text: "FileNotFoundError: [Errno 2] no such file"},
+	}}}
+	records := []mine.Record{
+		{"match": "FileNotFoundError", "kind": "defect", "status": "active",
+			"corpus": mine.CorpusTranscript, "unit": mine.UnitSession},
+	}
+	if got := undecidedChains(chains, records); got != 1 {
+		t.Errorf("a transcript class must not decide a review finding; want 1, got %d", got)
+	}
+}
+
+// pins existing behaviour
+func TestUndecidedChainsReadsAnUntaggedRecordAsReviewFindings(t *testing.T) {
+	// A record stored before the corpus tags existed carries neither tag. CorpusOf
+	// and UnitOf supply the review-findings defaults, so it keeps deciding.
+	chains := []mine.Chain{{Findings: []mine.Finding{
+		{Verdict: "ACCEPTED", Text: "widget parser drops a flag"},
+	}}}
+	records := []mine.Record{
+		{"match": "widget parser", "kind": "defect", "status": "active"},
+	}
+	if got := undecidedChains(chains, records); got != 0 {
+		t.Errorf("an untagged record still decides; want 0, got %d", got)
+	}
+}
+
 func TestNeedsAttention(t *testing.T) {
 	if !needsAttention(mine.Observation{Recurrence: mine.Recurrence{Occurred: true}}, struct{}{}, "instruction", nil) {
 		t.Error("recurrence should need attention")
