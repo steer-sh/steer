@@ -43,6 +43,7 @@ type interventionFlags struct {
 	findingsSince        float64
 	findingsStrictJoins  bool
 	findingsIncludeEmpty bool
+	findingsUndecided    bool
 	findingsJSON         bool
 
 	matchKind        string
@@ -467,6 +468,7 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 					Since:        v.findingsSince,
 					StrictJoins:  v.findingsStrictJoins,
 					IncludeEmpty: v.findingsIncludeEmpty,
+					Undecided:    v.findingsUndecided,
 					JSON:         v.findingsJSON,
 				})
 			},
@@ -476,6 +478,8 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 		f.Float64Var(&v.findingsSince, "since", 0, "only the last N days")
 		f.BoolVar(&v.findingsStrictJoins, "strict-joins", false, "round-joined rows only")
 		f.BoolVar(&v.findingsIncludeEmpty, "include-empty", false, "keep chains with no findings")
+		f.BoolVar(&v.findingsUndecided, "undecided", false,
+			"drop the chains a live class already covers, and mark the covered findings in the rest")
 		f.BoolVar(&v.findingsJSON, "json", false, "emit JSON")
 		cmds = append([]*cobra.Command{findings}, cmds...)
 	}

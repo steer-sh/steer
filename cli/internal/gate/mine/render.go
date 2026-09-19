@@ -66,7 +66,18 @@ type FindingsOpts struct {
 	Since        float64
 	StrictJoins  bool
 	IncludeEmpty bool
-	JSON         bool
+	// Undecided drops the chains whose every selected finding a live class already
+	// covers, and marks the covered findings inside the chains it keeps.
+	Undecided bool
+	JSON      bool
+}
+
+// RenderedFinding is a finding plus what the dump knows about it. CoveredBy is the
+// classes covering it, populated only in the undecided view, so a default dump
+// emits exactly the JSON it emitted before the view existed.
+type RenderedFinding struct {
+	Finding
+	CoveredBy []string `json:"covered_by,omitempty"`
 }
 
 // Findings emits adjudicated findings grouped by chain, for a reader to cluster.
@@ -88,10 +99,42 @@ func Findings(w io.Writer, stateDir string, o FindingsOpts) error {
 	}
 	chains = kept
 
+	records, err := Load(stateDir)
+	if err != nil {
+		return err
+	}
+	// The decided classes are read over the whole time-filtered corpus, so every
+	// incidence the dump prints keeps its denominator when --undecided narrows
+	// what the reader is shown.
+	var deciding []Deciding
+	if o.Undecided {
+		deciding = DecidingClasses(records)
+	}
+
 	var payload []map[string]any
+	selected, covered, residue, carrying, residueChains := 0, 0, 0, 0, 0
 	for _, ch := range chains {
-		findings := filterFindings(ch.Findings, o.Kind)
+		findings := renderFindings(filterFindings(ch.Findings, o.Kind), deciding, o.Undecided)
+		selected += len(findings)
+		if len(findings) > 0 {
+			carrying++
+		}
+		chainResidue := 0
+		for _, f := range findings {
+			if len(f.CoveredBy) > 0 {
+				covered++
+			} else {
+				chainResidue++
+			}
+		}
+		residue += chainResidue
+		if chainResidue > 0 {
+			residueChains++
+		}
 		if len(findings) == 0 && !o.IncludeEmpty {
+			continue
+		}
+		if o.Undecided && chainResidue == 0 && len(findings) > 0 {
 			continue
 		}
 		payload = append(payload, map[string]any{
@@ -104,16 +147,18 @@ func Findings(w io.Writer, stateDir string, o FindingsOpts) error {
 		})
 	}
 	reviewed := len(chains)
-	records, err := Load(stateDir)
-	if err != nil {
-		return err
-	}
 
 	if o.JSON {
 		out := map[string]any{
 			"chains_reviewed": reviewed,
 			"decisions":       nonNilRecords(records),
 			"chains":          nonNilMaps(payload),
+		}
+		if o.Undecided {
+			out["selected_findings"] = selected
+			out["covered_findings"] = covered
+			out["residual_findings"] = residue
+			out["residual_chains"] = residueChains
 		}
 		return writeJSON(w, out)
 	}
@@ -125,21 +170,51 @@ func Findings(w io.Writer, stateDir string, o FindingsOpts) error {
 		}
 		fmt.Fprintln(w, "#")
 	}
-	fmt.Fprintf(w, "# %d chains reviewed, %d carrying %s findings\n", reviewed, len(payload), o.Kind)
-	distinct := 0
-	for _, c := range payload {
-		distinct += len(c["findings"].([]Finding))
+	// Every header count describes the whole time-filtered corpus. --undecided
+	// narrows what is printed below, and says so on its own line, so no line
+	// reports the filtered subset under a name that means the corpus.
+	if o.Undecided {
+		fmt.Fprintf(w, "# %d chains reviewed, %d carrying %s findings\n", reviewed, carrying, o.Kind)
+		fmt.Fprintf(w, "# %d distinct findings\n", selected)
+		fmt.Fprintf(w, "# --undecided: %d covered, %d remaining over %d chain(s) — those %d chains are what is printed below\n",
+			covered, residue, residueChains, len(payload))
+		fmt.Fprintln(w, "# a covered finding is shown in place, marked [covered-by=...]; quote the text without the marker")
+	} else {
+		fmt.Fprintf(w, "# %d chains reviewed, %d carrying %s findings\n", reviewed, len(payload), o.Kind)
+		distinct := 0
+		for _, c := range payload {
+			distinct += len(c["findings"].([]RenderedFinding))
+		}
+		fmt.Fprintf(w, "# %d distinct findings\n", distinct)
 	}
-	fmt.Fprintf(w, "# %d distinct findings\n\n", distinct)
+	fmt.Fprintln(w)
 	for _, c := range payload {
 		fmt.Fprintf(w, "--- %s  ts=%s  rounds=%d  files=%d  end=%s\n",
 			c["date"], pyStr(c["start_ts"]), c["rounds"], c["files"], pyStr(c["terminal"]))
-		for _, f := range c["findings"].([]Finding) {
+		for _, f := range c["findings"].([]RenderedFinding) {
+			if len(f.CoveredBy) > 0 {
+				fmt.Fprintf(w, "  [%s] [covered-by=%s] %s\n", f.Verdict, strings.Join(f.CoveredBy, ","), f.Text)
+				continue
+			}
 			fmt.Fprintf(w, "  [%s] %s\n", f.Verdict, f.Text)
 		}
 		fmt.Fprintln(w)
 	}
 	return nil
+}
+
+// renderFindings pairs each finding with the classes covering it. Outside the
+// undecided view nothing is consulted, so no finding carries a marker.
+func renderFindings(findings []Finding, deciding []Deciding, undecided bool) []RenderedFinding {
+	out := make([]RenderedFinding, 0, len(findings))
+	for _, f := range findings {
+		r := RenderedFinding{Finding: f}
+		if undecided {
+			r.CoveredBy = CoveringIDs(f, deciding)
+		}
+		out = append(out, r)
+	}
+	return out
 }
 
 func filterFindings(findings []Finding, kind string) []Finding {

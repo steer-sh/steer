@@ -217,7 +217,7 @@ func Refresh(opts Options) (*Queue, error) {
 		q.Candidates = append(q.Candidates, Candidate{
 			Corpus:          CorpusReviewFindings,
 			UndecidedChains: undecided,
-			Dump:            "steer commit-gate mine findings",
+			Dump:            "steer commit-gate mine findings --undecided",
 		})
 	}
 

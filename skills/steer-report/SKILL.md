@@ -409,7 +409,7 @@ reads as a store holding nothing.
 If this machine has a commit-review ledger, dump the findings. If not, say "no commit-review corpus on this machine" in one line and skip to Step 3.
 
 ```bash
-steer commit-gate mine findings --kind accepted > "${TMPDIR:-/tmp}/gate-findings.txt"
+steer commit-gate mine findings --kind accepted --undecided > "${TMPDIR:-/tmp}/gate-findings.txt"
 steer commit-gate mine findings --kind rejected > "${TMPDIR:-/tmp}/gate-rejected.txt"
 ```
 
@@ -417,11 +417,13 @@ Read each file **once**. Do not cat them and do not re-read.
 
 The queue's review candidate names how many chains carry an accepted finding that no class regex — active or rejected — yet covers (`undecided_chains`). A class counts as covering one only when it is live (active or rejected, never removed or reworked), mined from this corpus, and authored against that finding's verdict — a false-positive class decides rejected findings and leaves an accepted defect undecided. A transcript-friction class names a pattern in a session transcript, so its regex meeting a finding's text here is a coincidence. A record stored before the corpus tags existed reads as review-findings. That is the pool the classes below come from; the review side has no per-class threshold the tier can compute, because a new class has no regex until you author one.
 
-Output is grouped by chain — one chain per commit attempt, findings deduplicated within it. The header line gives the denominator (`N chains reviewed`), which is what every rate on the review side is over.
+`--undecided` hands you the pool, not the corpus: it drops the chains whose every accepted finding a live class already covers, so what you cluster over is what is left to decide. A chain that carries one covered finding and one residual finding stays, with the covered one shown in place and marked `[covered-by=<class-id>]`. Quote the finding text without that marker — it is generated classification metadata, not part of the reviewer's words. The header names how many findings are covered, how many remain, and over how many chains, which is the arithmetic that tells you whether your classes are finished.
+
+Output is grouped by chain — one chain per commit attempt, findings deduplicated within it. The header line gives the denominator (`N chains reviewed`), which is what every rate on the review side is over. `--undecided` does not move that denominator: it narrows what you are shown, never what a rate is over, so an incidence printed under it means the same thing it means without it.
 
 Above that header the dump lists every class already decided on this corpus, each with its incidence **now** and, for a rejection, its reason and reopen condition. Read that block before you cluster. It is the one place a past refusal reaches you at the moment you would otherwise re-derive it.
 
-Pass `--since 60` to limit the window, `--strict-joins` to restrict to rows whose ledger join is reliable. Default is the full corpus, which is right for a first pass.
+Pass `--since 60` to limit the window, `--strict-joins` to restrict to rows whose ledger join is reliable, and drop `--undecided` to see the covered chains too. Default is the full corpus, which is right for a first pass.
 
 ## Step 3: Analyze and cluster — this is your job, not the script's
 
