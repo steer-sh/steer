@@ -112,6 +112,7 @@ func Findings(w io.Writer, stateDir string, o FindingsOpts) error {
 	}
 
 	var payload []map[string]any
+	var shown []Chain
 	selected, covered, residue, carrying, residueChains := 0, 0, 0, 0, 0
 	for _, ch := range chains {
 		findings := renderFindings(filterFindings(ch.Findings, o.Kind), deciding, o.Undecided)
@@ -137,14 +138,24 @@ func Findings(w io.Writer, stateDir string, o FindingsOpts) error {
 		if o.Undecided && chainResidue == 0 && len(findings) > 0 {
 			continue
 		}
-		payload = append(payload, map[string]any{
-			"date":     stamp(numFloat(ch.StartTS)),
-			"start_ts": ch.StartTS,
-			"terminal": ch.Terminal,
-			"rounds":   ch.Rounds,
-			"files":    ch.Files,
-			"findings": findings,
-		})
+		entry := map[string]any{
+			"date":      stamp(numFloat(ch.StartTS)),
+			"start_ts":  ch.StartTS,
+			"terminal":  ch.Terminal,
+			"rounds":    ch.Rounds,
+			"files":     ch.Files,
+			"findings":  findings,
+			"repo":      nil,
+			"repo_root": nil,
+		}
+		if ch.RepoKnown {
+			entry["repo"] = ch.Repo
+		}
+		if ch.RepoRootKnown {
+			entry["repo_root"] = ch.RepoRoot
+		}
+		shown = append(shown, ch)
+		payload = append(payload, entry)
 	}
 	reviewed := len(chains)
 
@@ -188,9 +199,10 @@ func Findings(w io.Writer, stateDir string, o FindingsOpts) error {
 		fmt.Fprintf(w, "# %d distinct findings\n", distinct)
 	}
 	fmt.Fprintln(w)
-	for _, c := range payload {
-		fmt.Fprintf(w, "--- %s  ts=%s  rounds=%d  files=%d  end=%s\n",
-			c["date"], pyStr(c["start_ts"]), c["rounds"], c["files"], pyStr(c["terminal"]))
+	labels := repoLabels(shown)
+	for i, c := range payload {
+		fmt.Fprintf(w, "--- %s  ts=%s  repo=%s  rounds=%d  files=%d  end=%s\n",
+			c["date"], pyStr(c["start_ts"]), labels[i], c["rounds"], c["files"], pyStr(c["terminal"]))
 		for _, f := range c["findings"].([]RenderedFinding) {
 			if len(f.CoveredBy) > 0 {
 				fmt.Fprintf(w, "  [%s] [covered-by=%s] %s\n", f.Verdict, strings.Join(f.CoveredBy, ","), f.Text)
@@ -201,6 +213,39 @@ func Findings(w io.Writer, stateDir string, o FindingsOpts) error {
 		fmt.Fprintln(w)
 	}
 	return nil
+}
+
+// repoLabels names each chain's repository for the text dump, one label per chain
+// in the order given. A basename is enough to read, but two checkouts can share
+// one: where a basename covers more than one root among the chains shown, every
+// chain carrying that basename is labelled by its whole root instead. A chain
+// whose rows carried no repository metadata is "unknown", never blank, because a
+// missing fact and an empty one are different readings.
+func repoLabels(chains []Chain) []string {
+	roots := map[string]map[string]bool{}
+	for _, ch := range chains {
+		// A chain with no root of its own cannot be disambiguated by one, so it
+		// must not create the collision that sends the others to their full paths.
+		if !ch.RepoKnown || !ch.RepoRootKnown {
+			continue
+		}
+		if roots[ch.Repo] == nil {
+			roots[ch.Repo] = map[string]bool{}
+		}
+		roots[ch.Repo][ch.RepoRoot] = true
+	}
+	labels := make([]string, len(chains))
+	for i, ch := range chains {
+		switch {
+		case !ch.RepoKnown:
+			labels[i] = "unknown"
+		case len(roots[ch.Repo]) > 1 && ch.RepoRootKnown:
+			labels[i] = ch.RepoRoot
+		default:
+			labels[i] = ch.Repo
+		}
+	}
+	return labels
 }
 
 // renderFindings pairs each finding with the classes covering it. Outside the

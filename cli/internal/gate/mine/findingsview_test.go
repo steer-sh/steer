@@ -183,3 +183,98 @@ func TestUndecidedHeaderCountsDescribeTheCorpus(t *testing.T) {
 		}
 	}
 }
+
+// repoDir writes one chain per (repository root, concern) pair.
+func repoDir(t *testing.T, roots []string, texts []string) string {
+	t.Helper()
+	dir := t.TempDir()
+	var ledger bytes.Buffer
+	for i := range texts {
+		ts := 1000 + i*100
+		deny := row(ts, "deny")
+		retry := concerns(row(ts+1, "retry"), "round", c(texts[i]))
+		if roots[i] != "" {
+			deny["repo"] = roots[i]
+			retry["repo"] = roots[i]
+		}
+		for _, r := range []gate.Row{deny, retry} {
+			ledger.Write(mustJSON(t, r))
+			ledger.WriteByte('\n')
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "adjudication.test.jsonl"), ledger.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(InterventionsPath(dir), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestFindingsNamesTheRepository(t *testing.T) {
+	dir := repoDir(t, []string{"/home/me/widget", ""}, []string{"alpha defect", "beta defect"})
+
+	text := findingsOut(t, dir, FindingsOpts{Kind: "accepted"})
+	if !strings.Contains(text, "repo=widget") {
+		t.Errorf("a known repository is named by its basename; got:\n%s", text)
+	}
+	if !strings.Contains(text, "repo=unknown") {
+		t.Errorf("a chain with no repository metadata reads as unknown, not blank; got:\n%s", text)
+	}
+
+	var payload struct {
+		Chains []struct {
+			Repo     *string `json:"repo"`
+			RepoRoot *string `json:"repo_root"`
+		} `json:"chains"`
+	}
+	out := findingsOut(t, dir, FindingsOpts{Kind: "accepted", JSON: true})
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Chains) != 2 {
+		t.Fatalf("want two chains, got %d", len(payload.Chains))
+	}
+	if payload.Chains[0].Repo == nil || *payload.Chains[0].Repo != "widget" {
+		t.Errorf("JSON carries the basename; got %v", payload.Chains[0].Repo)
+	}
+	if payload.Chains[0].RepoRoot == nil || *payload.Chains[0].RepoRoot != "/home/me/widget" {
+		t.Errorf("JSON carries the whole root; got %v", payload.Chains[0].RepoRoot)
+	}
+	if payload.Chains[1].Repo != nil || payload.Chains[1].RepoRoot != nil {
+		t.Errorf("an unknown repository is explicit, not an empty string; got %v %v",
+			payload.Chains[1].Repo, payload.Chains[1].RepoRoot)
+	}
+}
+
+func TestFindingsSeparatesTwoCheckoutsOfOneName(t *testing.T) {
+	// Two checkouts share a basename. Printing it twice would merge two repositories
+	// into one count, so both chains are labelled by their whole root.
+	dir := repoDir(t,
+		[]string{"/home/me/widget", "/mnt/work/widget", "/home/me/other"},
+		[]string{"alpha defect", "beta defect", "gamma defect"})
+
+	text := findingsOut(t, dir, FindingsOpts{Kind: "accepted"})
+	for _, want := range []string{"repo=/home/me/widget", "repo=/mnt/work/widget", "repo=other"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("want %q; got:\n%s", want, text)
+		}
+	}
+}
+
+func TestRepoLabelsIgnoreARootlessChain(t *testing.T) {
+	// A chain that knows its repository but not its root holds no root to compare.
+	// Counting its empty root as a second one would send every other chain of that
+	// name to its full path over a collision that does not exist.
+	chains := []Chain{
+		{Repo: "widget", RepoRoot: "/home/me/widget", RepoKnown: true, RepoRootKnown: true},
+		{Repo: "widget", RepoKnown: true},
+	}
+	got := repoLabels(chains)
+	if got[0] != "widget" {
+		t.Errorf("the only known root keeps its basename; got %q", got[0])
+	}
+	if got[1] != "widget" {
+		t.Errorf("the rootless chain reads by name; got %q", got[1])
+	}
+}
