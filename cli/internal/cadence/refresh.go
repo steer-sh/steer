@@ -8,7 +8,6 @@ package cadence
 
 import (
 	"encoding/json"
-	"regexp"
 	"sort"
 
 	"github.com/steer-sh/steer-cli/internal/gate"
@@ -278,65 +277,23 @@ func observationOf(v any) mine.Observation {
 }
 
 // undecidedChains counts chains carrying an accepted finding that no live class
-// decision covers. Only a defect class (kind accepted) can decide an accepted
-// finding — a false-positive class decides rejected findings and leaves the
-// accepted defect undecided. Only a live decision counts: active or rejected, not
-// a removed or reworked record whose class no longer stands. Only a decision
-// authored over this corpus counts: a class mined from session transcripts names
-// a pattern in a transcript, and its regex meeting a review finding's text is a
-// coincidence, not a classification. It is an upper bound the skill refines by
-// clustering the dump.
+// decision covers. The eligibility rules live in mine.DecidingClasses, which the
+// findings dump shares, so the queue's count and the dump's view of the same
+// corpus cannot drift apart. It is an upper bound the skill refines by clustering
+// the dump.
 func undecidedChains(chains []mine.Chain, records []mine.Record) int {
-	matchAll := regexp.MustCompile("")
-	var deciding []*regexp.Regexp
-	for _, r := range records {
-		status := str(r["status"])
-		if status != "active" && status != "rejected" {
-			continue
-		}
-		if mine.RecordKindFilter(r) != "accepted" {
-			continue
-		}
-		if mine.CorpusOf(r) != mine.CorpusReviewFindings || mine.UnitOf(r) != mine.UnitChain {
-			continue
-		}
-		re, err := regexp.Compile("(?i)" + str(r["match"]))
-		if err != nil {
-			continue
-		}
-		deciding = append(deciding, re)
-	}
+	deciding := mine.DecidingClasses(records)
 	count := 0
 	for _, ch := range chains {
-		accepted := mine.ChainHits(ch, matchAll, "accepted")
+		accepted := mine.FindingsOfKind(ch, "accepted")
 		if len(accepted) == 0 {
 			continue
 		}
-		// The chain is undecided if any one of its accepted findings is covered by
-		// no deciding class — a residual unclassified defect the skill must cluster.
-		// One classified finding does not decide the whole chain.
-		if hasUnclassified(accepted, deciding) {
+		if mine.HasUncovered(accepted, deciding) {
 			count++
 		}
 	}
 	return count
-}
-
-// hasUnclassified reports whether any finding is matched by none of the regexes.
-func hasUnclassified(findings []mine.Finding, deciding []*regexp.Regexp) bool {
-	for _, f := range findings {
-		matched := false
-		for _, re := range deciding {
-			if re.MatchString(f.Text) {
-				matched = true
-				break
-			}
-		}
-		if !matched {
-			return true
-		}
-	}
-	return false
 }
 
 func incidenceOf(v any) Incidence {
