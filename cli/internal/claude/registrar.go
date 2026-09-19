@@ -47,4 +47,22 @@ func (Registrar) RegisteredMasterPath(scope string) (string, error) {
 	return "", nil
 }
 
+// RegisteredMasterCommand reads back the command settings.json runs the master
+// with. A reader comparing registrations across a rebuild needs the text: the
+// path decodes the same whether or not it is quoted.
+func (Registrar) RegisteredMasterCommand(scope string) (string, error) {
+	settings, err := LoadSettings(scope)
+	if err != nil {
+		return "", err
+	}
+	for _, entry := range settings.Hooks.PreToolUse {
+		for _, hook := range entry.Hooks {
+			if hookstore.IsMasterCommand(hook.Command) {
+				return hook.Command, nil
+			}
+		}
+	}
+	return "", nil
+}
+
 var _ harness.Registrar = Registrar{}

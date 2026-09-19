@@ -77,6 +77,12 @@ than patched.`,
 			}
 			utils.Info(fmt.Sprintf("%s: registered %s", target.Harness.DisplayName, target.Path))
 		}
+		for _, target := range result.Targets {
+			if target.CommandChanged && target.Harness.Capabilities.TrustReview {
+				utils.Info(fmt.Sprintf("%s: the guard command changed, so re-approve it in %s.",
+					target.Harness.DisplayName, target.Harness.DisplayName))
+			}
+		}
 		if result.Stamp.Runtime != guard.RuntimeDigest() || result.Stamp.Version != version.Version {
 			utils.Info("The stamp does not match this binary; report it as a bug.")
 		}

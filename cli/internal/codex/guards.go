@@ -9,6 +9,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/hookstore"
 	"github.com/steer-sh/steer-cli/internal/instructions"
+	"github.com/steer-sh/steer-cli/internal/shellword"
 )
 
 // MasterMatcher is the matcher the guard master registers under. Codex applies a
@@ -33,7 +34,14 @@ func MasterCommand(scope, cwd string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("python3 %s %s %s", filepath.ToSlash(master), guard.HarnessFlag, harness.Codex), nil
+	// Codex runs the command through a shell, so the path is one shell word or the
+	// guard silently never runs. There is no degraded form to fall back on: an
+	// interpreter needs this path and no other.
+	master = filepath.ToSlash(master)
+	if err := shellword.Encodable(master); err != nil {
+		return "", fmt.Errorf("cannot register the guard master: %w", err)
+	}
+	return fmt.Sprintf("python3 %s %s %s", shellword.Quote(master), guard.HarnessFlag, harness.Codex), nil
 }
 
 // RegisterMaster upserts the guard master's PreToolUse handler, preserving every
@@ -161,6 +169,16 @@ func (Registrar) MasterRegistered(scope string) (bool, error) {
 // RegisteredMasterPath reads back the master path hooks.json names.
 func (Registrar) RegisteredMasterPath(scope string) (string, error) {
 	return hookstore.MasterPathFromCommand(MasterArming(scope, ".").Command), nil
+}
+
+// RegisteredMasterCommand reads back the command hooks.json runs the master with.
+// Codex hashes the handler definition when the operator approves it, so a caller
+// comparing this across a rebuild learns whether that approval still covers it.
+//
+// MasterArming is the read of hooks.json, and its Command is that file's text
+// verbatim, not a command this package would write.
+func (Registrar) RegisteredMasterCommand(scope string) (string, error) {
+	return MasterArming(scope, ".").Command, nil
 }
 
 var _ harness.Registrar = Registrar{}

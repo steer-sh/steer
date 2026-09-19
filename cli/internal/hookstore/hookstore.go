@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/steer-sh/steer-cli/internal/shellword"
 	"github.com/steer-sh/steer-cli/internal/steerpath"
 )
 
@@ -279,11 +280,19 @@ func writeWhole(path string, content []byte, mode os.FileMode) error {
 // harness actually runs, and on a migrated machine that is not always the one
 // Resolve answers: the legacy files are left in place for older binaries, so both
 // paths can hold a master. The result is "" when the command runs no master.
+//
+// The path is the interpreter's first argument, decoded, so a path holding a
+// space names one file here as it does to the shell. A command the codec cannot
+// read yields "": the alternative is a fragment of a path, which a caller cannot
+// tell from a short one.
 func MasterPathFromCommand(command string) string {
-	for _, field := range strings.Fields(command) {
-		if strings.HasSuffix(field, MasterName) {
-			return field
-		}
+	_, args, ok := shellword.Split(command)
+	if !ok {
+		return ""
 	}
-	return ""
+	path, _, ok := shellword.Split(args)
+	if !ok || !strings.HasSuffix(path, MasterName) {
+		return ""
+	}
+	return path
 }

@@ -17,6 +17,11 @@ type RebuildTarget struct {
 	Previous string
 	Path     string
 	Removed  bool
+	// CommandChanged reports a registration whose command text this rebuild
+	// rewrote. Previous and Path are decoded paths and read the same across a
+	// change of quoting, while a harness that records an approval hashes the
+	// text, so only this says whether that approval still covers the handler.
+	CommandChanged bool
 }
 
 // RebuildResult describes what a rebuild wrote.
@@ -73,12 +78,14 @@ func RebuildMaster(scope string, targets ...harness.Registrar) (*RebuildResult, 
 
 	list := harness.Targets(targets, Registrar{})
 	previous := make([]string, len(list))
+	priorCommand := make([]string, len(list))
 	for i, target := range list {
 		path, err := target.RegisteredMasterPath(scope)
 		if err != nil {
 			return nil, err
 		}
 		previous[i] = path
+		priorCommand[i] = registeredCommand(target, scope)
 	}
 
 	if err := ConsolidateHooks(scope); err != nil {
@@ -137,6 +144,7 @@ func RebuildMaster(scope string, targets ...harness.Registrar) (*RebuildResult, 
 			return nil, err
 		}
 		row.Path = path
+		row.CommandChanged = priorCommand[i] != "" && priorCommand[i] != registeredCommand(target, scope)
 		result.Targets = append(result.Targets, row)
 	}
 
@@ -147,4 +155,26 @@ func RebuildMaster(scope string, targets ...harness.Registrar) (*RebuildResult, 
 	result.Verification = verification
 
 	return result, nil
+}
+
+// masterCommandReader is implemented by a harness whose configuration carries the
+// master's command as text. Pi bakes the path into an extension and runs no
+// shell, so it has no command to compare.
+type masterCommandReader interface {
+	RegisteredMasterCommand(scope string) (string, error)
+}
+
+// registeredCommand reads a target's registered command, or "" when the harness
+// keeps none and when it cannot be read. A read that fails is not a rebuild
+// failure: the command is reported alongside the registration, never instead of it.
+func registeredCommand(target harness.Registrar, scope string) string {
+	reader, ok := target.(masterCommandReader)
+	if !ok {
+		return ""
+	}
+	command, err := reader.RegisteredMasterCommand(scope)
+	if err != nil {
+		return ""
+	}
+	return command
 }

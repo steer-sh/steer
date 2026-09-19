@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/steer-sh/steer-cli/internal/hookstore"
+	"github.com/steer-sh/steer-cli/internal/shellword"
 )
 
 const (
@@ -350,7 +351,14 @@ func GetMasterHookCommand(scope string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("python3 %s", filepath.ToSlash(masterPath)), nil
+	// Claude Code runs the command through a shell, so the path is one shell word
+	// or the guard silently never runs. There is no degraded form to fall back on:
+	// an interpreter needs this path and no other.
+	masterPath = filepath.ToSlash(masterPath)
+	if err := shellword.Encodable(masterPath); err != nil {
+		return "", fmt.Errorf("cannot register the guard master: %w", err)
+	}
+	return fmt.Sprintf("python3 %s", shellword.Quote(masterPath)), nil
 }
 
 // GetManifestFile returns the scope-specific manifest path.

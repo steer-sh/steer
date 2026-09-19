@@ -445,3 +445,32 @@ func TestMasterRegistrationResolvesASymlinkedConfigDirectory(t *testing.T) {
 		t.Fatalf("MasterRegistration through an alias = %q; want %q", got, want)
 	}
 }
+
+// TestMasterPathFromCommandReadsAQuotedPath: the registration is the only record
+// of which master a harness runs, so a path that needed quoting has to come back
+// whole. A command outside the written shape names no master at all, because a
+// fragment of a path cannot be told from a short one.
+func TestMasterPathFromCommandReadsAQuotedPath(t *testing.T) {
+	spaced := "/Users/two words/.steer/hooks/" + MasterName
+	cases := []struct {
+		name    string
+		command string
+		want    string
+	}{
+		{"a quoted path", "python3 '" + spaced + "' --harness codex", spaced},
+		{"an unquoted path an older binary wrote", "python3 /home/j/.steer/hooks/" + MasterName, "/home/j/.steer/hooks/" + MasterName},
+		{"a project registration", "python3 .steer/hooks/" + MasterName, ".steer/hooks/" + MasterName},
+		{"a windows registration", `python3 "C:/Program Files/.steer/hooks/` + MasterName + `"`, "C:/Program Files/.steer/hooks/" + MasterName},
+		{"an unterminated quote", "python3 '/Users/two words/.steer/hooks/" + MasterName, ""},
+		{"no master", "python3 /home/j/.claude/hooks/read-provenance.py", ""},
+		{"the interpreter alone", "python3", ""},
+		{"an empty command", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := MasterPathFromCommand(tc.command); got != tc.want {
+				t.Fatalf("MasterPathFromCommand = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
