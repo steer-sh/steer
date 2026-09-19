@@ -497,8 +497,11 @@ who has never met Steer decides from it without a glossary.
    words where the evidence carries them.
 2. **What supports that?** Name the source — session history or review history — the
    amount of relevant work it was counted over, and the limit on it.
-3. **What change is proposed?** Say the behavior it affects and where it applies: which
-   projects, which coding agents, which files.
+3. **What change is proposed?** Say the behavior it affects, then name the scope as
+   **project** or **global** in those words: project reaches this repository alone,
+   global reaches every repository on this machine. Choose it from the evidence —
+   chains from one repository scope to project, chains from several scope global —
+   and give that reason in a clause. Then say which coding agents and which files.
 4. **What is the tradeoff?** Name the legitimate work it could block. Every proposal has
    one; a proposal claiming none has not been thought through.
 5. **What decision is needed?** State the action and its consequence in one question.
@@ -507,9 +510,9 @@ A worked proposal:
 
 > The agent used `python` where this project requires `python3` in three recorded
 > sessions. I suggest a guard that blocks the bare command and tells the agent to use
-> `python3`. It applies in this project, to Claude Code and Codex. It could also block
-> an intentional use of `python`. Apply this guard and track whether the problem
-> becomes less frequent?
+> `python3`. It is a project fix: every recorded session was in this repository, so it
+> applies here alone, to Claude Code and Codex. It could also block an intentional use
+> of `python`. Apply this guard and track whether the problem becomes less frequent?
 
 Carry the same shape into the audit half. A result reads as a state, then its evidence,
 then whether anything is asked of the reader:
