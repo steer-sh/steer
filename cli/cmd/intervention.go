@@ -50,6 +50,7 @@ type interventionFlags struct {
 	matchStrictJoins bool
 	matchCorpus      string
 	matchSignalKind  string
+	matchShowResidue bool
 
 	registerClass         string
 	registerMatch         string
@@ -181,6 +182,7 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 				StrictJoins: v.matchStrictJoins,
 				Corpus:      v.matchCorpus,
 				SignalKind:  v.matchSignalKind,
+				ShowResidue: v.matchShowResidue,
 				Sessions:    storedSessions(),
 			})
 		},
@@ -190,6 +192,8 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 	m.BoolVar(&v.matchStrictJoins, "strict-joins", false, "round-joined rows only")
 	m.StringVar(&v.matchCorpus, "corpus", mine.CorpusReviewFindings, corpusUsage)
 	m.StringVar(&v.matchSignalKind, "signal-kind", "", signalKindUsage)
+	m.BoolVar(&v.matchShowResidue, "show-residue", false,
+		"list the frequent terms among the findings this regex misses")
 
 	register := &cobra.Command{
 		Use:   "register",

@@ -596,6 +596,8 @@ For each accepted review candidate:
 
    `match` also reports every recorded class that covers chains your candidate matches. A high share against a rejected class means you are re-proposing it: read the reason before going further.
 
+   Add `--show-residue` to see what the regex leaves behind: the findings of that kind it does not match, and the terms recurring among them, each with its count in the residue and its count across the whole corpus. Where the two counts are equal the term is the corpus's own vocabulary and names nothing; where the residue count is well under the corpus count, the regex already reaches most of that term's chains. A residue term with a high count and few matches is the class you did not name — either widen the regex or author a second class for it. The residue is per finding, so a chain your regex matches still contributes the findings inside it that it misses. What it lists is unmatched by **this** regex, which is not the same as unclassified: another registered class may already cover it, and `mine findings --undecided` is what answers that.
+
    Iterate until it matches the class members and nothing else. This regex is the class's permanent definition — `score` re-counts with it months from now, so an over-broad regex will report the class as recurring forever, and a commit-specific one will report a quiet window it did not earn. Prefer the defect's vocabulary over any single commit's identifiers.
 
 2. **Install the fix** through its tier's workflow, and verify it fires on the real case:

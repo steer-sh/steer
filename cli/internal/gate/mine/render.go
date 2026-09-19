@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -286,7 +287,18 @@ type MatchOpts struct {
 	SignalKind string
 	// Sessions is the session corpus, supplied by the caller that reads the store.
 	Sessions []SessionUnit
+	// ShowResidue prints the frequent terms among the findings this regex misses,
+	// which turns a verifier into a way of finding the class it should have named.
+	ShowResidue bool
 }
+
+// residueMinChains is the number of chains a term must appear in to be listed. A
+// term carried by one chain names one commit attempt and sizes no class, and the
+// 2-chain floor keeps the list short enough to read in one pass.
+const residueMinChains = 2
+
+// residueTermLimit caps the printed list. A longer one stops being read.
+const residueTermLimit = 25
 
 // Match tests a candidate class regex against the corpus its record will be counted
 // over. It routes to the engine that corpus names, so an author sees the same
@@ -297,6 +309,10 @@ func Match(w io.Writer, stateDir string, o MatchOpts) error {
 		return err
 	}
 	if spec.Engine == EngineSession {
+		if o.ShowResidue {
+			return fmt.Errorf("--show-residue reads the review corpus; %s is mined by chain-free units",
+				spec.Corpus)
+		}
 		return matchSessions(w, o)
 	}
 	regex, kind, ledger, strictJoins := o.Regex, o.Kind, o.Ledger, o.StrictJoins
@@ -330,6 +346,9 @@ func Match(w io.Writer, stateDir string, o MatchOpts) error {
 	if len(matched) == 0 {
 		fmt.Fprintln(w, "# no matches — the regex is too narrow, or the class is misnamed")
 	}
+	if o.ShowResidue {
+		printResidue(w, chains, pattern, kind)
+	}
 	records, err := Load(stateDir)
 	if err != nil {
 		return err
@@ -345,6 +364,76 @@ func Match(w io.Writer, stateDir string, o MatchOpts) error {
 		}
 	}
 	return nil
+}
+
+// printResidue reports the findings the candidate regex misses and the terms that
+// recur among them. The residue is per finding, not per chain: a chain the regex
+// matches can carry three findings it does not, and those three are exactly the
+// evidence a reader widening the regex needs.
+//
+// What it prints is unmatched by THIS regex, which is not the same as unclassified
+// — some of it may belong to another registered class. `mine findings --undecided`
+// answers that question; this one answers "what did I miss".
+func printResidue(w io.Writer, chains []Chain, pattern *regexp.Regexp, kind string) {
+	var groups, corpus []TermGroup
+	labels := repoLabels(chains)
+	selected, residue, residueChains := 0, 0, 0
+	for i, ch := range chains {
+		all := FindingsOfKind(ch, kind)
+		selected += len(all)
+		if len(all) > 0 {
+			corpus = append(corpus, TermGroup{Repo: labels[i], Findings: all})
+		}
+		var missed []Finding
+		for _, f := range all {
+			if !pattern.MatchString(f.Text) {
+				missed = append(missed, f)
+			}
+		}
+		if len(missed) == 0 {
+			continue
+		}
+		residue += len(missed)
+		residueChains++
+		groups = append(groups, TermGroup{Repo: labels[i], Findings: missed})
+	}
+
+	fmt.Fprintf(w, "\n# residue: %d of %d %s findings this regex misses, over %d chain(s)\n",
+		residue, selected, kind, residueChains)
+	if residue == 0 {
+		fmt.Fprintln(w, "# nothing is left over — the regex covers every finding of this kind")
+		return
+	}
+	ranked := RankTerms(groups, corpus, residueMinChains)
+	if len(ranked) == 0 {
+		fmt.Fprintf(w, "# no term recurs in %d or more of them; the residue has no shared vocabulary to widen toward\n",
+			residueMinChains)
+		return
+	}
+	shown := ranked
+	if len(shown) > residueTermLimit {
+		shown = shown[:residueTermLimit]
+	}
+	fmt.Fprintf(w, "# frequent terms among them — showing %d of %d listed (a term in fewer than %d chains is omitted)\n",
+		len(shown), len(ranked), residueMinChains)
+	fmt.Fprintln(w, "# each is chains-in-residue of chains-in-corpus: where the two are equal the term is the corpus's vocabulary, not a name for the residue")
+	for _, t := range shown {
+		fmt.Fprintf(w, "#   %4d/%-4d  %-22s %s: %s\n",
+			t.Chains, t.CorpusChains, t.Term, t.ExampleRepo, ellipsis(t.Example, 80))
+	}
+	fmt.Fprintln(w, "# this is what the regex misses, not what no class covers — `mine findings --undecided` answers that")
+}
+
+// ellipsis shortens a finding to one readable line. The limit counts runes, not
+// bytes: findings carry em-dashes and curly quotes, and a byte cut lands inside
+// one of those and writes a broken character to the reader's terminal.
+func ellipsis(text string, limit int) string {
+	text = strings.Join(strings.Fields(text), " ")
+	runes := []rune(text)
+	if len(runes) <= limit {
+		return text
+	}
+	return string(runes[:limit]) + "…"
 }
 
 // --- decision headlines -----------------------------------------------------
