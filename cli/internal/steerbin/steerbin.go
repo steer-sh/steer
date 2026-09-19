@@ -69,9 +69,9 @@ func Ensure() (string, error) {
 // PATH beats no registration at all, and the caller reports what it settled for.
 func HookCommand(args string) (string, error) {
 	if _, err := Ensure(); err != nil {
-		return strings.TrimSpace(steerpath.BinName + " " + args), err
+		return bareCommand(args), err
 	}
-	return Command(args), nil
+	return command(args)
 }
 
 func install() (string, error) {
@@ -142,22 +142,41 @@ func copyExecutable(src, dst string) error {
 
 // Command renders a hook command naming the stable executable. It falls back to
 // the bare word when the path cannot be resolved: a registration that resolves on
-// PATH beats no registration at all.
+// PATH beats no registration at all. HookCommand reports why it settled for the
+// fallback; a caller that only needs the string uses this.
 func Command(args string) string {
+	rendered, _ := command(args)
+	return rendered
+}
+
+func command(args string) (string, error) {
 	path, err := steerpath.BinPath()
 	if err != nil {
-		return strings.TrimSpace(steerpath.BinName + " " + args)
+		return bareCommand(args), err
 	}
-	return strings.TrimSpace(Quote(path) + " " + args)
+	// The stable path is the caller's preference, not its contract. A path this
+	// machine cannot render as one word still resolves on PATH under its bare
+	// name, so the fallback serves the unencodable path too.
+	if err := shellword.Encodable(path); err != nil {
+		return bareCommand(args), err
+	}
+	return strings.TrimSpace(Quote(path) + " " + args), nil
+}
+
+func bareCommand(args string) string {
+	return strings.TrimSpace(steerpath.BinName + " " + args)
 }
 
 // Relink rewrites a registered command to name the stable executable, keeping
 // every argument. A command whose first word is not steer's own is returned
 // unchanged: a user's wrapper script is not ours to rewrite.
-func Relink(command, path string) string {
-	head, rest := split(command)
+func Relink(registration, path string) string {
+	head, rest := split(registration)
 	if head == "" || !isSteer(head) {
-		return command
+		return registration
+	}
+	if err := shellword.Encodable(path); err != nil {
+		return registration
 	}
 	return strings.TrimSpace(Quote(path) + " " + rest)
 }
@@ -187,8 +206,15 @@ func Resolve(command string) string {
 }
 
 // split separates a command's first word from its arguments, honouring the
-// quoting Quote writes.
-func split(command string) (string, string) { return shellword.Split(command) }
+// quoting Quote writes. A command this package could not have written has no
+// first word, and every caller then leaves it alone.
+func split(command string) (string, string) {
+	head, rest, ok := shellword.Split(command)
+	if !ok {
+		return "", ""
+	}
+	return head, rest
+}
 
 // IsSteerCommand reports whether a command's first word is a steer executable. A
 // caller recognising one of steer's own registrations reads the head rather than
@@ -227,6 +253,11 @@ func Quote(path string) string { return shellword.Quote(path) }
 func StripFlags(command string, names ...string) string {
 	head, rest := split(command)
 	if head == "" || !isSteer(head) || rest == "" {
+		return command
+	}
+	// The head is re-encoded below, so a head this machine cannot render as one
+	// word is left in the caller's hands rather than rewritten into another path.
+	if err := shellword.Encodable(head); err != nil {
 		return command
 	}
 	wanted := map[string]bool{}

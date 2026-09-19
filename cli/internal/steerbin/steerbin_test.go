@@ -153,3 +153,24 @@ func TestHasFlagsReadsWhatStripFlagsWouldRemove(t *testing.T) {
 		t.Fatal("a wrapper script is not steer's to read as flagged")
 	}
 }
+
+// TestAnUnencodablePathLeavesTheRegistrationAlone: a path this machine cannot
+// render as one shell word must not be written into a command. Relink and
+// StripFlags return the caller's command, and a truncated head is no head, so
+// neither rewrites a registration into a path nobody named.
+func TestAnUnencodablePathLeavesTheRegistrationAlone(t *testing.T) {
+	command := "steer commit-gate review --model x"
+	if got := Relink(command, "/home/j/.steer\x00/bin/steer"); got != command {
+		t.Fatalf("relink to an unencodable path = %q, want %q", got, command)
+	}
+	unterminated := `'/home/two words/.steer/bin/steer commit-gate review --model x`
+	if got := StripFlags(unterminated, "--model"); got != unterminated {
+		t.Fatalf("StripFlags rewrote an unreadable command to %q", got)
+	}
+	if got := Relink(unterminated, "/home/j/.steer/bin/steer"); got != unterminated {
+		t.Fatalf("Relink rewrote an unreadable command to %q", got)
+	}
+	if got := Resolve(unterminated); got != Unknown {
+		t.Fatalf("an unreadable command resolved to %q, want %q", got, Unknown)
+	}
+}
