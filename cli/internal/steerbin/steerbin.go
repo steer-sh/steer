@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/steer-sh/steer-cli/internal/shellword"
 	"github.com/steer-sh/steer-cli/internal/steerpath"
 )
 
@@ -185,39 +186,9 @@ func Resolve(command string) string {
 	return Resolvable
 }
 
-// split separates a command's first word from its arguments, honouring the single
-// quotes Quote writes so a home directory with a space stays one word.
-func split(command string) (string, string) {
-	command = strings.TrimSpace(command)
-	// A double-quoted head is what Quote writes on Windows. Both forms are read on
-	// every platform, so a settings.json copied between machines still parses.
-	if strings.HasPrefix(command, `"`) {
-		head, rest, ok := strings.Cut(command[1:], `"`)
-		if !ok {
-			return "", ""
-		}
-		return head, strings.TrimSpace(rest)
-	}
-	if !strings.HasPrefix(command, "'") {
-		head, rest, _ := strings.Cut(command, " ")
-		return head, strings.TrimSpace(rest)
-	}
-	var head strings.Builder
-	for i := 1; i < len(command); {
-		if command[i] != '\'' {
-			head.WriteByte(command[i])
-			i++
-			continue
-		}
-		if strings.HasPrefix(command[i:], `'\''`) {
-			head.WriteByte('\'')
-			i += 4
-			continue
-		}
-		return head.String(), strings.TrimSpace(command[i+1:])
-	}
-	return "", ""
-}
+// split separates a command's first word from its arguments, honouring the
+// quoting Quote writes.
+func split(command string) (string, string) { return shellword.Split(command) }
 
 // IsSteerCommand reports whether a command's first word is a steer executable. A
 // caller recognising one of steer's own registrations reads the head rather than
@@ -239,22 +210,9 @@ func isSteer(head string) bool {
 	return strings.TrimSuffix(base, filepath.Ext(base)) == steerpath.BinStem
 }
 
-// Quote renders a path as one shell word. Both harnesses run a hook command
-// through a shell, so a path holding a space needs quoting. Windows runs it
-// through cmd.exe, which reads a backslash as a path separator and knows no
-// single quote, so there a path is bare or double quoted and never anything else.
-func Quote(path string) string {
-	if runtime.GOOS == "windows" {
-		if path != "" && !strings.ContainsAny(path, " \t\"") {
-			return path
-		}
-		return `"` + strings.ReplaceAll(path, `"`, "") + `"`
-	}
-	if path != "" && !strings.ContainsAny(path, " \t'\"$`\\*?") {
-		return path
-	}
-	return "'" + strings.ReplaceAll(path, "'", `'\''`) + "'"
-}
+// Quote renders a path as one shell word, so a path holding a space survives the
+// shell the harness runs the command through.
+func Quote(path string) string { return shellword.Quote(path) }
 
 // StripFlags removes the named flags, and the value each carries, from a
 // registered command. It reads both `--name value` and `--name=value`. Every name
