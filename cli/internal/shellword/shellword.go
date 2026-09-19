@@ -1,16 +1,9 @@
 // Package shellword encodes and decodes the one piece of shell text a hook
-// registration carries: the path of the program the harness runs, followed by its
-// arguments.
+// registration carries: the path of the program the harness runs, followed by
+// its arguments.
 //
-// A registration is a command string, and both harnesses run it through a shell.
-// The path in it therefore has to survive a shell's word splitting going out and
-// name the same file coming back in. Quote and Split are that pair, over the two
-// forms Quote writes and nothing else; they are not a shell.
-//
-// The pair is exact over every path Encodable accepts, and a caller quotes
-// nothing else. A path the encoder cannot render without changing it is refused
-// at the writer, because a registration naming a different file than the caller
-// asked for is worse than no registration.
+// Quote and Split are exact inverses over every path Encodable accepts, and
+// over the forms Quote writes and nothing else. They are not a shell.
 package shellword
 
 import (
@@ -60,15 +53,10 @@ func quoteOn(goos, path string) string {
 	return "'" + strings.ReplaceAll(path, "'", `'\''`) + "'"
 }
 
-// Split separates a command's first word from its arguments, honouring the
-// quoting Quote writes so a home directory with a space stays one word. Both
-// quoting forms are read on every platform, so a settings.json copied between
-// machines still parses.
-//
-// ok is false when the command holds no word Quote could have written: an
-// unterminated quote, or text joined to a closing quote. Such a command names a
-// path this package cannot recover, so it yields no head at all: a caller that
-// read a truncated one would rewrite the wrong file.
+// Split separates a command's first word from its arguments, reading both the
+// forms Quote writes on every platform. ok is false, and head and rest are
+// empty, when the command holds no word Quote could have written: an
+// unterminated quote, or text joined to a closing quote.
 func Split(command string) (head, rest string, ok bool) {
 	command = strings.TrimSpace(command)
 	if command == "" {
