@@ -366,14 +366,9 @@ func Match(w io.Writer, stateDir string, o MatchOpts) error {
 	return nil
 }
 
-// printResidue reports the findings the candidate regex misses and the terms that
-// recur among them. The residue is per finding, not per chain: a chain the regex
-// matches can carry three findings it does not, and those three are exactly the
-// evidence a reader widening the regex needs.
-//
-// What it prints is unmatched by THIS regex, which is not the same as unclassified
-// — some of it may belong to another registered class. `mine findings --undecided`
-// answers that question; this one answers "what did I miss".
+// printResidue reports the findings of the requested kind that the pattern does
+// not match, counted per finding rather than per chain, and ranks the terms
+// recurring among them. What it lists is unmatched, not unclassified.
 func printResidue(w io.Writer, chains []Chain, pattern *regexp.Regexp, kind string) {
 	var groups, corpus []TermGroup
 	labels := repoLabels(chains)

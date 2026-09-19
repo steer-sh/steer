@@ -14,16 +14,9 @@ type Deciding struct {
 	Pattern *regexp.Regexp
 }
 
-// DecidingClasses compiles the records that may cover a review finding.
-//
-// Three conditions admit a record, and each drops a different kind of false
-// coverage. The status must be live — active or rejected — because a removed or
-// reworked record's class no longer stands. The corpus and unit must read as
-// review-findings over chains, because a class mined elsewhere names a pattern in
-// other evidence and its regex meeting a finding's text is a coincidence. The
-// normalized kind must be accepted or rejected, because KindFilter treats every
-// other string as "both": an unrecognized kind would otherwise cover every
-// finding of every verdict. A record whose regex does not compile is skipped.
+// DecidingClasses compiles the records that may cover a review finding: a live
+// status, the review-findings corpus over chains, and a normalized kind of
+// accepted or rejected. A record whose regex does not compile is skipped.
 func DecidingClasses(records []Record) []Deciding {
 	var out []Deciding
 	for _, r := range records {
