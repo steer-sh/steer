@@ -19,7 +19,10 @@ the repository and runs the new top-level test functions under each one:
 
 Variants run in that order. copy, alias, guard and suppress come only from
 statements that intersect added lines; FUNCTION_CAP and RUN_CAP limit them,
-and the evidence lists each candidate a cap or a duplicate dropped.
+and the evidence lists each candidate a cap or a duplicate dropped. RUN_CAP
+spends its budget one site per function at a time, so a change in one file
+cannot starve the sites of another: without that, the order is alphabetical by
+path and a late path loses every site it had.
 
 A new test that fails under at least one variant passes the check. Every other
 new test is reported and the script exits 1: a test that fails before any
@@ -70,7 +73,7 @@ REPORTED = re.compile(r"^\s+\S+\.go:\d+: ")
 TIMED_OUT = re.compile(r"^panic: test timed out after ")
 RUNNING = re.compile(r"^\t\t(Test\w+)")
 FUNCTION_CAP = 4
-RUN_CAP = 16
+RUN_CAP = 48
 SITE_ORDER = ["copy", "alias", "guard", "suppress"]
 SITE_LABELS = {"copy": "copy statement suppressed", "alias": "copy replaced by its source",
                "guard": "guard clause suppressed", "suppress": "statement suppressed"}
@@ -251,6 +254,17 @@ def added_ranges(lines, spans):
     return [(offsets[start - 1], offsets[start - 1 + count]) for start, count in spans]
 
 
+def rank(candidates):
+    """Number each candidate within its own kind and function, in the order given.
+    Sorting on that number next spreads RUN_CAP over the functions: every function
+    spends its first site before any function spends its second."""
+    counts = {}
+    for candidate in candidates:
+        key = (candidate["kind"], candidate["path"], candidate["function"])
+        candidate["rank"] = counts.get(key, 0)
+        counts[key] = candidate["rank"] + 1
+
+
 def select_sites(candidates, seen):
     """Apply dedup and the caps to candidates in their priority order.
     Return (kept, omitted); seen holds (path, bytes) of earlier variants."""
@@ -319,9 +333,12 @@ def variants(base, paths, untracked, deadline):
                 candidate["offset"] = site["start"]
                 candidates.append(candidate)
     candidates.sort(key=lambda c: (SITE_ORDER.index(c["kind"]), c["path"], c["offset"]))
+    rank(candidates)
+    candidates.sort(key=lambda c: (SITE_ORDER.index(c["kind"]), c["rank"], c["path"],
+                                   c["offset"]))
     kept, omitted = select_sites(candidates, {(r["path"], r["data"]) for r in reverts})
     for candidate in kept:
-        del candidate["function"], candidate["offset"]
+        del candidate["function"], candidate["offset"], candidate["rank"]
     early = [c for c in kept if c["kind"] in ("copy", "alias")]
     late = [c for c in kept if c["kind"] not in ("copy", "alias")]
     return reverts + early + zeros, late, panics, omitted

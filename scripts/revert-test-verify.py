@@ -341,10 +341,12 @@ def check_sites(work):
 
 
 def check_caps(work):
-    """The caps keep 4 per function and 16 per run; a revert's bytes are not repeated."""
+    """The caps keep 4 per function and RUN_CAP per run, the run cap spends itself one
+    site per function at a time, and a revert's bytes are not repeated."""
+    names = [chr(ord("A") + i) for i in range(15)]
+    counts = [(names[0], 6)] + [(name, 4) for name in names[1:]]
     source = "package c\n\nvar n int\n\n" + "".join(
-        "func %s() {\n%s}\n\n" % (name, "\tn++\n" * count)
-        for name, count in (("A", 6), ("B", 4), ("C", 4), ("D", 4), ("E", 4)))
+        "func %s() {\n%s}\n\n" % (name, "\tn++\n" * count) for name, count in counts)
     root = make_repo(work, "caps",
                      {"cli/c/a.go": "package c\n\nfunc h() {}\n\nfunc G() {\n\tif false { h() }\n}\n"},
                      {"cli/c/a.go": "package c\n\nfunc h() {}\n\nfunc G() {\n\th()\n}\n",
@@ -352,13 +354,23 @@ def check_caps(work):
     early, late, omitted = generated(root)
     kept = [c for c in late if c["kind"] == "suppress"]
     reasons = [o["reason"] for o in omitted]
-    report("the run cap keeps 16 suppressions", len(kept) == 16, "(%d)" % len(kept))
+    loaded = module()
+    cap, eligible = loaded.RUN_CAP, sum(min(n, loaded.FUNCTION_CAP) for _, n in counts)
+    # The fixture must exceed the run cap, or every case below asserts nothing.
+    report("the fixture overruns the run cap", eligible > cap,
+           "(%d sites, cap %d)" % (eligible, cap))
+    report("the run cap keeps its whole budget", len(kept) == cap,
+           "(%d, cap %d)" % (len(kept), cap))
     report("the function cap omits 2 of A's 6",
-           sum(1 for o in omitted if "func A" in o["label"] and "per function" in o["reason"]) == 2,
+           sum(1 for o in omitted if "func A (" in o["label"] and "per function" in o["reason"]) == 2,
            repr(omitted))
-    report("the run cap omits E's 4",
-           sum(1 for o in omitted if "func E" in o["label"] and "per run" in o["reason"]) == 4,
-           repr(omitted))
+    per_function = [sum(1 for c in kept if "func %s (" % name in c["label"]) for name in names]
+    # The old order was alphabetical by path and offset, which spent the whole budget on
+    # the first functions and left the last ones with nothing.
+    report("the run cap starves no function", min(per_function) >= cap // len(names),
+           repr(dict(zip(names, per_function))))
+    report("the run cap omits the overflow, not a whole function",
+           sum(1 for o in omitted if "per run" in o["reason"]) == eligible - cap, repr(reasons))
     report("a suppression equal to a block revert is omitted as a duplicate",
            reasons.count("same bytes as an earlier variant") == 1
            and any("func G" in o["label"] for o in omitted), repr(reasons))
