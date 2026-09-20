@@ -97,6 +97,10 @@ Read the linked architecture section before changing the corresponding boundary:
   before it uses one. `gate/mine` may read no store itself. A project-scope
   record reaches a receipt only in the checkout and on the host it froze at
   registration, so a new record field must be stamped in `SteerHookFacts`.
+- Firing adjudications: the store `cli/internal/adjudication/` and its component
+  name in `cli/internal/statestore/Components`. A corpus absent from that list never
+  migrates. A judgment names its firing by the row's `firing_id` alone, and the
+  identity it was made against is stored with it; `gate/mine` reads no receipt store.
 - Check tier readings: `cli/internal/checks/state.go` is the one reader of a
   repository's check state, shared by the status snapshot, the refresh queue and
   `steer check list`. Adoption, registration, validation freshness and observed

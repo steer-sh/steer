@@ -27,6 +27,7 @@ const markerName = ".steer-state"
 // half in each place is a corpus nobody can score.
 var Components = []string{
 	"commit-review",
+	"firing-audits",
 	"steer-report",
 	"transcript-sessions",
 }

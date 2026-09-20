@@ -67,12 +67,18 @@ func (u SessionUnit) Subject() Subject {
 	}
 }
 
-// Firing is one guard block the master hook recorded.
+// Firing is one guard block the master hook recorded. FiringID is the row's own
+// identifier and the only identity that names one row; the remaining stamps are
+// the implementation that ran. All four are absent on a row an older master wrote.
 type Firing struct {
-	HookID    string  `json:"hook_id"`
-	Harness   string  `json:"harness"`
-	SessionID string  `json:"session_id"`
-	TS        float64 `json:"ts"`
+	HookID            string  `json:"hook_id"`
+	Harness           string  `json:"harness"`
+	SessionID         string  `json:"session_id"`
+	TS                float64 `json:"ts"`
+	FiringID          string  `json:"firing_id,omitempty"`
+	HookDigest        string  `json:"hook_digest,omitempty"`
+	RuleHash          string  `json:"rule_hash,omitempty"`
+	MasterBuildDigest string  `json:"master_build_digest,omitempty"`
 }
 
 // AuditLogName is the guard store's audit stream, one JSON row per block decision.
@@ -98,17 +104,25 @@ func LoadFirings(dirs ...string) (firings []Firing, present bool) {
 				continue
 			}
 			var row struct {
-				HookName  string `json:"hook_name"`
-				Harness   string `json:"harness"`
-				SessionID string `json:"session_id"`
-				Timestamp string `json:"timestamp"`
+				HookName          string `json:"hook_name"`
+				Harness           string `json:"harness"`
+				SessionID         string `json:"session_id"`
+				Timestamp         string `json:"timestamp"`
+				FiringID          string `json:"firing_id"`
+				HookDigest        string `json:"hook_digest"`
+				RuleHash          string `json:"rule_hash"`
+				MasterBuildDigest string `json:"master_build_digest"`
 			}
 			if err := json.Unmarshal([]byte(line), &row); err != nil {
 				continue
 			}
 			// The two scopes share one store on a migrated machine, so the same row can
-			// be read twice. Key on the whole row.
-			key := row.HookName + "\x1f" + row.Harness + "\x1f" + row.SessionID + "\x1f" + row.Timestamp
+			// be read twice. A stamped row keys on its own identifier; an older row has
+			// none, so it keys on the whole row and two blocks in one turn can collapse.
+			key := row.FiringID
+			if key == "" {
+				key = row.HookName + "\x1f" + row.Harness + "\x1f" + row.SessionID + "\x1f" + row.Timestamp
+			}
 			if seen[key] {
 				continue
 			}
@@ -118,6 +132,11 @@ func LoadFirings(dirs ...string) (firings []Firing, present bool) {
 				Harness:   row.Harness,
 				SessionID: row.SessionID,
 				TS:        parseISO(row.Timestamp),
+
+				FiringID:          row.FiringID,
+				HookDigest:        row.HookDigest,
+				RuleHash:          row.RuleHash,
+				MasterBuildDigest: row.MasterBuildDigest,
 			})
 		}
 	}

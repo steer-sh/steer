@@ -276,3 +276,25 @@ func TestSessionSubjectReadsTheResolvedRepositoryRoot(t *testing.T) {
 		t.Errorf("a session stored before the root was captured = %v; want Unknown", got)
 	}
 }
+
+// Two blocks in one turn share every legacy field, so only the row's own identifier
+// tells them apart. A stamped row must survive the deduplicator that a legacy row
+// still needs.
+func TestLoadFiringsKeysStampedRowsOnTheirIdentifier(t *testing.T) {
+	dir := t.TempDir()
+	row := func(id string) string {
+		return `{"hook_name":"no-bare-python","harness":"codex","session_id":"s1",` +
+			`"timestamp":"2026-08-01T10:00:00Z","firing_id":"` + id + `",` +
+			`"hook_digest":"d1","rule_hash":"r1","master_build_digest":"b1"}`
+	}
+	body := row("aa") + "\n" + row("bb") + "\n" + row("aa") + "\n"
+	if err := os.WriteFile(filepath.Join(dir, AuditLogName), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	firings, _ := LoadFirings(dir)
+	check(t, "two blocks in one turn stay two firings", len(firings), 2)
+	check(t, "the same identifier read twice is one firing", firings[0].FiringID, "aa")
+	check(t, "the row's guard source reaches the reader", firings[0].HookDigest, "d1")
+	check(t, "the row's rule reaches the reader", firings[0].RuleHash, "r1")
+	check(t, "the row's master build reaches the reader", firings[0].MasterBuildDigest, "b1")
+}
