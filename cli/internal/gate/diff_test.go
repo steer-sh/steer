@@ -492,3 +492,92 @@ func TestUnreadablePathspecWidens(t *testing.T) {
 		t.Error("and the tracked change must still reach the reviewer")
 	}
 }
+
+// TestAmendReviewsTheReplacingCommit pins the base an --amend is a delta against. HEAD
+// is the commit the amend replaces, so a delta against it holds only this round's edit
+// while the message describes the whole commit.
+func TestAmendReviewsTheReplacingCommit(t *testing.T) {
+	cfg := Defaults()
+	root := buildRepo(t, map[string]string{"zero.py": lines(80)})
+	gitCmd(t, root, verb, "-m", "zero")
+	writeFileAt(t, root, "a.py", lines(80))
+	gitCmd(t, root, "add", "-A")
+	gitCmd(t, root, verb, "-m", "a")
+	writeFileAt(t, root, "b.py", lines(80))
+	gitCmd(t, root, "add", "-A")
+
+	spec := DiffSpec{StagedOnly: true, Amend: true}
+	diff, ok := GetDiff(cfg, root, spec)
+	if !ok {
+		t.Fatal("GetDiff failed")
+	}
+	if !strings.Contains(diff, "a.py") {
+		t.Error("the amended commit's own file must be in the diff")
+	}
+	if !strings.Contains(diff, "b.py") {
+		t.Error("what this round adds must be in the diff")
+	}
+	if strings.Contains(diff, "zero.py") {
+		t.Error("the base is HEAD^, so an earlier commit's file must not be in the diff")
+	}
+	if strings.Contains(stagedDiff(t, cfg, root), "a.py") {
+		t.Error("without the amend flag the base stays HEAD")
+	}
+
+	paths, ok := ChangedFiles(cfg, root, spec)
+	if !ok {
+		t.Fatal("ChangedFiles failed")
+	}
+	got := strings.Join(paths, " ")
+	if !strings.Contains(got, "a.py") || !strings.Contains(got, "b.py") {
+		t.Errorf("ChangedFiles must name the whole replacing commit, got %q", got)
+	}
+}
+
+// TestAmendOfRootCommitUsesTheEmptyTree pins the base when HEAD has no parent. Both
+// object formats, because a sha256 repository names the empty tree by a hash a sha1
+// repository does not recognise.
+func TestAmendOfRootCommitUsesTheEmptyTree(t *testing.T) {
+	cfg := Defaults()
+	for _, format := range []string{"sha1", "sha256"} {
+		t.Run(format, func(t *testing.T) {
+			root := t.TempDir()
+			if out, err := initFormat(root, format); err != nil {
+				t.Skipf("git cannot create a %s repository: %v: %s", format, err, out)
+			}
+			writeFileAt(t, root, "a.py", lines(80))
+			gitCmd(t, root, "add", "-A")
+			gitCmd(t, root, verb, "-m", "root")
+			writeFileAt(t, root, "b.py", lines(80))
+			gitCmd(t, root, "add", "-A")
+
+			diff, ok := GetDiff(cfg, root, DiffSpec{StagedOnly: true, Amend: true})
+			if !ok {
+				t.Fatal("GetDiff failed")
+			}
+			if !strings.Contains(diff, "a.py") {
+				t.Error("the amended root must be in the diff")
+			}
+			if !strings.Contains(diff, "b.py") {
+				t.Error("what this round adds must be in the diff")
+			}
+		})
+	}
+}
+
+// initFormat creates a repository with the named object format, reporting git's own
+// refusal rather than failing the test: --object-format is not in every git.
+func initFormat(root, format string) (string, error) {
+	cmd := exec.Command("git", "init", "-q", "--object-format="+format, ".")
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+// TestSpecEqualComparesAmend pins the retry comparison: two rounds that differ only in
+// their base are not the same spec.
+func TestSpecEqualComparesAmend(t *testing.T) {
+	if (DiffSpec{StagedOnly: true}).Equal(DiffSpec{StagedOnly: true, Amend: true}) {
+		t.Error("a spec that changed its base must not compare equal")
+	}
+}

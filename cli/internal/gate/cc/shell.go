@@ -207,6 +207,15 @@ func DiffNotYetStaged(cmd string) bool {
 	return CommitsAllTracked(cmd) || StagesBeforeCommit(cmd)
 }
 
+// Amends reports `git commit --amend`, which replaces HEAD instead of adding a commit
+// after it.
+func Amends(cmd string) bool {
+	if parsed, err := parseCommit(cmd, ""); err == nil && parsed != nil {
+		return parsed.amends()
+	}
+	return false
+}
+
 // DiffSources returns the honest diff source for this command.
 //
 // The two predicates split here rather than sharing DiffNotYetStaged's answer: the -a form

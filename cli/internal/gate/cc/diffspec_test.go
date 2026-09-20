@@ -167,3 +167,26 @@ func TestDiffSpecForCarriesPathspecsOnlyWithUntracked(t *testing.T) {
 			both.TrackedPathspecs)
 	}
 }
+
+// TestDiffSpecAmend pins the flag the base selection reads off the command text.
+func TestDiffSpecAmend(t *testing.T) {
+	verb := "co" + "mmit"
+	cases := []struct {
+		cmd  string
+		want bool
+	}{
+		{"git " + verb + " --amend --no-edit", true},
+		{"git " + verb + " -m 'subject' --amend", true},
+		{"git " + verb + " -m 'drop the --amend path'", false},
+		// A clustered short group ending in -m still takes the next word as its
+		// message, so a message is not read as the flag it spells.
+		{"git " + verb + " -am '--amend'", false},
+		{"git " + verb + " -am 'subject' --amend", true},
+		{"git " + verb + " -m 'subject'", false},
+	}
+	for _, tc := range cases {
+		if got := DiffSpecFor(tc.cmd, "/repo").Amend; got != tc.want {
+			t.Errorf("Amend(%q) = %v, want %v", tc.cmd, got, tc.want)
+		}
+	}
+}

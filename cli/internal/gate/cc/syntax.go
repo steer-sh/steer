@@ -137,6 +137,13 @@ func gitSubcommand(args []shellsyntax.Word, gitArg int, cwd string) (sub int, gi
 }
 
 func commitHasDryRun(args []shellsyntax.Word) bool {
+	return commitHasFlag(args, "--dry-run")
+}
+
+// commitHasFlag reports a long flag among the commit's own arguments. It walks the
+// option grammar instead of searching the text, so the same spelling inside a -m
+// message or a pathspec is not read as a flag.
+func commitHasFlag(args []shellsyntax.Word, flag string) bool {
 	for i := 0; i < len(args); i++ {
 		if !args[i].Static {
 			continue
@@ -145,7 +152,7 @@ func commitHasDryRun(args []shellsyntax.Word) bool {
 		if token == "--" {
 			return false
 		}
-		if token == "--dry-run" {
+		if token == flag {
 			return true
 		}
 		name, _, attached := strings.Cut(token, "=")
@@ -490,6 +497,12 @@ func (p *parsedGit) commitsAllTracked() bool {
 		}
 	}
 	return false
+}
+
+// amends reports `git commit --amend`. The commit that lands is then HEAD^..new, not
+// HEAD..new, so the tree the reviewers must read is a different one.
+func (p *parsedGit) amends() bool {
+	return commitHasFlag(p.call.Args[p.subcommand+1:], "--amend")
 }
 
 // selectsPaths reports a commit that chooses its own paths: a pathspec, --only,

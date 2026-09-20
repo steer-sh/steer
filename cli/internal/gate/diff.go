@@ -15,6 +15,9 @@ import (
 type DiffSpec struct {
 	// StagedOnly selects `git diff --cached` over `git diff HEAD`.
 	StagedOnly bool
+	// Amend moves the base off HEAD, because an --amend REPLACES HEAD: the commit that
+	// lands is HEAD^..new, while a delta against HEAD holds only what the amend adds.
+	Amend bool
 	// IncludeUntracked adds files git has never seen, rendered as additions.
 	IncludeUntracked bool
 	// UntrackedPathspecs narrows those files to what the command's own staging step
@@ -31,7 +34,8 @@ type DiffSpec struct {
 // with ==, and a round that silently stopped comparing them would report every retry
 // as spec-unchanged.
 func (s DiffSpec) Equal(other DiffSpec) bool {
-	if s.StagedOnly != other.StagedOnly || s.IncludeUntracked != other.IncludeUntracked {
+	if s.StagedOnly != other.StagedOnly || s.IncludeUntracked != other.IncludeUntracked ||
+		s.Amend != other.Amend {
 		return false
 	}
 	return equalPathspecs(s.UntrackedPathspecs, other.UntrackedPathspecs) &&
@@ -73,14 +77,61 @@ type diffPlan struct {
 	excluded []string
 }
 
+// emptyTreeSHA1 is git's empty-tree object under SHA-1. A repository created with
+// --object-format=sha256 names the same tree by a different hash, so this is only the
+// fallback for a git that could not answer.
+const emptyTreeSHA1 = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+// emptyTree is the base of a root commit: the only base that shows the whole of one
+// being amended. git hashes it under the repository's own object format, so it is read
+// from git rather than written down.
+func emptyTree(cwd string) string {
+	if out, ok := Git(cwd, gitMedium, "hash-object", "-t", "tree", os.DevNull); ok {
+		if sha := strings.TrimSpace(out); sha != "" {
+			return sha
+		}
+	}
+	return emptyTreeSHA1
+}
+
+// amendBase returns the commit an --amend's diff is a delta against, or "" when the
+// command is not an amend.
+//
+// HEAD is the commit the amend REPLACES, so a delta against it holds only what this
+// round adds while the message describes the whole commit. The reviewers then read a
+// message about work no hunk shows, which is a BLOCKING finding they are right to
+// raise and wrong about. A root commit has no parent, so its base is the empty tree.
+func amendBase(cwd string, spec DiffSpec) string {
+	if !spec.Amend {
+		return ""
+	}
+	if _, ok := Git(cwd, gitMedium, "rev-parse", "--verify", "--quiet", "HEAD^"); ok {
+		return "HEAD^"
+	}
+	return emptyTree(cwd)
+}
+
+// diffBaseArgs returns the leading `diff` arguments that select the tree this commit
+// is a delta against. An amend base is appended to BOTH forms: `git diff --cached
+// HEAD^` reads the index against the amend's parent, and `git diff HEAD^` reads the
+// working tree against it.
+func diffBaseArgs(cwd string, spec DiffSpec) []string {
+	args := []string{"diff"}
+	if spec.StagedOnly {
+		args = append(args, "--cached")
+	}
+	if base := amendBase(cwd, spec); base != "" {
+		return append(args, base)
+	}
+	if !spec.StagedOnly {
+		args = append(args, "HEAD")
+	}
+	return args
+}
+
 // newDiffPlan builds the argument vectors and the exclusion pathspecs.
 func newDiffPlan(cfg Config, cwd string, spec DiffSpec) *diffPlan {
-	base := []string{"diff"}
-	if spec.StagedOnly {
-		base = append(base, "--cached")
-	} else {
-		base = append(base, "HEAD")
-	}
+	base := diffBaseArgs(cwd, spec)
 	// --no-relative on every call, and it is not about the pathspecs. It is already
 	// the default, but a repo setting `diff.relative = true` restricts git diff to the
 	// cwd's SUBTREE, so a commit made from a subdirectory would be reviewed with every
@@ -141,13 +192,17 @@ func trackedSelector(cwd string, spec DiffSpec) []string {
 	if spec.StagedOnly || len(spec.TrackedPathspecs) == 0 {
 		return nil
 	}
-	named, ok := Git(cwd, gitMedium, append([]string{"diff", "HEAD", "--name-only",
-		"--no-relative", "--no-renames", "-z", "--"}, spec.TrackedPathspecs...)...)
+	// Both halves read the same base as the diff, so an amend's selector covers every
+	// file the replacing commit lands, not only the ones this round touched.
+	worktree := append(diffBaseArgs(cwd, DiffSpec{Amend: spec.Amend}),
+		"--name-only", "--no-relative", "--no-renames", "-z", "--")
+	named, ok := Git(cwd, gitMedium, append(worktree, spec.TrackedPathspecs...)...)
 	if !ok {
 		return nil
 	}
-	staged, ok := Git(cwd, gitMedium, "diff", "--cached", "--name-only", "--no-relative",
-		"--no-renames", "-z")
+	index := append(diffBaseArgs(cwd, DiffSpec{StagedOnly: true, Amend: spec.Amend}),
+		"--name-only", "--no-relative", "--no-renames", "-z")
+	staged, ok := Git(cwd, gitMedium, index...)
 	if !ok {
 		return nil
 	}
@@ -412,13 +467,7 @@ func splitKeepEnds(text string) []string {
 // fail every "is this file in the diff" comparison and attach changed files as
 // unchanged callers. ok=false means git could not answer — fail open.
 func ChangedFiles(cfg Config, cwd string, spec DiffSpec) (paths []string, ok bool) {
-	args := []string{"diff"}
-	if spec.StagedOnly {
-		args = append(args, "--cached")
-	} else {
-		args = append(args, "HEAD")
-	}
-	args = append(args, "--name-only", "--no-relative")
+	args := append(diffBaseArgs(cwd, spec), "--name-only", "--no-relative")
 	args = append(args, pathspecTail(trackedSelector(cwd, spec), nil)...)
 	out, ok := Git(cwd, gitMedium, args...)
 	if !ok {

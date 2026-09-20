@@ -14,7 +14,8 @@ import "github.com/steer-sh/steer-cli/internal/gate"
 // cwd is the directory the shell starts in, as RepoDir takes it.
 func DiffSpecFor(cmd, cwd string) gate.DiffSpec {
 	stagedOnly, includeUntracked := DiffSources(cmd)
-	spec := gate.DiffSpec{StagedOnly: stagedOnly, IncludeUntracked: includeUntracked}
+	spec := gate.DiffSpec{StagedOnly: stagedOnly, IncludeUntracked: includeUntracked,
+		Amend: Amends(cmd)}
 	if includeUntracked {
 		spec.UntrackedPathspecs = StagedPathspecs(cmd, cwd)
 	}
