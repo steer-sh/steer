@@ -78,8 +78,9 @@ migration ownership:
   and the neutral store does not. Migration copies manifest-owned guards, the
   master and audit log, landing the manifest last. This migration does not copy
   `fixtures/`; when migrating a legacy store, check fixture availability separately.
-  `Prepare` also keeps a store `.gitignore` that names `steer-audit.jsonl`: a
-  project store is committed, and its audit log is machine-local.
+  `Prepare` also keeps a store `.gitignore` that names both evidence paths,
+  `steer-audit.jsonl` and `steer-audit-payloads/`, adding whichever a store is
+  missing: a project store is committed, and its firing evidence is machine-local.
 
 Both migrations retain legacy files and preserve files already in the destination.
 A retained legacy master can still be registered, so diagnostics read
@@ -219,8 +220,27 @@ and block contract. Audit rows add harness, root session, thread and repository
 provenance; the repository is the nearest directory holding a `.git` directory
 or file, so a worktree names its own root. Runtime tests under `internal/guard/` pin this translation.
 
+A row also identifies what ran and what was attempted. `hook_digest` and
+`rule_hash` come from `STEER_HOOK_META`, which consolidation stamps from the
+embedded guard source and the manifest entry; `master_build_digest` is the
+generated master's own constant. `locators` copies the call identifiers the
+payload supplied, by key presence, so an absent identifier is distinguishable
+from an empty one; the Pi bridge forwards `toolCallId` and keeps the native call
+in `steer_original_call` before it reduces the call to the Claude shape. The
+evidence bundle is the payload as it arrived and the virtual edit the guard
+objected to. It sits inline under `STEER_EVIDENCE_INLINE_LIMIT` serialized bytes
+and otherwise in `steer-audit-payloads/<firing_id>.json`, named by
+`evidence_ref`; `evidence_sha256`, `evidence_bytes` and `evidence_complete`
+describe either form. Evidence that cannot be retained marks the row incomplete
+rather than dropping the firing. Rows an older master wrote carry none of these
+fields, so a reader tests presence; coverage starts at the scope's rebuild.
+
 An installed master embeds the runtime it was built with. Its runtime digest stamp
-lets readers distinguish current, stale and unknown builds.
+lets readers distinguish current, stale and unknown builds. The master also
+carries its own build digest, taken over the generated text with a placeholder in
+that constant's place, so a firing names its build without reopening a path a
+rebuild can replace underneath it. Consolidation publishes the master through a
+temporary file and a rename for the same reason.
 `claude.RebuildMaster` regenerates and synchronizes registrations together;
 `steer hooks rebuild` exposes it. A runtime must never rebuild itself from a hook.
 

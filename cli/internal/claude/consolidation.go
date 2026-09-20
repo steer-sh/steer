@@ -1,6 +1,8 @@
 package claude
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -161,21 +163,31 @@ func ConsolidateHooks(scope string) error {
 		rule := ""
 		origin := ""
 		sourceID := ""
+		ruleHash := ""
 		if entry, ok := manifest.Hooks[hook.Name]; ok {
 			rule = strings.TrimSpace(entry.Rule)
 			origin = strings.TrimSpace(entry.Source)
 			sourceID = strings.TrimSpace(entry.SourceID)
+			ruleHash = strings.TrimSpace(entry.RuleHash)
 		}
-		hookMeta[hook.Name] = map[string]string{
+		meta := map[string]string{
 			"hook_name": hook.Name,
 			"rule":      rule,
 			"source":    origin,
 			"source_id": sourceID,
+			// The digest is taken over the bytes this master carries, never over
+			// the file on disk: the standalone guard can change after the master
+			// is built, so only the embedded source identifies what ran.
+			"hook_digest": sourceDigest([]byte(source.Source)),
 		}
+		if ruleHash != "" {
+			meta["rule_hash"] = ruleHash
+		}
+		hookMeta[hook.Name] = meta
 	}
 
 	masterContent := generateMasterHook(sources, guard.RequiredImports(), hookMeta)
-	if err := os.WriteFile(masterPath, []byte(masterContent), 0o755); err != nil {
+	if err := publishMaster(masterPath, []byte(masterContent)); err != nil {
 		return fmt.Errorf("failed to write master hook file: %w", err)
 	}
 
@@ -227,6 +239,45 @@ func isTopLevel(line string) bool {
 	return len(line) == len(strings.TrimLeft(line, " \t"))
 }
 
+// masterBuildDigestPlaceholder is the value STEER_MASTER_BUILD_DIGEST holds
+// while the master is hashed. A file cannot contain its own digest, so the
+// generated text is hashed with the placeholder in place and the digest is
+// substituted afterwards: the firing reports the build it belongs to without
+// reopening the master's path, which a rebuild can replace between load and
+// firing.
+const masterBuildDigestPlaceholder = "0000000000000000"
+
+// sourceDigest is sha256 truncated to 16 hex characters, the width
+// fixture.Digest uses, so an audit row's stamp compares to a fixture receipt's
+// without conversion.
+func sourceDigest(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])[:16]
+}
+
+// publishMaster writes the master through a temporary file in its own directory
+// and renames it into place. A guard firing loads the master by path, so a
+// rebuild that wrote in place could be read half-written.
+func publishMaster(path string, content []byte) error {
+	temp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*")
+	if err != nil {
+		return err
+	}
+	name := temp.Name()
+	defer os.Remove(name)
+	if _, err := temp.Write(content); err != nil {
+		temp.Close()
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(name, 0o755); err != nil {
+		return err
+	}
+	return os.Rename(name, path)
+}
+
 func generateMasterHook(sources []HookSource, importLines []string, hookMeta map[string]map[string]string) string {
 	var builder strings.Builder
 
@@ -247,6 +298,8 @@ Generated automatically - do not edit manually.
 		builder.WriteString("\n")
 	}
 	builder.WriteString("\n")
+
+	builder.WriteString("STEER_MASTER_BUILD_DIGEST = \"" + masterBuildDigestPlaceholder + "\"\n\n")
 
 	// A JSON object with string keys/values is also a valid Python dict literal:
 	// every escape JSON emits is one Python reads the same way.
@@ -274,7 +327,10 @@ Generated automatically - do not edit manually.
 	builder.WriteString("if __name__ == \"__main__\":\n")
 	builder.WriteString("    main()\n")
 
-	return builder.String()
+	rendered := builder.String()
+	assignment := "STEER_MASTER_BUILD_DIGEST = \"" + masterBuildDigestPlaceholder + "\""
+	digest := sourceDigest([]byte(rendered))
+	return strings.Replace(rendered, assignment, "STEER_MASTER_BUILD_DIGEST = \""+digest+"\"", 1)
 }
 
 // pythonDict renders a value as JSON, which for strings, maps and slices is also

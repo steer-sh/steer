@@ -24,6 +24,7 @@ const (
 	MasterName   = "steer-hooks.py"
 	ManifestName = "steer-manifest.json"
 	AuditName    = "steer-audit.jsonl"
+	PayloadsName = "steer-audit-payloads"
 	IgnoreName   = ".gitignore"
 )
 
@@ -121,7 +122,7 @@ func Prepare(scope string) (string, error) {
 	if err := os.MkdirAll(neutral, 0o755); err != nil {
 		return "", fmt.Errorf("failed to create hooks directory: %w", err)
 	}
-	if err := ignoreAudit(neutral); err != nil {
+	if err := ignoreEvidence(neutral); err != nil {
 		return "", fmt.Errorf("failed to write %s: %w", IgnoreName, err)
 	}
 	legacy, err := LegacyDir(scope)
@@ -137,26 +138,36 @@ func Prepare(scope string) (string, error) {
 	return neutral, nil
 }
 
-// ignoreAudit makes sure the store's .gitignore names the audit log. A project
-// store is committed with its manifest, while the audit log holds this machine's
-// blocked commands and sessions. An existing .gitignore keeps its lines and gains
-// the entry only when no line already names the log.
-func ignoreAudit(dir string) error {
+// ignoreEvidence makes sure the store's .gitignore names both evidence paths:
+// the audit log and the directory holding the payloads too large to sit inline
+// in a row. A project store is committed with its manifest, while the evidence
+// holds this machine's blocked commands, sessions and tool inputs. An existing
+// .gitignore keeps its lines and gains only the entries no line already names.
+func ignoreEvidence(dir string) error {
 	path := filepath.Join(dir, IgnoreName)
 	raw, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
+	named := make(map[string]bool, 2)
 	for _, line := range strings.Split(string(raw), "\n") {
-		if strings.TrimPrefix(strings.TrimSpace(line), "/") == AuditName {
-			return nil
+		entry := strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(line), "/"), "/")
+		named[entry] = true
+	}
+	missing := make([]string, 0, 2)
+	for _, entry := range []string{AuditName, PayloadsName + "/"} {
+		if !named[strings.TrimSuffix(entry, "/")] {
+			missing = append(missing, entry)
 		}
+	}
+	if len(missing) == 0 {
+		return nil
 	}
 	content := string(raw)
 	if content != "" && !strings.HasSuffix(content, "\n") {
 		content += "\n"
 	}
-	return writeWhole(path, []byte(content+AuditName+"\n"), 0o644)
+	return writeWhole(path, []byte(content+strings.Join(missing, "\n")+"\n"), 0o644)
 }
 
 // populated reports whether a directory holds a steer store. The manifest is the

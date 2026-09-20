@@ -62,7 +62,7 @@ export default function (pi: any) {
     try {
       const call = steerToolCall(event);
       if (!call) return undefined;
-      const reply = await runSteer({
+      const payload: any = {
         hook_event_name: "PreToolUse",
         tool_name: call.tool_name,
         tool_input: call.tool_input,
@@ -70,7 +70,15 @@ export default function (pi: any) {
         session_id: ctx.sessionManager.getSessionId(),
         transcript_path: ctx.sessionManager.getSessionFile(),
         model: ctx.model?.id ?? "",
-      });
+        // steerToolCall reduces the native call to the Claude shape every guard
+        // is written against, which drops the fields Pi alone sends. The audit
+        // keeps the call as it arrived beside the reduced form.
+        steer_original_call: { tool_name: event?.toolName, tool_input: event?.input },
+      };
+      if (event?.toolCallId !== undefined) {
+        payload.tool_call_id = event.toolCallId;
+      }
+      const reply = await runSteer(payload);
       if (ctx.hasUI && typeof reply?.systemMessage === "string") {
         ctx.ui.notify(reply.systemMessage, "info");
       }

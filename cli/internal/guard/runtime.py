@@ -1,6 +1,6 @@
 # Steer master-hook runtime. Spliced into the generated master hook, so it
-# declares no imports and no entrypoint: ast, datetime, io, json, os and sys are
-# guaranteed by the generated file's import block.
+# declares no imports and no entrypoint: ast, datetime, hashlib, io, json, os and
+# sys are guaranteed by the generated file's import block.
 
 STEER_CLAUDE = "claude-code"
 STEER_CODEX = "codex"
@@ -161,7 +161,81 @@ def steer_virtual_edits(payload):
     return [payload]
 
 
-def steer_audit_log(hook_name, payload, edit, harness):
+STEER_EVIDENCE_INLINE_LIMIT = 16384
+STEER_PAYLOADS_DIR = "steer-audit-payloads"
+
+# Every identifier a harness can supply for the call being blocked. A key that
+# did not arrive is left out of the row, so a reader tells "not supplied" from
+# "supplied empty".
+STEER_LOCATOR_KEYS = (
+    "tool_use_id",
+    "tool_call_id",
+    "call_id",
+    "turn_id",
+    "transcript_path",
+    "session_id",
+    "agent_id",
+    "thread_id",
+    "cwd",
+)
+
+
+def steer_master_build_digest():
+    """Read the digest of the master build that is running.
+
+    The constant is written by the generator, so a runtime loaded any other way
+    reports no build rather than failing.
+    """
+    return globals().get("STEER_MASTER_BUILD_DIGEST", "")
+
+
+def steer_locators(payload):
+    """Collect the call identifiers the payload supplied, by key presence."""
+    locators = {}
+    for key in STEER_LOCATOR_KEYS:
+        if key in payload:
+            locators[key] = payload[key]
+    return locators
+
+
+def steer_store_evidence(entry, evidence, store_dir):
+    """Put the evidence bundle inline, or in a sidecar when it is too large.
+
+    The bundle is the payload as it arrived and the virtual edit the guard
+    objected to. A sidecar is written whole and renamed into place before the row
+    naming it is appended, so a row never references a partial file. A failure to
+    retain the bundle marks the row incomplete rather than dropping the firing.
+    """
+    try:
+        data = json.dumps(evidence, ensure_ascii=False).encode("utf-8")
+    except Exception:
+        entry["evidence_complete"] = False
+        entry["evidence_error"] = "encode"
+        return
+    entry["evidence_bytes"] = len(data)
+    entry["evidence_sha256"] = hashlib.sha256(data).hexdigest()
+    if len(data) <= STEER_EVIDENCE_INLINE_LIMIT:
+        entry["evidence"] = evidence
+        entry["evidence_complete"] = True
+        return
+    name = entry["firing_id"] + ".json"
+    try:
+        directory = os.path.join(store_dir, STEER_PAYLOADS_DIR)
+        os.makedirs(directory, exist_ok=True)
+        target = os.path.join(directory, name)
+        temp = target + ".part"
+        with open(temp, "wb") as handle:
+            handle.write(data)
+        os.replace(temp, target)
+    except Exception:
+        entry["evidence_complete"] = False
+        entry["evidence_error"] = "write"
+        return
+    entry["evidence_ref"] = STEER_PAYLOADS_DIR + "/" + name
+    entry["evidence_complete"] = True
+
+
+def steer_audit_log(hook_name, payload, edit, harness, edit_index=None):
     """Append one JSON line per block decision to steer-audit.jsonl.
 
     Auditing must never break or weaken the block decision, so every failure path
@@ -202,6 +276,7 @@ def steer_audit_log(hook_name, payload, edit, harness):
                 break
         entry = {
             "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "firing_id": os.urandom(16).hex(),
             "rule": meta.get("rule", ""),
             "hook_name": meta.get("hook_name", hook_name),
             "enforcement": "block",
@@ -213,7 +288,25 @@ def steer_audit_log(hook_name, payload, edit, harness):
             "tool_name": tool_name,
             "snippet": snippet,
         }
-        audit_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "steer-audit.jsonl")
+        # The guard source and the rule it enforces identify what ran; the build
+        # digest identifies the master it ran inside. A stamp an older master
+        # never wrote is left out.
+        for key in ("hook_digest", "rule_hash"):
+            value = meta.get(key, "")
+            if value:
+                entry[key] = value
+        build = steer_master_build_digest()
+        if build:
+            entry["master_build_digest"] = build
+        locators = steer_locators(payload)
+        if locators:
+            entry["locators"] = locators
+        evidence = {"payload": payload, "edit": edit}
+        if edit_index is not None:
+            evidence["edit_index"] = edit_index
+        store_dir = os.path.dirname(os.path.abspath(__file__))
+        steer_store_evidence(entry, evidence, store_dir)
+        audit_path = os.path.join(store_dir, "steer-audit.jsonl")
         with open(audit_path, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(entry) + "\n")
     except Exception:
@@ -384,7 +477,7 @@ def steer_run(hook_names):
         hook_func = steer_load(hook_name)
         if hook_func is None:
             continue
-        for edit, edit_json in encoded:
+        for edit_index, (edit, edit_json) in enumerate(encoded):
             captured = io.StringIO()
             old_stdout = sys.stdout
             old_stdin = sys.stdin
@@ -406,7 +499,7 @@ def steer_run(hook_names):
             blocked, result = steer_parse_block(output)
             if not blocked:
                 continue
-            steer_audit_log(hook_name, payload, edit, harness)
+            steer_audit_log(hook_name, payload, edit, harness, edit_index)
             print(steer_render_block(output, result, hook_name, harness))
             sys.exit(0)
 

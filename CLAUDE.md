@@ -95,6 +95,11 @@ Read the linked architecture section before changing the corresponding boundary:
   repository's check state, shared by the status snapshot, the refresh queue and
   `steer check list`. Adoption, registration, validation freshness and observed
   execution stay four separate facts.
+- Audit row fields: the writer `cli/internal/guard/runtime.py`, the stamps
+  `cli/internal/claude/consolidation.go` puts in `STEER_HOOK_META`, the Pi
+  payload `cli/internal/pi/bridge_guards.ts` and the reader
+  `cli/internal/gate/mine/session.go`. A new field reaches rows only after
+  `steer hooks rebuild --scope <scope>`, so every reader tests presence.
 - Review addendum: the manifest key in `cli/internal/claude/manifest.go`, the
   gate's HEAD reader `cli/internal/gate/addendum.go` and `mine.SteerAddendumFacts`
   decode one `review_addendum` shape. The stock `prompts/review.md` is never the

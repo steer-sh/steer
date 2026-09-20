@@ -261,7 +261,8 @@ func TestPrepareKeepsTheAuditLogOutOfGit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for name, ignored := range map[string]bool{AuditName: true, ManifestName: false, MasterName: false} {
+	payload := filepath.Join(PayloadsName, "0123.json")
+	for name, ignored := range map[string]bool{AuditName: true, payload: true, ManifestName: false, MasterName: false} {
 		err := exec.Command("git", "-C", root, "check-ignore", "-q", filepath.Join(dir, name)).Run()
 		if got := err == nil; got != ignored {
 			t.Errorf("git ignores %s = %v; want %v", name, got, ignored)
@@ -269,7 +270,7 @@ func TestPrepareKeepsTheAuditLogOutOfGit(t *testing.T) {
 	}
 }
 
-func TestPrepareAddsTheAuditEntryToAnExistingGitignoreOnce(t *testing.T) {
+func TestPrepareAddsTheEvidenceEntriesToAnExistingGitignoreOnce(t *testing.T) {
 	projectRoot(t)
 	dir, err := Dir("project")
 	if err != nil {
@@ -287,7 +288,7 @@ func TestPrepareAddsTheAuditEntryToAnExistingGitignoreOnce(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if got, want := read(t, path), "fixtures/scratch\n"+AuditName+"\n"; got != want {
+	if got, want := read(t, path), "fixtures/scratch\n"+AuditName+"\n"+PayloadsName+"/\n"; got != want {
 		t.Errorf("%s = %q; want %q", IgnoreName, got, want)
 	}
 }
@@ -472,5 +473,29 @@ func TestMasterPathFromCommandReadsAQuotedPath(t *testing.T) {
 				t.Fatalf("MasterPathFromCommand = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestPrepareAddsThePayloadEntryToAStoreOlderThanIt covers the store written
+// before payload sidecars existed: its .gitignore names the audit log alone, and
+// the entry it is missing is added without disturbing the one it has.
+func TestPrepareAddsThePayloadEntryToAStoreOlderThanIt(t *testing.T) {
+	projectRoot(t)
+	dir, err := Dir("project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, IgnoreName)
+	if err := os.WriteFile(path, []byte(AuditName+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Prepare("project"); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := read(t, path), AuditName+"\n"+PayloadsName+"/\n"; got != want {
+		t.Errorf("%s = %q; want %q", IgnoreName, got, want)
 	}
 }
