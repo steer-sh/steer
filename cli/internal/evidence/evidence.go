@@ -11,6 +11,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
 	"github.com/steer-sh/steer-cli/internal/report"
 	"github.com/steer-sh/steer-cli/internal/sessions"
+	"github.com/steer-sh/steer-cli/internal/steerpath"
 )
 
 // Options name the corpora to read and how far back to read them.
@@ -51,6 +52,11 @@ func Gather(opts Options) mine.EvidenceSet {
 
 	ev.Firings, ev.AuditPresent = mine.LoadFirings(GuardStores()...)
 	ev.CheckRuns, ev.CheckRepos = CheckRuns()
+
+	records, _ := mine.Load(opts.GateStateDir)
+	ev.FixtureHost = gate.HostID()
+	ev.FixtureProjectRoot = ProjectRoot()
+	ev.FixtureReceipts = FixtureReceipts(records, ev.FixtureHost, ev.FixtureProjectRoot)
 	return ev
 }
 
@@ -96,4 +102,85 @@ func GuardStores() []string {
 		}
 	}
 	return dirs
+}
+
+// FixtureReceipts reads the fixture state behind every guard the records name, keyed
+// by the store this machine resolved. host and projectRoot are the identities that
+// resolved them, and it reads a store only for a key some record can be attributed
+// to here; the per-record ownership test is the reader's. A missing store or hook
+// yields no entry, and an unreadable one an entry naming the failure.
+func FixtureReceipts(records []mine.Record, host, projectRoot string) map[mine.FixtureKey]mine.FixtureReceipt {
+	out := map[mine.FixtureKey]mine.FixtureReceipt{}
+	seen := map[mine.FixtureKey]bool{}
+	for _, record := range records {
+		fix, bound := mine.GuardFixOf(record)
+		if !bound || fix.Scope == "" {
+			continue
+		}
+		if fix.Host != "" && host != "" && fix.Host != host {
+			continue
+		}
+		if fix.Scope == steerpath.ProjectScope && (fix.Repo == "" || fix.Repo != projectRoot) {
+			continue
+		}
+		key := mine.FixtureKey{Scope: fix.Scope, HookID: fix.ID}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		snapshot, err := claude.ReadHookFixtureSnapshot(fix.Scope, fix.ID)
+		switch {
+		case err != nil:
+			out[key] = mine.FixtureReceipt{
+				Applicable: true,
+				State:      mine.FixtureUnavailable,
+				Reason:     err.Error(),
+			}
+		case snapshot != nil:
+			out[key] = receiptOf(snapshot)
+		}
+	}
+	return out
+}
+
+// receiptOf reads one snapshot into the reported state. Precedence is attribution,
+// then a retained pass, then the master identity that pass named, then freshness:
+// a manifest keeps the digests of a run whose outcome it no longer holds, so a
+// cleared Tested is never read back as a failure or as a pass.
+func receiptOf(s *claude.FixtureSnapshot) mine.FixtureReceipt {
+	r := mine.FixtureReceipt{Applicable: true}
+	if s.Binding == nil || !s.Binding.Tested {
+		r.State = mine.FixtureNone
+		return r
+	}
+	cases, shadowed := s.Binding.Cases, s.Binding.Shadowed
+	r.Cases, r.Shadowed, r.VerifiedAt = &cases, &shadowed, s.Binding.VerifiedAt
+	if s.NoMasterIdentity {
+		r.State = mine.FixtureUnavailable
+		r.Reason = "the retained pass recorded no master identity, so it validates the guard under no master"
+		return r
+	}
+	r.Changed = append(append([]string{}, s.Changed...), s.Unavailable...)
+	if len(r.Changed) == 0 {
+		r.State = mine.FixtureCurrent
+		return r
+	}
+	r.State = mine.FixtureStale
+	r.Reason = s.Reason
+	return r
+}
+
+// ProjectRoot is the checkout whose project guard store this command resolves,
+// canonicalized the way a registration freezes it. Outside a repository it is
+// empty, and a project-scope record then reaches no receipt here.
+func ProjectRoot() string {
+	root, err := checks.RepoRootOf(".")
+	if err != nil {
+		return ""
+	}
+	identity, err := checks.RepoIdentity(root)
+	if err != nil {
+		return ""
+	}
+	return identity
 }

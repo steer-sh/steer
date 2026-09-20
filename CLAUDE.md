@@ -91,6 +91,12 @@ Read the linked architecture section before changing the corresponding boundary:
   The check tier's share of it lives in `cli/internal/status/checks.go`.
 - Refresh queue: `cli/internal/cadence/refresh.go` and
   `skills/steer-report/SKILL.md`. Read version constants at their source.
+- Fixture receipts: `cli/internal/claude/fixturestate.go` reads a guard store,
+  `cli/internal/evidence/` resolves it into `mine.EvidenceSet`, and
+  `cli/internal/gate/mine/guardfix.go` tests each record's frozen ownership
+  before it uses one. `gate/mine` may read no store itself. A project-scope
+  record reaches a receipt only in the checkout and on the host it froze at
+  registration, so a new record field must be stamped in `SteerHookFacts`.
 - Check tier readings: `cli/internal/checks/state.go` is the one reader of a
   repository's check state, shared by the status snapshot, the refresh queue and
   `steer check list`. Adoption, registration, validation freshness and observed

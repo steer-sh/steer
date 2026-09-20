@@ -171,7 +171,7 @@ func intPtr(n int) *int           { return &n }
 // so a renamed or reordered json tag fails here, the agent-contract guard.
 func TestJSONContractIsStable(t *testing.T) {
 	s := &SystemStatus{
-		StatusVersion: 24,
+		StatusVersion: 25,
 		GeneratedAt:   "2026-01-01T00:00:00Z",
 		Posture: Posture{
 			Instrument: "agy@sha", Reviewer: "gemini", Ledger: "/l.jsonl",
@@ -297,7 +297,7 @@ func TestJSONContractIsStable(t *testing.T) {
 }
 
 const goldenStatusJSON = `{
-  "status_version": 24,
+  "status_version": 25,
   "generated_at": "2026-01-01T00:00:00Z",
   "posture": {
     "instrument": "agy@sha",
@@ -496,6 +496,9 @@ const goldenStatusJSON = `{
           "rows": 3,
           "units": 2
         },
+        "fixtures": {
+          "applicable": false
+        },
         "checks": {
           "applicable": false,
           "stream_present": false,
@@ -620,6 +623,9 @@ const goldenStatusJSON = `{
           "class_scoped": false,
           "rows": 0,
           "units": 0
+        },
+        "fixtures": {
+          "applicable": false
         },
         "checks": {
           "applicable": true,

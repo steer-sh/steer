@@ -56,7 +56,10 @@ import (
 // telemetry.denials_rows and the auto-denials corpus row. v22 adds coverage
 // ledger_missed and ledger_overdue, and a ledger cause no longer files a record
 // under repair. v23 extends that to an unknown scope and a session with no project.
-const StatusVersion = 24
+// v25 adds observation.fixtures: what this machine knows about the stored cases
+// behind a guard-tier fix. Its states answer attribution and freshness, never
+// whether the guard blocks correctly in the field.
+const StatusVersion = 25
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20

@@ -12,6 +12,7 @@ type Observation struct {
 	Counts     ObservationCounts     `json:"counts"`
 	Recurrence Recurrence            `json:"recurrence"`
 	Firing     FiringActivity        `json:"firing"`
+	Fixtures   FixtureReceipt        `json:"fixtures"`
 	Checks     CheckActivity         `json:"checks"`
 	Coverage   ObservationCoverage   `json:"coverage"`
 	Provenance ObservationProvenance `json:"provenance"`
@@ -161,6 +162,7 @@ func chainObservation(record Record, before, after []Chain, beforeCov, afterCov 
 		},
 		Recurrence: chainRecurrence(after, pattern, kind),
 		Firing:     firing,
+		Fixtures:   fixtureReceiptOf(record, ev),
 		Checks:     chainCheckActivity(record, ev, splitTS, clock),
 		Coverage: ObservationCoverage{
 			Before:            coverageMap(beforeCov),
@@ -209,6 +211,7 @@ func sessionObservation(record Record, before, after []SessionUnit,
 		},
 		Recurrence: sessionRecurrence(after, pattern, signalKind),
 		Firing:     firing,
+		Fixtures:   fixtureReceiptOf(record, ev),
 		Checks:     sessionCheckActivity(record, after, ev),
 		Coverage: ObservationCoverage{
 			Before:            sessionCoverageMap(beforeCov),

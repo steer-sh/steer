@@ -68,7 +68,7 @@ steer report refresh --days 30
 
 Then Read the queue **once**: `~/.steer/state/steer-report/queue.json` (`version: 14`). It holds:
 
-- `interventions[]` — full contract records the tier flagged as **asking for a reader**: the class recurred after the split, an absent guard audit log or missing check evidence left the fix's activity unread, the record carries no frozen scope, the fix it binds is `absent` or `unreadable`, or the fix is in place but carries `artifact.removed`. These carry a `match`; they are the audit's action list, pre-filtered. Each carries `problem` and `intervention` — the record's own explanation of what goes wrong and what it does about it, authored when the class was found. Lead your report with those rather than with the class name or the regex, and correct one that no longer describes the evidence with `steer fix describe ID`, which changes no window. Each also carries the conditions the counts were taken under: `corpus` and `unit` (`review-findings` counts by `chain`, `transcript-friction` by `session` — never compare the two rates), `signal_kind` on a session-unit record, `scope` (the frozen eligibility rule, `null` on a legacy record), `before_coverage` / `after_coverage` (`total`, `eligible`, `ineligible`, `unknown`, `unknown_scope`, `unknown_evidence`, `pending`, `ledger_missed`, `ledger_overdue`, `partial_exposure`), `observation` — the six field blocks documented in the status contract below — and `artifact`, where the fix the record binds stands now.
+- `interventions[]` — full contract records the tier flagged as **asking for a reader**: the class recurred after the split, an absent guard audit log or missing check evidence left the fix's activity unread, the record carries no frozen scope, the fix it binds is `absent` or `unreadable`, or the fix is in place but carries `artifact.removed`. These carry a `match`; they are the audit's action list, pre-filtered. Each carries `problem` and `intervention` — the record's own explanation of what goes wrong and what it does about it, authored when the class was found. Lead your report with those rather than with the class name or the regex, and correct one that no longer describes the evidence with `steer fix describe ID`, which changes no window. Each also carries the conditions the counts were taken under: `corpus` and `unit` (`review-findings` counts by `chain`, `transcript-friction` by `session` — never compare the two rates), `signal_kind` on a session-unit record, `scope` (the frozen eligibility rule, `null` on a legacy record), `before_coverage` / `after_coverage` (`total`, `eligible`, `ineligible`, `unknown`, `unknown_scope`, `unknown_evidence`, `pending`, `ledger_missed`, `ledger_overdue`, `partial_exposure`), `observation` — the seven field blocks documented in the status contract below — and `artifact`, where the fix the record binds stands now.
 - `unscored[]` — ids of records no engine reads. Report their existence; do not read a result into them.
 - `candidates[]` — **one row per corpus**, each pointing at a pile of evidence no problem covers yet. The transcript row carries `ungrouped_clusters`; the review row carries `undecided_chains` and a `dump` command. The transcript row also carries a few `examples` — the strongest cluster keys, for a reader glancing at the row, never the pile itself; the review row carries none, because its `dump` command prints the findings in full. A row has **no** `match` and no title: grouping the pile and authoring the regex are your job, below. Read the full dumps for the pile; the row only sizes it.
 - `corpora[]` — one row per corpus (`review-findings`, `transcript-friction`) with `present` and `size`. Relay this sweep to the user in one sentence.
@@ -91,7 +91,7 @@ Behaviour is established at install instead: a guard's stored fixtures replay re
 
 ### Read the fields, speak the reading
 
-Each record carries an `observation` with five blocks. Read those; say what they
+Each record carries an `observation` with seven blocks. Read those; say what they
 show, in the same vocabulary the CLI prints: a **fix** rather than an
 intervention, a **recurring problem** rather than a class, a **result** rather
 than a verdict, **review history** or **session history** rather than a corpus, a
@@ -102,6 +102,7 @@ than a verdict, **review history** or **session history** rather than a corpus, 
 | `counts` | `split_ts`, `observed_ts`, `unit`, and per window `{hits, eligible, first_activity_ts, last_activity_ts}` | The two windows' sizes and dates. Never a rate comparison. |
 | `recurrence` | `occurred`, `matches`, `example_kind`, `example`, `example_ts` | Whether the problem came back, and the newest example. |
 | `firing` | `applicable`, `log_present`, `hook_id`, `scope`, `class_scoped`, `rows`, `units` | What the guard's audit stream recorded, and over what. |
+| `fixtures` | `applicable`, `state`, `cases`, `changed`, `verified_at`, `shadowed`, `reason` | Whether the guard's stored cases were last run against the guard installed now. Never that the guard blocks correctly in the field. |
 | `checks` | `applicable`, `attribution`, `stream_present`, `registered_host`, `other_host`, `check_id`, `scope`, `executions`, `outcomes`, `blocked`, `changed_detector` | What a repository check's executions on this machine recorded, and over what. |
 | `coverage` | the two coverage maps plus `zero_eligible_after` | Which units the window could not account for. |
 | `provenance` | `kind` plus the identities per window | Whether one instrument or two counted these windows. |
@@ -155,7 +156,7 @@ Digest schema (`digest_version: 3`):
 
 The digest is size-capped: the CLI evicts the lowest-scoring clusters to fit, and reports honesty in `stats`.
 
-### The `steer status --json` contract (`status_version: 24`)
+### The `steer status --json` contract (`status_version: 25`)
 
 Step 1 reads this snapshot for posture and the full class inventory. The unit is
 the failure class and what the corpus recorded about it, not the hook count. This
@@ -182,6 +183,8 @@ v19 adds `posture.masters[].state` `detached` and `store`: an installed harness
 that runs none of a scope's guards. v20 adds `artifact.removed`: a fix in place
 now that its store's archive records as removed after the record's split. v21
 removes `posture.denials`, `telemetry.denials_rows` and the `auto-denials` corpus.
+v25 adds `observation.fixtures`: what this machine knows about the stored
+cases behind a guard-tier fix.
 v22 adds coverage `ledger_missed` and `ledger_overdue`: a missing ledger is
 disclosed and no longer puts a record under repair. v23 does the same for an
 `unknown_scope` unit and a session with no project. v24 adds `store_problems`:
@@ -307,7 +310,7 @@ reads as a store holding nothing.
     `partial_exposure` is the session corpus's own category, for a session that
     straddled the install and so ran under both regimes: `unknown` means the
     scope could not decide, `partial_exposure` means the window could not.
-  - `observation` — what the corpus recorded. Five blocks:
+  - `observation` — what the corpus recorded. Seven blocks:
     - `counts` — `split_ts` (the boundary: the install, the refusal, or the
       scope migration), `observed_ts` (the read's clock), `unit`, and `before` /
       `after`, each `{hits, eligible, first_activity_ts, last_activity_ts}`. The
@@ -326,6 +329,24 @@ reads as a store holding nothing.
       `class_scoped` is then true) or `window_period` (every row this hook wrote
       inside the window's bounds, whatever work it landed on). A `window_period`
       count cannot establish that the guard fired on this class's work.
+    - `fixtures` — the guard's stored cases, read against the guard as it is
+      installed now: `{applicable, state, cases, changed, verified_at, shadowed,
+      reason}`. `state` is `current` (a retained pass whose fixtures, guard, rule
+      and master all still match), `stale` (a retained pass that no longer
+      matches, or whose components could not all be read — `changed` names them
+      and `reason` explains a read failure), `none` (the guard was resolved and
+      holds no retained pass; a verification that failed and one that a rebuild
+      invalidated leave the same manifest state, so this makes no historical
+      claim), or `unavailable` (this reading could not attribute or reach the
+      store — `reason` says which). A project-scope record is attributed only to
+      the checkout it was registered against, and a record frozen on another host
+      reads `unavailable` here. `cases` and `shadowed` describe a retained pass
+      and are absent without one; `shadowed` counts cases another guard
+      intercepted first, which that pass did not establish this guard blocked.
+      A pass is over inputs frozen at verification time: `current` says the
+      stored cases passed under this exact guard, rule and master, and says
+      nothing about the guard being reached in the field. Never read it as
+      efficacy, and never read `none` as a failed guard.
     - `checks` — a check-tier fix's execution stream: `{applicable, attribution,
       stream_present, registered_host, other_host, check_id, repo, scope, class_scoped, executions, outcomes,
       blocked, changed_detector, units, newest_ts}`. It counts executions recorded

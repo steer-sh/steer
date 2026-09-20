@@ -279,6 +279,10 @@ func hookFactsInScope(hookID, scope string) (map[string]any, error) {
 		"rule_hash":  ruleHash,
 		"hook_file":  entry.File,
 		"hook_scope": scope,
+		// The machine that read this store. A store's contents are local, so the
+		// same scope and id on another machine is a different guard, and a reading
+		// taken there establishes nothing about this record.
+		HookHostKey: gate.HostID(),
 	}
 	if entry.HookVersion != "" {
 		facts["hook_version"] = entry.HookVersion
@@ -531,6 +535,13 @@ type EvidenceSet struct {
 	// each repository with any check evidence here.
 	CheckRuns  []CheckRun
 	CheckRepos map[string]bool
+	// FixtureReceipts is one entry per guard store this machine resolved and read.
+	// FixtureHost and FixtureProjectRoot are the identities that resolved them, so
+	// a record frozen against another machine or another checkout is told apart
+	// from one this reading covers.
+	FixtureReceipts    map[FixtureKey]FixtureReceipt
+	FixtureHost        string
+	FixtureProjectRoot string
 }
 
 // ScoreWith scores one record through the engine its corpus names.

@@ -57,16 +57,48 @@ type FixtureBinding struct {
 	Shadowed     int    `json:"shadowed,omitempty"`
 }
 
+// Fixture component names, in the order a reader reports them.
+const (
+	FixtureComponentFixtures = "fixtures"
+	FixtureComponentHook     = "hook"
+	FixtureComponentRule     = "rule"
+	FixtureComponentMaster   = "master"
+)
+
+// Changed names every component whose current value differs from the one this
+// state was earned under, in FixtureComponent order. It compares the four values
+// and nothing else; a component that could not be read is the caller's to report.
+// A nil binding has no differences to report, which is not evidence of
+// validation: Bound is the predicate that says so.
+func (b *FixtureBinding) Changed(fixturesDigest, hookDigest, ruleHash, masterDigest string) []string {
+	if b == nil {
+		return nil
+	}
+	var changed []string
+	for _, c := range []struct {
+		name string
+		was  string
+		is   string
+	}{
+		{FixtureComponentFixtures, b.Digest, fixturesDigest},
+		{FixtureComponentHook, b.HookDigest, hookDigest},
+		{FixtureComponentRule, b.RuleHash, ruleHash},
+		{FixtureComponentMaster, b.MasterDigest, masterDigest},
+	} {
+		if c.was != c.is {
+			changed = append(changed, c.name)
+		}
+	}
+	return changed
+}
+
 // Bound reports whether this state was earned under the identity given. It is
 // never inherited: an unbound state reads as untested, never as current.
 func (b *FixtureBinding) Bound(fixturesDigest, hookDigest, ruleHash, masterDigest string) bool {
 	if b == nil || !b.Tested {
 		return false
 	}
-	return b.Digest == fixturesDigest &&
-		b.HookDigest == hookDigest &&
-		b.RuleHash == ruleHash &&
-		b.MasterDigest == masterDigest
+	return len(b.Changed(fixturesDigest, hookDigest, ruleHash, masterDigest)) == 0
 }
 
 // RuleEntry is one instruction-tier rule: text Steer owns and writes into every

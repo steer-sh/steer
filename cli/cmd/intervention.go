@@ -404,6 +404,10 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 				AuditPresent: ev.AuditPresent,
 				CheckRuns:    ev.CheckRuns,
 				CheckRepos:   ev.CheckRepos,
+
+				FixtureReceipts:    ev.FixtureReceipts,
+				FixtureHost:        ev.FixtureHost,
+				FixtureProjectRoot: ev.FixtureProjectRoot,
 			})
 		},
 	}

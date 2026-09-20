@@ -1070,6 +1070,11 @@ type ScoreOpts struct {
 	AuditPresent bool
 	CheckRuns    []CheckRun
 	CheckRepos   map[string]bool
+	// FixtureReceipts and the two identities that resolved them travel together:
+	// a receipt read on another machine or in another checkout binds no record here.
+	FixtureReceipts    map[FixtureKey]FixtureReceipt
+	FixtureHost        string
+	FixtureProjectRoot string
 }
 
 // Score recomputes each intervention's before/after incidence and verdict.
@@ -1108,6 +1113,10 @@ func Score(w io.Writer, stateDir string, o ScoreOpts) error {
 		AuditPresent: o.AuditPresent,
 		CheckRuns:    o.CheckRuns,
 		CheckRepos:   o.CheckRepos,
+
+		FixtureReceipts:    o.FixtureReceipts,
+		FixtureHost:        o.FixtureHost,
+		FixtureProjectRoot: o.FixtureProjectRoot,
 	}
 	results := make([]map[string]any, 0, len(records))
 	var unscored []string
@@ -1177,6 +1186,49 @@ func observationState(obs Observation, scoped bool) string {
 
 // writeObservation prints the field counts under one record: the windows, the
 // recurrence, the guard activity and the identities that counted each window.
+// writeFixtureReceipt prints a guard-tier record's fixture line: what this machine
+// knows about the stored cases behind the installed guard. Every state carries its
+// own limit, because a pass is over inputs frozen at verification time and says
+// nothing about the guard being reached in the field.
+func writeFixtureReceipt(w io.Writer, r FixtureReceipt) {
+	if !r.Applicable {
+		return
+	}
+	switch r.State {
+	case FixtureCurrent:
+		fmt.Fprintf(w, "    fixtures: current — %s passed%s; validates the stored cases only\n",
+			casesWord(r.Cases), shadowedClause(r.Shadowed))
+	case FixtureStale:
+		fmt.Fprintf(w, "    fixtures: stale — changed: %s; retained pass: %s%s\n",
+			joinOrNone(r.Changed), casesWord(r.Cases), shadowedClause(r.Shadowed))
+		if r.Reason != "" {
+			fmt.Fprintf(w, "      %s\n", r.Reason)
+		}
+	case FixtureNone:
+		fmt.Fprintln(w, "    fixtures: none — no passing fixture run is retained for this guard")
+	default:
+		fmt.Fprintf(w, "    fixtures: unavailable — %s\n", firstNonEmpty(r.Reason, "this reading cannot reach the store"))
+	}
+}
+
+// casesWord names the size of a retained pass, and says so when the manifest kept
+// no count rather than printing a zero it did not read.
+func casesWord(cases *int) string {
+	if cases == nil {
+		return "an unrecorded number of stored cases"
+	}
+	return fmt.Sprintf("%d stored cases", *cases)
+}
+
+// shadowedClause reports cases another guard intercepted first. A pass earned with
+// shadowed cases did not establish that this guard is what blocked them.
+func shadowedClause(shadowed *int) string {
+	if shadowed == nil || *shadowed == 0 {
+		return ""
+	}
+	return fmt.Sprintf("; %d shadowed by another guard", *shadowed)
+}
+
 // writeCheckActivity prints a check-tier record's execution line. Other tiers
 // print nothing.
 func writeCheckActivity(w io.Writer, c CheckActivity) {
@@ -1237,6 +1289,7 @@ func writeObservation(w io.Writer, obs Observation) {
 		fmt.Fprintf(w, "    firing: %d rows for %s, counted over %s (class-scoped=%t)\n",
 			obs.Firing.Rows, obs.Firing.HookID, obs.Firing.Scope, obs.Firing.ClassScoped)
 	}
+	writeFixtureReceipt(w, obs.Fixtures)
 	writeCheckActivity(w, obs.Checks)
 	if obs.Coverage.ZeroEligibleAfter {
 		fmt.Fprintln(w, "    coverage: no eligible work has arrived since the split")
