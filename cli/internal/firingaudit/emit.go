@@ -5,20 +5,17 @@ import (
 	"fmt"
 )
 
-// Emission reports what one rendering of a case cost and what it withheld.
-//
-// It exists so a reading pass spends an allowance without measuring anything
-// itself: it passes the bytes it can still afford to each call and subtracts
-// the count that comes back. Clipped is this rendering's own withholding and
-// is a different fact from a step's Truncated flag, which is the continuation
-// reader cutting each step's text to its own budget before any of this.
+// Emission reports what one rendering of a case cost and what it withheld, so
+// a caller spends an allowance without measuring the output itself.
 type Emission struct {
 	// EmittedBytes is the exact size of this rendering, counting its framing
 	// and this count itself.
 	EmittedBytes int `json:"emitted_bytes"`
 	// MaxBytes is the allowance the caller set, zero when it set none.
 	MaxBytes int `json:"max_bytes,omitempty"`
-	// Clipped names what this rendering withheld to fit MaxBytes.
+	// Clipped names what this rendering withheld to fit MaxBytes. It is not a
+	// step's Truncated flag, which is the continuation reader cutting one
+	// step's text.
 	Clipped []string `json:"clipped,omitempty"`
 	// StepsEmitted and StepsAvailable separate what a reader saw from what the
 	// continuation lookup reached, so a judgment states the extent it read.
@@ -29,15 +26,10 @@ type Emission struct {
 // Render writes one case at one clip level. Fit calls it repeatedly.
 type Render func(Case, Emission) ([]byte, error)
 
-// Fit renders a case within an allowance, withholding the least decisive
-// evidence first.
-//
-// The row and the blocked action settle whether the block was correct, so they
-// are never withheld: an allowance that cannot carry them is refused rather
-// than answered with a case nobody can judge. Prior readings go first, then
-// continuation steps from the tail, which is the end furthest from the block.
-//
-// A zero allowance withholds nothing and still reports the size.
+// Fit renders a case within an allowance, withholding prior readings first,
+// then continuation steps from the tail. It never withholds the row or the
+// blocked action: an allowance that cannot carry those is refused. A zero
+// allowance withholds nothing and still reports the size.
 func Fit(c Case, max int, render Render) ([]byte, Emission, error) {
 	available := len(c.Continuation.Steps)
 	base := Emission{MaxBytes: max, StepsAvailable: available}
