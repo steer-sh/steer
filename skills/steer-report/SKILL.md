@@ -2,7 +2,6 @@
 name: steer-report
 description: Audits the fixes steer already installed, then mines Claude Code and Codex transcripts and the commit-review ledger for new fix candidates backed by evidence — repository checks, guards, instruction rules, or review prompt entries. Use for steer onboarding ("what hooks should I create?"), periodic review of installed hooks and fixes, or when the user asks to mine usage history for candidates.
 user-invocable: true
-digest_version: 2
 compatibility: Requires the steer CLI (report, commit-gate and check subcommands) on PATH or bundled under scripts/. Reads transcripts from ~/.claude/projects and $CODEX_HOME/sessions, and, when present, the commit-review ledger under ~/.steer/state/commit-review (~/.claude/state/commit-review on a machine that has not yet migrated).
 allowed-tools: Bash(steer *), Read, Edit, Write
 ---
@@ -30,7 +29,6 @@ An empty corpus produces one line, never an error. An adopter with no commit-rev
 /steer-report --days 7
 /steer-report --project-only
 /steer-report --repo-only
-/steer-report --headless
 ```
 
 ## Step 0: Fresh-context gate (interactive mode only)
@@ -39,7 +37,7 @@ The analysis reads a sizable digest and a finding dump, then reasons over both. 
 
 > "A usage report works best in a fresh session: the analysis gets the full context window, and cost is lower because each step doesn't re-pay for this conversation's history. I recommend running `/steer-report` as the first message of a new session. Proceed here anyway?"
 
-Respect the user's choice. If the conversation is fresh, skip the warning and proceed. In `--headless` mode, skip this gate entirely and never ask questions.
+Respect the user's choice. If the conversation is fresh, skip the warning and proceed.
 
 ## Step 1: Snapshot the loop, refresh the queue, then audit
 
@@ -153,7 +151,7 @@ STEER_BIN="${STEER_BIN:-steer}"
 
 Then Read `${TMPDIR:-/tmp}/steer-digest.json` **once**. Do not cat the file and do not re-read it later — everything needed for analysis is in that single read.
 
-All projects and every harness are scanned by default (cross-project, cross-harness habits are the strongest candidates). Pass through any flags the user supplied (`--days N`, `--project-only`, `--repo-only`, `--harness claude-code|codex`, `--max-digest-bytes N`). `--project-only` reads the working directory alone; `--repo-only` reads every session launched anywhere inside the current checkout, and the two are mutually exclusive. Strip `--headless` — it is a skill flag, not a CLI flag.
+All projects and every harness are scanned by default (cross-project, cross-harness habits are the strongest candidates). Pass through any flags the user supplied (`--days N`, `--project-only`, `--repo-only`, `--harness claude-code|codex`, `--max-digest-bytes N`). `--project-only` reads the working directory alone; `--repo-only` reads every session launched anywhere inside the current checkout, and the two are mutually exclusive.
 
 The digest — not the queue — is the transcript corpus. The queue carries one row saying how many correction clusters are ungrouped; the clusters themselves are here. Most hold a single occurrence, because a cluster key is the user's own wording and merges verbatim repeats and nothing else: two complaints about one habit, phrased differently, arrive as two clusters. A cluster is therefore never a problem and its `count` is never a recurrence. Merging them into classes is your job, not the tier's.
 
@@ -724,41 +722,3 @@ This rewrites the queue and its timestamp from the new state, so the SessionStar
 - **Workload moves the split.** A `check`-tier fix scoped to Python cannot recur in a month of shell commits, and that reads as silence. Read `observation.counts` for each window's date bounds and eligible size before reading anything into a quiet after-window.
 - **A fresh record has an empty after-window.** The gate reviews on the order of a few commits a week, so `zero_eligible_after` is the normal state of a new record. Re-read on a cadence rather than the day after installing, and never read a fresh quiet window as success.
 - **Never inject this history into the reviewer or the authoring session.** A reviewer handed past findings re-finds them instead of searching, and a list of old defects is a gauge rather than a directive. The output of this loop is a gate, not a reminder.
-
-## Headless mode
-
-When the invocation contains `--headless`: skip the gate, ask nothing, install nothing, and emit only JSON as the final message — the scored interventions and the proposed candidates from both corpora:
-
-```json
-{
-  "digest_version": 3,
-  "stats": { "sessions_scanned": 0, "threads_scanned": 0, "truncated": false },
-  "interventions": [
-    {
-      "class": "stale test-count claim",
-      "recurred": true,
-      "before": "4/82",
-      "after": "1/29"
-    }
-  ],
-  "candidates": [
-    {
-      "corpus": "transcript-friction",
-      "rule": "never use console.log | use logger instead",
-      "scope": "project",
-      "tier": "steer",
-      "sources": ["instruction_files", "user_corrections"],
-      "evidence": "corrected in 4 sessions; directive in CLAUDE.md §Conventions"
-    },
-    {
-      "corpus": "review-findings",
-      "class": "unchecked error return",
-      "tier": "check",
-      "target": "check.sh",
-      "evidence": "flagged on 5 of 40 reviewed commits"
-    }
-  ]
-}
-```
-
-Report an empty corpus as an empty array, never an error. Headless mode reports candidates only — it never creates hooks.
