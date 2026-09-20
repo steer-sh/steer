@@ -138,8 +138,12 @@ type message struct {
 }
 
 type contentBlock struct {
-	Type      string          `json:"type"`
-	Text      string          `json:"text"`
+	Type string `json:"type"`
+	Text string `json:"text"`
+	// Thinking is the assistant's reasoning. Stream normalizes no thinking
+	// block; the continuation walk reads it, because the narrative after a
+	// block is what says whether the task carried on.
+	Thinking  string          `json:"thinking"`
 	Content   json.RawMessage `json:"content"`
 	IsError   bool            `json:"is_error"`
 	ToolUseID string          `json:"tool_use_id"`
