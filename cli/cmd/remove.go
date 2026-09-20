@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -41,6 +42,11 @@ artifacts:
 
 		hook, err := claude.ResolveHook(scope, identifier)
 		if err != nil {
+			// A hook in the other scope is this tier's, so the other tiers'
+			// remove commands are not the reader's next step.
+			if errors.Is(err, claude.ErrHookInOtherScope) {
+				return err
+			}
 			return fmt.Errorf("%w\n%s", err, otherTierRemoveHint(tier.Guard, identifier, scope))
 		}
 

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -72,21 +73,69 @@ func ListIndividualHooks(scope string) ([]HookFile, error) {
 	return hooks, nil
 }
 
-// ResolveHook finds a hook by full path, file name, stem, or readable name.
-func ResolveHook(scope, identifier string) (HookFile, error) {
-	hooks, err := ListIndividualHooks(scope)
-	if err != nil {
-		return HookFile{}, err
-	}
-	if len(hooks) == 0 {
-		return HookFile{}, fmt.Errorf("no hooks found")
-	}
+// ErrHookInOtherScope matches a miss whose identifier resolves in the scope the
+// command did not read. A caller that adds its own hint to a miss tests for it:
+// the reader's next step is the named --scope, not that hint.
+var ErrHookInOtherScope = errors.New("hook is in the other scope")
 
+// HookScopeMiss is that miss. It carries the identifier, the scope the lookup
+// read and the scope holding the hook, and matches ErrHookInOtherScope.
+type HookScopeMiss struct {
+	Identifier string
+	Read       string
+	Holds      string
+}
+
+func (e *HookScopeMiss) Error() string {
+	return fmt.Sprintf("%s is a %s hook; this read the %s store. Rerun with --scope %s",
+		e.Identifier, e.Holds, e.Read, e.Holds)
+}
+
+func (e *HookScopeMiss) Is(target error) bool { return target == ErrHookInOtherScope }
+
+// otherScope names the scope a hook lookup did not read.
+func otherScope(scope string) string {
+	if normalizeScope(scope) == GlobalScope {
+		return ProjectScope
+	}
+	return GlobalScope
+}
+
+// ResolveHook finds a hook by full path, file name, stem, or readable name.
+//
+// It reads one scope. A miss reports the scope it read, and names --scope when
+// the identifier resolves in the other one.
+func ResolveHook(scope, identifier string) (HookFile, error) {
 	id := strings.TrimSpace(identifier)
 	if id == "" {
 		return HookFile{}, fmt.Errorf("hook identifier cannot be empty")
 	}
 
+	hooks, err := ListIndividualHooks(scope)
+	if err != nil {
+		return HookFile{}, err
+	}
+	if hook, ok := matchHook(hooks, id); ok {
+		return hook, nil
+	}
+
+	scope = normalizeScope(scope)
+	other := otherScope(scope)
+	if otherHooks, err := ListIndividualHooks(other); err == nil {
+		if _, ok := matchHook(otherHooks, id); ok {
+			return HookFile{}, &HookScopeMiss{Identifier: identifier, Read: scope, Holds: other}
+		}
+	}
+
+	if len(hooks) == 0 {
+		return HookFile{}, fmt.Errorf("no hooks in the %s store; --scope %s reads the other one", scope, other)
+	}
+	return HookFile{}, fmt.Errorf("hook not found in the %s store: %s", scope, identifier)
+}
+
+// matchHook returns the hook an identifier names: a full path, a file name, a
+// stem, or the stem with its hyphens as spaces.
+func matchHook(hooks []HookFile, id string) (HookFile, bool) {
 	idAbs := ""
 	if abs, err := filepath.Abs(id); err == nil {
 		idAbs = abs
@@ -94,23 +143,23 @@ func ResolveHook(scope, identifier string) (HookFile, error) {
 
 	for _, hook := range hooks {
 		if id == hook.Path || id == hook.FileName || id == hook.Name {
-			return hook, nil
+			return hook, true
 		}
 
 		readable := strings.ReplaceAll(hook.Name, "-", " ")
 		if strings.EqualFold(readable, id) {
-			return hook, nil
+			return hook, true
 		}
 
 		if idAbs != "" {
 			hookAbs, err := filepath.Abs(hook.Path)
 			if err == nil && hookAbs == idAbs {
-				return hook, nil
+				return hook, true
 			}
 		}
 	}
 
-	return HookFile{}, fmt.Errorf("hook not found: %s", identifier)
+	return HookFile{}, false
 }
 
 // ConsolidateHooks rebuilds the master steer-hooks.py from all individual hooks.
