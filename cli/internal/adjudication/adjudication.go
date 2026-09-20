@@ -1,10 +1,8 @@
 // Package adjudication stores the agent's judgments of guard firings and reports
-// how much of the audit stream they cover.
-//
-// A judgment is a reading of one recorded block, kept in the neutral evidence root
-// and naming its subject by that row's own identifier. This package judges nothing:
-// it holds the record, the identity it was made against, and the arithmetic that
-// says what is left to read.
+// how much of the audit stream they cover. A judgment is a reading of one recorded
+// block, kept in the neutral evidence root and naming its subject by that row's own
+// identifier. This package judges nothing: it holds the record, the identity it was
+// made against, and the arithmetic that says what is left to read.
 package adjudication
 
 import (
