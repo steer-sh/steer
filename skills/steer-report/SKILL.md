@@ -89,7 +89,7 @@ Each record reports before/after incidence over its own unit — the fraction of
 
 Behaviour is established at install instead: a guard's stored fixtures replay real cases deterministically (`steer fix mine`, `steer test <hook>`). Field counts are maintenance evidence — they say whether a class is still happening, never whether a fix is what stopped it.
 
-### Read the fields, speak the reading
+### Read the fields, report the facts
 
 Each record carries an `observation` with seven blocks. Read those; say what they
 show, in the same vocabulary the CLI prints: a **fix** rather than an
@@ -112,6 +112,20 @@ There are three readings and no fourth:
 - **The problem came back.** `recurrence.occurred` is true. **Act on this first.** Open `recurrence.example` and decide whether the record still describes the problem. `example_kind` says what the example is: `adjudicated_finding` is a reviewer's confirmed concern; `cluster_key` is the text a classifier grouped a session's friction by, and is NOT a confirmed escaped failure. A recurrence beside `firing.rows: 0` on a known log points at the rule, its coverage or its registration — the guard recorded no block over work the class did match. For a repository check, `checks` separates three cases: zero `executions` on a known stream means the check never ran here — look at the adoption and the `check.sh` wiring; executions that all passed mean the check ran and did not catch the problem — look at the detector; `blocked` above zero means it stopped turns and the problem still came back — look at whether the class is wider than the check. `changed_detector` above zero means some of those runs were an edited detector, not the one registered. On a record with `declined: true`, nothing was installed: the recurrence is a reason to reconsider the refusal, never a fix that failed.
 - **The accounting is incomplete.** `firing.applicable` is true while `log_present` is false, or a bound `checks` block reads `stream_present: false` with `other_host: false`. A block with `other_host: true` is not this case: name `registered_host` as the machine that holds the check runs. **Act on this:** name the cause. An absent guard audit log and a repository with no check evidence on this machine have no command; name the cause rather than handing the user a command that changes nothing. A coverage map's `unknown` units do not put a record in this reading: they are left out of the counts, which stand over the rest, and no command recovers them. Say how many were left out, and why. `unknown_scope` is a review sequence that recorded no repository or changed files; the `unknown` remainder beyond `unknown_scope` + `unknown_evidence` is a session that recorded no project; `unknown_evidence` is `pending` + `ledger_missed` + `ledger_overdue`. `ledger_missed` is a ledger the resolver searched for and did not find; nothing routine recovers it. `ledger_overdue` is a ledger the resolver has not read yet; the status entry for `unresolved_rows` owns that repair on this machine, and a row on another host's shard is read there. A `null` `scope` is its own case: the record has no frozen eligibility rule, so its two windows count different opportunity sets. Scope it with `steer fix scope <id>`, which restarts its after-window.
 - **The window is quiet.** Eligible work arrived and the class did not. Say that, and stop there. `zero_eligible_after` is the separate case: no eligible work has arrived at all, which is not a quiet window and is not a fault — every freshly installed record reads that way.
+
+**These three names are yours, not the reader's.** Each one tells you which facts
+matter. The reader gets the facts. Write the counts, the dates and the limit that
+produced the reading, and never the label itself.
+
+| Instead of the label | Write |
+|---|---|
+| The problem came back | The newest example, its date, and what kind of example it is — a reviewer's confirmed concern, or a classifier's grouping that is not a confirmed failure. |
+| The accounting is incomplete | Which evidence is missing on this machine, how many units it leaves out of the counts, and the cause. |
+| The window is quiet | How much eligible work arrived in each window, over what dates, and that the class did not appear in the second one. |
+
+"This fix is in a quiet window" tells the reader nothing. "Eligible work arrived on
+24 days since 12 August and this problem appeared in none of it" tells the reader
+what was counted.
 
 State no direction and no percentage. "Fewer since the fix", "the fix worked", "a 60% reduction" all state a causal claim these counts cannot carry. Say what was counted: "this problem hit 4 of 37 review sequences before the fix and recurred 0 times in the 40 after."
 
@@ -539,12 +553,21 @@ A worked proposal:
 > applies here alone, to Claude Code and Codex. It could also block an intentional use
 > of `python`. Apply this guard and track whether the problem becomes less frequent?
 
-Carry the same shape into the audit half. A result reads as a state, then its evidence,
-then whether anything is asked of the reader:
+Carry the same shape into the audit half. A result reads as its counts and dates,
+then the limit on them, then whether anything is asked of the reader.
 
-> Too early to tell whether this guard helps. The problem appeared in three of ten
-> sessions before installation and one of four since. More comparable sessions are
-> needed. The guard stays installed; no action is needed now.
+Two rules from Step 1 apply again here, at the moment you write the sentence.
+State no direction and no percentage: "fewer since the fix", "the fix worked" and
+"a 60% reduction" are causal claims these counts cannot carry, and they are the
+natural sentence to reach for in a summary. And never hand the reader a reading's
+name — "the window is quiet", "the accounting is incomplete" — in place of the
+facts that produced it.
+
+> The problem appeared in three of ten sessions before this guard was installed and
+> in one of four since, the most recent on 14 September. Four sessions is too few to
+> read a trend into, and the same rule also sits in CLAUDE.md, so these counts cannot
+> separate the guard from the instruction. The guard stays installed; no action is
+> needed now.
 
 Name the tier by its type, never by its flag value: a **repository check**, a **pre-tool
 guard**, an **instruction rule** or a **review prompt**.
