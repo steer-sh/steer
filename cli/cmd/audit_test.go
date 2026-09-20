@@ -114,7 +114,7 @@ func TestWriteCaseShowsTheActionAndWhatFollowed(t *testing.T) {
 		"never use bare python", "hook_digest=hook1",
 		`"command": "python x.py"`,
 		"join=" + transcript.JoinCall, "2 fork(s)", "python3 x.py",
-		"ended at the " + transcript.EndHumanTurn,
+		"ended where the person spoke next",
 		adjudication.Unresolved, "the task context was missing",
 	} {
 		if !strings.Contains(text, want) {
@@ -124,6 +124,47 @@ func TestWriteCaseShowsTheActionAndWhatFollowed(t *testing.T) {
 	// A rule_hash the master never stamped is named, not left blank.
 	if !strings.Contains(text, "rule_hash=(none)") {
 		t.Errorf("an absent stamp printed as an empty column:\n%s", text)
+	}
+}
+
+func TestWriteCaseCarriesTheTurnReadingsAttributionLimit(t *testing.T) {
+	// A Codex block reaches its turn, and the turn holds work that preceded
+	// the block. The reader is told so here or nowhere.
+	c := firingaudit.Case{
+		Row: firingaudit.Row{FiringID: "aa", Harness: "codex"},
+		Continuation: transcript.Continuation{
+			Granularity: transcript.JoinTurn,
+			EndReason:   transcript.EndTurn,
+			Steps: []transcript.ContinuationStep{
+				{Kind: transcript.StepHumanTurn, Text: "run python x.py"},
+			},
+		},
+	}
+
+	var out bytes.Buffer
+	if err := writeCase(&out, c); err != nil {
+		t.Fatal(err)
+	}
+	text := out.String()
+	for _, want := range []string{
+		"join=" + transcript.JoinTurn,
+		"the whole turn is shown",
+		"position attributes nothing here to the block",
+		"ended where the turn ended",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("turn-granularity output missing %q:\n%s", want, text)
+		}
+	}
+
+	// A call-granularity reading makes no such claim about its steps.
+	c.Continuation.Granularity = transcript.JoinCall
+	var call bytes.Buffer
+	if err := writeCase(&call, c); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(call.String(), "the whole turn is shown") {
+		t.Errorf("a per-call reading printed the turn reading's limit:\n%s", call.String())
 	}
 }
 

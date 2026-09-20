@@ -1,6 +1,10 @@
 package transcript
 
-import "github.com/steer-sh/steer-cli/internal/harness"
+import (
+	"unicode/utf8"
+
+	"github.com/steer-sh/steer-cli/internal/harness"
+)
 
 // How closely a retrieved continuation is tied to the block it follows. A
 // receipt records the granularity it achieved rather than the harness's name,
@@ -50,6 +54,10 @@ const (
 	EndTranscript = "transcript"
 	// EndBudget means the step budget ran out with entries still to read.
 	EndBudget = "budget"
+	// EndTurn means the turn holding the block ended: the harness recorded the
+	// turn's completion, or a later turn's first entry. It is what a
+	// turn-granularity reading reaches in place of EndHumanTurn.
+	EndTurn = "turn_complete"
 )
 
 // ContinuationAnchors are the transcript positions a reading rests on, so a
@@ -137,4 +145,39 @@ type Continuation struct {
 // Reached reports that a continuation was retrieved at some granularity.
 func (c Continuation) Reached() bool {
 	return c.Granularity != "" && c.Granularity != JoinUnavailable
+}
+
+// Append adds one step to the continuation under the budget, clipping the
+// step's text, and reports whether the budget is now spent. Every reader goes
+// through it, so EndBudget and Truncated mean the same thing in each harness.
+func (c *Continuation) Append(step ContinuationStep, budget ContinuationBudget) bool {
+	step.Text, step.Truncated = Clip(step.Text, budget.TextBytes)
+	c.Steps = append(c.Steps, step)
+	if len(c.Steps) >= budget.Steps {
+		c.EndReason = EndBudget
+		return true
+	}
+	return false
+}
+
+// Clip cuts text to a byte limit, and reports that it cut. Only a rune the
+// limit split is dropped; bytes earlier in the text are kept as they are,
+// whether or not they decode.
+func Clip(text string, limit int) (string, bool) {
+	if limit <= 0 {
+		return "", text != ""
+	}
+	if len(text) <= limit {
+		return text, false
+	}
+	cut := text[:limit]
+	// A rune is at most 4 bytes, so a split one costs at most 3 of them.
+	for i := 0; i < utf8.UTFMax-1 && len(cut) > 0; i++ {
+		r, size := utf8.DecodeLastRuneInString(cut)
+		if r != utf8.RuneError || size > 1 {
+			break
+		}
+		cut = cut[:len(cut)-1]
+	}
+	return cut, true
 }

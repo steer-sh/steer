@@ -243,6 +243,13 @@ func writeCase(w io.Writer, c firingaudit.Case) error {
 	}
 
 	fmt.Fprintf(w, "\ncontinuation (join=%s)\n", c.Continuation.Granularity)
+	if c.Continuation.Granularity == transcript.JoinTurn {
+		// The steps are the whole turn, because the harness recorded no entry
+		// for the call it blocked. Saying so at the point of reading is the
+		// only place the attribution limit reaches the reader.
+		fmt.Fprintf(w, "  the whole turn is shown, including work that preceded the block;\n"+
+			"  position attributes nothing here to the block\n")
+	}
 	if c.Continuation.Reason != "" {
 		fmt.Fprintf(w, "  %s\n", c.Continuation.Reason)
 	}
@@ -261,8 +268,8 @@ func writeCase(w io.Writer, c firingaudit.Case) error {
 		}
 		fmt.Fprintf(w, "  %-14s %s\n", line, oneLine(text))
 	}
-	if c.Continuation.EndReason != "" {
-		fmt.Fprintf(w, "  ended at the %s\n", c.Continuation.EndReason)
+	if end := endPhrase(c.Continuation.EndReason); end != "" {
+		fmt.Fprintf(w, "  %s\n", end)
 	}
 
 	for _, prior := range c.Prior {
@@ -270,6 +277,22 @@ func writeCase(w io.Writer, c firingaudit.Case) error {
 			prior.JudgedAt, prior.Judgment, prior.Rationale)
 	}
 	return nil
+}
+
+// endPhrase says why a reading stopped. A budget that ran out leaves work
+// unread and a finished turn does not, so the two never share a sentence.
+func endPhrase(reason string) string {
+	switch reason {
+	case transcript.EndHumanTurn:
+		return "ended where the person spoke next"
+	case transcript.EndTurn:
+		return "ended where the turn ended"
+	case transcript.EndTranscript:
+		return "ended at the end of the transcript, which may still be live"
+	case transcript.EndBudget:
+		return "stopped at the step budget, with entries left unread"
+	}
+	return ""
 }
 
 var auditRecordCmd = &cobra.Command{

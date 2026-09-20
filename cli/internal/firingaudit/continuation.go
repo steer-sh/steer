@@ -7,6 +7,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/transcript"
 	"github.com/steer-sh/steer-cli/internal/transcript/cc"
+	"github.com/steer-sh/steer-cli/internal/transcript/codex"
 )
 
 // The locator keys the masters write. A key's absence and its empty value are
@@ -54,11 +55,20 @@ func (r Row) Reach() Reach {
 		}
 		return Reach{Granularity: transcript.JoinCall, TranscriptPath: path, CallID: id}
 	case harness.Codex:
-		// A blocked Codex call emits no rollout item, so the reachable join is
-		// the turn. The lookup is unbuilt.
-		return Reach{Granularity: transcript.JoinUnavailable,
-			TranscriptPath: path, TurnID: r.Locators[locatorTurnID],
-			Reason: "the Codex turn-level lookup is not implemented"}
+		// A blocked Codex call emits no rollout item, so its own call
+		// identifier reaches nothing and the turn is the join. The row's
+		// tool_use_id is left off the reach because the lookup never reads it.
+		turn := r.Locators[locatorTurnID]
+		if turn == "" || path == "" {
+			return Reach{Granularity: transcript.JoinUnavailable,
+				Reason: "the row carries no turn identifier and transcript path"}
+		}
+		if _, err := os.Stat(path); err != nil {
+			return Reach{Granularity: transcript.JoinUnavailable,
+				TranscriptPath: path, TurnID: turn,
+				Reason: fmt.Sprintf("the transcript %s is gone", path)}
+		}
+		return Reach{Granularity: transcript.JoinTurn, TranscriptPath: path, TurnID: turn}
 	case harness.Pi:
 		return Reach{Granularity: transcript.JoinUnavailable,
 			TranscriptPath: path,
@@ -88,7 +98,16 @@ func (r Row) Continuation(budget transcript.ContinuationBudget) (transcript.Cont
 	if reach.Granularity == transcript.JoinUnavailable {
 		return out, nil
 	}
-	return cc.Continuation(reach.TranscriptPath, reach.CallID, budget)
+	switch harness.ID(r.Harness) {
+	case harness.ClaudeCode:
+		return cc.Continuation(reach.TranscriptPath, reach.CallID, budget)
+	case harness.Codex:
+		return codex.Continuation(reach.TranscriptPath, reach.TurnID, budget)
+	}
+	// Reach reported a granularity for a harness with no reader, which is a
+	// disagreement inside this file rather than a fact about the row.
+	out.Reason = fmt.Sprintf("harness %q has no continuation reader", r.Harness)
+	return out, nil
 }
 
 // continuationOrUnavailable reads the continuation and turns a read failure

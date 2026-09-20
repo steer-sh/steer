@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/adjudication"
+	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/transcript"
 )
 
@@ -35,19 +36,91 @@ func TestReachReportsWhatTheRowsLocatorsAllow(t *testing.T) {
 		t.Errorf("a row without locators = %q; want unavailable", got.Granularity)
 	}
 
-	// Codex and Pi have no lookup yet, and each says so in its own terms
-	// rather than reading as a row whose evidence is missing.
-	codex := ccRow(t, "d", "2026-09-20T01:00:00Z")
-	codex.Harness = "codex"
-	codex.Locators["turn_id"] = "turn-1"
+	// A Codex row reaches its turn. Its call identifier stays off the reach:
+	// a blocked call has no rollout entry, so nothing would read it.
+	codex := codexRow(t, "d", "2026-09-20T01:00:00Z")
 	reach := codex.Reach()
-	if reach.Granularity != transcript.JoinUnavailable ||
-		!strings.Contains(reach.Reason, "Codex") {
-		t.Errorf("a Codex row = %q (%s); want unavailable naming Codex",
-			reach.Granularity, reach.Reason)
+	if reach.Granularity != transcript.JoinTurn {
+		t.Errorf("a Codex row = %q (%s); want %q",
+			reach.Granularity, reach.Reason, transcript.JoinTurn)
 	}
-	if reach.TurnID != "turn-1" {
-		t.Errorf("a Codex row lost its turn locator: %+v", reach)
+	if reach.TurnID != "turn_d" || reach.CallID != "" {
+		t.Errorf("reach = %+v; want the turn named and no call claimed", reach)
+	}
+
+	noTurn := codexRow(t, "e", "2026-09-20T01:00:00Z")
+	delete(noTurn.Locators, "turn_id")
+	if got := noTurn.Reach(); got.Granularity != transcript.JoinUnavailable ||
+		!strings.Contains(got.Reason, "turn identifier") {
+		t.Errorf("a Codex row without its turn = %q (%s); want unavailable naming it",
+			got.Granularity, got.Reason)
+	}
+
+	// Pi has no lookup yet, and says so in its own terms rather than reading
+	// as a row whose evidence is missing.
+	pi := ccRow(t, "f", "2026-09-20T01:00:00Z")
+	pi.Harness = "pi"
+	if got := pi.Reach(); got.Granularity != transcript.JoinUnavailable ||
+		!strings.Contains(got.Reason, "Pi") {
+		t.Errorf("a Pi row = %q (%s); want unavailable naming Pi",
+			got.Granularity, got.Reason)
+	}
+}
+
+func TestContinuationDispatchesToTheHarnessThatRecordedTheRow(t *testing.T) {
+	got, err := codexRow(t, "a", "2026-09-20T01:00:00Z").
+		Continuation(transcript.ContinuationBudget{})
+	if err != nil {
+		t.Fatalf("the Codex reading failed: %v", err)
+	}
+	if got.Granularity != transcript.JoinTurn || len(got.Steps) != 2 {
+		t.Fatalf("a Codex row read as %q with %d steps; want %q with 2",
+			got.Granularity, len(got.Steps), transcript.JoinTurn)
+	}
+	if got.Harness != harness.Codex {
+		t.Errorf("the reading named harness %q; want %q", got.Harness, harness.Codex)
+	}
+
+	cc, err := ccRow(t, "b", "2026-09-20T01:00:00Z").
+		Continuation(transcript.ContinuationBudget{})
+	if err != nil {
+		t.Fatalf("the Claude Code reading failed: %v", err)
+	}
+	if cc.Granularity != transcript.JoinCall {
+		t.Errorf("a Claude Code row read as %q; want %q",
+			cc.Granularity, transcript.JoinCall)
+	}
+}
+
+func TestRecordStampsTheTurnGranularityItReached(t *testing.T) {
+	row := codexRow(t, "a", "2026-09-20T01:00:00Z")
+	dir := t.TempDir()
+
+	receipt, err := Record([]Row{row}, dir, Judgment{
+		FiringID:              "a",
+		Judgment:              adjudication.Prevented,
+		Rationale:             "the command used bare python",
+		ContinuationInspected: true,
+		ContinuationOutcome:   "the task continued with python3",
+	}, transcript.ContinuationBudget{})
+	if err != nil {
+		t.Fatalf("the judgment failed: %v", err)
+	}
+	// The turn is what was read, and the receipt says so rather than naming
+	// the harness: a reader of the receipt needs the attribution limit, not
+	// the harness's name.
+	if receipt.Join != transcript.JoinTurn {
+		t.Errorf("join = %q; want %q", receipt.Join, transcript.JoinTurn)
+	}
+	if receipt.JoinSteps != 2 {
+		t.Errorf("join steps = %d; want the 2 read", receipt.JoinSteps)
+	}
+	if receipt.JoinAnchors == nil || receipt.JoinAnchors.TurnID != "turn_a" {
+		t.Errorf("anchors = %+v; want the turn that was opened", receipt.JoinAnchors)
+	}
+	if receipt.JoinAnchors.DenialEntry != "" {
+		t.Errorf("anchors = %+v; want no entry claimed for a call Codex never recorded",
+			receipt.JoinAnchors)
 	}
 }
 

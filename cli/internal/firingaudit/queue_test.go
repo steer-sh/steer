@@ -47,6 +47,41 @@ func ccRow(t *testing.T, id, timestamp string) Row {
 	}
 }
 
+// codexRollout writes a Codex rollout holding one turn, so a Codex row built
+// against it reaches that turn. The blocked call itself has no entry here,
+// because Codex records none for a call it never ran.
+func codexRollout(t *testing.T, turnID string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "rollout.jsonl")
+	lines := fmt.Sprintf(
+		`{"timestamp":"2026-09-20T01:00:00Z","ordinal":0,"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"run python x.py"}],"internal_chat_message_metadata_passthrough":{"turn_id":%q,"content_item_kinds":["user.text"]}}}`+"\n"+
+			`{"timestamp":"2026-09-20T01:00:02Z","ordinal":1,"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"I will use python3."}],"internal_chat_message_metadata_passthrough":{"turn_id":%q}}}`+"\n",
+		turnID, turnID)
+	if err := os.WriteFile(path, []byte(lines), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// codexRow is a Codex firing, whose locators reach a turn and never a call.
+func codexRow(t *testing.T, id, timestamp string) Row {
+	t.Helper()
+	turn := "turn_" + id
+	return Row{
+		FiringID:   id,
+		HookName:   "guard",
+		Harness:    "codex",
+		Timestamp:  timestamp,
+		HookDigest: "hook1",
+		RuleHash:   "rule1",
+		Locators: map[string]string{
+			"tool_use_id":     "exec-" + id,
+			"turn_id":         turn,
+			"transcript_path": codexRollout(t, turn),
+		},
+	}
+}
+
 func ids(items []Item) []string {
 	var out []string
 	for _, i := range items {

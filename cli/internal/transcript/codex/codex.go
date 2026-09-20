@@ -152,6 +152,8 @@ type payload struct {
 }
 
 type chatMeta struct {
+	// TurnID names the turn a response item belongs to.
+	TurnID string `json:"turn_id"`
 	// ContentItemKinds names what produced a message. Codex writes several
 	// user-role messages the person never typed — environment context, agent
 	// instructions — and only "user.text" is a human turn.
@@ -262,7 +264,7 @@ func (st *streamState) normalize(line []byte) error {
 	case r.Type == typeResponseItem && (p.Type == "function_call" || p.Type == "custom_tool_call"):
 		st.counts.Entries++
 		return st.toolCall(p, base)
-	case r.Type == typeResponseItem && strings.HasSuffix(p.Type, "_call_output"):
+	case r.Type == typeResponseItem && isCallOutput(p.Type):
 		st.counts.Entries++
 		return st.toolResult(p, base)
 	case r.Type == typeEventMsg && p.Type == "user_message":
@@ -334,6 +336,11 @@ func (st *streamState) toolResult(p payload, base transcript.Event) error {
 	base.Text = outputText(p.Output)
 	base.IsError = resultFailed(base.Text)
 	return st.emit(base)
+}
+
+// isCallOutput reports that a response item is a tool result.
+func isCallOutput(itemType string) bool {
+	return strings.HasSuffix(itemType, "_call_output")
 }
 
 // callTarget extracts what a tool call acted on, and whether it ran a shell

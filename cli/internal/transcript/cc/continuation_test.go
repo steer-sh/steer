@@ -212,13 +212,13 @@ func TestClipDropsOnlyTheRuneTheLimitSplit(t *testing.T) {
 	// A byte that decodes to nothing sits early in the text. Only the rune the
 	// limit splits may be dropped, so everything before the limit survives.
 	text := "ab\xffcdefgh"
-	got, cut := clip(text, 6)
+	got, cut := transcript.Clip(text, 6)
 	if !cut || got != "ab\xffcde" {
-		t.Errorf("clip = %q, %t; want the first 6 bytes kept", got, cut)
+		t.Errorf("Clip = %q, %t; want the first 6 bytes kept", got, cut)
 	}
-	whole, cut := clip(text, len(text))
+	whole, cut := transcript.Clip(text, len(text))
 	if cut || whole != text {
-		t.Errorf("clip of a text within the limit = %q, %t; want it whole", whole, cut)
+		t.Errorf("Clip of a text within the limit = %q, %t; want it whole", whole, cut)
 	}
 }
 

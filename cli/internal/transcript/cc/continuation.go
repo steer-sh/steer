@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"unicode/utf8"
 
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/transcript"
@@ -216,37 +215,9 @@ func (w *walker) emit(r walkRow, out *transcript.Continuation) bool {
 	return false
 }
 
-// appendStep adds one step and reports whether the budget is now spent.
+// appendStep adds one step under the walk's budget.
 func (w *walker) appendStep(out *transcript.Continuation, step transcript.ContinuationStep) bool {
-	step.Text, step.Truncated = clip(step.Text, w.budget.TextBytes)
-	out.Steps = append(out.Steps, step)
-	if len(out.Steps) >= w.budget.Steps {
-		out.EndReason = transcript.EndBudget
-		return true
-	}
-	return false
-}
-
-// clip cuts text to a byte limit, and reports that it cut. Only a rune the
-// limit split is dropped; bytes earlier in the text are kept as they are,
-// whether or not they decode.
-func clip(text string, limit int) (string, bool) {
-	if limit <= 0 {
-		return "", text != ""
-	}
-	if len(text) <= limit {
-		return text, false
-	}
-	cut := text[:limit]
-	// A rune is at most 4 bytes, so a split one costs at most 3 of them.
-	for i := 0; i < utf8.UTFMax-1 && len(cut) > 0; i++ {
-		r, size := utf8.DecodeLastRuneInString(cut)
-		if r != utf8.RuneError || size > 1 {
-			break
-		}
-		cut = cut[:len(cut)-1]
-	}
-	return cut, true
+	return out.Append(step, w.budget)
 }
 
 // decodeBlocks reads an entry's content blocks. A content field that is a plain
