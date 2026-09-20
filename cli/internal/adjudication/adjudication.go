@@ -74,6 +74,11 @@ type Receipt struct {
 	// JoinSteps is how many continuation steps were available to read. It is the
 	// extent of the reading, not a claim that each one was read.
 	JoinSteps int `json:"join_steps,omitempty"`
+	// InspectedSteps is how many of those steps reached the reader. A rendering
+	// under a byte allowance withholds steps from the end, so what the lookup
+	// found and what was read apart. Zero means the judgment stated no extent,
+	// which is not a claim that none was read.
+	InspectedSteps int `json:"inspected_steps,omitempty"`
 
 	// Selection records why this firing was read: which rule of the sampling pass
 	// picked it. A later pass advances coverage instead of repeating the same cases.

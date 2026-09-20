@@ -278,3 +278,44 @@ func TestShowGathersTheActionTheContinuationAndThePriorReadings(t *testing.T) {
 		t.Error("an identifier no row carries returned a case")
 	}
 }
+
+func TestRecordKeepsWhatWasReadApartFromWhatTheLookupReached(t *testing.T) {
+	row := ccRow(t, "a", "2026-09-20T01:00:00Z")
+	dir := t.TempDir()
+
+	// The reading saw one of the two steps, because a byte allowance withheld
+	// the other. The receipt says both numbers.
+	receipt, err := Record([]Row{row}, dir, Judgment{
+		FiringID:              "a",
+		Judgment:              adjudication.Prevented,
+		ContinuationInspected: true,
+		InspectedSteps:        1,
+	}, transcript.ContinuationBudget{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt.JoinSteps != 2 || receipt.InspectedSteps != 1 {
+		t.Errorf("join_steps=%d inspected_steps=%d; want 2 reached and 1 read",
+			receipt.JoinSteps, receipt.InspectedSteps)
+	}
+
+	// An extent above what the lookup reached is a claim about evidence that
+	// was never there.
+	if _, err := Record([]Row{row}, dir, Judgment{
+		FiringID:              "a",
+		Judgment:              adjudication.Prevented,
+		ContinuationInspected: true,
+		InspectedSteps:        3,
+	}, transcript.ContinuationBudget{}); err == nil {
+		t.Error("an extent beyond the lookup's reach was accepted")
+	}
+
+	// An extent without the inspection it describes is the same false record.
+	if _, err := Record([]Row{row}, dir, Judgment{
+		FiringID:       "a",
+		Judgment:       adjudication.Prevented,
+		InspectedSteps: 1,
+	}, transcript.ContinuationBudget{}); err == nil {
+		t.Error("read steps were accepted beside an uninspected continuation")
+	}
+}

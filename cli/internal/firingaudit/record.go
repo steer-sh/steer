@@ -58,6 +58,11 @@ type Judgment struct {
 	// next. Record refuses it when no join reached one.
 	ContinuationInspected bool
 	ContinuationOutcome   string
+	// InspectedSteps is how many continuation steps the reader actually read.
+	// Show can withhold steps to fit a byte allowance, so Record will not infer
+	// this from the lookup: an unstated extent stays zero rather than claiming
+	// everything the join reached.
+	InspectedSteps int
 	// Selection records why this firing was read, so a later pass advances
 	// coverage instead of repeating it.
 	Selection string
@@ -84,6 +89,16 @@ func Record(rows []Row, dir string, j Judgment,
 			"the judgment reports an inspected continuation and none was reached: %s",
 			continuation.Reason)
 	}
+	if j.InspectedSteps > 0 && !j.ContinuationInspected {
+		return adjudication.Receipt{}, fmt.Errorf(
+			"the judgment reports %d inspected continuation step(s) and no inspected continuation",
+			j.InspectedSteps)
+	}
+	if j.InspectedSteps > len(continuation.Steps) {
+		return adjudication.Receipt{}, fmt.Errorf(
+			"the judgment reports %d inspected continuation step(s) and the lookup reached %d",
+			j.InspectedSteps, len(continuation.Steps))
+	}
 	anchors := continuation.Anchors
 	receipt := adjudication.Receipt{
 		FiringID:  row.FiringID,
@@ -98,6 +113,7 @@ func Record(rows []Row, dir string, j Judgment,
 		Join:                  continuation.Granularity,
 		JoinAnchors:           &anchors,
 		JoinSteps:             len(continuation.Steps),
+		InspectedSteps:        j.InspectedSteps,
 
 		Selection: j.Selection,
 		JudgedAt:  time.Now().UTC().Format(time.RFC3339),

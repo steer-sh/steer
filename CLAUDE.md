@@ -105,6 +105,13 @@ Read the linked architecture section before changing the corresponding boundary:
   before it uses one. `gate/mine` may read no store itself. A project-scope
   record reaches a receipt only in the checkout and on the host it froze at
   registration, so a new record field must be stamped in `SteerHookFacts`.
+- Firing reading pass: the pass budget in `skills/steer-report/SKILL.md` and the
+  mechanism in `cli/internal/firingaudit/emit.go`. `steer audit show` bounds its own
+  output and reports the exact size; the skill carries the running total, so a change
+  to `Emission` changes what a pass can subtract. `steer audit queue` counts the whole
+  queue before `--limit`, and `Counts.Remaining` is the one wording for what a listing
+  left. A receipt keeps the extent read (`InspectedSteps`) apart from the extent the
+  lookup reached (`JoinSteps`).
 - Continuation lookups: the neutral contract in
   `cli/internal/transcript/continuation.go`, each harness's reader beside its
   adapter, and the dispatch in `cli/internal/firingaudit/continuation.go`.

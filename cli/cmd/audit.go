@@ -142,7 +142,7 @@ what asks for them.`,
 		if err != nil {
 			return err
 		}
-		items := firingaudit.Queue(source.Rows, source.Receipts, firingaudit.QueueOptions{
+		items, counts := firingaudit.Queue(source.Rows, source.Receipts, firingaudit.QueueOptions{
 			HookName:  auditHook,
 			Installed: source.Installed,
 			Other:     auditOther,
@@ -153,15 +153,16 @@ what asks for them.`,
 			return writeJSON(cmd.OutOrStdout(), map[string]any{
 				"audit_present": source.Present,
 				"items":         items,
+				"counts":        counts,
 				"coverage":      coverage,
 			})
 		}
-		return writeQueue(cmd.OutOrStdout(), source.Present, items, coverage)
+		return writeQueue(cmd.OutOrStdout(), source.Present, items, counts, coverage)
 	},
 }
 
 func writeQueue(w io.Writer, present bool, items []firingaudit.Item,
-	coverage []guardCoverage) error {
+	counts firingaudit.Counts, coverage []guardCoverage) error {
 	if !present {
 		fmt.Fprintln(w, "No guard store on this machine holds an audit stream.")
 		return nil
@@ -178,11 +179,7 @@ func writeQueue(w io.Writer, present bool, items []firingaudit.Item,
 				c.OtherJudged+c.OtherUnjudged, c.OtherJudged)
 		}
 	}
-	if len(items) == 0 {
-		fmt.Fprintln(w, "\nNothing is queued for reading.")
-		return nil
-	}
-	fmt.Fprintf(w, "\n%d firing(s) queued:\n", len(items))
+	fmt.Fprintf(w, "\n%s\n", counts.Remaining())
 	for _, item := range items {
 		fmt.Fprintf(w, "  %s  %s  %s  %s  reach=%s\n",
 			item.FiringID, item.Timestamp, item.HookName, item.Reason, item.Reach)
@@ -210,14 +207,25 @@ making the block wrong.`,
 		if err != nil {
 			return err
 		}
+		render := firingaudit.Render(renderCase)
 		if auditJSON {
-			return writeJSON(cmd.OutOrStdout(), c)
+			render = firingaudit.RenderJSON
 		}
-		return writeCase(cmd.OutOrStdout(), c)
+		out, _, err := firingaudit.Fit(c, auditMaxBytes, render)
+		if err != nil {
+			return err
+		}
+		_, err = cmd.OutOrStdout().Write(out)
+		return err
 	},
 }
 
-func writeCase(w io.Writer, c firingaudit.Case) error {
+// renderCase writes one case as text at one clip level. It ends on the same
+// account RenderJSON carries, so a reader of either form spends an allowance
+// from the same numbers.
+func renderCase(c firingaudit.Case, e firingaudit.Emission) ([]byte, error) {
+	var buf bytes.Buffer
+	w := &buf
 	fmt.Fprintf(w, "firing %s\n", c.Row.FiringID)
 	fmt.Fprintf(w, "  recorded  %s by %s on %s\n", c.Row.Timestamp, c.Row.HookName, c.Row.Harness)
 	fmt.Fprintf(w, "  rule      %s\n", c.Row.Rule)
@@ -276,7 +284,14 @@ func writeCase(w io.Writer, c firingaudit.Case) error {
 		fmt.Fprintf(w, "\nprior reading %s (%s): %s\n",
 			prior.JudgedAt, prior.Judgment, prior.Rationale)
 	}
-	return nil
+
+	fmt.Fprintf(w, "\nthis reading: %d continuation step(s) of %d shown\n",
+		e.StepsEmitted, e.StepsAvailable)
+	for _, clip := range e.Clipped {
+		fmt.Fprintf(w, "  %s\n", clip)
+	}
+	fmt.Fprintf(w, "  emitted_bytes %d\n", e.EmittedBytes)
+	return buf.Bytes(), nil
 }
 
 // endPhrase says why a reading stopped. A budget that ran out leaves work
@@ -326,6 +341,7 @@ population, and a recurrence does not erase a demonstrated prevention.`,
 			Rationale:             auditRationale,
 			Evidence:              auditEvidence,
 			ContinuationInspected: auditInspected,
+			InspectedSteps:        auditInspectedSteps,
 			ContinuationOutcome:   auditOutcome,
 			Selection:             auditSelection,
 		}, auditBudget())
@@ -372,18 +388,20 @@ func oneLine(s string) string {
 }
 
 var (
-	auditHook      string
-	auditLimit     int
-	auditOther     bool
-	auditJSON      bool
-	auditSteps     int
-	auditText      int
-	auditJudgment  string
-	auditRationale string
-	auditEvidence  []string
-	auditInspected bool
-	auditOutcome   string
-	auditSelection string
+	auditHook           string
+	auditLimit          int
+	auditOther          bool
+	auditJSON           bool
+	auditSteps          int
+	auditText           int
+	auditJudgment       string
+	auditRationale      string
+	auditEvidence       []string
+	auditInspected      bool
+	auditInspectedSteps int
+	auditMaxBytes       int
+	auditOutcome        string
+	auditSelection      string
 )
 
 func init() {
@@ -402,6 +420,8 @@ func init() {
 		f.IntVar(&auditSteps, "steps", 0, "continuation steps to read")
 		f.IntVar(&auditText, "text-bytes", 0, "text kept per continuation step")
 	}
+	auditShowCmd.Flags().IntVar(&auditMaxBytes, "max-bytes", 0,
+		"bound this command's whole output, withholding the least decisive evidence first (default unbounded)")
 
 	r := auditRecordCmd.Flags()
 	r.StringVar(&auditJudgment, "judgment", "",
@@ -411,6 +431,8 @@ func init() {
 		"what was read, beyond the anchors record stamps itself (repeatable)")
 	r.BoolVar(&auditInspected, "continuation-inspected", false,
 		"the task after the block was read")
+	r.IntVar(&auditInspectedSteps, "inspected-steps", 0,
+		"how many continuation steps reached the reader, when show withheld some")
 	r.StringVar(&auditOutcome, "continuation-outcome", "", "what the task did next")
 	r.StringVar(&auditSelection, "selection", "", "why this firing was read")
 	_ = auditRecordCmd.MarkFlagRequired("judgment")

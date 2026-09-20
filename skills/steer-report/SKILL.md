@@ -72,7 +72,7 @@ Then Read the queue **once**: `~/.steer/state/steer-report/queue.json` (`version
 - `corpora[]` — one row per corpus (`review-findings`, `transcript-friction`) with `present` and `size`. Relay this sweep to the user in one sentence.
 - `checks[]` — the open steps in the repository the refresh ran in, each with `kind`, `repo`, an optional `check_id`, a `detail` and the `fix` command that clears it. `not-adopted` is a repository declaring checks that this machine never authorized to run at the end of a turn (`steer check adopt`). `never-validated` is a declared check whose cases were never replayed here, so nothing shows it fails on the problem it names (`steer check test <id>`). `integration-failure` is a passing `check.sh` that ran no declared check — the script's wiring, never a failed assertion (`steer check init` prints the managed line to add). A **stale** receipt is deliberately not here: a stale check keeps running, and `steer status --json` carries the label. These are states of a declaration, not recurrence measured over a window, so they carry no count and never enter a before/after reading.
 
-The queue tells you what is pending. The full dumps below are the raw material you cluster over. Read the review-history fixes for the complete audit — the queue lists only the ones asking for a reader, not the quiet ones worth showing too. If this machine has no commit-review ledger, `mine score` reports an empty corpus — say "no fixes to audit on this machine" in one line and go to Step 2.
+The queue tells you what is pending. The full dumps below are the raw material you cluster over. Read the review-history fixes for the complete audit — the queue lists only the ones asking for a reader, not the quiet ones worth showing too. If this machine has no commit-review ledger, `mine score` reports an empty corpus — say "no fixes to audit on this machine" in one line, then run the reading pass below anyway. Guard evidence is a separate stream from review history, so an absent ledger says nothing about what the installed guards blocked.
 
 ```bash
 steer fix score
@@ -135,6 +135,100 @@ For every record whose problem came back, open the target file and decide betwee
 - **Remove** — the class is not mechanizable after all, or the defect stopped mattering. Remove the fix with its tier's remove command and a `--reason` (`steer check remove`, `steer remove`, `steer rules remove`, `steer commit-gate addendum remove`), then `retire <id> --reason "..."`. Each remove command archives the fix first; `steer archive list` shows the entries, and `steer archive restore <id>` puts one back through its tier's installer. A restore refuses an id its tier holds now, and a check comes back only when its cases still validate.
 
 A gate that never fires is not free. It costs oracle runtime on every commit and, worse, it reads as coverage that does not exist.
+
+### Read a sample of the blocks a guard recorded
+
+The counts above say whether a problem is still happening. They never say whether a
+guard blocked the right thing. That is settled one case at a time, by reading the
+action the guard blocked in its original task context, and separately what the task
+did next. `steer audit` is that path.
+
+**This pass has a budget: at most 3 cases, and at most 24,000 bytes of case evidence
+across the whole report.** Both numbers are provisional operating choices with no
+measurement behind them. Three cases make a pass incremental rather than exhaustive.
+24,000 bytes holds the pass below one maximum-length default continuation, so a single
+long case cannot consume the report. The budget is spent across every guard together,
+not per guard.
+
+Start with the queue. It lists unread cases oldest first and counts the whole queue
+before `--limit` cuts the listing:
+
+```bash
+steer audit queue --json --limit 3
+```
+
+`counts` holds `unjudged`, `continuation_unread`, `queued` and `listed`. A case is
+queued for one of two reasons: nobody judged it, or somebody judged the block and
+nobody read what the task did next while that transcript is still on this machine.
+`coverage[]` holds each guard's account of its own rows. Rows an earlier
+implementation recorded are **not** in this listing: no reading of them says what the
+guard running now does. `--other` asks for them as separate work.
+
+Then read each case, handing it the bytes you can still afford. Read cases in the
+**text** form. `--json` re-encodes and indents the same evidence and costs close to
+twice as much, which buys nothing a reader needs:
+
+```bash
+steer audit show FIRING_ID --max-bytes 8000
+```
+
+`show` enforces the allowance itself. Do not measure its output or stage it to a
+file. Its last line is `emitted_bytes N`: subtract that from the 24,000 you started
+with and pass what is left to the next call. The line above it says how many
+continuation steps you were shown against how many the lookup reached, and names
+anything that rendering withheld. A per-step truncation is a different fact: that is
+the continuation reader cutting one step's text, not this rendering withholding
+whole steps.
+
+`show` refuses an allowance too small to carry the row and the blocked action, and
+names the size it needed. That refusal is a result, not a failure: the case costs
+more than this pass can spend. Report it as a case you did not read. Never treat
+retrieving a case as having inspected it.
+
+Then record one judgment per case you read:
+
+```bash
+steer audit record FIRING_ID --judgment prevented \
+  --rationale "..." --selection "oldest unread, pass budget 3 cases" \
+  --continuation-inspected --inspected-steps 9 \
+  --continuation-outcome "..."
+```
+
+- `--judgment` is `prevented`, `incorrect` or `unresolved`. Judge the attempted
+  action on its own terms: why the action was wrong **in its original task context**,
+  not that it violated the rule. A rule violation establishes enforcement only. An
+  overbroad rule that validates itself is the failure this separation prevents.
+- `unresolved` is a judgment, not a missing one. The case was read and it did not
+  settle. A block's correctness and its continuation are separate axes, and an absent
+  continuation settles neither.
+- `--inspected-steps` is how many continuation steps actually reached you, which is
+  `emission.steps_emitted` and not `steps_available`. Leave it off when you read no
+  continuation. `record` refuses a number above what the lookup reached.
+- `--selection` records why this case was picked, so a later pass advances coverage
+  instead of rereading the same cases.
+
+Selection for this pass is the queue's own order: oldest first, up to the case cap.
+Do not invent a sampling scheme. If a case you read shows an over-fire or a derailed
+task, say so as an explicit finding and offer the user a focused drill-down or a
+reading of every recorded case for that guard. Full inspection is always the user's
+option; it is not the default, because reading cost grows with the installed
+inventory.
+
+**Close the pass with what it did not read.** Compose that sentence from `counts`
+and `coverage`, never from the case cap alone:
+
+> This pass read 3 blocks of `no-bare-python`, oldest first: two prevented the
+> failure the rule names and one was an acceptable block of a deliberate use. Nine
+> queued cases stay unexamined, seven of them never read and two judged with an
+> unread continuation. One case was skipped: its evidence needed 31,000 bytes and
+> this pass had 6,000 left.
+
+Three limits hold on every sentence you write from this pass. **An inspected
+fraction is never an efficacy estimate**, so no percentage and no direction follows
+from these judgments. **Reading three cases certifies nothing about the rest.** And
+**new unread work never erases a prior finding** — say "previously read blocks were
+correct; nine new cases await reading", not "audit pending".
+
 
 ## Step 2: Gather new evidence from both corpora
 

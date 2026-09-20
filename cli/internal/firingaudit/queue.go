@@ -1,6 +1,7 @@
 package firingaudit
 
 import (
+	"fmt"
 	"sort"
 
 	"github.com/steer-sh/steer-cli/internal/adjudication"
@@ -33,6 +34,36 @@ type Item struct {
 	Reach string `json:"reach"`
 }
 
+// Counts is the whole selected queue by reason, taken before Limit cuts the
+// listing. A pass that reads the listing alone cannot say what it left behind,
+// because Limit removes rows silently; these counts are what a disclosure
+// sentence is composed from.
+type Counts struct {
+	Unjudged           int `json:"unjudged"`
+	ContinuationUnread int `json:"continuation_unread"`
+	// Queued is Unjudged + ContinuationUnread: everything the options selected.
+	Queued int `json:"queued"`
+	// Listed is how many of Queued survived Limit.
+	Listed int `json:"listed"`
+}
+
+// Remaining states what a pass reading the listing has not taken on. It is the
+// one wording for that sentence, so the CLI and a skill reading --json do not
+// compose two different ones from the same counts.
+func (c Counts) Remaining() string {
+	left := c.Queued - c.Listed
+	switch {
+	case c.Queued == 0:
+		return "Nothing is queued for reading."
+	case left == 0:
+		return fmt.Sprintf("All %d queued firing(s) are listed: %d unread, %d judged with an unread continuation.",
+			c.Queued, c.Unjudged, c.ContinuationUnread)
+	default:
+		return fmt.Sprintf("%d of %d queued firing(s) listed; %d stay unexamined by this listing (%d unread, %d judged with an unread continuation in total).",
+			c.Listed, c.Queued, left, c.Unjudged, c.ContinuationUnread)
+	}
+}
+
 // QueueOptions selects what the queue offers.
 type QueueOptions struct {
 	// HookName narrows to one guard. Empty takes every guard.
@@ -56,7 +87,7 @@ type QueueOptions struct {
 // without reading the continuation that is still on disk. The judgment's value
 // is not one of them, so an unresolved receipt waits for new evidence or for
 // the operator to ask for it by name.
-func Queue(rows []Row, receipts []adjudication.Receipt, opts QueueOptions) []Item {
+func Queue(rows []Row, receipts []adjudication.Receipt, opts QueueOptions) ([]Item, Counts) {
 	latest := adjudication.Latest(receipts)
 	var items []Item
 	for _, row := range rows {
@@ -98,10 +129,21 @@ func Queue(rows []Row, receipts []adjudication.Receipt, opts QueueOptions) []Ite
 	sort.SliceStable(items, func(i, j int) bool {
 		return items[i].Timestamp < items[j].Timestamp
 	})
+	var counts Counts
+	for _, item := range items {
+		switch item.Reason {
+		case Unjudged:
+			counts.Unjudged++
+		case ContinuationUnread:
+			counts.ContinuationUnread++
+		}
+	}
+	counts.Queued = len(items)
 	if opts.Limit > 0 && len(items) > opts.Limit {
 		items = items[:opts.Limit]
 	}
-	return items
+	counts.Listed = len(items)
+	return items, counts
 }
 
 // Firing reduces a row to the counting unit the coverage arithmetic reads, so
