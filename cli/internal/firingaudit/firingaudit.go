@@ -88,10 +88,10 @@ const (
 // Evidence is one row's bundle: the payload as it arrived beside the virtual edit
 // the guard objected to. Bundle is empty unless Source is Inline or Sidecar.
 type Evidence struct {
-	Source string
-	Bundle json.RawMessage
+	Source string          `json:"source"`
+	Bundle json.RawMessage `json:"bundle,omitempty"`
 	// Reason says why there is no bundle, when there is none.
-	Reason string
+	Reason string `json:"reason,omitempty"`
 }
 
 // Load reads the audit streams in the named store directories.

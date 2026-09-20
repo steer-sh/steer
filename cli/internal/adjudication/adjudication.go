@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/steer-sh/steer-cli/internal/statestore"
+	"github.com/steer-sh/steer-cli/internal/transcript"
 )
 
 // Component is this corpus's name under the evidence root. It is machine-local and
@@ -62,6 +63,17 @@ type Receipt struct {
 	// the two facts are stored apart.
 	ContinuationInspected bool   `json:"continuation_inspected"`
 	ContinuationOutcome   string `json:"continuation_outcome,omitempty"`
+	// Join is how closely the continuation was tied to the block: one of
+	// transcript.JoinCall, JoinTurn or JoinUnavailable. Harnesses reach
+	// different granularity and one harness can fail to reach its own, so a
+	// reader of this receipt needs the granularity rather than the harness name.
+	Join string `json:"join,omitempty"`
+	// JoinAnchors are the transcript positions the reading rested on, so a later
+	// reader can open what this one opened.
+	JoinAnchors *transcript.ContinuationAnchors `json:"join_anchors,omitempty"`
+	// JoinSteps is how many continuation steps were available to read. It is the
+	// extent of the reading, not a claim that each one was read.
+	JoinSteps int `json:"join_steps,omitempty"`
 
 	// Selection records why this firing was read: which rule of the sampling pass
 	// picked it. A later pass advances coverage instead of repeating the same cases.
@@ -123,6 +135,11 @@ func Append(dir string, r Receipt) error {
 	if !validJudgment(r.Judgment) {
 		return fmt.Errorf("invalid judgment %q: expected one of %s",
 			r.Judgment, strings.Join(Judgments(), ", "))
+	}
+	// Claiming to have read a continuation no join reached is a false record,
+	// and an unread continuation is ordinary: it leaves benefit unresolved.
+	if r.ContinuationInspected && (r.Join == "" || r.Join == transcript.JoinUnavailable) {
+		return fmt.Errorf("a receipt cannot report an inspected continuation at join %q", r.Join)
 	}
 	line, err := json.Marshal(r)
 	if err != nil {

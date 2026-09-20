@@ -31,11 +31,18 @@ type Identity struct {
 // Both stamps must be present on both sides. A digest that matches while the rule
 // differs is a changed guard, so any disagreement is Historic.
 func Applies(r Receipt, installed Identity) string {
-	if r.HookDigest == "" || r.RuleHash == "" ||
+	return AppliesStamps(r.HookDigest, r.RuleHash, installed)
+}
+
+// AppliesStamps is Applies over a pair of stamps, for a caller holding a row
+// rather than a receipt. An unjudged row classifies by the same rule as a
+// judged one, so both sides go through here.
+func AppliesStamps(hookDigest, ruleHash string, installed Identity) string {
+	if hookDigest == "" || ruleHash == "" ||
 		installed.HookDigest == "" || installed.RuleHash == "" {
 		return Unknown
 	}
-	if r.HookDigest == installed.HookDigest && r.RuleHash == installed.RuleHash {
+	if hookDigest == installed.HookDigest && ruleHash == installed.RuleHash {
 		return Current
 	}
 	return Historic
@@ -126,7 +133,7 @@ func Cover(hookID string, firings []mine.Firing, receipts []Receipt, installed I
 // installed now. It reads the row's own stamps rather than a receipt's, so an
 // unjudged row classifies by the same rule as a judged one.
 func firingApplies(f mine.Firing, installed Identity) string {
-	return Applies(Receipt{HookDigest: f.HookDigest, RuleHash: f.RuleHash}, installed)
+	return AppliesStamps(f.HookDigest, f.RuleHash, installed)
 }
 
 // Refresh reports whether another audit pass is due, and why. Both triggers read

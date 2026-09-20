@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
+	"github.com/steer-sh/steer-cli/internal/transcript"
 )
 
 func check(t *testing.T, what string, got, want any) {
@@ -27,6 +28,27 @@ func TestAppendRefusesAReceiptItCannotAttach(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, LogName)); !os.IsNotExist(err) {
 		t.Error("a refused receipt still opened the stream")
+	}
+}
+
+// Reading a continuation no join reached is a claim nothing supports. An
+// unread continuation is ordinary and leaves benefit unresolved.
+func TestAppendRefusesAnInspectionNoJoinReached(t *testing.T) {
+	dir := t.TempDir()
+	for _, join := range []string{"", transcript.JoinUnavailable} {
+		err := Append(dir, Receipt{FiringID: "aa", Judgment: Prevented,
+			ContinuationInspected: true, Join: join})
+		if err == nil {
+			t.Errorf("join %q: an inspection with nothing behind it was accepted", join)
+		}
+	}
+	if err := Append(dir, Receipt{FiringID: "aa", Judgment: Prevented,
+		ContinuationInspected: true, Join: transcript.JoinCall}); err != nil {
+		t.Errorf("a continuation read at call granularity was refused: %v", err)
+	}
+	if err := Append(dir, Receipt{FiringID: "bb", Judgment: Prevented,
+		Join: transcript.JoinUnavailable}); err != nil {
+		t.Errorf("an unread continuation was refused: %v", err)
 	}
 }
 
