@@ -21,11 +21,11 @@ type Case struct {
 
 // Show assembles one firing for reading.
 //
-// storeDir is the guard store the row came from, which resolves an evidence
-// sidecar. An unresolvable bundle or continuation is reported in place rather
-// than failing the call: judging the action needs the row, and the rest are
-// separate facts about what could be read.
-func Show(rows []Row, firingID, storeDir string, receipts []adjudication.Receipt,
+// The row's sidecar resolves against the store it was read from, so no caller
+// can hand it the wrong one. An unresolvable bundle or continuation is reported
+// in place rather than failing the call: judging the action needs the row, and
+// the rest are separate facts about what could be read.
+func Show(rows []Row, firingID string, receipts []adjudication.Receipt,
 	budget transcript.ContinuationBudget) (Case, error) {
 	row, ok := Find(rows, firingID)
 	if !ok {
@@ -40,7 +40,7 @@ func Show(rows []Row, firingID, storeDir string, receipts []adjudication.Receipt
 	}
 	return Case{
 		Row:          row,
-		Evidence:     row.Resolve(storeDir),
+		Evidence:     row.Resolve(row.StoreDir),
 		Continuation: continuation,
 		Prior:        prior,
 	}, nil

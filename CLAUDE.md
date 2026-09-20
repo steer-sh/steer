@@ -75,6 +75,14 @@ Read the linked architecture section before changing the corresponding boundary:
   recurrence; they cannot establish a fix's efficacy or justify retirement.
   A check-tier record's binding is frozen by `cli/internal/checkscope/`, which
   may read the harness adapters that `gate/mine` may not.
+- Reading or judging a recorded guard firing:
+  [firing audits](ARCHITECTURE.md#firing-audits). Start with
+  `cli/internal/firingaudit/` and `cli/cmd/audit.go`. The receipt stream in
+  `cli/internal/adjudication/` is append-only, so a field a receipt must carry
+  lands before the first receipt is written. A caller authors no identity:
+  `Record` resolves the row and the continuation and copies the stamps. The
+  installed guard's identity comes from the registered master through
+  `claude.ReadMasterIdentity`, never from the manifest or the standalone guard.
 - Queue, status, status line, or dashboard:
   [readers and controls](ARCHITECTURE.md#cadence-status-and-controls).
   `cli/internal/status/` owns shared phrasing; the TUI calls shared mutation
@@ -97,6 +105,11 @@ Read the linked architecture section before changing the corresponding boundary:
   before it uses one. `gate/mine` may read no store itself. A project-scope
   record reaches a receipt only in the checkout and on the host it froze at
   registration, so a new record field must be stamped in `SteerHookFacts`.
+- Continuation lookups: the neutral contract in
+  `cli/internal/transcript/continuation.go`, each harness's reader beside its
+  adapter, and the dispatch in `cli/internal/firingaudit/continuation.go`.
+  A reader returns the granularity it achieved with its source anchors; adding
+  one means teaching `Reach` what that harness's locators allow.
 - Firing adjudications: the store `cli/internal/adjudication/` and its component
   name in `cli/internal/statestore/Components`. A corpus absent from that list never
   migrates. A judgment names its firing by the row's `firing_id` alone, and the

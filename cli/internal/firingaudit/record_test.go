@@ -79,7 +79,7 @@ func TestRecordKeepsTheJudgmentWhenTheTranscriptWillNotOpen(t *testing.T) {
 		t.Error("a claim to have read the unreadable transcript was accepted")
 	}
 
-	c, err := Show([]Row{row}, "a", t.TempDir(), nil, transcript.ContinuationBudget{})
+	c, err := Show([]Row{row}, "a", nil, transcript.ContinuationBudget{})
 	if err != nil {
 		t.Fatalf("an unreadable transcript stopped the case: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestShowGathersTheActionTheContinuationAndThePriorReadings(t *testing.T) {
 		{FiringID: "a", Judgment: adjudication.Unresolved},
 	}
 
-	c, err := Show([]Row{row}, "a", t.TempDir(), receipts, transcript.ContinuationBudget{})
+	c, err := Show([]Row{row}, "a", receipts, transcript.ContinuationBudget{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +200,7 @@ func TestShowGathersTheActionTheContinuationAndThePriorReadings(t *testing.T) {
 		t.Errorf("encoded case dropped the blocked action: %s", encoded)
 	}
 
-	if _, err := Show([]Row{row}, "nothing", t.TempDir(), nil,
+	if _, err := Show([]Row{row}, "nothing", nil,
 		transcript.ContinuationBudget{}); err == nil {
 		t.Error("an identifier no row carries returned a case")
 	}

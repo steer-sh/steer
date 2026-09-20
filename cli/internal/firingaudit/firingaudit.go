@@ -65,6 +65,11 @@ type Row struct {
 	// names which step failed when it did not: "encode" or "write".
 	EvidenceComplete bool   `json:"evidence_complete"`
 	EvidenceError    string `json:"evidence_error"`
+
+	// StoreDir is the guard store this row was read from, stamped by Load. It
+	// resolves the row's sidecar and names the master that recorded it; it is
+	// not a field of the row on disk.
+	StoreDir string `json:"store_dir,omitempty"`
 }
 
 // Where a resolved bundle came from, and what that says about it.
@@ -128,6 +133,7 @@ func Load(dirs ...string) (rows []Row, present bool) {
 				continue
 			}
 			seen[key] = true
+			row.StoreDir = dir
 			rows = append(rows, row)
 		}
 	}

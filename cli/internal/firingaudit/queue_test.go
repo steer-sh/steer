@@ -9,9 +9,9 @@ import (
 	"github.com/steer-sh/steer-cli/internal/adjudication"
 )
 
-// installed is the implementation the fixtures below record.
-var installed = map[string]adjudication.Identity{
-	"guard": {HookDigest: "hook1", RuleHash: "rule1"},
+// installed answers with the implementation the fixtures below record.
+func installed(Row) adjudication.Identity {
+	return adjudication.Identity{HookDigest: "hook1", RuleHash: "rule1"}
 }
 
 // transcriptFor writes a Claude Code transcript holding one blocked call, so a
@@ -130,13 +130,8 @@ func TestQueueNarrowsToOneGuard(t *testing.T) {
 	other := ccRow(t, "b", "2026-09-20T02:00:00Z")
 	other.HookName = "second"
 
-	twoGuards := map[string]adjudication.Identity{
-		"guard":  {HookDigest: "hook1", RuleHash: "rule1"},
-		"second": {HookDigest: "hook1", RuleHash: "rule1"},
-	}
-
 	items := Queue([]Row{mine, other}, nil,
-		QueueOptions{Installed: twoGuards, HookName: "second"})
+		QueueOptions{Installed: installed, HookName: "second"})
 	if len(items) != 1 || items[0].FiringID != "b" {
 		t.Errorf("queue = %v; want only the named guard's row", ids(items))
 	}

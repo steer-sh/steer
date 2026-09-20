@@ -37,9 +37,11 @@ type Item struct {
 type QueueOptions struct {
 	// HookName narrows to one guard. Empty takes every guard.
 	HookName string
-	// Installed is each guard's installed implementation, by hook name. A guard
-	// absent from it classifies Unknown.
-	Installed map[string]adjudication.Identity
+	// Installed returns the implementation installed for a row's guard. It is a
+	// function because a row's store decides which master answers for it, and
+	// resolving a store is the adapters' work. A nil resolver classifies every
+	// row Unknown.
+	Installed func(Row) adjudication.Identity
 	// Other includes the rows an implementation other than the installed one
 	// recorded. A reading pass cannot discharge them, so they are left out
 	// unless the caller asks.
@@ -64,8 +66,11 @@ func Queue(rows []Row, receipts []adjudication.Receipt, opts QueueOptions) []Ite
 		if row.FiringID == "" {
 			continue
 		}
-		applies := adjudication.AppliesStamps(row.HookDigest, row.RuleHash,
-			opts.Installed[row.HookName])
+		var identity adjudication.Identity
+		if opts.Installed != nil {
+			identity = opts.Installed(row)
+		}
+		applies := adjudication.AppliesStamps(row.HookDigest, row.RuleHash, identity)
 		if applies != adjudication.Current && !opts.Other {
 			continue
 		}

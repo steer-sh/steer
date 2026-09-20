@@ -527,6 +527,35 @@ into `present`; `removed` keeps the gap visible, and the queue carries the recor
 as it carries an absent fix. A project review entry's archive is read on disk, not
 at HEAD, so a removal that never reached HEAD can still show.
 
+## Firing audits
+
+`internal/firingaudit/` reads the guard audit stream for judging, where
+`mine.LoadFirings` reads it for counting: every field the master wrote, the
+locators by key presence, and the bundle held inline or in a sidecar. Both
+deduplicate on the same key. `Load` stamps each row with the store it came from,
+which resolves the row's sidecar and names the master that recorded it.
+
+`Reach` decides what join a row's own locators allow before a transcript is
+opened. Claude Code reaches the blocked call: `cc.Continuation` finds the
+`tool_result` carrying `tool_use_id` and walks `parentUuid` forward, following
+the first child at a fork and counting the rest. Codex and Pi have no lookup, and
+each says so in its own terms rather than reading as missing evidence.
+
+`internal/adjudication/` holds one append-only receipt per judged block. A
+receipt records the join granularity, its transcript anchors and its extent
+apart from whether the continuation was read, because block correctness and
+continuation are separate axes and a missing continuation settles neither.
+`Append` refuses a receipt reporting an inspected continuation at a join that
+reached none. `firingaudit.Record` resolves the row and the continuation itself
+and copies the implementation stamps, so a caller authors no identity.
+
+`Queue` offers unread rows of the installed guard, plus a judged row whose
+continuation nobody read while that transcript is still on this machine. The
+judgment's value queues nothing. `cmd/audit.go` groups rows per store and hook
+name, because two stores can hold a guard of the same name and their rows are
+not interchangeable; `claude.ReadMasterIdentity` reads each store's registered
+master for the installed stamps.
+
 ## Cadence, status and controls
 
 `internal/cadence/` coordinates evidence scoring and transcript mining into a
