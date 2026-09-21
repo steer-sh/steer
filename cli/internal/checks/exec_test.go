@@ -121,6 +121,9 @@ func TestExecRefusesAGoTestBinding(t *testing.T) {
 
 // A malformed parent deadline is an error, never an unbounded run.
 func TestInvocationFromEnvRefusesAMalformedDeadline(t *testing.T) {
+	for _, name := range []string{EnvSource, EnvHarness, EnvSession, EnvEvidenceDir} {
+		t.Setenv(name, "")
+	}
 	t.Setenv(EnvDeadline, "soon")
 	if _, err := InvocationFromEnv(); err == nil {
 		t.Fatal("a malformed deadline was accepted")
