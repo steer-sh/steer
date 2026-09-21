@@ -70,13 +70,9 @@ func (c SourceComparison) Complete() bool { return c.State == ComparisonComplete
 // their current source. An incomplete comparison never agrees.
 func (c SourceComparison) Agrees() bool { return c.Complete() && len(c.Drifted()) == 0 }
 
-// CompareMasterSources reads every guard file in storeDir against the sources
-// masterPath embeds.
-//
-// It compares the source itself rather than the hook_digest STEER_HOOK_META
-// records. A digest is the generator's claim about the bytes it wrote, so an
-// edit to the embedded source that leaves the metadata alone would read as
-// agreement.
+// CompareMasterSources reads every guard file in storeDir against the source
+// masterPath embeds for it, comparing the source itself and not its recorded
+// digest.
 func CompareMasterSources(storeDir, masterPath string) SourceComparison {
 	out := SourceComparison{StoreDir: storeDir, MasterPath: masterPath, State: ComparisonComplete}
 	if strings.TrimSpace(storeDir) == "" || strings.TrimSpace(masterPath) == "" {

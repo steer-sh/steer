@@ -288,12 +288,8 @@ type MasterRuntime struct {
 
 // SourcesDrifted reports that the registered master runs something other than
 // the guard files in the store. A comparison that reached no answer never
-// drifts: an unread store is not an agreeing one.
-//
-// A detached row never drifts here. Its registered master is a file the store
-// does not own, so comparing it to the store answers a question nobody asked and
-// would ask for a rebuild, which writes the store's master and not that file.
-// StoreSourcesDrifted is the reading that bears on a detached row.
+// drifts, and a detached row never drifts here: StoreSourcesDrifted is the
+// reading that bears on one.
 func (m MasterRuntime) SourcesDrifted() bool {
 	return !m.Detached() && m.Sources != nil &&
 		m.Sources.Complete() && len(m.Sources.Drifted()) > 0
