@@ -55,6 +55,10 @@ Read the linked architecture section before changing the corresponding boundary:
   `cli/internal/guard/runtime.py` is embedded in generated masters. A CLI upgrade
   needs `steer hooks rebuild --scope <scope>` to update an installed master;
   fixture runs must keep synthetic firings out of the live audit log.
+  To probe a guard, use `steer test` or `tests/sandbox.py`; never pipe a payload
+  into the installed master or run an agent against the real home. The runtime
+  cannot tell that block from real work, so it lands in the live log as a firing
+  and needs `steer audit exclude`.
 - Check declarations, validation, execution, adoption or the Stop runner:
   [repository checks](ARCHITECTURE.md#repository-checks). Start with
   `cli/internal/checks/`. Its `guide.md` is embedded in the binary and is the
