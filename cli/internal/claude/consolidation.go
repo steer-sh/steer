@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -38,39 +37,7 @@ func ListIndividualHooks(scope string) ([]HookFile, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	if _, err := os.Stat(hooksDir); os.IsNotExist(err) {
-		return []HookFile{}, nil
-	}
-
-	entries, err := os.ReadDir(hooksDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read hooks directory: %w", err)
-	}
-
-	hooks := make([]HookFile, 0)
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-
-		name := entry.Name()
-		if !strings.HasSuffix(name, ".py") || name == MasterHookName {
-			continue
-		}
-
-		hooks = append(hooks, HookFile{
-			Name:     strings.TrimSuffix(name, ".py"),
-			FileName: name,
-			Path:     filepath.Join(hooksDir, name),
-		})
-	}
-
-	sort.Slice(hooks, func(i, j int) bool {
-		return hooks[i].Name < hooks[j].Name
-	})
-
-	return hooks, nil
+	return listHooksInDir(hooksDir)
 }
 
 // ErrHookInOtherScope matches a miss whose identifier resolves in the scope the

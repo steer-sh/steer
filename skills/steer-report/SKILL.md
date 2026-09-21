@@ -262,7 +262,7 @@ Digest schema (`digest_version: 3`):
 
 The digest is size-capped: the CLI evicts the lowest-scoring clusters to fit, and reports honesty in `stats`.
 
-### The `steer status --json` contract (`status_version: 25`)
+### The `steer status --json` contract (`status_version: 26`)
 
 Step 1 reads this snapshot for posture and the full class inventory. The unit is
 the failure class and what the corpus recorded about it, not the hook count. This
@@ -295,7 +295,9 @@ v22 adds coverage `ledger_missed` and `ledger_overdue`: a missing ledger is
 disclosed and no longer puts a record under repair. v23 does the same for an
 `unknown_scope` unit and a session with no project. v24 adds `store_problems`:
 a guard store whose manifest a reader refused, so an unreadable store no longer
-reads as a store holding nothing.
+reads as a store holding nothing. v26 adds `posture.masters[].sources` and
+`store_sources`: the guard source a runner carries, read against the store's own
+guard files.
 
 - `status_version` — the schema version. `--json` is a stable agent contract.
 - `posture` — the arming state: `instrument` (reviewer model / runs / prompt
@@ -347,6 +349,18 @@ reads as a store holding nothing.
   `detached`:** run `steer hooks sync --scope <scope>`, which registers the
   runner the store already holds and writes nothing in the store; a clone of a
   repository whose guards were committed reads `detached` until it runs.
+  `sources` reads the guard source the REGISTERED runner embeds against the
+  scope's store files, and is a fourth fact beside registration, runtime
+  freshness and detachment: a runner carrying this binary's runtime can still run
+  source the store file no longer holds. Its `state` is `complete`, `no-master`,
+  `unavailable` or `not-applicable`, and only `complete` supports a reading —
+  `guards[]` then names each guard `matches`, `differs`, `absent-from-master` or
+  `absent-from-store`. An `unavailable` comparison is not agreement. `differs` is
+  directionless: it says the runner runs something other than the file, never
+  which one is wanted, so read the guard file before rebuilding. A detached row
+  also carries `store_sources`, the same reading for the runner the store holds,
+  because the two choose different repairs: a store runner that already covers
+  the store needs `sync`, not `rebuild`.
   `rules[]` reads each installed harness's `## Steer Rules` section against the
   manifest, one row per installed harness per scope; a harness that is not
   installed gets no row. `path` is the instruction file (CLAUDE.md or AGENTS.md),

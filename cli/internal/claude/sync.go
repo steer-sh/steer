@@ -1,9 +1,7 @@
 package claude
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -255,49 +253,30 @@ const masterSourcesPrefix = "\nSTEER_HOOK_SOURCES = "
 
 // MasterCovers reports an error unless the store's master exists and embeds
 // every guard in the store with its current source, and no other guard.
+//
+// It is the refusal CompareMasterSources feeds: sync reads the same comparison
+// status reads, so one definition of source agreement serves both.
 func MasterCovers(scope string) error {
+	dir, err := GetHooksDir(scope)
+	if err != nil {
+		return err
+	}
 	path, err := hookstore.MasterPath(scope)
 	if err != nil {
 		return err
 	}
-	data, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
+	c := CompareMasterSources(dir, path)
+	switch c.State {
+	case ComparisonNoMaster:
 		return fmt.Errorf("the store holds guards but no master at %s", path)
-	}
-	if err != nil {
-		return err
-	}
-	start := strings.Index(string(data), masterSourcesPrefix)
-	if start < 0 {
-		return fmt.Errorf("%s carries no guard sources", path)
-	}
-	embedded := map[string]string{}
-	decoder := json.NewDecoder(strings.NewReader(string(data[start+len(masterSourcesPrefix):])))
-	if err := decoder.Decode(&embedded); err != nil {
-		return fmt.Errorf("%s: unreadable guard sources: %w", path, err)
-	}
-
-	hooks, err := ListIndividualHooks(scope)
-	if err != nil {
-		return err
+	case ComparisonUnavailable, ComparisonNotApplicable:
+		return fmt.Errorf("%s", c.Reason)
 	}
 	var gaps []string
-	for _, hook := range hooks {
-		source, err := readHookSource(hook.Path)
-		if err != nil {
-			return fmt.Errorf("failed to read hook %s: %w", hook.Path, err)
+	for _, g := range c.Guards {
+		if g.State != SourceMatches {
+			gaps = append(gaps, gapPhrase(g))
 		}
-		held, ok := embedded[source.Name]
-		switch {
-		case !ok:
-			gaps = append(gaps, source.Name+" is not in it")
-		case held != source.Source:
-			gaps = append(gaps, source.Name+" differs from its file")
-		}
-		delete(embedded, source.Name)
-	}
-	for name := range embedded {
-		gaps = append(gaps, name+" has no file in the store")
 	}
 	if len(gaps) > 0 {
 		sort.Strings(gaps)

@@ -123,7 +123,15 @@ func (m *Model) diagnosticIssues() []diagnosticIssue {
 		detail := "The guard store holds guards, and " + agent + " registers no runner for " +
 			"them, so no guard blocks anything there while the rules still name them. This " +
 			"happens in a fresh clone of a repository whose guards were committed."
-		if master.Scope == m.scope {
+		if master.StoreSourcesDrifted() {
+			// Sync refuses a store whose runner does not carry its guards, so
+			// naming sync alone would send the reader into that refusal.
+			detail += " The store's own runner does not carry " +
+				strings.Join(master.StoreSources.Drifted(), ", ") +
+				" as the file holds it, and registering it would be refused. Read the guard " +
+				"file, then run: " + status.RebuildCommand(master.Scope) +
+				", which rebuilds and registers in one operation."
+		} else if master.Scope == m.scope {
 			detail += " Open Fixes and run the maintenance action under Maintenance needed."
 		} else {
 			detail += " The Fixes action syncs this dashboard's scope only; for this one, run: " +
@@ -132,6 +140,22 @@ func (m *Model) diagnosticIssues() []diagnosticIssue {
 		out = append(out, diagnosticIssue{
 			headline: agent + " runs none of the guards in " + scopeReach(master.Scope),
 			detail:   detail,
+		})
+	}
+	for _, master := range m.snap.Posture.Masters {
+		if !master.SourcesDrifted() {
+			continue
+		}
+		agent := status.HarnessLabel(master.Harness)
+		detail := "A guard file in the store was edited, and the runner still carries the " +
+			"source it was built with, so the edit changes nothing the agent runs. " +
+			"Rebuilding publishes the store's files; it does not establish that the store " +
+			"holds the version you want. Check the guard file first."
+		detail += " For this one, run: " + status.RebuildCommand(master.Scope)
+		out = append(out, diagnosticIssue{
+			headline: "The guard runner for " + agent + " in " + scopeReach(master.Scope) +
+				" runs different source than the store file holds",
+			detail: detail,
 		})
 	}
 	for _, master := range m.snap.Posture.Masters {
@@ -309,7 +333,11 @@ func (m *Model) technicalLines(width int) string {
 		if trust := status.RunnerTrustPhrase(master); trust != "" {
 			phrase += "; " + trust
 		}
-		if master.Stale() || master.Detached() || master.RunnerUnapproved() {
+		if src := status.MasterSourcePhrase(master); src != "" {
+			phrase += "; " + src
+		}
+		if master.Stale() || master.Detached() || master.RunnerUnapproved() ||
+			master.SourcesDrifted() || master.StoreSourcesDrifted() {
 			out += wrapTo(fmt.Sprintf("%-22s %s", label, warn(phrase)), "   ", width)
 			continue
 		}

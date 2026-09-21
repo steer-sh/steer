@@ -343,28 +343,39 @@ func runCadence() {
 			"steer: an agent's instruction file does not match Steer's rules (%s) — run: %s",
 			strings.Join(ruleLabels, "; "), strings.Join(repairs, " and ")))
 	}
-	detachedKey, detachedLabels, detachedScopes := status.DetachedMasters(
-		status.MasterRuntimes(claude.GlobalScope, claude.ProjectScope))
+	masters := status.MasterRuntimes(claude.GlobalScope, claude.ProjectScope)
+	detachedKey, detachedLabels, detachedScopes := status.DetachedMasters(masters)
 	if cadence.ShouldNudgeDetached(dir, detachedKey) {
 		repairs := make([]string, 0, len(detachedScopes))
 		for _, s := range detachedScopes {
-			repairs = append(repairs, status.SyncCommand(s))
+			repairs = append(repairs, status.DetachedRepair(masters, s))
 		}
 		lines = append(lines, fmt.Sprintf(
 			"steer: an installed agent runs none of Steer's guards (%s) — run: %s",
 			strings.Join(detachedLabels, "; "), strings.Join(repairs, " and ")))
+	}
+	driftKey, driftLabels, driftScopes := status.DriftedMasters(masters)
+	if cadence.ShouldNudgeSourceDrift(dir, driftKey) {
+		repairs := make([]string, 0, len(driftScopes))
+		for _, s := range driftScopes {
+			repairs = append(repairs, status.RebuildCommand(s))
+		}
+		lines = append(lines, fmt.Sprintf(
+			"steer: a guard file was edited and the runner still carries the old source (%s) — to restore agreement, run: %s",
+			strings.Join(driftLabels, "; "), strings.Join(repairs, " and ")))
 	}
 	if len(lines) == 0 {
 		// Nothing to say, but a repaired condition still has to clear its key: a
 		// record left behind would suppress the nudge if that same condition
 		// came back.
 		if prev := cadence.LoadNudge(dir); prev.Master != key || prev.Rules != rulesKey ||
-			prev.Detached != detachedKey {
-			_ = cadence.WriteNudge(dir, rec.WithMaster(key).WithRules(rulesKey).WithDetached(detachedKey))
+			prev.Detached != detachedKey || prev.SourceDrift != driftKey {
+			_ = cadence.WriteNudge(dir, rec.WithMaster(key).WithRules(rulesKey).
+				WithDetached(detachedKey).WithSourceDrift(driftKey))
 		}
 		return
 	}
-	rec = rec.WithMaster(key).WithRules(rulesKey).WithDetached(detachedKey)
+	rec = rec.WithMaster(key).WithRules(rulesKey).WithDetached(detachedKey).WithSourceDrift(driftKey)
 
 	msg := strings.Join(lines, "\n")
 	out, err := json.Marshal(sessionStartOutput{

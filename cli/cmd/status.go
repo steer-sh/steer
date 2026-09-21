@@ -187,6 +187,12 @@ func renderPosture(s *status.SystemStatus, width int) {
 		if m.Stale() || m.Detached() {
 			phrase = styles.WarningText.Render(phrase)
 		}
+		if src := status.MasterSourcePhrase(m); src != "" {
+			if m.SourcesDrifted() {
+				src = styles.WarningText.Render(src)
+			}
+			phrase += "; " + src
+		}
 		if trust := status.RunnerTrustPhrase(m); trust != "" {
 			if m.RunnerUnapproved() {
 				trust = styles.WarningText.Render(trust)

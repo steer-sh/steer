@@ -121,6 +121,13 @@ Read the linked architecture section before changing the corresponding boundary:
   name in `cli/internal/statestore/Components`. A corpus absent from that list never
   migrates. A judgment names its firing by the row's `firing_id` alone, and the
   identity it was made against is stored with it; `gate/mine` reads no receipt store.
+- Guard source agreement: `cli/internal/claude/sourcecompare.go` holds the one
+  comparison of a store's guard files against the copies a master embeds.
+  `MasterCovers` (`cli/internal/claude/sync.go`) wraps it as the refusal sync
+  depends on, and `cli/internal/status/status.go` runs it against each harness's
+  registered master, so a change to its states changes both. It compares source,
+  never the `hook_digest` in `STEER_HOOK_META`: a digest is the generator's claim
+  about the bytes it wrote.
 - Check tier readings: `cli/internal/checks/state.go` is the one reader of a
   repository's check state, shared by the status snapshot, the refresh queue and
   `steer check list`. Adoption, registration, validation freshness and observed

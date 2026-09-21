@@ -171,7 +171,7 @@ func intPtr(n int) *int           { return &n }
 // so a renamed or reordered json tag fails here, the agent-contract guard.
 func TestJSONContractIsStable(t *testing.T) {
 	s := &SystemStatus{
-		StatusVersion: 25,
+		StatusVersion: 26,
 		GeneratedAt:   "2026-01-01T00:00:00Z",
 		Posture: Posture{
 			Instrument: "agy@sha", Reviewer: "gemini", Ledger: "/l.jsonl",
@@ -192,10 +192,18 @@ func TestJSONContractIsStable(t *testing.T) {
 			},
 			Masters: []MasterRuntime{
 				{Harness: "claude-code", Scope: "global", Path: "/h/steer-hooks.py",
-					Runtime: "aaaaaaaa", Version: "0.1.0", Expected: "bbbbbbbb", State: MasterStale, Trust: TrustNotApplicable, Observed: 1690},
-				{Harness: "codex", Scope: "global", Expected: "bbbbbbbb", State: MasterNotRegistered},
+					Runtime: "aaaaaaaa", Version: "0.1.0", Expected: "bbbbbbbb", State: MasterStale, Trust: TrustNotApplicable, Observed: 1690,
+					Sources: &claude.SourceComparison{StoreDir: "/h/hooks", MasterPath: "/h/steer-hooks.py",
+						State:  claude.ComparisonComplete,
+						Guards: []claude.GuardSource{{Name: "no-console", State: claude.SourceDiffers}}}},
+				{Harness: "codex", Scope: "global", Expected: "bbbbbbbb", State: MasterNotRegistered,
+					Sources: &claude.SourceComparison{State: claude.ComparisonNotApplicable, Reason: "no registered guard runner"}},
 				{Harness: "codex", Scope: "project", Expected: "bbbbbbbb", State: MasterDetached,
-					Store: ".steer/hooks/steer-hooks.py"},
+					Store:   ".steer/hooks/steer-hooks.py",
+					Sources: &claude.SourceComparison{State: claude.ComparisonNotApplicable, Reason: "no registered guard runner"},
+					StoreSources: &claude.SourceComparison{StoreDir: ".steer/hooks", MasterPath: ".steer/hooks/steer-hooks.py",
+						State:  claude.ComparisonComplete,
+						Guards: []claude.GuardSource{{Name: "no-console", State: claude.SourceMatches}}}},
 			},
 			Rules: []RulesPresence{
 				{Harness: "codex", Scope: "global", Path: "/h/.codex/AGENTS.md", Expected: 3,
@@ -297,7 +305,7 @@ func TestJSONContractIsStable(t *testing.T) {
 }
 
 const goldenStatusJSON = `{
-  "status_version": 25,
+  "status_version": 26,
   "generated_at": "2026-01-01T00:00:00Z",
   "posture": {
     "instrument": "agy@sha",
@@ -359,20 +367,50 @@ const goldenStatusJSON = `{
         "expected": "bbbbbbbb",
         "state": "stale",
         "trust": "not-applicable",
-        "observed": 1690
+        "observed": 1690,
+        "sources": {
+          "store_dir": "/h/hooks",
+          "master_path": "/h/steer-hooks.py",
+          "state": "complete",
+          "guards": [
+            {
+              "name": "no-console",
+              "state": "differs"
+            }
+          ]
+        }
       },
       {
         "harness": "codex",
         "scope": "global",
         "expected": "bbbbbbbb",
-        "state": "not-registered"
+        "state": "not-registered",
+        "sources": {
+          "state": "not-applicable",
+          "reason": "no registered guard runner"
+        }
       },
       {
         "harness": "codex",
         "scope": "project",
         "expected": "bbbbbbbb",
         "state": "detached",
-        "store": ".steer/hooks/steer-hooks.py"
+        "store": ".steer/hooks/steer-hooks.py",
+        "sources": {
+          "state": "not-applicable",
+          "reason": "no registered guard runner"
+        },
+        "store_sources": {
+          "store_dir": ".steer/hooks",
+          "master_path": ".steer/hooks/steer-hooks.py",
+          "state": "complete",
+          "guards": [
+            {
+              "name": "no-console",
+              "state": "matches"
+            }
+          ]
+        }
       }
     ],
     "rules": [

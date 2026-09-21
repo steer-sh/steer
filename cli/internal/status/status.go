@@ -59,7 +59,7 @@ import (
 // v25 adds observation.fixtures: what this machine knows about the stored cases
 // behind a guard-tier fix. Its states answer attribution and freshness, never
 // whether the guard blocks correctly in the field.
-const StatusVersion = 25
+const StatusVersion = 26
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20
@@ -275,6 +275,36 @@ type MasterRuntime struct {
 	// Observed is the epoch second of the newest row in the audit log beside this
 	// registered master, 0 when the master never blocked a call.
 	Observed float64 `json:"observed,omitempty"`
+	// Sources reads the guard source the REGISTERED master embeds against the
+	// scope's store files. Registration, runtime freshness, detachment and source
+	// agreement are four facts, so this never folds into State.
+	Sources *claude.SourceComparison `json:"sources,omitempty"`
+	// StoreSources is the same reading for the master the store holds, set on a
+	// detached row. A detached harness can register matching source, and a store
+	// master that already covers the store is repaired by sync rather than by a
+	// rebuild, so the two readings choose different repairs.
+	StoreSources *claude.SourceComparison `json:"store_sources,omitempty"`
+}
+
+// SourcesDrifted reports that the registered master runs something other than
+// the guard files in the store. A comparison that reached no answer never
+// drifts: an unread store is not an agreeing one.
+//
+// A detached row never drifts here. Its registered master is a file the store
+// does not own, so comparing it to the store answers a question nobody asked and
+// would ask for a rebuild, which writes the store's master and not that file.
+// StoreSourcesDrifted is the reading that bears on a detached row.
+func (m MasterRuntime) SourcesDrifted() bool {
+	return !m.Detached() && m.Sources != nil &&
+		m.Sources.Complete() && len(m.Sources.Drifted()) > 0
+}
+
+// StoreSourcesDrifted reports a detached row whose own store master does not
+// carry the store's guards. It decides the ORDER of the repair: sync refuses a
+// store its master does not cover, so that store needs a rebuild first.
+func (m MasterRuntime) StoreSourcesDrifted() bool {
+	return m.StoreSources != nil && m.StoreSources.Complete() &&
+		len(m.StoreSources.Drifted()) > 0
 }
 
 // Stale reports whether this master needs a rebuild. An unstamped master is
@@ -771,8 +801,15 @@ func masterRuntimes(scope string) []MasterRuntime {
 			out = append(out, row)
 			continue
 		}
-		if store != "" && registrar.Harness().Installed() && !claude.SamePath(path, store) {
-			row.Path, row.Store, row.State = path, store, MasterDetached
+		row.Path = path
+		row.Sources = compareStore(scope, path, "no registered guard runner")
+		detached := store != "" && registrar.Harness().Installed() && !claude.SamePath(path, store)
+		if detached {
+			// Both readings, because they choose different repairs: a registered
+			// master can carry matching source while pointing elsewhere, and a
+			// store master that already covers the store needs sync, not rebuild.
+			row.Store, row.State = store, MasterDetached
+			row.StoreSources = compareStore(scope, store, "")
 			out = append(out, row)
 			continue
 		}
@@ -780,7 +817,6 @@ func masterRuntimes(scope string) []MasterRuntime {
 			out = append(out, row)
 			continue
 		}
-		row.Path = path
 		row.Trust = runnerTrust(registrar.Harness().ID, scope)
 		row.Observed = newestFiring(filepath.Dir(path))
 		stamp, ok := guard.ReadStamp(path)
@@ -797,6 +833,26 @@ func masterRuntimes(scope string) []MasterRuntime {
 		out = append(out, row)
 	}
 	return out
+}
+
+// compareStore reads one master against the scope's guard store. absent is the
+// reason to report when there is no master to compare, which is a separate
+// answer from a comparison that found agreement. A store that cannot be named
+// is unavailable, never empty.
+func compareStore(scope, master, absent string) *claude.SourceComparison {
+	if master == "" {
+		return &claude.SourceComparison{State: claude.ComparisonNotApplicable, Reason: absent}
+	}
+	dir, err := claude.GetHooksDir(scope)
+	if err != nil {
+		return &claude.SourceComparison{
+			MasterPath: master,
+			State:      claude.ComparisonUnavailable,
+			Reason:     err.Error(),
+		}
+	}
+	c := claude.CompareMasterSources(dir, master)
+	return &c
 }
 
 // storeMaster names the master a scope's store holds, "" when the store holds no

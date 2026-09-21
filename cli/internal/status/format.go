@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/steer-sh/steer-cli/internal/cadence"
+	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/tier"
 )
 
@@ -119,6 +120,71 @@ func SyncCommand(scope string) string {
 
 // RulesRepairCommand rewrites every installed harness's rules section in a scope.
 func RulesRepairCommand(scope string) string {
+	return SyncCommand(scope)
+}
+
+// MasterSourcePhrase names what a registered guard runner runs against the
+// store's own guard files, "" when the reading adds nothing. It is a reading and
+// not a repair: which artifact the operator wants running is not a fact about
+// the bytes.
+func MasterSourcePhrase(m MasterRuntime) string {
+	if m.Detached() {
+		if m.StoreSourcesDrifted() {
+			return "the store's own runner does not carry " +
+				strings.Join(m.StoreSources.Drifted(), ", ") + " as the file holds it"
+		}
+		return ""
+	}
+	if m.Sources == nil || m.State == MasterNotRegistered {
+		return ""
+	}
+	switch m.Sources.State {
+	case claude.ComparisonUnavailable:
+		return "guard source could not be read: " + m.Sources.Reason
+	case claude.ComparisonNoMaster:
+		return "no guard runner file to read"
+	}
+	drifted := m.Sources.Drifted()
+	if len(drifted) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("it runs different source for %s than the store file holds",
+		strings.Join(drifted, ", "))
+}
+
+// DriftedMasters summarizes the rows whose registered runner carries different
+// guard source, in the shape DetachedMasters uses.
+func DriftedMasters(rows []MasterRuntime) (key string, labels, scopes []string) {
+	var parts []string
+	seen := map[string]bool{}
+	for _, m := range rows {
+		if !m.SourcesDrifted() {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s/%s:%s", m.Harness, m.Scope,
+			strings.Join(m.Sources.Drifted(), ",")))
+		labels = append(labels, fmt.Sprintf("%s, %s scope", HarnessLabel(m.Harness), m.Scope))
+		if !seen[m.Scope] {
+			seen[m.Scope] = true
+			scopes = append(scopes, m.Scope)
+		}
+	}
+	if len(parts) == 0 {
+		return "", nil, nil
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, "|"), labels, scopes
+}
+
+// DetachedRepair names the command that registers a scope's guards again. Sync
+// refuses a store whose own runner does not carry its guards, so a scope holding
+// one needs the rebuild that writes and registers in one operation.
+func DetachedRepair(rows []MasterRuntime, scope string) string {
+	for _, m := range rows {
+		if m.Scope == scope && m.Detached() && m.StoreSourcesDrifted() {
+			return RebuildCommand(scope)
+		}
+	}
 	return SyncCommand(scope)
 }
 

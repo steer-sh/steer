@@ -34,6 +34,9 @@ type nudgeRecord struct {
 	// Detached is the key of the harnesses that run none of a store's guards,
 	// under the same once-per-key rule as Master.
 	Detached string `json:"detached,omitempty"`
+	// SourceDrift is the key of the registered runners carrying different guard
+	// source than the store file, under the same once-per-key rule as Master.
+	SourceDrift string `json:"source_drift,omitempty"`
 }
 
 // QueueHash is the change key of the queue file: the sha256 of its bytes. The queue
@@ -128,6 +131,21 @@ func ShouldNudgeDetached(dir, key string) bool {
 // WithDetached returns the record carrying a detached key.
 func (r nudgeRecord) WithDetached(key string) nudgeRecord {
 	r.Detached = key
+	return r
+}
+
+// ShouldNudgeSourceDrift decides whether to name a registered runner whose guard
+// source differs from the store file. An empty key means every one agrees.
+func ShouldNudgeSourceDrift(dir, key string) bool {
+	if key == "" {
+		return false
+	}
+	return readNudge(dir).SourceDrift != key
+}
+
+// WithSourceDrift returns the record carrying a source-drift key.
+func (r nudgeRecord) WithSourceDrift(key string) nudgeRecord {
+	r.SourceDrift = key
 	return r
 }
 
