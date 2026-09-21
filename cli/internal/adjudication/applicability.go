@@ -49,7 +49,7 @@ func AppliesStamps(hookDigest, ruleHash string, installed Identity) string {
 }
 
 // Coverage accounts for one guard's audit stream against the judgments on hand.
-// Rows == Adjudicable + Legacy, and Adjudicable == Judged + Unjudged. The four
+// Rows == Adjudicable + Legacy + Excluded, and Adjudicable == Judged + Unjudged. The four
 // counts below it partition Adjudicable a second way, crossing whether a row is
 // judged with whether the installed implementation recorded it.
 type Coverage struct {
@@ -62,6 +62,9 @@ type Coverage struct {
 	// not unread work: nothing can attach a judgment to them, and no later firing
 	// joins this set.
 	Legacy int `json:"legacy"`
+	// Excluded is the rows an exclusion retires as recording no real work. They
+	// stay in the stream and are counted nowhere else.
+	Excluded int `json:"excluded"`
 	// Judged is the adjudicable rows a receipt names.
 	Judged int `json:"judged"`
 	// Unjudged is the adjudicable rows no receipt names. It is a coverage limit on
@@ -88,8 +91,10 @@ type Coverage struct {
 }
 
 // Cover counts one guard's rows against the receipts on hand. hookID selects the
-// rows; an empty hookID counts every row given.
-func Cover(hookID string, firings []mine.Firing, receipts []Receipt, installed Identity) Coverage {
+// rows; an empty hookID counts every row given. excluded is keyed by row digest,
+// as Excluded returns it.
+func Cover(hookID string, firings []mine.Firing, receipts []Receipt, installed Identity,
+	excluded map[string]Exclusion) Coverage {
 	latest := Latest(receipts)
 	var c Coverage
 	for _, f := range firings {
@@ -97,6 +102,10 @@ func Cover(hookID string, firings []mine.Firing, receipts []Receipt, installed I
 			continue
 		}
 		c.Rows++
+		if _, ok := excluded[f.RowDigest]; ok && f.RowDigest != "" {
+			c.Excluded++
+			continue
+		}
 		if f.FiringID == "" {
 			c.Legacy++
 			continue

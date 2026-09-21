@@ -556,6 +556,15 @@ name, because two stores can hold a guard of the same name and their rows are
 not interchangeable; `claude.ReadMasterIdentity` reads each store's registered
 master for the installed stamps.
 
+A row that records no real work, such as a block a test run caused under the
+operator's guard store, is retired by an exclusion rather than removed: the audit
+stream stays append-only. `adjudication/exclusion.go` holds the stream beside the
+receipts, keyed by `mine.RowDigest`, the digest of the row's own line, because a
+legacy row carries no other identity. Both loaders stamp that digest. The queue,
+`Cover` and `evidence.Gather` read the same `Excluded` set; `gate/mine` reads
+none. `status.newestFiring` keeps excluded rows, because a test block still shows
+that the master executed.
+
 ## Cadence, status and controls
 
 `internal/cadence/` coordinates evidence scoring and transcript mining into a

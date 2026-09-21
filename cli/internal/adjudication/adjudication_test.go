@@ -133,7 +133,7 @@ func TestCoverSeparatesLegacyRowsFromUnjudgedOnes(t *testing.T) {
 		{FiringID: "bb", Judgment: Incorrect, HookDigest: "d0", RuleHash: "r0"},
 		{FiringID: "dd", Judgment: Prevented},
 	}
-	c := Cover("g", firings, receipts, installed)
+	c := Cover("g", firings, receipts, installed, nil)
 
 	check(t, "another guard's rows are not counted here", c.Rows, 4)
 	check(t, "a row with no identifier cannot be judged", c.Legacy, 1)
@@ -209,7 +209,7 @@ func TestCoverSplitsTheInstalledGuardsRowsFromOlderOnes(t *testing.T) {
 		{FiringID: "a", Judgment: Prevented, HookDigest: "new", RuleHash: "r2"},
 		{FiringID: "c", Judgment: Prevented, HookDigest: "old", RuleHash: "r1"},
 	}
-	c := Cover("g", firings, receipts, installed)
+	c := Cover("g", firings, receipts, installed, nil)
 
 	check(t, "the installed guard's judged rows", c.CurrentJudged, 1)
 	check(t, "its unread rows", c.CurrentUnjudged, 1)

@@ -205,6 +205,12 @@ steer audit record FIRING_ID --judgment prevented \
 - `unresolved` is a judgment, not a missing one. The case was read and it did not
   settle. A block's correctness and its continuation are separate axes, and an absent
   continuation settles neither.
+- A case that records no real work is not judged. A test run under the operator's
+  own guards, such as `codex exec` from a scratch directory ordering the forbidden
+  command, leaves a real row with no task behind it. Do not record it as
+  `unresolved`: tell the user what shows it is a test, and offer
+  `steer audit exclude FIRING_ID --reason "..." --evidence PATH`. The row stays in
+  the stream; the queue and every count leave it out. Exclude nothing unasked.
 - `--inspected-steps` is how many continuation steps actually reached you, which is
   `emission.steps_emitted` and not `steps_available`. Leave it off when you read no
   continuation. `record` refuses a number above what the lookup reached.

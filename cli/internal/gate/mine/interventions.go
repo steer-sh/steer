@@ -527,8 +527,9 @@ type EvidenceSet struct {
 	Chains []Chain
 	// Sessions is the transcript-friction corpus: normalized root-session snapshots.
 	Sessions []SessionUnit
-	// Firings is the guard audit stream; AuditPresent reports that a store was
-	// readable, so a silent guard is told apart from absent evidence.
+	// Firings is the guard audit stream less the rows an exclusion retires;
+	// AuditPresent reports that a store was readable, so a silent guard is told
+	// apart from absent evidence.
 	Firings      []Firing
 	AuditPresent bool
 	// CheckRuns is this machine's live check execution stream; CheckRepos holds

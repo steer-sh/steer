@@ -14,6 +14,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/steer-sh/steer-cli/internal/gate/mine"
 )
 
 // AuditLogName is the guard store's audit stream, one JSON row per block decision.
@@ -70,6 +72,9 @@ type Row struct {
 	// resolves the row's sidecar and names the master that recorded it; it is
 	// not a field of the row on disk.
 	StoreDir string `json:"store_dir,omitempty"`
+	// RowDigest is mine.RowDigest of the line, stamped by Load. It names a row
+	// that carries no FiringID, and it is not a field of the row on disk.
+	RowDigest string `json:"row_digest,omitempty"`
 }
 
 // Where a resolved bundle came from, and what that says about it.
@@ -134,6 +139,7 @@ func Load(dirs ...string) (rows []Row, present bool) {
 			}
 			seen[key] = true
 			row.StoreDir = dir
+			row.RowDigest = mine.RowDigest(line)
 			rows = append(rows, row)
 		}
 	}

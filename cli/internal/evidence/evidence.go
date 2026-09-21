@@ -5,6 +5,7 @@
 package evidence
 
 import (
+	"github.com/steer-sh/steer-cli/internal/adjudication"
 	"github.com/steer-sh/steer-cli/internal/checks"
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/gate"
@@ -50,7 +51,8 @@ func Gather(opts Options) mine.EvidenceSet {
 		ev.Sessions, _ = sessions.Load(dir)
 	}
 
-	ev.Firings, ev.AuditPresent = mine.LoadFirings(GuardStores()...)
+	firings, present := mine.LoadFirings(GuardStores()...)
+	ev.Firings, ev.AuditPresent = WithoutExcluded(firings, Exclusions()), present
 	ev.CheckRuns, ev.CheckRepos = CheckRuns()
 
 	records, _ := mine.Load(opts.GateStateDir)
@@ -58,6 +60,32 @@ func Gather(opts Options) mine.EvidenceSet {
 	ev.FixtureProjectRoot = ProjectRoot()
 	ev.FixtureReceipts = FixtureReceipts(records, ev.FixtureHost, ev.FixtureProjectRoot)
 	return ev
+}
+
+// Exclusions reads the rows this machine's exclusion stream retires, keyed by row
+// digest. An unreadable stream retires nothing.
+func Exclusions() map[string]adjudication.Exclusion {
+	entries, err := adjudication.LoadExclusions(adjudication.Dir())
+	if err != nil {
+		return nil
+	}
+	return adjudication.Excluded(entries)
+}
+
+// WithoutExcluded drops the firings an exclusion retires. A firing carrying no row
+// digest is kept, because nothing can name it.
+func WithoutExcluded(firings []mine.Firing, excluded map[string]adjudication.Exclusion) []mine.Firing {
+	if len(excluded) == 0 {
+		return firings
+	}
+	out := make([]mine.Firing, 0, len(firings))
+	for _, f := range firings {
+		if _, ok := excluded[f.RowDigest]; ok && f.RowDigest != "" {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
 }
 
 // CheckRuns reads this machine's live check evidence as the observation's execution

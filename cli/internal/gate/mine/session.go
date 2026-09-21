@@ -1,6 +1,8 @@
 package mine
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -79,6 +81,17 @@ type Firing struct {
 	HookDigest        string  `json:"hook_digest,omitempty"`
 	RuleHash          string  `json:"rule_hash,omitempty"`
 	MasterBuildDigest string  `json:"master_build_digest,omitempty"`
+	// RowDigest is RowDigest of the line this firing was read from. Every row
+	// carries one, including a row with no FiringID.
+	RowDigest string `json:"row_digest,omitempty"`
+}
+
+// RowDigest names one audit row by its own bytes: the SHA-256 of the line with
+// surrounding whitespace trimmed. Every reader of the stream computes it the same
+// way, so a correction keyed on it reaches all of them.
+func RowDigest(line string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(line)))
+	return hex.EncodeToString(sum[:])
 }
 
 // AuditLogName is the guard store's audit stream, one JSON row per block decision.
@@ -137,6 +150,7 @@ func LoadFirings(dirs ...string) (firings []Firing, present bool) {
 				HookDigest:        row.HookDigest,
 				RuleHash:          row.RuleHash,
 				MasterBuildDigest: row.MasterBuildDigest,
+				RowDigest:         RowDigest(line),
 			})
 		}
 	}

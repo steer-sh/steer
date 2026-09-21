@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/steer-sh/steer-cli/internal/adjudication"
 	"github.com/steer-sh/steer-cli/internal/checks"
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
@@ -114,5 +115,14 @@ func TestGatherResolvesNoStoreForAnUnattributableRecord(t *testing.T) {
 	}
 	if got := FixtureReceipts(records, "here", "/w/steer"); len(got) != 0 {
 		t.Errorf("Gather read a store for a record it cannot attribute: %+v", got)
+	}
+}
+
+// The recurrence counts drop an excluded row and keep a row nothing can name.
+func TestWithoutExcludedDropsOnlyRetiredRows(t *testing.T) {
+	firings := []mine.Firing{{HookID: "g", RowDigest: "ra"}, {HookID: "g", RowDigest: "rb"}, {HookID: "g"}}
+	got := WithoutExcluded(firings, map[string]adjudication.Exclusion{"ra": {}, "": {}})
+	if len(got) != 2 || got[0].RowDigest != "rb" || got[1].RowDigest != "" {
+		t.Errorf("kept %+v, want rb and the unnamed row", got)
 	}
 }

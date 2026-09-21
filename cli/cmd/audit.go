@@ -47,6 +47,8 @@ type auditSource struct {
 	Receipts  []adjudication.Receipt
 	Installed func(firingaudit.Row) adjudication.Identity
 	Groups    []group
+	// Excluded holds the rows an exclusion retires, keyed by row digest.
+	Excluded map[string]adjudication.Exclusion
 }
 
 // loadAudit reads both guard stores and the adjudication stream.
@@ -57,6 +59,10 @@ type auditSource struct {
 func loadAudit() (auditSource, error) {
 	rows, present := firingaudit.Load(evidence.GuardStores()...)
 	receipts, err := adjudication.Load(adjudication.Dir())
+	if err != nil {
+		return auditSource{}, err
+	}
+	exclusions, err := adjudication.LoadExclusions(adjudication.Dir())
 	if err != nil {
 		return auditSource{}, err
 	}
@@ -78,7 +84,8 @@ func loadAudit() (auditSource, error) {
 	}
 
 	return auditSource{Rows: rows, Present: present, Receipts: receipts,
-		Installed: installed, Groups: groupRows(rows, installed)}, nil
+		Installed: installed, Groups: groupRows(rows, installed),
+		Excluded: adjudication.Excluded(exclusions)}, nil
 }
 
 // groupRows collects each guard's rows per store, so the coverage arithmetic
@@ -122,7 +129,7 @@ func (s auditSource) coverageOf(hookName string) []guardCoverage {
 		}
 		out = append(out, guardCoverage{HookName: g.HookName, StoreDir: g.StoreDir,
 			Coverage: adjudication.Cover("", firingaudit.Firings(g.Rows),
-				s.Receipts, g.Identity)})
+				s.Receipts, g.Identity, s.Excluded)})
 	}
 	return out
 }
@@ -147,6 +154,7 @@ what asks for them.`,
 			Installed: source.Installed,
 			Other:     auditOther,
 			Limit:     auditLimit,
+			Excluded:  source.Excluded,
 		})
 		coverage := source.coverageOf(auditHook)
 		if auditJSON {
@@ -173,6 +181,9 @@ func writeQueue(w io.Writer, present bool, items []firingaudit.Item,
 			g.HookName, c.Rows, c.CurrentJudged+c.CurrentUnjudged, c.CurrentJudged)
 		if c.Legacy > 0 {
 			fmt.Fprintf(w, "  %d rows carry no identifier and can never be judged\n", c.Legacy)
+		}
+		if c.Excluded > 0 {
+			fmt.Fprintf(w, "  %d rows excluded as recording no real work (steer audit rows --excluded)\n", c.Excluded)
 		}
 		if c.OtherJudged+c.OtherUnjudged > 0 {
 			fmt.Fprintf(w, "  %d rows an earlier implementation recorded, %d of those read\n",
@@ -335,6 +346,12 @@ population, and a recurrence does not erase a demonstrated prevention.`,
 		if err != nil {
 			return err
 		}
+		if row, ok := firingaudit.Find(source.Rows, args[0]); ok {
+			if _, retired := source.Excluded[row.RowDigest]; retired {
+				return fmt.Errorf("firing %s is excluded as recording no real work; "+
+					"steer audit reinstate it before judging it", args[0])
+			}
+		}
 		receipt, err := firingaudit.Record(source.Rows, dir, firingaudit.Judgment{
 			FiringID:              args[0],
 			Judgment:              auditJudgment,
@@ -356,6 +373,132 @@ population, and a recurrence does not erase a demonstrated prevention.`,
 		return nil
 	},
 }
+
+// rowLine is one audit row as `audit rows` lists it: the fields that identify
+// the row and say where it came from, without its evidence bundle.
+type rowLine struct {
+	RowDigest  string `json:"row_digest"`
+	FiringID   string `json:"firing_id,omitempty"`
+	Timestamp  string `json:"timestamp"`
+	HookName   string `json:"hook_name"`
+	Harness    string `json:"harness,omitempty"`
+	SessionID  string `json:"session_id,omitempty"`
+	Repository string `json:"repository,omitempty"`
+	Snippet    string `json:"snippet,omitempty"`
+	StoreDir   string `json:"store_dir"`
+	Excluded   bool   `json:"excluded"`
+	// ExcludedFor is the reason of the exclusion that retires this row.
+	ExcludedFor string `json:"excluded_for,omitempty"`
+}
+
+var auditRowsCmd = &cobra.Command{
+	Use:   "rows",
+	Short: "List every audit row with the digest that names it",
+	Long: `Rows lists every recorded block, oldest first, with its row digest.
+
+The row digest names a row by its own bytes, so it names a row written before
+firing identifiers existed too. Exclude and reinstate take a firing identifier,
+a row digest, or a digest prefix of at least eight characters.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		source, err := loadAudit()
+		if err != nil {
+			return err
+		}
+		lines := listRows(source, auditHook, auditExcludedOnly)
+		if auditJSON {
+			return writeJSON(cmd.OutOrStdout(), lines)
+		}
+		w := cmd.OutOrStdout()
+		if !source.Present {
+			fmt.Fprintln(w, "No guard store on this machine holds an audit stream.")
+			return nil
+		}
+		for _, l := range lines {
+			mark := ""
+			if l.Excluded {
+				mark = "  EXCLUDED: " + l.ExcludedFor
+			}
+			fmt.Fprintf(w, "%s  %s  %s  %s  session=%s  firing=%s%s\n    %s  %s\n",
+				l.RowDigest[:12], l.Timestamp, l.HookName, or(l.Harness), or(l.SessionID),
+				or(l.FiringID), mark, or(l.Repository), oneLine(l.Snippet))
+		}
+		return nil
+	},
+}
+
+// listRows selects the rows `audit rows` prints, oldest first.
+func listRows(source auditSource, hook string, excludedOnly bool) []rowLine {
+	var out []rowLine
+	for _, r := range source.Rows {
+		if hook != "" && r.HookName != hook {
+			continue
+		}
+		e, retired := source.Excluded[r.RowDigest]
+		if excludedOnly && !retired {
+			continue
+		}
+		out = append(out, rowLine{
+			RowDigest: r.RowDigest, FiringID: r.FiringID, Timestamp: r.Timestamp,
+			HookName: r.HookName, Harness: r.Harness, SessionID: r.SessionID,
+			Repository: r.Repository, Snippet: r.Snippet, StoreDir: r.StoreDir,
+			Excluded: retired, ExcludedFor: e.Reason,
+		})
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Timestamp < out[j].Timestamp })
+	return out
+}
+
+// correctCmd builds exclude and reinstate, which differ only in the action.
+func correctCmd(action, use, short, long string) *cobra.Command {
+	return &cobra.Command{
+		Use:   use,
+		Short: short,
+		Long:  long,
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := prepareState(); err != nil {
+				return err
+			}
+			dir, err := statestore.Prepare(adjudication.Component)
+			if err != nil {
+				return err
+			}
+			source, err := loadAudit()
+			if err != nil {
+				return err
+			}
+			e, err := firingaudit.Correct(source.Rows, dir, firingaudit.Correction{
+				Ref: args[0], Action: action, Reason: auditReason, Evidence: auditEvidence,
+			}, source.Excluded)
+			if err != nil {
+				return err
+			}
+			if auditJSON {
+				return writeJSON(cmd.OutOrStdout(), e)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "%s row %s (%s, %s)\n",
+				map[string]string{adjudication.Exclude: "excluded", adjudication.Reinstate: "reinstated"}[action],
+				e.RowDigest[:12], e.HookID, e.Timestamp)
+			return nil
+		},
+	}
+}
+
+var auditExcludeCmd = correctCmd(adjudication.Exclude, "exclude REF",
+	"Retire one audit row that records no real work",
+	`Exclude appends a correction naming one row: a firing a test run caused under
+the operator's guard store, for example. The row stays in the audit stream. The
+queue, the coverage counts and the recurrence counts leave it out, and
+'steer audit rows --excluded' lists it with its reason.
+
+REF is a firing identifier, a row digest, or a digest prefix of at least eight
+characters. --reason and at least one --evidence are required: the evidence is
+what shows the row records no real work.`)
+
+var auditReinstateCmd = correctCmd(adjudication.Reinstate, "reinstate REF",
+	"Withdraw the exclusion of one audit row",
+	`Reinstate appends a correction that withdraws an earlier exclusion. The latest
+entry for a row decides. --reason is required.`)
 
 func auditBudget() transcript.ContinuationBudget {
 	return transcript.ContinuationBudget{Steps: auditSteps, TextBytes: auditText}
@@ -402,11 +545,14 @@ var (
 	auditMaxBytes       int
 	auditOutcome        string
 	auditSelection      string
+	auditReason         string
+	auditExcludedOnly   bool
 )
 
 func init() {
 	rootCmd.AddCommand(auditCmd)
-	auditCmd.AddCommand(auditQueueCmd, auditShowCmd, auditRecordCmd)
+	auditCmd.AddCommand(auditQueueCmd, auditShowCmd, auditRecordCmd,
+		auditRowsCmd, auditExcludeCmd, auditReinstateCmd)
 	auditCmd.PersistentFlags().BoolVar(&auditJSON, "json", false, "emit JSON")
 
 	q := auditQueueCmd.Flags()
@@ -436,4 +582,13 @@ func init() {
 	r.StringVar(&auditOutcome, "continuation-outcome", "", "what the task did next")
 	r.StringVar(&auditSelection, "selection", "", "why this firing was read")
 	_ = auditRecordCmd.MarkFlagRequired("judgment")
+
+	auditRowsCmd.Flags().StringVar(&auditHook, "hook", "", "only this guard")
+	auditRowsCmd.Flags().BoolVar(&auditExcludedOnly, "excluded", false, "only the excluded rows")
+	for _, c := range []*cobra.Command{auditExcludeCmd, auditReinstateCmd} {
+		c.Flags().StringVar(&auditReason, "reason", "", "why (required)")
+		_ = c.MarkFlagRequired("reason")
+	}
+	auditExcludeCmd.Flags().StringArrayVar(&auditEvidence, "evidence", nil,
+		"what shows the row records no real work (repeatable, required)")
 }

@@ -119,7 +119,8 @@ Read the linked architecture section before changing the corresponding boundary:
   one means teaching `Reach` what that harness's locators allow.
 - Firing adjudications: the store `cli/internal/adjudication/` and its component
   name in `cli/internal/statestore/Components`. A corpus absent from that list never
-  migrates. A judgment names its firing by the row's `firing_id` alone, and the
+  migrates. Its exclusion stream is keyed by `mine.RowDigest`; a change to how that
+  digest reads a line orphans every recorded exclusion. A judgment names its firing by the row's `firing_id` alone, and the
   identity it was made against is stored with it; `gate/mine` reads no receipt store.
 - Guard source agreement: `cli/internal/claude/sourcecompare.go` holds the one
   comparison of a store's guard files against the copies a master embeds.

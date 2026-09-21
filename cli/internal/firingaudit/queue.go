@@ -41,6 +41,9 @@ type Item struct {
 type Counts struct {
 	Unjudged           int `json:"unjudged"`
 	ContinuationUnread int `json:"continuation_unread"`
+	// Excluded is the selected rows an exclusion retires. They are not queued
+	// and not unexamined work.
+	Excluded int `json:"excluded"`
 	// Queued is Unjudged + ContinuationUnread: everything the options selected.
 	Queued int `json:"queued"`
 	// Listed is how many of Queued survived Limit.
@@ -79,6 +82,8 @@ type QueueOptions struct {
 	Other bool
 	// Limit caps the items returned, oldest first. Zero returns all of them.
 	Limit int
+	// Excluded holds the rows an exclusion retires, keyed by row digest.
+	Excluded map[string]adjudication.Exclusion
 }
 
 // Queue lists the firings a reading pass should take next, oldest first.
@@ -90,6 +95,7 @@ type QueueOptions struct {
 func Queue(rows []Row, receipts []adjudication.Receipt, opts QueueOptions) ([]Item, Counts) {
 	latest := adjudication.Latest(receipts)
 	var items []Item
+	excluded := 0
 	for _, row := range rows {
 		if opts.HookName != "" && row.HookName != opts.HookName {
 			continue
@@ -103,6 +109,10 @@ func Queue(rows []Row, receipts []adjudication.Receipt, opts QueueOptions) ([]It
 		}
 		applies := adjudication.AppliesStamps(row.HookDigest, row.RuleHash, identity)
 		if applies != adjudication.Current && !opts.Other {
+			continue
+		}
+		if _, ok := opts.Excluded[row.RowDigest]; ok && row.RowDigest != "" {
+			excluded++
 			continue
 		}
 		reach := row.Reach()
@@ -129,7 +139,7 @@ func Queue(rows []Row, receipts []adjudication.Receipt, opts QueueOptions) ([]It
 	sort.SliceStable(items, func(i, j int) bool {
 		return items[i].Timestamp < items[j].Timestamp
 	})
-	var counts Counts
+	counts := Counts{Excluded: excluded}
 	for _, item := range items {
 		switch item.Reason {
 		case Unjudged:
@@ -157,6 +167,7 @@ func (r Row) Firing() mine.Firing {
 		HookDigest:        r.HookDigest,
 		RuleHash:          r.RuleHash,
 		MasterBuildDigest: r.MasterBuildDigest,
+		RowDigest:         r.RowDigest,
 	}
 }
 
