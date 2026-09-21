@@ -214,6 +214,41 @@ reading of every recorded case for that guard. Full inspection is always the use
 option; it is not the default, because reading cost grows with the installed
 inventory.
 
+#### Repairing a guard you judged incorrect
+
+A block judged `incorrect` is this pass's highest-value output, and it needs a
+destination. Enter these steps only after `steer audit record --judgment incorrect`
+holds the judgment; that record is the evidence the repair answers to.
+
+1. **Read what fired.** Take the firing's scope, the guard identity it names and
+   the action it blocked. `steer audit show` already printed them. The identity
+   matters: a guard rebuilt since the firing is not the code that blocked it.
+2. **Choose the remedy before editing anything.** An incorrect block does not
+   always mean a new guard version. Four remedies are distinct: the store file
+   already allows this and only the runner carries the old source (publish it);
+   the guard's own logic is too broad (rework it); the rule the guard enforces is
+   wrong (revise the rule, then the guard); or the class is not guard-shaped at
+   all (remove the guard and say what replaces it). `steer status --json` answers
+   the first one: `posture.masters[].sources`.
+3. **Reproduce before you change the guard.** Store the blocked payload as an
+   `expect: allow` case with the filesystem context it needs, and keep every case
+   the guard already holds. Run `steer test <guard>` and confirm the new case
+   fails. A payload that already passes standalone has not reproduced the firing:
+   the runner normalizes one tool call into several, so the shape the guard saw
+   may not be the shape the harness sent.
+4. **Repair, rebuild, then read the rebuild.** After the edit run
+   `steer hooks rebuild --scope <scope>`. It publishes and registers the runner
+   and reruns the stored cases, but it reports a fixture failure without failing,
+   so read its `fixtures:` lines rather than its exit status. Then check that the
+   harnesses you care about register that build: `steer status --json` again.
+5. **Supersede the fix record, keep the audit receipt.** The record binds the fix
+   and changes with it. The receipt describes the implementation that actually
+   fired and stays true; it is why the repair exists.
+
+Say which remedy you chose and what the rebuild's fixture lines reported. A guard
+that passes its cases has established what it intercepts under this build, and
+nothing about what it will do in the field.
+
 **Close the pass with what it did not read.** Compose that sentence from `counts`
 and `coverage`, never from the case cap alone:
 
