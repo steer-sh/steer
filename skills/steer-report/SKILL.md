@@ -83,9 +83,13 @@ steer fix score
 name and still works, as does `steer commit-gate mine`; `findings`, which dumps the
 review corpus rather than managing a fix, lives only under the latter.
 
-Each record reports before/after incidence over its own unit — the fraction of reviewed commits on which the class appeared for a `review-findings` record, or the fraction of root sessions carrying it for a `transcript-friction` one — split at the install timestamp. **The comparison is uncontrolled and the record makes no efficacy claim.** The dominant input to an agent's behaviour is its standing instruction set — CLAUDE.md, AGENTS.md, imported globals, skills, hooks — which no chain and no session records, which a person edits by hand between sessions, and which an instruction-tier fix edits directly. So a fall between the two windows is a fact about the corpus and never a fact about the fix.
+Three kinds of evidence answer three different questions, and none of them establishes that a fix works:
 
-Behaviour is established at install instead: a guard's stored fixtures replay real cases deterministically (`steer fix mine`, `steer test <hook>`). Field counts are maintenance evidence — they say whether a class is still happening, never whether a fix is what stopped it.
+- **Stored fixtures.** A current passing result establishes that the stored cases produced their expected allow and block outcomes, under the recorded guard, rule, fixtures and master (`steer fix mine`, `steer test <hook>`). It establishes no field reach.
+- **Audited firings.** Reading a blocked action in its original task context supports a judgment about that one attempt: the action would have produced the failure the rule names, or the action was acceptable work, or the evidence does not settle it. These judgments establish no rate.
+- **Field counts.** A count reports matches to the recorded problem over eligible work. Read the matches before you call one a recurrence. A count attributes neither a recurrence nor its absence to the fix.
+
+Each record reports before/after incidence over its own unit — the fraction of reviewed commits on which the class appeared for a `review-findings` record, or the fraction of root sessions carrying it for a `transcript-friction` one — split at the install timestamp. **The comparison is uncontrolled and the record makes no efficacy claim.** An agent's standing instruction set — CLAUDE.md, AGENTS.md, imported globals, skills, hooks — can affect its behaviour, and no chain and no session records it, a person edits it by hand between sessions, and an instruction-tier fix edits it directly. So a fall between the two windows is a fact about the corpus and never a fact about the fix.
 
 ### Read the fields, report the facts
 
@@ -98,7 +102,7 @@ than a verdict, **review history** or **session history** rather than a corpus, 
 | Block | What it holds | What you may say from it |
 |---|---|---|
 | `counts` | `split_ts`, `observed_ts`, `unit`, and per window `{hits, eligible, first_activity_ts, last_activity_ts}` | The two windows' sizes and dates. Never a rate comparison. |
-| `recurrence` | `occurred`, `matches`, `example_kind`, `example`, `example_ts` | Whether the problem came back, and the newest example. |
+| `recurrence` | `occurred`, `matches`, `example_kind`, `example`, `example_ts` | Whether the record matched again, and the newest example. Never that the problem came back: read the example first. |
 | `firing` | `applicable`, `log_present`, `hook_id`, `scope`, `class_scoped`, `rows`, `units` | What the guard's audit stream recorded, and over what. |
 | `fixtures` | `applicable`, `state`, `cases`, `changed`, `verified_at`, `shadowed`, `reason` | Whether the guard's stored cases were last run against the guard installed now. Never that the guard blocks correctly in the field. |
 | `checks` | `applicable`, `attribution`, `stream_present`, `registered_host`, `other_host`, `check_id`, `scope`, `executions`, `outcomes`, `blocked`, `changed_detector` | What a repository check's executions on this machine recorded, and over what. |
@@ -107,7 +111,7 @@ than a verdict, **review history** or **session history** rather than a corpus, 
 
 There are three readings and no fourth:
 
-- **The problem came back.** `recurrence.occurred` is true. **Act on this first.** Open `recurrence.example` and decide whether the record still describes the problem. `example_kind` says what the example is: `adjudicated_finding` is a reviewer's confirmed concern; `cluster_key` is the text a classifier grouped a session's friction by, and is NOT a confirmed escaped failure. A recurrence beside `firing.rows: 0` on a known log points at the rule, its coverage or its registration — the guard recorded no block over work the class did match. For a repository check, `checks` separates three cases: zero `executions` on a known stream means the check never ran here — look at the adoption and the `check.sh` wiring; executions that all passed mean the check ran and did not catch the problem — look at the detector; `blocked` above zero means it stopped turns and the problem still came back — look at whether the class is wider than the check. `changed_detector` above zero means some of those runs were an edited detector, not the one registered. On a record with `declined: true`, nothing was installed: the recurrence is a reason to reconsider the refusal, never a fix that failed.
+- **The record matched again.** `recurrence.occurred` is true. **Act on this first.** Open `recurrence.example` and decide whether the record still describes the problem. `example_kind` says what the example is: `adjudicated_finding` is a reviewer's confirmed concern; `cluster_key` is the text a classifier grouped a session's friction by, and is NOT a confirmed escaped failure. **An example that does not belong to the recorded problem is a false match, and it establishes no recurrence.** The record's own regex is then the defect, and the installed fix is not: read the other matched findings with `steer fix match`, tighten the regex until it excludes the unrelated ones and still holds the known members, then `steer fix register --supersedes <id>` with the same binding and scope. Say which counts hold unrelated matches, and correct a count only for a window whose matches you read completely — a false match in one window establishes nothing about the other. The replacement record opens a fresh window at registration, so its baseline is not the old baseline minus the false matches; give the replacement's window dates. A recurrence beside `firing.rows: 0` on a known log points at the rule, its coverage or its registration — the guard recorded no block over work the class did match. For a repository check, `checks` separates three cases: zero `executions` on a known stream means the check never ran here — look at the adoption and the `check.sh` wiring; executions that all passed mean the check ran and did not catch the problem — look at the detector; `blocked` above zero means it stopped turns and the problem still came back — look at whether the class is wider than the check. `changed_detector` above zero means some of those runs were an edited detector, not the one registered. On a record with `declined: true`, nothing was installed: the recurrence is a reason to reconsider the refusal, never a fix that failed.
 - **The accounting is incomplete.** `firing.applicable` is true while `log_present` is false, or a bound `checks` block reads `stream_present: false` with `other_host: false`. A block with `other_host: true` is not this case: name `registered_host` as the machine that holds the check runs. **Act on this:** name the cause. An absent guard audit log and a repository with no check evidence on this machine have no command; name the cause rather than handing the user a command that changes nothing. A coverage map's `unknown` units do not put a record in this reading: they are left out of the counts, which stand over the rest, and no command recovers them. Say how many were left out, and why. `unknown_scope` is a review sequence that recorded no repository or changed files; the `unknown` remainder beyond `unknown_scope` + `unknown_evidence` is a session that recorded no project; `unknown_evidence` is `pending` + `ledger_missed` + `ledger_overdue`. `ledger_missed` is a ledger the resolver searched for and did not find; nothing routine recovers it. `ledger_overdue` is a ledger the resolver has not read yet; the status entry for `unresolved_rows` owns that repair on this machine, and a row on another host's shard is read there. A `null` `scope` is its own case: the record has no frozen eligibility rule, so its two windows count different opportunity sets. Scope it with `steer fix scope <id>`, which restarts its after-window.
 - **The window is quiet.** Eligible work arrived and the class did not. Say that, and stop there. `zero_eligible_after` is the separate case: no eligible work has arrived at all, which is not a quiet window and is not a fault — every freshly installed record reads that way.
 
@@ -117,7 +121,7 @@ produced the reading, and never the label itself.
 
 | Instead of the label | Write |
 |---|---|
-| The problem came back | The newest example, its date, and what kind of example it is — a reviewer's confirmed concern, or a classifier's grouping that is not a confirmed failure. |
+| The record matched again | The newest example, its date, what kind of example it is — a reviewer's confirmed concern, or a classifier's grouping that is not a confirmed failure — and whether it belongs to the recorded problem. |
 | The accounting is incomplete | Which evidence is missing on this machine, how many units it leaves out of the counts, and the cause. |
 | The window is quiet | How much eligible work arrived in each window, over what dates, and that the class did not appear in the second one. |
 
@@ -129,7 +133,7 @@ State no direction and no percentage. "Fewer since the fix", "the fix worked", "
 
 Read `provenance` before you weigh the two windows against each other. When the `before` and `after` lists differ, two instruments counted them — a different reviewer, or a different transcript parser — and the counts describe two measurements rather than one.
 
-For every record whose problem came back, open the target file and decide between:
+For every record with a recurrence you confirmed by reading its matches, open the target file and decide between:
 
 - **Rework** — the fix was aimed at the wrong tell. Fix it, then `register --supersedes <id>` so the old record is retired with a forward pointer and the new one gets a fresh baseline.
 - **Remove** — the class is not mechanizable after all, or the defect stopped mattering. Remove the fix with its tier's remove command and a `--reason` (`steer check remove`, `steer remove`, `steer rules remove`, `steer commit-gate addendum remove`), then `retire <id> --reason "..."`. Each remove command archives the fix first; `steer archive list` shows the entries, and `steer archive restore <id>` puts one back through its tier's installer. A restore refuses an id its tier holds now, and a check comes back only when its cases still validate.
@@ -235,7 +239,13 @@ holds the judgment; that record is the evidence the repair answers to.
    the guard already holds. Run `steer test <guard>` and confirm the new case
    fails. A payload that already passes standalone has not reproduced the firing:
    the runner normalizes one tool call into several, so the shape the guard saw
-   may not be the shape the harness sent.
+   may not be the shape the harness sent. **Never invoke the installed master to
+   reproduce or check a firing.** It appends synthetic rows to the live audit
+   stream, beside the master's own file, and the unjudged count stops being a
+   measure of real work. `steer test` runs byte-identical copies in a temporary
+   store for exactly this reason. If a probe the fixture runner cannot express is
+   unavoidable, copy the master into a fresh temporary directory, invoke that copy,
+   and keep its rows and evidence sidecars out of the live store.
 4. **Repair, rebuild, then read the rebuild.** After the edit run
    `steer hooks rebuild --scope <scope>`. It publishes and registers the runner
    and reruns the stored cases, but it reports a fixture failure without failing,
@@ -305,9 +315,9 @@ is the one copy of the schema in the bundled skills; change it with
 `cli/internal/status/status.go`. Fields:
 
 **Read every count here as an observation.** The windows are uncontrolled: the
-dominant input to an agent's behaviour is its standing instruction set, which no
-chain and no session records, which a person edits by hand between sessions, and
-which an instruction-tier fix edits directly. So the snapshot reports hits,
+agent's standing instruction set can affect its behaviour, no chain and no
+session records it, a person edits it by hand between sessions, and an
+instruction-tier fix edits it directly. So the snapshot reports hits,
 eligible units, window bounds, coverage, guard firings and the identities that
 counted each window, and it reports no efficacy verdict. The intervention's
 contribution to any change in these counts is unresolved. v11 removes `verdict`,
@@ -682,8 +692,17 @@ who has never met Steer decides from it without a glossary.
    global reaches every repository on this machine. Choose it from the evidence —
    chains from one repository scope to project, chains from several scope global —
    and give that reason in a clause. Then say which coding agents and which files.
-4. **What is the tradeoff?** Name the legitimate work it could block. Every proposal has
-   one; a proposal claiming none has not been thought through.
+4. **What is the tradeoff?** Name one concrete legitimate case the proposal could
+   obstruct, and say what in the proposed detector or wording would catch it. Each
+   tier has its own form: a **repository check** rejects valid repository content; a
+   **guard** blocks an acceptable tool action; an **instruction rule** discourages a
+   valid approach; a **review prompt entry** makes the reviewer flag correct code or
+   a deliberate design choice. Then say how the proposal preserves that case, or what
+   restriction stays. Keep the answer qualitative unless the evidence carries the rate
+   you claim, which needs a denominator: "no corpus records this" states a limit on
+   the measurement and is not an answer. If no concrete case comes up, give the
+   boundary you examined and the uncertainty that remains; never invent a harm, and
+   never call a proposal cost-free.
 5. **What decision is needed?** State the action and its consequence in one question.
 
 A worked proposal:
@@ -691,8 +710,8 @@ A worked proposal:
 > The agent used `python` where this project requires `python3` in three recorded
 > sessions. I suggest a guard that blocks the bare command and tells the agent to use
 > `python3`. It is a project fix: every recorded session was in this repository, so it
-> applies here alone, to Claude Code and Codex. It could also block an intentional use
-> of `python`. Apply this guard and track whether the problem becomes less frequent?
+> applies here alone, to Claude Code and Codex. It could also block a deliberate use of
+> `python`, because it matches the bare command anywhere in a shell call. Apply this guard and track whether the problem becomes less frequent?
 
 Carry the same shape into the audit half. A result reads as its counts and dates,
 then the limit on them, then whether anything is asked of the reader.
@@ -858,7 +877,8 @@ This rewrites the queue and its timestamp from the new state, so the SessionStar
 
 ## Reading the numbers honestly
 
-- **The comparison is uncontrolled, so no count here credits a fix.** The standing instruction set — CLAUDE.md, AGENTS.md, imported globals, skills, hooks — is the dominant input to the agent's behaviour, no corpus records it, and a person edits it by hand between sessions. Report what recurred and what did not. Behaviour is established at install, by a guard's stored fixtures.
+- **Keep the three kinds of evidence apart.** Fixtures establish expected outcomes on stored cases under the recorded identities; an audited firing supports a judgment about one attempted action; field counts describe matched recurrence over eligible work. None of them establishes efficacy.
+- **The comparison is uncontrolled, so no count here credits a fix.** The standing instruction set — CLAUDE.md, AGENTS.md, imported globals, skills, hooks — can affect the agent's behaviour, no corpus records it, and a person edits it by hand between sessions. Report what recurred and what did not.
 - **The adjudication is self-reported.** The review outcomes come from the agent that received the findings, so a class the agent systematically misjudges is invisible here. Treat incidence as a strong hint, never as ground truth.
 - **The instrument moves under the measurement.** Every ledger row is stamped with the reviewer that produced it (`model/runs/prompt-digest`), and `observation.provenance` lists every identity that counted each window. When the two lists differ, two instruments counted these windows — re-read the findings before weighing the counts against each other. A regex leaning on the reviewer's framing verbs ("hardcodes", "still advertises") is far more exposed than one leaning on code vocabulary, which is a reason to prefer the latter when authoring.
   - The stamp cannot catch vendor-side drift. An external model alias whose behaviour changes with no local diff makes an unchanged instrument string weaker evidence than a changed one.

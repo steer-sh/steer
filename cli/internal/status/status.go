@@ -33,8 +33,8 @@ import (
 // the shape or semantics of SystemStatus change.
 //
 // EVERY COUNT IN THIS SNAPSHOT IS OBSERVATIONAL. The two windows are uncontrolled:
-// the dominant input to an agent's behaviour is its standing instruction set,
-// which no chain and no session records. So the snapshot reports what the corpus
+// an agent's standing instruction set can affect its behaviour, and no chain and
+// no session records it. So the snapshot reports what the corpus
 // recorded — hits, eligible units, window bounds, coverage, guard firings and the
 // identities that counted each window — and the intervention's contribution to any
 // change in those counts is unresolved. v11 removes the claim fields (verdict,
