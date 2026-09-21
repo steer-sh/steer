@@ -290,6 +290,79 @@ type MatchOpts struct {
 	// ShowResidue prints the frequent terms among the findings this regex misses,
 	// which turns a verifier into a way of finding the class it should have named.
 	ShowResidue bool
+	// The scope predicates and cutoff of the record the regex will be registered as.
+	// With any scope set, Match also counts the window register would freeze.
+	ScopeAll      bool
+	ScopeHarness  []string
+	ScopeRepo     string
+	ScopeRepoRoot string
+	ScopePath     string
+	InstalledTS   int64
+}
+
+// baselinePreview is the registration window a scoped match counts beside the whole
+// corpus.
+type baselinePreview struct {
+	scope    *Scope
+	scopeMap map[string]any
+	cutoff   float64
+	at       float64
+}
+
+// preview resolves the window the scope flags describe, or nil when none is set. The
+// cutoff defaults to now, as register's does.
+func (o MatchOpts) preview(spec CorpusSpec) (*baselinePreview, error) {
+	scoped := o.ScopeAll || len(o.ScopeHarness) > 0 || o.ScopeRepo != "" ||
+		o.ScopeRepoRoot != "" || o.ScopePath != ""
+	if !scoped {
+		if o.InstalledTS != 0 {
+			return nil, fmt.Errorf("--installed-ts previews a registration baseline and needs " +
+				"the record's scope: pass --scope-all or the --scope-* predicates")
+		}
+		return nil, nil
+	}
+	if spec.Engine != EngineSession {
+		if o.StrictJoins {
+			return nil, fmt.Errorf("--strict-joins is not how register builds chains; " +
+				"drop it to preview a registration baseline")
+		}
+		if o.Kind != "accepted" && o.Kind != "rejected" {
+			return nil, fmt.Errorf("a registration baseline counts one verdict: pass --kind " +
+				"accepted (register --kind defect) or rejected (--kind false-positive)")
+		}
+	}
+	scopeMap, err := BuildScope(o.ScopeAll, o.ScopeHarness, o.ScopeRepo, o.ScopeRepoRoot, o.ScopePath)
+	if err != nil {
+		return nil, err
+	}
+	if err := spec.ValidateScope(scopeMap); err != nil {
+		return nil, err
+	}
+	scope, _, err := ParseScope(Record{"scope": scopeMap})
+	if err != nil {
+		return nil, err
+	}
+	at := now()
+	cutoff := o.InstalledTS
+	if cutoff == 0 {
+		cutoff = at
+	}
+	return &baselinePreview{scope: scope, scopeMap: scopeMap, cutoff: float64(cutoff), at: float64(at)}, nil
+}
+
+// header states the window register would freeze and its count under it.
+func (p *baselinePreview) header(hits, total int, rate float64, unit string) string {
+	return fmt.Sprintf("# registration baseline: %d/%d %s (%s) before %s, scope %s — "+
+		"the count `register` freezes with this scope and --installed-ts",
+		hits, total, unit, pct(rate), stamp(p.cutoff), pyDumps(p.scopeMap, 0))
+}
+
+// mark labels a matched unit by whether the registration window holds it.
+func mark(in bool) string {
+	if in {
+		return "counted in baseline"
+	}
+	return "outside baseline"
 }
 
 // residueMinChains is the number of chains a term must appear in to be listed. A
@@ -301,8 +374,9 @@ const residueMinChains = 2
 const residueTermLimit = 25
 
 // Match tests a candidate class regex against the corpus its record will be counted
-// over. It routes to the engine that corpus names, so an author sees the same
-// denominator the register will freeze.
+// over, routed to the engine that corpus names. It lists every match in the whole
+// corpus. Given the record's scope, it also counts the window register would freeze and
+// marks each listed unit in or outside it; without one, no count it prints is a baseline.
 func Match(w io.Writer, stateDir string, o MatchOpts) error {
 	spec, err := writableCorpus(o.Corpus)
 	if err != nil {
@@ -313,7 +387,11 @@ func Match(w io.Writer, stateDir string, o MatchOpts) error {
 			return fmt.Errorf("--show-residue reads the review corpus; %s is mined by chain-free units",
 				spec.Corpus)
 		}
-		return matchSessions(w, o)
+		return matchSessions(w, o, spec)
+	}
+	p, err := o.preview(spec)
+	if err != nil {
+		return err
 	}
 	regex, kind, ledger, strictJoins := o.Regex, o.Kind, o.Ledger, o.StrictJoins
 	pattern, err := compilePattern(regex)
@@ -336,9 +414,19 @@ func Match(w io.Writer, stateDir string, o MatchOpts) error {
 		}
 	}
 	hits, total, rate := Incidence(chains, pattern, kind)
-	fmt.Fprintf(w, "# %s matches %d/%d chains (%s)\n", pyRepr(regex), hits, total, pct(rate))
+	fmt.Fprintf(w, "# %s matches %d/%d chains (%s) in the whole corpus\n", pyRepr(regex), hits, total, pct(rate))
+	if p == nil {
+		fmt.Fprintln(w, "# not a registration baseline: pass the record's --scope-* flags to count that window")
+	} else {
+		bHits, bTotal, bRate := Incidence(baselineChains(chains, p.scope, p.cutoff, p.at), pattern, kind)
+		fmt.Fprintln(w, p.header(bHits, bTotal, bRate, "chains"))
+	}
 	for _, m := range matched {
-		fmt.Fprintf(w, "--- %s  ts=%s\n", stamp(numFloat(m.ch.StartTS)), pyStr(m.ch.StartTS))
+		label := ""
+		if p != nil {
+			label = "  " + mark(len(baselineChains([]Chain{m.ch}, p.scope, p.cutoff, p.at)) == 1)
+		}
+		fmt.Fprintf(w, "--- %s  ts=%s%s\n", stamp(numFloat(m.ch.StartTS)), pyStr(m.ch.StartTS), label)
 		for _, f := range m.found {
 			fmt.Fprintf(w, "  [%s] %s\n", f.Verdict, f.Text)
 		}
@@ -358,7 +446,7 @@ func Match(w io.Writer, stateDir string, o MatchOpts) error {
 		return err
 	}
 	if len(prior) > 0 {
-		fmt.Fprintf(w, "\n# %d prior decision(s) cover chains this regex matches:\n", len(prior))
+		fmt.Fprintf(w, "\n# %d prior decision(s) cover chains this regex matches in the whole corpus:\n", len(prior))
 		for _, d := range prior {
 			printDecisionShared(w, d.Record, d.Shared, d.Total)
 		}
@@ -393,7 +481,7 @@ func printResidue(w io.Writer, chains []Chain, pattern *regexp.Regexp, kind stri
 		groups = append(groups, TermGroup{Repo: labels[i], Findings: missed})
 	}
 
-	fmt.Fprintf(w, "\n# residue: %d of %d %s findings this regex misses, over %d chain(s)\n",
+	fmt.Fprintf(w, "\n# residue: %d of %d %s findings this regex misses, over %d chain(s) of the whole corpus\n",
 		residue, selected, kind, residueChains)
 	if residue == 0 {
 		fmt.Fprintln(w, "# nothing is left over — the regex covers every finding of this kind")
@@ -596,15 +684,13 @@ func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 		if signalKind == "" {
 			signalKind = SignalAny
 		}
-		beforeUnits, _, _ := SplitSessions(o.Sessions, float64(installed))
-		beforeUnits = SessionBaselineWindow(beforeUnits, scope)
-		bHits, bTotal, bRate = SessionIncidence(beforeUnits, pattern, signalKind)
+		bHits, bTotal, bRate = SessionIncidence(baselineSessions(o.Sessions, scope, float64(installed)),
+			pattern, signalKind)
 		instrument = sessionInstrumentValue(o.Sessions)
 		decisions, err = SessionOverlappingDecisions(records, o.Sessions, pattern, signalKind)
 	} else {
-		before, _ := SplitChains(chains, float64(installed))
-		before = baselineWindow(before, scope)
-		bHits, bTotal, bRate = Incidence(before, pattern, kindFilter)
+		bHits, bTotal, bRate = Incidence(baselineChains(chains, scope, float64(installed), float64(now())),
+			pattern, kindFilter)
 		instrument = instrumentValue(chains)
 		decisions, err = OverlappingDecisions(recordsForCorpus(records, spec.Corpus), chains, pattern, kindFilter)
 	}
@@ -876,14 +962,12 @@ func Reject(w io.Writer, stateDir string, o RejectOpts) error {
 		if signalKind == "" {
 			signalKind = SignalAny
 		}
-		beforeUnits, _, _ := SplitSessions(o.Sessions, float64(rejected))
-		beforeUnits = SessionBaselineWindow(beforeUnits, scope)
-		bHits, bTotal, bRate = SessionIncidence(beforeUnits, pattern, signalKind)
+		bHits, bTotal, bRate = SessionIncidence(baselineSessions(o.Sessions, scope, float64(rejected)),
+			pattern, signalKind)
 		instrument = sessionInstrumentValue(o.Sessions)
 	} else {
-		before, _ := SplitChains(chains, float64(rejected))
-		before = baselineWindow(before, scope)
-		bHits, bTotal, bRate = Incidence(before, pattern, kindFilter)
+		bHits, bTotal, bRate = Incidence(baselineChains(chains, scope, float64(rejected), float64(now())),
+			pattern, kindFilter)
 		instrument = instrumentValue(chains)
 	}
 	if bHits == 0 && !o.Force {
@@ -990,17 +1074,15 @@ func ScopeSet(w io.Writer, stateDir, id string, o ScopeSetOpts) error {
 	var bHits, bTotal int
 	var bRate float64
 	if spec.Engine == EngineSession {
-		beforeUnits, _, _ := SplitSessions(o.Sessions, SplitTS(rec))
-		beforeUnits = SessionBaselineWindow(beforeUnits, scope)
-		bHits, bTotal, bRate = SessionIncidence(beforeUnits, pattern, SessionSignalKind(rec))
+		bHits, bTotal, bRate = SessionIncidence(baselineSessions(o.Sessions, scope, SplitTS(rec)),
+			pattern, SessionSignalKind(rec))
 	} else {
 		rows, err := LoadRows(stateDir, o.Ledger)
 		if err != nil {
 			return err
 		}
-		before, _ := SplitChains(BuildChains(rows, false), SplitTS(rec))
-		before = baselineWindow(before, scope)
-		bHits, bTotal, bRate = Incidence(before, pattern, RecordKindFilter(rec))
+		bHits, bTotal, bRate = Incidence(baselineChains(BuildChains(rows, false), scope, SplitTS(rec), float64(now())),
+			pattern, RecordKindFilter(rec))
 	}
 	if bHits == 0 && !o.Force {
 		return fmt.Errorf("regex matches no unit in the scoped baseline — widen the scope, or pass --force")
@@ -1019,12 +1101,21 @@ func ScopeSet(w io.Writer, stateDir, id string, o ScopeSetOpts) error {
 	return nil
 }
 
-// baselineWindow is the eligible before-window a writer freezes its baseline over. It
-// runs the same evidence pass ScoreRecord runs, so the stored baseline and the scored
+// baselineChains is the eligible before-window a writer freezes its baseline over: the
+// chains starting before cutoff that the scope admits. It runs the same evidence pass
+// ScoreRecord runs, read against the clock at, so the stored baseline and the scored
 // one describe one set of chains. A chain with no adjudication is not evidence of the
 // class's absence, so it belongs in neither.
-func baselineWindow(before []Chain, scope *Scope) []Chain {
-	return CoverEvidence(before, scope, float64(now())).EligibleChains()
+func baselineChains(chains []Chain, scope *Scope, cutoff, at float64) []Chain {
+	before, _ := SplitChains(chains, cutoff)
+	return CoverEvidence(before, scope, at).EligibleChains()
+}
+
+// baselineSessions is the session engine's baseline window: the sessions wholly before
+// cutoff that the scope admits. A session spanning cutoff belongs to neither window.
+func baselineSessions(units []SessionUnit, scope *Scope, cutoff float64) []SessionUnit {
+	before, _, _ := SplitSessions(units, cutoff)
+	return SessionBaselineWindow(before, scope)
 }
 
 // baselineMap is the stored baseline in the one candidate-record contract. Its

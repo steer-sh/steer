@@ -21,18 +21,28 @@ func recordsForCorpus(records []Record, corpus string) []Record {
 }
 
 // matchSessions is `intervention match` over the transcript-friction corpus.
-func matchSessions(w io.Writer, o MatchOpts) error {
+func matchSessions(w io.Writer, o MatchOpts, spec CorpusSpec) error {
 	pattern, err := compilePattern(o.Regex)
 	if err != nil {
 		return fmt.Errorf("bad regex %s: %w", pyRepr(o.Regex), err)
+	}
+	p, err := o.preview(spec)
+	if err != nil {
+		return err
 	}
 	signalKind := o.SignalKind
 	if signalKind == "" {
 		signalKind = SignalAny
 	}
 	hits, total, rate := SessionIncidence(o.Sessions, pattern, signalKind)
-	fmt.Fprintf(w, "# %s matches %d/%d sessions (%s), signal kind %s\n",
+	fmt.Fprintf(w, "# %s matches %d/%d sessions (%s) in the whole corpus, signal kind %s\n",
 		pyRepr(o.Regex), hits, total, pct(rate), pyRepr(signalKind))
+	if p == nil {
+		fmt.Fprintln(w, "# not a registration baseline: pass the record's --scope-* flags to count that window")
+	} else {
+		bHits, bTotal, bRate := SessionIncidence(baselineSessions(o.Sessions, p.scope, p.cutoff), pattern, signalKind)
+		fmt.Fprintln(w, p.header(bHits, bTotal, bRate, "sessions"))
+	}
 	shown := 0
 	for _, u := range o.Sessions {
 		found := SessionHits(u, pattern, signalKind)
@@ -40,8 +50,12 @@ func matchSessions(w io.Writer, o MatchOpts) error {
 			continue
 		}
 		shown++
-		fmt.Fprintf(w, "--- %s  %s  session=%s  ts=%s\n",
-			stamp(u.StartTS), u.Harness, u.SessionID, pyStr(u.StartTS))
+		label := ""
+		if p != nil {
+			label = "  " + mark(len(baselineSessions([]SessionUnit{u}, p.scope, p.cutoff)) == 1)
+		}
+		fmt.Fprintf(w, "--- %s  %s  session=%s  ts=%s%s\n",
+			stamp(u.StartTS), u.Harness, u.SessionID, pyStr(u.StartTS), label)
 		for _, sig := range found {
 			fmt.Fprintf(w, "  [%s] %s\n", sig.Kind, sig.Text)
 		}

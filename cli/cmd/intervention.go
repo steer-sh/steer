@@ -51,6 +51,12 @@ type interventionFlags struct {
 	matchCorpus      string
 	matchSignalKind  string
 	matchShowResidue bool
+	matchScopeAll    bool
+	matchScopeHrn    []string
+	matchScopeRepo   string
+	matchScopeRoot   string
+	matchScopePath   string
+	matchInstalledTS int64
 
 	registerClass         string
 	registerMatch         string
@@ -184,6 +190,13 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 				SignalKind:  v.matchSignalKind,
 				ShowResidue: v.matchShowResidue,
 				Sessions:    storedSessions(),
+
+				ScopeAll:      v.matchScopeAll,
+				ScopeHarness:  v.matchScopeHrn,
+				ScopeRepo:     v.matchScopeRepo,
+				ScopeRepoRoot: v.matchScopeRoot,
+				ScopePath:     v.matchScopePath,
+				InstalledTS:   v.matchInstalledTS,
 			})
 		},
 	}
@@ -194,6 +207,14 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 	m.StringVar(&v.matchSignalKind, "signal-kind", "", signalKindUsage)
 	m.BoolVar(&v.matchShowResidue, "show-residue", false,
 		"list the frequent terms among the findings this regex misses")
+	m.BoolVar(&v.matchScopeAll, "scope-all", false,
+		"count the registration baseline over every unit (exclusive with the scope predicates)")
+	m.StringSliceVar(&v.matchScopeHrn, "scope-harness", nil, scopeHarnessUsage)
+	m.StringVar(&v.matchScopeRepo, "scope-repo", "", "eligibility scope: regex on the repository root basename")
+	m.StringVar(&v.matchScopeRoot, "scope-repo-root", "", scopeRepoRootUsage)
+	m.StringVar(&v.matchScopePath, "scope-path", "", "eligibility scope: regex on a repo-relative changed path")
+	m.Int64Var(&v.matchInstalledTS, "installed-ts", 0,
+		"baseline cutoff, as register takes it (default now); needs a scope")
 
 	register := &cobra.Command{
 		Use:   "register",
