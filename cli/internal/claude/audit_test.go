@@ -67,7 +67,7 @@ func TestMasterHookWritesAuditLineOnBlock(t *testing.T) {
 	}
 
 	output := runMasterHook(t, `{"tool_name":"Bash","tool_input":{"command":"var x = 1"}}`)
-	if !strings.Contains(output, `"block"`) {
+	if !masterBlocked(output) {
 		t.Fatalf("expected block decision, got: %s", output)
 	}
 
@@ -162,7 +162,7 @@ func installBlockingHook(t *testing.T) string {
 // row it writes.
 func auditRow(t *testing.T, hooksDir, payload string) map[string]any {
 	t.Helper()
-	if out := runMasterHook(t, payload); !strings.Contains(out, `"block"`) {
+	if out := runMasterHook(t, payload); !masterBlocked(out) {
 		t.Fatalf("expected block decision, got: %s", out)
 	}
 	data, err := os.ReadFile(filepath.Join(hooksDir, AuditLogName))

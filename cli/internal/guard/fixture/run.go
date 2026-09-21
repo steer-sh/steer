@@ -389,16 +389,21 @@ func (r Runner) invoke(script string, payload []byte, cwd, auditPath string) (Ou
 	return OutcomeAllow, nil
 }
 
-// parseBlock mirrors runtime.py's steer_parse_block, compact-text fallback
-// included: a reply this cannot decode that still says block is a block.
+// parseBlock reads both replies a run can produce: a guard's own block, which
+// mirrors runtime.py's steer_parse_block with its compact-text fallback, and
+// the master's rendered PreToolUse deny.
 func parseBlock(output string) bool {
 	if output == "" {
 		return false
 	}
-	var parsed map[string]any
+	var parsed struct {
+		Decision           string `json:"decision"`
+		HookSpecificOutput struct {
+			PermissionDecision string `json:"permissionDecision"`
+		} `json:"hookSpecificOutput"`
+	}
 	if err := json.Unmarshal([]byte(output), &parsed); err == nil {
-		decision, _ := parsed["decision"].(string)
-		return decision == "block"
+		return parsed.Decision == "block" || parsed.HookSpecificOutput.PermissionDecision == "deny"
 	}
 	return strings.Contains(strings.Join(strings.Fields(output), ""), `"decision":"block"`)
 }

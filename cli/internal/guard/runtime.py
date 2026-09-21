@@ -345,50 +345,41 @@ def steer_parse_block(output):
 
 
 def steer_render_block(output, result, hook_name, harness):
-    """Render a guard's block in the harness's native deny contract."""
+    """Render a guard's block in the harness's native deny contract.
+
+    The reason carries the guard's own explanation and the footer. An
+    undecodable reply that still says block becomes the reason verbatim.
+    """
     footer = steer_removal_footer(hook_name)
-    if harness == STEER_CODEX:
-        reason = output
-        if result is not None:
-            reason = ""
-            for key in ("stopReason", "reason"):
-                value = result.get(key)
-                if isinstance(value, str) and value:
-                    reason = value
-                    break
-        return json.dumps({
-            "hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
-                "permissionDecision": "deny",
-                "permissionDecisionReason": (reason + footer) if reason else footer.lstrip(),
-            }
-        })
+    reason = output
+    if result is not None:
+        reason = ""
+        for key in ("stopReason", "reason"):
+            value = result.get(key)
+            if isinstance(value, str) and value:
+                reason = value
+                break
+    reason = (reason + footer) if reason else footer.lstrip()
+    system_message = None
+    if result is not None and isinstance(result.get("systemMessage"), str):
+        system_message = result["systemMessage"]
     if harness == STEER_PI:
-        reason = output
-        if result is not None:
-            reason = ""
-            for key in ("stopReason", "reason"):
-                value = result.get(key)
-                if isinstance(value, str) and value:
-                    reason = value
-                    break
-        reply = {
-            "block": True,
-            "reason": (reason + footer) if reason else footer.lstrip(),
-        }
-        if result is not None and isinstance(result.get("systemMessage"), str):
-            reply["systemMessage"] = result["systemMessage"]
+        reply = {"block": True, "reason": reason}
+        if system_message is not None:
+            reply["systemMessage"] = system_message
         return json.dumps(reply)
-    if result is None:
-        # An undecodable reply is passed through untouched, exactly as it was
-        # before a footer could be attached to it.
-        return output
-    reason = result.get("stopReason")
-    if isinstance(reason, str):
-        result["stopReason"] = reason + footer
-    else:
-        result["stopReason"] = footer.lstrip()
-    return json.dumps(result)
+    reply = {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": reason,
+        }
+    }
+    # Claude Code shows the model permissionDecisionReason on a deny and the
+    # user systemMessage; Codex rejects fields its event does not support.
+    if harness != STEER_CODEX and system_message is not None:
+        reply["systemMessage"] = system_message
+    return json.dumps(reply)
 
 
 def steer_load_note(hook_name, reason):

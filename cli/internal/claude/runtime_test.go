@@ -210,7 +210,7 @@ func TestRuntimeNormalizesEveryToolShape(t *testing.T) {
 			_ = os.Remove(auditPath)
 
 			out := runMasterWithArgs(t, tc.payload)
-			blocked := strings.Contains(out, `"block"`)
+			blocked := masterBlocked(out)
 			if blocked != tc.want {
 				t.Fatalf("blocked = %v, want %v — %s\noutput: %s", blocked, tc.want, tc.why, out)
 			}
@@ -273,7 +273,7 @@ func TestRuntimeCarriesRemovedText(t *testing.T) {
 			}
 
 			out := runMasterWithArgs(t, tc.payload)
-			blocked := strings.Contains(out, `"block"`)
+			blocked := masterBlocked(out)
 			if blocked != tc.want {
 				t.Fatalf("blocked = %v, want %v — %s\noutput: %s", blocked, tc.want, tc.why, out)
 			}
@@ -294,14 +294,43 @@ func TestRuntimeCarriesRemovedText(t *testing.T) {
 	}
 }
 
+// claudeDeny is the PreToolUse deny a master prints for Claude Code.
+type claudeDeny struct {
+	Decision           any    `json:"decision"`
+	StopReason         any    `json:"stopReason"`
+	SystemMessage      string `json:"systemMessage"`
+	HookSpecificOutput *struct {
+		HookEventName            string `json:"hookEventName"`
+		PermissionDecision       string `json:"permissionDecision"`
+		PermissionDecisionReason string `json:"permissionDecisionReason"`
+	} `json:"hookSpecificOutput"`
+}
+
+// masterBlocked reports whether out is a master's Claude Code deny.
+func masterBlocked(out string) bool {
+	var reply claudeDeny
+	if err := json.Unmarshal([]byte(out), &reply); err != nil {
+		return false
+	}
+	return reply.HookSpecificOutput != nil && reply.HookSpecificOutput.PermissionDecision == "deny"
+}
+
+// masterReason returns the reason of a master's Claude Code deny, failing the
+// test when out is not one.
+func masterReason(t *testing.T, out string) string {
+	t.Helper()
+	if !masterBlocked(out) {
+		t.Fatalf("not a Claude Code deny: %s", out)
+	}
+	var reply claudeDeny
+	_ = json.Unmarshal([]byte(out), &reply)
+	return reply.HookSpecificOutput.PermissionDecisionReason
+}
+
 // echoedInput decodes the tool_input that echoHookContent returned as its reason.
 func echoedInput(t *testing.T, out string) map[string]any {
 	t.Helper()
-	var reply map[string]any
-	if err := json.Unmarshal([]byte(out), &reply); err != nil {
-		t.Fatalf("reply is not JSON: %v\n%s", err, out)
-	}
-	reason, _ := reply["stopReason"].(string)
+	reason := masterReason(t, out)
 	reason, _, _ = strings.Cut(reason, "\n\n— steer hook:")
 	var input map[string]any
 	if err := json.Unmarshal([]byte(reason), &input); err != nil {
@@ -380,17 +409,27 @@ func TestRuntimeRendersTheNativeDeny(t *testing.T) {
 
 	payload := `{"tool_name":"Bash","tool_input":{"command":"echo FORBIDDEN"}}`
 
+	// Claude Code shows the model permissionDecisionReason on a deny; a
+	// top-level stopReason reaches only the user.
 	claude := runMasterWithArgs(t, payload)
-	var claudeReply map[string]any
+	var claudeReply claudeDeny
 	if err := json.Unmarshal([]byte(claude), &claudeReply); err != nil {
 		t.Fatalf("Claude reply is not JSON: %v\n%s", err, claude)
 	}
-	if claudeReply["decision"] != "block" {
-		t.Fatalf("Claude reply lost its block decision: %s", claude)
+	if claudeReply.HookSpecificOutput == nil ||
+		claudeReply.HookSpecificOutput.PermissionDecision != "deny" ||
+		claudeReply.HookSpecificOutput.HookEventName != "PreToolUse" {
+		t.Fatalf("Claude deny malformed: %s", claude)
 	}
-	reason, _ := claudeReply["stopReason"].(string)
-	if !strings.Contains(reason, "steer hook: marker-hook") {
-		t.Fatalf("Claude stopReason lost the removal footer: %s", claude)
+	if claudeReply.Decision != nil || claudeReply.StopReason != nil {
+		t.Fatalf("Claude reply still carries the guard's own block fields: %s", claude)
+	}
+	if !strings.Contains(claudeReply.HookSpecificOutput.PermissionDecisionReason, "forbidden in") ||
+		!strings.Contains(claudeReply.HookSpecificOutput.PermissionDecisionReason, "steer hook: marker-hook") {
+		t.Fatalf("Claude reason lost the guard's reason or the footer: %s", claude)
+	}
+	if claudeReply.SystemMessage != "marker hook blocked a change" {
+		t.Fatalf("Claude deny lost its systemMessage: %s", claude)
 	}
 
 	codex := runMasterWithArgs(t, payload, "--harness", "codex")

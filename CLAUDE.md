@@ -195,6 +195,11 @@ and write firings into the live audit log. The runners use it; a manual run is
 holds no login. A run fails if it changed a real Steer or harness file or wrote a
 firing to the real audit log; nothing is restored.
 
+After a change to how the runtime renders a block, `tests/block_delivery.py` runs a
+real agent per harness against a probe guard and requires the guard's reason and
+footer in the agent's recorded tool result. A unit test sees only the master's JSON,
+not what a harness passes to the model.
+
 For routing changes, `tests/routing_scenarios.py --model <model>` runs the
 `/steer --headless --route-only` and `--route` scenarios in
 `tests/test_data/routing.yaml`.

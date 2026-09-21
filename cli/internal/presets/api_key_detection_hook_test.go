@@ -32,13 +32,17 @@ func runAPIKeyHook(t *testing.T, path, dir, tool, content string) bool {
 	if len(output) == 0 {
 		return false
 	}
+	// The guard replies with its own block; the master renders a deny.
 	var reply struct {
-		Decision string `json:"decision"`
+		Decision           string `json:"decision"`
+		HookSpecificOutput struct {
+			PermissionDecision string `json:"permissionDecision"`
+		} `json:"hookSpecificOutput"`
 	}
 	if err := json.Unmarshal(output, &reply); err != nil {
 		t.Fatalf("parsing hook reply %q: %v", output, err)
 	}
-	return reply.Decision == "block"
+	return reply.Decision == "block" || reply.HookSpecificOutput.PermissionDecision == "deny"
 }
 
 func TestAPIKeyDetectionScopesExemptionsToTheMatchedExpression(t *testing.T) {

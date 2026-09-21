@@ -1,7 +1,6 @@
 package claude
 
 import (
-	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -149,7 +148,7 @@ func consolidateWithManifest(t *testing.T, hookContent string, entry ManifestEnt
 }
 
 // runMaster executes a master hook source on a blocking input and returns the
-// stopReason field of the emitted block reply.
+// reason of the emitted deny.
 func runMaster(t *testing.T, master string) string {
 	t.Helper()
 
@@ -171,13 +170,7 @@ func runMaster(t *testing.T, master string) string {
 		t.Fatalf("master hook errored: %v", err)
 	}
 
-	var reply struct {
-		StopReason string `json:"stopReason"`
-	}
-	if err := json.Unmarshal(out, &reply); err != nil {
-		t.Fatalf("block reply is not JSON: %q (%v)", out, err)
-	}
-	return reply.StopReason
+	return masterReason(t, string(out))
 }
 
 func TestBlockFooterNamesRemoval(t *testing.T) {
@@ -205,7 +198,7 @@ func TestBlockFooterNamesRemoval(t *testing.T) {
 				t.Errorf("footer dropped the original reason: %q", reason)
 			}
 			if !strings.Contains(reason, tc.want) {
-				t.Errorf("stopReason missing removal command %q: %q", tc.want, reason)
+				t.Errorf("deny reason missing removal command %q: %q", tc.want, reason)
 			}
 		})
 	}
@@ -260,7 +253,7 @@ func TestConsolidatedMasterBlocksLikeIndividualHook(t *testing.T) {
 	}
 
 	blocked := run(`{"tool_name":"Bash","tool_input":{"command":"python script.py"}}`)
-	if !strings.Contains(blocked, `"decision": "block"`) {
+	if !masterBlocked(blocked) {
 		t.Errorf("master hook failed to block bare python: %q", blocked)
 	}
 
@@ -337,12 +330,12 @@ func TestTrailingCallDoesNotRunOnTheRealPayload(t *testing.T) {
 	master := consolidateFixture(t, bareCallHook)
 
 	blocked := runMasterRaw(t, master, `{"tool_name":"Bash","tool_input":{"command":"python script.py"}}`)
-	if !strings.Contains(blocked, `"decision": "block"`) {
+	if !masterBlocked(blocked) {
 		t.Errorf("master hook failed to block bare python: %q", blocked)
 	}
 	// The module body and the per-edit call would each answer, so a second
 	// reply is how the trailing call reaching the real payload shows up.
-	if strings.Count(blocked, `"decision"`) != 1 {
+	if strings.Count(blocked, `"decision"`)+strings.Count(blocked, `"permissionDecision"`) != 1 {
 		t.Errorf("master hook answered more than once: %q", blocked)
 	}
 
@@ -372,7 +365,7 @@ func TestARaisingTrailingCallKeepsTheGuard(t *testing.T) {
 	master := consolidateFixture(t, raisingBareCallHook)
 
 	out := runMasterRaw(t, master, `{"tool_name":"Bash","tool_input":{"command":"echo FORBIDDEN"}}`)
-	if !strings.Contains(out, `"decision": "block"`) {
+	if !masterBlocked(out) {
 		t.Errorf("a guard ending in a raising main() call was dropped: %q", out)
 	}
 }
