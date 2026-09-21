@@ -237,3 +237,68 @@ func TestOracleRunsEveryCheckFindsTheAllInvocation(t *testing.T) {
 		t.Fatal("the scaffold's --all invocation was not found")
 	}
 }
+
+// writeExecutable writes a detector the operating system may run by itself.
+func writeExecutable(t *testing.T, root, rel, content string) {
+	t.Helper()
+	writeFile(t, root, rel, content)
+	if err := os.Chmod(filepath.Join(root, filepath.FromSlash(rel)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+const pythonDetector = `#!/usr/bin/env python3
+import pathlib
+import sys
+
+if "TODO" in pathlib.Path("src/run.py").read_text():
+    print("left a TODO behind")
+    sys.exit(1)
+sys.exit(0)
+`
+
+// A detector that is executable and opens with a shebang runs under the
+// interpreter it names, so a check may be written in any language. The same
+// bytes without the executable bit run under bash, which cannot parse them.
+func TestExecRunsAnExecutableDetectorUnderItsShebang(t *testing.T) {
+	root := checkRepo(t, noCountScript)
+	writeFile(t, root, "src/run.py", "print(\"clean\")\n")
+	writeFile(t, root, ".steer/checks/todo.py", pythonDetector)
+	m, _ := Load(root)
+	m.Checks = append(m.Checks, Declaration{ID: "todo", Kind: KindScript, Script: ".steer/checks/todo.py"})
+	if err := Save(root, m); err != nil {
+		t.Fatal(err)
+	}
+
+	records, err := Exec(root, ExecOptions{IDs: []string{"todo"}})
+	if err != nil || len(records) != 1 {
+		t.Fatalf("Exec: %+v err %v; want one record", records, err)
+	}
+	if records[0].Outcome == OutcomePassed {
+		t.Fatalf("a mode-644 python detector passed; want bash to fail on it: %+v", records[0])
+	}
+
+	writeExecutable(t, root, ".steer/checks/todo.py", pythonDetector)
+	records, err = Exec(root, ExecOptions{IDs: []string{"todo"}})
+	if err != nil || len(records) != 1 || records[0].Outcome != OutcomePassed {
+		t.Fatalf("Exec: %+v err %v; want the shebang to run it and pass", records, err)
+	}
+}
+
+// Replay decides the interpreter from the copy in the case tree, which keeps
+// the detector's mode, so a non-bash detector validates.
+func TestReplayRunsAnExecutableDetectorUnderItsShebang(t *testing.T) {
+	root := checkRepo(t, noCountScript)
+	writeExecutable(t, root, ".steer/checks/todo.py", pythonDetector)
+	writeCases(t, root, "todo",
+		Case{Name: "clean", ExitCode: exitCode(0), Provenance: "the fixed tree",
+			Files: map[string]string{"src/run.py": "print(\"clean\")\n"}},
+		Case{Name: "todo-left", ExitCode: exitCode(1), Diagnostic: "left a TODO behind",
+			Provenance: "the defect the check exists to find",
+			Files:      map[string]string{"src/run.py": "# TODO: finish\n"}})
+
+	run, err := Add(root, Declaration{ID: "todo", Kind: KindScript, Script: ".steer/checks/todo.py"})
+	if err != nil || run.Verdict != VerdictValidated {
+		t.Fatalf("Add: verdict %s err %v; cases %+v", run.Verdict, err, run.Cases)
+	}
+}

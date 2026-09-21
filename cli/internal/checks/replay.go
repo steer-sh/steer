@@ -21,7 +21,7 @@ import (
 // ExecutorVersion names the replay semantics. Raise it when a change to replay
 // could turn a stored outcome into a different one; a receipt from another
 // executor version is stale.
-const ExecutorVersion = 1
+const ExecutorVersion = 2
 
 // CaseTimeout bounds each setup script and each check run within a case.
 var CaseTimeout = 120 * time.Second
@@ -197,7 +197,10 @@ func scriptRunner(root, bash string, d Declaration) caseRunner {
 			return copyDetectorFiles(root, tree, detectorFiles)
 		},
 		run: func(tree string, c Case, res *CaseResult) string {
-			code, out, timedOut, err := runBash(tree, bash, filepath.FromSlash(d.Script))
+			// The tree holds the copy that runs, and copyFile keeps its mode,
+			// so the shebang decision is made against the copy.
+			name, args := scriptCommand(bash, tree, d.Script)
+			code, out, timedOut, err := runCommand(tree, nil, name, args...)
 			if timedOut {
 				return fmt.Sprintf("the check exceeded %s", CaseTimeout)
 			}

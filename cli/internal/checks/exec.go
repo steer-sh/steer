@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/steer-sh/steer-cli/internal/procgroup"
@@ -127,6 +128,40 @@ func selectScripts(m Manifest, ids []string) ([]Declaration, error) {
 	return out, nil
 }
 
+// scriptCommand returns the command that runs the detector script of a check
+// rooted at root. An executable script whose first two bytes are a shebang runs
+// as itself, under the interpreter it names; every other script runs under bash.
+func scriptCommand(bash, root, script string) (string, []string) {
+	rel := filepath.FromSlash(script)
+	abs := filepath.Join(root, rel)
+	if runsItself(abs) {
+		return abs, nil
+	}
+	return bash, []string{rel}
+}
+
+// runsItself reports whether the file at path is executable and opens with a
+// shebang. Windows has no shebang, so nothing there runs as itself.
+func runsItself(path string) bool {
+	if runtime.GOOS == "windows" {
+		return false
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.Mode()&0o111 == 0 {
+		return false
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+	head := make([]byte, 2)
+	if n, _ := io.ReadFull(file, head); n < 2 {
+		return false
+	}
+	return head[0] == '#' && head[1] == '!'
+}
+
 // runScript runs one script check until it exits or the deadline passes, and
 // fills the outcome fields of rec.
 func runScript(root, bash string, d Declaration, deadline time.Time, stdout, stderr io.Writer, rec *Execution) {
@@ -140,7 +175,8 @@ func runScript(root, bash string, d Declaration, deadline time.Time, stdout, std
 		ctx, cancel = context.WithDeadline(ctx, deadline)
 		defer cancel()
 	}
-	cmd := exec.CommandContext(ctx, bash, filepath.FromSlash(d.Script))
+	name, args := scriptCommand(bash, root, d.Script)
+	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = root
 	procgroup.Set(cmd)
 	cmd.WaitDelay = time.Second

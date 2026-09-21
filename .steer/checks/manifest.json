@@ -4,9 +4,8 @@
     {
       "id": "revert-test",
       "kind": "script",
-      "script": "scripts/revert-test.sh",
+      "script": "scripts/revert-test.py",
       "inputs": [
-        "scripts/revert-test.py",
         "scripts/revert-test-funcs.go"
       ]
     }

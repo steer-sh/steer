@@ -48,7 +48,10 @@ Declarations live in `.steer/checks/manifest.json`. Each has a stable `id` and
 one binding kind:
 
 - `script`: a repository-relative script that Steer runs. Use it for searches
-  and for checks that no test runner reports on.
+  and for checks that no test runner reports on. A script that is executable
+  and opens with a shebang runs under the interpreter it names, so the detector
+  may be written in any language; every other script runs under bash. Windows
+  has no shebang, so a script runs under bash there whatever its first line.
 - `go-test`: one top-level test function in the repository's Go suite, named by
   its package directory (repository-relative, such as `cli/internal/status`)
   and its exact name. The test stays in the ordinary suite; Steer reads its
