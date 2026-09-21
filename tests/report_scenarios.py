@@ -19,7 +19,6 @@ Usage:
 """
 
 import argparse
-import os
 import shutil
 import subprocess
 import sys
@@ -29,6 +28,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent / "scenarios"))
 import scenarios  # noqa: E402
+from sandbox import Sandbox  # noqa: E402
 
 DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 REPO = Path(__file__).resolve().parent.parent
@@ -55,15 +55,16 @@ nothing, and write no files. Do not emit JSON — this is the report itself.
 def run_scenario(name: str, model: str) -> tuple[str, float]:
     """Generate one report. Returns (report text, cost in USD)."""
     with tempfile.TemporaryDirectory(prefix=f"steer-report-{name}-") as tmp:
-        status, queue = scenarios.write(name, tmp)
+        box = Sandbox(tmp)
+        work = box.root / "work"
+        work.mkdir()
+        status, queue = scenarios.write(name, str(work))
         # The run reads the WORKING TREE's skill, not whichever copy is
         # installed on this machine: the prose under test is the file just
         # edited. It is copied in as a project skill of the scenario
         # directory, which stays outside the repository so a run that writes
         # anything writes it into the temp directory.
-        shutil.copytree(SKILL_SRC, Path(tmp) / ".claude" / "skills" / "steer-report")
-        env = os.environ.copy()
-        env.pop("CLAUDECODE", None)  # a nested session is refused
+        shutil.copytree(SKILL_SRC, work / ".claude" / "skills" / "steer-report")
         cmd = [
             "claude", "-p", PROMPT.format(
                 status=status, queue=queue,
@@ -76,7 +77,9 @@ def run_scenario(name: str, model: str) -> tuple[str, float]:
             "--dangerously-skip-permissions",
         ]
         result = subprocess.run(cmd, capture_output=True, text=True,
-                                cwd=tmp, env=env)
+                                cwd=work, env=box.env())
+        for leak in box.leaks():
+            print(f"  LEAK: {leak}", file=sys.stderr)
     if result.returncode != 0:
         print(f"  ERROR: claude exited {result.returncode}", file=sys.stderr)
         print(f"  stderr: {result.stderr[:500]}", file=sys.stderr)

@@ -182,10 +182,17 @@ runner's help for options and select the model explicitly. Focused generation:
 `tests/.venv/bin/python3 tests/skill_test.py --test <name> --model <model>`;
 the full serial suite uses `tests/run_tests.py --model <model>` with that Python.
 
+A run that starts a real agent (`claude -p`, `codex exec`) goes through
+`tests/sandbox.py`: under the operator's home the installed guards block for real
+and write firings into the live audit log. The runners use it; a manual run is
+`python3 tests/sandbox.py [--codex] -- <command>`. Claude Code needs
+`CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` exported, because the sandbox home
+holds no login. A run fails if it changed a real Steer or harness file or wrote a
+firing to the real audit log; nothing is restored.
+
 For routing changes, `tests/routing_scenarios.py --model <model>` runs the
 `/steer --headless --route-only` and `--route` scenarios in
-`tests/test_data/routing.yaml`. The steer CLI runs under a temporary home, and
-a run fails if it changed the real Steer or harness files.
+`tests/test_data/routing.yaml`.
 
 For report prose changes, `tests/report_scenarios.py` copies the working-tree
 skill into saved scenarios and writes output under `tests/scenarios/out/`.

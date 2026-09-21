@@ -2,10 +2,10 @@
 """Run /steer's headless routing scenarios and check each decision.
 
 Each run gets a fresh git repository holding the scenario's files and a
-temporary home. Claude Code keeps the real home, which holds its login; the
-steer CLI the skill calls runs under the temporary home through a wrapper
-named by PLUGIN_ROOT and first on PATH. The runner hashes the real Steer and
-harness files before and after each run and fails the run when one changed.
+sandbox home (tests/sandbox.py) shared by Claude Code and the steer CLI the
+skill calls, which runs through a wrapper named by PLUGIN_ROOT and first on
+PATH. A run fails when it changed a real Steer or harness file or wrote a
+firing to the real audit log.
 
 Usage:
     tests/.venv/bin/python3 tests/routing_scenarios.py --model <model>
@@ -13,7 +13,6 @@ Usage:
 """
 
 import argparse
-import hashlib
 import json
 import os
 import shutil
@@ -24,26 +23,12 @@ from pathlib import Path
 
 import yaml
 
+from sandbox import Sandbox
+
 ROOT = Path(__file__).resolve().parent.parent
 SCENARIOS = ROOT / "tests" / "test_data" / "routing.yaml"
 STEER = ROOT / "scripts" / "steer"
-HOME = Path.home()
-GUARDED = [
-    HOME / ".claude" / "settings.json",
-    HOME / ".claude" / "CLAUDE.md",
-    HOME / ".claude" / "check-gate-approved.txt",
-    HOME / ".steer" / "state" / "checks" / "adoptions.jsonl",
-    HOME / ".steer" / "hooks" / "steer-manifest.json",
-    HOME / ".steer" / "hooks" / "steer-hooks.py",
-    HOME / ".codex" / "hooks.json",
-    HOME / ".codex" / "AGENTS.md",
-]
 FIELDS = ("tier", "action", "supported")
-
-
-def digest(paths):
-    return {str(p): hashlib.sha256(p.read_bytes()).hexdigest() if p.exists() else None
-            for p in paths}
 
 
 def git(cwd, *args):
@@ -67,7 +52,7 @@ def build_repo(workdir, files):
 
 def build_home(home, workdir, personal_gate):
     claude = home / ".claude"
-    claude.mkdir(parents=True)
+    claude.mkdir(parents=True, exist_ok=True)
     if personal_gate:
         hooks = claude / "hooks"
         hooks.mkdir()
@@ -106,17 +91,16 @@ def arming_problems(calls):
     return problems
 
 
-def run_skill(scenario, workdir, plugin, bindir, model):
+def run_skill(scenario, workdir, box, plugin, bindir, model):
     flags = "--headless --" + scenario["mode"]
     if scenario.get("harness"):
         flags += " --harness " + scenario["harness"]
-    env = os.environ.copy()
-    env.pop("CLAUDECODE", None)
+    env = box.env()
     env["PLUGIN_ROOT"] = str(plugin)
     env["PATH"] = "%s:%s" % (bindir, env.get("PATH", ""))
     result = subprocess.run(
         ["claude", "-p", "/steer %s %s" % (flags, scenario["rule"]),
-         "--output-format", "json", "--model", model,
+         "--output-format", "json", "--model", model, *box.claude_args(),
          "--no-session-persistence", "--dangerously-skip-permissions"],
         cwd=workdir, env=env, capture_output=True, text=True)
     if result.returncode != 0:
@@ -171,17 +155,16 @@ def installed_problems(workdir, home):
 def run_once(scenario, model):
     scratch = Path(tempfile.mkdtemp(prefix="steer-route-"))
     try:
-        workdir, home = scratch / "repo", scratch / "home"
+        box = Sandbox(scratch)
+        workdir, home = scratch / "repo", box.home
         workdir.mkdir()
         build_repo(workdir, scenario.get("files"))
         build_home(home, workdir, scenario.get("personal_gate", False))
         plugin, bindir, calls = build_wrapper(scratch, home)
 
-        before = digest(GUARDED)
-        result, error = run_skill(scenario, workdir, plugin, bindir, model)
-        leaked = [p for p, h in digest(GUARDED).items() if h != before[p]]
+        result, error = run_skill(scenario, workdir, box, plugin, bindir, model)
 
-        problems = ["the run changed the real %s" % p for p in leaked]
+        problems = box.leaks()
         if result is None:
             return problems + [error], None
         for field in FIELDS:

@@ -17,7 +17,6 @@ Note: Run from the steer repo root.
 
 import argparse
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -25,6 +24,8 @@ import tempfile
 from pathlib import Path
 
 import yaml
+
+from sandbox import Sandbox
 
 
 TESTS_DIR = Path(__file__).parent
@@ -43,97 +44,23 @@ def load_test_cases():
     return {tc["name"]: tc for tc in data["test_cases"]}
 
 
-GLOBAL_CLAUDE_DIR = Path.home() / ".claude"
-GLOBAL_SETTINGS = GLOBAL_CLAUDE_DIR / "settings.json"
-GLOBAL_CLAUDE_MD = GLOBAL_CLAUDE_DIR / "CLAUDE.md"
-# The guard store is neutral. The legacy directory stays under watch because a
-# model can still write a hook there by hand.
-GLOBAL_HOOKS_DIRS = [Path.home() / ".steer" / "hooks", GLOBAL_CLAUDE_DIR / "hooks"]
-
-
-def _read_hooks_tree() -> dict[str, bytes]:
-    """Map of "<store index>/<relative path>" → content for every guard store file."""
-    tree = {}
-    for index, hooks_dir in enumerate(GLOBAL_HOOKS_DIRS):
-        if not hooks_dir.exists():
-            continue
-        for path in sorted(hooks_dir.rglob("*")):
-            if path.is_file():
-                tree[f"{index}/{path.relative_to(hooks_dir)}"] = path.read_bytes()
-    return tree
-
-
-def _snapshot_global_state() -> dict:
-    """Snapshot the steer-managed global surface before a generation run.
-
-    The skill is instructed to register at project scope, but models sometimes
-    register at user scope anyway (observed with haiku: hook files written into
-    the global guard store, rule lines added to global CLAUDE.md, master hook wired
-    into global settings.json). Snapshot everything a leak can touch.
-    """
-    return {
-        "settings": GLOBAL_SETTINGS.read_text() if GLOBAL_SETTINGS.exists() else None,
-        "claude_md": GLOBAL_CLAUDE_MD.read_text() if GLOBAL_CLAUDE_MD.exists() else None,
-        "hooks": _read_hooks_tree(),
-    }
-
-
-def _restore_file(path: Path, snapshot: str | None):
-    if snapshot is None:
-        path.unlink(missing_ok=True)
-    else:
-        path.write_text(snapshot)
-
-
-def _restore_global_state(snapshot: dict) -> bool:
-    """Restore the global surface to its pre-test state.
-
-    Returns True if anything had been changed (i.e. the generation leaked
-    out of its temp workdir).
-    """
-    leaked = snapshot != _snapshot_global_state()
-    _restore_file(GLOBAL_SETTINGS, snapshot["settings"])
-    _restore_file(GLOBAL_CLAUDE_MD, snapshot["claude_md"])
-
-    for index, hooks_dir in enumerate(GLOBAL_HOOKS_DIRS):
-        if not hooks_dir.exists():
-            continue
-        for path in list(hooks_dir.rglob("*")):
-            if path.is_file() and f"{index}/{path.relative_to(hooks_dir)}" not in snapshot["hooks"]:
-                path.unlink()
-    for key, content in snapshot["hooks"].items():
-        index, rel = key.split("/", 1)
-        target = GLOBAL_HOOKS_DIRS[int(index)] / rel
-        if not target.exists() or target.read_bytes() != content:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(content)
-
-    return leaked
-
-
-def generate_hook(rule: str, workdir: Path, model: str) -> dict:
-    """Run the steer skill headlessly and return the parsed JSON result."""
+def generate_hook(rule: str, workdir: Path, box: Sandbox, model: str) -> dict:
+    """Run the steer skill headlessly inside box and return the parsed JSON result."""
     steer_path = shutil.which("steer")
     if not steer_path:
         print("  ERROR: steer CLI not found in PATH.")
         print("  Build and install: cd cli && bash build.sh --install")
         sys.exit(1)
 
-    env = os.environ.copy()
-    env.pop("CLAUDECODE", None)  # Prevent nested session error
-
     cmd = [
         "claude", "-p",
         f"/steer --headless {rule}",
         "--output-format", "json",
         "--model", model,
+        *box.claude_args(),
         "--no-session-persistence",
         "--dangerously-skip-permissions",
     ]
-
-    # Snapshot the global steer surface before the run — a generation that
-    # registers at user scope would poison live sessions and later tests.
-    state_snapshot = _snapshot_global_state()
 
     print(
         f"  Running: claude -p \"/steer --headless {rule[:60]}...\" "
@@ -144,13 +71,14 @@ def generate_hook(rule: str, workdir: Path, model: str) -> dict:
         capture_output=True,
         text=True,
         cwd=str(workdir),
-        env=env,
+        env=box.env(),
     )
 
-    # Always restore global state after the run, whether it succeeded or not.
-    if _restore_global_state(state_snapshot):
-        print("  WARNING: generation leaked into the global store (restored). "
-              "The hook may have been registered at user scope instead of the temp workdir.")
+    leaks = box.leaks()
+    for leak in leaks:
+        print(f"  ERROR: {leak}")
+    if leaks:
+        sys.exit(1)
 
     if result.returncode != 0:
         print(f"  ERROR: claude exited with code {result.returncode}")
@@ -318,11 +246,13 @@ def run_test_case(test_case: dict, model: str, save_dir: Path | None = None) -> 
     print(f"{'='*60}")
 
     with tempfile.TemporaryDirectory(prefix=f"steer-test-{name}-") as tmpdir:
-        workdir = Path(tmpdir)
+        box = Sandbox(tmpdir)
+        workdir = box.root / "work"
+        workdir.mkdir()
 
         # Step 1: Generate hook via skill
         print("\n[1/2] Generating hook...")
-        skill_result = generate_hook(rule, workdir, model)
+        skill_result = generate_hook(rule, workdir, box, model)
 
         self_passed = skill_result.get("self_test_passed", False)
         summary = skill_result.get("self_test_summary", {})
