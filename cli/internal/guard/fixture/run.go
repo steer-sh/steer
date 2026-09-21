@@ -32,9 +32,16 @@ const (
 	// MasterUnverified: the master pass could not answer — no master, an error,
 	// or a block whose objector no audit row names.
 	MasterUnverified = "unverified"
-	// MasterNotRun: an expect-allow case. Another guard may legitimately block
-	// it, so the master outcome is reported and asserts nothing.
+	// MasterNotRun: an expect-allow case the master did not decide against this
+	// guard. Another guard may legitimately block it, so the master outcome is
+	// reported and asserts nothing.
 	MasterNotRun = "not-run"
+	// MasterBlockedAllow: a case labelled allow that this guard blocked through
+	// the master, read off the audit row's hook_name. It names the violated
+	// expectation and no cause: identical source can answer differently inside
+	// the master, which normalizes one tool call into several and calls main()
+	// once per virtual edit.
+	MasterBlockedAllow = "blocked-allow"
 )
 
 // DefaultTimeout bounds one guard run.
@@ -105,10 +112,74 @@ func (r Report) Incomplete() bool {
 	return len(r.Cases) == 0
 }
 
+// BlockedAllow counts cases labelled allow that this guard blocked through the
+// master.
+func (r Report) BlockedAllow() int {
+	n := 0
+	for _, c := range r.Cases {
+		if c.MasterState == MasterBlockedAllow {
+			n++
+		}
+	}
+	return n
+}
+
 // Tested reports whether this run establishes that the guard intercepts its
 // stored cases. It says nothing about a field block being correct.
 func (r Report) Tested() bool {
-	return !r.Incomplete() && r.IndividualFailures() == 0 && r.MasterFailures() == 0
+	return !r.Incomplete() && r.IndividualFailures() == 0 &&
+		r.MasterFailures() == 0 && r.BlockedAllow() == 0
+}
+
+// Unanswered counts cases that reached no answer. A run reports these apart from
+// the cases it answered wrongly: a count of failures alone reads as zero on a
+// run that failed only because it could not decide.
+func (r Report) Unanswered() int {
+	n := 0
+	for _, c := range r.Cases {
+		if c.Err != "" || c.MasterState == MasterUnverified {
+			n++
+		}
+	}
+	return n
+}
+
+// NotVerified is the one accounting for a run that did not earn tested. Every
+// renderer prints it, so no summary can report a failure with zero counts.
+// runner is the caller's own word for the generated master, which the dashboard
+// spells differently from the CLI.
+func (r Report) NotVerified(runner string) string {
+	if len(r.Cases) == 0 {
+		return "NOT verified: the guard has no stored cases"
+	}
+	parts := []string{}
+	if n := r.IndividualFailures(); n > 0 {
+		parts = append(parts, fmt.Sprintf("%d case(s) the guard answered wrongly", n))
+	}
+	if n := r.MasterFailures(); n > 0 {
+		parts = append(parts, fmt.Sprintf("%d the %s allowed", n, runner))
+	}
+	if n := r.BlockedAllow(); n > 0 {
+		parts = append(parts, fmt.Sprintf("%d labelled allow that this guard blocked through the %s", n, runner))
+	}
+	if n := r.Unanswered(); n > 0 {
+		parts = append(parts, fmt.Sprintf("%d that reached no answer (%s)", n, r.firstError()))
+	}
+	if len(parts) == 0 {
+		return "NOT verified"
+	}
+	return "NOT verified: " + strings.Join(parts, ", ")
+}
+
+// firstError names why a case reached no answer, so the summary carries a reason
+// rather than a count the reader cannot act on.
+func (r Report) firstError() string {
+	for _, c := range r.Cases {
+		if c.Err != "" {
+			return c.Err
+		}
+	}
+	return "no master to verify against"
 }
 
 // Runner replays fixtures against byte-identical copies of a guard and the
@@ -192,11 +263,42 @@ func (r Runner) Run(guardPath, masterPath string, file File) (Report, error) {
 		row.IndividualPass = string(outcome) == c.Expect
 
 		if c.Expect == ExpectAllow {
-			// Reported, never asserted: another guard may legitimately block it.
-			if masterCopy != "" {
-				if masterOutcome, err := r.invoke(masterCopy, payload, sandbox, auditPath); err == nil {
-					row.Master = masterOutcome
-				}
+			if masterCopy == "" {
+				row.MasterState = MasterUnverified
+				row.Err = "no master hook to verify against"
+				report.Cases = append(report.Cases, row)
+				continue
+			}
+			masterOutcome, err := r.invoke(masterCopy, payload, sandbox, auditPath)
+			if err != nil {
+				row.MasterState = MasterUnverified
+				row.Err = err.Error()
+				report.Cases = append(report.Cases, row)
+				continue
+			}
+			row.Master = masterOutcome
+			if masterOutcome == OutcomeAllow {
+				report.Cases = append(report.Cases, row)
+				continue
+			}
+			// The master blocked a case labelled allow. Which guard objected is
+			// the whole answer, and the runner already holds it.
+			objector, err := lastObjector(auditPath)
+			if err != nil {
+				row.MasterState = MasterUnverified
+				row.Err = err.Error()
+				report.Cases = append(report.Cases, row)
+				continue
+			}
+			if objector == "" {
+				row.MasterState = MasterUnverified
+				row.Err = "the master blocked an allow case and no audit row names the guard that objected"
+				report.Cases = append(report.Cases, row)
+				continue
+			}
+			row.MasterObjector = objector
+			if objector == file.Hook {
+				row.MasterState = MasterBlockedAllow
 			}
 			report.Cases = append(report.Cases, row)
 			continue

@@ -130,9 +130,7 @@ func runStoredFixtures(scope, identifier string) error {
 		fmt.Println(styles.SuccessBox.Render(text))
 		return nil
 	}
-	fmt.Println(styles.ErrorBox.Render(fmt.Sprintf(
-		"Not verified: %d case(s) the guard answered wrongly, %d the master allowed.",
-		result.IndividualFailures(), result.MasterFailures())))
+	fmt.Println(styles.ErrorBox.Render(result.NotVerified("master") + "." + blockedAllowRepair(*result, scope)))
 	return fmt.Errorf("fixture verification failed for %s", hook.Name)
 }
 
@@ -151,7 +149,13 @@ func masterWord(c fixture.CaseResult) string {
 		return "blocked first by " + c.MasterObjector + " · this guard is not shown to run"
 	case fixture.MasterFailed:
 		return "allowed · the guard blocks it alone"
+	case fixture.MasterBlockedAllow:
+		return "blocked by this guard through the master · the case expects allow"
 	case fixture.MasterNotRun:
+		if c.MasterObjector != "" {
+			return "blocked first by " + c.MasterObjector +
+				" · not asserted, and " + c.MasterObjector + "'s block is not established as legitimate either"
+		}
 		if c.Master == "" {
 			return "not asserted · another guard may legitimately block it"
 		}
@@ -159,6 +163,28 @@ func masterWord(c fixture.CaseResult) string {
 	default:
 		return "not established"
 	}
+}
+
+// blockedAllowRepair names what to inspect after this guard blocked a case
+// labelled allow. It reads the store master, which is the master the run tested,
+// and never the registered one: a detached registration explains nothing about
+// the artifact the runner just executed.
+func blockedAllowRepair(r fixture.Report, scope string) string {
+	if r.BlockedAllow() == 0 {
+		return ""
+	}
+	agrees, err := claude.MasterEmbedsGuard(scope, r.Hook)
+	if err != nil {
+		return "\nThe source this master embeds could not be compared: " + err.Error()
+	}
+	if !agrees {
+		return "\nThe master embeds a different source for this guard than the store file holds." +
+			"\nRun steer hooks rebuild --scope " + scope + " to restore source agreement." +
+			"\nThat restores agreement; it does not establish that the difference caused this."
+	}
+	return "\nThis guard's source matches the tested master, so the cause is not source drift." +
+		"\nInspect payload normalization, execution context and state, and the case's own expectation." +
+		"\nThose are candidates, not an exhaustive list."
 }
 
 // readStoredDiff resolves a ledger row's diff_file, or a path, and parses it.

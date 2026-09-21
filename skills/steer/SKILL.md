@@ -2,7 +2,7 @@
 name: steer
 description: Turns a natural-language rule into the fix that can enforce it — a repository check, a PreToolUse Python guard, or an instruction rule — and installs it. Use when enforcing coding standards, blocking insecure patterns, making sure checks pass before a turn ends, managing hook lifecycle, or running steer CLI commands (register, remove, list, test, preset, verify, git-hooks).
 user-invocable: true
-prompt_version: 16
+prompt_version: 17
 compatibility: Requires Claude Code, Codex, or Pi with tool-call hook support. Hooks are installed into .steer/hooks/ and registered in every installed harness (settings.json for Claude Code, hooks.json for Codex, extensions for Pi). steer CLI must be available on PATH or bundled under scripts/.
 allowed-tools: Bash(steer *), Bash(python3 *), Bash(echo *), Read, Write, Edit
 ---
@@ -509,8 +509,15 @@ so your audit log records no synthetic firing:
   guard, and never a failure — it is simply not proof that your guard ran.
   *Allowed* is a failure: a case that blocks alone did not block through the
   master. Inspect the integration before blaming consolidation. An expect-allow
-  case is asserted against the guard only, because another guard may legitimately
-  block it.
+  case has three outcomes of its own. *Allowed* asserts nothing. *Blocked by
+  another guard* names that guard and is not this guard's failure, and that
+  guard's block is not established as legitimate either. *Blocked by this guard*
+  is a failure: the guard alone allowed a case it blocked through the master.
+  The run does not diagnose it, because equal source can still answer differently
+  inside the master — it normalizes one tool call into several and calls `main()`
+  once per virtual edit. Read whether the master embeds this guard's current
+  source; when it does, inspect normalization, the guard's own state across calls,
+  and the case's label.
 
 The state this earns says the guard intercepts its stored cases. It never says a
 field block was correct, or that what the agent did next was useful.

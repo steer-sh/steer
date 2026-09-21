@@ -320,8 +320,7 @@ func fixtureNote(v *claude.FixtureVerification, id string) string {
 	for _, r := range v.Reports {
 		switch {
 		case !r.Tested():
-			parts = append(parts, fmt.Sprintf("%s NOT verified: %d case(s) the guard answered wrongly, %d the guard runner allowed",
-				r.Hook, r.IndividualFailures(), r.MasterFailures()))
+			parts = append(parts, fmt.Sprintf("%s %s", r.Hook, r.NotVerified("guard runner")))
 		case r.Hook == id:
 			p := fmt.Sprintf("%s intercepted its %d stored case(s)", r.Hook, len(r.Cases))
 			if n := r.Shadowed(); n > 0 {

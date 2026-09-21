@@ -307,7 +307,6 @@ func printFixtureVerification(v *claude.FixtureVerification) {
 			fmt.Println()
 			continue
 		}
-		fmt.Printf("fixtures: %s — NOT verified: %d case(s) the guard answered wrongly, %d the master allowed\n",
-			report.Hook, report.IndividualFailures(), report.MasterFailures())
+		fmt.Printf("fixtures: %s — %s\n", report.Hook, report.NotVerified("master"))
 	}
 }

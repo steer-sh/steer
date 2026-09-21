@@ -3,6 +3,7 @@ package claude
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/guard/fixture"
@@ -372,5 +373,106 @@ func TestInstallStoresFixturesAndRebuildRerunsThem(t *testing.T) {
 	}
 	if b.MasterDigest != fixture.FileDigest(rebuilt.MasterPath) {
 		t.Fatal("the state names a master it did not run under")
+	}
+}
+
+func TestAnAllowCaseThisGuardBlocksThroughTheMasterIsNotTested(t *testing.T) {
+	dir := fixtureProject(t, map[string]string{"alpha": blockingHook("ALPHA")})
+	// The store file is edited after consolidation, so the guard alone allows
+	// ALPHA while the source the master carries still blocks it. Before this
+	// reading the run named no objector and explained the block away.
+	if err := os.WriteFile(filepath.Join(dir, "alpha.py"), []byte(blockingHook("GAMMA")), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.Save(dir, fixture.File{Version: fixture.Version, Hook: "alpha", Cases: []fixture.Case{
+		bashCase("leaves the old token alone", "run ALPHA now", fixture.ExpectAllow),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := VerifyHookFixtures(ProjectScope, "alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := report.Cases[0]
+	if !row.IndividualPass {
+		t.Fatal("the edited guard failed its own case")
+	}
+	if row.MasterState != fixture.MasterBlockedAllow {
+		t.Fatalf("want a blocked allow case, got %s (objector %q)", row.MasterState, row.MasterObjector)
+	}
+	if row.MasterObjector != "alpha" {
+		t.Fatalf("the objector is %q", row.MasterObjector)
+	}
+	if report.BlockedAllow() != 1 {
+		t.Fatalf("the violation is not counted: %d", report.BlockedAllow())
+	}
+	if report.Tested() {
+		t.Fatal("a case this guard blocked against its own label earned tested")
+	}
+	// The accounting names it. A summary of individual and master-allowed
+	// failures alone reports this run as NOT verified with two zeros.
+	if !strings.Contains(report.NotVerified("master"), "labelled allow") {
+		t.Fatalf("the summary does not name the violation: %s", report.NotVerified("master"))
+	}
+}
+
+func TestAnAllowCaseAnotherGuardBlocksNamesThatGuardAndStaysTested(t *testing.T) {
+	dir := fixtureProject(t, map[string]string{
+		"alpha": blockingHook("SHARED"),
+		"beta":  blockingHook("NOTHING-ELSE"),
+	})
+	if err := fixture.Save(dir, fixture.File{Version: fixture.Version, Hook: "beta", Cases: []fixture.Case{
+		bashCase("beta allows the shared token", "run SHARED now", fixture.ExpectAllow),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := VerifyHookFixtures(ProjectScope, "beta")
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := report.Cases[0]
+	if row.MasterState != fixture.MasterNotRun {
+		t.Fatalf("another guard's block is not this guard's violation: %s", row.MasterState)
+	}
+	if row.MasterObjector != "alpha" {
+		t.Fatalf("the objector is not named: %q", row.MasterObjector)
+	}
+	if !report.Tested() {
+		t.Fatal("another guard blocking an allow case cost this guard its contract")
+	}
+}
+
+func TestAnAllowCaseWithNoMasterReachesNoAnswer(t *testing.T) {
+	dir := fixtureProject(t, map[string]string{"alpha": blockingHook("ALPHA")})
+	master, err := GetMasterHookPath(ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(master); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.Save(dir, fixture.File{Version: fixture.Version, Hook: "alpha", Cases: []fixture.Case{
+		bashCase("leaves other commands alone", "run GAMMA now", fixture.ExpectAllow),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := VerifyHookFixtures(ProjectScope, "alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An allow case with no master reached no answer, exactly as a block case
+	// does. Otherwise a run that could not decide earns tested while a decided
+	// but unattributed one does not.
+	if report.Cases[0].MasterState != fixture.MasterUnverified {
+		t.Fatalf("want unverified, got %s", report.Cases[0].MasterState)
+	}
+	if report.Tested() {
+		t.Fatal("a case with no master to run against earned tested")
+	}
+	if report.Unanswered() != 1 {
+		t.Fatalf("the unanswered case is not counted: %d", report.Unanswered())
 	}
 }
