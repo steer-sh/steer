@@ -173,8 +173,9 @@ func hookBlockSnippet(text, lower string) string {
 	if i < 0 {
 		return matchLine(text, strings.Index(lower, "hook"))
 	}
-	// The footer's own line carries the removal command, and Codex appends the
-	// blocked command to it. Both vary per call, so the key stops at the name.
+	// The footer's first line continues with the firing identifier, and Codex
+	// appends the blocked command to the footer. Both vary per call, so the key
+	// stops at the name.
 	line := matchLine(text, i)
 	if cut := strings.Index(line, " · "); cut >= 0 {
 		line = line[:cut]
