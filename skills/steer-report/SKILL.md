@@ -140,6 +140,41 @@ For every record with a recurrence you confirmed by reading its matches, open th
 
 A gate that never fires is not free. It costs oracle runtime on every commit and, worse, it reads as coverage that does not exist.
 
+### Show what blocked agents contested
+
+A block's message offers the blocked agent `steer contest FIRING_ID "reason"`. The
+agent holds the task context at the moment of the block, so its contest is the
+cheapest signal that a block was wrong for the task. It is still a complaint, not a
+judgment: it reads no rule and no evidence beyond its own task.
+
+```bash
+steer audit contests --json
+```
+
+This reads no case evidence and spends nothing from the reading budget below. For
+each guard in `guards[]`, report these facts:
+
+- `contested` distinct firings, with each firing's `reasons[].reason` quoted as the
+  agent wrote it. Several contests of one firing are one contested firing.
+- `unread` as its own number. A contested firing that no receipt names is in both
+  counts; never add them, and never call an uncontested firing agreed.
+- `not_offered`: blocks whose message carried no contest line, from an older master
+  or a failed identifier allocation. Silence from these agents is not agreement, so
+  say how many of `firings` could not be contested at all.
+- A firing whose `applies` is not `current` was recorded by an implementation
+  other than the installed one. Its contest describes that older guard.
+- `judgment` is the latest receipt's judgment, when one exists. A contested firing
+  judged `prevented` is a disagreement between the agent and a reader; show both.
+
+List `contested_excluded` and `unmatched[]` apart from the counts. An unmatched
+contest names a firing no guard store on this machine holds: the row may sit on
+another machine, or the master may have failed to log it.
+
+A contest never unblocks anything and never exempts a guard. Offer the user a
+deeper audit of the contested firings: read each one with `steer audit show` and
+record a judgment, under the budget below. Do not read them unasked, and do not
+recommend removal on contests alone.
+
 ### Read a sample of the blocks a guard recorded
 
 The counts above say whether a problem is still happening. They never say whether a

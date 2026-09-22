@@ -448,6 +448,77 @@ func listRows(source auditSource, hook string, excludedOnly bool) []rowLine {
 	return out
 }
 
+var auditContestsCmd = &cobra.Command{
+	Use:   "contests",
+	Short: "List the blocks agents contested, per guard",
+	Long: `Contests lists, per guard, the firings a blocked agent contested with
+'steer contest', and each reason it gave. It reads no case evidence.
+
+Every count is of distinct firings. contested and unread are separate counts:
+a contested firing no receipt names is in both. not_offered counts the blocks
+whose message carried no contest line, so their silence is not agreement. A
+contest of an excluded row, and a contest no row read here carries, are listed
+apart from the counts.
+
+A contest is a complaint, not a judgment. Read the firing with 'steer audit
+show' before judging it.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		source, err := loadAudit()
+		if err != nil {
+			return err
+		}
+		contests, err := adjudication.LoadContests(adjudication.Dir())
+		if err != nil {
+			return err
+		}
+		report := firingaudit.Contests(source.Rows, contests, source.Receipts,
+			source.Excluded, source.Installed, auditHook)
+		if auditJSON {
+			return writeJSON(cmd.OutOrStdout(), report)
+		}
+		w := cmd.OutOrStdout()
+		if !source.Present && len(contests) == 0 {
+			fmt.Fprintln(w, "No guard store on this machine holds an audit stream, and no contest is recorded.")
+			return nil
+		}
+		for _, g := range report.Guards {
+			fmt.Fprintf(w, "%s  (%s)\n  firings %d  contested %d  unread %d  no contest offered %d",
+				g.HookName, g.StoreDir, g.Firings, g.Contested, g.Unread, g.NotOffered)
+			if g.ContestedExcluded > 0 {
+				fmt.Fprintf(w, "  contested but excluded %d", g.ContestedExcluded)
+			}
+			fmt.Fprintln(w)
+			printContested(w, g.ContestedFirings)
+		}
+		if len(report.Unmatched) > 0 {
+			fmt.Fprintf(w, "Contests no row read here carries: %d\n", len(report.Unmatched))
+			printContested(w, report.Unmatched)
+		}
+		return nil
+	},
+}
+
+// printContested lists contested firings with every reason given for each.
+func printContested(w io.Writer, firings []firingaudit.ContestedFiring) {
+	for _, f := range firings {
+		judgment := f.Judgment
+		if judgment == "" {
+			judgment = "unread"
+		}
+		fmt.Fprintf(w, "  firing=%s  %s  %s  %s", f.FiringID, or(f.Timestamp), or(f.Harness), judgment)
+		if f.HookName != "" && f.Applies == "" {
+			fmt.Fprintf(w, "  guard=%s", f.HookName)
+		}
+		if f.Applies != "" && f.Applies != adjudication.Current {
+			fmt.Fprintf(w, "  implementation=%s", f.Applies)
+		}
+		fmt.Fprintln(w)
+		for _, r := range f.Reasons {
+			fmt.Fprintf(w, "    %s  %s\n", r.RecordedAt, oneLine(r.Reason))
+		}
+	}
+}
+
 // correctCmd builds exclude and reinstate, which differ only in the action.
 func correctCmd(action, use, short, long string) *cobra.Command {
 	return &cobra.Command{
@@ -552,7 +623,7 @@ var (
 func init() {
 	rootCmd.AddCommand(auditCmd)
 	auditCmd.AddCommand(auditQueueCmd, auditShowCmd, auditRecordCmd,
-		auditRowsCmd, auditExcludeCmd, auditReinstateCmd)
+		auditRowsCmd, auditExcludeCmd, auditReinstateCmd, auditContestsCmd)
 	auditCmd.PersistentFlags().BoolVar(&auditJSON, "json", false, "emit JSON")
 
 	q := auditQueueCmd.Flags()
@@ -584,6 +655,7 @@ func init() {
 	_ = auditRecordCmd.MarkFlagRequired("judgment")
 
 	auditRowsCmd.Flags().StringVar(&auditHook, "hook", "", "only this guard")
+	auditContestsCmd.Flags().StringVar(&auditHook, "hook", "", "only this guard")
 	auditRowsCmd.Flags().BoolVar(&auditExcludedOnly, "excluded", false, "only the excluded rows")
 	for _, c := range []*cobra.Command{auditExcludeCmd, auditReinstateCmd} {
 		c.Flags().StringVar(&auditReason, "reason", "", "why (required)")

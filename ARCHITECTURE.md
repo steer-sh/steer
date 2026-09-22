@@ -576,6 +576,10 @@ reader counts it, it changes no enforcement, and `firingaudit.Contest` copies th
 row's identity, or records the contest unmatched when no store read holds the row.
 A row's `contest_protocol` says which footer the agent saw; a row without it
 predates the contest.
+`firingaudit.Contests` is the one reader, behind `steer audit contests`. It joins
+the stream to the rows on disk now, per guard and store, and counts distinct
+firing identifiers: contested, unread and not offered are separate counts, and a
+contest of an excluded row or of no row read here is listed apart from them.
 
 ## Cadence, status and controls
 
