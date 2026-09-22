@@ -826,6 +826,8 @@ steer fix register \
   --note "why this tell was chosen"
 ```
 
+Iterate until the regex matches the class members and nothing else, as on the review path. `match` prints every matched session with its signals; read them, not only the count. With the record's `--scope-*` flags it prints the `registration baseline` and marks each session `counted in baseline` or `outside baseline`. A false match in a counted session enters the baseline, and only a `--supersedes` record removes it.
+
 The unit here is the **root session**, not the chain: a class either occurred in a session or it did not, and a subagent thread is provenance on its root. `--signal-kind` names the classifier kind the regex is counted over — `any`, `user_corrections`, `user_rejections`, `tool_failures` or `hook_blocks` — and is frozen with the rest of the record. `--scope-path` is refused here, because a session carries no changed-path list; scope by harness or repo instead. The corpus lives in a snapshot store that `steer report refresh` writes, so a frozen baseline outlives the transcript the harness later rotates away.
 
 Pass `--tier steer --hook-id` for a generated guard. That is what gives the record an audit-log join, so `observation.firing` reports what the guard actually blocked over the window. A quiet window beside `firing.rows: 0` is silence the guard did not produce, and a recurrence beside `firing.rows: 0` points at the matcher. Neither reading is available from the incidence alone.
