@@ -685,6 +685,8 @@ The script does no semantic grouping by design. Read the findings and name the c
 
 Do the same pass over the rejected dump. A recurring **false-positive** class is equally actionable — it goes to the review addendum as a suppression, and it answers whether the rejected fraction is a prompt problem or reviewer noise.
 
+A rejection is the author's verdict on its own code, so a rejection that recurs can also be an author blind spot. Before you propose a false-positive class, re-read each member finding against the code at its commit, not only the author's reason. A member whose finding holds makes the class a defect candidate, never a suppression.
+
 Everything else is the irreducible cost of an independent reader. One-off findings are the gate working as designed; do not manufacture classes to fill a report.
 
 Cap the whole report at the **top 5–7 candidates across both corpora**. Finding fewer — or none — is a valid result; say so plainly rather than padding with weak candidates.
