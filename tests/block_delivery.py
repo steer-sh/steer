@@ -4,7 +4,8 @@
 A unit test can check the JSON a master prints, not what a harness does with it.
 This runs a real agent in a sandbox (tests/sandbox.py) against one probe guard
 and reads the agent's own transcript: the recorded result of the blocked call
-must carry the guard's reason and the `steer hook: ` footer.
+must carry the guard's reason, the `steer hook: ` footer and the contest
+command for that firing.
 
     python3 tests/block_delivery.py [--harness claude|codex ...] [--claude-model M]
         [--codex-model M] [--keep]
@@ -16,6 +17,7 @@ needs a login in ~/.codex/auth.json.
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -29,6 +31,7 @@ TOKEN = "STEER_DELIVERY_PROBE_7f3a"
 HOOK = "delivery-probe-hook"
 REASON = "delivery probe blocked this command"
 FOOTER = "steer hook: " + HOOK
+CONTEST = re.compile(r"firing: ([0-9a-f]{32})[\s\S]*contest \1 ")
 
 GUARD = '''#!/usr/bin/env python3
 import json
@@ -146,6 +149,9 @@ def run(harness, args):
         elif not any(REASON in r for r in hits):
             failures.append("%s: the footer arrived without the guard's reason: %s"
                             % (harness, hits[0][:300]))
+        elif not any(CONTEST.search(r.replace("\\n", "\n")) for r in hits):
+            failures.append("%s: the footer arrived without the contest command for its firing: %s"
+                            % (harness, hits[0][:600]))
         return failures
     finally:
         if args.keep:

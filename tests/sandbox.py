@@ -45,6 +45,7 @@ REAL_GUARDED = [
     REAL_HOME / ".steer" / "state" / "checks" / "adoptions.jsonl",
     REAL_HOME / ".steer" / "hooks" / "steer-manifest.json",
     REAL_HOME / ".steer" / "hooks" / "steer-hooks.py",
+    REAL_HOME / ".steer" / "state" / "firing-audits" / "contests.jsonl",
     REAL_HOME / ".codex" / "hooks.json",
     REAL_HOME / ".codex" / "config.toml",
     REAL_HOME / ".codex" / "AGENTS.md",

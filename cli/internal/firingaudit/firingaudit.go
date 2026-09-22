@@ -68,6 +68,10 @@ type Row struct {
 	EvidenceComplete bool   `json:"evidence_complete"`
 	EvidenceError    string `json:"evidence_error"`
 
+	// ContestProtocol is the version of the contest instruction the block's
+	// footer carried. Zero means the master that wrote the row offered none.
+	ContestProtocol int `json:"contest_protocol,omitempty"`
+
 	// StoreDir is the guard store this row was read from, stamped by Load. It
 	// resolves the row's sidecar and names the master that recorded it; it is
 	// not a field of the row on disk.

@@ -565,6 +565,18 @@ legacy row carries no other identity. Both loaders stamp that digest. The queue,
 none. `status.newestFiring` keeps excluded rows, because a test block still shows
 that the master executed.
 
+A blocked agent contests a block it holds wrong for its task with `steer contest`.
+The runtime allocates one firing identifier per block and puts it in both the row
+and the footer, so the contest names a row the agent cannot otherwise see. The
+footer offers the contest first and names removal as the user's decision, with
+the scope that holds the guard; its `steer hook: NAME · ` prefix is the key
+`report.hookBlockSnippet` cuts at. `adjudication/contest.go` holds the stream beside
+the receipts. A contest is a complaint, never a receipt: no coverage or queue
+reader counts it, it changes no enforcement, and `firingaudit.Contest` copies the
+row's identity, or records the contest unmatched when no store read holds the row.
+A row's `contest_protocol` says which footer the agent saw; a row without it
+predates the contest.
+
 ## Cadence, status and controls
 
 `internal/cadence/` coordinates evidence scoring and transcript mining into a

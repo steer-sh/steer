@@ -162,6 +162,9 @@ def steer_virtual_edits(payload):
 
 
 STEER_EVIDENCE_INLINE_LIMIT = 16384
+# The version of the contest instruction a block's footer carries. A row
+# without it was written by a master whose footer offered no contest.
+STEER_CONTEST_PROTOCOL = 1
 STEER_PAYLOADS_DIR = "steer-audit-payloads"
 
 # Every identifier a harness can supply for the call being blocked. A key that
@@ -218,7 +221,7 @@ def steer_store_evidence(entry, evidence, store_dir):
         entry["evidence"] = evidence
         entry["evidence_complete"] = True
         return
-    name = entry["firing_id"] + ".json"
+    name = (entry.get("firing_id") or entry["evidence_sha256"]) + ".json"
     try:
         directory = os.path.join(store_dir, STEER_PAYLOADS_DIR)
         os.makedirs(directory, exist_ok=True)
@@ -235,11 +238,21 @@ def steer_store_evidence(entry, evidence, store_dir):
     entry["evidence_complete"] = True
 
 
-def steer_audit_log(hook_name, payload, edit, harness, edit_index=None):
+def steer_new_firing_id():
+    """A fresh firing identifier, or "" when none can be allocated."""
+    try:
+        return os.urandom(16).hex()
+    except Exception:
+        return ""
+
+
+def steer_audit_log(hook_name, payload, edit, harness, edit_index=None, firing_id=""):
     """Append one JSON line per block decision to steer-audit.jsonl.
 
-    Auditing must never break or weaken the block decision, so every failure path
-    is swallowed.
+    firing_id is the identifier the block's footer shows. When the caller has
+    none, the row gets its own when one can be allocated, and no
+    contest_protocol, because its footer offered no contest. Auditing must never
+    break or weaken the block decision, so every failure path is swallowed.
     """
     try:
         meta = STEER_HOOK_META.get(hook_name, {})
@@ -276,7 +289,6 @@ def steer_audit_log(hook_name, payload, edit, harness, edit_index=None):
                 break
         entry = {
             "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            "firing_id": os.urandom(16).hex(),
             "rule": meta.get("rule", ""),
             "hook_name": meta.get("hook_name", hook_name),
             "enforcement": "block",
@@ -288,6 +300,15 @@ def steer_audit_log(hook_name, payload, edit, harness, edit_index=None):
             "tool_name": tool_name,
             "snippet": snippet,
         }
+        if firing_id:
+            entry["firing_id"] = firing_id
+            entry["contest_protocol"] = STEER_CONTEST_PROTOCOL
+        else:
+            # A row without an identifier is read by its digest, as a row
+            # written before identifiers existed is.
+            own = steer_new_firing_id()
+            if own:
+                entry["firing_id"] = own
         # The guard source and the rule it enforces identify what ran; the build
         # digest identifies the master it ran inside. A stamp an older master
         # never wrote is left out.
@@ -313,19 +334,42 @@ def steer_audit_log(hook_name, payload, edit, harness, edit_index=None):
         pass
 
 
-def steer_removal_footer(hook_name):
-    """Name the hook that blocked and the command that removes it."""
+def steer_cli():
+    """The steer command a blocked agent can run: the stable executable when it
+    is installed, otherwise the one on PATH."""
+    try:
+        stable = os.path.join(os.path.expanduser("~"), ".steer", "bin", "steer")
+        if os.path.isfile(stable) and os.access(stable, os.X_OK):
+            return stable
+    except Exception:
+        pass
+    return "steer"
+
+
+def steer_block_footer(hook_name, firing_id):
+    """Name the hook and the firing, tell the agent how to contest the block,
+    and name the removal command as the user's decision."""
     meta = STEER_HOOK_META.get(hook_name, {})
     hook_name = meta.get("hook_name", hook_name)
     source = meta.get("source", "")
     source_id = meta.get("source_id", "")
+    cli = steer_cli()
+    footer = "\n\n— steer hook: " + hook_name
+    if firing_id:
+        footer += " · firing: " + firing_id
+        footer += ("\nIf this block is wrong for this task, record why: " + cli
+                   + " contest " + firing_id + " '<task-specific reason>'. The block stays."
+                   + " Continue with a permitted approach; do not repeat or bypass"
+                   + " the blocked action.")
     if not source:
-        return "\n\n— steer hook: " + hook_name
+        return footer
     if source == "factory":
-        cmd = "steer preset disable " + (source_id or hook_name)
+        cmd = cli + " preset disable " + (source_id or hook_name)
     else:
-        cmd = "steer remove " + hook_name
-    return "\n\n— steer hook: " + hook_name + " · remove: " + cmd
+        cmd = cli + " remove " + hook_name
+    if meta.get("scope") == "global":
+        cmd += " --scope global"
+    return footer + "\nRemoving this hook needs the user's approval: " + cmd
 
 
 def steer_parse_block(output):
@@ -344,13 +388,13 @@ def steer_parse_block(output):
     return False, None
 
 
-def steer_render_block(output, result, hook_name, harness):
+def steer_render_block(output, result, hook_name, harness, firing_id=""):
     """Render a guard's block in the harness's native deny contract.
 
     The reason carries the guard's own explanation and the footer. An
     undecodable reply that still says block becomes the reason verbatim.
     """
-    footer = steer_removal_footer(hook_name)
+    footer = steer_block_footer(hook_name, firing_id)
     reason = output
     if result is not None:
         reason = ""
@@ -490,8 +534,9 @@ def steer_run(hook_names):
             blocked, result = steer_parse_block(output)
             if not blocked:
                 continue
-            steer_audit_log(hook_name, payload, edit, harness, edit_index)
-            print(steer_render_block(output, result, hook_name, harness))
+            firing_id = steer_new_firing_id()
+            steer_audit_log(hook_name, payload, edit, harness, edit_index, firing_id)
+            print(steer_render_block(output, result, hook_name, harness, firing_id))
             sys.exit(0)
 
     sys.exit(0)

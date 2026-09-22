@@ -195,6 +195,8 @@ func ConsolidateHooks(scope string) error {
 			// the file on disk: the standalone guard can change after the master
 			// is built, so only the embedded source identifies what ran.
 			"hook_digest": sourceDigest([]byte(source.Source)),
+			// The footer names the removal command for this store's scope.
+			"scope": normalizeScope(scope),
 		}
 		if ruleHash != "" {
 			meta["rule_hash"] = ruleHash
