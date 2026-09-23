@@ -117,14 +117,18 @@ type ContestReport struct {
 // RepoContests is one repository's check blocks and the contests that name
 // them. Every count is of distinct blocks, never of submissions.
 type RepoContests struct {
-	Repo   string `json:"repo"`
-	Blocks int    `json:"blocks"`
+	Repo string `json:"repo"`
+	// Blocks is the repository's blocks that no exclusion retires.
+	Blocks int `json:"blocks"`
 	// NotOffered is the blocks whose reason carried no contest line.
 	NotOffered int `json:"not_offered"`
 	Contested  int `json:"contested"`
 	// Unread is the blocks no check receipt names, contested or not.
-	Unread          int              `json:"unread"`
-	ContestedBlocks []ContestedBlock `json:"contested_blocks,omitempty"`
+	Unread int `json:"unread"`
+	// ContestedExcluded is the contested blocks an exclusion retires. They are
+	// in no other count.
+	ContestedExcluded int              `json:"contested_excluded"`
+	ContestedBlocks   []ContestedBlock `json:"contested_blocks,omitempty"`
 }
 
 // ContestedBlock is one check block at least one contest names. Failures is the
@@ -143,7 +147,7 @@ type ContestedBlock struct {
 // guard and so to no check block; installed classifies each row's
 // implementation and may be nil. It reads no case evidence.
 func Contests(rows []Row, cases []CheckCase, contests []adjudication.Contest, receipts []adjudication.Receipt,
-	excluded map[string]adjudication.Exclusion, installed func(Row) adjudication.Identity,
+	excluded, excludedRuns map[string]adjudication.Exclusion, installed func(Row) adjudication.Identity,
 	hookName string) ContestReport {
 	byFiring := adjudication.Contested(contests, adjudication.SubjectGuard)
 	latest := adjudication.Latest(receipts, adjudication.SubjectGuard)
@@ -224,7 +228,7 @@ func Contests(rows []Row, cases []CheckCase, contests []adjudication.Contest, re
 		return report.Unmatched[i].FiringID < report.Unmatched[j].FiringID
 	})
 	if hookName == "" {
-		report.Checks, report.UnmatchedChecks = checkContests(cases, contests, receipts)
+		report.Checks, report.UnmatchedChecks = checkContests(cases, contests, receipts, excludedRuns)
 	}
 	return report
 }
@@ -232,7 +236,7 @@ func Contests(rows []Row, cases []CheckCase, contests []adjudication.Contest, re
 // checkContests joins the check contests to the recorded blocks, per repository
 // in the order the cases first name each.
 func checkContests(cases []CheckCase, contests []adjudication.Contest,
-	receipts []adjudication.Receipt) ([]RepoContests, []ContestedBlock) {
+	receipts []adjudication.Receipt, excludedRuns map[string]adjudication.Exclusion) ([]RepoContests, []ContestedBlock) {
 	byRun := adjudication.Contested(contests, adjudication.SubjectCheck)
 	latest := adjudication.Latest(receipts, adjudication.SubjectCheck)
 	var repos []RepoContests
@@ -246,6 +250,16 @@ func checkContests(cases []CheckCase, contests []adjudication.Contest,
 			repos = append(repos, RepoContests{Repo: c.Run.Repo})
 		}
 		r := &repos[i]
+		submissions := byRun[c.Run.RunID]
+		if len(submissions) > 0 {
+			matched[c.Run.RunID] = true
+		}
+		if _, retired := excludedRuns[c.Run.RunID]; retired {
+			if len(submissions) > 0 {
+				r.ContestedExcluded++
+			}
+			continue
+		}
 		r.Blocks++
 		if c.Run.ContestProtocol == 0 {
 			r.NotOffered++
@@ -254,11 +268,9 @@ func checkContests(cases []CheckCase, contests []adjudication.Contest,
 		if !judged {
 			r.Unread++
 		}
-		submissions := byRun[c.Run.RunID]
 		if len(submissions) == 0 {
 			continue
 		}
-		matched[c.Run.RunID] = true
 		r.Contested++
 		r.ContestedBlocks = append(r.ContestedBlocks, ContestedBlock{
 			RunID: c.Run.RunID, Repo: c.Run.Repo, Harness: c.Run.Harness,

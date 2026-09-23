@@ -22,13 +22,18 @@ const (
 	Reinstate = "reinstate"
 )
 
-// Exclusion is one correction of one audit row.
+// Exclusion is one correction of one recorded block: a guard audit row or a
+// check.sh Stop block.
 //
-// RowDigest is the identity: a row written before firing identifiers existed has
-// no other. The remaining row fields are copied from the row by the caller so a
-// reader can see what was retired without opening the audit stream.
+// A guard exclusion is named by RowDigest: a row written before firing
+// identifiers existed has no other identity. A check exclusion is named by RunID.
+// The remaining fields are copied from the record by the caller so a reader can
+// see what was retired without opening the stream it came from.
 type Exclusion struct {
-	RowDigest string `json:"row_digest"`
+	Subject   string `json:"subject,omitempty"`
+	RowDigest string `json:"row_digest,omitempty"`
+	RunID     string `json:"run_id,omitempty"`
+	Repo      string `json:"repo,omitempty"`
 	FiringID  string `json:"firing_id,omitempty"`
 	HookID    string `json:"hook_id,omitempty"`
 	Harness   string `json:"harness,omitempty"`
@@ -44,8 +49,21 @@ type Exclusion struct {
 	RecordedAt string   `json:"recorded_at"`
 }
 
+// key is the identifier an exclusion's subject is named by, or "" for a subject
+// this build does not know.
+func (e Exclusion) key() string {
+	switch e.Subject {
+	case SubjectGuard:
+		return e.RowDigest
+	case SubjectCheck:
+		return e.RunID
+	}
+	return ""
+}
+
 // LoadExclusions reads every exclusion in a component directory, oldest first. A
-// missing stream yields none and no error.
+// missing stream yields none and no error. A line naming no subject reads as a
+// guard exclusion; a line whose subject this build does not know is skipped.
 func LoadExclusions(dir string) ([]Exclusion, error) {
 	file, err := os.Open(filepath.Join(dir, ExclusionLogName))
 	if err != nil {
@@ -64,7 +82,13 @@ func LoadExclusions(dir string) ([]Exclusion, error) {
 			continue
 		}
 		var e Exclusion
-		if err := json.Unmarshal([]byte(line), &e); err != nil || e.RowDigest == "" {
+		if err := json.Unmarshal([]byte(line), &e); err != nil {
+			continue
+		}
+		if e.Subject == "" {
+			e.Subject = SubjectGuard
+		}
+		if e.key() == "" {
 			continue
 		}
 		out = append(out, e)
@@ -76,11 +100,20 @@ func LoadExclusions(dir string) ([]Exclusion, error) {
 }
 
 // AppendExclusion writes one entry to the stream in dir, which must already exist.
-// It refuses an entry naming no row, an unknown action, an empty reason, and an
-// exclude that carries no evidence.
+// It refuses an entry naming no record of its subject, an unknown action, an
+// empty reason, and an exclude that carries no evidence.
 func AppendExclusion(dir string, e Exclusion) error {
-	if e.RowDigest == "" {
-		return fmt.Errorf("an exclusion must name the row it corrects")
+	switch e.Subject {
+	case SubjectGuard:
+		if e.RowDigest == "" || e.RunID != "" {
+			return fmt.Errorf("a guard exclusion must name the row it corrects")
+		}
+	case SubjectCheck:
+		if !ValidRunID(e.RunID) || e.RowDigest != "" {
+			return fmt.Errorf("a check exclusion must name the run it corrects")
+		}
+	default:
+		return fmt.Errorf("invalid subject %q: expected %s or %s", e.Subject, SubjectGuard, SubjectCheck)
 	}
 	if e.Action != Exclude && e.Action != Reinstate {
 		return fmt.Errorf("invalid exclusion action %q: expected %s or %s", e.Action, Exclude, Reinstate)
@@ -107,12 +140,25 @@ func AppendExclusion(dir string, e Exclusion) error {
 	return nil
 }
 
-// Excluded reduces a stream to the rows it currently retires, keyed by row digest.
-// The latest entry for a row decides, so a reinstate after an exclude restores it.
+// Excluded reduces a stream to the guard rows it currently retires, keyed by row
+// digest. The latest entry for a row decides, so a reinstate after an exclude
+// restores it.
 func Excluded(entries []Exclusion) map[string]Exclusion {
+	return retired(entries, SubjectGuard)
+}
+
+// ExcludedRuns reduces a stream to the check blocks it currently retires, keyed by
+// run identifier, by the same rule as Excluded.
+func ExcludedRuns(entries []Exclusion) map[string]Exclusion {
+	return retired(entries, SubjectCheck)
+}
+
+func retired(entries []Exclusion, subject string) map[string]Exclusion {
 	latest := map[string]Exclusion{}
 	for _, e := range entries {
-		latest[e.RowDigest] = e
+		if e.Subject == subject && e.key() != "" {
+			latest[e.key()] = e
+		}
 	}
 	out := map[string]Exclusion{}
 	for digest, e := range latest {

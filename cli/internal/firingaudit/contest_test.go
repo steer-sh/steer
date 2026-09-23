@@ -103,7 +103,7 @@ func TestContestsCountDistinctFiringsBesideUnread(t *testing.T) {
 		{Subject: adjudication.SubjectGuard, FiringID: judged, Reason: "third"},
 	}
 	receipts := []adjudication.Receipt{{Subject: adjudication.SubjectGuard, FiringID: judged, Judgment: adjudication.Incorrect}}
-	report := Contests(rows, nil, contests, receipts, nil, nil, "")
+	report := Contests(rows, nil, contests, receipts, nil, nil, nil, "")
 	if len(report.Guards) != 1 || len(report.Unmatched) != 0 {
 		t.Fatalf("report = %+v, want one guard and nothing unmatched", report)
 	}
@@ -132,7 +132,7 @@ func TestContestsDiscloseExcludedAndUnmatchedFirings(t *testing.T) {
 		{Subject: adjudication.SubjectGuard, FiringID: "44444444444444444444444444444444", Reason: "other guard", HookID: "h"},
 	}
 	excluded := map[string]adjudication.Exclusion{"d1": {RowDigest: "d1"}}
-	report := Contests(rows, nil, contests, nil, excluded, nil, "g")
+	report := Contests(rows, nil, contests, nil, excluded, nil, nil, "g")
 	g := report.Guards[0]
 	if g.Firings != 0 || g.Contested != 0 || g.ContestedExcluded != 1 {
 		t.Fatalf("guard = %+v, want the excluded contest counted only as excluded", g)
@@ -163,7 +163,7 @@ func TestCheckContestsCountEachRepositorysBlocks(t *testing.T) {
 	receipts := []adjudication.Receipt{{Subject: adjudication.SubjectCheck, RunID: "1a",
 		Failures: []adjudication.Failure{{Kind: adjudication.FailureOracle, Validity: adjudication.Valid, Attribution: adjudication.PreExisting}}}}
 
-	report := Contests(nil, cases, contests, receipts, nil, nil, "")
+	report := Contests(nil, cases, contests, receipts, nil, nil, nil, "")
 	if len(report.Checks) != 1 || len(report.UnmatchedChecks) != 1 || report.UnmatchedChecks[0].RunID != "9f" {
 		t.Fatalf("report = %+v; want one repository and the orphan unmatched", report)
 	}
@@ -172,7 +172,7 @@ func TestCheckContestsCountEachRepositorysBlocks(t *testing.T) {
 		len(r.ContestedBlocks[0].Failures) != 1 || len(r.ContestedBlocks[0].Reasons) != 1 {
 		t.Errorf("repository = %+v; want 2 blocks, 1 not offered, 1 contested with its reading, 1 unread", r)
 	}
-	if got := Contests(nil, cases, contests, receipts, nil, nil, "g"); len(got.Checks) != 0 || len(got.UnmatchedChecks) != 0 {
+	if got := Contests(nil, cases, contests, receipts, nil, nil, nil, "g"); len(got.Checks) != 0 || len(got.UnmatchedChecks) != 0 {
 		t.Errorf("one guard's report = %+v; want no blocks", got)
 	}
 }

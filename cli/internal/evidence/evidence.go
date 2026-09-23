@@ -53,7 +53,7 @@ func Gather(opts Options) mine.EvidenceSet {
 
 	firings, present := mine.LoadFirings(GuardStores()...)
 	ev.Firings, ev.AuditPresent = WithoutExcluded(firings, Exclusions()), present
-	ev.CheckRuns, ev.CheckRepos = CheckRuns()
+	ev.CheckRuns, ev.CheckRepos = CheckRuns(ExcludedRuns())
 
 	records, _ := mine.Load(opts.GateStateDir)
 	ev.FixtureHost = gate.HostID()
@@ -70,6 +70,16 @@ func Exclusions() map[string]adjudication.Exclusion {
 		return nil
 	}
 	return adjudication.Excluded(entries)
+}
+
+// ExcludedRuns reads the check blocks this machine's exclusion stream retires,
+// keyed by run. An unreadable stream retires nothing.
+func ExcludedRuns() map[string]adjudication.Exclusion {
+	entries, err := adjudication.LoadExclusions(adjudication.Dir())
+	if err != nil {
+		return nil
+	}
+	return adjudication.ExcludedRuns(entries)
 }
 
 // WithoutExcluded drops the firings an exclusion retires. A firing carrying no row
@@ -90,13 +100,14 @@ func WithoutExcluded(firings []mine.Firing, excluded map[string]adjudication.Exc
 
 // CheckRuns reads this machine's live check evidence as the observation's execution
 // stream, and the repositories that hold any check evidence here. A failed execution
-// is Blocked when its oracle run's disposition was block.
-func CheckRuns() ([]mine.CheckRun, map[string]bool) {
+// is Blocked when its oracle run's disposition was block. The executions of a block
+// an exclusion retires are left out; the records themselves stay.
+func CheckRuns(excludedRuns map[string]adjudication.Exclusion) ([]mine.CheckRun, map[string]bool) {
 	live, _ := checks.ReadLiveEvidence()
-	return checkRunsOf(live), live.Repos
+	return checkRunsOf(live, excludedRuns), live.Repos
 }
 
-func checkRunsOf(live checks.LiveEvidence) []mine.CheckRun {
+func checkRunsOf(live checks.LiveEvidence, excludedRuns map[string]adjudication.Exclusion) []mine.CheckRun {
 	blocking := map[string]bool{}
 	for _, r := range live.Runs {
 		if r.Disposition == checks.DispositionBlock {
@@ -105,6 +116,9 @@ func checkRunsOf(live checks.LiveEvidence) []mine.CheckRun {
 	}
 	runs := make([]mine.CheckRun, 0, len(live.Executions))
 	for _, e := range live.Executions {
+		if _, retired := excludedRuns[e.RunID]; retired && e.RunID != "" {
+			continue
+		}
 		runs = append(runs, mine.CheckRun{
 			Repo:           e.Repo,
 			CheckID:        e.CheckID,

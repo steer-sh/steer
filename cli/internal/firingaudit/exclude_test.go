@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/adjudication"
+	"github.com/steer-sh/steer-cli/internal/checks"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
 )
 
@@ -102,5 +103,43 @@ func TestQueueLeavesExcludedRowsOutAndCountsThem(t *testing.T) {
 	}
 	if counts.Excluded != 1 || counts.Queued != 1 || counts.Unjudged != 1 {
 		t.Errorf("counts %+v, want one excluded and one queued", counts)
+	}
+}
+
+// A check block is excluded by its run and restored the same way; the queue,
+// the coverage and the contest counts leave it out while it is excluded.
+func TestAnExcludedCheckBlockLeavesTheReadings(t *testing.T) {
+	demo := blockRun("/r", "1a", 1)
+	real := blockRun("/r", "2b", 2)
+	cases := CheckCases(checks.LiveEvidence{Runs: []checks.OracleRun{demo, real}})
+	dir := t.TempDir()
+	correction := Correction{Ref: "1a", Action: adjudication.Exclude, Reason: "demo session", Evidence: []string{"t.jsonl"}}
+	e, err := CorrectCheck(cases, dir, correction, nil)
+	if err != nil || e.Subject != adjudication.SubjectCheck || e.RunID != "1a" || e.Repo != "/r" {
+		t.Fatalf("exclusion = %+v, %v; want run 1a of /r", e, err)
+	}
+	entries, _ := adjudication.LoadExclusions(dir)
+	retired := adjudication.ExcludedRuns(entries)
+	if _, err := CorrectCheck(cases, dir, correction, retired); err == nil {
+		t.Error("an excluded run was excluded again")
+	}
+	if _, err := CorrectCheck(cases, dir, Correction{Ref: "2b", Action: adjudication.Reinstate, Reason: "x"}, retired); err == nil {
+		t.Error("a run never excluded was reinstated")
+	}
+	if _, err := CorrectCheck(cases, dir, Correction{Ref: "9z", Action: adjudication.Exclude, Reason: "x", Evidence: []string{"t"}}, retired); err == nil {
+		t.Error("a run no block has was excluded")
+	}
+
+	items, counts := Queue(nil, cases, nil, QueueOptions{ExcludedRuns: retired})
+	if len(items) != 1 || items[0].RunID != "2b" || counts.Excluded != 1 {
+		t.Errorf("queue = %v, counts %+v; want only 2b and one excluded", ids(items), counts)
+	}
+	if got := CoverChecks(cases, nil, retired); got[0].Blocks != 2 || got[0].Excluded != 1 || got[0].Unjudged != 1 {
+		t.Errorf("coverage = %+v; want 2 blocks, 1 excluded, 1 unread", got)
+	}
+	contests := []adjudication.Contest{{Subject: adjudication.SubjectCheck, RunID: "1a", Reason: "demo"}}
+	report := Contests(nil, cases, contests, nil, nil, retired, nil, "")
+	if r := report.Checks[0]; r.Blocks != 1 || r.Contested != 0 || r.ContestedExcluded != 1 || len(report.UnmatchedChecks) != 0 {
+		t.Errorf("contests = %+v; want the excluded block counted only as excluded", report)
 	}
 }

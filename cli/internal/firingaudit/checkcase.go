@@ -151,17 +151,20 @@ func InstalledDetectors() func(repo string) map[string]string {
 }
 
 // CheckCoverage accounts one repository's Stop blocks against the check
-// receipts on hand. Blocks == Judged + Unjudged.
+// receipts on hand. Blocks == Judged + Unjudged + Excluded.
 type CheckCoverage struct {
 	Repo     string `json:"repo"`
 	Blocks   int    `json:"blocks"`
 	Judged   int    `json:"judged"`
 	Unjudged int    `json:"unjudged"`
+	// Excluded is the blocks an exclusion retires as recording no real work.
+	Excluded int `json:"excluded"`
 }
 
 // CoverChecks counts each repository's blocks, in the order the cases first
-// name each repository.
-func CoverChecks(cases []CheckCase, receipts []adjudication.Receipt) []CheckCoverage {
+// name each repository. excludedRuns is keyed by run, as ExcludedRuns returns it.
+func CoverChecks(cases []CheckCase, receipts []adjudication.Receipt,
+	excludedRuns map[string]adjudication.Exclusion) []CheckCoverage {
 	latest := adjudication.Latest(receipts, adjudication.SubjectCheck)
 	var out []CheckCoverage
 	index := map[string]int{}
@@ -173,6 +176,10 @@ func CoverChecks(cases []CheckCase, receipts []adjudication.Receipt) []CheckCove
 			out = append(out, CheckCoverage{Repo: c.Run.Repo})
 		}
 		out[i].Blocks++
+		if _, retired := excludedRuns[c.Run.RunID]; retired {
+			out[i].Excluded++
+			continue
+		}
 		if _, judged := latest[c.Run.RunID]; judged {
 			out[i].Judged++
 		} else {

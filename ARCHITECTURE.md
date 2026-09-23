@@ -612,7 +612,10 @@ stream stays append-only. `adjudication/exclusion.go` holds the stream beside th
 receipts, keyed by `mine.RowDigest`, the digest of the row's own line, because a
 legacy row carries no other identity. Both loaders stamp that digest. The queue,
 `Cover` and `evidence.Gather` read the same `Excluded` set; `gate/mine` reads
-none. `status.newestFiring` keeps excluded rows, because a test block still shows
+none. An exclusion states its subject: a check.sh Stop block is retired by run
+(`adjudication.ExcludedRuns`, `firingaudit.CorrectCheck`), and the queue, check
+coverage, contest counts and `evidence.CheckRuns` leave it out while
+`runs.jsonl`, `executions.jsonl` and `steer check blocks` keep it. `status.newestFiring` keeps excluded rows, because a test block still shows
 that the master executed.
 
 A blocked agent contests a block it holds wrong for its task with `steer contest`.

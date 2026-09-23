@@ -25,7 +25,7 @@ func TestAFailedExecutionIsBlockedOnlyUnderABlockingRun(t *testing.T) {
 			{RunID: "r-yield", Disposition: checks.DispositionYield},
 		},
 	}
-	runs := checkRunsOf(live)
+	runs := checkRunsOf(live, nil)
 	if len(runs) != 4 {
 		t.Fatalf("got %d runs, want 4", len(runs))
 	}
@@ -124,5 +124,26 @@ func TestWithoutExcludedDropsOnlyRetiredRows(t *testing.T) {
 	got := WithoutExcluded(firings, map[string]adjudication.Exclusion{"ra": {}, "": {}})
 	if len(got) != 2 || got[0].RowDigest != "rb" || got[1].RowDigest != "" {
 		t.Errorf("kept %+v, want rb and the unnamed row", got)
+	}
+}
+
+// An excluded block's executions leave the observation stream; the other runs'
+// executions, and executions under no run, stay.
+func TestAnExcludedBlockLeavesTheObservations(t *testing.T) {
+	at := time.Unix(3000, 0)
+	live := checks.LiveEvidence{
+		Executions: []checks.Execution{
+			{RunID: "demo", CheckID: "a", Outcome: checks.OutcomeFailed, Started: at},
+			{RunID: "real", CheckID: "a", Outcome: checks.OutcomeFailed, Started: at},
+			{CheckID: "a", Outcome: checks.OutcomePassed, Started: at},
+		},
+		Runs: []checks.OracleRun{
+			{RunID: "demo", Disposition: checks.DispositionBlock},
+			{RunID: "real", Disposition: checks.DispositionBlock},
+		},
+	}
+	runs := checkRunsOf(live, map[string]adjudication.Exclusion{"demo": {RunID: "demo"}, "": {}})
+	if len(runs) != 2 || !runs[0].Blocked || runs[1].Outcome != checks.OutcomePassed {
+		t.Errorf("runs = %+v; want the real block and the unowned execution", runs)
 	}
 }

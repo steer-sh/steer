@@ -130,8 +130,8 @@ Read the linked architecture section before changing the corresponding boundary:
   `checks.RunIDLine`, so the block reason's last line changes with them.
 - Firing adjudications: the store `cli/internal/adjudication/` and its component
   name in `cli/internal/statestore/Components`. A corpus absent from that list never
-  migrates. Its exclusion stream is keyed by `mine.RowDigest`; a change to how that
-  digest reads a line orphans every recorded exclusion. A receipt states its subject: a guard judgment names its firing by the row's
+  migrates. Its exclusion stream keys a guard row by `mine.RowDigest` and a check block by
+  run; a change to how that digest reads a line orphans every recorded guard exclusion. A receipt states its subject: a guard judgment names its firing by the row's
   `firing_id` alone, a check judgment its run by `run_id`, and the identity it was
   made against is stored with it; `gate/mine` reads no receipt store.
 - Guard source agreement: `cli/internal/claude/sourcecompare.go` holds the one

@@ -66,6 +66,7 @@ func Correct(rows []Row, dir string, c Correction,
 		return adjudication.Exclusion{}, fmt.Errorf("row %s is not excluded", row.RowDigest)
 	}
 	e := adjudication.Exclusion{
+		Subject:    adjudication.SubjectGuard,
 		RowDigest:  row.RowDigest,
 		FiringID:   row.FiringID,
 		HookID:     row.HookName,
@@ -73,6 +74,39 @@ func Correct(rows []Row, dir string, c Correction,
 		SessionID:  row.SessionID,
 		Timestamp:  row.Timestamp,
 		StoreDir:   row.StoreDir,
+		Action:     c.Action,
+		Reason:     c.Reason,
+		Evidence:   c.Evidence,
+		RecordedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	if err := adjudication.AppendExclusion(dir, e); err != nil {
+		return adjudication.Exclusion{}, err
+	}
+	return e, nil
+}
+
+// CorrectCheck writes one exclusion entry for the check block of run c.Ref,
+// copying the run's own fields, with Correct's refusals.
+func CorrectCheck(cases []CheckCase, dir string, c Correction,
+	excluded map[string]adjudication.Exclusion) (adjudication.Exclusion, error) {
+	block, ok := FindCheckCase(cases, c.Ref)
+	if !ok {
+		return adjudication.Exclusion{}, fmt.Errorf("no recorded Stop block has the run %q", c.Ref)
+	}
+	_, retired := excluded[block.Run.RunID]
+	if c.Action == adjudication.Exclude && retired {
+		return adjudication.Exclusion{}, fmt.Errorf("run %s is already excluded", block.Run.RunID)
+	}
+	if c.Action == adjudication.Reinstate && !retired {
+		return adjudication.Exclusion{}, fmt.Errorf("run %s is not excluded", block.Run.RunID)
+	}
+	e := adjudication.Exclusion{
+		Subject:    adjudication.SubjectCheck,
+		RunID:      block.Run.RunID,
+		Repo:       block.Run.Repo,
+		Harness:    block.Run.Harness,
+		SessionID:  block.Run.Session,
+		Timestamp:  block.Run.Started.UTC().Format(time.RFC3339Nano),
 		Action:     c.Action,
 		Reason:     c.Reason,
 		Evidence:   c.Evidence,

@@ -120,3 +120,32 @@ func TestListRowsInterleavesBlocksAndRows(t *testing.T) {
 		t.Errorf("one guard's rows = %s", got)
 	}
 }
+
+// An exclusion's reference resolves to its subject as show's does; a digest
+// prefix counts as a guard reference.
+func TestCorrectionSubjectResolvesARunOrARow(t *testing.T) {
+	source := auditSource{
+		Rows:  []firingaudit.Row{{FiringID: "f1", RowDigest: "abcdef0011"}},
+		Cases: []firingaudit.CheckCase{checkBlock("abcdef00"), checkBlock("1a")},
+	}
+	if _, err := correctionSubject(source, "abcdef00", ""); err == nil {
+		t.Error("a reference naming a row prefix and a run was resolved")
+	}
+	for ref, want := range map[string]string{"f1": adjudication.SubjectGuard, "1a": adjudication.SubjectCheck} {
+		if got, err := correctionSubject(source, ref, ""); err != nil || got != want {
+			t.Errorf("%s = %q, %v; want %q", ref, got, err, want)
+		}
+	}
+}
+
+// --excluded lists excluded blocks with their reason beside excluded rows.
+func TestListRowsMarksAnExcludedBlock(t *testing.T) {
+	source := auditSource{
+		Cases:        []firingaudit.CheckCase{checkBlock("1a"), checkBlock("2b")},
+		ExcludedRuns: map[string]adjudication.Exclusion{"1a": {RunID: "1a", Reason: "demo session"}},
+	}
+	lines := listRows(source, "", "", true)
+	if len(lines) != 1 || lines[0].RunID != "1a" || !lines[0].Excluded || lines[0].ExcludedFor != "demo session" {
+		t.Errorf("excluded rows = %+v; want run 1a with its reason", lines)
+	}
+}

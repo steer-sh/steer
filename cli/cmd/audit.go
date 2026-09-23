@@ -53,8 +53,10 @@ type auditSource struct {
 	Groups    []group
 	// Excluded holds the rows an exclusion retires, keyed by row digest.
 	Excluded map[string]adjudication.Exclusion
-	// Cases are the check.sh Stop blocks recorded on this machine.
-	Cases []firingaudit.CheckCase
+	// Cases are the check.sh Stop blocks recorded on this machine, and
+	// ExcludedRuns the ones an exclusion retires, keyed by run.
+	Cases        []firingaudit.CheckCase
+	ExcludedRuns map[string]adjudication.Exclusion
 }
 
 // classify stamps each check failure with what a reading of it says about the
@@ -103,7 +105,8 @@ func loadAudit() (auditSource, error) {
 
 	return auditSource{Rows: rows, Present: present, Receipts: receipts,
 		Installed: installed, Groups: groupRows(rows, installed),
-		Excluded: adjudication.Excluded(exclusions), Cases: cases}, nil
+		Excluded: adjudication.Excluded(exclusions), Cases: cases,
+		ExcludedRuns: adjudication.ExcludedRuns(exclusions)}, nil
 }
 
 // groupRows collects each guard's rows per store, so the coverage arithmetic
@@ -176,12 +179,13 @@ names one guard and so lists no check block.`,
 		}
 		source.classify()
 		items, counts := firingaudit.Queue(source.Rows, source.Cases, source.Receipts, firingaudit.QueueOptions{
-			Subject:   auditSubject,
-			HookName:  auditHook,
-			Installed: source.Installed,
-			Other:     auditOther,
-			Limit:     auditLimit,
-			Excluded:  source.Excluded,
+			Subject:      auditSubject,
+			HookName:     auditHook,
+			Installed:    source.Installed,
+			Other:        auditOther,
+			Limit:        auditLimit,
+			Excluded:     source.Excluded,
+			ExcludedRuns: source.ExcludedRuns,
 		})
 		var coverage []guardCoverage
 		if auditSubject != adjudication.SubjectCheck {
@@ -189,7 +193,7 @@ names one guard and so lists no check block.`,
 		}
 		var checkCoverage []firingaudit.CheckCoverage
 		if auditSubject != adjudication.SubjectGuard && auditHook == "" {
-			checkCoverage = firingaudit.CoverChecks(source.Cases, source.Receipts)
+			checkCoverage = firingaudit.CoverChecks(source.Cases, source.Receipts, source.ExcludedRuns)
 		}
 		if auditJSON {
 			return writeJSON(cmd.OutOrStdout(), map[string]any{
@@ -212,6 +216,9 @@ func writeQueue(w io.Writer, present bool, items []firingaudit.Item,
 	}
 	for _, c := range checkCoverage {
 		fmt.Fprintf(w, "check.sh in %s: %d Stop blocks, %d of those read\n", c.Repo, c.Blocks, c.Judged)
+		if c.Excluded > 0 {
+			fmt.Fprintf(w, "  %d blocks excluded as recording no real work (steer audit rows --excluded)\n", c.Excluded)
+		}
 	}
 	for _, g := range coverage {
 		c := g.Coverage
@@ -620,6 +627,10 @@ was real and not this turn's is valid,pre-existing.`,
 
 // recordCheck writes one judgment of the check block of run runID.
 func recordCheck(cmd *cobra.Command, source auditSource, dir, runID string) error {
+	if _, retired := source.ExcludedRuns[runID]; retired {
+		return fmt.Errorf("run %s is excluded as recording no real work; "+
+			"steer audit reinstate it before judging it", runID)
+	}
 	if auditJudgment != "" {
 		return fmt.Errorf("--judgment reads a guard firing; %s is a check run, which takes one --failure per failure", runID)
 	}
@@ -703,8 +714,12 @@ identifier, a row digest, or a digest prefix of at least eight characters.
 		}
 		for _, l := range lines {
 			if l.Subject == adjudication.SubjectCheck {
-				fmt.Fprintf(w, "%s  %s  check.sh  %s  session=%s\n    %s\n",
-					l.RunID, l.Timestamp, or(l.Harness), or(l.SessionID), l.Repository)
+				mark := ""
+				if l.Excluded {
+					mark = "  EXCLUDED: " + l.ExcludedFor
+				}
+				fmt.Fprintf(w, "%s  %s  check.sh  %s  session=%s%s\n    %s\n",
+					l.RunID, l.Timestamp, or(l.Harness), or(l.SessionID), mark, l.Repository)
 				continue
 			}
 			mark := ""
@@ -719,17 +734,21 @@ identifier, a row digest, or a digest prefix of at least eight characters.
 	},
 }
 
-// listRows selects the rows `audit rows` prints, oldest first. A guard name or
-// the excluded filter selects guard rows only.
+// listRows selects the rows `audit rows` prints, oldest first. A guard name
+// selects guard rows only.
 func listRows(source auditSource, subject, hook string, excludedOnly bool) []rowLine {
 	var out []rowLine
-	if subject != adjudication.SubjectGuard && hook == "" && !excludedOnly {
+	if subject != adjudication.SubjectGuard && hook == "" {
 		for _, c := range source.Cases {
+			e, retired := source.ExcludedRuns[c.Run.RunID]
+			if excludedOnly && !retired {
+				continue
+			}
 			out = append(out, rowLine{
 				Subject: adjudication.SubjectCheck, RunID: c.Run.RunID,
 				Timestamp: c.Run.Started.UTC().Format(time.RFC3339Nano),
 				HookName:  "check.sh", Harness: c.Run.Harness, SessionID: c.Run.Session,
-				Repository: c.Run.Repo,
+				Repository: c.Run.Repo, Excluded: retired, ExcludedFor: e.Reason,
 			})
 		}
 	}
@@ -781,7 +800,7 @@ show' before judging it.`,
 			return err
 		}
 		report := firingaudit.Contests(source.Rows, source.Cases, contests, source.Receipts,
-			source.Excluded, source.Installed, auditHook)
+			source.Excluded, source.ExcludedRuns, source.Installed, auditHook)
 		if auditJSON {
 			return writeJSON(cmd.OutOrStdout(), report)
 		}
@@ -804,8 +823,12 @@ show' before judging it.`,
 			printContested(w, report.Unmatched)
 		}
 		for _, r := range report.Checks {
-			fmt.Fprintf(w, "check.sh  (%s)\n  blocks %d  contested %d  unread %d  no contest offered %d\n",
+			fmt.Fprintf(w, "check.sh  (%s)\n  blocks %d  contested %d  unread %d  no contest offered %d",
 				r.Repo, r.Blocks, r.Contested, r.Unread, r.NotOffered)
+			if r.ContestedExcluded > 0 {
+				fmt.Fprintf(w, "  contested but excluded %d", r.ContestedExcluded)
+			}
+			fmt.Fprintln(w)
 			printContestedBlocks(w, r.ContestedBlocks)
 		}
 		if len(report.UnmatchedChecks) > 0 {
@@ -875,9 +898,27 @@ func correctCmd(action, use, short, long string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			e, err := firingaudit.Correct(source.Rows, dir, firingaudit.Correction{
+			subject, err := correctionSubject(source, args[0], auditSubject)
+			if err != nil {
+				return err
+			}
+			correction := firingaudit.Correction{
 				Ref: args[0], Action: action, Reason: auditReason, Evidence: auditEvidence,
-			}, source.Excluded)
+			}
+			if subject == adjudication.SubjectCheck {
+				e, err := firingaudit.CorrectCheck(source.Cases, dir, correction, source.ExcludedRuns)
+				if err != nil {
+					return err
+				}
+				if auditJSON {
+					return writeJSON(cmd.OutOrStdout(), e)
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "%s check.sh run %s (%s, %s)\n",
+					map[string]string{adjudication.Exclude: "excluded", adjudication.Reinstate: "reinstated"}[action],
+					e.RunID, e.Repo, e.Timestamp)
+				return nil
+			}
+			e, err := firingaudit.Correct(source.Rows, dir, correction, source.Excluded)
 			if err != nil {
 				return err
 			}
@@ -892,16 +933,38 @@ func correctCmd(action, use, short, long string) *cobra.Command {
 	}
 }
 
+// correctionSubject decides whether an exclusion's reference names a guard row
+// (a firing identifier or a row digest or prefix) or a check run.
+func correctionSubject(source auditSource, ref, subject string) (string, error) {
+	if err := validSubject(subject); err != nil {
+		return "", err
+	}
+	if subject != "" {
+		return subject, nil
+	}
+	_, guardErr := firingaudit.FindRef(source.Rows, ref)
+	_, check := firingaudit.FindCheckCase(source.Cases, ref)
+	switch {
+	case guardErr == nil && check:
+		return "", fmt.Errorf("%s names both a guard row and a check run; pass --subject", ref)
+	case check:
+		return adjudication.SubjectCheck, nil
+	}
+	return adjudication.SubjectGuard, nil
+}
+
 var auditExcludeCmd = correctCmd(adjudication.Exclude, "exclude REF",
 	"Retire one audit row that records no real work",
-	`Exclude appends a correction naming one row: a firing a test run caused under
-the operator's guard store, for example. The row stays in the audit stream. The
-queue, the coverage counts and the recurrence counts leave it out, and
-'steer audit rows --excluded' lists it with its reason.
+	`Exclude appends a correction naming one recorded block: a firing a test run
+caused under the operator's guard store, or a check.sh Stop block from a demo
+session, for example. The record stays where it is. The queue, the coverage
+counts and the recurrence counts leave it out, and 'steer audit rows --excluded'
+lists it with its reason.
 
-REF is a firing identifier, a row digest, or a digest prefix of at least eight
-characters. --reason and at least one --evidence are required: the evidence is
-what shows the row records no real work.`)
+REF is a firing identifier, a row digest, a digest prefix of at least eight
+characters, or a check run identifier; --subject settles a REF both name.
+--reason and at least one --evidence are required: the evidence is what shows
+the block records no real work.`)
 
 var auditReinstateCmd = correctCmd(adjudication.Reinstate, "reinstate REF",
 	"Withdraw the exclusion of one audit row",
@@ -1001,6 +1064,7 @@ func init() {
 	auditContestsCmd.Flags().StringVar(&auditHook, "hook", "", "only this guard")
 	auditRowsCmd.Flags().BoolVar(&auditExcludedOnly, "excluded", false, "only the excluded rows")
 	for _, c := range []*cobra.Command{auditExcludeCmd, auditReinstateCmd} {
+		c.Flags().StringVar(&auditSubject, "subject", "", "guard or check (default whichever REF names)")
 		c.Flags().StringVar(&auditReason, "reason", "", "why (required)")
 		_ = c.MarkFlagRequired("reason")
 	}

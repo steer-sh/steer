@@ -108,8 +108,10 @@ type QueueOptions struct {
 	Other bool
 	// Limit caps the items returned, oldest first. Zero returns all of them.
 	Limit int
-	// Excluded holds the rows an exclusion retires, keyed by row digest.
-	Excluded map[string]adjudication.Exclusion
+	// Excluded holds the rows an exclusion retires, keyed by row digest, and
+	// ExcludedRuns the check blocks one retires, keyed by run.
+	Excluded     map[string]adjudication.Exclusion
+	ExcludedRuns map[string]adjudication.Exclusion
 }
 
 // Queue lists the cases a reading pass should take next, guard firings and check
@@ -129,7 +131,9 @@ func Queue(rows []Row, cases []CheckCase, receipts []adjudication.Receipt, opts 
 		excluded += n
 	}
 	if opts.Subject != adjudication.SubjectGuard && opts.HookName == "" {
-		items = append(items, checkItems(cases, receipts)...)
+		checks, n := checkItems(cases, receipts, opts.ExcludedRuns)
+		items = append(items, checks...)
+		excluded += n
 	}
 	sort.SliceStable(items, func(i, j int) bool {
 		return Earlier(items[i].Timestamp, items[j].Timestamp)
@@ -174,11 +178,18 @@ func revisit(receipt adjudication.Receipt, judged bool, reach string) string {
 	return ""
 }
 
-// checkItems lists the check blocks a reading pass should take.
-func checkItems(cases []CheckCase, receipts []adjudication.Receipt) []Item {
+// checkItems lists the check blocks a reading pass should take, and how many an
+// exclusion retires.
+func checkItems(cases []CheckCase, receipts []adjudication.Receipt,
+	excludedRuns map[string]adjudication.Exclusion) ([]Item, int) {
 	latest := adjudication.Latest(receipts, adjudication.SubjectCheck)
 	var items []Item
+	excluded := 0
 	for _, c := range cases {
+		if _, ok := excludedRuns[c.Run.RunID]; ok {
+			excluded++
+			continue
+		}
 		receipt, judged := latest[c.Run.RunID]
 		reach := c.Reach()
 		reason := revisit(receipt, judged, reach.Granularity)
@@ -200,7 +211,7 @@ func checkItems(cases []CheckCase, receipts []adjudication.Receipt) []Item {
 		}
 		items = append(items, item)
 	}
-	return items
+	return items, excluded
 }
 
 // guardItems lists the guard firings a reading pass should take, and how many
