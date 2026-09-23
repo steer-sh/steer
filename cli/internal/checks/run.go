@@ -20,7 +20,7 @@ import (
 const runsName = "runs.jsonl"
 
 // OracleRunVersion is the oracle-run record format.
-const OracleRunVersion = 1
+const OracleRunVersion = 2
 
 // Invocation sources that a Steer parent names.
 const (
@@ -67,7 +67,12 @@ type RunOptions struct {
 	Stderr      io.Writer
 	SteerBin    string
 	EvidenceDir string
-	Disposition func(OracleRun, []Execution) string
+	// Locators and StopHookActive are copied onto the run record.
+	Locators       map[string]string
+	StopHookActive *bool
+	// Disposition decides a finished run while the lock is held. It returns
+	// what the caller did with it and, for a block, the reason it sends.
+	Disposition func(OracleRun, []Execution) (disposition, blockReason string)
 }
 
 // OracleRun is the aggregate outcome of one check.sh run by a Steer parent. The
@@ -77,28 +82,34 @@ type RunOptions struct {
 // ConcurrentWith names the run that held the repository when this one was
 // refused; such a run is not executed and has no per-check records.
 // Disposition is what the caller did with the result, such as a Stop runner's
-// block or yield.
+// block or yield, and BlockReason is the text a block sent the model.
+// Locators are the Stop payload's transcript locators by key presence, from
+// version 2 on. Tree is the working-tree signature after check.sh finished.
 type OracleRun struct {
-	Version            int       `json:"version"`
-	RunID              string    `json:"run_id"`
-	Repo               string    `json:"repo"`
-	Source             string    `json:"source"`
-	Harness            string    `json:"harness,omitempty"`
-	Session            string    `json:"session,omitempty"`
-	Started            time.Time `json:"started"`
-	Finished           time.Time `json:"finished"`
-	Deadline           time.Time `json:"deadline"`
-	Outcome            string    `json:"outcome"`
-	Reason             string    `json:"reason,omitempty"`
-	ExitCode           *int      `json:"exit_code,omitempty"`
-	OutputDigest       string    `json:"output_digest,omitempty"`
-	Excerpt            string    `json:"excerpt,omitempty"`
-	Declared           []string  `json:"declared,omitempty"`
-	Missing            []string  `json:"missing,omitempty"`
-	IntegrationFailure bool      `json:"integration_failure,omitempty"`
-	ConcurrentWith     string    `json:"concurrent_with,omitempty"`
-	Disposition        string    `json:"disposition,omitempty"`
-	SteerVersion       string    `json:"steer_version"`
+	Version            int               `json:"version"`
+	RunID              string            `json:"run_id"`
+	Repo               string            `json:"repo"`
+	Source             string            `json:"source"`
+	Harness            string            `json:"harness,omitempty"`
+	Session            string            `json:"session,omitempty"`
+	Started            time.Time         `json:"started"`
+	Finished           time.Time         `json:"finished"`
+	Deadline           time.Time         `json:"deadline"`
+	Outcome            string            `json:"outcome"`
+	Reason             string            `json:"reason,omitempty"`
+	ExitCode           *int              `json:"exit_code,omitempty"`
+	OutputDigest       string            `json:"output_digest,omitempty"`
+	Excerpt            string            `json:"excerpt,omitempty"`
+	Declared           []string          `json:"declared,omitempty"`
+	Missing            []string          `json:"missing,omitempty"`
+	IntegrationFailure bool              `json:"integration_failure,omitempty"`
+	ConcurrentWith     string            `json:"concurrent_with,omitempty"`
+	Disposition        string            `json:"disposition,omitempty"`
+	BlockReason        string            `json:"block_reason,omitempty"`
+	Locators           map[string]string `json:"locators,omitempty"`
+	StopHookActive     *bool             `json:"stop_hook_active,omitempty"`
+	Tree               string            `json:"tree,omitempty"`
+	SteerVersion       string            `json:"steer_version"`
 }
 
 // Passed reports a check.sh that exited 0 with every declared check reported.
@@ -146,15 +157,17 @@ func RunOracle(root string, opts RunOptions) (OracleRun, []Execution, error) {
 	start := time.Now()
 	deadline := start.Add(timeout)
 	run := OracleRun{
-		Version:      OracleRunVersion,
-		RunID:        newRunID(),
-		Repo:         identity,
-		Source:       opts.Source,
-		Harness:      opts.Harness,
-		Session:      opts.Session,
-		Started:      start.UTC(),
-		Deadline:     deadline.UTC(),
-		SteerVersion: version.Version,
+		Version:        OracleRunVersion,
+		RunID:          newRunID(),
+		Repo:           identity,
+		Source:         opts.Source,
+		Harness:        opts.Harness,
+		Session:        opts.Session,
+		Started:        start.UTC(),
+		Deadline:       deadline.UTC(),
+		Locators:       opts.Locators,
+		StopHookActive: opts.StopHookActive,
+		SteerVersion:   version.Version,
 	}
 	if run.Source == "" {
 		run.Source = SourceRun
@@ -174,7 +187,7 @@ func RunOracle(root string, opts RunOptions) (OracleRun, []Execution, error) {
 		run.ConcurrentWith = holder.RunID
 		run.Reason = concurrentReason(holder)
 		if opts.Disposition != nil {
-			run.Disposition = opts.Disposition(run, nil)
+			run.Disposition, run.BlockReason = opts.Disposition(run, nil)
 		}
 		if err := appendJSONL(runsPath(dir, identity), run); err != nil {
 			return run, nil, fmt.Errorf("record oracle run: %w", err)
@@ -200,6 +213,7 @@ func RunOracle(root string, opts RunOptions) (OracleRun, []Execution, error) {
 	run.Finished = time.Now().UTC()
 	run.OutputDigest, run.Excerpt = out.digest(), out.excerpt()
 	classifyOracle(&run, runErr, ctx.Err() != nil)
+	run.Tree = treeSignature(identity)
 
 	all, err := executionsIn(dir, identity)
 	if err != nil {
@@ -247,7 +261,7 @@ func RunOracle(root string, opts RunOptions) (OracleRun, []Execution, error) {
 	}
 	records = append(records, unreported...)
 	if opts.Disposition != nil {
-		run.Disposition = opts.Disposition(run, records)
+		run.Disposition, run.BlockReason = opts.Disposition(run, records)
 	}
 	if err := appendJSONL(runsPath(dir, identity), run); err != nil {
 		return run, nil, fmt.Errorf("record oracle run: %w", err)

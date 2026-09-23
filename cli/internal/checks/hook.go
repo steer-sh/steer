@@ -6,12 +6,42 @@ import (
 )
 
 // StopPayload is the part of a Claude Code or Codex Stop payload the runner
-// reads. AgentID is set only on a subagent's thread.
+// reads. AgentID is set only on a subagent's thread. StopHookActive is nil when
+// the payload does not say whether a Stop hook already blocked this turn.
 type StopPayload struct {
-	HookEventName string `json:"hook_event_name"`
-	SessionID     string `json:"session_id"`
-	CWD           string `json:"cwd"`
-	AgentID       string `json:"agent_id"`
+	HookEventName  string `json:"hook_event_name"`
+	SessionID      string `json:"session_id"`
+	CWD            string `json:"cwd"`
+	AgentID        string `json:"agent_id"`
+	StopHookActive *bool  `json:"stop_hook_active,omitempty"`
+}
+
+// stopLocatorKeys are the payload fields that find a block in the harness
+// transcript: the file, and the turn as Claude Code (prompt_id) or Codex
+// (turn_id) names it.
+var stopLocatorKeys = []string{"transcript_path", "prompt_id", "turn_id"}
+
+// stopLocators collects the locator fields raw carries, by key presence: a
+// null or non-string value is kept as an empty string.
+func stopLocators(raw []byte) map[string]string {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil {
+		return nil
+	}
+	var out map[string]string
+	for _, key := range stopLocatorKeys {
+		value, ok := fields[key]
+		if !ok {
+			continue
+		}
+		if out == nil {
+			out = map[string]string{}
+		}
+		var s string
+		_ = json.Unmarshal(value, &s)
+		out[key] = s
+	}
+	return out
 }
 
 // StopReply is a Stop hook's reply; Claude Code and Codex read the same shape.
@@ -52,7 +82,8 @@ func StopHook(harness string, raw []byte, opts StopHookOptions) (StopDecision, *
 	case p.HookEventName != "Stop" || p.AgentID != "":
 		d = StopDecision{Disposition: DispositionIgnored}
 	default:
-		d = Stop(StopRequest{Harness: harness, Session: p.SessionID, CWD: p.CWD, Timeout: opts.Timeout, SteerBin: opts.SteerBin})
+		d = Stop(StopRequest{Harness: harness, Session: p.SessionID, CWD: p.CWD, Timeout: opts.Timeout, SteerBin: opts.SteerBin,
+			Locators: stopLocators(raw), StopHookActive: p.StopHookActive})
 	}
 	return d, d.Reply()
 }

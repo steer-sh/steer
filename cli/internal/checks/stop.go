@@ -38,6 +38,9 @@ const (
 
 const (
 	stopMessagePrefix = "[steer check] "
+	// runIDLabel leads the last line of a block reason, which names the run
+	// so the transcript entry holding the reason joins to its record.
+	runIDLabel = "steer check run: "
 	// diagnosticBytes and diagnosticLines bound the check.sh output a block
 	// hands the model.
 	diagnosticBytes = 8 << 10
@@ -53,6 +56,9 @@ type StopRequest struct {
 	CWD      string
 	Timeout  time.Duration
 	SteerBin string
+	// Locators and StopHookActive are recorded on the run; see OracleRun.
+	Locators       map[string]string
+	StopHookActive *bool
 }
 
 // StopDecision is the Stop runner's answer. Reason is for the model and is set
@@ -95,11 +101,16 @@ func Stop(req StopRequest) StopDecision {
 	}
 
 	tail := newTailRecorder(diagnosticBytes)
-	run, records, err := RunOracle(identity, RunOptions{
+	run, _, err := RunOracle(identity, RunOptions{
 		Source: SourceStop, Harness: req.Harness, Session: req.Session, Timeout: req.Timeout,
 		Stdout: tail, Stderr: tail, SteerBin: req.SteerBin,
-		Disposition: func(run OracleRun, records []Execution) string {
-			return stopDisposition(identity, req, run, records)
+		Locators: req.Locators, StopHookActive: req.StopHookActive,
+		Disposition: func(run OracleRun, records []Execution) (string, string) {
+			disposition := stopDisposition(identity, req, run, records)
+			if disposition != DispositionBlock {
+				return disposition, ""
+			}
+			return disposition, blockReason(identity, run, records, tail.excerpt())
 		},
 	})
 	switch {
@@ -123,7 +134,7 @@ func Stop(req StopRequest) StopDecision {
 	d := StopDecision{Disposition: run.Disposition, Run: &run}
 	switch run.Disposition {
 	case DispositionBlock:
-		d.Reason = blockReason(identity, run, records, tail.excerpt())
+		d.Reason = run.BlockReason
 	case DispositionYield:
 		d.Message = fmt.Sprintf("%s%s still fails in %s with the tree unchanged since the last block; the turn ends without another block.",
 			stopMessagePrefix, OracleName, identity)
@@ -172,12 +183,12 @@ func stopDisposition(identity string, req StopRequest, run OracleRun, records []
 	return DispositionBlock
 }
 
-// failureSignature identifies a failure by the working tree and by what each
+// failureSignature identifies a failure by the run's working tree and by what each
 // check reported. Check output is left out: it carries timings, so an
 // unchanged failure would never repeat.
 func failureSignature(identity string, run OracleRun, records []Execution) string {
 	h := sha256.New()
-	fmt.Fprintf(h, "tree %s\n", treeSignature(identity))
+	fmt.Fprintf(h, "tree %s\n", run.Tree)
 	fmt.Fprintf(h, "outcome %s\n", run.Outcome)
 	if run.ExitCode != nil {
 		fmt.Fprintf(h, "exit %d\n", *run.ExitCode)
@@ -250,6 +261,7 @@ func blockReason(identity string, run OracleRun, records []Execution, output str
 				fmt.Fprintf(&b, "  %s\n", line)
 			}
 		}
+		fmt.Fprintf(&b, "\n%s%s", runIDLabel, run.RunID)
 		return b.String()
 	}
 	exit := "no exit status"
@@ -272,6 +284,7 @@ func blockReason(identity string, run OracleRun, records []Execution, output str
 	b.WriteString("\nFix the code so check.sh passes. Do not weaken a check, loosen an assertion, skip a test, or add a suppression to reach green.\n")
 	b.WriteString("If this failure is not yours to clear (a flaky test, a missing credential, a network dependency), say so and change nothing: " +
 		"the turn ends when the tree and the failure are unchanged.")
+	fmt.Fprintf(&b, "\n\n%s%s", runIDLabel, run.RunID)
 	return b.String()
 }
 

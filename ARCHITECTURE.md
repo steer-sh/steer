@@ -314,7 +314,12 @@ with nothing missing. `checks.Stop` is the harness-neutral Stop runner and
 `checks.StopHook` its one adapter, because Claude Code and Codex share the payload
 fields and reply shape. It acts on a root Stop in an adopted repository only,
 blocks a failure once, and yields when the tree, outcome and per-check results
-repeat in the same session. Each run records its disposition. `steer check
+repeat in the same session. Each run records its disposition and the
+working-tree signature it judged. A Stop run also records the payload's
+transcript locators by key presence (`transcript_path`, and the turn as Claude
+Code's `prompt_id` or Codex's `turn_id`) and `stop_hook_active`; a block records
+the reason it sent, whose last line names the run. Neither harness names the
+transcript entry a block creates, so that line is the join. `steer check
 install` registers the runner as its own Stop entry with
 `checks.RegisteredHookTimeout()`; commit-gate writers and runner writers each keep
 the other's registration. Pi has no Stop runner.

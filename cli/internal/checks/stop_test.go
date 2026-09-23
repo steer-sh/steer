@@ -326,3 +326,73 @@ func TestStopHookAnswersOnlyTheRootStopEvent(t *testing.T) {
 		t.Fatalf("root stop: %+v %+v; want a block reply from a codex run", d, reply)
 	}
 }
+
+// A Stop run records the payload's transcript locators by key presence and
+// whether a Stop hook already blocked the turn. A block keeps the reason it
+// sent, and that reason names the run, so the transcript entry joins to it.
+func TestStopRecordsWhereItsBlockLandsInTheTranscript(t *testing.T) {
+	root, req := stopRepo(t, map[string]string{"a": "exit 1\n"}, "")
+	opts := StopHookOptions{Timeout: req.Timeout, SteerBin: req.SteerBin}
+	claude := fmt.Sprintf(`{"hook_event_name":"Stop","session_id":"s1","cwd":%q,`+
+		`"transcript_path":"/t/s1.jsonl","prompt_id":"p-1","stop_hook_active":false}`, root)
+	codex := fmt.Sprintf(`{"hook_event_name":"Stop","session_id":"s2","cwd":%q,`+
+		`"transcript_path":"/t/rollout.jsonl","turn_id":null}`, root)
+
+	d, reply := StopHook("claude-code", []byte(claude), opts)
+	if d.Disposition != DispositionBlock || reply == nil {
+		t.Fatalf("claude stop: %+v; want a block", d)
+	}
+	StopHook("codex", []byte(codex), opts)
+
+	runs, err := OracleRuns(root)
+	if err != nil || len(runs) != 2 {
+		t.Fatalf("runs %d (%v); want 2", len(runs), err)
+	}
+	first, second := runs[0], runs[1]
+	if first.Version != 2 || first.BlockReason != reply.Reason {
+		t.Errorf("recorded block reason %q (version %d); want the reply's reason %q", first.BlockReason, first.Version, reply.Reason)
+	}
+	if !strings.HasSuffix(reply.Reason, "\n"+runIDLabel+first.RunID) {
+		t.Errorf("block reason does not end naming run %s:\n%s", first.RunID, reply.Reason)
+	}
+	if got := fmt.Sprint(first.Locators); got != "map[prompt_id:p-1 transcript_path:/t/s1.jsonl]" {
+		t.Errorf("claude locators %s", got)
+	}
+	if first.StopHookActive == nil || *first.StopHookActive {
+		t.Errorf("claude stop_hook_active %v; want a recorded false", first.StopHookActive)
+	}
+	if got := fmt.Sprint(second.Locators); got != "map[transcript_path:/t/rollout.jsonl turn_id:]" {
+		t.Errorf("codex locators %s; want a null turn_id kept as present and empty", got)
+	}
+	if second.StopHookActive != nil {
+		t.Errorf("codex stop_hook_active %v; want absent, the payload carried none", *second.StopHookActive)
+	}
+}
+
+// Every run records the working tree it judged, allow and yield included, so a
+// later reader can tell a turn that changed nothing from one that fixed code.
+func TestStopRecordsTheTreeEachRunJudged(t *testing.T) {
+	root, req := stopRepo(t, map[string]string{"a": "exit 1\n"}, "")
+	Stop(req)
+	Stop(req)
+	writeFile(t, root, "src/edit.txt", "a change\n")
+	Stop(req)
+	writeFile(t, root, ".steer/checks/a.sh", "exit 0\n")
+	Stop(req)
+
+	runs, err := OracleRuns(root)
+	if err != nil || len(runs) != 4 {
+		t.Fatalf("runs %d (%v); want 4", len(runs), err)
+	}
+	for i, r := range runs {
+		if r.Tree == "" {
+			t.Errorf("run %d (%s) recorded no tree", i, r.Disposition)
+		}
+	}
+	if runs[0].Tree != runs[1].Tree {
+		t.Errorf("block and yield on one tree recorded %s and %s", runs[0].Tree, runs[1].Tree)
+	}
+	if runs[1].Tree == runs[2].Tree || runs[2].Tree == runs[3].Tree {
+		t.Errorf("an edit left the recorded tree unchanged: %s %s %s", runs[1].Tree, runs[2].Tree, runs[3].Tree)
+	}
+}
