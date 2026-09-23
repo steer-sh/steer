@@ -1,8 +1,9 @@
 # Report scenarios
 
 Seven saved snapshots covering the seven decisions a reader arrives at `/steer-report`
-with. `scenarios.py` builds each one over `base_status.json`; `../report_scenarios.py`
-feeds them to the skill headlessly and writes the reports into `out/`.
+with. `scenarios.py` builds each one over `base_status.json` as a status snapshot,
+its `steer fix score --json` rows and a queue; `../report_scenarios.py` feeds them to
+the skill headlessly and writes the reports into `out/`.
 
 There is no mechanical oracle for the prose. The runner regenerates; a person judges.
 Each report's first line names the skill files the run opened beside `SKILL.md`. A

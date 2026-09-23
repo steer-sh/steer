@@ -143,8 +143,11 @@ is in the same state when the teammate used a different harness or did not commi
 their harness configuration. Read the two readings that name this:
 
 ```bash
-"${STEER_BIN}" status --json
+"${STEER_BIN}" status --json > "${TMPDIR:-/tmp}/steer-setup-status.json"
 ```
+
+Read that file with the Read tool, to its end; a harness can show only the start
+of a long command output.
 
 In `posture.masters`, a row whose `state` is `detached` is an installed harness
 that runs none of that scope's guards. In `posture.rules`, a row whose `state` is

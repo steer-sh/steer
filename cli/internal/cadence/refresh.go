@@ -24,8 +24,9 @@ import (
 // removed after its split. v11 removes the auto-denials corpus row. v12 replaces
 // the per-cluster transcript candidates with one pointer row. v13 queues no record
 // for a ledger its resolver owes or closed as a miss. v14 queues no record for an
-// unknown scope or a session with no project.
-const QueueVersion = 14
+// unknown scope or a session with no project. v15 carries scope.repo_root, the
+// exact repository root a v3 scope binds.
+const QueueVersion = 15
 
 // maxCandidateExamples bounds the snippets a pointer row carries. The row exists
 // to say how big the ungrouped pile is; the examples show its shape, and the

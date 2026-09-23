@@ -28,7 +28,7 @@ func TestConvertersReadObservationAndCoverage(t *testing.T) {
 	record := mine.Record{
 		"id": "r", "class": "c", "match": "boom", "tier": "check",
 		"status": "active", "installed_ts": 5000,
-		"scope": map[string]any{"version": mine.ScopeVersion, "repo": "steer", "path": `\.go$`},
+		"scope": map[string]any{"version": mine.ScopeVersion, "repo": "steer", "repo_root": "/w/steer", "path": `\.go$`},
 	}
 	scored, err := mine.ScoreRecord(record, mine.EvidenceSet{Chains: mine.BuildChains(rows, false)})
 	if err != nil {
@@ -38,7 +38,7 @@ func TestConvertersReadObservationAndCoverage(t *testing.T) {
 	if obs.Coverage.Before["eligible"] == nil {
 		t.Fatalf("observation lost coverage: %#v", obs)
 	}
-	if got := ScopeOf(scored["scope"]); got == nil || got.Repo != "steer" || got.Path != `\.go$` {
+	if got := ScopeOf(scored["scope"]); got == nil || got.Repo != "steer" || got.RepoRoot != "/w/steer" || got.Path != `\.go$` {
 		t.Fatalf("scope did not survive conversion: %#v", got)
 	}
 	if got := CoverageOf(scored["before_coverage"]); got.Total == 0 || got.Total != got.Eligible+got.Ineligible+got.Unknown {
@@ -65,7 +65,7 @@ func TestQueueVersionAndObservationRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(data, &back); err != nil {
 		t.Fatal(err)
 	}
-	if back.Version != 14 || QueueVersion != 14 {
+	if back.Version != 15 || QueueVersion != 15 {
 		t.Fatalf("queue version drifted: %d", back.Version)
 	}
 	if len(back.Interventions) != 1 || !back.Interventions[0].Observation.Recurrence.Occurred ||

@@ -173,7 +173,7 @@ func intPtr(n int) *int           { return &n }
 // so a renamed or reordered json tag fails here, the agent-contract guard.
 func TestJSONContractIsStable(t *testing.T) {
 	s := &SystemStatus{
-		StatusVersion: 26,
+		StatusVersion: 27,
 		GeneratedAt:   "2026-01-01T00:00:00Z",
 		Posture: Posture{
 			Instrument: "agy@sha", Reviewer: "gemini", Ledger: "/l.jsonl",
@@ -240,13 +240,14 @@ func TestJSONContractIsStable(t *testing.T) {
 			Corpus: mine.CorpusReviewFindings, Unit: mine.UnitChain,
 			Before: cadence.Incidence{Hits: 12, Units: 12, Rate: 1}, After: cadence.Incidence{Hits: 0, Units: 12, Rate: 0},
 			Observation: mine.Observation{
+				Recurrence: mine.Recurrence{Occurred: true, Matches: 1},
 				Firing:     mine.FiringActivity{Applicable: true, LogPresent: true, HookID: "no-widget-flag", Scope: mine.FiringScopeWindowPeriod, Rows: 3, Units: 2},
 				Coverage:   mine.ObservationCoverage{Before: map[string]any{"total": 14, "eligible": 12, "ineligible": 1, "unknown": 1, "unknown_scope": 1}, After: map[string]any{"total": 13, "eligible": 12, "unknown": 1, "unknown_evidence": 1, "pending": 1}, ZeroEligibleAfter: false},
 				Provenance: mine.ObservationProvenance{Kind: mine.ProvenanceReviewer, Before: []string{"a"}, After: []string{"a", "b"}},
 			},
 			Artifact: &cadence.Artifact{ID: "no-widget-flag", Scope: "global", State: cadence.ArtifactPresent,
 				Removed: "2026-01-02T03:04:05.000000000Z"},
-			Scope:          &cadence.Scope{Version: 1, Repo: "steer.*", Path: `\.go$`},
+			Scope:          &cadence.Scope{Version: 3, Repo: "steer.*", RepoRoot: "/w/steer", Path: `\.go$`},
 			BeforeCoverage: cadence.Coverage{Total: 14, Eligible: 12, Ineligible: 1, Unknown: 1, UnknownScope: 1},
 			AfterCoverage:  cadence.Coverage{Total: 15, Eligible: 12, Unknown: 3, UnknownEvidence: 3, Pending: 1, LedgerMissed: 1, LedgerOverdue: 1, PartialExposure: 1},
 		}, {
@@ -270,7 +271,7 @@ func TestJSONContractIsStable(t *testing.T) {
 			Host: "h", StartTS: 1000, Rounds: 2, Files: 1, Findings: 1, Accepted: 1, Sessions: 1, Terminal: "clean",
 		}},
 		Attention: AttentionQueue{
-			Interventions: []cadence.Intervention{},
+			Interventions: []cadence.Intervention{{ID: "widget-flag", Class: "widget flag loss", Match: "widget.*flag"}},
 			Unscored:      []string{},
 			Candidates:    []cadence.Candidate{},
 			Checks: []cadence.CheckWork{{
@@ -289,9 +290,16 @@ func TestJSONContractIsStable(t *testing.T) {
 			{Corpus: "review-findings", Present: true, Size: 24, Path: "/state/review"},
 			{Corpus: "transcript-friction", Present: true, Size: 40, Path: "/state/sessions"},
 		},
-		Hooks:   []HookInfo{{Name: "no-console", Scope: "global", Source: "generated", Rule: "no console.log"}},
-		Presets: []PresetInfo{{Name: "shell-safety", Bundle: "security", Description: "block risky shell", Enabled: true, Drifted: false}},
-		Rules:   []RuleInfo{{ID: "config-path", Scope: "global", Text: "resolve config from the repo root"}},
+		Hooks: []HookInfo{
+			{Name: "no-console", Scope: "project", Source: "manual", Rule: "no console.log here"},
+			{Name: "no-console", Scope: "global", Source: "generated", Rule: "no console.log"},
+		},
+		Presets: []PresetInfo{
+			{Name: "shell-safety", Scope: "project", Bundle: "security", Description: "block risky shell", Enabled: false},
+			{Name: "shell-safety", Scope: "global", Bundle: "security", Description: "block risky shell", Enabled: true, Drifted: true},
+			{Name: "env-files", Scope: "global", Bundle: "security", Description: "block .env reads", Enabled: true},
+		},
+		Rules: []RuleInfo{{ID: "config-path", Scope: "global", Text: "resolve config from the repo root"}},
 		Addenda: []AddendumInfo{{ID: "fp-sort", Scope: "project", Text: "sorted output is fine",
 			HeadText: "sorted output is not a finding", State: AddendumUncommittedChange}},
 		Team:          TeamState{Present: true, Path: "steer-team.lock.json", HooksLocked: 3, CatalogVersion: "v7"},
@@ -307,7 +315,7 @@ func TestJSONContractIsStable(t *testing.T) {
 }
 
 const goldenStatusJSON = `{
-  "status_version": 26,
+  "status_version": 27,
   "generated_at": "2026-01-01T00:00:00Z",
   "posture": {
     "instrument": "agy@sha",
@@ -344,9 +352,7 @@ const goldenStatusJSON = `{
         "scope": "global",
         "registered": true,
         "effective": true,
-        "timeout": 30,
         "trust": "not-applicable",
-        "command": "/h/.steer/bin/steer commit-gate backfill",
         "resolvable": "resolvable"
       },
       {
@@ -489,12 +495,25 @@ const goldenStatusJSON = `{
       "class": "widget flag loss",
       "problem": "the parser drops a flag and the reviewer catches it after the fact",
       "intervention": "a guard refuses a parser branch that drops a flag",
-      "legacy_note": "guard tier 2",
-      "match": "widget.*flag",
       "tier": "guard",
       "target": "guard.py",
       "status": "active",
       "hook_id": "no-widget-flag",
+      "scope": {
+        "version": 3,
+        "repo": "steer.*",
+        "repo_root": "/w/steer",
+        "path": "\\.go$"
+      },
+      "artifact": {
+        "id": "no-widget-flag",
+        "scope": "global",
+        "state": "present",
+        "removed": "2026-01-02T03:04:05.000000000Z"
+      },
+      "corpus": "review-findings",
+      "unit": "chain",
+      "recurred": true,
       "before": {
         "hits": 12,
         "units": 12,
@@ -504,127 +523,25 @@ const goldenStatusJSON = `{
         "hits": 0,
         "units": 12,
         "rate": 0
-      },
-      "observation": {
-        "counts": {
-          "split_ts": 0,
-          "observed_ts": 0,
-          "unit": "",
-          "before": {
-            "hits": 0,
-            "eligible": 0,
-            "first_activity_ts": 0,
-            "last_activity_ts": 0
-          },
-          "after": {
-            "hits": 0,
-            "eligible": 0,
-            "first_activity_ts": 0,
-            "last_activity_ts": 0
-          }
-        },
-        "recurrence": {
-          "occurred": false,
-          "matches": 0
-        },
-        "firing": {
-          "applicable": true,
-          "log_present": true,
-          "hook_id": "no-widget-flag",
-          "scope": "window_period",
-          "class_scoped": false,
-          "rows": 3,
-          "units": 2
-        },
-        "fixtures": {
-          "applicable": false
-        },
-        "checks": {
-          "applicable": false,
-          "stream_present": false,
-          "other_host": false,
-          "class_scoped": false,
-          "executions": 0,
-          "blocked": 0,
-          "changed_detector": 0,
-          "units": 0
-        },
-        "coverage": {
-          "before": {
-            "eligible": 12,
-            "ineligible": 1,
-            "total": 14,
-            "unknown": 1,
-            "unknown_scope": 1
-          },
-          "after": {
-            "eligible": 12,
-            "pending": 1,
-            "total": 13,
-            "unknown": 1,
-            "unknown_evidence": 1
-          },
-          "zero_eligible_after": false
-        },
-        "provenance": {
-          "kind": "reviewer",
-          "before": [
-            "a"
-          ],
-          "after": [
-            "a",
-            "b"
-          ]
-        },
-        "declined": false
-      },
-      "artifact": {
-        "id": "no-widget-flag",
-        "scope": "global",
-        "state": "present",
-        "removed": "2026-01-02T03:04:05.000000000Z"
-      },
-      "scope": {
-        "version": 1,
-        "repo": "steer.*",
-        "path": "\\.go$"
-      },
-      "before_coverage": {
-        "total": 14,
-        "eligible": 12,
-        "ineligible": 1,
-        "unknown": 1,
-        "unknown_scope": 1,
-        "unknown_evidence": 0,
-        "pending": 0,
-        "ledger_missed": 0,
-        "ledger_overdue": 0,
-        "partial_exposure": 0
-      },
-      "after_coverage": {
-        "total": 15,
-        "eligible": 12,
-        "ineligible": 0,
-        "unknown": 3,
-        "unknown_scope": 0,
-        "unknown_evidence": 3,
-        "pending": 1,
-        "ledger_missed": 1,
-        "ledger_overdue": 1,
-        "partial_exposure": 1
-      },
-      "corpus": "review-findings",
-      "unit": "chain"
+      }
     },
     {
       "id": "taste-nit",
       "class": "taste nit",
       "problem": "the reviewer raises a wording preference with no defect behind it",
       "intervention": "no suitable fix was identified",
-      "match": "nit",
       "tier": "check",
       "target": "check.sh",
       "status": "rejected",
+      "scope": {
+        "version": 1,
+        "all": true
+      },
+      "artifact": null,
+      "corpus": "transcript-friction",
+      "unit": "session",
+      "signal_kind": "user_corrections",
+      "recurred": false,
       "before": {
         "hits": 0,
         "units": 0,
@@ -634,106 +551,7 @@ const goldenStatusJSON = `{
         "hits": 0,
         "units": 0,
         "rate": 0
-      },
-      "observation": {
-        "counts": {
-          "split_ts": 0,
-          "observed_ts": 0,
-          "unit": "",
-          "before": {
-            "hits": 0,
-            "eligible": 0,
-            "first_activity_ts": 0,
-            "last_activity_ts": 0
-          },
-          "after": {
-            "hits": 0,
-            "eligible": 0,
-            "first_activity_ts": 0,
-            "last_activity_ts": 0
-          }
-        },
-        "recurrence": {
-          "occurred": false,
-          "matches": 0
-        },
-        "firing": {
-          "applicable": false,
-          "log_present": false,
-          "class_scoped": false,
-          "rows": 0,
-          "units": 0
-        },
-        "fixtures": {
-          "applicable": false
-        },
-        "checks": {
-          "applicable": true,
-          "attribution": "check-id",
-          "stream_present": true,
-          "registered_host": "host-a",
-          "other_host": false,
-          "check_id": "json-contract",
-          "repo": "/w/steer",
-          "scope": "eligible_units",
-          "class_scoped": true,
-          "executions": 4,
-          "outcomes": {
-            "failed": 1,
-            "passed": 3
-          },
-          "blocked": 1,
-          "changed_detector": 1,
-          "units": 2,
-          "newest_ts": 1710
-        },
-        "coverage": {
-          "before": {},
-          "after": {},
-          "zero_eligible_after": true
-        },
-        "provenance": {
-          "kind": "parser",
-          "before": null,
-          "after": null
-        },
-        "declined": true
-      },
-      "artifact": null,
-      "reason": "not mechanizable",
-      "reopen": "incidence doubles",
-      "rejected_ts": 1700,
-      "scope": {
-        "version": 1,
-        "all": true
-      },
-      "before_coverage": {
-        "total": 0,
-        "eligible": 0,
-        "ineligible": 0,
-        "unknown": 0,
-        "unknown_scope": 0,
-        "unknown_evidence": 0,
-        "pending": 0,
-        "ledger_missed": 0,
-        "ledger_overdue": 0,
-        "partial_exposure": 0
-      },
-      "after_coverage": {
-        "total": 0,
-        "eligible": 0,
-        "ineligible": 0,
-        "unknown": 0,
-        "unknown_scope": 0,
-        "unknown_evidence": 0,
-        "pending": 0,
-        "ledger_missed": 0,
-        "ledger_overdue": 0,
-        "partial_exposure": 0
-      },
-      "corpus": "transcript-friction",
-      "unit": "session",
-      "signal_kind": "user_corrections"
+      }
     }
   ],
   "summary": {
@@ -743,21 +561,10 @@ const goldenStatusJSON = `{
       "repair": 1
     }
   },
-  "chains": [
-    {
-      "host": "h",
-      "start_ts": 1000,
-      "rounds": 2,
-      "files": 1,
-      "findings": 1,
-      "accepted": 1,
-      "rejected": 0,
-      "sessions": 1,
-      "terminal": "clean"
-    }
-  ],
   "attention": {
-    "interventions": [],
+    "interventions": [
+      "widget-flag"
+    ],
     "unscored": [],
     "candidates": [],
     "checks": [
@@ -809,6 +616,12 @@ const goldenStatusJSON = `{
   "hooks": [
     {
       "name": "no-console",
+      "scope": "project",
+      "source": "manual",
+      "rule": "no console.log here"
+    },
+    {
+      "name": "no-console",
       "scope": "global",
       "source": "generated",
       "rule": "no console.log"
@@ -816,11 +629,24 @@ const goldenStatusJSON = `{
   ],
   "presets": [
     {
+      "name": "env-files",
+      "bundle": "security",
+      "description": "block .env reads",
+      "enabled_scopes": [
+        "global"
+      ],
+      "drifted_scopes": []
+    },
+    {
       "name": "shell-safety",
       "bundle": "security",
       "description": "block risky shell",
-      "enabled": true,
-      "drifted": false
+      "enabled_scopes": [
+        "global"
+      ],
+      "drifted_scopes": [
+        "global"
+      ]
     }
   ],
   "rules": [

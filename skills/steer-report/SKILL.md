@@ -41,30 +41,39 @@ Respect the user's choice. If the conversation is fresh, skip the warning and pr
 
 ## Step 1: Snapshot the loop, refresh the queue, then audit
 
-First read the whole loop's posture and full class inventory in one snapshot:
+A deterministic tier runs this loop's mechanical half — scoring, corpus sweeps, threshold checks — with no model. It may have run on a schedule already; run it again now, synchronously, so you never read a stale queue. It takes seconds and spends no tokens. Run it first, so the snapshot and the scores below read the session history it refreshed.
 
 ```bash
 STEER_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}"
 STEER_BIN="${STEER_ROOT:+${STEER_ROOT}/scripts/steer}"
 STEER_BIN="${STEER_BIN:-steer}"
-"${STEER_BIN}" status --json > "${TMPDIR:-/tmp}/steer-status.json"
+"${STEER_BIN}" report refresh --days 30
 ```
 
-Read `${TMPDIR:-/tmp}/steer-status.json` **once**. The `interventions[]` array is
-the **full** inventory — every live class across every tier. This is your dedup
-source: when you cluster new candidates in Step 3, drop any class already here. A
-class in this list is already decided, so a new hook for it is a rework of that
-record. The schema is documented in "The `steer status --json` contract" below.
-Fail soft — if the command errors, say so in one line, continue, and read
-`audit.md` anyway: without a snapshot, nothing shows that there is no fix to audit.
-
-A deterministic tier runs this loop's mechanical half — scoring, corpus sweeps, threshold checks — with no model. It may have run on a schedule already; run it again now, synchronously, so you never read a stale queue. It takes seconds and spends no tokens.
+Then read the whole loop's posture and full class inventory in one snapshot, and
+each live record's detail beside it:
 
 ```bash
-steer report refresh --days 30
+"${STEER_BIN}" status --json > "${TMPDIR:-/tmp}/steer-status.json"
+"${STEER_BIN}" fix score --json > "${TMPDIR:-/tmp}/steer-score.json"
 ```
 
-Then Read the queue **once**: `~/.steer/state/steer-report/queue.json` (`version: 14`). It holds:
+Read each file **once**, with the Read tool, to its end. The `interventions[]`
+array of the snapshot is the **full** inventory — one summary row per live class
+across every tier. This is your dedup source: when you cluster new candidates in
+Step 3, drop any class already here. A class in this list is already decided, so a
+new hook for it is a rework of that record. The schema is documented in "The
+`steer status --json` contract" below.
+
+The score file is an array with one row per live record, carrying its
+`observation`, its coverage maps, and `reason` / `reopen` on a refused record.
+Join it to `interventions[]` by exact `id`, never by position. A summary row with
+no score row, or a score row with no summary row, is incomplete evidence: name the
+id and draw no audit conclusion for it. Fail soft — if a command errors, say so in
+one line, continue, and read `audit.md` anyway: without a snapshot, nothing shows
+that there is no fix to audit.
+
+Then Read the queue **once**: `~/.steer/state/steer-report/queue.json` (`version: 15`). It holds:
 
 - `interventions[]` — full contract records the tier flagged as **asking for a reader**: the class recurred after the split, an absent guard audit log or missing check evidence left the fix's activity unread, the record carries no frozen scope, the fix it binds is `absent` or `unreadable`, or the fix is in place but carries `artifact.removed`. These carry a `match`; they are the audit's action list, pre-filtered. Each carries `problem` and `intervention` — the record's own explanation of what goes wrong and what it does about it, authored when the class was found. Lead your report with those rather than with the class name or the regex, and correct one that no longer describes the evidence with `steer fix describe ID`, which changes no window. Each also carries the conditions the counts were taken under: `corpus` and `unit` (`review-findings` counts by `chain`, `transcript-friction` by `session` — never compare the two rates), `signal_kind` on a session-unit record, `scope` (the frozen eligibility rule, `null` on a legacy record), `before_coverage` / `after_coverage` (`total`, `eligible`, `ineligible`, `unknown`, `unknown_scope`, `unknown_evidence`, `pending`, `ledger_missed`, `ledger_overdue`, `partial_exposure`), `observation` — the seven field blocks documented in `audit.md` — and `artifact`, where the fix the record binds stands now.
 - `unscored[]` — ids of records no engine reads. Report their existence; do not read a result into them.
@@ -72,15 +81,11 @@ Then Read the queue **once**: `~/.steer/state/steer-report/queue.json` (`version
 - `corpora[]` — one row per corpus (`review-findings`, `transcript-friction`) with `present` and `size`. Relay this sweep to the user in one sentence. When `review-findings` is absent or empty, a second sentence says what comes next. If a `posture.commit_gate[]` row in the snapshot reads `effective: true`, the commit gate reviews each commit from now on, and a later `/steer-report` can mine those reviews for problems. If no row does, no review history collects until `/steer-setup` arms the commit gate.
 - `checks[]` — the open steps in the repository the refresh ran in, each with `kind`, `repo`, an optional `check_id`, a `detail` and the `fix` command that clears it. `not-adopted` is a repository declaring checks that this machine never authorized to run at the end of a turn (`steer check adopt`). `never-validated` is a declared check whose cases were never replayed here, so nothing shows it fails on the problem it names (`steer check test <id>`). `integration-failure` is a passing `check.sh` that ran no declared check — the script's wiring, never a failed assertion (`steer check init` prints the managed line to add). A **stale** receipt is deliberately not here: a stale check keeps running, and `steer status --json` carries the label. These are states of a declaration, not recurrence measured over a window, so they carry no count and never enter a before/after reading.
 
-The queue tells you what is pending. The full dumps below are the raw material you cluster over. Read the review-history fixes for the complete audit — the queue lists only the ones asking for a reader, not the quiet ones worth showing too. If this machine has no commit-review ledger, `mine score` reports an empty corpus. Say so in one line, then run the reading pass in `audit.md` anyway:
+The queue tells you what is pending. The full dumps below are the raw material you cluster over. The score file holds every live record for the complete audit — the queue lists only the ones asking for a reader, not the quiet ones worth showing too. When the score file is `[]`, this machine records no fix. Say so in one line, then run the reading pass in `audit.md` anyway:
 
 > No fixes to audit on this machine.
 
 Guard evidence is a separate stream from review history, so an absent ledger says nothing about what the installed guards blocked.
-
-```bash
-steer fix score
-```
 
 `steer fix` is the fix command set — `match`, `register`, `reject`, `scope`, `score`,
 `list`, `describe`, `retire`. `steer intervention` is the same set under its former
@@ -140,7 +145,7 @@ Digest schema (`digest_version: 3`):
 
 The digest is size-capped: the CLI evicts the lowest-scoring clusters to fit, and reports honesty in `stats`.
 
-### The `steer status --json` contract (`status_version: 26`)
+### The `steer status --json` contract (`status_version: 27`)
 
 Step 1 reads this snapshot for posture and the full class inventory. The unit is
 the failure class and what the corpus recorded about it, not the hook count. This
@@ -175,12 +180,19 @@ disclosed and no longer puts a record under repair. v23 does the same for an
 a guard store whose manifest a reader refused, so an unreadable store no longer
 reads as a store holding nothing. v26 adds `posture.masters[].sources` and
 `store_sources`: the guard source a runner carries, read against the store's own
-guard files.
+guard files. v27 is a summary: one row per live record without its `observation`,
+match or coverage maps, which `steer fix score --json` carries by the same `id`;
+`attention.interventions` holds ids; `hooks` and `presets` read both scopes;
+`resolver` rows keep only their arming readings; `scope` carries `repo_root`; and
+`chains` is gone.
 
 - `status_version` — the schema version. `--json` is a stable agent contract.
 - `posture` — the arming state: `instrument` (reviewer model / runs / prompt
-  digest), `reviewer`, `ledger` path, and `commit_gate[]` / `resolver[]`. Each row carries `harness`, `scope`, `registered`, `effective`,
-  `trust`, `command`, `resolvable`, `observed` and `observed_corpus`. A
+  digest), `reviewer`, `ledger` path, and `commit_gate[]` / `resolver[]`. A
+  `commit_gate` row carries `harness`, `scope`, `registered`, `effective`,
+  `timeout`, `trust`, `command`, `resolvable`, `observed` and `observed_corpus`; a
+  `resolver` row carries `harness`, `scope`, `registered`, `effective`, `trust` and
+  `resolvable`. A
   registration is three separate readings, and only the first is what the
   configuration says. `command` is the command the registration names, verbatim.
   `resolvable` is whether that command resolves — `resolvable`, `missing`,
@@ -276,15 +288,18 @@ guard files.
   `integration_failure`:** a passing `check.sh` that ran no declared check is the
   script's wiring and never a failed assertion — add the managed line naming
   `steer check exec --all` or `steer check go-test`.
-- `interventions[]` — the **full** inventory, one row per live class, each with
-  `id`, `class`, `problem`, `intervention`, `match`, `tier`, `status` and its
-  measurement conditions. The rest of each row's fields are documented in
-  `audit.md`, which Step 1 reads whenever this array holds a row.
+- `interventions[]` — the **full** inventory, one summary row per live class:
+  `id`, `class`, `problem`, `intervention`, `tier`, `target`, `status`,
+  `hook_id`, `scope`, `artifact`, `corpus`, `unit`, `signal_kind`, `recurred`
+  (the record matched work after its split) and `before` / `after` (`hits`,
+  `units`, `rate`). Each row's detail is the `steer fix score --json` row with the
+  same `id`; both are documented in `audit.md`, which Step 1 reads whenever this
+  array holds a row.
 - `summary` — `total` plus `counts` by action section (`inspect`, `repair`,
   `observe`).
-- `chains[]` — recent review chains, findings split `accepted` / `rejected`.
-- `attention` — the subset asking for a reader: `interventions[]` (a recurrence,
-  an absent audit log or check evidence, or no frozen scope), `candidates[]` (no `match` yet),
+- `attention` — the subset asking for a reader: `interventions[]` (the ids of
+  records with a recurrence, an absent audit log or check evidence, or no frozen
+  scope; the queue carries their full rows), `candidates[]` (no `match` yet),
   `unscored[]` (ids of records no engine reads), and `checks[]` — the open steps
   in this repository's check tier, the same rows the queue carries.
 - `telemetry` — corpus sizes: `review_chains`, `audit_firings`, `check_blocks`
@@ -293,10 +308,12 @@ guard files.
   `sessions`, `firings`, `check_blocks` and `chains`, so a harness that contributed
   nothing reads differently from one that was never mined.
 - `corpora[]` — one row per corpus with `present`, `size` and `path`.
-- `hooks[]` — the registered managed hooks in the active scope: `name`, `scope`,
-  `source`, `rule`.
-- `presets[]` — the catalog roster: `name`, `bundle`, `description`, `enabled`,
-  `drifted`.
+- `hooks[]` — the registered managed hooks in both scopes: `name`, `scope`,
+  `source`, `rule`. One name can appear once per scope; `scope` and `name`
+  together identify a guard.
+- `presets[]` — the catalog roster, one row per preset: `name`, `bundle`,
+  `description`, and `enabled_scopes` / `drifted_scopes`, the scopes it is enabled
+  in and the scopes whose installed copy drifted from the catalog.
 - `rules[]` — the instruction-tier rules in both stores: `id`, `scope`, `text`.
   Whether an agent's instructions carry one is `posture.rules[].missing`.
 - `addenda[]` — the review addendum entries in both stores: `id`, `scope`,

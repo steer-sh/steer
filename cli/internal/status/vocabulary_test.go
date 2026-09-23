@@ -111,8 +111,9 @@ func TestNoMachineWordReachesADisplayString(t *testing.T) {
 	}
 }
 
-// reportSkillQuotes returns the blockquote lines of the steer-report skill's files,
-// the phrases the skill hands a reader, with inline code removed: a command or an
+// reportSkillQuotes returns the blockquote lines of the bundled skills that speak to
+// a reader — steer-report's files, steer and steer-setup — the phrases a skill hands
+// a reader, with inline code removed: a command or an
 // identifier stays verbatim. A line without `>` that directly follows a quote line
 // is a lazy continuation and belongs to the quote. Fenced code blocks are skipped.
 func reportSkillQuotes(t *testing.T) map[string][]string {
@@ -121,6 +122,7 @@ func reportSkillQuotes(t *testing.T) map[string][]string {
 	if err != nil || len(paths) == 0 {
 		t.Fatalf("no steer-report skill files found: %v", err)
 	}
+	paths = append(paths, "../../../skills/steer/SKILL.md", "../../../skills/steer-setup/SKILL.md")
 	quote := regexp.MustCompile(`^\s*>\s?(.*)$`)
 	code := regexp.MustCompile("`[^`]*`")
 	blockStart := regexp.MustCompile(`^(#|[-*+] |\d+\. |\|)`)
@@ -153,7 +155,7 @@ func reportSkillQuotes(t *testing.T) map[string][]string {
 	return out
 }
 
-// The report skill writes each phrase it hands a reader as a blockquote, and the
+// Each skill writes the phrases it hands a reader as blockquotes, and the
 // description a rejection stores is shown by a later report. Neither may carry a
 // machine word. A phrase the skill describes in prose instead is out of reach here.
 func TestNoMachineWordReachesReportReaderText(t *testing.T) {

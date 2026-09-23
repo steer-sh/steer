@@ -42,8 +42,9 @@ OUT_DIR = Path(__file__).parent / "scenarios" / "out"
 PROMPT = """/steer-report
 
 This is a saved scenario, not this machine. Run no steer command at all.
-Read {status} as the output of `steer status --json`, and {queue} as the
-refreshed queue. Skip Step 0, Step 2 and Step 3.
+Read {status} as the output of `steer status --json`, {score} as the output of
+`steer fix score --json`, and {queue} as the refreshed queue. Skip Step 0, Step 2
+and Step 3.
 
 Produce only the prose a user reads: the audit of the records in the snapshot,
 and the proposals for the candidates in the queue. End each proposal with the
@@ -77,7 +78,7 @@ def run_scenario(name: str, model: str) -> tuple[str, float, list[str]]:
         box = Sandbox(tmp)
         work = box.root / "work"
         work.mkdir()
-        status, queue = scenarios.write(name, str(work))
+        status, score, queue = scenarios.write(name, str(work))
         # The run reads the WORKING TREE's skill, not whichever copy is
         # installed on this machine: the prose under test is the file just
         # edited. It is copied in as a project skill of the scenario
@@ -86,7 +87,7 @@ def run_scenario(name: str, model: str) -> tuple[str, float, list[str]]:
         shutil.copytree(SKILL_SRC, work / ".claude" / "skills" / "steer-report")
         cmd = [
             "claude", "-p", PROMPT.format(
-                status=status, queue=queue,
+                status=status, score=score, queue=queue,
                 request=("I have decided to remove the no-bare-python guard. Explain "
                          "what removal changes and how it differs from stopping tracking."
                          if name == "remove-a-guard" else "")),

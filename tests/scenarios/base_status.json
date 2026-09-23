@@ -1,5 +1,5 @@
 {
-  "status_version": 11,
+  "status_version": 27,
   "generated_at": "2026-09-01T09:00:00Z",
   "posture": {
     "instrument": "gemini-3.7-flash-high/3/95653688/go-findings-v3-shell",
@@ -103,9 +103,7 @@
         "scope": "global",
         "registered": true,
         "effective": true,
-        "timeout": 30,
         "trust": "not-applicable",
-        "command": "/home/example/.steer/bin/steer commit-gate backfill --if-due --apply --quiet",
         "resolvable": "resolvable"
       },
       {
@@ -113,9 +111,7 @@
         "scope": "global",
         "registered": true,
         "effective": true,
-        "timeout": 30,
         "trust": "unknown",
-        "command": "/home/example/.steer/bin/steer commit-gate backfill --if-due --apply --quiet",
         "resolvable": "resolvable"
       },
       {
@@ -123,9 +119,7 @@
         "scope": "global",
         "registered": true,
         "effective": true,
-        "timeout": 30,
         "trust": "record-present-unverified",
-        "command": "/home/example/.steer/bin/steer commit-gate backfill --if-due --apply --quiet",
         "resolvable": "resolvable"
       }
     ],
@@ -179,73 +173,52 @@
         "state": "current",
         "observed": 1788540158
       }
-    ]
+    ],
+    "rules": []
+  },
+  "checks": {
+    "manifest": false,
+    "adopted": false,
+    "runner": [],
+    "checks": [],
+    "latest_run": null
   },
   "interventions": [],
   "summary": {
     "total": 0,
     "counts": {}
   },
-  "chains": [
-    {
-      "host": "example-host",
-      "start_ts": 1788551824,
-      "rounds": 1,
-      "files": 8,
-      "findings": 1,
-      "accepted": 0,
-      "rejected": 1,
-      "sessions": 1
-    },
-    {
-      "host": "example-host",
-      "start_ts": 1788552343,
-      "rounds": 2,
-      "files": 14,
-      "findings": 1,
-      "accepted": 1,
-      "rejected": 0,
-      "sessions": 1,
-      "terminal": "clean"
-    },
-    {
-      "host": "example-host",
-      "start_ts": 1788556838,
-      "rounds": 2,
-      "files": 25,
-      "findings": 6,
-      "accepted": 5,
-      "rejected": 1,
-      "sessions": 1,
-      "terminal": "clean"
-    }
-  ],
   "attention": {
     "interventions": [],
+    "unscored": [],
     "candidates": [],
-    "unscored": []
+    "checks": []
   },
   "telemetry": {
     "review_chains": 211,
     "audit_firings": 19,
+    "check_blocks": 0,
     "session_snapshots": 520,
     "harnesses": [
       {
         "harness": "claude-code",
         "sessions": 307,
         "firings": 5,
+        "check_blocks": 0,
         "chains": 84
       },
       {
         "harness": "codex",
         "sessions": 158,
         "firings": 7,
+        "check_blocks": 0,
         "chains": 7
       },
       {
         "harness": "pi",
         "sessions": 55,
         "firings": 3,
+        "check_blocks": 0,
         "chains": 1
       }
     ]
@@ -270,89 +243,92 @@
       "name": "api-key-detection",
       "bundle": "security",
       "description": "Detect and block hardcoded API keys and secrets in code",
-      "enabled": false,
-      "drifted": false
+      "enabled_scopes": [],
+      "drifted_scopes": []
     },
     {
       "name": "dangerous-python-imports",
       "bundle": "security",
       "description": "Prevent use of dangerous Python serialization libraries",
-      "enabled": false,
-      "drifted": false
+      "enabled_scopes": [],
+      "drifted_scopes": []
     },
     {
       "name": "data-exfiltration-prevention",
       "bundle": "security",
       "description": "Prevent data exfiltration via piping to network tools",
-      "enabled": false,
-      "drifted": false
+      "enabled_scopes": [],
+      "drifted_scopes": []
     },
     {
       "name": "env-dump-prevention",
       "bundle": "security",
       "description": "Prevent environment variable enumeration and exposure",
-      "enabled": false,
-      "drifted": false
+      "enabled_scopes": [],
+      "drifted_scopes": []
     },
     {
       "name": "environment-variable-enumeration-prevention",
       "bundle": "security",
       "description": "Prevent enumeration of all environment variables for security",
-      "enabled": false,
-      "drifted": false
+      "enabled_scopes": [],
+      "drifted_scopes": []
     },
     {
       "name": "eval-usage-security",
       "bundle": "security",
       "description": "Block dangerous eval() usage for security",
-      "enabled": false,
-      "drifted": false
+      "enabled_scopes": [],
+      "drifted_scopes": []
     },
     {
       "name": "hardcoded-secret-reference-prevention",
       "bundle": "security",
       "description": "Prevent hardcoded references to sensitive files and crypto wallets",
-      "enabled": false,
-      "drifted": false
+      "enabled_scopes": [],
+      "drifted_scopes": []
     },
     {
       "name": "package-json-git-deps",
       "bundle": "security",
       "description": "Prevent git dependencies in production dependencies section",
-      "enabled": false,
-      "drifted": false
+      "enabled_scopes": [],
+      "drifted_scopes": []
     },
     {
       "name": "postinstall-script-prevention",
       "bundle": "security",
       "description": "Block postinstall scripts in package.json to prevent supply chain attacks",
-      "enabled": false,
-      "drifted": false
+      "enabled_scopes": [],
+      "drifted_scopes": []
     },
     {
       "name": "python-command-injection",
       "bundle": "security",
       "description": "Prevent command injection vulnerabilities in Python subprocess calls",
-      "enabled": false,
-      "drifted": false
+      "enabled_scopes": [],
+      "drifted_scopes": []
     },
     {
       "name": "recursive-search-prevention",
       "bundle": "security",
       "description": "Prevent dangerous recursive filesystem operations from home directory",
-      "enabled": false,
-      "drifted": false
+      "enabled_scopes": [],
+      "drifted_scopes": []
     },
     {
       "name": "sql-injection-prevention",
       "bundle": "security",
       "description": "Prevent SQL injection by blocking unsafe string formatting in SQL queries",
-      "enabled": false,
-      "drifted": false
+      "enabled_scopes": [],
+      "drifted_scopes": []
     }
   ],
+  "rules": [],
+  "addenda": [],
   "team": {
     "present": false,
     "hooks_locked": 0
-  }
+  },
+  "store_problems": []
 }

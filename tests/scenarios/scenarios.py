@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """The seven saved scenarios the report-comprehension pass reads.
 
-Each scenario is one `steer status --json` snapshot plus the refreshed queue the
-skill reads beside it, built over `base_status.json` — a real snapshot with its
+Each scenario is one `steer status --json` snapshot, the `steer fix score --json`
+rows and the refreshed queue the skill reads beside it, built over
+`base_status.json` — a real snapshot with its
 inventory emptied and its paths scrubbed. The scenarios cover the seven decisions a
 reader arrives with: a new suggestion, an installed guard with observed recurrence,
 reviewer identities that changed between windows, missing review decisions, a
@@ -44,7 +45,7 @@ def _record(**kw):
         "scope": {"version": 1, "all": True},
         "before_coverage": _coverage(0, 0), "after_coverage": _coverage(0, 0),
         # A build input for the observation's firing block, never a stored field:
-        # v11 and v5 carry the join inside `observation.firing`.
+        # the score row carries the join inside `observation.firing`.
         "_firing": {"applicable": False, "log_present": False,
                     "hook_id": "", "firings": 0, "sessions": 0},
     }
@@ -63,6 +64,7 @@ BARE_PYTHON = _record(
     hook_id="no-bare-python", corpus="transcript-friction", unit="session",
     signal_kind="tool_failures",
     scope={"version": 2, "harness": ["claude-code", "codex"]},
+    artifact={"id": "no-bare-python", "scope": "global", "state": "present"},
 )
 
 STALE_COUNT = _record(
@@ -73,6 +75,7 @@ STALE_COUNT = _record(
     match=r"test count|literal count",
     tier="check", target="check.sh",
     scope={"version": 1, "repo": "steer", "path": r"\.go$"},
+    artifact={"state": "unbound"},
 )
 
 
@@ -122,38 +125,54 @@ def _observe(rec, before_ids=None, after_ids=None):
 
 
 def _action(rec):
+    """status.ActionFor: unknown coverage is disclosed, never a repair; only an
+    absent guard log or a missing scope asks for one."""
     obs = rec["observation"]
     if obs["recurrence"]["occurred"]:
         return "inspect"
-    if rec["scope"] is None or any(_gap(c) for c in
-                                   (rec["before_coverage"], rec["after_coverage"])):
+    if rec["scope"] is None:
         return "repair"
     if obs["firing"]["applicable"] and not obs["firing"]["log_present"]:
         return "repair"
     return "observe"
 
 
-def _gap(c):
-    """status.ActionFor's coverage rule: `pending` is counted inside
-    `unknown_evidence` and settles on its own, so only the excess over it and the
-    causes no read can clear are a gap."""
-    return (c["unknown_evidence"] > c["pending"] or c["unknown_scope"] > 0
-            or c["unknown"] - c["unknown_scope"] - c["unknown_evidence"] > 0)
-
-
 def _queued(records):
     keys = ("id", "class", "problem", "intervention", "match", "corpus", "unit",
-            "tier", "target", "hook_id", "before", "after", "observation", "scope",
-            "before_coverage", "after_coverage", "signal_kind")
+            "tier", "target", "hook_id", "before", "after", "observation", "artifact",
+            "scope", "before_coverage", "after_coverage", "signal_kind")
     return [{k: r[k] for k in keys if k in r} for r in records if _action(r) != "observe"]
+
+
+def _summary(rec):
+    """The status v27 row: the record without its observation, match or coverage."""
+    keys = ("id", "class", "problem", "intervention", "tier", "target", "status",
+            "hook_id", "scope", "corpus", "unit", "signal_kind", "before", "after")
+    row = {k: rec[k] for k in keys if k in rec}
+    row["artifact"] = rec.get("artifact")
+    row["recurred"] = rec["observation"]["recurrence"]["occurred"]
+    return row
+
+
+def _score(rec):
+    """The `steer fix score --json` row: the detail, with `chains` as the unit count."""
+    keys = ("id", "class", "tier", "target", "status", "hook_id", "scope",
+            "before_coverage", "after_coverage", "observation", "reason", "reopen",
+            "signal_kind")
+    row = {k: rec[k] for k in keys if k in rec}
+    for side in ("before", "after"):
+        inc = rec[side]
+        row[side] = {"hits": inc["hits"], "chains": inc["units"], "rate": inc["rate"]}
+    return row
 
 
 def _queue(interventions=(), candidates=(), unscored=(), review_size=41):
     return {
-        "version": 5,
+        "version": 15,
         "interventions": _queued(interventions),
         "candidates": list(candidates),
         "unscored": list(unscored),
+        "checks": [],
         "corpora": [
             {"corpus": "review-findings", "present": review_size > 0,
              "size": review_size},
@@ -164,22 +183,24 @@ def _queue(interventions=(), candidates=(), unscored=(), review_size=41):
 
 def _snapshot(records=(), candidates=(), unresolved=0):
     snap = _base()
-    snap["interventions"] = [copy.deepcopy(r) for r in records]
-    # `_firing` built the observation and is no field of the contract.
-    for r in snap["interventions"]:
-        r.pop("_firing", None)
     counts = {}
-    for r in snap["interventions"]:
+    for r in records:
         action = _action(r)
         counts[action] = counts.get(action, 0) + 1
-    snap["summary"] = {"total": len(snap["interventions"]), "counts": counts}
+    snap["interventions"] = [_summary(r) for r in records]
+    snap["summary"] = {"total": len(records), "counts": counts}
     snap["attention"] = {
-        "interventions": _queued(snap["interventions"]),
-        "candidates": list(candidates),
+        "interventions": [r["id"] for r in _queued(records)],
         "unscored": [],
+        "candidates": list(candidates),
+        "checks": [],
     }
     snap["posture"]["unresolved_rows"] = unresolved
     return snap
+
+
+def _scores(records=()):
+    return [_score(r) for r in records]
 
 
 def _new_suggestion():
@@ -189,7 +210,7 @@ def _new_suggestion():
         {"corpus": "review-findings", "undecided_chains": 5,
          "dump": "steer commit-gate mine findings --kind accepted"},
     ]
-    return _snapshot(candidates=cands), _queue(candidates=cands)
+    return _snapshot(candidates=cands), _scores(), _queue(candidates=cands)
 
 
 def _awaiting_evidence():
@@ -203,7 +224,7 @@ def _awaiting_evidence():
                  "hook_id": "no-bare-python", "firings": 2, "sessions": 2},
     )
     _observe(rec)
-    return _snapshot([rec]), _queue([rec])
+    return _snapshot([rec]), _scores([rec]), _queue([rec])
 
 
 def _changed_comparison():
@@ -216,7 +237,7 @@ def _changed_comparison():
     )
     _observe(rec, ["claude/opus-4.6/2 runs/prompt-6f21"],
              ["claude/opus-5/2 runs/prompt-6f21"])
-    return _snapshot([rec]), _queue([rec])
+    return _snapshot([rec]), _scores([rec]), _queue([rec])
 
 
 def _missing_decisions():
@@ -228,7 +249,7 @@ def _missing_decisions():
         after_coverage=_coverage(9, 0, unknown=9, unknown_evidence=9, pending=2),
     )
     _observe(rec)
-    return _snapshot([rec], unresolved=7), _queue([rec])
+    return _snapshot([rec], unresolved=7), _scores([rec]), _queue([rec])
 
 
 def _declined_suggestion():
@@ -249,7 +270,7 @@ def _declined_suggestion():
         before_coverage=_coverage(60, 60), after_coverage=_coverage(41, 41),
     )
     _observe(rec)
-    return _snapshot([rec]), _queue([rec])
+    return _snapshot([rec]), _scores([rec]), _queue([rec])
 
 
 def _remove_a_guard():
@@ -262,7 +283,7 @@ def _remove_a_guard():
                  "hook_id": "no-bare-python", "firings": 31, "sessions": 12},
     )
     _observe(rec)
-    return _snapshot([rec]), _queue([rec])
+    return _snapshot([rec]), _scores([rec]), _queue([rec])
 
 
 def _first_run():
@@ -279,7 +300,6 @@ def _first_run():
          "count": 6, "sessions": 3, "signal_kind": "tool_failures"},
     ]
     snap = _snapshot(candidates=cands)
-    snap["chains"] = []
     snap["corpora"] = [
         {"corpus": "review-findings", "present": False, "size": 0,
          "path": "/home/example/.steer/state/commit-review"},
@@ -297,10 +317,10 @@ def _first_run():
             row["observed"] = 0
     for m in snap["posture"]["masters"]:
         m.pop("observed", None)
-    return snap, _queue(candidates=cands, review_size=0)
+    return snap, _scores(), _queue(candidates=cands, review_size=0)
 
 
-# SCENARIOS maps a name to a builder returning (status snapshot, queue).
+# SCENARIOS maps a name to a builder returning (status snapshot, score rows, queue).
 SCENARIOS = {
     "new-suggestion": _new_suggestion,
     "awaiting-evidence": _awaiting_evidence,
@@ -313,12 +333,14 @@ SCENARIOS = {
 
 
 def write(name, outdir):
-    """Write one scenario's two files into outdir and return their paths."""
-    snap, queue = SCENARIOS[name]()
+    """Write one scenario's three files into outdir and return their paths."""
+    snap, scores, queue = SCENARIOS[name]()
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
     status_path = outdir / "status.json"
+    score_path = outdir / "score.json"
     queue_path = outdir / "queue.json"
     status_path.write_text(json.dumps(snap, indent=2) + "\n")
+    score_path.write_text(json.dumps(scores, indent=2) + "\n")
     queue_path.write_text(json.dumps(queue, indent=2) + "\n")
-    return status_path, queue_path
+    return status_path, score_path, queue_path

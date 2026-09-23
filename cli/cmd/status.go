@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/cadence"
+	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/evidence"
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/reviewers"
@@ -30,10 +31,11 @@ every recorded problem and fix, the recent reviews, the work the deterministic
 tier flagged, the arming state, and how much evidence this machine holds. It
 writes no state.
 
---json prints the versioned SystemStatus contract on stdout, progress on stderr —
-the same discipline as 'steer report'. That contract keeps the machine's own
-words. An agent runs 'steer status --json' before installing a hook, to read the
-full inventory and skip a problem already decided.`,
+--json prints the versioned status contract on stdout, progress on stderr — the
+same discipline as 'steer report'. That contract keeps the machine's own words: one
+summary row per fix, and guards and built-in guards from both scopes. An agent runs
+'steer status --json' before installing a hook, to read the full inventory and skip
+a problem already decided; 'steer fix score --json' carries each fix's detail.`,
 	Example: `  steer status
   steer status --json
   steer status --days 7 --project-only
@@ -54,9 +56,12 @@ full inventory and skip a problem already decided.`,
 			Config:       cfg,
 			WindowDays:   statusDays,
 			Scope:        currentScope(),
-			ScanScope:    scope,
-			RepoRoot:     root,
-			Addendum:     gateAddendum(root),
+			// The command lists every scope's guards; only the TUI, which mutates
+			// the scope it lists, reads one.
+			InventoryScopes: []string{claude.ProjectScope, claude.GlobalScope},
+			ScanScope:       scope,
+			RepoRoot:        root,
+			Addendum:        gateAddendum(root),
 			Evidence: evidence.Gather(evidence.Options{
 				GateStateDir: cfg.StateDir,
 				ScanScope:    scope,

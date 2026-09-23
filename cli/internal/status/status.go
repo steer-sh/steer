@@ -2,7 +2,8 @@
 // on the failure class and what the corpus recorded about it rather than the hook.
 // Collect reads the intervention inventory and review chains (mine), the
 // attention subset (the pure cadence.Refresh), and the arming posture (claude).
-// It never writes state. Terminal, JSON and TUI all render this one struct.
+// It never writes state. Terminal and TUI render this one struct; --json renders
+// its projection (json.go).
 package status
 
 import (
@@ -60,8 +61,11 @@ import (
 // under repair. v23 extends that to an unknown scope and a session with no project.
 // v25 adds observation.fixtures: what this machine knows about the stored cases
 // behind a guard-tier fix. Its states answer attribution and freshness, never
-// whether the guard blocks correctly in the field.
-const StatusVersion = 26
+// whether the guard blocks correctly in the field. v27 is the projection in json.go:
+// one summary row per fix whose observation `steer fix score --json` carries,
+// attention by id, hooks and presets from both scopes, resolver rows cut to their
+// arming readings, scope.repo_root, and no chains.
+const StatusVersion = 27
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20
@@ -74,6 +78,9 @@ type Options struct {
 	Config       gate.Config
 	WindowDays   int    // transcript look-back for the attention refresh
 	Scope        string // active scope for the config-state read (default global)
+	// InventoryScopes are the scopes whose hooks and presets the snapshot lists; empty
+	// lists Scope alone. The TUI mutates the scope it lists, so it passes none.
+	InventoryScopes []string
 	// ScanScope selects which sessions the transcript scan reads. The zero
 	// value reads every project.
 	ScanScope report.Scope
@@ -143,6 +150,7 @@ type HookInfo struct {
 // PresetInfo is one catalog preset with its enable and drift state in a scope.
 type PresetInfo struct {
 	Name        string `json:"name"`
+	Scope       string `json:"scope"`
 	Bundle      string `json:"bundle"`
 	Description string `json:"description"`
 	Enabled     bool   `json:"enabled"`
@@ -485,12 +493,20 @@ func Collect(opts Options) (*SystemStatus, error) {
 	s.Posture = collectPosture(opts.Config, ev)
 	s.Checks = collectChecks(opts.RepoRoot)
 	s.Telemetry = telemetry(ev, checkBlocks())
-	var problems []StoreProblem
-	s.Hooks, problems = collectHooks(opts.Scope)
-	s.StoreProblems = append(s.StoreProblems, problems...)
-	s.Presets, problems = collectPresets(opts.Scope)
-	s.StoreProblems = append(s.StoreProblems, problems...)
-	s.Rules, problems = collectRules()
+	inventory := opts.InventoryScopes
+	if len(inventory) == 0 {
+		inventory = []string{opts.Scope}
+	}
+	for _, scope := range inventory {
+		hooks, problems := collectHooks(scope)
+		s.Hooks = append(s.Hooks, hooks...)
+		s.StoreProblems = append(s.StoreProblems, problems...)
+		roster, problems := collectPresets(scope)
+		s.Presets = append(s.Presets, roster...)
+		s.StoreProblems = append(s.StoreProblems, problems...)
+	}
+	rules, problems := collectRules()
+	s.Rules = rules
 	s.StoreProblems = append(s.StoreProblems, problems...)
 	s.StoreProblems = dedupeStoreProblems(s.StoreProblems)
 	s.Addenda = AddendumInventory(opts.Addendum)
@@ -1121,6 +1137,7 @@ func collectPresets(scope string) ([]PresetInfo, []StoreProblem) {
 		}
 		out = append(out, PresetInfo{
 			Name:        item.Name,
+			Scope:       scope,
 			Bundle:      presets.BundleFor(item),
 			Description: item.Description,
 			Enabled:     enabled,
@@ -1163,9 +1180,4 @@ func collectTeam() TeamState {
 		HooksLocked:    len(lf.Hooks),
 		CatalogVersion: lf.CatalogVersion,
 	}
-}
-
-// MarshalIndent renders the snapshot as indented JSON.
-func (s *SystemStatus) MarshalIndent() ([]byte, error) {
-	return json.MarshalIndent(s, "", "  ")
 }

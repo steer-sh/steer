@@ -2,7 +2,7 @@
 name: steer
 description: Turns a natural-language rule into the fix that can enforce it — a repository check, a PreToolUse Python guard, or an instruction rule — and installs it. Use when enforcing coding standards, blocking insecure patterns, making sure checks pass before a turn ends, managing hook lifecycle, or running steer CLI commands (register, remove, list, test, preset, verify, git-hooks).
 user-invocable: true
-prompt_version: 17
+prompt_version: 18
 compatibility: Requires Claude Code, Codex, or Pi with tool-call hook support. Hooks are installed into .steer/hooks/ and registered in every installed harness (settings.json for Claude Code, hooks.json for Codex, extensions for Pi). steer CLI must be available on PATH or bundled under scripts/.
 allowed-tools: Bash(steer *), Bash(python3 *), Bash(echo *), Read, Write, Edit
 ---
@@ -214,27 +214,28 @@ Follow these steps for every hook creation.
 
 ### Pre-flight: find what is already installed
 
-Before you install anything, read the fixes Steer already holds and the classes
-it already decided. This step stops a duplicate fix and a re-proposed class.
+Before you install anything, read the fixes Steer already holds and the recurring
+problems it already decided. This step stops a duplicate fix and a re-proposed
+problem.
 
 ```bash
 STEER_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}"
 STEER_BIN="${STEER_ROOT:+${STEER_ROOT}/scripts/steer}"
 STEER_BIN="${STEER_BIN:-steer}"
-"${STEER_BIN}" status --json
-"${STEER_BIN}" list --scope global
-"${STEER_BIN}" preset list --scope global
+"${STEER_BIN}" status --json > "${TMPDIR:-/tmp}/steer-preflight-status.json"
 ```
 
-`status --json` reads guards and presets in the project scope only; the two list
-commands add the global scope.
+Read `${TMPDIR:-/tmp}/steer-preflight-status.json` with the Read tool, to its
+end. Never read it from command output: a harness can show only the start of a
+long output. The snapshot lists guards and presets in both scopes; each row
+names its scope.
 
 **Installed fixes.** Compare the rule with each fix, whatever its tier:
 
-- Guards: `hooks[]`, the global `list`, and each enabled preset in `presets[]`
-  and the global `preset list`.
-- Instruction rules: `rules[]`, both scopes.
-- Review prompt entries: `addenda[]`, both scopes.
+- Guards: `hooks[]`, and each preset in `presets[]` whose `enabled_scopes` is
+  not empty.
+- Instruction rules: `rules[]`.
+- Review prompt entries: `addenda[]`.
 - Repository checks: `checks.checks[]`, for this repository only. For a request
   to run the tests before a turn ends, `checks.adopted` and `checks.runner[]`
   say whether this repository's `check.sh` already runs there.
@@ -242,26 +243,41 @@ commands add the global scope.
 Keep each fix that covers the rule, with its tier and scope. [Route the
 rule](#route-the-rule) decides what the match means.
 
-**Decided classes.** Read the `interventions[]` array. Each row is one live
-intervention with its `class`, `tier`, `target`, `status`, and its `observation`
-— what the corpus recorded, never a claim that the fix worked. Match the user's
-rule against the classes there:
+**Decided problems.** Each `interventions[]` row is one live record: its `id`,
+`class`, `problem`, `intervention`, `tier`, `target`, `status`, `scope`,
+`artifact`, `recurred`, and its before and after counts over its `unit`. Match the
+user's rule against each row's `problem`. When a row matches, read that record's
+detail before you decide:
 
-- The rule matches a class: the class is already decided. A record does not show
-  that its fix stands here: read its `artifact` and `scope`. While the fix stands
-  and the scope takes in this repository and harness, do not install a duplicate;
-  say which record covers it and what its observation shows. Otherwise the
-  install may go ahead, and the record does not measure it.
-- The record's `observation.recurrence.occurred` is true: the class came back
-  after the record went in. Treat the user's rule as a rework of that record
-  rather than as a new fix, and open `observation.recurrence.example` first.
-- The record has no `scope`, or its `observation.coverage` counts unknown units:
-  the class is installed and its window is not accounted for. Name that from the
+```bash
+"${STEER_BIN}" fix score --json --id <id> > "${TMPDIR:-/tmp}/steer-preflight-fix.json"
+```
+
+Read that file the same way. Its one row carries the record's `observation`, and
+`reason` and `reopen` on a refused record. Then:
+
+- A record does not show that its fix stands here: read its `artifact` and
+  `scope`. While the fix stands and the scope takes in this repository and
+  harness, do not install a duplicate; say which record covers it and what its
+  counts show. Otherwise the install may go ahead, and the record does not
+  measure it.
+- `recurred` is true: the record matched work after it went in. Open
+  `observation.recurrence.example` first. An example that belongs to the problem
+  makes the user's rule a rework of that record, not a new fix. An example that
+  does not belong is a false match, and `/steer-report` repairs the record.
+- The record has no `scope`, or `observation.coverage` counts unknown units: the
+  problem is installed and its window is not accounted for. Name that from the
   row, and do not install a duplicate.
+- The record is refused (`status: rejected`): read `reason` and `reopen`, and
+  say whether the user's rule meets the reopen condition.
 - No match: continue to Step 0.
 
 An observation states no direction. Never read a quiet after-window as proof the
 fix worked: prevention and absent opportunity both produce silence.
+
+Say what you found in plain words. A record is a **fix**, never an intervention;
+its class is a **recurring problem**; a chain is a **review sequence**. Field
+names belong in these instructions and in commands, never in what the user reads.
 
 Fail soft. If a command errors, or the CLI is absent, say so in one line and
 continue. This check is an optimization, not a gate. The `status --json` schema

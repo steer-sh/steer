@@ -4,7 +4,8 @@ Step 1 of `SKILL.md` sends you here. Finish this audit, then go back to Step 2.
 
 ## Read the fields, report the facts
 
-Each record carries an `observation` with seven blocks. Read those; say what they
+Each record's score row carries an `observation` with seven blocks; join it to the
+status summary row by exact `id`. Read those; say what they
 show, in the vocabulary `SKILL.md` sets under "Words the reader sees".
 
 | Block | What it holds | What you may say from it |
@@ -340,33 +341,38 @@ from these judgments. **Reading three cases certifies nothing about the rest.** 
 **new unread work never erases a prior finding** — say "previously read blocks were
 correct; nine new cases await reading", not "audit pending".
 
-## The `interventions[]` rows of `steer status --json`
+## The `interventions[]` rows of `steer status --json`, and their score rows
 
-`interventions[]` — the **full** inventory. It carries every live class. Each
-row: `id`, `class`, `problem`, `intervention`, `legacy_note`, `match` (the regex
-that defines the class), `tier`, `target`, `status` (`active` or `rejected`),
-`before` / `after` incidence (`hits`, `units`, `rate`), and for
-a refused class `reason`, `reopen` and `rejected_ts`. `problem` and `intervention` are the record's own explanation, authored when the
+A live record has two rows, joined by exact `id`. The status snapshot's
+`interventions[]` is the **full** inventory, one summary row per live class: `id`,
+`class`, `problem`, `intervention`, `tier`, `target`, `status` (`active` or
+`rejected`), `hook_id`, `scope`, `artifact`, `corpus`, `unit`, `signal_kind`,
+`recurred` (`observation.recurrence.occurred`) and `before` / `after` incidence
+(`hits`, `units`, `rate`). The `steer fix score --json` row with the same `id`
+carries the detail: `scope`, `before` / `after` (`hits`, `chains`, `rate`, where
+`chains` is the unit count whatever the corpus), `before_coverage` /
+`after_coverage`, `observation`, and for a refused class `reason` and `reopen`.
+The regex that defines a class, `match`, is on the queue's row for each record the
+queue lists. `problem` and `intervention` are the record's own explanation, authored when the
 evidence was in hand: what goes wrong, and what this record does about it. Lead
 with them — a `class` is a label and a `match` is a regex, and neither says what
 the class is. On a `rejected` row the `intervention` is the one that was
 considered, or the sentence `no suitable fix was identified` (`no suitable
 intervention was identified` on an older record; tell the reader no fix was found).
-`legacy_note` is present only on a record written before those fields existed;
-it holds implementation detail, so never read it as either. This is the dedup source
-— a class here is decided. `corpus` and `unit` name the evidence the class is
-counted over and what one denominator entry is: `review-findings` counts by
-`chain`, `transcript-friction` by `session`. Never compare a chain rate to a
-session rate. A session-unit row also carries `signal_kind` — the classifier
-kind its regex was authored against (`any`, `user_corrections`,
-`user_rejections`, `tool_failures` or `hook_blocks`). Each row also carries
+This is the dedup source — a class here is decided. `corpus` and `unit` name the
+evidence the class is counted over and what one denominator entry is:
+`review-findings` counts by `chain`, `transcript-friction` by `session`. Never
+compare a chain rate to a session rate. A session-unit row also carries
+`signal_kind` — the classifier kind its regex was authored against (`any`,
+`user_corrections`, `user_rejections`, `tool_failures` or `hook_blocks`). Each row also carries
 its measurement conditions:
 - `scope` — the frozen eligibility rule: `{version, all}`, or `{version, repo,
-  path}` at version 1, plus a `harness` id list at version 2. The predicates
+  path}` at version 1, plus a `harness` id list at version 2, plus `repo_root`
+  (one exact repository root) at version 3. The predicates
   combine with AND. `null` is a legacy record: its two windows describe
   different opportunity sets, and no scope is ever inferred for it. Run
   `steer fix scope <id>`.
-- `before_coverage` / `after_coverage` — each window's unit accounting:
+- `before_coverage` / `after_coverage` (score row) — each window's unit accounting:
   `total`, `eligible` (the denominator), `ineligible`, `unknown`,
   `unknown_scope`, `unknown_evidence`, `pending`, `ledger_missed`,
   `ledger_overdue`, `partial_exposure`. An unknown unit is not counted; it
@@ -375,7 +381,7 @@ its measurement conditions:
   `partial_exposure` is the session corpus's own category, for a session that
   straddled the install and so ran under both regimes: `unknown` means the
   scope could not decide, `partial_exposure` means the window could not.
-- `observation` — what the corpus recorded. Seven blocks:
+- `observation` (score row) — what the corpus recorded. Seven blocks:
   - `counts` — `split_ts` (the boundary: the install, the refusal, or the
     scope migration), `observed_ts` (the read's clock), `unit`, and `before` /
     `after`, each `{hits, eligible, first_activity_ts, last_activity_ts}`. The
@@ -437,7 +443,7 @@ its measurement conditions:
     instruments, which is a reason to read the examples rather than the counts.
   - `declined` — true on a refused record. Its after-window is the period since
     the refusal, so a recurrence there implies no fix that failed.
-- `artifact` — the fix the record binds and where it stands now:
+- `artifact` (summary row) — the fix the record binds and where it stands now:
   `{id, scope, repo, state, detail, removed}`, `null` on a declined record. It is read
   beside the observation and never enters it. `state` is `present` (the entry
   holds the text the record froze), `changed` (the same id with other text, or

@@ -97,9 +97,12 @@ Read the linked architecture section before changing the corresponding boundary:
 
 - Report digest: `cli/internal/report/digest.go` and
   `skills/steer-report/SKILL.md`.
-- Status JSON: `cli/internal/status/status.go` and the one documented copy in
-  `skills/steer-report/SKILL.md`, whose `interventions[]` row fields live in
-  `skills/steer-report/audit.md`; `TestJSONContractIsStable` pins the contract.
+- Status JSON: the projection `cli/internal/status/json.go` and the one documented
+  copy in `skills/steer-report/SKILL.md`, whose `interventions[]` row fields and
+  their `steer fix score --json` detail rows live in `skills/steer-report/audit.md`;
+  `TestJSONContractIsStable` pins the contract and
+  `TestContractNamesEveryFixWithinItsSizeCeiling` its size. The scenario builder
+  `tests/scenarios/scenarios.py` emits the same three documents.
   Step 1 loads `audit.md` only when `interventions[]` holds a row or
   `telemetry.audit_firings` or `telemetry.check_blocks` is above zero, so a change
   to any of those fields changes when the audit runs. A skill names a file of its own as `./<name>`, which

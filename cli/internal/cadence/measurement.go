@@ -7,7 +7,9 @@ type Scope struct {
 	All     bool     `json:"all,omitempty"`
 	Harness []string `json:"harness,omitempty"`
 	Repo    string   `json:"repo,omitempty"`
-	Path    string   `json:"path,omitempty"`
+	// RepoRoot is the one exact repository root a v3 scope binds.
+	RepoRoot string `json:"repo_root,omitempty"`
+	Path     string `json:"path,omitempty"`
 }
 
 // Coverage accounts for one window's units against the scope. Eligible units are the
@@ -34,10 +36,11 @@ func ScopeOf(v any) *Scope {
 		return nil
 	}
 	sc := &Scope{
-		Version: numInt(m["version"]),
-		All:     truthy(m["all"]),
-		Repo:    str(m["repo"]),
-		Path:    str(m["path"]),
+		Version:  numInt(m["version"]),
+		All:      truthy(m["all"]),
+		Repo:     str(m["repo"]),
+		RepoRoot: str(m["repo_root"]),
+		Path:     str(m["path"]),
 	}
 	if list, ok := m["harness"].([]any); ok {
 		for _, item := range list {

@@ -665,8 +665,11 @@ deterministic tier reads the check stores only, so no harness adapter enters it;
 the runner's registration reaches a reader through the status snapshot. A stale
 receipt is not an open step: a stale check keeps running.
 
-`internal/status/` composes the read-only `SystemStatus` for terminal, JSON and
-TUI. Shared problem, evidence and formatting helpers keep human summaries aligned;
+`internal/status/` composes the read-only `SystemStatus` for terminal and TUI.
+`--json` is a projection of it (`status/json.go`): one summary row per record, whose
+observation `steer fix score --json` carries under the same id, and guards and
+presets from both scopes. The TUI lists one scope because it mutates that scope.
+Shared problem, evidence and formatting helpers keep human summaries aligned;
 wire version constants and schema tests own machine compatibility.
 `vocabulary_test.go` checks display literals; dynamic stored values also need
 translation at rendering boundaries.
