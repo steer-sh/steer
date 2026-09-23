@@ -319,7 +319,12 @@ working-tree signature it judged. A Stop run also records the payload's
 transcript locators by key presence (`transcript_path`, and the turn as Claude
 Code's `prompt_id` or Codex's `turn_id`) and `stop_hook_active`; a block records
 the reason it sent, whose last line names the run. Neither harness names the
-transcript entry a block creates, so that line is the join. `steer check
+transcript entry a block creates, so that line is the join.
+`checks.BlockFollowups` (`followup.go`, printed by `steer check blocks`) reads
+those records after each block: the session's next Stop and whether its tree
+changed, the next executed run, and for each check that did not pass its next
+result and whether its detector changed before the recorded pass. It describes
+what followed a block, never whether the block was correct. `steer check
 install` registers the runner as its own Stop entry with
 `checks.RegisteredHookTimeout()`; commit-gate writers and runner writers each keep
 the other's registration. Pi has no Stop runner.
