@@ -158,3 +158,41 @@ func Refresh(c Coverage, unjudgedThreshold int) (due bool, reason string) {
 	}
 	return false, ""
 }
+
+// What a check failure's reading says about the detector installed now, beside
+// Current, Historic and Unknown.
+const (
+	// Unmanaged means the failure has no detector of its own: check.sh itself
+	// or its wiring failed, and Steer records no identity for either.
+	Unmanaged = "unmanaged"
+	// Unavailable means the installed detector could not be read: the
+	// repository is not on this machine, or its manifest or detector files do
+	// not read.
+	Unavailable = "unavailable"
+)
+
+// DetectorApplies reports what a check failure recorded under recorded says
+// about the repository's detectors now. installed maps each check the
+// repository declares now to its detector digest, "" for one whose detector did
+// not read; a nil map means the repository's checks could not be read. A check
+// no longer declared is Historic: the reading validates no installed detector.
+func DetectorApplies(kind, check, recorded string, installed map[string]string) string {
+	if kind != FailureCheck {
+		return Unmanaged
+	}
+	if installed == nil {
+		return Unavailable
+	}
+	digest, declared := installed[check]
+	switch {
+	case !declared:
+		return Historic
+	case digest == "":
+		return Unavailable
+	case recorded == "":
+		return Unknown
+	case recorded == digest:
+		return Current
+	}
+	return Historic
+}

@@ -1,6 +1,7 @@
 package firingaudit
 
 import (
+	"os"
 	"sort"
 
 	"github.com/steer-sh/steer-cli/internal/adjudication"
@@ -30,6 +31,10 @@ type CheckFailure struct {
 	// oracle's own failure is optional beside a failing check, because check.sh
 	// exits non-zero for that check and may report nothing else.
 	Required bool `json:"required"`
+	// Applies is what a reading of this failure says about the detector
+	// installed now: an adjudication applicability state. Empty until
+	// ClassifyCases runs.
+	Applies string `json:"applies,omitempty"`
 }
 
 // failedOutcomes are the execution outcomes that report a failure. A check the
@@ -108,4 +113,39 @@ func FindCheckCase(cases []CheckCase, runID string) (CheckCase, bool) {
 		}
 	}
 	return CheckCase{}, false
+}
+
+// ClassifyCases stamps each failure of each case with what a reading of it says
+// about the detector installed now. installed returns a repository's detectors
+// as adjudication.DetectorApplies reads them.
+func ClassifyCases(cases []CheckCase, installed func(repo string) map[string]string) {
+	for i := range cases {
+		detectors := installed(cases[i].Run.Repo)
+		for j := range cases[i].Failures {
+			f := &cases[i].Failures[j]
+			var recorded string
+			if f.Execution != nil {
+				recorded = f.Execution.DetectorDigest
+			}
+			f.Applies = adjudication.DetectorApplies(f.Kind, f.Check, recorded, detectors)
+		}
+	}
+}
+
+// InstalledDetectors returns a resolver that reads each repository's installed
+// detectors once. A repository that is not on this machine, or whose checks do
+// not read, resolves to nil.
+func InstalledDetectors() func(repo string) map[string]string {
+	cache := map[string]map[string]string{}
+	return func(repo string) map[string]string {
+		if detectors, ok := cache[repo]; ok {
+			return detectors
+		}
+		var detectors map[string]string
+		if info, err := os.Stat(repo); err == nil && info.IsDir() {
+			detectors, _ = checks.InstalledDetectors(repo)
+		}
+		cache[repo] = detectors
+		return detectors
+	}
 }

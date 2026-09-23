@@ -584,6 +584,13 @@ block in the same turn is a `hook_feedback` step, and `Matches` counts repeated
 entries. `CheckCase.Reach` reports why a case reaches nothing (a run without the
 line, no transcript path, a transcript gone, a harness with no Stop runner).
 
+A check failure's reading applies per detector: `adjudication.DetectorApplies`
+compares the execution's `detector_digest` with `checks.InstalledDetectors`, read
+once per repository. Beside current, historic and unknown, a failure with no
+detector of its own (`check.sh`, wiring) is `unmanaged`, and one whose repository
+or detector does not read now is `unavailable`; a check no longer declared is
+historic.
+
 `Queue` offers unread rows of the installed guard, plus a judged row whose
 continuation nobody read while that transcript is still on this machine. The
 judgment's value queues nothing. `cmd/audit.go` groups rows per store and hook

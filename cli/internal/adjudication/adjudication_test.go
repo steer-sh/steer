@@ -300,3 +300,28 @@ func TestAppendRefusesACheckReceiptThatIsNotOneReadingPerFailure(t *testing.T) {
 		t.Errorf("a run with three differently read failures was refused: %v", err)
 	}
 }
+
+// A check failure's reading describes the detector installed now only while the
+// declared check's digest matches; failures with no detector, and repositories
+// whose checks do not read, get their own bounded states.
+func TestDetectorAppliesSeparatesEachCaseOfTheInstalledDetector(t *testing.T) {
+	installed := map[string]string{"go": "d1", "lint": ""}
+	for name, tc := range map[string]struct {
+		kind, check, recorded string
+		installed             map[string]string
+		want                  string
+	}{
+		"the same detector":       {FailureCheck, "go", "d1", installed, Current},
+		"a changed detector":      {FailureCheck, "go", "d0", installed, Historic},
+		"a check since removed":   {FailureCheck, "vet", "d1", installed, Historic},
+		"a record with no digest": {FailureCheck, "go", "", installed, Unknown},
+		"a detector that fails":   {FailureCheck, "lint", "d1", installed, Unavailable},
+		"a repository not read":   {FailureCheck, "go", "d1", nil, Unavailable},
+		"check.sh itself":         {FailureOracle, "", "", installed, Unmanaged},
+		"the wiring":              {FailureIntegration, "", "", nil, Unmanaged},
+	} {
+		if got := DetectorApplies(tc.kind, tc.check, tc.recorded, tc.installed); got != tc.want {
+			t.Errorf("%s: got %s, want %s", name, got, tc.want)
+		}
+	}
+}

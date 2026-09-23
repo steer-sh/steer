@@ -417,3 +417,24 @@ func copyFile(src, dst string) error {
 	}
 	return out.Close()
 }
+
+// InstalledDetectors maps each check the repository at root declares now to its
+// detector digest, "" for a check whose detector does not read. A repository
+// with no manifest declares nothing and yields an empty map.
+func InstalledDetectors(root string) (map[string]string, error) {
+	m, err := Load(root)
+	if errors.Is(err, ErrNoManifest) {
+		return map[string]string{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(m.Checks))
+	for _, d := range m.Checks {
+		out[d.ID] = ""
+		if det, err := DetectorOf(root, d); err == nil {
+			out[d.ID] = det.Digest
+		}
+	}
+	return out, nil
+}

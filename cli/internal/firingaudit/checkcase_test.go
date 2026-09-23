@@ -1,6 +1,7 @@
 package firingaudit
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -113,5 +114,54 @@ func TestCheckCasesAssembleBlocksAcrossRepositories(t *testing.T) {
 	}
 	if _, ok := FindCheckCase(cases, "a2"); ok {
 		t.Error("a run that allowed its turn was found as a case")
+	}
+}
+
+// Each failure is classified against its own repository's detectors, read once
+// per repository.
+func TestClassifyCasesReadsEachRepositoryOnce(t *testing.T) {
+	a := blockRun("/a", "a1", 1)
+	b := blockRun("/b", "b1", 2)
+	withDigest := func(repo, run, digest string) checks.Execution {
+		e := record(repo, run, "go", checks.OutcomeFailed)
+		e.DetectorDigest = digest
+		return e
+	}
+	cases := CheckCases(checks.LiveEvidence{
+		Runs:       []checks.OracleRun{a, b},
+		Executions: []checks.Execution{withDigest("/a", "a1", "d1"), withDigest("/b", "b1", "d1")},
+	})
+	reads := map[string]int{}
+	ClassifyCases(cases, func(repo string) map[string]string {
+		reads[repo]++
+		if repo == "/a" {
+			return map[string]string{"go": "d1"}
+		}
+		return map[string]string{"go": "d2"}
+	})
+	got := map[string][]string{}
+	for _, c := range cases {
+		for _, f := range c.Failures {
+			got[c.Run.Repo] = append(got[c.Run.Repo], f.Applies)
+		}
+	}
+	if !sameList(got["/a"], []string{adjudication.Current, adjudication.Unmanaged}) ||
+		!sameList(got["/b"], []string{adjudication.Historic, adjudication.Unmanaged}) {
+		t.Errorf("applies = %v; want a current and b historic, check.sh unmanaged in both", got)
+	}
+	if reads["/a"] != 1 || reads["/b"] != 1 {
+		t.Errorf("reads = %v; want one per repository", reads)
+	}
+}
+
+// A repository on this machine with no manifest declares nothing; one that is
+// not on this machine resolves to nothing, which reads as unavailable.
+func TestInstalledDetectorsResolvesAMissingRepositoryToNothing(t *testing.T) {
+	resolve := InstalledDetectors()
+	if got := resolve(t.TempDir()); got == nil || len(got) != 0 {
+		t.Errorf("a repository without checks = %v; want an empty map", got)
+	}
+	if got := resolve(filepath.Join(t.TempDir(), "gone")); got != nil {
+		t.Errorf("a missing repository = %v; want nil", got)
 	}
 }
