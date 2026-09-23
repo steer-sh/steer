@@ -556,7 +556,13 @@ receipt records the join granularity, its transcript anchors and its extent
 apart from whether the continuation was read, because block correctness and
 continuation are separate axes and a missing continuation settles neither.
 `Append` refuses a receipt reporting an inspected continuation at a join that
-reached none. `firingaudit.Record` resolves the row and the continuation itself
+reached none. A receipt states its subject: a guard firing, named by `firing_id`
+with one judgment, or a blocked check run, named by `run_id` with one reading per
+failure the run reported (a failing check, `check.sh` itself, or an integration
+failure), each with its own validity, attribution and continuation outcome. A line
+without a subject predates check receipts and reads as a guard. `Latest` takes the
+subject, because a run identifier can fall back to decimal and no reader can tell
+the two apart by form. `firingaudit.Record` resolves the row and the continuation itself
 and copies the implementation stamps, so a caller authors no identity.
 
 `Queue` offers unread rows of the installed guard, plus a judged row whose

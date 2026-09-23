@@ -20,10 +20,10 @@ func check(t *testing.T, what string, got, want any) {
 // three readings is not one of them.
 func TestAppendRefusesAReceiptItCannotAttach(t *testing.T) {
 	dir := t.TempDir()
-	if err := Append(dir, Receipt{Judgment: Prevented}); err == nil {
+	if err := Append(dir, Receipt{Subject: SubjectGuard, Judgment: Prevented}); err == nil {
 		t.Error("a receipt naming no firing was accepted")
 	}
-	if err := Append(dir, Receipt{FiringID: "aa", Judgment: "effective"}); err == nil {
+	if err := Append(dir, Receipt{Subject: SubjectGuard, FiringID: "aa", Judgment: "effective"}); err == nil {
 		t.Error("a judgment outside the three readings was accepted")
 	}
 	if _, err := os.Stat(filepath.Join(dir, LogName)); !os.IsNotExist(err) {
@@ -36,17 +36,17 @@ func TestAppendRefusesAReceiptItCannotAttach(t *testing.T) {
 func TestAppendRefusesAnInspectionNoJoinReached(t *testing.T) {
 	dir := t.TempDir()
 	for _, join := range []string{"", transcript.JoinUnavailable} {
-		err := Append(dir, Receipt{FiringID: "aa", Judgment: Prevented,
+		err := Append(dir, Receipt{Subject: SubjectGuard, FiringID: "aa", Judgment: Prevented,
 			ContinuationInspected: true, Join: join})
 		if err == nil {
 			t.Errorf("join %q: an inspection with nothing behind it was accepted", join)
 		}
 	}
-	if err := Append(dir, Receipt{FiringID: "aa", Judgment: Prevented,
+	if err := Append(dir, Receipt{Subject: SubjectGuard, FiringID: "aa", Judgment: Prevented,
 		ContinuationInspected: true, Join: transcript.JoinCall}); err != nil {
 		t.Errorf("a continuation read at call granularity was refused: %v", err)
 	}
-	if err := Append(dir, Receipt{FiringID: "bb", Judgment: Prevented,
+	if err := Append(dir, Receipt{Subject: SubjectGuard, FiringID: "bb", Judgment: Prevented,
 		Join: transcript.JoinUnavailable}); err != nil {
 		t.Errorf("an unread continuation was refused: %v", err)
 	}
@@ -57,9 +57,9 @@ func TestAppendRefusesAnInspectionNoJoinReached(t *testing.T) {
 func TestLatestKeepsTheLastJudgmentOfEachFiring(t *testing.T) {
 	dir := t.TempDir()
 	for _, r := range []Receipt{
-		{FiringID: "aa", Judgment: Unresolved},
-		{FiringID: "bb", Judgment: Incorrect},
-		{FiringID: "aa", Judgment: Prevented},
+		{Subject: SubjectGuard, FiringID: "aa", Judgment: Unresolved},
+		{Subject: SubjectGuard, FiringID: "bb", Judgment: Incorrect},
+		{Subject: SubjectGuard, FiringID: "aa", Judgment: Prevented},
 	} {
 		if err := Append(dir, r); err != nil {
 			t.Fatal(err)
@@ -70,7 +70,7 @@ func TestLatestKeepsTheLastJudgmentOfEachFiring(t *testing.T) {
 		t.Fatal(err)
 	}
 	check(t, "every line is kept", len(receipts), 3)
-	latest := Latest(receipts)
+	latest := Latest(receipts, SubjectGuard)
 	check(t, "the re-read supersedes the first judgment", latest["aa"].Judgment, Prevented)
 	check(t, "an untouched firing keeps its judgment", latest["bb"].Judgment, Incorrect)
 }
@@ -98,7 +98,7 @@ func TestLoadFailsSoftOnAnAbsentOrDamagedStream(t *testing.T) {
 // the two stamps is a changed guard.
 func TestAppliesSeparatesTheJudgmentFromTheInstalledGuard(t *testing.T) {
 	installed := Identity{HookDigest: "d1", RuleHash: "r1"}
-	judged := Receipt{FiringID: "aa", Judgment: Prevented, HookDigest: "d1", RuleHash: "r1"}
+	judged := Receipt{Subject: SubjectGuard, FiringID: "aa", Judgment: Prevented, HookDigest: "d1", RuleHash: "r1"}
 
 	check(t, "the same implementation", Applies(judged, installed), Current)
 
@@ -129,9 +129,9 @@ func TestCoverSeparatesLegacyRowsFromUnjudgedOnes(t *testing.T) {
 		{HookID: "other", FiringID: "dd"},
 	}
 	receipts := []Receipt{
-		{FiringID: "aa", Judgment: Prevented, HookDigest: "d1", RuleHash: "r1"},
-		{FiringID: "bb", Judgment: Incorrect, HookDigest: "d0", RuleHash: "r0"},
-		{FiringID: "dd", Judgment: Prevented},
+		{Subject: SubjectGuard, FiringID: "aa", Judgment: Prevented, HookDigest: "d1", RuleHash: "r1"},
+		{Subject: SubjectGuard, FiringID: "bb", Judgment: Incorrect, HookDigest: "d0", RuleHash: "r0"},
+		{Subject: SubjectGuard, FiringID: "dd", Judgment: Prevented},
 	}
 	c := Cover("g", firings, receipts, installed, nil)
 
@@ -206,8 +206,8 @@ func TestCoverSplitsTheInstalledGuardsRowsFromOlderOnes(t *testing.T) {
 		{HookID: "g", FiringID: "d"},
 	}
 	receipts := []Receipt{
-		{FiringID: "a", Judgment: Prevented, HookDigest: "new", RuleHash: "r2"},
-		{FiringID: "c", Judgment: Prevented, HookDigest: "old", RuleHash: "r1"},
+		{Subject: SubjectGuard, FiringID: "a", Judgment: Prevented, HookDigest: "new", RuleHash: "r2"},
+		{Subject: SubjectGuard, FiringID: "c", Judgment: Prevented, HookDigest: "old", RuleHash: "r1"},
 	}
 	c := Cover("g", firings, receipts, installed, nil)
 
@@ -219,4 +219,84 @@ func TestCoverSplitsTheInstalledGuardsRowsFromOlderOnes(t *testing.T) {
 	check(t, "and the unjudged total still counts both", c.Unjudged, 2)
 	check(t, "the four counts account for every adjudicable row",
 		c.CurrentJudged+c.CurrentUnjudged+c.OtherJudged+c.OtherUnjudged, c.Adjudicable)
+}
+
+// A run identifier can fall back to decimal and a firing identifier is hexadecimal,
+// so the subject is stated, never read off the identifier. A line written before
+// the subject existed is a guard receipt; a subject this build does not know is
+// read as nothing rather than as a guard.
+func TestLoadReadsTheSubjectARecordStates(t *testing.T) {
+	dir := t.TempDir()
+	body := `{"firing_id":"aa","judgment":"prevented"}` + "\n" +
+		`{"subject":"check","run_id":"1726000000","failures":[{"kind":"oracle","validity":"valid","attribution":"introduced"}]}` + "\n" +
+		`{"subject":"review","firing_id":"bb","judgment":"prevented"}` + "\n" +
+		`{"subject":"check","firing_id":"cc","judgment":"prevented"}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, LogName), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	receipts, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(t, "a legacy line and a check line are read", len(receipts), 2)
+	guards := Latest(receipts, SubjectGuard)
+	checks := Latest(receipts, SubjectCheck)
+	check(t, "the legacy line is a guard receipt", guards["aa"].Judgment, Prevented)
+	check(t, "only it is", len(guards), 1)
+	check(t, "the check run is named by its run", checks["1726000000"].Failures[0].Kind, FailureOracle)
+	check(t, "and only it is a check receipt", len(checks), 1)
+}
+
+// Two subjects can carry the same identifier text; neither reader sees the other's.
+func TestLatestKeepsSubjectsApart(t *testing.T) {
+	receipts := []Receipt{
+		{Subject: SubjectGuard, FiringID: "1234", Judgment: Incorrect},
+		{Subject: SubjectCheck, RunID: "1234", Failures: []Failure{
+			{Kind: FailureOracle, Validity: Valid, Attribution: Introduced}}},
+	}
+	check(t, "the guard reading", Latest(receipts, SubjectGuard)["1234"].Judgment, Incorrect)
+	check(t, "the check reading", len(Latest(receipts, SubjectCheck)["1234"].Failures), 1)
+}
+
+// A check receipt is one reading per failure: never a guard judgment spread over
+// the run, never a failure read twice, and never a value outside each axis.
+func TestAppendRefusesACheckReceiptThatIsNotOneReadingPerFailure(t *testing.T) {
+	ok := Failure{Kind: FailureCheck, Check: "go-test", Validity: Valid, Attribution: PreExisting}
+	cases := map[string]Receipt{
+		"no subject":        {RunID: "r1", Failures: []Failure{ok}},
+		"no run":            {Subject: SubjectCheck, Failures: []Failure{ok}},
+		"no failures":       {Subject: SubjectCheck, RunID: "r1"},
+		"a guard judgment":  {Subject: SubjectCheck, RunID: "r1", Judgment: Prevented, Failures: []Failure{ok}},
+		"a firing":          {Subject: SubjectCheck, RunID: "r1", FiringID: "aa", Failures: []Failure{ok}},
+		"a failure twice":   {Subject: SubjectCheck, RunID: "r1", Failures: []Failure{ok, ok}},
+		"an unnamed check":  {Subject: SubjectCheck, RunID: "r1", Failures: []Failure{{Kind: FailureCheck, Validity: Valid, Attribution: Introduced}}},
+		"an oracle's check": {Subject: SubjectCheck, RunID: "r1", Failures: []Failure{{Kind: FailureOracle, Check: "x", Validity: Valid, Attribution: Introduced}}},
+		"an unknown kind":   {Subject: SubjectCheck, RunID: "r1", Failures: []Failure{{Kind: "lint", Validity: Valid, Attribution: Introduced}}},
+		"no validity":       {Subject: SubjectCheck, RunID: "r1", Failures: []Failure{{Kind: FailureOracle, Attribution: Introduced}}},
+		"a guard reading":   {Subject: SubjectCheck, RunID: "r1", Failures: []Failure{{Kind: FailureOracle, Validity: Prevented, Attribution: Introduced}}},
+		"no attribution":    {Subject: SubjectCheck, RunID: "r1", Failures: []Failure{{Kind: FailureOracle, Validity: Valid}}},
+		"an unread outcome": {Subject: SubjectCheck, RunID: "r1", Failures: []Failure{{Kind: FailureOracle, Validity: Valid, Attribution: Introduced, Continuation: Fixed}}},
+		"an unknown outcome": {Subject: SubjectCheck, RunID: "r1", ContinuationInspected: true, Join: transcript.JoinTurn,
+			Failures: []Failure{{Kind: FailureOracle, Validity: Valid, Attribution: Introduced, Continuation: "gave up"}}},
+		"check failures on a guard": {Subject: SubjectGuard, FiringID: "aa", Judgment: Prevented, Failures: []Failure{ok}},
+	}
+	dir := t.TempDir()
+	for name, r := range cases {
+		if err := Append(dir, r); err == nil {
+			t.Errorf("%s: the receipt was accepted", name)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, LogName)); !os.IsNotExist(err) {
+		t.Error("a refused receipt still opened the stream")
+	}
+
+	mixed := Receipt{Subject: SubjectCheck, RunID: "r1", ContinuationInspected: true, Join: transcript.JoinTurn,
+		Failures: []Failure{
+			{Kind: FailureCheck, Check: "go-test", Validity: Valid, Attribution: Introduced, Continuation: Fixed},
+			{Kind: FailureCheck, Check: "lint", Validity: Invalid, Attribution: Unresolved, Continuation: RoutedAround},
+			{Kind: FailureOracle, Validity: Unresolved, Attribution: PreExisting},
+		}}
+	if err := Append(dir, mixed); err != nil {
+		t.Errorf("a run with three differently read failures was refused: %v", err)
+	}
 }

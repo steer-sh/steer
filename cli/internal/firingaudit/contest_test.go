@@ -101,7 +101,7 @@ func TestContestsCountDistinctFiringsBesideUnread(t *testing.T) {
 		{FiringID: contestedID, Reason: "second"},
 		{FiringID: judged, Reason: "third"},
 	}
-	receipts := []adjudication.Receipt{{FiringID: judged, Judgment: adjudication.Incorrect}}
+	receipts := []adjudication.Receipt{{Subject: adjudication.SubjectGuard, FiringID: judged, Judgment: adjudication.Incorrect}}
 	report := Contests(rows, contests, receipts, nil, nil, "")
 	if len(report.Guards) != 1 || len(report.Unmatched) != 0 {
 		t.Fatalf("report = %+v, want one guard and nothing unmatched", report)

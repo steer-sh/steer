@@ -93,7 +93,7 @@ type QueueOptions struct {
 // is not one of them, so an unresolved receipt waits for new evidence or for
 // the operator to ask for it by name.
 func Queue(rows []Row, receipts []adjudication.Receipt, opts QueueOptions) ([]Item, Counts) {
-	latest := adjudication.Latest(receipts)
+	latest := adjudication.Latest(receipts, adjudication.SubjectGuard)
 	var items []Item
 	excluded := 0
 	for _, row := range rows {

@@ -92,7 +92,7 @@ func Contests(rows []Row, contests []adjudication.Contest, receipts []adjudicati
 	excluded map[string]adjudication.Exclusion, installed func(Row) adjudication.Identity,
 	hookName string) ContestReport {
 	byFiring := adjudication.Contested(contests)
-	latest := adjudication.Latest(receipts)
+	latest := adjudication.Latest(receipts, adjudication.SubjectGuard)
 	byKey := map[string]*GuardContests{}
 	var order []string
 	matched := map[string]bool{}

@@ -67,7 +67,7 @@ func TestCoverCountsExcludedRowsApart(t *testing.T) {
 		{HookID: "g", RowDigest: "rc"},
 		{HookID: "g", RowDigest: "rd"},
 	}
-	receipts := []Receipt{{FiringID: "bb", Judgment: Unresolved, HookDigest: "d1", RuleHash: "r1"}}
+	receipts := []Receipt{{Subject: SubjectGuard, FiringID: "bb", Judgment: Unresolved, HookDigest: "d1", RuleHash: "r1"}}
 	excluded := map[string]Exclusion{"rb": {}, "rd": {}}
 	c := Cover("g", firings, receipts, installed, excluded)
 

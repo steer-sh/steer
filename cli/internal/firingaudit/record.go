@@ -34,7 +34,7 @@ func Show(rows []Row, firingID string, receipts []adjudication.Receipt,
 	continuation := row.continuationOrUnavailable(budget)
 	var prior []adjudication.Receipt
 	for _, r := range receipts {
-		if r.FiringID == firingID {
+		if r.Subject == adjudication.SubjectGuard && r.FiringID == firingID {
 			prior = append(prior, r)
 		}
 	}
@@ -101,6 +101,7 @@ func Record(rows []Row, dir string, j Judgment,
 	}
 	anchors := continuation.Anchors
 	receipt := adjudication.Receipt{
+		Subject:   adjudication.SubjectGuard,
 		FiringID:  row.FiringID,
 		HookID:    row.HookName,
 		Harness:   row.Harness,

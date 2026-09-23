@@ -95,7 +95,7 @@ type Coverage struct {
 // as Excluded returns it.
 func Cover(hookID string, firings []mine.Firing, receipts []Receipt, installed Identity,
 	excluded map[string]Exclusion) Coverage {
-	latest := Latest(receipts)
+	latest := Latest(receipts, SubjectGuard)
 	var c Coverage
 	for _, f := range firings {
 		if hookID != "" && f.HookID != hookID {

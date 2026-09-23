@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/adjudication"
+	"github.com/steer-sh/steer-cli/internal/transcript"
 )
 
 // installed answers with the implementation the fixtures below record.
@@ -129,8 +130,8 @@ func TestQueueKeepsAJudgedRowWhoseContinuationNobodyRead(t *testing.T) {
 	read := ccRow(t, "b", "2026-09-20T02:00:00Z")
 
 	receipts := []adjudication.Receipt{
-		{FiringID: "a", Judgment: adjudication.Prevented},
-		{FiringID: "b", Judgment: adjudication.Prevented, ContinuationInspected: true},
+		{Subject: adjudication.SubjectGuard, FiringID: "a", Judgment: adjudication.Prevented},
+		{Subject: adjudication.SubjectGuard, FiringID: "b", Judgment: adjudication.Prevented, ContinuationInspected: true},
 	}
 
 	items, _ := Queue([]Row{row, read}, receipts, QueueOptions{Installed: installed})
@@ -151,8 +152,8 @@ func TestQueueDoesNotReofferEvidenceARereadCannotChange(t *testing.T) {
 	gone.Locators["transcript_path"] = filepath.Join(t.TempDir(), "absent.jsonl")
 
 	receipts := []adjudication.Receipt{
-		{FiringID: "a", Judgment: adjudication.Unresolved, ContinuationInspected: true},
-		{FiringID: "b", Judgment: adjudication.Prevented},
+		{Subject: adjudication.SubjectGuard, FiringID: "a", Judgment: adjudication.Unresolved, ContinuationInspected: true},
+		{Subject: adjudication.SubjectGuard, FiringID: "b", Judgment: adjudication.Prevented},
 	}
 
 	items, _ := Queue([]Row{unresolved, gone}, receipts, QueueOptions{Installed: installed})
@@ -194,5 +195,26 @@ func TestCountsDiscloseWhatTheListingLeft(t *testing.T) {
 	}
 	if !strings.Contains(cut.Remaining(), "stay unexamined") {
 		t.Errorf("a limited listing does not disclose what it left: %q", cut.Remaining())
+	}
+}
+
+// A check run's identifier can read the same as a firing's. A check receipt is
+// no judgment of a firing, so the guard queue and the prior readings ignore it.
+func TestAGuardReaderIgnoresACheckReceiptOfTheSameIdentifier(t *testing.T) {
+	row := ccRow(t, "a", "2026-09-20T01:00:00Z")
+	receipts := []adjudication.Receipt{{Subject: adjudication.SubjectCheck, RunID: "a",
+		Failures: []adjudication.Failure{{Kind: adjudication.FailureOracle,
+			Validity: adjudication.Valid, Attribution: adjudication.Introduced}}}}
+
+	items, _ := Queue([]Row{row}, receipts, QueueOptions{Installed: installed})
+	if len(items) != 1 || items[0].Reason != Unjudged {
+		t.Errorf("queue = %+v; want the firing offered as unread", items)
+	}
+	c, err := Show([]Row{row}, "a", receipts, transcript.ContinuationBudget{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Prior) != 0 {
+		t.Errorf("prior = %+v; want no guard reading", c.Prior)
 	}
 }

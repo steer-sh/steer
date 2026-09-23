@@ -244,8 +244,8 @@ func TestShowGathersTheActionTheContinuationAndThePriorReadings(t *testing.T) {
 	row := ccRow(t, "a", "2026-09-20T01:00:00Z")
 	row.Evidence = []byte(`{"tool_input":{"command":"python x.py"}}`)
 	receipts := []adjudication.Receipt{
-		{FiringID: "other", Judgment: adjudication.Prevented},
-		{FiringID: "a", Judgment: adjudication.Unresolved},
+		{Subject: adjudication.SubjectGuard, FiringID: "other", Judgment: adjudication.Prevented},
+		{Subject: adjudication.SubjectGuard, FiringID: "a", Judgment: adjudication.Unresolved},
 	}
 
 	c, err := Show([]Row{row}, "a", receipts, transcript.ContinuationBudget{})
