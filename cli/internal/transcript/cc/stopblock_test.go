@@ -135,3 +135,43 @@ func TestContinuationWalksPastParallelToolCalls(t *testing.T) {
 		t.Errorf("branch points = %d; want none", c.BranchPoints)
 	}
 }
+
+func interruption(text string) string {
+	return fmt.Sprintf(`"type":"user","message":{"content":[{"type":"text","text":%q}]}`, text)
+}
+
+// The person stopping the turn ends a reading as interrupted, not as the person
+// speaking, in a guard continuation and a Stop block reading alike.
+func TestAnInterruptionEndsTheReadingAsInterrupted(t *testing.T) {
+	path := writeWalk(t,
+		entry("call", "", assistantCall("toolu_blocked", "python x.py")),
+		entry("denial", "call", toolResult("toolu_blocked", "Blocked by hook", true)),
+		entry("fb", "denial", feedback("p1", blockReason)),
+		entry("try", "fb", assistantCall("t2", "go test")),
+		entry("stop", "try", interruption("[Request interrupted by user for tool use]")),
+	)
+	c, err := Continuation(path, "toolu_blocked", transcript.ContinuationBudget{})
+	if err != nil || c.EndReason != transcript.EndInterrupted {
+		t.Errorf("guard continuation end = %q, %v; want %q", c.EndReason, err, transcript.EndInterrupted)
+	}
+	r, err := StopBlock(path, "steer check run: 1a", "", transcript.ContinuationBudget{})
+	if err != nil || r.EndReason != transcript.EndInterrupted {
+		t.Errorf("stop block end = %q, %v; want %q", r.EndReason, err, transcript.EndInterrupted)
+	}
+}
+
+// A harness that records the same reason twice leaves two entries carrying the
+// line; the reading anchors on the first and counts both.
+func TestStopBlockCountsARepeatedFeedbackEntry(t *testing.T) {
+	path := writeWalk(t,
+		entry("prompt", "", humanTurn("go")),
+		entry("fb", "prompt", feedback("p1", blockReason)),
+		entry("again", "fb", feedback("p1", blockReason)),
+		entry("say", "again", assistantText("declining")),
+	)
+	r, err := StopBlock(path, "steer check run: 1a", "", transcript.ContinuationBudget{})
+	if err != nil || r.Anchors.DenialEntry != "fb" || r.Matches != 2 || r.Anchors.TurnID != "p1" {
+		t.Errorf("reading anchored on %q in turn %q with %d matches, %v; want fb, its turn p1 and two",
+			r.Anchors.DenialEntry, r.Anchors.TurnID, r.Matches, err)
+	}
+}

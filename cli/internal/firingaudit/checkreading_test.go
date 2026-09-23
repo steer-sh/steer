@@ -75,3 +75,16 @@ func TestCheckCaseReachNamesWhatIsMissing(t *testing.T) {
 		}
 	}
 }
+
+// A Stop payload can carry its turn key as null, which the run keeps as present
+// and empty. The reading then finds the block by its line in any turn.
+func TestCheckCaseReadsABlockWhoseTurnKeyIsEmpty(t *testing.T) {
+	c := readableCase(t, "codex", "turn_id")
+	c.Run.Locators["turn_id"] = ""
+	if r := c.Reach(); r.Granularity != transcript.JoinEntry || r.TurnID != "" {
+		t.Errorf("reach = %+v; want the entry join with no turn", r)
+	}
+	if got := c.Reading(transcript.ContinuationBudget{}); !got.Reached() || got.Anchors.TurnID != "p1" {
+		t.Errorf("reading = %s in turn %q (%s); want the block found in its own turn", got.Granularity, got.Anchors.TurnID, got.Reason)
+	}
+}

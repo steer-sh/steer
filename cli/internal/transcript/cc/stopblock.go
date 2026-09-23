@@ -33,17 +33,17 @@ func StopBlock(path, line, promptID string, budget transcript.ContinuationBudget
 		human  bool
 	}
 	nodes := map[string]node{}
-	var root string
+	var root, rootPrompt string
 	err := eachWalkRow(path, func(r walkRow) {
 		if r.IsSidechain || r.UUID == "" {
 			return
 		}
-		_, human := stepsOf(r)
-		nodes[r.UUID] = node{parent: r.ParentUUID, human: human}
+		_, end := stepsOf(r)
+		nodes[r.UUID] = node{parent: r.ParentUUID, human: end != ""}
 		if isStopFeedback(r, line) && (promptID == "" || r.PromptID == promptID) {
 			out.Matches++
 			if root == "" {
-				root = r.UUID
+				root, rootPrompt = r.UUID, r.PromptID
 			}
 		}
 	})
@@ -81,6 +81,9 @@ func StopBlock(path, line, promptID string, budget transcript.ContinuationBudget
 			walk.start(root)
 			out.Granularity = transcript.JoinEntry
 			out.Anchors.DenialEntry = root
+			if rootPrompt != "" {
+				out.Anchors.TurnID = rootPrompt
+			}
 			steps, _ := stepsOf(r)
 			for _, step := range steps {
 				if walk.appendStep(&out.Continuation, step) {

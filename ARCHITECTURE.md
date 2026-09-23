@@ -581,7 +581,10 @@ creates, so `cc.StopBlock` and `codex.StopBlock` find it by
 by the payload's turn key. Each returns the turn before the block, back to its
 prompt and bounded by `ContextSteps`, and the continuation after it; a later
 block in the same turn is a `hook_feedback` step, and `Matches` counts repeated
-entries. `CheckCase.Reach` reports why a case reaches nothing (a run without the
+entries. Both harnesses' readers, guard and Stop alike, end a reading
+`interrupted` where the harness recorded that the person stopped the turn (Codex
+`turn_aborted`, Claude Code's `[Request interrupted by user` text).
+`CheckCase.Reach` reports why a case reaches nothing (a run without the
 line, no transcript path, a transcript gone, a harness with no Stop runner).
 
 A check failure's reading applies per detector: `adjudication.DetectorApplies`

@@ -139,8 +139,8 @@ func speaks(r walkRow) bool {
 	if r.Type == "assistant" {
 		return true
 	}
-	_, human := stepsOf(r)
-	return human
+	_, end := stepsOf(r)
+	return end != ""
 }
 
 // locate finds the two anchors: the entry holding the blocked call, and the
@@ -177,18 +177,18 @@ func (w *walker) locate(r walkRow, out *transcript.Continuation) bool {
 // emit turns one walked entry into steps under the budget, and reports whether
 // the walk stops: the budget is spent or the person spoke.
 func (w *walker) emit(r walkRow, out *transcript.Continuation) bool {
-	steps, human := stepsOf(r)
+	steps, end := stepsOf(r)
 	for i, step := range steps {
 		spent := w.appendStep(out, step)
-		if human && i == len(steps)-1 {
+		if end != "" && i == len(steps)-1 {
 			break
 		}
 		if spent {
 			return true
 		}
 	}
-	if human {
-		out.EndReason = transcript.EndHumanTurn
+	if end != "" {
+		out.EndReason = end
 		return true
 	}
 	return false
@@ -198,36 +198,41 @@ func (w *walker) emit(r walkRow, out *transcript.Continuation) bool {
 // hook's block reason.
 const stopFeedbackPrefix = "Stop hook feedback:"
 
-// stepsOf turns one entry into the steps a reader sees, and reports whether its
-// last step is the person speaking, which ends the turn. An entry the harness
-// wrote for its own bookkeeping — an attachment, a meta user entry other than a
-// Stop hook's feedback — yields none.
-func stepsOf(r walkRow) ([]transcript.ContinuationStep, bool) {
+// interruptedPrefix opens the text Claude Code records when the person stops a
+// turn.
+const interruptedPrefix = "[Request interrupted by user"
+
+// stepsOf turns one entry into the steps a reader sees, and names how its last
+// step ends the turn: transcript.EndHumanTurn when the person spoke,
+// EndInterrupted when the person stopped the turn, "" when it goes on. An entry
+// the harness wrote for its own bookkeeping — an attachment, a meta user entry
+// other than a Stop hook's feedback — yields none.
+func stepsOf(r walkRow) ([]transcript.ContinuationStep, string) {
 	if r.Message == nil || (r.Type != "user" && r.Type != "assistant") {
-		return nil, false
+		return nil, ""
 	}
 	base := transcript.ContinuationStep{Timestamp: r.Timestamp, Entry: r.UUID}
 	if r.IsMeta {
 		if text := plainText(r.Message.Content); r.Type == "user" && strings.HasPrefix(text, stopFeedbackPrefix) {
 			base.Kind, base.Text = transcript.StepHookFeedback, text
-			return []transcript.ContinuationStep{base}, false
+			return []transcript.ContinuationStep{base}, ""
 		}
-		return nil, false
+		return nil, ""
 	}
 
 	// A user entry whose content is plain text is the person speaking.
 	var text string
 	if err := json.Unmarshal(r.Message.Content, &text); err == nil {
 		if r.Type != "user" {
-			return nil, false
+			return nil, ""
 		}
 		base.Kind, base.Text = transcript.StepHumanTurn, text
-		return []transcript.ContinuationStep{base}, true
+		return []transcript.ContinuationStep{base}, turnEnd(text)
 	}
 
 	blocks, ok := decodeBlocks(r.Message.Content)
 	if !ok {
-		return nil, false
+		return nil, ""
 	}
 	var steps []transcript.ContinuationStep
 	for _, b := range blocks {
@@ -244,7 +249,7 @@ func stepsOf(r walkRow) ([]transcript.ContinuationStep, bool) {
 		case "text":
 			if r.Type == "user" {
 				step.Kind, step.Text = transcript.StepHumanTurn, b.Text
-				return append(steps, step), true
+				return append(steps, step), turnEnd(b.Text)
 			}
 			step.Kind, step.Text = transcript.StepAssistantText, b.Text
 		case "tool_use":
@@ -264,7 +269,15 @@ func stepsOf(r walkRow) ([]transcript.ContinuationStep, bool) {
 		}
 		steps = append(steps, step)
 	}
-	return steps, false
+	return steps, ""
+}
+
+// turnEnd names how a person's text ends the turn.
+func turnEnd(text string) string {
+	if strings.HasPrefix(text, interruptedPrefix) {
+		return transcript.EndInterrupted
+	}
+	return transcript.EndHumanTurn
 }
 
 // plainText is an entry's content as text: the string itself, or its text
