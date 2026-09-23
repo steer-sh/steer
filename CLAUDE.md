@@ -126,6 +126,8 @@ Read the linked architecture section before changing the corresponding boundary:
   adapter, and the dispatch in `cli/internal/firingaudit/continuation.go`.
   A reader returns the granularity it achieved with its source anchors; adding
   one means teaching `Reach` what that harness's locators allow.
+  The Stop block readers (`cc.StopBlock`, `codex.StopBlock`) find a block by
+  `checks.RunIDLine`, so the block reason's last line changes with them.
 - Firing adjudications: the store `cli/internal/adjudication/` and its component
   name in `cli/internal/statestore/Components`. A corpus absent from that list never
   migrates. Its exclusion stream is keyed by `mine.RowDigest`; a change to how that

@@ -99,6 +99,9 @@ type ContinuationBudget struct {
 	Steps int
 	// TextBytes is the maximum text kept per step.
 	TextBytes int
+	// ContextSteps is the maximum number of steps kept before a Stop block.
+	// A guard continuation reads nothing before its block and ignores it.
+	ContextSteps int
 }
 
 // Default step and text limits, applied when a caller leaves the field zero.
@@ -115,6 +118,9 @@ func (b ContinuationBudget) WithDefaults() ContinuationBudget {
 	}
 	if b.TextBytes == 0 {
 		b.TextBytes = DefaultContinuationTextBytes
+	}
+	if b.ContextSteps == 0 {
+		b.ContextSteps = DefaultContextSteps
 	}
 	return b
 }

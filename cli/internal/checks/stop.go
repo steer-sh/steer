@@ -241,6 +241,10 @@ func treeSignature(root string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
+// RunIDLine is the last line of a block reason from run runID. It is the one
+// text that joins the transcript entry holding the reason to the run's record.
+func RunIDLine(runID string) string { return runIDLabel + runID }
+
 func blockReason(identity string, run OracleRun, records []Execution, output string) string {
 	var b strings.Builder
 	if run.IntegrationFailure {

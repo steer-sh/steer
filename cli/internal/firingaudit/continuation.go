@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/steer-sh/steer-cli/internal/checks"
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/transcript"
 	"github.com/steer-sh/steer-cli/internal/transcript/cc"
@@ -130,4 +131,71 @@ func (r Row) continuationOrUnavailable(budget transcript.ContinuationBudget) tra
 			TurnID:         reach.TurnID,
 		},
 	}
+}
+
+// locatorPromptID is Claude Code's Stop turn key; Codex names its turn turn_id.
+const locatorPromptID = "prompt_id"
+
+// Reach reports whether the transcript around this block can be read, and at
+// what granularity, without reading it. The run's reason line is the join, so a
+// run that recorded no reason with that line reaches nothing.
+func (c CheckCase) Reach() Reach {
+	path := c.Run.Locators[locatorTranscriptPath]
+	line := checks.RunIDLine(c.Run.RunID)
+	var turn string
+	switch harness.ID(c.Run.Harness) {
+	case harness.ClaudeCode:
+		turn = c.Run.Locators[locatorPromptID]
+	case harness.Codex:
+		turn = c.Run.Locators[locatorTurnID]
+	default:
+		return Reach{Granularity: transcript.JoinUnavailable,
+			Reason: fmt.Sprintf("harness %q has no Stop block reader", c.Run.Harness)}
+	}
+	unavailable := Reach{Granularity: transcript.JoinUnavailable, TranscriptPath: path, TurnID: turn}
+	switch {
+	case !transcript.HasLine(c.Run.BlockReason, line):
+		unavailable.Reason = "the run recorded no block reason ending in its run line"
+	case path == "":
+		unavailable.Reason = "the run carries no transcript path"
+	default:
+		if _, err := os.Stat(path); err != nil {
+			unavailable.Reason = fmt.Sprintf("the transcript %s is gone", path)
+			break
+		}
+		return Reach{Granularity: transcript.JoinEntry, TranscriptPath: path, TurnID: turn}
+	}
+	return unavailable
+}
+
+// Reading reads the transcript around this block. A reach that is unavailable,
+// or a transcript that will not open, yields an unavailable reading naming why.
+func (c CheckCase) Reading(budget transcript.ContinuationBudget) transcript.StopBlockReading {
+	reach := c.Reach()
+	out := transcript.StopBlockReading{Continuation: transcript.Continuation{
+		Harness:     harness.ID(c.Run.Harness),
+		Granularity: transcript.JoinUnavailable,
+		Reason:      reach.Reason,
+		Anchors: transcript.ContinuationAnchors{
+			TranscriptPath: reach.TranscriptPath,
+			TurnID:         reach.TurnID,
+		},
+	}}
+	if reach.Granularity == transcript.JoinUnavailable {
+		return out
+	}
+	line := checks.RunIDLine(c.Run.RunID)
+	var reading transcript.StopBlockReading
+	var err error
+	switch harness.ID(c.Run.Harness) {
+	case harness.ClaudeCode:
+		reading, err = cc.StopBlock(reach.TranscriptPath, line, reach.TurnID, budget)
+	case harness.Codex:
+		reading, err = codex.StopBlock(reach.TranscriptPath, line, reach.TurnID, budget)
+	}
+	if err != nil {
+		out.Reason = err.Error()
+		return out
+	}
+	return reading
 }

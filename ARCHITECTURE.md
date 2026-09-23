@@ -547,8 +547,10 @@ which resolves the row's sidecar and names the master that recorded it.
 
 `Reach` decides what join a row's own locators allow before a transcript is
 opened. Claude Code reaches the blocked call: `cc.Continuation` finds the
-`tool_result` carrying `tool_use_id` and walks `parentUuid` forward, following
-the first child at a fork and counting the rest. Codex and Pi have no lookup, and
+`tool_result` carrying `tool_use_id` and walks `parentUuid` forward over every
+descendant in file order, so parallel tool results and attachments stay on it. A
+second assistant or human child of one entry is a rewind branch, which it counts
+and does not follow. Codex and Pi have no lookup, and
 each says so in its own terms rather than reading as missing evidence.
 
 `internal/adjudication/` holds one append-only receipt per judged block. A
@@ -572,6 +574,15 @@ failed, errored, timed out or produced no result, `check.sh` itself, and an
 integration failure; a check the run never reached asserted nothing and is not
 one. `check.sh`'s own failure is required reading only when no declared check
 accounts for it. `steer check blocks` stays the facts view of one repository.
+
+A check case is read at `JoinEntry`: no Stop payload names the entry its block
+creates, so `cc.StopBlock` and `codex.StopBlock` find it by
+`checks.RunIDLine`, the reason's last line, matched as a whole line and narrowed
+by the payload's turn key. Each returns the turn before the block, back to its
+prompt and bounded by `ContextSteps`, and the continuation after it; a later
+block in the same turn is a `hook_feedback` step, and `Matches` counts repeated
+entries. `CheckCase.Reach` reports why a case reaches nothing (a run without the
+line, no transcript path, a transcript gone, a harness with no Stop runner).
 
 `Queue` offers unread rows of the installed guard, plus a judged row whose
 continuation nobody read while that transcript is still on this machine. The

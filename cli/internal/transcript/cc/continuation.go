@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/transcript"
@@ -18,6 +19,8 @@ type walkRow struct {
 	row
 	UUID       string `json:"uuid"`
 	ParentUUID string `json:"parentUuid"`
+	// PromptID names the turn a user entry belongs to.
+	PromptID string `json:"promptId"`
 	// DenialKind is what the harness called the denial. It reads
 	// "permission-rule" for a hook block and names no hook.
 	DenialKind string `json:"toolDenialKind"`
@@ -87,11 +90,19 @@ type walker struct {
 	// of the file, because a rewind appends its branch after the entries the
 	// walk already read.
 	done bool
-	// frontier is the entry the next step must descend from.
-	frontier string
-	// followed are the entries the walk already left. A later entry naming one
-	// of them as its parent is a second branch of a rewound session.
-	followed map[string]bool
+	// member holds the entries on the continuation. An entry joins when its
+	// parent is a member, so parallel tool results and attachments join too.
+	member map[string]bool
+	// spoken holds the members that already have an assistant or human child.
+	// A second such child is a branch of a rewound session.
+	spoken map[string]bool
+}
+
+// start makes root the first entry of the continuation.
+func (w *walker) start(root string) {
+	w.found = true
+	w.member = map[string]bool{root: true}
+	w.spoken = map[string]bool{}
 }
 
 // consider reads one entry into the walk.
@@ -100,18 +111,36 @@ func (w *walker) consider(r walkRow, out *transcript.Continuation) {
 		w.done = w.locate(r, out)
 		return
 	}
-	if r.IsSidechain {
+	if r.IsSidechain || !w.member[r.ParentUUID] {
 		return
 	}
-	if w.done || r.ParentUUID != w.frontier {
-		if w.followed[r.ParentUUID] {
-			out.BranchPoints++
-		}
+	speaks := speaks(r)
+	if speaks && w.spoken[r.ParentUUID] {
+		out.BranchPoints++
 		return
 	}
-	w.followed[w.frontier] = true
-	w.frontier = r.UUID
+	if w.done {
+		return
+	}
+	w.member[r.UUID] = true
+	if speaks {
+		w.spoken[r.ParentUUID] = true
+	}
 	w.done = w.emit(r, out)
+}
+
+// speaks reports an entry that continues the conversation: an assistant entry
+// or the person's turn. A tool result, an attachment or a meta entry hangs off
+// the conversation without continuing it.
+func speaks(r walkRow) bool {
+	if r.IsMeta {
+		return false
+	}
+	if r.Type == "assistant" {
+		return true
+	}
+	_, human := stepsOf(r)
+	return human
 }
 
 // locate finds the two anchors: the entry holding the blocked call, and the
@@ -129,9 +158,7 @@ func (w *walker) locate(r walkRow, out *transcript.Continuation) bool {
 		case b.Type == "tool_use" && b.ID == w.toolUseID:
 			out.Anchors.BlockedCallEntry = r.UUID
 		case b.Type == "tool_result" && b.ToolUseID == w.toolUseID:
-			w.found = true
-			w.frontier = r.UUID
-			w.followed = map[string]bool{}
+			w.start(r.UUID)
 			out.Granularity = transcript.JoinCall
 			out.Anchors.DenialEntry = r.UUID
 			return w.appendStep(out, transcript.ContinuationStep{
@@ -147,33 +174,62 @@ func (w *walker) locate(r walkRow, out *transcript.Continuation) bool {
 	return false
 }
 
-// emit turns one walked entry into steps. An entry the harness wrote for its
-// own bookkeeping — an attachment, a meta user entry — carries the chain
-// forward and contributes nothing to read.
+// emit turns one walked entry into steps under the budget, and reports whether
+// the walk stops: the budget is spent or the person spoke.
 func (w *walker) emit(r walkRow, out *transcript.Continuation) bool {
-	if r.Message == nil || r.IsMeta || (r.Type != "user" && r.Type != "assistant") {
-		return false
+	steps, human := stepsOf(r)
+	for i, step := range steps {
+		spent := w.appendStep(out, step)
+		if human && i == len(steps)-1 {
+			break
+		}
+		if spent {
+			return true
+		}
+	}
+	if human {
+		out.EndReason = transcript.EndHumanTurn
+		return true
+	}
+	return false
+}
+
+// stopFeedbackPrefix opens the meta user entry Claude Code writes for a Stop
+// hook's block reason.
+const stopFeedbackPrefix = "Stop hook feedback:"
+
+// stepsOf turns one entry into the steps a reader sees, and reports whether its
+// last step is the person speaking, which ends the turn. An entry the harness
+// wrote for its own bookkeeping — an attachment, a meta user entry other than a
+// Stop hook's feedback — yields none.
+func stepsOf(r walkRow) ([]transcript.ContinuationStep, bool) {
+	if r.Message == nil || (r.Type != "user" && r.Type != "assistant") {
+		return nil, false
 	}
 	base := transcript.ContinuationStep{Timestamp: r.Timestamp, Entry: r.UUID}
+	if r.IsMeta {
+		if text := plainText(r.Message.Content); r.Type == "user" && strings.HasPrefix(text, stopFeedbackPrefix) {
+			base.Kind, base.Text = transcript.StepHookFeedback, text
+			return []transcript.ContinuationStep{base}, false
+		}
+		return nil, false
+	}
 
-	// A user entry whose content is plain text is the person speaking, which
-	// ends the turn the block happened in.
+	// A user entry whose content is plain text is the person speaking.
 	var text string
 	if err := json.Unmarshal(r.Message.Content, &text); err == nil {
 		if r.Type != "user" {
-			return false
+			return nil, false
 		}
-		step := base
-		step.Kind, step.Text = transcript.StepHumanTurn, text
-		w.appendStep(out, step)
-		out.EndReason = transcript.EndHumanTurn
-		return true
+		base.Kind, base.Text = transcript.StepHumanTurn, text
+		return []transcript.ContinuationStep{base}, true
 	}
 
 	blocks, ok := decodeBlocks(r.Message.Content)
 	if !ok {
-		return false
+		return nil, false
 	}
+	var steps []transcript.ContinuationStep
 	for _, b := range blocks {
 		step := base
 		switch b.Type {
@@ -188,9 +244,7 @@ func (w *walker) emit(r walkRow, out *transcript.Continuation) bool {
 		case "text":
 			if r.Type == "user" {
 				step.Kind, step.Text = transcript.StepHumanTurn, b.Text
-				w.appendStep(out, step)
-				out.EndReason = transcript.EndHumanTurn
-				return true
+				return append(steps, step), true
 			}
 			step.Kind, step.Text = transcript.StepAssistantText, b.Text
 		case "tool_use":
@@ -208,11 +262,26 @@ func (w *walker) emit(r walkRow, out *transcript.Continuation) bool {
 		default:
 			continue
 		}
-		if w.appendStep(out, step) {
-			return true
+		steps = append(steps, step)
+	}
+	return steps, false
+}
+
+// plainText is an entry's content as text: the string itself, or its text
+// blocks joined. Any other shape yields "".
+func plainText(raw json.RawMessage) string {
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil {
+		return text
+	}
+	blocks, _ := decodeBlocks(raw)
+	var parts []string
+	for _, b := range blocks {
+		if b.Type == "text" {
+			parts = append(parts, b.Text)
 		}
 	}
-	return false
+	return strings.Join(parts, "\n")
 }
 
 // appendStep adds one step under the walk's budget.

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/transcript"
@@ -132,8 +133,8 @@ func (w *turnWalk) consider(line []byte, out *transcript.Continuation) {
 		return
 	}
 
-	if r.Type == typeEventMsg && p.Type == "task_complete" {
-		out.EndReason = transcript.EndTurn
+	if end := turnEnd(r, p); end != "" {
+		out.EndReason = end
 		w.done = true
 		return
 	}
@@ -143,13 +144,64 @@ func (w *turnWalk) consider(line []byte, out *transcript.Continuation) {
 	w.done = w.emit(r, p, out)
 }
 
-// emit turns one response item into steps. A developer message, an agent
-// message and a reasoning item with no summary are the harness talking to
-// itself, and contribute nothing to read.
+// turnEnd names how a line ends its turn, or "" for a line that does not.
+func turnEnd(r continuationRow, p turnPayload) string {
+	if r.Type != typeEventMsg {
+		return ""
+	}
+	switch p.Type {
+	case "task_complete":
+		return transcript.EndTurn
+	case "turn_aborted":
+		return transcript.EndInterrupted
+	}
+	return ""
+}
+
+// emit turns one response item into a step under the budget, and reports
+// whether the budget is spent.
 func (w *turnWalk) emit(r continuationRow, p turnPayload, out *transcript.Continuation) bool {
+	step, ok := stepOf(r, p)
+	if !ok {
+		return false
+	}
+	return out.Append(step, w.budget)
+}
+
+// hookPromptOpen and hookPromptClose wrap the message Codex writes for a Stop
+// hook's block reason.
+const (
+	hookPromptOpen  = "<hook_prompt"
+	hookPromptClose = "</hook_prompt>"
+)
+
+// hookPromptText returns a hook prompt message's reason without its wrapper,
+// and whether the message is a hook prompt.
+func hookPromptText(p turnPayload) (string, bool) {
+	if p.Type != "message" || p.Role != "user" {
+		return "", false
+	}
+	text := strings.TrimSpace(itemText(p.Content))
+	if !strings.HasPrefix(text, hookPromptOpen) {
+		return "", false
+	}
+	if i := strings.Index(text, ">"); i >= 0 {
+		text = text[i+1:]
+	}
+	return strings.TrimSuffix(text, hookPromptClose), true
+}
+
+// stepOf turns one response item into the step a reader sees. A developer
+// message, an agent message and a reasoning item with no summary are the
+// harness talking to itself, and yield none.
+func stepOf(r continuationRow, p turnPayload) (transcript.ContinuationStep, bool) {
 	step := transcript.ContinuationStep{Timestamp: r.Timestamp}
 	if r.Ordinal != nil {
 		step.Entry = strconv.Itoa(*r.Ordinal)
+	}
+	if text, ok := hookPromptText(p); ok {
+		step.Kind, step.Text = transcript.StepHookFeedback, text
+		return step, true
 	}
 
 	switch {
@@ -159,13 +211,13 @@ func (w *turnWalk) emit(r continuationRow, p turnPayload, out *transcript.Contin
 		// Codex writes several user-role messages the person never typed. Only
 		// the typed one is the prompt the turn answers.
 		if p.Meta == nil || !contains(p.Meta.ContentItemKinds, "user.text") {
-			return false
+			return step, false
 		}
 		step.Kind, step.Text = transcript.StepHumanTurn, itemText(p.Content)
 	case p.Type == "reasoning":
 		text := itemText(p.Summary)
 		if text == "" {
-			return false
+			return step, false
 		}
 		step.Kind, step.Text = transcript.StepThinking, text
 	case p.Type == "function_call" || p.Type == "custom_tool_call":
@@ -185,7 +237,7 @@ func (w *turnWalk) emit(r continuationRow, p turnPayload, out *transcript.Contin
 		step.Text = outputText(p.Output)
 		step.IsError = resultFailed(step.Text)
 	default:
-		return false
+		return step, false
 	}
-	return out.Append(step, w.budget)
+	return step, true
 }
