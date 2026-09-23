@@ -165,3 +165,17 @@ func TestInstalledDetectorsResolvesAMissingRepositoryToNothing(t *testing.T) {
 		t.Errorf("a missing repository = %v; want nil", got)
 	}
 }
+
+func TestCoverChecksCountsEachRepositorysBlocks(t *testing.T) {
+	cases := CheckCases(checks.LiveEvidence{Runs: []checks.OracleRun{
+		blockRun("/a", "a1", 1), blockRun("/b", "b1", 2), blockRun("/a", "a2", 3)}})
+	receipts := []adjudication.Receipt{
+		{Subject: adjudication.SubjectCheck, RunID: "a2"},
+		{Subject: adjudication.SubjectGuard, FiringID: "a1"},
+	}
+	got := CoverChecks(cases, receipts)
+	want := []CheckCoverage{{Repo: "/a", Blocks: 2, Judged: 1, Unjudged: 1}, {Repo: "/b", Blocks: 1, Unjudged: 1}}
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("coverage = %+v; want %+v (a guard receipt judges no block)", got, want)
+	}
+}

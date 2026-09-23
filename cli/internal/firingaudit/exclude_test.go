@@ -95,7 +95,7 @@ func TestQueueLeavesExcludedRowsOutAndCountsThem(t *testing.T) {
 	a.RowDigest = "ra"
 	b := ccRow(t, "bb", "2026-09-02T00:00:00Z")
 	b.RowDigest = "rb"
-	items, counts := Queue([]Row{a, b}, nil, QueueOptions{Installed: installed,
+	items, counts := Queue([]Row{a, b}, nil, nil, QueueOptions{Installed: installed,
 		Excluded: map[string]adjudication.Exclusion{"ra": {}}})
 	if len(items) != 1 || items[0].FiringID != "bb" {
 		t.Fatalf("queued %+v, want bb alone", items)

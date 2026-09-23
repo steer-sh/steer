@@ -87,7 +87,7 @@ func codexRow(t *testing.T, id, timestamp string) Row {
 func ids(items []Item) []string {
 	var out []string
 	for _, i := range items {
-		out = append(out, i.FiringID)
+		out = append(out, i.ID())
 	}
 	return out
 }
@@ -104,7 +104,7 @@ func TestQueueOffersUnreadRowsOfTheInstalledGuardOldestFirst(t *testing.T) {
 
 	rows := []Row{newest, oldest, middle, historic, legacy}
 
-	items, _ := Queue(rows, nil, QueueOptions{Installed: installed})
+	items, _ := Queue(rows, nil, nil, QueueOptions{Installed: installed})
 	if got := ids(items); fmt.Sprint(got) != fmt.Sprint([]string{"a", "b", "c"}) {
 		t.Errorf("queue = %v; want the installed guard's rows oldest first", got)
 	}
@@ -114,12 +114,12 @@ func TestQueueOffersUnreadRowsOfTheInstalledGuardOldestFirst(t *testing.T) {
 		}
 	}
 
-	widened, _ := Queue(rows, nil, QueueOptions{Installed: installed, Other: true})
+	widened, _ := Queue(rows, nil, nil, QueueOptions{Installed: installed, Other: true})
 	if got := ids(widened); fmt.Sprint(got) != fmt.Sprint([]string{"old", "a", "b", "c"}) {
 		t.Errorf("widened queue = %v; want the historic row too, never the legacy one", got)
 	}
 
-	limited, _ := Queue(rows, nil, QueueOptions{Installed: installed, Limit: 2})
+	limited, _ := Queue(rows, nil, nil, QueueOptions{Installed: installed, Limit: 2})
 	if got := ids(limited); fmt.Sprint(got) != fmt.Sprint([]string{"a", "b"}) {
 		t.Errorf("limited queue = %v; want the two oldest", got)
 	}
@@ -134,7 +134,7 @@ func TestQueueKeepsAJudgedRowWhoseContinuationNobodyRead(t *testing.T) {
 		{Subject: adjudication.SubjectGuard, FiringID: "b", Judgment: adjudication.Prevented, ContinuationInspected: true},
 	}
 
-	items, _ := Queue([]Row{row, read}, receipts, QueueOptions{Installed: installed})
+	items, _ := Queue([]Row{row, read}, nil, receipts, QueueOptions{Installed: installed})
 	if len(items) != 1 || items[0].FiringID != "a" {
 		t.Fatalf("queue = %v; want only the judgment with an unread continuation", ids(items))
 	}
@@ -156,7 +156,7 @@ func TestQueueDoesNotReofferEvidenceARereadCannotChange(t *testing.T) {
 		{Subject: adjudication.SubjectGuard, FiringID: "b", Judgment: adjudication.Prevented},
 	}
 
-	items, _ := Queue([]Row{unresolved, gone}, receipts, QueueOptions{Installed: installed})
+	items, _ := Queue([]Row{unresolved, gone}, nil, receipts, QueueOptions{Installed: installed})
 	if len(items) != 0 {
 		t.Errorf("queue = %v; want neither offered", ids(items))
 	}
@@ -167,7 +167,7 @@ func TestQueueNarrowsToOneGuard(t *testing.T) {
 	other := ccRow(t, "b", "2026-09-20T02:00:00Z")
 	other.HookName = "second"
 
-	items, _ := Queue([]Row{mine, other}, nil,
+	items, _ := Queue([]Row{mine, other}, nil, nil,
 		QueueOptions{Installed: installed, HookName: "second"})
 	if len(items) != 1 || items[0].FiringID != "b" {
 		t.Errorf("queue = %v; want only the named guard's row", ids(items))
@@ -180,7 +180,7 @@ func TestCountsDiscloseWhatTheListingLeft(t *testing.T) {
 		ccRow(t, "b", "2026-09-20T02:00:00Z"),
 		ccRow(t, "c", "2026-09-20T03:00:00Z"),
 	}
-	_, all := Queue(rows, nil, QueueOptions{Installed: installed})
+	_, all := Queue(rows, nil, nil, QueueOptions{Installed: installed})
 	if all.Queued != all.Listed {
 		t.Fatalf("an unlimited listing left %d of %d unlisted", all.Queued-all.Listed, all.Queued)
 	}
@@ -188,7 +188,7 @@ func TestCountsDiscloseWhatTheListingLeft(t *testing.T) {
 		t.Errorf("a complete listing does not say so: %q", all.Remaining())
 	}
 
-	_, cut := Queue(rows, nil, QueueOptions{Installed: installed, Limit: 1})
+	_, cut := Queue(rows, nil, nil, QueueOptions{Installed: installed, Limit: 1})
 	if cut.Listed != 1 || cut.Queued != all.Queued {
 		t.Fatalf("a limit changed the queued count: listed=%d queued=%d want listed=1 queued=%d",
 			cut.Listed, cut.Queued, all.Queued)
@@ -206,7 +206,7 @@ func TestAGuardReaderIgnoresACheckReceiptOfTheSameIdentifier(t *testing.T) {
 		Failures: []adjudication.Failure{{Kind: adjudication.FailureOracle,
 			Validity: adjudication.Valid, Attribution: adjudication.Introduced}}}}
 
-	items, _ := Queue([]Row{row}, receipts, QueueOptions{Installed: installed})
+	items, _ := Queue([]Row{row}, nil, receipts, QueueOptions{Installed: installed})
 	if len(items) != 1 || items[0].Reason != Unjudged {
 		t.Errorf("queue = %+v; want the firing offered as unread", items)
 	}

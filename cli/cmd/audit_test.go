@@ -53,7 +53,7 @@ func TestWriteQueueSeparatesTheCountsAReadingCanMove(t *testing.T) {
 	}}
 
 	var out bytes.Buffer
-	if err := writeQueue(&out, true, items, firingaudit.Counts{Queued: len(items), Listed: len(items)}, coverage); err != nil {
+	if err := writeQueue(&out, true, items, firingaudit.Counts{Queued: len(items), Listed: len(items)}, coverage, nil); err != nil {
 		t.Fatal(err)
 	}
 	text := out.String()
@@ -70,14 +70,14 @@ func TestWriteQueueSeparatesTheCountsAReadingCanMove(t *testing.T) {
 
 	// An empty queue is not an empty store, and neither is silence.
 	var quiet bytes.Buffer
-	if err := writeQueue(&quiet, true, nil, firingaudit.Counts{}, coverage); err != nil {
+	if err := writeQueue(&quiet, true, nil, firingaudit.Counts{}, coverage, nil); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(quiet.String(), "Nothing is queued") {
 		t.Errorf("an empty queue said nothing:\n%s", quiet.String())
 	}
 	var absent bytes.Buffer
-	if err := writeQueue(&absent, false, nil, firingaudit.Counts{}, nil); err != nil {
+	if err := writeQueue(&absent, false, nil, firingaudit.Counts{}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(absent.String(), "No guard store") {

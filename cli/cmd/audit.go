@@ -7,6 +7,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/adjudication"
@@ -19,14 +20,17 @@ import (
 
 var auditCmd = &cobra.Command{
 	Use:   "audit",
-	Short: "Read and judge the blocks a guard recorded",
-	Long: `Audit reads the guard audit stream and records one judgment per block.
+	Short: "Read and judge the blocks guards and check.sh recorded",
+	Long: `Audit reads the guard audit stream and the recorded check.sh Stop blocks, and
+records one judgment per block.
 
-A judgment is a reading of one recorded firing: whether the blocked action would
-have produced the failure its rule names, judged from the action in its original
-task context, and separately what the task did after the block. Field counts
+A guard judgment is a reading of one recorded firing: whether the blocked action
+would have produced the failure its rule names, judged from the action in its
+original task context, and separately what the task did after the block. A check
+judgment reads each failure a blocked run reported: whether it is real, whether
+the blocked turn introduced it, and what the task did about it. Field counts
 describe recurrence; they establish no fix's efficacy, and neither does the
-fraction of firings a pass reads.`,
+fraction of blocks a pass reads.`,
 }
 
 // group is one guard's rows in one store. The store decides which master
@@ -49,9 +53,18 @@ type auditSource struct {
 	Groups    []group
 	// Excluded holds the rows an exclusion retires, keyed by row digest.
 	Excluded map[string]adjudication.Exclusion
+	// Cases are the check.sh Stop blocks recorded on this machine.
+	Cases []firingaudit.CheckCase
 }
 
-// loadAudit reads both guard stores and the adjudication stream.
+// classify stamps each check failure with what a reading of it says about the
+// detector installed now. It reads repositories, so only readers call it.
+func (s auditSource) classify() {
+	firingaudit.ClassifyCases(s.Cases, firingaudit.InstalledDetectors())
+}
+
+// loadAudit reads both guard stores, the recorded check blocks and the
+// adjudication stream.
 //
 // A master that cannot be read is an error rather than a silent Unknown: an
 // unreadable identity would report every row as recorded by some other
@@ -83,9 +96,14 @@ func loadAudit() (auditSource, error) {
 		return adjudication.Identity{HookDigest: meta.HookDigest, RuleHash: meta.RuleHash}
 	}
 
+	cases, err := firingaudit.LoadCheckCases()
+	if err != nil {
+		return auditSource{}, err
+	}
+
 	return auditSource{Rows: rows, Present: present, Receipts: receipts,
 		Installed: installed, Groups: groupRows(rows, installed),
-		Excluded: adjudication.Excluded(exclusions)}, nil
+		Excluded: adjudication.Excluded(exclusions), Cases: cases}, nil
 }
 
 // groupRows collects each guard's rows per store, so the coverage arithmetic
@@ -136,44 +154,64 @@ func (s auditSource) coverageOf(hookName string) []guardCoverage {
 
 var auditQueueCmd = &cobra.Command{
 	Use:   "queue",
-	Short: "List the firings a reading pass should take next",
-	Long: `Queue lists unread firings of the installed guard, oldest first.
+	Short: "List the blocks a reading pass should take next",
+	Long: `Queue lists unread guard firings of the installed guard and unread check.sh
+Stop blocks, in one list, oldest first.
 
-A firing is here because no judgment names it, or because a judgment read the
+A block is here because no judgment names it, or because a judgment read the
 block and nobody read what the task did next while that transcript is still on
-this machine. Rows an earlier implementation recorded are a separate backlog:
-no reading of them establishes what the guard running now does, so --other is
-what asks for them.`,
+this machine. Guard rows an earlier implementation recorded are a separate
+backlog: no reading of them establishes what the guard running now does, so
+--other is what asks for them. A check block is listed whatever its detectors
+are now, and each failure says whether a reading of it describes the detector
+installed now (applies=current). --subject guard|check narrows the list; --hook
+names one guard and so lists no check block.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := validSubject(auditSubject); err != nil {
+			return err
+		}
 		source, err := loadAudit()
 		if err != nil {
 			return err
 		}
-		items, counts := firingaudit.Queue(source.Rows, source.Receipts, firingaudit.QueueOptions{
+		source.classify()
+		items, counts := firingaudit.Queue(source.Rows, source.Cases, source.Receipts, firingaudit.QueueOptions{
+			Subject:   auditSubject,
 			HookName:  auditHook,
 			Installed: source.Installed,
 			Other:     auditOther,
 			Limit:     auditLimit,
 			Excluded:  source.Excluded,
 		})
-		coverage := source.coverageOf(auditHook)
+		var coverage []guardCoverage
+		if auditSubject != adjudication.SubjectCheck {
+			coverage = source.coverageOf(auditHook)
+		}
+		var checkCoverage []firingaudit.CheckCoverage
+		if auditSubject != adjudication.SubjectGuard && auditHook == "" {
+			checkCoverage = firingaudit.CoverChecks(source.Cases, source.Receipts)
+		}
 		if auditJSON {
 			return writeJSON(cmd.OutOrStdout(), map[string]any{
-				"audit_present": source.Present,
-				"items":         items,
-				"counts":        counts,
-				"coverage":      coverage,
+				"audit_present":  source.Present,
+				"items":          items,
+				"counts":         counts,
+				"coverage":       coverage,
+				"check_coverage": checkCoverage,
 			})
 		}
-		return writeQueue(cmd.OutOrStdout(), source.Present, items, counts, coverage)
+		return writeQueue(cmd.OutOrStdout(), source.Present, items, counts, coverage, checkCoverage)
 	},
 }
 
 func writeQueue(w io.Writer, present bool, items []firingaudit.Item,
-	counts firingaudit.Counts, coverage []guardCoverage) error {
-	if !present {
-		fmt.Fprintln(w, "No guard store on this machine holds an audit stream.")
+	counts firingaudit.Counts, coverage []guardCoverage, checkCoverage []firingaudit.CheckCoverage) error {
+	if !present && len(checkCoverage) == 0 {
+		fmt.Fprintln(w, "No guard store on this machine holds an audit stream, and no check.sh Stop block is recorded.")
 		return nil
+	}
+	for _, c := range checkCoverage {
+		fmt.Fprintf(w, "check.sh in %s: %d Stop blocks, %d of those read\n", c.Repo, c.Blocks, c.Judged)
 	}
 	for _, g := range coverage {
 		c := g.Coverage
@@ -192,26 +230,90 @@ func writeQueue(w io.Writer, present bool, items []firingaudit.Item,
 	}
 	fmt.Fprintf(w, "\n%s\n", counts.Remaining())
 	for _, item := range items {
+		if item.Subject == adjudication.SubjectCheck {
+			var failures []string
+			for _, f := range item.Failures {
+				failures = append(failures, fmt.Sprintf("%s(applies=%s)",
+					firingaudit.FailureName(f.Kind, f.Check), f.Applies))
+			}
+			fmt.Fprintf(w, "  %s  %s  check.sh block in %s  %s  reach=%s  %s\n",
+				item.RunID, item.Timestamp, item.Repo, item.Reason, item.Reach, strings.Join(failures, " "))
+			continue
+		}
 		fmt.Fprintf(w, "  %s  %s  %s  %s  reach=%s\n",
 			item.FiringID, item.Timestamp, item.HookName, item.Reason, item.Reach)
 	}
 	return nil
 }
 
-var auditShowCmd = &cobra.Command{
-	Use:   "show FIRING_ID",
-	Short: "Show one firing: the action it blocked and what followed",
-	Long: `Show assembles one recorded block for reading.
+// validSubject refuses a --subject value other than guard, check or empty.
+func validSubject(subject string) error {
+	switch subject {
+	case "", adjudication.SubjectGuard, adjudication.SubjectCheck:
+		return nil
+	}
+	return fmt.Errorf("invalid --subject %q: expected %s or %s",
+		subject, adjudication.SubjectGuard, adjudication.SubjectCheck)
+}
 
-It prints the row, the payload as it arrived beside the virtual edit the guard
-objected to, and the continuation the harness allows. Anything it could not
-resolve says so in place: a judgment of the action does not need the
-continuation, and an unread continuation leaves benefit unresolved rather than
-making the block wrong.`,
+// resolveSubject decides whether id names a guard firing or a check run. The
+// two identifiers can read alike, so an id both name needs --subject.
+func resolveSubject(source auditSource, id, subject string) (string, error) {
+	if err := validSubject(subject); err != nil {
+		return "", err
+	}
+	if subject != "" {
+		return subject, nil
+	}
+	_, guard := firingaudit.Find(source.Rows, id)
+	_, check := firingaudit.FindCheckCase(source.Cases, id)
+	switch {
+	case guard && check:
+		return "", fmt.Errorf("%s names both a guard firing and a check run; pass --subject", id)
+	case check:
+		return adjudication.SubjectCheck, nil
+	}
+	return adjudication.SubjectGuard, nil
+}
+
+var auditShowCmd = &cobra.Command{
+	Use:   "show ID",
+	Short: "Show one block: what it stopped and what followed",
+	Long: `Show assembles one recorded block for reading. ID is a guard firing's
+identifier or a check run's; --subject settles an ID that names both.
+
+For a guard firing it prints the row, the payload as it arrived beside the
+virtual edit the guard objected to, and the continuation the harness allows. For
+a check block it prints the run, each failure it reported with whether a reading
+of it describes the detector installed now, what the records show next, the turn
+before the block and what the session did after it. Anything it could not
+resolve says so in place: an unread continuation leaves benefit unresolved
+rather than making the block wrong.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		source, err := loadAudit()
 		if err != nil {
+			return err
+		}
+		subject, err := resolveSubject(source, args[0], auditSubject)
+		if err != nil {
+			return err
+		}
+		if subject == adjudication.SubjectCheck {
+			source.classify()
+			c, err := firingaudit.ShowCheck(source.Cases, args[0], source.Receipts, auditBudget())
+			if err != nil {
+				return err
+			}
+			render := firingaudit.RenderCheck(renderCheckCase)
+			if auditJSON {
+				render = firingaudit.RenderCheckJSON
+			}
+			out, _, err := firingaudit.FitCheck(c, auditMaxBytes, render)
+			if err != nil {
+				return err
+			}
+			_, err = cmd.OutOrStdout().Write(out)
 			return err
 		}
 		c, err := firingaudit.Show(source.Rows, args[0], source.Receipts, auditBudget())
@@ -317,22 +419,151 @@ func endPhrase(reason string) string {
 		return "ended at the end of the transcript, which may still be live"
 	case transcript.EndBudget:
 		return "stopped at the step budget, with entries left unread"
+	case transcript.EndInterrupted:
+		return "ended where the turn was interrupted"
 	}
 	return ""
 }
 
+// renderCheckCase writes one check block as text at one clip level. It ends on
+// the same account RenderCheckJSON carries.
+func renderCheckCase(c firingaudit.CheckShow, e firingaudit.Emission) ([]byte, error) {
+	var buf bytes.Buffer
+	w := &buf
+	r := c.Case.Run
+	fmt.Fprintf(w, "check.sh run %s blocked a %s turn\n", r.RunID, or(r.Harness))
+	fmt.Fprintf(w, "  recorded   %s in %s (session %s)\n", r.Started.UTC().Format(time.RFC3339), r.Repo, or(r.Session))
+	exit := "no exit status"
+	if r.ExitCode != nil {
+		exit = fmt.Sprintf("exit %d", *r.ExitCode)
+	}
+	fmt.Fprintf(w, "  check.sh   %s (%s)\n", r.Outcome, exit)
+	if len(r.Missing) > 0 {
+		fmt.Fprintf(w, "  not reached %s\n", strings.Join(r.Missing, ", "))
+	}
+
+	fmt.Fprintln(w, "\nfailures (each is read on its own)")
+	for _, f := range c.Case.Failures {
+		need := "optional"
+		if f.Required {
+			need = "required"
+		}
+		line := fmt.Sprintf("  %-24s %s  applies=%s", firingaudit.FailureName(f.Kind, f.Check), need, or(f.Applies))
+		if f.Execution != nil {
+			line += fmt.Sprintf("  %s  detector=%s", f.Execution.Outcome, or(f.Execution.DetectorDigest))
+		}
+		fmt.Fprintln(w, line)
+		if f.Execution != nil && f.Execution.Excerpt != "" {
+			writeIndented(w, "    ", f.Execution.Excerpt)
+		}
+	}
+	if r.Excerpt != "" {
+		fmt.Fprintln(w, "  check.sh output (the recorded excerpt):")
+		writeIndented(w, "    ", r.Excerpt)
+	}
+
+	f := c.Followup
+	fmt.Fprintln(w, "\nwhat the records show next")
+	if f.NextStop != nil {
+		fmt.Fprintf(w, "  next Stop in this session: %s at %s; tree %s\n", f.NextStop.Disposition, f.NextStop.Started, f.SessionTree)
+	} else {
+		fmt.Fprintln(w, "  next Stop in this session: none recorded")
+	}
+	if f.NextRun != nil {
+		fmt.Fprintf(w, "  next check.sh run: %s at %s (%s)\n", f.NextRun.Outcome, f.NextRun.Started, f.NextRun.Source)
+	} else {
+		fmt.Fprintln(w, "  next check.sh run: none recorded")
+	}
+	for _, ch := range f.Checks {
+		fmt.Fprintf(w, "  %s: %s at the block; next %s; detector at the next pass %s\n",
+			ch.Check, ch.Blocked, or(ch.Next), ch.DetectorAtPass)
+	}
+
+	reading := c.Reading
+	fmt.Fprintf(w, "\ntranscript (join=%s)\n", reading.Granularity)
+	if reading.Reason != "" {
+		fmt.Fprintf(w, "  %s\n", reading.Reason)
+	}
+	if reading.Matches > 1 {
+		fmt.Fprintf(w, "  %d entries carry this block's reason; the reading anchors on the first\n", reading.Matches)
+	}
+	if reading.ContextOmitted > 0 {
+		fmt.Fprintf(w, "  %d step(s) between the prompt and the block are not shown\n", reading.ContextOmitted)
+	}
+	writeSteps(w, "before", reading.Context)
+	if reading.BranchPoints > 0 {
+		fmt.Fprintf(w, "  %d fork(s) passed; this reading follows the first branch\n", reading.BranchPoints)
+	}
+	writeSteps(w, "after", reading.Steps)
+	if end := endPhrase(reading.EndReason); end != "" {
+		fmt.Fprintf(w, "  %s\n", end)
+	}
+
+	for _, prior := range c.Prior {
+		var readings []string
+		for _, pf := range prior.Failures {
+			readings = append(readings, fmt.Sprintf("%s=%s,%s", firingaudit.FailureName(pf.Kind, pf.Check), pf.Validity, pf.Attribution))
+		}
+		fmt.Fprintf(w, "\nprior reading %s (%s): %s\n", prior.JudgedAt, strings.Join(readings, " "), prior.Rationale)
+	}
+
+	fmt.Fprintf(w, "\nthis reading: %d context step(s) of %d and %d continuation step(s) of %d shown\n",
+		e.ContextEmitted, e.ContextAvailable, e.StepsEmitted, e.StepsAvailable)
+	for _, clip := range e.Clipped {
+		fmt.Fprintf(w, "  %s\n", clip)
+	}
+	fmt.Fprintf(w, "  emitted_bytes %d\n", e.EmittedBytes)
+	return buf.Bytes(), nil
+}
+
+// writeIndented writes text line by line under a prefix. An excerpt is
+// already bounded when it is recorded, so it is written whole.
+func writeIndented(w io.Writer, prefix, text string) {
+	for _, line := range strings.Split(strings.TrimRight(text, "\n"), "\n") {
+		fmt.Fprintf(w, "%s%s\n", prefix, line)
+	}
+}
+
+// writeSteps lists transcript steps under a label, one line each.
+func writeSteps(w io.Writer, label string, steps []transcript.ContinuationStep) {
+	for _, step := range steps {
+		line := string(step.Kind)
+		if step.Tool != "" {
+			line += " " + step.Tool
+		}
+		text := step.Target
+		if text == "" {
+			text = step.Text
+		}
+		fmt.Fprintf(w, "  %-6s %-16s %s\n", label, line, oneLine(text))
+	}
+}
+
 var auditRecordCmd = &cobra.Command{
-	Use:   "record FIRING_ID",
+	Use:   "record ID",
 	Short: "Record one judgment of a recorded block",
-	Long: `Record writes one judgment to the append-only adjudication stream.
+	Long: `Record writes one judgment to the append-only adjudication stream. ID is a
+guard firing's identifier or a check run's; --subject settles an ID that names both.
 
 The reader supplies the judgment, the rationale and what it read. Record
-resolves everything else from the row itself: the guard's implementation
-stamps, the join granularity, its transcript anchors and its extent. It refuses
-a judgment that reports an inspected continuation when no join reached one.
+resolves everything else from the records: the guard's implementation stamps or
+each check's detector digest, the join granularity, its transcript anchors and
+its extent. It refuses a judgment that reports an inspected continuation when
+no join reached one.
 
-Judgments: prevented, incorrect, unresolved. Each describes this block and no
-population, and a recurrence does not erase a demonstrated prevention.`,
+A guard firing takes --judgment: prevented, incorrect or unresolved. Each
+describes this block and no population, and a recurrence does not erase a
+demonstrated prevention.
+
+A check block takes one --failure per failure it reads, and must read every
+failure show marks required:
+  --failure check:ID=VALIDITY,ATTRIBUTION[,CONTINUATION]
+  --failure oracle=...        check.sh itself
+  --failure integration=...   a declared check check.sh never ran
+VALIDITY is valid, invalid or unresolved; ATTRIBUTION is introduced,
+pre-existing or unresolved; CONTINUATION, only with --continuation-inspected,
+is fixed, routed-around, declined, interrupted or unresolved. A failure that
+was real and not this turn's is valid,pre-existing.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := prepareState(); err != nil {
@@ -345,6 +576,19 @@ population, and a recurrence does not erase a demonstrated prevention.`,
 		source, err := loadAudit()
 		if err != nil {
 			return err
+		}
+		subject, err := resolveSubject(source, args[0], auditSubject)
+		if err != nil {
+			return err
+		}
+		if subject == adjudication.SubjectCheck {
+			return recordCheck(cmd, source, dir, args[0])
+		}
+		if len(auditFailures) > 0 {
+			return fmt.Errorf("--failure reads a check block; %s is a guard firing, which takes --judgment", args[0])
+		}
+		if auditJudgment == "" {
+			return fmt.Errorf("a guard firing needs --judgment")
 		}
 		if row, ok := firingaudit.Find(source.Rows, args[0]); ok {
 			if _, retired := source.Excluded[row.RowDigest]; retired {
@@ -374,10 +618,49 @@ population, and a recurrence does not erase a demonstrated prevention.`,
 	},
 }
 
+// recordCheck writes one judgment of the check block of run runID.
+func recordCheck(cmd *cobra.Command, source auditSource, dir, runID string) error {
+	if auditJudgment != "" {
+		return fmt.Errorf("--judgment reads a guard firing; %s is a check run, which takes one --failure per failure", runID)
+	}
+	if len(auditFailures) == 0 {
+		return fmt.Errorf("a check block needs one --failure per failure it reads")
+	}
+	var failures []adjudication.Failure
+	for _, spec := range auditFailures {
+		f, err := firingaudit.ParseFailure(spec)
+		if err != nil {
+			return err
+		}
+		failures = append(failures, f)
+	}
+	receipt, err := firingaudit.RecordCheck(source.Cases, dir, firingaudit.CheckJudgment{
+		RunID:                 runID,
+		Failures:              failures,
+		Rationale:             auditRationale,
+		Evidence:              auditEvidence,
+		ContinuationInspected: auditInspected,
+		InspectedSteps:        auditInspectedSteps,
+		ContinuationOutcome:   auditOutcome,
+		Selection:             auditSelection,
+	}, auditBudget())
+	if err != nil {
+		return err
+	}
+	if auditJSON {
+		return writeJSON(cmd.OutOrStdout(), receipt)
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "recorded run %s: %d failure(s) read (join=%s, %d step(s))\n",
+		receipt.RunID, len(receipt.Failures), receipt.Join, receipt.JoinSteps)
+	return nil
+}
+
 // rowLine is one audit row as `audit rows` lists it: the fields that identify
 // the row and say where it came from, without its evidence bundle.
 type rowLine struct {
-	RowDigest  string `json:"row_digest"`
+	Subject    string `json:"subject"`
+	RowDigest  string `json:"row_digest,omitempty"`
+	RunID      string `json:"run_id,omitempty"`
 	FiringID   string `json:"firing_id,omitempty"`
 	Timestamp  string `json:"timestamp"`
 	HookName   string `json:"hook_name"`
@@ -393,27 +676,37 @@ type rowLine struct {
 
 var auditRowsCmd = &cobra.Command{
 	Use:   "rows",
-	Short: "List every audit row with the digest that names it",
-	Long: `Rows lists every recorded block, oldest first, with its row digest.
+	Short: "List every recorded block with the identifier that names it",
+	Long: `Rows lists every recorded block, oldest first: each guard audit row with its
+row digest, and each check.sh Stop block with its run identifier.
 
-The row digest names a row by its own bytes, so it names a row written before
-firing identifiers existed too. Exclude and reinstate take a firing identifier,
-a row digest, or a digest prefix of at least eight characters.`,
+The row digest names a guard row by its own bytes, so it names a row written
+before firing identifiers existed too. Exclude and reinstate take a firing
+identifier, a row digest, or a digest prefix of at least eight characters.
+--subject guard|check narrows the list; --hook names one guard.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := validSubject(auditSubject); err != nil {
+			return err
+		}
 		source, err := loadAudit()
 		if err != nil {
 			return err
 		}
-		lines := listRows(source, auditHook, auditExcludedOnly)
+		lines := listRows(source, auditSubject, auditHook, auditExcludedOnly)
 		if auditJSON {
 			return writeJSON(cmd.OutOrStdout(), lines)
 		}
 		w := cmd.OutOrStdout()
-		if !source.Present {
-			fmt.Fprintln(w, "No guard store on this machine holds an audit stream.")
+		if !source.Present && len(source.Cases) == 0 {
+			fmt.Fprintln(w, "No guard store on this machine holds an audit stream, and no check.sh Stop block is recorded.")
 			return nil
 		}
 		for _, l := range lines {
+			if l.Subject == adjudication.SubjectCheck {
+				fmt.Fprintf(w, "%s  %s  check.sh  %s  session=%s\n    %s\n",
+					l.RunID, l.Timestamp, or(l.Harness), or(l.SessionID), l.Repository)
+				continue
+			}
 			mark := ""
 			if l.Excluded {
 				mark = "  EXCLUDED: " + l.ExcludedFor
@@ -426,10 +719,24 @@ a row digest, or a digest prefix of at least eight characters.`,
 	},
 }
 
-// listRows selects the rows `audit rows` prints, oldest first.
-func listRows(source auditSource, hook string, excludedOnly bool) []rowLine {
+// listRows selects the rows `audit rows` prints, oldest first. A guard name or
+// the excluded filter selects guard rows only.
+func listRows(source auditSource, subject, hook string, excludedOnly bool) []rowLine {
 	var out []rowLine
+	if subject != adjudication.SubjectGuard && hook == "" && !excludedOnly {
+		for _, c := range source.Cases {
+			out = append(out, rowLine{
+				Subject: adjudication.SubjectCheck, RunID: c.Run.RunID,
+				Timestamp: c.Run.Started.UTC().Format(time.RFC3339Nano),
+				HookName:  "check.sh", Harness: c.Run.Harness, SessionID: c.Run.Session,
+				Repository: c.Run.Repo,
+			})
+		}
+	}
 	for _, r := range source.Rows {
+		if subject == adjudication.SubjectCheck {
+			break
+		}
 		if hook != "" && r.HookName != hook {
 			continue
 		}
@@ -438,13 +745,14 @@ func listRows(source auditSource, hook string, excludedOnly bool) []rowLine {
 			continue
 		}
 		out = append(out, rowLine{
+			Subject:   adjudication.SubjectGuard,
 			RowDigest: r.RowDigest, FiringID: r.FiringID, Timestamp: r.Timestamp,
 			HookName: r.HookName, Harness: r.Harness, SessionID: r.SessionID,
 			Repository: r.Repository, Snippet: r.Snippet, StoreDir: r.StoreDir,
 			Excluded: retired, ExcludedFor: e.Reason,
 		})
 	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].Timestamp < out[j].Timestamp })
+	sort.SliceStable(out, func(i, j int) bool { return firingaudit.Earlier(out[i].Timestamp, out[j].Timestamp) })
 	return out
 }
 
@@ -618,6 +926,8 @@ var (
 	auditSelection      string
 	auditReason         string
 	auditExcludedOnly   bool
+	auditSubject        string
+	auditFailures       []string
 )
 
 func init() {
@@ -630,7 +940,10 @@ func init() {
 	q.StringVar(&auditHook, "hook", "", "only this guard")
 	q.IntVar(&auditLimit, "limit", 0, "at most this many firings (default all)")
 	q.BoolVar(&auditOther, "other", false,
-		"include rows an implementation other than the installed one recorded")
+		"include guard rows an implementation other than the installed one recorded")
+	for _, c := range []*cobra.Command{auditQueueCmd, auditShowCmd, auditRecordCmd, auditRowsCmd} {
+		c.Flags().StringVar(&auditSubject, "subject", "", "guard or check (default both, or whichever the ID names)")
+	}
 
 	for _, c := range []*cobra.Command{auditShowCmd, auditRecordCmd} {
 		f := c.Flags()
@@ -642,7 +955,9 @@ func init() {
 
 	r := auditRecordCmd.Flags()
 	r.StringVar(&auditJudgment, "judgment", "",
-		"prevented|incorrect|unresolved (required)")
+		"prevented|incorrect|unresolved (a guard firing needs it)")
+	r.StringArrayVar(&auditFailures, "failure", nil,
+		"NAME=VALIDITY,ATTRIBUTION[,CONTINUATION] for one failure of a check block (repeatable)")
 	r.StringVar(&auditRationale, "rationale", "", "why, from the action in its task context")
 	r.StringArrayVar(&auditEvidence, "evidence", nil,
 		"what was read, beyond the anchors record stamps itself (repeatable)")
@@ -652,7 +967,6 @@ func init() {
 		"how many continuation steps reached the reader, when show withheld some")
 	r.StringVar(&auditOutcome, "continuation-outcome", "", "what the task did next")
 	r.StringVar(&auditSelection, "selection", "", "why this firing was read")
-	_ = auditRecordCmd.MarkFlagRequired("judgment")
 
 	auditRowsCmd.Flags().StringVar(&auditHook, "hook", "", "only this guard")
 	auditContestsCmd.Flags().StringVar(&auditHook, "hook", "", "only this guard")

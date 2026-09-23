@@ -21,6 +21,10 @@ type Emission struct {
 	// continuation lookup reached, so a judgment states the extent it read.
 	StepsEmitted   int `json:"steps_emitted"`
 	StepsAvailable int `json:"steps_available"`
+	// ContextEmitted and ContextAvailable do the same for the steps a check
+	// case shows before its block.
+	ContextEmitted   int `json:"context_emitted,omitempty"`
+	ContextAvailable int `json:"context_available,omitempty"`
 }
 
 // Render writes one case at one clip level. Fit calls it repeatedly.
@@ -84,7 +88,7 @@ func Fit(c Case, max int, render Render) ([]byte, Emission, error) {
 // is inside what it counts, so it is a fixed point rather than a measurement:
 // each round feeds back the last length, and the claim only ever grows by a
 // digit, so it settles.
-func settle(c Case, e Emission, render Render) (int, []byte, error) {
+func settle[C any](c C, e Emission, render func(C, Emission) ([]byte, error)) (int, []byte, error) {
 	claim := 0
 	for i := 0; i < 8; i++ {
 		e.EmittedBytes = claim

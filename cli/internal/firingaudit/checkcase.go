@@ -14,7 +14,7 @@ type CheckCase struct {
 	Run checks.OracleRun `json:"run"`
 	// Executions are every record under the run, the parent's not-executed
 	// records for checks the run never reached included.
-	Executions []checks.Execution   `json:"executions,omitempty"`
+	Executions []checks.Execution   `json:"-"`
 	Failures   []CheckFailure       `json:"failures"`
 	Followup   checks.BlockFollowup `json:"-"`
 }
@@ -148,4 +148,36 @@ func InstalledDetectors() func(repo string) map[string]string {
 		cache[repo] = detectors
 		return detectors
 	}
+}
+
+// CheckCoverage accounts one repository's Stop blocks against the check
+// receipts on hand. Blocks == Judged + Unjudged.
+type CheckCoverage struct {
+	Repo     string `json:"repo"`
+	Blocks   int    `json:"blocks"`
+	Judged   int    `json:"judged"`
+	Unjudged int    `json:"unjudged"`
+}
+
+// CoverChecks counts each repository's blocks, in the order the cases first
+// name each repository.
+func CoverChecks(cases []CheckCase, receipts []adjudication.Receipt) []CheckCoverage {
+	latest := adjudication.Latest(receipts, adjudication.SubjectCheck)
+	var out []CheckCoverage
+	index := map[string]int{}
+	for _, c := range cases {
+		i, ok := index[c.Run.Repo]
+		if !ok {
+			i = len(out)
+			index[c.Run.Repo] = i
+			out = append(out, CheckCoverage{Repo: c.Run.Repo})
+		}
+		out[i].Blocks++
+		if _, judged := latest[c.Run.RunID]; judged {
+			out[i].Judged++
+		} else {
+			out[i].Unjudged++
+		}
+	}
+	return out
 }

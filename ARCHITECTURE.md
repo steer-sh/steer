@@ -593,7 +593,15 @@ historic.
 
 `Queue` offers unread rows of the installed guard, plus a judged row whose
 continuation nobody read while that transcript is still on this machine. The
-judgment's value queues nothing. `cmd/audit.go` groups rows per store and hook
+judgment's value queues nothing. Check blocks share the queue under the same
+revisit rule, in one time order (`firingaudit.Earlier`), whatever their
+failures' applicability, which each item carries; `--subject` narrows it and
+`--hook` lists guards only. `show` and `record` take a firing or a run
+identifier (`--subject` settles one both carry); `ShowCheck` adds the records'
+follow-up and `FitCheck` withholds prior readings, then continuation from the
+tail, then context from the oldest end, never the run or its failures.
+`RecordCheck` refuses a failure the run did not report and an unread required
+one, and copies each failure's outcome and detector digest from its execution. `cmd/audit.go` groups rows per store and hook
 name, because two stores can hold a guard of the same name and their rows are
 not interchangeable; `claude.ReadMasterIdentity` reads each store's registered
 master for the installed stamps.

@@ -79,7 +79,7 @@ Read the linked architecture section before changing the corresponding boundary:
   recurrence; they cannot establish a fix's efficacy or justify retirement.
   A check-tier record's binding is frozen by `cli/internal/checkscope/`, which
   may read the harness adapters that `gate/mine` may not.
-- Reading or judging a recorded guard firing:
+- Reading or judging a recorded guard firing or check.sh Stop block:
   [firing audits](ARCHITECTURE.md#firing-audits). Start with
   `cli/internal/firingaudit/` and `cli/cmd/audit.go`. The receipt stream in
   `cli/internal/adjudication/` is append-only, so a field a receipt must carry
