@@ -72,7 +72,11 @@ Then Read the queue **once**: `~/.steer/state/steer-report/queue.json` (`version
 - `corpora[]` — one row per corpus (`review-findings`, `transcript-friction`) with `present` and `size`. Relay this sweep to the user in one sentence. When `review-findings` is absent or empty, a second sentence says what comes next. If a `posture.commit_gate[]` row in the snapshot reads `effective: true`, the commit gate reviews each commit from now on, and a later `/steer-report` can mine those reviews for problems. If no row does, no review history collects until `/steer-setup` arms the commit gate.
 - `checks[]` — the open steps in the repository the refresh ran in, each with `kind`, `repo`, an optional `check_id`, a `detail` and the `fix` command that clears it. `not-adopted` is a repository declaring checks that this machine never authorized to run at the end of a turn (`steer check adopt`). `never-validated` is a declared check whose cases were never replayed here, so nothing shows it fails on the problem it names (`steer check test <id>`). `integration-failure` is a passing `check.sh` that ran no declared check — the script's wiring, never a failed assertion (`steer check init` prints the managed line to add). A **stale** receipt is deliberately not here: a stale check keeps running, and `steer status --json` carries the label. These are states of a declaration, not recurrence measured over a window, so they carry no count and never enter a before/after reading.
 
-The queue tells you what is pending. The full dumps below are the raw material you cluster over. Read the review-history fixes for the complete audit — the queue lists only the ones asking for a reader, not the quiet ones worth showing too. If this machine has no commit-review ledger, `mine score` reports an empty corpus — say "no fixes to audit on this machine" in one line, then run the reading pass in `audit.md` anyway. Guard evidence is a separate stream from review history, so an absent ledger says nothing about what the installed guards blocked.
+The queue tells you what is pending. The full dumps below are the raw material you cluster over. Read the review-history fixes for the complete audit — the queue lists only the ones asking for a reader, not the quiet ones worth showing too. If this machine has no commit-review ledger, `mine score` reports an empty corpus. Say so in one line, then run the reading pass in `audit.md` anyway:
+
+> No fixes to audit on this machine.
+
+Guard evidence is a separate stream from review history, so an absent ledger says nothing about what the installed guards blocked.
 
 ```bash
 steer fix score
@@ -312,7 +316,9 @@ guard files.
 
 ### 2b. Commit-review findings
 
-If this machine has a commit-review ledger, dump the findings. If not, say "no commit-review corpus on this machine" in one line, with the sentence Step 1 gives for what comes next, and skip to Step 3.
+If this machine has a commit-review ledger, dump the findings. If not, say so in one line, add the sentence Step 1 gives for what comes next, and skip to Step 3:
+
+> No review history on this machine.
 
 ```bash
 steer commit-gate mine findings --kind accepted --undecided > "${TMPDIR:-/tmp}/gate-findings.txt"
@@ -394,9 +400,13 @@ not the flag value.
 | `prose` / `instruction` | instruction rule |
 | `prompt` / `review` | review prompt |
 
-Scope a guard project vs global — a rule seen across projects or from global CLAUDE.md suggests global scope. If nothing routes, say so. "No candidate qualified this pass" is a correct result.
+Scope a guard project vs global — a rule seen across projects or from global CLAUDE.md suggests global scope. If nothing routes, say so. It is a correct result:
 
-A detector the guide keeps out of `check.sh` may still be suggested as a manual or CI check. Say plainly that Steer observes no execution of it and cannot bind a check-tier record to it, so its effect stays unmonitored here.
+> No recurring problem was strong enough to propose a fix.
+
+A detector the guide keeps out of `check.sh` may still be suggested as a manual or CI check. Say plainly what that leaves:
+
+> Steer does not see this check run, so it cannot tell you if the problem comes back.
 
 ## Step 5: Present, then act
 
@@ -431,12 +441,14 @@ who has never met Steer decides from it without a glossary.
    boundary you examined and the uncertainty that remains; never invent a harm, and
    never call a proposal cost-free.
 5. **What decision is needed?** State the action and what follows it in one question.
-   For a fix, what follows is that Steer tells the user if the problem comes back:
-   "Apply this guard? Steer tells you if the problem comes back." A check's question
-   also carries what yes creates: "Apply this check? It runs at the end of every
-   turn in this repository, creates `check.sh` if the repository has none, and
-   Steer tells you if the problem comes back." Never promise that
-   the problem becomes less frequent; no count here can show that.
+   For a fix, what follows is that Steer tells the user if the problem comes back.
+   A check's question also carries what yes creates. Never promise that the problem
+   becomes less frequent; no count here can show that.
+
+   > Apply this guard? Steer tells you if the problem comes back.
+
+   > Apply this check? It runs at the end of every turn in this repository, creates
+   > `check.sh` if the repository has none, and Steer tells you if the problem comes back.
 
 A worked proposal:
 
@@ -467,9 +479,17 @@ incomplete" — in place of the facts that produced it, not even as a heading.
 Write in the vocabulary the CLI prints: a **fix** rather than an intervention, a
 **recurring problem** rather than a class, a **result** rather than a verdict,
 **review history** or **session history** rather than a corpus, a **review
-sequence** rather than a chain, **stop tracking** rather than retire.
+sequence** rather than a chain, a **block** rather than a firing, a **decision**
+rather than an adjudication, **stop tracking** rather than retire.
 
-A reader needs three terms, and the report defines each one the first time it uses it:
+Use plain words in every explanation, heading and question, and in the stored
+descriptions (`--problem`, `--intervention`) a later report shows. Field names and
+measurement terms belong in these instructions and in commands, never in the
+reader's text: say what one means instead. Reproduce commands, identifiers and
+quoted evidence verbatim. Write each phrase this skill hands the reader as a
+blockquote, and keep a negative example inline.
+
+A reader needs these terms, and the report defines each one the first time it uses it:
 
 - **Fix** — what Steer installs so that a recurring problem stops.
 - **The kind of fix**, named by its type and never by its flag value, and defined by
@@ -478,13 +498,16 @@ A reader needs three terms, and the report defines each one the first time it us
   rule** is a line in CLAUDE.md or AGENTS.md. A **review prompt** entry changes what
   the commit reviewer flags.
 - **Project** or **global**, as question 3 defines them.
+- **Block** — an action a guard stopped. The word says nothing about whether the
+  action was wrong.
+- **Decision** — the author's acceptance or rejection of a review finding.
 
 Say plainly which action does what. **Applying a fix** makes a change. **Stopping the
 tracking** of a fix ends its measurement and leaves the change in place — it removes
 nothing. **Removing a guard** takes the guard out and is a separate operation from
 either. A reader who conflates them removes a rule they meant to keep.
 
-Then ask which candidates to act on (multi-select). Create nothing unasked.
+Then ask which proposals to apply (multi-select). Create nothing unasked.
 
 ### Every record explains itself
 
@@ -495,13 +518,22 @@ record is read from a status page by someone with the class name, the regex and
 nothing else, and neither of those says what the class is.
 
 - **`--problem`** — what goes wrong, in one sentence, in the vocabulary of the defect.
-  Write it for a reader who was not in this session. "The reviewer raises a concern an
-  earlier round of the same review already settled", not "within-chain re-raised finding".
-- **`--intervention`** — what this record does about it, as concrete behavior. "check.sh
-  refuses a printed literal count", not "added a check". On a `reject`, describe the
-  intervention you considered; if you found none worth installing, say exactly
-  `no suitable intervention was identified`. `--reason` still explains the decision;
-  these two explain the class.
+  Write it for a reader who was not in this session, not as "within-chain re-raised
+  finding":
+
+  > The reviewer raises a concern an earlier round of the same review already settled.
+
+- **`--intervention`** — what this record does about it, as concrete behavior, not
+  "added a check":
+
+  > check.sh refuses a printed literal count.
+
+  On a `reject`, describe the fix you considered. If you found none worth installing,
+  say exactly:
+
+  > no suitable fix was identified
+
+  `--reason` still explains the decision; these two explain the class.
 - **`--note`** stays optional and is for implementation detail that fits neither.
 
 To correct a description on an existing record, use `steer fix describe ID
@@ -600,7 +632,7 @@ steer fix reject \
   --match 'YOUR REGEX' \
   --scope-all \
   --problem "the reviewer raises a concern an earlier round of the same review already settled" \
-  --intervention "no suitable intervention was identified" \
+  --intervention "no suitable fix was identified" \
   --reason "why no gate was installed" \
   --reopen "the observation that would change this answer"
 ```

@@ -250,7 +250,7 @@ func TestJSONContractIsStable(t *testing.T) {
 		}, {
 			ID: "taste-nit", Class: "taste nit",
 			Problem:      "the reviewer raises a wording preference with no defect behind it",
-			Intervention: "no suitable intervention was identified",
+			Intervention: "no suitable fix was identified",
 			Match:        "nit", Tier: "check", Target: "check.sh",
 			Status: "rejected",
 			Corpus: mine.CorpusTranscript, Unit: mine.UnitSession, SignalKind: mine.SignalCorrection,
@@ -618,7 +618,7 @@ const goldenStatusJSON = `{
       "id": "taste-nit",
       "class": "taste nit",
       "problem": "the reviewer raises a wording preference with no defect behind it",
-      "intervention": "no suitable intervention was identified",
+      "intervention": "no suitable fix was identified",
       "match": "nit",
       "tier": "check",
       "target": "check.sh",

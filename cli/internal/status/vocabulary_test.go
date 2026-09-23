@@ -4,12 +4,15 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"testing"
 	"unicode"
+
+	"github.com/steer-sh/steer-cli/internal/gate/mine"
 )
 
 // These tests refuse a machine word — intervention, class, chain, verdict,
@@ -105,6 +108,64 @@ func TestNoMachineWordReachesADisplayString(t *testing.T) {
 					path, w, text)
 			}
 		}
+	}
+}
+
+// reportSkillQuotes returns the blockquote lines of the steer-report skill's files,
+// the phrases the skill hands a reader, with inline code removed: a command or an
+// identifier stays verbatim. A line without `>` that directly follows a quote line
+// is a lazy continuation and belongs to the quote. Fenced code blocks are skipped.
+func reportSkillQuotes(t *testing.T) map[string][]string {
+	t.Helper()
+	paths, err := filepath.Glob("../../../skills/steer-report/*.md")
+	if err != nil || len(paths) == 0 {
+		t.Fatalf("no steer-report skill files found: %v", err)
+	}
+	quote := regexp.MustCompile(`^\s*>\s?(.*)$`)
+	code := regexp.MustCompile("`[^`]*`")
+	blockStart := regexp.MustCompile(`^(#|[-*+] |\d+\. |\|)`)
+	out := map[string][]string{}
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fenced, quoted := false, false
+		for _, line := range strings.Split(string(data), "\n") {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "```") {
+				fenced, quoted = !fenced, false
+				continue
+			}
+			if fenced {
+				continue
+			}
+			if m := quote.FindStringSubmatch(line); m != nil {
+				quoted = true
+				out[path] = append(out[path], code.ReplaceAllString(m[1], ""))
+			} else if quoted && trimmed != "" && !blockStart.MatchString(trimmed) {
+				out[path] = append(out[path], code.ReplaceAllString(trimmed, ""))
+			} else {
+				quoted = false
+			}
+		}
+	}
+	return out
+}
+
+// The report skill writes each phrase it hands a reader as a blockquote, and the
+// description a rejection stores is shown by a later report. Neither may carry a
+// machine word. A phrase the skill describes in prose instead is out of reach here.
+func TestNoMachineWordReachesReportReaderText(t *testing.T) {
+	for path, lines := range reportSkillQuotes(t) {
+		for _, text := range lines {
+			if w := machineWords.FindString(text); w != "" {
+				t.Errorf("%s: a reader is shown the machine word %q: %q", path, w, text)
+			}
+		}
+	}
+	if w := machineWords.FindString(mine.NoInterventionFound); w != "" {
+		t.Errorf("a rejection stores the machine word %q: %q", w, mine.NoInterventionFound)
 	}
 }
 

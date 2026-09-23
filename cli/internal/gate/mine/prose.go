@@ -30,7 +30,7 @@ const NotMechanizableFlag = "not-mechanizable"
 // NoInterventionFound is the one legitimate empty answer for a rejection's
 // intervention. A required field that a blank satisfies is not required, so the case
 // of "we looked and found nothing to install" has to be sayable in words.
-const NoInterventionFound = "no suitable intervention was identified"
+const NoInterventionFound = "no suitable fix was identified"
 
 // Prose is a record's reader-facing explanation.
 type Prose struct {

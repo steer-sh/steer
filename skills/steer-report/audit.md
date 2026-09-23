@@ -15,7 +15,7 @@ show, in the vocabulary `SKILL.md` sets under "Words the reader sees".
 | `fixtures` | `applicable`, `state`, `cases`, `changed`, `verified_at`, `shadowed`, `reason` | Whether the guard's stored cases were last run against the guard installed now. Never that the guard blocks correctly in the field. |
 | `checks` | `applicable`, `attribution`, `stream_present`, `registered_host`, `other_host`, `check_id`, `scope`, `executions`, `outcomes`, `blocked`, `changed_detector` | What a repository check's executions on this machine recorded, and over what. |
 | `coverage` | the two coverage maps plus `zero_eligible_after` | Which units the window could not account for. |
-| `provenance` | `kind` plus the identities per window | Whether one instrument or two counted these windows. |
+| `provenance` | `kind` plus the identities per window | Whether the reviewer setup, or the way Steer reads session history, changed between the two periods. |
 
 There are three readings and no fourth:
 
@@ -31,13 +31,18 @@ produced the reading, and never the label itself.
 |---|---|
 | The record matched again | The newest example, its date, what kind of example it is — a reviewer's confirmed concern, or a classifier's grouping that is not a confirmed failure — and whether it belongs to the recorded problem. |
 | The accounting is incomplete | Which evidence is missing on this machine, how many units it leaves out of the counts, and the cause. |
-| The window is quiet | How much eligible work arrived in each window, over what dates, and that the class did not appear in the second one. |
+| The window is quiet | How much work the fix covers arrived in each period, over what dates, and that the problem did not appear in the second one. |
 
-"This fix is in a quiet window" tells the reader nothing. "Eligible work arrived on
-24 days since 12 August and this problem appeared in none of it" tells the reader
-what was counted.
+"This fix is in a quiet window" tells the reader nothing. This tells the reader
+what was counted:
 
-State no direction and no percentage. "Fewer since the fix", "the fix worked", "a 60% reduction" all state a causal claim these counts cannot carry. Say what was counted: "this problem hit 4 of 37 review sequences before the fix and recurred 0 times in the 40 after."
+> Work this fix covers arrived on 24 days since 12 August, and this problem
+> appeared in none of it.
+
+State no direction and no percentage. "Fewer since the fix", "the fix worked", "a 60% reduction" all state a causal claim these counts cannot carry. Say what was counted:
+
+> This problem hit 4 of 37 review sequences before the fix and recurred 0 times in
+> the 40 after.
 
 Read `provenance` before you weigh the two windows against each other. When the `before` and `after` lists differ, two instruments counted them — a different reviewer, or a different transcript parser — and the counts describe two measurements rather than one.
 
@@ -213,8 +218,8 @@ and `coverage`, never from the case cap alone:
 
 > This pass read 3 blocks of `no-bare-python`, oldest first: two prevented the
 > failure the rule names and one was an acceptable block of a deliberate use. Nine
-> queued cases stay unexamined, seven of them never read and two judged with an
-> unread continuation. One case was skipped: its evidence needed 31,000 bytes and
+> queued cases stay unexamined: seven were never read, and two were judged before
+> what the agent did next was read. One case was skipped: its evidence needed 31,000 bytes and
 > this pass had 6,000 left.
 
 Three limits hold on every sentence you write from this pass. **An inspected
@@ -233,7 +238,8 @@ a refused class `reason`, `reopen` and `rejected_ts`. `problem` and `interventio
 evidence was in hand: what goes wrong, and what this record does about it. Lead
 with them — a `class` is a label and a `match` is a regex, and neither says what
 the class is. On a `rejected` row the `intervention` is the one that was
-considered, or the sentence `no suitable intervention was identified`.
+considered, or the sentence `no suitable fix was identified` (`no suitable
+intervention was identified` on an older record; tell the reader no fix was found).
 `legacy_note` is present only on a record written before those fields existed;
 it holds implementation detail, so never read it as either. This is the dedup source
 — a class here is decided. `corpus` and `unit` name the evidence the class is
