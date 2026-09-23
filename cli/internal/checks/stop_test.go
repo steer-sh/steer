@@ -396,3 +396,29 @@ func TestStopRecordsTheTreeEachRunJudged(t *testing.T) {
 		t.Errorf("an edit left the recorded tree unchanged: %s %s %s", runs[1].Tree, runs[2].Tree, runs[3].Tree)
 	}
 }
+
+// A block offers the blocked agent a contest naming its run, just above the
+// run line, and the run records that the offer was made; a yield offers none.
+func TestStopBlockOffersAContestOfItsRun(t *testing.T) {
+	root, req := stopRepo(t, map[string]string{"a": "exit 1\n"}, "")
+	block := Stop(req)
+	if block.Disposition != DispositionBlock {
+		t.Fatalf("first stop: %+v; want a block", block)
+	}
+	lines := strings.Split(block.Reason, "\n")
+	contest := lines[len(lines)-2]
+	if !strings.Contains(contest, "contest --run "+block.Run.RunID+" '<task-specific reason>'") ||
+		!strings.Contains(contest, "The block stays.") || lines[len(lines)-3] != "" ||
+		lines[len(lines)-1] != RunIDLine(block.Run.RunID) {
+		t.Errorf("reason tail = %q; want a blank line, the contest line, then the run line last", lines[len(lines)-3:])
+	}
+	yield := Stop(req)
+	runs, _ := OracleRuns(root)
+	if yield.Disposition != DispositionYield || len(runs) != 2 {
+		t.Fatalf("second stop: %+v, %d runs; want a recorded yield", yield, len(runs))
+	}
+	if runs[0].ContestProtocol != ContestProtocol || runs[1].ContestProtocol != 0 {
+		t.Errorf("contest protocols = %d, %d; want the block's offer recorded and none on the yield",
+			runs[0].ContestProtocol, runs[1].ContestProtocol)
+	}
+}

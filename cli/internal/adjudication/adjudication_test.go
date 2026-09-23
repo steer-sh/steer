@@ -3,6 +3,7 @@ package adjudication
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
@@ -323,5 +324,45 @@ func TestDetectorAppliesSeparatesEachCaseOfTheInstalledDetector(t *testing.T) {
 		if got := DetectorApplies(tc.kind, tc.check, tc.recorded, tc.installed); got != tc.want {
 			t.Errorf("%s: got %s, want %s", name, got, tc.want)
 		}
+	}
+}
+
+// A contest line states its subject as a receipt does: a legacy line is a guard
+// contest, an unknown subject is read as nothing, and a check contest names a
+// run in either form a run identifier takes.
+func TestContestsStateTheirSubject(t *testing.T) {
+	dir := t.TempDir()
+	fid := "0123456789abcdef0123456789abcdef"
+	body := `{"firing_id":"` + fid + `","reason":"legacy"}` + "\n" +
+		`{"subject":"review","firing_id":"` + fid + `","reason":"unknown"}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, ContestLogName), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []Contest{
+		{Subject: SubjectCheck, RunID: "61f2fc58fd179f86", Reason: "flaky"},
+		{Subject: SubjectCheck, RunID: "1726000000123456789", Reason: "decimal"},
+	} {
+		if err := AppendContest(dir, c); err != nil {
+			t.Errorf("%s: %v", c.RunID, err)
+		}
+	}
+	for name, c := range map[string]Contest{
+		"no subject":        {FiringID: fid, Reason: "x"},
+		"a run as a firing": {Subject: SubjectGuard, FiringID: fid, RunID: "1a", Reason: "x"},
+		"a firing as a run": {Subject: SubjectCheck, RunID: "1a", FiringID: fid, Reason: "x"},
+		"a malformed run":   {Subject: SubjectCheck, RunID: "RUN-1", Reason: "x"},
+		"a run past 32":     {Subject: SubjectCheck, RunID: strings.Repeat("a", 33), Reason: "x"},
+	} {
+		if err := AppendContest(dir, c); err == nil {
+			t.Errorf("%s: the contest was accepted", name)
+		}
+	}
+	contests, err := LoadContests(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guards, checks := Contested(contests, SubjectGuard), Contested(contests, SubjectCheck)
+	if len(contests) != 3 || len(guards[fid]) != 1 || len(checks) != 2 || checks["61f2fc58fd179f86"][0].Reason != "flaky" {
+		t.Errorf("guards %v, checks %v from %d lines; want the legacy guard contest and both check contests", guards, checks, len(contests))
 	}
 }

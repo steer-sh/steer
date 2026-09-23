@@ -631,6 +631,13 @@ the stream to the rows on disk now, per guard and store, and counts distinct
 firing identifiers: contested, unread and not offered are separate counts, and a
 contest of an excluded row or of no row read here is listed apart from them.
 
+A check.sh Stop block offers the same contest by run: the reason's line above
+`checks.RunIDLine` names `steer contest --run RUN_ID`, and the run records
+`contest_protocol` as a row does. A contest states its subject as a receipt does
+(a legacy line is a guard contest), `adjudication.Contested` takes the subject,
+and `firingaudit.Contests` reports check blocks per repository with the same
+distinct counts.
+
 ## Cadence, status and controls
 
 `internal/cadence/` coordinates evidence scoring and transcript mining into a

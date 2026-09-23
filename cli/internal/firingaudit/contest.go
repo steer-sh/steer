@@ -13,6 +13,7 @@ import (
 // or the master may have failed to log it.
 func Contest(rows []Row, dir, firingID, reason, cwd string) (adjudication.Contest, error) {
 	c := adjudication.Contest{
+		Subject:    adjudication.SubjectGuard,
 		FiringID:   firingID,
 		Reason:     reason,
 		RecordedAt: time.Now().UTC().Format(time.RFC3339),
@@ -28,6 +29,30 @@ func Contest(rows []Row, dir, firingID, reason, cwd string) (adjudication.Contes
 		c.Timestamp = row.Timestamp
 		c.HookDigest = row.HookDigest
 		c.RuleHash = row.RuleHash
+	}
+	if err := adjudication.AppendContest(dir, c); err != nil {
+		return adjudication.Contest{}, err
+	}
+	return c, nil
+}
+
+// ContestCheck writes one contest of the check block of run runID, copying the
+// run's own fields when a recorded block has that run. A contest no recorded
+// block matches is still written, unmatched: the run may be another machine's.
+func ContestCheck(cases []CheckCase, dir, runID, reason, cwd string) (adjudication.Contest, error) {
+	c := adjudication.Contest{
+		Subject:    adjudication.SubjectCheck,
+		RunID:      runID,
+		Reason:     reason,
+		RecordedAt: time.Now().UTC().Format(time.RFC3339),
+		Cwd:        cwd,
+	}
+	if block, ok := FindCheckCase(cases, runID); ok {
+		c.Matched = true
+		c.Repo = block.Run.Repo
+		c.Harness = block.Run.Harness
+		c.SessionID = block.Run.Session
+		c.Timestamp = block.Run.Started.UTC().Format(time.RFC3339Nano)
 	}
 	if err := adjudication.AppendContest(dir, c); err != nil {
 		return adjudication.Contest{}, err
@@ -76,22 +101,51 @@ type GuardContests struct {
 	ContestedFirings  []ContestedFiring `json:"contested_firings,omitempty"`
 }
 
-// ContestReport is every guard's contests, and the contests no row read here
-// carries.
+// ContestReport is every guard's and every repository's contests, and the
+// contests no row or recorded block read here carries.
 type ContestReport struct {
 	Guards []GuardContests `json:"guards"`
 	// Unmatched is the contested firings no loaded row carries. HookName is the
 	// guard the contest recorded when it was written, if any.
 	Unmatched []ContestedFiring `json:"unmatched,omitempty"`
+	// Checks is each repository's check blocks, and UnmatchedChecks the
+	// contested runs no recorded block carries.
+	Checks          []RepoContests   `json:"checks,omitempty"`
+	UnmatchedChecks []ContestedBlock `json:"unmatched_checks,omitempty"`
 }
 
-// Contests joins the contest stream to the rows on disk now, per guard and
-// store. hookName narrows to one guard; installed classifies each row's
+// RepoContests is one repository's check blocks and the contests that name
+// them. Every count is of distinct blocks, never of submissions.
+type RepoContests struct {
+	Repo   string `json:"repo"`
+	Blocks int    `json:"blocks"`
+	// NotOffered is the blocks whose reason carried no contest line.
+	NotOffered int `json:"not_offered"`
+	Contested  int `json:"contested"`
+	// Unread is the blocks no check receipt names, contested or not.
+	Unread          int              `json:"unread"`
+	ContestedBlocks []ContestedBlock `json:"contested_blocks,omitempty"`
+}
+
+// ContestedBlock is one check block at least one contest names. Failures is the
+// latest reading of it, empty when no receipt names it.
+type ContestedBlock struct {
+	RunID     string                 `json:"run_id"`
+	Repo      string                 `json:"repo,omitempty"`
+	Harness   string                 `json:"harness,omitempty"`
+	Timestamp string                 `json:"timestamp,omitempty"`
+	Failures  []adjudication.Failure `json:"failures,omitempty"`
+	Reasons   []ContestReason        `json:"reasons"`
+}
+
+// Contests joins the contest stream to the rows and recorded check blocks on
+// disk now, per guard and store and per repository. hookName narrows to one
+// guard and so to no check block; installed classifies each row's
 // implementation and may be nil. It reads no case evidence.
-func Contests(rows []Row, contests []adjudication.Contest, receipts []adjudication.Receipt,
+func Contests(rows []Row, cases []CheckCase, contests []adjudication.Contest, receipts []adjudication.Receipt,
 	excluded map[string]adjudication.Exclusion, installed func(Row) adjudication.Identity,
 	hookName string) ContestReport {
-	byFiring := adjudication.Contested(contests)
+	byFiring := adjudication.Contested(contests, adjudication.SubjectGuard)
 	latest := adjudication.Latest(receipts, adjudication.SubjectGuard)
 	byKey := map[string]*GuardContests{}
 	var order []string
@@ -169,7 +223,61 @@ func Contests(rows []Row, contests []adjudication.Contest, receipts []adjudicati
 	sort.Slice(report.Unmatched, func(i, j int) bool {
 		return report.Unmatched[i].FiringID < report.Unmatched[j].FiringID
 	})
+	if hookName == "" {
+		report.Checks, report.UnmatchedChecks = checkContests(cases, contests, receipts)
+	}
 	return report
+}
+
+// checkContests joins the check contests to the recorded blocks, per repository
+// in the order the cases first name each.
+func checkContests(cases []CheckCase, contests []adjudication.Contest,
+	receipts []adjudication.Receipt) ([]RepoContests, []ContestedBlock) {
+	byRun := adjudication.Contested(contests, adjudication.SubjectCheck)
+	latest := adjudication.Latest(receipts, adjudication.SubjectCheck)
+	var repos []RepoContests
+	index := map[string]int{}
+	matched := map[string]bool{}
+	for _, c := range cases {
+		i, ok := index[c.Run.Repo]
+		if !ok {
+			i = len(repos)
+			index[c.Run.Repo] = i
+			repos = append(repos, RepoContests{Repo: c.Run.Repo})
+		}
+		r := &repos[i]
+		r.Blocks++
+		if c.Run.ContestProtocol == 0 {
+			r.NotOffered++
+		}
+		receipt, judged := latest[c.Run.RunID]
+		if !judged {
+			r.Unread++
+		}
+		submissions := byRun[c.Run.RunID]
+		if len(submissions) == 0 {
+			continue
+		}
+		matched[c.Run.RunID] = true
+		r.Contested++
+		r.ContestedBlocks = append(r.ContestedBlocks, ContestedBlock{
+			RunID: c.Run.RunID, Repo: c.Run.Repo, Harness: c.Run.Harness,
+			Timestamp: c.Run.Started.UTC().Format(time.RFC3339Nano),
+			Failures:  receipt.Failures, Reasons: reasonsOf(submissions),
+		})
+	}
+	var unmatched []ContestedBlock
+	for id, submissions := range byRun {
+		if matched[id] {
+			continue
+		}
+		recorded := submissions[len(submissions)-1]
+		unmatched = append(unmatched, ContestedBlock{RunID: id, Repo: recorded.Repo,
+			Harness: recorded.Harness, Timestamp: recorded.Timestamp,
+			Failures: latest[id].Failures, Reasons: reasonsOf(submissions)})
+	}
+	sort.Slice(unmatched, func(i, j int) bool { return unmatched[i].RunID < unmatched[j].RunID })
+	return repos, unmatched
 }
 
 func reasonsOf(submissions []adjudication.Contest) []ContestReason {

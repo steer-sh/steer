@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/steer-sh/steer-cli/internal/statestore"
+	"github.com/steer-sh/steer-cli/internal/steerbin"
 )
 
 // Stop dispositions. Allow, block and yield follow a completed run. The others
@@ -41,6 +42,8 @@ const (
 	// runIDLabel leads the last line of a block reason, which names the run
 	// so the transcript entry holding the reason joins to its record.
 	runIDLabel = "steer check run: "
+	// ContestProtocol is the version of the contest line a block reason carries.
+	ContestProtocol = 1
 	// diagnosticBytes and diagnosticLines bound the check.sh output a block
 	// hands the model.
 	diagnosticBytes = 8 << 10
@@ -105,12 +108,13 @@ func Stop(req StopRequest) StopDecision {
 		Source: SourceStop, Harness: req.Harness, Session: req.Session, Timeout: req.Timeout,
 		Stdout: tail, Stderr: tail, SteerBin: req.SteerBin,
 		Locators: req.Locators, StopHookActive: req.StopHookActive,
-		Disposition: func(run OracleRun, records []Execution) (string, string) {
+		Disposition: func(run OracleRun, records []Execution) Verdict {
 			disposition := stopDisposition(identity, req, run, records)
 			if disposition != DispositionBlock {
-				return disposition, ""
+				return Verdict{Disposition: disposition}
 			}
-			return disposition, blockReason(identity, run, records, tail.excerpt())
+			return Verdict{Disposition: disposition, ContestProtocol: ContestProtocol,
+				BlockReason: blockReason(identity, run, records, tail.excerpt())}
 		},
 	})
 	switch {
@@ -265,7 +269,7 @@ func blockReason(identity string, run OracleRun, records []Execution, output str
 				fmt.Fprintf(&b, "  %s\n", line)
 			}
 		}
-		fmt.Fprintf(&b, "\n%s%s", runIDLabel, run.RunID)
+		fmt.Fprintf(&b, "\n%s\n%s%s", contestLine(run.RunID), runIDLabel, run.RunID)
 		return b.String()
 	}
 	exit := "no exit status"
@@ -288,8 +292,15 @@ func blockReason(identity string, run OracleRun, records []Execution, output str
 	b.WriteString("\nFix the code so check.sh passes. Do not weaken a check, loosen an assertion, skip a test, or add a suppression to reach green.\n")
 	b.WriteString("If this failure is not yours to clear (a flaky test, a missing credential, a network dependency), say so and change nothing: " +
 		"the turn ends when the tree and the failure are unchanged.")
-	fmt.Fprintf(&b, "\n\n%s%s", runIDLabel, run.RunID)
+	fmt.Fprintf(&b, "\n\n%s\n%s%s", contestLine(run.RunID), runIDLabel, run.RunID)
 	return b.String()
+}
+
+// contestLine tells a blocked agent how to record that this block is wrong for
+// its task. The block stands either way.
+func contestLine(runID string) string {
+	return "If this block is wrong for this task, record why: " +
+		steerbin.Command("contest --run "+runID+" '<task-specific reason>'") + ". The block stays."
 }
 
 func lastLines(s string, n int) string {

@@ -72,7 +72,20 @@ type RunOptions struct {
 	StopHookActive *bool
 	// Disposition decides a finished run while the lock is held. It returns
 	// what the caller did with it and, for a block, the reason it sends.
-	Disposition func(OracleRun, []Execution) (disposition, blockReason string)
+	Disposition func(OracleRun, []Execution) Verdict
+}
+
+// Verdict is what a caller did with a finished run. BlockReason is the text a
+// block sent the model, and ContestProtocol the version of the contest line it
+// carried, zero when it carried none.
+type Verdict struct {
+	Disposition     string
+	BlockReason     string
+	ContestProtocol int
+}
+
+func (r *OracleRun) apply(v Verdict) {
+	r.Disposition, r.BlockReason, r.ContestProtocol = v.Disposition, v.BlockReason, v.ContestProtocol
 }
 
 // OracleRun is the aggregate outcome of one check.sh run by a Steer parent. The
@@ -83,6 +96,8 @@ type RunOptions struct {
 // refused; such a run is not executed and has no per-check records.
 // Disposition is what the caller did with the result, such as a Stop runner's
 // block or yield, and BlockReason is the text a block sent the model.
+// ContestProtocol is the version of the contest line a block offered, zero
+// when it offered none.
 // Locators are the Stop payload's transcript locators by key presence, from
 // version 2 on. Tree is the working-tree signature after check.sh finished.
 type OracleRun struct {
@@ -106,6 +121,7 @@ type OracleRun struct {
 	ConcurrentWith     string            `json:"concurrent_with,omitempty"`
 	Disposition        string            `json:"disposition,omitempty"`
 	BlockReason        string            `json:"block_reason,omitempty"`
+	ContestProtocol    int               `json:"contest_protocol,omitempty"`
 	Locators           map[string]string `json:"locators,omitempty"`
 	StopHookActive     *bool             `json:"stop_hook_active,omitempty"`
 	Tree               string            `json:"tree,omitempty"`
@@ -187,7 +203,7 @@ func RunOracle(root string, opts RunOptions) (OracleRun, []Execution, error) {
 		run.ConcurrentWith = holder.RunID
 		run.Reason = concurrentReason(holder)
 		if opts.Disposition != nil {
-			run.Disposition, run.BlockReason = opts.Disposition(run, nil)
+			run.apply(opts.Disposition(run, nil))
 		}
 		if err := appendJSONL(runsPath(dir, identity), run); err != nil {
 			return run, nil, fmt.Errorf("record oracle run: %w", err)
@@ -261,7 +277,7 @@ func RunOracle(root string, opts RunOptions) (OracleRun, []Execution, error) {
 	}
 	records = append(records, unreported...)
 	if opts.Disposition != nil {
-		run.Disposition, run.BlockReason = opts.Disposition(run, records)
+		run.apply(opts.Disposition(run, records))
 	}
 	if err := appendJSONL(runsPath(dir, identity), run); err != nil {
 		return run, nil, fmt.Errorf("record oracle run: %w", err)

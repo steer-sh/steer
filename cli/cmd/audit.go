@@ -758,9 +758,10 @@ func listRows(source auditSource, subject, hook string, excludedOnly bool) []row
 
 var auditContestsCmd = &cobra.Command{
 	Use:   "contests",
-	Short: "List the blocks agents contested, per guard",
+	Short: "List the blocks agents contested, per guard and per repository",
 	Long: `Contests lists, per guard, the firings a blocked agent contested with
-'steer contest', and each reason it gave. It reads no case evidence.
+'steer contest', and per repository the check.sh Stop blocks contested with
+'steer contest --run', each with every reason given. It reads no case evidence.
 
 Every count is of distinct firings. contested and unread are separate counts:
 a contested firing no receipt names is in both. not_offered counts the blocks
@@ -779,14 +780,14 @@ show' before judging it.`,
 		if err != nil {
 			return err
 		}
-		report := firingaudit.Contests(source.Rows, contests, source.Receipts,
+		report := firingaudit.Contests(source.Rows, source.Cases, contests, source.Receipts,
 			source.Excluded, source.Installed, auditHook)
 		if auditJSON {
 			return writeJSON(cmd.OutOrStdout(), report)
 		}
 		w := cmd.OutOrStdout()
-		if !source.Present && len(contests) == 0 {
-			fmt.Fprintln(w, "No guard store on this machine holds an audit stream, and no contest is recorded.")
+		if !source.Present && len(source.Cases) == 0 && len(contests) == 0 {
+			fmt.Fprintln(w, "No guard store on this machine holds an audit stream, no check.sh Stop block is recorded, and no contest is recorded.")
 			return nil
 		}
 		for _, g := range report.Guards {
@@ -801,6 +802,15 @@ show' before judging it.`,
 		if len(report.Unmatched) > 0 {
 			fmt.Fprintf(w, "Contests no row read here carries: %d\n", len(report.Unmatched))
 			printContested(w, report.Unmatched)
+		}
+		for _, r := range report.Checks {
+			fmt.Fprintf(w, "check.sh  (%s)\n  blocks %d  contested %d  unread %d  no contest offered %d\n",
+				r.Repo, r.Blocks, r.Contested, r.Unread, r.NotOffered)
+			printContestedBlocks(w, r.ContestedBlocks)
+		}
+		if len(report.UnmatchedChecks) > 0 {
+			fmt.Fprintf(w, "Check contests no recorded block here carries: %d\n", len(report.UnmatchedChecks))
+			printContestedBlocks(w, report.UnmatchedChecks)
 		}
 		return nil
 	},
@@ -822,6 +832,25 @@ func printContested(w io.Writer, firings []firingaudit.ContestedFiring) {
 		}
 		fmt.Fprintln(w)
 		for _, r := range f.Reasons {
+			fmt.Fprintf(w, "    %s  %s\n", r.RecordedAt, oneLine(r.Reason))
+		}
+	}
+}
+
+// printContestedBlocks lists contested check blocks with every reason given
+// for each and the latest reading of each failure.
+func printContestedBlocks(w io.Writer, blocks []firingaudit.ContestedBlock) {
+	for _, b := range blocks {
+		reading := "unread"
+		if len(b.Failures) > 0 {
+			var parts []string
+			for _, f := range b.Failures {
+				parts = append(parts, fmt.Sprintf("%s=%s,%s", firingaudit.FailureName(f.Kind, f.Check), f.Validity, f.Attribution))
+			}
+			reading = strings.Join(parts, " ")
+		}
+		fmt.Fprintf(w, "  run=%s  %s  %s  %s\n", b.RunID, or(b.Timestamp), or(b.Harness), reading)
+		for _, r := range b.Reasons {
 			fmt.Fprintf(w, "    %s  %s\n", r.RecordedAt, oneLine(r.Reason))
 		}
 	}

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/adjudication"
+	"github.com/steer-sh/steer-cli/internal/checks"
 )
 
 const contestedID = "0123456789abcdef0123456789abcdef"
@@ -20,7 +21,7 @@ func TestAContestCopiesTheRowItNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := adjudication.Contest{FiringID: contestedID, Reason: "python is the venv interpreter here",
+	want := adjudication.Contest{Subject: adjudication.SubjectGuard, FiringID: contestedID, Reason: "python is the venv interpreter here",
 		RecordedAt: c.RecordedAt, Cwd: "/work", Matched: true, HookID: "no-bare-python",
 		Harness: "codex", SessionID: "s1", ThreadID: "t1", StoreDir: "/store",
 		Timestamp: "2026-09-21T00:00:00Z", HookDigest: "hd", RuleHash: "rh"}
@@ -73,10 +74,10 @@ func TestAContestRefusesAMalformedIdentifierOrReason(t *testing.T) {
 func TestContestedCountsDistinctFirings(t *testing.T) {
 	other := "ffffffffffffffffffffffffffffffff"
 	byFiring := adjudication.Contested([]adjudication.Contest{
-		{FiringID: contestedID, Reason: "first"},
-		{FiringID: contestedID, Reason: "second"},
-		{FiringID: other, Reason: "third"},
-	})
+		{Subject: adjudication.SubjectGuard, FiringID: contestedID, Reason: "first"},
+		{Subject: adjudication.SubjectGuard, FiringID: contestedID, Reason: "second"},
+		{Subject: adjudication.SubjectGuard, FiringID: other, Reason: "third"},
+	}, adjudication.SubjectGuard)
 	if len(byFiring) != 2 {
 		t.Fatalf("%d contested firings, want 2", len(byFiring))
 	}
@@ -97,12 +98,12 @@ func TestContestsCountDistinctFiringsBesideUnread(t *testing.T) {
 		{HookName: "g", StoreDir: "/s", Timestamp: "t0"},
 	}
 	contests := []adjudication.Contest{
-		{FiringID: contestedID, Reason: "first"},
-		{FiringID: contestedID, Reason: "second"},
-		{FiringID: judged, Reason: "third"},
+		{Subject: adjudication.SubjectGuard, FiringID: contestedID, Reason: "first"},
+		{Subject: adjudication.SubjectGuard, FiringID: contestedID, Reason: "second"},
+		{Subject: adjudication.SubjectGuard, FiringID: judged, Reason: "third"},
 	}
 	receipts := []adjudication.Receipt{{Subject: adjudication.SubjectGuard, FiringID: judged, Judgment: adjudication.Incorrect}}
-	report := Contests(rows, contests, receipts, nil, nil, "")
+	report := Contests(rows, nil, contests, receipts, nil, nil, "")
 	if len(report.Guards) != 1 || len(report.Unmatched) != 0 {
 		t.Fatalf("report = %+v, want one guard and nothing unmatched", report)
 	}
@@ -126,12 +127,12 @@ func TestContestsDiscloseExcludedAndUnmatchedFirings(t *testing.T) {
 	orphan := "33333333333333333333333333333333"
 	rows := []Row{{FiringID: contestedID, HookName: "g", StoreDir: "/s", RowDigest: "d1", ContestProtocol: 1}}
 	contests := []adjudication.Contest{
-		{FiringID: contestedID, Reason: "test run"},
-		{FiringID: orphan, Reason: "elsewhere", HookID: "g", Matched: true},
-		{FiringID: "44444444444444444444444444444444", Reason: "other guard", HookID: "h"},
+		{Subject: adjudication.SubjectGuard, FiringID: contestedID, Reason: "test run"},
+		{Subject: adjudication.SubjectGuard, FiringID: orphan, Reason: "elsewhere", HookID: "g", Matched: true},
+		{Subject: adjudication.SubjectGuard, FiringID: "44444444444444444444444444444444", Reason: "other guard", HookID: "h"},
 	}
 	excluded := map[string]adjudication.Exclusion{"d1": {RowDigest: "d1"}}
-	report := Contests(rows, contests, nil, excluded, nil, "g")
+	report := Contests(rows, nil, contests, nil, excluded, nil, "g")
 	g := report.Guards[0]
 	if g.Firings != 0 || g.Contested != 0 || g.ContestedExcluded != 1 {
 		t.Fatalf("guard = %+v, want the excluded contest counted only as excluded", g)
@@ -139,5 +140,39 @@ func TestContestsDiscloseExcludedAndUnmatchedFirings(t *testing.T) {
 	if len(report.Unmatched) != 1 || report.Unmatched[0].FiringID != orphan ||
 		report.Unmatched[0].HookName != "g" {
 		t.Fatalf("unmatched = %+v, want only the orphan of guard g", report.Unmatched)
+	}
+}
+
+// A check contest copies the recorded block's run, or is kept unmatched; the
+// report counts each repository's blocks apart from guards, and a guard name
+// leaves blocks out.
+func TestCheckContestsCountEachRepositorysBlocks(t *testing.T) {
+	offered := blockRun("/r", "1a", 1)
+	offered.ContestProtocol = 1
+	quiet := blockRun("/r", "2b", 2)
+	cases := CheckCases(checks.LiveEvidence{Runs: []checks.OracleRun{offered, quiet}})
+	dir := t.TempDir()
+	c, err := ContestCheck(cases, dir, "1a", "the failing test is another team's", "/work")
+	if err != nil || !c.Matched || c.Repo != "/r" || c.Harness != "codex" {
+		t.Fatalf("contest = %+v, %v; want the block's run copied", c, err)
+	}
+	if orphan, err := ContestCheck(cases, dir, "9f", "elsewhere", ""); err != nil || orphan.Matched {
+		t.Fatalf("orphan = %+v, %v; want it kept unmatched", orphan, err)
+	}
+	contests, _ := adjudication.LoadContests(dir)
+	receipts := []adjudication.Receipt{{Subject: adjudication.SubjectCheck, RunID: "1a",
+		Failures: []adjudication.Failure{{Kind: adjudication.FailureOracle, Validity: adjudication.Valid, Attribution: adjudication.PreExisting}}}}
+
+	report := Contests(nil, cases, contests, receipts, nil, nil, "")
+	if len(report.Checks) != 1 || len(report.UnmatchedChecks) != 1 || report.UnmatchedChecks[0].RunID != "9f" {
+		t.Fatalf("report = %+v; want one repository and the orphan unmatched", report)
+	}
+	r := report.Checks[0]
+	if r.Blocks != 2 || r.NotOffered != 1 || r.Contested != 1 || r.Unread != 1 ||
+		len(r.ContestedBlocks[0].Failures) != 1 || len(r.ContestedBlocks[0].Reasons) != 1 {
+		t.Errorf("repository = %+v; want 2 blocks, 1 not offered, 1 contested with its reading, 1 unread", r)
+	}
+	if got := Contests(nil, cases, contests, receipts, nil, nil, "g"); len(got.Checks) != 0 || len(got.UnmatchedChecks) != 0 {
+		t.Errorf("one guard's report = %+v; want no blocks", got)
 	}
 }
