@@ -1168,7 +1168,9 @@ type ScoreOpts struct {
 	FixtureProjectRoot string
 }
 
-// Score recomputes each intervention's before/after incidence and verdict.
+// Score recomputes each intervention's before/after incidence and verdict. With
+// JSON set it prints an array of scored rows, `[]` when none is selected; each
+// row's before/after `chains` counts the record's own unit, whatever its corpus.
 func Score(w io.Writer, stateDir string, o ScoreOpts) error {
 	records, err := Load(stateDir)
 	if err != nil {
@@ -1190,6 +1192,9 @@ func Score(w io.Writer, stateDir string, o ScoreOpts) error {
 		records = kept
 	}
 	if len(records) == 0 {
+		if o.JSON {
+			return writeJSON(w, []map[string]any{})
+		}
 		fmt.Fprintln(w, "# no interventions recorded yet")
 		return nil
 	}
@@ -1440,12 +1445,15 @@ func List(w io.Writer, stateDir string, asJSON bool) error {
 	if err != nil {
 		return err
 	}
+	if asJSON {
+		if records == nil {
+			records = []Record{}
+		}
+		return writeJSON(w, records)
+	}
 	if len(records) == 0 {
 		fmt.Fprintln(w, "# no interventions recorded yet")
 		return nil
-	}
-	if asJSON {
-		return writeJSON(w, records)
 	}
 	for _, r := range records {
 		date := str(r["installed_date"])

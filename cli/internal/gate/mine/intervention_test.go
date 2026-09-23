@@ -2,6 +2,7 @@ package mine
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -568,6 +569,34 @@ func TestScoreCarriesAnUnscorableRecordRatherThanAborting(t *testing.T) {
 	// Naming it by --id is an error: the caller asked for a verdict that does not exist.
 	if err := Score(io.Discard, stateDir, ScoreOpts{Ledger: ledger, ID: "orphan"}); err == nil {
 		t.Error("scoring an unreadable corpus by id must be refused")
+	}
+}
+
+// TestScoreAndListPrintAnEmptyJSONArray: a JSON caller reads an empty inventory as
+// an array, never as the comment line the text output prints.
+func TestScoreAndListPrintAnEmptyJSONArray(t *testing.T) {
+	stateDir := t.TempDir()
+	reworked := t.TempDir()
+	if err := Save(reworked, []Record{{"id": "old", "class": "o", "match": "x", "status": "reworked"}}); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name string
+		run  func(io.Writer) error
+	}{
+		{"score, no records", func(w io.Writer) error { return Score(w, stateDir, ScoreOpts{JSON: true}) }},
+		{"score, none live", func(w io.Writer) error { return Score(w, reworked, ScoreOpts{JSON: true}) }},
+		{"list, no records", func(w io.Writer) error { return List(w, stateDir, true) }},
+	}
+	for _, tc := range cases {
+		var buf strings.Builder
+		if err := tc.run(&buf); err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		var rows []any
+		if err := json.Unmarshal([]byte(buf.String()), &rows); err != nil || rows == nil || len(rows) != 0 {
+			t.Errorf("%s: want an empty JSON array, got %q (%v)", tc.name, buf.String(), err)
+		}
 	}
 }
 
