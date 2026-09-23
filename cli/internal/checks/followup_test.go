@@ -84,3 +84,31 @@ func TestFollowupOfABlockTheSessionFixed(t *testing.T) {
 		t.Errorf("tree %s; want changed when the next stop judged t2", f.SessionTree)
 	}
 }
+
+// Two repositories' records share one live read. A block's next run is its own
+// repository's, even when another repository ran check.sh in between.
+func TestLiveFollowupsKeepEachRepositoryApart(t *testing.T) {
+	block := stopRun("b", "s1", DispositionBlock, "t1", 10)
+	block.Repo = "/a"
+	elsewhere := stopRun("x", "s9", DispositionAllow, "u1", 11)
+	elsewhere.Repo, elsewhere.Outcome = "/b", OutcomePassed
+	later := stopRun("l", "s2", DispositionAllow, "t2", 12)
+	later.Repo, later.Outcome = "/a", OutcomePassed
+	blocked := execution("b", "go", OutcomeFailed, "d1", 10)
+	blocked.Repo = "/a"
+	otherGo := execution("x", "go", OutcomePassed, "d9", 11)
+	otherGo.Repo = "/b"
+	got := LiveBlockFollowups(LiveEvidence{
+		Runs:       []OracleRun{block, elsewhere, later},
+		Executions: []Execution{blocked, otherGo},
+	})
+	if len(got) != 1 {
+		t.Fatalf("followups %d; want 1", len(got))
+	}
+	if got[0].NextRun == nil || got[0].NextRun.RunID != "l" {
+		t.Errorf("next run %+v; want run l of the same repository", got[0].NextRun)
+	}
+	if c := got[0].Checks; len(c) != 1 || c[0].Next != nil {
+		t.Errorf("check followups %+v; want go with no later result in /a", c)
+	}
+}

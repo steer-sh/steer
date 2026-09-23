@@ -48,6 +48,30 @@ func BlockFollowups(root string) ([]BlockFollowup, error) {
 	return blockFollowups(runs, executions), nil
 }
 
+// LiveBlockFollowups returns a follow-up for each Stop block in live evidence
+// read across repositories. Each repository's records are followed apart from the
+// others, so a next run is always one of the block's own repository; within one
+// repository the order is the stream's, and repositories keep the order ev holds.
+func LiveBlockFollowups(ev LiveEvidence) []BlockFollowup {
+	var repos []string
+	runs := map[string][]OracleRun{}
+	executions := map[string][]Execution{}
+	for _, r := range ev.Runs {
+		if _, ok := runs[r.Repo]; !ok {
+			repos = append(repos, r.Repo)
+		}
+		runs[r.Repo] = append(runs[r.Repo], r)
+	}
+	for _, e := range ev.Executions {
+		executions[e.Repo] = append(executions[e.Repo], e)
+	}
+	var out []BlockFollowup
+	for _, repo := range repos {
+		out = append(out, blockFollowups(runs[repo], executions[repo])...)
+	}
+	return out
+}
+
 func blockFollowups(runs []OracleRun, executions []Execution) []BlockFollowup {
 	var out []BlockFollowup
 	for i, block := range runs {

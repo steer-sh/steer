@@ -3,7 +3,8 @@
 // the identifying stamps; judging a block needs the attempted action itself, so
 // this package also resolves the bundle a row holds inline or names in a sidecar,
 // and reports what it could not establish instead of returning a partial bundle as
-// though it were whole.
+// though it were whole. It also assembles each check.sh Stop block as a case from
+// the live check records, the second subject the same audit reads.
 package firingaudit
 
 import (

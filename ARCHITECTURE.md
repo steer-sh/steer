@@ -565,6 +565,14 @@ subject, because a run identifier can fall back to decimal and no reader can tel
 the two apart by form. `firingaudit.Record` resolves the row and the continuation itself
 and copies the implementation stamps, so a caller authors no identity.
 
+A check case is one Stop block: `firingaudit.CheckCases` assembles it from every
+repository's live runs and executions and `checks.LiveBlockFollowups`, which
+follows each repository apart. Its failures are each check whose execution
+failed, errored, timed out or produced no result, `check.sh` itself, and an
+integration failure; a check the run never reached asserted nothing and is not
+one. `check.sh`'s own failure is required reading only when no declared check
+accounts for it. `steer check blocks` stays the facts view of one repository.
+
 `Queue` offers unread rows of the installed guard, plus a judged row whose
 continuation nobody read while that transcript is still on this machine. The
 judgment's value queues nothing. `cmd/audit.go` groups rows per store and hook
