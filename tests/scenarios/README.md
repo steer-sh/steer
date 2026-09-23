@@ -1,10 +1,13 @@
 # Report scenarios
 
-Six saved snapshots covering the six decisions a reader arrives at `/steer-report`
+Seven saved snapshots covering the seven decisions a reader arrives at `/steer-report`
 with. `scenarios.py` builds each one over `base_status.json`; `../report_scenarios.py`
 feeds them to the skill headlessly and writes the reports into `out/`.
 
-There is no mechanical oracle here. The runner regenerates; a person judges.
+There is no mechanical oracle for the prose. The runner regenerates; a person judges.
+Each report's first line names the skill files the run opened beside `SKILL.md`. A
+scenario whose snapshot holds an `interventions[]` row or a nonzero
+`telemetry.audit_firings` must name `audit.md`; `first-run` must name none.
 
 | Scenario | The reader's question |
 |---|---|
@@ -14,17 +17,19 @@ There is no mechanical oracle here. The runner regenerates; a person judges.
 | `missing-decisions` | What is missing, and can I do anything about it? |
 | `declined-suggestion` | We said no to this — has that aged badly? |
 | `remove-a-guard` | How do I get rid of this, and what does that remove? |
+| `first-run` | Nothing is installed and no commit was reviewed yet: what now? |
 
 ## The comprehension checklist
 
-Read the six reports side by side with somebody who has never used Steer. Without a
+Read the seven reports side by side with somebody who has never used Steer. Without a
 glossary, and reading only the report, they should be able to say:
 
 - [ ] what problem Steer found, and where the evidence came from;
 - [ ] what applying a suggested fix changes, and where it applies;
 - [ ] whether a guard is installed, whether it ran, and whether its benefit is known;
 - [ ] why a result is uncertain, and whether any action of theirs helps;
-- [ ] whether an action removes a change or only stops measuring it.
+- [ ] whether an action removes a change or only stops measuring it;
+- [ ] what an empty history means, and what collects it from now on.
 
 Record every place they were misled, revise the copy, and regenerate. A report that
 needs a spoken explanation has failed the pass, whatever it says.

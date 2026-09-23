@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regenerate the /steer-report prose over six saved scenarios.
+"""Regenerate the /steer-report prose over seven saved scenarios.
 
 The skill-generation harness (skill_test.py) generates guards and checks them
 against fixtures. This runner answers a different question, and it has no
@@ -7,18 +7,19 @@ mechanical oracle: does the report a person reads say what happened, what a
 change would do, and what decision is needed — without a glossary?
 
 It feeds each saved scenario to the working tree's report skill headlessly and
-stores the output beside the others under tests/scenarios/out/. Read the six side by side with
+stores the output beside the others under tests/scenarios/out/. Read them side by side with
 somebody who has never used Steer, record where they were misled, and revise the
 copy. The runner never passes or fails; it only regenerates.
 
 Usage:
-    python3 tests/report_scenarios.py                       # all six
+    python3 tests/report_scenarios.py                       # all seven
     python3 tests/report_scenarios.py --scenario remove-a-guard
     python3 tests/report_scenarios.py --model claude-opus-5
     python3 tests/report_scenarios.py --list
 """
 
 import argparse
+import json
 import shutil
 import subprocess
 import sys
@@ -45,15 +46,33 @@ Read {status} as the output of `steer status --json`, and {queue} as the
 refreshed queue. Skip Step 0, Step 2 and Step 3.
 
 Produce only the prose a user reads: the audit of the records in the snapshot,
-and the proposals for the candidates in the queue. Ask no questions, install
-nothing, and write no files. Do not emit JSON — this is the report itself.
+and the proposals for the candidates in the queue. End each proposal with the
+question the skill asks, but wait for no answer: install nothing and write no
+files. Do not emit JSON — this is the report itself.
 
 {request}
 """
 
 
-def run_scenario(name: str, model: str) -> tuple[str, float]:
-    """Generate one report. Returns (report text, cost in USD)."""
+def skill_reads(events: list[dict]) -> list[str]:
+    """The skill files a run opened beside SKILL.md, in the order it opened them."""
+    names = [f.name for f in SKILL_SRC.iterdir() if f.name != "SKILL.md"]
+    seen = []
+    for ev in events:
+        if ev.get("type") != "assistant":
+            continue
+        for part in ev.get("message", {}).get("content", []):
+            if part.get("type") != "tool_use":
+                continue
+            text = json.dumps(part.get("input", {}))
+            for n in names:
+                if n in text and n not in seen:
+                    seen.append(n)
+    return seen
+
+
+def run_scenario(name: str, model: str) -> tuple[str, float, list[str]]:
+    """Generate one report. Returns (report text, cost in USD, skill files read)."""
     with tempfile.TemporaryDirectory(prefix=f"steer-report-{name}-") as tmp:
         box = Sandbox(tmp)
         work = box.root / "work"
@@ -71,7 +90,7 @@ def run_scenario(name: str, model: str) -> tuple[str, float]:
                 request=("I have decided to remove the no-bare-python guard. Explain "
                          "what removal changes and how it differs from stopping tracking."
                          if name == "remove-a-guard" else "")),
-            "--output-format", "json",
+            "--output-format", "stream-json", "--verbose",
             "--model", model,
             "--no-session-persistence",
             "--dangerously-skip-permissions",
@@ -83,10 +102,10 @@ def run_scenario(name: str, model: str) -> tuple[str, float]:
     if result.returncode != 0:
         print(f"  ERROR: claude exited {result.returncode}", file=sys.stderr)
         print(f"  stderr: {result.stderr[:500]}", file=sys.stderr)
-        return "", 0.0
-    import json
-    payload = json.loads(result.stdout)
-    return payload.get("result", ""), payload.get("total_cost_usd", 0.0)
+        return "", 0.0, []
+    events = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
+    final = next((e for e in reversed(events) if e.get("type") == "result"), {})
+    return final.get("result", ""), final.get("total_cost_usd", 0.0), skill_reads(events)
 
 
 def main():
@@ -114,14 +133,16 @@ def main():
     started = time.time()
     for name in names:
         print(f"\n=== {name} ===")
-        report, cost = run_scenario(name, args.model)
+        report, cost, reads = run_scenario(name, args.model)
         total += cost
         if not report:
             print("  no report generated")
             continue
         dest = OUT_DIR / f"{name}.md"
-        dest.write_text(f"<!-- {name} · {args.model} -->\n\n{report}\n")
-        print(f"  {len(report)} chars → {dest}  (${cost:.4f})")
+        opened = ", ".join(reads) or "none"
+        dest.write_text(f"<!-- {name} · {args.model} · skill files read: {opened} -->\n\n"
+                        f"{report}\n")
+        print(f"  {len(report)} chars → {dest}  (${cost:.4f})  skill files read: {opened}")
 
     print(f"\n{len(names)} scenario(s), ${total:.4f}, "
           f"{time.time() - started:.0f}s. Read them side by side.")

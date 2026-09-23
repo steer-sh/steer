@@ -56,3 +56,40 @@ func TestSiblingSkillReferencesResolve(t *testing.T) {
 		t.Errorf("no skill reads a sibling's file; %s is read by /steer-report as ../steer/prompts/routing.md", routingGuide)
 	}
 }
+
+var ownRef = regexp.MustCompile(`(?:^|[^.\w])\./([A-Za-z0-9_-][A-Za-z0-9_./-]*[A-Za-z0-9_-])`)
+
+// A skill reads each file beside its SKILL.md through a ./ path, and every ./ path
+// a skill file names is a file the skill holds.
+func TestSkillOwnFileReferencesResolve(t *testing.T) {
+	root := repoRoot(t)
+	dirs := map[string]bool{}
+	for _, rel := range pluginManifests {
+		skills, _ := readJSON(t, filepath.Join(root, rel))["skills"].([]any)
+		for _, s := range skills {
+			dir, _ := s.(string)
+			dirs[filepath.Join(root, strings.TrimPrefix(dir, "./"))] = true
+		}
+	}
+	for dir := range dirs {
+		files, _ := filepath.Glob(filepath.Join(dir, "*.md"))
+		named := map[string]bool{}
+		for _, file := range files {
+			raw, err := os.ReadFile(file)
+			if err != nil {
+				t.Fatalf("read %s: %v", file, err)
+			}
+			for _, m := range ownRef.FindAllStringSubmatch(string(raw), -1) {
+				named[filepath.Clean(m[1])] = true
+				if _, err := os.Stat(filepath.Join(dir, m[1])); err != nil {
+					t.Errorf("%s names ./%s, which the skill does not hold: %v", file, m[1], err)
+				}
+			}
+		}
+		for _, file := range files {
+			if base := filepath.Base(file); base != "SKILL.md" && !named[base] {
+				t.Errorf("%s is named by no ./ path in its skill, so no step reads it", file)
+			}
+		}
+	}
+}

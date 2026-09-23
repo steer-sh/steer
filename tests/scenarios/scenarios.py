@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""The six saved scenarios the report-comprehension pass reads.
+"""The seven saved scenarios the report-comprehension pass reads.
 
 Each scenario is one `steer status --json` snapshot plus the refreshed queue the
 skill reads beside it, built over `base_status.json` — a real snapshot with its
-inventory emptied and its paths scrubbed. The scenarios cover the six decisions a
+inventory emptied and its paths scrubbed. The scenarios cover the seven decisions a
 reader arrives with: a new suggestion, an installed guard with observed recurrence,
 reviewer identities that changed between windows, missing review decisions, a
-suggestion that was declined, and a guard to remove.
+suggestion that was declined, a guard to remove, and a first run with session
+history alone.
 
 Nothing here judges the output. A person reads the reports side by side; this
 file only pins what the model is shown.
@@ -147,14 +148,15 @@ def _queued(records):
     return [{k: r[k] for k in keys if k in r} for r in records if _action(r) != "observe"]
 
 
-def _queue(interventions=(), candidates=(), unscored=()):
+def _queue(interventions=(), candidates=(), unscored=(), review_size=41):
     return {
         "version": 5,
         "interventions": _queued(interventions),
         "candidates": list(candidates),
         "unscored": list(unscored),
         "corpora": [
-            {"corpus": "review-findings", "present": True, "size": 41},
+            {"corpus": "review-findings", "present": review_size > 0,
+             "size": review_size},
             {"corpus": "transcript-friction", "present": True, "size": 214},
         ],
     }
@@ -263,6 +265,41 @@ def _remove_a_guard():
     return _snapshot([rec]), _queue([rec])
 
 
+def _first_run():
+    """Session history only: the commit gate was just armed, so no review has run,
+    and no fix or guard is installed."""
+    cands = [
+        {"corpus": "transcript-friction",
+         "pattern": "run the tests before you say it is done",
+         "count": 7, "sessions": 4, "signal_kind": "user_corrections",
+         "examples": ["you said it was done but go test fails",
+                      "run the tests before you say it is done",
+                      "the tests fail again, check them before you stop"]},
+        {"corpus": "transcript-friction", "pattern": "python: command not found",
+         "count": 6, "sessions": 3, "signal_kind": "tool_failures"},
+    ]
+    snap = _snapshot(candidates=cands)
+    snap["chains"] = []
+    snap["corpora"] = [
+        {"corpus": "review-findings", "present": False, "size": 0,
+         "path": "/home/example/.steer/state/commit-review"},
+        {"corpus": "transcript-friction", "present": True, "size": 214,
+         "path": "/home/example/.steer/state/transcript-sessions"},
+    ]
+    tel = snap["telemetry"]
+    tel["review_chains"] = 0
+    tel["audit_firings"] = 0
+    for h in tel["harnesses"]:
+        h["chains"] = 0
+        h["firings"] = 0
+    for row in snap["posture"]["commit_gate"] + snap["posture"]["resolver"]:
+        if "observed" in row:
+            row["observed"] = 0
+    for m in snap["posture"]["masters"]:
+        m.pop("observed", None)
+    return snap, _queue(candidates=cands, review_size=0)
+
+
 # SCENARIOS maps a name to a builder returning (status snapshot, queue).
 SCENARIOS = {
     "new-suggestion": _new_suggestion,
@@ -271,6 +308,7 @@ SCENARIOS = {
     "missing-decisions": _missing_decisions,
     "declined-suggestion": _declined_suggestion,
     "remove-a-guard": _remove_a_guard,
+    "first-run": _first_run,
 }
 
 
