@@ -37,15 +37,6 @@ type CheckFailure struct {
 	Applies string `json:"applies,omitempty"`
 }
 
-// failedOutcomes are the execution outcomes that report a failure. A check the
-// run never reached, or one that skipped itself, asserted nothing.
-var failedOutcomes = map[string]bool{
-	checks.OutcomeFailed:      true,
-	checks.OutcomeError:       true,
-	checks.OutcomeTimeout:     true,
-	checks.OutcomeUnavailable: true,
-}
-
 // CheckFailures lists the failures a blocked run reported, from its own record
 // and the executions under it: each failing check in record order, then check.sh
 // itself when it failed, then the integration failure when check.sh passed without
@@ -54,7 +45,7 @@ func CheckFailures(run checks.OracleRun, executions []checks.Execution) []CheckF
 	var out []CheckFailure
 	seen := map[string]bool{}
 	for i, e := range executions {
-		if e.RunID != run.RunID || !failedOutcomes[e.Outcome] || seen[e.CheckID] {
+		if e.RunID != run.RunID || !e.Failed() || seen[e.CheckID] {
 			continue
 		}
 		seen[e.CheckID] = true

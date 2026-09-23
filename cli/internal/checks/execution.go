@@ -143,6 +143,17 @@ type Execution struct {
 	SteerVersion   string    `json:"steer_version"`
 }
 
+// Failed reports an outcome that reports a failure: an assertion failed, the
+// check could not run or produce a result, or the deadline stopped it. A check
+// never reached, or one that skipped itself, asserted nothing.
+func (e Execution) Failed() bool {
+	switch e.Outcome {
+	case OutcomeFailed, OutcomeError, OutcomeTimeout, OutcomeUnavailable:
+		return true
+	}
+	return false
+}
+
 // Passed reports an outcome that counts as a pass.
 func (e Execution) Passed() bool {
 	return e.Outcome == OutcomePassed || e.Outcome == OutcomePassedCached

@@ -422,3 +422,19 @@ func TestStopBlockOffersAContestOfItsRun(t *testing.T) {
 			runs[0].ContestProtocol, runs[1].ContestProtocol)
 	}
 }
+
+// A check check.sh never reached asserted nothing, so the reason lists it apart
+// from the failures and says so, instead of as a check that did not pass.
+func TestStopBlockListsAnUnreachedCheckApartFromFailures(t *testing.T) {
+	_, req := stopRepo(t, map[string]string{"a": "exit 0\n"}, "echo 'gofmt: needs formatting' >&2\nexit 1\n")
+	d := Stop(req)
+	if d.Disposition != DispositionBlock {
+		t.Fatalf("stop: %+v; want a block", d)
+	}
+	if strings.Contains(d.Reason, "failed: a") || strings.Contains(d.Reason, "did not pass") {
+		t.Errorf("reason lists the unreached check as a failure:\n%s", d.Reason)
+	}
+	if !strings.Contains(d.Reason, "not reached, because check.sh stopped before them: a. They asserted nothing.") {
+		t.Errorf("reason does not name the unreached check:\n%s", d.Reason)
+	}
+}

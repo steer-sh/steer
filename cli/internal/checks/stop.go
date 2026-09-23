@@ -277,14 +277,26 @@ func blockReason(identity string, run OracleRun, records []Execution, output str
 		exit = fmt.Sprintf("exit %d", *run.ExitCode)
 	}
 	fmt.Fprintf(&b, "%s failed (%s) in %s. It is this repository's verification oracle, and its verdict applies to this turn's work.\n", OracleName, exit, identity)
-	var failing []string
+	var failing, unreached, skipped []string
 	for _, r := range records {
-		if !r.Passed() {
+		switch {
+		case r.Failed():
 			failing = append(failing, fmt.Sprintf("%s (%s)", r.CheckID, r.Outcome))
+		case r.Outcome == OutcomeNotExecuted:
+			unreached = append(unreached, r.CheckID)
+		case r.Outcome == OutcomeSkipped:
+			skipped = append(skipped, r.CheckID)
 		}
 	}
 	if len(failing) > 0 {
-		fmt.Fprintf(&b, "Declared checks that did not pass: %s.\n", strings.Join(failing, ", "))
+		fmt.Fprintf(&b, "Declared checks that failed: %s.\n", strings.Join(failing, ", "))
+	}
+	if len(unreached) > 0 {
+		fmt.Fprintf(&b, "Declared checks not reached, because %s stopped before them: %s. They asserted nothing.\n",
+			OracleName, strings.Join(unreached, ", "))
+	}
+	if len(skipped) > 0 {
+		fmt.Fprintf(&b, "Declared checks that skipped themselves: %s.\n", strings.Join(skipped, ", "))
 	}
 	if lines := lastLines(output, diagnosticLines); lines != "" {
 		fmt.Fprintf(&b, "\n%s\n", lines)
