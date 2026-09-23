@@ -98,13 +98,14 @@ Each record reports before/after incidence over its own unit — the fraction of
 ### The audit lives in `audit.md`
 
 Decide this from the snapshot, never from what you expect to find. **When
-`interventions[]` holds a row, or `telemetry.audit_firings` is above zero, Read
-`./audit.md` from this skill's directory now, and finish its audit before Step 2.** It
-holds how to read each record's fields, the contests blocked agents filed, the
-sampled reading of recorded blocks, the repair of a guard judged incorrect, and the
-field reference for an `interventions[]` row.
+`interventions[]` holds a row, or `telemetry.audit_firings` or
+`telemetry.check_blocks` is above zero, Read `./audit.md` from this skill's
+directory now, and finish its audit before Step 2.** It holds how to read each
+record's fields, the contests blocked agents filed, the sampled reading of recorded
+guard and check.sh blocks, the repair of a block judged wrong, and the field
+reference for an `interventions[]` row.
 
-When neither holds, this machine has no fix to audit and no recorded block to read.
+When none holds, this machine has no fix to audit and no recorded block to read.
 Say so in one line and go to Step 2.
 
 ## Step 2: Gather new evidence from both corpora
@@ -286,10 +287,11 @@ guard files.
   an absent audit log or check evidence, or no frozen scope), `candidates[]` (no `match` yet),
   `unscored[]` (ids of records no engine reads), and `checks[]` — the open steps
   in this repository's check tier, the same rows the queue carries.
-- `telemetry` — corpus sizes: `review_chains`, `audit_firings`,
+- `telemetry` — corpus sizes: `review_chains`, `audit_firings`, `check_blocks`
+  (the check.sh Stop blocks recorded here that no exclusion retires),
   `session_snapshots`, plus `harnesses[]` — one row per harness with its
-  `sessions`, `firings` and `chains`, so a harness that contributed nothing reads
-  differently from one that was never mined.
+  `sessions`, `firings`, `check_blocks` and `chains`, so a harness that contributed
+  nothing reads differently from one that was never mined.
 - `corpora[]` — one row per corpus with `present`, `size` and `path`.
 - `hooks[]` — the registered managed hooks in the active scope: `name`, `scope`,
   `source`, `rule`.

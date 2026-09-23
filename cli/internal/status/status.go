@@ -13,7 +13,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/steer-sh/steer-cli/internal/adjudication"
 	"github.com/steer-sh/steer-cli/internal/cadence"
+	"github.com/steer-sh/steer-cli/internal/checks"
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/codex"
 	"github.com/steer-sh/steer-cli/internal/gate"
@@ -370,16 +372,20 @@ type AttentionQueue struct {
 // HarnessTelemetry is one harness's share of the corpora, so a reader can tell a
 // harness that contributed nothing from one that was never mined.
 type HarnessTelemetry struct {
-	Harness  string `json:"harness"`
-	Sessions int    `json:"sessions"`
-	Firings  int    `json:"firings"`
-	Chains   int    `json:"chains"`
+	Harness     string `json:"harness"`
+	Sessions    int    `json:"sessions"`
+	Firings     int    `json:"firings"`
+	CheckBlocks int    `json:"check_blocks"`
+	Chains      int    `json:"chains"`
 }
 
 // Telemetry reports corpus sizes — cheap line and row counts, no model call.
+// CheckBlocks counts the check.sh Stop blocks recorded on this machine that no
+// exclusion retires, the blocks a reading pass can take.
 type Telemetry struct {
 	ReviewChains     int                `json:"review_chains"`
 	AuditFirings     int                `json:"audit_firings"`
+	CheckBlocks      int                `json:"check_blocks"`
 	SessionSnapshots int                `json:"session_snapshots"`
 	Harnesses        []HarnessTelemetry `json:"harnesses"`
 }
@@ -478,7 +484,7 @@ func Collect(opts Options) (*SystemStatus, error) {
 
 	s.Posture = collectPosture(opts.Config, ev)
 	s.Checks = collectChecks(opts.RepoRoot)
-	s.Telemetry = telemetry(ev)
+	s.Telemetry = telemetry(ev, checkBlocks())
 	var problems []StoreProblem
 	s.Hooks, problems = collectHooks(opts.Scope)
 	s.StoreProblems = append(s.StoreProblems, problems...)
@@ -915,8 +921,9 @@ func trustState(id harness.ID, known, present bool) string {
 	}
 }
 
-// telemetry counts each corpus and splits the session and firing counts per harness.
-func telemetry(ev mine.EvidenceSet) Telemetry {
+// telemetry counts each corpus and splits the session, firing and check block
+// counts per harness. blocks is checkBlocks' count per harness.
+func telemetry(ev mine.EvidenceSet, blocks map[string]int) Telemetry {
 	t := Telemetry{
 		ReviewChains:     len(ev.Chains),
 		AuditFirings:     len(ev.Firings),
@@ -943,6 +950,10 @@ func telemetry(ev mine.EvidenceSet) Telemetry {
 	}
 	for _, f := range ev.Firings {
 		row(f.Harness).Firings++
+	}
+	for id, n := range blocks {
+		row(id).CheckBlocks += n
+		t.CheckBlocks += n
 	}
 	for _, ch := range ev.Chains {
 		if ch.HarnessKnown {
@@ -973,6 +984,27 @@ func auditFirings() int {
 		return 0
 	}
 	return countLines(filepath.Join(dir, claude.AuditLogName))
+}
+
+// checkBlocks counts the check.sh Stop blocks in this machine's live check state
+// per harness, less the ones an exclusion retires. Unreadable state counts zero.
+func checkBlocks() map[string]int {
+	live, _ := checks.ReadLiveEvidence()
+	var retired map[string]adjudication.Exclusion
+	if entries, err := adjudication.LoadExclusions(adjudication.Dir()); err == nil {
+		retired = adjudication.ExcludedRuns(entries)
+	}
+	return countBlocks(live.Runs, retired)
+}
+
+func countBlocks(runs []checks.OracleRun, retired map[string]adjudication.Exclusion) map[string]int {
+	out := map[string]int{}
+	for _, r := range runs {
+		if _, excluded := retired[r.RunID]; checks.IsStopBlock(r) && !excluded {
+			out[r.Harness]++
+		}
+	}
+	return out
 }
 
 // firingsApplicable reports whether a tier contributes to the audit-log firing

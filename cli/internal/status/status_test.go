@@ -7,7 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/steer-sh/steer-cli/internal/adjudication"
 	"github.com/steer-sh/steer-cli/internal/cadence"
+	"github.com/steer-sh/steer-cli/internal/checks"
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
@@ -277,10 +279,10 @@ func TestJSONContractIsStable(t *testing.T) {
 			}},
 		},
 		Telemetry: Telemetry{
-			ReviewChains: 24, AuditFirings: 3, SessionSnapshots: 40,
+			ReviewChains: 24, AuditFirings: 3, CheckBlocks: 2, SessionSnapshots: 40,
 			Harnesses: []HarnessTelemetry{
 				{Harness: "claude-code", Sessions: 30, Firings: 3, Chains: 24},
-				{Harness: "codex", Sessions: 10},
+				{Harness: "codex", Sessions: 10, CheckBlocks: 2},
 			},
 		},
 		Corpora: []CorpusRow{
@@ -771,18 +773,21 @@ const goldenStatusJSON = `{
   "telemetry": {
     "review_chains": 24,
     "audit_firings": 3,
+    "check_blocks": 2,
     "session_snapshots": 40,
     "harnesses": [
       {
         "harness": "claude-code",
         "sessions": 30,
         "firings": 3,
+        "check_blocks": 0,
         "chains": 24
       },
       {
         "harness": "codex",
         "sessions": 10,
         "firings": 0,
+        "check_blocks": 2,
         "chains": 0
       }
     ]
@@ -1065,5 +1070,25 @@ func TestCollectCarriesTheArtifactOfEachRecord(t *testing.T) {
 	if len(s.Attention.Interventions) != 1 || s.Attention.Interventions[0].Artifact == nil ||
 		s.Attention.Interventions[0].Artifact.State != cadence.ArtifactAbsent {
 		t.Fatalf("attention = %+v; want the record queued with its artifact", s.Attention.Interventions)
+	}
+}
+
+// Telemetry counts the Stop blocks a reading pass can take: a block, not a
+// yield or another source's failure, and never one an exclusion retires.
+func TestCountBlocksCountsReadableStopBlocksPerHarness(t *testing.T) {
+	runs := []checks.OracleRun{
+		{RunID: "1", Source: checks.SourceStop, Disposition: checks.DispositionBlock, Harness: "codex"},
+		{RunID: "2", Source: checks.SourceStop, Disposition: checks.DispositionBlock, Harness: "codex"},
+		{RunID: "3", Source: checks.SourceStop, Disposition: checks.DispositionBlock, Harness: "claude-code"},
+		{RunID: "4", Source: checks.SourceStop, Disposition: checks.DispositionYield, Harness: "codex"},
+		{RunID: "5", Source: checks.SourceRun, Disposition: checks.DispositionBlock, Harness: "codex"},
+	}
+	got := countBlocks(runs, map[string]adjudication.Exclusion{"2": {RunID: "2"}})
+	if len(got) != 2 || got["codex"] != 1 || got["claude-code"] != 1 {
+		t.Errorf("blocks = %v; want one per harness", got)
+	}
+	tel := telemetry(mine.EvidenceSet{}, got)
+	if tel.CheckBlocks != 2 {
+		t.Errorf("telemetry = %+v; want two check blocks", tel)
 	}
 }

@@ -72,10 +72,15 @@ func LiveBlockFollowups(ev LiveEvidence) []BlockFollowup {
 	return out
 }
 
+// IsStopBlock reports a run whose Stop runner blocked the turn.
+func IsStopBlock(r OracleRun) bool {
+	return r.Source == SourceStop && r.Disposition == DispositionBlock
+}
+
 func blockFollowups(runs []OracleRun, executions []Execution) []BlockFollowup {
 	var out []BlockFollowup
 	for i, block := range runs {
-		if block.Source != SourceStop || block.Disposition != DispositionBlock {
+		if !IsStopBlock(block) {
 			continue
 		}
 		f := BlockFollowup{Block: block, SessionTree: FollowUnknown}

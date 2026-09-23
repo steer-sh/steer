@@ -101,8 +101,8 @@ Read the linked architecture section before changing the corresponding boundary:
   `skills/steer-report/SKILL.md`, whose `interventions[]` row fields live in
   `skills/steer-report/audit.md`; `TestJSONContractIsStable` pins the contract.
   Step 1 loads `audit.md` only when `interventions[]` holds a row or
-  `telemetry.audit_firings` is above zero, so a change to either field changes
-  when the audit runs. A skill names a file of its own as `./<name>`, which
+  `telemetry.audit_firings` or `telemetry.check_blocks` is above zero, so a change
+  to any of those fields changes when the audit runs. A skill names a file of its own as `./<name>`, which
   `TestSkillOwnFileReferencesResolve` resolves.
   `skills/steer/SKILL.md` names only the fields its Pre-flight reads.
   The check tier's share of it lives in `cli/internal/status/checks.go`.

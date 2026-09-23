@@ -55,7 +55,8 @@ A gate that never fires is not free. It costs oracle runtime on every commit and
 
 ## Show what blocked agents contested
 
-A block's message offers the blocked agent `steer contest FIRING_ID "reason"`. The
+A guard block's message offers the blocked agent `steer contest FIRING_ID "reason"`,
+and a check.sh Stop block's message offers `steer contest --run RUN_ID "reason"`. The
 agent holds the task context at the moment of the block, so its contest is the
 cheapest signal that a block was wrong for the task. It is still a complaint, not a
 judgment: it reads no rule and no evidence beyond its own task.
@@ -83,24 +84,33 @@ List `contested_excluded` and `unmatched[]` apart from the counts. An unmatched
 contest names a firing no guard store on this machine holds: the row may sit on
 another machine, or the master may have failed to log it.
 
+`checks[]` holds the same account per repository for check.sh Stop blocks:
+`blocks`, `contested`, `unread`, `not_offered` (blocks whose reason carried no
+contest line) and `contested_excluded`, with each contested block's
+`reasons[]` and, when a receipt reads it, the latest reading of each of its
+`failures[]`. `unmatched_checks[]` names contested runs no recorded block here
+carries. Report them by the same rules as a guard's.
+
 A contest never unblocks anything and never exempts a guard. Offer the user a
 deeper audit of the contested firings: read each one with `steer audit show` and
 record a judgment, under the budget below. Do not read them unasked, and do not
 recommend removal on contests alone.
 
-## Read a sample of the blocks a guard recorded
+## Read a sample of the recorded blocks
 
 The counts above say whether a problem is still happening. They never say whether a
-guard blocked the right thing. That is settled one case at a time, by reading the
-action the guard blocked in its original task context, and separately what the task
-did next. `steer audit` is that path.
+guard blocked the right thing, or whether check.sh stopped a turn for a real failure
+of that turn's work. That is settled one case at a time, by reading the block in its
+original task context, and separately what the task did next. `steer audit` is that
+path, for guard firings and check.sh Stop blocks alike.
 
 **This pass has a budget: at most 3 cases, and at most 24,000 bytes of case evidence
 across the whole report.** Both numbers are provisional operating choices with no
 measurement behind them. Three cases make a pass incremental rather than exhaustive.
 24,000 bytes holds the pass below one maximum-length default continuation, so a single
-long case cannot consume the report. The budget is spent across every guard together,
-not per guard.
+long case cannot consume the report. The budget is spent across every guard and every
+repository's check.sh together: guard firings and check blocks share one queue and
+one budget, never one each.
 
 Start with the queue. It lists unread cases oldest first and counts the whole queue
 before `--limit` cuts the listing:
@@ -109,35 +119,41 @@ before `--limit` cuts the listing:
 steer audit queue --json --limit 3
 ```
 
-`counts` holds `unjudged`, `continuation_unread`, `queued` and `listed`. A case is
-queued for one of two reasons: nobody judged it, or somebody judged the block and
-nobody read what the task did next while that transcript is still on this machine.
-`coverage[]` holds each guard's account of its own rows. Rows an earlier
-implementation recorded are **not** in this listing: no reading of them says what the
-guard running now does. `--other` asks for them as separate work.
+`counts` holds `unjudged`, `continuation_unread`, `queued` and `listed`, over both
+kinds of case. A case is queued for one of two reasons: nobody judged it, or somebody
+judged the block and nobody read what the task did next while that transcript is
+still on this machine. Each item's `subject` says which kind it is: `guard`, named by
+`firing_id`, or `check`, named by `run_id` with its `repo` and its `failures[]`.
+`coverage[]` holds each guard's account of its own rows, and `check_coverage[]` each
+repository's account of its blocks. Guard rows an earlier implementation recorded
+are **not** in this listing: no reading of them says what the guard running now does.
+`--other` asks for them as separate work. A check block is listed whatever its
+detectors are now; each failure's `applies` says whether a reading of it describes
+the detector installed now.
 
 Then read each case, handing it the bytes you can still afford. Read cases in the
 **text** form. `--json` re-encodes and indents the same evidence and costs close to
 twice as much, which buys nothing a reader needs:
 
 ```bash
-steer audit show FIRING_ID --max-bytes 8000
+steer audit show ID --max-bytes 8000
 ```
 
-`show` enforces the allowance itself. Do not measure its output or stage it to a
+ID is the item's `firing_id` or `run_id`. `show` enforces the allowance itself. Do not measure its output or stage it to a
 file. Its last line is `emitted_bytes N`: subtract that from the 24,000 you started
 with and pass what is left to the next call. The line above it says how many
-continuation steps you were shown against how many the lookup reached, and names
-anything that rendering withheld. A per-step truncation is a different fact: that is
+continuation steps you were shown against how many the lookup reached (for a check
+block, the context steps before the block too), and names anything that rendering
+withheld. A per-step truncation is a different fact: that is
 the continuation reader cutting one step's text, not this rendering withholding
 whole steps.
 
-`show` refuses an allowance too small to carry the row and the blocked action, and
-names the size it needed. That refusal is a result, not a failure: the case costs
+`show` refuses an allowance too small to carry the row and the blocked action, or a
+check block's run and failures, and names the size it needed. That refusal is a result, not a failure: the case costs
 more than this pass can spend. Report it as a case you did not read. Never treat
 retrieving a case as having inspected it.
 
-Then record one judgment per case you read:
+Then record one judgment per case you read. A guard firing:
 
 ```bash
 steer audit record FIRING_ID --judgment prevented \
@@ -155,15 +171,30 @@ steer audit record FIRING_ID --judgment prevented \
   continuation settles neither.
 - A case that records no real work is not judged. A test run under the operator's
   own guards, such as `codex exec` from a scratch directory ordering the forbidden
-  command, leaves a real row with no task behind it. Do not record it as
-  `unresolved`: tell the user what shows it is a test, and offer
-  `steer audit exclude FIRING_ID --reason "..." --evidence PATH`. The row stays in
-  the stream; the queue and every count leave it out. Exclude nothing unasked.
+  command, leaves a real row with no task behind it, and a demo session in a real
+  repository leaves a real Stop block. Do not record it as `unresolved`: tell the
+  user what shows it is a test, and offer
+  `steer audit exclude ID --reason "..." --evidence PATH`. The record stays where it
+  is; the queue and every count leave it out. Exclude nothing unasked.
 - `--inspected-steps` is how many continuation steps actually reached you, which is
   `emission.steps_emitted` and not `steps_available`. Leave it off when you read no
   continuation. `record` refuses a number above what the lookup reached.
 - `--selection` records why this case was picked, so a later pass advances coverage
   instead of rereading the same cases.
+
+A check block is read with the section below, and recorded with one `--failure` per
+failure it reads:
+
+```bash
+steer audit record RUN_ID \
+  --failure check:go-test=valid,introduced,fixed \
+  --failure oracle=valid,introduced,fixed \
+  --rationale "..." --selection "oldest unread, pass budget 3 cases" \
+  --continuation-inspected --inspected-steps 6
+```
+
+`--judgment` is for guards only. `record` refuses a failure the run did not report
+and a block whose `required` failures are not all read.
 
 Selection for this pass is the queue's own order: oldest first, up to the case cap.
 Do not invent a sampling scheme. If a case you read shows an over-fire or a derailed
@@ -171,6 +202,81 @@ task, say so as an explicit finding and offer the user a focused drill-down or a
 reading of every recorded case for that guard. Full inspection is always the user's
 option; it is not the default, because reading cost grows with the installed
 inventory.
+
+### Reading a check.sh block
+
+A check block is one Stop run that stopped a turn. `show` prints the run, each
+failure it reported, what the records show next, the turn before the block and what
+the session did after it. Read each failure on its own: one run can hold a real
+failure this turn caused beside a broken detector, and one reading spread over both
+is wrong about one of them.
+
+- **Which failures to read.** Each declared check whose execution failed, errored,
+  timed out or produced no result is a `check:ID` failure, and is `required`.
+  check.sh itself is the `oracle` failure: `required` when no declared check
+  accounts for the exit, `optional` beside a failing check, since check.sh exits
+  non-zero for that check and may report nothing else. Read it when check.sh's output
+  shows a step no declared check owns failing too. `integration` is a check.sh that
+  passed without running a declared check, which is wiring and never a failed
+  assertion. A check the run never reached (`not reached`) asserted nothing and is
+  not a failure.
+- **Validity: is the failure real?** `valid` when it reports a real defect in what
+  the check reads; `invalid` when it does not: a flaky test, a wrong assertion, or a
+  dependence on something outside the code such as a credential, the network or a
+  clock. Read the failure's excerpt and check.sh's output, not the check's name.
+- **Attribution: did this turn introduce it?** `introduced` when the blocked turn's
+  own changes caused it; `pre-existing` when it failed before the turn touched
+  anything it reads. A pre-existing failure can still be `valid`: the defect is real
+  and it is not this turn's. The context before the block, and earlier runs in
+  `steer check blocks`, are the evidence.
+- **Continuation: what did the task do about it?** Read only with
+  `--continuation-inspected`. `fixed` when the turn changed the code and the failure
+  cleared; `routed-around` when it made the check pass without repairing the defect
+  (a skipped test, a loosened assertion, an edited detector, a suppression);
+  `declined` when it said the failure was not its to clear and changed nothing, which
+  is what the block reason asks of a failure outside the task; `interrupted` when the
+  person or the harness stopped the turn.
+- **Either axis can be `unresolved`.** It is a reading, not a missing one: the case
+  was read and the evidence did not settle it.
+- **What the records show next is facts, not readings.** "The detector changed before
+  the recorded pass" says the detector's digest moved; a real repair moves it too,
+  and routing around can leave it unchanged. Read the diff before you call it either.
+- **`applies`.** `current` means the reading describes the detector installed now;
+  `historic` means the detector changed or the check was removed since, and the
+  reading stands only as a reading of that block; `unknown` means a record carries no
+  digest; `unmanaged` is check.sh itself or its wiring, which carries no detector
+  identity; `unavailable` means the repository or the detector does not read here.
+- **`join=unavailable`.** A run from before the reason carried its run line, a
+  transcript that is gone, or a harness with no Stop runner leaves no transcript
+  reading. Judge validity from the excerpts and the records, leave the continuation
+  unread, and say so.
+
+### Where a check reading's repair goes
+
+Each reading points at one destination. Say which, and hand the user the next step
+rather than taking it unasked.
+
+1. **Production fix.** `valid`, `introduced`, and the continuation did not fix it
+   (`routed-around`, `declined`, `interrupted`). The defect the turn introduced is
+   still in the code. Name it and where it is. Nothing in Steer changes.
+2. **Detector repair.** `invalid`. The check is wrong, and a check that blocks real
+   work for no defect teaches agents to route around it. Repair the detector through
+   its lifecycle: edit the script or test, add the blocked case to its cases, and
+   `steer check test ID` before anything is declared again (`steer check guide`
+   is the authoring contract). Never loosen a detector to hide a `valid` failure.
+3. **Oracle wiring repair.** An `integration` failure, or an `oracle` failure from a
+   step of check.sh itself. The fix is in check.sh: add the managed line for an
+   unreported check (see `steer check guide`), or repair or move the failing step.
+4. **Failure outside the task.** `valid` and `pre-existing`. The defect is real and
+   the turn did not cause it; the block cost that turn its end. Say that, name the
+   defect, and leave the choice to the user: fix it on its own, or decide whether
+   this check should stop turns that did not touch what it reads.
+
+**Receipts are preserved through repairs.** A receipt records the detector that ran,
+so after a detector repair its failures read `historic`; that is correct, not stale.
+Never re-record a reading to make it current, and never exclude a real block because
+its detector was wrong. A repaired detector earns trust from its own cases, then
+from new blocks read under it.
 
 ### Repairing a guard you judged incorrect
 
@@ -221,6 +327,12 @@ and `coverage`, never from the case cap alone:
 > queued cases stay unexamined: seven were never read, and two were judged before
 > what the agent did next was read. One case was skipped: its evidence needed 31,000 bytes and
 > this pass had 6,000 left.
+
+For a check block, name the repository and each failure's reading, and keep the
+two axes apart in the sentence:
+
+> The one check.sh block read in `steer-skill` failed on `go-test`, a real failure
+> that was there before the turn began; the turn declined to change it.
 
 Three limits hold on every sentence you write from this pass. **An inspected
 fraction is never an efficacy estimate**, so no percentage and no direction follows
