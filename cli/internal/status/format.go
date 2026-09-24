@@ -296,10 +296,10 @@ func ResolvePhrase(a ScopeArming) string {
 	return ""
 }
 
-// ObservedPhrase names when this channel last wrote a row of its own. An empty
-// string means the channel writes no corpus, so nothing about it is observable.
-// "never observed" is not proof of breakage: nobody may have attempted the action
-// the channel fires on.
+// ObservedPhrase names when this channel last recorded its own work: a review for
+// the commit gate, a run for the check runner. An empty string means the channel
+// writes no corpus, so nothing about it is observable. "never observed" is not
+// proof of breakage: nobody may have attempted the action the channel fires on.
 func ObservedPhrase(a ScopeArming) string {
 	if a.ObservedCorpus == "" {
 		return ""
@@ -307,7 +307,14 @@ func ObservedPhrase(a ScopeArming) string {
 	if a.Observed == 0 {
 		return "never observed"
 	}
-	return "last row " + time.Unix(int64(a.Observed), 0).Format("2006-01-02 15:04")
+	what := "last recorded"
+	switch a.ObservedCorpus {
+	case ledgerCorpus:
+		what = "last review"
+	case checkCorpus:
+		what = "last check run"
+	}
+	return what + " " + time.Unix(int64(a.Observed), 0).Format("2006-01-02 15:04")
 }
 
 // RunnerUnapproved reports a registered runner the harness is known not to have

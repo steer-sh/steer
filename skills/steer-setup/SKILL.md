@@ -182,7 +182,7 @@ Finish by reading the answer back:
 "${STEER_BIN}" status
 ```
 
-Report its `Answer` section verbatim. Do not claim the gate is armed on the strength
+Report its `Commit review` section verbatim. Do not claim the gate is armed on the strength
 of the write alone: registration is the weakest of four states, and only an observed
 review proves the whole path. Tell the user to make a code change and commit
 normally, and that a small or prose-only change may skip review — a skipped review is

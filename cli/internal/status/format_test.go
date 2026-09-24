@@ -1,6 +1,7 @@
 package status
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/cadence"
@@ -53,6 +54,20 @@ func TestTierPhraseNamesTheTypeAndTheEmptyState(t *testing.T) {
 	for _, tc := range cases {
 		if got := TierPhrase(tc.tier, tc.target); got != tc.want {
 			t.Errorf("TierPhrase(%q, %q) = %q, want %q", tc.tier, tc.target, got, tc.want)
+		}
+	}
+}
+
+// A channel's observed time names what it recorded, so a reader never meets a bare
+// "row".
+func TestObservedPhraseNamesTheRecordKind(t *testing.T) {
+	for corpus, want := range map[string]string{
+		ledgerCorpus: "last review ",
+		checkCorpus:  "last check run ",
+	} {
+		got := ObservedPhrase(ScopeArming{ObservedCorpus: corpus, Observed: 1700000000})
+		if !strings.HasPrefix(got, want) || strings.Contains(got, "row") {
+			t.Errorf("%s: ObservedPhrase = %q; want it to start %q", corpus, got, want)
 		}
 	}
 }

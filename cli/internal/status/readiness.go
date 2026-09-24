@@ -136,7 +136,7 @@ func ReadinessOf(s *SystemStatus, probe reviewers.Probe) Readiness {
 		if _, ok := TrustStep(a.Harness, a.Trust, ""); ok {
 			note := fmt.Sprintf("%s %s scope: %s; current hook trust cannot be verified", HarnessLabel(a.Harness), a.Scope, TrustPhrase(a.Trust))
 			if phrase := ObservedPhrase(a); phrase != "" {
-				note += " · harness history: " + phrase
+				note += " · " + phrase
 			}
 			r.Unverified = append(r.Unverified, note)
 			if !open {

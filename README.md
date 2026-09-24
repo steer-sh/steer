@@ -65,11 +65,13 @@ For a Git pre-commit workflow, use `steer commit-gate install --precommit` in th
 
 The commit gate records every review and every decision locally under `~/.steer/state`. Steer can also read your agent's session history to find recurring corrections and failed commands.
 
-Use the overview to see what is active and what needs attention:
+Open the dashboard to see what is active and what needs attention. `steer status`
+answers the narrower question — are commits here reviewed, and what stands in the
+way — in a form you can paste or script:
 
 ```bash
-steer status
 steer dashboard
+steer status
 ```
 
 With the skills installed, run `/steer-report` in your agent to read the evidence and consider fixes. A recurring problem might call for a repository check, a guard, an instruction, or no change at all. A suggestion you decline is worth recording too — Steer watches whether that problem grows afterwards.

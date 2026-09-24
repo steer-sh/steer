@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/steer-sh/steer-cli/internal/cadence"
+	"github.com/steer-sh/steer-cli/internal/gate/reviewers"
 	"github.com/steer-sh/steer-cli/internal/status"
 )
 
@@ -13,22 +13,31 @@ import (
 // the dashboard's stacked labels avoid.
 func TestEveryWrappedLineLandsInItsOwnColumn(t *testing.T) {
 	long := strings.Repeat("a long sentence that has to wrap more than once. ", 6)
-	s := &status.SystemStatus{
-		Posture: status.Posture{Reviewer: long},
-		Attention: status.AttentionQueue{Interventions: []cadence.Intervention{{
-			Class:   "a recurring problem",
-			Problem: long,
-			Tier:    "check",
-			Target:  "check.sh",
-			Unit:    "chain",
-		}}},
+	s := &status.SystemStatus{StoreProblems: []status.StoreProblem{{Scope: "project", Error: long}}}
+
+	problems := captureStdout(t, func() { renderStoreProblems(s, 70) })
+	assertColumn(t, problems, "Why", len(problemFieldIndent)+problemLabelWidth+1)
+}
+
+// The text view is the readiness answer and a pointer: the loop's other sections
+// belong to the dashboard and to --json, and printing them here again is the
+// surface this command gave up.
+func TestStatusPrintsTheReadinessAnswerAndNothingElse(t *testing.T) {
+	s := &status.SystemStatus{Posture: status.Posture{
+		CommitGate: []status.ScopeArming{{Harness: "claude-code", Scope: "global"}},
+		Masters:    []status.MasterRuntime{{Harness: "claude-code", Scope: "global", State: status.MasterCurrent}},
+	}, Summary: status.VerdictSummary{Total: 2}}
+	out := captureStdout(t, func() { renderStatus(s, reviewers.Probe{}) })
+	for _, want := range []string{"Commit review", "steer dashboard", "steer status --json"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("status is missing %q:\n%s", want, out)
+		}
 	}
-
-	posture := captureStdout(t, func() { renderReviewer(s, 70) })
-	assertColumn(t, posture, "Reviewer", 2+postureLabelWidth+1)
-
-	problems := captureStdout(t, func() { renderAttention(s, 70) })
-	assertColumn(t, problems, "Problem", len(problemFieldIndent)+problemLabelWidth+1)
+	for _, gone := range []string{"Arming", "Guard runner", "Problems", "Reviewer", "recorded problems\n"} {
+		if strings.Contains(out, gone) {
+			t.Errorf("status still prints the %q section:\n%s", gone, out)
+		}
+	}
 }
 
 // assertColumn reads the lines under one label and checks each continuation
