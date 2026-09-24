@@ -223,44 +223,43 @@ func (m *Model) viewProblems() string {
 // the selection marker and the title.
 const summaryIndent = "    "
 
-// problemSummary is one compact entry: the title, then labeled lines for the fix,
-// the result, and the one short reason or next step the entry needs.
+// problemSummary is one compact entry: the title, then the result beside the
+// fix's type, then the one short cause a limited result carries. The fix's text
+// and the step live in the detail area; the section heading names the step.
 func (m *Model) problemSummary(r problemRow, selected bool, width int) string {
 	out := selectedRow(problemTitle(r), "", selected, width)
-	for _, f := range summaryFields(r) {
-		out += field(f.label, f.value, summaryIndent, width)
+	if r.candidate != nil {
+		for _, f := range candidateFields(*r.candidate) {
+			out += field(f.label, f.value, summaryIndent, width)
+		}
+		return out
+	}
+	it := *r.item
+	out += wrapTo(verdictBadge(it.Observation)+secondary(" · "+rowKind(it)), summaryIndent, width)
+	if cause := status.ProblemCause(problemView(it)); cause != "" {
+		out += wrapTo(secondary(cause), summaryIndent, width)
 	}
 	return out
+}
+
+// rowKind names the fix's type on a compact row, or that the fix was declined.
+func rowKind(it status.ScoredIntervention) string {
+	if it.Status == "rejected" {
+		return "fix declined"
+	}
+	return status.TierPhrase(it.Tier, "")
 }
 
 // summaryField is one labeled line of a summary.
 type summaryField struct{ label, value string }
 
-// summaryFields are the lines under one title. A queue row names its source and
-// the handoff; a tracked row names the fix, the result, and either the reason the
-// result is unavailable or the step the reader can take — never a generic
-// instruction that names no decision.
-func summaryFields(r problemRow) []summaryField {
-	if r.candidate != nil {
-		return []summaryField{
-			{"Evidence", candidateEvidence(*r.candidate)},
-			{"Next", status.CandidateNext},
-		}
+// candidateFields are the lines under a queue row's title: its source and the
+// handoff.
+func candidateFields(c cadence.Candidate) []summaryField {
+	return []summaryField{
+		{"Evidence", candidateEvidence(c)},
+		{"Next", status.CandidateNext},
 	}
-	it := *r.item
-	v := problemView(it)
-	fields := []summaryField{
-		{fixLabel(it), fixSummary(it)},
-		{"Result", verdictBadge(it.Observation)},
-	}
-	why, next := status.ProblemWhy(v), status.ProblemNext(v)
-	if why != "" {
-		fields = append(fields, summaryField{"Why", why})
-	}
-	if next != "" {
-		fields = append(fields, summaryField{"Next", next})
-	}
-	return fields
 }
 
 // problemTitle names the entry. A queue row covers no problem yet, so it says so
@@ -373,6 +372,7 @@ func detailBlock(r problemRow, width int) string {
 			time.Unix(int64(it.RejectedTS), 0).Format("2006-01-02"), detailIndent, width)
 	}
 	out += detailSection("Result", resultDetail(it), width)
+	out += exampleDetail(it, width)
 	out += evidenceDetail(it, width)
 	out += actionDetail(it, width)
 	return out
@@ -428,14 +428,46 @@ func fixDetail(it status.ScoredIntervention) string {
 	return out + "."
 }
 
-// resultDetail is the result label with its own explanation under it.
+// resultDetail is the result label with the reason it is limited, when it is. A
+// step belongs to "What you can do", so it is not repeated here.
 func resultDetail(it status.ScoredIntervention) string {
 	label := status.ObservationLabel(it.Observation)
-	sentence := status.ActionSentence(it.Observation, it.Scope, it.Tier, it.Artifact)
-	if sentence == "" {
-		return label + ". Nothing is asked of you here."
+	if why, _ := summaryReason(it); why != "" {
+		return label + ". " + sentenceCase(why)
 	}
-	return label + ". " + sentenceCase(sentence)
+	return label + "."
+}
+
+// exampleLines caps the newest example shown in the detail area. A reviewer's
+// finding can run to paragraphs, and the command after the cut prints it whole.
+const exampleLines = 4
+
+// exampleDetail is the newest recurrence the record observed: what kind of text
+// it is, when it was recorded, and the text itself up to exampleLines.
+func exampleDetail(it status.ScoredIntervention, width int) string {
+	rec := it.Observation.Recurrence
+	if !rec.Occurred || strings.TrimSpace(rec.Example) == "" {
+		return ""
+	}
+	kind := "The newest match"
+	switch rec.ExampleKind {
+	case mine.ExampleAdjudicatedFinding:
+		kind = "A review finding with a recorded decision"
+	case mine.ExampleClusterKey:
+		kind = "The text a session's correction was grouped by; it is not a confirmed failure"
+	}
+	if rec.ExampleTS > 0 {
+		kind += ", " + time.Unix(int64(rec.ExampleTS), 0).Format("2006-01-02 15:04")
+	}
+	out := headingStyle.Render("Newest example") + "\n" + wrapTo(secondary(kind), detailIndent, width)
+	text := strings.Join(strings.Fields(rec.Example), " ")
+	lines := strings.Split(strings.TrimRight(wrapTo(text, detailIndent, width), "\n"), "\n")
+	if len(lines) > exampleLines {
+		lines = append(lines[:exampleLines], detailIndent+"…")
+		out += strings.Join(lines, "\n") + "\n"
+		return out + wrapTo(secondary("the whole text: steer fix score --id "+it.ID), detailIndent, width)
+	}
+	return out + strings.Join(lines, "\n") + "\n"
 }
 
 // evidenceDetail is the before and after counts on their own lines, each with its
@@ -470,12 +502,31 @@ func incidenceLine(in cadence.Incidence, unit string) string {
 // stopping the tracking would and would not do.
 func actionDetail(it status.ScoredIntervention, width int) string {
 	out := headingStyle.Render("What you can do") + "\n"
-	if _, next := summaryReason(it); next != "" {
-		out += wrapTo(sentenceCase(next), detailIndent, width)
+	if step := detailStep(it); step != "" {
+		out += wrapTo(step, detailIndent, width)
 	}
 	out += wrapTo("x — stop tracking. "+sentenceCase(status.RemovalPhrase(it.Tier, it.Artifact)),
 		detailIndent, width)
 	return out
+}
+
+// detailStep is the one step the detail area names. A plain recurrence points at
+// the example the area shows, or at the command that prints it when the record
+// carries none; every other step is the shared sentence.
+func detailStep(it status.ScoredIntervention) string {
+	_, next := summaryReason(it)
+	obs := it.Observation
+	if next == "" || !status.GenericRecurrence(obs) {
+		return sentenceCase(next)
+	}
+	where := "Read the newest example above"
+	if strings.TrimSpace(obs.Recurrence.Example) == "" {
+		where = "Read the newest example with: steer fix score --id " + it.ID
+	}
+	if it.Status == "rejected" {
+		return where + ". No fix is installed, so decide whether one is needed now."
+	}
+	return where + ", then decide whether the fix needs reworking."
 }
 
 // sentenceCase capitalizes a phrase that starts a sentence of its own.

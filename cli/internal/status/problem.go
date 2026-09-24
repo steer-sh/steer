@@ -72,6 +72,21 @@ func ProblemNext(v ProblemView) string {
 	return next
 }
 
+// ProblemCause is the one sentence a compact row keeps under its result: the
+// reason a result is limited, or a step that names a cause. It is empty for a
+// plain recurrence, whose step the section heading already names. A recurrence
+// carries no evidence gap, so no cause is lost.
+func ProblemCause(v ProblemView) string {
+	if GenericRecurrence(v.Observation) {
+		return ""
+	}
+	why, next := problemReason(v)
+	if why != "" {
+		return why
+	}
+	return next
+}
+
 // problemReason splits the entry's one explanatory sentence into the reason a
 // result is unavailable and the step the reader can take. An observation that
 // asks nothing carries a reason and no step; one that asks the reader to look at

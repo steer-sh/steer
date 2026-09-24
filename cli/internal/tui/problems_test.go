@@ -445,6 +445,7 @@ func TestCandidateDetailClaimsItemsOnlyWhereTheyAre(t *testing.T) {
 
 // The detail joins shared phrases into sentences, so a phrase that already ends in
 // a period or starts in lowercase must not reach the reader as ".." or ". the".
+// A one-letter key name such as "x —" starts its own line and is allowed.
 func TestTheDetailWritesWholeSentences(t *testing.T) {
 	it := status.ScoredIntervention{ID: "d", Class: "declined-problem", Status: "rejected",
 		Tier: "check", Intervention: "A check that compares the message with the diff.",
@@ -453,7 +454,50 @@ func TestTheDetailWritesWholeSentences(t *testing.T) {
 	if strings.Contains(text, "..") {
 		t.Errorf("the detail doubles a period: %s", text)
 	}
-	if bad := regexp.MustCompile(`\. [a-z]`).FindString(text); bad != "" {
+	if bad := regexp.MustCompile(`\. [a-z]\S`).FindString(text); bad != "" {
 		t.Errorf("a sentence starts in lowercase at %q: %s", bad, text)
+	}
+}
+
+// A compact row carries the result and the fix's type, and leaves the fix's text
+// and a plain recurrence's step to the detail area and the section heading.
+func TestARecurrenceRowIsTheResultAndTheFixType(t *testing.T) {
+	m := New(gate.Defaults(), "global")
+	m.snap = &status.SystemStatus{Interventions: []status.ScoredIntervention{{
+		ID: "c", Class: "recurring-problem", Status: "active", Tier: "guard", Unit: "session",
+		Intervention: "blocks the bare command", Scope: allScope(), Observation: recurrenceObservation(),
+	}}}
+	m.active = panelProblems
+	view := strings.Join(strings.Fields(ansi.Strip(m.viewProblems())), " ")
+	if !strings.Contains(view, "Recurrence observed · pre-tool guard") {
+		t.Errorf("the row does not pair the result with the fix type:\n%s", view)
+	}
+	for _, gone := range []string{"blocks the bare command", "decide whether the fix needs reworking"} {
+		if strings.Contains(view, gone) {
+			t.Errorf("the compact row repeats %q:\n%s", gone, view)
+		}
+	}
+}
+
+// The detail shows the newest example, capped, with the command that prints it
+// whole, and names the step once.
+func TestTheDetailShowsTheNewestExampleOnce(t *testing.T) {
+	obs := recurrenceObservation()
+	obs.Recurrence.ExampleKind = mine.ExampleAdjudicatedFinding
+	obs.Recurrence.Example = strings.Repeat("the reviewer claims the build fails ", 40)
+	it := status.ScoredIntervention{ID: "c", Class: "recurring-problem", Status: "active",
+		Tier: "review", Unit: "chain", Scope: allScope(), Observation: obs}
+	text := strings.Join(strings.Fields(ansi.Strip(detailBlock(problemRow{item: &it}, 80))), " ")
+	for _, want := range []string{"Newest example", "A review finding with a recorded decision",
+		"…", "steer fix score --id c", "Read the newest example above"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the detail is missing %q:\n%s", want, text)
+		}
+	}
+	if n := strings.Count(text, "decide whether the fix needs reworking"); n != 1 {
+		t.Errorf("the step appears %d times:\n%s", n, text)
+	}
+	if n := strings.Count(text, "the reviewer claims the build fails"); n > 20 {
+		t.Errorf("the example is not capped: %d repeats shown", n)
 	}
 }

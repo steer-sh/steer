@@ -76,15 +76,22 @@ func ObservationLabel(obs mine.Observation) string {
 	return "No recurrence observed"
 }
 
+// GenericRecurrence reports a recurrence whose step is to read the newest example,
+// the step the "inspect the example" heading already names. A guard that recorded
+// no block while the problem returned has a step of its own.
+func GenericRecurrence(obs mine.Observation) bool {
+	return obs.Recurrence.Occurred && !(obs.Firing.Known() && obs.Firing.Rows == 0)
+}
+
 // ActionSentence is the observation translated into an instruction. A declined
 // record installed no fix, so its recurrence is phrased with no rework implied.
 func ActionSentence(obs mine.Observation, scope *cadence.Scope, t string, artifact *cadence.Artifact) string {
 	switch {
-	case obs.Recurrence.Occurred && obs.Firing.Known() && obs.Firing.Rows == 0:
+	case obs.Recurrence.Occurred && !GenericRecurrence(obs):
 		return "the problem returned while the guard recorded no block — inspect the rule, its coverage and its registration"
-	case obs.Recurrence.Occurred && obs.Declined:
+	case GenericRecurrence(obs) && obs.Declined:
 		return "the problem recurred since this fix was declined, and no fix is installed — inspect the newest example"
-	case obs.Recurrence.Occurred:
+	case GenericRecurrence(obs):
 		return "inspect the newest example and decide whether the fix needs reworking"
 	case artifact.NeedsBaseline(t):
 		return "the fix's text differs from the text this record measured, so these counts " +
