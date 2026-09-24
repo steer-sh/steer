@@ -173,7 +173,9 @@ Read the linked architecture section before changing the corresponding boundary:
 Run `./check.sh` before reporting a change complete. It checks gofmt, builds,
 vets and runs Go tests, then `scripts/revert-test.py`: each Go test added since
 the upstream branch must fail under some variant of the change, and
-`// pins existing behaviour` in a test's doc comment exempts it. Its per-test
+`// pins existing behaviour` in a test's doc comment exempts it. A test it accepted
+is judged again only when its package's test-side files or the checker change
+(`.git/revert-test/accepted`), so unpushed commits do not slow later runs. Its per-test
 evidence (deciding variant, failure excerpt, diffs, full output) is written to
 `.git/revert-test/<key>.json`, and the console names the file. It copies the module
 to one scratch path per worktree and holds `.git/revert-test/lock` for the whole run,

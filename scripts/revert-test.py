@@ -41,6 +41,13 @@ Each run writes one evidence record per new test to EVIDENCE/<key>.json in the
 git directory: the variant that decided it, the failure excerpt and its kind
 (assertion, crash, or non-panic failure), and the outcome of every other
 variant, with each variant's diff and the full test output.
+
+A test that fails under a variant is recorded in EVIDENCE/ACCEPTED with the
+digest of its package's test-side files: the *_test.go files in its directory
+and every file under its testdata/. A later run of the same checker does not
+judge that test again while that digest is unchanged, so a test is judged again
+when its test side changes, not when only the code under test changes. Files
+outside the package that a test reads are not in the digest.
 """
 
 import difflib
@@ -65,6 +72,7 @@ PANIC = 'panic("revert-test")'
 FUNCS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "revert-test-funcs.go")
 EVIDENCE = "revert-test"
 LOCK = "lock"
+ACCEPTED = "accepted"
 WAIT = 120
 KEEP = 20
 NOISE = re.compile(r"^(=== (RUN|PAUSE|CONT|NAME)|--- (FAIL|PASS|SKIP)|\s*$)")
@@ -361,11 +369,61 @@ def test_deps(prefix, packages, deadline):
     return deps
 
 
-def change_key(base, name_status, paths):
+def checker_digest():
     digest = hashlib.sha256()
     for script in (__file__, FUNCS):
         with open(script, "rb") as handle:
             digest.update(handle.read())
+    return digest.hexdigest()
+
+
+def test_inputs(package):
+    """Return the digest of package's test-side files: the *_test.go files in its
+    directory and every file under its testdata/, tracked or not. Return None when
+    one of them is a symlink, so no acceptance is reused or recorded for it."""
+    directory = os.path.join(MODULE, package)
+    paths = [os.path.join(directory, f) for f in os.listdir(directory) if f.endswith("_test.go")]
+    testdata = os.path.join(directory, "testdata")
+    if os.path.islink(testdata):
+        return None
+    for top, dirs, names in os.walk(testdata):
+        if any(os.path.islink(os.path.join(top, d)) for d in dirs):
+            return None
+        paths.extend(os.path.join(top, n) for n in names)
+    digest = hashlib.sha256()
+    for path in sorted(paths):
+        if os.path.islink(path):
+            return None
+        with open(path, "rb") as handle:
+            data = handle.read()
+        digest.update(b"%s\0%d\0" % (path.encode(), len(data)) + data)
+    return digest.hexdigest()
+
+
+def read_accepted(directory, checker):
+    """Return the acceptance records by (package, test), or {} when the store is
+    missing, unreadable, or written by a different checker."""
+    try:
+        with open(os.path.join(directory, ACCEPTED), encoding="utf-8") as handle:
+            store = json.load(handle)
+        if store["checker"] != checker:
+            return {}
+        return {(r["package"], r["test"]): r for r in store["tests"]}
+    except (OSError, ValueError, KeyError, TypeError):
+        return {}
+
+
+def write_accepted(directory, checker, records):
+    path = os.path.join(directory, ACCEPTED)
+    with open(path + ".tmp", "w", encoding="utf-8") as handle:
+        json.dump({"checker": checker, "tests": [records[t] for t in sorted(records)]},
+                  handle, indent=1)
+    os.replace(path + ".tmp", path)
+
+
+def change_key(base, name_status, paths):
+    digest = hashlib.sha256()
+    digest.update(checker_digest().encode())
     digest.update(base.encode() + name_status.encode())
     for path in paths:
         digest.update(path.encode() + b"\0")
@@ -702,17 +760,10 @@ def assess(test, baseline, notes, linked, behavioural, attempts, panics, probes,
     return record
 
 
-def render(record, full):
-    head = "  %s: %s: %s" % (record["package"], record["test"], record["verdict"])
-    if record["verdict"] != "rejected":
-        decisive = record["decisive"]
-        if not full:
-            return [head + " — %s — %s" % (decisive["variant"], decisive["excerpt"])]
-        return [head,
-                "    mutation: %s" % decisive["variant"],
-                "    result: FAIL (%s) — %s" % (decisive["kind"], decisive["excerpt"]),
-                "    variants: %s" % record["variants"]]
-    lines = [head, "    reason: %s" % record["reason"]]
+def render(record):
+    """Return the console lines for a rejected test."""
+    lines = ["  %s: %s: %s" % (record["package"], record["test"], record["verdict"]),
+             "    reason: %s" % record["reason"]]
     if "excerpt" in record:
         lines.append("    baseline: %s — %s" % (record["baseline"]["result"].upper(),
                                                 record["excerpt"]))
@@ -729,7 +780,8 @@ def render(record, full):
     return lines
 
 
-def write_evidence(directory, key, base, behavioural, panics, omitted, incomplete, records):
+def write_evidence(directory, key, base, behavioural, panics, omitted, incomplete, records,
+                   reused):
     os.makedirs(directory, exist_ok=True)
     path = os.path.join(directory, key[:16] + ".json")
     listed = [{k: v for k, v in change.items() if k != "data"} for change in behavioural + panics]
@@ -739,7 +791,8 @@ def write_evidence(directory, key, base, behavioural, panics, omitted, incomplet
         json.dump({"base": base, "key": key, "incomplete": incomplete, "limits": limits,
                    "behavioural_variants": listed[:len(behavioural)],
                    "panic_probes": listed[len(behavioural):], "omitted_candidates": omitted,
-                   "tests": records}, handle, indent=1)
+                   "tests": records, "previously_accepted": [reused[t] for t in sorted(reused)]},
+                  handle, indent=1)
     old = sorted((os.path.join(directory, f) for f in os.listdir(directory) if f.endswith(".json")),
                  key=os.path.getmtime)
     for stale in old[:-KEEP]:
@@ -788,6 +841,19 @@ def main():
     except OSError:
         pass
 
+    checker = checker_digest()
+    by_package_all = by_package
+    inputs = {package: test_inputs(package) for package in by_package}
+    reused = {t: r for t, r in read_accepted(directory, checker).items()
+              if t[1] in by_package.get(t[0], []) and inputs[t[0]] is not None
+              and r.get("inputs") == inputs[t[0]]}
+    by_package = {p: [n for n in ns if (p, n) not in reused] for p, ns in by_package.items()}
+    by_package = {p: ns for p, ns in by_package.items() if ns}
+    if not by_package:
+        print("revert-test: base %s, %d new test(s), all previously accepted; test files "
+              "unchanged" % (base[:8], len(reused)))
+        return 0
+
     with open(os.path.join(MODULE, "go.mod"), encoding="utf-8") as handle:
         prefix = re.search(r"^module (\S+)", handle.read(), re.MULTILINE).group(1)
     selected = {(p, n) for p, ns in by_package.items() for n in ns}
@@ -822,30 +888,39 @@ def main():
     records = [assess(t, baseline, baseline_notes, t in linked, behavioural, attempts.get(t, []),
                       panics, probes.get(t, []), incomplete) for t in sorted(selected)]
     path = os.path.relpath(write_evidence(directory, key, base, behavioural, panics, omitted,
-                                          incomplete, records), root)
+                                          incomplete, records, reused), root)
 
     undecided = [r for r in records if r.get("reason") == BUDGET_REASON]
     rejected = [r for r in records if r["verdict"] == "rejected" and r not in undecided]
     accepted = [r for r in records if r["verdict"] != "rejected"]
-    print("revert-test: base %s, %d new test(s), %d variant(s), %d panic probe(s), "
-          "%d omitted candidate(s), %.0fs; evidence: %s"
-          % (base[:8], len(selected), len(behavioural), len(panics), len(omitted),
-             time.monotonic() - started, path), flush=True)
+    # Records of tests outside this run stay, so a branch switch does not discard them.
+    # A test edited during the run keeps no acceptance: its judged bytes are gone.
+    store = {t: r for t, r in read_accepted(directory, checker).items()
+             if t[1] not in by_package_all.get(t[0], [])}
+    store.update(reused)
+    for record in accepted:
+        digest = test_inputs(record["package"])
+        if digest is not None and digest == inputs[record["package"]]:
+            store[(record["package"], record["test"])] = {
+                "package": record["package"], "test": record["test"], "inputs": digest,
+                "verdict": record["verdict"], "decisive": record["decisive"], "base": base,
+                "evidence": os.path.basename(path)}
+    write_accepted(directory, checker, store)
+    print("revert-test: base %s, %d new test(s): %d judged, %d accepted, %d previously "
+          "accepted; %d variant(s), %d panic probe(s), %d omitted candidate(s), %.0fs; "
+          "evidence: %s"
+          % (base[:8], len(selected) + len(reused), len(selected), len(accepted), len(reused),
+             len(behavioural), len(panics), len(omitted), time.monotonic() - started, path),
+          flush=True)
     if not rejected and not incomplete:
-        for record in accepted:
-            print("\n".join(render(record, full=False)))
         with open(stamp, "w", encoding="utf-8") as handle:
             handle.write(key)
         return 0
     out = []
-    if accepted:
-        out.append("revert-test: these new tests fail under a variant:")
-        for record in accepted:
-            out.extend(render(record, full=False))
     if rejected:
         out.append("revert-test: these new tests do not show that they test the change:")
         for record in rejected:
-            out.extend(render(record, full=True))
+            out.extend(render(record))
         out.append("Keep each rejected test; do not delete or weaken it to pass this check. "
                    "Read the evidence file: it holds each variant's diff and the full test "
                    "output. If a variant breaks the property the test claims, make the test "

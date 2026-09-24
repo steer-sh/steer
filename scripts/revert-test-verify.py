@@ -99,11 +99,13 @@ def entries(cache):
     return len(glob.glob(os.path.join(cache, "*/*-d")))
 
 
-def run_script(root, cache):
-    """Run revert-test.py over root with its own build cache, ignoring the pass stamp."""
-    stamp = os.path.join(evidence_dir(root), "pass")
-    if os.path.exists(stamp):
-        os.remove(stamp)
+def run_script(root, cache, reuse=False):
+    """Run revert-test.py over root with its own build cache, ignoring the pass stamp
+    and, unless reuse, the acceptance records."""
+    for name in ("pass",) if reuse else ("pass", "accepted"):
+        stamp = os.path.join(evidence_dir(root), name)
+        if os.path.exists(stamp):
+            os.remove(stamp)
     return subprocess.run([sys.executable, SCRIPT], cwd=root, capture_output=True, text=True,
                           env=dict(os.environ, GOCACHE=cache, GOFLAGS=""))
 
@@ -587,6 +589,76 @@ def check_kills(work, cache):
            repr([evidence["behavioural_variants"][a["variant"]]["label"] for a in broken]))
 
 
+ACCEPT_TEST = ("package a\n\nimport \"testing\"\n\n"
+               "func TestTwo(t *testing.T) {\n\tif Two() != 2 {\n\t\tt.Fatal(Two())\n\t}\n}\n")
+VACUOUS_TEST = ("package a\n\nimport \"testing\"\n\n"
+                "func TestNothing(t *testing.T) {\n\t_ = Two()\n}\n")
+
+
+def accepted(root):
+    try:
+        return {r["test"] for r in json.load(open(os.path.join(evidence_dir(root), "accepted")))["tests"]}
+    except OSError:
+        return set()
+
+
+def check_acceptance(work, cache):
+    """An accepted test is not judged again until its package's test-side files change."""
+    source = "package a\n\nfunc Two() int {\n\treturn 2\n}\n"
+    root = make_repo(work, "accept", {"cli/a/a.go": "package a\n"},
+                     {"cli/a/a.go": source, "cli/a/a_test.go": ACCEPT_TEST})
+    first = run_script(root, cache)
+    report("an accepted test is recorded",
+           first.returncode == 0 and accepted(root) == {"TestTwo"}, first.stdout + first.stderr)
+    report("a passing run prints one line", len(first.stdout.strip().splitlines()) == 1,
+           first.stdout)
+    with open(os.path.join(root, "cli/a/a.go"), "w") as handle:
+        handle.write(source + "\nfunc Three() int {\n\treturn 3\n}\n")
+    code = run_script(root, cache, reuse=True)
+    report("a code-only change does not judge the accepted test again",
+           code.returncode == 0 and "all previously accepted" in code.stdout, code.stdout + code.stderr)
+    with open(os.path.join(root, "cli/a/a_test.go"), "a") as handle:
+        handle.write("\n// edited\n")
+    edited = run_script(root, cache, reuse=True)
+    report("a test-file edit judges the test again",
+           edited.returncode == 0 and "1 judged" in edited.stdout
+           and [r["test"] for r in latest_evidence(root)["tests"]] == ["TestTwo"],
+           edited.stdout + edited.stderr)
+    with open(os.path.join(root, "cli/a/a_test.go"), "w") as handle:
+        handle.write(VACUOUS_TEST.replace("TestNothing", "TestTwo"))
+    weakened = run_script(root, cache, reuse=True)
+    report("a weakened accepted test is rejected and loses its record",
+           weakened.returncode == 1 and "TestTwo" in weakened.stderr and not accepted(root),
+           weakened.stderr[-300:])
+
+    root = make_repo(work, "accept-mixed", {"cli/a/a.go": "package a\n"},
+                     {"cli/a/a.go": source, "cli/a/a_test.go": ACCEPT_TEST,
+                      "cli/a/b_test.go": VACUOUS_TEST})
+    mixed = run_script(root, cache)
+    report("a failing run still records the tests it accepted",
+           mixed.returncode == 1 and accepted(root) == {"TestTwo"}, mixed.stderr[-300:])
+    os.remove(os.path.join(root, "cli/a/b_test.go"))
+    os.makedirs(os.path.join(root, "cli/b"))
+    with open(os.path.join(root, "cli/b/b.go"), "w") as handle:
+        handle.write(source.replace("package a", "package b"))
+    with open(os.path.join(root, "cli/b/b_test.go"), "w") as handle:
+        handle.write(ACCEPT_TEST.replace("package a", "package b"))
+    shutil.move(os.path.join(root, "cli/a"), os.path.join(work, "accept-a"))
+    other = run_script(root, cache, reuse=True)
+    report("a run over other tests keeps the records it did not judge",
+           other.returncode == 0 and accepted(root) == {"TestTwo"}
+           and len(json.load(open(os.path.join(evidence_dir(root), "accepted")))["tests"]) == 2,
+           other.stdout + other.stderr)
+
+    root = make_repo(work, "accept-link", {"cli/a/a.go": "package a\n"},
+                     {"cli/a/a.go": source, "cli/a/a_test.go": ACCEPT_TEST,
+                      "fixtures/f.txt": "x\n"})
+    os.symlink(os.path.join(root, "fixtures"), os.path.join(root, "cli/a/testdata"))
+    linked = run_script(root, cache)
+    report("a symlinked testdata directory records no acceptance",
+           linked.returncode == 0 and not accepted(root), linked.stdout + linked.stderr)
+
+
 def events(package, *rows):
     return "\n".join(json.dumps(dict(row, Package="example.com/fx/" + package)) for row in rows)
 
@@ -691,6 +763,7 @@ def main():
         check_caps(work)
         check_references(work, cache)
         check_kills(work, cache)
+        check_acceptance(work, cache)
         check_timeout(work, cache)
     finally:
         subprocess.run(["chmod", "-R", "u+w", work])
