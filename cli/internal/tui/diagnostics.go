@@ -14,7 +14,9 @@ import (
 // screen says these checks found nothing rather than that everything works.
 
 // viewDiagnostics is the read-only panel: the issues these checks detect, the
-// history on this machine, and the technical block behind t.
+// history on this machine, and the technical block behind t. A fact another panel
+// acts on lives on that panel: the waiting review outcomes on Arming, and the
+// repository's checks and their last run on Fixes.
 func (m *Model) viewDiagnostics() string {
 	width := m.bodyWidth()
 	out := m.title("Diagnostics — what these checks found")
@@ -22,9 +24,7 @@ func (m *Model) viewDiagnostics() string {
 	out += section("Issues detected")
 	issues := m.diagnosticIssues()
 	if len(issues) == 0 {
-		out += wrapTo(dim("No issues detected by these checks. They cover the review "+
-			"outcomes still waiting, the guard runner's version and this repository's "+
-			"checks; they do not read your whole setup."), "  ", width)
+		out += wrapTo(dim("No issues detected by these checks."), "  ", width)
 	}
 	for _, issue := range issues {
 		out += wrapTo(warn(issue.headline), "  ", width)
@@ -35,12 +35,7 @@ func (m *Model) viewDiagnostics() string {
 	for _, line := range m.historyLines() {
 		out += wrapTo(fmt.Sprintf("%6s  %s", line.value, secondary(line.label)), "  ", width)
 	}
-	out += wrapTo(dim("These are counts of what is stored here. A count says nothing about "+
-		"whether the records are current or complete, and an empty one means nothing was "+
-		"recorded on this machine."), "  ", width)
-
-	out += section("Repository checks")
-	out += m.checkLines(width)
+	out += wrapTo(dim("Counts recorded on this machine; the history may be incomplete."), "  ", width)
 
 	out += section("Team guard configuration")
 	out += m.teamLines(width)
@@ -86,16 +81,7 @@ type diagnosticIssue struct {
 // consequence and the panel that repairs it, so no issue leaves the reader to
 // work out where to go.
 func (m *Model) diagnosticIssues() []diagnosticIssue {
-	var out []diagnosticIssue
-	if n := m.snap.Posture.Unresolved; n > 0 {
-		out = append(out, diagnosticIssue{
-			headline: status.OutcomesWaitingPhrase(n),
-			detail: "A review that has no recorded outcome is left out of every result it belongs " +
-				"to, and each result counts only the rest. Open Arming and press enter on the read-outcomes " +
-				"row, or run: " + status.BackfillCommand,
-		})
-	}
-	out = append(out, m.checkIssues()...)
+	out := m.checkIssues()
 	for _, master := range m.snap.Posture.Masters {
 		if !master.Stale() {
 			continue
@@ -190,24 +176,6 @@ func (m *Model) diagnosticIssues() []diagnosticIssue {
 				" do not match Steer's",
 			detail: detail,
 		})
-	}
-	return out
-}
-
-// checkLines report this repository's own checks: whether they run at the end of
-// a turn here, what the last run that did any work recorded, and where each
-// declared check's proof and last execution stand. Three separate readings: a
-// registered runner is not authorization, and neither is a passing script proof
-// that a particular check ran.
-func (m *Model) checkLines(width int) string {
-	c := m.snap.Checks
-	out := wrapTo(status.CheckAdoptionPhrase(c), "  ", width)
-	if c.Repo == "" {
-		return out
-	}
-	out += wrapTo(dim("last run: "+status.CheckRunPhrase(c.LatestRun)), "  ", width)
-	for _, row := range c.Checks {
-		out += wrapTo(status.CheckPhrase(row), "  ", width)
 	}
 	return out
 }

@@ -693,6 +693,9 @@ to withhold it; one working resolver reads every harness's ledger. Machine-local
 
 `internal/tui/` provides Arming, Problems, Fixes, Reviewer and Diagnostics panels.
 Mutations call shared lifecycle/settings functions and recompose status afterwards.
+A fact appears on the panel that acts on it: waiting review outcomes on Arming,
+the repository's checks and their last run on Fixes. Diagnostics holds the
+issues that ask for a step, the history counts and the technical block.
 Problems lists tracked records first, then the candidate pointers: a tracked row
 offers a key that acts on it and a pointer row offers only the handoff. Authoring
 goes through the skills. Fixes lists guards, rules, review addendum entries and the repository's

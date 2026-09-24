@@ -187,8 +187,9 @@ func addendumUnremovable(a status.AddendumInfo) string {
 	return ""
 }
 
-// checkRows are this repository, whose row authorizes the whole repository, and
-// one row per declared check, whose row replays that one declaration. Outside a
+// checkRows are this repository, whose row authorizes the whole repository and
+// names its last check.sh run, and one row per declared check, whose row tests
+// that one declaration. Outside a
 // repository there is nothing to list.
 func (m *Model) checkRows() []fixRow {
 	c := m.snap.Checks
@@ -196,7 +197,8 @@ func (m *Model) checkRows() []fixRow {
 		return nil
 	}
 	rows := []fixRow{{kind: fixRepo, name: "this repository", description: c.Repo,
-		state: status.CheckAdoptionPhrase(c), attention: c.Manifest && !c.Adopted}}
+		state:     status.CheckAdoptionPhrase(c) + "; " + lastRunPhrase(c.LatestRun),
+		attention: c.Manifest && !c.Adopted}}
 	for _, row := range c.Checks {
 		rows = append(rows, fixRow{kind: fixCheck, name: row.ID, description: row.Binding,
 			state:     status.CheckStatePhrase(row),
@@ -204,6 +206,14 @@ func (m *Model) checkRows() []fixRow {
 			scope:     claude.ProjectScope, removable: true})
 	}
 	return rows
+}
+
+// lastRunPhrase names the repository's last check.sh run that did any work.
+func lastRunPhrase(r *status.CheckRun) string {
+	if r == nil {
+		return status.CheckRunPhrase(nil)
+	}
+	return "last run " + status.CheckRunPhrase(r)
 }
 
 // guardRepairs is one row per detected issue: a built-in guard whose installed

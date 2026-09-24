@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/steer-sh/steer-cli/internal/checks"
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/guard"
 	"github.com/steer-sh/steer-cli/internal/status"
@@ -25,7 +26,8 @@ func TestACleanScreenClaimsOnlyItsOwnChecks(t *testing.T) {
 	}
 }
 
-// Each issue names its consequence and the panel that repairs it.
+// Each issue names its consequence and the panel that repairs it. The waiting
+// review outcomes are Arming's action row, so they are not an issue here too.
 func TestEachIssueNamesWhereItIsRepaired(t *testing.T) {
 	m := New(gate.Defaults(), "global")
 	m.width = 200
@@ -38,9 +40,10 @@ func TestEachIssueNamesWhereItIsRepaired(t *testing.T) {
 	}}
 	m.active = panelDiagnostics
 	view := m.viewDiagnostics()
+	if strings.Contains(view, "no outcome yet") {
+		t.Errorf("diagnostics repeats the waiting outcomes Arming acts on:\n%s", view)
+	}
 	for _, want := range []string{
-		"3 reviews have no outcome yet",
-		"Open Arming",
 		"The guard runner for Claude Code in every project on this machine is out of date",
 		"Open Fixes",
 	} {
@@ -110,7 +113,7 @@ func TestAnAbsentCountIsLocal(t *testing.T) {
 	if !strings.Contains(view, "none recorded here") {
 		t.Errorf("an empty count does not say where it is empty:\n%s", view)
 	}
-	if !strings.Contains(view, "recorded on this machine") {
+	if !strings.Contains(view, "Counts recorded on this machine") {
 		t.Errorf("the counts do not say they are local:\n%s", view)
 	}
 }
@@ -221,5 +224,27 @@ func TestAnOtherScopeStaleRunnerNamesItsOwnCommand(t *testing.T) {
 		if r.kind == guardRepair {
 			t.Errorf("Fixes offers a repair for a runner in the other scope: %q", r.name)
 		}
+	}
+}
+
+// The repository's checks and their last run are listed once, on Fixes, where
+// enter acts on them. Diagnostics keeps only a check issue that asks for a step.
+func TestRepositoryChecksAndTheirLastRunLiveOnFixes(t *testing.T) {
+	m := New(gate.Defaults(), "global")
+	m.width = 200
+	m.snap = &status.SystemStatus{Checks: status.CheckTier{
+		Repo: "/w/steer", Manifest: true, Adopted: true,
+		LatestRun: &status.CheckRun{Source: checks.SourceStop, Outcome: checks.OutcomePassed},
+		Checks:    []status.CheckRow{{ID: "no-count", Binding: "check.sh", Validation: checks.FreshCurrent}},
+	}}
+	m.active = panelDiagnostics
+	if view := m.viewDiagnostics(); strings.Contains(view, "passed at the end of a turn") ||
+		strings.Contains(view, "no-count") {
+		t.Errorf("diagnostics repeats the checks Fixes lists:\n%s", view)
+	}
+	m.active = panelFixes
+	fixes := strings.Join(strings.Fields(m.viewFixes()), " ")
+	if !strings.Contains(fixes, "last run passed at the end of a turn") {
+		t.Errorf("fixes does not name the last check.sh run:\n%s", fixes)
 	}
 }

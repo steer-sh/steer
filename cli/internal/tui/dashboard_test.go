@@ -83,7 +83,7 @@ func TestPanelsCarryTheMeasurementConditions(t *testing.T) {
 	}
 
 	m.active = panelDiagnostics
-	if !strings.Contains(m.View(), "4 reviews have no outcome yet") {
-		t.Error("diagnostics does not name the reviews still waiting")
+	if strings.Contains(m.View(), "4 reviews have no outcome yet") {
+		t.Error("diagnostics repeats the reviews still waiting that Arming acts on")
 	}
 }
