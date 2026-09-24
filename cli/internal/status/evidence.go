@@ -32,28 +32,28 @@ func EvidenceGap(obs mine.Observation, scope *cadence.Scope) *Gap {
 	windows := []map[string]any{obs.Coverage.Before, obs.Coverage.After}
 	for _, c := range windows {
 		if numInt(c["unknown_scope"]) > 0 {
-			return &Gap{Sentence: "review sequences inside the observation period record no repository or changed files, so they are left out of the counts"}
+			return &Gap{Sentence: "review sequences in the before or after period record no repository or changed files, so they are left out of the counts"}
 		}
 		// A chain map's `unknown` is its two named causes summed, so only the
 		// remainder is a cause of its own — which is the whole of a session map's
 		// `unknown`, since that corpus counts one bucket and writes neither name.
 		if numInt(c["unknown"])-numInt(c["unknown_scope"])-numInt(c["unknown_evidence"]) > 0 {
-			return &Gap{Sentence: "agent sessions inside the observation period record no project, so they are left out of the counts"}
+			return &Gap{Sentence: "agent sessions in the before or after period record no project, so they are left out of the counts"}
 		}
 	}
 	for _, c := range windows {
 		if numInt(c["ledger_overdue"]) > 0 {
-			return &Gap{Sentence: "review sequences inside the observation period have no outcome read yet, so they are left out of the counts"}
+			return &Gap{Sentence: "review sequences in the before or after period have no outcome read yet, so they are left out of the counts"}
 		}
 	}
 	for _, c := range windows {
 		if numInt(c["ledger_missed"]) > 0 {
-			return &Gap{Sentence: "review sequences inside the observation period have no decision in any session history read here, so they are left out of the counts"}
+			return &Gap{Sentence: "review sequences in the before or after period have no decision in any session history read here, so they are left out of the counts"}
 		}
 	}
 	for _, c := range windows {
 		if numInt(c["pending"]) > 0 {
-			return &Gap{Sentence: "review sequences inside the observation period still await a decision, and settle on their own"}
+			return &Gap{Sentence: "review sequences in the before or after period still await a decision, and settle on their own"}
 		}
 	}
 	return nil

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -413,7 +414,7 @@ func candidateDetail(c cadence.Candidate, width int) string {
 // whether the entry the record names is still there; it says nothing about whether
 // a coding agent runs it.
 func fixDetail(it status.ScoredIntervention) string {
-	out := fixSummary(it)
+	out := strings.TrimRight(fixSummary(it), ".")
 	if it.Status == "rejected" {
 		return out + ". Declining one suggestion establishes only that this one was " +
 			"declined; another fix may still work."
@@ -434,7 +435,7 @@ func resultDetail(it status.ScoredIntervention) string {
 	if sentence == "" {
 		return label + ". Nothing is asked of you here."
 	}
-	return label + ". " + sentence
+	return label + ". " + sentenceCase(sentence)
 }
 
 // evidenceDetail is the before and after counts on their own lines, each with its
@@ -446,7 +447,7 @@ func evidenceDetail(it status.ScoredIntervention, width int) string {
 	out += "\n" + evidencePeriod("After:", it.After, it.Unit, it.AfterCoverage, width)
 	if it.Observation.Firing.Applicable {
 		if it.Observation.Firing.LogPresent {
-			out += wrapTo(fmt.Sprintf("guard activity: %d blocks in the observation window (%s)", it.Observation.Firing.Rows, it.Observation.Firing.Scope), detailIndent, width)
+			out += wrapTo(fmt.Sprintf("guard activity: %d blocks in the after period (%s)", it.Observation.Firing.Rows, it.Observation.Firing.Scope), detailIndent, width)
 		} else {
 			out += wrapTo("guard activity is unknown because the audit log is absent", detailIndent, width)
 		}
@@ -470,11 +471,20 @@ func incidenceLine(in cadence.Incidence, unit string) string {
 func actionDetail(it status.ScoredIntervention, width int) string {
 	out := headingStyle.Render("What you can do") + "\n"
 	if _, next := summaryReason(it); next != "" {
-		out += wrapTo(next, detailIndent, width)
+		out += wrapTo(sentenceCase(next), detailIndent, width)
 	}
-	out += wrapTo("x — stop tracking. "+status.RemovalPhrase(it.Tier, it.Artifact),
+	out += wrapTo("x — stop tracking. "+sentenceCase(status.RemovalPhrase(it.Tier, it.Artifact)),
 		detailIndent, width)
 	return out
+}
+
+// sentenceCase capitalizes a phrase that starts a sentence of its own.
+func sentenceCase(s string) string {
+	r := []rune(s)
+	if len(r) == 0 {
+		return s
+	}
+	return string(unicode.ToUpper(r[0])) + string(r[1:])
 }
 
 // technicalBlock holds what supports inspection and repair: the exact pattern,

@@ -29,7 +29,7 @@ import (
 // without anybody remembering to add it.
 func displayFiles(t *testing.T) []string {
 	t.Helper()
-	files := []string{"action.go", "format.go", "evidence.go", "problem.go", "readiness.go", "../../cmd/status.go"}
+	files := []string{"action.go", "format.go", "evidence.go", "fixes.go", "problem.go", "readiness.go", "../../cmd/status.go"}
 	panels, err := filepath.Glob("../tui/*.go")
 	if err != nil {
 		t.Fatal(err)
@@ -45,13 +45,20 @@ func displayFiles(t *testing.T) []string {
 // machineWords are the words with a display replacement. Each names a thing in
 // the measurement system that a reader has no word for: say review sequence, not
 // chain; recurring problem, not class; result, not verdict; fix, not
-// intervention; decision, not adjudication; built-in guard, not preset.
-var machineWords = regexp.MustCompile(`(?i)\b(class|classes|intervention|interventions|adjudicate|adjudicated|adjudication|adjudications|corpus|corpora|chain|chains|verdict|verdicts|confound|confounds|matcher|matchers|incidence|denominator|ledger|ledgers|firing|firings|candidate|candidates|instrument|instruments|preset|presets|master|masters|resolver|resolvers|posture|postures)\b`)
+// intervention; decision, not adjudication; built-in guard, not preset; guard
+// files or the scope, not store; tested, not replayed; counted, not eligible;
+// review prompt entry, not addendum.
+var machineWords = regexp.MustCompile(`(?i)\b(class|classes|intervention|interventions|adjudicate|adjudicated|adjudication|adjudications|corpus|corpora|chain|chains|verdict|verdicts|confound|confounds|matcher|matchers|incidence|denominator|ledger|ledgers|firing|firings|candidate|candidates|instrument|instruments|preset|presets|master|masters|resolver|resolvers|posture|postures|store|stores|replay|replayed|eligible|addendum|addenda|observation period|disposition|dispositions)\b`)
 
 // allowedPhrases are the literals that legitimately carry a machine word. Keep
 // this list short and justified: every entry is a place a reader meets the
 // machine's vocabulary, and each one needs a reason.
-var allowedPhrases = map[string]bool{}
+var allowedPhrases = map[string]bool{
+	// The command a reader types to remove a review prompt entry.
+	"steer commit-gate addendum remove ": true,
+	// Matched against the gate's own read error, never shown.
+	" store": true,
+}
 
 // isPhrase says a literal is something a reader is shown: one carrying
 // whitespace, and one starting with a capital. Every machine value in these files

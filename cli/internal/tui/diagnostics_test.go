@@ -110,7 +110,7 @@ func TestAnAbsentCountIsLocal(t *testing.T) {
 	if !strings.Contains(view, "none recorded here") {
 		t.Errorf("an empty count does not say where it is empty:\n%s", view)
 	}
-	if !strings.Contains(view, "recorded on THIS machine") {
+	if !strings.Contains(view, "recorded on this machine") {
 		t.Errorf("the counts do not say they are local:\n%s", view)
 	}
 }

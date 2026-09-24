@@ -45,11 +45,11 @@ func readArchived(root string) ([]archivedEntry, []string) {
 	project, projectErr := claude.GetHooksDir(claude.ProjectScope)
 	global, globalErr := claude.GetHooksDir(claude.GlobalScope)
 	stores := []store{
-		{label: "the project hook store", scope: claude.ProjectScope, dir: project, err: projectErr},
-		{label: "the global hook store", scope: claude.GlobalScope, dir: global, err: globalErr},
+		{label: "the project archive", scope: claude.ProjectScope, dir: project, err: projectErr},
+		{label: "the global archive", scope: claude.GlobalScope, dir: global, err: globalErr},
 	}
 	if root != "" {
-		stores = append(stores, store{label: "this repository's check store",
+		stores = append(stores, store{label: "this repository's check archive",
 			scope: claude.ProjectScope, dir: checks.Dir(root), root: root})
 	}
 	var out []archivedEntry
@@ -103,7 +103,7 @@ func (m *Model) archivedRows() []fixRow {
 			state += "; missing from the archive: " + strings.Join(s.Missing, ", ") + ", so a restore is refused"
 		}
 		rows = append(rows, fixRow{kind: fixArchived, name: s.ID, scope: e.scope,
-			description: status.ArtifactNoun(s.Tier) + " from the " + e.scope + " store, removed " + removed,
+			description: status.ArtifactNoun(s.Tier) + ", " + e.scope + ", removed " + removed,
 			state:       state, attention: len(s.Missing) > 0, archived: e})
 	}
 	return rows
@@ -234,10 +234,10 @@ func archiveConsequence(f archiveForm) string {
 		return "This removes the guard from " + scopeReach(f.scope) + ", so it no longer runs there. " +
 			"Its file, fixtures and manifest entry go to the archive, and the Archived section can restore them."
 	case tier.Instruction:
-		return "This removes the rule from the " + f.scope + " store and from the instructions each agent reads in " +
+		return "This removes the rule from the instructions each agent reads in " +
 			scopeReach(f.scope) + ". Its text goes to the archive, and the Archived section can restore it."
 	case tier.Review:
-		out := "This removes the entry from the " + f.scope + " store, so the commit gate's reviewer is no longer told it. " +
+		out := "This removes the " + f.scope + " entry, so the commit gate's reviewer is no longer told it. " +
 			"Its text goes to the archive, and the Archived section can restore it."
 		if f.scope == claude.ProjectScope {
 			step := commitStep("removal")
@@ -272,7 +272,7 @@ func (m *Model) restoreArchived(e *archivedEntry) tea.Cmd {
 			return nil
 		}
 		m.checking = checkRestore
-		m.note("replaying the cases of %s; it is declared again only if they all match…", s.ID)
+		m.note("testing the cases of %s; it is declared again only if they all match…", s.ID)
 		root := e.root
 		return func() tea.Msg {
 			_, run, err := checks.Restore(root, s)

@@ -37,7 +37,7 @@ func (m *Model) viewDiagnostics() string {
 	}
 	out += wrapTo(dim("These are counts of what is stored here. A count says nothing about "+
 		"whether the records are current or complete, and an empty one means nothing was "+
-		"recorded on THIS machine."), "  ", width)
+		"recorded on this machine."), "  ", width)
 
 	out += section("Repository checks")
 	out += m.checkLines(width)
@@ -120,13 +120,13 @@ func (m *Model) diagnosticIssues() []diagnosticIssue {
 			continue
 		}
 		agent := status.HarnessLabel(master.Harness)
-		detail := "The guard store holds guards, and " + agent + " registers no runner for " +
+		detail := "Guard files are installed, and " + agent + " registers no runner for " +
 			"them, so no guard blocks anything there while the rules still name them. This " +
 			"happens in a fresh clone of a repository whose guards were committed."
 		if master.StoreSourcesDrifted() {
 			// Sync refuses a store whose runner does not carry its guards, so
 			// naming sync alone would send the reader into that refusal.
-			detail += " The store's own runner does not carry " +
+			detail += " The runner built from these guard files does not carry " +
 				strings.Join(master.StoreSources.Drifted(), ", ") +
 				" as the file holds it, and registering it would be refused. Read the guard " +
 				"file, then run: " + status.RebuildCommand(master.Scope) +
@@ -147,14 +147,14 @@ func (m *Model) diagnosticIssues() []diagnosticIssue {
 			continue
 		}
 		agent := status.HarnessLabel(master.Harness)
-		detail := "A guard file in the store was edited, and the runner still carries the " +
+		detail := "A guard file was edited, and the runner still carries the " +
 			"source it was built with, so the edit changes nothing the agent runs. " +
-			"Rebuilding publishes the store's files; it does not establish that the store " +
-			"holds the version you want. Check the guard file first."
+			"Rebuilding publishes the guard files; it does not establish that they " +
+			"hold the version you want. Check the guard file first."
 		detail += " For this one, run: " + status.RebuildCommand(master.Scope)
 		out = append(out, diagnosticIssue{
 			headline: "The guard runner for " + agent + " in " + scopeReach(master.Scope) +
-				" runs different source than the store file holds",
+				" runs different source than the guard file holds",
 			detail: detail,
 		})
 	}
@@ -256,7 +256,7 @@ func (m *Model) checkIssues() []diagnosticIssue {
 			continue
 		}
 		out = append(out, diagnosticIssue{
-			headline: "The check " + row.ID + " was never replayed on this machine",
+			headline: "The check " + row.ID + " was never tested on this machine",
 			detail: "Nothing here shows it fails on the problem it names, so a passing run " +
 				"proves nothing about it. Open Fixes and press enter on its row, or run: " +
 				"steer check test " + row.ID,
@@ -310,7 +310,8 @@ func (m *Model) teamLines(width int) string {
 }
 
 // technicalLines hold what supports inspection and repair: where each corpus is
-// stored, the runner versions, and how the evidence was produced. The Reviewer
+// stored, the runner versions, how the evidence was produced, and where the
+// guards live. The Reviewer
 // panel owns the settings themselves, so none is repeated here.
 func (m *Model) technicalLines(width int) string {
 	out := ""
@@ -347,6 +348,7 @@ func (m *Model) technicalLines(width int) string {
 	out += wrapTo(fmt.Sprintf("%-22s %s", "reviewer", m.snap.Posture.Reviewer), "   ", width)
 	out += wrapTo(fmt.Sprintf("%-22s %s", "how evidence was made",
 		m.snap.Posture.Instrument), "   ", width)
-	out += wrapTo(dim(m.snap.Posture.Ledger), "   ", width)
+	out += wrapTo(fmt.Sprintf("%-22s %s", "guard files ("+m.scope+")", dim(m.guardStorePath())), "   ", width)
+	out += wrapTo(fmt.Sprintf("%-22s %s", "decision log", dim(m.snap.Posture.Ledger)), "   ", width)
 	return out
 }

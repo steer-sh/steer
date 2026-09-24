@@ -29,7 +29,7 @@ var ActionOrder = []string{ActionInspect, ActionRepair, ActionObserve}
 var ActionHeading = map[string]string{
 	ActionInspect: "Observed problems — inspect the example",
 	ActionRepair:  "Coverage evidence — repair the accounting",
-	ActionObserve: "Quiet windows — nothing is asked of you",
+	ActionObserve: "Quiet — nothing is asked of you",
 }
 
 // ActionFor is total over observations: an observation matching no branch lands
@@ -69,7 +69,7 @@ func ObservationLabel(obs mine.Observation) string {
 	case missingCoverage(obs):
 		return "Coverage incomplete"
 	case obs.Coverage.ZeroEligibleAfter:
-		return "No eligible work yet"
+		return "No counted work yet"
 	case mine.UnitsExcluded(obs):
 		return "No recurrence in the counted work"
 	}
@@ -93,9 +93,9 @@ func ActionSentence(obs mine.Observation, scope *cadence.Scope, t string, artifa
 	case scope == nil || missingCoverage(obs):
 		return "read the coverage before deciding what to change"
 	case obs.Coverage.ZeroEligibleAfter:
-		return "no eligible work has arrived since this went in"
+		return "no work that counts has arrived since this went in"
 	}
-	return "eligible work is present and the problem did not come back"
+	return "counted work is present and the problem did not come back"
 }
 
 // missingCoverage is mine.MissingCoverage, which every reader shares. A unit the
@@ -163,7 +163,7 @@ func artifactNoun(k tier.Kind) (noun, remove string) {
 	case tier.Instruction:
 		return "rule", "steer rules remove "
 	case tier.Review:
-		return "addendum entry", "steer commit-gate addendum remove "
+		return "review prompt entry", "steer commit-gate addendum remove "
 	case tier.Check:
 		return "check", "steer check remove "
 	}
@@ -202,9 +202,9 @@ func artifactStatePhrase(kind tier.Kind, noun, name string, a *cadence.Artifact)
 		case kind == tier.Check:
 			return "the " + name + " is no longer declared in " + a.Repo
 		case kind == tier.Review && a.Scope == "project":
-			return "the " + name + " is not in the project store at HEAD, so the commit gate does not read it"
+			return "the " + name + " is not in the project's committed review prompt, so the commit gate does not read it"
 		}
-		return fmt.Sprintf("the %s is no longer in the %s store", name, a.Scope)
+		return fmt.Sprintf("the %s is no longer installed (%s)", name, a.Scope)
 	case cadence.ArtifactUnreadable:
 		return "where the " + name + " stands is not known: " + a.Detail
 	case cadence.ArtifactUnbound:
@@ -212,7 +212,7 @@ func artifactStatePhrase(kind tier.Kind, noun, name string, a *cadence.Artifact)
 	case cadence.ArtifactElsewhere:
 		return "the " + name + " belongs to " + a.Repo + ", which this reading does not inspect"
 	case cadence.ArtifactUnplaced:
-		return "this record does not name the repository whose store holds the " + name +
+		return "this record does not name the repository that holds the " + name +
 			", so where it stands is not known"
 	}
 	return "the " + name + " is in the state " + a.State

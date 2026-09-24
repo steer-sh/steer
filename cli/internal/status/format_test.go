@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/cadence"
+	"github.com/steer-sh/steer-cli/internal/checks"
 )
 
 func TestScopePhraseCombinesPredicatesWithAnd(t *testing.T) {
@@ -30,11 +31,11 @@ func TestCoveragePhraseAccountsForEveryChain(t *testing.T) {
 		Total: 20, Eligible: 12, Ineligible: 3, Unknown: 6,
 		UnknownScope: 2, UnknownEvidence: 4, Pending: 1, LedgerOverdue: 1, LedgerMissed: 1,
 	})
-	want := "12 eligible / 20 (3 out of scope, 2 unknown scope, 1 with no outcome read, 1 with no decision found, 1 with no decision recorded, 1 pending)"
+	want := "12 of 20 counted (3 out of scope, 2 with no repository recorded, 1 with no outcome read, 1 with no decision found, 1 with no decision recorded, 1 pending)"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
-	if got := CoveragePhrase(cadence.Coverage{Total: 8, Eligible: 8}); got != "8 eligible / 8" {
+	if got := CoveragePhrase(cadence.Coverage{Total: 8, Eligible: 8}); got != "8 of 8 counted" {
 		t.Errorf("a clean window carries no parenthetical, got %q", got)
 	}
 }
@@ -68,6 +69,28 @@ func TestObservedPhraseNamesTheRecordKind(t *testing.T) {
 		got := ObservedPhrase(ScopeArming{ObservedCorpus: corpus, Observed: 1700000000})
 		if !strings.HasPrefix(got, want) || strings.Contains(got, "row") {
 			t.Errorf("%s: ObservedPhrase = %q; want it to start %q", corpus, got, want)
+		}
+	}
+}
+
+// A check.sh run names what started it and what it did to the turn in words, never
+// as the stored source and disposition tokens.
+func TestCheckRunPhraseNamesSourceAndDispositionInWords(t *testing.T) {
+	cases := []struct {
+		run  CheckRun
+		want string
+	}{
+		{CheckRun{Source: checks.SourceStop, Outcome: checks.OutcomePassed, Disposition: checks.DispositionAllow},
+			"passed at the end of a turn"},
+		{CheckRun{Source: checks.SourceStop, Outcome: checks.OutcomeFailed, Disposition: checks.DispositionBlock},
+			"failed at the end of a turn; it blocked the turn"},
+		{CheckRun{Source: checks.SourceStop, Outcome: checks.OutcomeFailed, Disposition: checks.DispositionYield},
+			"failed at the end of a turn; it failed again on an unchanged tree, so the turn ended without another block"},
+		{CheckRun{Source: checks.SourceRun, Outcome: checks.OutcomePassed}, "passed from steer check run"},
+	}
+	for _, c := range cases {
+		if got := CheckRunPhrase(&c.run); got != c.want {
+			t.Errorf("got %q, want %q", got, c.want)
 		}
 	}
 }

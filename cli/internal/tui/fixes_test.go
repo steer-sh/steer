@@ -182,7 +182,7 @@ func TestTheArchiveFormSaysWhatItRemovesAndWhen(t *testing.T) {
 	selectKind(t, m, fixAddendum)
 	m.fixesKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
 	view := strings.Join(strings.Fields(m.View()), " ")
-	for _, want := range []string{"Archive addendum entry fp-live", "the Archived section can restore it",
+	for _, want := range []string{"Archive review prompt entry fp-live", "the Archived section can restore it",
 		"restore it. The commit gate reads project entries at HEAD, so the removal takes effect after you commit",
 		"enter archive · esc cancel"} {
 		if !strings.Contains(view, want) {
@@ -420,7 +420,7 @@ func TestEachTierNamesItsOwnState(t *testing.T) {
 		"/w/steer",
 		"not authorized to run here",
 		"no-count",
-		"never replayed here",
+		"never tested here",
 	} {
 		if !strings.Contains(view, want) {
 			t.Errorf("the panel is missing %q:\n%s", want, view)
@@ -438,7 +438,7 @@ func TestCheckActionsNameTheirScopeAndRunOneAtATime(t *testing.T) {
 		t.Errorf("the repository row's legend reads %q", got)
 	}
 	selectKind(t, m, fixCheck)
-	if got := m.fixesLegend(); !strings.Contains(got, "replay this one check") {
+	if got := m.fixesLegend(); !strings.Contains(got, "test this one check") {
 		t.Errorf("the check row's legend reads %q", got)
 	}
 	if _, cmd := m.fixesKey(tea.KeyMsg{Type: tea.KeyEnter}); cmd == nil || m.checking != checkTest {
@@ -577,7 +577,7 @@ func TestXSaysWhyAnEntryOffDiskCannotBeArchived(t *testing.T) {
 	}
 
 	m.snap.Addenda = []status.AddendumInfo{{Scope: "project", State: status.AddendumUnreadable, Detail: "boom"}}
-	selectRow(t, m, fixAddendum, "the project store")
+	selectRow(t, m, fixAddendum, "the project review prompt")
 	m.message = ""
 	m.fixesKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
 	if m.editing || !strings.Contains(m.message, "not one entry") {

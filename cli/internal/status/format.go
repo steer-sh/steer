@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/steer-sh/steer-cli/internal/cadence"
+	"github.com/steer-sh/steer-cli/internal/checks"
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/tier"
 )
@@ -38,13 +39,13 @@ func ScopePhrase(sc *cadence.Scope) string {
 
 // CoveragePhrase reports one window's chain accounting under the scope.
 func CoveragePhrase(c cadence.Coverage) string {
-	s := fmt.Sprintf("%d eligible / %d", c.Eligible, c.Total)
+	s := fmt.Sprintf("%d of %d counted", c.Eligible, c.Total)
 	extra := []string{}
 	if c.Ineligible > 0 {
 		extra = append(extra, fmt.Sprintf("%d out of scope", c.Ineligible))
 	}
 	if c.UnknownScope > 0 {
-		extra = append(extra, fmt.Sprintf("%d unknown scope", c.UnknownScope))
+		extra = append(extra, fmt.Sprintf("%d with no repository recorded", c.UnknownScope))
 	}
 	if c.LedgerOverdue > 0 {
 		extra = append(extra, fmt.Sprintf("%d with no outcome read", c.LedgerOverdue))
@@ -130,7 +131,7 @@ func RulesRepairCommand(scope string) string {
 func MasterSourcePhrase(m MasterRuntime) string {
 	if m.Detached() {
 		if m.StoreSourcesDrifted() {
-			return "the store's own runner does not carry " +
+			return "the runner built from these guard files does not carry " +
 				strings.Join(m.StoreSources.Drifted(), ", ") + " as the file holds it"
 		}
 		return ""
@@ -148,7 +149,7 @@ func MasterSourcePhrase(m MasterRuntime) string {
 	if len(drifted) == 0 {
 		return ""
 	}
-	return fmt.Sprintf("it runs different source for %s than the store file holds",
+	return fmt.Sprintf("it runs different source for %s than the guard file holds",
 		strings.Join(drifted, ", "))
 }
 
@@ -413,22 +414,36 @@ func CheckRunPhrase(r *CheckRun) string {
 	if r.IntegrationFailure {
 		phrase += ", without running " + strings.Join(r.Missing, ", ")
 	}
+	if how := checkRunSource(r.Source); how != "" {
+		phrase += " " + how
+	}
 	if r.Finished > 0 {
-		phrase += " at " + time.Unix(int64(r.Finished), 0).Format("2006-01-02 15:04")
+		phrase += " on " + time.Unix(int64(r.Finished), 0).Format("2006-01-02 15:04")
 	}
-	var how []string
-	for _, part := range []string{r.Source, r.Disposition} {
-		if part != "" {
-			how = append(how, part)
-		}
-	}
-	if len(how) > 0 {
-		phrase += " (" + strings.Join(how, ", ") + ")"
+	switch r.Disposition {
+	case checks.DispositionBlock:
+		phrase += "; it blocked the turn"
+	case checks.DispositionYield:
+		phrase += "; it failed again on an unchanged tree, so the turn ended without another block"
 	}
 	if r.RefusedAfter > 0 {
 		phrase += "; a later run was turned away with this one still holding the repository"
 	}
 	return phrase
+}
+
+// checkRunSource names what started a check.sh run, "" for a source a reader
+// has no phrase for.
+func checkRunSource(source string) string {
+	switch source {
+	case checks.SourceStop:
+		return "at the end of a turn"
+	case checks.SourceRun:
+		return "from steer check run"
+	case checks.SourceAdopt:
+		return "during steer check adopt"
+	}
+	return ""
 }
 
 // CheckPhrase names one declared check in one clause: what it binds to, how its
@@ -444,11 +459,11 @@ func CheckStatePhrase(c CheckRow) string {
 	phrase := ""
 	switch c.Validation {
 	case ValidationNone:
-		phrase += "never replayed here"
+		phrase += "never tested here"
 	case CheckStale:
-		phrase += "replayed, then " + strings.Join(c.Changed, " and ") + " changed"
+		phrase += "tested, then " + strings.Join(c.Changed, " and ") + " changed"
 	default:
-		phrase += "replayed and unchanged since"
+		phrase += "tested and unchanged since"
 	}
 	if c.Execution == ExecutionUnobserved {
 		phrase += "; no execution recorded here"

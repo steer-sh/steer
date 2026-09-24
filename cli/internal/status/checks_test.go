@@ -79,9 +79,9 @@ func TestCollectChecksReadsRegistrationAdoptionAndExecutionApart(t *testing.T) {
 	}
 	row := c.Checks[0]
 	if row.Validation != ValidationNone || row.Execution != ExecutionUnobserved || row.Passed() {
-		t.Fatalf("row %+v; want a check never replayed and never observed", row)
+		t.Fatalf("row %+v; want a check never tested and never observed", row)
 	}
-	if phrase := CheckPhrase(row); !strings.Contains(phrase, "never replayed") ||
+	if phrase := CheckPhrase(row); !strings.Contains(phrase, "never tested") ||
 		!strings.Contains(phrase, "no execution recorded") {
 		t.Fatalf("phrase %q; want both readings named", phrase)
 	}

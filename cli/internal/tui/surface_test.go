@@ -65,7 +65,7 @@ func assertBackgroundOnEveryCell(t *testing.T, rendered string) {
 func TestEvidenceSeparatesCountsFromCompleteCoverage(t *testing.T) {
 	it := status.ScoredIntervention{Unit: "chain", Before: cadence.Incidence{Hits: 20, Units: 162}, After: cadence.Incidence{Hits: 2, Units: 28}, BeforeCoverage: cadence.Coverage{Eligible: 162, Total: 199, UnknownEvidence: 37}}
 	text := ansi.Strip(evidenceDetail(it, 100))
-	for _, want := range []string{"Before: 20 recurrences in 162 review sequences", "After: 2 recurrences in 28 review sequences", "Coverage: 162 eligible / 199 (37 with no decision recorded)", "They do not establish that the fix caused the change"} {
+	for _, want := range []string{"Before: 20 recurrences in 162 review sequences", "After: 2 recurrences in 28 review sequences", "Coverage: 162 of 199 counted (37 with no decision recorded)", "They do not establish that the fix caused the change"} {
 		if !strings.Contains(strings.Join(strings.Fields(text), " "), want) {
 			t.Fatalf("missing %q: %s", want, text)
 		}

@@ -121,7 +121,7 @@ func renderStoreProblems(s *status.SystemStatus, width int) {
 	if len(s.StoreProblems) == 0 {
 		return
 	}
-	fmt.Println(styles.SectionHeader.Render("Guard store"))
+	fmt.Println(styles.SectionHeader.Render("Guard files"))
 	for _, p := range s.StoreProblems {
 		fmt.Print(problemEntry(
 			styles.WarningText.Render("Steer cannot read the "+p.Scope+" guard list"),

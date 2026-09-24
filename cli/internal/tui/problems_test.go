@@ -1,10 +1,12 @@
 package tui
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/steer-sh/steer-cli/internal/cadence"
 	"github.com/steer-sh/steer-cli/internal/gate"
@@ -438,5 +440,20 @@ func TestCandidateDetailClaimsItemsOnlyWhereTheyAre(t *testing.T) {
 	}, 100)
 	if !strings.Contains(transcript, "one item of the pile") {
 		t.Errorf("a row with examples must say what they are:\n%s", transcript)
+	}
+}
+
+// The detail joins shared phrases into sentences, so a phrase that already ends in
+// a period or starts in lowercase must not reach the reader as ".." or ". the".
+func TestTheDetailWritesWholeSentences(t *testing.T) {
+	it := status.ScoredIntervention{ID: "d", Class: "declined-problem", Status: "rejected",
+		Tier: "check", Intervention: "A check that compares the message with the diff.",
+		Unit: "chain", Scope: allScope(), Observation: recurrenceObservation()}
+	text := strings.Join(strings.Fields(ansi.Strip(detailBlock(problemRow{item: &it}, 200))), " ")
+	if strings.Contains(text, "..") {
+		t.Errorf("the detail doubles a period: %s", text)
+	}
+	if bad := regexp.MustCompile(`\. [a-z]`).FindString(text); bad != "" {
+		t.Errorf("a sentence starts in lowercase at %q: %s", bad, text)
 	}
 }

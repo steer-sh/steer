@@ -114,7 +114,7 @@ func (m *Model) ruleRows() []fixRow {
 	for _, r := range m.snap.Rules {
 		state, attention := m.ruleState(r)
 		rows = append(rows, fixRow{kind: fixRule, name: r.ID, description: r.Text,
-			state: r.Scope + " store; " + state, attention: attention,
+			state: r.Scope + "; " + state, attention: attention,
 			scope: r.Scope, removable: true})
 	}
 	return rows
@@ -144,7 +144,7 @@ func (m *Model) ruleState(r status.RuleInfo) (string, bool) {
 			" — run: "+status.RulesRepairCommand(r.Scope))
 	}
 	if len(parts) == 0 {
-		return "no installed agent's instructions were read for this store", false
+		return "no installed agent's instructions were read at this scope", false
 	}
 	return strings.Join(parts, "; "), len(missing) > 0
 }
@@ -157,13 +157,13 @@ func (m *Model) addendumRows() []fixRow {
 	for _, a := range m.snap.Addenda {
 		name, text := a.ID, a.Text
 		if name == "" {
-			name = "the " + a.Scope + " store"
+			name = "the " + a.Scope + " review prompt"
 		}
 		if text == "" {
 			text = a.HeadText
 		}
 		rows = append(rows, fixRow{kind: fixAddendum, name: name, description: text,
-			state:       a.Scope + " store; " + status.AddendumPhrase(a),
+			state:       a.Scope + "; " + status.AddendumPhrase(a),
 			attention:   a.State != status.AddendumLive,
 			scope:       a.Scope,
 			removable:   a.ID != "" && a.Text != "",
@@ -179,9 +179,9 @@ func (m *Model) addendumRows() []fixRow {
 func addendumUnremovable(a status.AddendumInfo) string {
 	switch {
 	case a.ID == "":
-		return "this row stands for the " + a.Scope + " store, not one entry, so there is nothing to archive"
+		return "this row stands for the whole " + a.Scope + " review prompt, not one entry, so there is nothing to archive"
 	case a.Text == "":
-		return a.ID + " is not in the working tree's " + a.Scope + " store, so there is nothing left to archive; " +
+		return a.ID + " is no longer in the " + a.Scope + " review prompt on disk, so there is nothing left to archive; " +
 			commitStep("removal")
 	}
 	return ""
@@ -257,9 +257,9 @@ func (m *Model) guardRepairs() []fixRow {
 		rows = append(rows, fixRow{
 			kind: guardRepair, repair: repairSync,
 			name: "Run the guards in " + agent,
-			issue: "The guard store in " + scopeReach(master.Scope) + " holds guards, and " + agent +
+			issue: "Guard files are installed in " + scopeReach(master.Scope) + ", and " + agent +
 				" registers no runner for them, so none of them runs there. Syncing registers " +
-				"the runner the store already holds and writes the rules sections. It leaves " +
+				"the runner already built from those files and writes the rules sections. It leaves " +
 				"the runner and your guard files as they are.",
 		})
 		break
@@ -349,7 +349,7 @@ func (m *Model) fixesLegend() string {
 		}
 	case fixCheck:
 		if m.checking == "" {
-			return "enter replay this one check · " + archive
+			return "enter test this one check · " + archive
 		}
 	case fixArchived:
 		if row.archived.stored.Tier != string(tier.Check) || m.checking == "" {
@@ -433,9 +433,9 @@ func (m *Model) startCheckAction(action, id string) tea.Cmd {
 	root := m.snap.Checks.Repo
 	m.checking = action
 	if action == checkAdopt {
-		m.note("authorizing %s: replaying checks without a current proof, then running check.sh…", root)
+		m.note("authorizing %s: testing checks without a current proof, then running check.sh…", root)
 	} else {
-		m.note("replaying the cases of %s…", id)
+		m.note("testing the cases of %s…", id)
 	}
 	return func() tea.Msg {
 		if action == checkAdopt {
@@ -577,7 +577,7 @@ func lastNonEmptyLines(s string, n int) []string {
 func testNote(id string, run checks.ValidationRun, err error) string {
 	switch {
 	case run.Verdict == checks.VerdictValidated:
-		return id + " replayed: it passed the known-good case and failed the defect case"
+		return id + " tested: it passed the known-good case and failed the defect case"
 	case run.Verdict != "" && run.Reason != "":
 		return id + " " + run.Verdict + ": " + run.Reason
 	case run.Verdict != "":
@@ -585,7 +585,7 @@ func testNote(id string, run checks.ValidationRun, err error) string {
 	case err != nil:
 		return "error: " + err.Error()
 	}
-	return id + " replayed"
+	return id + " tested"
 }
 
 // togglePreset turns a built-in guard on or off through the same presets
@@ -665,7 +665,7 @@ func (m *Model) syncStore() {
 		return
 	}
 	m.refresh()
-	m.note("synced %d agent(s); %d already matched the store", len(res.Synced), len(res.Current))
+	m.note("synced %d agent(s); %d already matched the guard files", len(res.Synced), len(res.Current))
 }
 
 // viewFixes renders each tier's fixes, the built-in guards you can turn on, and
@@ -696,17 +696,16 @@ func (m *Model) viewFixes() string {
 	out += wrapTo(secondary("This is what Steer registered here. It is not every hook your coding "+
 		"agent runs: review before commit, and any hook you set up yourself, are not listed."),
 		"  ", width)
-	out += wrapTo(dim("Stored in "+m.guardStorePath()), "  ", width)
 
 	out += section("Rules — instructions your coding agent reads")
 	if !anyOfKind(rows, fixRule) {
-		out += wrapTo(dim("no rules in either store."), "  ", width)
+		out += wrapTo(dim("No rules installed, project or global."), "  ", width)
 	}
 	out += stateRows(rows, fixRule, m.cursor[panelFixes], width, column)
 
-	out += section("Review addendum — what the commit gate's reviewer is told")
+	out += section("Review prompt entries — what the commit gate's reviewer is told")
 	if !anyOfKind(rows, fixAddendum) {
-		out += wrapTo(dim("no entries in either store."), "  ", width)
+		out += wrapTo(dim("No entries installed, project or global."), "  ", width)
 	}
 	out += stateRows(rows, fixAddendum, m.cursor[panelFixes], width, column)
 
@@ -733,7 +732,7 @@ func (m *Model) viewFixes() string {
 
 	out += section("Archived — fixes a removal took out, which enter puts back")
 	if !anyOfKind(rows, fixArchived) && len(m.archiveUnread) == 0 {
-		out += dim("  nothing archived in the project or global stores, or in this repository's checks.\n")
+		out += dim("  Nothing archived, project or global, or in this repository's checks.\n")
 	}
 	for _, line := range m.archiveUnread {
 		out += wrapTo(warn(line), "  ", width)

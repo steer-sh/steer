@@ -68,7 +68,7 @@ func TestRemovalPhraseNamesEachTiersRemovalCommand(t *testing.T) {
 		{"prose", &cadence.Artifact{ID: "config-path", Scope: "project"},
 			"stopping the tracking ends the measurement and removes no rule; to remove it, run: steer rules remove config-path --scope project"},
 		{"review", &cadence.Artifact{ID: "fp-sort", Scope: "global"},
-			"stopping the tracking ends the measurement and removes no addendum entry; to remove it, run: steer commit-gate addendum remove fp-sort --scope global"},
+			"stopping the tracking ends the measurement and removes no review prompt entry; to remove it, run: steer commit-gate addendum remove fp-sort --scope global"},
 		{"check", &cadence.Artifact{ID: "no-count", Repo: "/w/steer"},
 			"stopping the tracking ends the measurement and removes no check; to remove it, run: steer check remove no-count"},
 		{"check", &cadence.Artifact{State: cadence.ArtifactUnbound},
@@ -91,9 +91,9 @@ func TestArtifactPhraseNamesTheState(t *testing.T) {
 		want string
 	}{
 		{"instruction", &cadence.Artifact{ID: "config-path", Scope: "global", State: cadence.ArtifactAbsent},
-			"the rule config-path is no longer in the global store"},
+			"the rule config-path is no longer installed (global)"},
 		{"review", &cadence.Artifact{ID: "fp-sort", Scope: "project", State: cadence.ArtifactAbsent},
-			"the addendum entry fp-sort is not in the project store at HEAD, so the commit gate does not read it"},
+			"the review prompt entry fp-sort is not in the project's committed review prompt, so the commit gate does not read it"},
 		{"check", &cadence.Artifact{ID: "no-count", Repo: "/w/steer", State: cadence.ArtifactChanged},
 			"the check no-count is declared, but its detector differs from the one this record registered"},
 		{"guard", &cadence.Artifact{ID: "g", Scope: "project", Repo: "/w/other", State: cadence.ArtifactElsewhere},

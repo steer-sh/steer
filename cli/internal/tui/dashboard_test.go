@@ -66,8 +66,8 @@ func TestPanelsCarryTheMeasurementConditions(t *testing.T) {
 	m.panelKey(keyOf("t"))
 	expanded := m.View()
 	for _, want := range []string{
-		"12 eligible / 14 (2 out of scope)",
-		"5 eligible / 6 (1 with no decision found)",
+		"12 of 14 counted (2 out of scope)",
+		"5 of 6 counted (1 with no decision found)",
 		"These counts describe the recorded evidence",
 		"repo=/steer/ AND path=/\\.go$/",
 	} {

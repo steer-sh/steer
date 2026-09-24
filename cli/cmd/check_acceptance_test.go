@@ -224,7 +224,7 @@ func TestAcceptancePlantedIneffectiveCheckThroughStop(t *testing.T) {
 			t.Errorf("runner row %+v; want the Stop run observed", a)
 		}
 	}
-	if phrase := status.CheckPhrase(row); !strings.Contains(phrase, "replayed and unchanged since") ||
+	if phrase := status.CheckPhrase(row); !strings.Contains(phrase, "tested and unchanged since") ||
 		!strings.Contains(phrase, "last "+checks.OutcomeFailed) {
 		t.Errorf("phrase %q; want the proof and the failed execution named apart", phrase)
 	}

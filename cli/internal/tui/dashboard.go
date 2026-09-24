@@ -509,7 +509,7 @@ func (m *Model) legend() string {
 		}
 		return "enter edit setting · " + common
 	case panelDiagnostics:
-		common = "pgup/pgdn/home/end scroll · ↑↓ scroll · tab/←→ panel · r refresh · q quit"
+		common = "↑↓/pgup/pgdn/home/end scroll · tab/←→ panel · r refresh · q quit"
 		if m.technical {
 			return "t hide technical details · " + common
 		}
