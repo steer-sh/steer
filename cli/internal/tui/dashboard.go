@@ -72,6 +72,12 @@ type Model struct {
 	// store whose archive could not be read.
 	archived      []archivedEntry
 	archiveUnread []string
+	// fixOpen is the key of the rule or review prompt entry whose full text the
+	// Fixes panel shows, "" when every entry shows one line. showCatalog and
+	// showArchived open the built-in guard catalog and the Archived list.
+	fixOpen      string
+	showCatalog  bool
+	showArchived bool
 
 	// expanded says the selected problem's detail area is open; technical says its
 	// technical block is open too. detailOffset is the first visible line of that

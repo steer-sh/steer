@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/steer-sh/steer-cli/internal/checks"
 	"github.com/steer-sh/steer-cli/internal/claude"
@@ -18,7 +19,7 @@ import (
 )
 
 // The Fixes panel is the inventory of what Steer installs to keep a problem from
-// coming back: guards, rules, review addendum entries and this repository's
+// coming back: guards, rules, review prompt entries and this repository's
 // checks, then the built-in guards you have not turned on. A built-in guard
 // already in your inventory appears once, in yours. Each tier's row says where
 // that fix stands in its own terms, and each action sits on the row whose scope it
@@ -34,6 +35,9 @@ const (
 	fixRepo        = "repository"
 	fixCheck       = "check"
 	fixArchived    = "archived"
+	// A disclosure row opens or closes the section under it.
+	catalogToggle = "catalog-toggle"
+	archiveToggle = "archive-toggle"
 )
 
 // fixRow is one line of the panel: a guard in your inventory, a rule, a review
@@ -41,7 +45,12 @@ const (
 // turn on, an archived fix, or a maintenance action a detected issue asks for.
 type fixRow struct {
 	kind string
-	name string
+	// name is the fix's id, the one archive and restore act on; label is what the
+	// row shows when it differs, and a row that names no fix carries a label only.
+	name  string
+	label string
+	// compact shows the first line of description only.
+	compact bool
 	// origin is where an installed guard came from; description is a built-in
 	// guard's own summary, a rule's or entry's text, or a check's binding.
 	origin      string
@@ -66,6 +75,19 @@ type fixRow struct {
 	archived *archivedEntry
 }
 
+// display is the name the row shows.
+func (r fixRow) display() string {
+	if r.label != "" {
+		return r.label
+	}
+	return r.name
+}
+
+// fixKey identifies a rule or review prompt entry across a recompose.
+func fixKey(r fixRow) string {
+	return r.kind + "\x00" + r.scope + "\x00" + r.name
+}
+
 // The repair actions. Each names one operation and one detected issue.
 const (
 	repairPresets = "update-built-ins"
@@ -73,14 +95,15 @@ const (
 	repairSync    = "sync-registrations"
 )
 
-// fixRows lists the rows in the order the panel prints them: your guards, rules,
-// addendum entries, this repository and its checks, the built-in guards not in
-// your inventory, the archived fixes, then one row per detected issue.
+// fixRows lists the rows in the order the panel prints them, which is the order
+// the cursor walks: one row per detected issue, your guards, rules, review prompt
+// entries, this repository and its checks, then the built-in guards not in your
+// inventory and the archived fixes, each behind a row that opens it.
 func (m *Model) fixRows() []fixRow {
 	if m.snap == nil {
 		return nil
 	}
-	var rows []fixRow
+	rows := m.guardRepairs()
 	visible := map[string]bool{}
 	for _, p := range m.snap.Presets {
 		visible[p.Name] = true
@@ -94,17 +117,46 @@ func (m *Model) fixRows() []fixRow {
 	rows = append(rows, m.ruleRows()...)
 	rows = append(rows, m.addendumRows()...)
 	rows = append(rows, m.checkRows()...)
+	var catalog []fixRow
 	for _, p := range m.snap.Presets {
 		if p.Enabled {
 			// It is already in your inventory above. A second line here reads as two
 			// protections where one is installed.
 			continue
 		}
-		rows = append(rows, fixRow{kind: guardAvailable, name: p.Name,
+		catalog = append(catalog, fixRow{kind: guardAvailable, name: p.Name,
 			description: p.Description})
 	}
-	rows = append(rows, m.archivedRows()...)
-	return append(rows, m.guardRepairs()...)
+	rows = append(rows, disclose(catalogToggle, catalog, m.showCatalog,
+		fmt.Sprintf("%d you can turn on", len(catalog)))...)
+	archived := m.archivedRows()
+	return append(rows, disclose(archiveToggle, archived, m.showArchived,
+		fmt.Sprintf("%d archived %s", len(archived), fixNoun(len(archived))))...)
+}
+
+// fixNoun is "fix" or "fixes".
+func fixNoun(n int) string {
+	if n == 1 {
+		return "fix"
+	}
+	return "fixes"
+}
+
+// disclose is a section's opening row, then its rows while it is open. An empty
+// section has no opening row: its empty state is printed instead.
+func disclose(kind string, rows []fixRow, open bool, count string) []fixRow {
+	if len(rows) == 0 {
+		return nil
+	}
+	verb := "enter shows them"
+	if open {
+		verb = "enter hides them"
+	}
+	out := []fixRow{{kind: kind, label: count, description: verb}}
+	if open {
+		out = append(out, rows...)
+	}
+	return out
 }
 
 // ruleRows is one row per rule in either store, with the agents whose instruction
@@ -113,9 +165,11 @@ func (m *Model) ruleRows() []fixRow {
 	var rows []fixRow
 	for _, r := range m.snap.Rules {
 		state, attention := m.ruleState(r)
-		rows = append(rows, fixRow{kind: fixRule, name: r.ID, description: r.Text,
+		row := fixRow{kind: fixRule, name: r.ID, description: r.Text,
 			state: r.Scope + "; " + state, attention: attention,
-			scope: r.Scope, removable: true})
+			scope: r.Scope, removable: true}
+		row.compact = fixKey(row) != m.fixOpen
+		rows = append(rows, row)
 	}
 	return rows
 }
@@ -155,19 +209,21 @@ func (m *Model) ruleState(r status.RuleInfo) (string, bool) {
 func (m *Model) addendumRows() []fixRow {
 	var rows []fixRow
 	for _, a := range m.snap.Addenda {
-		name, text := a.ID, a.Text
-		if name == "" {
-			name = "the " + a.Scope + " review prompt"
-		}
+		text := a.Text
 		if text == "" {
 			text = a.HeadText
 		}
-		rows = append(rows, fixRow{kind: fixAddendum, name: name, description: text,
+		row := fixRow{kind: fixAddendum, name: a.ID, description: text,
 			state:       a.Scope + "; " + status.AddendumPhrase(a),
 			attention:   a.State != status.AddendumLive,
 			scope:       a.Scope,
 			removable:   a.ID != "" && a.Text != "",
-			unremovable: addendumUnremovable(a)})
+			unremovable: addendumUnremovable(a)}
+		if a.ID == "" {
+			row.label = "the " + a.Scope + " review prompt"
+		}
+		row.compact = fixKey(row) != m.fixOpen
+		rows = append(rows, row)
 	}
 	return rows
 }
@@ -196,7 +252,7 @@ func (m *Model) checkRows() []fixRow {
 	if c.Repo == "" {
 		return nil
 	}
-	rows := []fixRow{{kind: fixRepo, name: "this repository", description: c.Repo,
+	rows := []fixRow{{kind: fixRepo, label: "this repository", description: c.Repo,
 		state:     status.CheckAdoptionPhrase(c) + "; " + lastRunPhrase(c.LatestRun),
 		attention: c.Manifest && !c.Adopted}}
 	for _, row := range c.Checks {
@@ -230,7 +286,7 @@ func (m *Model) guardRepairs() []fixRow {
 	if len(drifted) > 0 {
 		rows = append(rows, fixRow{
 			kind: guardRepair, repair: repairPresets,
-			name: "Update built-in guards",
+			label: "Update built-in guards",
 			issue: fmt.Sprintf("%s no longer %s the built-in guard this version of Steer ships. "+
 				"Updating reinstalls %s from the catalog in the running Steer, and puts back any "+
 				"supporting guard Steer keeps for itself. Local edits to %s are replaced.",
@@ -247,7 +303,7 @@ func (m *Model) guardRepairs() []fixRow {
 		agent := status.HarnessLabel(master.Harness)
 		rows = append(rows, fixRow{
 			kind: guardRepair, repair: repairRunner,
-			name: "Update the guard runner for " + agent,
+			label: "Update the guard runner for " + agent,
 			issue: "The shared runner registered for " + agent + " in " + scopeReach(master.Scope) +
 				" is older than this Steer, or carries no version at all. Rebuilding it writes a " +
 				"new runner from the guard files you already have and repoints " + agent +
@@ -266,7 +322,7 @@ func (m *Model) guardRepairs() []fixRow {
 		agent := status.HarnessLabel(master.Harness)
 		rows = append(rows, fixRow{
 			kind: guardRepair, repair: repairSync,
-			name: "Run the guards in " + agent,
+			label: "Run the guards in " + agent,
 			issue: "Guard files are installed in " + scopeReach(master.Scope) + ", and " + agent +
 				" registers no runner for them, so none of them runs there. Syncing registers " +
 				"the runner already built from those files and writes the rules sections. It leaves " +
@@ -282,7 +338,7 @@ func (m *Model) guardRepairs() []fixRow {
 		agent := status.HarnessLabel(r.Harness)
 		rows = append(rows, fixRow{
 			kind: guardRepair, repair: repairSync,
-			name: "Restore the rules " + agent + " reads",
+			label: "Restore the rules " + agent + " reads",
 			issue: "The instruction file " + agent + " reads in " + scopeReach(r.Scope) +
 				" does not match the rules Steer holds: " + status.RulesPhrase(r) + ". " +
 				"The agent reads only the rules in that file. " +
@@ -345,6 +401,13 @@ func (m *Model) fixesLegend() string {
 		archive = "x archive · "
 	}
 	switch row.kind {
+	case catalogToggle, archiveToggle:
+		return "enter " + strings.TrimPrefix(row.description, "enter ") + " · "
+	case fixRule, fixAddendum:
+		if row.compact {
+			return "enter show full text · " + archive
+		}
+		return "enter hide full text · " + archive
 	case guardRepair:
 		return "enter run this repair · "
 	case guardInstalled:
@@ -370,8 +433,9 @@ func (m *Model) fixesLegend() string {
 }
 
 // fixesKey acts on the selected row. Enter turns a built-in guard on or off, runs
-// a repair row's operation, authorizes the repository, replays a check or
-// restores an archived fix; x opens the archive form over any other fix.
+// a repair row's operation, authorizes the repository, tests a check, restores an
+// archived fix, shows or hides an entry's full text, or opens a section; x opens
+// the archive form over any other fix.
 func (m *Model) fixesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	rows := m.fixRows()
 	if len(rows) == 0 {
@@ -387,6 +451,18 @@ func (m *Model) fixesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch row.kind {
+	case catalogToggle:
+		m.showCatalog = !m.showCatalog
+		m.clampCursor(panelFixes)
+	case archiveToggle:
+		m.showArchived = !m.showArchived
+		m.clampCursor(panelFixes)
+	case fixRule, fixAddendum:
+		if row.compact {
+			m.fixOpen = fixKey(row)
+		} else {
+			m.fixOpen = ""
+		}
 	case guardRepair:
 		switch row.repair {
 		case repairPresets:
@@ -678,8 +754,8 @@ func (m *Model) syncStore() {
 	m.note("synced %d agent(s); %d already matched the guard files", len(res.Synced), len(res.Current))
 }
 
-// viewFixes renders each tier's fixes, the built-in guards you can turn on, and
-// any repair a detected issue asks for.
+// viewFixes renders any repair a detected issue asks for, each tier's fixes, and
+// the built-in guards you can turn on and the archived fixes behind a row each.
 func (m *Model) viewFixes() string {
 	if m.editing && m.archiveForm != nil {
 		return m.viewArchiveForm()
@@ -687,91 +763,101 @@ func (m *Model) viewFixes() string {
 	width := m.bodyWidth()
 	out := m.title("Fixes — what Steer installed to keep a problem from coming back")
 	rows := m.fixRows()
-	column := guardNameWidth(rows, width)
+	cursor := m.cursor[panelFixes]
 
-	out += section("Guards — run before your coding agent acts")
+	if anyOfKind(rows, guardRepair) {
+		out += section("Maintenance needed")
+		for i, r := range rows {
+			if r.kind != guardRepair {
+				continue
+			}
+			out += selectedRow(r.display(), " "+warn("needs attention"), i == cursor, width)
+			out += wrapTo(r.issue, "    ", width)
+		}
+	}
+
+	out += section("Guards Steer registered — run before your coding agent acts")
 	if !anyOfKind(rows, guardInstalled) {
 		out += wrapTo(m.emptyGuardNote(), "  ", width)
 	}
+	column := nameColumn(rows, width, guardInstalled)
 	for i, r := range rows {
-		if r.kind != guardInstalled {
-			continue
+		if r.kind == guardInstalled {
+			out += guardTitleInColumn(r.display(), r.origin, i == cursor, width, column)
 		}
-		out += guardTitleInColumn(r.name, r.origin, i == m.cursor[panelFixes], width, guardNameWidth(rows, width))
 	}
 	if anyOfKind(rows, guardInstalled) {
 		out += wrapTo(secondary("Turning a built-in guard off writes no archive: it comes back from the built-in "+
 			"guards below. Archiving any other guard keeps its file and fixtures for a restore."), "  ", width)
 	}
-	out += wrapTo(secondary("This is what Steer registered here. It is not every hook your coding "+
-		"agent runs: review before commit, and any hook you set up yourself, are not listed."),
-		"  ", width)
 
 	out += section("Rules — instructions your coding agent reads")
 	if !anyOfKind(rows, fixRule) {
 		out += wrapTo(dim("No rules installed, project or global."), "  ", width)
 	}
-	out += stateRows(rows, fixRule, m.cursor[panelFixes], width, column)
+	out += stateRows(rows, cursor, width, fixRule)
 
 	out += section("Review prompt entries — what the commit gate's reviewer is told")
 	if !anyOfKind(rows, fixAddendum) {
 		out += wrapTo(dim("No entries installed, project or global."), "  ", width)
 	}
-	out += stateRows(rows, fixAddendum, m.cursor[panelFixes], width, column)
+	out += stateRows(rows, cursor, width, fixAddendum)
 
 	out += section("Checks — run by check.sh at the end of a turn")
 	if !anyOfKind(rows, fixRepo) {
 		out += wrapTo(dim("not inside a repository, so there are no checks to read."), "  ", width)
 	}
-	out += stateRows(rows, fixRepo, m.cursor[panelFixes], width, column)
-	out += stateRows(rows, fixCheck, m.cursor[panelFixes], width, column)
+	out += stateRows(rows, cursor, width, fixRepo, fixCheck)
 	if m.checking != "" {
 		out += wrapTo(secondary("A check action is running; its result appears at the bottom of the screen when it finishes."), "  ", width)
 	}
 
 	out += section("Available built-in guards")
-	if !anyOfKind(rows, guardAvailable) {
+	if !anyOfKind(rows, catalogToggle) {
 		out += dim("  every built-in guard is already on here.\n")
 	}
+	column = nameColumn(rows, width, guardAvailable)
 	for i, r := range rows {
-		if r.kind != guardAvailable {
-			continue
+		switch r.kind {
+		case catalogToggle:
+			out += selectedRow(r.display(), " "+secondary("— "+r.description), i == cursor, width)
+		case guardAvailable:
+			out += guardTitleInColumn(r.display(), r.description, i == cursor, width, column)
 		}
-		out += guardTitleInColumn(r.name, r.description, i == m.cursor[panelFixes], width, guardNameWidth(rows, width))
 	}
 
 	out += section("Archived — fixes a removal took out, which enter puts back")
-	if !anyOfKind(rows, fixArchived) && len(m.archiveUnread) == 0 {
+	if !anyOfKind(rows, archiveToggle) && len(m.archiveUnread) == 0 {
 		out += dim("  Nothing archived, project or global, or in this repository's checks.\n")
 	}
 	for _, line := range m.archiveUnread {
 		out += wrapTo(warn(line), "  ", width)
 	}
-	out += stateRows(rows, fixArchived, m.cursor[panelFixes], width, column)
-
-	if !anyOfKind(rows, guardRepair) {
-		return out
-	}
-	out += section("Maintenance needed")
 	for i, r := range rows {
-		if r.kind != guardRepair {
-			continue
+		if r.kind == archiveToggle {
+			out += selectedRow(r.display(), " "+secondary("— "+r.description), i == cursor, width)
 		}
-		out += selectedRow(r.name, " "+warn("needs attention"), i == m.cursor[panelFixes], width)
-		out += wrapTo(r.issue, "    ", width)
 	}
-	return out
+	return out + stateRows(rows, cursor, width, fixArchived)
 }
 
-// stateRows renders the rows of one kind: the name with its text or binding, and
-// under it where that fix stands, marked when it asks the reader to act.
-func stateRows(rows []fixRow, kind string, cursor, width, column int) string {
+// stateRows renders the rows of the named kinds: the name with its text or
+// binding, and under it where that fix stands, marked when it asks the reader to
+// act. The name column is the section's own, so a long name elsewhere on the
+// panel never narrows this text. A compact row shows its text's first line.
+func stateRows(rows []fixRow, cursor, width int, kinds ...string) string {
+	column := nameColumn(rows, width, kinds...)
 	out := ""
 	for i, r := range rows {
-		if r.kind != kind {
+		if !slices.Contains(kinds, r.kind) {
 			continue
 		}
-		out += guardTitleInColumn(r.name, r.description, i == cursor, width, column)
+		description := r.description
+		if r.compact {
+			description = ansi.Truncate(strings.Join(strings.Fields(description), " "),
+				max(1, width-column-6), "…")
+		}
+		out += guardTitleInColumn(r.display(), description, i == cursor, width, column)
 		state := secondary(r.state)
 		if r.attention {
 			state = warn(r.state)
@@ -781,12 +867,10 @@ func stateRows(rows []fixRow, kind string, cursor, width, column int) string {
 	return out
 }
 
-// emptyGuardNote says an empty inventory is empty HERE. This scope's store says
-// nothing about the other scope, about another machine, or about a guard a coding
-// agent runs that Steer did not register.
+// emptyGuardNote says an empty inventory is empty in this scope, and names the
+// scope, so it claims nothing about the other one or another machine.
 func (m *Model) emptyGuardNote() string {
-	return secondary("No guards recorded for " + scopeReach(m.scope) +
-		". Guards in the other location, and on your other machines, are not read here.")
+	return secondary("No Steer guards registered for " + scopeReach(m.scope) + ".")
 }
 
 // guardStorePath is where this scope's guards live, so a reader can look. A store
@@ -830,11 +914,13 @@ func guardTitleInColumn(name, description string, selected bool, width, column i
 	return out
 }
 
-func guardNameWidth(rows []fixRow, width int) int {
+// nameColumn is the width the names of one section share, capped at half the
+// panel.
+func nameColumn(rows []fixRow, width int, kinds ...string) int {
 	column := 0
 	for _, row := range rows {
-		if row.kind != guardRepair {
-			column = max(column, lipgloss.Width(row.name))
+		if slices.Contains(kinds, row.kind) {
+			column = max(column, lipgloss.Width(row.display()))
 		}
 	}
 	return min(column, width/2)

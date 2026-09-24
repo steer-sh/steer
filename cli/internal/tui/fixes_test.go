@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/steer-sh/steer-cli/internal/archive"
 	"github.com/steer-sh/steer-cli/internal/checks"
@@ -30,6 +31,7 @@ func TestAnEnabledBuiltInGuardIsListedOnce(t *testing.T) {
 		},
 	}
 	m.active = panelFixes
+	m.showCatalog = true
 
 	if got := strings.Count(m.viewFixes(), "bare-python"); got != 1 {
 		t.Errorf("the enabled built-in guard appears %d times, want once", got)
@@ -58,7 +60,7 @@ func TestEveryGuardNamesItsOrigin(t *testing.T) {
 		}
 	}
 	// The inventory is Steer's own registrations, never every hook the agent runs.
-	if !strings.Contains(view, "It is not every hook your coding agent runs") {
+	if !strings.Contains(view, "Guards Steer registered") {
 		t.Error("the inventory claims to hold every hook")
 	}
 }
@@ -71,11 +73,8 @@ func TestAnEmptyInventoryIsLocal(t *testing.T) {
 	m.snap = &status.SystemStatus{}
 	m.active = panelFixes
 	view := m.viewFixes()
-	if !strings.Contains(view, "No guards recorded for this project") {
+	if !strings.Contains(view, "No Steer guards registered for this project") {
 		t.Errorf("the empty state does not name the location:\n%s", view)
-	}
-	if !strings.Contains(view, "your other machines, are not read here") {
-		t.Errorf("the empty state does not say what it did not read:\n%s", view)
 	}
 }
 
@@ -320,8 +319,9 @@ func TestAFixtureNoteNamesTheRestoredGuardAndEveryFailure(t *testing.T) {
 // selectRow puts the cursor on the row of a kind with a name.
 func selectRow(t *testing.T, m *Model, kind, name string) {
 	t.Helper()
+	m.showCatalog, m.showArchived = true, true
 	for i, r := range m.fixRows() {
-		if r.kind == kind && r.name == name {
+		if r.kind == kind && r.display() == name {
 			m.cursor[panelFixes] = i
 			return
 		}
@@ -367,7 +367,7 @@ func TestEachIssueNamesItsOperationAndItsReach(t *testing.T) {
 	if repairs != 2 {
 		t.Errorf("%d repair rows, want one per detected issue", repairs)
 	}
-	m.cursor[panelFixes] = len(rows) - 1
+	m.cursor[panelFixes] = 0
 	if got := m.fixesLegend(); !strings.Contains(got, "run this repair") {
 		t.Errorf("the legend on a repair row reads %q", got)
 	}
@@ -398,6 +398,7 @@ func fixesModel(adopted bool) *Model {
 // selectKind puts the cursor on the first row of a kind.
 func selectKind(t *testing.T, m *Model, kind string) {
 	t.Helper()
+	m.showCatalog, m.showArchived = true, true
 	for i, r := range m.fixRows() {
 		if r.kind == kind {
 			m.cursor[panelFixes] = i
@@ -582,5 +583,71 @@ func TestXSaysWhyAnEntryOffDiskCannotBeArchived(t *testing.T) {
 	m.fixesKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
 	if m.editing || !strings.Contains(m.message, "not one entry") {
 		t.Errorf("x on a row standing for a store: editing %v, note %q", m.editing, m.message)
+	}
+}
+
+// The catalog and the archive open from a row that counts them, and the cursor
+// walks only the rows on screen: closed, their entries are not selectable.
+func TestTheCatalogAndTheArchiveOpenFromACountedRow(t *testing.T) {
+	m := New(gate.Defaults(), "global")
+	m.width = 200
+	m.snap = &status.SystemStatus{Presets: []status.PresetInfo{
+		{Name: "no-force-push", Description: "blocks git push --force"},
+		{Name: "no-rm-rf", Description: "blocks rm -rf"},
+	}}
+	m.active = panelFixes
+	rows := m.fixRows()
+	if anyOfKind(rows, guardAvailable) {
+		t.Fatal("a closed catalog put its guards in the cursor's list")
+	}
+	view := strings.Join(strings.Fields(m.viewFixes()), " ")
+	if !strings.Contains(view, "2 you can turn on — enter shows them") || strings.Contains(view, "no-force-push") {
+		t.Errorf("the closed catalog does not read as a counted row:\n%s", view)
+	}
+	for i, r := range rows {
+		if r.kind == catalogToggle {
+			m.cursor[panelFixes] = i
+		}
+	}
+	m.fixesKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if !strings.Contains(m.viewFixes(), "no-force-push") || !anyOfKind(m.fixRows(), guardAvailable) {
+		t.Error("enter on the counted row did not open the catalog")
+	}
+}
+
+// A rule or review prompt entry shows the first line of its text, and enter shows
+// the whole of it. The row's id stays the id archive acts on.
+func TestAnEntryShowsOneLineUntilEnterOpensIt(t *testing.T) {
+	m := fixesModel(true)
+	m.width = 80
+	m.snap.Rules[0].Text = strings.Repeat("resolve config from the repo root ", 10) + "END-OF-RULE"
+	if strings.Contains(m.viewFixes(), "END-OF-RULE") {
+		t.Error("a closed rule shows its whole text")
+	}
+	selectKind(t, m, fixRule)
+	if !strings.Contains(m.fixesLegend(), "enter show full text") {
+		t.Errorf("the rule row's legend reads %q", m.fixesLegend())
+	}
+	m.fixesKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if !strings.Contains(strings.Join(strings.Fields(m.viewFixes()), ""), "END-OF-RULE") {
+		t.Error("enter did not show the rule's whole text")
+	}
+	m.fixesKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	if m.archiveForm == nil || m.archiveForm.id != "config-path" {
+		t.Errorf("x on an open rule archives %+v, want config-path", m.archiveForm)
+	}
+}
+
+// Each section lays its names out in its own column, so a long built-in guard
+// name never pushes a rule's text to the right.
+func TestEachSectionHasItsOwnNameColumn(t *testing.T) {
+	m := fixesModel(true)
+	m.showCatalog = true
+	m.snap.Presets = []status.PresetInfo{{Name: strings.Repeat("long-name-", 6), Description: "d"}}
+	for _, line := range strings.Split(ansi.Strip(m.viewFixes()), "\n") {
+		name := strings.TrimLeft(line, " ›")
+		if strings.HasPrefix(name, "config-path") && !strings.HasPrefix(name, "config-path resolve") {
+			t.Errorf("the rule's text sits in another section's column: %q", line)
+		}
 	}
 }

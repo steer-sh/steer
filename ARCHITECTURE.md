@@ -698,8 +698,10 @@ the repository's checks and their last run on Fixes. Diagnostics holds the
 issues that ask for a step, the history counts and the technical block.
 Problems lists tracked records first, then the candidate pointers: a tracked row
 offers a key that acts on it and a pointer row offers only the handoff. Authoring
-goes through the skills. Fixes lists guards, rules, review addendum entries and the repository's
-checks, each with its own state. A project addendum entry is read on disk and at
+goes through the skills. Fixes lists guards, rules, review prompt entries and the repository's
+checks, each with its own state, after any maintenance a detected issue asks for;
+the built-in guard catalog and the Archived section open from a row that counts
+them. `fixRows` returns rows in render order, because the cursor walks that list. A project addendum entry is read on disk and at
 HEAD through `status.AddendumInventory`, which `steer commit-gate addendum list`
 shares, so an entry removed on disk but still committed stays listed. Every fix
 except a built-in guard archives through its tier's remove function; a built-in
