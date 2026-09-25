@@ -173,7 +173,7 @@ func intPtr(n int) *int           { return &n }
 // so a renamed or reordered json tag fails here, the agent-contract guard.
 func TestJSONContractIsStable(t *testing.T) {
 	s := &SystemStatus{
-		StatusVersion: 27,
+		StatusVersion: 28,
 		GeneratedAt:   "2026-01-01T00:00:00Z",
 		Posture: Posture{
 			Instrument: "agy@sha", Reviewer: "gemini", Ledger: "/l.jsonl",
@@ -315,7 +315,7 @@ func TestJSONContractIsStable(t *testing.T) {
 }
 
 const goldenStatusJSON = `{
-  "status_version": 27,
+  "status_version": 28,
   "generated_at": "2026-01-01T00:00:00Z",
   "posture": {
     "instrument": "agy@sha",
@@ -433,7 +433,20 @@ const goldenStatusJSON = `{
         "extra": [],
         "state": "drifted"
       }
-    ]
+    ],
+    "readiness": {
+      "reviewing": true,
+      "headline": "Commits here are reviewed before they land — Claude Code global.",
+      "steps": [
+        {
+          "title": "Codex global scope: the registered command does not resolve here — the hook is skipped silently",
+          "fix": "steer bin install"
+        }
+      ],
+      "unverified": [
+        "Codex global scope: trust record present, unverified; current hook trust cannot be verified · never observed"
+      ]
+    }
   },
   "checks": {
     "repo": "/w/steer",

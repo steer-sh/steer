@@ -160,3 +160,27 @@ func eightRecordSnapshot() *SystemStatus {
 	s.Chains = make([]ChainSummary, recentChainLimit)
 	return s
 }
+
+// TestJSONReadinessWithholdsReviewingFromAnUntrustedCodexGate: a Codex registration
+// reads effective before Codex trusts the hook, so an agent that reads the contract
+// must get the readiness answer, which withholds "reviewing" until trust is known.
+func TestJSONReadinessWithholdsReviewingFromAnUntrustedCodexGate(t *testing.T) {
+	s := &SystemStatus{StatusVersion: StatusVersion}
+	s.Posture.CommitGate = []ScopeArming{{Harness: "codex", Scope: "global", Registered: true,
+		Effective: true, Trust: TrustMissing, Resolvable: ResolveResolvable}}
+	raw, err := s.MarshalIndent()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded statusJSON
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	r := decoded.Posture.Readiness
+	if r.Reviewing {
+		t.Fatalf("readiness = %+v; an untrusted Codex hook is not reviewing", r)
+	}
+	if len(r.Unverified) != 1 || !strings.Contains(r.Unverified[0], "no trust record") {
+		t.Errorf("unverified = %q; want the Codex trust line", r.Unverified)
+	}
+}

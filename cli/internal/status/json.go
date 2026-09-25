@@ -39,6 +39,32 @@ type postureJSON struct {
 	Unresolved int             `json:"unresolved_rows"`
 	Masters    []MasterRuntime `json:"masters"`
 	Rules      []RulesPresence `json:"rules"`
+	Readiness  readinessJSON   `json:"readiness"`
+}
+
+// readinessJSON is ReadinessOf, the answer `steer status` prints: whether a commit
+// here is reviewed, each setup step with the command that clears it, and the trust
+// Steer cannot verify.
+type readinessJSON struct {
+	Reviewing  bool       `json:"reviewing"`
+	Headline   string     `json:"headline"`
+	Steps      []stepJSON `json:"steps"`
+	Unverified []string   `json:"unverified"`
+	Note       string     `json:"note,omitempty"`
+}
+
+type stepJSON struct {
+	Title string `json:"title"`
+	Fix   string `json:"fix,omitempty"`
+}
+
+func readinessRow(r Readiness) readinessJSON {
+	out := readinessJSON{Reviewing: r.Reviewing, Headline: r.Headline, Steps: []stepJSON{},
+		Unverified: nonNil(r.Unverified), Note: r.Note}
+	for _, step := range r.Steps {
+		out.Steps = append(out.Steps, stepJSON{Title: step.Title, Fix: step.Fix})
+	}
+	return out
 }
 
 // resolverJSON is one harness and scope's review-outcome reader: whether it is
@@ -109,6 +135,7 @@ func (s *SystemStatus) contract() statusJSON {
 			Unresolved: s.Posture.Unresolved,
 			Masters:    nonNil(s.Posture.Masters),
 			Rules:      nonNil(s.Posture.Rules),
+			Readiness:  readinessRow(ReadinessOf(s, s.ReviewerProbe)),
 		},
 		Checks:        s.Checks,
 		Interventions: []fixSummaryJSON{},

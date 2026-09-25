@@ -675,8 +675,8 @@ receipt is not an open step: a stale check keeps running.
 renders only its readiness answer (`status.ReadinessOf`) and a guard store it could
 not read.
 `--json` is a projection of it (`status/json.go`): one summary row per record, whose
-observation `steer fix score --json` carries under the same id, and guards and
-presets from both scopes. The TUI lists one scope because it mutates that scope.
+observation `steer fix score --json` carries under the same id, guards and
+presets from both scopes, and the readiness answer as `posture.readiness`. The TUI lists one scope because it mutates that scope.
 Shared problem, evidence and formatting helpers keep human summaries aligned;
 wire version constants and schema tests own machine compatibility.
 `vocabulary_test.go` checks display literals; dynamic stored values also need

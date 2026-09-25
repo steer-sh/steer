@@ -78,7 +78,7 @@ Then Read the queue **once**: `~/.steer/state/steer-report/queue.json` (`version
 - `interventions[]` — full contract records the tier flagged as **asking for a reader**: the class recurred after the split, an absent guard audit log or missing check evidence left the fix's activity unread, the record carries no frozen scope, the fix it binds is `absent` or `unreadable`, or the fix is in place but carries `artifact.removed`. These carry a `match`; they are the audit's action list, pre-filtered. Each carries `problem` and `intervention` — the record's own explanation of what goes wrong and what it does about it, authored when the class was found. Lead your report with those rather than with the class name or the regex, and correct one that no longer describes the evidence with `steer fix describe ID`, which changes no window. Each also carries the conditions the counts were taken under: `corpus` and `unit` (`review-findings` counts by `chain`, `transcript-friction` by `session` — never compare the two rates), `signal_kind` on a session-unit record, `scope` (the frozen eligibility rule, `null` on a legacy record), `before_coverage` / `after_coverage` (`total`, `eligible`, `ineligible`, `unknown`, `unknown_scope`, `unknown_evidence`, `pending`, `ledger_missed`, `ledger_overdue`, `partial_exposure`), `observation` — the seven field blocks documented in `audit.md` — and `artifact`, where the fix the record binds stands now.
 - `unscored[]` — ids of records no engine reads. Report their existence; do not read a result into them.
 - `candidates[]` — **one row per corpus**, each pointing at a pile of evidence no problem covers yet. The transcript row carries `ungrouped_clusters`; the review row carries `undecided_chains` and a `dump` command. The transcript row also carries a few `examples` — the strongest cluster keys, for a reader glancing at the row, never the pile itself; the review row carries none, because its `dump` command prints the findings in full. A row has **no** `match` and no title: grouping the pile and authoring the regex are your job, below. Read the full dumps for the pile; the row only sizes it.
-- `corpora[]` — one row per corpus (`review-findings`, `transcript-friction`) with `present` and `size`. Relay this sweep to the user in one sentence. When `review-findings` is absent or empty, a second sentence says what comes next. If a `posture.commit_gate[]` row in the snapshot reads `effective: true`, the commit gate reviews each commit from now on, and a later `/steer-report` can mine those reviews for problems. If no row does, no review history collects until `/steer-setup` arms the commit gate.
+- `corpora[]` — one row per corpus (`review-findings`, `transcript-friction`) with `present` and `size`. Relay this sweep to the user in one sentence. When `review-findings` is absent or empty, a second sentence says what comes next. Read that from `posture.readiness`, never from a `commit_gate[]` row's `effective`, which holds before Codex trusts the hook. If `readiness.reviewing` is true, the commit gate reviews each commit from now on, and a later `/steer-report` can mine those reviews for problems. If it is false, no review history collects yet: relay `readiness.headline`, each `steps[]` entry with its `fix`, and each `unverified[]` line. A Codex line clears when the user approves the hook in Codex's `/hooks`. When no commit gate is registered, `/steer-setup` arms one.
 - `checks[]` — the open steps in the repository the refresh ran in, each with `kind`, `repo`, an optional `check_id`, a `detail` and the `fix` command that clears it. `not-adopted` is a repository declaring checks that this machine never authorized to run at the end of a turn (`steer check adopt`). `never-validated` is a declared check whose cases were never replayed here, so nothing shows it fails on the problem it names (`steer check test <id>`). `integration-failure` is a passing `check.sh` that ran no declared check — the script's wiring, never a failed assertion (`steer check init` prints the managed line to add). A **stale** receipt is deliberately not here: a stale check keeps running, and `steer status --json` carries the label. These are states of a declaration, not recurrence measured over a window, so they carry no count and never enter a before/after reading.
 
 The queue tells you what is pending. The full dumps below are the raw material you cluster over. The score file holds every live record for the complete audit — the queue lists only the ones asking for a reader, not the quiet ones worth showing too. When the score file is `[]`, this machine records no fix. Say so in one line, then run the reading pass in `audit.md` anyway:
@@ -145,7 +145,7 @@ Digest schema (`digest_version: 3`):
 
 The digest is size-capped: the CLI evicts the lowest-scoring clusters to fit, and reports honesty in `stats`.
 
-### The `steer status --json` contract (`status_version: 27`)
+### The `steer status --json` contract (`status_version: 28`)
 
 Step 1 reads this snapshot for posture and the full class inventory. The unit is
 the failure class and what the corpus recorded about it, not the hook count. This
@@ -184,7 +184,7 @@ guard files. v27 is a summary: one row per live record without its `observation`
 match or coverage maps, which `steer fix score --json` carries by the same `id`;
 `attention.interventions` holds ids; `hooks` and `presets` read both scopes;
 `resolver` rows keep only their arming readings; `scope` carries `repo_root`; and
-`chains` is gone.
+`chains` is gone. v28 adds `posture.readiness`: the answer `steer status` prints.
 
 - `status_version` — the schema version. `--json` is a stable agent contract.
 - `posture` — the arming state: `instrument` (reviewer model / runs / prompt
@@ -192,7 +192,10 @@ match or coverage maps, which `steer fix score --json` carries by the same `id`;
   `commit_gate` row carries `harness`, `scope`, `registered`, `effective`,
   `timeout`, `trust`, `command`, `resolvable`, `observed` and `observed_corpus`; a
   `resolver` row carries `harness`, `scope`, `registered`, `effective`, `trust` and
-  `resolvable`. A
+  `resolvable`. `readiness` combines those rows with the reviewer CLI into one
+  answer: `reviewing` (a registration enforces and the reviewer CLI resolves),
+  `headline`, `steps[]` (`title` and the `fix` command that clears it), `unverified[]`
+  (trust that Steer cannot read) and an optional `note`. A
   registration is three separate readings, and only the first is what the
   configuration says. `command` is the command the registration names, verbatim.
   `resolvable` is whether that command resolves — `resolvable`, `missing`,

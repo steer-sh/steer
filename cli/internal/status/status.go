@@ -22,6 +22,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
 	"github.com/steer-sh/steer-cli/internal/gate/resolve"
+	"github.com/steer-sh/steer-cli/internal/gate/reviewers"
 	"github.com/steer-sh/steer-cli/internal/guard"
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/pi"
@@ -64,8 +65,9 @@ import (
 // whether the guard blocks correctly in the field. v27 is the projection in json.go:
 // one summary row per fix whose observation `steer fix score --json` carries,
 // attention by id, hooks and presets from both scopes, resolver rows cut to their
-// arming readings, scope.repo_root, and no chains.
-const StatusVersion = 27
+// arming readings, scope.repo_root, and no chains. v28 adds posture.readiness: the
+// answer `steer status` prints, so an agent reads trust and resolution with it.
+const StatusVersion = 28
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20
@@ -93,6 +95,9 @@ type Options struct {
 	// Evidence is every corpus a scoring pass reads. A caller leaving it zero gets
 	// the ledger alone, and every session-unit record reports missing evidence.
 	Evidence mine.EvidenceSet
+	// ReviewerProbe is whether the configured reviewer CLI resolves, which the
+	// readiness answer reads. The zero value checked nothing and raises no step.
+	ReviewerProbe reviewers.Probe
 }
 
 // ScoredIntervention is one live intervention with its recomputed observation. It
@@ -422,6 +427,9 @@ type SystemStatus struct {
 	// snapshot a machine with no guards produces, while the installed guards
 	// still run.
 	StoreProblems []StoreProblem `json:"store_problems"`
+	// ReviewerProbe is the caller's reading of the reviewer CLI, kept for the
+	// readiness answer.
+	ReviewerProbe reviewers.Probe `json:"-"`
 }
 
 // StoreProblem names a guard store whose manifest a reader refused, with the
@@ -447,6 +455,7 @@ func Collect(opts Options) (*SystemStatus, error) {
 		Summary:       VerdictSummary{Counts: map[string]int{}},
 		Hooks:         []HookInfo{},
 		Presets:       []PresetInfo{},
+		ReviewerProbe: opts.ReviewerProbe,
 	}
 
 	// Full scored inventory + recent chains, read-only.

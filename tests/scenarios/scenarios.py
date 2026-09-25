@@ -317,6 +317,11 @@ def _first_run():
             row["observed"] = 0
     for m in snap["posture"]["masters"]:
         m.pop("observed", None)
+    readiness = snap["posture"]["readiness"]
+    readiness["unverified"] = [
+        line.split(" · ")[0] + " · never observed" if " · " in line else line
+        for line in readiness["unverified"]]
+    readiness["note"] = "no review observed yet — that is expected until the first commit in scope"
     return snap, _scores(), _queue(candidates=cands, review_size=0)
 
 

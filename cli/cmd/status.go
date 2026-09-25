@@ -59,6 +59,7 @@ a problem already decided; 'steer fix score --json' carries each fix's detail.`,
 			InventoryScopes: []string{claude.ProjectScope, claude.GlobalScope},
 			ScanScope:       scope,
 			RepoRoot:        root,
+			ReviewerProbe:   reviewerProbe(cfg, resolveErr),
 			Addendum:        gateAddendum(root),
 			Evidence: evidence.Gather(evidence.Options{
 				GateStateDir: cfg.StateDir,
@@ -76,7 +77,7 @@ a problem already decided; 'steer fix score --json' carries each fix's detail.`,
 			fmt.Println(string(data))
 			return nil
 		}
-		renderStatus(s, reviewerProbe(cfg, resolveErr))
+		renderStatus(s, s.ReviewerProbe)
 		return nil
 	},
 }
