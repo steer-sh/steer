@@ -83,7 +83,7 @@ var Fields = []Field{
 		Label:        "Reviewer CLI",
 		Help:         "The command Steer runs to review a change before it commits.",
 		Kind:         KindChoice,
-		DefaultLabel: "agy",
+		DefaultLabel: reviewers.ProviderLabel(""),
 		Choices: func() []Choice {
 			out := []Choice{}
 			for _, p := range reviewers.Providers() {

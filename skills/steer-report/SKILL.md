@@ -118,7 +118,7 @@ case: the fail-soft rule above reads `audit.md` anyway.
 
 ### 2a. Transcript friction
 
-Use `steer` from PATH if available, otherwise fall back to the plugin root (`PLUGIN_ROOT` on Codex, `CLAUDE_PLUGIN_ROOT` on Claude Code). Redirect the digest to a temp file so it enters context exactly once — via Read, not via command output. Run a **single command**:
+Prefer the launcher bundled with the plugin (`PLUGIN_ROOT` on Codex, `CLAUDE_PLUGIN_ROOT` on Claude Code), and fall back to `steer` on PATH when the plugin root is not set. Redirect the digest to a temp file so it enters context exactly once — via Read, not via command output. Run a **single command**:
 
 ```bash
 STEER_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}"

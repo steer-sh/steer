@@ -29,7 +29,7 @@ type Provider struct {
 // providers is the supported set, in the order an editor lists it.
 var providers = []Provider{
 	{
-		ID: "agy", Label: "agy", Aliases: []string{""}, Executable: "agy",
+		ID: "agy", Label: "Antigravity", Aliases: []string{""}, Executable: "agy",
 		Efforts: []string{"low", "medium", "high"},
 		build: func(model, effort, agyDefault string) gate.Reviewer {
 			if model == "" {

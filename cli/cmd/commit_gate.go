@@ -369,12 +369,12 @@ func installReviewChannel(cfg gate.Config) error {
 		entry.DisplayName, scope, timeout, int(cfg.ReviewTimeout.Seconds()), commitGateTimeoutMargin)
 	switch target {
 	case harness.ClaudeCode:
-		registered += "\nResolver: Stop hook registered (steer commit-gate backfill)"
+		registered += "\nReview outcomes: read at the end of each turn (Stop hook)"
 	case harness.Codex:
-		registered += "\nResolver: Stop and SubagentStop hooks registered (steer commit-gate backfill)" +
+		registered += "\nReview outcomes: read at the end of each turn (Stop and SubagentStop hooks)" +
 			"\nHooks: " + path
 	case harness.Pi:
-		registered += "\nResolver: turn_end handler registered (steer commit-gate backfill)" +
+		registered += "\nReview outcomes: read at the end of each turn (turn_end handler)" +
 			"\nExtension: " + path
 	}
 	fmt.Println()
