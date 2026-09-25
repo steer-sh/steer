@@ -24,7 +24,7 @@ func (Adapter) Harness() harness.ID { return harness.ClaudeCode }
 
 // instrument is this adapter's normalization identity, pinned by
 // TestInstrumentMatchesFixtureReplay. Bump it when that test fails.
-const instrument = "claude-code:4b7c1a39"
+const instrument = "claude-code:672cb59e"
 
 func (Adapter) Instrument() string { return instrument }
 
@@ -130,8 +130,13 @@ type row struct {
 	Timestamp   string   `json:"timestamp"`
 	SessionID   string   `json:"sessionId"`
 	Cwd         string   `json:"cwd"`
+	Entrypoint  string   `json:"entrypoint"`
 	Message     *message `json:"message"`
 }
+
+// headlessEntrypoint is the entrypoint of a `claude -p` run. Its user turns are the
+// prompt the calling program passed, so no person typed them.
+const headlessEntrypoint = "sdk-cli"
 
 type message struct {
 	Content json.RawMessage `json:"content"`
@@ -214,11 +219,12 @@ func (a Adapter) normalize(line []byte, f transcript.Filter, counts *transcript.
 	}
 
 	// A user entry is either plain text — a human turn — or tool_result blocks.
+	human := base
+	human.Kind, human.Meta = transcript.KindHumanTurn, r.IsMeta || r.Entrypoint == headlessEntrypoint
 	var text string
 	if err := json.Unmarshal(r.Message.Content, &text); err == nil {
-		event := base
-		event.Kind, event.Text = transcript.KindHumanTurn, text
-		return emit(event)
+		human.Text = text
+		return emit(human)
 	}
 
 	var blocks []contentBlock
@@ -228,8 +234,8 @@ func (a Adapter) normalize(line []byte, f transcript.Filter, counts *transcript.
 	for _, b := range blocks {
 		switch b.Type {
 		case "text":
-			event := base
-			event.Kind, event.Text = transcript.KindHumanTurn, b.Text
+			event := human
+			event.Text = b.Text
 			if err := emit(event); err != nil {
 				return err
 			}

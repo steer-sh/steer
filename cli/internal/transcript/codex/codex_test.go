@@ -338,3 +338,31 @@ func TestEventsCarryTheHeadersWorkingDirectory(t *testing.T) {
 		}
 	}
 }
+
+// TestStreamMarksAnExecRunsTurnsMeta: a `codex exec` rollout's user turns are a
+// program's prompt, so they are Meta; an interactive rollout's are not.
+func TestStreamMarksAnExecRunsTurnsMeta(t *testing.T) {
+	root := t.TempDir()
+	exec := strings.Replace(rootRollout, `"originator":"codex-tui"`, `"originator":"codex_exec","source":"exec"`, 1)
+	for name, c := range map[string]struct {
+		body string
+		meta bool
+	}{"exec": {exec, true}, "interactive": {rootRollout, false}, "legacy": {legacyRollout, false}} {
+		path := writeRollout(t, root, "2026/08/29", "rollout-"+name+".jsonl", c.body)
+		events, _ := collect(t, transcript.Session{Harness: harness.Codex, Path: path}, transcript.Filter{})
+		turns := 0
+		for _, e := range events {
+			if e.Kind == transcript.KindHumanTurn {
+				turns++
+				if e.Meta != c.meta {
+					t.Errorf("%s: turn %q Meta = %v, want %v", name, e.Text, e.Meta, c.meta)
+				}
+			} else if e.Meta {
+				t.Errorf("%s: %s event marked Meta", name, e.Kind)
+			}
+		}
+		if turns == 0 {
+			t.Errorf("%s: no human turn read", name)
+		}
+	}
+}

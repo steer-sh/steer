@@ -57,8 +57,9 @@ type Event struct {
 	Timestamp string
 	// Text is the human turn, or a tool result flattened to plain text.
 	Text string
-	// Meta marks an event the harness generated rather than the person, such as
-	// a session-resume banner.
+	// Meta marks a human turn that no person typed in this session: text the
+	// harness generated, such as a session-resume banner, or the prompt a program
+	// passed to a headless run.
 	Meta bool
 	// Tool names the tool for a call or a result.
 	Tool string

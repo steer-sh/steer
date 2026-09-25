@@ -306,3 +306,24 @@ func TestDiscoverInRepositoryScopeReadsTheFileNotTheDirectoryName(t *testing.T) 
 		t.Fatalf("repository scope selected %+v; want only the session inside /repo/demo", files)
 	}
 }
+
+// TestStreamMarksAHeadlessRunsTurnsMeta: a `claude -p` run's user turn is a program's
+// prompt, so it is Meta; its tool results and an interactive turn are not.
+func TestStreamMarksAHeadlessRunsTurnsMeta(t *testing.T) {
+	session := write(t, []string{
+		line(map[string]any{"type": "user", "sessionId": "s1", "entrypoint": "sdk-cli", "timestamp": "2026-07-10T00:00:00Z",
+			"message": map[string]any{"content": "don't use var"}}),
+		line(map[string]any{"type": "user", "sessionId": "s1", "entrypoint": "sdk-cli", "timestamp": "2026-07-10T00:00:01Z",
+			"message": map[string]any{"content": []any{map[string]any{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}}}}),
+		line(map[string]any{"type": "user", "sessionId": "s2", "entrypoint": "cli", "timestamp": "2026-07-10T00:00:02Z",
+			"message": map[string]any{"content": []any{map[string]any{"type": "text", "text": "don't use var"}}}}),
+	})
+	events, _ := stream(t, session, transcript.Filter{})
+	if len(events) != 3 {
+		t.Fatalf("events = %+v; want three", events)
+	}
+	if !events[0].Meta || events[1].Meta || events[2].Meta {
+		t.Errorf("Meta = %v, %v, %v; want only the headless human turn marked",
+			events[0].Meta, events[1].Meta, events[2].Meta)
+	}
+}

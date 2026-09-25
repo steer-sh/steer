@@ -430,6 +430,9 @@ streaming, loss counts and the fields the classifier sees.
 
 Codex joins subagent rollouts to their root and drops replayed parent history.
 Tagged user messages are primary human turns, with legacy event-message fallback.
+A headless run's user turns (Claude Code `entrypoint: sdk-cli`, a `codex exec`
+rollout) are `Meta`: a program wrote them, such as a reviewer prompt or an agent
+consulting another agent.
 Pi session files are trees: the adapter emits only the active leaf's ancestry,
 retains history across model-context compaction, and excludes user-run shell
 commands. Forked history is deduplicated against the parent when it is available.
@@ -449,8 +452,9 @@ is munged.
 
 `internal/report/scan.go` owns the shared friction classifier. `command.go`
 distinguishes executed programs from source-printing commands and extracts causal
-failure keys, including traceback exception lines. Parser identity includes these
-rules. Session snapshots stamp parser plus adapter identity, so readers can show
+failure keys, including traceback exception lines. The correction matcher removes
+`<pasted_content>` blocks first, because pasted text is not what the person said.
+Parser identity includes these rules. Session snapshots stamp parser plus adapter identity, so readers can show
 which pipeline produced their evidence.
 
 `internal/sessions/` persists `sessions.<host>.jsonl`. Refresh merges newly read

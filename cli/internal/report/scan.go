@@ -39,6 +39,10 @@ var correctionPatterns = []*regexp.Regexp{
 // askedOpinion matches a "why do you think" question at a correction match's start.
 var askedOpinion = regexp.MustCompile(`(?i)^why (are|do|did|would) you think\b`)
 
+// pastedBlock matches text the harness marks as pasted into a turn, through its
+// closing tag or, when the tag was never closed, to the end of the turn.
+var pastedBlock = regexp.MustCompile(`(?s)<pasted_content\b[^>]*>(?:.*?</pasted_content>|.*$)`)
+
 // steerRuleLine matches a line of Steer's own rule output quoted back into a turn:
 // the section header or a "- rule | instead" bullet.
 var steerRuleLine = regexp.MustCompile(`^(## Steer Rules$|- .+ \| .+)`)
@@ -92,9 +96,10 @@ func (c *Classifier) Classify(e transcript.Event) (Signal, bool) {
 	return Signal{}, false
 }
 
-// correction matches a human turn against correction candidate language.
+// correction matches a human turn against correction candidate language. Pasted
+// blocks are removed first: they are text the person brought in, not what they said.
 func (c *Classifier) correction(text string) (Signal, bool) {
-	trimmed := strings.TrimSpace(text)
+	trimmed := strings.TrimSpace(pastedBlock.ReplaceAllString(text, ""))
 	if trimmed == "" || strings.HasPrefix(trimmed, "<") || strings.HasPrefix(trimmed, "Caveat:") {
 		return Signal{}, false
 	}
@@ -197,6 +202,8 @@ func ParserInstrument() string {
 	h.Write([]byte("correction-skip:" + steerRuleLine.String()))
 	h.Write([]byte{0})
 	h.Write([]byte("correction-skip:" + askedOpinion.String()))
+	h.Write([]byte{0})
+	h.Write([]byte("correction-skip:" + pastedBlock.String()))
 	h.Write([]byte{0})
 	h.Write([]byte(failurePattern.String()))
 	h.Write([]byte{0})

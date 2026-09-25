@@ -611,3 +611,39 @@ func TestCorrectionCandidates(t *testing.T) {
 		}
 	}
 }
+
+// TestCorrectionIgnoresPastedBlocks: text the harness marks as pasted is not what the
+// person said, so it raises no correction, and a correction typed beside it still does,
+// even when the paste opens the turn.
+func TestCorrectionIgnoresPastedBlocks(t *testing.T) {
+	cases := []struct {
+		text string
+		want string
+	}{
+		{"<pasted_content id=\"a1\">\ndon't use var in this file\n</pasted_content>\n\nwhat do you make of this?", ""},
+		{"<pasted_content id=\"a1\">\nbuild log\n</pasted_content>\n\nwhy did you add the flag?", "why did you add the flag?"},
+		{"read this <pasted_content id=\"b2\">\nnever use mocks here", ""},
+		{"don't use var\n<pasted_content id=\"c3\">\nquoted\n</pasted_content>", "don't use var"},
+	}
+	for _, c := range cases {
+		sig, ok := NewClassifier().Classify(transcript.Event{Kind: transcript.KindHumanTurn, Text: c.text})
+		if got := map[bool]string{true: sig.Key}[ok]; got != c.want {
+			t.Errorf("%q: key %q, want %q", c.text, got, c.want)
+		}
+	}
+}
+
+// TestScannerReadsNoCorrectionInAHeadlessRun: a `claude -p` run's user turn is the
+// prompt a program passed, such as a commit review with a diff in it.
+func TestScannerReadsNoCorrectionInAHeadlessRun(t *testing.T) {
+	dir := t.TempDir()
+	headless := `{"type":"user","entrypoint":"sdk-cli","sessionId":"s1","timestamp":"2026-07-10T00:00:00Z","message":{"content":"Review this diff.\n+// don't use the cache here"}}`
+	tf := writeTranscript(t, dir, "s.jsonl", []string{headless})
+	s := NewScanner(time.Time{})
+	if err := s.ScanSession(cc.New(), tf); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Finalize(30, nil, nil).Signals.UserCorrections; len(got) != 0 {
+		t.Fatalf("a headless prompt produced corrections: %+v", got)
+	}
+}

@@ -24,7 +24,7 @@ func (Adapter) Harness() harness.ID { return harness.Codex }
 
 // instrument is this adapter's normalization identity, pinned by
 // TestInstrumentMatchesFixtureReplay. Bump it when that test fails.
-const instrument = "codex:1e3d4014"
+const instrument = "codex:bee30484"
 
 func (Adapter) Instrument() string { return instrument }
 
@@ -130,6 +130,10 @@ type sessionMeta struct {
 	SessionID string `json:"session_id"`
 	ID        string `json:"id"`
 	Cwd       string `json:"cwd"`
+	// Source is "exec" on a `codex exec` root, and Originator is "codex_exec" on it
+	// and on every thread it spawns. Either marks a headless run.
+	Source     json.RawMessage `json:"source"`
+	Originator string          `json:"originator"`
 	// SubagentHistoryStart is the first ordinal belonging to this thread. A
 	// subagent forks its parent's history, so every earlier entry in this file
 	// is a verbatim replay of entries the parent's own rollout already holds.
@@ -217,6 +221,8 @@ type streamState struct {
 	threadID     string
 	cwd          string
 	historyStart int
+	// headless marks a `codex exec` rollout, whose user turns a program wrote.
+	headless bool
 
 	sawPrimaryTurn bool
 	legacyTurns    []transcript.Event
@@ -285,6 +291,7 @@ func (st *streamState) readMeta(raw json.RawMessage) {
 		st.sessionID = meta.ID
 	}
 	st.cwd = meta.Cwd
+	st.headless = meta.Originator == "codex_exec" || string(meta.Source) == `"exec"`
 	if meta.ID != "" && meta.ID != st.sessionID {
 		st.threadID = meta.ID
 		st.historyStart = meta.SubagentHistoryStart
@@ -298,7 +305,7 @@ func (st *streamState) humanTurn(p payload, base transcript.Event) error {
 	}
 	st.counts.Entries++
 	st.sawPrimaryTurn = true
-	base.Kind, base.Text = transcript.KindHumanTurn, itemText(p.Content)
+	base.Kind, base.Text, base.Meta = transcript.KindHumanTurn, itemText(p.Content), st.headless
 	return st.emit(base)
 }
 
@@ -307,7 +314,7 @@ func (st *streamState) humanTurn(p payload, base transcript.Event) error {
 // sources overlap when both are present, so these are emitted only if the file
 // yields no primary turn at all.
 func (st *streamState) legacyTurn(p payload, base transcript.Event) {
-	base.Kind, base.Text = transcript.KindHumanTurn, p.Message
+	base.Kind, base.Text, base.Meta = transcript.KindHumanTurn, p.Message, st.headless
 	st.legacyTurns = append(st.legacyTurns, base)
 }
 
