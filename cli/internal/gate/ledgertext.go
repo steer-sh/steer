@@ -33,8 +33,8 @@ func PlaceholderSubject(s string) bool {
 var ledgerRoundRe = regexp.MustCompile(
 	`(?im)^[ \t]*(?:[-+>]\s*)?\**\s*` + regexp.QuoteMeta(LedgerHeader) + `[^\n]*?\(\s*round\s*(\d+)`)
 
-// ledgerSectionRe reads one round's section out of a chain ledger: `**Round 3/4**` or
-// `**Round 5, terminal**`. A ledger carrying these answers every round of its chain, so
+// ledgerSectionRe reads one round's section out of a chain ledger: `**Round 3, blocking**`
+// or `**Round 5, terminal**`, and `**Round 3/4**` in older ledgers. A ledger carrying these answers every round of its chain, so
 // it belongs to no single round and only the resolver can join it.
 var ledgerSectionRe = regexp.MustCompile(`(?im)^[ \t]*(?:[-+>]\s*)?\**\s*Round\s+\d+\s*[/,]`)
 
@@ -195,20 +195,24 @@ func HasLedgerLine(text string) bool {
 	return false
 }
 
+// chainLedgerName is what a chain ledger's header calls the chain: "review sequence",
+// or "chain ledger" in older ledgers.
+const chainLedgerName = `(?:review sequence|chain ledger)`
+
 // ledgerChainRe matches a chain ledger's header line. One message can carry more than
 // one, so a candidate is a BLOCK of a message, never the whole message.
 var ledgerChainRe = regexp.MustCompile(
-	`(?im)^[ \t]*(?:[-+>]\s*)?\**\s*` + regexp.QuoteMeta(LedgerHeader) + `[^\n]*chain ledger`)
+	`(?im)^[ \t]*(?:[-+>]\s*)?\**\s*` + regexp.QuoteMeta(LedgerHeader) + `[^\n]*` + chainLedgerName)
 
 // ledgerSectionCapRe is ledgerSectionRe with the round number captured.
 var ledgerSectionCapRe = regexp.MustCompile(`(?im)^[ \t]*(?:[-+>]\s*)?\**\s*Round\s+(\d+)\s*[/,]`)
 
 // blockSubjectRe reads the commit subject a chain ledger's header line names, after
 // the chain ID when the header carries one.
-var blockSubjectRe = regexp.MustCompile(`(?i)chain ledger(?:\s*#[0-9a-f]+)?\s*,\s*(.+?)\s*\**\s*$`)
+var blockSubjectRe = regexp.MustCompile(`(?i)` + chainLedgerName + `(?:\s*#[0-9a-f]+)?\s*,\s*(.+?)\s*\**\s*$`)
 
 // blockChainIDRe reads the chain ID a chain ledger's header line carries.
-var blockChainIDRe = regexp.MustCompile(`(?i)chain ledger\s*#([0-9a-f]+)\b`)
+var blockChainIDRe = regexp.MustCompile(`(?i)` + chainLedgerName + `\s*#([0-9a-f]+)\b`)
 
 // LedgerRounds returns the rounds a chain ledger reports on. Empty for a legacy
 // per-round ledger, whose one round lives in the header LedgerRound reads.

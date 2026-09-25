@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -253,26 +254,32 @@ func TestLedgerRound(t *testing.T) {
 
 // The shape the agent is told to write is a contract with its readers, so this asserts
 // against the RENDERED template rather than a copy of it. The ledger's unit is the
-// chain: its header names no round, and each round appears as its own section. Only the
-// Python resolver parses those sections, so the sections are pinned here as text.
+// chain: its header names no round, and each round appears as its own section, which
+// the section parser must read back.
 func TestTemplateHeadersCarryNoRound(t *testing.T) {
 	deny := gate.BuildDeny(3, "r", 2, 4, "", "s", "", "a reviewer")
 	if _, ok := gate.LedgerRound(deny); ok {
 		t.Error("the chain ledger's header names no round")
 	}
-	for _, want := range []string{"**Round 1/4**", "**Round 2/4**"} {
+	for _, want := range []string{"**Round 1, blocking**", "**Round 2, blocking**"} {
 		if !strings.Contains(deny, want) {
 			t.Errorf("deny template is missing the %s section", want)
 		}
+	}
+	if blocks := gate.ChainBlocks(deny); len(blocks) != 1 || !reflect.DeepEqual(gate.LedgerRounds(blocks[0]), map[int]bool{1: true, 2: true}) {
+		t.Errorf("the deny template's ledger must read back as one block with rounds 1 and 2: %q", blocks)
 	}
 	capped := gate.BuildCap(3, "r", 5, 4, "s", "", "a reviewer")
 	if _, ok := gate.LedgerRound(capped); ok {
 		t.Error("the terminal template hands over that same chain header")
 	}
-	for _, want := range []string{"**Round 1/4**", "**Round 5, terminal**"} {
+	for _, want := range []string{"**Round 1, blocking**", "**Round 5, terminal**"} {
 		if !strings.Contains(capped, want) {
 			t.Errorf("cap template is missing the %s section", want)
 		}
+	}
+	if blocks := gate.ChainBlocks(capped); len(blocks) != 1 || !reflect.DeepEqual(gate.LedgerRounds(blocks[0]), map[int]bool{1: true, 5: true}) {
+		t.Errorf("the cap template's ledger must read back as one block with rounds 1 and 5: %q", blocks)
 	}
 }
 

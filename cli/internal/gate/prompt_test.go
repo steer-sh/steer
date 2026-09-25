@@ -17,8 +17,8 @@ var promptDigests = map[string]struct {
 	want string
 }{
 	"review":     {reviewPrompt, "956536885eab8804f8029edc29953336a7c4664e09a0a09a58f59cf48df00b2c"},
-	"deny":       {denyTemplate, "cb5c70a28338a73c885076836415e2a70723de4094d4a3b96d542d7dacb9b738"},
-	"cap":        {capTemplate, "513b1b7c400d8dc217688530c66bf452a8668ae01d9f345a0a92a4831bc21b54"},
+	"deny":       {denyTemplate, "413e7e6b933fb6b79c9cfe91c2cec26d5d6e557beab1f9a87585f4ca7bc175bb"},
+	"cap":        {capTemplate, "c48ff124e9ef6cbae111a3e66367ea2ec371b8840de9c76b8955ad7991e2a1bc"},
 	"round-note": {roundNote, "f40acabd50e95481f309c08ccacf4cac025835d79e8e265601170f7c4a4d34c3"},
 	"rerun-note": {rerunNoteText, "27d14c6916336301abd551b90d82d5fc799e027ae7d95b0520ef501c0efa9f1b"},
 }
@@ -84,13 +84,13 @@ func TestCommitSubject(t *testing.T) {
 // The subject the row stores and the subject the agent is handed must be one string.
 func TestSubjectReachesTheHeader(t *testing.T) {
 	const subject = "fix(resolver): chain join — one ledger per chain"
-	if !strings.Contains(BuildDeny(3, "r", 2, 4, "", subject, "", "a reviewer"), "chain ledger, "+subject+"**") {
+	if !strings.Contains(BuildDeny(3, "r", 2, 4, "", subject, "", "a reviewer"), "review sequence, "+subject+"**") {
 		t.Error("the deny header must carry the subject verbatim")
 	}
-	if !strings.Contains(BuildCap(3, "r", 5, 4, subject, "", "a reviewer"), "chain ledger, "+subject+"**") {
+	if !strings.Contains(BuildCap(3, "r", 5, 4, subject, "", "a reviewer"), "review sequence, "+subject+"**") {
 		t.Error("the terminal header must carry it too")
 	}
-	if !strings.Contains(BuildDeny(3, "r", 2, 4, "", "", "", "a reviewer"), "chain ledger, "+NoSubject+"**") {
+	if !strings.Contains(BuildDeny(3, "r", 2, 4, "", "", "", "a reviewer"), "review sequence, "+NoSubject+"**") {
 		t.Error("an unread commit message still renders a header, matching no row")
 	}
 }
@@ -101,7 +101,7 @@ func TestChainIDReachesTheHeader(t *testing.T) {
 		"deny": BuildDeny(3, "r", 2, 4, "", subject, "7f3a2b9c", "a reviewer"),
 		"cap":  BuildCap(3, "r", 5, 4, subject, "7f3a2b9c", "a reviewer"),
 	} {
-		start := strings.Index(out, "**"+LedgerHeader+" — chain ledger")
+		start := strings.Index(out, "**"+LedgerHeader+" — review sequence")
 		if start < 0 {
 			t.Fatalf("%s renders no chain header", name)
 		}
@@ -111,7 +111,7 @@ func TestChainIDReachesTheHeader(t *testing.T) {
 		}
 	}
 	legacy := BuildDeny(3, "r", 2, 4, "", subject, "", "a reviewer")
-	if !strings.Contains(legacy, "chain ledger, "+subject+"**") {
+	if !strings.Contains(legacy, "review sequence, "+subject+"**") {
 		t.Error("a chain with no ID renders the header it had before")
 	}
 	if BlockChainID("**Commit gate fired — chain ledger, fix: #abc123 in the parser**") != "" {

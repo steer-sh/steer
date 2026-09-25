@@ -24,17 +24,17 @@ Keep your round-{firing} verdicts where you can find them again. A round reconst
 
 Each line is SELF-CONTAINED. Never refer to a finding by a bare label — "E2", "the third finding", "R1.2" alone — because those identifiers exist only in text the user does not have. Say what the finding CLAIMED, in your own words, before ruling on it.
 
-Emit exactly this shape, ahead of your other commentary. Copy the header line as it stands, chain ID and subject included — it is what files this ledger against THIS commit, and one turn often commits more than once to the same repo. Every round that fired then gets a section, and its round number is not optional either — that is what files the section against the round it answers:
+Emit exactly this shape, ahead of your other commentary. Copy the header line as it stands, sequence ID and subject included — it is what files this ledger against THIS commit, and one turn often commits more than once to the same repo. Every round that fired then gets a section, and its round number is not optional either — that is what files the section against the round it answers:
 
-**Commit gate fired — chain ledger{chain}, {subject}**
+**Commit gate fired — review sequence{chain}, {subject}**
 
-**Round 1/{cap}** — <N> reviewers, <M> raw findings, <K> distinct concerns.
+**Round 1, blocking** — <N> reviewers, <M> raw findings, <K> distinct concerns.
 
 - **ACCEPTED** — <the concern in one clause> → <the change you made, file:line>
 - **REJECTED** — <the concern in one clause> → <the premise, and why it is false>
 - Weakest surviving: <the concern> — <why it still stands, or that none survived>
 
-**Round 2/{cap}** — <N> reviewers, <M> raw findings, <K> distinct concerns.
+**Round 2, blocking** — <N> reviewers, <M> raw findings, <K> distinct concerns.
 
 - one section in this shape for every round that fired, up to and including the last.
 

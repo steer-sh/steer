@@ -237,7 +237,7 @@ func TestChainCarriesOneIDThroughItsRounds(t *testing.T) {
 		}
 	}
 	for _, d := range []Decision{first, second} {
-		if !strings.Contains(d.Reason, "chain ledger #"+id+", subject**") {
+		if !strings.Contains(d.Reason, "review sequence #"+id+", subject**") {
 			t.Errorf("the header the agent copies must carry the chain ID %s", id)
 		}
 	}
@@ -255,7 +255,7 @@ func TestChainSavedWithoutAnIDStaysWithoutOne(t *testing.T) {
 	writeFileAt(t, h.repo, "a.py", lines(120)+"fixed = 1\n")
 	gitCmd(t, h.repo, "add", "-A")
 	d := h.handle()
-	if !strings.Contains(d.Reason, "chain ledger, subject**") {
+	if !strings.Contains(d.Reason, "review sequence, subject**") {
 		t.Error("a chain from before IDs renders its header without one")
 	}
 	rows := h.rows()
