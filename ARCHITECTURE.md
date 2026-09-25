@@ -336,6 +336,10 @@ to native hooks and git pre-commit. Reviewer processes live under
 `internal/gate/reviewers/`; prompts and their pinned digests live under `prompts/`.
 The review prompt digest is part of reviewer identity. Ledger rows record both a
 legacy instrument string and structured identity dimensions.
+`steer commit-gate test-reviewer` (`gate.TrialReview`) runs one reviewer over a fixed
+sample diff through the same prompt and outcome classification, and writes no ledger
+row or chain state. Setup runs it because a resolvable executable does not prove that
+the reviewer answers; it proves nothing about hook delivery.
 
 The stock review prompt is embedded and fixed; the review addendum is the
 operator-writable addition to it (`internal/gate/addendum.go`). Each request

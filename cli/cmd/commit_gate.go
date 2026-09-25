@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/claude"
@@ -229,6 +230,72 @@ native tool_call reply on stdout. It always exits 0 so adapter failures fail ope
 	},
 }
 
+var commitGateTestReviewerCmd = &cobra.Command{
+	Use:   "test-reviewer",
+	Short: "Run one review of a sample diff with the configured reviewer",
+	Long: `test-reviewer sends one small sample diff to the configured reviewer, with its
+provider, model and effort, and checks that the reply follows the review protocol.
+It shows that the reviewer CLI runs and answers here. It does not show that a harness
+delivers the commit hook: 'steer status' reads that. It writes no ledger row, and it
+exits non-zero when the reviewer does not answer.`,
+	Example: `  steer commit-gate test-reviewer
+  steer commit-gate test-reviewer --provider claude-code --model sonnet`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, reviewer, err := resolvedGateConfig()
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Sending a sample diff to %s (%s%s). One run; this can take up to %s.\n",
+			reviewers.ProviderLabel(reviewer.Name()), cfg.ReviewerModel, effortNote(cfg.ReviewerEffort), cfg.ReviewTimeout)
+		result, err := gate.TrialReview(context.Background(), cfg, reviewer)
+		if err != nil {
+			return err
+		}
+		text, ok := renderTrial(result, cfg)
+		fmt.Println()
+		fmt.Print(text)
+		if !ok {
+			os.Exit(1)
+		}
+		return nil
+	},
+}
+
+// renderTrial words a trial review's result. ok is false when the reviewer did not
+// answer, which is the failure every commit would meet.
+func renderTrial(r gate.TrialResult, cfg gate.Config) (string, bool) {
+	if r.Answered() {
+		found := "no findings"
+		if r.Findings == 1 {
+			found = "1 finding"
+		} else if r.Findings > 1 {
+			found = fmt.Sprintf("%d findings", r.Findings)
+		}
+		return styles.SuccessBox.Render(fmt.Sprintf(
+			"The reviewer answered in %s with %s on the sample diff.\n"+
+				"Each commit review runs it %d times in parallel.",
+			r.Elapsed.Round(time.Second), found, cfg.ReviewerRuns)) + "\n", true
+	}
+	width := styles.Width()
+	detail := string(r.Run.Outcome)
+	if r.Run.Detail != "" {
+		detail += ": " + truncateDetail(r.Run.Detail, 400)
+	}
+	return styles.WarningBox.Render("The reviewer did not answer.\n"+
+			"Until it answers, every commit goes through unreviewed.") + "\n" +
+			styles.Wrap("Reviewer output: "+detail, "  ", width) +
+			styles.Wrap("Check that the reviewer CLI is signed in and that the model name is correct: steer config show", "  ", width),
+		false
+}
+
+func truncateDetail(text string, n int) string {
+	text = strings.TrimSpace(text)
+	if len(text) <= n {
+		return text
+	}
+	return text[:n] + "…"
+}
+
 var commitGateInstallCmd = &cobra.Command{
 	Use:   "install",
 	Short: "Arm the commit gate on one channel",
@@ -342,7 +409,8 @@ func installSteps(cfg gate.Config, target harness.ID, command string) []status.S
 // happen, and puts the registration facts beneath it. A success box over an open step
 // reads as a working gate.
 func renderInstallReadiness(steps []status.Step, registered string) string {
-	return renderReadinessBox(steps, "Ready — the next `git commit` in scope is reviewed.",
+	return renderReadinessBox(steps, "Ready — the next `git commit` in scope goes to the reviewer.\n"+
+		"To check that the reviewer answers: steer commit-gate test-reviewer",
 		"Not reviewing yet — %d %s before the first review.", registered)
 }
 
@@ -755,7 +823,8 @@ func codexProjectDir() (string, error) {
 func init() {
 	rootCmd.AddCommand(commitGateCmd)
 	commitGateCmd.AddCommand(commitGateReviewCmd, commitGateCodexReviewCmd, commitGatePiReviewCmd, commitGatePreCommitCmd,
-		commitGateInstallCmd, commitGateRemoveCmd, commitGateStatusCmd, commitGateBackfillCmd)
+		commitGateInstallCmd, commitGateRemoveCmd, commitGateStatusCmd, commitGateBackfillCmd,
+		commitGateTestReviewerCmd)
 
 	commitGateBackfillCmd.Flags().BoolVar(&backfillApply, "apply", false, "Write the resolved rows")
 	commitGateBackfillCmd.Flags().BoolVar(&backfillIfDue, "if-due", false, "Exit early unless a row is due")

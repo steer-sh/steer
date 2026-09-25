@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/status"
 )
 
@@ -28,6 +29,30 @@ func TestInstallReadinessReportsReadyOnlyWithNoSteps(t *testing.T) {
 	out := renderInstallReadiness(nil, "Registered: the Claude Code commit gate on PreToolUse")
 	if !strings.Contains(out, "Ready") || strings.Contains(out, "step(s) remain") {
 		t.Errorf("output = %q; want the ready headline", out)
+	}
+	// The write proves no reviewer answers, so the ready box names the command that does.
+	if !strings.Contains(out, "steer commit-gate test-reviewer") {
+		t.Errorf("output = %q; want the pointer to the reviewer test", out)
+	}
+}
+
+// TestTrialFailureSaysCommitsGoUnreviewed: a reviewer that did not answer fails the
+// command and says what that costs, with the outcome that names the cause.
+func TestTrialFailureSaysCommitsGoUnreviewed(t *testing.T) {
+	cfg := gate.Defaults()
+	out, ok := renderTrial(gate.TrialResult{Run: gate.ReviewRun{
+		Outcome: gate.OutcomeExit, Detail: "rc=1 not logged in"}}, cfg)
+	if ok {
+		t.Fatal("ok = true for a reviewer that did not answer")
+	}
+	for _, want := range []string{"did not answer", "exit: rc=1 not logged in", "unreviewed"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output = %q; missing %q", out, want)
+		}
+	}
+	out, ok = renderTrial(gate.TrialResult{Run: gate.ReviewRun{Text: "NO FINDINGS", Outcome: gate.OutcomeOK}}, cfg)
+	if !ok || !strings.Contains(out, "no findings") {
+		t.Errorf("ok = %v, output = %q; want an answer with no findings", ok, out)
 	}
 }
 

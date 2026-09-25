@@ -66,7 +66,7 @@ Each row is a provider id, its name, the executable it calls and whether that
 executable resolves here. Present the `available` ones first. An executable that
 resolves is not proof the reviewer runs — it may be unauthenticated — and a `missing`
 one is still a valid choice if the user is about to install it. Say both plainly
-rather than filtering the list.
+rather than filtering the list. Step 5 runs one test review, which is the proof.
 
 The reviewer is independent of the agent writing the code. A user working in Codex
 may prefer the Claude Code reviewer, and a Pi user must pick one of these three
@@ -176,6 +176,18 @@ Each harness decides whether a registered hook actually runs:
 - **Pi** — a project extension runs only after Pi trusts the project. A global
   registration needs no project trust.
 
+Then check that the reviewer answers. This sends one small sample diff to the
+configured reviewer and writes no review record:
+
+```bash
+"${STEER_BIN}" commit-gate test-reviewer
+```
+
+If it exits non-zero, relay its output verbatim and stop here: until the reviewer
+answers, every commit goes through unreviewed. The usual causes are a reviewer CLI
+that is not signed in and a model name the CLI does not know. Run it again after the
+user fixes the cause. Do not report setup as complete while it fails.
+
 Finish by reading the answer back:
 
 ```bash
@@ -184,9 +196,10 @@ Finish by reading the answer back:
 
 Report its `Commit review` section verbatim. Do not claim the gate is armed on the strength
 of the write alone: registration is the weakest of four states, and only an observed
-review proves the whole path. Tell the user to make a code change and commit
-normally, and that a small or prose-only change may skip review — a skipped review is
-not a clean review.
+review proves the whole path. A passing test review proves the reviewer, not that the
+harness delivers the hook. Tell the user to make a code change and commit normally.
+A small or prose-only change skips review, and the gate prints a line that says so
+and why; a skipped review is not a clean review.
 
 ## Step 6: Repository checks (only when the user asks)
 
