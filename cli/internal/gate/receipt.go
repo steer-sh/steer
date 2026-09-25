@@ -42,12 +42,18 @@ func commitNameParts(req Request) []string {
 	return parts
 }
 
-// proceed builds one receipt for a commit the gate does not block and sends it to both
-// channels.
+// proceed builds the receipt for a commit the gate does not block. Both channels carry
+// the same sentence; only the agent's copy names the firing and the diff digest.
 //
 // Kind stays the caller's: a path that reviewed and passed still allows, and a path
 // that reviewed nothing still declines to rule.
 func proceed(kind DecisionKind, req Request, raw string, firing int, sentence string, err error) Decision {
-	text := fmt.Sprintf("[commit-gate] %s: %s", CommitIdentity(req, raw, firing), sentence)
-	return Decision{Kind: kind, Reason: text, SystemMessage: text, LedgerError: err}
+	return Decision{Kind: kind, Reason: agentReceipt(req, raw, firing, sentence),
+		SystemMessage: fmt.Sprintf("[commit-gate] %s: %s", CommitName(req), sentence), LedgerError: err}
+}
+
+// agentReceipt is the agent's copy of a let-through receipt: the sentence under the
+// commit's full identity.
+func agentReceipt(req Request, raw string, firing int, sentence string) string {
+	return fmt.Sprintf("[commit-gate] %s: %s", CommitIdentity(req, raw, firing), sentence)
 }

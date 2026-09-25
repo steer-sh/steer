@@ -167,8 +167,11 @@ func TestFindingsDeny(t *testing.T) {
 	if !strings.Contains(d.Reason, oneFinding) {
 		t.Error("the deny must carry the reviewers' raw output")
 	}
-	if !strings.Contains(d.SystemMessage, "gate FIRED (round 1/") {
-		t.Errorf("the operator receipt must name the round: %q", d.SystemMessage)
+	wantNote := "[commit-gate] Commit blocked — 2 of 2 reviewers returned 2 finding(s), " +
+		"duplicates included, on a diff of 1 changed file(s). Only the agent sees the " +
+		"findings; expect its answer to each one in its reply. Blocking round 1 of at most 4."
+	if d.SystemMessage != wantNote {
+		t.Errorf("operator receipt:\n got %q\nwant %q", d.SystemMessage, wantNote)
 	}
 	row := h.lastRow()
 	if row["phase"] != "deny" || row["finding_slots"] != float64(2) {
@@ -191,11 +194,11 @@ func TestUnchangedRetryEndsChain(t *testing.T) {
 		t.Fatalf("retry Kind = %v, want ContextOnly — the chain end must not also start "+
 			"auto-approving, and the agent must still be told the gate stopped", d.Kind)
 	}
-	if !strings.Contains(d.SystemMessage, "byte-identical") {
+	if !strings.Contains(d.SystemMessage, "identical to the one the reviewers already read") {
 		t.Errorf("the receipt must say why the chain ended: %q", d.SystemMessage)
 	}
-	if d.Reason != d.SystemMessage {
-		t.Errorf("both channels carry one receipt: %q vs %q", d.Reason, d.SystemMessage)
+	if receiptSentence(d.Reason) != receiptSentence(d.SystemMessage) {
+		t.Errorf("both channels carry one sentence: %q vs %q", d.Reason, d.SystemMessage)
 	}
 	rows := h.rows()
 	retry := rows[len(rows)-1]
@@ -276,7 +279,7 @@ func TestChangedRetryRefires(t *testing.T) {
 	if d.Kind != Deny {
 		t.Fatalf("second round Kind = %v, want Deny", d.Kind)
 	}
-	if !strings.Contains(d.SystemMessage, "round 2/") {
+	if !strings.Contains(d.SystemMessage, "Blocking round 2 of at most") {
 		t.Errorf("the receipt must name round 2: %q", d.SystemMessage)
 	}
 	if !strings.Contains(d.Reason, "This is firing 2 of at most") {
@@ -303,6 +306,10 @@ func TestCapEndsWithTerminalReview(t *testing.T) {
 	if !strings.Contains(d.Reason, "ENDED at its") {
 		t.Error("the terminal message must say the chain ended and is not blocking")
 	}
+	if !strings.HasPrefix(d.SystemMessage, "[commit-gate] Commit not blocked — the review "+
+		"sequence reached its limit of 2 blocks.") {
+		t.Errorf("the operator line must lead with the commit's fate: %q", d.SystemMessage)
+	}
 	if got := h.lastRow()["phase"]; got != "cap" {
 		t.Errorf("phase = %v, want cap", got)
 	}
@@ -316,7 +323,7 @@ func TestAllReviewersUnavailableLogsUngated(t *testing.T) {
 	if d.Kind != Allow {
 		t.Fatalf("Kind = %v, want Allow — the gate fails open", d.Kind)
 	}
-	if !strings.Contains(d.SystemMessage, "ungated") {
+	if !strings.Contains(d.SystemMessage, "NOT reviewed") {
 		t.Errorf("the operator must be told the change was not reviewed: %q", d.SystemMessage)
 	}
 	row := h.lastRow()
@@ -554,9 +561,6 @@ func TestACleanReviewReachesTheAgentWithItsIdentity(t *testing.T) {
 	if d.Kind != Allow {
 		t.Fatalf("Kind = %v, want Allow — a clean review keeps its auto-approval", d.Kind)
 	}
-	if d.Reason != d.SystemMessage {
-		t.Fatalf("both channels carry one receipt: %q vs %q", d.Reason, d.SystemMessage)
-	}
 	raw := stagedDiff(t, h.cfg, h.repo)
 	for _, want := range []string{filepath.Base(h.repo), "subject", Digest(raw), "found nothing"} {
 		if !strings.Contains(d.Reason, want) {
@@ -566,6 +570,17 @@ func TestACleanReviewReachesTheAgentWithItsIdentity(t *testing.T) {
 	if strings.Contains(d.Reason, "correct") == false {
 		t.Error("the receipt must say the review ran, not that the change is sound")
 	}
+	wantUser := fmt.Sprintf("[commit-gate] %s \"subject\": 2 reviewers read this diff and "+
+		"found nothing — commit proceeds.", filepath.Base(h.repo))
+	if d.SystemMessage != wantUser {
+		t.Errorf("operator receipt:\n got %q\nwant %q", d.SystemMessage, wantUser)
+	}
+}
+
+// receiptSentence returns what a receipt says after the commit it names.
+func receiptSentence(receipt string) string {
+	_, sentence, _ := strings.Cut(receipt, ": ")
+	return sentence
 }
 
 // A retry that reads the WORKING TREE sees every edit the last round saw and more. It

@@ -381,13 +381,14 @@ neither the index nor the working tree the gate reads; and a bundled
 form is reviewed from the working tree (`cc.DiffSpecFor`), which would show the
 reviewers edits the commit does not carry.
 
-Every decision that does not block carries one receipt to both the agent's context
+Every decision that does not block carries a receipt to both the agent's context
 and the operator (`internal/gate/receipt.go`); no path lets a commit through
 silently, because absent agent-facing text is indistinguishable from an absent
 gate. Claude Code carries it beside an `allow`, so a clean review keeps its
-auto-approval; the other adapters carry it without a decision. The receipt
-identifies the commit by repository, subject and diff digest — the hook runs
-before a commit hash exists. A skipped commit (prose only, or a raw diff under
+auto-approval; the other adapters carry it without a decision. Both copies carry
+one sentence. The agent's copy identifies the commit by repository, subject,
+firing and diff digest — the hook runs before a commit hash exists; the
+operator's names the repository and subject. A skipped commit (prose only, or a raw diff under
 `MinDiffChars`) gets a receipt that names the reason and rules nothing; only a
 repository git cannot read stays silent.
 
