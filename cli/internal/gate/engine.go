@@ -120,6 +120,8 @@ type prepared struct {
 	// the chain state and the changed-since-last-round test all key on it — because
 	// two different over-budget versions of one file render to the same stat block.
 	raw string
+	// chars is the raw diff's length on a round skipped as too small.
+	chars int
 }
 
 // prepare resolves the diff for this round, logging the skip rows itself so both
@@ -149,7 +151,7 @@ func (e *Engine) prepare(req Request, firing int, d *DiffResult) (prepared, stri
 		// direction that flatters the gate.
 		err := e.log(req, Row{"ts": time.Now().Unix(), "phase": "skip-empty",
 			"files": len(paths), "chars": len(d.Raw), "firing": firing})
-		return prepared{}, "empty", err
+		return prepared{chars: len(d.Raw)}, "empty", err
 	}
 	return prepared{paths: paths, diff: d.Text, raw: d.Raw}, "", nil
 }
@@ -181,7 +183,7 @@ func (e *Engine) Handle(ctx context.Context, req Request) Decision {
 func (e *Engine) handleFirst(ctx context.Context, req Request, chain *Chain) Decision {
 	p, status, err := e.prepare(req, 1, nil)
 	if status != "" {
-		return Decision{Kind: Silent, LedgerError: err}
+		return e.skipped(req, status, p.chars, err)
 	}
 	// The cleared record is read once the diff is in hand, because it is keyed on the
 	// diff's own content. That is also one `git diff` cheaper than probing first.
@@ -287,10 +289,31 @@ func (e *Engine) handleRetry(ctx context.Context, req Request, chain *Chain, sta
 			// about the round the chain still awaits an answer for.
 			return proceed(ContextOnly, req, state.Diff, firing, notice, logErr)
 		}
-		return Decision{Kind: Silent, LedgerError: logErr}
+		return e.skipped(req, status, p.chars, logErr)
 	}
 	// The diff changed, so this round reviews code no reviewer has read.
 	return withLedgerError(e.reviewCommit(ctx, req, chain, p, next), logErr)
+}
+
+// skipped answers a commit the gate chose not to review, with one receipt that names
+// the reason on both channels: a skip otherwise looks exactly like a gate that never
+// ran. It rules nothing, so the commit keeps its own permission path. A repository git
+// could not read is the fail-open case and stays silent.
+func (e *Engine) skipped(req Request, status string, chars int, err error) Decision {
+	var why string
+	switch {
+	case status == "prose":
+		why = "every changed file is prose (.md, .txt and the like), which the gate does not review"
+	case status == "empty" && chars == 0:
+		why = "the diff is empty"
+	case status == "empty":
+		why = fmt.Sprintf("the diff is %d characters, under the %d-character minimum for a review",
+			chars, e.cfg.MinDiffChars)
+	default:
+		return Decision{Kind: Silent, LedgerError: err}
+	}
+	text := fmt.Sprintf("[commit-gate] %s: not reviewed — %s.", CommitName(req), why)
+	return Decision{Kind: ContextOnly, Reason: text, SystemMessage: text, LedgerError: err}
 }
 
 func withLedgerError(d Decision, err error) Decision {

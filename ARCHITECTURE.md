@@ -381,7 +381,9 @@ silently, because absent agent-facing text is indistinguishable from an absent
 gate. Claude Code carries it beside an `allow`, so a clean review keeps its
 auto-approval; the other adapters carry it without a decision. The receipt
 identifies the commit by repository, subject and diff digest — the hook runs
-before a commit hash exists.
+before a commit hash exists. A skipped commit (prose only, or a raw diff under
+`MinDiffChars`) gets a receipt that names the reason and rules nothing; only a
+repository git cannot read stays silent.
 
 `internal/gate/resolve/` joins adjudication rows to harness-neutral `LedgerMsg`
 values supplied by each adapter's harvest. The join uses thread id when present,

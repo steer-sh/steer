@@ -3,6 +3,7 @@ package gate
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -347,8 +348,8 @@ func TestProseOnlySkips(t *testing.T) {
 		Repo: repo, Actor: "s", Channel: ChannelPreToolUse, SessionID: "s",
 		Spec: DiffSpec{StagedOnly: true}, Message: "notes",
 	})
-	if d.Kind != Silent {
-		t.Fatalf("Kind = %v, want Silent", d.Kind)
+	if d.Kind != ContextOnly {
+		t.Fatalf("Kind = %v, want ContextOnly — a skip rules nothing and still says so", d.Kind)
 	}
 	if reviewer.calls != 0 {
 		t.Errorf("reviewer ran %d times on a prose-only change", reviewer.calls)
@@ -359,6 +360,39 @@ func TestProseOnlySkips(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), `"phase":"skip-prose"`) {
 		t.Errorf("row = %s, want a skip-prose phase", raw)
+	}
+	if !strings.Contains(d.SystemMessage, "not reviewed") || !strings.Contains(d.SystemMessage, "prose") {
+		t.Errorf("SystemMessage = %q; the operator must be told the commit was skipped and why", d.SystemMessage)
+	}
+	if d.Reason != d.SystemMessage {
+		t.Errorf("both channels carry one receipt: %q vs %q", d.Reason, d.SystemMessage)
+	}
+}
+
+// A diff under the minimum is skipped, and the operator line names the size and the
+// configured minimum rather than a constant.
+func TestASmallDiffSkipNamesTheConfiguredMinimum(t *testing.T) {
+	cfg := Defaults()
+	cfg.StateDir = t.TempDir()
+	cfg.MinDiffChars = 5000
+	repo := buildRepo(t, map[string]string{"a.py": lines(120)})
+	reviewer := &stubReviewer{replies: []RawRun{findingReply(oneFinding)}}
+	d := NewEngine(cfg, reviewer).Handle(context.Background(), Request{
+		Repo: repo, Actor: "s", Channel: ChannelPreToolUse, SessionID: "s",
+		Spec: DiffSpec{StagedOnly: true}, Message: "small",
+	})
+	if d.Kind != ContextOnly || reviewer.calls != 0 {
+		t.Fatalf("Kind = %v after %d reviewer calls; want an unreviewed ContextOnly skip", d.Kind, reviewer.calls)
+	}
+	chars := len(stagedDiff(t, cfg, repo))
+	for _, want := range []string{"not reviewed", fmt.Sprintf("%d characters", chars), "5000-character minimum", `"small"`} {
+		if !strings.Contains(d.SystemMessage, want) {
+			t.Errorf("SystemMessage = %q; missing %q", d.SystemMessage, want)
+		}
+	}
+	raw, err := os.ReadFile(cfg.LogFile())
+	if err != nil || !strings.Contains(string(raw), `"phase":"skip-empty"`) {
+		t.Errorf("the skip row must still be written: %s (%v)", raw, err)
 	}
 }
 

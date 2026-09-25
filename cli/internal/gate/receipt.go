@@ -12,6 +12,26 @@ import (
 // No commit hash appears here. PreToolUse fires before git runs, so the hash does not
 // exist yet.
 func CommitIdentity(req Request, raw string, firing int) string {
+	parts := commitNameParts(req)
+	tail := fmt.Sprintf("firing %d", firing)
+	if raw != "" {
+		tail += ", diff " + Digest(raw)
+	}
+	parts = append(parts, "("+tail+")")
+	return strings.Join(parts, " ")
+}
+
+// CommitName names the commit by its repository and subject alone, for a line about a
+// commit the gate did not review.
+func CommitName(req Request) string {
+	parts := commitNameParts(req)
+	if len(parts) == 0 {
+		return "commit"
+	}
+	return strings.Join(parts, " ")
+}
+
+func commitNameParts(req Request) []string {
 	var parts []string
 	if name := filepath.Base(req.Repo); name != "" && name != "." && name != string(filepath.Separator) {
 		parts = append(parts, name)
@@ -19,12 +39,7 @@ func CommitIdentity(req Request, raw string, firing int) string {
 	if subject := CommitSubject(req.Message); subject != "" {
 		parts = append(parts, fmt.Sprintf("%q", subject))
 	}
-	tail := fmt.Sprintf("firing %d", firing)
-	if raw != "" {
-		tail += ", diff " + Digest(raw)
-	}
-	parts = append(parts, "("+tail+")")
-	return strings.Join(parts, " ")
+	return parts
 }
 
 // proceed builds one receipt for a commit the gate does not block and sends it to both
