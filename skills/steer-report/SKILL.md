@@ -81,11 +81,7 @@ Then Read the queue **once**: `~/.steer/state/steer-report/queue.json` (`version
 - `corpora[]` — one row per corpus (`review-findings`, `transcript-friction`) with `present` and `size`. Relay this sweep to the user in one sentence. When `review-findings` is absent or empty, a second sentence says what comes next. Read that from `posture.readiness`, never from a `commit_gate[]` row's `effective`, which holds before Codex trusts the hook. If `readiness.reviewing` is true, the commit gate reviews each commit from now on, and a later `/steer-report` can mine those reviews for problems. If it is false, no review history collects yet: relay `readiness.headline`, each `steps[]` entry with its `fix`, and each `unverified[]` line. A Codex line clears when the user approves the hook in Codex's `/hooks`. When no commit gate is registered, `/steer-setup` arms one.
 - `checks[]` — the open steps in the repository the refresh ran in, each with `kind`, `repo`, an optional `check_id`, a `detail` and the `fix` command that clears it. `not-adopted` is a repository declaring checks that this machine never authorized to run at the end of a turn (`steer check adopt`). `never-validated` is a declared check whose cases were never replayed here, so nothing shows it fails on the problem it names (`steer check test <id>`). `integration-failure` is a passing `check.sh` that ran no declared check — the script's wiring, never a failed assertion (`steer check init` prints the managed line to add). A **stale** receipt is deliberately not here: a stale check keeps running, and `steer status --json` carries the label. These are states of a declaration, not recurrence measured over a window, so they carry no count and never enter a before/after reading.
 
-The queue tells you what is pending. The full dumps below are the raw material you cluster over. The score file holds every live record for the complete audit — the queue lists only the ones asking for a reader, not the quiet ones worth showing too. When the score file is `[]`, this machine records no fix. Say so in one line, then run the reading pass in `audit.md` anyway:
-
-> No fixes to audit on this machine.
-
-Guard evidence is a separate stream from review history, so an absent ledger says nothing about what the installed guards blocked.
+The queue tells you what is pending. The full dumps below are the raw material you cluster over. The score file holds every live record for the complete audit — the queue lists only the ones asking for a reader, not the quiet ones worth showing too. When the score file is `[]`, this machine records no fix. Guard evidence is a separate stream from review history, so an absent ledger says nothing about what the installed guards blocked: the rule under "The audit lives in `audit.md`" decides whether the audit runs.
 
 `steer fix` is the fix command set — `match`, `register`, `reject`, `scope`, `score`,
 `list`, `describe`, `retire`. `steer intervention` is the same set under its former
@@ -111,7 +107,12 @@ guard and check.sh blocks, the repair of a block judged wrong, and the field
 reference for an `interventions[]` row.
 
 When none holds, this machine has no fix to audit and no recorded block to read.
-Say so in one line and go to Step 2.
+Say so in one line and go to Step 2:
+
+> No fixes to audit on this machine.
+
+This is the report's one line about absent fixes. A failed snapshot is not this
+case: the fail-soft rule above reads `audit.md` anyway.
 
 ## Step 2: Gather new evidence from both corpora
 
@@ -338,9 +339,7 @@ match or coverage maps, which `steer fix score --json` carries by the same `id`;
 
 ### 2b. Commit-review findings
 
-If this machine has a commit-review ledger, dump the findings. If not, say so in one line, add the sentence Step 1 gives for what comes next, and skip to Step 3:
-
-> No review history on this machine.
+If this machine has a commit-review ledger, dump the findings. If not, skip to Step 3 and add nothing: Step 1's sweep sentence already told the reader that review history is absent, and what comes next.
 
 ```bash
 steer commit-gate mine findings --kind accepted --undecided > "${TMPDIR:-/tmp}/gate-findings.txt"
