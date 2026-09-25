@@ -45,7 +45,9 @@ type claudeReply struct {
 }
 
 func (c *ClaudeCode) Review(ctx context.Context, prompt, cwd string) gate.RawRun {
-	argv := []string{c.binary(), "-p", "--output-format", "json"}
+	// --no-session-persistence keeps the run out of the user's session history: its
+	// prompt is a diff, not anything the user said.
+	argv := []string{c.binary(), "-p", "--output-format", "json", "--no-session-persistence"}
 	if c.Model != "" {
 		argv = append(argv, "--model", c.Model)
 	}

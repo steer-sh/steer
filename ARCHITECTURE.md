@@ -339,7 +339,9 @@ legacy instrument string and structured identity dimensions.
 `steer commit-gate test-reviewer` (`gate.TrialReview`) runs one reviewer over a fixed
 sample diff through the same prompt and outcome classification, and writes no ledger
 row or chain state. Setup runs it because a resolvable executable does not prove that
-the reviewer answers; it proves nothing about hook delivery.
+the reviewer answers; it proves nothing about hook delivery. The Claude Code and Codex
+reviewers run with `--no-session-persistence` and `--ephemeral`, so a review adds no
+session to the user's history; agy has no such flag.
 
 The stock review prompt is embedded and fixed; the review addendum is the
 operator-writable addition to it (`internal/gate/addendum.go`). Each request

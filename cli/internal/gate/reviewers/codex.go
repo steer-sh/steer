@@ -37,7 +37,9 @@ func (c *Codex) binary() string {
 }
 
 func (c *Codex) Review(ctx context.Context, prompt, cwd string) gate.RawRun {
-	argv := []string{c.binary(), "exec", "--skip-git-repo-check"}
+	// --ephemeral keeps the run out of the user's session history: its prompt is a
+	// diff, not anything the user said.
+	argv := []string{c.binary(), "exec", "--skip-git-repo-check", "--ephemeral"}
 	if c.Model != "" {
 		argv = append(argv, "--model", c.Model)
 	}

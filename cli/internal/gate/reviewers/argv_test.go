@@ -131,7 +131,7 @@ func TestCodexRendersEffortAsAConfigOverride(t *testing.T) {
 		t.Fatalf("Review = %#v; want the stdout text", run)
 	}
 	assertArgv(t, recordedArgv(t, argvFile), []string{
-		"exec", "--skip-git-repo-check", "--model", "gpt-reviewer",
+		"exec", "--skip-git-repo-check", "--ephemeral", "--model", "gpt-reviewer",
 		"-c", "model_reasoning_effort=high", "-",
 	})
 }
@@ -144,7 +144,7 @@ func TestCodexOmitsAnUnsetModel(t *testing.T) {
 	reviewer.Binary = binary
 	reviewer.Review(context.Background(), "PROMPT", t.TempDir())
 	assertArgv(t, recordedArgv(t, argvFile), []string{
-		"exec", "--skip-git-repo-check", "-c", "model_reasoning_effort=low", "-",
+		"exec", "--skip-git-repo-check", "--ephemeral", "-c", "model_reasoning_effort=low", "-",
 	})
 }
 
@@ -156,7 +156,7 @@ func TestClaudeCodeRendersModelAndEffort(t *testing.T) {
 		t.Fatalf("Review = %#v; want the parsed result", run)
 	}
 	assertArgv(t, recordedArgv(t, argvFile), []string{
-		"-p", "--output-format", "json", "--model", "sonnet", "--effort", "xhigh",
+		"-p", "--output-format", "json", "--no-session-persistence", "--model", "sonnet", "--effort", "xhigh",
 	})
 }
 
@@ -165,7 +165,7 @@ func TestClaudeCodeOmitsAnUnsetModelAndEffort(t *testing.T) {
 	reviewer := NewClaudeCode("", "")
 	reviewer.Binary = binary
 	reviewer.Review(context.Background(), "PROMPT", t.TempDir())
-	assertArgv(t, recordedArgv(t, argvFile), []string{"-p", "--output-format", "json"})
+	assertArgv(t, recordedArgv(t, argvFile), []string{"-p", "--output-format", "json", "--no-session-persistence"})
 }
 
 func TestEffortWarningNamesOnlyADocumentedSet(t *testing.T) {
