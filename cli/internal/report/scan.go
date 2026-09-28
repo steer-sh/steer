@@ -22,6 +22,10 @@ const (
 	// tool_result payloads can be huge (full test runs); only the head is
 	// needed to classify them.
 	maxResultScan = 4096
+
+	// rejectionEnvelope opens the error result Claude Code writes for a tool call
+	// the user declined at the permission prompt, lowercased.
+	rejectionEnvelope = "the user doesn't want to proceed with this tool use"
 )
 
 // correctionPatterns match user-turn language that can name a correction. A match
@@ -128,7 +132,7 @@ func (c *Classifier) toolResult(e transcript.Event) (Signal, bool) {
 	lower := strings.ToLower(text)
 
 	switch {
-	case strings.Contains(lower, "doesn't want to proceed") || strings.Contains(lower, "user rejected"):
+	case e.IsError && strings.HasPrefix(strings.TrimSpace(lower), rejectionEnvelope):
 		key := call.Name + ": " + call.Target
 		return Signal{kindRejection, key, key}, true
 	case e.IsError && isHookBlock(lower):
@@ -213,7 +217,7 @@ func ParserInstrument() string {
 		h.Write([]byte(v))
 		h.Write([]byte{0})
 	}
-	h.Write([]byte("rejection:doesn't want to proceed|user rejected"))
+	h.Write([]byte("rejection:is-error+prefix:" + rejectionEnvelope))
 	h.Write([]byte{0})
 	h.Write([]byte("hookblock:steer-footer-to-name|hook+block|denied,key-on-footer"))
 	return "scan-" + hex.EncodeToString(h.Sum(nil))[:12]

@@ -54,6 +54,7 @@ type Signals struct {
 	// Precision is checked by hand; recall is unmeasured.
 	UserCorrections []*Cluster `json:"user_corrections"`
 	// UserRejections are tool calls the user declined at the permission prompt.
+	// Only Claude Code's decline result is recognized.
 	UserRejections []*Cluster `json:"user_rejections"`
 	// ToolFailures are tool results matching lint/test/compile failure patterns.
 	ToolFailures []*Cluster `json:"tool_failures"`

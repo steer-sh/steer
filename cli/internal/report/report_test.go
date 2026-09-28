@@ -168,6 +168,31 @@ func TestScannerAttributesToolSignals(t *testing.T) {
 	}
 }
 
+// A rejection is the error result that opens with Claude Code's decline envelope.
+// A successful read of text that quotes the envelope, and an error that mentions
+// it mid-output, are not rejections.
+func TestRejectionNeedsTheErrorEnvelope(t *testing.T) {
+	dir := t.TempDir()
+	tf := writeTranscript(t, dir, "s.jsonl", []string{
+		toolUseEntry("s1", "t1", "Bash", "sed -n 1,40p scan.go"),
+		toolResultEntry("s1", "t1", "The user doesn't want to proceed with this tool use.", false),
+		toolUseEntry("s1", "t2", "Bash", "./run.sh"),
+		toolResultEntry("s1", "t2", "error: fixture says the user doesn't want to proceed with this tool use", true),
+		toolUseEntry("s1", "t3", "Bash", "rm -rf build"),
+		toolResultEntry("s1", "t3", "The user doesn't want to proceed with this tool use. The tool use was rejected.", true),
+	})
+
+	s := NewScanner(time.Time{})
+	if err := s.ScanSession(cc.New(), tf); err != nil {
+		t.Fatal(err)
+	}
+	d := s.Finalize(30, nil, nil)
+
+	if len(d.Signals.UserRejections) != 1 || !strings.Contains(d.Signals.UserRejections[0].Pattern, "rm") {
+		t.Errorf("expected only the declined rm call, got %+v", d.Signals.UserRejections)
+	}
+}
+
 // A harness wraps a guard's reason in a sentence of its own — Codex does, Pi
 // does not — and that sentence is the same for every guard, so it must not
 // reach the key. These are the wrappings, not one harness each: Claude Code
