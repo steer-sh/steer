@@ -95,8 +95,8 @@ Read the linked architecture section before changing the corresponding boundary:
 
 ## Changes that must travel together
 
-- Report digest: `cli/internal/report/digest.go` and
-  `skills/steer-report/SKILL.md`.
+- Report index and details: `cli/internal/report/digest.go` and `index.go`, and
+  Step 2a of `skills/steer-report/SKILL.md`; a shape change bumps `DigestVersion`.
 - Status JSON: the projection `cli/internal/status/json.go` and the one documented
   copy in `skills/steer-report/SKILL.md`, whose `interventions[]` row fields and
   their `steer fix score --json` detail rows live in `skills/steer-report/audit.md`;

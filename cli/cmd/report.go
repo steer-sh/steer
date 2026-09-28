@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -65,11 +67,14 @@ transcripts of the current working directory, or --repo-only to read every
 session launched anywhere inside the current checkout. A sibling worktree, a
 nested repository and a submodule each have a root of their own and stay out.
 
-The digest is mechanical evidence only — deciding which signals deserve hooks
-is the job of the /steer-report skill, which reads this output. Stdout carries
-pure JSON; progress goes to stderr. The digest is capped (--max-digest-bytes)
-by evicting the lowest-scoring clusters, and reports its own truncation in
-stats.truncated.`,
+The report is mechanical evidence only — deciding which signals deserve hooks
+is the job of the /steer-report skill, which reads this output. The scan stores
+the whole report, every occurrence of every cluster, in the steer-report state
+directory, and prints the first page of its index: coverage, a summary of each
+signal and instruction document, and one row per correction and rejection
+cluster. 'steer report show' reads the rest of the stored report. Stdout
+carries pure JSON; progress goes to stderr. A page stays within
+--max-digest-bytes, and page.next_cursor names the next one.`,
 	Example: `  steer report
   steer report --days 7
   steer report --harness codex
@@ -102,23 +107,88 @@ stats.truncated.`,
 		})
 
 		digest := scanner.Finalize(reportDays, projectNames, collectInstructionFiles(only))
-		data, err := digest.Marshal(reportMaxBytes)
+		dir, err := cadence.PrepareStateDir()
 		if err != nil {
-			return fmt.Errorf("failed to marshal digest: %w", err)
+			return err
+		}
+		if err := report.Save(dir, digest); err != nil {
+			return fmt.Errorf("failed to store the report: %w", err)
+		}
+		data, err := report.IndexPage(digest, 0, reportMaxBytes)
+		if err != nil {
+			return err
 		}
 
 		for _, cov := range digest.Stats.Harnesses {
 			fmt.Fprintf(os.Stderr, "%s: %d file(s), %d session(s), %d thread(s).\n",
 				cov.Harness, cov.FilesScanned, cov.SessionsScanned, cov.ThreadsScanned)
 		}
-		fmt.Fprintf(os.Stderr, "Scanned %d sessions (%d bytes); emitting %d of %d clusters (truncated=%v).\n",
+		fmt.Fprintf(os.Stderr, "Scanned %d sessions (%d bytes); found %d clusters; stored report %s in %s.\n",
 			digest.Stats.SessionsScanned,
 			digest.Stats.BytesScanned,
-			digest.Stats.ClustersEmitted,
 			digest.Stats.ClustersFound,
-			digest.Stats.Truncated,
+			digest.ReportID,
+			report.ReportPath(dir),
 		)
 
+		fmt.Println(string(data))
+		return nil
+	},
+}
+
+var (
+	reportShowReport string
+	reportShowCursor int
+	reportShowMatch  string
+	reportShowBytes  int
+)
+
+var reportShowCmd = &cobra.Command{
+	Use:   "show [signal | id...]",
+	Short: "Read the stored report: index pages, one signal's clusters, or item details",
+	Long: `show reads the report the last 'steer report' stored, without scanning again.
+
+With no argument it prints the index page at --cursor. With a signal name
+(user_corrections, user_rejections, tool_failures, hook_blocks) it lists that
+signal's clusters, filtered by --match when given. With ids from the index
+(c3, r1, f12, h2, i1) it prints every occurrence of each cluster and every
+directive of each instruction document.
+
+Every output is one page within --max-bytes; page.next_cursor names the next
+page. Pass --report with the report_id the index printed: a later scan replaces
+the stored report, and show refuses to mix the two.`,
+	Example: `  steer report show --report 3f2a9c1b7d4e --cursor 57
+  steer report show hook_blocks --match 'python' --report 3f2a9c1b7d4e
+  steer report show c3 c7 i1 --report 3f2a9c1b7d4e`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		d, err := report.Load(cadence.StateDir(), reportShowReport)
+		if err != nil {
+			return err
+		}
+		var match *regexp.Regexp
+		if reportShowMatch != "" {
+			if match, err = regexp.Compile(reportShowMatch); err != nil {
+				return fmt.Errorf("--match: %w", err)
+			}
+		}
+		var data []byte
+		switch {
+		case len(args) == 0:
+			if match != nil {
+				return fmt.Errorf("--match filters a signal listing; name the signal")
+			}
+			data, err = report.IndexPage(d, reportShowCursor, reportShowBytes)
+		case len(args) == 1 && slices.Contains(report.SignalNames(), args[0]):
+			data, err = report.SignalPage(d, args[0], match, reportShowCursor, reportShowBytes)
+		default:
+			if match != nil {
+				return fmt.Errorf("--match filters a signal listing, not item details")
+			}
+			data, err = report.DetailPage(d, args, reportShowCursor, reportShowBytes)
+		}
+		if err != nil {
+			return err
+		}
 		fmt.Println(string(data))
 		return nil
 	},
@@ -441,7 +511,12 @@ func init() {
 	reportCmd.Flags().BoolVar(&reportProjectOnly, "project-only", false, "Restrict the scan to transcripts of the current working directory")
 	reportCmd.Flags().BoolVar(&reportRepoOnly, "repo-only", false, "Restrict the scan to transcripts of the current checkout")
 	reportCmd.Flags().StringVar(&reportHarness, "harness", "", "Mine one harness only: all (default), claude-code, or codex")
-	reportCmd.Flags().IntVar(&reportMaxBytes, "max-digest-bytes", report.DefaultMaxDigestBytes, "Hard cap on digest size; lowest-scoring clusters are evicted to fit")
+	reportCmd.Flags().IntVar(&reportMaxBytes, "max-digest-bytes", report.DefaultMaxDigestBytes, "Size bound of the printed index page")
+	reportCmd.AddCommand(reportShowCmd)
+	reportShowCmd.Flags().StringVar(&reportShowReport, "report", "", "The report_id the index printed; refuse any other stored report")
+	reportShowCmd.Flags().IntVar(&reportShowCursor, "cursor", 0, "Row to start the page at (page.next_cursor of the previous page)")
+	reportShowCmd.Flags().StringVar(&reportShowMatch, "match", "", "Regex keeping the clusters of a signal listing whose pattern or an occurrence matches")
+	reportShowCmd.Flags().IntVar(&reportShowBytes, "max-bytes", report.DefaultMaxDigestBytes, "Size bound of the printed page")
 }
 
 // sourceWord counts the queued rows with their own noun, so no bare number

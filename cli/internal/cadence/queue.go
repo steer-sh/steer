@@ -20,6 +20,10 @@ const lockStaleAfter = 5 * time.Minute
 // StateDir is where the queue and its timestamp live.
 func StateDir() string { return statestore.Resolve(stateSubdir) }
 
+// PrepareStateDir names the directory a write to this state must use, migrating
+// a legacy corpus into it first.
+func PrepareStateDir() (string, error) { return statestore.Prepare(stateSubdir) }
+
 // QueuePath is the queue file the skill reads.
 func QueuePath(dir string) string { return filepath.Join(dir, "queue.json") }
 

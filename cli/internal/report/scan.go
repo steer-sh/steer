@@ -376,18 +376,16 @@ func (s *Scanner) addCluster(kind, keyBasis, example string, e transcript.Event)
 	if e.Timestamp > c.LastSeen {
 		c.LastSeen = e.Timestamp
 	}
-	if len(c.Examples) < maxExamplesPerCluster {
-		ex := whitespaceRun.ReplaceAllString(strings.TrimSpace(example), " ")
-		if len(ex) > maxExampleLen {
-			ex = ex[:maxExampleLen]
-		}
-		c.Examples = append(c.Examples, ex)
-	}
+	text := whitespaceRun.ReplaceAllString(strings.TrimSpace(example), " ")
+	c.Occurrences = append(c.Occurrences, Occurrence{
+		Session:   e.SessionID,
+		Timestamp: e.Timestamp,
+		Text:      clip(text, maxOccurrenceLen),
+	})
 }
 
-// Finalize assembles the digest from accumulated clusters. Correction clusters
-// are keyed on the user's own wording, so most hold one occurrence; Marshal
-// reserves budget for them rather than letting the score ordering evict them.
+// Finalize assembles the digest from accumulated clusters, ranks each signal's
+// clusters and numbers them.
 func (s *Scanner) Finalize(windowDays int, projects []string, instructionFiles []InstructionFile) *Digest {
 	d := NewDigest(windowDays)
 	d.ProjectsScanned = projects
@@ -405,6 +403,10 @@ func (s *Scanner) Finalize(windowDays int, projects []string, instructionFiles [
 	d.Signals.ToolFailures = collect(s.clusters[kindFailure])
 	d.Signals.HookBlocks = collect(s.clusters[kindHookBlock])
 
+	for _, list := range d.Signals.lists() {
+		d.Stats.ClustersFound += len(list.items)
+	}
+	d.assignIDs()
 	return d
 }
 

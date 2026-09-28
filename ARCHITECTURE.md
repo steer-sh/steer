@@ -460,6 +460,16 @@ failure keys, including traceback exception lines. The correction matcher remove
 Parser identity includes these rules. Session snapshots stamp parser plus adapter identity, so readers can show
 which pipeline produced their evidence.
 
+`steer report` stores the whole report, every occurrence of every cluster, as
+`report.json` in the steer-report state directory under a content-derived
+`report_id`, and prints the first page of an index: coverage, a summary per signal
+and per instruction document, and one row per correction and rejection cluster.
+`steer report show` reads the stored report and never scans: later index pages, one
+signal's clusters filtered by `--match`, or the occurrences and directives of named
+items. Each output is one page within a byte bound and holds at least one row, so
+paging drops no evidence; `show` refuses a `--report` id that a later scan replaced.
+The refresh queue reads `report.Generate` in memory, never the stored report.
+
 `internal/sessions/` persists `sessions.<host>.jsonl`. Refresh merges newly read
 sessions with stored ones, retaining sessions whose source transcript disappeared.
 `steer report refresh` writes snapshots; status and dashboard read them.

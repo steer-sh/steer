@@ -1,48 +1,56 @@
 // Package report scans Claude Code session transcripts and CLAUDE.md files,
 // extracting mechanical signals of repeated friction (user corrections, tool
-// failures, rejections, hook blocks) into a compact size-bounded JSON digest.
-// Semantic judgment of the digest — which clusters are hookable, how to phrase
-// rules — belongs to the model layer (the steer-report skill), not this package.
+// failures, rejections, hook blocks) into a stored report that a paged index
+// and item details read. Semantic judgment of the report — which clusters are
+// hookable, how to phrase rules — belongs to the model layer (the steer-report
+// skill), not this package.
 package report
 
 import (
-	"encoding/json"
-	"sort"
+	"strconv"
 	"time"
+	"unicode/utf8"
 
 	"github.com/steer-sh/steer-cli/internal/harness"
 )
 
-// DigestVersion is the schema version of the emitted digest. The steer-report
-// skill prompt reads this field; bump it whenever the shape or semantics of
-// the digest change. v3 adds instruction_files[].guard_rules and stops treating
-// every steer_rules line as enforced.
-const DigestVersion = 3
+// DigestVersion is the schema version of the stored report and of every page
+// read from it. The steer-report skill prompt reads this field; bump it whenever
+// the shape or semantics change. v4 stores every occurrence and replaces the
+// size-capped digest with a paged index and item details.
+const DigestVersion = 4
 
-// DefaultMaxDigestBytes caps the marshaled digest so it can be read into a
-// session without crowding the context window.
+// DefaultMaxDigestBytes bounds one page of index, listing or detail output.
 const DefaultMaxDigestBytes = 40960
 
 const (
-	maxExamplesPerCluster = 3
-	maxExampleLen         = 280
-	clusterKeyLen         = 96
+	maxOccurrenceLen = 1000
+	clusterKeyLen    = 96
 )
+
+// Occurrence is one classified event of a cluster.
+type Occurrence struct {
+	Session   string `json:"session"`
+	Timestamp string `json:"timestamp,omitempty"`
+	Text      string `json:"text"`
+}
 
 // Cluster aggregates one recurring signal across sessions.
 type Cluster struct {
-	Pattern   string   `json:"pattern"`
-	Count     int      `json:"count"`
-	Sessions  int      `json:"sessions"`
-	FirstSeen string   `json:"first_seen,omitempty"`
-	LastSeen  string   `json:"last_seen,omitempty"`
-	Examples  []string `json:"examples"`
+	// ID names the cluster within one stored report.
+	ID          string       `json:"id"`
+	Pattern     string       `json:"pattern"`
+	Count       int          `json:"count"`
+	Sessions    int          `json:"sessions"`
+	FirstSeen   string       `json:"first_seen,omitempty"`
+	LastSeen    string       `json:"last_seen,omitempty"`
+	Occurrences []Occurrence `json:"occurrences"`
 
 	sessionIDs map[string]struct{}
 }
 
-// Score ranks clusters for eviction: repetition spread across sessions
-// outranks repetition within one.
+// Score ranks clusters: repetition spread across sessions outranks repetition
+// within one.
 func (c *Cluster) Score() int {
 	return c.Count * c.Sessions
 }
@@ -63,6 +71,23 @@ type Signals struct {
 	HookBlocks []*Cluster `json:"hook_blocks"`
 }
 
+// signalList is one signal kind with the id prefix its clusters carry.
+type signalList struct {
+	kind   string
+	prefix string
+	items  []*Cluster
+}
+
+// lists returns the signal kinds in index order.
+func (s Signals) lists() []signalList {
+	return []signalList{
+		{kindCorrection, "c", s.UserCorrections},
+		{kindRejection, "r", s.UserRejections},
+		{kindFailure, "f", s.ToolFailures},
+		{kindHookBlock, "h", s.HookBlocks},
+	}
+}
+
 // Directive is an instruction-file bullet outside the Steer Rules section — a standing
 // instruction not yet backed by a deterministic hook.
 type Directive struct {
@@ -74,6 +99,8 @@ type Directive struct {
 // AGENTS.md: the lines Steer wrote, the subset a guard enforces, and
 // directives that are candidates for enforcement.
 type InstructionFile struct {
+	// ID names the document within one stored report.
+	ID      string     `json:"id"`
 	Harness harness.ID `json:"harness"`
 	Path    string     `json:"path"`
 	// SteerRules is every line of the Steer Rules section. A guard writes its
@@ -99,26 +126,28 @@ type HarnessCoverage struct {
 	EntriesSkipped  int        `json:"entries_skipped"`
 }
 
-// Stats reports scan coverage and honesty about truncation.
+// Stats reports scan coverage.
 type Stats struct {
 	FilesScanned    int `json:"files_scanned"`
 	SessionsScanned int `json:"sessions_scanned"`
 	// ThreadsScanned counts subagent threads seen under those sessions. A
 	// thread is provenance, never a unit: it is reported and never counted as
 	// a session.
-	ThreadsScanned  int               `json:"threads_scanned"`
-	BytesScanned    int64             `json:"bytes_scanned"`
-	EntriesScanned  int               `json:"entries_scanned"`
-	EntriesSkipped  int               `json:"entries_skipped"`
-	ClustersFound   int               `json:"clusters_found"`
-	ClustersEmitted int               `json:"clusters_emitted"`
-	Truncated       bool              `json:"truncated"`
-	Harnesses       []HarnessCoverage `json:"harnesses"`
+	ThreadsScanned int               `json:"threads_scanned"`
+	BytesScanned   int64             `json:"bytes_scanned"`
+	EntriesScanned int               `json:"entries_scanned"`
+	EntriesSkipped int               `json:"entries_skipped"`
+	ClustersFound  int               `json:"clusters_found"`
+	Harnesses      []HarnessCoverage `json:"harnesses"`
 }
 
-// Digest is the JSON contract between the scanner and the steer-report skill.
+// Digest is the stored report: every cluster with every occurrence. The index
+// and `steer report show` read it; nothing reads it whole into a session.
 type Digest struct {
-	DigestVersion    int               `json:"digest_version"`
+	DigestVersion int `json:"digest_version"`
+	// ReportID names one stored scan, so a page or a detail request can refuse
+	// to mix evidence from two scans.
+	ReportID         string            `json:"report_id"`
 	GeneratedAt      string            `json:"generated_at"`
 	WindowDays       int               `json:"window_days"`
 	ProjectsScanned  []string          `json:"projects_scanned"`
@@ -127,98 +156,17 @@ type Digest struct {
 	Signals          Signals           `json:"signals"`
 }
 
-// CorrectionReserve is the number of correction clusters the digest budget
-// protects from eviction. A correction's key is the user's own sentence, so it
-// scores 1 against machine output that repeats verbatim and would otherwise be
-// evicted first every time.
-const CorrectionReserve = 15
-
-// budgeted is one evictable signal list and the number of its highest-scoring
-// entries eviction must leave alone while any unreserved entry remains.
-type budgeted struct {
-	items   *[]*Cluster
-	reserve int
-}
-
-// Marshal renders the digest within maxBytes, evicting the lowest-scoring
-// signal clusters until it fits. InstructionFiles are exempt from eviction:
-// they are small and the highest-precision source. Stats.Truncated and
-// ClustersEmitted are updated to reflect what survived.
-func (d *Digest) Marshal(maxBytes int) ([]byte, error) {
-	if maxBytes <= 0 {
-		maxBytes = DefaultMaxDigestBytes
-	}
-
-	lists := []budgeted{
-		{&d.Signals.UserCorrections, CorrectionReserve},
-		{&d.Signals.UserRejections, 0},
-		{&d.Signals.ToolFailures, 0},
-		{&d.Signals.HookBlocks, 0},
-	}
-
-	for _, list := range lists {
-		sort.SliceStable(*list.items, func(i, j int) bool {
-			return (*list.items)[i].Score() > (*list.items)[j].Score()
-		})
-	}
-
-	d.Stats.ClustersFound = 0
-	for _, list := range lists {
-		d.Stats.ClustersFound += len(*list.items)
-	}
-
-	for {
-		d.Stats.ClustersEmitted = 0
-		for _, list := range lists {
-			d.Stats.ClustersEmitted += len(*list.items)
-		}
-		d.Stats.Truncated = d.Stats.ClustersEmitted < d.Stats.ClustersFound
-
-		data, err := json.MarshalIndent(d, "", "  ")
-		if err != nil {
-			return nil, err
-		}
-		if len(data) <= maxBytes {
-			return data, nil
-		}
-
-		if !evictLowest(lists) {
-			// Nothing left to evict; emit oversized rather than empty.
-			return data, nil
+// assignIDs numbers every cluster by its rank within its signal, and every
+// instruction file by its position.
+func (d *Digest) assignIDs() {
+	for _, list := range d.Signals.lists() {
+		for i, c := range list.items {
+			c.ID = list.prefix + strconv.Itoa(i+1)
 		}
 	}
-}
-
-// evictLowest removes the single lowest-scoring cluster across all lists,
-// preferring entries outside a list's reserve. Lists are already sorted
-// descending, so the candidate is each list's tail. Reserved entries are
-// evictable once nothing unreserved is left, so the budget still converges.
-func evictLowest(lists []budgeted) bool {
-	if evictLowestWhere(lists, func(l budgeted) bool { return len(*l.items) > l.reserve }) {
-		return true
+	for i := range d.InstructionFiles {
+		d.InstructionFiles[i].ID = "i" + strconv.Itoa(i+1)
 	}
-	return evictLowestWhere(lists, func(l budgeted) bool { return len(*l.items) > 0 })
-}
-
-func evictLowestWhere(lists []budgeted, eligible func(budgeted) bool) bool {
-	victim := -1
-	victimScore := 0
-	for i, list := range lists {
-		if !eligible(list) {
-			continue
-		}
-		score := (*list.items)[len(*list.items)-1].Score()
-		if victim == -1 || score < victimScore {
-			victim = i
-			victimScore = score
-		}
-	}
-	if victim == -1 {
-		return false
-	}
-	l := lists[victim].items
-	*l = (*l)[:len(*l)-1]
-	return true
 }
 
 // NewDigest returns an empty digest stamped with the current time.
@@ -236,4 +184,32 @@ func NewDigest(windowDays int) *Digest {
 		InstructionFiles: []InstructionFile{},
 		ProjectsScanned:  []string{},
 	}
+}
+
+// clip cuts s to at most n bytes without splitting a UTF-8 sequence.
+func clip(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	s = s[:n]
+	for i := len(s) - 1; i >= 0 && i >= len(s)-utf8.UTFMax; i-- {
+		if utf8.RuneStart(s[i]) {
+			if !utf8.FullRuneInString(s[i:]) {
+				s = s[:i]
+			}
+			break
+		}
+	}
+	return s
+}
+
+// distinctSessions counts the sessions a set of clusters occurred in.
+func distinctSessions(clusters []*Cluster) int {
+	seen := map[string]struct{}{}
+	for _, c := range clusters {
+		for _, o := range c.Occurrences {
+			seen[o.Session] = struct{}{}
+		}
+	}
+	return len(seen)
 }

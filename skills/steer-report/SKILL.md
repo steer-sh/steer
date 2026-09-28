@@ -33,7 +33,7 @@ An empty corpus produces one line, never an error. An adopter with no commit-rev
 
 ## Step 0: Fresh-context gate (interactive mode only)
 
-The analysis reads a sizable digest and a finding dump, then reasons over both. If this conversation already contains substantial prior work — more than a few turns, or a large amount of loaded code and discussion — warn before proceeding:
+The analysis reads a report index, its details and a finding dump, then reasons over both. If this conversation already contains substantial prior work — more than a few turns, or a large amount of loaded code and discussion — warn before proceeding:
 
 > "A usage report works best in a fresh session: the analysis gets the full context window, and cost is lower because each step doesn't re-pay for this conversation's history. I recommend running `/steer-report` as the first message of a new session. Proceed here anyway?"
 
@@ -118,33 +118,48 @@ case: the fail-soft rule above reads `audit.md` anyway.
 
 ### 2a. Transcript friction
 
-Prefer the launcher bundled with the plugin (`PLUGIN_ROOT` on Codex, `CLAUDE_PLUGIN_ROOT` on Claude Code), and fall back to `steer` on PATH when the plugin root is not set. Redirect the digest to a temp file so it enters context exactly once — via Read, not via command output. Run a **single command**:
+Prefer the launcher bundled with the plugin (`PLUGIN_ROOT` on Codex, `CLAUDE_PLUGIN_ROOT` on Claude Code), and fall back to `steer` on PATH when the plugin root is not set. Redirect every report output to a temp file and Read the file once — via Read, not via command output, which a harness can cut. Run a **single command** for the scan:
 
 ```bash
 STEER_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}"
 STEER_BIN="${STEER_ROOT:+${STEER_ROOT}/scripts/steer}"
 STEER_BIN="${STEER_BIN:-steer}"
-"${STEER_BIN}" report --days 30 > "${TMPDIR:-/tmp}/steer-digest.json"
+"${STEER_BIN}" report --days 30 > "${TMPDIR:-/tmp}/steer-index.json"
 ```
 
-Then Read `${TMPDIR:-/tmp}/steer-digest.json` **once**. Do not cat the file and do not re-read it later — everything needed for analysis is in that single read.
+Then Read `${TMPDIR:-/tmp}/steer-index.json`. It is the first page of the report's index. The scan stored the whole report — every occurrence of every cluster — and `steer report show` reads the rest of that stored report without scanning again. Pass `--report` with the index's `report_id` on every `show`: a later scan replaces the stored report, and `show` refuses to mix the two.
+
+```bash
+"${STEER_BIN}" report show --report ID --cursor N > "${TMPDIR:-/tmp}/steer-show.json"          # the next index page
+"${STEER_BIN}" report show SIGNAL --match 'RE' --report ID > "${TMPDIR:-/tmp}/steer-show.json" # one signal's clusters
+"${STEER_BIN}" report show c3 r1 i1 --report ID > "${TMPDIR:-/tmp}/steer-show.json"            # every occurrence or directive
+```
 
 All projects and every harness are scanned by default (cross-project, cross-harness habits are the strongest candidates). Pass through any flags the user supplied (`--days N`, `--project-only`, `--repo-only`, `--harness claude-code|codex`, `--max-digest-bytes N`). `--project-only` reads the working directory alone; `--repo-only` reads every session launched anywhere inside the current checkout, and the two are mutually exclusive.
 
-The digest — not the queue — is the transcript corpus. The queue carries one row saying how many correction clusters are ungrouped; the clusters themselves are here. Most hold a single occurrence, because a cluster key is the user's own wording and merges verbatim repeats and nothing else: two complaints about one habit, phrased differently, arrive as two clusters. A cluster is therefore never a problem and its `count` is never a recurrence. Merging them into classes is your job, not the tier's.
+The report — not the queue — is the transcript corpus. The queue carries one row saying how many correction clusters are ungrouped; the clusters themselves are here. Most hold a single occurrence, because a cluster key is the user's own wording and merges verbatim repeats and nothing else: two complaints about one habit, phrased differently, arrive as two clusters. A cluster is therefore never a problem and its `count` is never a recurrence. Merging them into classes is your job, not the tier's.
 
-Digest schema (`digest_version: 3`):
+**Read the whole index before you merge.** While `page.next_cursor` is present, fetch the next page with `--cursor` and read it. A merge of paraphrases needs every row at once, so never group from one page. If you stop before the last page, say which rows you covered.
 
-- `stats` — coverage: `sessions_scanned`, `threads_scanned`, `bytes_scanned`, `clusters_found`, `clusters_emitted`, `truncated`. **Always relay coverage to the user in one sentence.** If `truncated` is true, say so and suggest narrowing (`--days 7`) or raising `--max-digest-bytes`.
+Index schema (`digest_version: 4`):
+
+- `report_id` — pass it to every `show`.
+- `stats` — coverage: `sessions_scanned`, `threads_scanned`, `bytes_scanned`, `clusters_found`. **Always relay coverage to the user in one sentence**, with the sizes of the two signals the index does not list, and say that the user can ask to see either one.
 - `stats.harnesses[]` — per harness: `harness`, `files_scanned`, `sessions_scanned`, `threads_scanned`, `bytes_scanned`, `entries_scanned`, `entries_skipped`. A harness missing from this list was never reached; a harness present with zeros has no evidence on this machine. Say which when a harness contributes nothing.
 - The session is the unit and a subagent thread is provenance under its root session. `threads_scanned` reports how many threads rode along; it is never added to `sessions_scanned`.
-- `instruction_files[]` — per instruction document (CLAUDE.md or AGENTS.md), tagged with its `harness`: `steer_rules` (every line of the `## Steer Rules` section), `guard_rules` (the subset a guard in that scope enforces) and `directives` (standing instructions with their section heading, NOT yet enforced). A guard writes its rule into the section and so does an instruction rule, so a `steer_rules` line absent from `guard_rules` is an instruction rule: the loop decided on it, and nothing enforces it.
-- `signals.user_corrections[]` — heuristic correction candidates: user turns matching correction language. A match is not a confirmed correction, so read the examples before you count one as evidence, and do not treat a missing cluster as proof that no correction happened. Each cluster: `pattern`, `count`, `sessions` (distinct sessions), `first_seen`, `last_seen`, `examples` (up to 3 raw snippets).
-- `signals.user_rejections[]` — tool calls the user declined at the permission prompt (pattern is `Tool: target`). Only Claude Code's decline is recognized, so an absent Codex or Pi rejection is no reading.
-- `signals.tool_failures[]` — recurring lint/test/compile failures from shell-tool output, whichever harness ran the shell.
-- `signals.hook_blocks[]` — operations already blocked by existing hooks. These are enforcement *working*; use them only to avoid suggesting duplicates.
+- `instruction_files[]` — per instruction document (CLAUDE.md or AGENTS.md): `id`, `harness`, `path`, `directives` (a count), `steer_rules` (every line of the `## Steer Rules` section) and `guard_rules` (the subset a guard in that scope enforces). A guard writes its rule into the section and so does an instruction rule, so a `steer_rules` line absent from `guard_rules` is an instruction rule: the loop decided on it, and nothing enforces it. The directives — standing instructions with their section heading, NOT yet enforced — are in the document's details (`show i1`).
+- `signals[]` — one summary per signal kind: `signal`, `clusters`, `sessions` (distinct sessions across its clusters) and `in_index`. The index lists the rows of `user_corrections` and `user_rejections`; `tool_failures` and `hook_blocks` are machine output, read only through the fixed steps in Step 3 or when the user asks.
+- `rows[]` — one per correction (`c…`) and rejection (`r…`) cluster: `id`, `sessions`, `count` and `text`, the first occurrence cut at 120 bytes.
+- `page` — `cursor`, `shown`, `total`, `remaining`, and `next_cursor` while a page remains.
 
-The digest is size-capped: the CLI evicts the lowest-scoring clusters to fit, and reports honesty in `stats`.
+The signal kinds:
+
+- `user_corrections` — heuristic correction candidates: user turns matching correction language. A match is not a confirmed correction, so read a cluster's details before you count it as evidence, and do not treat a missing cluster as proof that no correction happened.
+- `user_rejections` — tool calls the user declined at the permission prompt (text is `Tool: target`). Only Claude Code's decline is recognized, so an absent Codex or Pi rejection is no reading.
+- `tool_failures` — recurring lint/test/compile failures from shell-tool output, whichever harness ran the shell.
+- `hook_blocks` — operations already blocked by existing hooks, Steer's or another's. These are enforcement *working*; use them only to avoid suggesting duplicates.
+
+Details (`show <id>…`): `items[]` heads each requested item — a cluster's `signal`, `pattern`, `count`, `sessions`, `first_seen`, `last_seen`; a document's `path`, `steer_rules`, `guard_rules` — and `rows[]` holds every occurrence (`id`, `session`, `timestamp`, `text`) or every directive (`id`, `section`, `text`). A signal listing (`show <signal>`) holds rows of the index's shape. Every `show` output pages like the index.
 
 ### The `steer status --json` contract (`status_version: 28`)
 
@@ -376,8 +391,8 @@ Discard the rest silently — do not pad the report.
 
 Then:
 
-1. **CLAUDE.md gap analysis first.** Directives are the highest-precision source: the user already wrote the rule down; it just isn't enforced. Check each directive a check or guard could detect against `guard_rules`, `hook_blocks` and the `checks` reading — skip anything a guard or check already covers. A directive no check or guard can detect is already in its strongest place; skip it. A directive that matches only an instruction rule (in `steer_rules`, not in `guard_rules`) is not enforced: propose a guard for it only with a reason why the instruction rule's `--not-mechanizable` argument no longer holds, and name the instruction rule the guard would replace.
-2. **Corrections and failures second.** Weight by `sessions` over `count` (friction across sessions beats one bad session). Read the `examples` — the pattern key is normalized and lossy; the examples carry the user's actual words. Drop a cluster that a `steer_rules` line (guards and instruction rules both write one) or a check in the `checks` reading already answers: a fix `/steer` installed has no record in `interventions[]`, and the friction from before its install stays in the window. Where it keeps recurring after the install, propose registering the installed fix with `steer fix register` and its `--hook-id`, `--rule-id` or `--check-id`, not a second fix.
+1. **CLAUDE.md gap analysis first.** Directives are the highest-precision source: the user already wrote the rule down; it just isn't enforced. Fetch the directives of every instruction document first (`show i1 i2 … --report ID`); the index carries only their count. Check each directive a check or guard could detect against `guard_rules` and the `checks` reading — skip anything a guard or check already covers. Before you propose a guard, fetch the hook blocks that match its terms (`show hook_blocks --match 'TERM' --report ID`): a matching block is a hook, Steer's or another's, that already enforces it. A directive no check or guard can detect is already in its strongest place; skip it. A directive that matches only an instruction rule (in `steer_rules`, not in `guard_rules`) is not enforced: propose a guard for it only with a reason why the instruction rule's `--not-mechanizable` argument no longer holds, and name the instruction rule the guard would replace.
+2. **Corrections and rejections second.** Weight by `sessions` over `count` (friction across sessions beats one bad session). Fetch the details of every cluster you weigh (`show c3 r1 … --report ID`): a row's text is cut and the pattern is normalized; the occurrences carry the user's actual words. When a candidate is a repository check about a failure ("tests must pass before the turn ends"), fetch the matching failures as its evidence (`show tool_failures --match 'TERM' --report ID`). Drop a cluster that a `steer_rules` line (guards and instruction rules both write one) or a check in the `checks` reading already answers: a fix `/steer` installed has no record in `interventions[]`, and the friction from before its install stays in the window. Where it keeps recurring after the install, propose registering the installed fix with `steer fix register` and its `--hook-id`, `--rule-id` or `--check-id`, not a second fix.
 3. **Deduplicate across sources.** A CLAUDE.md directive corroborated by correction clusters is one candidate with stronger evidence, not two.
 4. **Phrase each candidate as a rule.** A guard candidate uses `detect | suggest` syntax, e.g. `never use python bare | use python3 instead`. Reuse the user's own wording where possible.
 
