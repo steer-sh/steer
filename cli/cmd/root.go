@@ -22,17 +22,15 @@ prevent recurring mistakes.
 Set up the commit gate:
   1. steer config set reviewer.provider claude-code   # claude-code | codex | agy
   2. steer commit-gate install --harness claude-code --scope global
-  3. steer commit-gate status                         # what is armed, and what is missing
+  3. steer status                                     # whether commits here are reviewed, and what to repair
 
 Then read what the reviews taught you:
-  steer status            # whether commits here are reviewed, and what to repair
   steer dashboard         # the whole loop, interactive
 
 Steer supports Claude Code, Codex and Pi, plus a Git pre-commit channel
 (steer commit-gate install --precommit) for other workflows.`,
 	Example: `  steer config set reviewer.provider claude-code
   steer commit-gate install --harness codex --scope global
-  steer commit-gate status
   steer status
   steer dashboard`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {

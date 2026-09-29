@@ -38,15 +38,18 @@ could not be resolved. Do not try to install it by another route.
 
 ```bash
 "${STEER_BIN}" config show
-"${STEER_BIN}" commit-gate status
+"${STEER_BIN}" status --json > "${TMPDIR:-/tmp}/steer-setup-status.json"
 ```
+
+Read the status file with the Read tool, to its end. Its `posture.commit_gate[]` has
+one row per harness per scope, with `harness`, `scope` and `registered`.
 
 Read both before you write anything. They tell you which of two paths you are on:
 
 - **First-time setup** — `config show` reports every value as the shipped default and
   the settings file is not written yet. Do Steps 2 through 5.
-- **Adding a harness** — the settings file exists and names a reviewer, or a harness
-  already reads `armed`. **Skip Step 2 entirely.** Do Steps 3 through 5 for the new
+- **Adding a harness** — the settings file exists and names a reviewer, or a
+  `posture.commit_gate[]` row is `registered`. **Skip Step 2 entirely.** Do Steps 3 through 5 for the new
   harness only, and tell the user which reviewer the existing configuration uses so
   they can see that it did not change.
 
@@ -98,8 +101,8 @@ runs is the shipped design, and each run costs their reviewer account.
 
 ## Step 3: Arm the gate
 
-Ask which agent will make the commits. `commit-gate status` from Step 1 already shows
-which harnesses are armed, so name those and do not re-arm them.
+Ask which agent will make the commits. The `posture.commit_gate[]` rows from Step 1
+already show which harnesses are registered, so name those and do not re-arm them.
 
 ```bash
 # one of:

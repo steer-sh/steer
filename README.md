@@ -50,7 +50,7 @@ steer config providers                        # which reviewer CLIs are installe
 steer config set reviewer.provider claude-code
 steer config set reviewer.model sonnet
 steer commit-gate install --harness claude-code --scope global
-steer commit-gate status
+steer status                                  # whether commits here are reviewed
 ```
 
 Steer runs reviews through an installed, authenticated CLI: `claude`, `codex`, or `agy`. The reviewer can be different from the agent writing your code. Leave the model unset to use the reviewer CLI's own default. By default, three reviewers run in parallel. Reviews take time and use your reviewer's account or API allowance.
