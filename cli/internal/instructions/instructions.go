@@ -19,9 +19,15 @@ const (
 // SetRules replaces the Steer Rules section of the document at path with
 // exactly these rules, creating the section, and the file, when either is
 // absent. An empty set removes the section. A line written by hand inside the
-// section does not survive; the section is Steer's, as the marker says.
+// section does not survive; the section is Steer's, as the marker says. A
+// symlinked document is written at its target, so the link survives.
 func SetRules(path string, rules []string) error {
 	wanted := normalizeRules(rules)
+
+	path, err := resolveLink(path)
+	if err != nil {
+		return err
+	}
 
 	if dir := filepath.Dir(path); dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -161,6 +167,20 @@ func trimTrailingBlanks(lines []string) []string {
 		lines = lines[:len(lines)-1]
 	}
 	return lines
+}
+
+// resolveLink returns the file a symlinked path names, or path itself when it is
+// no symlink or does not exist. A symlink to a missing file is an error.
+func resolveLink(path string) (string, error) {
+	info, err := os.Lstat(path)
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		return path, nil
+	}
+	target, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", fmt.Errorf("%s is a symlink that does not resolve: %w", path, err)
+	}
+	return target, nil
 }
 
 // writeAtomic replaces path through a temporary file in the same directory, so a

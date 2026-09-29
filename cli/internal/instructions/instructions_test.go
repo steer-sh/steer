@@ -143,6 +143,51 @@ func TestSectionRulesReadsOnlyTheSectionsBullets(t *testing.T) {
 	}
 }
 
+// A document that is a symlink keeps the link; the section lands in its target.
+func TestSetRulesWritesThroughASymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "source", "AGENTS.md")
+	link := filepath.Join(dir, "harness", "AGENTS.md")
+	for _, d := range []string{filepath.Dir(target), filepath.Dir(link)} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatalf("MkdirAll: %v", err)
+		}
+	}
+	write(t, target, "# Project\n")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	if err := SetRules(link, []string{"rule A"}); err != nil {
+		t.Fatalf("SetRules: %v", err)
+	}
+
+	info, err := os.Lstat(link)
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("the link was replaced: %v, %v", info, err)
+	}
+	want := "# Project\n\n## Steer Rules\n<!-- managed-by-steer -->\n- rule A\n"
+	if got := read(t, target); got != want {
+		t.Fatalf("want:\n%q\ngot:\n%q", want, got)
+	}
+}
+
+// A symlink whose target is missing is refused rather than replaced by a file.
+func TestSetRulesRefusesADanglingSymlink(t *testing.T) {
+	dir := t.TempDir()
+	link := filepath.Join(dir, "AGENTS.md")
+	if err := os.Symlink(filepath.Join(dir, "missing.md"), link); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	if err := SetRules(link, []string{"rule A"}); err == nil {
+		t.Fatal("SetRules wrote through a dangling symlink")
+	}
+	if info, err := os.Lstat(link); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("the link was replaced: %v, %v", info, err)
+	}
+}
+
 // The temporary file writeAtomic renames from must not be left in the directory.
 func TestSetRulesLeavesNoTemporaryFile(t *testing.T) {
 	dir := t.TempDir()
