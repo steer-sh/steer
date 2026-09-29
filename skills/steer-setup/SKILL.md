@@ -204,6 +204,10 @@ harness delivers the hook. Tell the user to make a code change and commit normal
 A small or prose-only change skips review, and the gate prints a line that says so
 and why; a skipped review is not a clean review.
 
+End with the report: tell the user to run `/steer-report` as the first message of a
+new session, not in this one. The report reads their past sessions, and this setup
+conversation takes context and cost that the report needs.
+
 ## Step 6: Repository checks (only when the user asks)
 
 A repository check blocks the end of an agent's turn while the repository's
