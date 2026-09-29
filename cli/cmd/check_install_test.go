@@ -15,6 +15,7 @@ import (
 	codexhooks "github.com/steer-sh/steer-cli/internal/codex"
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/steerbin"
+	"github.com/steer-sh/steer-cli/internal/testhome"
 )
 
 // runCheckCmd runs a check subcommand at global scope in a fake home and
@@ -37,7 +38,7 @@ func runCheckCmd(t *testing.T, c *cobra.Command, harnessName string) (string, er
 func fakeHomes(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testhome.Set(t, home)
 	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
 	withCmdProjectTempDir(t)
 	return home

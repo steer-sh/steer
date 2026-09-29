@@ -11,6 +11,7 @@ import (
 
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
 	"github.com/steer-sh/steer-cli/internal/report"
+	"github.com/steer-sh/steer-cli/internal/testhome"
 )
 
 // isolate points HOME at a temp dir so the transcript scan and the output dir
@@ -18,7 +19,7 @@ import (
 func isolate(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testhome.Set(t, home)
 	return home
 }
 

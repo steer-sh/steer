@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/gate"
+	"github.com/steer-sh/steer-cli/internal/testhome"
 )
 
 // testNotMechanizable is the argument an instruction registration carries.
@@ -65,7 +66,7 @@ func TestBothInstructionSpellingsNeedARuleID(t *testing.T) {
 func TestAnUnknownRuleIDIsRefused(t *testing.T) {
 	stateDir, ledger := registerRuleFixture(t)
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testhome.Set(t, home)
 	t.Chdir(t.TempDir())
 
 	err := Register(io.Discard, stateDir, RegisterOpts{
@@ -84,7 +85,7 @@ func TestAnUnknownRuleIDIsRefused(t *testing.T) {
 func TestAnInstructionRecordFreezesItsRuleText(t *testing.T) {
 	stateDir, ledger := registerRuleFixture(t)
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testhome.Set(t, home)
 	t.Chdir(t.TempDir())
 	writeRuleStore(t, filepath.Join(home, ".steer", "hooks"), "config-path",
 		"resolve a config path from the repo root")
@@ -114,7 +115,7 @@ func TestAnInstructionRecordFreezesItsRuleText(t *testing.T) {
 func TestAnInstructionTierNeedsItsNotMechanizableArgument(t *testing.T) {
 	stateDir, ledger := registerRuleFixture(t)
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testhome.Set(t, home)
 	t.Chdir(t.TempDir())
 	writeRuleStore(t, filepath.Join(home, ".steer", "hooks"), "config-path",
 		"resolve a config path from the repo root")

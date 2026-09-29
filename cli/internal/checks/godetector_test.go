@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/steer-sh/steer-cli/internal/testhome"
 )
 
 const respGoMod = "module example.com/svc\n\ngo 1.21\n"
@@ -37,7 +39,7 @@ func goCheckRepo(t *testing.T, testSource string) string {
 	modcache, _ := exec.Command("go", "env", "GOMODCACHE").Output()
 	t.Setenv("GOCACHE", strings.TrimSpace(string(cache)))
 	t.Setenv("GOMODCACHE", strings.TrimSpace(string(modcache)))
-	t.Setenv("HOME", t.TempDir())
+	testhome.Set(t, t.TempDir())
 	root := t.TempDir()
 	writeFile(t, root, "svc/go.mod", respGoMod)
 	writeFile(t, root, "svc/resp/resp.go", respProduction)

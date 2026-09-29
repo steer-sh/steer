@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/steer-sh/steer-cli/internal/testhome"
 )
 
 // suiteTests indents its functions so that no fixture line reads as a test of
@@ -41,7 +43,7 @@ func suiteRepo(t *testing.T) string {
 		t.Fatal(err)
 	}
 	t.Setenv("GOCACHE", strings.TrimSpace(string(cache)))
-	t.Setenv("HOME", t.TempDir())
+	testhome.Set(t, t.TempDir())
 	t.Setenv("GOFLAGS", "")
 	t.Setenv("GOWORK", "off")
 	root := t.TempDir()

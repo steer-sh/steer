@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/steer-sh/steer-cli/internal/archive"
+	"github.com/steer-sh/steer-cli/internal/testhome"
 )
 
 const noCountScript = `#!/usr/bin/env bash
@@ -30,7 +31,7 @@ func checkRepo(t *testing.T, script string) string {
 	if runtime.GOOS == "windows" {
 		t.Skip("replay needs bash")
 	}
-	t.Setenv("HOME", t.TempDir())
+	testhome.Set(t, t.TempDir())
 	root := t.TempDir()
 	if _, _, err := Init(root); err != nil {
 		t.Fatalf("Init: %v", err)

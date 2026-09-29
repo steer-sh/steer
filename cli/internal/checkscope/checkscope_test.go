@@ -15,6 +15,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/statestore"
+	"github.com/steer-sh/steer-cli/internal/testhome"
 )
 
 const countScript = `#!/usr/bin/env bash
@@ -34,7 +35,7 @@ func validatedRepo(t *testing.T) string {
 	if runtime.GOOS == "windows" {
 		t.Skip("replay needs bash")
 	}
-	t.Setenv("HOME", t.TempDir())
+	testhome.Set(t, t.TempDir())
 	root := t.TempDir()
 	if _, _, err := checks.Init(root); err != nil {
 		t.Fatalf("Init: %v", err)
@@ -196,7 +197,7 @@ func TestBindFreezesAGoTestBinding(t *testing.T) {
 	modcache, _ := exec.Command("go", "env", "GOMODCACHE").Output()
 	t.Setenv("GOCACHE", strings.TrimSpace(string(cache)))
 	t.Setenv("GOMODCACHE", strings.TrimSpace(string(modcache)))
-	t.Setenv("HOME", t.TempDir())
+	testhome.Set(t, t.TempDir())
 	root := t.TempDir()
 	if _, _, err := checks.Init(root); err != nil {
 		t.Fatalf("Init: %v", err)

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/steer-sh/steer-cli/internal/checks"
+	"github.com/steer-sh/steer-cli/internal/testhome"
 )
 
 // A run the repository lock turned away carries no result of its own, so it is
@@ -41,7 +42,7 @@ func TestCheckRunOfKeepsTheHolderAheadOfARefusal(t *testing.T) {
 // readings. A repository that declares checks nothing validated reports them as
 // never replayed with no execution, which is not a pass.
 func TestCollectChecksReadsRegistrationAdoptionAndExecutionApart(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testhome.Set(t, t.TempDir())
 	root := t.TempDir()
 	if _, _, err := checks.Init(root); err != nil {
 		t.Fatalf("Init: %v", err)
@@ -93,7 +94,7 @@ func TestCollectChecksReadsRegistrationAdoptionAndExecutionApart(t *testing.T) {
 // Outside a repository there is nothing to adopt and nothing declared, and a
 // registered runner is still machine state worth reading back.
 func TestCollectChecksOutsideARepositoryStillReadsTheRunner(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testhome.Set(t, t.TempDir())
 	c := collectChecks("")
 	if c.Repo != "" || c.Manifest || len(c.Checks) != 0 {
 		t.Fatalf("tier %+v; want nothing declared", c)

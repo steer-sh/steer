@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/gate"
+	"github.com/steer-sh/steer-cli/internal/testhome"
 )
 
 // harnessChain is one adjudicated chain on a harness, carrying one accepted finding.
@@ -30,7 +31,7 @@ func registeredBaseline(t *testing.T, stateDir string, o RegisterOpts) string {
 }
 
 func TestScopedMatchCountsTheChainsRegisterFreezes(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testhome.Set(t, t.TempDir())
 	t.Chdir(t.TempDir())
 	const cutoff = 2000
 	var rows []gate.Row
@@ -63,7 +64,7 @@ func TestScopedMatchCountsTheChainsRegisterFreezes(t *testing.T) {
 }
 
 func TestScopedMatchCountsTheSessionsRegisterFreezes(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testhome.Set(t, t.TempDir())
 	t.Chdir(t.TempDir())
 	const cutoff = 2000
 	units := []SessionUnit{

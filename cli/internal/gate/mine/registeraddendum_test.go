@@ -10,6 +10,7 @@ import (
 
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/gate"
+	"github.com/steer-sh/steer-cli/internal/testhome"
 )
 
 func writeAddendumStore(t *testing.T, dir, id, text string) {
@@ -63,7 +64,7 @@ func addendumOpts(ledger string) RegisterOpts {
 
 func TestAReviewTierBindsItsAddendumEntry(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testhome.Set(t, home)
 	t.Chdir(t.TempDir())
 	writeAddendumStore(t, filepath.Join(home, ".steer", "hooks"), "no-style", "style is not a finding")
 	stateDir, ledger := registerAddendumFixture(t)
@@ -82,7 +83,7 @@ func TestAReviewTierBindsItsAddendumEntry(t *testing.T) {
 
 func TestAReviewTierNeedsAnAddendumIDAndAFalsePositiveClass(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testhome.Set(t, home)
 	t.Chdir(t.TempDir())
 	writeAddendumStore(t, filepath.Join(home, ".steer", "hooks"), "no-style", "style is not a finding")
 	stateDir, ledger := registerAddendumFixture(t)
@@ -108,7 +109,7 @@ func TestAReviewTierNeedsAnAddendumIDAndAFalsePositiveClass(t *testing.T) {
 func TestAReviewTierRefusesAnAddendumIDInBothStores(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
-	t.Setenv("HOME", home)
+	testhome.Set(t, home)
 	t.Chdir(project)
 	writeAddendumStore(t, filepath.Join(home, ".steer", "hooks"), "no-style", "the global wording")
 	writeAddendumStore(t, filepath.Join(project, ".steer", "hooks"), "no-style", "the project wording")
@@ -133,7 +134,7 @@ func TestAReviewTierRefusesAnAddendumIDInBothStores(t *testing.T) {
 func TestAReviewTierRefusesAProjectEntryTheGateDoesNotReadYet(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
-	t.Setenv("HOME", home)
+	testhome.Set(t, home)
 	t.Chdir(project)
 	store := filepath.Join(project, ".steer", "hooks")
 	writeAddendumStore(t, store, "no-style", "style is not a finding")

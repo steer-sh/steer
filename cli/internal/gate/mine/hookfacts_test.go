@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/steer-sh/steer-cli/internal/testhome"
 )
 
 // writeStore places a manifest and its guard file in one scope's neutral store.
@@ -25,7 +27,7 @@ func writeStore(t *testing.T, dir, hookID, rule, version, body string) {
 
 func TestSteerHookFactsReadsTheNeutralStoreAndTheImplementationIdentity(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testhome.Set(t, home)
 	t.Chdir(t.TempDir())
 	writeStore(t, filepath.Join(home, ".steer", "hooks"), "no-bare-python", "use python3",
 		"factory-hook-v2", "print('v2')\n")
@@ -60,7 +62,7 @@ func TestSteerHookFactsReadsTheNeutralStoreAndTheImplementationIdentity(t *testi
 
 func TestSteerHookFactsRefusesAnIDHeldByBothStores(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testhome.Set(t, home)
 	project := t.TempDir()
 	t.Chdir(project)
 	writeStore(t, filepath.Join(home, ".steer", "hooks"), "shared-id", "global rule", "v1", "g")
@@ -77,7 +79,7 @@ func TestSteerHookFactsRefusesAnIDHeldByBothStores(t *testing.T) {
 }
 
 func TestSteerHookFactsReportsAnAbsentIDAsNoFacts(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testhome.Set(t, t.TempDir())
 	t.Chdir(t.TempDir())
 	facts, err := SteerHookFacts("absent", "")
 	if facts != nil || err != nil {
@@ -90,7 +92,7 @@ func TestSteerHookFactsReportsAnAbsentIDAsNoFacts(t *testing.T) {
 
 func TestSteerHookFactsReportsACorruptManifestRatherThanAnAbsentHook(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testhome.Set(t, home)
 	t.Chdir(t.TempDir())
 	dir := filepath.Join(home, ".steer", "hooks")
 	if err := os.MkdirAll(dir, 0o755); err != nil {

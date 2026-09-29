@@ -9,6 +9,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/codex"
 	"github.com/steer-sh/steer-cli/internal/guard"
+	"github.com/steer-sh/steer-cli/internal/testhome"
 )
 
 // projectDir moves into an empty repository root, so a scope read sees only what
@@ -149,7 +150,7 @@ func TestACodexRunnerWithNoApprovalRecordReadsUnapproved(t *testing.T) {
 // Codex document, and a harness that is not installed gets no row at all.
 func TestRulesPresenceCoversInstalledHarnessesOnly(t *testing.T) {
 	root := projectDir(t)
-	t.Setenv("HOME", root)
+	testhome.Set(t, root)
 	if err := os.MkdirAll(filepath.Join(root, ".claude"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +188,7 @@ func TestRulesPresenceCoversInstalledHarnessesOnly(t *testing.T) {
 // brings the row back to the master's own runtime state.
 func TestAnInstalledHarnessWithoutTheStoresRegistrationIsDetached(t *testing.T) {
 	root := projectDir(t)
-	t.Setenv("HOME", root)
+	testhome.Set(t, root)
 	if err := os.MkdirAll(filepath.Join(root, ".claude"), 0o755); err != nil {
 		t.Fatal(err)
 	}

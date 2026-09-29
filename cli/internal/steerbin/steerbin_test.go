@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/steer-sh/steer-cli/internal/testhome"
 )
 
 // TestEnsurePlacesTheRunningBinary copies this test binary to the stable path and
@@ -11,8 +13,7 @@ import (
 // no-op, which is what an install registering three channels relies on.
 func TestEnsurePlacesTheRunningBinary(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-
+	testhome.Set(t, home)
 	path, err := Ensure()
 	if err != nil {
 		t.Fatal(err)
@@ -39,7 +40,7 @@ func TestEnsurePlacesTheRunningBinary(t *testing.T) {
 // TestResolveSeesAMissingCommand pins the reading the whole posture change rests
 // on: a registration naming a command that is not there is missing, not armed.
 func TestResolveSeesAMissingCommand(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testhome.Set(t, t.TempDir())
 	if got := Resolve("/nowhere/steer commit-gate review"); got != Missing {
 		t.Fatalf("absolute missing command = %q, want %q", got, Missing)
 	}

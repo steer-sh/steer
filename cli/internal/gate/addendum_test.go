@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/steer-sh/steer-cli/internal/testhome"
 )
 
 // The global addendum store lives under $HOME, so every gate test runs against an
@@ -17,6 +19,7 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	os.Setenv("HOME", home)
+	os.Setenv("USERPROFILE", home)
 	code := m.Run()
 	os.RemoveAll(home)
 	os.Exit(code)
@@ -40,7 +43,7 @@ func addendumManifest(t *testing.T, entries map[string]string) string {
 func writeGlobalAddendum(t *testing.T, entries map[string]string) {
 	t.Helper()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testhome.Set(t, home)
 	writeFileAt(t, home, ".steer/hooks/steer-manifest.json", addendumManifest(t, entries))
 }
 

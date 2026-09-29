@@ -11,6 +11,7 @@ import (
 
 	"github.com/steer-sh/steer-cli/internal/checks"
 	"github.com/steer-sh/steer-cli/internal/claude"
+	"github.com/steer-sh/steer-cli/internal/testhome"
 )
 
 // writeRuleStore places a manifest carrying one instruction rule in one scope's
@@ -28,7 +29,7 @@ func writeRuleStore(t *testing.T, dir, ruleID, text string) {
 
 func TestSteerRuleFactsReadsTheStoreAndRecomputesTheDigest(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testhome.Set(t, home)
 	t.Chdir(t.TempDir())
 	text := "resolve a config path from the repo root"
 	writeRuleStore(t, filepath.Join(home, ".steer", "hooks"), "config-path", text)
@@ -53,7 +54,7 @@ func TestSteerRuleFactsReadsTheStoreAndRecomputesTheDigest(t *testing.T) {
 // into its own error naming the repair.
 func TestSteerRuleFactsAnswersNothingForAnUnknownRule(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testhome.Set(t, home)
 	t.Chdir(t.TempDir())
 	writeRuleStore(t, filepath.Join(home, ".steer", "hooks"), "config-path", "a rule")
 
@@ -68,7 +69,7 @@ func TestSteerRuleFactsAnswersNothingForAnUnknownRule(t *testing.T) {
 func TestSteerRuleFactsRefusesAnIDInBothStores(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
-	t.Setenv("HOME", home)
+	testhome.Set(t, home)
 	t.Chdir(project)
 	writeRuleStore(t, filepath.Join(home, ".steer", "hooks"), "config-path", "the global wording")
 	writeRuleStore(t, filepath.Join(project, ".steer", "hooks"), "config-path", "the project wording")
@@ -89,7 +90,7 @@ func TestSteerRuleFactsRefusesAnIDInBothStores(t *testing.T) {
 func TestProjectFactsRecordTheRepository(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
-	t.Setenv("HOME", home)
+	testhome.Set(t, home)
 	t.Chdir(project)
 	if out, err := exec.Command("git", "init", "-q").CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v %s", err, out)

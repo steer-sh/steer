@@ -10,6 +10,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/report"
+	"github.com/steer-sh/steer-cli/internal/testhome"
 	"github.com/steer-sh/steer-cli/internal/transcript"
 )
 
@@ -130,7 +131,7 @@ func TestLoadReadsEveryShardAndSkipsJunk(t *testing.T) {
 func TestRefreshNeverRewritesAnotherHostsSessions(t *testing.T) {
 	// HOME points at an empty sandbox, so the build reaches no transcript and the
 	// merge is the stored shard alone.
-	t.Setenv("HOME", t.TempDir())
+	testhome.Set(t, t.TempDir())
 	dir := t.TempDir()
 	ours := []mine.SessionUnit{unit("claude-code", "mine", 1000, 1100, "bare python")}
 	if err := Save(dir, "hostA", ours); err != nil {

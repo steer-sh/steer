@@ -10,6 +10,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/cadence"
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
+	"github.com/steer-sh/steer-cli/internal/testhome"
 )
 
 // TestCollectListsTheInventoryScopesItIsGiven: the command lists both scopes' guards
@@ -17,7 +18,7 @@ import (
 // reads its own scope alone.
 func TestCollectListsTheInventoryScopesItIsGiven(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testhome.Set(t, home)
 	t.Chdir(t.TempDir())
 	writeStore(t, filepath.Join(home, ".steer", "hooks"),
 		`{"hooks":{"no-console":{"file":"no-console.py","rule":"global rule"}}}`)

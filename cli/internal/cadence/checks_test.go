@@ -4,13 +4,14 @@ import (
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/checks"
+	"github.com/steer-sh/steer-cli/internal/testhome"
 )
 
 // A repository declaring checks that this machine never authorized, holding a
 // declaration nothing replayed, reports both steps with the command that clears
 // each. A caller naming no repository reports none.
 func TestCheckWorkReportsAdoptionAndUnprovenChecks(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testhome.Set(t, t.TempDir())
 	root := t.TempDir()
 	if _, _, err := checks.Init(root); err != nil {
 		t.Fatalf("Init: %v", err)
@@ -49,7 +50,7 @@ func TestCheckWorkReportsAdoptionAndUnprovenChecks(t *testing.T) {
 
 // A refresh carries the repository's open check steps in the queue it writes.
 func TestRefreshCarriesTheCheckSteps(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testhome.Set(t, t.TempDir())
 	root := t.TempDir()
 	if _, _, err := checks.Init(root); err != nil {
 		t.Fatalf("Init: %v", err)

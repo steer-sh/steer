@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/gate"
+	"github.com/steer-sh/steer-cli/internal/testhome"
 )
 
 // writeLedger seeds a single-file ledger in a fresh state dir and returns both paths.
@@ -59,7 +60,7 @@ func TestLegacyBaselineChainsRoundTrip(t *testing.T) {
 
 func TestRegisterScoreRoundTrip(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testhome.Set(t, home)
 	t.Chdir(t.TempDir())
 	writeRuleStore(t, filepath.Join(home, ".steer", "hooks"), "widget-rule", "keep every parser flag")
 	var rows []gate.Row

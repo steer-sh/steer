@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/gate"
+	"github.com/steer-sh/steer-cli/internal/testhome"
 )
 
 func writeStore(t *testing.T, dir, body string) {
@@ -31,7 +32,7 @@ func addendumByID(rows []AddendumInfo) map[string]AddendumInfo {
 // entry removed on disk that the gate still reads until the removal is committed.
 func TestAddendumInventoryReadsEachPendingChangeAgainstHead(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testhome.Set(t, home)
 	t.Chdir(t.TempDir())
 	writeStore(t, filepath.Join(home, ".steer", "hooks"),
 		`{"review_addendum":{"no-nits":{"text":"style nits are not findings"}}}`)
@@ -73,7 +74,7 @@ func TestAddendumInventoryReadsEachPendingChangeAgainstHead(t *testing.T) {
 // unknown, never live; a global entry is read from disk either way.
 func TestAddendumInventoryNeverReadsAnUnreadHeadAsLive(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testhome.Set(t, home)
 	t.Chdir(t.TempDir())
 	writeStore(t, filepath.Join(home, ".steer", "hooks"), `{"review_addendum":{"g":{"text":"global"}}}`)
 	writeStore(t, filepath.Join(".steer", "hooks"), `{"review_addendum":{"p":{"text":"project"}}}`)

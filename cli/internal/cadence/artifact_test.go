@@ -10,6 +10,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/checks"
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
+	"github.com/steer-sh/steer-cli/internal/testhome"
 )
 
 // writeManifest places a steer manifest in a store directory.
@@ -49,7 +50,7 @@ func wantState(t *testing.T, got *Artifact, state string) {
 // when the section an agent reads was synced to match, and a corrupt store says so.
 func TestArtifactReadsARuleAgainstTheTextTheRecordFroze(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testhome.Set(t, home)
 	store := filepath.Join(home, ".steer", "hooks")
 	rec := ruleRecord("global")
 
@@ -74,7 +75,7 @@ func TestArtifactReadsARuleAgainstTheTextTheRecordFroze(t *testing.T) {
 // holding the same id is not that entry, and a record that names no repository is
 // never matched against whichever checkout the reader stands in.
 func TestArtifactPlacesAProjectEntryByItsRepository(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testhome.Set(t, t.TempDir())
 	a, b := t.TempDir(), t.TempDir()
 	for _, root := range []string{a, b} {
 		writeManifest(t, filepath.Join(root, ".steer", "hooks"),
@@ -94,7 +95,7 @@ func TestArtifactPlacesAProjectEntryByItsRepository(t *testing.T) {
 // A review entry is read from what the commit gate reads, so a project entry
 // removed from HEAD is absent whatever the working tree holds.
 func TestArtifactReadsAnAddendumEntryAsTheCommitGateReadsIt(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testhome.Set(t, t.TempDir())
 	root := t.TempDir()
 	rec := mine.Record{"tier": "review", "status": "active", "addendum_id": "fp-sort",
 		"addendum_scope": "project", "addendum_repo": identity(t, root),
@@ -116,7 +117,7 @@ func TestArtifactReadsAnAddendumEntryAsTheCommitGateReadsIt(t *testing.T) {
 // A guard is read from its store's hooks section by the rule digest it froze.
 func TestArtifactReadsAGuardEntry(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testhome.Set(t, home)
 	store := filepath.Join(home, ".steer", "hooks")
 	rec := mine.Record{"tier": "guard", "status": "active", "hook_id": "no-bare-python",
 		"hook_scope": "global", "rule_hash": "h1"}
@@ -134,7 +135,7 @@ func TestArtifactReadsAGuardEntry(t *testing.T) {
 // A check is read from the repository its record binds, against the detector the
 // record registered.
 func TestArtifactReadsACheckDeclaration(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testhome.Set(t, t.TempDir())
 	root, other := t.TempDir(), t.TempDir()
 	if _, _, err := checks.Init(root); err != nil {
 		t.Fatal(err)
@@ -180,7 +181,7 @@ func TestArtifactReadsACheckDeclaration(t *testing.T) {
 // A declined record installed nothing, so it has no artifact to read, while the same
 // record still active does.
 func TestArtifactIsNilForADeclinedRecord(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testhome.Set(t, t.TempDir())
 	rec := ruleRecord("global")
 	wantState(t, ArtifactOf(rec, ArtifactSources{}), ArtifactAbsent)
 	rec["status"] = "rejected"
@@ -192,7 +193,7 @@ func TestArtifactIsNilForADeclinedRecord(t *testing.T) {
 // A refresh queues a record whose fix is gone, and carries the reading with it.
 func TestRefreshQueuesARecordWhoseFixIsAbsent(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testhome.Set(t, home)
 	writeManifest(t, filepath.Join(home, ".steer", "hooks"), `{"rules":{}}`)
 	state := t.TempDir()
 	rec := ruleRecord("global")
@@ -242,7 +243,7 @@ const split2026 = 1767225600
 // of another tier under the same id is not its removal.
 func TestArtifactCarriesARemovalAfterTheSplit(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testhome.Set(t, home)
 	store := filepath.Join(home, ".steer", "hooks")
 	rec := ruleRecord("global")
 	rec["installed_ts"] = split2026
@@ -272,7 +273,7 @@ func TestArtifactCarriesARemovalAfterTheSplit(t *testing.T) {
 // split's own second predates a record registered after a restore.
 func TestARemovalInTheSplitSecondIsNotRecorded(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testhome.Set(t, home)
 	store := filepath.Join(home, ".steer", "hooks")
 	rec := ruleRecord("global")
 	rec["installed_ts"] = split2026
@@ -293,7 +294,7 @@ func TestARemovalInTheSplitSecondIsNotRecorded(t *testing.T) {
 // store for a global entry, the repository's check store for a check.
 func TestArtifactReadsTheArchiveOfAnAddendumAndACheck(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testhome.Set(t, home)
 	archiveAt(t, filepath.Join(home, ".steer", "hooks"), "review", "fp-sort", "2026-02-01T00:00:00.000000000Z")
 	rev := mine.Record{"tier": "review", "status": "active", "addendum_id": "fp-sort",
 		"addendum_scope": "global", "installed_ts": split2026}
@@ -337,7 +338,7 @@ func TestArtifactReadsTheArchiveOfAnAddendumAndACheck(t *testing.T) {
 // A refresh queues a record whose fix is in place but was archived after the split.
 func TestRefreshQueuesARecordWhoseFixWasRemovedSinceItsSplit(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testhome.Set(t, home)
 	store := filepath.Join(home, ".steer", "hooks")
 	writeManifest(t, store, `{"rules":{"config-path":{"text":"resolve config from the repo root"}}}`)
 	state := t.TempDir()
@@ -375,7 +376,7 @@ func git(t *testing.T, dir string, args ...string) {
 // reading sits in a linked worktree, so the worktree's branch-local copy never
 // decides what the record's repository is reported to hold.
 func TestArtifactReadsTheBoundCheckoutFromALinkedWorktree(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testhome.Set(t, t.TempDir())
 	root := t.TempDir()
 	if out, err := exec.Command("git", "-C", root, "init").CombinedOutput(); err != nil {
 		t.Skipf("git init unavailable: %s", out)

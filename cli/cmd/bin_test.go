@@ -9,6 +9,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/claude"
 	codexhooks "github.com/steer-sh/steer-cli/internal/codex"
 	"github.com/steer-sh/steer-cli/internal/steerbin"
+	"github.com/steer-sh/steer-cli/internal/testhome"
 )
 
 // TestRelinkRepointsAPATHRegistration pins the repair half: a registration
@@ -17,7 +18,7 @@ import (
 // reviewer flags that outrank the settings file.
 func TestRelinkRepointsAPATHRegistration(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testhome.Set(t, home)
 	if err := claude.RegisterCommitGateHook(claude.GlobalScope,
 		"steer commit-gate review --provider gemini", 210); err != nil {
 		t.Fatal(err)
@@ -61,7 +62,7 @@ func TestRelinkRepointsAPATHRegistration(t *testing.T) {
 // registration it was given. Steer repoints its own command, not everyone's.
 func TestAForeignCommandIsNeverRewritten(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testhome.Set(t, home)
 	wrapper := "/usr/local/bin/my-wrapper commit-gate review"
 	if err := claude.RegisterCommitGateHook(claude.GlobalScope, wrapper, 210); err != nil {
 		t.Fatal(err)
@@ -88,7 +89,7 @@ func TestAForeignCommandIsNeverRewritten(t *testing.T) {
 // fresh registration carries names the absolute path, not the bare word.
 func TestInstallRegistersTheStableExecutable(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testhome.Set(t, home)
 	path, err := steerbin.Ensure()
 	if err != nil {
 		t.Fatal(err)
@@ -110,7 +111,7 @@ func TestInstallRegistersTheStableExecutable(t *testing.T) {
 // only" — not "register a hook that runs nothing".
 func TestCodexRelinkWritesNoEmptyResolver(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testhome.Set(t, home)
 	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
 	cwd := withCmdProjectTempDir(t)
 	_ = cwd
