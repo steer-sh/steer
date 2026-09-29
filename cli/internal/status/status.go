@@ -67,7 +67,9 @@ import (
 // attention by id, hooks and presets from both scopes, resolver rows cut to their
 // arming readings, scope.repo_root, and no chains. v28 adds posture.readiness: the
 // answer `steer status` prints, so an agent reads trust and resolution with it.
-const StatusVersion = 28
+// v29 adds posture.plugins: each harness's cached plugin copy, read against the
+// stable executable.
+const StatusVersion = 29
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20
@@ -369,6 +371,8 @@ type Posture struct {
 	Masters []MasterRuntime `json:"masters"`
 	// Rules is each installed harness's rules section against the manifest.
 	Rules []RulesPresence `json:"rules"`
+	// Plugins is each harness's cached copy of the Steer plugin.
+	Plugins []PluginCopy `json:"plugins"`
 }
 
 // AttentionQueue is the subset of the loop needing action: the cadence queue
@@ -633,6 +637,7 @@ func collectPosture(cfg gate.Config, ev mine.EvidenceSet) Posture {
 		Resolver:   []ScopeArming{},
 		Masters:    []MasterRuntime{},
 		Rules:      []RulesPresence{},
+		Plugins:    PluginCopies(),
 		Unresolved: resolve.CountUnresolved(cfg),
 	}
 	cwd, _ := os.Getwd()

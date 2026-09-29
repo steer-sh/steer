@@ -39,6 +39,10 @@ Read the linked architecture section before changing the corresponding boundary:
   `cli/internal/plugindist/` checks the four plugin/marketplace manifests together.
   The working skills live under `skills/`, including `steer`, `steer-report` and
   `steer-setup`; there is no root generation `SKILL.md`.
+  A harness runs skills and the launcher from its cached plugin copy, which an
+  unchanged version does not refresh and `steer bin install` never touches;
+  `posture.plugins` (`cli/internal/status/plugins.go`) compares each copy's binary
+  with `~/.steer/bin/steer`.
 - Harness support, paths, or migrations: [harnesses and storage](ARCHITECTURE.md#harnesses-and-storage).
   Start with `cli/internal/harness/` and `cli/internal/steerpath/`; registration
   adapters and shared stores have different ownership.

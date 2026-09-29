@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"unicode"
 
@@ -111,6 +112,7 @@ func renderStatus(s *status.SystemStatus, probe reviewers.Probe) {
 	renderReadiness(status.ReadinessOf(s, probe), width)
 	fmt.Println()
 	renderStoreProblems(s, width)
+	renderPluginCopies(s, width)
 	fmt.Print(styles.Wrap(styles.MutedText.Render("Fixes, recorded problems and arming: steer dashboard"), "  ", width))
 	fmt.Print(styles.Wrap(styles.MutedText.Render("An agent reads the whole loop: steer status --json"), "  ", width))
 }
@@ -129,6 +131,35 @@ func renderStoreProblems(s *status.SystemStatus, width int) {
 			[]problemField{
 				{"Why", []string{p.Error}},
 				{"Next", []string{"edit the entry named above; the guards already installed keep running"}},
+			}, width))
+	}
+	fmt.Println()
+}
+
+// renderPluginCopies prints each harness's cached plugin copy that bundles a build
+// other than the stable executable. The skills that harness loads and the launcher
+// they call come from that copy, so the hooks and the skills run different builds.
+func renderPluginCopies(s *status.SystemStatus, width int) {
+	var differ []status.PluginCopy
+	for _, p := range s.Posture.Plugins {
+		if p.Differs() {
+			differ = append(differ, p)
+		}
+	}
+	if len(differ) == 0 {
+		return
+	}
+	fmt.Println(styles.SectionHeader.Render("Plugin copies"))
+	for _, p := range differ {
+		fmt.Print(problemEntry(
+			styles.WarningText.Render("the "+status.HarnessLabel(p.Harness)+" plugin copy bundles another Steer build"),
+			[]problemField{
+				{"Where", []string{p.Path}},
+				{"Why", []string{"its skills and launcher come from that copy, and the hooks run ~/.steer/bin/steer"}},
+				{"Next", []string{
+					"if the copy is older, update the plugin in " + status.HarnessLabel(p.Harness),
+					"if the copy is newer, run: " + filepath.Join(p.Path, "scripts", "steer") + " bin install",
+				}},
 			}, width))
 	}
 	fmt.Println()

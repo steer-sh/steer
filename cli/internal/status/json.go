@@ -39,6 +39,7 @@ type postureJSON struct {
 	Unresolved int             `json:"unresolved_rows"`
 	Masters    []MasterRuntime `json:"masters"`
 	Rules      []RulesPresence `json:"rules"`
+	Plugins    []PluginCopy    `json:"plugins"`
 	Readiness  readinessJSON   `json:"readiness"`
 }
 
@@ -135,6 +136,7 @@ func (s *SystemStatus) contract() statusJSON {
 			Unresolved: s.Posture.Unresolved,
 			Masters:    nonNil(s.Posture.Masters),
 			Rules:      nonNil(s.Posture.Rules),
+			Plugins:    nonNil(s.Posture.Plugins),
 			Readiness:  readinessRow(ReadinessOf(s, s.ReviewerProbe)),
 		},
 		Checks:        s.Checks,

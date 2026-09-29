@@ -173,7 +173,7 @@ func intPtr(n int) *int           { return &n }
 // so a renamed or reordered json tag fails here, the agent-contract guard.
 func TestJSONContractIsStable(t *testing.T) {
 	s := &SystemStatus{
-		StatusVersion: 28,
+		StatusVersion: 29,
 		GeneratedAt:   "2026-01-01T00:00:00Z",
 		Posture: Posture{
 			Instrument: "agy@sha", Reviewer: "gemini", Ledger: "/l.jsonl",
@@ -210,6 +210,10 @@ func TestJSONContractIsStable(t *testing.T) {
 			Rules: []RulesPresence{
 				{Harness: "codex", Scope: "global", Path: "/h/.codex/AGENTS.md", Expected: 3,
 					Missing: []string{"config-path"}, Extra: []string{}, State: RulesDrifted},
+			},
+			Plugins: []PluginCopy{
+				{Harness: "claude-code", Path: "/h/.claude/plugins/cache/m/steer/0.1.0", State: PluginDifferentBinary},
+				{Harness: "codex", Path: "/h/.codex/plugins/cache/m/steer/0.1.0", Target: "/w/steer", State: PluginSameBinary},
 			},
 			Unresolved: 4,
 		},
@@ -315,7 +319,7 @@ func TestJSONContractIsStable(t *testing.T) {
 }
 
 const goldenStatusJSON = `{
-  "status_version": 28,
+  "status_version": 29,
   "generated_at": "2026-01-01T00:00:00Z",
   "posture": {
     "instrument": "agy@sha",
@@ -432,6 +436,19 @@ const goldenStatusJSON = `{
         ],
         "extra": [],
         "state": "drifted"
+      }
+    ],
+    "plugins": [
+      {
+        "harness": "claude-code",
+        "path": "/h/.claude/plugins/cache/m/steer/0.1.0",
+        "state": "different-binary"
+      },
+      {
+        "harness": "codex",
+        "path": "/h/.codex/plugins/cache/m/steer/0.1.0",
+        "target": "/w/steer",
+        "state": "same-binary"
       }
     ],
     "readiness": {
