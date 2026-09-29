@@ -24,7 +24,7 @@ func (Adapter) Harness() harness.ID { return harness.ClaudeCode }
 
 // instrument is this adapter's normalization identity, pinned by
 // TestInstrumentMatchesFixtureReplay. Bump it when that test fails.
-const instrument = "claude-code:672cb59e"
+const instrument = "claude-code:4a99a5ef"
 
 func (Adapter) Instrument() string { return instrument }
 
@@ -223,8 +223,7 @@ func (a Adapter) normalize(line []byte, f transcript.Filter, counts *transcript.
 	human.Kind, human.Meta = transcript.KindHumanTurn, r.IsMeta || r.Entrypoint == headlessEntrypoint
 	var text string
 	if err := json.Unmarshal(r.Message.Content, &text); err == nil {
-		human.Text = text
-		return emit(human)
+		return emit(humanEvent(human, text))
 	}
 
 	var blocks []contentBlock
@@ -234,9 +233,7 @@ func (a Adapter) normalize(line []byte, f transcript.Filter, counts *transcript.
 	for _, b := range blocks {
 		switch b.Type {
 		case "text":
-			event := human
-			event.Text = b.Text
-			if err := emit(event); err != nil {
+			if err := emit(humanEvent(human, b.Text)); err != nil {
 				return err
 			}
 		case "tool_result":
@@ -251,6 +248,19 @@ func (a Adapter) normalize(line []byte, f transcript.Filter, counts *transcript.
 		}
 	}
 	return nil
+}
+
+// humanEvent fills a human-turn event with its text. An interrupt marker, which
+// Claude Code writes as a user turn, becomes a Meta event naming the interrupt.
+func humanEvent(e transcript.Event, text string) transcript.Event {
+	e.Text = text
+	switch strings.TrimSpace(text) {
+	case "[Request interrupted by user]":
+		e.Interrupt, e.Meta = transcript.InterruptTurn, true
+	case "[Request interrupted by user for tool use]":
+		e.Interrupt, e.Meta = transcript.InterruptToolUse, true
+	}
+	return e
 }
 
 func (a Adapter) emitToolCalls(raw json.RawMessage, base transcript.Event, emit func(transcript.Event) error) error {

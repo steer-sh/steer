@@ -17,7 +17,7 @@ import (
 // DigestVersion is the schema version of the stored report and of every page
 // read from it. The steer-report skill prompt reads this field; bump it whenever
 // the shape or semantics change.
-const DigestVersion = 5
+const DigestVersion = 6
 
 // DefaultMaxDigestBytes bounds one page of index, listing or detail output.
 const DefaultMaxDigestBytes = 40960
@@ -42,6 +42,9 @@ type Occurrence struct {
 	FirstObservedHumanTextInScan *ObservedText `json:"first_observed_human_text_in_scan,omitempty"`
 	// Group numbers the send group of a repeated wording occurrence.
 	Group int `json:"group,omitempty"`
+	// AfterInterrupt marks a correction typed right after the person stopped a
+	// running turn.
+	AfterInterrupt bool `json:"after_interrupt,omitempty"`
 }
 
 // ObservedText is human text shown as context, cut to a bound.
@@ -83,6 +86,11 @@ type Signals struct {
 	// UserRejections are tool calls the user declined at the permission prompt.
 	// Only Claude Code's decline result is recognized.
 	UserRejections []*Cluster `json:"user_rejections"`
+	// AfterInterrupt is the message typed right after the person stopped a
+	// running turn, when no correction pattern matched it. Most are redirections
+	// or continuations, not corrections. It is report-only: no session snapshot
+	// or fix score reads it.
+	AfterInterrupt []*Cluster `json:"after_interrupt"`
 	// RepeatedWording is typed human text that recurs verbatim, after whitespace
 	// normalization, in two or more sessions. It is report-only: no session
 	// snapshot or fix score reads it.
@@ -109,6 +117,7 @@ func (s Signals) lists() []signalList {
 	return []signalList{
 		{kindCorrection, "c", s.UserCorrections, true},
 		{kindRejection, "r", s.UserRejections, true},
+		{kindAfterInterrupt, "a", s.AfterInterrupt, true},
 		{kindRepeatedWording, "w", s.RepeatedWording, true},
 		{kindFailure, "f", s.ToolFailures, false},
 		{kindHookBlock, "h", s.HookBlocks, false},
@@ -205,6 +214,7 @@ func NewDigest(windowDays int) *Digest {
 		Signals: Signals{
 			UserCorrections: []*Cluster{},
 			UserRejections:  []*Cluster{},
+			AfterInterrupt:  []*Cluster{},
 			RepeatedWording: []*Cluster{},
 			ToolFailures:    []*Cluster{},
 			HookBlocks:      []*Cluster{},

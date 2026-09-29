@@ -21,6 +21,7 @@ const (
 	kindHookBlock  = "hook_blocks"
 
 	kindRepeatedWording = "repeated_wording"
+	kindAfterInterrupt  = "after_interrupt"
 
 	// tool_result payloads can be huge (full test runs); only the head is
 	// needed to classify them.
@@ -29,10 +30,6 @@ const (
 	// rejectionEnvelope opens the error result Claude Code writes for a tool call
 	// the user declined at the permission prompt, lowercased.
 	rejectionEnvelope = "the user doesn't want to proceed with this tool use"
-
-	// interruptMarker opens the text Claude Code records as a user turn when the
-	// person stops a turn. Nobody typed it.
-	interruptMarker = "[Request interrupted by user"
 
 	// maxRepeatRunes bounds the turns repeated wording collects. It is a
 	// retrieval heuristic: standing instructions are short, and long turns are
@@ -256,25 +253,27 @@ func ParserInstrument() string {
 // Scanner accumulates signal clusters from normalized transcript events. It
 // reads no harness format of its own: an Adapter supplies the events.
 type Scanner struct {
-	Since    time.Time
-	stats    Stats
-	clusters map[string]map[string]*Cluster
-	sessions map[string]struct{}
-	threads  map[string]struct{}
-	coverage map[harness.ID]*harnessScan
-	wording  map[string]*wordingText
+	Since      time.Time
+	stats      Stats
+	clusters   map[string]map[string]*Cluster
+	sessions   map[string]struct{}
+	threads    map[string]struct{}
+	coverage   map[harness.ID]*harnessScan
+	wording    map[string]*textGroup
+	interrupts map[string]*textGroup
 }
 
-// wordingText is one normalized human text and every place it was typed.
-type wordingText struct {
+// textGroup is one normalized human text and every place it was typed.
+type textGroup struct {
 	occurrences []Occurrence
 	sessions    map[string]struct{}
 }
 
-// threadContext is the human text one session's thread showed before its
-// current event.
+// threadContext is what one session's thread showed before its current event:
+// its human text, and whether the person just stopped a running turn.
 type threadContext struct {
 	first, previous *ObservedText
+	afterInterrupt  bool
 }
 
 // harnessScan is one harness's running coverage. It keeps its own id sets: the
@@ -296,10 +295,11 @@ func NewScanner(since time.Time) *Scanner {
 			kindFailure:    {},
 			kindHookBlock:  {},
 		},
-		sessions: map[string]struct{}{},
-		threads:  map[string]struct{}{},
-		coverage: map[harness.ID]*harnessScan{},
-		wording:  map[string]*wordingText{},
+		sessions:   map[string]struct{}{},
+		threads:    map[string]struct{}{},
+		coverage:   map[harness.ID]*harnessScan{},
+		wording:    map[string]*textGroup{},
+		interrupts: map[string]*textGroup{},
 	}
 }
 
@@ -360,28 +360,44 @@ func (s *Scanner) classify(e transcript.Event, c *Classifier, hs *harnessScan, c
 		}
 		s.threads[e.ThreadID] = struct{}{}
 	}
-	human := e.Kind == transcript.KindHumanTurn && !e.Meta && !strings.HasPrefix(strings.TrimSpace(e.Text), interruptMarker)
 	key := e.SessionID + "\x00" + e.ThreadID
 	ctx := contexts[key]
 	if ctx == nil {
 		ctx = &threadContext{}
 		contexts[key] = ctx
 	}
+	if e.Interrupt != "" {
+		// A declined tool call is already a rejection, so only a stopped turn
+		// makes the next message an after-interrupt one.
+		ctx.afterInterrupt = e.Interrupt == transcript.InterruptTurn
+	}
+	var observed *ObservedText
+	real := false
+	if e.Kind == transcript.KindHumanTurn && !e.Meta {
+		observed, real = observe(e.Text)
+	}
+	// The next real message answers the interrupt, whatever it says.
+	answers := real && ctx.afterInterrupt
+	if real {
+		ctx.afterInterrupt = false
+	}
+	corrected := false
 	if sig, ok := c.Classify(e); ok {
 		o := s.addCluster(sig.Kind, sig.Key, sig.Example, e)
 		if o != nil && sig.Kind == kindCorrection {
+			corrected = true
 			o.PreviousHumanText = ctx.previous
 			if ctx.first != ctx.previous {
 				o.FirstObservedHumanTextInScan = ctx.first
 			}
+			o.AfterInterrupt = answers
 		}
 	}
-	if !human {
+	if !real {
 		return
 	}
-	observed, ok := observe(e.Text)
-	if !ok {
-		return
+	if answers && !corrected {
+		s.addAfterInterrupt(e, ctx)
 	}
 	if ctx.first == nil {
 		ctx.first = observed
@@ -421,13 +437,33 @@ func (s *Scanner) addWording(e transcript.Event) {
 	if utf8.RuneCountInString(text) > maxRepeatRunes {
 		return
 	}
-	w := s.wording[text]
-	if w == nil {
-		w = &wordingText{sessions: map[string]struct{}{}}
-		s.wording[text] = w
+	addText(s.wording, text, Occurrence{Session: e.SessionID, Timestamp: e.Timestamp, Text: text})
+}
+
+// addAfterInterrupt records the typed text that answered a stopped turn, with
+// the thread's human text before the interrupt as context. A paste-only answer
+// has no typed text and records nothing.
+func (s *Scanner) addAfterInterrupt(e transcript.Event, ctx *threadContext) {
+	typed, ok := typedText(e.Text)
+	if !ok {
+		return
 	}
-	w.sessions[e.SessionID] = struct{}{}
-	w.occurrences = append(w.occurrences, Occurrence{Session: e.SessionID, Timestamp: e.Timestamp, Text: text})
+	text := whitespaceRun.ReplaceAllString(typed, " ")
+	o := Occurrence{Session: e.SessionID, Timestamp: e.Timestamp, Text: text, PreviousHumanText: ctx.previous}
+	if ctx.first != ctx.previous {
+		o.FirstObservedHumanTextInScan = ctx.first
+	}
+	addText(s.interrupts, text, o)
+}
+
+func addText(m map[string]*textGroup, text string, o Occurrence) {
+	g := m[text]
+	if g == nil {
+		g = &textGroup{sessions: map[string]struct{}{}}
+		m[text] = g
+	}
+	g.sessions[o.Session] = struct{}{}
+	g.occurrences = append(g.occurrences, o)
 }
 
 // matchLine returns the line containing byte offset pos, for use as a cluster
@@ -516,6 +552,11 @@ func (s *Scanner) Finalize(windowDays int, projects []string, instructionFiles [
 	d.Signals.ToolFailures = collect(s.clusters[kindFailure])
 	d.Signals.HookBlocks = collect(s.clusters[kindHookBlock])
 	d.Signals.RepeatedWording = repeatedWording(s.wording)
+	interrupts := map[string]*Cluster{}
+	for text, g := range s.interrupts {
+		interrupts[text] = textCluster(text, g)
+	}
+	d.Signals.AfterInterrupt = collect(interrupts)
 
 	for _, list := range d.Signals.lists() {
 		d.Stats.ClustersFound += len(list.items)
@@ -538,27 +579,14 @@ func (s *Scanner) harnessRows() []HarnessCoverage {
 
 // repeatedWording keeps the texts typed in minRepeatSessions or more sessions,
 // numbers each one's send groups, and ranks them by session spread.
-func repeatedWording(m map[string]*wordingText) []*Cluster {
+func repeatedWording(m map[string]*textGroup) []*Cluster {
 	out := []*Cluster{}
-	for text, w := range m {
-		if len(w.sessions) < minRepeatSessions {
+	for text, g := range m {
+		if len(g.sessions) < minRepeatSessions {
 			continue
 		}
-		occ := append([]Occurrence(nil), w.occurrences...)
-		groups := assignSendGroups(occ)
-		c := &Cluster{
-			Pattern: clip(text, maxOccurrenceLen), Count: len(occ), Sessions: len(w.sessions),
-			Occurrences: occ, SendGroups: groups,
-		}
-		for i := range occ {
-			occ[i].Text = clip(occ[i].Text, maxOccurrenceLen)
-			if c.FirstSeen == "" || occ[i].Timestamp < c.FirstSeen {
-				c.FirstSeen = occ[i].Timestamp
-			}
-			if occ[i].Timestamp > c.LastSeen {
-				c.LastSeen = occ[i].Timestamp
-			}
-		}
+		c := textCluster(text, g)
+		c.SendGroups = assignSendGroups(c.Occurrences)
 		out = append(out, c)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -575,6 +603,22 @@ func repeatedWording(m map[string]*wordingText) []*Cluster {
 		return a.Pattern < b.Pattern
 	})
 	return out
+}
+
+// textCluster is one text group as a cluster, its texts clipped.
+func textCluster(text string, g *textGroup) *Cluster {
+	occ := append([]Occurrence(nil), g.occurrences...)
+	c := &Cluster{Pattern: clip(text, maxOccurrenceLen), Count: len(occ), Sessions: len(g.sessions), Occurrences: occ}
+	for i := range occ {
+		occ[i].Text = clip(occ[i].Text, maxOccurrenceLen)
+		if c.FirstSeen == "" || occ[i].Timestamp < c.FirstSeen {
+			c.FirstSeen = occ[i].Timestamp
+		}
+		if occ[i].Timestamp > c.LastSeen {
+			c.LastSeen = occ[i].Timestamp
+		}
+	}
+	return c
 }
 
 // assignSendGroups orders occurrences by time and numbers their send groups. An

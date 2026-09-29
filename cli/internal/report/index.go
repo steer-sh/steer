@@ -110,6 +110,7 @@ type DetailRow struct {
 	Timestamp                    string        `json:"timestamp,omitempty"`
 	Section                      string        `json:"section,omitempty"`
 	Group                        int           `json:"group,omitempty"`
+	AfterInterrupt               bool          `json:"after_interrupt,omitempty"`
 	Text                         string        `json:"text"`
 	PreviousHumanText            *ObservedText `json:"previous_human_text,omitempty"`
 	FirstObservedHumanTextInScan *ObservedText `json:"first_observed_human_text_in_scan,omitempty"`
@@ -227,7 +228,8 @@ func DetailPage(d *Digest, ids []string, cursor, maxBytes int) ([]byte, error) {
 			})
 			for _, o := range c.Occurrences {
 				rows = append(rows, DetailRow{
-					ID: id, Session: o.Session, Timestamp: o.Timestamp, Group: o.Group, Text: o.Text,
+					ID: id, Session: o.Session, Timestamp: o.Timestamp, Group: o.Group,
+					AfterInterrupt: o.AfterInterrupt, Text: o.Text,
 					PreviousHumanText: o.PreviousHumanText, FirstObservedHumanTextInScan: o.FirstObservedHumanTextInScan,
 				})
 			}

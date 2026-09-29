@@ -26,6 +26,7 @@ func sampleDigest() *Digest {
 	d := NewDigest(30)
 	d.Signals.UserCorrections = []*Cluster{cluster("don't use var", "s1", "s2"), cluster("stop adding docstrings", "s2")}
 	d.Signals.UserRejections = []*Cluster{cluster("Bash: rm -rf build", "s3")}
+	d.Signals.AfterInterrupt = []*Cluster{cluster("you are obsessing", "s7")}
 	d.Signals.RepeatedWording = []*Cluster{cluster("commit when complete", "s1", "s6")}
 	d.Signals.RepeatedWording[0].SendGroups = 2
 	d.Signals.ToolFailures = []*Cluster{cluster("FAIL: TestThing", "s1", "s4")}
@@ -54,10 +55,10 @@ func TestIndexListsTheUserSignalsOnly(t *testing.T) {
 	for _, r := range idx.Rows {
 		ids = append(ids, r.ID)
 	}
-	if strings.Join(ids, ",") != "c1,c2,r1,w1" {
-		t.Errorf("index rows = %v, want c1,c2,r1,w1", ids)
+	if strings.Join(ids, ",") != "c1,c2,r1,a1,w1" {
+		t.Errorf("index rows = %v, want c1,c2,r1,a1,w1", ids)
 	}
-	if w := idx.Rows[3]; w.SendGroups != 2 || w.Sessions != 2 || w.Count != 2 {
+	if w := idx.Rows[4]; w.SendGroups != 2 || w.Sessions != 2 || w.Count != 2 {
 		t.Errorf("repeated wording row = %+v", w)
 	}
 	if strings.Contains(string(data), "FAIL: TestThing") || strings.Contains(string(data), "never force push") {
@@ -66,6 +67,7 @@ func TestIndexListsTheUserSignalsOnly(t *testing.T) {
 	want := map[string]SignalSummary{
 		"user_corrections": {Signal: "user_corrections", Clusters: 2, Sessions: 2, InIndex: true},
 		"user_rejections":  {Signal: "user_rejections", Clusters: 1, Sessions: 1, InIndex: true},
+		"after_interrupt":  {Signal: "after_interrupt", Clusters: 1, Sessions: 1, InIndex: true},
 		"repeated_wording": {Signal: "repeated_wording", Clusters: 1, Sessions: 2, InIndex: true},
 		"tool_failures":    {Signal: "tool_failures", Clusters: 1, Sessions: 2},
 		"hook_blocks":      {Signal: "hook_blocks", Clusters: 1, Sessions: 1},

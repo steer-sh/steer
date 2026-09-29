@@ -28,6 +28,17 @@ const (
 	KindToolResult Kind = "tool_result"
 )
 
+// Interrupt names how a person stopped the agent.
+type Interrupt string
+
+const (
+	// InterruptTurn is the person stopping a running turn.
+	InterruptTurn Interrupt = "turn"
+	// InterruptToolUse is the person declining a tool call at the permission
+	// prompt.
+	InterruptToolUse Interrupt = "tool_use"
+)
+
 // Session is one root session's transcript. The root session is the statistical
 // unit; a subagent thread is provenance carried on the events.
 type Session struct {
@@ -61,6 +72,10 @@ type Event struct {
 	// harness generated, such as a session-resume banner, or the prompt a program
 	// passed to a headless run.
 	Meta bool
+	// Interrupt marks the human-turn entry a harness writes when the person
+	// stopped the agent. Such an event is Meta, since nobody typed its text. An
+	// adapter that cannot tell an interrupt apart leaves it empty.
+	Interrupt Interrupt
 	// Tool names the tool for a call or a result.
 	Tool string
 	// Shell reports that a tool call ran a shell command. A classifier reads
@@ -174,7 +189,7 @@ type Adapter interface {
 	// Harness names the harness this adapter reads.
 	Harness() harness.ID
 	// Instrument identifies this adapter's normalization, as "<harness>:<digest>".
-	// The adapter decides Kind, Shell, Target and IsError, which are the fields a
+	// The adapter decides Kind, Shell, Target, IsError and Interrupt, the fields a
 	// classifier reads, so a change here moves signals the same way a classifier
 	// change does. The value is a declared constant that ReplayDigest pins.
 	Instrument() string
@@ -195,6 +210,11 @@ func ReplayDigest(a Adapter, paths []string) (string, error) {
 	for _, path := range paths {
 		s := Session{Harness: a.Harness(), Path: path}
 		counts, err := a.Stream(s, Filter{AllProjects: true}, func(e Event) error {
+			// Only a set Interrupt is hashed, so an adapter that never sets it
+			// keeps its digest.
+			if e.Interrupt != "" {
+				fmt.Fprintf(h, "interrupt:%s\x1f", e.Interrupt)
+			}
 			fmt.Fprintf(h, "%s\x1f%s\x1f%s\x1f%s\x1f%t\x1f%s\x1f%t\x1f%s\x1f%s\x1f%t\x1f%s\x1e",
 				e.Kind, e.SessionID, e.ThreadID, e.Timestamp, e.Meta,
 				e.Tool, e.Shell, e.Target, e.ToolUseID, e.IsError, e.Text)

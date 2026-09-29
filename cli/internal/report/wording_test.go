@@ -22,6 +22,12 @@ func humanTurn(session, ts, text string) transcript.Event {
 	return transcript.Event{Kind: transcript.KindHumanTurn, SessionID: session, Timestamp: ts, Text: text}
 }
 
+// interrupt is the marker event an adapter emits when the person stops the agent.
+func interrupt(session, ts string, kind transcript.Interrupt) transcript.Event {
+	return transcript.Event{Kind: transcript.KindHumanTurn, SessionID: session, Timestamp: ts,
+		Text: "[Request interrupted by user]", Meta: true, Interrupt: kind}
+}
+
 // Only typed root-thread text counts, whole and after whitespace normalization:
 // a punctuation difference is another wording, and a wording typed in one
 // session is no repeat.
@@ -39,8 +45,8 @@ func TestRepeatedWordingMatchesWholeTypedText(t *testing.T) {
 		humanTurn("s6", "2026-09-01T05:00:00Z", habit+"<pasted_content>a long log</pasted_content>"),
 		humanTurn("s1", "2026-09-01T06:00:00Z", "run the tests"),
 		humanTurn("s1", "2026-09-01T07:00:00Z", "run the tests"),
-		humanTurn("s1", "2026-09-01T08:00:00Z", "[Request interrupted by user]"),
-		humanTurn("s2", "2026-09-01T09:00:00Z", "[Request interrupted by user]"),
+		interrupt("s1", "2026-09-01T08:00:00Z", transcript.InterruptTurn),
+		interrupt("s2", "2026-09-01T09:00:00Z", transcript.InterruptTurn),
 		humanTurn("s1", "2026-09-01T10:00:00Z", strings.Repeat("x", maxRepeatRunes+1)),
 		humanTurn("s2", "2026-09-01T11:00:00Z", strings.Repeat("x", maxRepeatRunes+1)),
 	})
@@ -97,7 +103,7 @@ func TestCorrectionCarriesObservedHumanText(t *testing.T) {
 		banner, sub,
 		humanTurn("s1", "2026-09-01T00:03:00Z", "second   message"),
 		humanTurn("s1", "2026-09-01T00:03:30Z", "<local-command-stdout>Set effort level</local-command-stdout>"),
-		humanTurn("s1", "2026-09-01T00:04:00Z", "[Request interrupted by user for tool use]"),
+		interrupt("s1", "2026-09-01T00:04:00Z", transcript.InterruptToolUse),
 		humanTurn("s1", "2026-09-01T00:05:00Z", "don't use var"),
 		humanTurn("s2", "2026-09-01T00:00:00Z", "<pasted_content>a build log</pasted_content>"),
 		humanTurn("s2", "2026-09-01T00:00:10Z", "don't use var"),
@@ -161,5 +167,63 @@ func TestCorrectionCarriesObservedHumanText(t *testing.T) {
 	}
 	if strings.Contains(string(index), "second message") {
 		t.Errorf("the index carries context text:\n%s", index)
+	}
+}
+
+// The next real message after a stopped turn answers it, once and in its own
+// session and thread. A declined tool call, a wrapper and a Meta turn answer
+// nothing; a message a correction pattern matches stays a correction.
+func TestAfterInterruptTakesTheNextTypedMessage(t *testing.T) {
+	sub := humanTurn("s5", "2026-09-01T00:01:00Z", "a reply in another thread")
+	sub.ThreadID = "sub-1"
+	banner := humanTurn("s1", "2026-09-01T00:01:30Z", "session resumed")
+	banner.Meta = true
+	d := scanEvents(t, []transcript.Event{
+		humanTurn("s1", "2026-09-01T00:00:00Z", "please refactor the parser"),
+		interrupt("s1", "2026-09-01T00:01:00Z", transcript.InterruptTurn),
+		humanTurn("s1", "2026-09-01T00:01:10Z", "<command-name>/model</command-name>"),
+		banner,
+		humanTurn("s1", "2026-09-01T00:02:00Z", "you are obsessing, just test it"),
+		humanTurn("s1", "2026-09-01T00:03:00Z", "and then commit"),
+
+		interrupt("s2", "2026-09-01T00:00:00Z", transcript.InterruptToolUse),
+		humanTurn("s2", "2026-09-01T00:00:10Z", "no, edit the other file"),
+
+		interrupt("s3", "2026-09-01T00:00:00Z", transcript.InterruptTurn),
+		humanTurn("s3", "2026-09-01T00:00:10Z", "don't use var"),
+
+		interrupt("s4", "2026-09-01T00:00:00Z", transcript.InterruptTurn),
+		humanTurn("s4", "2026-09-01T00:00:10Z", "<pasted_content>a build log</pasted_content>"),
+		humanTurn("s4", "2026-09-01T00:00:20Z", "why is this failing"),
+
+		interrupt("s5", "2026-09-01T00:00:00Z", transcript.InterruptTurn),
+		sub,
+
+		interrupt("s6", "2026-09-01T00:00:00Z", transcript.InterruptTurn),
+		humanTurn("s6", "2026-09-01T00:00:10Z", "continue"),
+		interrupt("s7", "2026-09-01T00:00:00Z", transcript.InterruptTurn),
+		humanTurn("s7", "2026-09-01T00:00:10Z", "continue"),
+	})
+	var got []string
+	for _, c := range d.Signals.AfterInterrupt {
+		got = append(got, c.ID+"="+c.Pattern)
+	}
+	if strings.Join(got, "|") != "a1=continue|a2=you are obsessing, just test it" {
+		t.Fatalf("after_interrupt = %v", got)
+	}
+	a := d.Signals.AfterInterrupt
+	if a[0].Sessions != 2 || a[0].Count != 2 {
+		t.Errorf("continue = %+v", a[0])
+	}
+	if p := a[1].Occurrences[0].PreviousHumanText; p == nil || p.Text != "please refactor the parser" {
+		t.Errorf("previous = %+v, want the text before the interrupt", p)
+	}
+	if len(d.Signals.UserCorrections) != 1 || !d.Signals.UserCorrections[0].Occurrences[0].AfterInterrupt {
+		t.Errorf("corrections = %+v, want one marked after_interrupt", d.Signals.UserCorrections)
+	}
+	for _, c := range d.Signals.RepeatedWording {
+		if strings.HasPrefix(c.Pattern, "[Request interrupted") {
+			t.Errorf("a marker reached repeated wording: %+v", c)
+		}
 	}
 }

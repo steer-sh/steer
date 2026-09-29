@@ -327,3 +327,37 @@ func TestStreamMarksAHeadlessRunsTurnsMeta(t *testing.T) {
 			events[0].Meta, events[1].Meta, events[2].Meta)
 	}
 }
+
+// Only the two exact markers are interrupts. They are Meta, because Claude Code
+// wrote them; a person's text that quotes one stays their turn.
+func TestStreamMarksInterruptMarkers(t *testing.T) {
+	text := func(ts, s string) string {
+		return line(map[string]any{"type": "user", "sessionId": "s1", "timestamp": ts,
+			"message": map[string]any{"content": []any{map[string]any{"type": "text", "text": s}}}})
+	}
+	session := write(t, []string{
+		text("2026-07-10T00:00:00Z", "[Request interrupted by user]"),
+		text("2026-07-10T00:00:01Z", "[Request interrupted by user for tool use]"),
+		line(map[string]any{"type": "user", "sessionId": "s1", "timestamp": "2026-07-10T00:00:02Z",
+			"message": map[string]any{"content": "[Request interrupted by user]"}}),
+		text("2026-07-10T00:00:03Z", "[Request interrupted by user] then I said stop"),
+	})
+	events, _ := stream(t, session, transcript.Filter{})
+	want := []struct {
+		interrupt transcript.Interrupt
+		meta      bool
+	}{
+		{transcript.InterruptTurn, true},
+		{transcript.InterruptToolUse, true},
+		{transcript.InterruptTurn, true},
+		{"", false},
+	}
+	if len(events) != len(want) {
+		t.Fatalf("events = %+v", events)
+	}
+	for i, w := range want {
+		if events[i].Interrupt != w.interrupt || events[i].Meta != w.meta || events[i].Kind != transcript.KindHumanTurn {
+			t.Errorf("event %d = %+v; want interrupt %q meta %v", i, events[i], w.interrupt, w.meta)
+		}
+	}
+}
