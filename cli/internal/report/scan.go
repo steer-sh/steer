@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/shellsyntax"
@@ -19,6 +20,8 @@ const (
 	kindFailure    = "tool_failures"
 	kindHookBlock  = "hook_blocks"
 
+	kindRepeatedWording = "repeated_wording"
+
 	// tool_result payloads can be huge (full test runs); only the head is
 	// needed to classify them.
 	maxResultScan = 4096
@@ -26,6 +29,23 @@ const (
 	// rejectionEnvelope opens the error result Claude Code writes for a tool call
 	// the user declined at the permission prompt, lowercased.
 	rejectionEnvelope = "the user doesn't want to proceed with this tool use"
+
+	// interruptMarker opens the text Claude Code records as a user turn when the
+	// person stops a turn. Nobody typed it.
+	interruptMarker = "[Request interrupted by user"
+
+	// maxRepeatRunes bounds the turns repeated wording collects. It is a
+	// retrieval heuristic: standing instructions are short, and long turns are
+	// briefs that rarely recur verbatim.
+	maxRepeatRunes = 400
+	// minRepeatSessions is how many sessions a wording must occur in.
+	minRepeatSessions = 2
+	// sendGroupWindow bounds a send group from its earliest member: identical
+	// text sent to other sessions within it counts as one send.
+	sendGroupWindow = 10 * time.Minute
+
+	// maxObservedLen bounds the context text a correction occurrence carries.
+	maxObservedLen = 400
 )
 
 // correctionPatterns match user-turn language that can name a correction. A match
@@ -103,8 +123,8 @@ func (c *Classifier) Classify(e transcript.Event) (Signal, bool) {
 // correction matches a human turn against correction candidate language. Pasted
 // blocks are removed first: they are text the person brought in, not what they said.
 func (c *Classifier) correction(text string) (Signal, bool) {
-	trimmed := strings.TrimSpace(pastedBlock.ReplaceAllString(text, ""))
-	if trimmed == "" || strings.HasPrefix(trimmed, "<") || strings.HasPrefix(trimmed, "Caveat:") {
+	trimmed, ok := typedText(text)
+	if !ok {
 		return Signal{}, false
 	}
 	for _, p := range correctionPatterns {
@@ -117,6 +137,16 @@ func (c *Classifier) correction(text string) (Signal, bool) {
 		}
 	}
 	return Signal{}, false
+}
+
+// typedText is a human turn without its pasted blocks. It is false when nothing
+// remains, or when the turn is a harness wrapper or banner.
+func typedText(text string) (string, bool) {
+	trimmed := strings.TrimSpace(pastedBlock.ReplaceAllString(text, ""))
+	if trimmed == "" || strings.HasPrefix(trimmed, "<") || strings.HasPrefix(trimmed, "Caveat:") {
+		return "", false
+	}
+	return trimmed, true
 }
 
 // toolResult classifies a result as rejection, hook block, or lint/test failure.
@@ -232,6 +262,19 @@ type Scanner struct {
 	sessions map[string]struct{}
 	threads  map[string]struct{}
 	coverage map[harness.ID]*harnessScan
+	wording  map[string]*wordingText
+}
+
+// wordingText is one normalized human text and every place it was typed.
+type wordingText struct {
+	occurrences []Occurrence
+	sessions    map[string]struct{}
+}
+
+// threadContext is the human text one session's thread showed before its
+// current event.
+type threadContext struct {
+	first, previous *ObservedText
 }
 
 // harnessScan is one harness's running coverage. It keeps its own id sets: the
@@ -256,6 +299,7 @@ func NewScanner(since time.Time) *Scanner {
 		sessions: map[string]struct{}{},
 		threads:  map[string]struct{}{},
 		coverage: map[harness.ID]*harnessScan{},
+		wording:  map[string]*wordingText{},
 	}
 }
 
@@ -265,9 +309,10 @@ func (s *Scanner) ScanSession(a transcript.Adapter, session transcript.Session) 
 	// answers, and results always land in the same transcript as their call.
 	c := NewClassifier()
 	hs := s.harnessScanFor(session.Harness)
+	contexts := map[string]*threadContext{}
 
 	counts, err := a.Stream(session, transcript.Filter{Since: s.Since}, func(e transcript.Event) error {
-		s.classify(e, c, hs)
+		s.classify(e, c, hs, contexts)
 		return nil
 	})
 	s.stats.FilesScanned++
@@ -300,7 +345,7 @@ func (s *Scanner) harnessScanFor(id harness.ID) *harnessScan {
 	return hs
 }
 
-func (s *Scanner) classify(e transcript.Event, c *Classifier, hs *harnessScan) {
+func (s *Scanner) classify(e transcript.Event, c *Classifier, hs *harnessScan, contexts map[string]*threadContext) {
 	if e.SessionID != "" {
 		if _, seen := hs.sessions[e.SessionID]; !seen {
 			hs.sessions[e.SessionID] = struct{}{}
@@ -315,9 +360,74 @@ func (s *Scanner) classify(e transcript.Event, c *Classifier, hs *harnessScan) {
 		}
 		s.threads[e.ThreadID] = struct{}{}
 	}
-	if sig, ok := c.Classify(e); ok {
-		s.addCluster(sig.Kind, sig.Key, sig.Example, e)
+	human := e.Kind == transcript.KindHumanTurn && !e.Meta && !strings.HasPrefix(strings.TrimSpace(e.Text), interruptMarker)
+	key := e.SessionID + "\x00" + e.ThreadID
+	ctx := contexts[key]
+	if ctx == nil {
+		ctx = &threadContext{}
+		contexts[key] = ctx
 	}
+	if sig, ok := c.Classify(e); ok {
+		o := s.addCluster(sig.Kind, sig.Key, sig.Example, e)
+		if o != nil && sig.Kind == kindCorrection {
+			o.PreviousHumanText = ctx.previous
+			if ctx.first != ctx.previous {
+				o.FirstObservedHumanTextInScan = ctx.first
+			}
+		}
+	}
+	if !human {
+		return
+	}
+	observed, ok := observe(e.Text)
+	if !ok {
+		return
+	}
+	if ctx.first == nil {
+		ctx.first = observed
+	}
+	ctx.previous = observed
+	if e.ThreadID == "" {
+		s.addWording(e)
+	}
+}
+
+// pastedPlaceholder stands in context text for a pasted block, so a turn that
+// held only a paste still reads as the previous turn.
+const pastedPlaceholder = "[pasted text]"
+
+// observe renders a human turn as context: pasted blocks become a placeholder,
+// whitespace collapses, and the text is cut to maxObservedLen. It is false for
+// an empty turn and for a harness wrapper or banner.
+func observe(text string) (*ObservedText, bool) {
+	trimmed := strings.TrimSpace(pastedBlock.ReplaceAllString(text, pastedPlaceholder))
+	if trimmed == "" || strings.HasPrefix(trimmed, "<") || strings.HasPrefix(trimmed, "Caveat:") {
+		return nil, false
+	}
+	flat := whitespaceRun.ReplaceAllString(trimmed, " ")
+	cut := clip(flat, maxObservedLen)
+	return &ObservedText{Text: cut, Cut: len(cut) < len(flat)}, true
+}
+
+// addWording records a root-thread human turn's typed text for repeated
+// wording. The text is matched whole after whitespace normalization only, so
+// two sentences that differ in punctuation stay apart.
+func (s *Scanner) addWording(e transcript.Event) {
+	typed, ok := typedText(e.Text)
+	if !ok {
+		return
+	}
+	text := whitespaceRun.ReplaceAllString(typed, " ")
+	if utf8.RuneCountInString(text) > maxRepeatRunes {
+		return
+	}
+	w := s.wording[text]
+	if w == nil {
+		w = &wordingText{sessions: map[string]struct{}{}}
+		s.wording[text] = w
+	}
+	w.sessions[e.SessionID] = struct{}{}
+	w.occurrences = append(w.occurrences, Occurrence{Session: e.SessionID, Timestamp: e.Timestamp, Text: text})
 }
 
 // matchLine returns the line containing byte offset pos, for use as a cluster
@@ -352,10 +462,12 @@ func normalizeKey(s string) string {
 	return key
 }
 
-func (s *Scanner) addCluster(kind, keyBasis, example string, e transcript.Event) {
+// addCluster adds the event to its cluster and returns the occurrence it
+// appended, or nil when the key normalizes to nothing.
+func (s *Scanner) addCluster(kind, keyBasis, example string, e transcript.Event) *Occurrence {
 	key := normalizeKey(keyBasis)
 	if key == "" {
-		return
+		return nil
 	}
 
 	m := s.clusters[kind]
@@ -382,6 +494,7 @@ func (s *Scanner) addCluster(kind, keyBasis, example string, e transcript.Event)
 		Timestamp: e.Timestamp,
 		Text:      clip(text, maxOccurrenceLen),
 	})
+	return &c.Occurrences[len(c.Occurrences)-1]
 }
 
 // Finalize assembles the digest from accumulated clusters, ranks each signal's
@@ -402,6 +515,7 @@ func (s *Scanner) Finalize(windowDays int, projects []string, instructionFiles [
 	d.Signals.UserRejections = collect(s.clusters[kindRejection])
 	d.Signals.ToolFailures = collect(s.clusters[kindFailure])
 	d.Signals.HookBlocks = collect(s.clusters[kindHookBlock])
+	d.Signals.RepeatedWording = repeatedWording(s.wording)
 
 	for _, list := range d.Signals.lists() {
 		d.Stats.ClustersFound += len(list.items)
@@ -420,6 +534,96 @@ func (s *Scanner) harnessRows() []HarnessCoverage {
 		}
 	}
 	return out
+}
+
+// repeatedWording keeps the texts typed in minRepeatSessions or more sessions,
+// numbers each one's send groups, and ranks them by session spread.
+func repeatedWording(m map[string]*wordingText) []*Cluster {
+	out := []*Cluster{}
+	for text, w := range m {
+		if len(w.sessions) < minRepeatSessions {
+			continue
+		}
+		occ := append([]Occurrence(nil), w.occurrences...)
+		groups := assignSendGroups(occ)
+		c := &Cluster{
+			Pattern: clip(text, maxOccurrenceLen), Count: len(occ), Sessions: len(w.sessions),
+			Occurrences: occ, SendGroups: groups,
+		}
+		for i := range occ {
+			occ[i].Text = clip(occ[i].Text, maxOccurrenceLen)
+			if c.FirstSeen == "" || occ[i].Timestamp < c.FirstSeen {
+				c.FirstSeen = occ[i].Timestamp
+			}
+			if occ[i].Timestamp > c.LastSeen {
+				c.LastSeen = occ[i].Timestamp
+			}
+		}
+		out = append(out, c)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if a.Sessions != b.Sessions {
+			return a.Sessions > b.Sessions
+		}
+		if a.SendGroups != b.SendGroups {
+			return a.SendGroups > b.SendGroups
+		}
+		if a.Count != b.Count {
+			return a.Count > b.Count
+		}
+		return a.Pattern < b.Pattern
+	})
+	return out
+}
+
+// assignSendGroups orders occurrences by time and numbers their send groups. An
+// occurrence joins the open group when it falls within sendGroupWindow of the
+// group's earliest member and its session is not in the group yet; otherwise it
+// opens the next group. An occurrence whose timestamp does not parse is a group
+// of its own. It returns the group count.
+func assignSendGroups(occ []Occurrence) int {
+	times := make([]time.Time, len(occ))
+	parsed := make([]bool, len(occ))
+	for i, o := range occ {
+		t, err := time.Parse(time.RFC3339Nano, o.Timestamp)
+		times[i], parsed[i] = t, err == nil
+	}
+	idx := make([]int, len(occ))
+	for i := range idx {
+		idx[i] = i
+	}
+	sort.SliceStable(idx, func(a, b int) bool {
+		i, j := idx[a], idx[b]
+		if parsed[i] != parsed[j] {
+			return parsed[i]
+		}
+		if !times[i].Equal(times[j]) {
+			return times[i].Before(times[j])
+		}
+		if occ[i].Timestamp != occ[j].Timestamp {
+			return occ[i].Timestamp < occ[j].Timestamp
+		}
+		return occ[i].Session < occ[j].Session
+	})
+	sorted := make([]Occurrence, len(occ))
+	group := 0
+	var start time.Time
+	open := false
+	members := map[string]struct{}{}
+	for k, i := range idx {
+		_, dup := members[occ[i].Session]
+		if !open || !parsed[i] || dup || times[i].Sub(start) > sendGroupWindow {
+			group++
+			start, open = times[i], parsed[i]
+			members = map[string]struct{}{}
+		}
+		members[occ[i].Session] = struct{}{}
+		sorted[k] = occ[i]
+		sorted[k].Group = group
+	}
+	copy(occ, sorted)
+	return group
 }
 
 func collect(m map[string]*Cluster) []*Cluster {

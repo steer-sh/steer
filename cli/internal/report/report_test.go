@@ -364,8 +364,8 @@ func TestDigestReportsCoveragePerHarness(t *testing.T) {
 	scanner, projects := Scan(adapters, time.Time{}, transcript.Filter{AllProjects: true}, nil)
 	d := scanner.Finalize(30, projects, nil)
 
-	if d.DigestVersion != 4 {
-		t.Errorf("digest_version = %d; want 4", d.DigestVersion)
+	if d.DigestVersion != 5 {
+		t.Errorf("digest_version = %d; want 5", d.DigestVersion)
 	}
 	// Two root sessions and one thread: a thread is provenance, not a unit.
 	if d.Stats.SessionsScanned != 2 || d.Stats.ThreadsScanned != 1 {

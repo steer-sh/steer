@@ -52,7 +52,8 @@ var reportCmd = &cobra.Command{
 	Short: "Scan agent transcripts for hook-suggestion signals",
 	Long: `Report streams session transcripts from the last N days and emits a compact
 JSON digest of recurring friction: user corrections, rejected tool calls,
-lint/test failures, and hook blocks. It also diffs instruction-file directives
+lint/test failures, and hook blocks. It also lists typed human text that repeats
+verbatim across sessions, and diffs instruction-file directives
 (CLAUDE.md, AGENTS.md) against already-registered steer rules.
 
 Every harness with transcripts on this machine is mined — Claude Code
@@ -71,8 +72,8 @@ The report is mechanical evidence only — deciding which signals deserve hooks
 is the job of the /steer-report skill, which reads this output. The scan stores
 the whole report, every occurrence of every cluster, in the steer-report state
 directory, and prints the first page of its index: coverage, a summary of each
-signal and instruction document, and one row per correction and rejection
-cluster. 'steer report show' reads the rest of the stored report. Stdout
+signal and instruction document, and one row per correction, rejection and
+repeated wording cluster. 'steer report show' reads the rest of the stored report. Stdout
 carries pure JSON; progress goes to stderr. A page stays within
 --max-digest-bytes, and page.next_cursor names the next one.`,
 	Example: `  steer report
@@ -149,9 +150,9 @@ var reportShowCmd = &cobra.Command{
 	Long: `show reads the report the last 'steer report' stored, without scanning again.
 
 With no argument it prints the index page at --cursor. With a signal name
-(user_corrections, user_rejections, tool_failures, hook_blocks) it lists that
-signal's clusters, filtered by --match when given. With ids from the index
-(c3, r1, f12, h2, i1) it prints every occurrence of each cluster and every
+(user_corrections, user_rejections, repeated_wording, tool_failures, hook_blocks)
+it lists that signal's clusters, filtered by --match when given. With ids from
+the index (c3, r1, w2, f12, h2, i1) it prints every occurrence of each cluster and every
 directive of each instruction document.
 
 Every output is one page within --max-bytes; page.next_cursor names the next

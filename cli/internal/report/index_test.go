@@ -26,6 +26,8 @@ func sampleDigest() *Digest {
 	d := NewDigest(30)
 	d.Signals.UserCorrections = []*Cluster{cluster("don't use var", "s1", "s2"), cluster("stop adding docstrings", "s2")}
 	d.Signals.UserRejections = []*Cluster{cluster("Bash: rm -rf build", "s3")}
+	d.Signals.RepeatedWording = []*Cluster{cluster("commit when complete", "s1", "s6")}
+	d.Signals.RepeatedWording[0].SendGroups = 2
 	d.Signals.ToolFailures = []*Cluster{cluster("FAIL: TestThing", "s1", "s4")}
 	d.Signals.HookBlocks = []*Cluster{cluster("no python bare", "s5")}
 	d.InstructionFiles = []InstructionFile{{
@@ -39,7 +41,7 @@ func sampleDigest() *Digest {
 
 // The first read lists the user's own signals and sizes the machine-output ones;
 // an instruction document arrives as its rule lines and a directive count.
-func TestIndexListsCorrectionsAndRejectionsOnly(t *testing.T) {
+func TestIndexListsTheUserSignalsOnly(t *testing.T) {
 	data, err := IndexPage(sampleDigest(), 0, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -52,8 +54,11 @@ func TestIndexListsCorrectionsAndRejectionsOnly(t *testing.T) {
 	for _, r := range idx.Rows {
 		ids = append(ids, r.ID)
 	}
-	if strings.Join(ids, ",") != "c1,c2,r1" {
-		t.Errorf("index rows = %v, want c1,c2,r1", ids)
+	if strings.Join(ids, ",") != "c1,c2,r1,w1" {
+		t.Errorf("index rows = %v, want c1,c2,r1,w1", ids)
+	}
+	if w := idx.Rows[3]; w.SendGroups != 2 || w.Sessions != 2 || w.Count != 2 {
+		t.Errorf("repeated wording row = %+v", w)
 	}
 	if strings.Contains(string(data), "FAIL: TestThing") || strings.Contains(string(data), "never force push") {
 		t.Errorf("index carries a machine-output row or a directive:\n%s", data)
@@ -61,6 +66,7 @@ func TestIndexListsCorrectionsAndRejectionsOnly(t *testing.T) {
 	want := map[string]SignalSummary{
 		"user_corrections": {Signal: "user_corrections", Clusters: 2, Sessions: 2, InIndex: true},
 		"user_rejections":  {Signal: "user_rejections", Clusters: 1, Sessions: 1, InIndex: true},
+		"repeated_wording": {Signal: "repeated_wording", Clusters: 1, Sessions: 2, InIndex: true},
 		"tool_failures":    {Signal: "tool_failures", Clusters: 1, Sessions: 2},
 		"hook_blocks":      {Signal: "hook_blocks", Clusters: 1, Sessions: 1},
 	}

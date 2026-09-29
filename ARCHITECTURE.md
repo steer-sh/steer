@@ -463,12 +463,23 @@ which pipeline produced their evidence.
 `steer report` stores the whole report, every occurrence of every cluster, as
 `report.json` in the steer-report state directory under a content-derived
 `report_id`, and prints the first page of an index: coverage, a summary per signal
-and per instruction document, and one row per correction and rejection cluster.
+and per instruction document, and one row per cluster of each signal whose
+`signalList.inIndex` is set: corrections, rejections and repeated wording.
 `steer report show` reads the stored report and never scans: later index pages, one
 signal's clusters filtered by `--match`, or the occurrences and directives of named
 items. Each output is one page within a byte bound and holds at least one row, so
 paging drops no evidence; `show` refuses a `--report` id that a later scan replaced.
 The refresh queue reads `report.Generate` in memory, never the stored report.
+
+Two report-only readings live in the `Scanner`, not the `Classifier`, because they
+need more than one event: session snapshots and fix scores never carry them.
+`repeated_wording` counts a root-thread human turn's typed text, whole after
+whitespace normalization, across sessions; it groups identical sends to several
+sessions into heuristic send groups. A correction occurrence carries the previous
+and the first human text observed in its session and thread within the scan as
+details-only context, which no key, count or `--match` reads. Both skip Meta turns,
+Claude Code's interrupt marker and the harness wrappers the correction matcher
+skips; context text keeps a paste-only turn as a placeholder.
 
 `internal/sessions/` persists `sessions.<host>.jsonl`. Refresh merges newly read
 sessions with stored ones, retaining sessions whose source transcript disappeared.

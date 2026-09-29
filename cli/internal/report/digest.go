@@ -16,9 +16,8 @@ import (
 
 // DigestVersion is the schema version of the stored report and of every page
 // read from it. The steer-report skill prompt reads this field; bump it whenever
-// the shape or semantics change. v4 stores every occurrence and replaces the
-// size-capped digest with a paged index and item details.
-const DigestVersion = 4
+// the shape or semantics change.
+const DigestVersion = 5
 
 // DefaultMaxDigestBytes bounds one page of index, listing or detail output.
 const DefaultMaxDigestBytes = 40960
@@ -33,6 +32,22 @@ type Occurrence struct {
 	Session   string `json:"session"`
 	Timestamp string `json:"timestamp,omitempty"`
 	Text      string `json:"text"`
+	// PreviousHumanText is the human text observed last before a correction in
+	// the same session and thread. It is context, never evidence: no key, count
+	// or match reads it. Absent means none was observed within this scan.
+	PreviousHumanText *ObservedText `json:"previous_human_text,omitempty"`
+	// FirstObservedHumanTextInScan is the first human text observed in the same
+	// session and thread within this scan. It is absent when it is the previous
+	// human text, and it is never a filter or a rank.
+	FirstObservedHumanTextInScan *ObservedText `json:"first_observed_human_text_in_scan,omitempty"`
+	// Group numbers the send group of a repeated wording occurrence.
+	Group int `json:"group,omitempty"`
+}
+
+// ObservedText is human text shown as context, cut to a bound.
+type ObservedText struct {
+	Text string `json:"text"`
+	Cut  bool   `json:"cut,omitempty"`
 }
 
 // Cluster aggregates one recurring signal across sessions.
@@ -45,6 +60,10 @@ type Cluster struct {
 	FirstSeen   string       `json:"first_seen,omitempty"`
 	LastSeen    string       `json:"last_seen,omitempty"`
 	Occurrences []Occurrence `json:"occurrences"`
+	// SendGroups counts the send groups of a repeated wording: identical text
+	// sent to several sessions within sendGroupWindow is one group. A group is a
+	// heuristic, not a proven duplicate.
+	SendGroups int `json:"send_groups,omitempty"`
 
 	sessionIDs map[string]struct{}
 }
@@ -64,6 +83,10 @@ type Signals struct {
 	// UserRejections are tool calls the user declined at the permission prompt.
 	// Only Claude Code's decline result is recognized.
 	UserRejections []*Cluster `json:"user_rejections"`
+	// RepeatedWording is typed human text that recurs verbatim, after whitespace
+	// normalization, in two or more sessions. It is report-only: no session
+	// snapshot or fix score reads it.
+	RepeatedWording []*Cluster `json:"repeated_wording"`
 	// ToolFailures are tool results matching lint/test/compile failure patterns.
 	ToolFailures []*Cluster `json:"tool_failures"`
 	// HookBlocks are operations blocked by an existing PreToolUse hook —
@@ -71,20 +94,24 @@ type Signals struct {
 	HookBlocks []*Cluster `json:"hook_blocks"`
 }
 
-// signalList is one signal kind with the id prefix its clusters carry.
+// signalList is one signal kind with the id prefix its clusters carry. The
+// index lists the rows of a kind with inIndex set; `steer report show <signal>`
+// reads the others.
 type signalList struct {
-	kind   string
-	prefix string
-	items  []*Cluster
+	kind    string
+	prefix  string
+	items   []*Cluster
+	inIndex bool
 }
 
 // lists returns the signal kinds in index order.
 func (s Signals) lists() []signalList {
 	return []signalList{
-		{kindCorrection, "c", s.UserCorrections},
-		{kindRejection, "r", s.UserRejections},
-		{kindFailure, "f", s.ToolFailures},
-		{kindHookBlock, "h", s.HookBlocks},
+		{kindCorrection, "c", s.UserCorrections, true},
+		{kindRejection, "r", s.UserRejections, true},
+		{kindRepeatedWording, "w", s.RepeatedWording, true},
+		{kindFailure, "f", s.ToolFailures, false},
+		{kindHookBlock, "h", s.HookBlocks, false},
 	}
 }
 
@@ -178,6 +205,7 @@ func NewDigest(windowDays int) *Digest {
 		Signals: Signals{
 			UserCorrections: []*Cluster{},
 			UserRejections:  []*Cluster{},
+			RepeatedWording: []*Cluster{},
 			ToolFailures:    []*Cluster{},
 			HookBlocks:      []*Cluster{},
 		},

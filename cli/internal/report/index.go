@@ -16,10 +16,11 @@ const rowTextLen = 120
 // Row is one cluster in the index or in a signal listing. Its text is the first
 // occurrence, clipped.
 type Row struct {
-	ID       string `json:"id"`
-	Sessions int    `json:"sessions"`
-	Count    int    `json:"count"`
-	Text     string `json:"text"`
+	ID         string `json:"id"`
+	Sessions   int    `json:"sessions"`
+	Count      int    `json:"count"`
+	SendGroups int    `json:"send_groups,omitempty"`
+	Text       string `json:"text"`
 }
 
 // SignalSummary sizes one signal kind.
@@ -54,7 +55,7 @@ type Page struct {
 }
 
 // Index is the first page of the index: coverage, one summary per signal and
-// per instruction document, and the correction and rejection rows.
+// per instruction document, and the rows of every signal the index lists.
 type Index struct {
 	DigestVersion    int                  `json:"digest_version"`
 	ReportID         string               `json:"report_id"`
@@ -93,6 +94,7 @@ type DetailItem struct {
 	Pattern    string     `json:"pattern,omitempty"`
 	Count      int        `json:"count,omitempty"`
 	Sessions   int        `json:"sessions,omitempty"`
+	SendGroups int        `json:"send_groups,omitempty"`
 	FirstSeen  string     `json:"first_seen,omitempty"`
 	LastSeen   string     `json:"last_seen,omitempty"`
 	Harness    harness.ID `json:"harness,omitempty"`
@@ -103,11 +105,14 @@ type DetailItem struct {
 
 // DetailRow is one occurrence of a cluster, or one directive of a document.
 type DetailRow struct {
-	ID        string `json:"id"`
-	Session   string `json:"session,omitempty"`
-	Timestamp string `json:"timestamp,omitempty"`
-	Section   string `json:"section,omitempty"`
-	Text      string `json:"text"`
+	ID                           string        `json:"id"`
+	Session                      string        `json:"session,omitempty"`
+	Timestamp                    string        `json:"timestamp,omitempty"`
+	Section                      string        `json:"section,omitempty"`
+	Group                        int           `json:"group,omitempty"`
+	Text                         string        `json:"text"`
+	PreviousHumanText            *ObservedText `json:"previous_human_text,omitempty"`
+	FirstObservedHumanTextInScan *ObservedText `json:"first_observed_human_text_in_scan,omitempty"`
 }
 
 // Detail is one page of the rows of the requested items.
@@ -123,8 +128,10 @@ type Detail struct {
 // page, with the whole header.
 func IndexPage(d *Digest, cursor, maxBytes int) ([]byte, error) {
 	var rows []Row
-	for _, list := range d.Signals.lists()[:2] {
-		rows = append(rows, rowsOf(list.items)...)
+	for _, list := range d.Signals.lists() {
+		if list.inIndex {
+			rows = append(rows, rowsOf(list.items)...)
+		}
 	}
 	if cursor > 0 {
 		return paged(rows, cursor, maxBytes, func(shown []Row, p Page) any {
@@ -146,12 +153,12 @@ func IndexPage(d *Digest, cursor, maxBytes int) ([]byte, error) {
 			SteerRules: f.SteerRules, GuardRules: f.GuardRules,
 		})
 	}
-	for i, list := range d.Signals.lists() {
+	for _, list := range d.Signals.lists() {
 		head.Signals = append(head.Signals, SignalSummary{
 			Signal:   list.kind,
 			Clusters: len(list.items),
 			Sessions: distinctSessions(list.items),
-			InIndex:  i < 2,
+			InIndex:  list.inIndex,
 		})
 	}
 	return paged(rows, cursor, maxBytes, func(shown []Row, p Page) any {
@@ -215,11 +222,14 @@ func DetailPage(d *Digest, ids []string, cursor, maxBytes int) ([]byte, error) {
 	for _, id := range ids {
 		if c, ok := clusters[id]; ok {
 			detail.Items = append(detail.Items, DetailItem{
-				ID: id, Signal: signals[id], Pattern: c.Pattern, Count: c.Count,
-				Sessions: c.Sessions, FirstSeen: c.FirstSeen, LastSeen: c.LastSeen,
+				ID: id, Signal: signals[id], Pattern: c.Pattern, Count: c.Count, Sessions: c.Sessions,
+				SendGroups: c.SendGroups, FirstSeen: c.FirstSeen, LastSeen: c.LastSeen,
 			})
 			for _, o := range c.Occurrences {
-				rows = append(rows, DetailRow{ID: id, Session: o.Session, Timestamp: o.Timestamp, Text: o.Text})
+				rows = append(rows, DetailRow{
+					ID: id, Session: o.Session, Timestamp: o.Timestamp, Group: o.Group, Text: o.Text,
+					PreviousHumanText: o.PreviousHumanText, FirstObservedHumanTextInScan: o.FirstObservedHumanTextInScan,
+				})
 			}
 			continue
 		}
@@ -257,7 +267,7 @@ func rowsOf(clusters []*Cluster) []Row {
 		if len(c.Occurrences) > 0 {
 			text = c.Occurrences[0].Text
 		}
-		rows = append(rows, Row{ID: c.ID, Sessions: c.Sessions, Count: c.Count, Text: clip(text, rowTextLen)})
+		rows = append(rows, Row{ID: c.ID, Sessions: c.Sessions, Count: c.Count, SendGroups: c.SendGroups, Text: clip(text, rowTextLen)})
 	}
 	return rows
 }
