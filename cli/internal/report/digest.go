@@ -17,7 +17,7 @@ import (
 // DigestVersion is the schema version of the stored report and of every page
 // read from it. The steer-report skill prompt reads this field; bump it whenever
 // the shape or semantics change.
-const DigestVersion = 6
+const DigestVersion = 7
 
 // DefaultMaxDigestBytes bounds one page of index, listing or detail output.
 const DefaultMaxDigestBytes = 40960
@@ -45,7 +45,38 @@ type Occurrence struct {
 	// AfterInterrupt marks a correction typed right after the person stopped a
 	// running turn.
 	AfterInterrupt bool `json:"after_interrupt,omitempty"`
+	// RecentToolCalls is the tail of the tool calls the same session and thread
+	// requested since the previous real human turn. It is context, never
+	// evidence, and absent when none was observed.
+	RecentToolCalls *RecentToolCalls `json:"recent_tool_calls,omitempty"`
 }
+
+// RecentToolCalls is a bounded tail of requested tool calls, oldest first.
+// Omitted counts the earlier calls of the same interval the bound dropped.
+type RecentToolCalls struct {
+	Calls   []RecentToolCall `json:"calls"`
+	Omitted int              `json:"omitted,omitempty"`
+}
+
+// RecentToolCall is one requested tool call and what its result showed before
+// the human turn. Target is the normalized subject, a path or a shell command
+// head, cut to a bound; it is empty when the harness recorded none. Result is
+// one of the toolResult* states.
+type RecentToolCall struct {
+	Tool   string `json:"tool"`
+	Target string `json:"target,omitempty"`
+	Cut    bool   `json:"cut,omitempty"`
+	Result string `json:"result"`
+}
+
+// Result states of a RecentToolCall. toolResultNonError is an observed result
+// the harness did not mark as an error, not a verified success.
+const (
+	toolResultUnobserved = "unobserved"
+	toolResultError      = "error"
+	toolResultNonError   = "non_error"
+	toolResultDeclined   = "declined"
+)
 
 // ObservedText is human text shown as context, cut to a bound.
 type ObservedText struct {

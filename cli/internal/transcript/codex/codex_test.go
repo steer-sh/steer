@@ -243,6 +243,39 @@ func TestStreamPrefersPrimaryTurnsOverLegacyEvents(t *testing.T) {
 	}
 }
 
+// A legacy turn is emitted at the end of the file, after every tool event, so
+// it is marked deferred; a primary turn keeps its place and is not.
+func TestStreamMarksLegacyTurnsDeferred(t *testing.T) {
+	root := t.TempDir()
+	interleaved := legacyRollout +
+		`{"timestamp":"2026-05-08T01:42:50.000Z","ordinal":4,"type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"ls\"}","call_id":"call_l"}}` + "\n" +
+		`{"timestamp":"2026-05-08T01:42:55.000Z","ordinal":5,"type":"event_msg","payload":{"type":"user_message","message":"why did you list"}}` + "\n"
+	legacy := writeRollout(t, root, "2026/05/08", "rollout-interleaved.jsonl", interleaved)
+	primary := writeRollout(t, root, "2026/08/29", "rollout-alpha.jsonl", rootRollout)
+
+	events, _ := collect(t, transcript.Session{Harness: harness.Codex, Path: legacy}, transcript.Filter{})
+	var kinds []string
+	for _, e := range events {
+		kinds = append(kinds, string(e.Kind))
+		if e.Kind == transcript.KindHumanTurn && !e.DeferredHumanTurn {
+			t.Errorf("legacy turn %q is not marked deferred", e.Text)
+		}
+		if e.Kind != transcript.KindHumanTurn && e.DeferredHumanTurn {
+			t.Errorf("tool event marked deferred: %+v", e)
+		}
+	}
+	if strings.Join(kinds, ",") != "tool_call,human_turn,human_turn" {
+		t.Fatalf("legacy emission order = %v", kinds)
+	}
+
+	events, _ = collect(t, transcript.Session{Harness: harness.Codex, Path: primary}, transcript.Filter{})
+	for _, e := range events {
+		if e.DeferredHumanTurn {
+			t.Errorf("primary event marked deferred: %+v", e)
+		}
+	}
+}
+
 func TestStreamAppliesTheTimeWindow(t *testing.T) {
 	root := t.TempDir()
 	path := writeRollout(t, root, "2026/08/29", "rollout-alpha.jsonl", rootRollout)

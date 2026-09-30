@@ -325,6 +325,7 @@ func (st *streamState) flush() error {
 	}
 	for _, e := range st.legacyTurns {
 		st.counts.Entries++
+		e.DeferredHumanTurn = true
 		if err := st.emit(e); err != nil {
 			return err
 		}

@@ -92,6 +92,11 @@ type Event struct {
 	// classifier input, so ReplayDigest does not hash it and stamping it moves no
 	// adapter's instrument. A harness that records none leaves it empty.
 	Cwd string
+	// DeferredHumanTurn marks a human turn emitted after its position in the
+	// file, so the tool events before it are not the ones that preceded it. It
+	// is emission-order provenance rather than a classifier input: ReplayDigest
+	// does not hash it.
+	DeferredHumanTurn bool
 }
 
 // NormalizeProject collapses a path or a harness's munged form of one to a
