@@ -15,13 +15,40 @@ func PreflightDeny(cmd, cwd string) (reason, receipt string) {
 	if reason := AmbiguousShellReason(cmd, cwd); reason != "" {
 		return reason, AmbiguousShellReceipt
 	}
-	if parsed, err := parseCommit(cmd, cwd); err == nil && parsed != nil && parsed.selectsPaths() {
-		return selectedPathsReason, SelectedPathsReceipt
+	if parsed, err := parseCommit(cmd, cwd); err == nil && parsed != nil {
+		if step := parsed.stepBeforeCommit(); step != "" {
+			return fmt.Sprintf(stepBeforeCommitReason, shortStep(step)), StepBeforeCommitReceipt
+		}
+		if parsed.selectsPaths() {
+			return selectedPathsReason, SelectedPathsReceipt
+		}
 	}
 	if reason := PartlyStagedReason(cmd, cwd); reason != "" {
 		return reason, PartlyStagedReceipt
 	}
 	return "", ""
+}
+
+const stepBeforeCommitReason = "[commit-gate] BLOCKED: this command runs `%s` before " +
+	"its commit. The gate reads the tree before the command starts, so the reviewers " +
+	"would not see what that step changes, and the commit would carry it unreviewed. " +
+	"NOTHING IN THE COMMAND RAN. Run that step as its own command first. Before a " +
+	"commit, one command may hold only cd, git add and git status."
+
+// StepBeforeCommitReceipt states that the step-before-commit refusal blocked before review.
+const StepBeforeCommitReceipt = "[commit-gate] refused a commit that runs another step " +
+	"first. No review ran and no adjudication row was written."
+
+// shortStep keeps a refused step's first line, cut to a length a reason can quote.
+func shortStep(step string) string {
+	line, _, cut := strings.Cut(step, "\n")
+	if len(line) > 80 {
+		line, cut = line[:80], true
+	}
+	if cut {
+		line += " …"
+	}
+	return line
 }
 
 const selectedPathsReason = "[commit-gate] BLOCKED: this commit selects its own paths " +

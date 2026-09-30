@@ -442,11 +442,150 @@ func (p *parsedGit) writtenHeredoc(target string) (string, bool) {
 func trimHeredoc(body string) string { return strings.TrimSuffix(body, "\n") }
 
 func outputRedirect(redir shellsyntax.Redirect) bool {
-	switch redir.Op {
+	return outputOp(redir.Op)
+}
+
+func outputOp(op syntax.RedirOperator) bool {
+	switch op {
 	case syntax.RdrOut, syntax.AppOut, syntax.RdrAll, syntax.AppAll, syntax.ClbOut, syntax.RdrInOut:
 		return true
 	}
 	return false
+}
+
+// Steps that may run before the commit in the same command. None of them writes a
+// file except through a redirect, which stepBeforeCommit judges on its own.
+var stepsBeforeCommit = map[string]bool{
+	"cd": true, "pwd": true, "echo": true, "printf": true, "cat": true, "head": true,
+	"tail": true, "grep": true, "wc": true, "true": true, ":": true, "set": true,
+	"unset": true,
+}
+
+var gitStepsBeforeCommit = map[string]bool{
+	"add": true, "stage": true, "status": true, "log": true, "diff": true, "show": true,
+	"rev-parse": true, "push": true, "fetch": true,
+}
+
+// Directories an output redirect before the commit may write to, outside the
+// commit's own directory: a message file there changes no tree git reads.
+var scratchRoots = []string{"/tmp", "/private/tmp", "/var/folders", os.TempDir()}
+
+// stepBeforeCommit returns the source of the first step that runs before git
+// commits and may change the tree: a call outside the allowlist, or an output
+// redirect outside a scratch directory. That region is everything up to the end
+// of the commit's statement, plus its heredoc bodies, because a substitution there
+// runs before git does. Empty means no such step.
+func (p *parsedGit) stepBeforeCommit() string {
+	file, err := syntax.NewParser().Parse(strings.NewReader(p.program.Source), "command")
+	if err != nil {
+		return ""
+	}
+	end := p.call.End
+	var heredocs [][2]int
+	var commitStmt *syntax.Stmt
+	syntax.Walk(file, func(node syntax.Node) bool {
+		stmt, ok := node.(*syntax.Stmt)
+		if !ok {
+			return true
+		}
+		if call, ok := stmt.Cmd.(*syntax.CallExpr); ok && int(call.Pos().Offset()) == p.call.Start {
+			commitStmt = stmt
+			// A Stmt's own end runs past its heredoc bodies, which the region holds
+			// separately, so the statement ends at its last redirect word.
+			for _, redir := range stmt.Redirs {
+				if redir.Word != nil {
+					end = max(end, int(redir.Word.End().Offset()))
+				}
+				if redir.Hdoc != nil {
+					heredocs = append(heredocs, [2]int{int(redir.Hdoc.Pos().Offset()), int(redir.Hdoc.End().Offset())})
+				}
+			}
+		}
+		return true
+	})
+	runsFirst := func(start int) bool {
+		if start < end {
+			return true
+		}
+		for _, body := range heredocs {
+			if start >= body[0] && start < body[1] {
+				return true
+			}
+		}
+		return false
+	}
+	var step string
+	syntax.Walk(file, func(node syntax.Node) bool {
+		stmt, ok := node.(*syntax.Stmt)
+		if !ok || step != "" || stmt == commitStmt || !runsFirst(int(stmt.Pos().Offset())) {
+			return step == ""
+		}
+		for _, redir := range stmt.Redirs {
+			if outputOp(redir.Op) && !p.scratchTarget(redir.Word) {
+				step = p.program.Source[stmt.Pos().Offset():stmt.End().Offset()]
+				return false
+			}
+		}
+		return true
+	})
+	if step != "" {
+		return step
+	}
+	for i, call := range p.program.Calls {
+		if i == p.callIndex || !runsFirst(call.Start) || p.allowedBeforeCommit(call) {
+			continue
+		}
+		return p.program.Source[call.Start:call.End]
+	}
+	return ""
+}
+
+func (p *parsedGit) allowedBeforeCommit(call shellsyntax.Call) bool {
+	if gitArg, ok := gitExecutable(call.Args); ok {
+		sub, _, _, _, ok := gitSubcommand(call.Args, gitArg, p.baseCWD)
+		if !ok || !gitStepsBeforeCommit[call.Args[sub].Value] {
+			return false
+		}
+		for _, arg := range call.Args[sub+1:] {
+			if !arg.Static || strings.HasPrefix(arg.Value, "--output") {
+				return false
+			}
+		}
+		return true
+	}
+	return call.Args[0].Static && stepsBeforeCommit[call.Args[0].Value]
+}
+
+// scratchTarget reports whether a redirect writes /dev/null, or a static absolute
+// path under a scratch root and outside the commit's directory.
+func (p *parsedGit) scratchTarget(word *syntax.Word) bool {
+	if word == nil {
+		return false
+	}
+	target, ok := shellsyntax.StaticWord(word)
+	if !ok {
+		return false
+	}
+	if target == "/dev/null" {
+		return true
+	}
+	if !filepath.IsAbs(target) {
+		return false
+	}
+	target = filepath.Clean(target)
+	if repo, ok := p.repoDir(); !ok || within(target, repo) {
+		return false
+	}
+	for _, root := range scratchRoots {
+		if within(target, filepath.Clean(root)) {
+			return true
+		}
+	}
+	return false
+}
+
+func within(path, root string) bool {
+	return path == root || strings.HasPrefix(path, root+string(filepath.Separator))
 }
 
 func parsedWritesFile(program *shellsyntax.Program) bool {

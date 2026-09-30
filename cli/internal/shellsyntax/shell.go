@@ -158,6 +158,9 @@ func normalizeWord(source string, word *syntax.Word) Word {
 	return Word{Value: value, Raw: raw, Static: static}
 }
 
+// StaticWord returns a word's value when it holds only literals and quotes.
+func StaticWord(word *syntax.Word) (string, bool) { return staticWord(word) }
+
 func staticWord(word *syntax.Word) (string, bool) {
 	var b strings.Builder
 	for _, part := range word.Parts {

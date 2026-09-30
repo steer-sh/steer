@@ -106,3 +106,40 @@ func TestPreflightDenyRefusesABundledAddOverAPartlyStagedFile(t *testing.T) {
 		}
 	}
 }
+
+// TestPreflightDenyRefusesAStepThatRunsBeforeTheCommit: the gate reads the tree before
+// the command starts, so an edit the same command makes before git commits lands
+// unreviewed.
+func TestPreflightDenyRefusesAStepThatRunsBeforeTheCommit(t *testing.T) {
+	c := "co" + "mmit"
+	for _, cmd := range []string{
+		"python3 edit.py && git add a && git " + c + " -m x",
+		"python3 - <<'EOF'\nopen('a', 'w')\nEOF\ngit add a && git " + c + " -m x",
+		"sed -i s/a/b/ f && git add f && git " + c + " -m x",
+		"git stash && git " + c + " -m x",
+		"echo x > a && git add a && git " + c + " -m x",
+		"{ echo x; } > a; git " + c + " -m x",
+		`git ` + c + ` -m x --author="$(touch a; echo A)"`,
+		`git ` + c + ` -m x <<< "$(touch a)"`,
+	} {
+		reason, receipt := PreflightDeny(cmd, "/cwd")
+		if receipt != StepBeforeCommitReceipt {
+			t.Errorf("%q changes the tree before git commits and must be refused, got %q", cmd, reason)
+		}
+	}
+	for _, cmd := range []string{
+		"git " + c + " -m x",
+		"cd /repo && git add a b && git " + c + " -m x",
+		"git -C /repo add -A && git -C /repo " + c + " -m x",
+		"git add a 2>/dev/null && git " + c + " -m x",
+		"git status --short && git " + c + " -m x",
+		"git " + c + " -F - <<'EOF'\nsubject\n\nbody\nEOF",
+		"git " + c + " -m x && git log --oneline -1 && python3 after.py > out.txt",
+		"git " + c + " -F - <<'EOF' && git status -sb | head -2 && python3 after.py\nsubject\nEOF",
+		"cat > /tmp/msg <<'EOF'\nsubject\nEOF\ngit " + c + " -F /tmp/msg",
+	} {
+		if reason, _ := PreflightDeny(cmd, "/cwd"); reason != "" {
+			t.Errorf("%q changes nothing before git commits and must go to review, got %q", cmd, reason)
+		}
+	}
+}
