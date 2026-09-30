@@ -9,7 +9,8 @@ change would do, and what decision is needed — without a glossary?
 It feeds each saved scenario to the working tree's report skill headlessly and
 stores the output beside the others under tests/scenarios/out/. Read them side by side with
 somebody who has never used Steer, record where they were misled, and revise the
-copy. The runner never passes or fails; it only regenerates.
+copy. The runner never passes or fails; it only regenerates. It records each
+report's word count in the report's first line and in its closing summary.
 
 Usage:
     python3 tests/report_scenarios.py                       # all scenarios
@@ -185,6 +186,7 @@ def main():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     total = 0.0
     failed = 0
+    words: dict[str, int] = {}
     started = time.time()
     for name in names:
         print(f"\n=== {name} ===")
@@ -196,10 +198,15 @@ def main():
             continue
         dest = OUT_DIR / f"{name}.md"
         opened = ", ".join(reads) or "none"
-        dest.write_text(f"<!-- {name} · {args.model} · skill files read: {opened} -->\n\n"
-                        f"{report}\n")
-        print(f"  {len(report)} chars → {dest}  (${cost:.4f})  skill files read: {opened}")
+        words[name] = len(report.split())
+        dest.write_text(f"<!-- {name} · {args.model} · {words[name]} words · "
+                        f"skill files read: {opened} -->\n\n{report}\n")
+        print(f"  {words[name]} words → {dest}  (${cost:.4f})  skill files read: {opened}")
 
+    if words:
+        print("\nWords per report:")
+        for name, count in words.items():
+            print(f"  {count:5d}  {name}")
     print(f"\n{len(names)} scenario(s), ${total:.4f}, "
           f"{time.time() - started:.0f}s. Read them side by side.")
     return 1 if failed else 0

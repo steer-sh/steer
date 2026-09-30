@@ -473,74 +473,80 @@ A detector the guide keeps out of `check.sh` may still be suggested as a manual 
 
 ### Executive view by default
 
-Lead with the overall assessment and the decisions needing the user's attention.
-Use short paragraphs or a compact list, with one reason for each recommendation.
-Group fixes that need no action instead of giving every record a paragraph. An
-ordinary report should fit in a few short paragraphs; expand when distinct
-material decisions need space, rather than dropping one to meet a word limit.
+Open with one sentence: the overall assessment. Then give each item that needs the
+reader as a **verdict, one reason, and the decision** you ask for, in two or three
+sentences. The reasoning behind the verdict waits for a request ("Evidence behind
+the assessment" below). Group the fixes that need no action into one line, with a
+few words of reason each. There is no word limit: more decisions make a longer
+report, never a longer item.
 
-- **Installed fixes:** recommend leaving in place, investigating, or tweaking,
-  and state the evidence behind that judgment. Distinguish a problem not seen
-  again from a fix whose inspected blocks stopped real mistakes. Too little
-  relevant work, missing evidence, and an uninspected block are different reasons
-  an assessment remains open; give the relevant reason plainly.
-- **New findings:** in two or three sentences, name the recurring problem, the
-  recommended response, where it applies, and its main tradeoff. Recommend
-  applying, investigating, or holding off. Include evidence strength when it
-  changes that decision. Finding nothing worth installing is a complete outcome.
-- **Earlier refusals:** mention them when new evidence merits reconsideration or
-  the user needs a decision. Explain whether the stored reopen condition was met
-  and why the recommendation stands or changes; a shorter report changes no
-  threshold or routing rule.
+- **Installed fixes:** leave in place, investigate, or tweak. The reason is the
+  evidence that decided it: the problem has not come back; the blocks you
+  inspected stopped real mistakes; too early, since no relevant work arrived; the
+  evidence is missing; or a block still awaits inspection.
+- **New findings:** the recurring problem, the response and where it applies, the
+  main tradeoff, and apply, investigate or hold off. Give evidence strength only
+  when it changes that recommendation. Finding nothing worth installing is a
+  complete outcome.
+- **Earlier refusals:** only when new evidence meets or misses the stored reopen
+  condition, or the reader must decide. Say which, and whether the recommendation
+  stands; a shorter report changes no threshold or routing rule.
 
-Keep counts, dates, file lists, identifiers, commands, scan totals and audit
-budgets out of the default view unless needed to understand a decision or act.
-Explain technical terms through the behavior proposed, without a glossary.
-Missing evidence or setup trouble belongs up front when it limits the assessment
-or requires action. Routine accounting belongs in a requested explanation.
-Test each sentence about evidence you did not read, setup, or what you did not
-do: keep it only if it changes a recommendation or asks the user to act. A limit
-every report shares is routine, such as stored test cases absent from the
+Leave out an item or section with nothing in it: what you did not find, a normal
+commit gate, or evidence you did not read. Keep it only if it changes a
+recommendation or asks the reader to act, or when the whole report found nothing.
+A limit every report shares is routine, such as stored test cases absent from the
 snapshot, or a harness's unverifiable hook trust while `readiness.reviewing` is true.
-Apply this presentation rule to reporting instructions throughout this skill and
-`./audit.md`; it changes disclosure, not the evidence the agent must inspect.
+Missing evidence or setup trouble belongs up front when it limits the assessment
+or needs action. Keep counts, dates, file lists, identifiers, commands, scan
+totals and audit budgets out of the default view unless the reader needs one to
+understand a decision or act. Explain technical terms through the behavior
+proposed, without a glossary. Apply this rule to every reporting instruction in
+this skill and `./audit.md`; it changes disclosure, not the evidence you inspect.
 
-Before asking to apply a fix, make the scope and practical effect clear. Name the
-scope as **project** (this repository alone) or **global** (every repository on
-this machine), and choose it from the evidence: evidence from one repository
-scopes to project, evidence from several scopes global. Give that reason in a
-clause.
+A complete default report, to copy for shape; its fixes are invented:
 
-Say what will be blocked or changed, and the important legitimate work it could
-obstruct. Each kind of fix has its own form of that harm: a repository check
-rejects valid repository content, a guard blocks an acceptable tool action, an
-instruction rule discourages a valid approach, and a review prompt entry makes the
-reviewer flag correct code or a deliberate design choice. Examine a concrete
-boundary. Keep the tradeoff qualitative unless the evidence carries the rate you
-claim, with its denominator; "no history records this" is a limit on the
-measurement, not an answer. If no harm is established, state the uncertainty
-without inventing a tradeoff, and never call a proposal cost-free.
+> One fix needs a change, and one new finding needs your answer; the rest can stay.
+>
+> - **Lockfile check: loosen it.** Both turns it blocked had updated the lockfile
+>   correctly after a dependency change. I'd let it accept a lockfile that changes
+>   with its manifest, though it would then miss a stray lockfile edit in that
+>   same turn. Apply?
+> - **Leave in place:** the generated-code rule (the problem has not come back) and
+>   the force-push guard (too early; no relevant work yet).
+> - **New: migrations that drop a column in the release that stops reading it.** A
+>   check at the end of each turn in this repository could block these, but 14
+>   existing migrations would fail it first. Do old and new code still run side by
+>   side during a deploy? If not, I'd drop it.
 
-Mention affected agents when coverage differs materially. A repository check is
-always project scope: yes adopts this repository, and the check then runs at the
-end of every Claude Code and Codex turn here and blocks a turn that fails it. Pi
-has no runner, so it blocks no Pi turn. Disclose creation of `check.sh` or
-substantial cleanup when needed. Keep these consequences in the proposal even when
-implementation details wait.
+#### What a sentence may claim
 
-What follows a yes is that Steer tells the user if the problem comes back. Never
-promise that the problem becomes less frequent; no count here can show that.
-Ask for the decisions actually needed, grouping related actions where useful.
-Create nothing unasked.
+These rules limit the sentences the default view already holds; they add none.
+State a limit on its own only where a reader would otherwise draw the wrong
+conclusion. "The problem has not come back" is the supported claim, and it needs
+no disclaimer after it.
 
-> Three reviews found database migrations that drop a column in the same release
-> that stops reading it. A check at the end of each turn here could flag that
-> pattern, but 14 existing migrations would fail it. I recommend holding off until
-> we know whether this repository still deploys with old and new code running together.
-
-> Steer counted an unrelated Python failure against the missing-path fix. I
-> recommend correcting the tracking; this finding calls for no guard change.
-> Apply that correction?
+- **Scope.** A proposal names **project** (this repository alone) or **global**
+  (every repository on this machine), chosen from the evidence: one repository
+  scopes to project, several to global. The reason fits in a clause.
+  Name an agent the fix does not reach when coverage differs materially.
+- **Harm.** A proposal says what it blocks or changes and the legitimate work it
+  could obstruct, in the form that kind of fix's harm takes: a repository check
+  rejects valid repository content, a guard blocks an acceptable tool action, an
+  instruction rule discourages a valid approach, and a review prompt entry makes
+  the reviewer flag correct code or a deliberate design choice. Examine a concrete
+  boundary. Keep the tradeoff qualitative unless the evidence carries the rate,
+  with its denominator; "no history records this" limits the measurement and
+  answers nothing. With no harm established, say the harm is unknown; never invent
+  a tradeoff or call a proposal cost-free.
+- **Checks.** A repository check is always project scope. A yes adopts this
+  repository, and the check then blocks any Claude Code or Codex turn here that
+  fails it. Say that a yes needs substantial cleanup first when it does, and that
+  it creates `check.sh` only when the evidence shows the repository has none.
+- **Outcome.** A yes buys this: Steer tells the user if the problem comes back.
+  Never promise that the problem becomes less frequent; no count here can show that.
+- **Decisions.** Ask for the decisions actually needed, and group related actions.
+  Create nothing unasked.
 
 ### Evidence behind the assessment
 
