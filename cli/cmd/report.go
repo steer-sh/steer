@@ -436,18 +436,27 @@ func runCadence() {
 			"steer: a guard file was edited and the runner still carries the old source (%s) — to restore agreement, run: %s",
 			strings.Join(driftLabels, "; "), strings.Join(repairs, " and ")))
 	}
+	// A harness runs skills and the launcher from its cached plugin copy, and
+	// nothing refreshes that copy when the stable executable changes.
+	pluginKey, pluginLabels := status.DifferingPlugins(status.PluginCopies())
+	if cadence.ShouldNudgePlugins(dir, pluginKey) {
+		lines = append(lines, fmt.Sprintf(
+			"steer: a harness's plugin copy bundles another Steer build than ~/.steer/bin/steer (%s) — run: steer status",
+			strings.Join(pluginLabels, "; ")))
+	}
 	if len(lines) == 0 {
 		// Nothing to say, but a repaired condition still has to clear its key: a
 		// record left behind would suppress the nudge if that same condition
 		// came back.
 		if prev := cadence.LoadNudge(dir); prev.Master != key || prev.Rules != rulesKey ||
-			prev.Detached != detachedKey || prev.SourceDrift != driftKey {
+			prev.Detached != detachedKey || prev.SourceDrift != driftKey || prev.Plugins != pluginKey {
 			_ = cadence.WriteNudge(dir, rec.WithMaster(key).WithRules(rulesKey).
-				WithDetached(detachedKey).WithSourceDrift(driftKey))
+				WithDetached(detachedKey).WithSourceDrift(driftKey).WithPlugins(pluginKey))
 		}
 		return
 	}
-	rec = rec.WithMaster(key).WithRules(rulesKey).WithDetached(detachedKey).WithSourceDrift(driftKey)
+	rec = rec.WithMaster(key).WithRules(rulesKey).WithDetached(detachedKey).WithSourceDrift(driftKey).
+		WithPlugins(pluginKey)
 
 	msg := strings.Join(lines, "\n")
 	out, err := json.Marshal(sessionStartOutput{

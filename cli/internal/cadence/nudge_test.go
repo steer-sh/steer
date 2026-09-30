@@ -180,3 +180,29 @@ func TestQueueNudgeCarriesTheMasterKey(t *testing.T) {
 		t.Fatalf("master key: got %q, want %q", rec.Master, key)
 	}
 }
+
+// A differing plugin copy nudges once per key, and a cleared key lets the same
+// copy nudge again when it differs again.
+func TestPluginsNudgeFiresOncePerKey(t *testing.T) {
+	dir := t.TempDir()
+	key := "codex:/h/.codex/plugins/cache/m/steer/0.1.0"
+
+	if ShouldNudgePlugins(dir, "") {
+		t.Error("an empty key nudged")
+	}
+	if !ShouldNudgePlugins(dir, key) {
+		t.Fatal("a first differing copy did not nudge")
+	}
+	if err := WriteNudge(dir, LoadNudge(dir).WithPlugins(key)); err != nil {
+		t.Fatal(err)
+	}
+	if ShouldNudgePlugins(dir, key) {
+		t.Error("the same differing copy nudged twice")
+	}
+	if err := WriteNudge(dir, LoadNudge(dir).WithPlugins("")); err != nil {
+		t.Fatal(err)
+	}
+	if !ShouldNudgePlugins(dir, key) {
+		t.Error("a copy that differs again did not nudge after the key was cleared")
+	}
+}

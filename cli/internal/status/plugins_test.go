@@ -82,3 +82,26 @@ func TestPluginCopiesReadEachCacheAgainstTheStableExecutable(t *testing.T) {
 		t.Error("Differs holds only for a different-binary copy")
 	}
 }
+
+// TestDifferingPluginsKeysOnlyTheCopiesThatDiffer: the key names each differing
+// copy by harness and path in a fixed order, a same-binary or unknown copy adds
+// nothing, and no differing copy gives the empty key that nudges nothing.
+func TestDifferingPluginsKeysOnlyTheCopiesThatDiffer(t *testing.T) {
+	rows := []PluginCopy{
+		{Harness: "codex", Path: "/h/.codex/plugins/cache/m/steer/0.1.0", State: PluginDifferentBinary},
+		{Harness: "claude-code", Path: "/h/.claude/plugins/cache/m/steer/0.1.0", State: PluginSameBinary},
+		{Harness: "claude-code", Path: "/h/.claude/plugins/cache/m/steer/0.2.0", State: PluginDifferentBinary},
+		{Harness: "codex", Path: "/h/.codex/plugins/cache/m/steer/0.2.0", State: PluginUnknown},
+	}
+	key, labels := DifferingPlugins(rows)
+	want := "claude-code:/h/.claude/plugins/cache/m/steer/0.2.0|codex:/h/.codex/plugins/cache/m/steer/0.1.0"
+	if key != want {
+		t.Errorf("key %q, want %q", key, want)
+	}
+	if len(labels) != 2 || labels[0] != "Codex /h/.codex/plugins/cache/m/steer/0.1.0" {
+		t.Errorf("labels %q", labels)
+	}
+	if key, labels := DifferingPlugins(rows[1:2]); key != "" || labels != nil {
+		t.Errorf("a same-binary copy keyed %q with labels %q", key, labels)
+	}
+}

@@ -37,6 +37,9 @@ type nudgeRecord struct {
 	// SourceDrift is the key of the registered runners carrying different guard
 	// source than the store file, under the same once-per-key rule as Master.
 	SourceDrift string `json:"source_drift,omitempty"`
+	// Plugins is the key of the cached plugin copies bundling another build than
+	// the stable executable, under the same once-per-key rule as Master.
+	Plugins string `json:"plugins,omitempty"`
 }
 
 // QueueHash is the change key of the queue file: the sha256 of its bytes. The queue
@@ -146,6 +149,21 @@ func ShouldNudgeSourceDrift(dir, key string) bool {
 // WithSourceDrift returns the record carrying a source-drift key.
 func (r nudgeRecord) WithSourceDrift(key string) nudgeRecord {
 	r.SourceDrift = key
+	return r
+}
+
+// ShouldNudgePlugins decides whether to name a cached plugin copy that bundles
+// another build than the stable executable. An empty key means every copy agrees.
+func ShouldNudgePlugins(dir, key string) bool {
+	if key == "" {
+		return false
+	}
+	return readNudge(dir).Plugins != key
+}
+
+// WithPlugins returns the record carrying a plugin-copy key.
+func (r nudgeRecord) WithPlugins(key string) nudgeRecord {
+	r.Plugins = key
 	return r
 }
 

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/steerbin"
@@ -81,6 +82,24 @@ func PluginCopies() []PluginCopy {
 		}
 	}
 	return out
+}
+
+// DifferingPlugins summarizes the copies that bundle another build for a one-line
+// notice: a key that changes whenever the set does, and one label per copy.
+func DifferingPlugins(rows []PluginCopy) (key string, labels []string) {
+	var parts []string
+	for _, p := range rows {
+		if !p.Differs() {
+			continue
+		}
+		parts = append(parts, p.Harness+":"+p.Path)
+		labels = append(labels, HarnessLabel(p.Harness)+" "+p.Path)
+	}
+	if len(parts) == 0 {
+		return "", nil
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, "|"), labels
 }
 
 // sameFile compares two files byte for byte. ok is false when either cannot be read.
