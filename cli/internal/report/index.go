@@ -105,16 +105,15 @@ type DetailItem struct {
 
 // DetailRow is one occurrence of a cluster, or one directive of a document.
 type DetailRow struct {
-	ID                           string           `json:"id"`
-	Session                      string           `json:"session,omitempty"`
-	Timestamp                    string           `json:"timestamp,omitempty"`
-	Section                      string           `json:"section,omitempty"`
-	Group                        int              `json:"group,omitempty"`
-	AfterInterrupt               bool             `json:"after_interrupt,omitempty"`
-	Text                         string           `json:"text"`
-	PreviousHumanText            *ObservedText    `json:"previous_human_text,omitempty"`
-	FirstObservedHumanTextInScan *ObservedText    `json:"first_observed_human_text_in_scan,omitempty"`
-	RecentToolCalls              *RecentToolCalls `json:"recent_tool_calls,omitempty"`
+	ID                           string        `json:"id"`
+	Session                      string        `json:"session,omitempty"`
+	Timestamp                    string        `json:"timestamp,omitempty"`
+	Section                      string        `json:"section,omitempty"`
+	Group                        int           `json:"group,omitempty"`
+	AfterInterrupt               bool          `json:"after_interrupt,omitempty"`
+	Text                         string        `json:"text"`
+	PreviousHumanText            *ObservedText `json:"previous_human_text,omitempty"`
+	FirstObservedHumanTextInScan *ObservedText `json:"first_observed_human_text_in_scan,omitempty"`
 }
 
 // Detail is one page of the rows of the requested items.
@@ -232,7 +231,6 @@ func DetailPage(d *Digest, ids []string, cursor, maxBytes int) ([]byte, error) {
 					ID: id, Session: o.Session, Timestamp: o.Timestamp, Group: o.Group,
 					AfterInterrupt: o.AfterInterrupt, Text: o.Text,
 					PreviousHumanText: o.PreviousHumanText, FirstObservedHumanTextInScan: o.FirstObservedHumanTextInScan,
-					RecentToolCalls: o.RecentToolCalls,
 				})
 			}
 			continue

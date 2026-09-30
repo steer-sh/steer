@@ -43,10 +43,6 @@ const (
 
 	// maxObservedLen bounds the context text a correction occurrence carries.
 	maxObservedLen = 400
-	// maxRecentToolCalls bounds the tool calls an occurrence carries as context.
-	maxRecentToolCalls = 3
-	// maxToolTargetLen bounds each context tool call's target.
-	maxToolTargetLen = 96
 )
 
 // correctionPatterns match user-turn language that can name a correction. A match
@@ -163,7 +159,7 @@ func (c *Classifier) toolResult(e transcript.Event) (Signal, bool) {
 	lower := strings.ToLower(text)
 
 	switch {
-	case e.IsError && declined(lower):
+	case e.IsError && strings.HasPrefix(strings.TrimSpace(lower), rejectionEnvelope):
 		key := call.Name + ": " + call.Target
 		return Signal{kindRejection, key, key}, true
 	case e.IsError && isHookBlock(lower):
@@ -190,12 +186,6 @@ func (c *Classifier) toolResult(e transcript.Event) (Signal, bool) {
 		}
 	}
 	return Signal{}, false
-}
-
-// declined reports whether a tool result's text opens with Claude Code's decline
-// envelope. The caller checks that the result is an error.
-func declined(text string) bool {
-	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(text)), rejectionEnvelope)
 }
 
 // steerFooter is the marker every steer guard appends to its deny reason. Only
@@ -280,70 +270,10 @@ type textGroup struct {
 }
 
 // threadContext is what one session's thread showed before its current event:
-// its human text, whether the person just stopped a running turn, and the tool
-// calls requested since the previous real human turn.
+// its human text, and whether the person just stopped a running turn.
 type threadContext struct {
 	first, previous *ObservedText
 	afterInterrupt  bool
-	calls           []*RecentToolCall
-	callsByID       map[string]*RecentToolCall
-	omitted         int
-}
-
-// addCall keeps a requested tool call in the bounded tail.
-func (ctx *threadContext) addCall(e transcript.Event) {
-	target := clip(e.Target, maxToolTargetLen)
-	call := &RecentToolCall{Tool: e.Tool, Target: target, Cut: len(target) < len(e.Target), Result: toolResultUnobserved}
-	if len(ctx.calls) == maxRecentToolCalls {
-		for id, c := range ctx.callsByID {
-			if c == ctx.calls[0] {
-				delete(ctx.callsByID, id)
-			}
-		}
-		ctx.calls = ctx.calls[1:]
-		ctx.omitted++
-	}
-	ctx.calls = append(ctx.calls, call)
-	if e.ToolUseID != "" {
-		if ctx.callsByID == nil {
-			ctx.callsByID = map[string]*RecentToolCall{}
-		}
-		ctx.callsByID[e.ToolUseID] = call
-	}
-}
-
-// addResult records a result on the kept call it answers.
-func (ctx *threadContext) addResult(e transcript.Event) {
-	call := ctx.callsByID[e.ToolUseID]
-	if call == nil || e.ToolUseID == "" {
-		return
-	}
-	switch {
-	case !e.IsError:
-		call.Result = toolResultNonError
-	case declined(e.Text):
-		call.Result = toolResultDeclined
-	default:
-		call.Result = toolResultError
-	}
-}
-
-// recentCalls copies the tail as it stands, so a later result cannot change
-// it. It is nil when no call was observed.
-func (ctx *threadContext) recentCalls() *RecentToolCalls {
-	if len(ctx.calls) == 0 {
-		return nil
-	}
-	out := &RecentToolCalls{Calls: make([]RecentToolCall, len(ctx.calls)), Omitted: ctx.omitted}
-	for i, c := range ctx.calls {
-		out.Calls[i] = *c
-	}
-	return out
-}
-
-// resetCalls opens the interval that the next real human turn closes.
-func (ctx *threadContext) resetCalls() {
-	ctx.calls, ctx.callsByID, ctx.omitted = nil, nil, 0
 }
 
 // harnessScan is one harness's running coverage. It keeps its own id sets: the
@@ -441,20 +371,10 @@ func (s *Scanner) classify(e transcript.Event, c *Classifier, hs *harnessScan, c
 		// makes the next message an after-interrupt one.
 		ctx.afterInterrupt = e.Interrupt == transcript.InterruptTurn
 	}
-	switch e.Kind {
-	case transcript.KindToolCall:
-		ctx.addCall(e)
-	case transcript.KindToolResult:
-		ctx.addResult(e)
-	}
 	var observed *ObservedText
-	var recent *RecentToolCalls
 	real := false
 	if e.Kind == transcript.KindHumanTurn && !e.Meta {
 		observed, real = observe(e.Text)
-	}
-	if real && !e.DeferredHumanTurn {
-		recent = ctx.recentCalls()
 	}
 	// The next real message answers the interrupt, whatever it says.
 	answers := real && ctx.afterInterrupt
@@ -471,16 +391,14 @@ func (s *Scanner) classify(e transcript.Event, c *Classifier, hs *harnessScan, c
 				o.FirstObservedHumanTextInScan = ctx.first
 			}
 			o.AfterInterrupt = answers
-			o.RecentToolCalls = recent
 		}
 	}
 	if !real {
 		return
 	}
 	if answers && !corrected {
-		s.addAfterInterrupt(e, ctx, recent)
+		s.addAfterInterrupt(e, ctx)
 	}
-	ctx.resetCalls()
 	if ctx.first == nil {
 		ctx.first = observed
 	}
@@ -523,15 +441,15 @@ func (s *Scanner) addWording(e transcript.Event) {
 }
 
 // addAfterInterrupt records the typed text that answered a stopped turn, with
-// the thread's human text before the interrupt and its recent tool calls as
-// context. A paste-only answer has no typed text and records nothing.
-func (s *Scanner) addAfterInterrupt(e transcript.Event, ctx *threadContext, recent *RecentToolCalls) {
+// the thread's human text before the interrupt as context. A paste-only answer
+// has no typed text and records nothing.
+func (s *Scanner) addAfterInterrupt(e transcript.Event, ctx *threadContext) {
 	typed, ok := typedText(e.Text)
 	if !ok {
 		return
 	}
 	text := whitespaceRun.ReplaceAllString(typed, " ")
-	o := Occurrence{Session: e.SessionID, Timestamp: e.Timestamp, Text: text, PreviousHumanText: ctx.previous, RecentToolCalls: recent}
+	o := Occurrence{Session: e.SessionID, Timestamp: e.Timestamp, Text: text, PreviousHumanText: ctx.previous}
 	if ctx.first != ctx.previous {
 		o.FirstObservedHumanTextInScan = ctx.first
 	}
