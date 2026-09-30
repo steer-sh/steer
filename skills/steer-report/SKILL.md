@@ -13,6 +13,12 @@ This skill closes the friction loop. It decides two things, in this order:
 1. **Is a problem the loop already answered still happening?** A class that came back gets reworked or removed.
 2. **Which new patterns recur often enough to deserve a hook?** Both corpora feed this — transcript friction and commit-review findings.
 
+The default output is an executive assessment: what needs attention, what can stay
+in place, what remains uncertain, and which new findings merit action. Complete
+the evidence gathering below; Step 5 governs what reaches the reader. Detailed
+counts, dates, commands and audit accounting are available on request, except when
+they materially change a recommendation or the scope of approval.
+
 The audit comes first on purpose. Proposing new hooks is the interesting half, and skipping the audit is how a log of interventions turns into a graveyard of unmeasured good intentions.
 
 Two corpora feed this skill, and either may be empty on a given machine:
@@ -78,7 +84,7 @@ Then Read the queue **once**: `~/.steer/state/steer-report/queue.json` (`version
 - `interventions[]` — full contract records the tier flagged as **asking for a reader**: the class recurred after the split, an absent guard audit log or missing check evidence left the fix's activity unread, the record carries no frozen scope, the fix it binds is `absent` or `unreadable`, or the fix is in place but carries `artifact.removed`. These carry a `match`; they are the audit's action list, pre-filtered. Each carries `problem` and `intervention` — the record's own explanation of what goes wrong and what it does about it, authored when the class was found. Lead your report with those rather than with the class name or the regex, and correct one that no longer describes the evidence with `steer fix describe ID`, which changes no window. Each also carries the conditions the counts were taken under: `corpus` and `unit` (`review-findings` counts by `chain`, `transcript-friction` by `session` — never compare the two rates), `signal_kind` on a session-unit record, `scope` (the frozen eligibility rule, `null` on a legacy record), `before_coverage` / `after_coverage` (`total`, `eligible`, `ineligible`, `unknown`, `unknown_scope`, `unknown_evidence`, `pending`, `ledger_missed`, `ledger_overdue`, `partial_exposure`), `observation` — the seven field blocks documented in `audit.md` — and `artifact`, where the fix the record binds stands now.
 - `unscored[]` — ids of records no engine reads. Report their existence; do not read a result into them.
 - `candidates[]` — **one row per corpus**, each pointing at a pile of evidence no problem covers yet. The transcript row carries `ungrouped_clusters`; the review row carries `undecided_chains` and a `dump` command. The transcript row also carries a few `examples` — the strongest cluster keys, for a reader glancing at the row, never the pile itself; the review row carries none, because its `dump` command prints the findings in full. A row has **no** `match` and no title: grouping the pile and authoring the regex are your job, below. Read the full dumps for the pile; the row only sizes it.
-- `corpora[]` — one row per corpus (`review-findings`, `transcript-friction`) with `present` and `size`. Relay this sweep to the user in one sentence. When `review-findings` is absent or empty, a second sentence says what comes next. Read that from `posture.readiness`, never from a `commit_gate[]` row's `effective`, which holds before Codex trusts the hook. If `readiness.reviewing` is true, the commit gate reviews each commit from now on, and a later `/steer-report` can mine those reviews for problems. If it is false, no review history collects yet: relay `readiness.headline`, each `steps[]` entry with its `fix`, and each `unverified[]` line. A Codex line clears when the user approves the hook in Codex's `/hooks`. When no commit gate is registered, `/steer-setup` arms one.
+- `corpora[]` — one row per corpus (`review-findings`, `transcript-friction`) with `present` and `size`. Use this sweep to establish what history is available; surface a gap when it limits the assessment or requires action. When `review-findings` is absent or empty, a second sentence says what comes next. Read that from `posture.readiness`, never from a `commit_gate[]` row's `effective`, which holds before Codex trusts the hook. If `readiness.reviewing` is true, the commit gate reviews each commit from now on, and a later `/steer-report` can mine those reviews for problems. If it is false, no review history collects yet: relay `readiness.headline`, each `steps[]` entry with its `fix`, and each `unverified[]` line. A Codex line clears when the user approves the hook in Codex's `/hooks`. When no commit gate is registered, `/steer-setup` arms one.
 - `checks[]` — the open steps in the repository the refresh ran in, each with `kind`, `repo`, an optional `check_id`, a `detail` and the `fix` command that clears it. `not-adopted` is a repository declaring checks that this machine never authorized to run at the end of a turn (`steer check adopt`). `never-validated` is a declared check whose cases were never replayed here, so nothing shows it fails on the problem it names (`steer check test <id>`). `integration-failure` is a passing `check.sh` that ran no declared check — the script's wiring, never a failed assertion (`steer check init` prints the managed line to add). A **stale** receipt is deliberately not here: a stale check keeps running, and `steer status --json` carries the label. These are states of a declaration, not recurrence measured over a window, so they carry no count and never enter a before/after reading.
 
 The queue tells you what is pending. The full dumps below are the raw material you cluster over. The score file holds every live record for the complete audit — the queue lists only the ones asking for a reader, not the quiet ones worth showing too. When the score file is `[]`, this machine records no fix. Guard evidence is a separate stream from review history, so an absent ledger says nothing about what the installed guards blocked: the rule under "The audit lives in `audit.md`" decides whether the audit runs.
@@ -144,8 +150,8 @@ The report — not the queue — is the transcript corpus. The queue carries one
 Index schema (`digest_version: 6`):
 
 - `report_id` — pass it to every `show`.
-- `stats` — coverage: `sessions_scanned`, `threads_scanned`, `bytes_scanned`, `clusters_found`. **Always relay coverage to the user in one sentence**, with the sizes of the two signals the index does not list, and say that the user can ask to see either one.
-- `stats.harnesses[]` — per harness: `harness`, `files_scanned`, `sessions_scanned`, `threads_scanned`, `bytes_scanned`, `entries_scanned`, `entries_skipped`. A harness missing from this list was never reached; a harness present with zeros has no evidence on this machine. Say which when a harness contributes nothing.
+- `stats` — coverage: `sessions_scanned`, `threads_scanned`, `bytes_scanned`, `clusters_found`. Keep coverage and the sizes of signals outside the index available for a requested explanation. Disclose an incomplete scan when it limits a conclusion; routine scan totals do not belong in the executive view.
+- `stats.harnesses[]` — per harness: `harness`, `files_scanned`, `sessions_scanned`, `threads_scanned`, `bytes_scanned`, `entries_scanned`, `entries_skipped`. A harness missing from this list was never reached; a harness present with zeros has no evidence on this machine. Explain the distinction when it limits the assessment or the user asks about that harness.
 - The session is the unit and a subagent thread is provenance under its root session. `threads_scanned` reports how many threads rode along; it is never added to `sessions_scanned`.
 - `instruction_files[]` — per instruction document (CLAUDE.md or AGENTS.md): `id`, `harness`, `path`, `directives` (a count), `steer_rules` (every line of the `## Steer Rules` section) and `guard_rules` (the subset a guard in that scope enforces). A guard writes its rule into the section and so does an instruction rule, so a `steer_rules` line absent from `guard_rules` is an instruction rule: the loop decided on it, and nothing enforces it. The directives — standing instructions with their section heading, NOT yet enforced — are in the document's details (`show i1`).
 - `signals[]` — one summary per signal kind: `signal`, `clusters`, `sessions` (distinct sessions across its clusters) and `in_index`. The index lists the rows of `user_corrections`, `user_rejections`, `after_interrupt` and `repeated_wording`; `tool_failures` and `hook_blocks` are machine output, read only through the fixed steps in Step 3 or when the user asks.
@@ -465,104 +471,144 @@ A detector the guide keeps out of `check.sh` may still be suggested as a manual 
 
 ## Step 5: Present, then act
 
-### How a proposal reads
+### Executive view by default
 
-Write each proposal as connected prose that answers five questions in order. A reader
-who has never met Steer decides from it without a glossary.
+Lead with the overall assessment and the decisions needing the user's attention.
+Use short paragraphs or a compact list, with one reason for each recommendation.
+Group fixes that need no action instead of giving every record a paragraph. An
+ordinary report should fit in a few short paragraphs; expand when distinct
+material decisions need space, rather than dropping one to meet a word limit.
 
-1. **What problem keeps happening?** Show one representative example, in the user's own
-   words where the evidence carries them.
-2. **What supports that?** Name the source — session history or review history — the
-   amount of relevant work it was counted over, and the limit on it.
-3. **What change is proposed?** Say the behavior it affects, then name the scope as
-   **project** or **global** in those words: project reaches this repository alone,
-   global reaches every repository on this machine. Choose it from the evidence —
-   chains from one repository scope to project, chains from several scope global —
-   and give that reason in a clause. Then say which coding agents and which files.
-   A **repository check** is always project scope. For one, also say what yes does:
-   it arms this repository, the check then runs at the end of every Claude Code and
-   Codex turn here and blocks a turn that fails it, and `steer check init` creates
-   `check.sh` when the repository has none. Pi has no runner, so the check blocks no
-   Pi turn.
-4. **What is the tradeoff?** Name one concrete legitimate case the proposal could
-   obstruct, and say what in the proposed detector or wording would catch it. Each
-   tier has its own form: a **repository check** rejects valid repository content; a
-   **guard** blocks an acceptable tool action; an **instruction rule** discourages a
-   valid approach; a **review prompt entry** makes the reviewer flag correct code or
-   a deliberate design choice. Then say how the proposal preserves that case, or what
-   restriction stays. Keep the answer qualitative unless the evidence carries the rate
-   you claim, which needs a denominator: "no corpus records this" states a limit on
-   the measurement and is not an answer. If no concrete case comes up, give the
-   boundary you examined and the uncertainty that remains; never invent a harm, and
-   never call a proposal cost-free.
-5. **What decision is needed?** State the action and what follows it in one question.
-   For a fix, what follows is that Steer tells the user if the problem comes back.
-   A check's question also carries what yes creates. Never promise that the problem
-   becomes less frequent; no count here can show that.
+- **Installed fixes:** recommend leaving in place, investigating, or tweaking,
+  and state the evidence behind that judgment. Distinguish a problem not seen
+  again from a fix whose inspected blocks stopped real mistakes. Too little
+  relevant work, missing evidence, and an uninspected block are different reasons
+  an assessment remains open; give the relevant reason plainly.
+- **New findings:** in two or three sentences, name the recurring problem, the
+  recommended response, where it applies, and its main tradeoff. Recommend
+  applying, investigating, or holding off. Include evidence strength when it
+  changes that decision. Finding nothing worth installing is a complete outcome.
+- **Earlier refusals:** mention them when new evidence merits reconsideration or
+  the user needs a decision. Explain whether the stored reopen condition was met
+  and why the recommendation stands or changes; a shorter report changes no
+  threshold or routing rule.
 
-   > Apply this guard? Steer tells you if the problem comes back.
+Keep counts, dates, file lists, identifiers, commands, scan totals and audit
+budgets out of the default view unless needed to understand a decision or act.
+Explain technical terms through the behavior proposed, without a glossary.
+Missing evidence or setup trouble belongs up front when it limits the assessment
+or requires action. Routine accounting belongs in a requested explanation.
+Test each sentence about evidence you did not read, setup, or what you did not
+do: keep it only if it changes a recommendation or asks the user to act. A limit
+every report shares is routine, such as stored test cases absent from the
+snapshot, or a harness's unverifiable hook trust while `readiness.reviewing` is true.
+Apply this presentation rule to reporting instructions throughout this skill and
+`./audit.md`; it changes disclosure, not the evidence the agent must inspect.
 
-   > Apply this check? It runs at the end of every turn in this repository, creates
-   > `check.sh` if the repository has none, and Steer tells you if the problem comes back.
+Before asking to apply a fix, make the scope and practical effect clear. Name the
+scope as **project** (this repository alone) or **global** (every repository on
+this machine), and choose it from the evidence: evidence from one repository
+scopes to project, evidence from several scopes global. Give that reason in a
+clause.
 
-A worked proposal:
+Say what will be blocked or changed, and the important legitimate work it could
+obstruct. Each kind of fix has its own form of that harm: a repository check
+rejects valid repository content, a guard blocks an acceptable tool action, an
+instruction rule discourages a valid approach, and a review prompt entry makes the
+reviewer flag correct code or a deliberate design choice. Examine a concrete
+boundary. Keep the tradeoff qualitative unless the evidence carries the rate you
+claim, with its denominator; "no history records this" is a limit on the
+measurement, not an answer. If no harm is established, state the uncertainty
+without inventing a tradeoff, and never call a proposal cost-free.
 
-> The agent used `python` where this project requires `python3` in three recorded
-> sessions. I suggest a guard that blocks the bare command and tells the agent to use
-> `python3`. It is a project fix: every recorded session was in this repository, so it
-> applies here alone, to Claude Code and Codex. It could also block a deliberate use of
-> `python`, because it matches the bare command anywhere in a shell call. Apply this guard? Steer tells you if the problem comes back.
+Mention affected agents when coverage differs materially. A repository check is
+always project scope: yes adopts this repository, and the check then runs at the
+end of every Claude Code and Codex turn here and blocks a turn that fails it. Pi
+has no runner, so it blocks no Pi turn. Disclose creation of `check.sh` or
+substantial cleanup when needed. Keep these consequences in the proposal even when
+implementation details wait.
 
-Carry the same shape into the audit half. A result reads as its counts and dates,
-then the limit on them, then whether anything is asked of the reader.
+What follows a yes is that Steer tells the user if the problem comes back. Never
+promise that the problem becomes less frequent; no count here can show that.
+Ask for the decisions actually needed, grouping related actions where useful.
+Create nothing unasked.
 
-Two rules from `audit.md` apply here too, at the moment you write the sentence.
-State no direction and no percentage: "fewer since the fix", "the fix worked" and
-"a 60% reduction" are causal claims these counts cannot carry, and they are the
-natural sentence to reach for in a summary. And never hand the reader a reading's
-name — "the record matched again", "the window is quiet", "the accounting is
-incomplete" — in place of the facts that produced it, not even as a heading.
+> Three reviews found database migrations that drop a column in the same release
+> that stops reading it. A check at the end of each turn here could flag that
+> pattern, but 14 existing migrations would fail it. I recommend holding off until
+> we know whether this repository still deploys with old and new code running together.
 
-> The problem appeared in three of ten sessions before this guard was installed and
-> in one of four since, the most recent on 14 September. Four sessions is too few to
-> read a trend into, and the same rule also sits in CLAUDE.md, so these counts cannot
-> separate the guard from the instruction. The guard stays installed; no action is
-> needed now.
+> Steer counted an unrelated Python failure against the missing-path fix. I
+> recommend correcting the tracking; this finding calls for no guard change.
+> Apply that correction?
+
+### Evidence behind the assessment
+
+Read and retain the evidence needed to explain each judgment on request: the
+matched examples, counts and dates, scope, validation, inspected blocks and
+unread work. Give the requested detail for that judgment without repeating the
+whole report or silently strengthening its conclusion. If additional inspection
+changes the recommendation, identify the new evidence and the change.
+
+Field counts never establish that a fix caused an improvement. A quiet history
+supports saying the problem has not appeared again. An inspected block supports
+saying that particular block stopped a real mistake. Stored cases establish their
+expected outcomes under the tested implementation. Use the supported statement;
+avoid broad claims that a fix works and repeated methodological disclaimers.
+State no direction: "fewer since the fix", "the drop" and "a 60% reduction" are
+causal claims these counts cannot carry. Compare rates only where a stored reopen
+condition names one. A block is an action a guard stopped; a count of blocks says
+nothing about whether those actions were wrong.
+
+> The blocks I inspected stopped real mistakes. I recommend leaving this guard
+> in place; other recorded blocks still await inspection.
+
+> No relevant work has arrived since this fix was installed, so it is too early
+> to assess it. Leave it in place for now.
 
 ### Words the reader sees
 
-Write in the vocabulary the CLI prints: a **fix** rather than an intervention, a
-**recurring problem** rather than a class, a **result** rather than a verdict,
-**review history** or **session history** rather than a corpus, a **review
-sequence** rather than a chain, a **block** rather than a firing, a **decision**
-rather than an adjudication, **stop tracking** rather than retire.
-
 Use plain words in every explanation, heading and question, and in the stored
-descriptions (`--problem`, `--intervention`) a later report shows. Field names and
-measurement terms belong in these instructions and in commands, never in the
-reader's text: say what one means instead. Reproduce commands, identifiers and
-quoted evidence verbatim. Write each phrase this skill hands the reader as a
-blockquote, and keep a negative example inline.
+descriptions (`--problem`, `--intervention`) a later report shows. Field names,
+measurement terms and the names of Steer's own files and stores (the queue, the
+snapshot, a record, the tracker, a regex) belong in these instructions and in
+commands, never in the reader's text: say what one means instead, such as "session
+history shows" or "Steer's tracking of this fix". That includes the names of the readings
+in `./audit.md` ("the window is quiet", "the record matched again", "the accounting
+is incomplete"): give the facts that produced one, not its name.
 
-A reader needs these terms, and the report defines each one the first time it uses it:
+Use **fix**, **recurring problem**, **review history**, **session history**,
+**review sequence**, **block**, and **decision** in place of intervention, class,
+corpus, chain, firing, and adjudication. Describe a contest as **agent feedback**,
+and a contested block as a block the agent reported as wrong:
 
-- **Fix** — what Steer installs so that a recurring problem stops.
-- **The kind of fix**, named by its type and never by its flag value, and defined by
-  where it acts. A **repository check** fails the agent's turn at the end. A
-  **pre-tool guard** blocks a command or an edit before it runs. An **instruction
-  rule** is a line in CLAUDE.md or AGENTS.md. A **review prompt** entry changes what
-  the commit reviewer flags.
-- **Project** or **global**, as question 3 defines them.
-- **Block** — an action a guard stopped. The word says nothing about whether the
-  action was wrong.
-- **Decision** — the author's acceptance or rejection of a review finding.
+> An agent reported that this fix blocked valid work. That report has not yet
+> been checked; I recommend inspecting the blocked action before changing the fix.
 
-Say plainly which action does what. **Applying a fix** makes a change. **Stopping the
-tracking** of a fix ends its measurement and leaves the change in place — it removes
-nothing. **Removing a guard** takes the guard out and is a separate operation from
-either. A reader who conflates them removes a rule they meant to keep.
+Distinguish a reported false positive from a confirmed one, and distinguish a
+tracking error from a guard that blocked valid work. Summarize the feedback
+faithfully; quote exact wording when it matters. Usually omit an empty feedback
+section. Absence of feedback establishes no agreement or correctness.
 
-Then ask which proposals to apply (multi-select). Create nothing unasked.
+Use commands, identifiers and quoted evidence verbatim when requested or needed
+for action. Write example reader-facing phrases in this skill as blockquotes;
+keep examples of forbidden wording inline.
+
+Applying a fix changes behavior. Stopping tracking leaves the fix installed.
+Removing a fix changes enforcement. Explain these differences when the proposed
+action makes them relevant.
+
+When the user has already decided an action, explain what it changes and ask only
+what carrying it out needs. Give contrary evidence once, as information, never as
+a condition. A prediction of what removal will cause is a causal claim the counts
+cannot carry, like "the fix worked".
+
+### After approved actions
+
+Report what changed, whether validation passed, and anything unfinished. State
+material consequences such as restarting tracking, a failed check, or changes
+still needing a commit. Keep implementation inventories and commands available
+on request. A queue refresh alone is routine accounting, not a user outcome.
 
 ### Every record explains itself
 

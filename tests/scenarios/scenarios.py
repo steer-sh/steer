@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""The seven saved scenarios the report-comprehension pass reads.
+"""The saved scenarios the report-comprehension pass reads.
 
 Each scenario is one `steer status --json` snapshot, the `steer fix score --json`
 rows and the refreshed queue the skill reads beside it, built over
 `base_status.json` — a real snapshot with its
-inventory emptied and its paths scrubbed. The scenarios cover the seven decisions a
+inventory emptied and its paths scrubbed. The scenarios cover the decisions a
 reader arrives with: a new suggestion, an installed guard with observed recurrence,
 reviewer identities that changed between windows, missing review decisions, a
 suggestion that was declined, a guard to remove, and a first run with session
@@ -75,7 +75,11 @@ STALE_COUNT = _record(
     match=r"test count|literal count",
     tier="check", target="check.sh",
     scope={"version": 1, "repo": "steer", "path": r"\.go$"},
-    artifact={"state": "unbound"},
+    artifact={"id": "no-literal-test-count", "scope": "project", "repo": "steer",
+              "state": "present"},
+    # A build input for the observation's checks block: executions recorded here
+    # in the after-window, all passing.
+    _checks={"check_id": "no-literal-test-count", "executions": 5},
 )
 
 
@@ -113,6 +117,15 @@ def _observe(rec, before_ids=None, after_ids=None):
     }
     if rec.get("hook_id"):
         rec["observation"]["firing"]["hook_id"] = rec["hook_id"]
+    if rec.get("_checks"):
+        runs = rec["_checks"]["executions"]
+        rec["observation"]["checks"] = {
+            "applicable": True, "attribution": "check-id", "stream_present": True,
+            "other_host": False, "check_id": rec["_checks"]["check_id"],
+            "repo": rec["scope"]["repo"], "scope": "window_period", "class_scoped": False,
+            "executions": runs, "outcomes": {"passed": runs} if runs else {},
+            "blocked": 0, "changed_detector": 0, "units": 0,
+            "newest_ts": observed - 300 if runs else 0}
     if attr["firings"]:
         rec["observation"]["firing"]["newest_ts"] = observed - 200
     if hits:
@@ -166,7 +179,7 @@ def _score(rec):
     return row
 
 
-def _queue(interventions=(), candidates=(), unscored=(), review_size=41):
+def _queue(interventions=(), candidates=(), unscored=(), review_size=211):
     return {
         "version": 15,
         "interventions": _queued(interventions),
@@ -176,7 +189,7 @@ def _queue(interventions=(), candidates=(), unscored=(), review_size=41):
         "corpora": [
             {"corpus": "review-findings", "present": review_size > 0,
              "size": review_size},
-            {"corpus": "transcript-friction", "present": True, "size": 214},
+            {"corpus": "transcript-friction", "present": True, "size": 520},
         ],
     }
 
@@ -196,6 +209,27 @@ def _snapshot(records=(), candidates=(), unresolved=0):
         "checks": [],
     }
     snap["posture"]["unresolved_rows"] = unresolved
+    # Blocks come from the records' guards alone; the base snapshot's count
+    # belongs to guards no scenario lists.
+    firings = sum(r["_firing"]["firings"] for r in records)
+    snap["telemetry"]["audit_firings"] = firings
+    for h in snap["telemetry"]["harnesses"]:
+        h["firings"] = firings if h["harness"] == "claude-code" else 0
+    bound = [r for r in records if "checks" in r["observation"]]
+    if bound:
+        installed = min(r["observation"]["counts"]["split_ts"] for r in bound)
+        snap["checks"] = {
+            "repo": "/home/example/steer", "manifest": True, "adopted": True,
+            "adopted_at": installed - 200,
+            "runner": [{"harness": "claude-code", "scope": "global", "registered": True,
+                        "effective": True, "trust": "not-applicable"}],
+            "checks": [{"id": r["_checks"]["check_id"], "kind": "script",
+                        "binding": "scripts/no-literal-count.sh", "validation": "current",
+                        "validated_at": installed - 100, "execution": "passed",
+                        "executed_at": r["observation"]["checks"]["newest_ts"]}
+                       for r in bound],
+            "latest_run": None,
+        }
     return snap
 
 
@@ -232,6 +266,7 @@ def _changed_comparison():
     rec.update(
         before={"hits": 4, "units": 82, "rate": 0.0488},
         after={"hits": 1, "units": 29, "rate": 0.0345},
+        _checks={"check_id": "no-literal-test-count", "executions": 40},
         before_coverage=_coverage(84, 82, ineligible=2),
         after_coverage=_coverage(30, 29, ineligible=1),
     )
@@ -303,7 +338,7 @@ def _first_run():
     snap["corpora"] = [
         {"corpus": "review-findings", "present": False, "size": 0,
          "path": "/home/example/.steer/state/commit-review"},
-        {"corpus": "transcript-friction", "present": True, "size": 214,
+        {"corpus": "transcript-friction", "present": True, "size": 520,
          "path": "/home/example/.steer/state/transcript-sessions"},
     ]
     tel = snap["telemetry"]
@@ -325,6 +360,87 @@ def _first_run():
     return snap, _scores(), _queue(candidates=cands, review_size=0)
 
 
+def _busy_report():
+    records = []
+    addenda = []
+    for ident, problem, hits, after in (
+        ("untracked-document", "The reviewer claims an untracked document is committed.", 6, 72),
+        ("message-inventory", "The reviewer asks the commit message to list every changed file.", 11, 58),
+        ("build-claim", "The reviewer incorrectly claims the change does not build.", 4, 91),
+    ):
+        text = "A review prompt entry addresses this claim."
+        rec = _record(id=ident, problem=problem, intervention=text, tier="prompt",
+                      before={"hits": hits, "units": 412, "rate": hits / 412},
+                      after={"hits": 0, "units": after, "rate": 0},
+                      before_coverage=_coverage(412, 412), after_coverage=_coverage(after, after),
+                      artifact={"id": ident, "scope": "global", "state": "present"})
+        records.append(_observe(rec))
+        addenda.append({"id": ident, "scope": "global", "text": text, "state": "present"})
+    # A fresh check: bound, validated and running here, with no eligible review
+    # work since its install.
+    fresh = copy.deepcopy(STALE_COUNT)
+    fresh.update(before={"hits": 4, "units": 82, "rate": 4 / 82},
+                 before_coverage=_coverage(82, 82))
+    records.append(_observe(fresh))
+    repair = copy.deepcopy(BARE_PYTHON)
+    repair.update(after={"hits": 1, "units": 34, "rate": 1 / 34},
+                  after_coverage=_coverage(34, 34),
+                  _firing={"applicable": True, "log_present": True,
+                           "hook_id": "no-bare-python", "firings": 0, "sessions": 0})
+    _observe(repair)
+    repair["observation"]["recurrence"]["example"] = "python helper prints command not found as a test fixture"
+    records.append(repair)
+    # The Windows finding reaches the report as a review pile; supporting_evidence
+    # holds the dump's content.
+    cands = [{"corpus": "review-findings", "undecided_chains": 2,
+              "dump": "steer commit-gate mine findings --kind accepted"}]
+    snap = _snapshot(records, candidates=cands)
+    snap["addenda"] = addenda
+    return snap, _scores(records), _queue(records, candidates=cands)
+
+
+def _agent_feedback():
+    rec = copy.deepcopy(BARE_PYTHON)
+    rec.update(before={"hits": 3, "units": 41, "rate": 3 / 41}, before_coverage=_coverage(41, 41),
+               after={"hits": 0, "units": 34, "rate": 0}, after_coverage=_coverage(34, 34),
+               _firing={"applicable": True, "log_present": True,
+                        "hook_id": "no-bare-python", "firings": 1, "sessions": 1})
+    _observe(rec)
+    return _snapshot([rec]), _scores([rec]), _queue([rec])
+
+
+def supporting_evidence(name):
+    """Saved audit output and inspected facts supplied instead of live commands."""
+    if name == "busy-report":
+        return {"inspected_match": {
+            "id": "bare-python-call", "belongs_to_problem": False,
+            "context": "The command invoked python3 and printed a diagnostic as fixture data. "
+                       "It never invoked the bare python command.",
+        }, "review_findings": {
+            "source": "the review candidate's dump command, summarized",
+            "problem": "Two Go tests set HOME but not USERPROFILE; Windows home lookup uses USERPROFILE.",
+            "review_sequences": 2, "repository": "example-project",
+            "files_needing_cleanup": 22, "windows_ci": "not established by available evidence",
+        }}
+    if name.startswith("agent-feedback"):
+        firing = {"firing_id": "example-firing", "hook_name": "no-bare-python",
+                  "harness": "claude-code", "applies": "current",
+                  "reasons": [{"reason": "This command invokes python inside a container where it exists.",
+                               "recorded_at": "2026-09-01T09:00:00Z"}]}
+        confirmed = name == "agent-feedback-confirmed"
+        if confirmed:
+            firing["judgment"] = "incorrect"
+        return {"contests": {"guards": [{
+            "hook_name": "no-bare-python", "store_dir": "/home/example/.steer/hooks",
+            "firings": 1, "not_offered": 0, "contested": 1,
+            "unread": 0 if confirmed else 1, "contested_excluded": 0,
+            "contested_firings": [firing],
+        }]}, "inspection": ({"blocked_action": "docker run example-image python -V",
+                              "finding": "The image contains python; the guard applied the host's restriction inside the container.",
+                              "continuation_inspected": False} if confirmed else None)}
+    return None
+
+
 # SCENARIOS maps a name to a builder returning (status snapshot, score rows, queue).
 SCENARIOS = {
     "new-suggestion": _new_suggestion,
@@ -334,6 +450,9 @@ SCENARIOS = {
     "declined-suggestion": _declined_suggestion,
     "remove-a-guard": _remove_a_guard,
     "first-run": _first_run,
+    "busy-report": _busy_report,
+    "agent-feedback": _agent_feedback,
+    "agent-feedback-confirmed": _agent_feedback,
 }
 
 

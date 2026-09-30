@@ -20,30 +20,18 @@ show, in the vocabulary `SKILL.md` sets under "Words the reader sees".
 
 There are three readings and no fourth:
 
-- **The record matched again.** `recurrence.occurred` is true. **Act on this first.** Open `recurrence.example` and decide whether the record still describes the problem. `example_kind` says what the example is: `adjudicated_finding` is a reviewer's confirmed concern; `cluster_key` is the text a classifier grouped a session's friction by, and is NOT a confirmed escaped failure. **An example that does not belong to the recorded problem is a false match, and it establishes no recurrence.** The record's own regex is then the defect, and the installed fix is not: read the other matched findings with `steer fix match` under the record's scope flags and `--installed-ts`, tighten the regex until it excludes the unrelated ones and still holds the known members, then `steer fix register --supersedes <id>` with the same binding and scope. Say which counts hold unrelated matches, and correct a count only for a window whose matches you read completely — a false match in one window establishes nothing about the other. The replacement record opens a fresh window at registration, so its baseline is not the old baseline minus the false matches; give the replacement's window dates. A recurrence beside `firing.rows: 0` on a known log points at the rule, its coverage or its registration — the guard recorded no block over work the class did match. For a repository check, `checks` separates three cases: zero `executions` on a known stream means the check never ran here — look at the adoption and the `check.sh` wiring; executions that all passed mean the check ran and did not catch the problem — look at the detector; `blocked` above zero means it stopped turns and the problem still came back — look at whether the class is wider than the check. `changed_detector` above zero means some of those runs were an edited detector, not the one registered. On a record with `declined: true`, nothing was installed: the recurrence is a reason to reconsider the refusal, never a fix that failed.
-- **The accounting is incomplete.** `firing.applicable` is true while `log_present` is false, or a bound `checks` block reads `stream_present: false` with `other_host: false`. A block with `other_host: true` is not this case: name `registered_host` as the machine that holds the check runs. **Act on this:** name the cause. An absent guard audit log and a repository with no check evidence on this machine have no command; name the cause rather than handing the user a command that changes nothing. A coverage map's `unknown` units do not put a record in this reading: they are left out of the counts, which stand over the rest, and no command recovers them. Say how many were left out, and why. `unknown_scope` is a review sequence that recorded no repository or changed files; the `unknown` remainder beyond `unknown_scope` + `unknown_evidence` is a session that recorded no project; `unknown_evidence` is `pending` + `ledger_missed` + `ledger_overdue`. `ledger_missed` is a ledger the resolver searched for and did not find; nothing routine recovers it. `ledger_overdue` is a ledger the resolver has not read yet; the status entry for `unresolved_rows` owns that repair on this machine, and a row on another host's shard is read there. A `null` `scope` is its own case: the record has no frozen eligibility rule, so its two windows count different opportunity sets. Scope it with `steer fix scope <id>`, which restarts its after-window.
+- **The record matched again.** `recurrence.occurred` is true. **Act on this first.** Open `recurrence.example` and decide whether the record still describes the problem. `example_kind` says what the example is: `adjudicated_finding` is a reviewer's confirmed concern; `cluster_key` is the text a classifier grouped a session's friction by, and is NOT a confirmed escaped failure. **An example that does not belong to the recorded problem is a false match, and it establishes no recurrence.** The record's own regex is then the defect, and the installed fix is not: read the other matched findings with `steer fix match` under the record's scope flags and `--installed-ts`, tighten the regex until it excludes the unrelated ones and still holds the known members, then `steer fix register --supersedes <id>` with the same binding and scope. Say which counts hold unrelated matches, and correct a count only for a window whose matches you read completely — a false match in one window establishes nothing about the other. The replacement record opens a fresh window at registration, so its baseline is not the old baseline minus the false matches; disclose that tracking restarts, with the exact window dates available on request. A recurrence beside `firing.rows: 0` on a known log points at the rule, its coverage or its registration — the guard recorded no block over work the class did match. For a repository check, `checks` separates three cases: zero `executions` on a known stream means the check never ran here — look at the adoption and the `check.sh` wiring; executions that all passed mean the check ran and did not catch the problem — look at the detector; `blocked` above zero means it stopped turns and the problem still came back — look at whether the class is wider than the check. `changed_detector` above zero means some of those runs were an edited detector, not the one registered. On a record with `declined: true`, nothing was installed: the recurrence is a reason to reconsider the refusal, never a fix that failed.
+- **The accounting is incomplete.** `firing.applicable` is true while `log_present` is false, or a bound `checks` block reads `stream_present: false` with `other_host: false`. A block with `other_host: true` is not this case: name `registered_host` as the machine that holds the check runs. **Act on this:** name the cause. An absent guard audit log and a repository with no check evidence on this machine have no command; name the cause rather than handing the user a command that changes nothing. A coverage map's `unknown` units do not put a record in this reading: they are left out of the counts, which stand over the rest, and no command recovers them. Keep how many were left out and why for the explanation; surface the gap when it limits the assessment. `unknown_scope` is a review sequence that recorded no repository or changed files; the `unknown` remainder beyond `unknown_scope` + `unknown_evidence` is a session that recorded no project; `unknown_evidence` is `pending` + `ledger_missed` + `ledger_overdue`. `ledger_missed` is a ledger the resolver searched for and did not find; nothing routine recovers it. `ledger_overdue` is a ledger the resolver has not read yet; the status entry for `unresolved_rows` owns that repair on this machine, and a row on another host's shard is read there. A `null` `scope` is its own case: the record has no frozen eligibility rule, so its two windows count different opportunity sets. Scope it with `steer fix scope <id>`, which restarts its after-window.
 - **The window is quiet.** Eligible work arrived and the class did not. Say that, and stop there. `zero_eligible_after` is the separate case: no eligible work has arrived at all, which is not a quiet window and is not a fault — every freshly installed record reads that way.
 
-**These three names are yours, not the reader's.** Each one tells you which facts
-matter. The reader gets the facts. Write the counts, the dates and the limit that
-produced the reading, and never the label itself.
+Use these readings to form the executive assessment in Step 5 of `SKILL.md`.
+Give the recommendation and its concrete reason. Keep the underlying counts,
+dates, excluded units and examples for a requested explanation, unless a fact
+changes the decision. Group records needing no action. A short assessment must
+still distinguish absent opportunity, absent evidence and no observed recurrence.
 
-| Instead of the label | Write |
-|---|---|
-| The record matched again | The newest example, its date, what kind of example it is — a reviewer's confirmed concern, or a classifier's grouping that is not a confirmed failure — and whether it belongs to the recorded problem. |
-| The accounting is incomplete | Which evidence is missing on this machine, how many units it leaves out of the counts, and the cause. |
-| The window is quiet | How much work the fix covers arrived in each period, over what dates, and that the problem did not appear in the second one. |
-
-"This fix is in a quiet window" tells the reader nothing. This tells the reader
-what was counted:
-
-> Work this fix covers arrived on 24 days since 12 August, and this problem
-> appeared in none of it.
-
-State no direction and no percentage. "Fewer since the fix", "the fix worked", "a 60% reduction" all state a causal claim these counts cannot carry. Say what was counted:
-
-> This problem hit 4 of 37 review sequences before the fix and recurred 0 times in
-> the 40 after.
+> The tracked problem has not appeared again in subsequent work. Leave this fix
+> in place; that observation alone does not establish how much it helped.
 
 Read `provenance` before you weigh the two windows against each other. When the `before` and `after` lists differ, two instruments counted them — a different reviewer, or a different transcript parser — and the counts describe two measurements rather than one.
 
@@ -54,7 +42,7 @@ For every record with a recurrence you confirmed by reading its matches, open th
 
 A gate that never fires is not free. It costs oracle runtime on every commit and, worse, it reads as coverage that does not exist.
 
-## Show what blocked agents contested
+## Read feedback from blocked agents
 
 A guard block's message offers the blocked agent `steer contest FIRING_ID "reason"`,
 and a check.sh Stop block's message offers `steer contest --run RUN_ID "reason"`. The
@@ -67,21 +55,22 @@ steer audit contests --json
 ```
 
 This reads no case evidence and spends nothing from the reading budget below. For
-each guard in `guards[]`, report these facts:
+each guard in `guards[]`, inspect these facts. Present relevant feedback using
+the plain wording in Step 5; routine totals stay in the supporting evidence:
 
-- `contested` distinct firings, with each firing's `reasons[].reason` quoted as the
-  agent wrote it. Several contests of one firing are one contested firing.
+- `contested` distinct firings, with each firing's `reasons[].reason` read in the
+  agent's own words. Several contests of one firing are one contested firing.
 - `unread` as its own number. A contested firing that no receipt names is in both
   counts; never add them, and never call an uncontested firing agreed.
 - `not_offered`: blocks whose message carried no contest line, from an older master
   or a failed identifier allocation. Silence from these agents is not agreement, so
-  say how many of `firings` could not be contested at all.
+  retain how many of `firings` offered no feedback path; disclose this when it limits a claim about feedback.
 - A firing whose `applies` is not `current` was recorded by an implementation
   other than the installed one. Its contest describes that older guard.
 - `judgment` is the latest receipt's judgment, when one exists. A contested firing
   judged `prevented` is a disagreement between the agent and a reader; show both.
 
-List `contested_excluded` and `unmatched[]` apart from the counts. An unmatched
+Keep `contested_excluded` and `unmatched[]` apart from the counts in the evidence. An unmatched
 contest names a firing no guard store on this machine holds: the row may sit on
 another machine, or the master may have failed to log it.
 
@@ -90,7 +79,7 @@ another machine, or the master may have failed to log it.
 contest line) and `contested_excluded`, with each contested block's
 `reasons[]` and, when a receipt reads it, the latest reading of each of its
 `failures[]`. `unmatched_checks[]` names contested runs no recorded block here
-carries. Report them by the same rules as a guard's.
+carries. Read and summarize them by the same rules as a guard's.
 
 A contest never unblocks anything and never exempts a guard. Offer the user a
 deeper audit of the contested firings: read each one with `steer audit show` and
@@ -320,20 +309,20 @@ Say which remedy you chose and what the rebuild's fixture lines reported. A guar
 that passes its cases has established what it intercepts under this build, and
 nothing about what it will do in the field.
 
-**Close the pass with what it did not read.** Compose that sentence from `counts`
-and `coverage`, never from the case cap alone:
+**Keep the assessment bounded by what was read.** Use `counts` and `coverage`
+to distinguish inspected cases, cases still unread, and older implementations.
+Keep exact queue totals and byte budgets in the supporting evidence. Mention
+remaining inspection when it limits a recommendation or needs a user decision.
+A successful sample must never sound like approval of every recorded block.
 
-> This pass read 3 blocks of `no-bare-python`, oldest first: two prevented the
-> failure the rule names and one was an acceptable block of a deliberate use. Nine
-> queued cases stay unexamined: seven were never read, and two were judged before
-> what the agent did next was read. One case was skipped: its evidence needed 31,000 bytes and
-> this pass had 6,000 left.
+> The two blocks I inspected stopped real mistakes. Other recorded blocks still
+> await inspection; I found no reason in these two cases to change the guard.
 
-For a check block, name the repository and each failure's reading, and keep the
-two axes apart in the sentence:
+For a check block, preserve whether the failure was real and whether it belonged
+to the task, using plain language:
 
-> The one check.sh block read in `steer-skill` failed on `go-test`, a real failure
-> that was there before the turn began; the turn declined to change it.
+> The check found a real test failure that was already there before the task
+> began. The task ended without repairing it.
 
 Three limits hold on every sentence you write from this pass. **An inspected
 fraction is never an efficacy estimate**, so no percentage and no direction follows
