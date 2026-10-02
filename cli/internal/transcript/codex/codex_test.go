@@ -109,6 +109,51 @@ func TestDiscoverWalksTheDateTreeAndReadsProject(t *testing.T) {
 	}
 }
 
+// A child carries none of its root's own entries, so a child the window selects
+// brings the root rollout the window passed over, ahead of itself. A file whose
+// name matches but whose header names another thread stays out, and a root the
+// window already selected is not listed twice.
+func TestDiscoverBringsTheRootAChildsWindowPassedOver(t *testing.T) {
+	const rootID = "01a0faed-9379-7550-a2b4-61c07e30da81"
+	const childID = "01a0faee-0000-7000-8000-000000000009"
+	rootBody := strings.ReplaceAll(rootRollout, "root-1", rootID)
+	childBody := strings.ReplaceAll(strings.ReplaceAll(childRollout, "root-1", rootID), "thread-9", childID)
+	old := time.Now().AddDate(0, 0, -45)
+	window := transcript.Filter{Since: time.Now().AddDate(0, 0, -30), AllProjects: true}
+
+	discover := func(rootHeader string, rootFresh bool) []string {
+		t.Helper()
+		root := t.TempDir()
+		rootPath := writeRollout(t, root, "2026/08/29", "rollout-2026-08-29T20-35-20-"+rootID+".jsonl", rootHeader)
+		if !rootFresh {
+			if err := os.Chtimes(rootPath, old, old); err != nil {
+				t.Fatal(err)
+			}
+		}
+		writeRollout(t, root, "2026/08/30", "rollout-2026-08-30T21-06-23-"+childID+".jsonl", childBody)
+		sessions, err := New().Discover(root, window)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var names []string
+		for _, s := range sessions {
+			names = append(names, filepath.Base(filepath.Dir(s.Path))+"/"+s.Cwd)
+		}
+		return names
+	}
+
+	if got := discover(rootBody, false); strings.Join(got, ",") != "29//repo/alpha,30//repo/alpha" {
+		t.Errorf("the passed-over root must come ahead of its child, got %v", got)
+	}
+	decoy := strings.ReplaceAll(rootBody, `"id":"`+rootID+`"`, `"id":"someone-else"`)
+	if got := discover(decoy, false); len(got) != 1 {
+		t.Errorf("a file whose header names another thread must stay out, got %v", got)
+	}
+	if got := discover(rootBody, true); len(got) != 2 {
+		t.Errorf("a root the window selected must be listed once, got %v", got)
+	}
+}
+
 func TestDiscoverOnMissingRootYieldsNothing(t *testing.T) {
 	sessions, err := New().Discover(filepath.Join(t.TempDir(), "absent"), transcript.Filter{AllProjects: true})
 	if err != nil {

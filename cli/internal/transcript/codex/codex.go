@@ -43,11 +43,19 @@ func (Adapter) Root() (string, error) {
 
 // Discover walks the date-partitioned rollout tree. A subagent thread writes
 // its own rollout file, so one root session can appear as several files here;
-// they rejoin through the session id the events carry.
+// they rejoin through the session id the events carry. A child replays none of
+// its root's own entries, so a selected child whose root rollout the window
+// passed over brings that root with it, placed ahead of the child so the root's
+// header names the launch directory. The child already selected the session, so
+// the scope is not asked again.
 func (a Adapter) Discover(root string, f transcript.Filter) ([]transcript.Session, error) {
 	keep := f.Selector()
 
 	var sessions []transcript.Session
+	var metas []sessionMeta
+	// passed indexes the rollouts older than the window by the thread id that
+	// ends their file name.
+	passed := map[string]string{}
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil // an unreadable subtree narrows the scan, never ends it
@@ -56,12 +64,19 @@ func (a Adapter) Discover(root string, f transcript.Filter) ([]transcript.Sessio
 			return nil
 		}
 		info, err := d.Info()
-		if err != nil || info.ModTime().Before(f.Since) {
+		if err != nil {
+			return nil
+		}
+		if info.ModTime().Before(f.Since) {
+			if id := nameThreadID(d.Name()); id != "" {
+				passed[id] = path
+			}
 			return nil
 		}
 		// The header cwd is both the project key and the launch directory: a
 		// rollout records the directory once, at the top of the file.
-		project := readProject(path)
+		meta := readHeader(path)
+		project := meta.Cwd
 		session := transcript.Session{
 			Harness: harness.Codex,
 			Path:    path,
@@ -72,6 +87,7 @@ func (a Adapter) Discover(root string, f transcript.Filter) ([]transcript.Sessio
 			return nil
 		}
 		sessions = append(sessions, session)
+		metas = append(metas, meta)
 		return nil
 	})
 	if err != nil {
@@ -80,33 +96,71 @@ func (a Adapter) Discover(root string, f transcript.Filter) ([]transcript.Sessio
 		}
 		return nil, err
 	}
-	return sessions, nil
+	return withPassedRoots(sessions, metas, passed), nil
 }
 
-// readProject returns the working directory a rollout ran in, read from its
-// session_meta header. An unreadable header yields "", which matches no
-// project filter and leaves the file out of a scoped scan.
-func readProject(path string) string {
+// withPassedRoots inserts, ahead of its first selected child, each root rollout the
+// window passed over. A candidate found by file name joins only when its header
+// names it the root of that session.
+func withPassedRoots(sessions []transcript.Session, metas []sessionMeta, passed map[string]string) []transcript.Session {
+	selected := map[string]bool{}
+	for _, m := range metas {
+		selected[m.threadID()] = true
+	}
+	out := make([]transcript.Session, 0, len(sessions))
+	for i, s := range sessions {
+		m := metas[i]
+		if path, ok := passed[m.SessionID]; ok && !selected[m.SessionID] && m.threadID() != m.SessionID {
+			if root := readHeader(path); root.ID == m.SessionID && (root.SessionID == "" || root.SessionID == root.ID) {
+				selected[m.SessionID] = true
+				out = append(out, transcript.Session{
+					Harness: harness.Codex,
+					Path:    path,
+					Project: root.Cwd,
+					Cwd:     root.Cwd,
+				})
+			}
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// nameThreadID reads the thread id a rollout's file name ends in, as Codex names
+// it: rollout-<time>-<uuid>.jsonl. A name too short to hold one yields "".
+func nameThreadID(name string) string {
+	stem := strings.TrimSuffix(name, ".jsonl")
+	const uuidLen = 36
+	if len(stem) <= uuidLen || stem[len(stem)-uuidLen-1] != '-' {
+		return ""
+	}
+	return stem[len(stem)-uuidLen:]
+}
+
+// readHeader returns a rollout's session_meta header. An unreadable header yields
+// the zero value, whose empty cwd matches no project filter and leaves the file
+// out of a scoped scan.
+func readHeader(path string) sessionMeta {
 	file, err := os.Open(path)
 	if err != nil {
-		return ""
+		return sessionMeta{}
 	}
 	defer file.Close()
 
 	reader := bufio.NewReaderSize(file, 256*1024)
 	line, err := reader.ReadBytes('\n')
 	if err != nil && len(line) == 0 {
-		return ""
+		return sessionMeta{}
 	}
 	var r row
 	if err := json.Unmarshal(line, &r); err != nil || r.Type != typeSessionMeta || r.Payload == nil {
-		return ""
+		return sessionMeta{}
 	}
 	var meta sessionMeta
 	if err := json.Unmarshal(r.Payload, &meta); err != nil {
-		return ""
+		return sessionMeta{}
 	}
-	return meta.Cwd
+	return meta
 }
 
 const (
@@ -138,6 +192,15 @@ type sessionMeta struct {
 	// subagent forks its parent's history, so every earlier entry in this file
 	// is a verbatim replay of entries the parent's own rollout already holds.
 	SubagentHistoryStart int `json:"subagent_history_start_ordinal"`
+}
+
+// threadID is the thread this rollout records: its id, or on a legacy rollout
+// that carries only a session id, that.
+func (m sessionMeta) threadID() string {
+	if m.ID != "" {
+		return m.ID
+	}
+	return m.SessionID
 }
 
 // payload is the union of the response_item and event_msg fields this adapter

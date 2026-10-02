@@ -453,6 +453,8 @@ unit; subagent threads carry provenance. Consumers read normalized events and th
 streaming, loss counts and the fields the classifier sees.
 
 Codex joins subagent rollouts to their root and drops replayed parent history.
+Discovery adds a selected child's root rollout when the window passed over it, found
+by the thread id in its file name and confirmed by its header.
 Tagged user messages are primary human turns, with legacy event-message fallback.
 A headless run's user turns (Claude Code `entrypoint: sdk-cli`, a `codex exec`
 rollout) are `Meta`: a program wrote them, such as a reviewer prompt or an agent
