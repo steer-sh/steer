@@ -215,7 +215,19 @@ func soleHandlerOwned(raw any, owns func(string) bool) bool {
 	return owns(command)
 }
 
-func save(path string, root map[string]any) error {
+func save(scope, path string, root map[string]any) error {
+	// Project configuration must not redirect a write into another scope's hooks.
+	if scope == "project" {
+		for _, p := range []string{filepath.Dir(path), path} {
+			info, err := os.Lstat(p)
+			if err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			if err == nil && info.Mode()&os.ModeSymlink != 0 {
+				return fmt.Errorf("%s is a symlink; project hooks must be stored in the checkout", p)
+			}
+		}
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -291,7 +303,7 @@ func RegisterCommitGateAndResolver(scope, cwd, review string, reviewTimeout int,
 			Hooks: []commandHook{{Type: "command", Command: resolver, Timeout: resolverTimeout}},
 		}))
 	}
-	return path, save(path, root)
+	return path, save(scope, path, root)
 }
 
 // entryValue renders one entry as the generic JSON value the file is edited as, so an
@@ -337,7 +349,7 @@ func RemoveCommitGateAndResolver(scope, cwd string) (string, error) {
 	for _, event := range resolverEvents {
 		setOrDrop(hooks, event, filterBy(eventEntries(root, event), isSteerOwned))
 	}
-	return path, save(path, root)
+	return path, save(scope, path, root)
 }
 
 // ResolverArming reports whether the resolver is registered on both turn-end events,

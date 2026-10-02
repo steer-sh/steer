@@ -39,7 +39,7 @@ func RegisterCheckHook(scope, cwd, command string, timeout int) (string, error) 
 		Hooks: []commandHook{{Type: "command", Command: command, Timeout: timeout,
 			StatusMessage: CheckHookStatusMessage}},
 	}))
-	return path, save(path, root)
+	return path, save(scope, path, root)
 }
 
 // RemoveCheckHook takes the Stop runner out and reports the hooks file and
@@ -65,7 +65,7 @@ func RemoveStopHooksMatching(scope, cwd string, match func(string) bool) (string
 	}
 	hooks, _ := root["hooks"].(map[string]any)
 	setOrDrop(hooks, "Stop", filterBy(eventEntries(root, "Stop"), match))
-	return path, true, save(path, root)
+	return path, true, save(scope, path, root)
 }
 
 // CheckHookArming reports the Stop runner's registration, its timeout and the

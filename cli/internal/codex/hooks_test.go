@@ -8,6 +8,84 @@ import (
 	"testing"
 )
 
+func TestProjectHookMutationsRefuseSymlinks(t *testing.T) {
+	operations := []struct {
+		name string
+		run  func(string) error
+	}{
+		{"register gate and resolver", func(dir string) error {
+			_, err := RegisterCommitGateAndResolver("project", dir, "steer commit-gate review-codex", 210, "steer commit-gate backfill", 30)
+			return err
+		}},
+		{"remove gate and resolver", func(dir string) error {
+			_, err := RemoveCommitGateAndResolver("project", dir)
+			return err
+		}},
+		{"register master", func(dir string) error {
+			_, err := RegisterMaster("project", dir)
+			return err
+		}},
+		{"remove master", func(dir string) error {
+			_, err := RemoveMaster("project", dir)
+			return err
+		}},
+		{"register check", func(dir string) error {
+			_, err := RegisterCheckHook("project", dir, "steer check hook --harness codex", 330)
+			return err
+		}},
+		{"remove check", func(dir string) error {
+			_, _, err := RemoveCheckHook("project", dir)
+			return err
+		}},
+	}
+	for _, link := range []string{"directory", "file"} {
+		for _, op := range operations {
+			t.Run(link+"/"+op.name, func(t *testing.T) {
+				project, external := t.TempDir(), t.TempDir()
+				if _, err := RegisterCommitGateAndResolver("project", external, "old-steer commit-gate review-codex", 90, "old-steer commit-gate backfill", 15); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := RegisterMaster("project", external); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := RegisterCheckHook("project", external, "old-steer check hook --harness codex", 90); err != nil {
+					t.Fatal(err)
+				}
+				dir := filepath.Join(external, ".codex")
+				path := filepath.Join(dir, "hooks.json")
+				before, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				target, at := dir, filepath.Join(project, ".codex")
+				if link == "file" {
+					if err := os.Mkdir(at, 0o755); err != nil {
+						t.Fatal(err)
+					}
+					target, at = path, filepath.Join(at, "hooks.json")
+				}
+				if err := os.Symlink(target, at); err != nil {
+					t.Fatal(err)
+				}
+				if err := op.run(project); err == nil || !strings.Contains(err.Error(), "symlink") {
+					t.Fatalf("mutation error = %v, want symlink refusal", err)
+				}
+				after, err := os.ReadFile(path)
+				if err != nil || string(after) != string(before) {
+					t.Fatalf("external hooks changed: %v\n%s", err, after)
+				}
+				if info, err := os.Lstat(at); err != nil || info.Mode()&os.ModeSymlink == 0 {
+					t.Fatalf("project symlink replaced: %v", err)
+				}
+				entries, err := os.ReadDir(dir)
+				if err != nil || len(entries) != 1 {
+					t.Fatalf("external directory changed: %v, entries %v", err, entries)
+				}
+			})
+		}
+	}
+}
+
 func TestRegisterPreservesUnrelatedKeysAndIsIdempotent(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CODEX_HOME", home)

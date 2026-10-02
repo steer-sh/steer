@@ -52,6 +52,9 @@ the handler definition, not the script it runs. A Codex registration therefore
 rewrites a Steer handler at its existing entry (`codex.upsertEntry`) and appends
 only when none is there: a handler that moves voids its own approval and that of
 the handler taking its place, and Codex then skips both until `/hooks`.
+All Codex hook mutations share `codex.save`, which refuses a symlink at a
+project's `.codex` directory or `hooks.json` before creating a temporary file.
+Global configuration retains operator-selected paths, including symlinked homes.
 
 `internal/steerpath/` is the common path entry point. Two stores have different
 migration ownership:

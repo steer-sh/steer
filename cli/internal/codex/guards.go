@@ -84,7 +84,7 @@ func RegisterMaster(scope, cwd string) (string, error) {
 		Hooks: []commandHook{{Type: "command", Command: command, Timeout: timeout,
 			StatusMessage: MasterStatusMessage}},
 	}))
-	return path, save(path, root)
+	return path, save(scope, path, root)
 }
 
 // RemoveMaster takes only the guard master out.
@@ -102,7 +102,7 @@ func RemoveMaster(scope, cwd string) (string, error) {
 		return path, nil
 	}
 	setOrDrop(hooks, "PreToolUse", filterBy(preToolUse(root), isMaster))
-	return path, save(path, root)
+	return path, save(scope, path, root)
 }
 
 // MasterArming reports whether the guard master is registered, under which
