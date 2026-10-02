@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/steer-sh/steer-cli/internal/shellsyntax"
+	"github.com/steer-sh/steer-cli/internal/steerpath"
 	"mvdan.cc/sh/v3/syntax"
 )
 
@@ -483,7 +484,7 @@ var gitStepsBeforeCommit = map[string]bool{
 }
 
 // Directories an output redirect before the commit may write to, outside the
-// commit's own directory: a message file there changes no tree git reads.
+// commit's repository: a message file there changes no tree git reads.
 var scratchRoots = []string{"/tmp", "/private/tmp", "/var/folders", os.TempDir()}
 
 // stepBeforeCommit returns the source of the first step that runs before git
@@ -754,7 +755,9 @@ func (p *parsedGit) gitEnvironment() []string {
 }
 
 // scratchTarget reports whether a redirect writes /dev/null, or a static absolute
-// path under a scratch root and outside the commit's directory.
+// path that lies, with its links resolved, under a scratch root and outside the top
+// level of the commit's repository. A link that does not resolve lies nowhere, so it
+// is never scratch: a write through it creates its target.
 func (p *parsedGit) scratchTarget(word *syntax.Word) bool {
 	if word == nil {
 		return false
@@ -769,20 +772,20 @@ func (p *parsedGit) scratchTarget(word *syntax.Word) bool {
 	if !filepath.IsAbs(target) {
 		return false
 	}
-	target = filepath.Clean(target)
-	if repo, ok := p.repoDir(); !ok || within(target, repo) {
+	dir, ok := p.repoDir()
+	if !ok {
+		return false
+	}
+	repo, err := steerpath.ProjectRootOf(dir)
+	if err != nil || steerpath.Within(repo, target) {
 		return false
 	}
 	for _, root := range scratchRoots {
-		if within(target, filepath.Clean(root)) {
+		if steerpath.Within(root, target) {
 			return true
 		}
 	}
 	return false
-}
-
-func within(path, root string) bool {
-	return path == root || strings.HasPrefix(path, root+string(filepath.Separator))
 }
 
 func parsedWritesFile(program *shellsyntax.Program) bool {

@@ -152,18 +152,17 @@ func TestPreflightDenyRefusesAStepThatRunsBeforeTheCommit(t *testing.T) {
 func TestPreflightDenyRefusesARedirectOnTheCommitItself(t *testing.T) {
 	c := "co" + "mmit"
 	for cmd, redir := range map[string]string{
-		"git " + c + " -a -m x > code.go":                      "> code.go",
-		"git " + c + " -m x > out.log":                         "> out.log",
-		"git " + c + " --all -m x 2> code.go":                  "2> code.go",
-		"git " + c + " -am x &> code.go":                       "&> code.go",
-		"git " + c + " -am x >| code.go":                       ">| code.go",
-		"git " + c + " -am x >> code.go":                       ">> code.go",
-		"git " + c + " -am x >& code.go":                       ">& code.go",
-		"git " + c + " -am x 2>&1 >code.go":                    ">code.go",
-		`git ` + c + ` -am x > "$OUT"`:                         `> "$OUT"`,
-		"git add a && git " + c + " -m x > a":                  "> a",
-		"git " + c + " -F - > code.go <<'EOF'\nsubject\nEOF":   "> code.go",
-		"git -C /tmp/repo " + c + " -am x > /tmp/repo/code.go": "> /tmp/repo/code.go",
+		"git " + c + " -a -m x > code.go":                    "> code.go",
+		"git " + c + " -m x > out.log":                       "> out.log",
+		"git " + c + " --all -m x 2> code.go":                "2> code.go",
+		"git " + c + " -am x &> code.go":                     "&> code.go",
+		"git " + c + " -am x >| code.go":                     ">| code.go",
+		"git " + c + " -am x >> code.go":                     ">> code.go",
+		"git " + c + " -am x >& code.go":                     ">& code.go",
+		"git " + c + " -am x 2>&1 >code.go":                  ">code.go",
+		`git ` + c + ` -am x > "$OUT"`:                       `> "$OUT"`,
+		"git add a && git " + c + " -m x > a":                "> a",
+		"git " + c + " -F - > code.go <<'EOF'\nsubject\nEOF": "> code.go",
 	} {
 		reason, receipt := PreflightDeny(cmd, "/cwd")
 		if receipt != StepBeforeCommitReceipt || reason != fmt.Sprintf(commitRedirectReason, redir) {
@@ -182,6 +181,44 @@ func TestPreflightDenyRefusesARedirectOnTheCommitItself(t *testing.T) {
 		if reason, _ := PreflightDeny(cmd, "/cwd"); reason != "" {
 			t.Errorf("%q writes no file git reads and must go to review, got %q", cmd, reason)
 		}
+	}
+}
+
+// TestPreflightDenyJudgesAScratchPathAgainstTheResolvedRepository: a scratch root can
+// hold the repository itself, and a link under one can point into it, so a redirect
+// target is scratch only when it lies outside the repository's top level with its
+// links resolved.
+func TestPreflightDenyJudgesAScratchPathAgainstTheResolvedRepository(t *testing.T) {
+	c := "co" + "mmit"
+	tmp := t.TempDir()
+	repo := filepath.Join(tmp, "repo")
+	sub := filepath.Join(repo, "sub")
+	if out, err := exec.Command("git", "init", "-q", repo).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link, dangling := filepath.Join(tmp, "link"), filepath.Join(tmp, "dangling")
+	if err := os.Symlink(repo, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(repo, "new.go"), dangling); err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{
+		filepath.Join(repo, "code.go"),
+		filepath.Join(link, "code.go"),
+		dangling,
+	} {
+		cmd := "git " + c + " -am x > " + target
+		if reason, receipt := PreflightDeny(cmd, sub); receipt != StepBeforeCommitReceipt {
+			t.Errorf("%q writes inside the repository and must be refused, got %q", cmd, reason)
+		}
+	}
+	cmd := "git " + c + " -am x > " + filepath.Join(tmp, "commit.log")
+	if reason, _ := PreflightDeny(cmd, sub); reason != "" {
+		t.Errorf("%q writes outside the repository and must go to review, got %q", cmd, reason)
 	}
 }
 
