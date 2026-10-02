@@ -134,3 +134,84 @@ func TestLoadSettingsMissingFileReturnsEmpty(t *testing.T) {
 		t.Fatalf("SaveSettings of empty settings failed: %v", err)
 	}
 }
+
+// A project settings file is written only where it resolves inside the
+// repository: a linked .claude directory, settings file or backup that leads
+// outside is refused and its target left as it was, and a link inside is kept.
+func TestSaveSettingsBoundsAProjectLinkByTheRepository(t *testing.T) {
+	const kept = "kept\n"
+	setup := map[string]func(t *testing.T, outside string){
+		"linked .claude": func(t *testing.T, outside string) {
+			if err := os.Symlink(outside, ClaudeDirName); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"linked settings.json": func(t *testing.T, outside string) {
+			if err := os.Mkdir(ClaudeDirName, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(filepath.Join(outside, SettingsName), filepath.Join(ClaudeDirName, SettingsName)); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"linked backup": func(t *testing.T, outside string) {
+			if err := os.Mkdir(ClaudeDirName, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(ClaudeDirName, SettingsName), []byte("{}\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(filepath.Join(outside, SettingsName), filepath.Join(ClaudeDirName, SettingsName+BackupExtension)); err != nil {
+				t.Fatal(err)
+			}
+		},
+	}
+	for name, link := range setup {
+		t.Run(name, func(t *testing.T) {
+			withProjectTempDir(t)
+			outside := t.TempDir()
+			if err := os.WriteFile(filepath.Join(outside, SettingsName), []byte(kept), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			link(t, outside)
+
+			if err := SaveSettings(ProjectScope, &Settings{}); err == nil {
+				t.Fatal("SaveSettings wrote through a link that leaves the repository")
+			}
+			entries, err := os.ReadDir(outside)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(entries) != 1 {
+				t.Fatalf("SaveSettings left %d entries at the link's target", len(entries))
+			}
+			if raw, _ := os.ReadFile(filepath.Join(outside, SettingsName)); string(raw) != kept {
+				t.Fatalf("the outside file changed: %q", raw)
+			}
+		})
+	}
+
+	t.Run("link inside the repository", func(t *testing.T) {
+		withProjectTempDir(t)
+		if err := os.WriteFile("shared-settings.json", []byte("{}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Mkdir(ClaudeDirName, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		link := filepath.Join(ClaudeDirName, SettingsName)
+		if err := os.Symlink(filepath.Join("..", "shared-settings.json"), link); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := SaveSettings(ProjectScope, &Settings{}); err != nil {
+			t.Fatalf("SaveSettings: %v", err)
+		}
+		if info, err := os.Lstat(link); err != nil || info.Mode()&os.ModeSymlink == 0 {
+			t.Fatalf("the link was replaced: %v, %v", info, err)
+		}
+		if raw, _ := os.ReadFile("shared-settings.json"); string(raw) == "{}\n" {
+			t.Fatal("the settings were not written at the link's target")
+		}
+	})
+}

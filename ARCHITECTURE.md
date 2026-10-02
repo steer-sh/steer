@@ -111,8 +111,11 @@ not one transaction; synchronization and rebuild are retry paths. `SyncTargets` 
 `internal/instructions/` replaces that managed section while preserving surrounding
 prose. Rebuild and removal retries also synchronize it. Handwritten lines inside
 the managed section do not survive regeneration. A symlinked document is written
-at its target so the link survives; under project scope `instructions.LinkBound`
-bounds that target to the repository, which carries the link.
+at its target so the link survives; under project scope `steerpath.LinkBound`
+bounds that target to the repository, which carries the link. `claude.SaveSettings`
+applies the same bound to a project `.claude/settings.json` and its backup.
+`steerpath.Within` places a file not yet written by its directory, so a linked
+`.claude` leads outside too.
 
 A project manifest is a file a repository carries, so the guard names in it are
 untrusted input to every reader that joins one to the store directory.

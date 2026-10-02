@@ -248,21 +248,3 @@ func TestSetRulesFollowsALinkInsideItsBound(t *testing.T) {
 		t.Fatalf("want:\n%q\ngot:\n%q", want, got)
 	}
 }
-
-// Project scope bounds a link by the working directory's project root; global
-// scope leaves it unbounded.
-func TestLinkBoundIsTheProjectRootOnlyUnderProjectScope(t *testing.T) {
-	dir := t.TempDir()
-	t.Chdir(dir)
-	physical, err := filepath.EvalSymlinks(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if got, err := LinkBound("project"); err != nil || got != physical {
-		t.Fatalf("project bound: %q, %v; want %q", got, err, physical)
-	}
-	if got, err := LinkBound("global"); err != nil || got != "" {
-		t.Fatalf("global bound: %q, %v; want none", got, err)
-	}
-}

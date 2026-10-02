@@ -9,6 +9,7 @@ import (
 
 	"github.com/steer-sh/steer-cli/internal/hookstore"
 	"github.com/steer-sh/steer-cli/internal/shellword"
+	"github.com/steer-sh/steer-cli/internal/steerpath"
 )
 
 const (
@@ -436,6 +437,9 @@ func SaveSettings(scope string, settings *Settings) error {
 	if err != nil {
 		return err
 	}
+	if err := refuseSettingsOutsideBound(scope, settingsPath); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
@@ -453,6 +457,23 @@ func SaveSettings(scope string, settings *Settings) error {
 		return fmt.Errorf("failed to write settings file: %w", err)
 	}
 
+	return nil
+}
+
+// refuseSettingsOutsideBound refuses a settings file, or its backup, that
+// resolves outside the scope's bound. A project's .claude directory is
+// committed, so a link at the directory or at either file is one the repository
+// carried.
+func refuseSettingsOutsideBound(scope, settingsPath string) error {
+	within, err := steerpath.LinkBound(scope)
+	if err != nil || within == "" {
+		return err
+	}
+	for _, path := range []string{settingsPath, settingsPath + BackupExtension} {
+		if !steerpath.Within(within, path) {
+			return fmt.Errorf("%s resolves outside %s; Steer writes a project's settings only inside its repository", path, within)
+		}
+	}
 	return nil
 }
 

@@ -124,6 +124,62 @@ func ProjectRootOf(dir string) (string, error) {
 	return root, nil
 }
 
+// LinkBound returns the directory a project file Steer writes must resolve
+// inside under scope. Under project scope it is the working directory's project
+// root, since the repository carries any link on the way to the file. Under
+// global scope it is "": the operator made the link.
+func LinkBound(scope string) (string, error) {
+	if !strings.EqualFold(strings.TrimSpace(scope), ProjectScope) {
+		return "", nil
+	}
+	return ProjectRoot()
+}
+
+// Within reports whether path, with its symlinks resolved, lies inside dir. A
+// path that does not exist yet is placed by its directory, so a linked parent
+// still counts; a link that does not resolve lies nowhere and is outside.
+func Within(dir, path string) bool {
+	root, err := PhysicalDir(dir)
+	if err != nil {
+		return false
+	}
+	target, err := physicalPath(path)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(root, target)
+	if err != nil || filepath.IsAbs(rel) {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// physicalPath returns path absolute with its symlinks resolved. A path that
+// does not exist keeps its own name under its directory's physical path. A link
+// that does not resolve is an error, since a write through it creates its target.
+func physicalPath(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err == nil {
+		return resolved, nil
+	}
+	if _, lerr := os.Lstat(abs); !os.IsNotExist(lerr) {
+		return "", err
+	}
+	parent := filepath.Dir(abs)
+	if parent == abs {
+		return "", err
+	}
+	dir, err := physicalPath(parent)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, filepath.Base(abs)), nil
+}
+
 // HooksDir returns the neutral guard directory for a scope, for the working
 // directory's repository. See HooksDirIn.
 func HooksDir(scope string) (string, error) { return HooksDirIn(scope, "") }

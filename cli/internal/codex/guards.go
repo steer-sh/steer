@@ -10,6 +10,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/hookstore"
 	"github.com/steer-sh/steer-cli/internal/instructions"
 	"github.com/steer-sh/steer-cli/internal/shellword"
+	"github.com/steer-sh/steer-cli/internal/steerpath"
 )
 
 // MasterMatcher is the matcher the guard master registers under. Codex applies a
@@ -155,7 +156,7 @@ func (Registrar) SetRules(rules []string, scope string) error {
 	if err != nil {
 		return err
 	}
-	within, err := instructions.LinkBound(scope)
+	within, err := steerpath.LinkBound(scope)
 	if err != nil {
 		return err
 	}

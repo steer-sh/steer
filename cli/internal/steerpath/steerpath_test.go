@@ -137,3 +137,67 @@ func TestProjectHooksRelIsRepositoryRelative(t *testing.T) {
 		}
 	}
 }
+
+// Project scope bounds a link by the working directory's project root; global
+// scope leaves it unbounded.
+func TestLinkBoundIsTheProjectRootOnlyUnderProjectScope(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	physical, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got, err := LinkBound("project"); err != nil || got != physical {
+		t.Fatalf("project bound: %q, %v; want %q", got, err, physical)
+	}
+	if got, err := LinkBound("global"); err != nil || got != "" {
+		t.Fatalf("global bound: %q, %v; want none", got, err)
+	}
+}
+
+// Within places a path by where its links lead, and places a path that does not
+// exist yet by its directory.
+func TestWithinPlacesAPathWhereItsLinksLead(t *testing.T) {
+	repo := t.TempDir()
+	outside := t.TempDir()
+	mustWrite := func(path string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte("x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustLink := func(target, link string) {
+		t.Helper()
+		if err := os.Symlink(target, link); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Mkdir(filepath.Join(repo, "real"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(filepath.Join(repo, "real", "file.json"))
+	mustWrite(filepath.Join(outside, "file.json"))
+	mustLink(filepath.Join(outside, "file.json"), filepath.Join(repo, "out-file.json"))
+	mustLink(outside, filepath.Join(repo, "out-dir"))
+	mustLink(filepath.Join(repo, "real", "file.json"), filepath.Join(repo, "in-file.json"))
+	mustLink(filepath.Join(outside, "missing.json"), filepath.Join(repo, "dangling.json"))
+
+	for _, tc := range []struct {
+		path string
+		want bool
+	}{
+		{filepath.Join(repo, "real", "file.json"), true},
+		{filepath.Join(repo, "real", "new.json"), true},
+		{filepath.Join(repo, "new-dir", "new.json"), true},
+		{filepath.Join(repo, "in-file.json"), true},
+		{filepath.Join(repo, "out-file.json"), false},
+		{filepath.Join(repo, "out-dir", "new.json"), false},
+		{filepath.Join(repo, "dangling.json"), false},
+		{filepath.Join(outside, "file.json"), false},
+	} {
+		if got := Within(repo, tc.path); got != tc.want {
+			t.Errorf("Within(repo, %s) = %v, want %v", filepath.Base(filepath.Dir(tc.path))+"/"+filepath.Base(tc.path), got, tc.want)
+		}
+	}
+}

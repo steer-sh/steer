@@ -24,7 +24,7 @@ const (
 // section does not survive; the section is Steer's, as the marker says. A
 // symlinked document is written at its target, so the link survives. within,
 // when not empty, bounds that target: a link that resolves outside it is
-// refused. LinkBound names the bound for a scope.
+// refused. steerpath.LinkBound names the bound for a scope.
 func SetRules(path string, rules []string, within string) error {
 	wanted := normalizeRules(rules)
 
@@ -173,17 +173,6 @@ func trimTrailingBlanks(lines []string) []string {
 	return lines
 }
 
-// LinkBound returns the directory a symlinked document's target must lie inside
-// under scope. Under project scope it is the working directory's project root,
-// since the repository carries the link. Under global scope it is "": the
-// operator made the link.
-func LinkBound(scope string) (string, error) {
-	if !strings.EqualFold(strings.TrimSpace(scope), steerpath.ProjectScope) {
-		return "", nil
-	}
-	return steerpath.ProjectRoot()
-}
-
 // resolveLink returns the file a symlinked path names, or path itself when it is
 // no symlink or does not exist. A symlink to a missing file is an error, and so
 // is one that resolves outside within when within is not empty.
@@ -196,29 +185,10 @@ func resolveLink(path, within string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("%s is a symlink that does not resolve: %w", path, err)
 	}
-	if within != "" && !inside(within, target) {
+	if within != "" && !steerpath.Within(within, target) {
 		return "", fmt.Errorf("%s links to %s, outside %s; Steer writes a project's instruction document only inside its repository", path, target, within)
 	}
 	return target, nil
-}
-
-// inside reports whether path lies within dir. Both are compared as absolute
-// physical paths, since a project document's path is relative to the working
-// directory.
-func inside(dir, path string) bool {
-	dir, err := steerpath.PhysicalDir(dir)
-	if err != nil {
-		return false
-	}
-	path, err = steerpath.PhysicalDir(path)
-	if err != nil {
-		return false
-	}
-	rel, err := filepath.Rel(dir, path)
-	if err != nil || filepath.IsAbs(rel) {
-		return false
-	}
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // writeAtomic replaces path through a temporary file in the same directory, so a

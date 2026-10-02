@@ -15,6 +15,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/hookstore"
 	"github.com/steer-sh/steer-cli/internal/instructions"
+	"github.com/steer-sh/steer-cli/internal/steerpath"
 	"github.com/steer-sh/steer-cli/internal/version"
 )
 
@@ -220,7 +221,7 @@ func (Registrar) SetRules(rules []string, scope string) error {
 	if err != nil {
 		return err
 	}
-	within, err := instructions.LinkBound(scope)
+	within, err := steerpath.LinkBound(scope)
 	if err != nil {
 		return err
 	}
