@@ -7,7 +7,87 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/steer-sh/steer-cli/internal/gate"
 )
+
+// TestPreflightDenyRefusesRepositoryOverrides checks options on git and its wrappers.
+func TestPreflightDenyRefusesRepositoryOverrides(t *testing.T) {
+	c := "co" + "mmit"
+	for _, cmd := range []string{
+		"git --git-dir=/other/.git --work-tree=/repo " + c + " -m x",
+		"git --work-tree /repo --git-dir /other/.git " + c + " -m x",
+		"git --work-tree=/other " + c + " -am x",
+		"git --work-tree /other " + c + " -am x",
+		"git --bare " + c + " -m x",
+		"env -C /other git " + c + " -m x",
+		"env -C/other git " + c + " -m x",
+		"env --chdir /other git " + c + " -m x",
+		"env --chdir=/other git " + c + " -m x",
+		"command env -u FOO -C /other env -- git " + c + " -m x",
+		"env --chdir=/other git -C /repo " + c + " -m x",
+		"git --work-tree=/other add . && git " + c + " -m x",
+		"env -C /other git add . && git " + c + " -m x",
+	} {
+		if reason, receipt := PreflightDeny(cmd, "/cwd"); receipt != GitLocationReceipt ||
+			!strings.Contains(reason, "git -C /absolute/path/to/repo") {
+			t.Errorf("%q must refuse the override and name the supported form, got %q / %q", cmd, reason, receipt)
+		}
+	}
+	for _, cmd := range []string{
+		"git -C /repo " + c + " -m x",
+		"cd /repo && git " + c + " -m x",
+		"env -u FOO git -C /repo " + c + " -m x",
+		"env -u -C git -C /repo " + c + " -m x",
+		"sudo -C 3 git -C /repo " + c + " -m x",
+		"env -- git -C /repo " + c + " -m x",
+		"git -c alias.sample=--work-tree " + c + " -m x",
+		"git " + c + " -m 'env -C /other --git-dir=/meta --work-tree=/other'",
+		"git " + c + " -m x && env -C /other git status",
+	} {
+		if reason, _ := PreflightDeny(cmd, "/cwd"); reason != "" {
+			t.Errorf("%q must reach review, got %q", cmd, reason)
+		}
+	}
+}
+
+// TestPreflightDenyBlocksAnotherIndexBehindAProseOnlyTree uses separate staged indexes.
+func TestPreflightDenyBlocksAnotherIndexBehindAProseOnlyTree(t *testing.T) {
+	prose, code := t.TempDir(), t.TempDir()
+	run := func(root string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	for root, name := range map[string]string{prose: "README.md", code: "bug.go"} {
+		run(root, "init", "-q")
+		if err := os.WriteFile(filepath.Join(root, name), []byte("staged content\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		run(root, "add", name)
+	}
+	paths, ok := gate.ChangedFiles(gate.Defaults(), prose, gate.DiffSpec{StagedOnly: true})
+	if !ok || !gate.IsProseOnly(paths) {
+		t.Fatalf("prose repository paths %v, ok %v", paths, ok)
+	}
+	gitDir := filepath.Join(code, ".git")
+	if got := run(prose, "--git-dir="+gitDir, "--work-tree="+prose, "diff", "--cached", "--name-only"); got != "bug.go" {
+		t.Fatalf("overridden index paths %q; want bug.go", got)
+	}
+	for _, cmd := range []string{
+		fmt.Sprintf("git --git-dir=%q --work-tree=%q co"+"mmit -m x", gitDir, prose),
+		fmt.Sprintf("env -C %q git co"+"mmit -m x", code),
+	} {
+		if reason, receipt := PreflightDeny(cmd, prose); reason == "" || receipt != GitLocationReceipt {
+			t.Errorf("%q must be refused before the prose exemption, got %q / %q", cmd, reason, receipt)
+		}
+	}
+}
 
 // TestPreflightDenyRefusesACommitThatSelectsItsOwnPaths: `git commit <paths>` lands
 // those paths from the working tree and --include adds them to the index, while the

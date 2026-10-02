@@ -48,18 +48,25 @@ func parseCommit(cmd, cwd string) (*parsedGit, error) {
 }
 
 func gitExecutable(args []shellsyntax.Word) (int, bool) {
+	i, _, ok := gitInvocation(args)
+	return i, ok
+}
+
+// gitInvocation also names an env directory change the gate does not reproduce.
+func gitInvocation(args []shellsyntax.Word) (int, string, bool) {
+	location := ""
 	for i := 0; i < len(args); {
 		if !args[i].Static {
-			return 0, false
+			return 0, "", false
 		}
 		switch args[i].Base() {
 		case "git":
-			return i, true
+			return i, location, true
 		case "command":
 			i++
 			for i < len(args) && args[i].Static && strings.HasPrefix(args[i].Value, "-") {
 				if args[i].Value == "-v" || args[i].Value == "-V" {
-					return 0, false
+					return 0, "", false
 				}
 				i++
 			}
@@ -67,9 +74,17 @@ func gitExecutable(args []shellsyntax.Word) (int, bool) {
 			i++
 			for i < len(args) {
 				if !args[i].Static {
-					return 0, false
+					return 0, "", false
 				}
 				v := args[i].Value
+				if v == "-C" || v == "--chdir" || strings.HasPrefix(v, "--chdir=") ||
+					strings.HasPrefix(v, "-C") && len(v) > 2 {
+					location = "env --chdir/-C"
+				}
+				if v == "--" {
+					i++
+					break
+				}
 				if v == "-u" || v == "-C" || v == "-S" || v == "--unset" || v == "--chdir" {
 					i += 2
 					continue
@@ -92,10 +107,41 @@ func gitExecutable(args []shellsyntax.Word) (int, bool) {
 		case "nohup":
 			i++
 		default:
-			return 0, false
+			return 0, "", false
 		}
 	}
-	return 0, false
+	return 0, "", false
+}
+
+// gitLocationOption checks git calls before or on the commit, including a bundled add.
+func (p *parsedGit) gitLocationOption() string {
+	for _, call := range p.program.Calls {
+		if call.Start >= p.call.End || !scopeAffects(call.Scopes, p.call.Scopes) {
+			continue
+		}
+		gitArg, location, ok := gitInvocation(call.Args)
+		if !ok {
+			continue
+		}
+		if location != "" {
+			return location
+		}
+		sub, _, _, _, ok := gitSubcommand(call.Args, gitArg, p.baseCWD)
+		if !ok {
+			continue
+		}
+		for i := gitArg + 1; i < sub; i++ {
+			name, _, attached := strings.Cut(call.Args[i].Value, "=")
+			switch name {
+			case "--git-dir", "--work-tree", "--bare":
+				return name
+			}
+			if takesGitValue(name) && !attached {
+				i++
+			}
+		}
+	}
+	return ""
 }
 
 func gitSubcommand(args []shellsyntax.Word, gitArg int, cwd string) (sub int, gitCWD, workTree string, gitDirOnly, ok bool) {

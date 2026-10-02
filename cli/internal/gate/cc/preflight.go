@@ -16,6 +16,9 @@ func PreflightDeny(cmd, cwd string) (reason, receipt string) {
 		return reason, AmbiguousShellReceipt
 	}
 	if parsed, err := parseCommit(cmd, cwd); err == nil && parsed != nil {
+		if option := parsed.gitLocationOption(); option != "" {
+			return fmt.Sprintf(gitLocationReason, option), GitLocationReceipt
+		}
 		if names := parsed.gitEnvironment(); len(names) > 0 {
 			return fmt.Sprintf(gitEnvironmentReason, strings.Join(names, ", ")), GitEnvironmentReceipt
 		}
@@ -37,6 +40,16 @@ func PreflightDeny(cmd, cwd string) (reason, receipt string) {
 	}
 	return "", ""
 }
+
+const gitLocationReason = "[commit-gate] BLOCKED: this command selects git's repository " +
+	"or working tree with %s. The gate's own git calls do not apply that option, so " +
+	"the reviewers could read a different repository, index or working tree. NOTHING " +
+	"IN THE COMMAND RAN. Select the repository with `git -C /absolute/path/to/repo` " +
+	"and run the commit without repository or working-tree overrides."
+
+// GitLocationReceipt states that a repository override was refused before review.
+const GitLocationReceipt = "[commit-gate] refused a commit with a repository or working-tree override. " +
+	"No review ran and no adjudication row was written."
 
 const gitEnvironmentReason = "[commit-gate] BLOCKED: this command sets %s for git. The " +
 	"gate reads the repository, index and working tree from its own environment, so the " +
