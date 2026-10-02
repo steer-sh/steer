@@ -273,7 +273,7 @@ func SaveManifest(scope string, manifest *Manifest) error {
 		return fmt.Errorf("failed to marshal manifest: %w", err)
 	}
 
-	if err := os.WriteFile(manifestPath, data, 0o644); err != nil {
+	if err := hookstore.WriteFile(manifestPath, data, 0o644); err != nil {
 		return fmt.Errorf("failed to write manifest: %w", err)
 	}
 

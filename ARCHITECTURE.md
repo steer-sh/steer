@@ -110,7 +110,9 @@ with harness updates. These are sequential writes across artifacts and targets,
 not one transaction; synchronization and rebuild are retry paths. `SyncTargets` derives `## Steer Rules` from `ManifestRules`;
 `internal/instructions/` replaces that managed section while preserving surrounding
 prose. Rebuild and removal retries also synchronize it. Handwritten lines inside
-the managed section do not survive regeneration.
+the managed section do not survive regeneration. A symlinked document is written
+at its target so the link survives; under project scope `instructions.LinkBound`
+bounds that target to the repository, which carries the link.
 
 A project manifest is a file a repository carries, so the guard names in it are
 untrusted input to every reader that joins one to the store directory.
@@ -120,8 +122,12 @@ the whole file rather than dropping the entry. The readers that decode a manifes
 or an archived entry without `LoadManifest` — `internal/hookstore`'s migration,
 `gate/mine`, `claude.restoreGuard` — call it directly. Reads that copy a guard
 into the archive go through the store root, because a plain name can still be a
-link out of the store. Status reports a refused store in `store_problems` instead
-of an empty inventory.
+link out of the store. Writes are stricter: `hookstore.WriteFile` refuses a
+symlink at the file or at its directory, and `hookstore.Prepare` refuses a linked
+store directory and, under project scope, a linked `.steer`. A guard file, the
+manifest and a fixture file go through `WriteFile`; the master is renamed into
+place, which replaces a link instead of following it. Status reports a refused
+store in `store_problems` instead of an empty inventory.
 
 The manifest has `hooks`, prose-only `rules` and `review_addendum` entries
 (`internal/claude/addendum.go`). Ids are mutually exclusive across the three at

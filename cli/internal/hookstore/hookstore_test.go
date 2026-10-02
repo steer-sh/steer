@@ -499,3 +499,70 @@ func TestPrepareAddsThePayloadEntryToAStoreOlderThanIt(t *testing.T) {
 		t.Errorf("%s = %q; want %q", IgnoreName, got, want)
 	}
 }
+
+// A store file that is a symlink is refused, and the file it names is left as
+// it was.
+func TestWriteFileRefusesALinkedFile(t *testing.T) {
+	store := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	if err := os.WriteFile(outside, []byte("kept\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(store, "guard.py")
+	if err := os.Symlink(outside, path); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := WriteFile(path, []byte("guard\n"), 0o755); err == nil {
+		t.Fatal("WriteFile wrote through a linked file")
+	}
+	if got := read(t, outside); got != "kept\n" {
+		t.Fatalf("the outside file changed: %q", got)
+	}
+}
+
+// A store subdirectory that is a symlink is refused, so no file lands at its
+// target.
+func TestWriteFileRefusesALinkedDirectory(t *testing.T) {
+	store := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(store, "fixtures")); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := WriteFile(filepath.Join(store, "fixtures", "guard.json"), []byte("{}\n"), 0o644); err == nil {
+		t.Fatal("WriteFile wrote through a linked directory")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "guard.json")); !os.IsNotExist(err) {
+		t.Fatalf("a file landed outside the store: %v", err)
+	}
+}
+
+// A project's .steer or hooks directory that is a symlink is refused before
+// Prepare creates or writes anything at its target.
+func TestPrepareRefusesALinkedProjectStore(t *testing.T) {
+	for _, linked := range []string{".steer", filepath.Join(".steer", "hooks")} {
+		t.Run(linked, func(t *testing.T) {
+			root := projectRoot(t)
+			outside := t.TempDir()
+			at := filepath.Join(root, linked)
+			if err := os.MkdirAll(filepath.Dir(at), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(outside, at); err != nil {
+				t.Fatal(err)
+			}
+
+			if _, err := Prepare("project"); err == nil {
+				t.Fatalf("Prepare accepted a linked %s", linked)
+			}
+			entries, err := os.ReadDir(outside)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(entries) != 0 {
+				t.Fatalf("Prepare wrote %d entries at the link's target", len(entries))
+			}
+		})
+	}
+}

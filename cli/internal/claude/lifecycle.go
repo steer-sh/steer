@@ -271,7 +271,7 @@ func InstallManagedHook(scope string, input InstallManagedHookInput, targets ...
 	}
 
 	updatedContent := applyMetadataHeader(input.Content, entry.Source, entry.PromptVersion, entry.HookVersion)
-	if err := os.WriteFile(targetPath, updatedContent, 0o755); err != nil {
+	if err := hookstore.WriteFile(targetPath, updatedContent, 0o755); err != nil {
 		return nil, fmt.Errorf("failed to write hook file: %w", err)
 	}
 

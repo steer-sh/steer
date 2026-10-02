@@ -119,6 +119,9 @@ func Prepare(scope string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if err := refuseLinkedStore(scope, neutral); err != nil {
+		return "", err
+	}
 	if err := os.MkdirAll(neutral, 0o755); err != nil {
 		return "", fmt.Errorf("failed to create hooks directory: %w", err)
 	}
@@ -136,6 +139,41 @@ func Prepare(scope string) (string, error) {
 		return "", err
 	}
 	return neutral, nil
+}
+
+// refuseLinkedStore refuses a store directory that is a symlink, since every
+// store write would land at its target. Under project scope the .steer directory
+// is refused too: the repository carries it. Under global scope it is the
+// operator's own.
+func refuseLinkedStore(scope, dir string) error {
+	dirs := []string{dir}
+	if strings.EqualFold(strings.TrimSpace(scope), steerpath.ProjectScope) {
+		dirs = []string{filepath.Dir(dir), dir}
+	}
+	for _, d := range dirs {
+		if isLink(d) {
+			return fmt.Errorf("%s is a symlink; the guard store must be a directory of its own", d)
+		}
+	}
+	return nil
+}
+
+// WriteFile writes one of the store's own files through a temporary file and a
+// rename. A symlink at path or at its directory is refused: a project store is
+// committed, so such a link is one a repository carried, and a write through it
+// lands outside the store.
+func WriteFile(path string, content []byte, mode os.FileMode) error {
+	for _, p := range []string{path, filepath.Dir(path)} {
+		if isLink(p) {
+			return fmt.Errorf("%s is a symlink; the guard store writes only its own files", p)
+		}
+	}
+	return writeWhole(path, content, mode)
+}
+
+func isLink(path string) bool {
+	info, err := os.Lstat(path)
+	return err == nil && info.Mode()&os.ModeSymlink != 0
 }
 
 // ignoreEvidence makes sure the store's .gitignore names both evidence paths:
@@ -266,7 +304,7 @@ func migrate(legacy, neutral string) error {
 // writeWhole writes content to path through a temporary file in the same
 // directory, so a reader never sees a partly written file.
 func writeWhole(path string, content []byte, mode os.FileMode) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".steer-migrate.*")
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".steer-write.*")
 	if err != nil {
 		return err
 	}

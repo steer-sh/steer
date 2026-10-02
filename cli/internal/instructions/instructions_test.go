@@ -29,7 +29,7 @@ func read(t *testing.T, path string) string {
 func TestSetRulesCreatesTheFileAndTheSection(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "CLAUDE.md")
 
-	if err := SetRules(path, []string{"rule A", "rule B"}); err != nil {
+	if err := SetRules(path, []string{"rule A", "rule B"}, ""); err != nil {
 		t.Fatalf("SetRules: %v", err)
 	}
 
@@ -43,7 +43,7 @@ func TestSetRulesKeepsTheSurroundingDocument(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "AGENTS.md")
 	write(t, path, "# Project\n\nSome prose.\n\n## Steer Rules\n<!-- managed-by-steer -->\n- old rule\n\n## Other\n\nMore prose.\n")
 
-	if err := SetRules(path, []string{"new rule"}); err != nil {
+	if err := SetRules(path, []string{"new rule"}, ""); err != nil {
 		t.Fatalf("SetRules: %v", err)
 	}
 
@@ -58,7 +58,7 @@ func TestSetRulesEmptyRemovesTheSection(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "CLAUDE.md")
 	write(t, path, "# Project\n\n## Steer Rules\n<!-- managed-by-steer -->\n- rule A\n\n## Other\n\nText.\n")
 
-	if err := SetRules(path, nil); err != nil {
+	if err := SetRules(path, nil, ""); err != nil {
 		t.Fatalf("SetRules: %v", err)
 	}
 
@@ -75,7 +75,7 @@ func TestSetRulesEmptyRemovesTheSection(t *testing.T) {
 func TestSetRulesEmptyWritesNoFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "CLAUDE.md")
 
-	if err := SetRules(path, nil); err != nil {
+	if err := SetRules(path, nil, ""); err != nil {
 		t.Fatalf("SetRules: %v", err)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -86,12 +86,12 @@ func TestSetRulesEmptyWritesNoFile(t *testing.T) {
 func TestSetRulesIsIdempotent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "CLAUDE.md")
 
-	if err := SetRules(path, []string{"rule A", " rule A ", "", "rule B"}); err != nil {
+	if err := SetRules(path, []string{"rule A", " rule A ", "", "rule B"}, ""); err != nil {
 		t.Fatalf("SetRules: %v", err)
 	}
 	first := read(t, path)
 
-	if err := SetRules(path, []string{"rule A", "rule B"}); err != nil {
+	if err := SetRules(path, []string{"rule A", "rule B"}, ""); err != nil {
 		t.Fatalf("SetRules: %v", err)
 	}
 	if second := read(t, path); second != first {
@@ -158,7 +158,7 @@ func TestSetRulesWritesThroughASymlink(t *testing.T) {
 		t.Fatalf("Symlink: %v", err)
 	}
 
-	if err := SetRules(link, []string{"rule A"}); err != nil {
+	if err := SetRules(link, []string{"rule A"}, ""); err != nil {
 		t.Fatalf("SetRules: %v", err)
 	}
 
@@ -180,7 +180,7 @@ func TestSetRulesRefusesADanglingSymlink(t *testing.T) {
 		t.Fatalf("Symlink: %v", err)
 	}
 
-	if err := SetRules(link, []string{"rule A"}); err == nil {
+	if err := SetRules(link, []string{"rule A"}, ""); err == nil {
 		t.Fatal("SetRules wrote through a dangling symlink")
 	}
 	if info, err := os.Lstat(link); err != nil || info.Mode()&os.ModeSymlink == 0 {
@@ -193,7 +193,7 @@ func TestSetRulesLeavesNoTemporaryFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "CLAUDE.md")
 
-	if err := SetRules(path, []string{"rule A"}); err != nil {
+	if err := SetRules(path, []string{"rule A"}, ""); err != nil {
 		t.Fatalf("SetRules: %v", err)
 	}
 
@@ -203,5 +203,66 @@ func TestSetRulesLeavesNoTemporaryFile(t *testing.T) {
 	}
 	if len(entries) != 1 || entries[0].Name() != "CLAUDE.md" {
 		t.Fatalf("unexpected directory contents: %v", entries)
+	}
+}
+
+// A link the repository carries is refused when it resolves outside the bound;
+// the file it names is left as it was.
+func TestSetRulesRefusesALinkOutsideItsBound(t *testing.T) {
+	repo := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "notes.md")
+	write(t, outside, "# Not the repository's\n")
+	link := filepath.Join(repo, "CLAUDE.md")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	if err := SetRules(link, []string{"rule A"}, repo); err == nil {
+		t.Fatal("SetRules wrote through a link that leaves its bound")
+	}
+	if got := read(t, outside); got != "# Not the repository's\n" {
+		t.Fatalf("the outside file changed:\n%q", got)
+	}
+}
+
+// A link that stays inside the bound, such as CLAUDE.md naming AGENTS.md, is
+// still written at its target. The path is relative, as a project document's is.
+func TestSetRulesFollowsALinkInsideItsBound(t *testing.T) {
+	repo := t.TempDir()
+	t.Chdir(repo)
+	target := filepath.Join(repo, "AGENTS.md")
+	write(t, target, "# Project\n")
+	link := filepath.Join(repo, "CLAUDE.md")
+	if err := os.Symlink("AGENTS.md", link); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	if err := SetRules("CLAUDE.md", []string{"rule A"}, repo); err != nil {
+		t.Fatalf("SetRules: %v", err)
+	}
+	if info, err := os.Lstat(link); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("the link was replaced: %v, %v", info, err)
+	}
+	want := "# Project\n\n## Steer Rules\n<!-- managed-by-steer -->\n- rule A\n"
+	if got := read(t, target); got != want {
+		t.Fatalf("want:\n%q\ngot:\n%q", want, got)
+	}
+}
+
+// Project scope bounds a link by the working directory's project root; global
+// scope leaves it unbounded.
+func TestLinkBoundIsTheProjectRootOnlyUnderProjectScope(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	physical, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got, err := LinkBound("project"); err != nil || got != physical {
+		t.Fatalf("project bound: %q, %v; want %q", got, err, physical)
+	}
+	if got, err := LinkBound("global"); err != nil || got != "" {
+		t.Fatalf("global bound: %q, %v; want none", got, err)
 	}
 }

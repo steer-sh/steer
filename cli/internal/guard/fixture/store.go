@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/steer-sh/steer-cli/internal/hookstore"
 )
 
 // Version is the stored file's format version.
@@ -161,7 +163,7 @@ func Save(storeDir string, file File) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	return hookstore.WriteFile(path, data, 0o644)
 }
 
 // Remove drops a guard's fixtures. It is called with the guard.

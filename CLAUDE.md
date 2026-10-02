@@ -236,8 +236,9 @@ has no mechanical pass/fail oracle for comprehension.
   `hookstore`. Project scope anchors at the repository root, and the filesystem
   path, the registration string and the repository-relative path are three
   different forms; see [harnesses and storage](ARCHITECTURE.md#harnesses-and-storage)
-  before changing one. Read the registered master when diagnosing execution or
-  audit data.
+  before changing one. A new write into a store goes through `hookstore.WriteFile`,
+  which refuses a symlink the repository may carry. Read the registered master
+  when diagnosing execution or audit data.
 - Stable hook executable: `~/.steer/bin/steer`; `steer bin install` updates it and
   repairs Steer-owned registrations. Reviewer timeout changes need channel
   re-registration to update the harness timeout too.

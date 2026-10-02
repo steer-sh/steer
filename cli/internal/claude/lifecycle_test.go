@@ -222,3 +222,67 @@ func TestInstallManagedHookUpdatesItsOwnFile(t *testing.T) {
 		}
 	}
 }
+
+// A guard file the repository carries as a symlink is refused, and the file it
+// names is left as it was.
+func TestInstallManagedHookRefusesASymlinkedGuardFile(t *testing.T) {
+	withProjectTempDir(t)
+	if err := EnsureDirectories(ProjectScope); err != nil {
+		t.Fatal(err)
+	}
+	hooksDir, err := GetHooksDir(ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	if err := os.WriteFile(outside, []byte("kept\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(hooksDir, "linked.py")); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = InstallManagedHook(ProjectScope, InstallManagedHookInput{
+		HookName: "linked",
+		FileName: "linked.py",
+		Rule:     "probe rule | probe",
+		Content:  []byte(blockingHookContent),
+		Metadata: HookInstallMetadata{Source: SourceGenerated},
+	})
+	if err == nil {
+		t.Fatal("InstallManagedHook wrote through a symlinked guard file")
+	}
+	if raw, _ := os.ReadFile(outside); string(raw) != "kept\n" {
+		t.Fatalf("the outside file changed: %q", raw)
+	}
+}
+
+// A manifest the repository carries as a dangling symlink is refused, so
+// registration creates no file at its target.
+func TestInstallManagedHookRefusesASymlinkedManifest(t *testing.T) {
+	withProjectTempDir(t)
+	if err := EnsureDirectories(ProjectScope); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath, err := GetManifestFile(ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "created.json")
+	if err := os.Symlink(outside, manifestPath); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = InstallManagedHook(ProjectScope, InstallManagedHookInput{
+		HookName: "probe",
+		Rule:     "probe rule | probe",
+		Content:  []byte(blockingHookContent),
+		Metadata: HookInstallMetadata{Source: SourceGenerated},
+	})
+	if err == nil {
+		t.Fatal("InstallManagedHook wrote through a symlinked manifest")
+	}
+	if _, err := os.Stat(outside); !os.IsNotExist(err) {
+		t.Fatalf("registration created the link's target: %v", err)
+	}
+}

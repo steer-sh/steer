@@ -476,3 +476,30 @@ func TestAnAllowCaseWithNoMasterReachesNoAnswer(t *testing.T) {
 		t.Fatalf("the unanswered case is not counted: %d", report.Unanswered())
 	}
 }
+
+// A fixtures directory the repository carries as a symlink is refused, so no
+// fixture file lands at its target.
+func TestFixtureSaveRefusesALinkedFixturesDirectory(t *testing.T) {
+	withProjectTempDir(t)
+	if err := EnsureDirectories(ProjectScope); err != nil {
+		t.Fatal(err)
+	}
+	dir, err := GetHooksDir(ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(dir, fixture.DirName)); err != nil {
+		t.Fatal(err)
+	}
+
+	err = fixture.Save(dir, fixture.File{Version: fixture.Version, Hook: "alpha", Cases: []fixture.Case{
+		bashCase("blocks the token", "run ALPHA now", fixture.ExpectBlock),
+	}})
+	if err == nil {
+		t.Fatal("fixture.Save wrote through a linked fixtures directory")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "alpha.json")); !os.IsNotExist(err) {
+		t.Fatalf("a fixture landed outside the store: %v", err)
+	}
+}

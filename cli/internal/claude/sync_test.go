@@ -33,7 +33,7 @@ func (agentsRegistrar) InstructionPath(string) (string, error) { return "AGENTS.
 
 func (r agentsRegistrar) SetRules(rules []string, scope string) error {
 	path, _ := r.InstructionPath(scope)
-	return instructions.SetRules(path, rules)
+	return instructions.SetRules(path, rules, "")
 }
 
 // A harness installed after the rules were written never received them, and a

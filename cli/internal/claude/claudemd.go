@@ -10,5 +10,9 @@ func SetRules(rules []string, scope string) error {
 	if err != nil {
 		return err
 	}
-	return instructions.SetRules(path, rules)
+	within, err := instructions.LinkBound(scope)
+	if err != nil {
+		return err
+	}
+	return instructions.SetRules(path, rules, within)
 }
