@@ -454,6 +454,20 @@ func outputOp(op syntax.RedirOperator) bool {
 	return false
 }
 
+// writesTarget reports a redirect that opens its word as a file for output. A `>&` to
+// a word other than a descriptor number or `-` sends stdout and stderr to that file.
+func writesTarget(redir *syntax.Redirect) bool {
+	if outputOp(redir.Op) {
+		return true
+	}
+	if redir.Op != syntax.DplOut || redir.Word == nil {
+		return false
+	}
+	word, ok := shellsyntax.StaticWord(redir.Word)
+	fd := strings.TrimSuffix(word, "-")
+	return !ok || (fd != "" && strings.Trim(fd, "0123456789") != "")
+}
+
 // Steps that may run before the commit in the same command. None of them writes a
 // file except through a redirect, which stepBeforeCommit judges on its own.
 var stepsBeforeCommit = map[string]bool{
@@ -483,27 +497,19 @@ func (p *parsedGit) stepBeforeCommit() string {
 	}
 	end := p.call.End
 	var heredocs [][2]int
-	var commitStmt *syntax.Stmt
-	syntax.Walk(file, func(node syntax.Node) bool {
-		stmt, ok := node.(*syntax.Stmt)
-		if !ok {
-			return true
-		}
-		if call, ok := stmt.Cmd.(*syntax.CallExpr); ok && int(call.Pos().Offset()) == p.call.Start {
-			commitStmt = stmt
-			// A Stmt's own end runs past its heredoc bodies, which the region holds
-			// separately, so the statement ends at its last redirect word.
-			for _, redir := range stmt.Redirs {
-				if redir.Word != nil {
-					end = max(end, int(redir.Word.End().Offset()))
-				}
-				if redir.Hdoc != nil {
-					heredocs = append(heredocs, [2]int{int(redir.Hdoc.Pos().Offset()), int(redir.Hdoc.End().Offset())})
-				}
+	commitStmt := p.commitStatement(file)
+	if commitStmt != nil {
+		// A Stmt's own end runs past its heredoc bodies, which the region holds
+		// separately, so the statement ends at its last redirect word.
+		for _, redir := range commitStmt.Redirs {
+			if redir.Word != nil {
+				end = max(end, int(redir.Word.End().Offset()))
+			}
+			if redir.Hdoc != nil {
+				heredocs = append(heredocs, [2]int{int(redir.Hdoc.Pos().Offset()), int(redir.Hdoc.End().Offset())})
 			}
 		}
-		return true
-	})
+	}
 	runsFirst := func(start int) bool {
 		if start < end {
 			return true
@@ -522,7 +528,7 @@ func (p *parsedGit) stepBeforeCommit() string {
 			return step == ""
 		}
 		for _, redir := range stmt.Redirs {
-			if outputOp(redir.Op) && !p.scratchTarget(redir.Word) {
+			if writesTarget(redir) && !p.scratchTarget(redir.Word) {
 				step = p.program.Source[stmt.Pos().Offset():stmt.End().Offset()]
 				return false
 			}
@@ -539,6 +545,40 @@ func (p *parsedGit) stepBeforeCommit() string {
 		return p.program.Source[call.Start:call.End]
 	}
 	return ""
+}
+
+// commitRedirect returns the source of the first redirect on the commit's own
+// statement that writes outside a scratch directory. The shell opens that file before
+// git reads the tree, so `git commit -a > f` lands f empty. Empty means none.
+func (p *parsedGit) commitRedirect() string {
+	file, err := syntax.NewParser().Parse(strings.NewReader(p.program.Source), "command")
+	if err != nil {
+		return ""
+	}
+	stmt := p.commitStatement(file)
+	if stmt == nil {
+		return ""
+	}
+	for _, redir := range stmt.Redirs {
+		if writesTarget(redir) && !p.scratchTarget(redir.Word) {
+			return p.program.Source[redir.Pos().Offset():redir.End().Offset()]
+		}
+	}
+	return ""
+}
+
+// commitStatement returns the statement whose call is the commit, or nil.
+func (p *parsedGit) commitStatement(file *syntax.File) *syntax.Stmt {
+	var found *syntax.Stmt
+	syntax.Walk(file, func(node syntax.Node) bool {
+		if stmt, ok := node.(*syntax.Stmt); ok {
+			if call, ok := stmt.Cmd.(*syntax.CallExpr); ok && int(call.Pos().Offset()) == p.call.Start {
+				found = stmt
+			}
+		}
+		return found == nil
+	})
+	return found
 }
 
 func (p *parsedGit) allowedBeforeCommit(call shellsyntax.Call) bool {

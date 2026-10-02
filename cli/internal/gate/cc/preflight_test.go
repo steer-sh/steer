@@ -1,6 +1,7 @@
 package cc
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -119,6 +120,7 @@ func TestPreflightDenyRefusesAStepThatRunsBeforeTheCommit(t *testing.T) {
 		"git stash && git " + c + " -m x",
 		"echo x > a && git add a && git " + c + " -m x",
 		"{ echo x; } > a; git " + c + " -m x",
+		"echo x >& a; git " + c + " -m x",
 		`git ` + c + ` -m x --author="$(touch a; echo A)"`,
 		`git ` + c + ` -m x <<< "$(touch a)"`,
 	} {
@@ -140,6 +142,45 @@ func TestPreflightDenyRefusesAStepThatRunsBeforeTheCommit(t *testing.T) {
 	} {
 		if reason, _ := PreflightDeny(cmd, "/cwd"); reason != "" {
 			t.Errorf("%q changes nothing before git commits and must go to review, got %q", cmd, reason)
+		}
+	}
+}
+
+// TestPreflightDenyRefusesARedirectOnTheCommitItself: the shell opens a commit's own
+// output redirect before git reads the tree, so `git commit -a > code.go` lands
+// code.go empty after the reviewers read it whole.
+func TestPreflightDenyRefusesARedirectOnTheCommitItself(t *testing.T) {
+	c := "co" + "mmit"
+	for cmd, redir := range map[string]string{
+		"git " + c + " -a -m x > code.go":                      "> code.go",
+		"git " + c + " -m x > out.log":                         "> out.log",
+		"git " + c + " --all -m x 2> code.go":                  "2> code.go",
+		"git " + c + " -am x &> code.go":                       "&> code.go",
+		"git " + c + " -am x >| code.go":                       ">| code.go",
+		"git " + c + " -am x >> code.go":                       ">> code.go",
+		"git " + c + " -am x >& code.go":                       ">& code.go",
+		"git " + c + " -am x 2>&1 >code.go":                    ">code.go",
+		`git ` + c + ` -am x > "$OUT"`:                         `> "$OUT"`,
+		"git add a && git " + c + " -m x > a":                  "> a",
+		"git " + c + " -F - > code.go <<'EOF'\nsubject\nEOF":   "> code.go",
+		"git -C /tmp/repo " + c + " -am x > /tmp/repo/code.go": "> /tmp/repo/code.go",
+	} {
+		reason, receipt := PreflightDeny(cmd, "/cwd")
+		if receipt != StepBeforeCommitReceipt || reason != fmt.Sprintf(commitRedirectReason, redir) {
+			t.Errorf("%q writes %q before git reads the tree and must be refused naming it, got %q", cmd, redir, reason)
+		}
+	}
+	for _, cmd := range []string{
+		"git " + c + " -am x > /dev/null",
+		"git " + c + " -am x 2>/dev/null",
+		"git " + c + " -am x > /tmp/commit.log 2>&1",
+		"git " + c + " -am x 2>&1",
+		"git " + c + " -am x >&2",
+		"git " + c + " -am x 2>&-",
+		"git " + c + " -F - <<'EOF'\nsubject\nEOF",
+	} {
+		if reason, _ := PreflightDeny(cmd, "/cwd"); reason != "" {
+			t.Errorf("%q writes no file git reads and must go to review, got %q", cmd, reason)
 		}
 	}
 }

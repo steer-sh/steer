@@ -390,7 +390,9 @@ the hook's environment and would review the default index, repository and work t
 instead of the ones the variable selects; a command that
 runs a step before git commits that could change the tree, because the gate read
 the tree before the command started (the allowlist and the scratch-directory
-redirect rule are in `cc/syntax.go`, `stepBeforeCommit`); a commit that
+redirect rule are in `cc/syntax.go`, `stepBeforeCommit`); a commit whose own
+output redirect writes outside a scratch directory, because the shell opens that
+file before git reads the tree (`commitRedirect`); a commit that
 selects its own paths (pathspecs, `--only`, `--include`), whose landed tree is
 neither the index nor the working tree the gate reads; and a bundled
 `git add ... && git commit` while a file holds both staged and unstaged edits: that
