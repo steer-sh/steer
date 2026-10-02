@@ -384,6 +384,10 @@ Pi's bridge supplies its execution cwd and session metadata directly.
 The native adapters share one pre-review refusal, `cc.PreflightDeny`, called before
 the engine so a refusal starts no reviewer, consumes no firing and leaves a pending
 chain intact. It refuses a command whose shell form is ambiguous; a command that
+sets a `GIT_*` variable outside the identity, date and editor allowlist on or before
+its commit (`cc/syntax.go`, `gitEnvironment`), because the gate's own git calls read
+the hook's environment and would review the default index, repository and work tree
+instead of the ones the variable selects; a command that
 runs a step before git commits that could change the tree, because the gate read
 the tree before the command started (the allowlist and the scratch-directory
 redirect rule are in `cc/syntax.go`, `stepBeforeCommit`); a commit that

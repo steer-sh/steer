@@ -143,3 +143,33 @@ func TestPreflightDenyRefusesAStepThatRunsBeforeTheCommit(t *testing.T) {
 		}
 	}
 }
+
+// TestPreflightDenyRefusesACommitThatSetsGitsEnvironment: the gate's own git calls read
+// the hook's environment, so an index, repository or work tree the command selects by
+// variable is a tree the reviewers never see.
+func TestPreflightDenyRefusesACommitThatSetsGitsEnvironment(t *testing.T) {
+	c := "co" + "mmit"
+	for _, cmd := range []string{
+		"GIT_INDEX_FILE=/tmp/alt git " + c + " -m x",
+		"env GIT_INDEX_FILE=/tmp/alt git " + c + " -m x",
+		"env -u PAGER GIT_DIR=/other/.git git " + c + " -m x",
+		`GIT_INDEX_FILE="$IDX" git ` + c + ` -m x`,
+		"GIT_WORK_TREE=/other git add . && git " + c + " -m x",
+		"export GIT_INDEX_FILE=/tmp/alt && git " + c + " -m x",
+		"set -a; GIT_INDEX_FILE=/tmp/alt; git " + c + " -m x",
+		"GIT_CONFIG_PARAMETERS=\"'core.worktree'='/other'\" git " + c + " -m x",
+	} {
+		if reason, receipt := PreflightDeny(cmd, "/cwd"); receipt != GitEnvironmentReceipt {
+			t.Errorf("%q sets git's environment and must be refused, got %q", cmd, reason)
+		}
+	}
+	for _, cmd := range []string{
+		"GIT_AUTHOR_DATE=2026-01-01 GIT_COMMITTER_DATE=2026-01-01 git " + c + " -m x",
+		"env LC_ALL=C GIT_EDITOR=true git " + c + " -m x",
+		"git " + c + " -m x && GIT_DIR=/other/.git git log -1",
+	} {
+		if reason, _ := PreflightDeny(cmd, "/cwd"); reason != "" {
+			t.Errorf("%q leaves the tree git commits unchanged and must go to review, got %q", cmd, reason)
+		}
+	}
+}

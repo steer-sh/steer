@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/steer-sh/steer-cli/internal/shellsyntax"
@@ -554,6 +555,54 @@ func (p *parsedGit) allowedBeforeCommit(call shellsyntax.Call) bool {
 		return true
 	}
 	return call.Args[0].Static && stepsBeforeCommit[call.Args[0].Value]
+}
+
+// gitEnvAllowed names the GIT_* variables a commit command may set. Each changes who or
+// when, never which repository, index or tree git commits from.
+var gitEnvAllowed = map[string]bool{
+	"GIT_AUTHOR_NAME": true, "GIT_AUTHOR_EMAIL": true, "GIT_AUTHOR_DATE": true,
+	"GIT_COMMITTER_NAME": true, "GIT_COMMITTER_EMAIL": true, "GIT_COMMITTER_DATE": true,
+	"GIT_EDITOR": true, "GIT_PAGER": true, "GIT_TERMINAL_PROMPT": true,
+}
+
+// gitEnvironment returns each GIT_* variable outside gitEnvAllowed that the command sets
+// before or on its commit: a prefix, a bare or exported assignment, or an env argument
+// to a git call. The gate's own git calls inherit the hook's environment, not these.
+func (p *parsedGit) gitEnvironment() []string {
+	file, err := syntax.NewParser().Parse(strings.NewReader(p.program.Source), "command")
+	if err != nil {
+		return nil
+	}
+	var names []string
+	add := func(name string) {
+		if strings.HasPrefix(name, "GIT_") && !gitEnvAllowed[name] && !slices.Contains(names, name) {
+			names = append(names, name)
+		}
+	}
+	// Program.Calls holds neither a bare assignment nor export/declare, so the tree is
+	// walked for every assignment instead.
+	syntax.Walk(file, func(node syntax.Node) bool {
+		if assign, ok := node.(*syntax.Assign); ok && assign.Name != nil &&
+			int(assign.Pos().Offset()) < p.call.End {
+			add(assign.Name.Value)
+		}
+		return true
+	})
+	for _, call := range p.program.Calls {
+		if call.Start >= p.call.End {
+			continue
+		}
+		gitArg, ok := gitExecutable(call.Args)
+		if !ok {
+			continue
+		}
+		for _, arg := range call.Args[:gitArg] {
+			if name, _, ok := strings.Cut(arg.Value, "="); ok && !strings.HasPrefix(arg.Value, "-") {
+				add(name)
+			}
+		}
+	}
+	return names
 }
 
 // scratchTarget reports whether a redirect writes /dev/null, or a static absolute

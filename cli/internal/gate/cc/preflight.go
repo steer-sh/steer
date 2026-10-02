@@ -16,6 +16,9 @@ func PreflightDeny(cmd, cwd string) (reason, receipt string) {
 		return reason, AmbiguousShellReceipt
 	}
 	if parsed, err := parseCommit(cmd, cwd); err == nil && parsed != nil {
+		if names := parsed.gitEnvironment(); len(names) > 0 {
+			return fmt.Sprintf(gitEnvironmentReason, strings.Join(names, ", ")), GitEnvironmentReceipt
+		}
 		if step := parsed.stepBeforeCommit(); step != "" {
 			return fmt.Sprintf(stepBeforeCommitReason, shortStep(step)), StepBeforeCommitReceipt
 		}
@@ -28,6 +31,17 @@ func PreflightDeny(cmd, cwd string) (reason, receipt string) {
 	}
 	return "", ""
 }
+
+const gitEnvironmentReason = "[commit-gate] BLOCKED: this command sets %s for git. The " +
+	"gate reads the repository, index and working tree from its own environment, so the " +
+	"reviewers would read a tree other than the one this commit lands. NOTHING IN THE " +
+	"COMMAND RAN. Make the default index hold exactly what this commit should carry, then " +
+	"run the commit without that variable; select another repository with `git -C`. The " +
+	"author, committer and editor variables stay permitted."
+
+// GitEnvironmentReceipt states that the git-environment refusal blocked before review.
+const GitEnvironmentReceipt = "[commit-gate] refused a commit that sets git's environment. " +
+	"No review ran and no adjudication row was written."
 
 const stepBeforeCommitReason = "[commit-gate] BLOCKED: this command runs `%s` before " +
 	"its commit. The gate reads the tree before the command starts, so the reviewers " +
