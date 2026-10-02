@@ -231,11 +231,15 @@ func (m *Model) checkIssues() []diagnosticIssue {
 		})
 	}
 	if r := c.LatestRun; r != nil && r.IntegrationFailure {
-		out = append(out, diagnosticIssue{
-			headline: "The last run passed without running every check it declares",
-			detail: "That is the script's wiring, not a failed assertion: " +
-				strings.Join(r.Missing, ", ") + " never ran. Add the managed line to check.sh.",
-		})
+		issue := diagnosticIssue{
+			headline: "The last run exited zero with incomplete verification",
+			detail:   "A declared check reported a nonpassing result. Open Fixes to inspect its result and restore passing verification.",
+		}
+		if len(r.Missing) > 0 {
+			issue.detail = "These declared checks had no execution record: " +
+				strings.Join(r.Missing, ", ") + ". Add their managed executor lines to check.sh. Inspect any other nonpassing results in Fixes."
+		}
+		out = append(out, issue)
 	}
 	return out
 }

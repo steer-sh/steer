@@ -412,7 +412,10 @@ func CheckRunPhrase(r *CheckRun) string {
 	}
 	phrase := r.Outcome
 	if r.IntegrationFailure {
-		phrase += ", without running " + strings.Join(r.Missing, ", ")
+		phrase += ", verification incomplete"
+		if len(r.Missing) > 0 {
+			phrase += ", without running " + strings.Join(r.Missing, ", ")
+		}
 	}
 	if how := checkRunSource(r.Source); how != "" {
 		phrase += " " + how

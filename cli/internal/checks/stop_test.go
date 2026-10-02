@@ -146,6 +146,68 @@ func TestStopBlocksAnIntegrationFailureWithoutClaimingAnAssertionFailed(t *testi
 	}
 }
 
+// A zero-exit Go suite cannot satisfy a declaration whose test was deleted,
+// renamed, filtered out or skipped. Stop preserves the executor's result.
+func TestStopBlocksAGoSuiteWithoutAPassingDeclaredTest(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		source  string
+		args    string
+		outcome string
+	}{
+		{"deleted", "package p\n", "./p", OutcomeUnavailable},
+		{"renamed", "package p\nimport \"testing\"\nfunc TestRenamed(t *testing.T) {}\n", "./p", OutcomeUnavailable},
+		{"filtered", "package p\nimport \"testing\"\nfunc TestGood(t *testing.T) {}\n", "./p -run ^TestOther$", OutcomeUnavailable},
+		{"skipped", "package p\nimport \"testing\"\nfunc TestGood(t *testing.T) { t.Skip(\"skip\") }\n", "./p", OutcomeSkipped},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := suiteRepo(t)
+			if err := Save(root, Manifest{Version: ManifestVersion, Checks: []Declaration{
+				{ID: "good", Kind: KindGoTest, Package: "p", Test: "TestGood"},
+			}}); err != nil {
+				t.Fatal(err)
+			}
+			gitIn(t, root, "init", "-q")
+			identity, err := RepoIdentity(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := appendAdoption(Adoption{Version: AdoptionVersion, Action: ActionAdopt, Repo: identity, At: time.Now().UTC()}); err != nil {
+				t.Fatal(err)
+			}
+			exe, err := os.Executable()
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv(testExecutorEnv, "1")
+			writeFile(t, root, OracleName, "\"$STEER_BIN\" check go-test ./p -run ^TestGood$\n")
+			req := StopRequest{Harness: "codex", Session: "deleted-go-test", CWD: root, Timeout: time.Minute, SteerBin: exe}
+			if d := Stop(req); d.Disposition != DispositionAllow {
+				t.Fatalf("initial passing test: %+v", d)
+			}
+			if d := Stop(req); d.Disposition != DispositionAllow {
+				t.Fatalf("cached passing test: %+v", d)
+			}
+			writeFile(t, root, "p/p_test.go", tc.source)
+			writeFile(t, root, OracleName, "\"$STEER_BIN\" check go-test "+tc.args+"\n")
+			d := Stop(req)
+			if d.Disposition != DispositionBlock || d.Run == nil || !d.Run.IntegrationFailure || d.Run.Passed() {
+				t.Fatalf("Stop %+v; want an integration block", d)
+			}
+			if d.Run.Outcome != OutcomePassed || d.Run.ExitCode == nil || *d.Run.ExitCode != 0 || len(d.Run.Missing) != 0 {
+				t.Fatalf("run %+v; want the suite's zero exit and no missing records", d.Run)
+			}
+			records, err := Executions(root)
+			if err != nil || len(records) != 3 || records[1].Outcome != OutcomePassedCached || records[2].Outcome != tc.outcome || records[2].Executor != ExecutorGoTest {
+				t.Fatalf("records %+v err %v; want the original %s Go record", records, err, tc.outcome)
+			}
+			if !strings.Contains(d.Reason, "good ("+tc.outcome+")") || strings.Contains(d.Reason, "does not call") {
+				t.Fatalf("block reason misdescribes the result:\n%s", d.Reason)
+			}
+		})
+	}
+}
+
 // A run that passes its deadline ends the turn with a notice and no block.
 func TestStopFailsOpenOnATimeout(t *testing.T) {
 	root, req := stopRepo(t, map[string]string{"a": "exit 0\n"}, "sleep 30\n")

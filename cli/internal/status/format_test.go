@@ -87,6 +87,10 @@ func TestCheckRunPhraseNamesSourceAndDispositionInWords(t *testing.T) {
 		{CheckRun{Source: checks.SourceStop, Outcome: checks.OutcomeFailed, Disposition: checks.DispositionYield},
 			"failed at the end of a turn; it failed again on an unchanged tree, so the turn ended without another block"},
 		{CheckRun{Source: checks.SourceRun, Outcome: checks.OutcomePassed}, "passed from steer check run"},
+		{CheckRun{Source: checks.SourceStop, Outcome: checks.OutcomePassed, IntegrationFailure: true, Disposition: checks.DispositionBlock},
+			"passed, verification incomplete at the end of a turn; it blocked the turn"},
+		{CheckRun{Source: checks.SourceRun, Outcome: checks.OutcomePassed, IntegrationFailure: true, Missing: []string{"declared"}},
+			"passed, verification incomplete, without running declared from steer check run"},
 	}
 	for _, c := range cases {
 		if got := CheckRunPhrase(&c.run); got != c.want {

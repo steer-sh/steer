@@ -251,9 +251,9 @@ func RunIDLine(runID string) string { return runIDLabel + runID }
 
 func blockReason(identity string, run OracleRun, records []Execution, output string) string {
 	var b strings.Builder
-	if run.IntegrationFailure {
+	if run.IntegrationFailure && len(run.Missing) > 0 {
 		fmt.Fprintf(&b, "%s passed in %s without running these declared checks: %s.\n", OracleName, identity, strings.Join(run.Missing, ", "))
-		b.WriteString("No assertion failed: check.sh does not call the Steer executor for them. ")
+		b.WriteString("No assertion failed for these missing checks: check.sh does not call the Steer executor for them. ")
 		b.WriteString("Add the managed line for each to its sequence (see `steer check guide`):\n")
 		lines := map[string]bool{}
 		for _, r := range records {
@@ -269,6 +269,9 @@ func blockReason(identity string, run OracleRun, records []Execution, output str
 				fmt.Fprintf(&b, "  %s\n", line)
 			}
 		}
+		if run.Reason != "" {
+			fmt.Fprintf(&b, "\n%s.\n", run.Reason)
+		}
 		fmt.Fprintf(&b, "\n%s\n%s%s", contestLine(run.RunID), runIDLabel, run.RunID)
 		return b.String()
 	}
@@ -276,7 +279,16 @@ func blockReason(identity string, run OracleRun, records []Execution, output str
 	if run.ExitCode != nil {
 		exit = fmt.Sprintf("exit %d", *run.ExitCode)
 	}
-	fmt.Fprintf(&b, "%s failed (%s) in %s. It is this repository's verification oracle, and its verdict applies to this turn's work.\n", OracleName, exit, identity)
+	if run.IntegrationFailure {
+		fmt.Fprintf(&b, "%s exited zero in %s, but verification is incomplete: %s.\n", OracleName, identity, run.Reason)
+		for _, r := range records {
+			if !r.Passed() && r.Reason != "" {
+				fmt.Fprintf(&b, "  %s (%s): %s\n", r.CheckID, r.Outcome, r.Reason)
+			}
+		}
+	} else {
+		fmt.Fprintf(&b, "%s failed (%s) in %s. It is this repository's verification oracle, and its verdict applies to this turn's work.\n", OracleName, exit, identity)
+	}
 	var failing, unreached, skipped []string
 	for _, r := range records {
 		switch {

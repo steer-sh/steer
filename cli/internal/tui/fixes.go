@@ -567,7 +567,7 @@ func adoptNote(root string, res checks.AdoptResult, err error) string {
 	}
 	lines = append(lines, oracleOutcomeLine(res.Oracle)...)
 	lines = append(lines, adoptFailureRows(res)...)
-	if res.Oracle.IntegrationFailure {
+	if res.Oracle.IntegrationFailure && len(res.Oracle.Missing) > 0 {
 		lines = append(lines, "Add "+checks.ExecInvocation+" to its sequence: steer check guide")
 	}
 	return strings.Join(append(lines, adoptExcerptLines(res)...), "\n")

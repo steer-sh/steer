@@ -26,7 +26,7 @@ func TestMain(m *testing.M) {
 }
 
 func testExecutor(args []string) int {
-	if len(args) < 3 || args[0] != "check" || args[1] != "exec" || args[2] != "--all" {
+	if len(args) < 3 || args[0] != "check" || (args[1] != "exec" && args[1] != "go-test") {
 		fmt.Fprintln(os.Stderr, "test executor: unsupported arguments", args)
 		return 2
 	}
@@ -39,6 +39,17 @@ func testExecutor(args []string) int {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
+	}
+	if args[1] == "go-test" {
+		code, _, err := RunGoSuite(root, GoSuiteOptions{Args: args[2:], Stdout: os.Stdout, Stderr: os.Stderr, Invocation: inv})
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		return code
+	}
+	if args[2] != "--all" {
+		return 2
 	}
 	records, err := Exec(root, ExecOptions{Stdout: os.Stdout, Stderr: os.Stderr, Invocation: inv, Timeout: DefaultExecTimeout})
 	if err != nil {

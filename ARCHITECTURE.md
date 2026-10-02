@@ -308,7 +308,10 @@ for `check run`, adoption and Stop. It takes a non-waiting per-repository OS
 lock, runs `bash check.sh` from the root under one deadline and appends one
 aggregate record to `runs.jsonl`. A declared check with no record under the run
 ID gets a `not-executed` record, and a passing `check.sh` that omitted one is an
-integration failure rather than a failed assertion. A run the lock refused
+integration failure rather than a failed assertion. A zero-exit oracle also fails
+integration when a declared check reports a nonpassing result, including an
+unavailable or skipped Go test; cached passes satisfy the declaration. The
+original executor record and suite exit status stay intact. A run the lock refused
 records `concurrent_with` and executes nothing. `STEER_CHECK_EVIDENCE_DIR`
 isolates the execution and run records of adoption; receipts ignore it.
 

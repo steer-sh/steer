@@ -557,6 +557,13 @@ func TestARefusedAdoptionNamesAValidationVerdictAndTheIntegrationRemedy(t *testi
 	if !strings.Contains(got, checks.ExecInvocation) || !strings.Contains(got, "steer check guide") {
 		t.Errorf("an integration failure names no remedy:\n%s", got)
 	}
+	got = adoptNote("/w/steer", checks.AdoptResult{
+		Oracle: checks.OracleRun{Outcome: checks.OutcomePassed, IntegrationFailure: true,
+			Reason: "declared checks without a passing result: good (unavailable)"},
+	}, errors.New("adoption refused: good (unavailable)"))
+	if !strings.Contains(got, "good (unavailable)") || strings.Contains(got, "Add "+checks.ExecInvocation) {
+		t.Errorf("nonpassing result gets a wiring remedy:\n%s", got)
+	}
 }
 
 // x on a row whose tier the panel does archive says why it cannot archive this one,

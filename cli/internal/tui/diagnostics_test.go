@@ -78,6 +78,11 @@ func TestCheckIssuesNameThePanelThatRepairsThem(t *testing.T) {
 	if strings.Contains(view, "--harness claude-code --scope global") {
 		t.Errorf("the runner hint still names one harness and scope:\n%s", view)
 	}
+	m.snap.Checks.LatestRun = &status.CheckRun{Outcome: checks.OutcomePassed, IntegrationFailure: true}
+	view = strings.Join(strings.Fields(m.viewDiagnostics()), " ")
+	if !strings.Contains(view, "incomplete verification") || strings.Contains(view, "Add the managed line") {
+		t.Errorf("nonpassing result is described as missing wiring:\n%s", view)
+	}
 }
 
 // Each history count appears once, with the noun it counts. The review count was

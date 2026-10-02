@@ -1,11 +1,33 @@
 package cadence
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/checks"
 	"github.com/steer-sh/steer-cli/internal/testhome"
 )
+
+// A reported nonpassing check needs its result repaired, while an absent
+// executor record needs the oracle's managed line restored.
+func TestIntegrationWorkDistinguishesNonpassingAndMissingResults(t *testing.T) {
+	for _, missing := range [][]string{nil, {"absent"}} {
+		work := integrationWork("/repo", checks.OracleRun{
+			IntegrationFailure: true, Missing: missing,
+			Reason: "declared checks without a passing result: good (unavailable)",
+		})
+		if !strings.Contains(work.Detail, "good (unavailable)") {
+			t.Fatalf("work %+v; want the nonpassing result", work)
+		}
+		if len(missing) == 0 {
+			if work.Fix != "steer check run" || strings.Contains(work.Detail, "managed line") {
+				t.Fatalf("work %+v; want inspection of results, without a wiring diagnosis", work)
+			}
+		} else if work.Fix != "steer check init" || !strings.Contains(work.Detail, "without running absent") {
+			t.Fatalf("work %+v; want the missing executor remedy", work)
+		}
+	}
+}
 
 // A repository declaring checks that this machine never authorized, holding a
 // declaration nothing replayed, reports both steps with the command that clears

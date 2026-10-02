@@ -174,8 +174,10 @@ apart from the per-check records. It then compares the declared checks with the
 records under that run ID. A declared check with no record is recorded as not
 executed. When `check.sh` passed without running a declared check, that is an
 integration failure: the oracle does not call its executor, which says nothing
-about the check's assertion. `check run` exits non-zero unless `check.sh`
-passed and every declared check reported.
+about the check's assertion. A zero-exit oracle also fails integration when a
+declared check reports a nonpassing result, including an unavailable or skipped
+Go test. Cached passes count as passing results. `check run` exits non-zero
+unless `check.sh` passed and every declared check has a passing result.
 
 Automatic runs need adoption. `steer check adopt [repo]` authorizes them for
 the repository's resolved root on this machine. A linked worktree of an

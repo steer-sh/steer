@@ -92,6 +92,8 @@ func (r *OracleRun) apply(v Verdict) {
 // per-check results are execution records under the same RunID. Missing names
 // the declared checks that no executor reported; after a passing check.sh they
 // are an integration failure, otherwise checks the run never reached.
+// A zero-exit oracle with a nonpassing declared result also fails integration;
+// Reason names those checks while Missing stays limited to absent records.
 // ConcurrentWith names the run that held the repository when this one was
 // refused; such a run is not executed and has no per-check records.
 // Disposition is what the caller did with the result, such as a Stop runner's
@@ -128,7 +130,7 @@ type OracleRun struct {
 	SteerVersion       string            `json:"steer_version"`
 }
 
-// Passed reports a check.sh that exited 0 with every declared check reported.
+// Passed reports a check.sh that exited 0 with every declared check passing.
 func (r OracleRun) Passed() bool {
 	return r.Outcome == OutcomePassed && !r.IntegrationFailure
 }
@@ -237,10 +239,14 @@ func RunOracle(root string, opts RunOptions) (OracleRun, []Execution, error) {
 	}
 	var records []Execution
 	reported := map[string]bool{}
+	nonpassing := map[string][]string{}
 	for _, e := range all {
 		if e.RunID == run.RunID {
 			records = append(records, e)
 			reported[e.CheckID] = true
+			if !e.Passed() {
+				nonpassing[e.CheckID] = append(nonpassing[e.CheckID], fmt.Sprintf("%s (%s)", e.CheckID, e.Outcome))
+			}
 		}
 	}
 	var unreported []Execution
@@ -272,6 +278,16 @@ func RunOracle(root string, opts RunOptions) (OracleRun, []Execution, error) {
 		unreported = append(unreported, rec)
 	}
 	run.IntegrationFailure = run.Outcome == OutcomePassed && len(run.Missing) > 0
+	if run.Outcome == OutcomePassed {
+		var unmet []string
+		for _, d := range declared {
+			unmet = append(unmet, nonpassing[d.ID]...)
+		}
+		if len(unmet) > 0 {
+			run.IntegrationFailure = true
+			run.Reason = "declared checks without a passing result: " + strings.Join(unmet, ", ")
+		}
+	}
 	if err := appendExecutions(opts.EvidenceDir, identity, unreported); err != nil {
 		return run, nil, err
 	}

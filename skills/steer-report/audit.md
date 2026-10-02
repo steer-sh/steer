@@ -206,9 +206,10 @@ is wrong about one of them.
   check.sh itself is the `oracle` failure: `required` when no declared check
   accounts for the exit, `optional` beside a failing check, since check.sh exits
   non-zero for that check and may report nothing else. Read it when check.sh's output
-  shows a step no declared check owns failing too. `integration` is a check.sh that
-  passed without running a declared check, which is wiring and never a failed
-  assertion. A check the run never reached (`not reached`) asserted nothing and is
+  shows a step no declared check owns failing too. `integration` is a zero-exit
+  check.sh with absent or nonpassing declared results. Absent records are wiring;
+  unavailable or skipped results need their own reading, never an assumption that
+  an executor line is missing. A check the run never reached (`not reached`) asserted nothing and is
   not a failure.
 - **Validity: is the failure real?** `valid` when it reports a real defect in what
   the check reads; `invalid` when it does not: a flaky test, a wrong assertion, or a

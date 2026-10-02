@@ -22,8 +22,8 @@ const (
 	// CheckNeverValidated is a declared check whose cases were never replayed
 	// here, so nothing establishes that it fails on the defect it names.
 	CheckNeverValidated = "never-validated"
-	// CheckIntegrationFailure is a passing script that ran no declared check,
-	// which is the script's wiring and never a failed assertion.
+	// CheckIntegrationFailure is a zero-exit oracle with absent or nonpassing
+	// declared results.
 	CheckIntegrationFailure = "integration-failure"
 )
 
@@ -68,13 +68,25 @@ func checkWork(root string) []CheckWork {
 		})
 	}
 	if st.Latest != nil && st.Latest.IntegrationFailure {
-		out = append(out, CheckWork{
-			Kind: CheckIntegrationFailure, Repo: st.Repo,
-			Detail: fmt.Sprintf("%s passed without running %s, so no assertion of theirs was reached; "+
-				"the managed line is missing from its sequence",
-				checks.OracleName, strings.Join(st.Latest.Missing, ", ")),
-			Fix: "steer check init",
-		})
+		out = append(out, integrationWork(st.Repo, *st.Latest))
 	}
 	return out
+}
+
+func integrationWork(repo string, run checks.OracleRun) CheckWork {
+	work := CheckWork{
+		Kind: CheckIntegrationFailure, Repo: repo,
+		Detail: run.Reason,
+		Fix:    "steer check run",
+	}
+	if len(run.Missing) > 0 {
+		work.Detail = fmt.Sprintf("%s passed without running %s, so no assertion of theirs was reached; "+
+			"the managed line is missing from its sequence",
+			checks.OracleName, strings.Join(run.Missing, ", "))
+		if run.Reason != "" {
+			work.Detail += "; " + run.Reason
+		}
+		work.Fix = "steer check init"
+	}
+	return work
 }

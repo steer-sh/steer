@@ -182,6 +182,9 @@ func Adopt(root string, opts AdoptOptions) (AdoptResult, error) {
 	}
 	switch {
 	case run.IntegrationFailure:
+		if run.Reason != "" {
+			return res, fmt.Errorf("%w: %s", ErrNotAdopted, run.Reason)
+		}
 		return res, fmt.Errorf("%w: %s passed without running %s", ErrNotAdopted, OracleName, strings.Join(run.Missing, ", "))
 	case !run.Passed():
 		return res, fmt.Errorf("%w: %s %s", ErrNotAdopted, OracleName, run.Outcome)

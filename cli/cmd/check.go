@@ -358,7 +358,10 @@ func printOracleRun(cmd *cobra.Command, run checks.OracleRun, records []checks.E
 		}
 		fmt.Fprintln(out)
 	}
-	if run.IntegrationFailure {
+	if run.IntegrationFailure && run.Reason != "" {
+		fmt.Fprintf(out, "Integration failure: %s. Restore a passing result for every declared check (see `steer check guide`).\n", run.Reason)
+	}
+	if run.IntegrationFailure && len(run.Missing) > 0 {
 		fmt.Fprintf(out, "Integration failure: %s passed without running %s. Add the managed lines to its sequence (see `steer check guide`):\n  %s\n",
 			checks.OracleName, strings.Join(run.Missing, ", "), checks.ExecInvocation)
 	}
