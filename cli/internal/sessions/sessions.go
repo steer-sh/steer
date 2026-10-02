@@ -36,8 +36,9 @@ func ShardPath(dir, host string) string {
 
 // Options are the inputs to a build.
 type Options struct {
-	// WindowDays bounds the transcript look-back. A session older than this is not
-	// re-read; the snapshot already stored for it stands.
+	// WindowDays bounds the transcript look-back. A transcript file last modified
+	// before it is not re-read, and what it contributed before stands. A file
+	// inside the window is read whole.
 	WindowDays int
 	// Scope selects which sessions the scan reads. The zero value reads every
 	// project, which is what a cross-project mining read wants.
@@ -46,17 +47,24 @@ type Options struct {
 	Only harness.ID
 }
 
+// Fresh is one build: a snapshot per root session it read, and every transcript file
+// it read to the end without error, including a file that yielded no session.
+type Fresh struct {
+	Units []mine.SessionUnit
+	Read  map[string]bool
+}
+
 // Build reads both harnesses' transcripts and returns one snapshot per root session,
 // sorted. A harness whose transcript root is unreadable contributes nothing and never
 // fails the build.
-func Build(opts Options) ([]mine.SessionUnit, error) {
+func Build(opts Options) (Fresh, error) {
 	since := time.Now().AddDate(0, 0, -opts.WindowDays)
 	// One resolver serves both the scope predicate and each session's stored
 	// root, so a directory is resolved once however the scan selects.
 	resolve := report.RootResolver()
 	filter, err := opts.Scope.FilterWith(since, resolve)
 	if err != nil {
-		return nil, err
+		return Fresh{}, err
 	}
 	parser := report.ParserInstrument()
 
@@ -64,6 +72,7 @@ func Build(opts Options) ([]mine.SessionUnit, error) {
 	// seeded marks the sessions whose launch directory has already been read. A
 	// session's entries can span several files, so it outlives one collectSession.
 	seeded := map[string]bool{}
+	read := map[string]bool{}
 	for _, adapter := range report.Adapters(opts.Only) {
 		root, err := adapter.Root()
 		if err != nil {
@@ -77,35 +86,69 @@ func Build(opts Options) ([]mine.SessionUnit, error) {
 		// instrument names both halves of the pipeline that produced it.
 		instrument := mine.ComposeSessionInstrument(parser, adapter.Instrument())
 		for _, session := range discovered {
-			collectSession(adapter, session, since, instrument, resolve, seeded, byID)
+			if collectSession(adapter, session, instrument, resolve, seeded, byID) {
+				read[sourcePath(session.Path)] = true
+			}
 		}
 	}
-	return sorted(byID), nil
+	for _, u := range byID {
+		derive(u)
+	}
+	return Fresh{Units: sorted(byID), Read: read}, nil
 }
 
-// collectSession streams one transcript into the snapshot for its root session. A
-// subagent thread is provenance, so its signals land on the root's snapshot.
-func collectSession(a transcript.Adapter, s transcript.Session, since time.Time,
-	instrument string, resolve func(string) string, seeded map[string]bool,
-	byID map[string]*mine.SessionUnit) {
+// collectSession streams one whole transcript file into the snapshots of the root
+// sessions it names, one source contribution each, and reports whether the read was
+// clean. The window selected the file and never trims its events: a resumed
+// session's early entries are as much its own as its late ones. A failed read adds
+// nothing. A subagent thread is provenance, so its signals land on the root's
+// snapshot.
+func collectSession(a transcript.Adapter, s transcript.Session, instrument string,
+	resolve func(string) string, seeded map[string]bool,
+	byID map[string]*mine.SessionUnit) bool {
 	c := report.NewClassifier()
-	project := transcript.NormalizeProject(s.Project)
-	harnessID := string(a.Harness())
-	// The adapter read the launch directory at discovery, before the time
-	// window applied, so a session whose first entries fall outside the window
-	// still resolves to where it started.
-	root := resolve(s.Cwd)
+	path := sourcePath(s.Path)
+	staged := map[string]*mine.SessionSource{}
 
-	_, _ = a.Stream(s, transcript.Filter{Since: since}, func(e transcript.Event) error {
+	_, err := a.Stream(s, transcript.Filter{}, func(e transcript.Event) error {
 		if e.SessionID == "" {
 			return nil
 		}
-		key := harnessID + "\x1f" + e.SessionID
+		src, ok := staged[e.SessionID]
+		if !ok {
+			src = &mine.SessionSource{Path: path, Instrument: instrument}
+			staged[e.SessionID] = src
+		}
+		ts := parseTS(e.Timestamp)
+		if ts > 0 {
+			if src.StartTS == 0 || ts < src.StartTS {
+				src.StartTS = ts
+			}
+			if ts > src.EndTS {
+				src.EndTS = ts
+			}
+		}
+		if sig, ok := c.Classify(e); ok {
+			src.Signals = append(src.Signals, mine.SessionSignal{Kind: sig.Kind, Text: sig.Key, TS: ts})
+		}
+		return nil
+	})
+	if err != nil {
+		return false
+	}
+
+	project := transcript.NormalizeProject(s.Project)
+	harnessID := string(a.Harness())
+	// The adapter read the launch directory at discovery, so a session resolves to
+	// where it started rather than to a directory an event recorded.
+	root := resolve(s.Cwd)
+	for id, src := range staged {
+		key := harnessID + "\x1f" + id
 		u, ok := byID[key]
 		if !ok {
 			u = &mine.SessionUnit{
 				Harness:    harnessID,
-				SessionID:  e.SessionID,
+				SessionID:  id,
 				Project:    project,
 				Instrument: instrument,
 			}
@@ -118,20 +161,42 @@ func collectSession(a transcript.Adapter, s transcript.Session, since time.Time,
 			seeded[key] = true
 			u.RepoRoot = root
 		}
-		ts := parseTS(e.Timestamp)
-		if ts > 0 {
-			if u.StartTS == 0 || ts < u.StartTS {
-				u.StartTS = ts
-			}
-			if ts > u.EndTS {
-				u.EndTS = ts
+		u.Sources = append(u.Sources, *src)
+	}
+	return true
+}
+
+// sourcePath is a transcript file's identity as a source contribution.
+func sourcePath(path string) string { return filepath.Clean(path) }
+
+// derive recomputes a session's bounds and signals from its sources. A signal that a
+// legacy contribution shares with a file-backed source is shown once, because the
+// legacy snapshot was read from one of those files.
+func derive(u *mine.SessionUnit) {
+	u.StartTS, u.EndTS, u.Signals = 0, 0, nil
+	backed := map[mine.SessionSignal]int{}
+	for _, src := range u.Sources {
+		if src.Path != "" {
+			for _, sig := range src.Signals {
+				backed[sig]++
 			}
 		}
-		if sig, ok := c.Classify(e); ok {
-			u.Signals = append(u.Signals, mine.SessionSignal{Kind: sig.Kind, Text: sig.Key, TS: ts})
+	}
+	for _, src := range u.Sources {
+		if src.StartTS > 0 && (u.StartTS == 0 || src.StartTS < u.StartTS) {
+			u.StartTS = src.StartTS
 		}
-		return nil
-	})
+		if src.EndTS > u.EndTS {
+			u.EndTS = src.EndTS
+		}
+		for _, sig := range src.Signals {
+			if src.Path == "" && backed[sig] > 0 {
+				backed[sig]--
+				continue
+			}
+			u.Signals = append(u.Signals, sig)
+		}
+	}
 }
 
 // Load reads every snapshot shard in the directory, newest write per session wins.
@@ -177,24 +242,66 @@ func loadFiles(paths []string) ([]mine.SessionUnit, error) {
 	return sorted(byID), nil
 }
 
-// Merge folds a fresh build into the stored snapshots. A freshly built session replaces
-// the stored one, because the transcript is the source of truth while it survives; a
-// stored session the build did not reach is kept, which is the whole point of the store.
-func Merge(stored, fresh []mine.SessionUnit) []mine.SessionUnit {
+// Merge folds a fresh build into the stored snapshots one source file at a time. A
+// file the build read replaces everything it contributed before, so a reread can
+// retract a signal or a whole session; a contribution from a file the build did not
+// read is kept, which is the whole point of the store. A session stored before
+// sources were recorded keeps its whole snapshot as one legacy contribution beside
+// the fresh ones, because its files are unknown.
+func Merge(stored []mine.SessionUnit, fresh Fresh) []mine.SessionUnit {
 	byID := map[string]*mine.SessionUnit{}
-	for _, list := range [][]mine.SessionUnit{stored, fresh} {
-		for i := range list {
-			u := list[i]
-			key := u.Harness + "\x1f" + u.SessionID
-			// A root resolved once is kept when a later build cannot resolve it,
-			// because the directory a rebuild reads may no longer exist.
-			if prev, ok := byID[key]; ok && u.RepoRoot == "" {
-				u.RepoRoot = prev.RepoRoot
+	changed := map[string]bool{}
+	legacy := map[string]bool{}
+	for i := range stored {
+		u := stored[i]
+		key := u.Harness + "\x1f" + u.SessionID
+		legacy[key] = len(u.Sources) == 0
+		var kept []mine.SessionSource
+		for _, src := range u.Sources {
+			if src.Path == "" || !fresh.Read[src.Path] {
+				kept = append(kept, src)
 			}
+		}
+		if len(kept) != len(u.Sources) {
+			changed[key] = true
+		}
+		u.Sources = kept
+		byID[key] = &u
+	}
+	for i := range fresh.Units {
+		u := fresh.Units[i]
+		key := u.Harness + "\x1f" + u.SessionID
+		changed[key] = true
+		prev, ok := byID[key]
+		if !ok {
 			byID[key] = &u
+			continue
+		}
+		if legacy[key] {
+			prev.Sources = []mine.SessionSource{legacySource(*prev)}
+		}
+		prev.Sources = append(prev.Sources, u.Sources...)
+		prev.Project, prev.Instrument = u.Project, u.Instrument
+		// A root resolved once is kept when a later build cannot resolve it,
+		// because the directory a rebuild reads may no longer exist.
+		if u.RepoRoot != "" {
+			prev.RepoRoot = u.RepoRoot
 		}
 	}
+	for key := range changed {
+		u := byID[key]
+		if len(u.Sources) == 0 {
+			delete(byID, key)
+			continue
+		}
+		derive(u)
+	}
 	return sorted(byID)
+}
+
+// legacySource is a snapshot stored before sources were recorded, kept whole.
+func legacySource(u mine.SessionUnit) mine.SessionSource {
+	return mine.SessionSource{StartTS: u.StartTS, EndTS: u.EndTS, Signals: u.Signals, Instrument: u.Instrument}
 }
 
 // Save writes the snapshots to this machine's shard, atomically. It sorts what it is
@@ -251,25 +358,23 @@ func sorted(byID map[string]*mine.SessionUnit) []mine.SessionUnit {
 }
 
 // sortUnits is the store's one order: harness, then session id, with each session's
-// signals ordered by time, kind and text. It copies, so the caller's slice keeps its
-// own order.
+// sources ordered by path and every signal list by time, kind and text. It copies, so
+// the caller's slice keeps its own order.
 func sortUnits(units []mine.SessionUnit) []mine.SessionUnit {
 	out := make([]mine.SessionUnit, len(units))
 	copy(out, units)
 	for i := range out {
-		signals := make([]mine.SessionSignal, len(out[i].Signals))
-		copy(signals, out[i].Signals)
-		sort.SliceStable(signals, func(a, b int) bool {
-			x, y := signals[a], signals[b]
-			if x.TS != y.TS {
-				return x.TS < y.TS
-			}
-			if x.Kind != y.Kind {
-				return x.Kind < y.Kind
-			}
-			return x.Text < y.Text
-		})
-		out[i].Signals = signals
+		out[i].Signals = sortSignals(out[i].Signals)
+		if len(out[i].Sources) == 0 {
+			continue
+		}
+		sources := make([]mine.SessionSource, len(out[i].Sources))
+		copy(sources, out[i].Sources)
+		for j := range sources {
+			sources[j].Signals = sortSignals(sources[j].Signals)
+		}
+		sort.SliceStable(sources, func(a, b int) bool { return sources[a].Path < sources[b].Path })
+		out[i].Sources = sources
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Harness != out[j].Harness {
@@ -278,6 +383,22 @@ func sortUnits(units []mine.SessionUnit) []mine.SessionUnit {
 		return out[i].SessionID < out[j].SessionID
 	})
 	return out
+}
+
+func sortSignals(in []mine.SessionSignal) []mine.SessionSignal {
+	signals := make([]mine.SessionSignal, len(in))
+	copy(signals, in)
+	sort.SliceStable(signals, func(a, b int) bool {
+		x, y := signals[a], signals[b]
+		if x.TS != y.TS {
+			return x.TS < y.TS
+		}
+		if x.Kind != y.Kind {
+			return x.Kind < y.Kind
+		}
+		return x.Text < y.Text
+	})
+	return signals
 }
 
 // parseTS reads a harness's own timestamp string into unix seconds. An unparsable or

@@ -33,7 +33,7 @@ still distinguish absent opportunity, absent evidence and no observed recurrence
 > The tracked problem has not appeared again in subsequent work. Leave this fix
 > in place; that observation alone does not establish how much it helped.
 
-Read `provenance` before you weigh the two windows against each other. When the `before` and `after` lists differ, two instruments counted them — a different reviewer, or a different transcript parser — and the counts describe two measurements rather than one.
+Read `provenance` before you weigh the two windows against each other. When the `before` and `after` lists differ, two instruments counted them — a different reviewer, or a different transcript parser — and the counts describe two measurements rather than one. Equal lists do not prove the reverse: a session keeps the signals of a transcript file its latest read did not reach, counted by the instrument of that earlier read.
 
 For every record with a recurrence you confirmed by reading its matches, open the target file and decide between:
 

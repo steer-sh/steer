@@ -50,9 +50,26 @@ type SessionUnit struct {
 	StartTS  float64         `json:"start_ts"`
 	EndTS    float64         `json:"end_ts"`
 	Signals  []SessionSignal `json:"signals"`
-	// Instrument is the pipeline that produced this session's signals: the
-	// classifier, and the adapter that normalized this harness's transcript.
+	// Instrument is the pipeline of the most recent read that produced this
+	// session's signals: the classifier, and the adapter that normalized this
+	// harness's transcript. Signals kept from a source that read did not reach
+	// carry their own pipeline in Sources, so one label does not establish that
+	// one pipeline classified every signal.
 	Instrument string `json:"instrument,omitempty"`
+	// Sources are the per-file contributions the store derived StartTS, EndTS and
+	// Signals from. A session stored before this field existed has none.
+	Sources []SessionSource `json:"sources,omitempty"`
+}
+
+// SessionSource is what one transcript file contributed to a session. Path is
+// empty for a legacy contribution: a whole snapshot stored before sources were
+// recorded, whose file is unknown.
+type SessionSource struct {
+	Path       string          `json:"path,omitempty"`
+	StartTS    float64         `json:"start_ts"`
+	EndTS      float64         `json:"end_ts"`
+	Signals    []SessionSignal `json:"signals"`
+	Instrument string          `json:"instrument,omitempty"`
 }
 
 // Subject reduces a session to the metadata a scope reads. A session changes no known

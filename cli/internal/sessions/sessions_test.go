@@ -1,9 +1,12 @@
 package sessions
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,6 +28,32 @@ func unit(harness, id string, start, end float64, texts ...string) mine.SessionU
 		})
 	}
 	return u
+}
+
+// source is one file-backed contribution of signals at the given times.
+func source(path string, start, end float64, texts ...string) mine.SessionSource {
+	src := mine.SessionSource{Path: path, StartTS: start, EndTS: end, Instrument: "parser/1"}
+	for i, text := range texts {
+		src.Signals = append(src.Signals, mine.SessionSignal{
+			Kind: mine.SignalCorrection, Text: text, TS: start + float64(i),
+		})
+	}
+	return src
+}
+
+// sourced is a session built from its sources, as the store derives one.
+func sourced(harness, id string, sources ...mine.SessionSource) mine.SessionUnit {
+	u := mine.SessionUnit{Harness: harness, SessionID: id, Project: "proj", Instrument: "parser/1", Sources: sources}
+	derive(&u)
+	return u
+}
+
+func texts(u mine.SessionUnit) []string {
+	var out []string
+	for _, sig := range u.Signals {
+		out = append(out, sig.Text)
+	}
+	return out
 }
 
 // A second save over identical evidence must be byte-identical, or the store's own
@@ -56,6 +85,20 @@ func TestSaveIsByteIdentical(t *testing.T) {
 		t.Fatal(err)
 	}
 	if string(first) != string(second) {
+		t.Errorf("a round-tripped save changed bytes:\n%s\n---\n%s", first, second)
+	}
+
+	// Sources the caller holds in another order save to the same bytes.
+	a, b := source("/t/a.jsonl", 1000, 1001, "x"), source("/t/b.jsonl", 1002, 1003, "y")
+	if err := Save(dir, "h", []mine.SessionUnit{sourced("codex", "s3", b, a)}); err != nil {
+		t.Fatal(err)
+	}
+	first, _ = os.ReadFile(ShardPath(dir, "h"))
+	if err := Save(dir, "h", []mine.SessionUnit{sourced("codex", "s3", a, b)}); err != nil {
+		t.Fatal(err)
+	}
+	second, _ = os.ReadFile(ShardPath(dir, "h"))
+	if string(first) != string(second) {
 		t.Errorf("a second save drifted.\n--- first ---\n%s\n--- second ---\n%s", first, second)
 	}
 	if len(loaded) != 2 || loaded[0].Harness != "claude-code" {
@@ -64,15 +107,18 @@ func TestSaveIsByteIdentical(t *testing.T) {
 }
 
 // The store outlives the transcript: a session the rebuild no longer reaches is kept,
-// and a session the rebuild did reach is replaced by the fresh read.
+// and a file the rebuild did read replaces what it contributed, so a reread under a
+// new instrument can retract a signal.
 func TestMergeKeepsWhatTheRebuildNoLongerReaches(t *testing.T) {
 	stored := []mine.SessionUnit{
-		unit("claude-code", "rotated", 1000, 1100, "bare python"),
-		unit("claude-code", "live", 2000, 2100, "stale text"),
+		sourced("claude-code", "rotated", source("/t/rotated.jsonl", 1000, 1100, "bare python")),
+		sourced("claude-code", "live", source("/t/live.jsonl", 2000, 2100, "stale text")),
 	}
-	fresh := []mine.SessionUnit{
-		unit("claude-code", "live", 2000, 2200, "fresh text"),
-		unit("codex", "new", 3000, 3100, "bare python"),
+	live := sourced("claude-code", "live", source("/t/live.jsonl", 2000, 2200, "fresh text"))
+	live.Instrument, live.Sources[0].Instrument = "parser/2", "parser/2"
+	fresh := Fresh{
+		Units: []mine.SessionUnit{live, sourced("codex", "new", source("/t/new.jsonl", 3000, 3100, "bare python"))},
+		Read:  map[string]bool{"/t/live.jsonl": true, "/t/new.jsonl": true},
 	}
 	merged := Merge(stored, fresh)
 	byID := map[string]mine.SessionUnit{}
@@ -85,12 +131,135 @@ func TestMergeKeepsWhatTheRebuildNoLongerReaches(t *testing.T) {
 	if _, ok := byID["claude-code/rotated"]; !ok {
 		t.Error("a rotated-away session must survive in the store")
 	}
-	live := byID["claude-code/live"]
-	if live.Signals[0].Text != "fresh text" || live.EndTS != 2200 {
-		t.Errorf("the fresh read must win over the stored snapshot, got %+v", live)
+	got := byID["claude-code/live"]
+	if strings.Join(texts(got), ",") != "fresh text" || got.EndTS != 2200 || got.Instrument != "parser/2" {
+		t.Errorf("the reread file must replace its own contribution, got %+v", got)
 	}
 	if _, ok := byID["codex/new"]; !ok {
 		t.Error("a newly built session must land in the store")
+	}
+}
+
+// A file the rebuild did not reach keeps its contribution beside one it reread, in
+// either order: a resumed parent must not erase an older child, nor the reverse.
+func TestMergeKeepsTheSiblingFileTheRebuildDidNotRead(t *testing.T) {
+	for _, c := range []struct {
+		reread, want string
+		start        float64
+	}{
+		{"/t/parent.jsonl", "child correction,resumed", 2000},
+		{"/t/child.jsonl", "parent correction,resumed", 1000},
+	} {
+		reread := c.reread
+		stored := []mine.SessionUnit{sourced("codex", "root",
+			source("/t/parent.jsonl", 1000, 1100, "parent correction"),
+			source("/t/child.jsonl", 2000, 2100, "child correction"))}
+		fresh := Fresh{
+			Units: []mine.SessionUnit{sourced("codex", "root", source(reread, 5000, 5100, "resumed"))},
+			Read:  map[string]bool{reread: true},
+		}
+		merged := Merge(stored, fresh)
+		if len(merged) != 1 {
+			t.Fatalf("want one session, got %+v", merged)
+		}
+		got := merged[0]
+		if strings.Join(texts(got), ",") != c.want || got.StartTS != c.start {
+			t.Errorf("rereading %s: got signals %v start %v, want %s from %v",
+				reread, texts(got), got.StartTS, c.want, c.start)
+		}
+	}
+}
+
+// A clean reread that no longer names a session retracts that file's contribution,
+// and a session left with no source leaves the store.
+func TestMergeRetractsWhatACleanRereadNoLongerEmits(t *testing.T) {
+	stored := []mine.SessionUnit{
+		sourced("pi", "two", source("/t/a.jsonl", 1000, 1100, "abandoned branch"), source("/t/b.jsonl", 2000, 2100, "kept")),
+		sourced("pi", "one", source("/t/c.jsonl", 3000, 3100, "gone")),
+	}
+	merged := Merge(stored, Fresh{Read: map[string]bool{"/t/a.jsonl": true, "/t/c.jsonl": true}})
+	if len(merged) != 1 || merged[0].SessionID != "two" {
+		t.Fatalf("a session with no remaining source must leave the store, got %+v", merged)
+	}
+	if got := texts(merged[0]); strings.Join(got, ",") != "kept" || merged[0].StartTS != 2000 {
+		t.Errorf("the reread file's signals must be retracted, got %v start %v", got, merged[0].StartTS)
+	}
+}
+
+// A session stored before sources were recorded keeps its whole snapshot: a signal
+// later than the fresh start and an end later than the fresh end may belong to a
+// file this build did not read. A signal the fresh source also carries shows once,
+// and a second refresh changes nothing.
+func TestMergeKeepsALegacySnapshotWhole(t *testing.T) {
+	stored := []mine.SessionUnit{unit("codex", "old", 1000, 5000, "shared", "unmatched")}
+	stored[0].Signals[1].TS = 4000
+	fresh := Fresh{
+		Units: []mine.SessionUnit{sourced("codex", "old", source("/t/parent.jsonl", 1000, 3000, "shared"))},
+		Read:  map[string]bool{"/t/parent.jsonl": true},
+	}
+	once := Merge(stored, fresh)
+	twice := Merge(once, fresh)
+	for i, merged := range [][]mine.SessionUnit{once, twice} {
+		if len(merged) != 1 {
+			t.Fatalf("merge %d: want one session, got %+v", i+1, merged)
+		}
+		got := merged[0]
+		if strings.Join(texts(got), ",") != "shared,unmatched" {
+			t.Errorf("merge %d: signals %v", i+1, texts(got))
+		}
+		if got.StartTS != 1000 || got.EndTS != 5000 {
+			t.Errorf("merge %d: bounds %v-%v, want the legacy end kept", i+1, got.StartTS, got.EndTS)
+		}
+	}
+}
+
+// A refresh reads a resumed transcript whole: its early entries are older than the
+// window, but they are the session's own, and the session spans an intervention
+// made between them.
+func TestRefreshKeepsAResumedSessionsEarlyEntries(t *testing.T) {
+	home := t.TempDir()
+	testhome.Set(t, home)
+	project := filepath.Join(home, ".claude", "projects", "-t-proj")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	row := func(ts time.Time, text string) string {
+		return fmt.Sprintf(`{"type":"user","sessionId":"s1","timestamp":%q,"message":{"content":%q}}`+"\n",
+			ts.UTC().Format(time.RFC3339), text)
+	}
+	early := time.Now().AddDate(0, 0, -45)
+	body := row(early, "don't use var") + row(time.Now().Add(-time.Hour), "ok continue")
+	if err := os.WriteFile(filepath.Join(project, "s1.jsonl"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	for _, days := range []int{60, 30} {
+		if _, err := Refresh(dir, "h", Options{WindowDays: days}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	units, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(units) != 1 || len(units[0].Signals) != 1 || units[0].StartTS != float64(early.Unix()) {
+		t.Fatalf("the early correction and start must survive, got %+v", units)
+	}
+	_, _, partial := mine.SplitSessions(units, float64(time.Now().AddDate(0, 0, -10).Unix()))
+	if len(partial) != 1 {
+		t.Errorf("a session resumed across an intervention spans it, got partial=%d", len(partial))
+	}
+
+	// The stored row names its file, so rereading the file after its correction is
+	// gone retracts the correction rather than keeping it as unknown evidence.
+	if err := os.WriteFile(filepath.Join(project, "s1.jsonl"), []byte(row(early, "ok start")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Refresh(dir, "h", Options{WindowDays: 30}); err != nil {
+		t.Fatal(err)
+	}
+	if units, _ = Load(dir); len(units) != 1 || len(units[0].Signals) != 0 {
+		t.Errorf("a reread file must retract its own signal, got %+v", units)
 	}
 }
 
@@ -171,7 +340,7 @@ func TestMergeKeepsARootTheRebuildCouldNotResolve(t *testing.T) {
 		withRoot(unit("claude-code", "moved", 2000, 2200), "/repo/elsewhere"),
 	}
 	byID := map[string]mine.SessionUnit{}
-	for _, u := range Merge(stored, fresh) {
+	for _, u := range Merge(stored, Fresh{Units: fresh}) {
 		byID[u.SessionID] = u
 	}
 	if got := byID["live"].RepoRoot; got != "/repo/demo" {
@@ -184,7 +353,10 @@ func TestMergeKeepsARootTheRebuildCouldNotResolve(t *testing.T) {
 
 // stubAdapter emits a fixed event list, so a test can decide what working
 // directories a session recorded and in what order.
-type stubAdapter struct{ events []transcript.Event }
+type stubAdapter struct {
+	events []transcript.Event
+	err    error
+}
 
 func (stubAdapter) Harness() harness.ID   { return harness.ClaudeCode }
 func (stubAdapter) Instrument() string    { return "claude-code:test" }
@@ -200,7 +372,22 @@ func (a stubAdapter) Stream(_ transcript.Session, _ transcript.Filter,
 			return transcript.Counts{}, err
 		}
 	}
-	return transcript.Counts{}, nil
+	return transcript.Counts{}, a.err
+}
+
+// A read that fails after emitting events adds nothing and is not reported clean, so
+// a partial file can neither add signals nor retract the ones stored for it.
+func TestCollectSessionCommitsNothingFromAFailedRead(t *testing.T) {
+	events := []transcript.Event{{
+		Kind: transcript.KindHumanTurn, SessionID: "s1", Text: "don't use var",
+		Timestamp: "2026-07-10T00:00:00Z",
+	}}
+	byID := map[string]*mine.SessionUnit{}
+	ok := collectSession(stubAdapter{events: events, err: errors.New("truncated")},
+		transcript.Session{Path: "/t/s1.jsonl"}, "parser/1", report.RootResolver(), map[string]bool{}, byID)
+	if ok || len(byID) != 0 {
+		t.Errorf("a failed read must commit nothing: clean=%v units=%+v", ok, byID)
+	}
 }
 
 // A session's root is the launch directory the adapter read at discovery, not a
@@ -222,7 +409,7 @@ func TestTheLaunchDirectoryDecidesTheRootEvenWhenItResolvesToNone(t *testing.T) 
 			})
 		}
 		byID := map[string]*mine.SessionUnit{}
-		collectSession(stubAdapter{events}, transcript.Session{Cwd: launch}, time.Time{},
+		collectSession(stubAdapter{events: events}, transcript.Session{Cwd: launch},
 			"parser/1", report.RootResolver(), map[string]bool{}, byID)
 		return *byID["claude-code\x1fs1"]
 	}

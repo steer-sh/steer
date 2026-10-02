@@ -508,8 +508,12 @@ and the first human text observed in its session and thread within the scan as
 details-only context, which no key, count or `--match` reads. All skip Meta turns
 and the harness wrappers the correction matcher skips; context text keeps a paste-only turn as a placeholder.
 
-`internal/sessions/` persists `sessions.<host>.jsonl`. Refresh merges newly read
-sessions with stored ones, retaining sessions whose source transcript disappeared.
+`internal/sessions/` persists `sessions.<host>.jsonl`. A session's row keeps one
+contribution per transcript file (`Sources`), and its bounds and signals derive from
+them. The look-back window selects files by modification time, and a selected file is
+read whole. Refresh replaces only what a cleanly reread file contributed, so a file the
+build did not reach, or one that has disappeared, keeps its contribution. A row stored
+before sources were recorded stays whole as one legacy contribution.
 `steer report refresh` writes snapshots; status and dashboard read them.
 `internal/evidence/` gathers review rows, session snapshots and guard firings into
 one `mine.EvidenceSet` shared by cadence, status and intervention commands.
