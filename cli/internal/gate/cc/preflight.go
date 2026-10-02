@@ -25,6 +25,9 @@ func PreflightDeny(cmd, cwd string) (reason, receipt string) {
 		if redir := parsed.commitRedirect(); redir != "" {
 			return fmt.Sprintf(commitRedirectReason, shortStep(redir)), StepBeforeCommitReceipt
 		}
+		if step := parsed.concurrentStep(); step != "" {
+			return fmt.Sprintf(concurrentStepReason, shortStep(step)), StepBeforeCommitReceipt
+		}
 		if parsed.selectsPaths() {
 			return selectedPathsReason, SelectedPathsReceipt
 		}
@@ -58,10 +61,16 @@ const commitRedirectReason = "[commit-gate] BLOCKED: this commit writes its outp
 	"RAN. Drop the redirect, or send the output to /dev/null or to an absolute path " +
 	"under /tmp outside the repository."
 
-// StepBeforeCommitReceipt states that the step-before-commit refusal, or the refusal of
-// a redirect on the commit itself, blocked before review.
+const concurrentStepReason = "[commit-gate] BLOCKED: this command runs `%s` while its " +
+	"commit runs. A pipeline member or a background job runs beside git, so it can change " +
+	"the tree after the reviewers read it and before git does. NOTHING IN THE COMMAND RAN. " +
+	"Run the commit on its own, or pipe its output only to a filter such as tail, head or " +
+	"grep that writes no file in the repository."
+
+// StepBeforeCommitReceipt states that a refusal of a step before or beside the commit,
+// or of a redirect on the commit itself, blocked before review.
 const StepBeforeCommitReceipt = "[commit-gate] refused a commit whose command can change " +
-	"the tree before git reads it. No review ran and no adjudication row was written."
+	"the tree before or while git reads it. No review ran and no adjudication row was written."
 
 // shortStep keeps a refused step's first line, cut to a length a reason can quote.
 func shortStep(step string) string {

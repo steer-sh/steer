@@ -468,8 +468,9 @@ func writesTarget(redir *syntax.Redirect) bool {
 	return !ok || (fd != "" && strings.Trim(fd, "0123456789") != "")
 }
 
-// Steps that may run before the commit in the same command. None of them writes a
-// file except through a redirect, which stepBeforeCommit judges on its own.
+// Steps that may run before or beside the commit in the same command. None of them
+// writes a file except through a redirect, which stepBeforeCommit and memberStep judge
+// on their own.
 var stepsBeforeCommit = map[string]bool{
 	"cd": true, "pwd": true, "echo": true, "printf": true, "cat": true, "head": true,
 	"tail": true, "grep": true, "wc": true, "true": true, ":": true, "set": true,
@@ -487,40 +488,14 @@ var scratchRoots = []string{"/tmp", "/private/tmp", "/var/folders", os.TempDir()
 
 // stepBeforeCommit returns the source of the first step that runs before git
 // commits and may change the tree: a call outside the allowlist, or an output
-// redirect outside a scratch directory. That region is everything up to the end
-// of the commit's statement, plus its heredoc bodies, because a substitution there
-// runs before git does. Empty means no such step.
+// redirect outside a scratch directory. Empty means no such step.
 func (p *parsedGit) stepBeforeCommit() string {
 	file, err := syntax.NewParser().Parse(strings.NewReader(p.program.Source), "command")
 	if err != nil {
 		return ""
 	}
-	end := p.call.End
-	var heredocs [][2]int
 	commitStmt := p.commitStatement(file)
-	if commitStmt != nil {
-		// A Stmt's own end runs past its heredoc bodies, which the region holds
-		// separately, so the statement ends at its last redirect word.
-		for _, redir := range commitStmt.Redirs {
-			if redir.Word != nil {
-				end = max(end, int(redir.Word.End().Offset()))
-			}
-			if redir.Hdoc != nil {
-				heredocs = append(heredocs, [2]int{int(redir.Hdoc.Pos().Offset()), int(redir.Hdoc.End().Offset())})
-			}
-		}
-	}
-	runsFirst := func(start int) bool {
-		if start < end {
-			return true
-		}
-		for _, body := range heredocs {
-			if start >= body[0] && start < body[1] {
-				return true
-			}
-		}
-		return false
-	}
+	runsFirst := p.firstRegion(commitStmt)
 	var step string
 	syntax.Walk(file, func(node syntax.Node) bool {
 		stmt, ok := node.(*syntax.Stmt)
@@ -567,6 +542,135 @@ func (p *parsedGit) commitRedirect() string {
 	return ""
 }
 
+// firstRegion reports whether a source offset runs before git commits: everything up
+// to the end of the commit's statement, plus its heredoc bodies, because a
+// substitution there runs before git does.
+func (p *parsedGit) firstRegion(commitStmt *syntax.Stmt) func(int) bool {
+	end := p.call.End
+	var heredocs [][2]int
+	if commitStmt != nil {
+		// A Stmt's own end runs past its heredoc bodies, which the region holds
+		// separately, so the statement ends at its last redirect word.
+		for _, redir := range commitStmt.Redirs {
+			if redir.Word != nil {
+				end = max(end, int(redir.Word.End().Offset()))
+			}
+			if redir.Hdoc != nil {
+				heredocs = append(heredocs, [2]int{int(redir.Hdoc.Pos().Offset()), int(redir.Hdoc.End().Offset())})
+			}
+		}
+	}
+	return func(start int) bool {
+		if start < end {
+			return true
+		}
+		for _, body := range heredocs {
+			if start >= body[0] && start < body[1] {
+				return true
+			}
+		}
+		return false
+	}
+}
+
+// concurrentStep returns the source of the first step that may run while git commits
+// and change the tree it reads: an asynchronous statement that starts before the
+// commit ends or holds it, or a step in a member of a pipeline that holds the commit.
+// Empty means no such step.
+func (p *parsedGit) concurrentStep() string {
+	file, err := syntax.NewParser().Parse(strings.NewReader(p.program.Source), "command")
+	if err != nil {
+		return ""
+	}
+	commitStmt := p.commitStatement(file)
+	if commitStmt == nil {
+		return ""
+	}
+	runsFirst := p.firstRegion(commitStmt)
+	var step string
+	syntax.Walk(file, func(node syntax.Node) bool {
+		if step != "" {
+			return false
+		}
+		switch node := node.(type) {
+		case *syntax.Stmt:
+			if asynchronous(node) && runsFirst(int(node.Pos().Offset())) {
+				step = p.source(node)
+			}
+		case *syntax.BinaryCmd:
+			if node.Op != syntax.Pipe && node.Op != syntax.PipeAll {
+				break
+			}
+			if holds(node.X, commitStmt) {
+				step = p.memberStep(node.Y)
+			} else if holds(node.Y, commitStmt) {
+				step = p.memberStep(node.X)
+			}
+		}
+		return step == ""
+	})
+	return step
+}
+
+// memberStep returns the source of the first step in a pipeline member beside the
+// commit that may change the tree while git reads it: a call that is a git call or
+// outside the read-only steps, or a redirect outside a scratch directory.
+func (p *parsedGit) memberStep(member *syntax.Stmt) string {
+	var step string
+	syntax.Walk(member, func(node syntax.Node) bool {
+		if step != "" {
+			return false
+		}
+		switch node := node.(type) {
+		case *syntax.Stmt:
+			for _, redir := range node.Redirs {
+				if writesTarget(redir) && !p.scratchTarget(redir.Word) {
+					step = p.source(node)
+				}
+			}
+		case *syntax.CallExpr:
+			if len(node.Args) > 0 && !p.filterCall(int(node.Pos().Offset())) {
+				step = p.source(node)
+			}
+		}
+		return step == ""
+	})
+	return step
+}
+
+// filterCall reports whether the call at a source offset is a read-only step and
+// not a git call, so it may run beside the commit.
+func (p *parsedGit) filterCall(start int) bool {
+	for _, call := range p.program.Calls {
+		if call.Start == start {
+			_, isGit := gitExecutable(call.Args)
+			return !isGit && readOnlyStep(call)
+		}
+	}
+	return false
+}
+
+// asynchronous reports a statement the shell does not wait for: one sent to the
+// background, a coprocess, or a disowned job.
+func asynchronous(stmt *syntax.Stmt) bool {
+	_, coproc := stmt.Cmd.(*syntax.CoprocClause)
+	return stmt.Background || stmt.Coprocess || stmt.Disown || coproc
+}
+
+// holds reports whether target is node or lies inside it.
+func holds(node syntax.Node, target *syntax.Stmt) bool {
+	found := false
+	syntax.Walk(node, func(n syntax.Node) bool {
+		found = found || n == target
+		return !found
+	})
+	return found
+}
+
+func (p *parsedGit) source(node syntax.Node) string {
+	return p.program.Source[node.Pos().Offset():node.End().Offset()]
+}
+
 // commitStatement returns the statement whose call is the commit, or nil.
 func (p *parsedGit) commitStatement(file *syntax.File) *syntax.Stmt {
 	var found *syntax.Stmt
@@ -594,6 +698,10 @@ func (p *parsedGit) allowedBeforeCommit(call shellsyntax.Call) bool {
 		}
 		return true
 	}
+	return readOnlyStep(call)
+}
+
+func readOnlyStep(call shellsyntax.Call) bool {
 	return call.Args[0].Static && stepsBeforeCommit[call.Args[0].Value]
 }
 

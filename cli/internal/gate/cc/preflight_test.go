@@ -185,6 +185,46 @@ func TestPreflightDenyRefusesARedirectOnTheCommitItself(t *testing.T) {
 	}
 }
 
+// TestPreflightDenyRefusesAStepThatRunsBesideTheCommit: a pipeline member or a
+// background job runs while git reads the tree, so it can change what lands after the
+// reviewers read it.
+func TestPreflightDenyRefusesAStepThatRunsBesideTheCommit(t *testing.T) {
+	c := "co" + "mmit"
+	for cmd, step := range map[string]string{
+		"git " + c + " -am x | tee code.go":                    "tee code.go",
+		"git " + c + " -am x |& tee code.go":                   "tee code.go",
+		"git " + c + " -am x 2>&1 | sed -i s/a/b/ code.go":     "sed -i s/a/b/ code.go",
+		"git add a | git " + c + " -m x":                       "git add a",
+		"git " + c + " -am x | tail -3 > code.go":              "tail -3 > code.go",
+		"git " + c + " -am x | { tail -3; } > code.go":         "{ tail -3; } > code.go",
+		"(git " + c + " -am x | tail -3) | tee code.go":        "tee code.go",
+		"git " + c + " -am x | tail -$(sed -i s/a/b/ code.go)": "sed -i s/a/b/ code.go",
+		"git " + c + " -am x &":                                "git " + c + " -am x &",
+		"git " + c + " -am x | tail -3 &":                      "git " + c + " -am x | tail -3 &",
+		"git " + c + " -m x && echo done &":                    "git " + c + " -m x && echo done &",
+		"{ git " + c + " -am x; } &":                           "{ git " + c + " -am x; } &",
+		"git add a & git " + c + " -m x":                       "git add a &",
+		"coproc git " + c + " -am x":                           "coproc git " + c + " -am x",
+	} {
+		reason, receipt := PreflightDeny(cmd, "/cwd")
+		if receipt != StepBeforeCommitReceipt || reason != fmt.Sprintf(concurrentStepReason, step) {
+			t.Errorf("%q runs %q beside git and must be refused naming it, got %q", cmd, step, reason)
+		}
+	}
+	for _, cmd := range []string{
+		"git " + c + " -am x 2>&1 | tail -3",
+		"git " + c + " -m x | head -2",
+		"git " + c + " -m x |& grep -v hint",
+		"git " + c + " -m x | tail -3 > /tmp/commit.log",
+		"git " + c + " -m x; sleep 5 &",
+		"git status | head -2 && git " + c + " -m x",
+	} {
+		if reason, _ := PreflightDeny(cmd, "/cwd"); reason != "" {
+			t.Errorf("%q runs nothing beside git that writes the tree and must go to review, got %q", cmd, reason)
+		}
+	}
+}
+
 // TestPreflightDenyRefusesACommitThatSetsGitsEnvironment: the gate's own git calls read
 // the hook's environment, so an index, repository or work tree the command selects by
 // variable is a tree the reviewers never see.
