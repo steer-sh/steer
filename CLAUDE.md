@@ -83,6 +83,8 @@ Read the linked architecture section before changing the corresponding boundary:
   [observations](ARCHITECTURE.md#interventions-and-observations).
   `cli/internal/gate/mine/` owns both corpus engines. Field counts describe
   recurrence; they cannot establish a fix's efficacy or justify retirement.
+  Inventory mutations hold `mine.lockInventory` from loading records through
+  `save`; locking only the final write still loses concurrent changes.
   A check-tier record's binding is frozen by `cli/internal/checkscope/`, which
   may read the harness adapters that `gate/mine` may not.
 - Reading or judging a recorded guard firing or check.sh Stop block:

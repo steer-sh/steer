@@ -97,6 +97,11 @@ type DescribeOpts struct {
 // This is the opposite of ScopeSet, which stamps scope_set_ts precisely because
 // changing eligibility does invalidate the window it opened.
 func Describe(w io.Writer, stateDir, id string, o DescribeOpts) error {
+	release, err := lockInventory(stateDir)
+	if err != nil {
+		return err
+	}
+	defer release()
 	records, err := Load(stateDir)
 	if err != nil {
 		return err
@@ -116,7 +121,7 @@ func Describe(w io.Writer, stateDir, id string, o DescribeOpts) error {
 		return err
 	}
 	prose.writeInto(rec)
-	if err := Save(stateDir, records); err != nil {
+	if err := save(stateDir, records); err != nil {
 		return err
 	}
 	fmt.Fprintln(w, pyDumps(rec, 2))

@@ -57,14 +57,20 @@ func goRunner(root string, d Declaration, gd goDetector) (caseRunner, error) {
 			return copyDetectorFiles(root, tree, inputs)
 		},
 		run: func(tree string, c Case, res *CaseResult) string {
-			pkgDir := filepath.Join(tree, filepath.FromSlash(d.Package))
-			if err := removeTestFiles(pkgDir); err != nil {
+			caseTree, err := os.OpenRoot(tree)
+			if err != nil {
 				return err.Error()
 			}
-			if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+			defer caseTree.Close()
+			pkg := filepath.FromSlash(d.Package)
+			pkgDir := filepath.Join(tree, pkg)
+			if err := removeTestFiles(caseTree, pkg); err != nil {
 				return err.Error()
 			}
-			if err := os.WriteFile(filepath.Join(pkgDir, generatedTestName), src, 0o644); err != nil {
+			if err := caseTree.MkdirAll(pkg, 0o755); err != nil {
+				return err.Error()
+			}
+			if err := caseTree.WriteFile(filepath.Join(pkg, generatedTestName), src, 0o644); err != nil {
 				return err.Error()
 			}
 			_, out, timedOut, err := runCommand(pkgDir, goReplayEnv, goBin,
@@ -105,17 +111,22 @@ func goRunner(root string, d Declaration, gd goDetector) (caseRunner, error) {
 	}, nil
 }
 
-func removeTestFiles(dir string) error {
-	entries, err := os.ReadDir(dir)
+func removeTestFiles(tree *os.Root, dir string) error {
+	f, err := tree.Open(dir)
 	if os.IsNotExist(err) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
+	defer f.Close()
+	entries, err := f.ReadDir(-1)
+	if err != nil {
+		return err
+	}
 	for _, e := range entries {
 		if !e.IsDir() && strings.HasSuffix(e.Name(), "_test.go") {
-			if err := os.Remove(filepath.Join(dir, e.Name())); err != nil {
+			if err := tree.Remove(filepath.Join(dir, e.Name())); err != nil {
 				return err
 			}
 		}

@@ -21,7 +21,7 @@ import (
 // ExecutorVersion names the replay semantics. Raise it when a change to replay
 // could turn a stored outcome into a different one; a receipt from another
 // executor version is stale.
-const ExecutorVersion = 2
+const ExecutorVersion = 3
 
 // CaseTimeout bounds each setup script and each check run within a case.
 var CaseTimeout = 120 * time.Second
@@ -249,8 +249,13 @@ func changedDetectorFile(root, tree string, files []string) string {
 }
 
 func copyDetectorFiles(root, tree string, files map[string]bool) error {
+	dst, err := os.OpenRoot(tree)
+	if err != nil {
+		return err
+	}
+	defer dst.Close()
 	for p := range files {
-		if err := copyFile(filepath.Join(root, filepath.FromSlash(p)), filepath.Join(tree, filepath.FromSlash(p))); err != nil {
+		if err := copyFile(filepath.Join(root, filepath.FromSlash(p)), dst, filepath.FromSlash(p)); err != nil {
 			return fmt.Errorf("copy detector file %s: %w", p, err)
 		}
 	}
@@ -305,12 +310,17 @@ func replayCase(root, bash string, runner caseRunner, c Case) CaseResult {
 			return invalid(fmt.Sprintf("the patch %s changes detector file %s", c.Patch, p))
 		}
 	}
+	caseTree, err := os.OpenRoot(tree)
+	if err != nil {
+		return invalid(fmt.Sprintf("open case tree: %v", err))
+	}
+	defer caseTree.Close()
 	for p, content := range c.Files {
-		dst := filepath.Join(tree, filepath.FromSlash(p))
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		dst := filepath.FromSlash(p)
+		if err := caseTree.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			return invalid(fmt.Sprintf("write case file %s: %v", p, err))
 		}
-		if err := os.WriteFile(dst, []byte(content), 0o644); err != nil {
+		if err := caseTree.WriteFile(dst, []byte(content), 0o644); err != nil {
 			return invalid(fmt.Sprintf("write case file %s: %v", p, err))
 		}
 	}
@@ -394,7 +404,8 @@ func excerpt(out []byte) string {
 	return strings.ToValidUTF8(string(out), "?")
 }
 
-func copyFile(src, dst string) error {
+// copyFile bounds writes to the case tree, including snapshot symlink targets.
+func copyFile(src string, tree *os.Root, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return err
@@ -404,10 +415,10 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+	if err := tree.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode().Perm())
+	out, err := tree.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode().Perm())
 	if err != nil {
 		return err
 	}

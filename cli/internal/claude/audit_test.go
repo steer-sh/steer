@@ -350,3 +350,221 @@ func TestAFailedSidecarStillWritesTheRow(t *testing.T) {
 		t.Errorf("a firing whose evidence could not be retained lost its row: %v", entry)
 	}
 }
+
+func forcePortableAuditWrites(t *testing.T, masterPath string) {
+	t.Helper()
+	master, err := os.ReadFile(masterPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	master = []byte(strings.Replace(string(master), "def steer_descriptor_writes():", "def steer_descriptor_writes():\n    return False", 1))
+	if err := os.WriteFile(masterPath, master, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMasterAuditRefusesSymlinkedLogAndStore(t *testing.T) {
+	for _, component := range []string{"log", "dangling-log", "hooks", "parent", "log-portable", "dangling-log-portable", "hooks-portable", "parent-portable"} {
+		t.Run(component, func(t *testing.T) {
+			withProjectTempDir(t)
+			requirePython3(t)
+			hooksDir := installBlockingHook(t)
+			if strings.HasSuffix(component, "-portable") {
+				forcePortableAuditWrites(t, filepath.Join(hooksDir, MasterHookName))
+				component = strings.TrimSuffix(component, "-portable")
+			}
+			outside := t.TempDir()
+			target := filepath.Join(outside, AuditLogName)
+			original := []byte("unrelated data\n")
+			if component != "dangling-log" {
+				if err := os.WriteFile(target, original, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			link := filepath.Join(hooksDir, AuditLogName)
+			switch component {
+			case "hooks", "parent":
+				link = hooksDir
+				if component == "parent" {
+					link = filepath.Dir(hooksDir)
+				}
+				moved := link + "-original"
+				if err := os.Rename(link, moved); err != nil {
+					t.Fatal(err)
+				}
+				// Keep the generated master executable through the linked path.
+				master, err := os.ReadFile(filepath.Join(moved, MasterHookName))
+				if component == "parent" {
+					master, err = os.ReadFile(filepath.Join(moved, "hooks", MasterHookName))
+					if mkdirErr := os.Mkdir(filepath.Join(outside, "hooks"), 0o700); mkdirErr != nil {
+						t.Fatal(mkdirErr)
+					}
+					target = filepath.Join(outside, "hooks", AuditLogName)
+					if writeErr := os.WriteFile(target, original, 0o600); writeErr != nil {
+						t.Fatal(writeErr)
+					}
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(filepath.Dir(target), MasterHookName), master, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(outside, link); err != nil {
+					t.Fatal(err)
+				}
+			default:
+				if err := os.Symlink(target, link); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if output := runMasterHook(t, `{"tool_name":"Bash","tool_input":{"command":"var x = 1"}}`); !masterBlocked(output) {
+				t.Fatalf("audit refusal weakened the guard: %s", output)
+			}
+			got, err := os.ReadFile(target)
+			if component == "dangling-log" {
+				if !os.IsNotExist(err) {
+					t.Fatalf("dangling log link created its target: %v, %s", err, got)
+				}
+			} else if err != nil || string(got) != string(original) {
+				t.Fatalf("audit write escaped through %s: %v, %s", component, err, got)
+			}
+		})
+	}
+}
+
+// pins existing behaviour: a global .steer link is selected by the operator.
+func TestGlobalAuditKeepsOperatorSelectedStoreLink(t *testing.T) {
+	for _, portable := range []bool{false, true} {
+		t.Run(map[bool]string{false: "descriptors", true: "portable"}[portable], func(t *testing.T) {
+			withProjectTempDir(t)
+			requirePython3(t)
+			home := spacedHome(t)
+			storeParent := t.TempDir()
+			if err := os.Symlink(storeParent, filepath.Join(home, ".steer")); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := InstallManagedHook(GlobalScope, InstallManagedHookInput{
+				HookName: "no-var-hook", FileName: "no-var-hook.py", Rule: "never use var",
+				Content: []byte(blockingHookContent), Metadata: HookInstallMetadata{Source: SourceGenerated},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			masterPath, err := GetMasterHookPath(GlobalScope)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if portable {
+				forcePortableAuditWrites(t, masterPath)
+			}
+			for _, size := range []int{10, 40000} {
+				payload, err := json.Marshal(map[string]any{
+					"tool_name": "Bash", "tool_input": map[string]any{"command": "var " + strings.Repeat("z", size)},
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				cmd := exec.Command("python3", masterPath)
+				cmd.Stdin = strings.NewReader(string(payload))
+				if output, err := cmd.CombinedOutput(); err != nil || !masterBlocked(string(output)) {
+					t.Fatalf("global master failed: %v, %s", err, output)
+				}
+			}
+			data, err := os.ReadFile(filepath.Join(storeParent, "hooks", AuditLogName))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var rows []map[string]any
+			for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+				var row map[string]any
+				if err := json.Unmarshal([]byte(line), &row); err != nil {
+					t.Fatal(err)
+				}
+				rows = append(rows, row)
+			}
+			if len(rows) != 2 {
+				t.Fatalf("linked global store lost audit rows: %v", rows)
+			}
+			for _, row := range rows {
+				if row["evidence_complete"] != true {
+					t.Fatalf("linked global store lost evidence: %v", row)
+				}
+				if ref, ok := row["evidence_ref"].(string); ok {
+					if _, err := os.Stat(filepath.Join(storeParent, "hooks", filepath.FromSlash(ref))); err != nil {
+						t.Fatalf("global sidecar absent: %v", err)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestMasterEvidenceRefusesSymlinkedPaths(t *testing.T) {
+	for _, component := range []string{"directory", "temporary", "target", "directory-portable", "temporary-portable", "target-portable"} {
+		t.Run(component, func(t *testing.T) {
+			withProjectTempDir(t)
+			requirePython3(t)
+			hooksDir := installBlockingHook(t)
+			if strings.HasSuffix(component, "-portable") {
+				forcePortableAuditWrites(t, filepath.Join(hooksDir, MasterHookName))
+				component = strings.TrimSuffix(component, "-portable")
+			}
+			outside := t.TempDir()
+			original := []byte("unrelated data\n")
+			target := filepath.Join(outside, "unrelated.txt")
+			if err := os.WriteFile(target, original, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			// A fixed firing identifier makes the sidecar paths deterministic.
+			masterPath := filepath.Join(hooksDir, MasterHookName)
+			master, err := os.ReadFile(masterPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			master = []byte(strings.Replace(string(master), "return os.urandom(16).hex()", `return "fixed-firing"`, 1))
+			if err := os.WriteFile(masterPath, master, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			directory := filepath.Join(hooksDir, hookstore.PayloadsName)
+			link := directory
+			if component == "directory" {
+				target = outside
+			} else {
+				if err := os.Mkdir(directory, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				link = filepath.Join(directory, "fixed-firing.json")
+				if component == "temporary" {
+					link += ".part"
+				}
+			}
+			if err := os.Symlink(target, link); err != nil {
+				t.Fatal(err)
+			}
+			payload, err := json.Marshal(map[string]any{
+				"tool_name": "Bash", "tool_input": map[string]any{"command": "var " + strings.Repeat("z", 40000)},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			entry := auditRow(t, hooksDir, string(payload))
+			if entry["evidence_complete"] != false || entry["evidence_error"] != "write" {
+				t.Fatalf("unsafe evidence path was accepted: %v", entry)
+			}
+			if component == "directory" {
+				files, err := os.ReadDir(outside)
+				if err != nil || len(files) != 1 {
+					t.Fatalf("evidence escaped into linked directory: %v, %v", files, err)
+				}
+			} else {
+				got, err := os.ReadFile(target)
+				if err != nil || string(got) != string(original) {
+					t.Fatalf("evidence overwrote linked target: %v, %s", err, got)
+				}
+			}
+			if info, err := os.Lstat(link); err != nil || info.Mode()&os.ModeSymlink == 0 {
+				t.Fatalf("refused link was replaced: %v, %v", info, err)
+			}
+		})
+	}
+}

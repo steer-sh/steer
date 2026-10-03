@@ -671,6 +671,11 @@ func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 	if installed == 0 {
 		installed = now()
 	}
+	release, err := lockInventory(stateDir)
+	if err != nil {
+		return err
+	}
+	defer release()
 	records, err := Load(stateDir)
 	if err != nil {
 		return err
@@ -858,7 +863,7 @@ func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 		record["supersedes"] = o.Supersedes
 	}
 	records = append(records, record)
-	if err := Save(stateDir, records); err != nil {
+	if err := save(stateDir, records); err != nil {
 		return err
 	}
 	fmt.Fprintln(w, pyDumps(record, 2))
@@ -975,6 +980,11 @@ func Reject(w io.Writer, stateDir string, o RejectOpts) error {
 			"no baseline can never be re-scored, and cannot be recognised when the class " +
 			"returns. Widen the scope or the regex, or pass --force")
 	}
+	release, err := lockInventory(stateDir)
+	if err != nil {
+		return err
+	}
+	defer release()
 	records, err := Load(stateDir)
 	if err != nil {
 		return err
@@ -1009,7 +1019,7 @@ func Reject(w io.Writer, stateDir string, o RejectOpts) error {
 		}
 	}
 	records = append(records, record)
-	if err := Save(stateDir, records); err != nil {
+	if err := save(stateDir, records); err != nil {
 		return err
 	}
 	fmt.Fprintln(w, pyDumps(record, 2))
@@ -1034,6 +1044,11 @@ type ScopeSetOpts struct {
 // select on already-observed post-install results. An existing scope is never edited;
 // correcting one is a retire plus a fresh register.
 func ScopeSet(w io.Writer, stateDir, id string, o ScopeSetOpts) error {
+	release, err := lockInventory(stateDir)
+	if err != nil {
+		return err
+	}
+	defer release()
 	records, err := Load(stateDir)
 	if err != nil {
 		return err
@@ -1094,7 +1109,7 @@ func ScopeSet(w io.Writer, stateDir, id string, o ScopeSetOpts) error {
 	rec["scope"] = scopeMap
 	rec["scope_set_ts"] = int(setTS)
 	rec["baseline"] = baselineMap(bHits, bTotal, bRate)
-	if err := Save(stateDir, records); err != nil {
+	if err := save(stateDir, records); err != nil {
 		return err
 	}
 	fmt.Fprintln(w, pyDumps(rec, 2))
@@ -1468,6 +1483,11 @@ func List(w io.Writer, stateDir string, asJSON bool) error {
 
 // Retire marks an intervention reworked or removed.
 func Retire(w io.Writer, stateDir, id, reason, status string) error {
+	release, err := lockInventory(stateDir)
+	if err != nil {
+		return err
+	}
+	defer release()
 	records, err := Load(stateDir)
 	if err != nil {
 		return err
@@ -1479,7 +1499,7 @@ func Retire(w io.Writer, stateDir, id, reason, status string) error {
 	hit["status"] = status
 	hit["retired_ts"] = int(now())
 	hit["retired_reason"] = reason
-	if err := Save(stateDir, records); err != nil {
+	if err := save(stateDir, records); err != nil {
 		return err
 	}
 	fmt.Fprintln(w, pyDumps(hit, 2))

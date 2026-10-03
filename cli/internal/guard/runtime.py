@@ -1,6 +1,6 @@
 # Steer master-hook runtime. Spliced into the generated master hook, so it
-# declares no imports and no entrypoint: ast, datetime, hashlib, io, json, os and
-# sys are guaranteed by the generated file's import block.
+# declares no imports and no entrypoint: ast, datetime, hashlib, io, json, os,
+# stat and sys are guaranteed by the generated file's import block.
 
 STEER_CLAUDE = "claude-code"
 STEER_CODEX = "codex"
@@ -201,7 +201,91 @@ def steer_locators(payload):
     return locators
 
 
-def steer_store_evidence(entry, evidence, store_dir):
+def steer_descriptor_writes():
+    """Use directory-relative no-follow writes where the platform supports them."""
+    return (hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY")
+            and os.open in os.supports_dir_fd)
+
+
+def steer_unlinked_path(directory, name):
+    path = os.path.join(directory, name)
+    if os.path.islink(path):
+        raise OSError("audit path is a symlink")
+    return path
+
+
+def steer_open_store(store_dir, scope):
+    """Anchor writes in the master's store, refusing repository-carried links."""
+    parent = os.path.dirname(store_dir)
+    if not steer_descriptor_writes():
+        if scope != "global" and os.path.islink(parent):
+            raise OSError("store parent is a symlink")
+        steer_unlinked_path(parent, os.path.basename(store_dir))
+        return store_dir
+    flags = os.O_RDONLY | os.O_DIRECTORY
+    if scope == "global":
+        parent_fd = os.open(parent, flags)
+    else:
+        root_fd = os.open(os.path.dirname(parent), flags)
+        try:
+            parent_fd = os.open(os.path.basename(parent), flags | os.O_NOFOLLOW,
+                                dir_fd=root_fd)
+        finally:
+            os.close(root_fd)
+    try:
+        return os.open(os.path.basename(store_dir), flags | os.O_NOFOLLOW,
+                       dir_fd=parent_fd)
+    finally:
+        os.close(parent_fd)
+
+
+def steer_write_sidecar(data, name, store):
+    """Retain a whole sidecar without opening an existing temporary file."""
+    if isinstance(store, str):
+        directory = steer_unlinked_path(store, STEER_PAYLOADS_DIR)
+        os.makedirs(directory, exist_ok=True)
+        target = steer_unlinked_path(directory, name)
+        temp = steer_unlinked_path(directory, name + ".part")
+        handle = open(temp, "xb")
+        try:
+            with handle:
+                handle.write(data)
+            os.replace(temp, target)
+        finally:
+            if os.path.exists(temp):
+                os.unlink(temp)
+        return
+    try:
+        os.mkdir(STEER_PAYLOADS_DIR, dir_fd=store)
+    except FileExistsError:
+        pass
+    directory_fd = os.open(STEER_PAYLOADS_DIR,
+                           os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                           dir_fd=store)
+    try:
+        try:
+            info = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+            if stat.S_ISLNK(info.st_mode):
+                raise OSError("evidence target is a symlink")
+        except FileNotFoundError:
+            pass
+        temp = name + ".part"
+        fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                     0o600, dir_fd=directory_fd)
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(data)
+            os.replace(temp, name, src_dir_fd=directory_fd, dst_dir_fd=directory_fd)
+        finally:
+            try:
+                os.unlink(temp, dir_fd=directory_fd)
+            except FileNotFoundError:
+                pass
+    finally:
+        os.close(directory_fd)
+
+
+def steer_store_evidence(entry, evidence, store):
     """Put the evidence bundle inline, or in a sidecar when it is too large.
 
     The bundle is the payload as it arrived and the virtual edit the guard
@@ -223,13 +307,7 @@ def steer_store_evidence(entry, evidence, store_dir):
         return
     name = (entry.get("firing_id") or entry["evidence_sha256"]) + ".json"
     try:
-        directory = os.path.join(store_dir, STEER_PAYLOADS_DIR)
-        os.makedirs(directory, exist_ok=True)
-        target = os.path.join(directory, name)
-        temp = target + ".part"
-        with open(temp, "wb") as handle:
-            handle.write(data)
-        os.replace(temp, target)
+        steer_write_sidecar(data, name, store)
     except Exception:
         entry["evidence_complete"] = False
         entry["evidence_error"] = "write"
@@ -244,6 +322,17 @@ def steer_new_firing_id():
         return os.urandom(16).hex()
     except Exception:
         return ""
+
+
+def steer_open_audit(store):
+    if isinstance(store, str):
+        path = steer_unlinked_path(store, "steer-audit.jsonl")
+        if os.path.exists(path) and not stat.S_ISREG(os.stat(path).st_mode):
+            raise OSError("audit log is not a regular file")
+        return open(path, "a", encoding="utf-8")
+    fd = os.open("steer-audit.jsonl", os.O_WRONLY | os.O_APPEND | os.O_CREAT
+                 | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600, dir_fd=store)
+    return os.fdopen(fd, "a", encoding="utf-8")
 
 
 def steer_audit_log(hook_name, payload, edit, harness, edit_index=None, firing_id=""):
@@ -326,10 +415,16 @@ def steer_audit_log(hook_name, payload, edit, harness, edit_index=None, firing_i
         if edit_index is not None:
             evidence["edit_index"] = edit_index
         store_dir = os.path.dirname(os.path.abspath(__file__))
-        steer_store_evidence(entry, evidence, store_dir)
-        audit_path = os.path.join(store_dir, "steer-audit.jsonl")
-        with open(audit_path, "a", encoding="utf-8") as handle:
-            handle.write(json.dumps(entry) + "\n")
+        store_fd = steer_open_store(store_dir, meta.get("scope"))
+        try:
+            steer_store_evidence(entry, evidence, store_fd)
+            with steer_open_audit(store_fd) as handle:
+                if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                    raise OSError("audit log is not a regular file")
+                handle.write(json.dumps(entry) + "\n")
+        finally:
+            if not isinstance(store_fd, str):
+                os.close(store_fd)
     except Exception:
         pass
 

@@ -24,7 +24,7 @@ func (Adapter) Harness() harness.ID { return harness.Codex }
 
 // instrument is this adapter's normalization identity, pinned by
 // TestInstrumentMatchesFixtureReplay. Bump it when that test fails.
-const instrument = "codex:bee30484"
+const instrument = "codex:4ae8a0f8"
 
 func (Adapter) Instrument() string { return instrument }
 
@@ -289,6 +289,7 @@ type streamState struct {
 
 	sawPrimaryTurn bool
 	legacyTurns    []transcript.Event
+	execCalls      map[string]bool
 }
 
 func (st *streamState) normalize(line []byte) error {
@@ -398,6 +399,12 @@ func (st *streamState) flush() error {
 func (st *streamState) toolCall(p payload, base transcript.Event) error {
 	base.Kind, base.Tool, base.ToolUseID = transcript.KindToolCall, p.Name, p.CallID
 	base.Target, base.Shell = callTarget(p)
+	if p.Name == "exec" && base.Target != "" {
+		if st.execCalls == nil {
+			st.execCalls = map[string]bool{}
+		}
+		st.execCalls[p.CallID] = true
+	}
 	return st.emit(base)
 }
 
@@ -405,6 +412,11 @@ func (st *streamState) toolResult(p payload, base transcript.Event) error {
 	base.Kind, base.ToolUseID = transcript.KindToolResult, p.CallID
 	base.Text = outputText(p.Output)
 	base.IsError = resultFailed(base.Text)
+	if st.execCalls[p.CallID] {
+		var failed bool
+		base.Text, failed = execOutput(base.Text)
+		base.IsError = base.IsError || failed
+	}
 	return st.emit(base)
 }
 
@@ -416,13 +428,13 @@ func isCallOutput(itemType string) bool {
 // callTarget extracts what a tool call acted on, and whether it ran a shell
 // command. Codex spells a shell call three ways: a function call taking a JSON
 // argument string, a custom "exec" call whose input is JavaScript wrapping the
-// same JSON object, and write_stdin against an already-running command.
+// shell argument object, and write_stdin against an already-running command.
 func callTarget(p payload) (string, bool) {
 	switch p.Name {
 	case "exec_command", "write_stdin":
 		return argField(p.Args), true
 	case "exec":
-		return argField(firstJSONObject(p.Input)), true
+		return execCommands(p.Input), true
 	case "apply_patch":
 		return patchFile(p.Input), false
 	}
@@ -448,22 +460,6 @@ func argField(raw string) string {
 		}
 	}
 	return ""
-}
-
-// firstJSONObject returns the first complete JSON object embedded in s. The
-// "exec" tool's input is a JavaScript snippet whose only object literal is the
-// call's arguments.
-func firstJSONObject(s string) string {
-	i := strings.IndexByte(s, '{')
-	if i < 0 {
-		return ""
-	}
-	dec := json.NewDecoder(strings.NewReader(s[i:]))
-	var raw json.RawMessage
-	if err := dec.Decode(&raw); err != nil {
-		return ""
-	}
-	return string(raw)
 }
 
 // patchFile returns the first file an apply_patch touches. A patch may span

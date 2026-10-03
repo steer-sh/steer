@@ -54,8 +54,18 @@ func Load(stateDir string) ([]Record, error) {
 	return out, nil
 }
 
-// Save writes the log atomically: tmp file, then rename.
+// Save replaces the log atomically. Mutations must hold the inventory lock before
+// loading records and call save while still holding it.
 func Save(stateDir string, records []Record) error {
+	release, err := lockInventory(stateDir)
+	if err != nil {
+		return err
+	}
+	defer release()
+	return save(stateDir, records)
+}
+
+func save(stateDir string, records []Record) error {
 	path := InterventionsPath(stateDir)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
@@ -65,11 +75,24 @@ func Save(stateDir string, records []Record) error {
 		b.WriteString(pyDumps(r, 0))
 		b.WriteByte('\n')
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(b.String()), 0o644); err != nil {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".interventions-*")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	defer os.Remove(tmp.Name())
+	if err := tmp.Chmod(0o644); err != nil {
+		tmp.Close()
+		return err
+	}
+	_, writeErr := tmp.WriteString(b.String())
+	closeErr := tmp.Close()
+	if writeErr != nil {
+		return writeErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	return os.Rename(tmp.Name(), path)
 }
 
 // RecordKindFilter is the verdict filter a record's regex was authored against.

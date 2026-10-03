@@ -82,9 +82,9 @@ type diffPlan struct {
 // fallback for a git that could not answer.
 const emptyTreeSHA1 = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
-// emptyTree is the base of a root commit: the only base that shows the whole of one
-// being amended. git hashes it under the repository's own object format, so it is read
-// from git rather than written down.
+// emptyTree is the base of an initial commit or an amended root commit. Git hashes
+// it under the repository's own object format, so it is read from git rather than
+// written down.
 func emptyTree(cwd string) string {
 	if out, ok := Git(cwd, gitMedium, "hash-object", "-t", "tree", os.DevNull); ok {
 		if sha := strings.TrimSpace(out); sha != "" {
@@ -124,6 +124,9 @@ func diffBaseArgs(cwd string, spec DiffSpec) []string {
 		return append(args, base)
 	}
 	if !spec.StagedOnly {
+		if _, ok := Git(cwd, gitMedium, "rev-parse", "--verify", "--quiet", "HEAD"); !ok {
+			return append(args, emptyTree(cwd))
+		}
 		args = append(args, "HEAD")
 	}
 	return args

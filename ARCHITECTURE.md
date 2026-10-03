@@ -246,6 +246,12 @@ and otherwise in `steer-audit-payloads/<firing_id>.json`, named by
 describe either form. Evidence that cannot be retained marks the row incomplete
 rather than dropping the firing. Rows an older master wrote carry none of these
 fields, so a reader tests presence; coverage starts at the scope's rebuild.
+Runtime writes refuse linked audit files, payload directories and sidecar files,
+and linked store directories. A project store also refuses a linked parent
+`.steer` (or legacy `.claude`); a global store permits the operator's parent link.
+Platforms supporting directory-relative opens anchor writes in open directories
+and refuse links at open time. Other platforms check paths before writing and
+create sidecar temporary files exclusively.
 
 An installed master embeds the runtime it was built with. Its runtime digest stamp
 lets readers distinguish current, stale and unknown builds. The master also
@@ -297,8 +303,10 @@ test-side declarations it statically reaches, written into one generated test
 file, so the code replayed is the code digested. Declared `inputs` cover files
 that analysis cannot track; production code is outside the detector. A snapshot
 case restores a commit pinned under `refs/steer/snapshots/`, overlays the current
-detector and applies a defect patch. An incompatible case, an unavailable
-environment or a missing snapshot is an invalid case, never an expected outcome,
+detector and applies a defect patch. Detector overlays, case file writes and Go
+test replacement stay inside the temporary tree, including through symlinks;
+a link that escapes the tree makes the case invalid. An incompatible case, an
+unavailable environment or a missing snapshot is an invalid case, never an expected outcome,
 and the previous receipt stays as history. `FreshnessOf` reads a receipt as
 current or stale; stale is a label, and a stale check keeps running.
 
@@ -465,6 +473,9 @@ Codex joins subagent rollouts to their root and drops replayed parent history.
 Discovery adds a selected child's root rollout when the window passed over it, found
 by the thread id in its file name and confirmed by its header.
 Tagged user messages are primary human turns, with legacy event-message fallback.
+For code-mode `exec`, the Codex adapter extracts static shell command literals
+and unwraps printed tool-result objects before classification. Batched commands
+share the outer call's attribution; dynamically constructed commands stay unknown.
 A headless run's user turns (Claude Code `entrypoint: sdk-cli`, a `codex exec`
 rollout) are `Meta`: a program wrote them, such as a reviewer prompt or an agent
 consulting another agent. Claude Code's two interrupt markers are `Meta` too, and
@@ -536,6 +547,14 @@ transcript-friction to root-session units. `ScoreWith` dispatches to the registe
 engine. Unsupported corpus/unit records remain unscored.
 `cmd/intervention.go` constructs the shared command tree exposed by `steer fix`,
 its `intervention` alias and the original `commit-gate mine` path.
+
+Inventory mutations serialize across processes with a persistent lock file beside
+`interventions.jsonl`. Registration, rejection, scope migration, retirement and
+description changes hold `mine.lockInventory` across loading, validation against
+the current records and atomic `save`. The operating system releases the lock on
+process exit; the lock file stays in place so every writer locks the same inode.
+`Save` replaces a complete inventory and takes the same lock, while readers use
+the atomically replaced file without locking.
 
 Records bind a class regex, corpus, unit, tier, artifact and explanatory prose.
 Eligibility is frozen at registration from harness, repository and changed-path
