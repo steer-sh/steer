@@ -93,6 +93,22 @@ func TestProjectRegistrarNamesTheMasterRelativeToTheRepository(t *testing.T) {
 	if strings.Contains(string(content), target) {
 		t.Fatalf("the bridge names the checkout that wrote it:\n%s", content)
 	}
+	gate, err := RegisterCommitGateAndResolver(harness.ProjectScope, target,
+		"steer commit-gate review-pi", 360, "steer commit-gate backfill", 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RemoveMaster(harness.ProjectScope, target); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RemoveCommitGateAndResolver(harness.ProjectScope, target); err != nil {
+		t.Fatal(err)
+	}
+	for _, bridge := range []string{path, gate} {
+		if _, err := os.Stat(bridge); !os.IsNotExist(err) {
+			t.Fatalf("ordinary project bridge was not removed: %v", err)
+		}
+	}
 }
 
 func TestRegistrarRefusesAnUnstampedExtension(t *testing.T) {

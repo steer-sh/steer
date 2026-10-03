@@ -1,0 +1,33 @@
+{"type":"session_meta","payload":{"id":"polling-root","cwd":"/repo"}}
+{"type":"response_item","payload":{"type":"function_call","name":"exec_command","call_id":"direct-start","arguments":"{\"cmd\":\"go test ./direct\"}"}}
+{"type":"response_item","payload":{"type":"function_call_output","call_id":"direct-start","output":"Process running with session ID 42\nOutput:\n"}}
+{"type":"response_item","payload":{"type":"function_call","name":"write_stdin","call_id":"direct-pending","arguments":"{\"session_id\":42,\"chars\":\"\"}"}}
+{"type":"response_item","payload":{"type":"function_call_output","call_id":"direct-pending","output":"Process running with session ID 42\nOutput:\nworking"}}
+{"type":"response_item","payload":{"type":"function_call","name":"write_stdin","call_id":"direct-complete","arguments":"{\"session_id\":42,\"chars\":\"\"}"}}
+{"type":"response_item","payload":{"type":"function_call_output","call_id":"direct-complete","output":"Process exited with code 1\nOutput:\n--- FAIL: TestDirect (0.00s)\nFAIL"}}
+{"type":"response_item","payload":{"type":"function_call","name":"write_stdin","call_id":"expired","arguments":"{\"session_id\":42,\"chars\":\"go test ./fictional\"}"}}
+{"type":"response_item","payload":{"type":"function_call_output","call_id":"expired","output":"Process exited with code 1\nOutput:\n--- FAIL: TestExpired (0.00s)\nFAIL"}}
+{"type":"response_item","payload":{"type":"custom_tool_call","name":"exec","call_id":"code-start","input":"text(await tools.exec_command({cmd:'go test ./code'}));"}}
+{"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"code-start","output":"Script completed\nOutput:\n{\"session_id\":42,\"output\":\"\",\"wall_time_seconds\":1}"}}
+{"type":"response_item","payload":{"type":"custom_tool_call","name":"exec","call_id":"code-pending","input":"text(await tools.write_stdin({session_id:42,chars:''}));"}}
+{"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"code-pending","output":"Script completed\nOutput:\n{\"session_id\":42,\"output\":\"working\",\"wall_time_seconds\":1}"}}
+{"type":"response_item","payload":{"type":"custom_tool_call","name":"exec","call_id":"code-complete","input":"text(await tools.write_stdin({session_id:42,chars:''}));"}}
+{"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"code-complete","output":"Script completed\nOutput:\n{\"exit_code\":1,\"output\":\"--- FAIL: TestCode (0.00s)\\nFAIL\",\"wall_time_seconds\":1}"}}
+{"type":"response_item","payload":{"type":"custom_tool_call","name":"exec","call_id":"reader-start","input":"text(await tools.exec_command({cmd:'cat saved-output.txt'}));"}}
+{"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"reader-start","output":"Script completed\nOutput:\n{\"session_id\":42,\"output\":\"\",\"wall_time_seconds\":1}"}}
+{"type":"response_item","payload":{"type":"custom_tool_call","name":"exec","call_id":"reader-complete","input":"text(await tools.write_stdin({session_id:42,chars:''}));"}}
+{"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"reader-complete","output":"Script completed\nOutput:\n{\"exit_code\":0,\"output\":\"--- FAIL: TestPrinted (0.00s)\\nFAIL\",\"wall_time_seconds\":1}"}}
+{"type":"response_item","payload":{"type":"custom_tool_call","name":"exec","call_id":"unknown","input":"text(await tools.write_stdin({session_id:42,chars:'go test ./fictional'}));"}}
+{"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"unknown","output":"Script completed\nOutput:\n{\"exit_code\":1,\"output\":\"--- FAIL: TestUnknown (0.00s)\\nFAIL\",\"wall_time_seconds\":1}"}}
+{"type":"response_item","payload":{"type":"function_call","name":"exec_command","call_id":"old-origin","arguments":"{\"cmd\":\"go test ./old\"}"}}
+{"type":"response_item","payload":{"type":"function_call_output","call_id":"old-origin","output":"Process running with session ID 99\nOutput:\n"}}
+{"type":"response_item","payload":{"type":"custom_tool_call","name":"exec","call_id":"dynamic-reuse","input":"text(await tools.exec_command({cmd: command}));"}}
+{"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"dynamic-reuse","output":"Script completed\nOutput:\n{\"session_id\":99,\"output\":\"\",\"wall_time_seconds\":1}"}}
+{"type":"response_item","payload":{"type":"function_call","name":"write_stdin","call_id":"unknown-reused","arguments":"{\"session_id\":99,\"chars\":\"\"}"}}
+{"type":"response_item","payload":{"type":"function_call_output","call_id":"unknown-reused","output":"Process exited with code 1\nOutput:\n--- FAIL: TestReused (0.00s)\nFAIL"}}
+{"type":"response_item","payload":{"type":"custom_tool_call","name":"exec","call_id":"mixed","input":"text(await Promise.all([tools.write_stdin({session_id:99,chars:''}),tools.exec_command({cmd:'go test ./other'})]));"}}
+{"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"mixed","output":"Script completed\nOutput:\n[{\"exit_code\":1,\"output\":\"--- FAIL: TestMixed (0.00s)\\nFAIL\"},{\"exit_code\":0,\"output\":\"ok\"}]"}}
+{"type":"response_item","payload":{"type":"function_call","name":"exec_command","call_id":"printed-metadata","arguments":"{\"cmd\":\"go test ./printer\"}"}}
+{"type":"response_item","payload":{"type":"function_call_output","call_id":"printed-metadata","output":"Process exited with code 0\nOutput:\n{\"session_id\":66,\"output\":\"\"}"}}
+{"type":"response_item","payload":{"type":"function_call","name":"write_stdin","call_id":"phantom-poll","arguments":"{\"session_id\":66,\"chars\":\"\"}"}}
+{"type":"response_item","payload":{"type":"function_call_output","call_id":"phantom-poll","output":"Process exited with code 1\nOutput:\n--- FAIL: TestPhantom (0.00s)\nFAIL"}}

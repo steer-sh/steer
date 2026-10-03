@@ -54,7 +54,10 @@ only when none is there: a handler that moves voids its own approval and that of
 the handler taking its place, and Codex then skips both until `/hooks`.
 All Codex hook mutations share `codex.save`, which refuses a symlink at a
 project's `.codex` directory or `hooks.json` before creating a temporary file.
-Global configuration retains operator-selected paths, including symlinked homes.
+Pi guard and gate mutations share `pi.refuseLinkedBridge`, refusing project
+links at `.pi`, `extensions` or the bridge file before creating or removing files;
+`pi.writeBridge` checks the same boundary. Global configuration retains
+operator-selected paths, including symlinked homes.
 
 `internal/steerpath/` is the common path entry point. Two stores have different
 migration ownership:
@@ -141,6 +144,10 @@ every installation boundary. Rule and addendum text is stored so its normalized
 digest can be recomputed; duplicate normalized text under another id of the same
 kind is refused. Addendum entries derive no harness document; the commit gate
 reads them.
+A guard's registered id can differ from its file stem. Resolution, firing
+metadata and fixture verification keep the registered id; embedded sources keep
+file-stem keys. A filename replacement retires the previous file before updating
+the manifest and leaves no removal archive, like a same-file upsert.
 A prose edit does not consolidate the master or invalidate unrelated guard tests.
 Removing a shared artifact removes its derived rule for every target, including
 Pi and Codex's shared project document.
@@ -476,6 +483,9 @@ Tagged user messages are primary human turns, with legacy event-message fallback
 For code-mode `exec`, the Codex adapter extracts static shell command literals
 and unwraps printed tool-result objects before classification. Batched commands
 share the outer call's attribution; dynamically constructed commands stay unknown.
+Polled shell results retain their originating command through the returned process
+session id. Completion clears that binding; unknown processes and code-mode batches
+mixing polls with other operations retain no inferred origin.
 A headless run's user turns (Claude Code `entrypoint: sdk-cli`, a `codex exec`
 rollout) are `Meta`: a program wrote them, such as a reviewer prompt or an agent
 consulting another agent. Claude Code's two interrupt markers are `Meta` too, and
@@ -536,6 +546,8 @@ them. The look-back window selects files by modification time, and a selected fi
 read whole. Refresh replaces only what a cleanly reread file contributed, so a file the
 build did not reach, or one that has disappeared, keeps its contribution. A row stored
 before sources were recorded stays whole as one legacy contribution.
+Refresh holds a per-host operating-system lock from loading the shard through
+scanning, merging and publication; each save publishes from a unique temporary file.
 `steer report refresh` writes snapshots; status and dashboard read them.
 `internal/evidence/` gathers review rows, session snapshots and guard firings into
 one `mine.EvidenceSet` shared by cadence, status and intervention commands.
@@ -567,8 +579,10 @@ the same eligibility pass.
 Repository scope has two predicates. The basename regex keeps its original
 semantics for existing records; the exact repository root introduced with scope
 version 3 separates checkouts that share a basename. Chains preserve the whole
-root their rows recorded beside the basename; a session carries the harness's
-munged project key, and the two compare through that key. A unit whose evidence
+root their rows recorded beside the basename; sessions carry the resolved git
+root captured at ingestion. Both compare stored roots exactly after separator
+and trailing-separator normalization, without resolving historical paths again.
+The session's project discovery key is separate metadata. A unit whose evidence
 names no repository stays unknown coverage.
 
 A check-tier record binds one check: check id, binding kind, resolved

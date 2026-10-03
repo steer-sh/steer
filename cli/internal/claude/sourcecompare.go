@@ -161,8 +161,13 @@ func MasterEmbedsGuard(scope, hook string) (bool, error) {
 	if !c.Complete() {
 		return false, fmt.Errorf("%s", c.Reason)
 	}
+	resolved, err := ResolveHook(scope, hook)
+	if err != nil {
+		return false, err
+	}
+	stem := strings.TrimSuffix(resolved.FileName, ".py")
 	for _, g := range c.Guards {
-		if g.Name == hook {
+		if g.Name == stem {
 			return g.State == SourceMatches, nil
 		}
 	}

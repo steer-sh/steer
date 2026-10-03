@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -23,6 +22,9 @@ type DiffSpec struct {
 	// UntrackedPathspecs narrows those files to what the command's own staging step
 	// names. Empty means every untracked file in the repo.
 	UntrackedPathspecs []string
+	// ForcedUntrackedPathspecs selects additions a bundled force-add may stage even
+	// when ignored. Each add keeps its exclusions separate; :/ selects the whole repository.
+	ForcedUntrackedPathspecs [][]string
 	// TrackedPathspecs narrows the tracked diff to the same paths, joined with the
 	// index. Empty means every tracked change. The two lists differ for a command
 	// that stages a path AND commits with -a: the add bounds what new files can land,
@@ -39,7 +41,20 @@ func (s DiffSpec) Equal(other DiffSpec) bool {
 		return false
 	}
 	return equalPathspecs(s.UntrackedPathspecs, other.UntrackedPathspecs) &&
+		equalAddPathspecs(s.ForcedUntrackedPathspecs, other.ForcedUntrackedPathspecs) &&
 		equalPathspecs(s.TrackedPathspecs, other.TrackedPathspecs)
+}
+
+func equalAddPathspecs(a, b [][]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if !equalPathspecs(a[i], b[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 func equalPathspecs(a, b []string) bool {
@@ -299,7 +314,7 @@ func (p *diffPlan) stat(newPaths []string) string {
 	return stat
 }
 
-// untrackedPaths lists root-relative paths git has never seen, honouring .gitignore.
+// untrackedPaths lists root-relative additions, honoring ignores except for forced adds.
 //
 // `--full-name -- :/` for the reason the plan passes --no-relative: from a
 // subdirectory, bare `ls-files --others` lists that subtree ALONE, so a commit made
@@ -312,10 +327,27 @@ func (p *diffPlan) untrackedPaths() []string {
 		// drop: a review missing a new file the commit lands is the worse direction.
 		out, ok = Git(p.cwd, gitMedium, append(append([]string{}, base...), ":/")...)
 	}
-	if !ok || out == "" {
+	if !ok {
 		return nil
 	}
+	for _, specs := range p.spec.ForcedUntrackedPathspecs {
+		forcedBase := []string{"ls-files", "--others", "--full-name", "--"}
+		forced, forcedOK := Git(p.cwd, gitMedium, append(forcedBase, specs...)...)
+		if !forcedOK {
+			forced, _ = Git(p.cwd, gitMedium, "ls-files", "--others", "--full-name", "--", ":/")
+		}
+		out += forced
+	}
 	paths := dropCruft(nonEmptyLines(out))
+	seen := map[string]bool{}
+	unique := paths[:0]
+	for _, path := range paths {
+		if !seen[path] {
+			seen[path] = true
+			unique = append(unique, path)
+		}
+	}
+	paths = unique
 	sort.Strings(paths)
 	return paths
 }
@@ -333,8 +365,8 @@ func (p *diffPlan) untrackedSelector() []string {
 // it skipped.
 //
 // `--no-index` against /dev/null is what makes an untracked file render as an ordinary
-// `new file mode` section. The only budget here is per-file: budgetSections spends the
-// aggregate one and names what it dropped.
+// `new file mode` section. Rendering spends the budget after the raw additions
+// have been collected for size and identity checks.
 func (p *diffPlan) untrackedSections(paths []string) (text string, used, skipped []string) {
 	if len(paths) == 0 {
 		return "", nil, nil
@@ -342,10 +374,6 @@ func (p *diffPlan) untrackedSections(paths []string) (text string, used, skipped
 	top := Toplevel(p.cwd)
 	var sb strings.Builder
 	for _, path := range paths {
-		if size, ok := fileSize(filepath.Join(top, path)); !ok || size > int64(p.cfg.MaxDiffChars) {
-			skipped = append(skipped, path)
-			continue
-		}
 		// Git() cannot run this: --no-index exits 1 whenever the two sides differ,
 		// which is every call here, and Git() reads any non-zero as failure.
 		out, code, err := runGitAllowingExit1(top, "diff", "--no-index", "--no-color", "--", os.DevNull, path)

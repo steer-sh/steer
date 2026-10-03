@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/steer-sh/steer-cli/internal/guard/fixture"
@@ -126,17 +127,14 @@ func VerifyFixtures(scope string) (*FixtureVerification, error) {
 	if err != nil {
 		return nil, err
 	}
-	hooks, err := ListIndividualHooks(scope)
-	if err != nil {
-		return nil, err
+	names := make([]string, 0, len(manifest.Hooks))
+	for name := range manifest.Hooks {
+		names = append(names, name)
 	}
-
+	sort.Strings(names)
 	result := &FixtureVerification{Scope: scope}
-	for _, hook := range hooks {
-		if _, ok := manifest.Hooks[hook.Name]; !ok {
-			continue
-		}
-		report, err := VerifyHookFixtures(scope, hook.Name)
+	for _, name := range names {
+		report, err := VerifyHookFixtures(scope, name)
 		if err != nil {
 			return result, err
 		}

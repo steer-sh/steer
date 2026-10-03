@@ -5,6 +5,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"encoding/json"
+	"github.com/steer-sh/steer-cli/internal/archive"
+	"github.com/steer-sh/steer-cli/internal/guard/fixture"
 )
 
 func writeTestHook(t *testing.T, path string) []byte {
@@ -284,5 +288,140 @@ func TestInstallManagedHookRefusesASymlinkedManifest(t *testing.T) {
 	}
 	if _, err := os.Stat(outside); !os.IsNotExist(err) {
 		t.Fatalf("registration created the link's target: %v", err)
+	}
+}
+
+func TestGuardFilenameReplacementRetiresTheOldImplementation(t *testing.T) {
+	withProjectTempDir(t)
+	input := InstallManagedHookInput{HookName: "policy", FileName: "policy.py", Rule: "block OLD", Content: []byte(blockingHook("OLD"))}
+	if _, err := InstallManagedHook(ProjectScope, input); err != nil {
+		t.Fatal(err)
+	}
+	input.FileName, input.Rule, input.Content = "implementation.py", "block NEW", []byte(blockingHook("NEW"))
+	input.Fixtures = &fixture.File{Version: fixture.Version, Hook: "policy", Cases: []fixture.Case{
+		bashCase("retired token is allowed", "echo OLD", fixture.ExpectAllow),
+		bashCase("replacement token is blocked", "echo NEW", fixture.ExpectBlock),
+	}}
+	result, err := InstallManagedHook(ProjectScope, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Verification == nil || len(result.Verification.Reports) != 1 || !result.Verification.Reports[0].Tested() {
+		t.Fatalf("replacement fixtures did not verify the owning guard: %+v", result.Verification)
+	}
+	dir := filepath.Dir(result.HookPath)
+	if _, err := os.Stat(filepath.Join(dir, "policy.py")); !os.IsNotExist(err) {
+		t.Fatalf("previous implementation remains in the store: %v", err)
+	}
+	if entries, err := archive.List(dir); err != nil || len(entries) != 0 {
+		t.Fatalf("continuous replacement recorded a removal: %+v, %v", entries, err)
+	}
+	if agrees, err := MasterEmbedsGuard(ProjectScope, "policy"); err != nil || !agrees {
+		t.Fatalf("master lost the registered guard identity: %v, %v", agrees, err)
+	}
+	identity, err := ReadMasterIdentity(dir)
+	if err != nil || identity.Hooks["policy"].RuleHash != HashRule("block NEW") {
+		t.Fatalf("master identity cannot resolve the firing's guard id: %+v, %v", identity, err)
+	}
+	removed, err := RemoveManagedHook(ProjectScope, "implementation", RemoveOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed.HookName != "policy" || removed.Rule != "block NEW" {
+		t.Fatalf("filename removal lost its manifest owner: %+v", removed)
+	}
+	entry, err := archive.Load(removed.ArchivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored ManifestEntry
+	if err := json.Unmarshal(entry.Manifest, &stored); err != nil || stored.File != "implementation.py" {
+		t.Fatalf("removal did not archive replacement metadata: %+v, %v", stored, err)
+	}
+	manifest, err := LoadManifest(ProjectScope)
+	if err != nil || len(manifest.Hooks) != 0 {
+		t.Fatalf("removal left a guard registered: %+v, %v", manifest, err)
+	}
+	if hooks, err := ListIndividualHooks(ProjectScope); err != nil || len(hooks) != 0 {
+		t.Fatalf("removal left an implementation active: %+v, %v", hooks, err)
+	}
+	if _, err := RestoreArchived(ProjectScope, entry); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+}
+
+func TestGuardFilenameReplacementRetryFinishesAfterManifestWriteFailure(t *testing.T) {
+	withProjectTempDir(t)
+	input := InstallManagedHookInput{HookName: "policy", FileName: "policy.py", Rule: "block OLD", Content: []byte(blockingHook("OLD"))}
+	if _, err := InstallManagedHook(ProjectScope, input); err != nil {
+		t.Fatal(err)
+	}
+	path, err := GetManifestFile(ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	external := filepath.Join(t.TempDir(), "manifest.json")
+	if err := os.WriteFile(external, original, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(external, path); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	input.FileName, input.Rule, input.Content = "replacement.py", "block NEW", []byte(blockingHook("NEW"))
+	if _, err := InstallManagedHook(ProjectScope, input); err == nil {
+		t.Fatal("replacement did not report the refused manifest write")
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, original, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := InstallManagedHook(ProjectScope, input)
+	if err != nil {
+		t.Fatalf("replacement retry: %v", err)
+	}
+	report, err := (fixture.Runner{}).Run(result.HookPath, filepath.Join(filepath.Dir(path), MasterHookName), fixture.File{
+		Version: fixture.Version, Hook: "policy", Cases: []fixture.Case{
+			bashCase("retired token is allowed", "echo OLD", fixture.ExpectAllow),
+			bashCase("replacement token is blocked", "echo NEW", fixture.ExpectBlock),
+		},
+	})
+	if err != nil || !report.Tested() {
+		t.Fatalf("retry retained obsolete execution: %+v, %v", report, err)
+	}
+}
+
+func TestGuardFilenameReplacementRefusesLinkedPreviousImplementation(t *testing.T) {
+	withProjectTempDir(t)
+	input := InstallManagedHookInput{HookName: "policy", FileName: "policy.py", Rule: "block OLD", Content: []byte(blockingHook("OLD"))}
+	installed, err := InstallManagedHook(ProjectScope, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	external := filepath.Join(t.TempDir(), "external.py")
+	if err := os.Rename(installed.HookPath, external); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(external, installed.HookPath); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	input.FileName = "replacement.py"
+	if _, err := InstallManagedHook(ProjectScope, input); err == nil {
+		t.Fatal("replacement accepted a linked previous implementation")
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(installed.HookPath), input.FileName)); !os.IsNotExist(err) {
+		t.Fatalf("refused replacement wrote another implementation: %v", err)
+	}
+	entry, found, err := GetHookEntry(ProjectScope, "policy")
+	if err != nil || !found || entry.File != "policy.py" {
+		t.Fatalf("refusal changed ownership: %+v, %v", entry, err)
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/steer-sh/steer-cli/internal/guard"
+	"github.com/steer-sh/steer-cli/internal/hookstore"
 	"github.com/steer-sh/steer-cli/internal/version"
 )
 
@@ -82,6 +83,13 @@ func ResolveHook(scope, identifier string) (HookFile, error) {
 	if err != nil {
 		return HookFile{}, err
 	}
+	manifest, err := LoadManifest(scope)
+	if err != nil {
+		return HookFile{}, err
+	}
+	for i := range hooks {
+		hooks[i] = ownedHook(manifest, hooks[i])
+	}
 	if hook, ok := matchHook(hooks, id); ok {
 		return hook, nil
 	}
@@ -89,6 +97,11 @@ func ResolveHook(scope, identifier string) (HookFile, error) {
 	scope = normalizeScope(scope)
 	other := otherScope(scope)
 	if otherHooks, err := ListIndividualHooks(other); err == nil {
+		if otherManifest, err := LoadManifest(other); err == nil {
+			for i := range otherHooks {
+				otherHooks[i] = ownedHook(otherManifest, otherHooks[i])
+			}
+		}
 		if _, ok := matchHook(otherHooks, id); ok {
 			return HookFile{}, &HookScopeMiss{Identifier: identifier, Read: scope, Holds: other}
 		}
@@ -100,6 +113,18 @@ func ResolveHook(scope, identifier string) (HookFile, error) {
 	return HookFile{}, fmt.Errorf("hook not found in the %s store: %s", scope, identifier)
 }
 
+// ownedHook keeps a registered guard's id when its file has a different stem.
+func ownedHook(manifest *Manifest, hook HookFile) HookFile {
+	for name, entry := range manifest.Hooks {
+		file, err := hookstore.EntryFileName("manifest", name, entry.File)
+		if err == nil && file == hook.FileName {
+			hook.Name = name
+			break
+		}
+	}
+	return hook
+}
+
 // matchHook returns the hook an identifier names: a full path, a file name, a
 // stem, or the stem with its hyphens as spaces.
 func matchHook(hooks []HookFile, id string) (HookFile, bool) {
@@ -109,12 +134,13 @@ func matchHook(hooks []HookFile, id string) (HookFile, bool) {
 	}
 
 	for _, hook := range hooks {
-		if id == hook.Path || id == hook.FileName || id == hook.Name {
+		stem := strings.TrimSuffix(hook.FileName, ".py")
+		if id == hook.Path || id == hook.FileName || id == hook.Name || id == stem {
 			return hook, true
 		}
 
 		readable := strings.ReplaceAll(hook.Name, "-", " ")
-		if strings.EqualFold(readable, id) {
+		if strings.EqualFold(readable, id) || strings.EqualFold(strings.ReplaceAll(stem, "-", " "), id) {
 			return hook, true
 		}
 
@@ -180,14 +206,15 @@ func ConsolidateHooks(scope string) error {
 		origin := ""
 		sourceID := ""
 		ruleHash := ""
-		if entry, ok := manifest.Hooks[hook.Name]; ok {
+		owner := ownedHook(manifest, hook).Name
+		if entry, ok := manifest.Hooks[owner]; ok {
 			rule = strings.TrimSpace(entry.Rule)
 			origin = strings.TrimSpace(entry.Source)
 			sourceID = strings.TrimSpace(entry.SourceID)
 			ruleHash = strings.TrimSpace(entry.RuleHash)
 		}
 		meta := map[string]string{
-			"hook_name": hook.Name,
+			"hook_name": owner,
 			"rule":      rule,
 			"source":    origin,
 			"source_id": sourceID,

@@ -125,6 +125,9 @@ func RegisterMaster(scope, cwd string) (string, error) {
 		return "", err
 	}
 	path := filepath.Join(dir, guardBridgeName)
+	if err := refuseLinkedBridge(scope, path); err != nil {
+		return path, err
+	}
 	if existing, readErr := os.ReadFile(path); readErr == nil {
 		if got, ok := parseBridge(existing); !ok || got.Channel != "guards" {
 			return path, fmt.Errorf("refusing to replace unowned Pi extension %s", path)
@@ -148,16 +151,36 @@ func RegisterMaster(scope, cwd string) (string, error) {
 	if err != nil {
 		return path, err
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return path, err
-	}
-	if err := writeBridge(path, content); err != nil {
+	if err := writeBridge(scope, path, content); err != nil {
 		return path, err
 	}
 	return path, nil
 }
 
-func writeBridge(path string, content []byte) error {
+// refuseLinkedBridge keeps project configuration in the checkout.
+func refuseLinkedBridge(scope, path string) error {
+	if !strings.EqualFold(strings.TrimSpace(scope), harness.ProjectScope) {
+		return nil
+	}
+	for _, p := range []string{filepath.Dir(filepath.Dir(path)), filepath.Dir(path), path} {
+		info, err := os.Lstat(p)
+		if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		if err == nil && info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("%s is a symlink; project Pi extensions must be stored in the checkout", p)
+		}
+	}
+	return nil
+}
+
+func writeBridge(scope, path string, content []byte) error {
+	if err := refuseLinkedBridge(scope, path); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".steer-bridge.*")
 	if err != nil {
 		return err
@@ -185,6 +208,9 @@ func RemoveMaster(scope, cwd string) (string, error) {
 		return "", err
 	}
 	path := filepath.Join(dir, guardBridgeName)
+	if err := refuseLinkedBridge(scope, path); err != nil {
+		return path, err
+	}
 	content, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return path, nil

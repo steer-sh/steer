@@ -24,7 +24,7 @@ func (Adapter) Harness() harness.ID { return harness.Codex }
 
 // instrument is this adapter's normalization identity, pinned by
 // TestInstrumentMatchesFixtureReplay. Bump it when that test fails.
-const instrument = "codex:4ae8a0f8"
+const instrument = "codex:14b9fbc9"
 
 func (Adapter) Instrument() string { return instrument }
 
@@ -290,6 +290,8 @@ type streamState struct {
 	sawPrimaryTurn bool
 	legacyTurns    []transcript.Event
 	execCalls      map[string]bool
+	shellCalls     map[string]shellCall
+	processes      map[int]string
 }
 
 func (st *streamState) normalize(line []byte) error {
@@ -399,7 +401,21 @@ func (st *streamState) flush() error {
 func (st *streamState) toolCall(p payload, base transcript.Event) error {
 	base.Kind, base.Tool, base.ToolUseID = transcript.KindToolCall, p.Name, p.CallID
 	base.Target, base.Shell = callTarget(p)
-	if p.Name == "exec" && base.Target != "" {
+	call, shell := shellOperation(p)
+	if shell {
+		call.codeMode = p.Name == "exec"
+		if st.shellCalls == nil {
+			st.shellCalls = map[string]shellCall{}
+		}
+		if call.polling {
+			base.Target = st.processes[call.sessionID]
+			call.command = base.Target
+		} else if p.Name == "write_stdin" || call.ambiguous {
+			base.Target = ""
+		}
+		st.shellCalls[p.CallID] = call
+	}
+	if p.Name == "exec" && (base.Target != "" || shell) {
 		if st.execCalls == nil {
 			st.execCalls = map[string]bool{}
 		}
@@ -412,6 +428,28 @@ func (st *streamState) toolResult(p payload, base transcript.Event) error {
 	base.Kind, base.ToolUseID = transcript.KindToolResult, p.CallID
 	base.Text = outputText(p.Output)
 	base.IsError = resultFailed(base.Text)
+	if call, ok := st.shellCalls[p.CallID]; ok {
+		states := processStates(base.Text, call.codeMode)
+		if call.polling {
+			for _, state := range states {
+				if state.complete {
+					delete(st.processes, call.sessionID)
+				}
+			}
+		}
+		for _, state := range states {
+			if state.sessionID != nil {
+				if st.processes == nil {
+					st.processes = map[int]string{}
+				}
+				delete(st.processes, *state.sessionID)
+				if len(states) == 1 && call.command != "" && !state.complete {
+					st.processes[*state.sessionID] = call.command
+				}
+			}
+		}
+		delete(st.shellCalls, p.CallID)
+	}
 	if st.execCalls[p.CallID] {
 		var failed bool
 		base.Text, failed = execOutput(base.Text)
@@ -431,8 +469,10 @@ func isCallOutput(itemType string) bool {
 // shell argument object, and write_stdin against an already-running command.
 func callTarget(p payload) (string, bool) {
 	switch p.Name {
-	case "exec_command", "write_stdin":
+	case "exec_command":
 		return argField(p.Args), true
+	case "write_stdin":
+		return "", true
 	case "exec":
 		return execCommands(p.Input), true
 	case "apply_patch":

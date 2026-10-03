@@ -48,6 +48,9 @@ Read the linked architecture section before changing the corresponding boundary:
   adapters and shared stores have different ownership.
   Codex hook writers share `cli/internal/codex/hooks.go`'s `save`; every mutation
   must pass its scope so project writes refuse symlinked configuration paths.
+  Pi bridge mutations share `cli/internal/pi/registrar.go`'s
+  `refuseLinkedBridge`; writes and removals must pass their scope to refuse
+  project configuration links while retaining operator-selected global paths.
   Importing a personal check gate is `cli/cmd/check_migrate.go`: it reads the
   operator's harness files and never rewrites one without `--apply`.
 - Guard/rule lifecycle or instruction synchronization: [guards and instructions](ARCHITECTURE.md#guards-and-instructions).
@@ -79,6 +82,8 @@ Read the linked architecture section before changing the corresponding boundary:
   `cli/internal/transcript/` owns normalization; `cli/internal/report/` classifies
   events. Root sessions are the unit; subagent history and abandoned branches
   require adapter-specific handling.
+  `cli/internal/sessions/Refresh` holds its per-host shard lock through the complete
+  read-build-merge-save transaction; another snapshot writer must share that lock.
 - Intervention records, eligibility, or scoring:
   [observations](ARCHITECTURE.md#interventions-and-observations).
   `cli/internal/gate/mine/` owns both corpus engines. Field counts describe

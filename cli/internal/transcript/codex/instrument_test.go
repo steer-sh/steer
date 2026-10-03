@@ -11,7 +11,7 @@ import (
 // instrumentFixtures is the corpus the adapter's instrument digests, in order.
 // It is separate from the behaviour tests' fixtures so that adding a case to one
 // of those does not read as a change to what the adapter emits.
-var instrumentFixtures = []string{"root.jsonl", "child.jsonl", "legacy.jsonl", "exec.jsonl", "code-mode.jsonl"}
+var instrumentFixtures = []string{"root.jsonl", "child.jsonl", "legacy.jsonl", "exec.jsonl", "code-mode.jsonl", "polling.jsonl"}
 
 func TestInstrumentMatchesFixtureReplay(t *testing.T) {
 	var paths []string

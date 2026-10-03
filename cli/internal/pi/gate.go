@@ -79,6 +79,9 @@ func RegisterCommitGateAndResolver(scope, cwd, review string, reviewSeconds int,
 		return "", err
 	}
 	path := filepath.Join(dir, gateBridgeName)
+	if err := refuseLinkedBridge(scope, path); err != nil {
+		return path, err
+	}
 	if existing, readErr := os.ReadFile(path); readErr == nil {
 		if got, ok := parseBridge(existing); !ok || got.Channel != "commit-gate" {
 			return path, fmt.Errorf("refusing to replace unowned Pi extension %s", path)
@@ -90,10 +93,7 @@ func RegisterCommitGateAndResolver(scope, cwd, review string, reviewSeconds int,
 	if err != nil {
 		return path, err
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return path, err
-	}
-	return path, writeBridge(path, content)
+	return path, writeBridge(scope, path, content)
 }
 
 // RemoveCommitGateAndResolver removes only Steer's stamped Pi gate extension.
@@ -103,6 +103,9 @@ func RemoveCommitGateAndResolver(scope, cwd string) (string, error) {
 		return "", err
 	}
 	path := filepath.Join(dir, gateBridgeName)
+	if err := refuseLinkedBridge(scope, path); err != nil {
+		return path, err
+	}
 	content, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return path, nil

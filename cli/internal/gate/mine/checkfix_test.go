@@ -129,8 +129,7 @@ func TestScopeSetKeepsABoundCheckInItsRepository(t *testing.T) {
 	}
 }
 
-// The exact-root predicate separates repositories the basename regex pools, and a
-// transcript's project key names the same root as a ledger row's absolute path.
+// The exact-root predicate separates repositories the basename regex pools.
 func TestExactRepoRootSeparatesSameBasenameRepositories(t *testing.T) {
 	m, err := BuildScope(false, nil, "", boundRoot, "")
 	if err != nil {
@@ -145,8 +144,8 @@ func TestExactRepoRootSeparatesSameBasenameRepositories(t *testing.T) {
 	subject := func(root string) Subject { return Subject{RepoRoot: root, RepoRootKnown: root != ""} }
 	check(t, "the declaring repository is eligible", scope.ClassifySubject(subject(boundRoot)), Eligible)
 	check(t, "a sibling of the same name is not", scope.ClassifySubject(subject("/src/two/steer")), Ineligible)
-	check(t, "a session names the root through its project key",
-		scope.ClassifySubject(subject(transcript.NormalizeProject(boundRoot))), Eligible)
+	check(t, "a project discovery key establishes no matching root",
+		scope.ClassifySubject(subject(transcript.NormalizeProject(boundRoot))), Ineligible)
 	check(t, "a unit with no root is unknown coverage", scope.ClassifySubject(subject("")), Unknown)
 
 	// The older predicate keeps its basename-regex semantics, which both roots match.

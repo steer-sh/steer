@@ -18,6 +18,9 @@ func DiffSpecFor(cmd, cwd string) gate.DiffSpec {
 		Amend: Amends(cmd)}
 	if includeUntracked {
 		spec.UntrackedPathspecs = StagedPathspecs(cmd, cwd)
+		if parsed, err := parseCommit(cmd, cwd); err == nil && parsed != nil {
+			spec.ForcedUntrackedPathspecs = parsedAddPathspecs(parsed.program, parsed, true)
+		}
 	}
 	if !stagedOnly && !CommitsAllTracked(cmd) {
 		spec.TrackedPathspecs = StagedPathspecs(cmd, cwd)

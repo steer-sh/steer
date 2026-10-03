@@ -988,27 +988,43 @@ func parsedStagesBefore(program *shellsyntax.Program, commit *parsedGit) bool {
 // paths resolve against its own directory and the diff runs in the commit's, so an
 // add whose directory, after cd and -C, differs from the commit's yields nil.
 func parsedStagedPathspecs(program *shellsyntax.Program, commit *parsedGit) []string {
-	commitCWD, commitTree, ok := commit.resolvedDirs()
-	if !ok {
+	adds := parsedAddPathspecs(program, commit, false)
+	var paths []string
+	for _, specs := range adds {
+		paths = append(paths, specs...)
+	}
+	return paths
+}
+
+// parsedAddPathspecs preserves the selection of forced adds independently of ordinary adds.
+func parsedAddPathspecs(program *shellsyntax.Program, commit *parsedGit, forcedOnly bool) [][]string {
+	wide := func() [][]string {
+		if forcedOnly {
+			return [][]string{{":/"}}
+		}
 		return nil
 	}
-	var out []string
+	commitCWD, commitTree, ok := commit.resolvedDirs()
+	if !ok {
+		return wide()
+	}
+	var out [][]string
 	for _, add := range parsedGitCalls(program, commit.baseCWD, "add", "stage") {
-		if add.call.Start >= commit.call.Start {
+		if add.call.Start >= commit.call.Start || forcedOnly && !add.forcesAdd() {
 			continue
 		}
 		if add.gitDirOnly {
-			return nil
+			return wide()
 		}
 		addCWD, addTree, ok := add.resolvedDirs()
 		if !ok || addCWD != commitCWD || addTree != commitTree {
-			return nil
+			return wide()
 		}
 		literal := false
 		var specs []string
 		for _, arg := range add.call.Args[add.subcommand+1:] {
 			if !arg.Static {
-				return nil
+				return wide()
 			}
 			if !literal && arg.Value == "--" {
 				literal = true
@@ -1016,21 +1032,45 @@ func parsedStagedPathspecs(program *shellsyntax.Program, commit *parsedGit) []st
 			}
 			if !literal && strings.HasPrefix(arg.Value, "-") {
 				if strings.HasPrefix(arg.Value, "--pathspec-from-file") {
-					return nil
+					return wide()
 				}
 				continue
 			}
 			specs = append(specs, arg.Value)
 		}
 		if len(specs) == 0 {
-			return nil
+			return wide()
 		}
-		out = append(out, specs...)
+		out = append(out, specs)
 	}
 	if len(out) == 0 {
 		return nil
 	}
 	return out
+}
+
+// forcesAdd reads the last force option before a literal path delimiter.
+func (p *parsedGit) forcesAdd() bool {
+	force := false
+	for _, arg := range p.call.Args[p.subcommand+1:] {
+		if !arg.Static {
+			continue
+		}
+		if arg.Value == "--" {
+			break
+		}
+		switch arg.Value {
+		case "--force":
+			force = true
+		case "--no-force":
+			force = false
+		default:
+			if strings.HasPrefix(arg.Value, "-") && !strings.HasPrefix(arg.Value, "--") && strings.Contains(arg.Value[1:], "f") {
+				force = true
+			}
+		}
+	}
+	return force
 }
 
 func shellAmbiguity(cmd, cwd string) string {

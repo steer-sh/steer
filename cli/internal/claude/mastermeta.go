@@ -64,6 +64,16 @@ func ReadMasterIdentity(dir string) (MasterIdentity, error) {
 	if err := json.Unmarshal([]byte(object), &out.Hooks); err != nil {
 		return out, fmt.Errorf("failed to read %s from %s: %w", masterMetaConst, path, err)
 	}
+	// Runtime keys follow file stems; audit rows carry the registered guard id.
+	byName := make(map[string]MasterHookMeta, len(out.Hooks))
+	for key, meta := range out.Hooks {
+		name := meta.HookName
+		if name == "" {
+			name = key
+		}
+		byName[name] = meta
+	}
+	out.Hooks = byName
 	return out, nil
 }
 

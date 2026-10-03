@@ -11,6 +11,28 @@ import (
 	"github.com/steer-sh/steer-cli/internal/transcript/codex"
 )
 
+// Polled shell failures retain their command; expired sessions and readers
+// produce no failure signal even when their stdin or printed text names a test.
+func TestCodexPolledFailuresReachTheClassifier(t *testing.T) {
+	classifier := report.NewClassifier()
+	var signals []report.Signal
+	path := filepath.Join("..", "transcript", "codex", "testdata", "instrument", "polling.jsonl")
+	_, err := codex.New().Stream(transcript.Session{Path: path}, transcript.Filter{}, func(e transcript.Event) error {
+		if sig, ok := classifier.Classify(e); ok {
+			signals = append(signals, sig)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(signals) != 2 || signals[0].Kind != "tool_failures" || signals[1].Kind != "tool_failures" ||
+		signals[0].Example != "--- FAIL: TestDirect (0.00s) — cmd: go test ./direct" ||
+		signals[1].Example != "--- FAIL: TestCode (0.00s) — cmd: go test ./code" {
+		t.Fatalf("polled failure attribution: %+v", signals)
+	}
+}
+
 // TestCodexCodeModeFailuresReachTheClassifier covers literal arguments and printed results.
 func TestCodexCodeModeFailuresReachTheClassifier(t *testing.T) {
 	failure := "--- FAIL: TestBroken (0.00s)\nFAIL"

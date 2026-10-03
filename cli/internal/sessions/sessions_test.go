@@ -1,6 +1,8 @@
 package sessions
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -16,6 +18,131 @@ import (
 	"github.com/steer-sh/steer-cli/internal/testhome"
 	"github.com/steer-sh/steer-cli/internal/transcript"
 )
+
+// Concurrent scoped refreshes preserve both projects' contributions and wait
+// before reading the shard another process is updating.
+func TestConcurrentScopedRefreshesKeepBothSessions(t *testing.T) {
+	if dir := os.Getenv("STEER_SESSION_TEST_STATE"); dir != "" {
+		id := os.Getenv("STEER_SESSION_TEST_ID")
+		if err := os.WriteFile(filepath.Join(dir, id+".ready"), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Refresh(dir, "h", Options{WindowDays: 30, Scope: report.ScopeProject, Only: harness.ClaudeCode}); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+
+	home := t.TempDir()
+	testhome.Set(t, home)
+	dir := t.TempDir()
+	release, err := lockShard(dir, "h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	held := true
+	defer func() {
+		if held {
+			release()
+		}
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	type worker struct {
+		id     string
+		output *bytes.Buffer
+		done   chan error
+	}
+	var workers []worker
+	for _, id := range []string{"a", "b"} {
+		project, err := filepath.EvalSymlinks(t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		transcripts := filepath.Join(home, ".claude", "projects", transcript.NormalizeProject(project))
+		if err := os.MkdirAll(transcripts, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		body := fmt.Sprintf(`{"type":"user","sessionId":%q,"cwd":%q,"timestamp":%q,"message":{"content":"do not use hardcoded counts"}}`+"\n",
+			id, project, time.Now().UTC().Format(time.RFC3339))
+		if err := os.WriteFile(filepath.Join(transcripts, id+".jsonl"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		output := new(bytes.Buffer)
+		cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestConcurrentScopedRefreshesKeepBothSessions$")
+		cmd.Dir = project
+		cmd.Env = append(os.Environ(), "STEER_SESSION_TEST_STATE="+dir, "STEER_SESSION_TEST_ID="+id)
+		cmd.Stdout, cmd.Stderr = output, output
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan error, 1)
+		go func() { done <- cmd.Wait() }()
+		workers = append(workers, worker{id, output, done})
+	}
+	for _, w := range workers {
+		for {
+			if _, err := os.Stat(filepath.Join(dir, w.id+".ready")); err == nil {
+				break
+			}
+			select {
+			case err := <-w.done:
+				t.Fatalf("worker %s exited before ready: %v\n%s", w.id, err, w.output)
+			case <-ctx.Done():
+				t.Fatal("workers did not become ready")
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+	}
+	for _, w := range workers {
+		select {
+		case err := <-w.done:
+			t.Fatalf("worker %s refreshed while the shard was locked: %v\n%s", w.id, err, w.output)
+		case <-time.After(150 * time.Millisecond):
+		}
+	}
+	release()
+	held = false
+	for _, w := range workers {
+		if err := <-w.done; err != nil {
+			t.Fatalf("worker %s: %v\n%s", w.id, err, w.output)
+		}
+	}
+	units, err := LoadShard(dir, "h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(units) != 2 || units[0].SessionID != "a" || units[1].SessionID != "b" || len(units[0].Signals) != 1 || len(units[1].Signals) != 1 {
+		t.Fatalf("concurrent scoped refresh lost evidence: %+v", units)
+	}
+}
+
+// Snapshot ingestion preserves failures that arrive in later Codex polls.
+func TestBuildRetainsCodexPolledFailures(t *testing.T) {
+	home := t.TempDir()
+	testhome.Set(t, home)
+	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
+	root := filepath.Join(home, ".codex", "sessions")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join("..", "transcript", "codex", "testdata", "instrument", "polling.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "polling.jsonl"), body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := Build(Options{WindowDays: 30, Only: harness.Codex})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fresh.Units) != 1 || len(fresh.Units[0].Signals) != 2 ||
+		fresh.Units[0].Signals[0].Text != "--- FAIL: TestCode (0.00s)" ||
+		fresh.Units[0].Signals[1].Text != "--- FAIL: TestDirect (0.00s)" {
+		t.Fatalf("polled failures absent from snapshot: %+v", fresh.Units)
+	}
+}
 
 func unit(harness, id string, start, end float64, texts ...string) mine.SessionUnit {
 	u := mine.SessionUnit{

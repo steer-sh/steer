@@ -246,6 +246,21 @@ func InstallManagedHook(scope string, input InstallManagedHookInput, targets ...
 	}
 
 	existingEntry, manifestExists := manifest.Hooks[hookName]
+	previousPath := ""
+	if manifestExists {
+		previousFile, err := hookstore.EntryFileName(filepath.Join(hooksDir, hookstore.ManifestName), hookName, existingEntry.File)
+		if err != nil {
+			return nil, err
+		}
+		if previousFile != fileName {
+			previousPath = filepath.Join(hooksDir, previousFile)
+			if info, err := os.Lstat(previousPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+				return nil, fmt.Errorf("%s is a symlink; the guard store replaces only its own files", previousPath)
+			} else if err != nil && !os.IsNotExist(err) {
+				return nil, err
+			}
+		}
+	}
 
 	now := time.Now().Format("2006-01-02")
 	created := existingEntry.Created
@@ -273,6 +288,14 @@ func InstallManagedHook(scope string, input InstallManagedHookInput, targets ...
 	updatedContent := applyMetadataHeader(input.Content, entry.Source, entry.PromptVersion, entry.HookVersion)
 	if err := hookstore.WriteFile(targetPath, updatedContent, 0o755); err != nil {
 		return nil, fmt.Errorf("failed to write hook file: %w", err)
+	}
+
+	// Retire the old file while the manifest still names it, so a retry can
+	// finish retirement before it forgets which implementation was replaced.
+	if previousPath != "" {
+		if err := os.Remove(previousPath); err != nil && !os.IsNotExist(err) {
+			return nil, fmt.Errorf("failed to retire previous hook file: %w", err)
+		}
 	}
 
 	if err := SetHookEntry(scope, hookName, entry); err != nil {

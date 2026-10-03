@@ -171,10 +171,8 @@ type Subject struct {
 	HarnessKnown bool
 	Repo         string
 	RepoKnown    bool
-	// RepoRoot is the whole repository root the unit's evidence recorded, in whatever
-	// form its corpus stores it. The root predicate compares normalized keys, so a
-	// ledger row's absolute path and a transcript's munged project directory name the
-	// same repository.
+	// RepoRoot is the whole repository root the unit's evidence recorded. Both
+	// corpora carry resolved paths; project discovery keys are separate metadata.
 	RepoRoot      string
 	RepoRootKnown bool
 	Paths         []string
@@ -295,27 +293,10 @@ func trimRoot(s string) string {
 	return strings.TrimRight(strings.ReplaceAll(strings.TrimSpace(s), "\\", "/"), "/")
 }
 
-// sameRepoRoot compares two repository roots through the project key both corpora can
-// produce. A ledger row stores the absolute root; a transcript stores the harness's
-// munged directory name for it, and no path survives that unchanged.
+// sameRepoRoot compares stored identities without resolving historical paths again.
 func sameRepoRoot(a, b string) bool {
-	return projectKey(a) != "" && projectKey(a) == projectKey(b)
-}
-
-// projectKey is transcript.NormalizeProject's pre-image, repeated here because nothing
-// under gate may import a transcript adapter. scope_test.go pins the two together. It
-// is idempotent, so a key normalized once compares equal to its own path.
-func projectKey(s string) string {
-	var b strings.Builder
-	b.Grow(len(s))
-	for _, r := range strings.TrimRight(strings.ReplaceAll(s, "\\", "/"), "/") {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
-			b.WriteRune(r)
-		} else {
-			b.WriteRune('-')
-		}
-	}
-	return b.String()
+	a, b = trimRoot(a), trimRoot(b)
+	return a != "" && a == b
 }
 
 func matchesAnyPath(re *regexp.Regexp, paths []string) bool {

@@ -321,11 +321,23 @@ func Save(dir, host string, units []mine.SessionUnit) error {
 		b.WriteByte('\n')
 	}
 	path := ShardPath(dir, host)
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(b.String()), 0o644); err != nil {
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".*.tmp")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	defer os.Remove(tmp.Name())
+	if err := tmp.Chmod(0o644); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.WriteString(b.String()); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
 }
 
 // Refresh builds, merges and saves in one pass, returning the whole stored corpus.
@@ -333,6 +345,11 @@ func Save(dir, host string, units []mine.SessionUnit) error {
 // transcripts, so only this machine's shard may grow from it. Another machine's shard
 // is read into the returned corpus and never rewritten.
 func Refresh(dir, host string, opts Options) ([]mine.SessionUnit, error) {
+	release, err := lockShard(dir, host)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	own, err := LoadShard(dir, host)
 	if err != nil {
 		return nil, err
