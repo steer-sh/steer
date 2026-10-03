@@ -5,6 +5,7 @@ import (
 	"sort"
 
 	"github.com/steer-sh/steer-cli/internal/cadence"
+	"github.com/steer-sh/steer-cli/internal/mods"
 )
 
 // statusJSON is the --json contract: the snapshot an agent reads for Steer's
@@ -40,6 +41,7 @@ type postureJSON struct {
 	Masters    []MasterRuntime `json:"masters"`
 	Rules      []RulesPresence `json:"rules"`
 	Plugins    []PluginCopy    `json:"plugins"`
+	Mods       []mods.Exposure `json:"mods"`
 	Readiness  readinessJSON   `json:"readiness"`
 }
 
@@ -137,6 +139,7 @@ func (s *SystemStatus) contract() statusJSON {
 			Masters:    nonNil(s.Posture.Masters),
 			Rules:      nonNil(s.Posture.Rules),
 			Plugins:    nonNil(s.Posture.Plugins),
+			Mods:       nonNil(s.Posture.Mods),
 			Readiness:  readinessRow(ReadinessOf(s, s.ReviewerProbe)),
 		},
 		Checks:        s.Checks,

@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/steer-sh/steer-cli/internal/harness"
+	"github.com/steer-sh/steer-cli/internal/mods"
+	"github.com/steer-sh/steer-cli/internal/statestore"
 	"github.com/steer-sh/steer-cli/internal/steerbin"
 	"github.com/steer-sh/steer-cli/internal/steerpath"
 )
@@ -82,6 +84,22 @@ func PluginCopies() []PluginCopy {
 		}
 	}
 	return out
+}
+
+// ModExposures reads each enabled Claude Code mod against the inspection cache that
+// `steer mods inspect` writes. It runs no process, so a mod nobody inspected reads as
+// uninspected rather than as safe.
+func ModExposures() []mods.Exposure {
+	h, ok := harness.Get(harness.ClaudeCode)
+	if !ok {
+		return []mods.Exposure{}
+	}
+	dir, err := h.ConfigDir(harness.GlobalScope, "")
+	if err != nil {
+		return []mods.Exposure{}
+	}
+	root, _ := steerpath.ProjectRoot()
+	return mods.Read(mods.Candidates(dir, root), statestore.Resolve(mods.Component))
 }
 
 // DifferingPlugins summarizes the copies that bundle another build for a one-line

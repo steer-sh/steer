@@ -13,6 +13,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
+	"github.com/steer-sh/steer-cli/internal/mods"
 	"github.com/steer-sh/steer-cli/internal/pi"
 )
 
@@ -173,7 +174,7 @@ func intPtr(n int) *int           { return &n }
 // so a renamed or reordered json tag fails here, the agent-contract guard.
 func TestJSONContractIsStable(t *testing.T) {
 	s := &SystemStatus{
-		StatusVersion: 29,
+		StatusVersion: 30,
 		GeneratedAt:   "2026-01-01T00:00:00Z",
 		Posture: Posture{
 			Instrument: "agy@sha", Reviewer: "gemini", Ledger: "/l.jsonl",
@@ -214,6 +215,11 @@ func TestJSONContractIsStable(t *testing.T) {
 			Plugins: []PluginCopy{
 				{Harness: "claude-code", Path: "/h/.claude/plugins/cache/m/steer/0.1.0", State: PluginDifferentBinary},
 				{Harness: "codex", Path: "/h/.codex/plugins/cache/m/steer/0.1.0", Target: "/w/steer", State: PluginSameBinary},
+			},
+			Mods: []mods.Exposure{
+				{ID: "guard@m", Path: "/h/.claude/plugins/cache/m/guard/0.1.0", Enabled: "user",
+					State: mods.StateToolHooks, Handlers: []string{"tool.call{tool=Bash}", "tool.check"}, InspectedAt: 1720},
+				{ID: "pane@m", Path: "/h/.claude/plugins/cache/m/pane/0.1.0", Enabled: "project", State: mods.StateUninspected},
 			},
 			Unresolved: 4,
 		},
@@ -319,7 +325,7 @@ func TestJSONContractIsStable(t *testing.T) {
 }
 
 const goldenStatusJSON = `{
-  "status_version": 29,
+  "status_version": 30,
   "generated_at": "2026-01-01T00:00:00Z",
   "posture": {
     "instrument": "agy@sha",
@@ -451,6 +457,25 @@ const goldenStatusJSON = `{
         "state": "same-binary"
       }
     ],
+    "mods": [
+      {
+        "id": "guard@m",
+        "path": "/h/.claude/plugins/cache/m/guard/0.1.0",
+        "enabled": "user",
+        "state": "tool-hooks",
+        "handlers": [
+          "tool.call{tool=Bash}",
+          "tool.check"
+        ],
+        "inspected_at": 1720
+      },
+      {
+        "id": "pane@m",
+        "path": "/h/.claude/plugins/cache/m/pane/0.1.0",
+        "enabled": "project",
+        "state": "uninspected"
+      }
+    ],
     "readiness": {
       "reviewing": true,
       "headline": "Commits here are reviewed before they land — Claude Code global.",
@@ -461,7 +486,9 @@ const goldenStatusJSON = `{
         }
       ],
       "unverified": [
-        "Codex global scope: trust record present, unverified; current hook trust cannot be verified · never observed"
+        "Codex global scope: trust record present, unverified; current hook trust cannot be verified · never observed",
+        "Claude Code mod guard@m handles tool.call{tool=Bash}, tool.check, so it can skip or override Steer's hooks",
+        "Claude Code mod pane@m is not inspected, so whether it can skip Steer's hooks is unknown — run steer mods inspect"
       ]
     }
   },

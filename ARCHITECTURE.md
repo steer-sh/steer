@@ -771,6 +771,16 @@ wire version constants and schema tests own machine compatibility.
 `vocabulary_test.go` checks display literals; dynamic stored values also need
 translation at rendering boundaries.
 
+A Claude Code mod's `tool.call` handler runs before every settings-file PreToolUse
+hook, so it can keep a guard master or the commit gate from running, and its
+`tool.check` handler can approve a call they blocked. Only managed-settings hooks
+run ahead of mods. `internal/mods/` lists the enabled plugins that declare a hooks
+module and joins them to the inspection cache (statestore component `mods`) that
+`steer mods inspect` writes from `claude plugin validate --json`. `posture.mods`
+reads that cache by a file fingerprint and starts no process, so a mod without a
+current inspection reads as uninspected, never as safe. Readiness lists bypass-capable
+and uninspected mods as unverified beside a Claude Code registration.
+
 The check tier is one section of that snapshot, read through
 `checks.StateOf`, the single reader of a repository's check state that `steer
 check list` and the queue share. A repository's declaration, this machine's

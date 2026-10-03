@@ -25,6 +25,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/gate/reviewers"
 	"github.com/steer-sh/steer-cli/internal/guard"
 	"github.com/steer-sh/steer-cli/internal/harness"
+	"github.com/steer-sh/steer-cli/internal/mods"
 	"github.com/steer-sh/steer-cli/internal/pi"
 	"github.com/steer-sh/steer-cli/internal/presets"
 	"github.com/steer-sh/steer-cli/internal/report"
@@ -69,7 +70,7 @@ import (
 // answer `steer status` prints, so an agent reads trust and resolution with it.
 // v29 adds posture.plugins: each harness's cached plugin copy, read against the
 // stable executable.
-const StatusVersion = 29
+const StatusVersion = 30
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20
@@ -373,6 +374,8 @@ type Posture struct {
 	Rules []RulesPresence `json:"rules"`
 	// Plugins is each harness's cached copy of the Steer plugin.
 	Plugins []PluginCopy `json:"plugins"`
+	// Mods is each enabled Claude Code mod read against its cached inspection.
+	Mods []mods.Exposure `json:"mods"`
 }
 
 // AttentionQueue is the subset of the loop needing action: the cadence queue
@@ -638,6 +641,7 @@ func collectPosture(cfg gate.Config, ev mine.EvidenceSet) Posture {
 		Masters:    []MasterRuntime{},
 		Rules:      []RulesPresence{},
 		Plugins:    PluginCopies(),
+		Mods:       ModExposures(),
 		Unresolved: resolve.CountUnresolved(cfg),
 	}
 	cwd, _ := os.Getwd()

@@ -99,7 +99,8 @@ Read the linked architecture section before changing the corresponding boundary:
   [readers and controls](ARCHITECTURE.md#cadence-status-and-controls).
   `cli/internal/status/` owns shared phrasing; the TUI calls shared mutation
   functions. Registration, executable resolution and observed activity are
-  distinct facts.
+  distinct facts. A Claude Code mod can skip a registered hook; `posture.mods`
+  (`cli/internal/mods/`) reads only the cache `steer mods inspect` writes.
 
 ## Changes that must travel together
 

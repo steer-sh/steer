@@ -6,6 +6,7 @@ import (
 
 	"github.com/steer-sh/steer-cli/internal/gate/reviewers"
 	"github.com/steer-sh/steer-cli/internal/harness"
+	"github.com/steer-sh/steer-cli/internal/mods"
 )
 
 func armed(h string) ScopeArming {
@@ -227,5 +228,33 @@ func TestAnUnconfirmedResolverIsUnverifiedAndNotAStep(t *testing.T) {
 	}
 	if len(r.Unverified) != 1 || !strings.Contains(r.Unverified[0], "Codex global scope: review-outcome reader: no trust record") {
 		t.Fatalf("unverified = %q; want the resolver's own trust named", r.Unverified)
+	}
+}
+
+// A Claude Code mod runs before the gate's PreToolUse hook, so a mod that handles a
+// tool event, or one no inspection covers, qualifies a Claude Code registration. It
+// does not qualify a Codex one, and a mod read as handling no tool event adds nothing.
+func TestModsQualifyOnlyAClaudeCodeRegistration(t *testing.T) {
+	exposures := []mods.Exposure{
+		{ID: "guard@m", State: mods.StateToolHooks, Handlers: []string{"tool.check"}},
+		{ID: "pane@m", State: mods.StateNoToolHooks},
+		{ID: "new@m", State: mods.StateStale},
+	}
+	s := snapshot(armed(string(harness.ClaudeCode)))
+	s.Posture.Mods = exposures
+	r := ReadinessOf(s, available())
+	if !r.Reviewing {
+		t.Fatal("a mod withheld reviewing; it is a diagnostic, not a broken registration")
+	}
+	joined := strings.Join(r.Unverified, "\n")
+	if len(r.Unverified) != 2 || !strings.Contains(joined, "guard@m handles tool.check") ||
+		!strings.Contains(joined, "new@m is changed since its inspection") || strings.Contains(joined, "pane@m") {
+		t.Fatalf("unverified = %q; want guard@m and new@m and not pane@m", r.Unverified)
+	}
+
+	codex := snapshot(armed(string(harness.Codex)))
+	codex.Posture.Mods = exposures
+	if got := ReadinessOf(codex, available()).Unverified; len(got) != 0 {
+		t.Fatalf("a Codex-only gate reports Claude Code mods: %q", got)
 	}
 }

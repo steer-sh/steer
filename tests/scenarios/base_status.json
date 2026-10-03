@@ -1,5 +1,5 @@
 {
-  "status_version": 29,
+  "status_version": 30,
   "generated_at": "2026-09-01T09:00:00Z",
   "posture": {
     "instrument": "gemini-3.7-flash-high/3/95653688/go-findings-v3-shell",
@@ -176,6 +176,7 @@
     ],
     "rules": [],
     "plugins": [],
+    "mods": [],
     "readiness": {
       "reviewing": true,
       "headline": "Commits here are reviewed before they land — Claude Code global.",

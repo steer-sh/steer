@@ -173,7 +173,12 @@ rebuild`, rewrites the shared runner for the whole team, so it is the user's cal
 
 Each harness decides whether a registered hook actually runs:
 
-- **Claude Code** — the registration is enforcement. Nothing more to do.
+- **Claude Code** — the registration runs unless a mod stops it. A mod is a plugin
+  with a JavaScript hooks module: its `tool.call` handler runs before every
+  settings-file hook and can answer a call so the gate never runs, and its
+  `tool.check` handler can approve a call the gate blocked. Run
+  `steer mods inspect`; `steer status` then names each enabled mod that can do this,
+  and each one no inspection covers.
 - **Codex** — restart Codex, then review and approve the hook definitions in `/hooks`.
   Until then the gate is registered and not enforcing.
 - **Pi** — a project extension runs only after Pi trusts the project. A global

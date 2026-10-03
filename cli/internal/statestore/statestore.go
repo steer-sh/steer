@@ -28,6 +28,7 @@ const markerName = ".steer-state"
 var Components = []string{
 	"commit-review",
 	"firing-audits",
+	"mods",
 	"steer-report",
 	"transcript-sessions",
 }

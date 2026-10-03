@@ -6,6 +6,7 @@ import (
 
 	"github.com/steer-sh/steer-cli/internal/gate/reviewers"
 	"github.com/steer-sh/steer-cli/internal/harness"
+	"github.com/steer-sh/steer-cli/internal/mods"
 )
 
 // A Step is one condition that must hold before a commit is reviewed, named with the
@@ -156,6 +157,7 @@ func ReadinessOf(s *SystemStatus, probe reviewers.Probe) Readiness {
 		steps, unverified := resolverSteps(s.Posture)
 		r.Steps = append(r.Steps, steps...)
 		r.Unverified = append(r.Unverified, unverified...)
+		r.Unverified = append(r.Unverified, modLines(s.Posture)...)
 	}
 	if !registered {
 		r.Steps = append([]Step{{
@@ -218,6 +220,45 @@ func resolverSteps(p Posture) (steps []Step, unverified []string) {
 		}
 	}
 	return nil, nil
+}
+
+// modLines reports the Claude Code mods that can run before a Claude Code
+// registration. A mod's tool.call handler runs ahead of every settings-file
+// PreToolUse hook and can answer a call so the gate never sees it, and its
+// tool.check handler can approve a call the gate blocked. An uninspected mod is
+// reported too: its handlers are unknown, not absent.
+func modLines(p Posture) []string {
+	claudeRegistered := false
+	for _, a := range p.CommitGate {
+		if a.Registered && a.Harness == string(harness.ClaudeCode) {
+			claudeRegistered = true
+		}
+	}
+	if !claudeRegistered {
+		return nil
+	}
+	var out []string
+	for _, m := range p.Mods {
+		switch m.State {
+		case mods.StateToolHooks:
+			out = append(out, fmt.Sprintf("Claude Code mod %s handles %s, so it can skip or override Steer's hooks",
+				m.ID, strings.Join(m.Handlers, ", ")))
+		case mods.StateUninspected, mods.StateStale, mods.StateFailed:
+			out = append(out, fmt.Sprintf("Claude Code mod %s is %s, so whether it can skip Steer's hooks is unknown — run steer mods inspect",
+				m.ID, modStatePhrase(m.State)))
+		}
+	}
+	return out
+}
+
+func modStatePhrase(state string) string {
+	switch state {
+	case mods.StateStale:
+		return "changed since its inspection"
+	case mods.StateFailed:
+		return "not readable by Claude Code's validator"
+	}
+	return "not inspected"
 }
 
 // prefixHarness names the registration a step belongs to. One store serves several

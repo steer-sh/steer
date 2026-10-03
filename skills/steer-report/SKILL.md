@@ -176,7 +176,7 @@ A correction occurrence can carry two context fields, each `{text, cut}` with `c
 
 An `after_interrupt` occurrence carries the same two fields, read from before the interrupt.
 
-### The `steer status --json` contract (`status_version: 29`)
+### The `steer status --json` contract (`status_version: 30`)
 
 Step 1 reads this snapshot for posture and the full class inventory. The unit is
 the failure class and what the corpus recorded about it, not the hook count. This
@@ -217,7 +217,8 @@ match or coverage maps, which `steer fix score --json` carries by the same `id`;
 `resolver` rows keep only their arming readings; `scope` carries `repo_root`; and
 `chains` is gone. v28 adds `posture.readiness`: the answer `steer status` prints.
 v29 adds `posture.plugins`: each harness's cached plugin copy, read against the
-stable executable.
+stable executable. v30 adds `posture.mods`: each enabled Claude Code mod, read
+against the cache `steer mods inspect` writes.
 
 - `status_version` — the schema version. `--json` is a stable agent contract.
 - `posture` — the arming state: `instrument` (reviewer model / runs / prompt
@@ -306,6 +307,18 @@ stable executable.
   are different builds, never which one is newer. **Act on `different-binary`:**
   update the plugin in that harness when the copy is older, or run the copy's
   `scripts/steer bin install` when it is newer.
+  `mods[]` is each enabled Claude Code plugin with a hooks module: `id`, `path`,
+  `enabled` (the settings scope that turned it on: `user`, `project` or `local`),
+  `state`, and `handlers`, `inspected_at` and `error` when an inspection says so. A
+  mod's `tool.call` handler runs before every settings-file hook, so it can stop a
+  Steer guard or the commit gate from running; its `tool.check` handler can approve
+  a call they blocked. `state` is `tool-hooks` (it handles a tool event, named in
+  `handlers`), `no-tool-hooks`, `uninspected`, `stale` (its files changed since the
+  inspection) or `failed` (Claude Code's validator refused it or could not run).
+  Status runs no process, so only `steer mods inspect` refreshes these readings.
+  Built-in mods and `--plugin-dir` plugins have no install record and are absent.
+  **Act on `uninspected`, `stale` or `failed`:** run `steer mods inspect`. A
+  `tool-hooks` row is the operator's decision: the mod may be one they trust.
 - `checks` — this repository's check tier on this machine, with an empty reading
   when `steer status` ran outside a repository. `repo` is the resolved Git root,
   `manifest` says whether it declares checks, and `adopted` / `adopted_at` say
