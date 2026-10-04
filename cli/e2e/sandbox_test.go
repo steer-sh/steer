@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/steer-sh/steer-cli/e2e/stubreviewer/stubcall"
 )
@@ -395,4 +396,33 @@ func (s *Sandbox) RegisteredCommand(rel, sub string) string {
 func fileExists(p string) bool {
 	_, err := os.Stat(p)
 	return err == nil
+}
+
+// WaitFor waits until path exists and the sandbox root stops changing, so a process a
+// command left running has finished writing.
+func (s *Sandbox) WaitFor(path string) {
+	s.t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for !fileExists(path) {
+		if time.Now().After(deadline) {
+			s.t.Fatalf("%s did not appear", path)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	last, quiet := "", 0
+	for quiet < 4 && time.Now().Before(deadline) {
+		var b strings.Builder
+		filepath.Walk(s.Root, func(p string, info os.FileInfo, err error) error {
+			if err == nil {
+				fmt.Fprintf(&b, "%s %d %d\n", p, info.Size(), info.ModTime().UnixNano())
+			}
+			return nil
+		})
+		if b.String() == last {
+			quiet++
+		} else {
+			last, quiet = b.String(), 0
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
