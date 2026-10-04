@@ -21,7 +21,7 @@ type Span struct{ Start, End int }
 //
 // Two guards: the subcommand must not be followed by a word character or a dot, and the
 // option tokens before it may not contain `;`, `&` or `|`. The `git` must sit at a
-// command boundary — start of text, whitespace, or one of those three operators.
+// command boundary — start of text or any non-word byte.
 func commitSpans(cmd string) []Span {
 	cmd = maskDocumentHeredocs(cmd)
 	var spans []Span
@@ -64,12 +64,11 @@ func boundaryStart(cmd string, i int) int {
 	return i
 }
 
+// atCommandBoundary treats any non-word byte before `git` as a boundary, so a commit
+// inside a quoted wrapper (`bash -c 'git commit'`, `eval "git commit"`) or behind a
+// backslash or path (`\git`, `/usr/bin/git`) still counts.
 func atCommandBoundary(cmd string, i int) bool {
-	if i == 0 {
-		return true
-	}
-	prev := cmd[i-1]
-	return isSpace(prev) || prev == ';' || prev == '&' || prev == '|'
+	return i == 0 || !isWordByte(cmd[i-1])
 }
 
 func isSpace(b byte) bool {

@@ -114,6 +114,24 @@ func TestIsCommitCommand(t *testing.T) {
 	}
 }
 
+// A commit the parser cannot see because a wrapper hides it reaches the loose detector,
+// and the gate refuses it before review rather than letting it run unreviewed.
+func TestWrappedCommitIsRefused(t *testing.T) {
+	for _, cmd := range []string{
+		"bash -c 'git " + c + " -m x'",
+		"eval \"git " + c + " -m x\"",
+		"\\git " + c + " -m x",
+		"sh -c \"cd /r && git " + c + " -m x\"",
+	} {
+		if !IsCommitCommand(cmd) {
+			t.Errorf("IsCommitCommand(%q) = false, want true", cmd)
+		}
+		if reason, _ := PreflightDeny(cmd, "/r"); reason == "" {
+			t.Errorf("PreflightDeny(%q) allowed a wrapped commit", cmd)
+		}
+	}
+}
+
 // The deny stops the WHOLE command, so a file the command wrote is not on disk and a
 // retry of the `git commit` half alone exits 128. The note says so, and only for the
 // commands that can hit it.
