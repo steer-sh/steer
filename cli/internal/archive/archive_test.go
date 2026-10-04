@@ -145,3 +145,59 @@ func TestWriteRefusesANameThatLeavesTheEntry(t *testing.T) {
 		t.Fatal("a refused write left a file behind")
 	}
 }
+
+// A repository can commit any directory on the archive path as a symlink; a write
+// through it would land the removed fix outside the repository.
+func TestWriteRefusesALinkedArchivePath(t *testing.T) {
+	cases := map[string]func(repo, outside string) (store string){
+		"archive": func(repo, outside string) string {
+			store := filepath.Join(repo, ".steer", "hooks")
+			mustMkdir(t, store)
+			mustLink(t, outside, filepath.Join(store, DirName))
+			return store
+		},
+		"id": func(repo, outside string) string {
+			store := filepath.Join(repo, ".steer", "hooks")
+			mustMkdir(t, filepath.Join(store, DirName))
+			mustLink(t, outside, filepath.Join(store, DirName, "alpha"))
+			return store
+		},
+		"store": func(repo, outside string) string {
+			mustMkdir(t, filepath.Join(repo, ".steer"))
+			mustLink(t, outside, filepath.Join(repo, ".steer", "hooks"))
+			return filepath.Join(repo, ".steer", "hooks")
+		},
+		"project parent": func(repo, outside string) string {
+			mustLink(t, outside, filepath.Join(repo, ".steer"))
+			return filepath.Join(repo, ".steer", "hooks")
+		},
+	}
+	for name, setup := range cases {
+		t.Run(name, func(t *testing.T) {
+			repo, outside := t.TempDir(), t.TempDir()
+			store := setup(repo, outside)
+			_, err := Write(store, Entry{Tier: "guard", ID: "alpha", Scope: "project"},
+				map[string][]byte{"alpha.py": []byte("print('a')\n")})
+			if err == nil || !strings.Contains(err.Error(), "symlink") {
+				t.Fatalf("Write through a linked %s: err = %v", name, err)
+			}
+			if leaked, _ := os.ReadDir(outside); len(leaked) != 0 {
+				t.Fatalf("Write left %d entries outside the repository", len(leaked))
+			}
+		})
+	}
+}
+
+func mustMkdir(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mustLink(t *testing.T, target, link string) {
+	t.Helper()
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+}

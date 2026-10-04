@@ -16,6 +16,9 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/steer-sh/steer-cli/internal/hookstore"
+	"github.com/steer-sh/steer-cli/internal/steerpath"
 )
 
 // Version is the format version of archive.json.
@@ -85,6 +88,9 @@ func Write(storeDir string, e Entry, files map[string][]byte) (string, error) {
 	sort.Strings(e.Missing)
 
 	idDir := filepath.Join(storeDir, DirName, e.ID)
+	if err := refuseLinkedArchive(storeDir, e); err != nil {
+		return "", err
+	}
 	if err := os.MkdirAll(idDir, 0o755); err != nil {
 		return "", fmt.Errorf("failed to create archive directory: %w", err)
 	}
@@ -95,7 +101,7 @@ func Write(storeDir string, e Entry, files map[string][]byte) (string, error) {
 	defer os.RemoveAll(tmp)
 
 	for name, content := range files {
-		if err := os.WriteFile(filepath.Join(tmp, name), content, 0o644); err != nil {
+		if err := hookstore.WriteFile(filepath.Join(tmp, name), content, 0o644); err != nil {
 			return "", fmt.Errorf("failed to write archived %s: %w", name, err)
 		}
 	}
@@ -103,7 +109,7 @@ func Write(storeDir string, e Entry, files map[string][]byte) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(filepath.Join(tmp, EntryName), append(raw, '\n'), 0o644); err != nil {
+	if err := hookstore.WriteFile(filepath.Join(tmp, EntryName), append(raw, '\n'), 0o644); err != nil {
 		return "", fmt.Errorf("failed to write %s: %w", EntryName, err)
 	}
 
@@ -116,6 +122,23 @@ func Write(storeDir string, e Entry, files map[string][]byte) (string, error) {
 		return "", fmt.Errorf("failed to place archive entry: %w", err)
 	}
 	return final, nil
+}
+
+// refuseLinkedArchive refuses a symlink on the directories an entry is written under.
+// A project store is committed, so such a link is one a repository carried and a
+// write through it lands outside the store; the project store's .steer parent is
+// refused for the same reason. A global store's parent is the operator's own.
+func refuseLinkedArchive(storeDir string, e Entry) error {
+	dirs := []string{storeDir, filepath.Join(storeDir, DirName), filepath.Join(storeDir, DirName, e.ID)}
+	if strings.EqualFold(strings.TrimSpace(e.Scope), steerpath.ProjectScope) {
+		dirs = append([]string{filepath.Dir(storeDir)}, dirs...)
+	}
+	for _, dir := range dirs {
+		if info, err := os.Lstat(dir); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("%s is a symlink; the archive writes only inside its own store", dir)
+		}
+	}
+	return nil
 }
 
 // List reads every entry under storeDir, oldest first. A store with no archive

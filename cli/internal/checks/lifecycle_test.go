@@ -262,6 +262,30 @@ func TestRemoveKeepsCasesAndHistory(t *testing.T) {
 	}
 }
 
+// A repository that commits .steer/checks/archive as a symlink cannot make a removal
+// write the declaration outside the repository; the check stays declared.
+func TestRemoveRefusesALinkedArchive(t *testing.T) {
+	root := checkRepo(t, noCountScript)
+	writeCases(t, root, "no-count", goodCase(), defectCase("literal test count"))
+	if _, err := Add(root, noCount); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(Dir(root), archive.DirName)); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := Remove(root, "no-count", ""); err == nil {
+		t.Fatal("Remove archived through a linked archive directory")
+	}
+	if leaked, _ := os.ReadDir(outside); len(leaked) != 0 {
+		t.Fatalf("Remove left %d entries outside the repository", len(leaked))
+	}
+	if m, _ := Load(root); len(m.Checks) != 1 {
+		t.Fatalf("manifest declares %+v; a refused archive must leave the check declared", m.Checks)
+	}
+}
+
 // Removing a check archives its declaration with the reason.
 func TestRemoveArchivesTheDeclaration(t *testing.T) {
 	root := checkRepo(t, noCountScript)
