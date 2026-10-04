@@ -14,10 +14,14 @@ import (
 const Instrument = "mvdan-sh-v3.13.1-calls-v1"
 
 // Word is one shell word. Static is false when evaluating it requires expansion.
+// Start and End are the word's byte range in the source; a word built by a caller
+// rather than the parser leaves both zero.
 type Word struct {
 	Value  string
 	Raw    string
 	Static bool
+	Start  int
+	End    int
 }
 
 // Redirect is one redirection attached to a simple command.
@@ -155,7 +159,7 @@ func normalizeWord(source string, word *syntax.Word) Word {
 	if start >= 0 && end >= start && end <= len(source) {
 		raw = source[start:end]
 	}
-	return Word{Value: value, Raw: raw, Static: static}
+	return Word{Value: value, Raw: raw, Static: static, Start: start, End: end}
 }
 
 // StaticWord returns a word's value when it holds only literals and quotes.

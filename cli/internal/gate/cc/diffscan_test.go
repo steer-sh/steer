@@ -35,6 +35,12 @@ func matchedBehindWideBoundary(cmd string) bool {
 	return false
 }
 
+// exemptedByText reports a command the Python detector exempted for holding `--dry-run`
+// anywhere; Go exempts only a parsed dry-run call, so it may add a match there.
+func exemptedByText(cmd string) bool {
+	return strings.Contains(cmd, "--dry-run")
+}
+
 func TestLooseCommitDetectorMatchesPython(t *testing.T) {
 	var raw []byte
 	if path := os.Getenv("COMMIT_GATE_SCAN_CORPUS"); path != "" {
@@ -63,7 +69,7 @@ func TestLooseCommitDetectorMatchesPython(t *testing.T) {
 	}
 	for _, tc := range cases {
 		got := looseIsCommitCommand(tc.Cmd)
-		if got == tc.IsCommit || (got && matchedBehindWideBoundary(tc.Cmd)) {
+		if got == tc.IsCommit || (got && (matchedBehindWideBoundary(tc.Cmd) || exemptedByText(tc.Cmd))) {
 			continue
 		}
 		t.Errorf("looseIsCommitCommand(%q) = %v, python %v", tc.Cmd, got, tc.IsCommit)

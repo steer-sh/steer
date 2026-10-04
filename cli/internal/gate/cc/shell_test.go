@@ -132,6 +132,37 @@ func TestWrappedCommitIsRefused(t *testing.T) {
 	}
 }
 
+// A dry run is exempt only as the parsed call whose own options keep --dry-run in
+// effect; the same text anywhere else exempts no commit.
+func TestDryRunExemptsOnlyItsOwnCall(t *testing.T) {
+	cases := []struct {
+		cmd  string
+		want bool
+		why  string
+	}{
+		{"bash -c 'git " + c + " -m \"fix --dry-run parsing\"'", true, "a wrapped message mentions the flag"},
+		{"bash -c 'git " + c + " -m x' && git " + c + " --dry-run", true, "the dry run is a different call"},
+		{"bash -c 'git " + c + " --dry-run'", true, "a wrapped dry run is not a parsed one"},
+		{"git " + c + " --dry-run --no-dry-run -m x", true, "a later option clears the dry run"},
+		{"git " + c + " --dry-run --no-dry -m x", true, "an abbreviation clears it too"},
+		{"git " + c + " --dry-run \"$opt\"", true, "a dynamic word may clear it"},
+		{"git " + c + " \"$opt\" --dry-run", true, "a dynamic word may take the flag as its value"},
+		{"git " + c + " -m \"$msg\" --dry-run", false, "a dynamic message value is not an option"},
+		{"git " + c + " --dry-run -- \"$path\"", false, "a dynamic pathspec is not an option"},
+		{"/usr/bin/git " + c + " --dry-run", false, "a path to git"},
+		{"echo $(git " + c + " --dry-run)", false, "a nested dry run"},
+	}
+	for _, tc := range cases {
+		if got := IsCommitCommand(tc.cmd); got != tc.want {
+			t.Errorf("IsCommitCommand(%q) = %v, want %v — %s", tc.cmd, got, tc.want, tc.why)
+		}
+	}
+	cmd := "bash -c 'git " + c + " -m \"fix --dry-run parsing\"'"
+	if reason, _ := PreflightDeny(cmd, "/r"); reason == "" {
+		t.Errorf("PreflightDeny(%q) allowed a wrapped commit", cmd)
+	}
+}
+
 // The deny stops the WHOLE command, so a file the command wrote is not on disk and a
 // retry of the `git commit` half alone exits 128. The note says so, and only for the
 // commands that can hit it.

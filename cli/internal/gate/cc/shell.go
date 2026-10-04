@@ -13,8 +13,9 @@ import (
 	"github.com/steer-sh/steer-cli/internal/shellsyntax"
 )
 
-// Span is a half-open byte range in the command text.
-type Span struct{ Start, End int }
+// Span is a half-open byte range in the command text. Git is the index of the match's
+// `git`, which Start may precede by the command boundary.
+type Span struct{ Start, End, Git int }
 
 // commitSpans finds every `git ...` invocation of the subcommand, hand-rolled because
 // the pattern needs a negative lookahead RE2 does not have.
@@ -30,7 +31,7 @@ func commitSpans(cmd string) []Span {
 			continue
 		}
 		if end, ok := scanToCommit(cmd, i+3); ok {
-			spans = append(spans, Span{Start: boundaryStart(cmd, i), End: end})
+			spans = append(spans, Span{Start: boundaryStart(cmd, i), End: end, Git: i})
 			// Matches are non-overlapping, left to right. `git git commit` is ONE
 			// invocation whose first token happens to be `git`, not two: resuming
 			// inside it would report the inner `git` as a second commit and move the
@@ -115,10 +116,10 @@ func skipSpace(cmd string, pos int) int {
 
 // IsCommitCommand reports whether this Bash command runs `git commit` for real.
 //
-// Deliberately permissive on shape (compound commands, heredocs, leading env) and
-// conservative on intent: --dry-run rehearsals are not commits. A command this misses
-// is a commit that ships ungated, which is the failure the gate exists to prevent, so
-// it errs toward matching.
+// Deliberately permissive on shape (compound commands, heredocs, leading env). A
+// --dry-run rehearsal is not a commit, but only the parser can say that a match is
+// one. A command this misses is a commit that ships ungated, which is the failure the
+// gate exists to prevent, so it errs toward matching.
 func IsCommitCommand(cmd string) bool {
 	if parsed, err := parseCommit(cmd, ""); err == nil && parsed != nil {
 		return true
@@ -126,8 +127,22 @@ func IsCommitCommand(cmd string) bool {
 	return looseIsCommitCommand(cmd)
 }
 
+// looseIsCommitCommand reports a `git ... commit` match in the text whose `git` and
+// `commit` are not the command words of one parsed dry-run call. A `--dry-run`
+// elsewhere in the text exempts nothing: inside a wrapper or a message it does not
+// reach the commit's own options.
 func looseIsCommitCommand(cmd string) bool {
-	return len(commitSpans(cmd)) > 0 && !strings.Contains(cmd, "--dry-run")
+	spans := commitSpans(cmd)
+	if len(spans) == 0 {
+		return false
+	}
+	dryRuns := dryRunCommitWords(cmd)
+	for _, span := range spans {
+		if !dryRuns[commitWords{span.Git + len("git"), span.End - len("commit"), span.End}] {
+			return true
+		}
+	}
+	return false
 }
 
 // RepoDir resolves which repo this command writes to, honouring both `-C <path>` and a

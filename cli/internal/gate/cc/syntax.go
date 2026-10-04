@@ -37,7 +37,7 @@ func parseCommit(cmd, cwd string) (*parsedGit, error) {
 			continue
 		}
 		sub, gitCWD, workTree, gitDirOnly, ok := gitSubcommand(call.Args, gitArg, cwd)
-		if !ok || call.Args[sub].Value != "commit" || commitHasDryRun(call.Args[sub+1:]) {
+		if !ok || call.Args[sub].Value != "commit" || commitDryRun(call.Args[sub+1:]) {
 			continue
 		}
 		multiple := found != nil
@@ -184,8 +184,62 @@ func gitSubcommand(args []shellsyntax.Word, gitArg int, cwd string) (sub int, gi
 	return 0, "", "", false, false
 }
 
-func commitHasDryRun(args []shellsyntax.Word) bool {
-	return commitHasFlag(args, "--dry-run")
+// commitDryRun reports that a commit's own options leave --dry-run in effect for the
+// whole call: the flag is set, no later --no-dry-run (or an abbreviation of it) clears
+// it, and no free-standing dynamic word stands among the options, since one could
+// clear it or be a value option that takes `--dry-run` as its value.
+func commitDryRun(args []shellsyntax.Word) bool {
+	dry := false
+	for i := 0; i < len(args); i++ {
+		if !args[i].Static {
+			return false
+		}
+		token := args[i].Value
+		if token == "--" {
+			break
+		}
+		name, _, attached := strings.Cut(token, "=")
+		switch {
+		case token == "--dry-run":
+			dry = true
+		case strings.HasPrefix(name, "--no-d"):
+			dry = false
+		case commitOptionTakesValue(name) && !attached:
+			i++
+		case strings.HasPrefix(token, "-") && !strings.HasPrefix(token, "--"):
+			kind, value := shortCommitValue(token)
+			if strings.ContainsRune("mFCct", rune(kind)) && value == "" {
+				i++
+			}
+		}
+	}
+	return dry
+}
+
+// commitWords locates a commit call's command words: the end of its `git` word and
+// the byte range of its `commit` word.
+type commitWords struct{ gitEnd, commitStart, commitEnd int }
+
+// dryRunCommitWords returns the command words of every parsed dry-run commit call,
+// so the loose scan can exempt a match that is that call and nothing else.
+func dryRunCommitWords(cmd string) map[commitWords]bool {
+	program, err := shellsyntax.Parse(cmd)
+	if err != nil {
+		return nil
+	}
+	words := map[commitWords]bool{}
+	for _, call := range program.Calls {
+		gitArg, ok := gitExecutable(call.Args)
+		if !ok {
+			continue
+		}
+		sub, _, _, _, ok := gitSubcommand(call.Args, gitArg, "")
+		if !ok || call.Args[sub].Value != "commit" || !commitDryRun(call.Args[sub+1:]) {
+			continue
+		}
+		words[commitWords{call.Args[gitArg].End, call.Args[sub].Start, call.Args[sub].End}] = true
+	}
+	return words
 }
 
 // commitHasFlag reports a long flag among the commit's own arguments. It walks the
