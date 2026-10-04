@@ -161,6 +161,14 @@ func Targets(targets []Registrar, fallback Registrar) []Registrar {
 // order fixes the iteration order of All, so every listing renders the same way.
 var order = []ID{ClaudeCode, Codex, Pi}
 
+// unlisted harnesses keep their adapters and accept an explicit name, but help
+// text and messages never offer them. A reading names one only where a
+// registration or evidence for it already exists.
+var unlisted = map[ID]bool{Pi: true}
+
+// Listed reports whether help text and messages offer the harness.
+func Listed(id ID) bool { return !unlisted[id] }
+
 // All returns every registered harness in a stable order.
 func All() []Harness {
 	out := make([]Harness, 0, len(order))
@@ -201,7 +209,9 @@ func ParseOrDetect(name string) (ID, error) {
 func names() []string {
 	out := make([]string, 0, len(order))
 	for _, id := range order {
-		out = append(out, string(id))
+		if Listed(id) {
+			out = append(out, string(id))
+		}
 	}
 	return out
 }

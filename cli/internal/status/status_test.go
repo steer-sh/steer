@@ -141,9 +141,25 @@ func TestCollectEmptyMachineFailsSoft(t *testing.T) {
 		t.Error("empty machine should carry an empty attention queue")
 	}
 	// Posture is harness-qualified: the commit gate and its resolver report every
-	// enforcing harness in both scopes, and nothing is armed.
-	if len(s.Posture.CommitGate) != 6 || len(s.Posture.Resolver) != 6 {
-		t.Errorf("gate posture should report all harnesses in both scopes, got %+v", s.Posture)
+	// listed harness in both scopes, and nothing is armed. Pi is unlisted and has
+	// no registration here, so no row names it.
+	if len(s.Posture.CommitGate) != 4 || len(s.Posture.Resolver) != 4 {
+		t.Errorf("gate posture should report the listed harnesses in both scopes, got %+v", s.Posture)
+	}
+	for _, row := range append(append([]ScopeArming{}, s.Posture.CommitGate...), s.Posture.Resolver...) {
+		if row.Harness == "pi" {
+			t.Errorf("an unregistered Pi must not appear, got %+v", row)
+		}
+	}
+	for _, m := range s.Posture.Masters {
+		if m.Harness == "pi" {
+			t.Errorf("an unregistered Pi master must not appear, got %+v", m)
+		}
+	}
+	for _, h := range s.Telemetry.Harnesses {
+		if h.Harness == "pi" {
+			t.Errorf("Pi telemetry without evidence must not appear, got %+v", h)
+		}
 	}
 	for _, row := range s.Posture.CommitGate {
 		if row.Harness == "" {
@@ -153,11 +169,11 @@ func TestCollectEmptyMachineFailsSoft(t *testing.T) {
 			t.Errorf("an empty machine arms nothing, got %+v", row)
 		}
 	}
-	// Codex and Pi review hook trust, so a registration there proves no enforcement
-	// and Trust reads unknown. Effective is the registration's own shape, not trust.
+	// Codex reviews hook trust, so a registration there proves no enforcement and
+	// Trust reads unknown. Effective is the registration's own shape, not trust.
 	for _, row := range s.Posture.CommitGate {
 		want := TrustNotApplicable
-		if row.Harness == "codex" || row.Harness == "pi" {
+		if row.Harness == "codex" {
 			want = TrustUnknown
 		}
 		if row.Trust != want {
@@ -816,8 +832,9 @@ func TestObservedReadsTheNewestRowPerHarness(t *testing.T) {
 }
 
 // TestPiPostureReadsTheRegisteredExtension pins the Pi rows over an ARMED machine:
-// the empty-machine test proves only that the rows exist. Pi writes the review and
-// the resolver into one extension file, so both rows read back from one write.
+// the empty-machine test proves only that they are absent. Pi writes the review and
+// the resolver into one extension file, so both rows read back from one write, and
+// the scope with no registration carries no Pi row.
 func TestPiPostureReadsTheRegisteredExtension(t *testing.T) {
 	isolate(t)
 	if _, err := pi.RegisterCommitGateAndResolver(claude.GlobalScope, t.TempDir(),
@@ -833,10 +850,16 @@ func TestPiPostureReadsTheRegisteredExtension(t *testing.T) {
 		if a.Harness == "pi" && a.Scope == claude.GlobalScope {
 			gateRow = a
 		}
+		if a.Harness == "pi" && a.Scope == claude.ProjectScope {
+			t.Errorf("unregistered pi project gate row = %+v", a)
+		}
 	}
 	for _, a := range p.Resolver {
 		if a.Harness == "pi" && a.Scope == claude.GlobalScope {
 			resolverRow = a
+		}
+		if a.Harness == "pi" && a.Scope == claude.ProjectScope {
+			t.Errorf("unregistered pi project resolver row = %+v", a)
 		}
 	}
 	if !gateRow.Registered || !gateRow.Effective || gateRow.Timeout != 210 ||

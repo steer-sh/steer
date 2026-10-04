@@ -29,10 +29,13 @@ func TestHelpHintNamesTheFailingSubcommand(t *testing.T) {
 // the README leads with. It described the retired guard-first, Claude-only flow.
 func TestRootHelpLeadsWithTheCommitGate(t *testing.T) {
 	long := rootCmd.Long
-	for _, want := range []string{"commit-gate install", "reviewer.provider", "Codex", "Pi"} {
+	for _, want := range []string{"commit-gate install", "reviewer.provider", "Codex", "macOS and Linux"} {
 		if !strings.Contains(long, want) {
 			t.Errorf("the root help does not name %q", want)
 		}
+	}
+	if strings.Contains(long, "Pi") {
+		t.Error("the root help names Pi, which this release does not list")
 	}
 	if strings.Contains(long, "Claude Code hooks generated") {
 		t.Error("the root help still describes the retired guard-first flow")

@@ -1,6 +1,6 @@
 ---
 name: steer-setup
-description: Set up steer after installing the plugin — pick a reviewer CLI and model, arm the commit gate for this agent, and place the stable executable. Use for first-time steer setup, when adding a second harness (Claude Code, Codex or Pi) to an existing steer install, or when the user asks to configure, arm or repair the commit gate. Also arms repository checks at turn end and moves a personal check gate into Steer.
+description: Set up steer after installing the plugin — pick a reviewer CLI and model, arm the commit gate for this agent, and place the stable executable. Use for first-time steer setup, when adding a second harness (Claude Code or Codex) to an existing steer install, or when the user asks to configure, arm or repair the commit gate. Also arms repository checks at turn end and moves a personal check gate into Steer.
 user-invocable: true
 compatibility: Runs the steer CLI from PATH, or from the bundled launcher under the plugin root (PLUGIN_ROOT on Codex, CLAUDE_PLUGIN_ROOT on Claude Code). Writes ~/.steer/config.json and the invoking harness's hook registration. Needs an installed, authenticated reviewer CLI — claude, codex or agy.
 allowed-tools: Bash(steer *), Read
@@ -72,8 +72,7 @@ one is still a valid choice if the user is about to install it. Say both plainly
 rather than filtering the list. Step 5 runs one test review, which is the proof.
 
 The reviewer is independent of the agent writing the code. A user working in Codex
-may prefer the Claude Code reviewer, and a Pi user must pick one of these three
-because Pi ships no reviewer CLI of its own. Ask; do not infer from the harness.
+may prefer the Claude Code reviewer. Ask; do not infer from the harness.
 
 Then ask for the model. Suggest one per provider and accept whatever the user types:
 
@@ -108,7 +107,6 @@ already show which harnesses are registered, so name those and do not re-arm the
 # one of:
 "${STEER_BIN}" commit-gate install --harness claude-code --scope global
 "${STEER_BIN}" commit-gate install --harness codex --scope global
-"${STEER_BIN}" commit-gate install --harness pi --scope global
 ```
 
 `--scope global` covers every repository. Use `--scope project` in the current
@@ -181,8 +179,6 @@ Each harness decides whether a registered hook actually runs:
   and each one no inspection covers.
 - **Codex** — restart Codex, then review and approve the hook definitions in `/hooks`.
   Until then the gate is registered and not enforcing.
-- **Pi** — a project extension runs only after Pi trusts the project. A global
-  registration needs no project trust.
 
 Then check that the reviewer answers. This sends one small sample diff to the
 configured reviewer and writes no review record:
@@ -229,7 +225,7 @@ Three separate facts arm a repository, and none implies another:
 
 1. **The Stop runner is registered** in the harness:
    `"${STEER_BIN}" check install --harness <claude-code|codex> --scope <project|global>`.
-   Pi has no Stop runner. In Codex, the user must approve the new Stop hook in
+   In Codex, the user must approve the new Stop hook in
    `/hooks`; Steer cannot read that trust record, so `check install` reports the
    step as unknown.
 2. **The repository is adopted** on this machine: `"${STEER_BIN}" check adopt`

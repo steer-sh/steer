@@ -4,7 +4,7 @@ Steer reviews your agent's code before it commits, then helps you prevent recurr
 
 Start with the commit gate. Independent reviewers inspect a proposed change, and your agent checks their findings against the code, fixes what holds up, and explains what it accepted or rejected. The review history becomes evidence for better checks, rules, and instructions.
 
-Steer supports Claude Code and Codex, with a Git pre-commit option for other workflows.
+Steer supports Claude Code and Codex on macOS and Linux, with a Git pre-commit option for other workflows.
 
 ## Review your next commit
 

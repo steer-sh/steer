@@ -2,8 +2,8 @@
 name: steer
 description: Turns a natural-language rule into the fix that can enforce it — a repository check, a PreToolUse Python guard, or an instruction rule — and installs it. Use when enforcing coding standards, blocking insecure patterns, making sure checks pass before a turn ends, managing hook lifecycle, or running steer CLI commands (register, remove, list, test, preset, verify, git-hooks).
 user-invocable: true
-prompt_version: 18
-compatibility: Requires Claude Code, Codex, or Pi with tool-call hook support. Hooks are installed into .steer/hooks/ and registered in every installed harness (settings.json for Claude Code, hooks.json for Codex, extensions for Pi). steer CLI must be available on PATH or bundled under scripts/.
+prompt_version: 19
+compatibility: Requires Claude Code or Codex with tool-call hook support. Hooks are installed into .steer/hooks/ and registered in every installed harness (settings.json for Claude Code, hooks.json for Codex). steer CLI must be available on PATH or bundled under scripts/.
 allowed-tools: Bash(steer *), Bash(python3 *), Bash(echo *), Read, Write, Edit
 ---
 
@@ -83,10 +83,10 @@ them, and any `--harness <id>`, from the rule text as you strip `--headless`.
 - `--route`: route the rule, then install on the routed tier as [Route the
   rule](#route-the-rule) says.
 
-`--harness <id>` names the harness the rule must hold in (`claude-code`,
-`codex` or `pi`). Without it, the rule must hold in every harness installed
-here. `supported` is false when the routed tier cannot enforce the rule in
-that harness, such as a repository check under Pi, which has no Stop runner.
+`--harness <id>` names the harness the rule must hold in (`claude-code` or
+`codex`). Without it, the rule must hold in every harness installed here.
+`supported` is false when the routed tier cannot enforce the rule in that
+harness, such as a repository check in a harness with no Stop runner.
 Keep the routed tier; never swap in a weaker one to reach `supported: true`.
 With `--route`, a rule that is not supported installs nothing.
 
@@ -455,7 +455,7 @@ The store is shared between harnesses; the registration is not. `register` write
 to every hook-registering harness installed on the machine — the one whose config
 directory exists — and reports which ones on the last line of its output. A guard
 is a rule about the operator's work, not about one agent, so all get it. Add
-`--harness claude-code`, `--harness codex`, or `--harness pi` to write to one only, or
+`--harness claude-code` or `--harness codex` to write to one only, or
 `--all-harnesses` to write to every hook-supporting harness whether or not it is
 installed here. On a machine with no harness directory, `register` writes to
 Claude Code.

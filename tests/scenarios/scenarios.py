@@ -189,7 +189,7 @@ def _queue(interventions=(), candidates=(), unscored=(), review_size=211):
         "corpora": [
             {"corpus": "review-findings", "present": review_size > 0,
              "size": review_size},
-            {"corpus": "transcript-friction", "present": True, "size": 520},
+            {"corpus": "transcript-friction", "present": True, "size": 465},
         ],
     }
 
@@ -338,7 +338,7 @@ def _first_run():
     snap["corpora"] = [
         {"corpus": "review-findings", "present": False, "size": 0,
          "path": "/home/example/.steer/state/commit-review"},
-        {"corpus": "transcript-friction", "present": True, "size": 520,
+        {"corpus": "transcript-friction", "present": True, "size": 465,
          "path": "/home/example/.steer/state/transcript-sessions"},
     ]
     tel = snap["telemetry"]

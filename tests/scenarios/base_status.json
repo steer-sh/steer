@@ -27,16 +27,6 @@
         "observed_corpus": "commit-review"
       },
       {
-        "harness": "pi",
-        "scope": "project",
-        "registered": false,
-        "effective": false,
-        "trust": "unknown",
-        "resolvable": "not-registered",
-        "observed": 1788538643,
-        "observed_corpus": "commit-review"
-      },
-      {
         "harness": "claude-code",
         "scope": "global",
         "registered": true,
@@ -59,18 +49,6 @@
         "resolvable": "resolvable",
         "observed": 1788557157,
         "observed_corpus": "commit-review"
-      },
-      {
-        "harness": "pi",
-        "scope": "global",
-        "registered": true,
-        "effective": true,
-        "timeout": 360,
-        "trust": "unknown",
-        "command": "/home/example/.steer/bin/steer commit-gate review-pi",
-        "resolvable": "resolvable",
-        "observed": 1788538643,
-        "observed_corpus": "commit-review"
       }
     ],
     "resolver": [
@@ -80,14 +58,6 @@
         "registered": false,
         "effective": false,
         "trust": "not-applicable",
-        "resolvable": "not-registered"
-      },
-      {
-        "harness": "pi",
-        "scope": "project",
-        "registered": false,
-        "effective": false,
-        "trust": "unknown",
         "resolvable": "not-registered"
       },
       {
@@ -104,14 +74,6 @@
         "registered": true,
         "effective": true,
         "trust": "not-applicable",
-        "resolvable": "resolvable"
-      },
-      {
-        "harness": "pi",
-        "scope": "global",
-        "registered": true,
-        "effective": true,
-        "trust": "unknown",
         "resolvable": "resolvable"
       },
       {
@@ -138,12 +100,6 @@
         "state": "not-registered"
       },
       {
-        "harness": "pi",
-        "scope": "project",
-        "expected": "9cd1fde8",
-        "state": "not-registered"
-      },
-      {
         "harness": "claude-code",
         "scope": "global",
         "path": "/home/example/.steer/hooks/steer-hooks.py",
@@ -162,16 +118,6 @@
         "expected": "9cd1fde8",
         "state": "current",
         "observed": 1788540158
-      },
-      {
-        "harness": "pi",
-        "scope": "global",
-        "path": "/home/example/.steer/hooks/steer-hooks.py",
-        "runtime": "9cd1fde8",
-        "version": "0.1.0",
-        "expected": "9cd1fde8",
-        "state": "current",
-        "observed": 1788540158
       }
     ],
     "rules": [],
@@ -183,8 +129,6 @@
       "steps": [],
       "unverified": [
         "Codex global scope: trust record present, unverified; current hook trust cannot be verified · last review 2026-09-04 15:25",
-        "Pi global scope: trust unknown; current hook trust cannot be verified · last review 2026-09-04 10:17",
-        "Pi global scope: review-outcome reader: trust unknown; current hook trust cannot be verified",
         "Codex global scope: review-outcome reader: trust record present, unverified; current hook trust cannot be verified"
       ]
     }
@@ -211,7 +155,7 @@
     "review_chains": 211,
     "audit_firings": 19,
     "check_blocks": 0,
-    "session_snapshots": 520,
+    "session_snapshots": 465,
     "harnesses": [
       {
         "harness": "claude-code",
@@ -226,13 +170,6 @@
         "firings": 7,
         "check_blocks": 0,
         "chains": 7
-      },
-      {
-        "harness": "pi",
-        "sessions": 55,
-        "firings": 3,
-        "check_blocks": 0,
-        "chains": 1
       }
     ]
   },
@@ -246,7 +183,7 @@
     {
       "corpus": "transcript-friction",
       "present": true,
-      "size": 520,
+      "size": 465,
       "path": "/home/example/.steer/state/transcript-sessions"
     }
   ],

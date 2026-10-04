@@ -46,6 +46,9 @@ Read the linked architecture section before changing the corresponding boundary:
 - Harness support, paths, or migrations: [harnesses and storage](ARCHITECTURE.md#harnesses-and-storage).
   Start with `cli/internal/harness/` and `cli/internal/steerpath/`; registration
   adapters and shared stores have different ownership.
+  Pi is unlisted: help text and messages offer only harnesses `harness.Listed`
+  accepts, and a status row names Pi only where a Pi registration or evidence
+  exists. A new user-facing harness listing must apply the same test.
   Codex hook writers share `cli/internal/codex/hooks.go`'s `save`; every mutation
   must pass its scope so project writes refuse symlinked configuration paths.
   Pi bridge mutations share `cli/internal/pi/registrar.go`'s

@@ -182,9 +182,55 @@ func TestRulesPresenceCoversInstalledHarnessesOnly(t *testing.T) {
 	}
 }
 
+// An installed Pi whose document carries no Steer rule gets no rules row, so an
+// unlisted harness is never named for drift Steer did not cause. Once the shared
+// project AGENTS.md carries the section, the Pi row reads it.
+func TestAnUnlistedHarnessReadsRulesOnlyWhereSteerWroteThem(t *testing.T) {
+	root := projectDir(t)
+	testhome.Set(t, root)
+	if err := os.MkdirAll(filepath.Join(root, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CODEX_HOME", t.TempDir())
+	piDir := filepath.Join(root, "pi-agent")
+	if err := os.MkdirAll(piDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PI_CODING_AGENT_DIR", piDir)
+
+	if _, err := claude.InstallManagedRule(claude.ProjectScope, "config-path",
+		"resolve a config path from the repo root", claude.Registrar{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range RulesPresences(claude.ProjectScope, guardRegistrars()) {
+		if row.Harness == "pi" {
+			t.Fatalf("a Pi document with no Steer rule carries a row: %#v", row)
+		}
+	}
+
+	if _, err := claude.SyncStore(claude.ProjectScope, claude.Registrar{}, codex.Registrar{}); err != nil {
+		t.Fatal(err)
+	}
+	row := rulesRowFor(t, RulesPresences(claude.ProjectScope, guardRegistrars()), "pi")
+	if row.State != RulesCurrent || row.Expected != 1 {
+		t.Fatalf("pi row after the shared document gained the rule = %#v", row)
+	}
+}
+
+func rulesRowFor(t *testing.T, rows []RulesPresence, id string) RulesPresence {
+	t.Helper()
+	for _, row := range rows {
+		if row.Harness == id {
+			return row
+		}
+	}
+	t.Fatalf("no rules row for harness %q in %#v", id, rows)
+	return RulesPresence{}
+}
+
 // A clone carries a committed store and none of this machine's registrations.
 // Every installed harness then runs none of the store's guards and reads
-// detached; a harness that is not installed stays not-registered; and a sync
+// detached; Pi, unlisted and unregistered, carries no row; and a sync
 // brings the row back to the master's own runtime state.
 func TestAnInstalledHarnessWithoutTheStoresRegistrationIsDetached(t *testing.T) {
 	root := projectDir(t)
@@ -216,8 +262,10 @@ func TestAnInstalledHarnessWithoutTheStoresRegistrationIsDetached(t *testing.T) 
 			t.Errorf("%s phrase = %q", id, MasterPhrase(row))
 		}
 	}
-	if row := rowFor(t, rows, "pi"); row.State != MasterNotRegistered {
-		t.Fatalf("pi row = %#v", row)
+	for _, row := range rows {
+		if row.Harness == "pi" {
+			t.Fatalf("an unregistered Pi carries no row, got %#v", row)
+		}
 	}
 	key, labels, scopes := DetachedMasters(rows)
 	if key == "" || len(labels) != 2 || strings.Join(scopes, ",") != "project" {

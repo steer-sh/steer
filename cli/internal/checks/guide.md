@@ -198,7 +198,7 @@ held the repository, and never counts as a pass.
 `steer check hook --harness <claude-code|codex>` is the Stop hook, and
 `steer check install --harness <claude-code|codex> --scope <project|global>`
 registers it. A registration authorizes nothing by itself: the hook runs
-`check.sh` only in an adopted repository. Pi is not supported. In an adopted
+`check.sh` only in an adopted repository. In an adopted
 repository it runs `check.sh` for the root thread's Stop event; subagent Stop
 events are ignored. A failure blocks the turn and hands you the failing checks
 and the tail of the output. An integration failure also blocks, and says that

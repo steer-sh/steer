@@ -58,7 +58,7 @@ event at --scope, beside every other Stop hook. Its timeout exceeds the run
 deadline, so the harness does not stop the hook while it records the run.
 
 A registration authorizes nothing: check.sh runs only in a repository adopted on
-this machine (steer check adopt). Pi is not supported.`,
+this machine (steer check adopt).`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name, _ := cmd.Flags().GetString("harness")

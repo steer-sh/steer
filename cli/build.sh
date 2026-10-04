@@ -48,7 +48,6 @@ build_target darwin  amd64 darwin-amd64   steer
 build_target darwin  arm64 darwin-arm64   steer
 build_target linux   amd64 linux-amd64    steer
 build_target linux   arm64 linux-arm64    steer
-build_target windows amd64 windows-amd64  steer.exe
 
 echo ""
 echo "Binaries written to bin/"

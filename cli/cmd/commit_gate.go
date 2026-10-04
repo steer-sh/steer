@@ -67,7 +67,6 @@ decision.
 Three channels share one review engine:
   review        PreToolUse hook for Claude Code — reads a JSON payload on stdin
   review-codex  PreToolUse hook for Codex — reads a JSON payload on stdin
-  review-pi     tool_call bridge for Pi — reads a JSON payload on stdin
   precommit  git pre-commit hook — reads the index
 
 Arming both channels in one repository reviews every commit twice. Use
@@ -211,8 +210,9 @@ native hook reply on stdout. It always exits 0 so adapter failures fail open.`,
 }
 
 var commitGatePiReviewCmd = &cobra.Command{
-	Use:   "review-pi",
-	Short: "Pi tool_call hook: rule on a Bash git commit before it runs",
+	Use:    "review-pi",
+	Hidden: true,
+	Short:  "Pi tool_call hook: rule on a Bash git commit before it runs",
 	Long: `review-pi reads the Pi bridge's PreToolUse payload on stdin and writes Pi's
 native tool_call reply on stdout. It always exits 0 so adapter failures fail open.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -736,13 +736,17 @@ var commitGateStatusCmd = &cobra.Command{
 		}
 		for _, scope := range []string{claude.ProjectScope, claude.GlobalScope} {
 			arming := pihooks.CommitGateArming(scope, cwd)
+			resolver := pihooks.ResolverArming(scope, cwd)
+			// Pi is unlisted: its rows appear only where a registration exists.
+			if !arming.Registered && !resolver.Registered {
+				continue
+			}
 			state := "not armed"
 			if arming.Registered {
 				state = fmt.Sprintf("registered, timeout %ds, trust state unavailable", arming.Timeout)
 			}
 			fmt.Printf("  Pi           %s scope: %s%s\n", scope, state,
 				commandNote(arming.Registered, arming.Command))
-			resolver := pihooks.ResolverArming(scope, cwd)
 			resolverState := "not armed"
 			if resolver.Registered {
 				resolverState = fmt.Sprintf("turn_end armed, timeout %ds", resolver.Timeout)
@@ -848,9 +852,9 @@ func init() {
 	commitGateInstallCmd.Flags().BoolVar(&commitGateForce, "force", false,
 		"Overwrite an existing non-steer pre-commit hook")
 	commitGateInstallCmd.Flags().StringVar(&commitGateHarness, "harness", "claude-code",
-		"PreToolUse harness (claude-code|codex|pi)")
+		"PreToolUse harness (claude-code|codex)")
 	commitGateRemoveCmd.Flags().StringVar(&commitGateHarness, "harness", "claude-code",
-		"PreToolUse harness (claude-code|codex|pi)")
+		"PreToolUse harness (claude-code|codex)")
 }
 
 // reviewerProbe reads whether the configured reviewer can actually run. An

@@ -27,7 +27,7 @@ Set up the commit gate:
 Then read what the reviews taught you:
   steer dashboard         # the whole loop, interactive
 
-Steer supports Claude Code, Codex and Pi, plus a Git pre-commit channel
+Steer supports Claude Code and Codex on macOS and Linux, plus a Git pre-commit channel
 (steer commit-gate install --precommit) for other workflows.`,
 	Example: `  steer config set reviewer.provider claude-code
   steer commit-gate install --harness codex --scope global

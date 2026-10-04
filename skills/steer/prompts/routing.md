@@ -86,8 +86,8 @@ Limits to state to the user, not work around:
 
 - A detector that needs the network, credentials or a device, or that is slow
   or flaky, does not belong in `check.sh`. Suggest it as a manual or CI check.
-- The Stop runner exists for Claude Code and Codex. Pi has none, so a check
-  blocks no Pi turn. Say so. An instruction rule is not a substitute for a
+- The Stop runner exists for Claude Code and Codex only, so a check blocks no
+  turn in any other harness. Say so. An instruction rule is not a substitute for a
   requested guarantee.
 - The runner blocks a failing turn once. When the same failure repeats on an
   unchanged tree, the turn ends without another block. A timeout also lets the
