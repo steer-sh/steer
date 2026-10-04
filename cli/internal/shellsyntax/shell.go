@@ -169,17 +169,38 @@ func normalizeWord(source string, word *syntax.Word) Word {
 // StaticWord returns a word's value when it holds only literals and quotes.
 func StaticWord(word *syntax.Word) (string, bool) { return staticWord(word) }
 
-func staticWord(word *syntax.Word) (string, bool) {
+func staticWord(word *syntax.Word) (string, bool) { return wordValue(word, false) }
+
+// FixedValue returns a word's value when running no command but cat is needed to know
+// it: a static word, or one whose double-quoted parts include `$(cat <<'TAG' ... TAG)`,
+// whose output is the heredoc body. Static stays false for the second kind, so a
+// reader of Static alone sees the normalized representation Instrument names.
+func FixedValue(w Word) (string, bool) {
+	if w.Static {
+		return w.Value, true
+	}
+	file, err := syntax.NewParser().Parse(strings.NewReader("x "+w.Raw), "")
+	if err != nil || len(file.Stmts) != 1 {
+		return "", false
+	}
+	call, ok := file.Stmts[0].Cmd.(*syntax.CallExpr)
+	if !ok || len(call.Args) != 2 {
+		return "", false
+	}
+	return wordValue(call.Args[1], true)
+}
+
+func wordValue(word *syntax.Word, catHeredocs bool) (string, bool) {
 	var b strings.Builder
 	for _, part := range word.Parts {
-		if !staticPart(&b, part) {
+		if !staticPart(&b, part, catHeredocs) {
 			return "", false
 		}
 	}
 	return b.String(), true
 }
 
-func staticPart(b *strings.Builder, part syntax.WordPart) bool {
+func staticPart(b *strings.Builder, part syntax.WordPart, catHeredocs bool) bool {
 	switch p := part.(type) {
 	case *syntax.Lit:
 		b.WriteString(p.Value)
@@ -187,7 +208,15 @@ func staticPart(b *strings.Builder, part syntax.WordPart) bool {
 		b.WriteString(p.Value)
 	case *syntax.DblQuoted:
 		for _, nested := range p.Parts {
-			if !staticPart(b, nested) {
+			if subst, ok := nested.(*syntax.CmdSubst); ok && catHeredocs {
+				body, ok := catHeredoc(subst)
+				if !ok {
+					return false
+				}
+				b.WriteString(body)
+				continue
+			}
+			if !staticPart(b, nested, catHeredocs) {
 				return false
 			}
 		}
@@ -195,6 +224,50 @@ func staticPart(b *strings.Builder, part syntax.WordPart) bool {
 		return false
 	}
 	return true
+}
+
+// catHeredoc returns the value of a double-quoted `$(cat <<'TAG' ... TAG)`: the
+// heredoc body less its trailing newlines, as command substitution strips them. The
+// tag must be quoted, so the body does not expand. Unquoted, the substitution's
+// output would be split into words, so only staticPart's DblQuoted case calls this.
+func catHeredoc(subst *syntax.CmdSubst) (string, bool) {
+	if len(subst.Stmts) != 1 {
+		return "", false
+	}
+	stmt := subst.Stmts[0]
+	if stmt.Negated || stmt.Background || stmt.Coprocess || len(stmt.Redirs) != 1 {
+		return "", false
+	}
+	call, ok := stmt.Cmd.(*syntax.CallExpr)
+	if !ok || len(call.Assigns) != 0 || len(call.Args) != 1 {
+		return "", false
+	}
+	if name, ok := staticWord(call.Args[0]); !ok || name != "cat" {
+		return "", false
+	}
+	redir := stmt.Redirs[0]
+	if redir.Op != syntax.Hdoc || redir.N != nil || redir.Hdoc == nil || !quotedTag(redir.Word) {
+		return "", false
+	}
+	body, ok := staticWord(redir.Hdoc)
+	if !ok {
+		return "", false
+	}
+	return strings.TrimRight(body, "\n"), true
+}
+
+// quotedTag reports a heredoc tag written with quotes, which stops the body expanding.
+func quotedTag(tag *syntax.Word) bool {
+	if tag == nil {
+		return false
+	}
+	for _, part := range tag.Parts {
+		switch part.(type) {
+		case *syntax.SglQuoted, *syntax.DblQuoted:
+			return true
+		}
+	}
+	return false
 }
 
 // Base returns the executable basename when a word is statically known.

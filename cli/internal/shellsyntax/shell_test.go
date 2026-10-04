@@ -63,6 +63,40 @@ func TestParseRedirectAndHeredoc(t *testing.T) {
 	}
 }
 
+// A double-quoted `$(cat <<'TAG' ...)` has a fixed value: the heredoc body without
+// its trailing newlines. An unquoted substitution splits into words, an unquoted tag
+// expands, and any other command runs, so each of those has none. Static stays false
+// for every substitution.
+func TestQuotedCatHeredocSubstitutionHasAFixedValue(t *testing.T) {
+	cases := []struct {
+		src    string
+		static bool
+		value  string
+	}{
+		{"x -m \"$(cat <<'EOF'\nsubject\n\nbody $HOME\nEOF\n)\"", true, "subject\n\nbody $HOME"},
+		{"x -m \"pre $(cat <<\"EOF\"\nsubject\nEOF\n)\"", true, "pre subject"},
+		{"x -m $(cat <<'EOF'\nsubject\nEOF\n)", false, ""},
+		{"x -m \"$(cat <<EOF\nsubject\nEOF\n)\"", false, ""},
+		{"x -m \"$(cat msg.txt)\"", false, ""},
+		{"x -m \"$(sh <<'EOF'\necho subject\nEOF\n)\"", false, ""},
+		{"x -m \"$(cat <<'EOF' | tr a b\nsubject\nEOF\n)\"", false, ""},
+	}
+	for _, tc := range cases {
+		p, err := Parse(tc.src)
+		if err != nil {
+			t.Fatalf("%q: %v", tc.src, err)
+		}
+		word := p.Calls[0].Args[2]
+		if word.Static {
+			t.Errorf("%q: a substitution must not read as Static", tc.src)
+		}
+		got, fixed := FixedValue(word)
+		if fixed != tc.static || got != tc.value {
+			t.Errorf("%q: fixed %v value %q, want %v %q", tc.src, fixed, got, tc.static, tc.value)
+		}
+	}
+}
+
 func TestDynamicWordKeepsAComparableKey(t *testing.T) {
 	p, err := Parse(`cat > "$D/msg.txt"`)
 	if err != nil {

@@ -371,3 +371,42 @@ func TestPreflightDenyRefusesACommitThatSetsGitsEnvironment(t *testing.T) {
 		}
 	}
 }
+
+// Claude Code's own commit form passes its message through a quoted cat heredoc. The
+// gate reads that message and reviews the commit; an unquoted tag expands the body,
+// so its message stays unknown and the commit is refused.
+func TestPreflightDenyReadsAQuotedCatHeredocMessage(t *testing.T) {
+	c := "co" + "mmit"
+	cmd := "git add a && git " + c + " -m \"$(cat <<'EOF'\nsubject\n\nbody naming git " + c + " -m x\nEOF\n)\""
+	if reason, _ := PreflightDeny(cmd, "/cwd"); reason != "" {
+		t.Errorf("%q must go to review, got %q", cmd, reason)
+	}
+	if got := ExtractMessage(cmd, "/cwd"); got != "subject\n\nbody naming git "+c+" -m x" {
+		t.Errorf("message = %q", got)
+	}
+	expanded := "git " + c + " -m \"$(cat <<EOF\nsubject $USER\nEOF\n)\""
+	if _, receipt := PreflightDeny(expanded, "/cwd"); receipt != AmbiguousShellReceipt {
+		t.Errorf("%q has an expanded message and must be refused, got %q", expanded, receipt)
+	}
+}
+
+// The commit forms Claude Code and Codex sessions on the author's machine ran most
+// often go to review. A refusal of any of them stops a first user's first commit.
+func TestPreflightDenyPassesTheFormsAgentsUse(t *testing.T) {
+	c := "co" + "mmit"
+	repo := t.TempDir()
+	for _, cmd := range []string{
+		"git " + c + " -m 'subject'",
+		"git add a && git " + c + " -m \"$(cat <<'EOF'\nsubject\n\nbody\nEOF\n)\"",
+		"git " + c + " -q -F - <<'MSG' && git log --oneline -1\nsubject\n\nthe " + c + " gate\nMSG",
+		"git " + c + " -q -F - <<'MSG' && git push -q\nsubject\nMSG",
+		"git " + c + " -F /tmp/msg.txt",
+		"git add -A && git " + c + " -m 'x' && git push",
+		"cd " + repo + " && git add a && git " + c + " -m 'x'",
+		"git -C " + repo + " " + c + " -m 'x'",
+	} {
+		if reason, _ := PreflightDeny(cmd, repo); reason != "" {
+			t.Errorf("%q must go to review, got %q", cmd, reason)
+		}
+	}
+}

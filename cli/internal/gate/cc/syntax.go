@@ -222,7 +222,7 @@ type commitCall struct {
 	dryRun      bool
 	commitStart int // byte range of the subcommand word
 	commitEnd   int
-	inert       [][2]int // static arguments and static heredoc bodies the call reads as data
+	inert       [][2]int // fixed arguments and static heredoc bodies the call reads as data
 }
 
 // commitCalls returns every parsed commit call, real or dry run.
@@ -240,7 +240,7 @@ func commitCalls(program *shellsyntax.Program) []commitCall {
 		found := commitCall{dryRun: commitDryRun(call.Args[sub+1:]),
 			commitStart: call.Args[sub].Start, commitEnd: call.Args[sub].End}
 		for _, arg := range call.Args[sub+1:] {
-			if arg.Static {
+			if _, fixed := shellsyntax.FixedValue(arg); fixed {
 				found.inert = append(found.inert, [2]int{arg.Start, arg.End})
 			}
 		}
@@ -438,10 +438,14 @@ func (p *parsedGit) message() (string, bool) {
 			i = len(args)
 		case token == "-m" || token == "--message":
 			i++
-			if i >= len(args) || !args[i].Static {
+			if i >= len(args) {
 				return "", false
 			}
-			messages = append(messages, args[i].Value)
+			value, fixed := shellsyntax.FixedValue(args[i])
+			if !fixed {
+				return "", false
+			}
+			messages = append(messages, value)
 		case strings.HasPrefix(token, "--message="):
 			messages = append(messages, strings.TrimPrefix(token, "--message="))
 		case token == "-F" || token == "--file":
@@ -482,10 +486,11 @@ func (p *parsedGit) message() (string, bool) {
 				word = args[i]
 			}
 			if kind == 'm' {
-				if !word.Static {
+				value, fixed := shellsyntax.FixedValue(word)
+				if !fixed {
 					return "", false
 				}
-				messages = append(messages, word.Value)
+				messages = append(messages, value)
 			} else if kind == 'F' {
 				message, ok := p.messageFile(word, gitCWD)
 				if !ok {
