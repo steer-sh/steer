@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "fresh",
+      "exit_code": 0,
+      "provenance": "cli/build.sh output committed after the CLI change, as chore(bin) commits do",
+      "files": {
+        "cli/main.go": "package main\n\nfunc main() {}\n"
+      },
+      "setup": "export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null\ngit init -q .\ngit add cli/main.go\ngit commit -qm 'feat: cli'\nstamp=$(git rev-parse --short=7 HEAD)\nfor t in darwin-amd64 darwin-arm64 linux-amd64 linux-arm64; do mkdir -p bin/$t; printf 'ELF\\0%s\\0end' \"$stamp\" > bin/$t/steer; done\ngit add bin\ngit commit -qm 'chore(bin): rebuild'\n"
+    },
+    {
+      "name": "test-and-e2e-change-after-build",
+      "exit_code": 0,
+      "provenance": "c956289 changed cli/e2e and test files only and no byte of the binary",
+      "files": {
+        "cli/main.go": "package main\n\nfunc main() {}\n"
+      },
+      "setup": "export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null\ngit init -q .\ngit add cli/main.go\ngit commit -qm 'feat: cli'\nstamp=$(git rev-parse --short=7 HEAD)\nfor t in darwin-amd64 darwin-arm64 linux-amd64 linux-arm64; do mkdir -p bin/$t; printf 'ELF\\0%s\\0end' \"$stamp\" > bin/$t/steer; done\ngit add bin\ngit commit -qm 'chore(bin): rebuild'\nmkdir -p cli/e2e cli/internal/p/testdata\necho 'package e2e' > cli/e2e/a_test.go\necho 'package p' > cli/internal/p/p_test.go\necho 'x' > cli/internal/p/testdata/x.txt\ngit add cli\ngit commit -qm 'test: e2e'\n"
+    },
+    {
+      "name": "cli-change-after-build",
+      "exit_code": 1,
+      "diagnostic": "lacks commit",
+      "provenance": "a CLI commit with no chore(bin) rebuild after it, the gap each chore(bin) commit such as cde1994 closes by hand",
+      "files": {
+        "cli/main.go": "package main\n\nfunc main() {}\n"
+      },
+      "setup": "export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null\ngit init -q .\ngit add cli/main.go\ngit commit -qm 'feat: cli'\nstamp=$(git rev-parse --short=7 HEAD)\nfor t in darwin-amd64 darwin-arm64 linux-amd64 linux-arm64; do mkdir -p bin/$t; printf 'ELF\\0%s\\0end' \"$stamp\" > bin/$t/steer; done\ngit add bin\ngit commit -qm 'chore(bin): rebuild'\necho '// change' >> cli/main.go\ngit commit -qam 'fix: cli'\n"
+    },
+    {
+      "name": "missing-target",
+      "exit_code": 1,
+      "diagnostic": "bin/linux-arm64/steer is missing",
+      "provenance": "a build that wrote three of the four shipped targets",
+      "files": {
+        "cli/main.go": "package main\n\nfunc main() {}\n"
+      },
+      "setup": "export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null\ngit init -q .\ngit add cli/main.go\ngit commit -qm 'feat: cli'\nstamp=$(git rev-parse --short=7 HEAD)\nfor t in darwin-amd64 darwin-arm64 linux-amd64 linux-arm64; do mkdir -p bin/$t; printf 'ELF\\0%s\\0end' \"$stamp\" > bin/$t/steer; done\ngit add bin\ngit commit -qm 'chore(bin): rebuild'\ngit rm -q bin/linux-arm64/steer\ngit commit -qm 'drop'\n"
+    }
+  ]
+}
