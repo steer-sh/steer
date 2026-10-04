@@ -3,6 +3,7 @@ package cc
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -160,6 +161,51 @@ func TestDryRunExemptsOnlyItsOwnCall(t *testing.T) {
 	cmd := "bash -c 'git " + c + " -m \"fix --dry-run parsing\"'"
 	if reason, _ := PreflightDeny(cmd, "/r"); reason == "" {
 		t.Errorf("PreflightDeny(%q) allowed a wrapped commit", cmd)
+	}
+}
+
+// Text a parsed commit reads as data belongs to that commit; text outside every parsed
+// commit is a possible commit of its own.
+func TestDetectClassifiesLooseMatches(t *testing.T) {
+	cases := []struct {
+		cmd  string
+		want Detection
+		why  string
+	}{
+		{"git status", NoCommit, "not a commit"},
+		{"git " + c + " -m x", ParsedCommit, "a plain commit"},
+		{"git " + c + " -m \"fix git " + c + " parsing\"", ParsedCommit, "the message mentions the words"},
+		{"git " + c + " -F - <<'EOF'\nrun git " + c + " -m x\nEOF", ParsedCommit, "a quoted heredoc message"},
+		{"git " + c + " -F - <<EOF\nrun git " + c + " -m x\nEOF", ParsedCommit, "a heredoc with no expansion"},
+		{"env -u PAGER GIT_DIR=/r/.git git " + c + " -m x", ParsedCommit, "the scan starts at an earlier git"},
+		{"git " + c + " --dry-run -m \"git " + c + "\"", NoCommit, "a dry run's message"},
+		{"rg \"git " + c + "\" cli/", PossibleCommit, "a search pattern"},
+		{"bash -c 'git " + c + " -m x'", PossibleCommit, "a wrapped commit"},
+		{"git " + c + " -m x && bash -c 'git " + c + " -m y'", ParsedAndPossible, "a second, wrapped commit"},
+		{"git " + c + " -F - <<EOF\n$(bash -c 'git " + c + " -m y')\nEOF", ParsedAndPossible, "a wrapper in an expanded heredoc"},
+		{"(git " + c + " -m x", UnparsedCommit, "the parser rejects the text"},
+	}
+	for _, tc := range cases {
+		if got := Detect(tc.cmd); got != tc.want {
+			t.Errorf("Detect(%q) = %v, want %v — %s", tc.cmd, got, tc.want, tc.why)
+		}
+	}
+}
+
+// Each detection that is not a parsed commit gets a refusal that names its own case.
+func TestDetectionDenyNamesTheCase(t *testing.T) {
+	cases := map[string]string{
+		"rg \"git " + c + "\" cli/":                          "git[ ]commit",
+		"git " + c + " -m x && bash -c 'git " + c + " -m y'": "also holds a possible commit",
+		"(git " + c + " -m x":                                "could not be parsed",
+	}
+	for cmd, want := range cases {
+		if reason, receipt := PreflightDeny(cmd, "/r"); !strings.Contains(reason, want) || receipt == "" {
+			t.Errorf("PreflightDeny(%q) = %q, %q; want a reason holding %q", cmd, reason, receipt, want)
+		}
+	}
+	if reason, _ := DetectionDeny("git " + c + " -m \"fix git " + c + " parsing\""); reason != "" {
+		t.Errorf("a parsed commit was refused: %q", reason)
 	}
 }
 
@@ -347,11 +393,11 @@ func TestExactShellGrammarAdversarialCases(t *testing.T) {
 	if !IsCommitCommand(falseTrigger) {
 		t.Fatal("the conservative detector must retain its false-positive posture")
 	}
-	if reason := AmbiguousShellReason(falseTrigger, "/cwd"); reason == "" {
-		t.Fatal("loose-only evidence must be refused before repository inference")
+	if reason, _ := DetectionDeny(falseTrigger); !strings.Contains(reason, "possible commit") {
+		t.Fatalf("loose-only evidence must be refused as a possible commit, got %q", reason)
 	}
-	if reason := AmbiguousShellReason("command echo git "+c, "/cwd"); reason == "" {
-		t.Fatal("a wrapper's argument must remain loose-only evidence")
+	if reason, _ := DetectionDeny("command echo git " + c); !strings.Contains(reason, "possible commit") {
+		t.Fatalf("a wrapper's argument must remain loose-only evidence, got %q", reason)
 	}
 	if reason := AmbiguousShellReason("git "+c+" -m one && git "+c+" -m two", "/cwd"); reason == "" {
 		t.Fatal("one gate request cannot represent two commits")

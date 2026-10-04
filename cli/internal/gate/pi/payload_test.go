@@ -77,7 +77,7 @@ func TestRunRefusesLooseOnlyCommitWithoutReviewOrLedger(t *testing.T) {
 	Run(context.Background(), cfg, stubReviewer{}, strings.NewReader(payload), &stdout)
 	var out Output
 	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil || !out.Block ||
-		!strings.Contains(out.Reason, "conservative detector") {
+		!strings.Contains(out.Reason, "possible commit") {
 		t.Fatalf("output = %q, err = %v", stdout.String(), err)
 	}
 	if _, err := os.Stat(cfg.LogFile()); !os.IsNotExist(err) {

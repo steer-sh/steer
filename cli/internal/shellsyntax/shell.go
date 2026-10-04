@@ -24,13 +24,16 @@ type Word struct {
 	End    int
 }
 
-// Redirect is one redirection attached to a simple command.
+// Redirect is one redirection attached to a simple command. HeredocStart and
+// HeredocEnd are the heredoc body's byte range in the source.
 type Redirect struct {
 	Op            syntax.RedirOperator
 	FD            string
 	Target        Word
 	Heredoc       string
 	HeredocStatic bool
+	HeredocStart  int
+	HeredocEnd    int
 }
 
 // Call is one simple command, including calls nested in substitutions and subshells.
@@ -139,6 +142,7 @@ func parse(source string, parser *syntax.Parser) (*Program, error) {
 				}
 				if redir.Hdoc != nil {
 					r.Heredoc, r.HeredocStatic = staticWord(redir.Hdoc)
+					r.HeredocStart, r.HeredocEnd = offset(redir.Hdoc.Pos()), offset(redir.Hdoc.End())
 				}
 				call.Redirects = append(call.Redirects, r)
 			}

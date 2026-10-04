@@ -185,6 +185,16 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, stdin io.
 	if !cc.IsCommitCommand(command) {
 		return
 	}
+	// The text decides first: a possible commit names no repository either, and the
+	// repository refusal would tell its author to retry a commit it may not hold.
+	if reason, receipt := cc.DetectionDeny(command); reason != "" {
+		emit(stdout, Output{HookSpecificOutput: &hookOutput{
+			HookEventName:            "PreToolUse",
+			PermissionDecision:       "deny",
+			PermissionDecisionReason: reason,
+		}, SystemMessage: receipt})
+		return
+	}
 	if ambiguousRepo(invocation) {
 		emit(stdout, Output{HookSpecificOutput: &hookOutput{
 			HookEventName:            "PreToolUse",

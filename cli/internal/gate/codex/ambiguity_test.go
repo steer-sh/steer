@@ -69,6 +69,22 @@ func TestRunRefusesARelativeRepositorySelection(t *testing.T) {
 	}
 }
 
+// A search names no repository either, so the text must decide before the repository
+// refusal tells its author to retry a commit the command does not hold.
+func TestRunRefusesAPossibleCommitBeforeTheRepositoryCheck(t *testing.T) {
+	cfg := testConfig(t)
+	out := runGate(t, cfg, bareCommit("/tmp", `rg \"git commit\" cli/`))
+	if out.HookSpecificOutput == nil || out.HookSpecificOutput.PermissionDecision != "deny" {
+		t.Fatalf("output = %#v", out)
+	}
+	if reason := out.HookSpecificOutput.PermissionDecisionReason; !strings.Contains(reason, "possible commit") {
+		t.Fatalf("reason = %q", reason)
+	}
+	if _, err := os.Stat(cfg.LogFile()); err == nil {
+		t.Fatal("the refusal wrote an adjudication row")
+	}
+}
+
 func TestRunLeavesANonCommitCommandAlone(t *testing.T) {
 	cfg := testConfig(t)
 	if out := runGate(t, cfg, bareCommit("/tmp", "git status")); out.HookSpecificOutput != nil {

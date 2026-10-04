@@ -216,30 +216,58 @@ func commitDryRun(args []shellsyntax.Word) bool {
 	return dry
 }
 
-// commitWords locates a commit call's command words: the end of its `git` word and
-// the byte range of its `commit` word.
-type commitWords struct{ gitEnd, commitStart, commitEnd int }
+// commitCall is one parsed `git commit` call, located in the source so the loose scan
+// can tell its own match from text elsewhere.
+type commitCall struct {
+	dryRun      bool
+	commitStart int // byte range of the subcommand word
+	commitEnd   int
+	inert       [][2]int // static arguments and static heredoc bodies the call reads as data
+}
 
-// dryRunCommitWords returns the command words of every parsed dry-run commit call,
-// so the loose scan can exempt a match that is that call and nothing else.
-func dryRunCommitWords(cmd string) map[commitWords]bool {
-	program, err := shellsyntax.Parse(cmd)
-	if err != nil {
-		return nil
-	}
-	words := map[commitWords]bool{}
+// commitCalls returns every parsed commit call, real or dry run.
+func commitCalls(program *shellsyntax.Program) []commitCall {
+	var out []commitCall
 	for _, call := range program.Calls {
 		gitArg, ok := gitExecutable(call.Args)
 		if !ok {
 			continue
 		}
 		sub, _, _, _, ok := gitSubcommand(call.Args, gitArg, "")
-		if !ok || call.Args[sub].Value != "commit" || !commitDryRun(call.Args[sub+1:]) {
+		if !ok || call.Args[sub].Value != "commit" {
 			continue
 		}
-		words[commitWords{call.Args[gitArg].End, call.Args[sub].Start, call.Args[sub].End}] = true
+		found := commitCall{dryRun: commitDryRun(call.Args[sub+1:]),
+			commitStart: call.Args[sub].Start, commitEnd: call.Args[sub].End}
+		for _, arg := range call.Args[sub+1:] {
+			if arg.Static {
+				found.inert = append(found.inert, [2]int{arg.Start, arg.End})
+			}
+		}
+		for _, redir := range call.Redirects {
+			if redir.HeredocStatic {
+				found.inert = append(found.inert, [2]int{redir.HeredocStart, redir.HeredocEnd})
+			}
+		}
+		out = append(out, found)
 	}
-	return words
+	return out
+}
+
+// owns reports that a loose match ends at this call's own subcommand word, or lies
+// inside one of its static arguments or static heredoc bodies. The match may start at
+// an earlier `git` than the call's, as in `GIT_DIR=/r/.git git`, so only its end
+// identifies the call.
+func (c commitCall) owns(span Span) bool {
+	if span.End-len("commit") == c.commitStart && span.End == c.commitEnd {
+		return true
+	}
+	for _, r := range c.inert {
+		if span.Git >= r[0] && span.End <= r[1] {
+			return true
+		}
+	}
+	return false
 }
 
 // commitHasFlag reports a long flag among the commit's own arguments. It walks the
@@ -1127,13 +1155,12 @@ func (p *parsedGit) forcesAdd() bool {
 	return force
 }
 
+// shellAmbiguity names why the gate cannot establish a parsed commit's repository or
+// message. A command with no parsed commit is DetectionDeny's to judge.
 func shellAmbiguity(cmd, cwd string) string {
 	p, err := parseCommit(cmd, cwd)
-	if err != nil {
-		return fmt.Sprintf("the shell syntax could not be parsed (%v)", err)
-	}
-	if p == nil {
-		return "only the conservative detector recognized a commit"
+	if err != nil || p == nil {
+		return ""
 	}
 	if p.multiple {
 		return "the shell command contains multiple commits"

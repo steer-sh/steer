@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/steer-sh/steer-cli/internal/gate"
+	"github.com/steer-sh/steer-cli/internal/shellsyntax"
 )
 
 // PreflightDeny returns the refusal for a commit command the gate cannot review as
@@ -12,6 +13,9 @@ import (
 // before the engine, so a refusal consumes no firing and leaves a pending chain intact.
 // Empty means the command goes to review.
 func PreflightDeny(cmd, cwd string) (reason, receipt string) {
+	if reason, receipt := DetectionDeny(cmd); reason != "" {
+		return reason, receipt
+	}
 	if reason := AmbiguousShellReason(cmd, cwd); reason != "" {
 		return reason, AmbiguousShellReceipt
 	}
@@ -40,6 +44,42 @@ func PreflightDeny(cmd, cwd string) (reason, receipt string) {
 	}
 	return "", ""
 }
+
+// DetectionDeny returns the refusal for a command whose commit text the parser cannot
+// read as exactly the commit calls it found, and its receipt. It reads the text alone,
+// so an adapter may call it before any check of the payload. Empty means Detect found
+// no commit, or only parsed ones.
+func DetectionDeny(cmd string) (reason, receipt string) {
+	switch Detect(cmd) {
+	case UnparsedCommit:
+		_, err := shellsyntax.Parse(cmd)
+		return fmt.Sprintf(ambiguousShellReason, fmt.Sprintf("the shell syntax could not be parsed (%v)", err)),
+			AmbiguousShellReceipt
+	case PossibleCommit:
+		return possibleCommitReason, PossibleCommitReceipt
+	case ParsedAndPossible:
+		return possibleBesideCommitReason, PossibleCommitReceipt
+	}
+	return "", ""
+}
+
+const possibleCommitReason = "[commit-gate] BLOCKED: this command holds a possible " +
+	"commit: `git ... commit` text that the gate cannot read as a plain command, such as " +
+	"a commit inside bash -c or eval, or the words inside a quoted argument. NOTHING IN " +
+	"THE COMMAND RAN. To commit, run git commit as a plain command, for example " +
+	"`git -C /absolute/path/to/repo commit -m 'subject'`. To search for the text, write a " +
+	"pattern that does not match itself, for example `rg 'git[ ]commit' cli/`."
+
+const possibleBesideCommitReason = "[commit-gate] BLOCKED: this command runs a commit " +
+	"and also holds a possible commit outside it: `git ... commit` text that the gate " +
+	"cannot read as a plain command, such as a second commit inside bash -c or eval. The " +
+	"gate reviews only the commit it can read, so anything the other one commits would " +
+	"land unreviewed. NOTHING IN THE COMMAND RAN. Run the commit as its own plain " +
+	"command, and run the rest separately."
+
+// PossibleCommitReceipt states that a possible commit was refused before review.
+const PossibleCommitReceipt = "[commit-gate] refused a command that holds a possible commit " +
+	"the parser could not read. No review ran and no adjudication row was written."
 
 const gitLocationReason = "[commit-gate] BLOCKED: this command selects git's repository " +
 	"or working tree with %s. The gate's own git calls do not apply that option, so " +

@@ -68,11 +68,11 @@ func TestLooseCommitDetectorMatchesPython(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, tc := range cases {
-		got := looseIsCommitCommand(tc.Cmd)
+		got := IsCommitCommand(tc.Cmd)
 		if got == tc.IsCommit || (got && (matchedBehindWideBoundary(tc.Cmd) || exemptedByText(tc.Cmd))) {
 			continue
 		}
-		t.Errorf("looseIsCommitCommand(%q) = %v, python %v", tc.Cmd, got, tc.IsCommit)
+		t.Errorf("IsCommitCommand(%q) = %v, python %v", tc.Cmd, got, tc.IsCommit)
 	}
 	t.Logf("%d loose-detector cases replayed", len(cases))
 }

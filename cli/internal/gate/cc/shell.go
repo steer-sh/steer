@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/steer-sh/steer-cli/internal/gate"
@@ -114,35 +115,71 @@ func skipSpace(cmd string, pos int) int {
 	return pos
 }
 
-// IsCommitCommand reports whether this Bash command runs `git commit` for real.
+// Detection is what a command's text shows about the commits it runs.
+type Detection int
+
+const (
+	// NoCommit: neither the parser nor the loose scan finds a commit.
+	NoCommit Detection = iota
+	// ParsedCommit: the parser finds a commit call, and every loose match belongs to a
+	// parsed commit call.
+	ParsedCommit
+	// PossibleCommit: only the loose scan matches, as for a commit inside a wrapper
+	// or the words in a quoted argument.
+	PossibleCommit
+	// ParsedAndPossible: a parsed commit, plus a loose match outside every parsed
+	// commit call.
+	ParsedAndPossible
+	// UnparsedCommit: the loose scan matches and the shell parser rejects the text.
+	UnparsedCommit
+)
+
+// Detect classifies a command by the commits its text shows.
+//
+// The parser recognizes a call whose command words are a static `git` (by name or
+// path, behind command, env, sudo or nohup) and a static `commit`. The loose scan
+// matches `git ... commit` text at any command boundary, so a commit inside bash -c or
+// eval, or behind a backslash, counts as a possible commit. A match belongs to a parsed
+// call when it is that call's command words, or text inside its static arguments or
+// static heredoc bodies. A command word that neither can read, such as $GIT,
+// $'g\x69t', an alias or a function, is covered by neither.
+func Detect(cmd string) Detection {
+	spans := commitSpans(cmd)
+	program, err := shellsyntax.Parse(cmd)
+	if err != nil {
+		if len(spans) > 0 {
+			return UnparsedCommit
+		}
+		return NoCommit
+	}
+	calls := commitCalls(program)
+	parsed := false
+	for _, call := range calls {
+		parsed = parsed || !call.dryRun
+	}
+	possible := false
+	for _, span := range spans {
+		possible = possible || !slices.ContainsFunc(calls, func(call commitCall) bool { return call.owns(span) })
+	}
+	switch {
+	case parsed && possible:
+		return ParsedAndPossible
+	case parsed:
+		return ParsedCommit
+	case possible:
+		return PossibleCommit
+	}
+	return NoCommit
+}
+
+// IsCommitCommand reports whether this Bash command may run `git commit` for real.
 //
 // Deliberately permissive on shape (compound commands, heredocs, leading env). A
 // --dry-run rehearsal is not a commit, but only the parser can say that a match is
 // one. A command this misses is a commit that ships ungated, which is the failure the
 // gate exists to prevent, so it errs toward matching.
 func IsCommitCommand(cmd string) bool {
-	if parsed, err := parseCommit(cmd, ""); err == nil && parsed != nil {
-		return true
-	}
-	return looseIsCommitCommand(cmd)
-}
-
-// looseIsCommitCommand reports a `git ... commit` match in the text whose `git` and
-// `commit` are not the command words of one parsed dry-run call. A `--dry-run`
-// elsewhere in the text exempts nothing: inside a wrapper or a message it does not
-// reach the commit's own options.
-func looseIsCommitCommand(cmd string) bool {
-	spans := commitSpans(cmd)
-	if len(spans) == 0 {
-		return false
-	}
-	dryRuns := dryRunCommitWords(cmd)
-	for _, span := range spans {
-		if !dryRuns[commitWords{span.Git + len("git"), span.End - len("commit"), span.End}] {
-			return true
-		}
-	}
-	return false
+	return Detect(cmd) != NoCommit
 }
 
 // RepoDir resolves which repo this command writes to, honouring both `-C <path>` and a
