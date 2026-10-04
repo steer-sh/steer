@@ -22,7 +22,7 @@ func TestEmptyMachineReadings(t *testing.T) {
 		args []string
 		want []string
 	}{
-		{[]string{"status"}, []string{"Commits here are NOT reviewed.", "run: steer "}},
+		{[]string{"status"}, []string{"Commits here are NOT reviewed.", "run: /steer-setup"}},
 		{[]string{"commit-gate", "status"}, []string{"not armed"}},
 		{[]string{"fix", "score", "--json"}, []string{"[]"}},
 		{[]string{"fix", "list", "--json"}, []string{"[]"}},
@@ -100,8 +100,8 @@ func TestEmptyMachineStatusJSON(t *testing.T) {
 		t.Fatalf("status --json: %v\n%s", err, r.Stdout)
 	}
 	p := doc.Posture
-	if p.Readiness.Reviewing || len(p.Readiness.Steps) == 0 || !strings.HasPrefix(p.Readiness.Steps[0].Fix, "steer ") {
-		t.Errorf("readiness = %+v, want not reviewing with a steer command as the first repair", p.Readiness)
+	if p.Readiness.Reviewing || len(p.Readiness.Steps) == 0 || !strings.HasPrefix(p.Readiness.Steps[0].Fix, "/steer-setup") {
+		t.Errorf("readiness = %+v, want not reviewing with /steer-setup as the first repair", p.Readiness)
 	}
 	if p.Plugins == nil || p.Mods == nil || doc.Interventions == nil {
 		t.Errorf("an empty list was emitted as null: plugins %v, mods %v, interventions %v", p.Plugins, p.Mods, doc.Interventions)

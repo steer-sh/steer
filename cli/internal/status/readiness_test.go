@@ -30,8 +30,8 @@ func TestNoRegistrationSaysCommitsAreNotReviewed(t *testing.T) {
 	if r.Reviewing {
 		t.Fatal("Reviewing is true with no registration")
 	}
-	if len(r.Steps) != 1 || !strings.Contains(r.Steps[0].Fix, "commit-gate install") {
-		t.Fatalf("steps = %+v; want one naming the install", r.Steps)
+	if len(r.Steps) != 1 || !strings.HasPrefix(r.Steps[0].Fix, "/steer-setup") {
+		t.Fatalf("steps = %+v; want one naming /steer-setup, which chooses the reviewer before it arms", r.Steps)
 	}
 }
 
