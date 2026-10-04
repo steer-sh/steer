@@ -380,8 +380,9 @@ session to the user's history; agy has no such flag. They also load none of the
 operator's hooks (`--safe-mode`, `--disable hooks`), which in an adopted repository
 would run check.sh inside the review. Claude Code gets only file-read tools
 (`--tools Read,Grep,Glob`; safe mode also drops MCP servers). Codex runs its commands
-in `--sandbox read-only`, but the operator's Codex MCP servers stay loaded under their
-own approval settings. agy has no flag for either: the operator's agy hooks and
+in `--sandbox read-only` with the built-in `codex_apps` connectors off
+(`--disable apps`); MCP servers the operator configures stay loaded under their own
+approval settings. agy has no flag for either: the operator's agy hooks and
 permissions are its only boundary.
 
 The stock review prompt is embedded and fixed; the review addendum is the

@@ -40,10 +40,11 @@ func (c *Codex) Review(ctx context.Context, prompt, cwd string) gate.RawRun {
 	// --ephemeral keeps the run out of the user's session history: its prompt is a
 	// diff, not anything the user said. --disable hooks keeps the operator's Codex
 	// hooks, including the turn-end check.sh runners, out of the review session, and
-	// the read-only sandbox keeps the commands it runs from writing. The operator's MCP
-	// servers stay loaded under their own approval settings.
+	// the read-only sandbox keeps the commands it runs from writing. --disable apps
+	// drops the built-in codex_apps connectors, which the sandbox does not bind; MCP
+	// servers the operator configures stay loaded under their own approval settings.
 	argv := []string{c.binary(), "exec", "--skip-git-repo-check", "--ephemeral",
-		"--sandbox", "read-only", "--disable", "hooks"}
+		"--sandbox", "read-only", "--disable", "hooks", "--disable", "apps"}
 	if c.Model != "" {
 		argv = append(argv, "--model", c.Model)
 	}

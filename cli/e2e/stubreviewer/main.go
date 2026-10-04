@@ -133,7 +133,10 @@ func parseArgv(call *Call) error {
 				if args[i] == "--sandbox" {
 					seen["read-only"] = v == "read-only"
 				} else if args[i] == "--disable" {
-					seen["hooks off"] = v == "hooks"
+					if v != "hooks" && v != "apps" {
+						return fmt.Errorf("unknown feature to disable %q", v)
+					}
+					seen[v+" off"] = true
 				} else if args[i] == "--model" {
 					call.Model = v
 				} else if effort, ok := strings.CutPrefix(v, "model_reasoning_effort="); ok {
@@ -146,8 +149,9 @@ func parseArgv(call *Call) error {
 				return fmt.Errorf("unknown flag %q", args[i])
 			}
 		}
-		if !seen["--skip-git-repo-check"] || !seen["--ephemeral"] || !seen["read-only"] || !seen["hooks off"] {
-			return fmt.Errorf("want --skip-git-repo-check --ephemeral --sandbox read-only --disable hooks, got %q", args)
+		if !seen["--skip-git-repo-check"] || !seen["--ephemeral"] ||
+			!seen["read-only"] || !seen["hooks off"] || !seen["apps off"] {
+			return fmt.Errorf("want --skip-git-repo-check --ephemeral --sandbox read-only --disable hooks --disable apps, got %q", args)
 		}
 		call.Prompt = call.Stdin
 	default:

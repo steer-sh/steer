@@ -44,7 +44,7 @@ func TestReviewerArgvPerProvider(t *testing.T) {
 					"--safe-mode", "--tools", "Read,Grep,Glob", "--model", "model-claude-code", "--effort", "high"}
 			case "codex":
 				want = []string{"exec", "--skip-git-repo-check", "--ephemeral", "--sandbox", "read-only",
-					"--disable", "hooks", "--model", "model-codex",
+					"--disable", "hooks", "--disable", "apps", "--model", "model-codex",
 					"-c", "model_reasoning_effort=high", "-"}
 			}
 			if !slices.Equal(c.Argv, want) {

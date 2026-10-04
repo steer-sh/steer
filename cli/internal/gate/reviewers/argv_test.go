@@ -131,7 +131,7 @@ func TestCodexRendersEffortAsAConfigOverride(t *testing.T) {
 		t.Fatalf("Review = %#v; want the stdout text", run)
 	}
 	assertArgv(t, recordedArgv(t, argvFile), []string{
-		"exec", "--skip-git-repo-check", "--ephemeral", "--sandbox", "read-only", "--disable", "hooks",
+		"exec", "--skip-git-repo-check", "--ephemeral", "--sandbox", "read-only", "--disable", "hooks", "--disable", "apps",
 		"--model", "gpt-reviewer",
 		"-c", "model_reasoning_effort=high", "-",
 	})
@@ -145,20 +145,21 @@ func TestCodexOmitsAnUnsetModel(t *testing.T) {
 	reviewer.Binary = binary
 	reviewer.Review(context.Background(), "PROMPT", t.TempDir())
 	assertArgv(t, recordedArgv(t, argvFile), []string{
-		"exec", "--skip-git-repo-check", "--ephemeral", "--sandbox", "read-only", "--disable", "hooks",
+		"exec", "--skip-git-repo-check", "--ephemeral", "--sandbox", "read-only", "--disable", "hooks", "--disable", "apps",
 		"-c", "model_reasoning_effort=low", "-",
 	})
 }
 
 // A review session that loads the operator's hooks runs their turn-end check.sh
 // inside the review, which holds the review past its deadline in an adopted repository.
+// The codex_apps connectors reach outside services the sandbox does not bind.
 func TestCodexRunsWithoutOperatorHooksInAReadOnlySandbox(t *testing.T) {
 	binary, argvFile := stubBinary(t, "findings")
 	reviewer := NewCodex("", "")
 	reviewer.Binary = binary
 	reviewer.Review(context.Background(), "PROMPT", t.TempDir())
 	argv := strings.Join(recordedArgv(t, argvFile), " ")
-	for _, want := range []string{"--disable hooks", "--sandbox read-only"} {
+	for _, want := range []string{"--disable hooks", "--disable apps", "--sandbox read-only"} {
 		if !strings.Contains(argv, want) {
 			t.Fatalf("argv = %q; want %q", argv, want)
 		}
