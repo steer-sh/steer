@@ -201,6 +201,11 @@ The variant kinds, their caps and the time budget are in the script's docstring;
 run that the budget stops before it finishes records no pass. When no variant can violate the
 property a correct test checks, extend the generator (`scripts/revert-test-funcs.go`
 finds statement sites) rather than the test.
+`./check.sh` also runs `cli/e2e/` (`go test -tags e2e ./e2e/...` from `cli/`): the
+built binary as a subprocess in a throwaway home, with `cli/e2e/stubreviewer` linked
+on PATH as `agy`, `claude` and `codex`. Its environment is built from nothing, so a
+case reads no operator setting. `revert-test.py` runs no tagged test, so each e2e
+test carries `// pins existing behaviour`.
 `./check-full.sh` adds `scripts/revert-test-verify.py`, which checks that script's
 copy, lock and variant generation over fixture repositories, then the slow headless skill-generation
 harness that invokes `claude -p`; it is separate from the turn-end gate.
