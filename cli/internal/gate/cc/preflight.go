@@ -66,9 +66,13 @@ func DetectionDeny(cmd string) (reason, receipt string) {
 const possibleCommitReason = "[commit-gate] BLOCKED: this command holds a possible " +
 	"commit: `git ... commit` text that the gate cannot read as a plain command, such as " +
 	"a commit inside bash -c or eval, or the words inside a quoted argument. NOTHING IN " +
-	"THE COMMAND RAN. To commit, run git commit as a plain command, for example " +
-	"`git -C /absolute/path/to/repo commit -m 'subject'`. To search for the text, write a " +
-	"pattern that does not match itself, for example `rg 'git[ ]commit' cli/`."
+	"THE COMMAND RAN. To search for the text, write a pattern that does not match " +
+	"itself, for example `" + selfSafeSearchExample + "`. To commit, run git commit as " +
+	"a plain command with the full intended message. This form keeps a multi-line " +
+	"message whole:\n\n" + heredocCommitExample
+
+// selfSafeSearchExample searches for commit text without holding it.
+const selfSafeSearchExample = "rg 'git[ ]commit' cli/"
 
 const possibleBesideCommitReason = "[commit-gate] BLOCKED: this command runs a commit " +
 	"and also holds a possible commit outside it: `git ... commit` text that the gate " +
@@ -105,8 +109,9 @@ const GitEnvironmentReceipt = "[commit-gate] refused a commit that sets git's en
 const stepBeforeCommitReason = "[commit-gate] BLOCKED: this command runs `%s` before " +
 	"its commit. The gate reads the tree before the command starts, so the reviewers " +
 	"would not see what that step changes, and the commit would carry it unreviewed. " +
-	"NOTHING IN THE COMMAND RAN. Run that step as its own command first. Before a " +
-	"commit, one command may hold only cd, git add and git status."
+	"NOTHING IN THE COMMAND RAN. Run that step as its own command first, then the " +
+	"commit. The commit's command may also hold cd, git add, and steps that change no " +
+	"file, such as git status, git diff, cat or grep."
 
 const commitRedirectReason = "[commit-gate] BLOCKED: this commit writes its output " +
 	"with `%s`. The shell opens that file before git reads the tree, and `>` empties it, " +

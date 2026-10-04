@@ -1179,10 +1179,14 @@ func shellAmbiguity(cmd, cwd string) string {
 	return ""
 }
 
+// heredocCommitExample is a commit form the gate reviews that keeps a message body.
+const heredocCommitExample = "git -C /absolute/path/to/repo commit -F - <<'MSG'\n" +
+	"subject\n\nbody\nMSG"
+
 const ambiguousShellReason = "[commit-gate] BLOCKED: %s, so the gate cannot establish " +
 	"the repository and commit message safely. Re-run the commit as a plain command " +
-	"with an absolute repository and a literal message, for example " +
-	"`git -C /absolute/path/to/repo commit -m 'subject'`."
+	"with an absolute repository and a literal message. This form keeps a multi-line " +
+	"message whole:\n\n" + heredocCommitExample
 
 func AmbiguousShellReason(cmd, cwd string) string {
 	why := shellAmbiguity(cmd, cwd)

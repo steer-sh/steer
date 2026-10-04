@@ -410,3 +410,51 @@ func TestPreflightDenyPassesTheFormsAgentsUse(t *testing.T) {
 		}
 	}
 }
+
+// TestRefusalReasonsNameFormsTheGateReviews: an agent follows a refusal's text, so
+// every form a reason offers must pass preflight, and the commit form must keep a
+// message body.
+func TestRefusalReasonsNameFormsTheGateReviews(t *testing.T) {
+	c := "co" + "mmit"
+	possible, _ := DetectionDeny(`echo "git ` + c + `"`)
+	for name, reason := range map[string]string{
+		"dynamic-message": AmbiguousShellReason(`git `+c+` -F "$MSG"`, "/cwd"),
+		"possible-commit": possible,
+	} {
+		_, example, ok := strings.Cut(reason, "\n\n")
+		if !ok {
+			t.Errorf("the %s refusal offers no commit form: %q", name, reason)
+			continue
+		}
+		if denied, _ := PreflightDeny(example, "/cwd"); denied != "" {
+			t.Errorf("the %s refusal offers %q, which is itself refused: %s", name, example, denied)
+		}
+		if msg := ExtractMessage(example, "/cwd"); msg != "subject\n\nbody" {
+			t.Errorf("the %s refusal offers a form that drops the message body: %q", name, msg)
+		}
+	}
+	if !strings.Contains(possible, selfSafeSearchExample) {
+		t.Errorf("the possible-commit refusal does not offer its search form: %q", possible)
+	}
+	if denied, _ := DetectionDeny(selfSafeSearchExample); denied != "" {
+		t.Errorf("the offered search %q is itself refused: %s", selfSafeSearchExample, denied)
+	}
+
+	reason := fmt.Sprintf(stepBeforeCommitReason, "python3 edit.py")
+	for step, cmd := range map[string]string{
+		"cd":         "cd /repo",
+		"git add":    "git add a",
+		"git status": "git status",
+		"git diff":   "git diff --cached",
+		"cat":        "cat a",
+		"grep":       "grep x a",
+	} {
+		if !strings.Contains(reason, step) {
+			t.Errorf("the step refusal does not name %q: %q", step, reason)
+		}
+		full := cmd + " && git " + c + " -m x"
+		if denied, _ := PreflightDeny(full, "/cwd"); denied != "" {
+			t.Errorf("the step refusal permits %q, but %q is refused: %s", step, full, denied)
+		}
+	}
+}
