@@ -121,9 +121,8 @@ carries pure JSON; progress goes to stderr. A page stays within
 			return err
 		}
 
-		for _, cov := range digest.Stats.Harnesses {
-			fmt.Fprintf(os.Stderr, "%s: %d file(s), %d session(s), %d thread(s).\n",
-				cov.Harness, cov.FilesScanned, cov.SessionsScanned, cov.ThreadsScanned)
+		for _, line := range coverageLines(digest.Stats.Harnesses) {
+			fmt.Fprintln(os.Stderr, line)
 		}
 		fmt.Fprintf(os.Stderr, "Scanned %d sessions (%d bytes); found %d clusters; stored report %s in %s.\n",
 			digest.Stats.SessionsScanned,
@@ -537,4 +536,18 @@ func sourceWord(n int) string {
 		return "source"
 	}
 	return "sources"
+}
+
+// coverageLines is one line per scanned harness. An unlisted harness gets a line only
+// when the scan read a file of its.
+func coverageLines(harnesses []report.HarnessCoverage) []string {
+	var lines []string
+	for _, cov := range harnesses {
+		if !harness.Listed(cov.Harness) && cov.FilesScanned == 0 {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("%s: %d file(s), %d session(s), %d thread(s).",
+			cov.Harness, cov.FilesScanned, cov.SessionsScanned, cov.ThreadsScanned))
+	}
+	return lines
 }
