@@ -218,8 +218,9 @@ VERSION=0.1.0 ./build.sh
 ```
 
 The `binary-freshness` check (`scripts/binary-freshness.sh`) fails `./check.sh` while
-any committed binary lacks the short hash of the newest commit to `cli/` outside tests,
-`testdata/` and `cli/e2e/`. `.github/workflows/check.yml` runs `./check.sh` on Linux and
+any binary committed at HEAD lacks the short hash of the newest commit to `cli/` outside
+tests, `testdata/` and `cli/e2e/`, or of a later commit; `build.sh` stamps the HEAD it
+built at. `.github/workflows/check.yml` runs `./check.sh` on Linux and
 macOS with full history, which that check needs, and cross-compiles every shipped target.
 
 The model-driven tests under `tests/` need PyYAML in `tests/.venv`. Read the

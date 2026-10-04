@@ -16,7 +16,7 @@ BIN_DIR="${PLUGIN_DIR}/bin"
 
 # Version info
 VERSION="${VERSION:-dev}"
-GIT_COMMIT="$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo "unknown")"
+GIT_COMMIT="$(git -C "$SCRIPT_DIR" rev-parse --short=7 HEAD 2>/dev/null || echo "unknown")"
 BUILD_DATE="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
 LDFLAGS="-s -w"
