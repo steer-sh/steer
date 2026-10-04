@@ -539,7 +539,7 @@ func sourceWord(n int) string {
 }
 
 // coverageLines is one line per scanned harness. An unlisted harness gets a line only
-// when the scan read a file of its.
+// when the scan found a file of its, readable or not.
 func coverageLines(harnesses []report.HarnessCoverage) []string {
 	var lines []string
 	for _, cov := range harnesses {
