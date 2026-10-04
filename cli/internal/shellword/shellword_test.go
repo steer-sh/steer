@@ -1,6 +1,10 @@
 package shellword
 
-import "testing"
+import (
+	"os/exec"
+	"runtime"
+	"testing"
+)
 
 // TestADoubleQuotedHeadSplits: the Windows form is read on every platform, so a
 // settings.json copied from a Windows machine still names one path.
@@ -112,5 +116,48 @@ func TestSplitRefusesAWordItCouldNotHaveWritten(t *testing.T) {
 		if head != "" || rest != "" {
 			t.Fatalf("%q yielded head %q and rest %q, want neither", command, head, rest)
 		}
+	}
+}
+
+// A registered command runs through a shell, so a path holding any metacharacter
+// must reach the program as the one word it names. An unquoted ( or & makes the
+// shell exit 2, and a Claude Code PreToolUse hook that exits 2 blocks every call.
+func TestAQuotedPathIsOneWordToTheShell(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the POSIX form runs through /bin/sh")
+	}
+	paths := []string{
+		"/Users/ho(me)/.steer/hooks/steer-hooks.py",
+		"/Users/a&b", "/Users/a;b", "/Users/a|b", "/Users/a<b>c", "/Users/a #b",
+		"/Users/a!b", "~/x", "/Users/a{b,c}", "/Users/a[b]", "/Users/tab\there",
+		"/Users/new\nline", "/Users/café", "/Users/o'brien", "/Users/a$b", "steer=1",
+	}
+	for _, path := range paths {
+		out, err := exec.Command("/bin/sh", "-c", "printf %s "+Quote(path)).Output()
+		if err != nil {
+			t.Errorf("sh rejected %q as %s: %v", path, Quote(path), err)
+			continue
+		}
+		if string(out) != path {
+			t.Errorf("sh read %s as %q, want %q", Quote(path), out, path)
+		}
+		if head, _, ok := Split(Quote(path) + " --harness codex"); !ok || head != path {
+			t.Errorf("Split(%s) = %q, %v", Quote(path), head, ok)
+		}
+	}
+}
+
+// cmd.exe reads & | < > ( ) ^ outside double quotes, splits a word at , ; = and
+// reads / as a switch, so the Windows form quotes every path its allowlist does not
+// cover.
+func TestTheWindowsFormQuotesCmdMetacharacters(t *testing.T) {
+	for _, path := range []string{`C:\Users\a&b`, `C:\Users\ho(me)`, `C:\Users\a^b`, `C:\Users\a|b`,
+		`C:\Users\Doe,John\steer.exe`, `C:\opt\k=v\steer.exe`, `C:/steer/bin/steer.exe`} {
+		if got := quoteOn("windows", path); got != `"`+path+`"` {
+			t.Errorf("quoteOn(windows, %q) = %s", path, got)
+		}
+	}
+	if got := quoteOn("windows", `C:\Users\steer\hooks.py`); got != `C:\Users\steer\hooks.py` {
+		t.Errorf("a plain Windows path was quoted: %s", got)
 	}
 }

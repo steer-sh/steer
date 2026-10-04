@@ -31,26 +31,53 @@ func encodableOn(goos, path string) error {
 }
 
 // Quote renders a path as one shell word. Both harnesses run a hook command
-// through a shell, so a path holding a space needs quoting. Windows runs it
-// through cmd.exe, which reads a backslash as a path separator and knows no
-// single quote, so there a path is bare or double quoted and never anything else.
+// through a shell, so a path holding any byte outside a safe set is quoted.
+// Windows runs it through cmd.exe, which reads a backslash as a path separator and
+// knows no single quote, so there a path is bare or double quoted and never
+// anything else.
 //
 // The caller passes a path Encodable accepts; Quote does not check.
 func Quote(path string) string { return quoteOn(runtime.GOOS, path) }
 
 func quoteOn(goos, path string) string {
 	if goos == "windows" {
-		// A bare word may not begin with a quote character: Split reads the first
-		// character to choose a form, and an apostrophe is a legal Windows path name.
-		if path != "" && !strings.ContainsAny(path, " \t\"") && !strings.HasPrefix(path, "'") {
+		if bare(path, windowsSafe) {
 			return path
 		}
 		return `"` + path + `"`
 	}
-	if path != "" && !strings.ContainsAny(path, " \t'\"$`\\*?") {
+	if bare(path, posixSafe) {
 		return path
 	}
 	return "'" + strings.ReplaceAll(path, "'", `'\''`) + "'"
+}
+
+// The punctuation each platform's shell leaves alone in an unquoted word, beside
+// letters and digits. cmd.exe splits a word at , ; = and reads / as a switch, so
+// its set is smaller. Both are allowlists: a metacharacter such as ( & | < > # ! ~
+// or a non-ASCII byte is quoted without being named. A quote character is in
+// neither, which Split relies on: it reads the first character to choose a form.
+const (
+	posixSafe   = "_@%+:,./-"
+	windowsSafe = `_.-:\`
+)
+
+// bare reports whether path can stand as an unquoted word: every byte is a letter,
+// a digit or one of safe.
+func bare(path, safe string) bool {
+	if path == "" {
+		return false
+	}
+	for i := 0; i < len(path); i++ {
+		b := path[i]
+		switch {
+		case b >= 'a' && b <= 'z', b >= 'A' && b <= 'Z', b >= '0' && b <= '9':
+		case strings.IndexByte(safe, b) >= 0:
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // Split separates a command's first word from its arguments, reading both the
