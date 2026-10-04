@@ -90,7 +90,11 @@ func scanToCommit(cmd string, pos int) (int, bool) {
 		return 0, false // `git\s+` demands at least one space
 	}
 	for {
-		pos = skipSpace(cmd, pos)
+		next, ok := skipBlank(cmd, pos)
+		if !ok {
+			return 0, false
+		}
+		pos = next
 		if strings.HasPrefix(cmd[pos:], "commit") {
 			after := pos + len("commit")
 			if after >= len(cmd) || (!isWordByte(cmd[after]) && cmd[after] != '.') {
@@ -108,11 +112,27 @@ func scanToCommit(cmd string, pos int) (int, bool) {
 	}
 }
 
-func skipSpace(cmd string, pos int) int {
+// skipBlank skips whitespace inside one command. An unescaped newline ends the
+// command, as it does in the shell, so the walk stops there; a backslash-newline is
+// a line continuation and is skipped.
+func skipBlank(cmd string, pos int) (int, bool) {
 	for pos < len(cmd) && isSpace(cmd[pos]) {
+		if cmd[pos] == '\n' && !escaped(cmd, pos) {
+			return pos, false
+		}
 		pos++
 	}
-	return pos
+	return pos, true
+}
+
+// escaped reports an odd run of backslashes just before pos: `\\` is a literal
+// backslash, so only an odd run escapes the byte at pos.
+func escaped(cmd string, pos int) bool {
+	n := 0
+	for i := pos - 1; i >= 0 && cmd[i] == '\\'; i-- {
+		n++
+	}
+	return n%2 == 1
 }
 
 // Detection is what a command's text shows about the commits it runs.
