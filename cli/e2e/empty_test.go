@@ -53,7 +53,7 @@ func TestEmptyMachineReadings(t *testing.T) {
 		t.Errorf("report cadence exited %d and printed %q on an empty machine", r.Code, r.Stdout)
 	}
 	// cadence starts a detached refresh; it must finish before the home is removed.
-	s.WaitFor(filepath.Join(s.Home, ".steer", "state", "steer-report", "queue.json"))
+	s.WaitForRefresh()
 	if r := s.Steer("report", "show"); r.Code == 0 || !strings.Contains(r.Output(), "run `steer report` first") {
 		t.Errorf("report show with no stored report exited %d:\n%s", r.Code, r.Output())
 	}

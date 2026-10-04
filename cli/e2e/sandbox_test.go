@@ -398,30 +398,15 @@ func fileExists(p string) bool {
 	return err == nil
 }
 
-// WaitFor waits until path exists and the sandbox root stops changing, so a process a
-// command left running has finished writing.
-func (s *Sandbox) WaitFor(path string) {
+// WaitForRefresh waits for a detached `steer report refresh` to finish: its last write
+// is last_refresh, made under .refresh.lock, which it removes on the way out.
+func (s *Sandbox) WaitForRefresh() {
 	s.t.Helper()
+	dir := filepath.Join(s.Home, ".steer", "state", "steer-report")
 	deadline := time.Now().Add(20 * time.Second)
-	for !fileExists(path) {
+	for !fileExists(filepath.Join(dir, "last_refresh")) || fileExists(filepath.Join(dir, ".refresh.lock")) {
 		if time.Now().After(deadline) {
-			s.t.Fatalf("%s did not appear", path)
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	last, quiet := "", 0
-	for quiet < 4 && time.Now().Before(deadline) {
-		var b strings.Builder
-		filepath.Walk(s.Root, func(p string, info os.FileInfo, err error) error {
-			if err == nil {
-				fmt.Fprintf(&b, "%s %d %d\n", p, info.Size(), info.ModTime().UnixNano())
-			}
-			return nil
-		})
-		if b.String() == last {
-			quiet++
-		} else {
-			last, quiet = b.String(), 0
+			s.t.Fatalf("the detached refresh did not finish within 20s in %s", dir)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
