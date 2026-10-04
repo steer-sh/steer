@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/steer-sh/steer-cli/internal/gate"
 )
 
 // precommitSandbox arms the pre-commit channel with a three-run stub panel.
@@ -32,8 +34,13 @@ func TestPrecommitCleanReviewProceeds(t *testing.T) {
 	if r.Code != 0 || s.Head() == before {
 		t.Fatalf("commit exited %d and HEAD moved %v:\n%s", r.Code, s.Head() != before, r.Output())
 	}
-	if !strings.Contains(r.Stderr, "3 reviewers read this diff and found nothing — commit proceeds.") {
-		t.Errorf("no clean receipt:\n%s", r.Stderr)
+	receipt := "[commit-gate] " + filepath.Base(s.Repo) + " (firing 1, diff "
+	if n := strings.Count(r.Stderr, "found nothing — commit proceeds."); n != 1 ||
+		!strings.Contains(r.Stderr, receipt) {
+		t.Errorf("want one clean receipt starting %q, got %d:\n%s", receipt, n, r.Stderr)
+	}
+	if strings.Contains(r.Stderr, gate.SubjectUnavailable) {
+		t.Errorf("the receipt quotes the reviewer placeholder as the subject:\n%s", r.Stderr)
 	}
 	if n := len(s.Calls()); n != 3 {
 		t.Errorf("the panel made %d reviewer calls, want 3", n)

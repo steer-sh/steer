@@ -8,6 +8,7 @@ import (
 
 // CommitIdentity names the commit a receipt is about: the repository, the subject and
 // the diff's digest, which is the key the cleared record and the ledger already store.
+// A placeholder subject is an instruction to the reviewer and is left out.
 //
 // No commit hash appears here. PreToolUse fires before git runs, so the hash does not
 // exist yet.
@@ -36,7 +37,7 @@ func commitNameParts(req Request) []string {
 	if name := filepath.Base(req.Repo); name != "" && name != "." && name != string(filepath.Separator) {
 		parts = append(parts, name)
 	}
-	if subject := CommitSubject(req.Message); subject != "" {
+	if subject := CommitSubject(req.Message); subject != "" && !PlaceholderSubject(subject) {
 		parts = append(parts, fmt.Sprintf("%q", subject))
 	}
 	return parts
@@ -49,7 +50,8 @@ func commitNameParts(req Request) []string {
 // that reviewed nothing still declines to rule.
 func proceed(kind DecisionKind, req Request, raw string, firing int, sentence string, err error) Decision {
 	return Decision{Kind: kind, Reason: agentReceipt(req, raw, firing, sentence),
-		SystemMessage: fmt.Sprintf("[commit-gate] %s: %s", CommitName(req), sentence), LedgerError: err}
+		SystemMessage: fmt.Sprintf("[commit-gate] %s: %s", CommitName(req), sentence),
+		Receipt:       true, LedgerError: err}
 }
 
 // agentReceipt is the agent's copy of a let-through receipt: the sentence under the

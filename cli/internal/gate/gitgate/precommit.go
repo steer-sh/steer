@@ -79,11 +79,16 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, cwd strin
 // yet.
 const commitMessageUnavailable = gate.SubjectUnavailable
 
+// render maps a decision onto git's one stderr. A receipt's agent copy already carries
+// the operator's sentence, so the operator copy is dropped to print it once.
 func render(d gate.Decision) Result {
 	operator := d.SystemMessage
+	if d.Receipt {
+		operator = ""
+	}
 	if d.LedgerError != nil {
-		operator += " [commit-gate] the adjudication row could NOT be written (" +
-			d.LedgerError.Error() + ")."
+		operator = strings.TrimSpace(operator + " [commit-gate] the adjudication row could NOT be written (" +
+			d.LedgerError.Error() + ").")
 	}
 	switch d.Kind {
 	case gate.Deny:

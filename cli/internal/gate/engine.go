@@ -30,6 +30,10 @@ type Decision struct {
 	Kind          DecisionKind
 	Reason        string
 	SystemMessage string
+	// Receipt is true when Reason is the agent's copy of the SystemMessage receipt, under
+	// the commit's full identity. A channel whose agent and operator read one stream
+	// writes only Reason.
+	Receipt bool
 	// LedgerError, when set, is a failure of the ledger append itself. It has no disk
 	// to record on, so the adapter reports it on the operator channel.
 	LedgerError error
@@ -313,7 +317,7 @@ func (e *Engine) skipped(req Request, status string, chars int, err error) Decis
 		return Decision{Kind: Silent, LedgerError: err}
 	}
 	text := fmt.Sprintf("[commit-gate] %s: not reviewed — %s.", CommitName(req), why)
-	return Decision{Kind: ContextOnly, Reason: text, SystemMessage: text, LedgerError: err}
+	return Decision{Kind: ContextOnly, Reason: text, SystemMessage: text, Receipt: true, LedgerError: err}
 }
 
 func withLedgerError(d Decision, err error) Decision {
