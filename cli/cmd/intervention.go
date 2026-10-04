@@ -9,10 +9,12 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/cadence"
 	"github.com/steer-sh/steer-cli/internal/checkscope"
+	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/evidence"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
 	"github.com/steer-sh/steer-cli/internal/guardscope"
 	"github.com/steer-sh/steer-cli/internal/sessions"
+	"github.com/steer-sh/steer-cli/internal/status"
 	"github.com/steer-sh/steer-cli/internal/tier"
 )
 
@@ -476,8 +478,12 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 			if err := prepareState(); err != nil {
 				return err
 			}
-			return mine.Retire(out(), gateConfig().StateDir, args[0],
-				v.retireReason, v.retireStatus)
+			stateDir := gateConfig().StateDir
+			if err := mine.Retire(out(), stateDir, args[0], v.retireReason, v.retireStatus); err != nil {
+				return err
+			}
+			printRetiredFix(cmd.ErrOrStderr(), stateDir, args[0])
+			return nil
 		},
 	}
 	retire.Flags().StringVar(&v.retireReason, "reason", "", "why (required)")
@@ -553,4 +559,54 @@ func recordTier(id string) (string, error) {
 		}
 	}
 	return "", nil
+}
+
+// printRetiredFix tells the reader that a retire left the fix it measured installed,
+// and names the command that removes it. It prints nothing once the fix is gone.
+func printRetiredFix(w io.Writer, stateDir, id string) {
+	records, _ := mine.Load(stateDir)
+	root := repoRootOrNone()
+	for _, r := range records {
+		if fmt.Sprint(r["id"]) != id {
+			continue
+		}
+		a := cadence.ArtifactOf(r, cadence.ArtifactSources{RepoRoot: root, Addendum: gateAddendum(root)})
+		if a == nil || (a.State != cadence.ArtifactPresent && a.State != cadence.ArtifactChanged) {
+			return
+		}
+		t := fmt.Sprint(r["tier"])
+		unnamed := *a
+		unnamed.ID = ""
+		switch {
+		case !boundHere(a, root):
+			// The remove command acts on the checkout it runs in, so name the one holding the fix.
+			fmt.Fprintf(w, "Retired %s: %s; it stays installed in %s, so run its remove command there.\n",
+				id, status.RemovalPhrase(t, &unnamed), a.Repo)
+		case removedFromWorkingTree(t, a):
+			// The gate reads a project entry at HEAD, so the removal waits on a commit.
+			fmt.Fprintf(w, "Retired %s: %s; its removal is not committed yet, so commit %s for the commit gate to stop reading it.\n",
+				id, status.RemovalPhrase(t, &unnamed), projectManifestPath())
+		default:
+			fmt.Fprintf(w, "Retired %s: %s.\n", id, status.RemovalPhrase(t, a))
+		}
+		return
+	}
+}
+
+// removedFromWorkingTree reports a project review entry that HEAD still holds and
+// the working tree's store no longer does. A store that cannot be read reports false.
+func removedFromWorkingTree(t string, a *cadence.Artifact) bool {
+	if kind, _ := tier.Of(t); kind != tier.Review || a.Scope != claude.ProjectScope {
+		return false
+	}
+	entries, err := claude.ListAddendum(claude.ProjectScope)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if e.ID == a.ID {
+			return false
+		}
+	}
+	return true
 }

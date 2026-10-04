@@ -13,7 +13,7 @@ var allHarnesses bool
 // registrarFor maps a registry id to its adapter.
 func registrarFor(id harness.ID) (harness.Registrar, error) { return guardscope.RegistrarFor(id) }
 
-// currentRegistrars resolves the harnesses a mutation writes to: every harness
+// currentRegistrars resolves the harnesses a mutation writes to: every listed harness
 // that supports hooks under --all-harnesses, the named one under --harness, and
 // otherwise every such harness installed on this machine. The guard store is
 // shared, so a guard the operator installs is meant to run in each agent they

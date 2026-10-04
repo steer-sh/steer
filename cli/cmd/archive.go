@@ -7,8 +7,10 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/archive"
+	"github.com/steer-sh/steer-cli/internal/cadence"
 	"github.com/steer-sh/steer-cli/internal/checks"
 	"github.com/steer-sh/steer-cli/internal/claude"
+	"github.com/steer-sh/steer-cli/internal/gate/mine"
 	"github.com/steer-sh/steer-cli/internal/styles"
 	"github.com/steer-sh/steer-cli/internal/tier"
 )
@@ -108,7 +110,7 @@ no manifest entry names.`,
 			}
 			fmt.Fprintln(out, styles.SuccessBox.Render(fmt.Sprintf("Restored check %s\nFrom: %s", d.ID, s.Dir)))
 			printOracleWiring(out, checkRoot, d.ID)
-			printRestorePointer(out)
+			printRestorePointer(out, s, d.ID, scope)
 			return nil
 		}
 
@@ -129,7 +131,7 @@ no manifest entry names.`,
 			fmt.Fprintf(out, "The commit gate reads project entries from HEAD. Commit %s on its own, before the change "+
 				"the restored entry is for: a commit that carries both is reviewed without the entry.\n", projectManifestPath())
 		}
-		printRestorePointer(out)
+		printRestorePointer(out, s, s.ID, scope)
 		return nil
 	},
 }
@@ -211,9 +213,49 @@ func printOracleWiring(out io.Writer, root, id string) {
 		"Add one of those lines to %s.\n", checks.OracleName, checks.ExecInvocation, id, id, checks.OracleName)
 }
 
-func printRestorePointer(out io.Writer) {
-	fmt.Fprintln(out, "A record that measured this fix now shows its removal. "+
-		"`steer fix register --supersedes <record-id>` starts a clean window.")
+// printRestorePointer names each live record that measures the restored fix in the
+// restored scope and whose split precedes the removal just undone, and prints nothing
+// when no record does. The removal is compared directly: a project review entry is
+// read at HEAD, where a restore has not reached yet.
+func printRestorePointer(out io.Writer, restored archive.Stored, id, restoreScope string) {
+	records, _ := mine.Load(gateConfig().StateDir)
+	root := repoRootOrNone()
+	src := cadence.ArtifactSources{RepoRoot: root, Addendum: gateAddendum(root)}
+	removed := restored.RemovedAt().Unix()
+	var ids []string
+	for _, r := range records {
+		if t, ok := tier.Of(fmt.Sprint(r["tier"])); !ok || string(t) != restored.Tier || r["retired_ts"] != nil {
+			continue
+		}
+		a := cadence.ArtifactOf(r, src)
+		if a == nil || a.ID != id || (a.Scope != "" && a.Scope != restoreScope) || !boundHere(a, root) {
+			continue
+		}
+		switch a.State {
+		case cadence.ArtifactPresent, cadence.ArtifactChanged, cadence.ArtifactAbsent:
+		default:
+			continue
+		}
+		if removed > int64(mine.SplitTS(r)) {
+			ids = append(ids, fmt.Sprint(r["id"]))
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	fmt.Fprintf(out, "%s measured this fix and now shows its removal. "+
+		"`steer fix register --supersedes <record-id>` starts a clean window.\n", strings.Join(ids, ", "))
+}
+
+// boundHere reports whether the fix an artifact reading names lives in this checkout
+// or in no checkout at all. From a linked worktree, a reading follows a project record
+// to the main checkout, whose store a command run here does not touch.
+func boundHere(a *cadence.Artifact, root string) bool {
+	if a.Repo == "" {
+		return true
+	}
+	here, err := checks.RepoIdentity(root)
+	return root != "" && err == nil && here == a.Repo
 }
 
 func init() {

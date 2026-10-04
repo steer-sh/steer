@@ -41,6 +41,14 @@ func TestHookRegistrarsFollowTheInstalledHarnesses(t *testing.T) {
 	if len(installed) != 0 {
 		t.Fatalf("empty machine: got %d targets, want none", len(installed))
 	}
+	// The unfiltered list offers every listed harness, and Pi only once installed.
+	all, err := HookRegistrars(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2 || all[0].Harness().ID != harness.ClaudeCode || all[1].Harness().ID != harness.Codex {
+		t.Fatalf("empty machine, unfiltered: got %d targets, want Claude Code and Codex", len(all))
+	}
 
 	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
 		t.Fatal(err)
@@ -62,8 +70,7 @@ func TestHookRegistrarsFollowTheInstalledHarnesses(t *testing.T) {
 		t.Fatalf("all installed: got %d targets (%v)", len(installed), err)
 	}
 
-	// The unfiltered list ignores presence and includes every hook-capable harness.
-	all, err := HookRegistrars(false)
+	all, err = HookRegistrars(false)
 	if err != nil {
 		t.Fatal(err)
 	}

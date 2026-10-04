@@ -648,7 +648,15 @@ var commitGateRemoveCmd = &cobra.Command{
 		}
 		// Both steer-owned Claude Code entries come down in one write, preserving
 		// unrelated PreToolUse and Stop hooks.
-		return claude.RemoveCommitGateAndResolver(scope)
+		if err := claude.RemoveCommitGateAndResolver(scope); err != nil {
+			return err
+		}
+		path, err := claude.GetSettingsFile(scope)
+		if err != nil {
+			return err
+		}
+		fmt.Println("Removed Claude Code commit gate from " + path)
+		return nil
 	},
 }
 

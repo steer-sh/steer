@@ -198,7 +198,9 @@ var presetDisableCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		item, ok := presets.FindVisiblePreset(catalog, name)
+		// An internal preset is never offered, but its block names this command as
+		// the user's way to remove it, so disable accepts one.
+		item, ok := catalog.Find(name)
 		if !ok {
 			return fmt.Errorf("preset not found: %s", name)
 		}

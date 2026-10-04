@@ -33,14 +33,15 @@ func RegistrarFor(id harness.ID) (harness.Registrar, error) {
 
 // HookRegistrars returns an adapter for every harness Steer can register into,
 // keeping the registry's order. onlyInstalled drops the ones whose configuration
-// directory is absent from this machine.
+// directory is absent from this machine; an unlisted harness is dropped when absent
+// either way.
 func HookRegistrars(onlyInstalled bool) ([]harness.Registrar, error) {
 	out := make([]harness.Registrar, 0, len(harness.All()))
 	for _, entry := range harness.All() {
 		if !entry.Capabilities.HookRegistration {
 			continue
 		}
-		if onlyInstalled && !entry.Installed() {
+		if (onlyInstalled || !harness.Listed(entry.ID)) && !entry.Installed() {
 			continue
 		}
 		registrar, err := RegistrarFor(entry.ID)
