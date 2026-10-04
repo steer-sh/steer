@@ -134,15 +134,11 @@ const (
 	UnparsedCommit
 )
 
-// Detect classifies a command by the commits its text shows.
-//
-// The parser recognizes a call whose command words are a static `git` (by name or
-// path, behind command, env, sudo or nohup) and a static `commit`. The loose scan
-// matches `git ... commit` text at any command boundary, so a commit inside bash -c or
-// eval, or behind a backslash, counts as a possible commit. A match belongs to a parsed
-// call when it is that call's command words, or text inside its static arguments or
-// static heredoc bodies. A command word that neither can read, such as $GIT,
-// $'g\x69t', an alias or a function, is covered by neither.
+// Detect classifies a command by the commits its text shows. The parser reads a call
+// whose command words are a static `git` (by name or path, behind command, env, sudo or
+// nohup) and a static `commit`; the loose scan matches `git ... commit` text at any
+// command boundary, as inside bash -c or eval or behind a backslash. A command word
+// neither reads, such as $GIT, $'g\x69t', an alias or a function, is not covered.
 func Detect(cmd string) Detection {
 	spans := commitSpans(cmd)
 	program, err := shellsyntax.Parse(cmd)
