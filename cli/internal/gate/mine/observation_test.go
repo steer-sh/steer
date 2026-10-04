@@ -36,6 +36,7 @@ func obsRecord(tier, hookID string, ts int) Record {
 	}
 	if hookID != "" {
 		r["hook_id"] = hookID
+		r[HookScopeKey] = "global"
 	}
 	return r
 }
@@ -118,15 +119,15 @@ func TestChainGuardActivityIsWindowLevelAndLabelled(t *testing.T) {
 	}
 	firings := []Firing{
 		// A block in a session that produced no commit: no chain can claim it.
-		{HookID: "no-widget", Harness: "claude-code", SessionID: "never-committed", TS: 2500},
+		{HookID: "no-widget", Scope: "global", Harness: "claude-code", SessionID: "never-committed", TS: 2500},
 		// The same row read twice off two stores of a migrated machine.
-		{HookID: "no-widget", Harness: "claude-code", SessionID: "s1", TS: 3050},
-		{HookID: "no-widget", Harness: "claude-code", SessionID: "s1", TS: 3050},
+		{HookID: "no-widget", Scope: "global", Harness: "claude-code", SessionID: "s1", TS: 3050},
+		{HookID: "no-widget", Scope: "global", Harness: "claude-code", SessionID: "s1", TS: 3050},
 		// Another harness at the same instant is its own firing.
-		{HookID: "no-widget", Harness: "codex", SessionID: "s1", TS: 3050},
+		{HookID: "no-widget", Scope: "global", Harness: "codex", SessionID: "s1", TS: 3050},
 		// Outside the period, and another hook.
-		{HookID: "no-widget", Harness: "claude-code", SessionID: "s0", TS: 1500},
-		{HookID: "other-hook", Harness: "claude-code", SessionID: "s1", TS: 3060},
+		{HookID: "no-widget", Scope: "global", Harness: "claude-code", SessionID: "s0", TS: 1500},
+		{HookID: "other-hook", Scope: "global", Harness: "claude-code", SessionID: "s1", TS: 3060},
 	}
 	var obs Observation
 	withClock(9000, func() {
@@ -188,8 +189,8 @@ func TestSessionObservationPinsEveryField(t *testing.T) {
 	units[2].Instrument = "scan-aaa/claude-code:2"
 	r := sessionRecord(t, "bare python", "guard", "no-bare-python", 2000)
 	firings := []Firing{
-		{HookID: "no-bare-python", Harness: "claude-code", SessionID: "s3000", TS: 3000},
-		{HookID: "no-bare-python", Harness: "claude-code", SessionID: "s3001", TS: 3001},
+		{HookID: "no-bare-python", Scope: "global", Harness: "claude-code", SessionID: "s3000", TS: 3000},
+		{HookID: "no-bare-python", Scope: "global", Harness: "claude-code", SessionID: "s3001", TS: 3001},
 	}
 	var obs Observation
 	withClock(9000, func() {

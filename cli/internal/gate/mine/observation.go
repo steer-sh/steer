@@ -141,15 +141,16 @@ func chainObservation(record Record, before, after []Chain, beforeCov, afterCov 
 	aHits, _, _ := Incidence(after, pattern, kind)
 
 	hookID := str(record["hook_id"])
+	fix, _ := GuardFixOf(record)
 	firing := FiringActivity{
 		Applicable:  firingsApplicable(str(record["tier"])) && hookID != "",
-		LogPresent:  ev.AuditPresent,
+		LogPresent:  ev.AuditPresent && storeOwnershipGap(fix, ev) == "",
 		HookID:      hookID,
 		Scope:       FiringScopeWindowPeriod,
 		ClassScoped: false,
 	}
-	if firing.Applicable {
-		firing.Rows, firing.NewestTS = countFiringsInPeriod(ev.Firings, hookID, splitTS, clock)
+	if firing.Applicable && firing.LogPresent {
+		firing.Rows, firing.NewestTS = countFiringsInPeriod(ev.Firings, fix, splitTS, clock)
 	}
 
 	return Observation{
@@ -197,8 +198,9 @@ func sessionObservation(record Record, before, after []SessionUnit,
 		Rows:        attr.Firings,
 		Units:       attr.Sessions,
 	}
-	if firing.Applicable {
-		firing.NewestTS = newestFiringIn(after, ev.Firings, attr.HookID)
+	if firing.Applicable && firing.LogPresent {
+		fix, _ := GuardFixOf(record)
+		firing.NewestTS = newestFiringIn(after, ev.Firings, fix)
 	}
 
 	return Observation{
@@ -306,17 +308,17 @@ func sessionRecurrence(after []SessionUnit, pattern patternMatcher, signalKind s
 	return r
 }
 
-// countFiringsInPeriod counts a hook's audit rows inside [from, to], once per hook
-// id, harness and timestamp. The dedup key is the row itself rather than the
+// countFiringsInPeriod counts a guard's audit rows inside [from, to], once per hook
+// id, harness and timestamp; a row counts only from the guard's own store. The dedup key is the row itself rather than the
 // session, so a guard that fired in a session producing no commit is still counted
 // and a session producing several commits is not counted several times.
-func countFiringsInPeriod(firings []Firing, hookID string, from, to float64) (rows int, newest float64) {
-	if hookID == "" {
+func countFiringsInPeriod(firings []Firing, fix GuardFix, from, to float64) (rows int, newest float64) {
+	if fix.ID == "" {
 		return 0, 0
 	}
 	seen := map[string]bool{}
 	for _, f := range firings {
-		if f.HookID != hookID || f.TS < from || (to > 0 && f.TS > to) {
+		if !fix.fired(f) || f.TS < from || (to > 0 && f.TS > to) {
 			continue
 		}
 		key := f.HookID + "\x1f" + f.Harness + "\x1f" + strconv.FormatFloat(f.TS, 'f', -1, 64)
@@ -334,8 +336,8 @@ func countFiringsInPeriod(firings []Firing, hookID string, from, to float64) (ro
 
 // newestFiringIn is the newest timestamp of the class-scoped join the session
 // engine counted, read back over the same exact key.
-func newestFiringIn(units []SessionUnit, firings []Firing, hookID string) float64 {
-	if hookID == "" {
+func newestFiringIn(units []SessionUnit, firings []Firing, fix GuardFix) float64 {
+	if fix.ID == "" {
 		return 0
 	}
 	index := map[string]string{}
@@ -344,7 +346,7 @@ func newestFiringIn(units []SessionUnit, firings []Firing, hookID string) float6
 	}
 	var newest float64
 	for _, f := range firings {
-		if f.HookID != hookID || f.SessionID == "" {
+		if !fix.fired(f) || f.SessionID == "" {
 			continue
 		}
 		if h, ok := index[f.SessionID]; !ok || h != f.Harness {

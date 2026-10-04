@@ -560,9 +560,9 @@ type EvidenceSet struct {
 	CheckRuns  []CheckRun
 	CheckRepos map[string]bool
 	// FixtureReceipts is one entry per guard store this machine resolved and read.
-	// FixtureHost and FixtureProjectRoot are the identities that resolved them, so
-	// a record frozen against another machine or another checkout is told apart
-	// from one this reading covers.
+	// FixtureHost and FixtureProjectRoot are the identities that resolved them and
+	// the stores Firings was read from, so a record frozen against another machine
+	// or another checkout is told apart from one this reading covers.
 	FixtureReceipts    map[FixtureKey]FixtureReceipt
 	FixtureHost        string
 	FixtureProjectRoot string

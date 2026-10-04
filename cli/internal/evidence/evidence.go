@@ -51,7 +51,7 @@ func Gather(opts Options) mine.EvidenceSet {
 		ev.Sessions, _ = sessions.Load(dir)
 	}
 
-	firings, present := mine.LoadFirings(GuardStores()...)
+	firings, present := mine.LoadStoreFirings(AuditStores()...)
 	ev.Firings, ev.AuditPresent = WithoutExcluded(firings, Exclusions()), present
 	ev.CheckRuns, ev.CheckRepos = CheckRuns(ExcludedRuns())
 
@@ -144,6 +144,22 @@ func GuardStores() []string {
 		}
 	}
 	return dirs
+}
+
+// AuditStores names each guard store with the scope it resolved under, so a firing
+// is attributed to the store that wrote it. A project scope that resolves to the
+// global store's directory is read as the global store.
+func AuditStores() []mine.AuditStore {
+	global, globalErr := claude.GetHooksDir(claude.GlobalScope)
+	var stores []mine.AuditStore
+	if project, err := claude.GetHooksDir(claude.ProjectScope); err == nil &&
+		(globalErr != nil || project != global) {
+		stores = append(stores, mine.AuditStore{Scope: claude.ProjectScope, Dir: project})
+	}
+	if globalErr == nil {
+		stores = append(stores, mine.AuditStore{Scope: claude.GlobalScope, Dir: global})
+	}
+	return stores
 }
 
 // FixtureReceipts reads the fixture state behind every guard the records name, keyed

@@ -101,6 +101,15 @@ type Firing struct {
 	// RowDigest is RowDigest of the line this firing was read from. Every row
 	// carries one, including a row with no FiringID.
 	RowDigest string `json:"row_digest,omitempty"`
+	// Scope is the scope of the store the row was read from. The runtime writes a
+	// row into its master's own store, so the store names the guard that fired.
+	Scope string `json:"scope,omitempty"`
+}
+
+// AuditStore is one guard store directory and the scope it was resolved under.
+type AuditStore struct {
+	Scope string
+	Dir   string
 }
 
 // RowDigest names one audit row by its own bytes: the SHA-256 of the line with
@@ -118,8 +127,19 @@ const AuditLogName = "steer-audit.jsonl"
 // reports whether any store was readable, which separates "the guard never fired" from
 // "no audit evidence exists here".
 func LoadFirings(dirs ...string) (firings []Firing, present bool) {
-	seen := map[string]bool{}
+	stores := make([]AuditStore, 0, len(dirs))
 	for _, dir := range dirs {
+		stores = append(stores, AuditStore{Dir: dir})
+	}
+	return LoadStoreFirings(stores...)
+}
+
+// LoadStoreFirings is LoadFirings over scoped stores: each firing carries the scope of
+// the store it was read from. A row read from two stores keeps the first one's scope.
+func LoadStoreFirings(stores ...AuditStore) (firings []Firing, present bool) {
+	seen := map[string]bool{}
+	for _, store := range stores {
+		dir := store.Dir
 		if dir == "" {
 			continue
 		}
@@ -168,6 +188,7 @@ func LoadFirings(dirs ...string) (firings []Firing, present bool) {
 				RuleHash:          row.RuleHash,
 				MasterBuildDigest: row.MasterBuildDigest,
 				RowDigest:         RowDigest(line),
+				Scope:             store.Scope,
 			})
 		}
 	}
@@ -293,10 +314,10 @@ type Attribution struct {
 	Sessions int `json:"sessions"`
 }
 
-// joinFirings counts this record's hook's firings that landed in the window's eligible
-// sessions. The join is exact on hook id, harness and root session id.
-func joinFirings(units []SessionUnit, firings []Firing, hookID string) (rows int, sessions int) {
-	if hookID == "" {
+// joinFirings counts this record's guard's firings that landed in the window's eligible
+// sessions. The join is exact on hook id, store scope, harness and root session id.
+func joinFirings(units []SessionUnit, firings []Firing, fix GuardFix) (rows int, sessions int) {
+	if fix.ID == "" {
 		return 0, 0
 	}
 	index := map[string]string{} // session id -> harness
@@ -305,7 +326,7 @@ func joinFirings(units []SessionUnit, firings []Firing, hookID string) (rows int
 	}
 	hit := map[string]bool{}
 	for _, f := range firings {
-		if f.HookID != hookID || f.SessionID == "" {
+		if !fix.fired(f) || f.SessionID == "" {
 			continue
 		}
 		harnessOf, ok := index[f.SessionID]
@@ -356,13 +377,14 @@ func ScoreSessionRecord(record Record, ev EvidenceSet) (map[string]any, error) {
 	aHits, aTotal, aRate := SessionIncidence(after, pattern, signalKind)
 
 	hookID := str(record["hook_id"])
+	fix, _ := GuardFixOf(record)
 	attr := Attribution{
 		Applicable: firingsApplicable(str(record["tier"])) && hookID != "",
-		LogPresent: ev.AuditPresent,
+		LogPresent: ev.AuditPresent && storeOwnershipGap(fix, ev) == "",
 		HookID:     hookID,
 	}
-	if attr.Applicable {
-		attr.Firings, attr.Sessions = joinFirings(after, ev.Firings, hookID)
+	if attr.Applicable && attr.LogPresent {
+		attr.Firings, attr.Sessions = joinFirings(after, ev.Firings, fix)
 	}
 
 	afterInstruments := sessionInstruments(after)

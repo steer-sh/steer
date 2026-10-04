@@ -45,6 +45,7 @@ func sessionRecord(t *testing.T, match, tier, hookID string, installed int) Reco
 	}
 	if hookID != "" {
 		r["hook_id"] = hookID
+		r[HookScopeKey] = "global"
 	}
 	return r
 }
@@ -92,7 +93,7 @@ func TestSessionFiringActivityRidesBesideTheCounts(t *testing.T) {
 	check(t, "and that zero is known", silent.Firing.Known(), true)
 	check(t, "the join is class-scoped", silent.Firing.ClassScoped, true)
 
-	firings := []Firing{{HookID: "no-bare-python", Harness: "claude-code", SessionID: "s3000", TS: 3000}}
+	firings := []Firing{{HookID: "no-bare-python", Scope: "global", Harness: "claude-code", SessionID: "s3000", TS: 3000}}
 	joined := scoreSession(t, r, EvidenceSet{Sessions: units, Firings: firings, AuditPresent: true})
 	check(t, "the join counts rows", observed(t, joined).Firing.Rows, 1)
 	check(t, "the join counts sessions", observed(t, joined).Firing.Units, 1)
@@ -109,10 +110,10 @@ func TestSessionFiringJoinIsExact(t *testing.T) {
 		window(3000, 12, "claude-code", "proj", "nothing here")...)
 	r := sessionRecord(t, "bare python", "guard", "no-bare-python", 2000)
 	wrong := []Firing{
-		{HookID: "some-other-hook", Harness: "claude-code", SessionID: "s3000"},
-		{HookID: "no-bare-python", Harness: "codex", SessionID: "s3000"},
-		{HookID: "no-bare-python", Harness: "claude-code", SessionID: "s1000"},
-		{HookID: "no-bare-python", Harness: "claude-code", SessionID: "unknown"},
+		{HookID: "some-other-hook", Scope: "global", Harness: "claude-code", SessionID: "s3000"},
+		{HookID: "no-bare-python", Scope: "global", Harness: "codex", SessionID: "s3000"},
+		{HookID: "no-bare-python", Scope: "global", Harness: "claude-code", SessionID: "s1000"},
+		{HookID: "no-bare-python", Scope: "global", Harness: "claude-code", SessionID: "unknown"},
 	}
 	res := scoreSession(t, r, EvidenceSet{Sessions: units, Firings: wrong, AuditPresent: true})
 	check(t, "no row joins", observed(t, res).Firing.Rows, 0)
@@ -131,7 +132,7 @@ func TestSessionRecurrenceIsReportedBesideFiring(t *testing.T) {
 	check(t, "the guard recorded nothing", silent.Firing.Rows, 0)
 	check(t, "the example is a cluster key", silent.Recurrence.ExampleKind, ExampleClusterKey)
 
-	firings := []Firing{{HookID: "no-bare-python", Harness: "claude-code", SessionID: "s3005"}}
+	firings := []Firing{{HookID: "no-bare-python", Scope: "global", Harness: "claude-code", SessionID: "s3005"}}
 	fired := observed(t, scoreSession(t, r, EvidenceSet{Sessions: units, Firings: firings, AuditPresent: true}))
 	check(t, "the class still recurred", fired.Recurrence.Occurred, true)
 	check(t, "and the guard blocked once", fired.Firing.Rows, 1)
@@ -297,4 +298,75 @@ func TestLoadFiringsKeysStampedRowsOnTheirIdentifier(t *testing.T) {
 	check(t, "the row's guard source reaches the reader", firings[0].HookDigest, "d1")
 	check(t, "the row's rule reaches the reader", firings[0].RuleHash, "r1")
 	check(t, "the row's master build reaches the reader", firings[0].MasterBuildDigest, "b1")
+}
+
+// A guard of the same name in another store is a different guard: its rows neither
+// inflate this guard's count nor make a silent guard read as active.
+func TestFiringCountsMatchTheGuardsOwnStore(t *testing.T) {
+	units := append(window(1000, 12, "claude-code", "proj", "bare python here"),
+		window(3000, 12, "claude-code", "proj", "nothing here")...)
+	r := sessionRecord(t, "bare python", "guard", "no-bare-python", 2000)
+	namesake := []Firing{{HookID: "no-bare-python", Scope: "project", Harness: "claude-code", SessionID: "s3000", TS: 3000}}
+
+	session := observed(t, scoreSession(t, r, EvidenceSet{Sessions: units, Firings: namesake, AuditPresent: true}))
+	check(t, "the session join counts no namesake row", session.Firing.Rows, 0)
+	check(t, "so the global guard reads as silent", session.Firing.Known(), true)
+
+	chains := []Chain{obsChain(t, 1000, "agy/1/aaa/v1", "widget"), obsChain(t, 3000, "agy/1/aaa/v1", "widget")}
+	withClock(9000, func() {
+		scored, err := ScoreRecord(obsRecord("guard", "no-bare-python", 2000),
+			EvidenceSet{Chains: chains, Firings: namesake, AuditPresent: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		check(t, "the window count counts no namesake row", observationOf(t, scored).Firing.Rows, 0)
+	})
+}
+
+// A project guard frozen in another checkout, or a record naming no store, has no
+// store this reading resolved, so its zero is unknown rather than silent.
+func TestFiringsOfAnUnreadStoreAreUnknown(t *testing.T) {
+	units := append(window(1000, 12, "claude-code", "proj", "bare python here"),
+		window(3000, 12, "claude-code", "proj", "nothing here")...)
+	firings := []Firing{{HookID: "no-bare-python", Scope: "project", Harness: "claude-code", SessionID: "s3000", TS: 3000}}
+	ev := EvidenceSet{Sessions: units, Firings: firings, AuditPresent: true, FixtureProjectRoot: "/repo/here"}
+
+	elsewhere := sessionRecord(t, "bare python", "guard", "no-bare-python", 2000)
+	elsewhere[HookScopeKey], elsewhere[HookRepoKey] = "project", "/repo/there"
+	obs := observed(t, scoreSession(t, elsewhere, ev))
+	check(t, "another checkout's guard joins no row", obs.Firing.Rows, 0)
+	check(t, "and its zero is not a fact", obs.Firing.Known(), false)
+
+	unscoped := sessionRecord(t, "bare python", "guard", "no-bare-python", 2000)
+	delete(unscoped, HookScopeKey)
+	obs = observed(t, scoreSession(t, unscoped, ev))
+	check(t, "a record naming no store joins no row", obs.Firing.Rows, 0)
+	check(t, "and its zero is not a fact", obs.Firing.Known(), false)
+
+	here := sessionRecord(t, "bare python", "guard", "no-bare-python", 2000)
+	here[HookScopeKey], here[HookRepoKey] = "project", "/repo/here"
+	obs = observed(t, scoreSession(t, here, ev))
+	check(t, "this checkout's project guard joins its row", obs.Firing.Rows, 1)
+}
+
+// Each firing carries the scope of the store it was read from.
+func TestLoadStoreFiringsTagsTheStoreScope(t *testing.T) {
+	project, global := t.TempDir(), t.TempDir()
+	row := func(session string) string {
+		return `{"hook_name":"no-bare-python","harness":"claude-code","session_id":"` + session +
+			`","timestamp":"2026-08-01T10:00:00Z"}` + "\n"
+	}
+	if err := os.WriteFile(filepath.Join(project, AuditLogName), []byte(row("p")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(global, AuditLogName), []byte(row("g")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	firings, _ := LoadStoreFirings(AuditStore{Scope: "project", Dir: project}, AuditStore{Scope: "global", Dir: global})
+	scopes := map[string]string{}
+	for _, f := range firings {
+		scopes[f.SessionID] = f.Scope
+	}
+	check(t, "the project row", scopes["p"], "project")
+	check(t, "the global row", scopes["g"], "global")
 }

@@ -37,6 +37,38 @@ func GuardFixOf(record Record) (GuardFix, bool) {
 	return fix, fix.ID != ""
 }
 
+// fired reports that an audit row is this guard's: the same id read from a store of
+// the same scope. A guard of the same name in another store is a different guard.
+func (fix GuardFix) fired(f Firing) bool {
+	return fix.ID != "" && fix.Scope != "" && f.HookID == fix.ID && f.Scope == fix.Scope
+}
+
+// storeOwnershipGap says why this reading cannot attribute the record's guard to the
+// stores it read, or "" when it can. The stores are resolved on ev's host and, for
+// project scope, in ev's checkout.
+func storeOwnershipGap(fix GuardFix, ev EvidenceSet) string {
+	switch {
+	case fix.Scope == "":
+		return "the record names no store"
+	case fix.Host != "" && ev.FixtureHost != "" && fix.Host != ev.FixtureHost:
+		return "registered on host " + fix.Host +
+			"; this command reads the stores on host " + ev.FixtureHost
+	}
+	if fix.Scope == steerpath.ProjectScope {
+		switch {
+		case fix.Repo == "":
+			return "the record does not establish its owning checkout"
+		case ev.FixtureProjectRoot == "":
+			return "registered against the project store in " + fix.Repo +
+				"; this command resolves no project store"
+		case fix.Repo != ev.FixtureProjectRoot:
+			return "registered against the project store in " + fix.Repo +
+				"; this command resolves " + ev.FixtureProjectRoot
+		}
+	}
+	return ""
+}
+
 // Fixture receipt states. They answer one question — what does this machine know
 // about the stored cases behind this guard — and none of them claims the guard
 // blocks correctly in the field.
@@ -90,24 +122,8 @@ func fixtureReceiptOf(record Record, ev EvidenceSet) FixtureReceipt {
 	if !firingsApplicable(str(record["tier"])) || !bound {
 		return FixtureReceipt{}
 	}
-	switch {
-	case fix.Scope == "":
-		return unavailableReceipt("the record names no store")
-	case fix.Host != "" && ev.FixtureHost != "" && fix.Host != ev.FixtureHost:
-		return unavailableReceipt("registered on host " + fix.Host +
-			"; this command reads the stores on host " + ev.FixtureHost)
-	}
-	if fix.Scope == steerpath.ProjectScope {
-		switch {
-		case fix.Repo == "":
-			return unavailableReceipt("the record does not establish its owning checkout")
-		case ev.FixtureProjectRoot == "":
-			return unavailableReceipt("registered against the project store in " + fix.Repo +
-				"; this command resolves no project store")
-		case fix.Repo != ev.FixtureProjectRoot:
-			return unavailableReceipt("registered against the project store in " + fix.Repo +
-				"; this command resolves " + ev.FixtureProjectRoot)
-		}
+	if gap := storeOwnershipGap(fix, ev); gap != "" {
+		return unavailableReceipt(gap)
 	}
 	receipt, ok := ev.FixtureReceipts[FixtureKey{Scope: fix.Scope, HookID: fix.ID}]
 	if !ok {
