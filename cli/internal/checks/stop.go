@@ -208,8 +208,8 @@ func failureSignature(identity string, run OracleRun, records []Execution) strin
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// treeSignature digests HEAD and the content of every path with uncommitted
-// changes, untracked files included.
+// treeSignature digests HEAD, executable state and the content of every path
+// with uncommitted changes, untracked files included.
 func treeSignature(root string) string {
 	h := sha256.New()
 	head, err := exec.Command("git", "-C", root, "rev-parse", "HEAD").Output()
@@ -235,7 +235,18 @@ func treeSignature(root string) string {
 	sort.Strings(paths)
 	for _, p := range paths {
 		fmt.Fprintf(h, "\x00%s\x00", p)
-		if data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(p))); err == nil {
+		abs := filepath.Join(root, filepath.FromSlash(p))
+		// Match the executable-mode predicate used by scriptCommand.
+		mode := byte('?')
+		if info, err := os.Stat(abs); err == nil {
+			if info.Mode()&0o111 != 0 {
+				mode = 'x'
+			} else {
+				mode = '-'
+			}
+		}
+		h.Write([]byte{mode})
+		if data, err := os.ReadFile(abs); err == nil {
 			sum := sha256.Sum256(data)
 			h.Write(sum[:])
 		} else {
