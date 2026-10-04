@@ -46,8 +46,10 @@ type claudeReply struct {
 
 func (c *ClaudeCode) Review(ctx context.Context, prompt, cwd string) gate.RawRun {
 	// --no-session-persistence keeps the run out of the user's session history: its
-	// prompt is a diff, not anything the user said.
-	argv := []string{c.binary(), "-p", "--output-format", "json", "--no-session-persistence"}
+	// prompt is a diff, not anything the user said. --safe-mode drops the operator's
+	// hooks, plugins, CLAUDE.md and output style, and --tools leaves only file reads.
+	argv := []string{c.binary(), "-p", "--output-format", "json", "--no-session-persistence",
+		"--safe-mode", "--tools", "Read,Grep,Glob"}
 	if c.Model != "" {
 		argv = append(argv, "--model", c.Model)
 	}

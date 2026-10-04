@@ -131,7 +131,8 @@ func TestCodexRendersEffortAsAConfigOverride(t *testing.T) {
 		t.Fatalf("Review = %#v; want the stdout text", run)
 	}
 	assertArgv(t, recordedArgv(t, argvFile), []string{
-		"exec", "--skip-git-repo-check", "--ephemeral", "--model", "gpt-reviewer",
+		"exec", "--skip-git-repo-check", "--ephemeral", "--sandbox", "read-only", "--disable", "hooks",
+		"--model", "gpt-reviewer",
 		"-c", "model_reasoning_effort=high", "-",
 	})
 }
@@ -144,8 +145,24 @@ func TestCodexOmitsAnUnsetModel(t *testing.T) {
 	reviewer.Binary = binary
 	reviewer.Review(context.Background(), "PROMPT", t.TempDir())
 	assertArgv(t, recordedArgv(t, argvFile), []string{
-		"exec", "--skip-git-repo-check", "--ephemeral", "-c", "model_reasoning_effort=low", "-",
+		"exec", "--skip-git-repo-check", "--ephemeral", "--sandbox", "read-only", "--disable", "hooks",
+		"-c", "model_reasoning_effort=low", "-",
 	})
+}
+
+// A review session that loads the operator's hooks runs their turn-end check.sh
+// inside the review, which holds the review past its deadline in an adopted repository.
+func TestCodexRunsWithoutOperatorHooksInAReadOnlySandbox(t *testing.T) {
+	binary, argvFile := stubBinary(t, "findings")
+	reviewer := NewCodex("", "")
+	reviewer.Binary = binary
+	reviewer.Review(context.Background(), "PROMPT", t.TempDir())
+	argv := strings.Join(recordedArgv(t, argvFile), " ")
+	for _, want := range []string{"--disable hooks", "--sandbox read-only"} {
+		if !strings.Contains(argv, want) {
+			t.Fatalf("argv = %q; want %q", argv, want)
+		}
+	}
 }
 
 func TestClaudeCodeRendersModelAndEffort(t *testing.T) {
@@ -156,7 +173,8 @@ func TestClaudeCodeRendersModelAndEffort(t *testing.T) {
 		t.Fatalf("Review = %#v; want the parsed result", run)
 	}
 	assertArgv(t, recordedArgv(t, argvFile), []string{
-		"-p", "--output-format", "json", "--no-session-persistence", "--model", "sonnet", "--effort", "xhigh",
+		"-p", "--output-format", "json", "--no-session-persistence", "--safe-mode", "--tools", "Read,Grep,Glob",
+		"--model", "sonnet", "--effort", "xhigh",
 	})
 }
 
@@ -165,7 +183,23 @@ func TestClaudeCodeOmitsAnUnsetModelAndEffort(t *testing.T) {
 	reviewer := NewClaudeCode("", "")
 	reviewer.Binary = binary
 	reviewer.Review(context.Background(), "PROMPT", t.TempDir())
-	assertArgv(t, recordedArgv(t, argvFile), []string{"-p", "--output-format", "json", "--no-session-persistence"})
+	assertArgv(t, recordedArgv(t, argvFile), []string{
+		"-p", "--output-format", "json", "--no-session-persistence", "--safe-mode", "--tools", "Read,Grep,Glob",
+	})
+}
+
+// The review session loads none of the operator's hooks, and its only tools read files.
+func TestClaudeCodeRunsWithoutOperatorHooksAndWithReadOnlyTools(t *testing.T) {
+	binary, argvFile := stubBinary(t, `{"result":"ok","is_error":false}`)
+	reviewer := NewClaudeCode("", "")
+	reviewer.Binary = binary
+	reviewer.Review(context.Background(), "PROMPT", t.TempDir())
+	argv := strings.Join(recordedArgv(t, argvFile), " ")
+	for _, want := range []string{"--safe-mode", "--tools Read,Grep,Glob"} {
+		if !strings.Contains(argv, want) {
+			t.Fatalf("argv = %q; want %q", argv, want)
+		}
+	}
 }
 
 func TestEffortWarningNamesOnlyADocumentedSet(t *testing.T) {

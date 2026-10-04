@@ -89,9 +89,9 @@ func parseArgv(call *Call) error {
 		seen := map[string]bool{}
 		for i := 0; i < len(args); i++ {
 			switch args[i] {
-			case "-p", "--no-session-persistence":
+			case "-p", "--no-session-persistence", "--safe-mode":
 				seen[args[i]] = true
-			case "--output-format", "--model", "--effort":
+			case "--output-format", "--tools", "--model", "--effort":
 				v, err := value(i)
 				if err != nil {
 					return err
@@ -99,6 +99,8 @@ func parseArgv(call *Call) error {
 				switch args[i] {
 				case "--output-format":
 					seen["json"] = v == "json"
+				case "--tools":
+					seen["read-only tools"] = v == "Read,Grep,Glob"
 				case "--model":
 					call.Model = v
 				case "--effort":
@@ -109,8 +111,9 @@ func parseArgv(call *Call) error {
 				return fmt.Errorf("unknown flag %q", args[i])
 			}
 		}
-		if !seen["-p"] || !seen["json"] || !seen["--no-session-persistence"] {
-			return fmt.Errorf("want -p --output-format json --no-session-persistence, got %q", args)
+		if !seen["-p"] || !seen["json"] || !seen["--no-session-persistence"] ||
+			!seen["--safe-mode"] || !seen["read-only tools"] {
+			return fmt.Errorf("want -p --output-format json --no-session-persistence --safe-mode --tools Read,Grep,Glob, got %q", args)
 		}
 		call.Prompt = call.Stdin
 	case "codex":
@@ -122,12 +125,16 @@ func parseArgv(call *Call) error {
 			switch args[i] {
 			case "--skip-git-repo-check", "--ephemeral":
 				seen[args[i]] = true
-			case "--model", "-c":
+			case "--sandbox", "--disable", "--model", "-c":
 				v, err := value(i)
 				if err != nil {
 					return err
 				}
-				if args[i] == "--model" {
+				if args[i] == "--sandbox" {
+					seen["read-only"] = v == "read-only"
+				} else if args[i] == "--disable" {
+					seen["hooks off"] = v == "hooks"
+				} else if args[i] == "--model" {
 					call.Model = v
 				} else if effort, ok := strings.CutPrefix(v, "model_reasoning_effort="); ok {
 					call.Effort = effort
@@ -139,8 +146,8 @@ func parseArgv(call *Call) error {
 				return fmt.Errorf("unknown flag %q", args[i])
 			}
 		}
-		if !seen["--skip-git-repo-check"] || !seen["--ephemeral"] {
-			return fmt.Errorf("want --skip-git-repo-check --ephemeral, got %q", args)
+		if !seen["--skip-git-repo-check"] || !seen["--ephemeral"] || !seen["read-only"] || !seen["hooks off"] {
+			return fmt.Errorf("want --skip-git-repo-check --ephemeral --sandbox read-only --disable hooks, got %q", args)
 		}
 		call.Prompt = call.Stdin
 	default:

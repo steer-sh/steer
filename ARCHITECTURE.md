@@ -376,7 +376,13 @@ sample diff through the same prompt and outcome classification, and writes no le
 row or chain state. Setup runs it because a resolvable executable does not prove that
 the reviewer answers; it proves nothing about hook delivery. The Claude Code and Codex
 reviewers run with `--no-session-persistence` and `--ephemeral`, so a review adds no
-session to the user's history; agy has no such flag.
+session to the user's history; agy has no such flag. They also load none of the
+operator's hooks (`--safe-mode`, `--disable hooks`), which in an adopted repository
+would run check.sh inside the review. Claude Code gets only file-read tools
+(`--tools Read,Grep,Glob`; safe mode also drops MCP servers). Codex runs its commands
+in `--sandbox read-only`, but the operator's Codex MCP servers stay loaded under their
+own approval settings. agy has no flag for either: the operator's agy hooks and
+permissions are its only boundary.
 
 The stock review prompt is embedded and fixed; the review addendum is the
 operator-writable addition to it (`internal/gate/addendum.go`). Each request
