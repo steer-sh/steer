@@ -90,6 +90,10 @@ type diffPlan struct {
 	// excluded names what the harness dropped and TELLS the reviewer. OS cruft is
 	// dropped from the same pathspecs and deliberately absent here.
 	excluded []string
+
+	// incomplete records that an untracked file the commit may land is missing from
+	// the diff: enumeration failed, or a listed file did not render.
+	incomplete bool
 }
 
 // emptyTreeSHA1 is git's empty-tree object under SHA-1. A repository created with
@@ -297,6 +301,9 @@ func (p *diffPlan) run() (diff, names string, newPaths []string, ok bool) {
 	}
 	text, used, skipped := p.untrackedSections(reviewable)
 	p.excluded = append(p.excluded, skipped...)
+	if len(skipped) > 0 {
+		p.incomplete = true
+	}
 	diff += text
 	for _, path := range used {
 		names += path + "\n"
@@ -328,13 +335,17 @@ func (p *diffPlan) untrackedPaths() []string {
 		out, ok = Git(p.cwd, gitMedium, append(append([]string{}, base...), ":/")...)
 	}
 	if !ok {
+		p.incomplete = true
 		return nil
 	}
 	for _, specs := range p.spec.ForcedUntrackedPathspecs {
 		forcedBase := []string{"ls-files", "--others", "--full-name", "--"}
 		forced, forcedOK := Git(p.cwd, gitMedium, append(forcedBase, specs...)...)
 		if !forcedOK {
-			forced, _ = Git(p.cwd, gitMedium, "ls-files", "--others", "--full-name", "--", ":/")
+			forced, forcedOK = Git(p.cwd, gitMedium, "ls-files", "--others", "--full-name", "--", ":/")
+			if !forcedOK {
+				p.incomplete = true
+			}
 		}
 		out += forced
 	}
@@ -520,6 +531,8 @@ func ChangedFiles(cfg Config, cwd string, spec DiffSpec) (paths []string, ok boo
 type DiffResult struct {
 	Text string
 	Raw  string
+	// Complete is false when an untracked file the commit may land is missing from Raw.
+	Complete bool
 }
 
 // GetDiff assembles the diff text the reviewers read: filtered, budgeted, and
@@ -537,7 +550,8 @@ func GetDiffSized(cfg Config, cwd string, spec DiffSpec) (DiffResult, bool) {
 	if !ok {
 		return DiffResult{}, false
 	}
-	return DiffResult{Text: renderDiff(cfg, plan, diff, names, newPaths), Raw: diff}, true
+	return DiffResult{Text: renderDiff(cfg, plan, diff, names, newPaths), Raw: diff,
+		Complete: !plan.incomplete}, true
 }
 
 func renderDiff(cfg Config, plan *diffPlan, diff, names string, newPaths []string) string {

@@ -130,7 +130,7 @@ type prepared struct {
 
 // prepare resolves the diff for this round, logging the skip rows itself so both
 // callers record them identically. A non-empty status means there is nothing to
-// review: "norepo" (git could not answer — fail open), "prose", or "empty".
+// review: "norepo" (git could not answer — fail open), "prose", "binary", or "empty".
 func (e *Engine) prepare(req Request, firing int, d *DiffResult) (prepared, string, error) {
 	paths, ok := ChangedFiles(e.cfg, req.Repo, req.Spec)
 	if !ok {
@@ -144,6 +144,11 @@ func (e *Engine) prepare(req Request, firing int, d *DiffResult) (prepared, stri
 	if d == nil {
 		got, _ := GetDiffSized(e.cfg, req.Repo, req.Spec)
 		d = &got
+	}
+	if d.Complete && IsBinaryOnly(d.Raw, paths) && !externalDiffConfigured(req.Repo) {
+		err := e.log(req, Row{"ts": time.Now().Unix(), "phase": "skip-binary",
+			"files": len(paths), "firing": firing})
+		return prepared{}, "binary", err
 	}
 	// The RAW length decides, not the rendered one. They differ only when rendering
 	// makes the diff shorter, which is exactly the over-budget branches — so testing
@@ -308,6 +313,9 @@ func (e *Engine) skipped(req Request, status string, chars int, err error) Decis
 	switch {
 	case status == "prose":
 		why = "every changed file is prose (.md, .txt and the like), which the gate does not review"
+	case status == "binary":
+		why = "only the content of existing binary files changed, with paths and modes " +
+			"unchanged, and a reviewer cannot read binary content"
 	case status == "empty" && chars == 0:
 		why = "the diff is empty"
 	case status == "empty":

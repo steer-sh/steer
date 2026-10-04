@@ -445,9 +445,14 @@ gate. Claude Code carries it beside an `allow`, so a clean review keeps its
 auto-approval; the other adapters carry it without a decision. Both copies carry
 one sentence. The agent's copy identifies the commit by repository, subject,
 firing and diff digest — the hook runs before a commit hash exists; the
-operator's names the repository and subject. A skipped commit (prose only, or a raw diff under
-`MinDiffChars`) gets a receipt that names the reason and rules nothing; only a
-repository git cannot read stays silent.
+operator's names the repository and subject. A skipped commit (prose only, binary
+content only, or a raw diff under `MinDiffChars`) gets a receipt that names the reason
+and rules nothing; only a repository git cannot read stays silent. The binary skip
+(`IsBinaryOnly`) reads the raw diff the reviewers would get: every stanza must be a
+content change to an existing binary at an unchanged path and mode, every changed
+path must appear, the untracked part must be complete, and no external diff command
+may be configured. It covers the visible diff only: a change git hides from both the
+path list and the diff is not seen.
 
 `internal/gate/resolve/` joins adjudication rows to harness-neutral `LedgerMsg`
 values supplied by each adapter's harvest. The join uses thread id when present,

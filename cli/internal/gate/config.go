@@ -86,10 +86,9 @@ const (
 const InstrumentSuffix = "go-findings-v3-shell"
 
 // Phases where no reviewer ran. They open no chain and close none, so a reader of
-// the log must not treat one as a boundary. mine.py keeps its own copy; the two must
-// stay in step.
+// the log must not treat one as a boundary.
 var NonReviewPhases = map[string]bool{
-	"skip-prose": true, "skip-empty": true, "skip-cleared": true, "ungated": true,
+	"skip-prose": true, "skip-binary": true, "skip-empty": true, "skip-cleared": true, "ungated": true,
 	"ungated-partial": true,
 }
 

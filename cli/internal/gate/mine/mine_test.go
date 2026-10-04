@@ -80,6 +80,17 @@ func TestChainSegmentation(t *testing.T) {
 	check(t, "chain rounds is max firing", chains[0].Rounds, 3)
 }
 
+func TestBinarySkipJoinsNoChain(t *testing.T) {
+	rows := []gate.Row{
+		row(100, "deny"),
+		row(110, "skip-binary"),
+		firing(row(120, "clean"), 2),
+	}
+	chains := BuildChains(rows, false)
+	check(t, "one chain", len(chains), 1)
+	check(t, "the skip row stays outside it", len(chains[0].Rows), 2)
+}
+
 func TestHostPartitioning(t *testing.T) {
 	mixed := []gate.Row{
 		host(row(100, "deny"), "alpha"),
