@@ -37,6 +37,17 @@ type RemoveManagedRuleResult struct {
 	ArchivePath string
 }
 
+// refuseMultilineRule refuses rule text that spans lines. The managed section writes
+// each rule as one "- " bullet, so a line break would leave the remaining lines
+// outside the bullet, and a line that starts with "## " would end the section early.
+func refuseMultilineRule(text string) error {
+	if strings.ContainsAny(text, "\r\n") {
+		return fmt.Errorf("rule text must be one line: the ## Steer Rules section holds " +
+			"each rule as a single bullet")
+	}
+	return nil
+}
+
 // InstallManagedRule writes one instruction rule into the shared store and
 // re-derives every target's rules section.
 //
@@ -58,6 +69,9 @@ func InstallManagedRule(scope, id, text string, targets ...harness.Registrar) (*
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return nil, fmt.Errorf("rule text cannot be empty")
+	}
+	if err := refuseMultilineRule(text); err != nil {
+		return nil, err
 	}
 
 	if err := EnsureDirectories(scope); err != nil {

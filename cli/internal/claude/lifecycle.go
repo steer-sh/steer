@@ -193,6 +193,9 @@ func InstallManagedHook(scope string, input InstallManagedHookInput, targets ...
 	if rule == "" {
 		return nil, fmt.Errorf("rule cannot be empty")
 	}
+	if err := refuseMultilineRule(rule); err != nil {
+		return nil, err
+	}
 	if len(input.Content) == 0 {
 		return nil, fmt.Errorf("hook content cannot be empty")
 	}

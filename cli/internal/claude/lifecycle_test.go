@@ -425,3 +425,30 @@ func TestGuardFilenameReplacementRefusesLinkedPreviousImplementation(t *testing.
 		t.Fatalf("refusal changed ownership: %+v, %v", entry, err)
 	}
 }
+
+// A rule with a line break would leave its later lines outside the managed bullet, and
+// a "## " line among them would end the managed section early.
+func TestInstallersRefuseMultilineRuleText(t *testing.T) {
+	withProjectTempDir(t)
+
+	for _, text := range []string{"first\n## Injected\nthird", "first\rsecond"} {
+		if _, err := InstallManagedRule(ProjectScope, "multi", text); err == nil {
+			t.Errorf("InstallManagedRule accepted %q", text)
+		}
+		if _, err := InstallManagedHook(ProjectScope, InstallManagedHookInput{
+			HookName: "multi-hook",
+			Rule:     text,
+			Content:  []byte(blockingHookContent),
+			Metadata: HookInstallMetadata{Source: SourceGenerated},
+		}); err == nil {
+			t.Errorf("InstallManagedHook accepted %q", text)
+		}
+	}
+	manifest, err := LoadManifest(ProjectScope)
+	if err != nil {
+		t.Fatalf("LoadManifest error: %v", err)
+	}
+	if len(manifest.Rules) != 0 || len(manifest.Hooks) != 0 {
+		t.Fatalf("a refused install left manifest entries: rules=%v hooks=%v", manifest.Rules, manifest.Hooks)
+	}
+}
