@@ -30,6 +30,11 @@ var pluginManifests = []string{
 // is the marketplace's decision about the entry.
 var marketplaceOnlyKeys = []string{"source", "strict"}
 
+// manifestOnlyKeys are the components only the plugin manifest declares. Claude
+// Code refuses to load a non-strict entry when both documents declare
+// components, and refuses a hooks file path in any marketplace entry.
+var manifestOnlyKeys = []string{"skills", "hooks"}
+
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()
@@ -115,6 +120,15 @@ func TestEveryPluginManifestMatchesItsMarketplaceEntry(t *testing.T) {
 			}
 			delete(entry, key)
 		}
+		for _, key := range manifestOnlyKeys {
+			if _, ok := manifest[key]; !ok {
+				t.Errorf("%s is missing %q", rel, key)
+			}
+			if value, ok := entry[key]; ok {
+				t.Errorf("marketplace entry carries %q = %v; that key is the plugin manifest's", key, value)
+			}
+			delete(manifest, key)
+		}
 		if !reflect.DeepEqual(entry, manifest) {
 			t.Errorf("%s differs from its marketplace entry:\n keys(manifest): %v\n keys(entry):    %v\n manifest: %s\n entry:    %s",
 				rel, keys(manifest), keys(entry), mustJSON(t, manifest), mustJSON(t, entry))
@@ -168,6 +182,15 @@ func TestReadmeInstallCommandsNameTheManifestRepository(t *testing.T) {
 func githubSlug(ref string) (string, bool) {
 	slug := strings.TrimSuffix(strings.TrimPrefix(ref, "https://github.com/"), ".git")
 	return slug, strings.Count(slug, "/") == 1 && !strings.Contains(slug, ":")
+}
+
+// A strict entry defers to the plugin manifest, so Claude Code loads the
+// components the manifest declares.
+func TestTheMarketplaceEntryIsStrict(t *testing.T) {
+	entry := soleSteerPlugin(t, filepath.Join(repoRoot(t), ".claude-plugin", "marketplace.json"))
+	if entry["strict"] != true {
+		t.Fatalf("marketplace entry strict = %v, want true", entry["strict"])
+	}
 }
 
 func TestEveryDeclaredPluginPathExists(t *testing.T) {

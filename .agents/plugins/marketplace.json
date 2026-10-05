@@ -11,7 +11,7 @@
     {
       "name": "steer",
       "source": "./",
-      "strict": false,
+      "strict": true,
       "description": "Generate Claude Code and Codex hooks from natural language rules to enforce coding standards, security policies, and best practices",
       "version": "0.1.0",
       "author": {
@@ -20,9 +20,7 @@
       "homepage": "https://steer.sh",
       "repository": "https://github.com/steer-sh/steer-skill",
       "license": "MIT",
-      "keywords": ["hooks", "code-quality", "security", "linting", "enforcement"],
-      "skills": ["./skills/steer", "./skills/steer-report", "./skills/steer-setup"],
-      "hooks": "./hooks/hooks.json"
+      "keywords": ["hooks", "code-quality", "security", "linting", "enforcement"]
     }
   ]
 }
