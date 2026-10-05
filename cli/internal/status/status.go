@@ -376,6 +376,9 @@ type Posture struct {
 	Plugins []PluginCopy `json:"plugins"`
 	// Mods is each enabled Claude Code mod read against its cached inspection.
 	Mods []mods.Exposure `json:"mods"`
+	// HookTimeout is the harness timeout, in seconds, a commit-gate registration
+	// needs under the current reviewer timeout.
+	HookTimeout int `json:"-"`
 }
 
 // AttentionQueue is the subset of the loop needing action: the cadence queue
@@ -633,16 +636,17 @@ func recentChains(chains []mine.Chain, limit int) []ChainSummary {
 func collectPosture(cfg gate.Config, ev mine.EvidenceSet) Posture {
 	observed := observedChannels(ev)
 	p := Posture{
-		Instrument: cfg.InstrumentID(),
-		Reviewer:   cfg.ReviewerModel,
-		Ledger:     cfg.LogFile(),
-		CommitGate: []ScopeArming{},
-		Resolver:   []ScopeArming{},
-		Masters:    []MasterRuntime{},
-		Rules:      []RulesPresence{},
-		Plugins:    PluginCopies(),
-		Mods:       ModExposures(),
-		Unresolved: resolve.CountUnresolved(cfg),
+		Instrument:  cfg.InstrumentID(),
+		Reviewer:    cfg.ReviewerModel,
+		Ledger:      cfg.LogFile(),
+		CommitGate:  []ScopeArming{},
+		Resolver:    []ScopeArming{},
+		Masters:     []MasterRuntime{},
+		Rules:       []RulesPresence{},
+		Plugins:     PluginCopies(),
+		Mods:        ModExposures(),
+		Unresolved:  resolve.CountUnresolved(cfg),
+		HookTimeout: cfg.HookTimeout(),
 	}
 	cwd, _ := os.Getwd()
 	claudeID := string(harness.ClaudeCode)

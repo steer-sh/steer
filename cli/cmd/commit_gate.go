@@ -31,11 +31,6 @@ import (
 
 const (
 	commitGatePreCommitMarker = "# steer-managed: commit-gate"
-	// The PreToolUse timeout must EXCEED the per-reviewer wall clock, or a slow review
-	// is killed mid-flight and the commit lands ungated with no message AND no row. A
-	// value equal to the review timeout does exactly that, so the margin is not
-	// decoration.
-	commitGateTimeoutMargin = 60
 	// The resolver reads transcripts and rewrites the shard; 30s clears the largest
 	// local corpus with headroom.
 	backfillHookTimeout = 30
@@ -324,7 +319,7 @@ func installReviewChannel(cfg gate.Config) error {
 				"arming both reviews every commit twice — pass --both-channels to do it anyway", path)
 		}
 	}
-	timeout := int(cfg.ReviewTimeout.Seconds()) + commitGateTimeoutMargin
+	timeout := cfg.HookTimeout()
 	target, err := harness.Parse(commitGateHarness)
 	if err != nil {
 		return err
@@ -366,7 +361,7 @@ func installReviewChannel(cfg gate.Config) error {
 		}
 	}
 	registered := fmt.Sprintf("Registered: the %s commit gate on PreToolUse\nScope: %s\nTimeout: %ds (reviewer timeout %ds + %ds margin)",
-		entry.DisplayName, scope, timeout, int(cfg.ReviewTimeout.Seconds()), commitGateTimeoutMargin)
+		entry.DisplayName, scope, timeout, int(cfg.ReviewTimeout.Seconds()), gate.HookTimeoutMargin)
 	switch target {
 	case harness.ClaudeCode:
 		registered += "\nReview outcomes: read at the end of each turn (Stop hook)"

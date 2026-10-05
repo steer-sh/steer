@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/checks"
+	"github.com/steer-sh/steer-cli/internal/checkscope"
 	"github.com/steer-sh/steer-cli/internal/claude"
 	codexhooks "github.com/steer-sh/steer-cli/internal/codex"
 	"github.com/steer-sh/steer-cli/internal/harness"
@@ -139,15 +140,14 @@ func applyMigration(cmd *cobra.Command, approvals []migrationApproval, gates []m
 				label, len(pending), plural(len(pending), "repository is", "repositories are"))
 			continue
 		}
-		arming, err := registerCheckRunner(g.Harness, g.Scope)
+		arming, err := replacePersonalGate(g.Harness, g.Scope)
 		if err != nil {
 			return err
 		}
-		removed, err := removePersonalGate(g.Harness, g.Scope)
-		if err != nil {
-			return err
+		if !arming.Registered {
+			return fmt.Errorf("wrote the Stop runner to %s, but reading it back found none", arming.Path)
 		}
-		if !removed {
+		if _, still := personalGateAt(g.Harness, g.Scope); still {
 			return fmt.Errorf("the %s personal hook at %s is still registered after removing it", label, g.Path)
 		}
 		replaced++
@@ -256,16 +256,28 @@ func personalGateAt(target harness.ID, scope string) (migrationGate, bool) {
 	return g, a.Registered
 }
 
-func removePersonalGate(target harness.ID, scope string) (bool, error) {
+// replacePersonalGate registers the Stop runner and removes the personal hook. Codex
+// keys a hook's approval by its position, so there both happen in one write that
+// puts the runner in the first entry a runner or the personal hook holds alone.
+func replacePersonalGate(target harness.ID, scope string) (checkscope.Arming, error) {
 	if target == harness.Codex {
 		cwd, err := codexProjectDir()
 		if err != nil {
-			return false, err
+			return checkscope.Arming{}, err
 		}
-		_, removed, err := codexhooks.RemoveStopHooksMatching(scope, cwd, checks.IsPersonalGateCommand)
-		return removed, err
+		if _, err := codexhooks.ReplaceStopHook(scope, cwd, checkHookCommand(target),
+			checks.RegisteredHookTimeout(), checks.IsPersonalGateCommand); err != nil {
+			return checkscope.Arming{}, err
+		}
+		return checkRunnerArming(target, scope)
 	}
-	return claude.RemoveStopHooksMatching(scope, checks.IsPersonalGateCommand)
+	if err := claude.RegisterCheckHook(scope, checkHookCommand(target), checks.RegisteredHookTimeout()); err != nil {
+		return checkscope.Arming{}, err
+	}
+	if _, err := claude.RemoveStopHooksMatching(scope, checks.IsPersonalGateCommand); err != nil {
+		return checkscope.Arming{}, err
+	}
+	return checkRunnerArming(target, scope)
 }
 
 func plural(n int, one, many string) string {

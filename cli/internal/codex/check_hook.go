@@ -19,6 +19,15 @@ func isCheckHook(command string) bool { return strings.Contains(command, checkHo
 // thread, and check.sh runs for the root thread alone. Every other handler, the
 // resolver's included, and every unrelated key is kept.
 func RegisterCheckHook(scope, cwd, command string, timeout int) (string, error) {
+	return ReplaceStopHook(scope, cwd, command, timeout, func(string) bool { return false })
+}
+
+// ReplaceStopHook registers the Stop runner in place of every Stop handler that
+// replaces matches, in one write. The runner takes the slot of the first entry
+// whose only handler is a runner or a replaced hook, so that entry adds no shift to
+// the positions Codex keys approval by. Every other owned handler is removed, and
+// an entry left empty moves the entries after it up one.
+func ReplaceStopHook(scope, cwd, command string, timeout int, replaces func(string) bool) (string, error) {
 	if !isCheckHook(command) {
 		return "", fmt.Errorf("check runner command must contain %q", checkHookIdentity)
 	}
@@ -35,7 +44,8 @@ func RegisterCheckHook(scope, cwd, command string, timeout int) (string, error) 
 		hooks = map[string]any{}
 		root["hooks"] = hooks
 	}
-	hooks["Stop"] = upsertEntry(eventEntries(root, "Stop"), isCheckHook, entryValue(hookEntry{
+	owns := func(c string) bool { return isCheckHook(c) || replaces(c) }
+	hooks["Stop"] = upsertEntry(eventEntries(root, "Stop"), owns, entryValue(hookEntry{
 		Hooks: []commandHook{{Type: "command", Command: command, Timeout: timeout,
 			StatusMessage: CheckHookStatusMessage}},
 	}))

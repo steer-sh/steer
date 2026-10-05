@@ -20,7 +20,7 @@ import (
 const Version = 1
 
 // DirName is the fixtures directory inside a guard store.
-const DirName = "fixtures"
+const DirName = hookstore.FixturesName
 
 // Expected outcomes a case can declare.
 const (

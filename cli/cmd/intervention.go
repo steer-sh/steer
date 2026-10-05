@@ -561,7 +561,7 @@ func recordTier(id string) (string, error) {
 	return "", nil
 }
 
-// printRetiredFix tells the reader that a retire left the fix it measured installed,
+// printRetiredFix tells the reader that a retire left the fix it tracked installed,
 // and names the command that removes it. It prints nothing once the fix is gone.
 func printRetiredFix(w io.Writer, stateDir, id string) {
 	records, _ := mine.Load(stateDir)

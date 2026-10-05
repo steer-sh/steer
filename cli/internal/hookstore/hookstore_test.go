@@ -43,6 +43,9 @@ func writeLegacy(t *testing.T, files map[string]string) {
 		t.Fatal(err)
 	}
 	for name, content := range files {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, name)), 0o755); err != nil {
+			t.Fatal(err)
+		}
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -131,6 +134,68 @@ func TestPrepareMovesTheStoreAndLeavesEveryOtherHookAlone(t *testing.T) {
 	}
 	if got != dir {
 		t.Errorf("Resolve = %q after migration; want %q", got, dir)
+	}
+}
+
+// A guard's stored cases travel with it: the receipt in the manifest names them, and
+// once the store resolves to the neutral copy nothing reads the legacy directory.
+func TestPrepareCarriesEachGuardsFixtures(t *testing.T) {
+	projectRoot(t)
+	writeLegacy(t, map[string]string{
+		ManifestName:     manifest,
+		"no-var-hook.py": "print('guard')\n",
+		filepath.Join(FixturesName, "no-var.json"):  `{"cases":[]}`,
+		filepath.Join(FixturesName, "someone.json"): `{"other":true}`,
+		filepath.Join(FixturesName, "README.md"):    "notes\n",
+		filepath.Join("other-tool", "no-var.json"):  "{}\n",
+	})
+
+	dir, err := Prepare("project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, filepath.Join(dir, FixturesName, "no-var.json")); got != `{"cases":[]}` {
+		t.Errorf("fixtures = %q; want the legacy cases", got)
+	}
+	for _, name := range []string{filepath.Join(FixturesName, "someone.json"), filepath.Join(FixturesName, "README.md"), "other-tool"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
+			t.Errorf("%s was copied; only a manifest key's cases belong to the store", name)
+		}
+	}
+}
+
+// A fixtures directory the repository carries as a symlink is never written through.
+func TestPrepareRefusesALinkedFixturesDirectory(t *testing.T) {
+	root := projectRoot(t)
+	writeLegacy(t, map[string]string{
+		ManifestName: manifest,
+		filepath.Join(FixturesName, "no-var.json"): `{"cases":[]}`,
+	})
+	outside := t.TempDir()
+	neutral := filepath.Join(root, ".steer", "hooks")
+	if err := os.MkdirAll(neutral, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(neutral, FixturesName)); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Prepare("project"); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("Prepare = %v; want a symlink refusal", err)
+	}
+	if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+		t.Errorf("migration wrote %d file(s) through the link", len(entries))
+	}
+
+	// A target that already holds the file is refused too, and the store stays unmarked.
+	if err := os.WriteFile(filepath.Join(outside, "no-var.json"), []byte(`{"cases":["outside"]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Prepare("project"); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("Prepare = %v; want a symlink refusal when the target holds the file", err)
+	}
+	if _, err := os.Stat(filepath.Join(neutral, ManifestName)); !os.IsNotExist(err) {
+		t.Errorf("the manifest landed beside a linked fixtures directory (%v)", err)
 	}
 }
 

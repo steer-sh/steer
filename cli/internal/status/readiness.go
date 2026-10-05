@@ -54,6 +54,21 @@ func CommandStep(resolvable string) (Step, bool) {
 	}, true
 }
 
+// GateTimeoutStep reports a commit-gate registration whose harness timeout is
+// shorter than the one the reviewer timeout needs. The harness then stops a slow
+// review, and the commit lands unreviewed with no message and no ledger row. A
+// registration with no timeout, or an unknown need, raises none.
+func GateTimeoutStep(a ScopeArming, need int) (Step, bool) {
+	if !a.Registered || a.Timeout <= 0 || need <= 0 || a.Timeout >= need {
+		return Step{}, false
+	}
+	return prefixHarness(Step{
+		Title: fmt.Sprintf("the registered wall clock is %ds, and a review may take %ds, so a slow review is stopped and its commit lands unreviewed",
+			a.Timeout, need),
+		Fix: fmt.Sprintf("steer commit-gate install --harness %s --scope %s", a.Harness, a.Scope),
+	}, a), true
+}
+
 // TrustStep reports a harness that reviews hook trust itself. Registration alone does
 // not prove enforcement there, and only the operator can clear it.
 func TrustStep(harnessID, trust, path string) (Step, bool) {
@@ -133,6 +148,11 @@ func ReadinessOf(s *SystemStatus, probe reviewers.Probe) Readiness {
 		if step, ok := CommandStep(a.Resolvable); ok {
 			r.Steps = append(r.Steps, prefixHarness(step, a))
 			open = true
+		}
+		// A short wall clock still reviews every fast commit, so it leaves the
+		// registration enforcing and only names the repair.
+		if step, ok := GateTimeoutStep(a, s.Posture.HookTimeout); ok {
+			r.Steps = append(r.Steps, step)
 		}
 		if _, ok := TrustStep(a.Harness, a.Trust, ""); ok {
 			note := fmt.Sprintf("%s %s scope: %s; current hook trust cannot be verified", HarnessLabel(a.Harness), a.Scope, TrustPhrase(a.Trust))

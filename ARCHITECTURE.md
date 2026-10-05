@@ -86,9 +86,9 @@ migration ownership:
   `steerpath.ProjectHooksRel` is the repository-relative path a git object read or
   another checkout's store is addressed by; it never depends on the working
   directory. Legacy `.claude/hooks` is eligible while it has the manifest
-  and the neutral store does not. Migration copies manifest-owned guards, the
-  master and audit log, landing the manifest last. This migration does not copy
-  `fixtures/`; when migrating a legacy store, check fixture availability separately.
+  and the neutral store does not. Migration copies manifest-owned guards, each
+  manifest key's `fixtures/<hook>.json`, the master and audit log, landing the
+  manifest last.
   `Prepare` also keeps a store `.gitignore` that names both evidence paths,
   `steer-audit.jsonl` and `steer-audit-payloads/`, adding whichever a store is
   missing: a project store is committed, and its firing evidence is machine-local.

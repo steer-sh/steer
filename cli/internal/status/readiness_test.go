@@ -45,6 +45,34 @@ func TestAnArmedResolvableGateWithAnAvailableReviewerIsReviewing(t *testing.T) {
 	}
 }
 
+// A registration whose wall clock is shorter than a review may take still reviews a
+// fast commit, so the answer stays reviewing and the step names the reinstall.
+func TestAShortGateTimeoutIsAStepThatKeepsTheReviewingAnswer(t *testing.T) {
+	short := armed(string(harness.ClaudeCode))
+	short.Timeout = 360
+	s := snapshot(short)
+	s.Posture.HookTimeout = 660
+
+	r := ReadinessOf(s, available())
+	if !r.Reviewing {
+		t.Fatalf("Readiness = %+v; a short wall clock still reviews fast commits", r)
+	}
+	if len(r.Steps) != 1 || r.Steps[0].Fix != "steer commit-gate install --harness claude-code --scope global" ||
+		!strings.Contains(r.Steps[0].Title, "360s") || !strings.Contains(r.Steps[0].Title, "660s") {
+		t.Fatalf("steps = %+v; want one naming both wall clocks and the reinstall", r.Steps)
+	}
+
+	for name, timeout := range map[string]int{"enough": 660, "unset": 0} {
+		ok := armed(string(harness.ClaudeCode))
+		ok.Timeout = timeout
+		s := snapshot(ok)
+		s.Posture.HookTimeout = 660
+		if r := ReadinessOf(s, available()); len(r.Steps) != 0 {
+			t.Errorf("%s: steps = %+v; want none", name, r.Steps)
+		}
+	}
+}
+
 // The four states are distinct, and registration is the weakest of them. A machine
 // that registered a gate it cannot run must not read as reviewing.
 func TestEachOpenStateWithholdsTheReviewingAnswer(t *testing.T) {

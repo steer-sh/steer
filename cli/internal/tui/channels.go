@@ -20,10 +20,6 @@ import (
 	"github.com/steer-sh/steer-cli/internal/steerbin"
 )
 
-// commitGateTimeoutMargin matches cmd's margin: the hook timeout is the reviewer
-// timeout plus this, so the pair cannot drift.
-const commitGateTimeoutMargin = 60
-
 // backfillTimeout matches cmd's Stop-hook resolver wall clock.
 const backfillTimeout = 30
 
@@ -227,7 +223,7 @@ func (m *Model) toggleChannel(row channelRow) error {
 	on := row.armed.Effective || row.armed.Registered
 	switch row.kind {
 	case "commit-gate":
-		timeout := int(m.cfg.ReviewTimeout.Seconds()) + commitGateTimeoutMargin
+		timeout := m.cfg.HookTimeout()
 		// A failed copy of the stable executable returns the PATH form beside its
 		// error. Register that rather than nothing, exactly as the CLI does: the
 		// posture then reports whether the command resolves.

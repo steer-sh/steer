@@ -216,6 +216,14 @@ func (c Config) LogFile() string {
 	return filepath.Join(c.StateDir, "adjudication."+c.HostID+".jsonl")
 }
 
+// HookTimeoutMargin is how far a commit-gate registration's harness timeout exceeds
+// the reviewer timeout. A harness that stops the hook first lets the commit land
+// unreviewed, with no message and no ledger row.
+const HookTimeoutMargin = 60
+
+// HookTimeout is the harness timeout, in seconds, a commit-gate registration needs.
+func (c Config) HookTimeout() int { return int(c.ReviewTimeout.Seconds()) + HookTimeoutMargin }
+
 func (c Config) DiffDir() string   { return filepath.Join(c.StateDir, "diffs") }
 func (c Config) TaskDir() string   { return filepath.Join(c.StateDir, "tasks") }
 func (c Config) PrefixDir() string { return filepath.Join(c.StateDir, "prefixes") }

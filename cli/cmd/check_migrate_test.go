@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -180,6 +181,48 @@ func TestCheckMigrateApplyImportsApprovalsAndReplacesTheGate(t *testing.T) {
 	}
 	if read(t, settingsPath) != settings || read(t, codexPath) != codex {
 		t.Fatal("a second apply rewrote the registrations")
+	}
+}
+
+// Codex keys a hook's approval by its entry position, so the runner takes the
+// personal hook's own entry and the operator's later entry keeps its index.
+func TestCheckMigrateKeepsCodexEntryPositions(t *testing.T) {
+	home := fakeHomes(t)
+	writeApprovals(t, home, approvedRepo(t, "#!/usr/bin/env bash\nexit 0\n"))
+	codexPath := filepath.Join(home, ".codex", "hooks.json")
+	if err := os.MkdirAll(filepath.Dir(codexPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := fmt.Sprintf(`{"hooks":{"Stop":[
+	  {"hooks":[{"type":"command","command":%q,"timeout":330}]},
+	  {"hooks":[{"type":"command","command":"echo operator-stop"}]}]}}`, personalGateCommand)
+	if err := os.WriteFile(codexPath, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := runMigrate(t, nil, true); err != nil {
+		t.Fatalf("migrate --apply: %v", err)
+	}
+	var doc struct {
+		Hooks struct {
+			Stop []struct {
+				Hooks []struct {
+					Command string `json:"command"`
+				} `json:"hooks"`
+			} `json:"Stop"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal([]byte(read(t, codexPath)), &doc); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, entry := range doc.Hooks.Stop {
+		for _, h := range entry.Hooks {
+			got = append(got, h.Command)
+		}
+	}
+	if len(got) != 2 || !strings.Contains(got[0], "check hook") || got[1] != "echo operator-stop" {
+		t.Fatalf("Codex Stop entries = %q; want the runner in the personal hook's entry and the operator's after it", got)
 	}
 }
 

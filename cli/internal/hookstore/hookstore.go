@@ -26,6 +26,9 @@ const (
 	AuditName    = "steer-audit.jsonl"
 	PayloadsName = "steer-audit-payloads"
 	IgnoreName   = ".gitignore"
+	// FixturesName is the directory holding each guard's stored cases, one
+	// <hook>.json per manifest key.
+	FixturesName = "fixtures"
 )
 
 // Dir returns the neutral guard directory for a scope, whether or not it exists.
@@ -243,6 +246,9 @@ func ownedFiles(dir string) ([]string, error) {
 			return nil, err
 		}
 		names = append(names, file)
+		if cases := name + ".json"; LocalFileName(cases) {
+			names = append(names, filepath.Join(FixturesName, cases))
+		}
 	}
 	return names, nil
 }
@@ -266,6 +272,11 @@ func migrate(legacy, neutral string) error {
 	for _, name := range names {
 		if _, ok := staged[name]; ok {
 			continue
+		}
+		// os.Stat follows links, so a linked subdirectory is refused before the
+		// existence check could skip a file through it.
+		if dir := filepath.Dir(filepath.Join(neutral, name)); dir != neutral && isLink(dir) {
+			return fmt.Errorf("%s is a symlink; the guard store writes only its own files", dir)
 		}
 		if _, err := os.Stat(filepath.Join(neutral, name)); err == nil {
 			continue
@@ -294,7 +305,11 @@ func migrate(legacy, neutral string) error {
 		if info, err := os.Stat(filepath.Join(legacy, name)); err == nil {
 			mode = info.Mode().Perm()
 		}
-		if err := writeWhole(filepath.Join(neutral, name), staged[name], mode); err != nil {
+		path := filepath.Join(neutral, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return fmt.Errorf("failed to create %s: %w", filepath.Dir(path), err)
+		}
+		if err := WriteFile(path, staged[name], mode); err != nil {
 			return fmt.Errorf("failed to write %s: %w", name, err)
 		}
 	}

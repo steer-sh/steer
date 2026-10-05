@@ -125,7 +125,7 @@ func TestArchiveRestoreSelectsAcrossTheHookAndCheckStores(t *testing.T) {
 	}
 }
 
-// A restore names the live record that measured the fix, and only that one.
+// A restore names the live record that tracks the fix, and only that one.
 func TestArchiveRestoreNamesTheRecordThatMeasuredTheFix(t *testing.T) {
 	archiveRepo(t)
 	if _, err := claude.InstallManagedRule(claude.GlobalScope, "shared", "resolve a config path from the repo root"); err != nil {
@@ -172,7 +172,7 @@ func TestArchiveRestoreNamesTheRecordThatMeasuredTheFix(t *testing.T) {
 }
 
 // A project review entry is read at HEAD, where a committed removal still stands after
-// the restore; the record that measured it is named all the same.
+// the restore; the record that tracks it is named all the same.
 func TestArchiveRestoreNamesAProjectReviewRecordBeforeTheRestoreIsCommitted(t *testing.T) {
 	root := archiveRepo(t)
 	if _, err := claude.InstallAddendum(claude.ProjectScope, "nits", "naming preferences are not findings"); err != nil {
