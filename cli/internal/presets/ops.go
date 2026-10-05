@@ -209,18 +209,19 @@ func disableOptions(item CatalogItem, factoryMatch bool) claude.RemoveOptions {
 	return claude.RemoveOptions{CatalogCopy: factoryMatch, Reason: "removed by disabling preset " + item.Name}
 }
 
-// EnsureAutoManagedFactoryPresets reinstalls internal auto-enabled presets that drifted.
-func EnsureAutoManagedFactoryPresets(scope string, catalog *Catalog, dryRun bool, targets ...harness.Registrar) (int, error) {
+// EnsureAutoManagedFactoryPresets reinstalls internal auto-enabled presets that drifted
+// and returns the ones it installed, or would install under dryRun.
+func EnsureAutoManagedFactoryPresets(scope string, catalog *Catalog, dryRun bool, targets ...harness.Registrar) ([]CatalogItem, error) {
 	manifest, err := claude.LoadManifest(scope)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
-	ensuredCount := 0
+	var ensured []CatalogItem
 	for _, item := range catalog.InternalAutoEnabled() {
 		hookName := strings.TrimSuffix(item.HookFile, ".py")
 		if hookName == "" {
-			return ensuredCount, fmt.Errorf("invalid preset hook_file for %s", item.Name)
+			return ensured, fmt.Errorf("invalid preset hook_file for %s", item.Name)
 		}
 
 		entry, hasEntry := manifest.Hooks[hookName]
@@ -229,7 +230,7 @@ func EnsureAutoManagedFactoryPresets(scope string, catalog *Catalog, dryRun bool
 			var reason string
 			needsInstall, reason, err = FactoryPresetNeedsReinstall(scope, catalog, item, hookName, entry, targets...)
 			if err != nil {
-				return ensuredCount, err
+				return ensured, err
 			}
 			_ = reason
 		}
@@ -238,22 +239,22 @@ func EnsureAutoManagedFactoryPresets(scope string, catalog *Catalog, dryRun bool
 			continue
 		}
 
-		ensuredCount++
+		ensured = append(ensured, item)
 		if dryRun {
 			continue
 		}
 
 		if _, err := InstallFactoryPreset(scope, catalog, item, true, targets...); err != nil {
-			return ensuredCount, err
+			return ensured, err
 		}
 
 		manifest, err = claude.LoadManifest(scope)
 		if err != nil {
-			return ensuredCount, err
+			return ensured, err
 		}
 	}
 
-	return ensuredCount, nil
+	return ensured, nil
 }
 
 // SyncFactoryPresets reconciles enabled factory presets with the embedded catalog.

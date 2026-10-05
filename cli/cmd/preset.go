@@ -88,13 +88,17 @@ var presetListCmd = &cobra.Command{
 
 		fmt.Println(styles.SectionHeader.Render(fmt.Sprintf("Found %d presets", len(rows))))
 		fmt.Println()
-		fmt.Printf("%-40s %-8s %-10s %s\n", "NAME", "STATUS", "BUNDLE", "DESCRIPTION")
+		width := len("NAME")
+		for _, row := range rows {
+			width = max(width, len(row.item.Name))
+		}
+		fmt.Printf("%-*s %-8s %-10s %s\n", width, "NAME", "STATUS", "BUNDLE", "DESCRIPTION")
 		for _, row := range rows {
 			status := "disabled"
 			if row.enabled {
 				status = "enabled"
 			}
-			fmt.Printf("%-40s %-8s %-10s %s\n", row.item.Name, status, presets.BundleFor(row.item), row.item.Description)
+			fmt.Printf("%-*s %-8s %-10s %s\n", width, row.item.Name, status, presets.BundleFor(row.item), row.item.Description)
 			if !presetListVerbose {
 				continue
 			}
@@ -163,14 +167,14 @@ var presetEnableCmd = &cobra.Command{
 			return err
 		}
 
-		ensuredCount, err := presets.EnsureAutoManagedFactoryPresets(scope, catalog, false, targets...)
+		ensured, err := presets.EnsureAutoManagedFactoryPresets(scope, catalog, false, targets...)
 		if err != nil {
 			return fmt.Errorf("enabled preset %s but failed to ensure internal factory presets: %w", name, err)
 		}
 
 		message := fmt.Sprintf("Preset: %s\nStatus: %s\nScope: %s", name, status, scope)
-		if ensuredCount > 0 {
-			message += fmt.Sprintf("\nInternal auto-managed ensured: %d", ensuredCount)
+		if line := internalPresetsLine(ensured); line != "" {
+			message += "\n" + line
 		}
 		fmt.Println(styles.SuccessBox.Render(message))
 		return nil
@@ -276,14 +280,12 @@ var presetEnableBundleCmd = &cobra.Command{
 		}
 
 		fmt.Println()
-		fmt.Println(styles.InfoBox.Render(fmt.Sprintf(
-			"Bundle: %s\nEnabled: %d\nAlready enabled: %d\nInternal auto-managed ensured: %d\nFailed: %d",
-			bundle,
-			enabledCount,
-			alreadyCount,
-			internalEnsured,
-			failureCount,
-		)))
+		summary := fmt.Sprintf("Bundle: %s\nEnabled: %d\nAlready enabled: %d\nFailed: %d",
+			bundle, enabledCount, alreadyCount, failureCount)
+		if line := internalPresetsLine(internalEnsured); line != "" {
+			summary += "\n" + line
+		}
+		fmt.Println(styles.InfoBox.Render(summary))
 
 		if failureCount > 0 {
 			return fmt.Errorf("bundle enable completed with %d failures", failureCount)
@@ -457,4 +459,14 @@ func init() {
 	presetSyncCmd.Flags().BoolVar(&presetSyncDryRun, "dry-run", false, "Preview reconcile actions without mutating files")
 	presetSyncCmd.Flags().BoolVar(&presetSyncStrict, "strict", false, "Return non-zero when orphan factory entries are kept")
 	presetSyncCmd.Flags().BoolVar(&presetSyncPruneOrphans, "prune-orphans", false, "Remove orphan factory entries via managed lifecycle")
+}
+
+// internalPresetsLine names the internal presets an enable installed beside the one
+// asked for, or "" when it installed none.
+func internalPresetsLine(installed []presets.CatalogItem) string {
+	lines := make([]string, len(installed))
+	for i, item := range installed {
+		lines[i] = "Also installed: " + item.Name + "\n  " + item.Description
+	}
+	return strings.Join(lines, "\n")
 }
