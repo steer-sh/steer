@@ -113,6 +113,50 @@ func TestTheFooterNamesTheStableExecutableWhenInstalled(t *testing.T) {
 	}
 }
 
+// An agent pastes the footer's commands into a shell, so a stable executable
+// under a home that holds a space must still run as one word.
+func TestTheFooterCommandsRunUnderAHomeWithASpace(t *testing.T) {
+	withProjectTempDir(t)
+	home := filepath.Join(t.TempDir(), "ho me")
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	requirePython3(t)
+	stable := filepath.Join(home, ".steer", "bin", "steer")
+	if err := os.MkdirAll(filepath.Dir(stable), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	argsFile := filepath.Join(t.TempDir(), "args")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" >> '" + argsFile + "'\n"
+	if err := os.WriteFile(stable, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	installGuard(t, "marker-hook", markerHookContent)
+
+	reason := masterReason(t, runMasterWithArgs(t, `{"tool_name":"Bash","tool_input":{"command":"echo FORBIDDEN"}}`))
+	id := footerFiring.FindStringSubmatch(reason)
+	if id == nil {
+		t.Fatalf("footer names no firing: %s", reason)
+	}
+	contest := regexp.MustCompile(`record why: (.*'<task-specific reason>')`).FindStringSubmatch(reason)
+	removal := regexp.MustCompile(`(?m)approval: (.*)$`).FindStringSubmatch(reason)
+	if contest == nil || removal == nil {
+		t.Fatalf("footer lacks a contest or a removal command:\n%s", reason)
+	}
+	for _, command := range []string{contest[1], removal[1]} {
+		if out, err := exec.Command("sh", "-c", command).CombinedOutput(); err != nil {
+			t.Fatalf("footer command %q failed: %v\n%s", command, err, out)
+		}
+	}
+	got, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "contest\n" + id[1] + "\n<task-specific reason>\nremove\nmarker-hook\n"
+	if string(got) != want {
+		t.Fatalf("the footer commands passed %q, want %q", got, want)
+	}
+}
+
 // A firing identifier that cannot be allocated still blocks and still writes its
 // row. The footer then offers no contest, so the row claims no contest protocol.
 func TestAFailedFiringIdentifierStillBlocksWithoutAContest(t *testing.T) {

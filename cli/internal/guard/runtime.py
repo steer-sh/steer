@@ -1,6 +1,6 @@
 # Steer master-hook runtime. Spliced into the generated master hook, so it
 # declares no imports and no entrypoint: ast, datetime, hashlib, io, json, os,
-# stat and sys are guaranteed by the generated file's import block.
+# shlex, stat and sys are guaranteed by the generated file's import block.
 
 STEER_CLAUDE = "claude-code"
 STEER_CODEX = "codex"
@@ -452,12 +452,12 @@ def steer_audit_log(hook_name, payload, edit, harness, edit_index=None, firing_i
 
 
 def steer_cli():
-    """The steer command a blocked agent can run: the stable executable when it
-    is installed, otherwise the one on PATH."""
+    """The steer command a blocked agent can run, as one shell word: the stable
+    executable when it is installed, otherwise the one on PATH."""
     try:
         stable = os.path.join(os.path.expanduser("~"), ".steer", "bin", "steer")
         if os.path.isfile(stable) and os.access(stable, os.X_OK):
-            return stable
+            return shlex.quote(stable)
     except Exception:
         pass
     return "steer"
