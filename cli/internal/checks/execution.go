@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/steer-sh/steer-cli/internal/jsonl"
 	"github.com/steer-sh/steer-cli/internal/statestore"
 )
 
@@ -210,7 +211,7 @@ func appendJSONL(path string, values ...any) error {
 	if err != nil {
 		return err
 	}
-	if _, err := f.Write(buf); err != nil {
+	if _, err := f.Write(jsonl.Separated(path, buf)); err != nil {
 		f.Close()
 		return err
 	}

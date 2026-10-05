@@ -13,6 +13,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/steer-sh/steer-cli/internal/jsonl"
 )
 
 // Row is one adjudication-ledger entry. It is a map rather than a struct because the
@@ -91,37 +93,15 @@ func (l *Ledger) Log(row Row) error {
 	if err != nil {
 		return fmt.Errorf("encode row: %w", err)
 	}
-	// A shard cut off mid-row would swallow this row into the fragment.
-	if !endsInNewline(l.cfg.LogFile()) {
-		line = append([]byte{'\n'}, line...)
-	}
 	f, err := os.OpenFile(l.cfg.LogFile(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return fmt.Errorf("open ledger: %w", err)
 	}
 	defer f.Close()
-	if _, err := f.Write(append(line, '\n')); err != nil {
+	if _, err := f.Write(jsonl.Separated(l.cfg.LogFile(), append(line, '\n'))); err != nil {
 		return fmt.Errorf("append ledger: %w", err)
 	}
 	return nil
-}
-
-// endsInNewline reports that path is absent, empty, unreadable, or ends in a newline.
-func endsInNewline(path string) bool {
-	f, err := os.Open(path)
-	if err != nil {
-		return true
-	}
-	defer f.Close()
-	info, err := f.Stat()
-	if err != nil || info.Size() == 0 {
-		return true
-	}
-	last := make([]byte, 1)
-	if _, err := f.ReadAt(last, info.Size()-1); err != nil {
-		return true
-	}
-	return last[0] == '\n'
 }
 
 func setDefault(row Row, key string, value any) {

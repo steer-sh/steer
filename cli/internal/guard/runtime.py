@@ -335,6 +335,27 @@ def steer_open_audit(store):
     return os.fdopen(fd, "a", encoding="utf-8")
 
 
+def steer_audit_torn(store):
+    """True when the audit log ends mid-line, as a crash during an earlier append
+    leaves it. Any failure to read it answers False."""
+    try:
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        if isinstance(store, str):
+            fd = os.open(steer_unlinked_path(store, "steer-audit.jsonl"), flags)
+        else:
+            fd = os.open("steer-audit.jsonl", flags, dir_fd=store)
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_size == 0:
+                return False
+            os.lseek(fd, info.st_size - 1, os.SEEK_SET)
+            return os.read(fd, 1) != b"\n"
+        finally:
+            os.close(fd)
+    except Exception:
+        return False
+
+
 def steer_audit_log(hook_name, payload, edit, harness, edit_index=None, firing_id=""):
     """Append one JSON line per block decision to steer-audit.jsonl.
 
@@ -418,10 +439,11 @@ def steer_audit_log(hook_name, payload, edit, harness, edit_index=None, firing_i
         store_fd = steer_open_store(store_dir, meta.get("scope"))
         try:
             steer_store_evidence(entry, evidence, store_fd)
+            lead = "\n" if steer_audit_torn(store_fd) else ""
             with steer_open_audit(store_fd) as handle:
                 if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
                     raise OSError("audit log is not a regular file")
-                handle.write(json.dumps(entry) + "\n")
+                handle.write(lead + json.dumps(entry) + "\n")
         finally:
             if not isinstance(store_fd, str):
                 os.close(store_fd)

@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/steer-sh/steer-cli/internal/jsonl"
 )
 
 // ContestLogName is the append-only stream of contests, beside the receipts in the
@@ -146,7 +148,7 @@ func AppendContest(dir string, c Contest) error {
 		return fmt.Errorf("failed to open %s: %w", ContestLogName, err)
 	}
 	defer file.Close()
-	if _, err := file.Write(append(line, '\n')); err != nil {
+	if _, err := file.Write(jsonl.Separated(filepath.Join(dir, ContestLogName), append(line, '\n'))); err != nil {
 		return fmt.Errorf("failed to append to %s: %w", ContestLogName, err)
 	}
 	return nil

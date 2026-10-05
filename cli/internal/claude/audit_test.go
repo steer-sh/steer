@@ -433,6 +433,37 @@ func TestMasterAuditRefusesSymlinkedLogAndStore(t *testing.T) {
 	}
 }
 
+// An audit log that ends in half a row, as a crash mid-append leaves it, must not
+// swallow the next firing's row.
+func TestMasterAuditRowAfterATornLineParses(t *testing.T) {
+	for _, portable := range []bool{false, true} {
+		t.Run(map[bool]string{false: "descriptors", true: "portable"}[portable], func(t *testing.T) {
+			withProjectTempDir(t)
+			requirePython3(t)
+			hooksDir := installBlockingHook(t)
+			if portable {
+				forcePortableAuditWrites(t, filepath.Join(hooksDir, MasterHookName))
+			}
+			auditPath := filepath.Join(hooksDir, AuditLogName)
+			if err := os.WriteFile(auditPath, []byte(`{"hook_name":"torn`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if output := runMasterHook(t, `{"tool_name":"Bash","tool_input":{"command":"var x = 1"}}`); !masterBlocked(output) {
+				t.Fatalf("expected block decision, got: %s", output)
+			}
+			data, err := os.ReadFile(auditPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lines := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
+			var entry map[string]any
+			if err := json.Unmarshal([]byte(lines[len(lines)-1]), &entry); err != nil || entry["hook_name"] != "no-var-hook" {
+				t.Errorf("the firing's row does not parse on its own line (%v):\n%s", err, data)
+			}
+		})
+	}
+}
+
 // pins existing behaviour: a global .steer link is selected by the operator.
 func TestGlobalAuditKeepsOperatorSelectedStoreLink(t *testing.T) {
 	for _, portable := range []bool{false, true} {

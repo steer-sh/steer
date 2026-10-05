@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/steer-sh/steer-cli/internal/jsonl"
 	"github.com/steer-sh/steer-cli/internal/statestore"
 	"github.com/steer-sh/steer-cli/internal/version"
 )
@@ -170,7 +171,7 @@ func appendRun(identity string, run ValidationRun) error {
 	if err != nil {
 		return fmt.Errorf("record validation: %w", err)
 	}
-	if _, err := f.Write(append(line, '\n')); err != nil {
+	if _, err := f.Write(jsonl.Separated(path, append(line, '\n'))); err != nil {
 		f.Close()
 		return fmt.Errorf("record validation: %w", err)
 	}

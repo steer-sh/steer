@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/steer-sh/steer-cli/internal/jsonl"
 	"github.com/steer-sh/steer-cli/internal/statestore"
 	"github.com/steer-sh/steer-cli/internal/transcript"
 )
@@ -255,7 +256,7 @@ func Append(dir string, r Receipt) error {
 		return fmt.Errorf("failed to open %s: %w", LogName, err)
 	}
 	defer file.Close()
-	if _, err := file.Write(append(line, '\n')); err != nil {
+	if _, err := file.Write(jsonl.Separated(filepath.Join(dir, LogName), append(line, '\n'))); err != nil {
 		return fmt.Errorf("failed to append to %s: %w", LogName, err)
 	}
 	return nil

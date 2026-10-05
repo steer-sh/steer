@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/steer-sh/steer-cli/internal/jsonl"
 )
 
 // ExclusionLogName is the append-only stream of corrections to the audit stream,
@@ -134,7 +136,7 @@ func AppendExclusion(dir string, e Exclusion) error {
 		return fmt.Errorf("failed to open %s: %w", ExclusionLogName, err)
 	}
 	defer file.Close()
-	if _, err := file.Write(append(line, '\n')); err != nil {
+	if _, err := file.Write(jsonl.Separated(filepath.Join(dir, ExclusionLogName), append(line, '\n'))); err != nil {
 		return fmt.Errorf("failed to append to %s: %w", ExclusionLogName, err)
 	}
 	return nil
