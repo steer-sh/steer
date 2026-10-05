@@ -36,7 +36,8 @@ Read the linked architecture section before changing the corresponding boundary:
 
 - Plugin packaging or setup: [distribution](ARCHITECTURE.md#distribution-and-installation).
   `scripts/steer` dispatches to committed `bin/<os>-<arch>/` builds;
-  `cli/internal/plugindist/` checks the four plugin/marketplace manifests together.
+  `cli/internal/plugindist/` checks the four plugin/marketplace manifests together
+  and the README's install commands against their repository and marketplace.
   The working skills live under `skills/`, including `steer`, `steer-report` and
   `steer-setup`; there is no root generation `SKILL.md`.
   A harness runs skills and the launcher from its cached plugin copy, which an

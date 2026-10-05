@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -119,6 +120,54 @@ func TestEveryPluginManifestMatchesItsMarketplaceEntry(t *testing.T) {
 				rel, keys(manifest), keys(entry), mustJSON(t, manifest), mustJSON(t, entry))
 		}
 	}
+}
+
+var (
+	readmeMarketplaceAdd = regexp.MustCompile("marketplace add ([^\\s`'\"]+?)[.,;:)]*(?:[\\s`'\"]|$)")
+	readmePluginInstall  = regexp.MustCompile("plugin (?:install|add) steer@([^\\s`'\"]+?)[.,;:)]*(?:[\\s`'\"]|$)")
+)
+
+// A user installs from the README's commands, so each one must name the
+// repository and the marketplace the manifests declare; a slug that drifts from
+// them installs nothing.
+//
+// pins existing behaviour
+func TestReadmeInstallCommandsNameTheManifestRepository(t *testing.T) {
+	root := repoRoot(t)
+	doc := readJSON(t, filepath.Join(root, ".claude-plugin", "marketplace.json"))
+	repository, _ := soleSteerPlugin(t, filepath.Join(root, ".claude-plugin", "marketplace.json"))["repository"].(string)
+	slug, ok := githubSlug(repository)
+	if !ok {
+		t.Fatalf("marketplace repository %q is not a https://github.com/<owner>/<repo> URL", repository)
+	}
+	raw, err := os.ReadFile(filepath.Join(root, "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	readme := string(raw)
+
+	adds := readmeMarketplaceAdd.FindAllStringSubmatch(readme, -1)
+	installs := readmePluginInstall.FindAllStringSubmatch(readme, -1)
+	if len(adds) == 0 || len(installs) == 0 {
+		t.Fatalf("README carries %d marketplace add and %d plugin install command(s); want both", len(adds), len(installs))
+	}
+	for _, m := range adds {
+		if got, _ := githubSlug(m[1]); got != slug {
+			t.Errorf("README: %q names %s; the manifests declare %s", m[0], m[1], slug)
+		}
+	}
+	for _, m := range installs {
+		if m[1] != doc["name"] {
+			t.Errorf("README: %q names marketplace %s; the manifests declare %v", m[0], m[1], doc["name"])
+		}
+	}
+}
+
+// githubSlug reduces a GitHub repository reference, as a slug or a URL, to
+// <owner>/<repo>, and reports whether it names exactly one repository.
+func githubSlug(ref string) (string, bool) {
+	slug := strings.TrimSuffix(strings.TrimPrefix(ref, "https://github.com/"), ".git")
+	return slug, strings.Count(slug, "/") == 1 && !strings.Contains(slug, ":")
 }
 
 func TestEveryDeclaredPluginPathExists(t *testing.T) {
