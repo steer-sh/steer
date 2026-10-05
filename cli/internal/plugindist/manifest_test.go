@@ -261,6 +261,48 @@ func TestBundledHookResolvesEitherHarnessPluginRoot(t *testing.T) {
 	}
 }
 
+var claudeRootExpansion = regexp.MustCompile(`\$\{?CLAUDE_PLUGIN_ROOT\b[^}"\s]*\}?`)
+
+// Claude Code exports no plugin root to the Bash tool; it substitutes only the
+// exact text ${CLAUDE_PLUGIN_ROOT}, and only into SKILL.md. A skill's shell
+// expansion of that name is the bare placeholder, in its SKILL.md.
+func TestSkillsExpandTheClaudePluginRootPlaceholder(t *testing.T) {
+	root := repoRoot(t)
+	dirs := map[string]bool{}
+	for _, rel := range pluginManifests {
+		skills, _ := readJSON(t, filepath.Join(root, rel))["skills"].([]any)
+		for _, s := range skills {
+			dir, _ := s.(string)
+			dirs[filepath.Join(root, strings.TrimPrefix(dir, "./"))] = true
+		}
+	}
+	found := 0
+	for dir := range dirs {
+		err := filepath.WalkDir(dir, func(file string, d os.DirEntry, err error) error {
+			if err != nil || d.IsDir() || filepath.Ext(file) != ".md" {
+				return err
+			}
+			raw, err := os.ReadFile(file)
+			if err != nil {
+				return err
+			}
+			for _, m := range claudeRootExpansion.FindAllString(string(raw), -1) {
+				found++
+				if m != "${CLAUDE_PLUGIN_ROOT}" || filepath.Base(file) != "SKILL.md" {
+					t.Errorf("%s expands %s, which Claude Code leaves unsubstituted", file, m)
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("walk %s: %v", dir, err)
+		}
+	}
+	if found == 0 {
+		t.Error("no skill resolves the bundled launcher through ${CLAUDE_PLUGIN_ROOT}")
+	}
+}
+
 func mustJSON(t *testing.T, v any) string {
 	t.Helper()
 	raw, err := json.MarshalIndent(v, "", "  ")

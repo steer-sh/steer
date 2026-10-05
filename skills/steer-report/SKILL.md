@@ -50,7 +50,7 @@ Respect the user's choice. If the conversation is fresh, skip the warning and pr
 A deterministic tier runs this loop's mechanical half — scoring, corpus sweeps, threshold checks — with no model. It may have run on a schedule already; run it again now, synchronously, so you never read a stale queue. It takes seconds and spends no tokens. Run it first, so the snapshot and the scores below read the session history it refreshed.
 
 ```bash
-STEER_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}"
+STEER_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}"
 STEER_BIN="${STEER_ROOT:+${STEER_ROOT}/scripts/steer}"
 STEER_BIN="${STEER_BIN:-steer}"
 "${STEER_BIN}" report refresh --days 30
@@ -127,7 +127,7 @@ case: the fail-soft rule above reads `audit.md` anyway.
 Prefer the launcher bundled with the plugin (`PLUGIN_ROOT` on Codex, `CLAUDE_PLUGIN_ROOT` on Claude Code), and fall back to `steer` on PATH when the plugin root is not set. Redirect every report output to a temp file and Read the file once — via Read, not via command output, which a harness can cut. Run a **single command** for the scan:
 
 ```bash
-STEER_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}"
+STEER_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}"
 STEER_BIN="${STEER_ROOT:+${STEER_ROOT}/scripts/steer}"
 STEER_BIN="${STEER_BIN:-steer}"
 "${STEER_BIN}" report --days 30 > "${TMPDIR:-/tmp}/steer-index.json"

@@ -219,7 +219,7 @@ problems it already decided. This step stops a duplicate fix and a re-proposed
 problem.
 
 ```bash
-STEER_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}"
+STEER_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}"
 STEER_BIN="${STEER_ROOT:+${STEER_ROOT}/scripts/steer}"
 STEER_BIN="${STEER_BIN:-steer}"
 "${STEER_BIN}" status --json > "${TMPDIR:-/tmp}/steer-preflight-status.json"
@@ -434,7 +434,7 @@ stored case is rerunnable evidence. A count is not.
 Use the steer CLI to register the hook. Use `steer` from PATH if available, otherwise fall back to the plugin root (`PLUGIN_ROOT` on Codex, `CLAUDE_PLUGIN_ROOT` on Claude Code). Run a **single command** — do not try one and then the other:
 
 ```bash
-STEER_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}"
+STEER_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}"
 STEER_BIN="${STEER_ROOT:+${STEER_ROOT}/scripts/steer}"
 STEER_BIN="${STEER_BIN:-steer}"
 "${STEER_BIN}" register <store>/hooks/<rule-name>-hook.py --rule "<original rule text>" --scope <project|global> \

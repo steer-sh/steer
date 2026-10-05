@@ -23,7 +23,7 @@ Prefer the launcher bundled with the plugin, and fall back to `steer` on PATH wh
 the plugin root is not set. Run a **single command**:
 
 ```bash
-STEER_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}"
+STEER_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}"
 STEER_BIN="${STEER_ROOT:+${STEER_ROOT}/scripts/steer}"
 STEER_BIN="${STEER_BIN:-steer}"
 "${STEER_BIN}" --help >/dev/null && echo "steer resolved: ${STEER_BIN}"
