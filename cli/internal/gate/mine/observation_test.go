@@ -147,6 +147,26 @@ func TestChainGuardActivityIsWindowLevelAndLabelled(t *testing.T) {
 	check(t, "and a zero would be a fact", obs.Firing.Known(), true)
 }
 
+// Two blocks in one second, such as parallel tool calls in one turn, are two rows:
+// the loader keeps both, and the window count must not merge them on the timestamp.
+func TestChainGuardActivityCountsTwoBlocksInOneSecond(t *testing.T) {
+	chains := []Chain{obsChain(t, 1000, "agy/1/aaa/v1", "widget"), obsChain(t, 3000, "agy/1/aaa/v1", "widget")}
+	firings := []Firing{
+		{HookID: "no-widget", Scope: "global", Harness: "claude-code", SessionID: "s1", TS: 3050, FiringID: "aa"},
+		{HookID: "no-widget", Scope: "global", Harness: "claude-code", SessionID: "s1", TS: 3050, FiringID: "bb"},
+		{HookID: "no-widget", Scope: "global", Harness: "claude-code", SessionID: "s1", TS: 3051, RowDigest: "r1"},
+		{HookID: "no-widget", Scope: "global", Harness: "claude-code", SessionID: "s1", TS: 3051, RowDigest: "r2"},
+	}
+	withClock(9000, func() {
+		scored, err := ScoreRecord(obsRecord("guard", "no-widget", 2000),
+			EvidenceSet{Chains: chains, Firings: firings, AuditPresent: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		check(t, "each row counts once, by its own identity", observationOf(t, scored).Firing.Rows, 4)
+	})
+}
+
 // A missing audit log is unknown activity, never a known zero.
 func TestAMissingAuditLogIsUnknownRatherThanZero(t *testing.T) {
 	chains := []Chain{obsChain(t, 1000, "agy/1/aaa/v1", "widget"), obsChain(t, 3000, "agy/1/aaa/v1", "widget")}

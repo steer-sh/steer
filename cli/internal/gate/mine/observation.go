@@ -308,10 +308,10 @@ func sessionRecurrence(after []SessionUnit, pattern patternMatcher, signalKind s
 	return r
 }
 
-// countFiringsInPeriod counts a guard's audit rows inside [from, to], once per hook
-// id, harness and timestamp; a row counts only from the guard's own store. The dedup key is the row itself rather than the
-// session, so a guard that fired in a session producing no commit is still counted
-// and a session producing several commits is not counted several times.
+// countFiringsInPeriod counts a guard's audit rows inside [from, to], once per row;
+// a row counts only from the guard's own store. The dedup key is the row itself rather
+// than the session, so a guard that fired in a session producing no commit is still
+// counted and a session producing several commits is not counted several times.
 func countFiringsInPeriod(firings []Firing, fix GuardFix, from, to float64) (rows int, newest float64) {
 	if fix.ID == "" {
 		return 0, 0
@@ -321,7 +321,15 @@ func countFiringsInPeriod(firings []Firing, fix GuardFix, from, to float64) (row
 		if !fix.fired(f) || f.TS < from || (to > 0 && f.TS > to) {
 			continue
 		}
-		key := f.HookID + "\x1f" + f.Harness + "\x1f" + strconv.FormatFloat(f.TS, 'f', -1, 64)
+		// TS holds whole seconds, so two blocks in one second differ only by the
+		// row's own identity.
+		key := f.FiringID
+		if key == "" {
+			key = f.RowDigest
+		}
+		if key == "" {
+			key = f.HookID + "\x1f" + f.Harness + "\x1f" + strconv.FormatFloat(f.TS, 'f', -1, 64)
+		}
 		if seen[key] {
 			continue
 		}
