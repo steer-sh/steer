@@ -452,3 +452,71 @@ func TestInstallersRefuseMultilineRuleText(t *testing.T) {
 		t.Fatalf("a refused install left manifest entries: rules=%v hooks=%v", manifest.Rules, manifest.Hooks)
 	}
 }
+
+// A guard's name lands in the master's Python source and in the shell command its
+// block footer prints, so a name outside the plain charset is refused at install.
+func TestInstallManagedHookRefusesAnUnsafeGuardName(t *testing.T) {
+	withProjectTempDir(t)
+	hooksDir, err := GetHooksDir(ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct{ hookName, fileName string }{
+		{"ok", "ok\nimport os\n#.py"}, {"ok", "a b.py"}, {"ok", "x$(id).py"},
+		{"ok", "-flag.py"}, {"ok", ".hidden.py"}, {"x$(id)", "ok.py"},
+	}
+	for _, c := range cases {
+		fileName := c.fileName
+		_, err := InstallManagedHook(ProjectScope, InstallManagedHookInput{
+			HookName: c.hookName,
+			FileName: fileName,
+			Rule:     "probe rule | probe",
+			Content:  []byte(blockingHookContent),
+			Metadata: HookInstallMetadata{Source: SourceGenerated},
+		})
+		if err == nil || !strings.Contains(err.Error(), "a guard name holds only") {
+			t.Errorf("InstallManagedHook(%q, %q) = %v; want the guard-name refusal", c.hookName, fileName, err)
+		}
+		if _, statErr := os.Stat(filepath.Join(hooksDir, fileName)); statErr == nil {
+			t.Errorf("guard name %q was written into the store", fileName)
+		}
+	}
+}
+
+// An install into a store that already holds an unsafe name is refused before it
+// writes, since the rebuild that follows the write would refuse the store.
+func TestInstallManagedHookRefusesAStoreHoldingAnUnsafeName(t *testing.T) {
+	withProjectTempDir(t)
+	hooksDir, err := GetHooksDir(ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(hooksDir, "a b.py"), []byte(blockingHookContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = InstallManagedHook(ProjectScope, InstallManagedHookInput{
+		HookName: "good",
+		FileName: "good.py",
+		Rule:     "probe rule | probe",
+		Content:  []byte(blockingHookContent),
+		Metadata: HookInstallMetadata{Source: SourceGenerated},
+	})
+	if err == nil || !strings.Contains(err.Error(), "a guard name holds only") {
+		t.Fatalf("InstallManagedHook = %v; want the guard-name refusal for the store", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(hooksDir, "good.py")); statErr == nil {
+		t.Error("the refused install wrote good.py")
+	}
+	manifest, err := LoadManifest(ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := manifest.Hooks["good"]; ok {
+		t.Error("the refused install wrote a manifest entry")
+	}
+}

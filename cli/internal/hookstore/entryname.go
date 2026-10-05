@@ -3,8 +3,17 @@ package hookstore
 import (
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
+
+var guardName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
+
+// GuardName reports whether name, a guard file name without ".py", is safe to
+// carry into the generated master's Python source and into the shell commands its
+// block footer prints: letters, digits, '_', '.' and '-', starting with neither
+// '.' nor '-'.
+func GuardName(name string) bool { return guardName.MatchString(name) }
 
 // LocalFileName reports whether name is a single path element: no separator, no
 // directory traversal, and no volume or root prefix.

@@ -543,3 +543,47 @@ func TestHookWithoutMainIsRefused(t *testing.T) {
 		t.Error("readHookSource accepted a hook with no main()")
 	}
 }
+
+// A file name outside the guard charset could end the comment the master writes
+// after each guard name and run as code that no embedded source holds.
+func TestAGuardNameThatIsNotPlainStopsTheBuild(t *testing.T) {
+	withProjectTempDir(t)
+	hooksDir := mustHooksDir(t)
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	name := "ok\nopen('PWNED', 'w').write('x')\n#.py"
+	if err := os.WriteFile(filepath.Join(hooksDir, name), []byte("def main():\n    pass\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ConsolidateHooks(ProjectScope); err == nil || !strings.Contains(err.Error(), "a guard name holds only") ||
+		!strings.Contains(err.Error(), "steer remove 'ok\nopen(") {
+		t.Fatalf("ConsolidateHooks = %v; want the guard-name refusal naming its removal", err)
+	}
+	if _, err := os.Stat(filepath.Join(hooksDir, MasterHookName)); err == nil {
+		t.Error("a master was written")
+	}
+}
+
+// The footer's removal command names the manifest key that owns a file, so a key
+// outside the charset is refused even when the file name is plain.
+func TestAnUnsafeManifestKeyStopsTheBuild(t *testing.T) {
+	withProjectTempDir(t)
+	hooksDir := mustHooksDir(t)
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(hooksDir, "ok.py"), []byte("def main():\n    pass\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := &Manifest{Hooks: map[string]ManifestEntry{"x$(id)": {File: "ok.py", Rule: "probe | probe"}}}
+	if err := SaveManifest(ProjectScope, m); err != nil {
+		t.Fatal(err)
+	}
+
+	err := ConsolidateHooks(ProjectScope)
+	if err == nil || !strings.Contains(err.Error(), "a guard name holds only") {
+		t.Fatalf("ConsolidateHooks = %v; want the guard-name refusal for the manifest key", err)
+	}
+}

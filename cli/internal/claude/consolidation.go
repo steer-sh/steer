@@ -13,6 +13,7 @@ import (
 
 	"github.com/steer-sh/steer-cli/internal/guard"
 	"github.com/steer-sh/steer-cli/internal/hookstore"
+	"github.com/steer-sh/steer-cli/internal/shellword"
 	"github.com/steer-sh/steer-cli/internal/version"
 )
 
@@ -166,13 +167,16 @@ func ConsolidateHooks(scope string) error {
 		return err
 	}
 
-	if err := clearFixtureState(scope); err != nil {
-		return err
-	}
-
 	hooks, err := ListIndividualHooks(scope)
 	if err != nil {
 		return fmt.Errorf("failed to list hooks: %w", err)
+	}
+	if err := refuseUnsafeGuardNames(scope, hooks); err != nil {
+		return err
+	}
+
+	if err := clearFixtureState(scope); err != nil {
+		return err
 	}
 
 	masterPath, err := GetMasterHookPath(scope)
@@ -236,6 +240,29 @@ func ConsolidateHooks(scope string) error {
 		return fmt.Errorf("failed to write master hook file: %w", err)
 	}
 
+	return nil
+}
+
+// refuseUnsafeGuardNames refuses a store whose guard file stem or owning manifest
+// key falls outside hookstore.GuardName. The stem is written into the master's
+// source and the key into the shell command its block footer prints. It runs
+// before anything in the store changes.
+func refuseUnsafeGuardNames(scope string, hooks []HookFile) error {
+	if len(hooks) == 0 {
+		return nil
+	}
+	manifest, err := LoadManifest(scope)
+	if err != nil {
+		return fmt.Errorf("failed to load manifest: %w", err)
+	}
+	for _, hook := range hooks {
+		for _, name := range []string{hook.Name, ownedHook(manifest, hook).Name} {
+			if !hookstore.GuardName(name) {
+				return fmt.Errorf("guard %q (file %q in %s): a guard name holds only letters, digits, '_', '.' and '-', and starts with a letter or digit; remove it with `steer remove %s --scope %s`, or rename the file and its manifest entry",
+					name, hook.FileName, filepath.Dir(hook.Path), shellword.Quote(hook.Name), normalizeScope(scope))
+			}
+		}
+	}
 	return nil
 }
 

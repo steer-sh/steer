@@ -188,6 +188,18 @@ func InstallManagedHook(scope string, input InstallManagedHookInput, targets ...
 	if fileName == MasterHookName {
 		return nil, fmt.Errorf("cannot register %s directly", MasterHookName)
 	}
+	if stem := strings.TrimSuffix(fileName, filepath.Ext(fileName)); !hookstore.GuardName(stem) || !hookstore.GuardName(hookName) {
+		return nil, fmt.Errorf("hook file %q: a guard name holds only letters, digits, '_', '.' and '-', and starts with a letter or digit", fileName)
+	}
+	// The rebuild after the write refuses a store holding an unsafe name, so refuse
+	// it here, before this install changes the store.
+	existing, err := ListIndividualHooks(scope)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list hooks: %w", err)
+	}
+	if err := refuseUnsafeGuardNames(scope, existing); err != nil {
+		return nil, err
+	}
 
 	rule := strings.TrimSpace(input.Rule)
 	if rule == "" {
