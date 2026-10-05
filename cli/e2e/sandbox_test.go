@@ -206,18 +206,25 @@ func (r Result) Output() string { return r.Stdout + r.Stderr }
 // Run runs name in dir with the sandbox environment plus extra, feeding stdin.
 func (s *Sandbox) Run(dir, stdin string, extra []string, name string, args ...string) Result {
 	s.t.Helper()
-	cmd := exec.Command(name, args...)
-	cmd.Dir = dir
-	cmd.Env = append(append([]string{}, s.env...), extra...)
-	// Resolve name against the sandbox PATH, not this process's.
+	// Resolve name against the sandbox PATH only: exec.Command would look it up on
+	// this process's PATH and fail, or run the operator's copy, when the two differ.
+	path := name
 	if !strings.ContainsRune(name, os.PathSeparator) {
+		path = ""
 		for _, dir := range filepath.SplitList(s.Getenv("PATH")) {
 			if p := filepath.Join(dir, exe(name)); fileExists(p) {
-				cmd.Path = p
+				path = p
 				break
 			}
 		}
+		if path == "" {
+			s.t.Fatalf("run %s %q: not on the sandbox PATH", name, args)
+		}
 	}
+	cmd := exec.Command(path, args...)
+	cmd.Args[0] = name
+	cmd.Dir = dir
+	cmd.Env = append(append([]string{}, s.env...), extra...)
 	cmd.Stdin = strings.NewReader(stdin)
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb

@@ -1,6 +1,7 @@
 package cadence
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -204,5 +205,17 @@ func TestPluginsNudgeFiresOncePerKey(t *testing.T) {
 	}
 	if !ShouldNudgePlugins(dir, key) {
 		t.Error("a copy that differs again did not nudge after the key was cleared")
+	}
+}
+
+// The first session on a fresh machine writes its record before any refresh has
+// made the state directory.
+func TestWriteNudgeCreatesTheStateDirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "steer-report")
+	if err := WriteNudge(dir, LoadNudge(dir).WithPlugins("claude-code:/cache/steer")); err != nil {
+		t.Fatalf("WriteNudge returned error: %v", err)
+	}
+	if ShouldNudgePlugins(dir, "claude-code:/cache/steer") {
+		t.Error("the same plugin copy nudged twice")
 	}
 }

@@ -167,11 +167,15 @@ func (r nudgeRecord) WithPlugins(key string) nudgeRecord {
 	return r
 }
 
-// WriteNudge persists the last-nudged record. A write failure is non-fatal: the
-// worst case is one repeated nudge, never a blocked session.
+// WriteNudge persists the last-nudged record, creating dir when no refresh has yet.
+// A write failure is non-fatal: the worst case is one repeated nudge, never a
+// blocked session.
 func WriteNudge(dir string, rec nudgeRecord) error {
 	data, err := json.Marshal(rec)
 	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
 	return writeAtomic(NudgePath(dir), append(data, '\n'))

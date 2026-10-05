@@ -11,6 +11,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/hookstore"
 	"github.com/steer-sh/steer-cli/internal/presets"
+	"github.com/steer-sh/steer-cli/internal/testhome"
 )
 
 const guardSource = `#!/usr/bin/env python3
@@ -156,6 +157,10 @@ func TestNoNamedHarnessRegistersClaudeCode(t *testing.T) {
 }
 
 func TestAllHarnessesTargetsEveryHarnessThatRegistersHooks(t *testing.T) {
+	// An empty home installs no harness, so only --all-harnesses reaches both.
+	home := t.TempDir()
+	testhome.Set(t, home)
+	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
 	harnessFlag, allHarnesses = "", true
 	t.Cleanup(func() { allHarnesses = false })
 
@@ -163,8 +168,8 @@ func TestAllHarnessesTargetsEveryHarnessThatRegistersHooks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(targets) != 3 {
-		t.Fatalf("targets = %v; want all three harnesses", harnessNames(targets))
+	if len(targets) != 2 || targets[0].Harness().ID != harness.ClaudeCode || targets[1].Harness().ID != harness.Codex {
+		t.Fatalf("targets = %v; want Claude Code and Codex", harnessNames(targets))
 	}
 }
 
