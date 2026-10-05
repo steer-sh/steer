@@ -73,6 +73,20 @@ func (s *Sandbox) FireNoVar(session string) string {
 // repository.
 func (s *Sandbox) SeedBlockedSession(session, reason string) {
 	s.t.Helper()
+	s.SeedBashSession(session, "var x = 1", "PreToolUse:Bash hook error: "+reason)
+}
+
+// SessionPath is where Claude Code keeps the transcript of a session started in the
+// repository.
+func (s *Sandbox) SessionPath(session string) string {
+	slug := strings.NewReplacer("/", "-", ".", "-").Replace(s.Repo)
+	return filepath.Join(s.Home, ".claude", "projects", slug, session+".jsonl")
+}
+
+// SeedBashSession writes a Claude Code transcript in which one Bash call running
+// command came back as an error carrying result.
+func (s *Sandbox) SeedBashSession(session, command, result string) {
+	s.t.Helper()
 	now := time.Now().UTC()
 	ts := func(ms int) string {
 		return now.Add(time.Duration(ms) * time.Millisecond).Format("2006-01-02T15:04:05.000Z")
@@ -80,17 +94,19 @@ func (s *Sandbox) SeedBlockedSession(session, reason string) {
 	base := func(kind string, ms int, message map[string]any) map[string]any {
 		return map[string]any{"type": kind, "sessionId": session, "cwd": s.Repo, "timestamp": ts(ms), "message": message}
 	}
-	lines := []map[string]any{
-		base("user", 0, map[string]any{"role": "user", "content": "declare x"}),
+	s.writeTranscript(s.SessionPath(session), []map[string]any{
+		base("user", 0, map[string]any{"role": "user", "content": "run " + command}),
 		base("assistant", 1, map[string]any{"role": "assistant", "content": []any{
-			map[string]any{"type": "tool_use", "id": "t1", "name": "Bash", "input": map[string]any{"command": "var x = 1"}}}}),
+			map[string]any{"type": "tool_use", "id": "t1", "name": "Bash", "input": map[string]any{"command": command}}}}),
 		base("user", 2, map[string]any{"role": "user", "content": []any{
-			map[string]any{"type": "tool_result", "tool_use_id": "t1", "is_error": true,
-				"content": "PreToolUse:Bash hook error: " + reason}}}),
-	}
-	slug := strings.NewReplacer("/", "-", ".", "-").Replace(s.Repo)
-	dir := filepath.Join(s.Home, ".claude", "projects", slug)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+			map[string]any{"type": "tool_result", "tool_use_id": "t1", "is_error": true, "content": result}}}),
+	})
+}
+
+// writeTranscript writes one JSON object per line to path.
+func (s *Sandbox) writeTranscript(path string, lines []map[string]any) {
+	s.t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		s.t.Fatal(err)
 	}
 	var b strings.Builder
@@ -99,7 +115,7 @@ func (s *Sandbox) SeedBlockedSession(session, reason string) {
 		b.Write(data)
 		b.WriteByte('\n')
 	}
-	if err := os.WriteFile(filepath.Join(dir, session+".jsonl"), []byte(b.String()), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
 		s.t.Fatal(err)
 	}
 }
@@ -451,5 +467,96 @@ func TestFixtureRunFailsAnAllowCaseTheGuardBlocks(t *testing.T) {
 	}
 	if r := s.Steer("fixture", "run", noVarHook); r.Code == 0 || !strings.Contains(r.Output(), "var-command") {
 		t.Fatalf("exit %d; a blocked allow case did not fail the replay by name:\n%s", r.Code, r.Output())
+	}
+}
+
+// TestGuardFixRefusesAnUnapprovedCodexRunner checks that a guard record scoped to Codex
+// is refused while the registered Codex runner has no approval record, and that
+// --force records it anyway.
+//
+// pins existing behaviour
+func TestGuardFixRefusesAnUnapprovedCodexRunner(t *testing.T) {
+	t.Parallel()
+	s := NewSandbox(t)
+	s.RegisterNoVar("codex")
+	r := s.Steer(noVarFixArgs(time.Now().Unix(), "--scope-harness", "codex")...)
+	if r.Code == 0 || !strings.Contains(r.Output(), "guard runner is registered but has no approval record") {
+		t.Fatalf("exit %d; an unapproved Codex runner was not refused by name:\n%s", r.Code, r.Output())
+	}
+	if n := len(s.Records()); n != 0 {
+		t.Fatalf("the refused registration wrote %d records", n)
+	}
+	s.MustSteer(noVarFixArgs(time.Now().Unix(), "--scope-harness", "codex", "--force")...)
+	if n := len(s.Records()); n != 1 {
+		t.Errorf("--force wrote %d records, want 1", n)
+	}
+}
+
+// TestBothManagedInstallersRefuseAMultiLineRule checks that a guard's rule and an
+// instruction rule must each be one line, and that a refusal writes neither document.
+//
+// pins existing behaviour
+func TestBothManagedInstallersRefuseAMultiLineRule(t *testing.T) {
+	t.Parallel()
+	s := NewSandbox(t)
+	src := s.path(noVarHook + ".py")
+	if err := os.WriteFile(src, []byte(noVarSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	const multi = "never use var\n## Injected"
+	for _, args := range [][]string{
+		{"register", src, "--rule", multi, "--harness", "claude-code"},
+		{"rules", "add", "multi", "--rule", multi},
+	} {
+		if r := s.Steer(args...); r.Code == 0 || !strings.Contains(r.Output(), "rule text must be one line") {
+			t.Errorf("steer %s: exit %d, want a one-line refusal:\n%s", args[0], r.Code, r.Output())
+		}
+	}
+	for _, doc := range []string{"CLAUDE.md", "AGENTS.md"} {
+		if fileExists(filepath.Join(s.Repo, doc)) {
+			t.Errorf("a refused multi-line rule wrote %s", doc)
+		}
+	}
+}
+
+// TestNamesakeGuardsKeepSeparateFiringCounts checks that a guard of the same name in
+// the project and global stores counts only its own store's rows, and that two blocks
+// in one second are two rows.
+//
+// pins existing behaviour
+func TestNamesakeGuardsKeepSeparateFiringCounts(t *testing.T) {
+	t.Parallel()
+	s := NewSandbox(t)
+	s.RegisterNoVar("claude-code")
+	s.MustSteer("register", s.path(noVarHook+".py"), "--rule", noVarRule, "--harness", "claude-code", "--scope", "global")
+	installed := nextSecond() - 1
+	fire := func(store string) {
+		payload := `{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"var x = 1"},"session_id":"s1"}`
+		if r := s.Run(s.Repo, payload, nil, "python3", filepath.Join(store, "steer-hooks.py")); !strings.Contains(r.Stdout, `"deny"`) {
+			t.Fatalf("the %s master did not deny:\n%s", store, r.Output())
+		}
+	}
+	fire(filepath.Join(s.Repo, ".steer", "hooks"))
+	fire(filepath.Join(s.Home, ".steer", "hooks"))
+	fire(filepath.Join(s.Home, ".steer", "hooks"))
+	for _, scope := range []string{"project", "global"} {
+		s.MustSteer("fix", "register", "--tier", "guard", "--hook-id", noVarHook, "--hook-scope", scope,
+			"--class", "var-"+scope, "--match", "never use var",
+			"--problem", "Agents declare JavaScript variables with var.",
+			"--intervention", "A guard blocks var declarations in shell commands.",
+			"--target", ".steer/hooks/"+noVarHook+".py", "--scope-harness", "claude-code",
+			"--installed-ts", fmt.Sprint(installed), "--force")
+	}
+	r := s.MustSteer("fix", "score", "--json")
+	var records []map[string]any
+	if err := json.Unmarshal([]byte(r.Stdout), &records); err != nil {
+		t.Fatalf("fix score --json: %v\n%s", err, r.Stdout)
+	}
+	rows := map[string]any{}
+	for _, rec := range records {
+		rows[fmt.Sprint(rec["id"])] = dig(rec, "observation", "firing", "rows")
+	}
+	if rows["var-project"] != float64(1) || rows["var-global"] != float64(2) {
+		t.Errorf("firing rows = %v, want var-project 1 and var-global 2", rows)
 	}
 }

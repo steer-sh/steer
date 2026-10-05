@@ -23,6 +23,8 @@ import (
 var (
 	steerBin string
 	stubBin  string
+	// goCache is the build cache TestMain built with, shared with a case that runs go.
+	goCache string
 )
 
 // providerBinary maps a reviewer provider to the executable name its adapter runs.
@@ -44,6 +46,13 @@ func TestMain(m *testing.M) {
 			os.Exit(1)
 		}
 	}
+	out, err := exec.Command("go", "env", "GOCACHE").Output()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "go env GOCACHE: %v\n", err)
+		os.RemoveAll(dir)
+		os.Exit(1)
+	}
+	goCache = strings.TrimSpace(string(out))
 	code := m.Run()
 	os.RemoveAll(dir)
 	os.Exit(code)
@@ -72,6 +81,7 @@ type sandboxOptions struct {
 	repoName string
 	noStubs  bool
 	noBase   bool
+	goTool   bool
 	tools    []string
 }
 
@@ -101,6 +111,12 @@ func WithoutBaseCommit() SandboxOption {
 // WithTools links more of the operator's executables into the sandbox PATH.
 func WithTools(names ...string) SandboxOption {
 	return func(o *sandboxOptions) { o.tools = append(o.tools, names...) }
+}
+
+// WithGo links the go toolchain into the sandbox PATH with TestMain's build cache, so a
+// case that runs a Go suite compiles nothing already built.
+func WithGo() SandboxOption {
+	return func(o *sandboxOptions) { o.goTool = true; o.tools = append(o.tools, "go") }
 }
 
 // NewSandbox makes a home, a tool directory, a stub directory and a repository
@@ -156,6 +172,9 @@ func NewSandbox(t *testing.T, opts ...SandboxOption) *Sandbox {
 		"STEER_STUB_STATE=" + s.path("stubstate"),
 		"STEER_STUB_LOG=" + s.path("stub.jsonl"),
 		"STEER_STUB_SCRIPT=" + s.path("stub-script"),
+	}
+	if o.goTool {
+		s.env = append(s.env, "GOCACHE="+goCache, "GOTOOLCHAIN=local", "GOFLAGS=", "GOPATH="+filepath.Join(s.Home, "go"))
 	}
 	s.Git("init", "-q")
 	if !o.noBase {
