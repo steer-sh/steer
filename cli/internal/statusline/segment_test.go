@@ -1,6 +1,8 @@
 package statusline
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -95,5 +97,36 @@ func TestEveryCountCarriesItsNoun(t *testing.T) {
 		if got := decisionsPhrase(n); !strings.Contains(got, "decision") {
 			t.Errorf("decisionsPhrase(%d) = %q, want a noun", n, got)
 		}
+	}
+}
+
+// TestCollectNamesTheModelTheConfiguredProviderRuns reads the reviewer through the
+// settings file, where a provider other than agy must not report agy's shipped model.
+func TestCollectNamesTheModelTheConfiguredProviderRuns(t *testing.T) {
+	cases := []struct {
+		name, reviewer, want string
+	}{
+		{"a configured model", `{"provider":"claude-code","model":"claude-sonnet-5-5"}`, "claude-sonnet-5-5"},
+		{"the provider's own default", `{"provider":"claude-code"}`, "claude-code"},
+		{"no reviewer for an unknown provider", `{"provider":"nonesuch"}`, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("USERPROFILE", home)
+			t.Setenv("COMMIT_GATE_MODEL", "")
+			dir := filepath.Join(home, ".steer")
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			doc := `{"reviewer":` + tc.reviewer + `}`
+			if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(doc), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if got := Collect().Model; got != tc.want {
+				t.Fatalf("Collect().Model = %q; want %q", got, tc.want)
+			}
+		})
 	}
 }

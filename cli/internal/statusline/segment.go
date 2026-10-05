@@ -11,6 +11,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/cadence"
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/gate"
+	"github.com/steer-sh/steer-cli/internal/settings"
 )
 
 // Prefix names the row, so it stays identifiable under another script's output.
@@ -86,7 +87,14 @@ func Collect() Inputs {
 	in := Inputs{Armed: gateArmed()}
 
 	if cfg, err := gate.Load(); err == nil {
-		in.Model = cfg.ReviewerModel
+		// A provider that does not resolve runs no reviewer, so the row names none.
+		if resolved, reviewer, err := settings.Resolve(cfg, nil); err == nil {
+			in.Model = resolved.ReviewerModel
+			// A `<provider>-default` model is the CLI's own default and names no model.
+			if in.Model == reviewer.Name()+"-default" {
+				in.Model = reviewer.Name()
+			}
+		}
 		in.Runs = cfg.ReviewerRuns
 		if info, err := os.Stat(cfg.LogFile()); err == nil && info.Size() > 0 {
 			in.Observed = true
