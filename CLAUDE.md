@@ -234,7 +234,7 @@ and write firings into the live audit log. The runners use it; a manual run is
 `python3 tests/sandbox.py [--codex] -- <command>`. Claude Code needs
 `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` exported, because the sandbox home
 holds no login. A run fails if it changed a real Steer or harness file or wrote a
-firing to the real audit log; nothing is restored.
+firing to the real audit log or a review to the real ledger; nothing is restored.
 
 After a change to how the runtime renders a block, `tests/block_delivery.py` runs a
 real agent per harness against a probe guard and requires the guard's reason and

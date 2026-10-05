@@ -132,8 +132,8 @@ type ObservationProvenance struct {
 }
 
 // chainObservation builds the observation for a review-chain record. Its firing
-// count is window-level: rows are counted once by hook id, harness and timestamp
-// inside the window's bounds, and labelled as the broader thing they are.
+// count is window-level: each audit row inside the window's bounds counts once, and
+// the count is labelled as the broader thing it is.
 func chainObservation(record Record, before, after []Chain, beforeCov, afterCov Coverage,
 	pattern patternMatcher, kind string, ev EvidenceSet, splitTS, clock float64) Observation {
 
