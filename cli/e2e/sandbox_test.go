@@ -72,6 +72,7 @@ type sandboxOptions struct {
 	repoName string
 	noStubs  bool
 	noBase   bool
+	tools    []string
 }
 
 // SandboxOption changes one part of a new sandbox.
@@ -97,6 +98,11 @@ func WithoutBaseCommit() SandboxOption {
 	return func(o *sandboxOptions) { o.noBase = true }
 }
 
+// WithTools links more of the operator's executables into the sandbox PATH.
+func WithTools(names ...string) SandboxOption {
+	return func(o *sandboxOptions) { o.tools = append(o.tools, names...) }
+}
+
 // NewSandbox makes a home, a tool directory, a stub directory and a repository
 // with one base commit.
 func NewSandbox(t *testing.T, opts ...SandboxOption) *Sandbox {
@@ -118,7 +124,7 @@ func NewSandbox(t *testing.T, opts ...SandboxOption) *Sandbox {
 			t.Fatal(err)
 		}
 	}
-	for _, name := range []string{"git", "python3", "sh", "bash"} {
+	for _, name := range append([]string{"git", "python3", "sh", "bash"}, o.tools...) {
 		real, err := exec.LookPath(name)
 		if err != nil {
 			t.Fatalf("e2e needs %s on PATH: %v", name, err)

@@ -444,6 +444,28 @@ func TestLedgerAppendFailureIsReturned(t *testing.T) {
 	}
 }
 
+// A shard that ends in half a row, as a crash mid-append leaves it, must not swallow
+// the next row.
+func TestLedgerRowAfterATruncatedLineParses(t *testing.T) {
+	cfg := Defaults()
+	cfg.StateDir = t.TempDir()
+	if err := os.WriteFile(cfg.LogFile(), []byte(`{"ts":1,"phase":"cle`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := NewLedger(cfg).Log(Row{"phase": "deny"}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(cfg.LogFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
+	var row map[string]any
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &row); err != nil || row["phase"] != "deny" {
+		t.Errorf("the new row does not parse on its own line (%v):\n%s", err, raw)
+	}
+}
+
 // The stat-only fallback renders SHORTER than the raw diff it replaces, so testing the
 // rendered length against MinDiffChars made the smallest-commit filter discard the
 // largest commits: a one-file change too big to inline was never reviewed.
