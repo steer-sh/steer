@@ -560,3 +560,113 @@ func TestNamesakeGuardsKeepSeparateFiringCounts(t *testing.T) {
 		t.Errorf("firing rows = %v, want var-project 1 and var-global 2", rows)
 	}
 }
+
+const keepSrc = `#!/usr/bin/env python3
+import sys
+import json
+
+def main():
+    data = json.load(sys.stdin)
+    if "KEEP" in data.get("tool_input", {}).get("old_string", ""):
+        print(json.dumps({"decision": "block", "reason": "never remove a line marked KEEP"}))
+    sys.exit(0)
+
+if __name__ == "__main__":
+    main()
+`
+
+// TestFixtureMineCarriesRemovedText checks Suite A step 2's deletion-only fixture: the
+// gate stores a diff that only removes lines and deletes a file, the miner turns each
+// removal into an Edit carrying the removed text and the deleted file into the
+// runtime's delete marker, and a guard on removed text intercepts the mined cases.
+//
+// pins existing behaviour
+func TestFixtureMineCarriesRemovedText(t *testing.T) {
+	t.Parallel()
+	s, g := newNativeGate(t, "claude-code", ".claude/settings.json", "commit-gate review")
+	var before, after strings.Builder
+	for i := 0; i < 20; i++ {
+		line := fmt.Sprintf("def f%d(x):\n    return x + %d\n", i, i)
+		if i%5 == 0 {
+			before.WriteString(strings.TrimSuffix(line, "\n") + "  # KEEP\n")
+			continue
+		}
+		before.WriteString(line)
+		after.WriteString(line)
+	}
+	s.Write("mod.py", before.String())
+	s.Write("notes.txt", "old notes\nKEEP this\n")
+	s.Git("add", "mod.py", "notes.txt")
+	s.Git("commit", "-q", "-m", "add files")
+	s.Write("mod.py", after.String())
+	s.Git("rm", "-q", "notes.txt")
+	s.Git("add", "mod.py")
+	s.Script("finding", "finding", "finding")
+	if r := g.Hook("git commit -m 'drop the markers'", ""); !r.Denied() {
+		t.Fatalf("the review did not deny, so no diff is stored:\n%s", r.Text())
+	}
+	rows := s.LedgerRows()
+	diff, _ := rows[len(rows)-1]["diff_file"].(string)
+	out := s.path("candidates.json")
+	s.MustSteer("fixture", "mine", "--diff", diff, "-o", out)
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mined struct {
+		Candidates []struct {
+			Path        string         `json:"path"`
+			Hunk        int            `json:"hunk"`
+			DeletedFile bool           `json:"deleted_file"`
+			Payload     map[string]any `json:"payload"`
+		} `json:"candidates"`
+	}
+	if err := json.Unmarshal(data, &mined); err != nil {
+		t.Fatalf("candidates: %v\n%s", err, data)
+	}
+	var cases []any
+	removals, deletes := 0, 0
+	for _, c := range mined.Candidates {
+		input, _ := c.Payload["tool_input"].(map[string]any)
+		old, hasOld := input["old_string"].(string)
+		expect := "allow"
+		switch {
+		case c.DeletedFile:
+			deletes++
+			if c.Path != "notes.txt" || input["steer_operation"] != "delete" || hasOld || input["new_string"] != "" {
+				t.Errorf("the deleted file is not the runtime's delete marker without its content: %v", c.Payload)
+			}
+		case c.Path == "mod.py":
+			removals++
+			if !strings.Contains(old, "# KEEP") || input["new_string"] != "" {
+				t.Errorf("hunk %d does not carry only its removed text: %v", c.Hunk, input)
+			}
+			expect = "block"
+		}
+		payload := map[string]any{"hook_event_name": "PreToolUse"}
+		for k, v := range c.Payload {
+			payload[k] = v
+		}
+		cases = append(cases, map[string]any{"name": fmt.Sprintf("%s-hunk-%d", c.Path, c.Hunk),
+			"payload": payload, "expect": expect, "origin": "reconstructed"})
+	}
+	if removals != 4 || deletes != 1 {
+		t.Fatalf("mined %d removal hunks and %d deleted files, want 4 and 1:\n%s", removals, deletes, data)
+	}
+
+	fixtures, _ := json.Marshal(map[string]any{"version": 1, "hook": "keep-marker", "cases": cases})
+	if err := os.WriteFile(s.path("keep-fixtures.json"), fixtures, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(s.path("keep-marker.py"), []byte(keepSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s.MustSteer("register", s.path("keep-marker.py"), "--rule", "never remove a line marked KEEP | leave it in place",
+		"--harness", "claude-code", "--fixtures", s.path("keep-fixtures.json"))
+	r := s.MustSteer("fixture", "run", "keep-marker")
+	for _, want := range []string{"mod.py-hunk-1", "notes.txt-hunk-1", "The guard intercepts its stored cases."} {
+		if !strings.Contains(r.Output(), want) {
+			t.Errorf("fixture run lacks %q:\n%s", want, r.Output())
+		}
+	}
+}
