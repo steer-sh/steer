@@ -379,11 +379,17 @@ reviewers run with `--no-session-persistence` and `--ephemeral`, so a review add
 session to the user's history; agy has no such flag. They also load none of the
 operator's hooks (`--safe-mode`, `--disable hooks`), which in an adopted repository
 would run check.sh inside the review. Claude Code gets only file-read tools
-(`--tools Read,Grep,Glob`; safe mode also drops MCP servers). Codex runs its commands
+(`--tools Read,Grep,Glob`; safe mode also drops MCP servers), and `--restricted` keeps
+those reads inside the working directory whatever the operator's or the repository's
+permission rules allow. `--restricted` skips every settings file, so the reviewer
+passes the user settings' `env` and `apiKeyHelper` back through a private
+`--settings` file, which keeps a settings-file sign-in working. Codex runs its commands
 in `--sandbox read-only` with the built-in `codex_apps` connectors off
 (`--disable apps`); MCP servers the operator configures stay loaded under their own
 approval settings. agy has no flag for either: the operator's agy hooks and
-permissions are its only boundary.
+permissions are its only boundary. In print mode agy denies any tool call that no
+allow rule names, because it cannot prompt, so an allow rule the operator keeps for
+interactive use applies to every review.
 
 The stock review prompt is embedded and fixed; the review addendum is the
 operator-writable addition to it (`internal/gate/addendum.go`). Each request

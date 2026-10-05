@@ -89,7 +89,7 @@ func parseArgv(call *Call) error {
 		seen := map[string]bool{}
 		for i := 0; i < len(args); i++ {
 			switch args[i] {
-			case "-p", "--no-session-persistence", "--safe-mode":
+			case "-p", "--no-session-persistence", "--safe-mode", "--restricted":
 				seen[args[i]] = true
 			case "--output-format", "--tools", "--model", "--effort":
 				v, err := value(i)
@@ -112,8 +112,8 @@ func parseArgv(call *Call) error {
 			}
 		}
 		if !seen["-p"] || !seen["json"] || !seen["--no-session-persistence"] ||
-			!seen["--safe-mode"] || !seen["read-only tools"] {
-			return fmt.Errorf("want -p --output-format json --no-session-persistence --safe-mode --tools Read,Grep,Glob, got %q", args)
+			!seen["--safe-mode"] || !seen["read-only tools"] || !seen["--restricted"] {
+			return fmt.Errorf("want -p --output-format json --no-session-persistence --safe-mode --tools Read,Grep,Glob --restricted, got %q", args)
 		}
 		call.Prompt = call.Stdin
 	case "codex":

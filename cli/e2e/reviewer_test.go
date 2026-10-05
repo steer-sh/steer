@@ -41,7 +41,7 @@ func TestReviewerArgvPerProvider(t *testing.T) {
 					"--output-format", "json", "-p", c.Prompt}
 			case "claude-code":
 				want = []string{"-p", "--output-format", "json", "--no-session-persistence",
-					"--safe-mode", "--tools", "Read,Grep,Glob", "--model", "model-claude-code", "--effort", "high"}
+					"--safe-mode", "--tools", "Read,Grep,Glob", "--restricted", "--model", "model-claude-code", "--effort", "high"}
 			case "codex":
 				want = []string{"exec", "--skip-git-repo-check", "--ephemeral", "--sandbox", "read-only",
 					"--disable", "hooks", "--disable", "apps", "--model", "model-codex",

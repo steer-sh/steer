@@ -3,8 +3,10 @@ package reviewers
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"strings"
 
+	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/gate"
 )
 
@@ -15,6 +17,9 @@ type ClaudeCode struct {
 	Model  string
 	Effort string
 	Binary string
+	// UserSettings defaults to the global Claude Code settings.json. Overridable so a
+	// test reads no operator file.
+	UserSettings string
 }
 
 func NewClaudeCode(model, effort string) *ClaudeCode {
@@ -38,6 +43,54 @@ func (c *ClaudeCode) binary() string {
 	return "claude"
 }
 
+// authSettingsKeys are the user settings a review needs to sign in. --restricted skips
+// the settings files that carry them, and --settings still applies under it.
+var authSettingsKeys = []string{"env", "apiKeyHelper"}
+
+// authSettings writes the user settings' sign-in keys to a temporary file readable
+// only by the user, and returns its path. It returns "" when the settings carry none
+// or cannot be read; the caller removes the file.
+func (c *ClaudeCode) authSettings() string {
+	path := c.UserSettings
+	if path == "" {
+		var err error
+		if path, err = claude.GetSettingsFile(claude.GlobalScope); err != nil {
+			return ""
+		}
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	var all map[string]json.RawMessage
+	if json.Unmarshal(data, &all) != nil {
+		return ""
+	}
+	auth := map[string]json.RawMessage{}
+	for _, key := range authSettingsKeys {
+		if v, ok := all[key]; ok {
+			auth[key] = v
+		}
+	}
+	if len(auth) == 0 {
+		return ""
+	}
+	body, err := json.Marshal(auth)
+	if err != nil {
+		return ""
+	}
+	f, err := os.CreateTemp("", "steer-review-settings-*.json")
+	if err != nil {
+		return ""
+	}
+	_, werr := f.Write(body)
+	if cerr := f.Close(); werr != nil || cerr != nil {
+		os.Remove(f.Name())
+		return ""
+	}
+	return f.Name()
+}
+
 type claudeReply struct {
 	Result  string `json:"result"`
 	IsError bool   `json:"is_error"`
@@ -48,8 +101,16 @@ func (c *ClaudeCode) Review(ctx context.Context, prompt, cwd string) gate.RawRun
 	// --no-session-persistence keeps the run out of the user's session history: its
 	// prompt is a diff, not anything the user said. --safe-mode drops the operator's
 	// hooks, plugins, CLAUDE.md and output style, and --tools leaves only file reads.
+	// --restricted ignores the operator's and the repository's settings files, so no
+	// permission rule there can widen those reads past the working directory. The
+	// sign-in keys it would drop come back through --settings, as a file so that a key
+	// in env never appears in the process list.
 	argv := []string{c.binary(), "-p", "--output-format", "json", "--no-session-persistence",
-		"--safe-mode", "--tools", "Read,Grep,Glob"}
+		"--safe-mode", "--tools", "Read,Grep,Glob", "--restricted"}
+	if path := c.authSettings(); path != "" {
+		defer os.Remove(path)
+		argv = append(argv, "--settings", path)
+	}
 	if c.Model != "" {
 		argv = append(argv, "--model", c.Model)
 	}

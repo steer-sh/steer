@@ -2,6 +2,7 @@ package reviewers
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -170,11 +171,12 @@ func TestClaudeCodeRendersModelAndEffort(t *testing.T) {
 	binary, argvFile := stubBinary(t, `{"result":"ok","is_error":false}`)
 	reviewer := NewClaudeCode("sonnet", "xhigh")
 	reviewer.Binary = binary
+	reviewer.UserSettings = filepath.Join(t.TempDir(), "absent.json")
 	if run := reviewer.Review(context.Background(), "PROMPT", t.TempDir()); run.Response != "ok" {
 		t.Fatalf("Review = %#v; want the parsed result", run)
 	}
 	assertArgv(t, recordedArgv(t, argvFile), []string{
-		"-p", "--output-format", "json", "--no-session-persistence", "--safe-mode", "--tools", "Read,Grep,Glob",
+		"-p", "--output-format", "json", "--no-session-persistence", "--safe-mode", "--tools", "Read,Grep,Glob", "--restricted",
 		"--model", "sonnet", "--effort", "xhigh",
 	})
 }
@@ -183,23 +185,72 @@ func TestClaudeCodeOmitsAnUnsetModelAndEffort(t *testing.T) {
 	binary, argvFile := stubBinary(t, `{"result":"ok","is_error":false}`)
 	reviewer := NewClaudeCode("", "")
 	reviewer.Binary = binary
+	reviewer.UserSettings = filepath.Join(t.TempDir(), "absent.json")
 	reviewer.Review(context.Background(), "PROMPT", t.TempDir())
 	assertArgv(t, recordedArgv(t, argvFile), []string{
-		"-p", "--output-format", "json", "--no-session-persistence", "--safe-mode", "--tools", "Read,Grep,Glob",
+		"-p", "--output-format", "json", "--no-session-persistence", "--safe-mode", "--tools", "Read,Grep,Glob", "--restricted",
 	})
 }
 
-// The review session loads none of the operator's hooks, and its only tools read files.
+// The review session loads none of the operator's hooks, its only tools read files, and
+// those reads stay inside the working directory.
 func TestClaudeCodeRunsWithoutOperatorHooksAndWithReadOnlyTools(t *testing.T) {
 	binary, argvFile := stubBinary(t, `{"result":"ok","is_error":false}`)
 	reviewer := NewClaudeCode("", "")
 	reviewer.Binary = binary
+	reviewer.UserSettings = filepath.Join(t.TempDir(), "absent.json")
 	reviewer.Review(context.Background(), "PROMPT", t.TempDir())
 	argv := strings.Join(recordedArgv(t, argvFile), " ")
-	for _, want := range []string{"--safe-mode", "--tools Read,Grep,Glob"} {
+	for _, want := range []string{"--safe-mode", "--tools Read,Grep,Glob", "--restricted"} {
 		if !strings.Contains(argv, want) {
 			t.Fatalf("argv = %q; want %q", argv, want)
 		}
+	}
+}
+
+// --restricted skips the user's settings file, so its sign-in keys reach the review
+// through a --settings file, and nothing else in it does.
+func TestClaudeCodeForwardsOnlyTheSignInSettings(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the stub is a shell script")
+	}
+	dir := t.TempDir()
+	user := filepath.Join(dir, "settings.json")
+	body := `{"env":{"CLAUDE_CODE_USE_BEDROCK":"1"},"apiKeyHelper":"/bin/key",` +
+		`"permissions":{"allow":["Read(//**)"]},"model":"haiku"}`
+	if err := os.WriteFile(user, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	copied := filepath.Join(dir, "forwarded.json")
+	binary := filepath.Join(dir, "stub")
+	script := "#!/bin/sh\nwhile [ $# -gt 0 ]; do\n  if [ \"$1\" = --settings ]; then cp \"$2\" " + copied +
+		"; ls -l \"$2\" > " + copied + ".mode; echo \"$2\" > " + copied + ".path; fi\n  shift\ndone\n" +
+		"echo '{\"result\":\"ok\",\"is_error\":false}'\n"
+	if err := os.WriteFile(binary, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	reviewer := NewClaudeCode("", "")
+	reviewer.Binary = binary
+	reviewer.UserSettings = user
+	reviewer.Review(context.Background(), "PROMPT", t.TempDir())
+
+	data, err := os.ReadFile(copied)
+	if err != nil {
+		t.Fatalf("no --settings file reached the reviewer: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got["apiKeyHelper"] != "/bin/key" || got["env"] == nil {
+		t.Fatalf("forwarded settings = %s; want only env and apiKeyHelper", data)
+	}
+	if mode, _ := os.ReadFile(copied + ".mode"); !strings.HasPrefix(string(mode), "-rw-------") {
+		t.Fatalf("forwarded settings mode = %q; want readable by the user only", mode)
+	}
+	path, _ := os.ReadFile(copied + ".path")
+	if _, err := os.Stat(strings.TrimSpace(string(path))); !os.IsNotExist(err) {
+		t.Fatalf("forwarded settings %s outlived the review: %v", path, err)
 	}
 }
 
