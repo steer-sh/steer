@@ -358,10 +358,8 @@ func Preview(next config.Config, warn func(string)) (gate.Config, error) {
 	return cfg, err
 }
 
-// Impact names the measurements a pending reviewer identity lands in. It grades the
-// prospective identity through the scorer's own computation, so a class named here as
-// majorly drifted is one `steer fix score` will withhold rather than a
-// second opinion about it.
+// Impact names the measurements a pending reviewer identity lands in, graded by
+// mine.ImpactOf against each record's before-window reviewer.
 func Impact(cfg gate.Config) []mine.InstrumentImpact {
 	records, err := mine.Load(cfg.StateDir)
 	if err != nil || len(records) == 0 {
@@ -386,12 +384,12 @@ func ImpactWidth(impacts []mine.InstrumentImpact) int {
 	return width
 }
 
-// ImpactNote says what a grade costs the reader: a major drift withholds the verdict,
-// a minor one rides beside the range.
+// ImpactNote says what a grade means for the record's counts: the window after the
+// change is counted by another reviewer, or by the same one set differently.
 func ImpactNote(im mine.InstrumentImpact) string {
-	consequence := "reported beside the range"
+	consequence := "the same reviewer, set differently, counts the window after this change"
 	if im.Grade == mine.DriftMajor {
-		consequence = "the verdict is withheld while the windows disagree"
+		consequence = "a different reviewer counts the window after this change"
 	}
 	if len(im.Dims) == 0 {
 		return consequence

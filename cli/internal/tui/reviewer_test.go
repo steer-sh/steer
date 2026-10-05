@@ -208,7 +208,7 @@ func TestReviewerPanelConfirmsAnIdentityChangeThatLandsInAMeasurement(t *testing
 	tempSettingsHome(t)
 	m := New(gate.Defaults(), "global")
 	m.impactOf = func(gate.Config) []mine.InstrumentImpact {
-		return []mine.InstrumentImpact{{ID: "bare-python", Class: "bare python call", Grade: mine.DriftMajor}}
+		return []mine.InstrumentImpact{{ID: "bare-python", Class: "bare python call", Grade: mine.DriftMinor, Dims: []string{"effort"}}}
 	}
 	m.active = panelReviewer
 	m.cursor[panelReviewer] = indexOfField(t, "reviewer.effort")
@@ -221,7 +221,7 @@ func TestReviewerPanelConfirmsAnIdentityChangeThatLandsInAMeasurement(t *testing
 		t.Fatalf("the first enter wrote %#v (err %v); want the confirmation first", got, err)
 	}
 	view := m.View()
-	for _, want := range []string{"lands in 1 measurement(s)", "bare python call", "withheld"} {
+	for _, want := range []string{"lands in 1 measurement(s)", "bare python call", "effort — the same reviewer, set differently"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("the confirmation is missing %q", want)
 		}
