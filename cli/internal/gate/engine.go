@@ -203,14 +203,29 @@ func (e *Engine) handleFirst(ctx context.Context, req Request, chain *Chain) Dec
 		logErr := e.log(req, Row{"ts": time.Now().Unix(), "phase": "skip-cleared",
 			"firing": 1, "diff_sha": record.DiffSHA, "chars": len(p.raw),
 			"session_id": req.SessionID, "cleared_ts": record.TS,
-			"cleared_channel": record.Channel})
+			"cleared_channel": record.Channel, "cleared_ending": record.Ending})
 		return proceed(ContextOnly, req, p.raw, 1,
-			"NOT reviewed again — reviewers already passed this exact diff, and git "+
+			"NOT reviewed again — "+clearedEnding(record.Ending)+", and git "+
 				"refused that commit for its own reasons. The gate does not block it.",
 			logErr)
 	}
 	req.chainID = NewChainID()
 	return e.reviewCommit(ctx, req, chain, p, 1)
+}
+
+// clearedEnding words how the earlier review sequence let this exact diff through.
+func clearedEnding(ending string) string {
+	switch ending {
+	case ClearedClean:
+		return "reviewers already passed this exact diff"
+	case ClearedUnchanged:
+		return "the review sequence already ended on this exact diff, after reviewers " +
+			"blocked it and it came back unchanged"
+	case ClearedCap:
+		return "the review sequence already ended on this exact diff at its block limit"
+	default:
+		return "a review sequence already ended on this exact diff"
+	}
 }
 
 func (e *Engine) handleRetry(ctx context.Context, req Request, chain *Chain, state ChainState) Decision {
@@ -265,7 +280,7 @@ func (e *Engine) handleRetry(ctx context.Context, req Request, chain *Chain, sta
 		// path withholds one: the record means "reviewed and let through", and writing
 		// it here blesses the very tree the notice exists to question.
 		if notice == "" {
-			if err := chain.RememberCleared(after.Raw, req.Channel); err != nil && logErr == nil {
+			if err := chain.RememberCleared(after.Raw, req.Channel, ClearedUnchanged); err != nil && logErr == nil {
 				logErr = err
 			}
 		}
@@ -372,7 +387,7 @@ func (e *Engine) reviewCommit(ctx context.Context, req Request, chain *Chain, p 
 			// "reviewed and let through", and a later commit presenting this same diff
 			// would skip the gate on the strength of it — blessing the tree the notice
 			// exists to question.
-			if cerr := chain.RememberCleared(p.raw, req.Channel); cerr != nil && err == nil {
+			if cerr := chain.RememberCleared(p.raw, req.Channel, ClearedClean); cerr != nil && err == nil {
 				err = cerr
 			}
 		}
@@ -470,7 +485,7 @@ func (e *Engine) terminalReview(ctx context.Context, req Request, chain *Chain, 
 	// the tree the notice questions.
 	var clearedErr error
 	if p.notice == "" {
-		clearedErr = chain.RememberCleared(p.raw, req.Channel)
+		clearedErr = chain.RememberCleared(p.raw, req.Channel, ClearedCap)
 	}
 
 	if len(result.Reviews) == 0 {

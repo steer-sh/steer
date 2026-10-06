@@ -62,7 +62,18 @@ type ClearedRecord struct {
 	Chars   int    `json:"chars"`
 	TS      int64  `json:"ts"`
 	Channel string `json:"channel"`
+	// Ending names how the review sequence let this diff through: one of the
+	// Cleared* values, or empty in a record written before the field existed.
+	Ending string `json:"ending,omitempty"`
 }
+
+// How a review sequence let a diff through. A later commit of the same diff names
+// the ending in its receipt, so a sequence the reviewers blocked never reads as a pass.
+const (
+	ClearedClean     = "clean"
+	ClearedUnchanged = "unchanged"
+	ClearedCap       = "cap"
+)
 
 // Chain owns the on-disk state for one (actor, repo) pair.
 type Chain struct {
@@ -138,13 +149,13 @@ func (c *Chain) Clear() error {
 }
 
 // RememberCleared records that this exact diff was reviewed and let through.
-func (c *Chain) RememberCleared(diff, channel string) error {
+func (c *Chain) RememberCleared(diff, channel, ending string) error {
 	if err := os.MkdirAll(c.cfg.StateDir, 0o755); err != nil {
 		return err
 	}
 	sha := Digest(diff)
 	raw, err := json.Marshal(ClearedRecord{
-		DiffSHA: sha, Chars: len(diff), TS: time.Now().Unix(), Channel: channel,
+		DiffSHA: sha, Chars: len(diff), TS: time.Now().Unix(), Channel: channel, Ending: ending,
 	})
 	if err != nil {
 		return err

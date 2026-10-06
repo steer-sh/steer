@@ -211,8 +211,11 @@ func TestUnchangedRetryEndsChain(t *testing.T) {
 	// A third attempt presents the same diff the gate cleared, so it must not re-enter
 	// as firing 1 and re-review adjudicated code.
 	third := h.handle()
-	if third.Kind != ContextOnly || !strings.Contains(third.SystemMessage, "already") {
+	if third.Kind != ContextOnly || !strings.Contains(third.SystemMessage, "already ended on this exact diff") {
 		t.Errorf("third attempt = %v / %q, want the cleared-diff skip", third.Kind, third.SystemMessage)
+	}
+	if strings.Contains(third.SystemMessage, "passed") {
+		t.Errorf("the reviewers blocked this diff, so the skip must not call it passed: %q", third.SystemMessage)
 	}
 	if got := h.lastRow()["phase"]; got != "skip-cleared" {
 		t.Errorf("phase = %v, want skip-cleared — an invisible skip corrupts the log in "+
