@@ -236,7 +236,11 @@ exits non-zero when the reviewer does not answer.`,
 	Example: `  steer commit-gate test-reviewer
   steer commit-gate test-reviewer --provider claude-code --model sonnet`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, reviewer, err := resolvedGateConfig()
+		base, err := providerSwitch(gateConfig(), commitGateProvider, commitGateModel, commitGateEffort)
+		if err != nil {
+			return err
+		}
+		cfg, reviewer, err := resolveReviewer(base)
 		if err != nil {
 			return err
 		}
@@ -254,6 +258,25 @@ exits non-zero when the reviewer does not answer.`,
 		}
 		return nil
 	},
+}
+
+// providerSwitch prepares a trial under a --provider that names another provider
+// than the configured one. The configured model names a model of that other
+// provider, so it is refused unless --model replaces it; the configured effort gives
+// way to the new provider's own unless --effort names one.
+func providerSwitch(cfg gate.Config, provider, model, effort string) (gate.Config, error) {
+	next, ok := reviewers.FindProvider(provider)
+	current, known := reviewers.FindProvider(cfg.ReviewerProvider)
+	if provider == "" || !ok || !known || next.ID == current.ID {
+		return cfg, nil
+	}
+	if model == "" && cfg.ReviewerModelOverride != "" {
+		return cfg, fmt.Errorf("the configured model %s is a %s model, and --provider %s names another provider; "+
+			"name a model for it: steer commit-gate test-reviewer --provider %s --model <model>",
+			cfg.ReviewerModelOverride, current.ID, next.ID, next.ID)
+	}
+	cfg.ReviewerEffort = effort
+	return cfg, nil
 }
 
 // renderTrial words a trial review's result. ok is false when the reviewer did not
