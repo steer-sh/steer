@@ -41,9 +41,12 @@ func (c *Codex) Review(ctx context.Context, prompt, cwd string) gate.RawRun {
 	// diff, not anything the user said. --disable hooks keeps the operator's Codex
 	// hooks, including the turn-end check.sh runners, out of the review session, and
 	// the read-only sandbox keeps the commands it runs from writing. --disable apps
-	// drops the built-in codex_apps connectors, which the sandbox does not bind; MCP
-	// servers the operator configures stay loaded under their own approval settings.
-	argv := []string{c.binary(), "exec", "--skip-git-repo-check", "--ephemeral",
+	// drops the built-in codex_apps connectors, which the sandbox does not bind.
+	// --ignore-user-config drops the user's config.toml, so no MCP server it or a
+	// project it trusts declares starts outside the sandbox. The login in auth.json
+	// still applies; a config.toml credential store or model_provider does not. An
+	// unset model or effort falls to Codex's built-in default, not to config.toml's.
+	argv := []string{c.binary(), "exec", "--skip-git-repo-check", "--ephemeral", "--ignore-user-config",
 		"--sandbox", "read-only", "--disable", "hooks", "--disable", "apps"}
 	if c.Model != "" {
 		argv = append(argv, "--model", c.Model)

@@ -43,7 +43,7 @@ func TestReviewerArgvPerProvider(t *testing.T) {
 				want = []string{"-p", "--output-format", "json", "--no-session-persistence",
 					"--safe-mode", "--tools", "Read,Grep,Glob", "--restricted", "--model", "model-claude-code", "--effort", "high"}
 			case "codex":
-				want = []string{"exec", "--skip-git-repo-check", "--ephemeral", "--sandbox", "read-only",
+				want = []string{"exec", "--skip-git-repo-check", "--ephemeral", "--ignore-user-config", "--sandbox", "read-only",
 					"--disable", "hooks", "--disable", "apps", "--model", "model-codex",
 					"-c", "model_reasoning_effort=high", "-"}
 			}

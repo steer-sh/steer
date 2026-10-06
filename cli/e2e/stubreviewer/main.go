@@ -123,7 +123,7 @@ func parseArgv(call *Call) error {
 		seen := map[string]bool{}
 		for i := 1; i < len(args)-1; i++ {
 			switch args[i] {
-			case "--skip-git-repo-check", "--ephemeral":
+			case "--skip-git-repo-check", "--ephemeral", "--ignore-user-config":
 				seen[args[i]] = true
 			case "--sandbox", "--disable", "--model", "-c":
 				v, err := value(i)
@@ -149,9 +149,9 @@ func parseArgv(call *Call) error {
 				return fmt.Errorf("unknown flag %q", args[i])
 			}
 		}
-		if !seen["--skip-git-repo-check"] || !seen["--ephemeral"] ||
+		if !seen["--skip-git-repo-check"] || !seen["--ephemeral"] || !seen["--ignore-user-config"] ||
 			!seen["read-only"] || !seen["hooks off"] || !seen["apps off"] {
-			return fmt.Errorf("want --skip-git-repo-check --ephemeral --sandbox read-only --disable hooks --disable apps, got %q", args)
+			return fmt.Errorf("want --skip-git-repo-check --ephemeral --ignore-user-config --sandbox read-only --disable hooks --disable apps, got %q", args)
 		}
 		call.Prompt = call.Stdin
 	default:
