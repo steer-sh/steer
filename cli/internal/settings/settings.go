@@ -374,13 +374,11 @@ func Impact(cfg gate.Config) []mine.InstrumentImpact {
 	return mine.ImpactOf(records, ev.Chains, mine.InstrumentUse{ID: cfg.InstrumentID(), Fields: fields})
 }
 
-// AddendumImpact names the measurements a review addendum change, already written to
-// its store, lands in: each record graded against the configured reviewer run with
-// the addendum its chains will get. A project change (project set) takes effect in
-// repo once committed, so it moves only records whose scope admits repo, graded with
-// the global store plus repo's working-tree entries. A global change moves every
-// record; one scoped to a repository root is graded with what the gate reads there,
-// and any other with the global entries alone.
+// AddendumImpact names the measurements a written addendum change lands in. A project
+// change (project set) moves only records whose scope admits repo, graded with the
+// global entries plus repo's working-tree entries. A global change grades a record
+// scoped to a repository root with what the gate reads there, and any other with the
+// global entries alone.
 func AddendumImpact(cfg gate.Config, repo string, project bool) []mine.InstrumentImpact {
 	records, err := mine.Load(cfg.StateDir)
 	if err != nil || len(records) == 0 {
