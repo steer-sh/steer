@@ -196,6 +196,19 @@ answers, every commit goes through unreviewed. The usual causes are a reviewer C
 that is not signed in and a model name the CLI does not know. Run it again after the
 user fixes the cause. Do not report setup as complete while it fails.
 
+**Claude Code only: offer the status line.** Steer's row shows, at every prompt,
+whether a commit here is reviewed, by which reviewer, and the one command that
+changes the answer. Nothing else installs it. Ask the user; on yes:
+
+```bash
+"${STEER_BIN}" statusline install --scope global
+```
+
+Read what it prints, not its exit status. When the user already has a status line,
+it writes nothing and names two choices: `--wrap` keeps their row above Steer's, and
+`--replace` discards it. Relay both and run the one the user picks; never choose
+`--replace` for them. Codex has no status line, so skip this in Codex.
+
 Finish by reading the answer back:
 
 ```bash
