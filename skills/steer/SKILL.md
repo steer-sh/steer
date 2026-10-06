@@ -218,10 +218,17 @@ Before you install anything, read the fixes Steer already holds and the recurrin
 problems it already decided. This step stops a duplicate fix and a re-proposed
 problem.
 
+Every `steer` command in this skill runs the launcher bundled with the plugin, or
+`steer` on PATH when there is none. Replace `<SKILL_DIR>` with the absolute
+directory that holds this SKILL.md; the harness names it when it loads the skill.
+Codex gives a skill no plugin root, so there the launcher is found only through
+`<SKILL_DIR>`.
+
 ```bash
 STEER_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}"
-STEER_BIN="${STEER_ROOT:+${STEER_ROOT}/scripts/steer}"
-STEER_BIN="${STEER_BIN:-steer}"
+STEER_ROOT="${STEER_ROOT:-<SKILL_DIR>/../..}"
+STEER_BIN="${STEER_ROOT}/scripts/steer"
+[ -x "${STEER_BIN}" ] || STEER_BIN=steer
 "${STEER_BIN}" status --json > "${TMPDIR:-/tmp}/steer-preflight-status.json"
 ```
 
@@ -431,12 +438,13 @@ stored case is rerunnable evidence. A count is not.
 
 ### Step 4: Register the Hook
 
-Use the steer CLI to register the hook. Use `steer` from PATH if available, otherwise fall back to the plugin root (`PLUGIN_ROOT` on Codex, `CLAUDE_PLUGIN_ROOT` on Claude Code). Run a **single command** — do not try one and then the other:
+Use the steer CLI to register the hook, resolved as in Pre-flight: the bundled launcher, else `steer` on PATH. Run a **single command** — do not try one and then the other:
 
 ```bash
 STEER_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}"
-STEER_BIN="${STEER_ROOT:+${STEER_ROOT}/scripts/steer}"
-STEER_BIN="${STEER_BIN:-steer}"
+STEER_ROOT="${STEER_ROOT:-<SKILL_DIR>/../..}"
+STEER_BIN="${STEER_ROOT}/scripts/steer"
+[ -x "${STEER_BIN}" ] || STEER_BIN=steer
 "${STEER_BIN}" register <store>/hooks/<rule-name>-hook.py --rule "<original rule text>" --scope <project|global> \
   --source generated \
   --prompt-version "<prompt_version from SKILL.md frontmatter>" \

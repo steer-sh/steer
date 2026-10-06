@@ -2,7 +2,7 @@
 name: steer-setup
 description: Set up steer after installing the plugin — pick a reviewer CLI and model, arm the commit gate for this agent, and place the stable executable. Use for first-time steer setup, when adding a second harness (Claude Code or Codex) to an existing steer install, or when the user asks to configure, arm or repair the commit gate. Also arms repository checks at turn end and moves a personal check gate into Steer.
 user-invocable: true
-compatibility: Runs the steer CLI from PATH, or from the bundled launcher under the plugin root (PLUGIN_ROOT on Codex, CLAUDE_PLUGIN_ROOT on Claude Code). Writes ~/.steer/config.json and the invoking harness's hook registration. Needs an installed, authenticated reviewer CLI — claude, codex or agy.
+compatibility: Runs the bundled launcher at the plugin root (CLAUDE_PLUGIN_ROOT on Claude Code, two directories above this skill on Codex), or the steer CLI from PATH. Writes ~/.steer/config.json and the invoking harness's hook registration. Needs an installed, authenticated reviewer CLI — claude, codex or agy.
 allowed-tools: Bash(steer *), Read
 ---
 
@@ -20,12 +20,16 @@ reviewer left exactly as it is.
 ## Step 0: Resolve the CLI
 
 Prefer the launcher bundled with the plugin, and fall back to `steer` on PATH when
-the plugin root is not set. Run a **single command**:
+there is none. Replace `<SKILL_DIR>` with the absolute directory that holds this
+SKILL.md; the harness names it when it loads the skill. Claude Code fills in its
+plugin root itself, but Codex gives a skill no plugin root, so there the launcher
+is found only through `<SKILL_DIR>`. Run a **single command**:
 
 ```bash
 STEER_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}"
-STEER_BIN="${STEER_ROOT:+${STEER_ROOT}/scripts/steer}"
-STEER_BIN="${STEER_BIN:-steer}"
+STEER_ROOT="${STEER_ROOT:-<SKILL_DIR>/../..}"
+STEER_BIN="${STEER_ROOT}/scripts/steer"
+[ -x "${STEER_BIN}" ] || STEER_BIN=steer
 "${STEER_BIN}" --help >/dev/null && echo "steer resolved: ${STEER_BIN}"
 ```
 

@@ -49,10 +49,13 @@ Respect the user's choice. If the conversation is fresh, skip the warning and pr
 
 A deterministic tier runs this loop's mechanical half — scoring, corpus sweeps, threshold checks — with no model. It may have run on a schedule already; run it again now, synchronously, so you never read a stale queue. It takes seconds and spends no tokens. Run it first, so the snapshot and the scores below read the session history it refreshed.
 
+Every `steer` command in this skill runs the launcher bundled with the plugin, or `steer` on PATH when there is none. Replace `<SKILL_DIR>` with the absolute directory that holds this SKILL.md; the harness names it when it loads the skill. Codex gives a skill no plugin root, so there the launcher is found only through `<SKILL_DIR>`.
+
 ```bash
 STEER_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}"
-STEER_BIN="${STEER_ROOT:+${STEER_ROOT}/scripts/steer}"
-STEER_BIN="${STEER_BIN:-steer}"
+STEER_ROOT="${STEER_ROOT:-<SKILL_DIR>/../..}"
+STEER_BIN="${STEER_ROOT}/scripts/steer"
+[ -x "${STEER_BIN}" ] || STEER_BIN=steer
 "${STEER_BIN}" report refresh --days 30
 ```
 
@@ -124,12 +127,13 @@ case: the fail-soft rule above reads `audit.md` anyway.
 
 ### 2a. Transcript friction
 
-Prefer the launcher bundled with the plugin (`PLUGIN_ROOT` on Codex, `CLAUDE_PLUGIN_ROOT` on Claude Code), and fall back to `steer` on PATH when the plugin root is not set. Redirect every report output to a temp file and Read the file once — via Read, not via command output, which a harness can cut. Run a **single command** for the scan:
+Resolve the CLI as in Step 1. Redirect every report output to a temp file and Read the file once — via Read, not via command output, which a harness can cut. Run a **single command** for the scan:
 
 ```bash
 STEER_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}"
-STEER_BIN="${STEER_ROOT:+${STEER_ROOT}/scripts/steer}"
-STEER_BIN="${STEER_BIN:-steer}"
+STEER_ROOT="${STEER_ROOT:-<SKILL_DIR>/../..}"
+STEER_BIN="${STEER_ROOT}/scripts/steer"
+[ -x "${STEER_BIN}" ] || STEER_BIN=steer
 "${STEER_BIN}" report --days 30 > "${TMPDIR:-/tmp}/steer-index.json"
 ```
 

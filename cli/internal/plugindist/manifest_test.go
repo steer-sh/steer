@@ -303,6 +303,56 @@ func TestSkillsExpandTheClaudePluginRootPlaceholder(t *testing.T) {
 	}
 }
 
+const (
+	pluginRootLine = `STEER_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}"`
+	skillDirLine   = `STEER_ROOT="${STEER_ROOT:-<SKILL_DIR>/../..}"`
+)
+
+// Codex gives a skill no plugin root, so each resolution falls back to the
+// launcher two directories above the skill, which must hold scripts/steer.
+func TestSkillsResolveTheLauncherBesideTheSkill(t *testing.T) {
+	root := repoRoot(t)
+	dirs := map[string]bool{}
+	for _, rel := range pluginManifests {
+		skills, _ := readJSON(t, filepath.Join(root, rel))["skills"].([]any)
+		for _, s := range skills {
+			dir, _ := s.(string)
+			dirs[filepath.Join(root, strings.TrimPrefix(dir, "./"))] = true
+		}
+	}
+	total := 0
+	for dir := range dirs {
+		raw, err := os.ReadFile(filepath.Join(dir, "SKILL.md"))
+		if err != nil {
+			t.Fatalf("read %s: %v", dir, err)
+		}
+		lines := strings.Split(string(raw), "\n")
+		sites := 0
+		for i, line := range lines {
+			if !strings.HasPrefix(line, `STEER_ROOT="${PLUGIN_ROOT`) {
+				continue
+			}
+			sites++
+			if line != pluginRootLine || i+1 >= len(lines) || lines[i+1] != skillDirLine {
+				t.Errorf("%s/SKILL.md:%d resolves the launcher without %s then %s", dir, i+1, pluginRootLine, skillDirLine)
+			}
+		}
+		total += sites
+		if sites == 0 {
+			continue
+		}
+		info, err := os.Stat(filepath.Join(dir, "..", "..", "scripts", "steer"))
+		if err != nil {
+			t.Errorf("%s: no launcher two directories above the skill: %v", dir, err)
+		} else if info.Mode().Perm()&0o111 == 0 {
+			t.Errorf("%s: the launcher two directories above the skill is not executable", dir)
+		}
+	}
+	if total == 0 {
+		t.Error("no skill resolves the bundled launcher")
+	}
+}
+
 func mustJSON(t *testing.T, v any) string {
 	t.Helper()
 	raw, err := json.MarshalIndent(v, "", "  ")
