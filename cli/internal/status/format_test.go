@@ -1,6 +1,7 @@
 package status
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -96,5 +97,23 @@ func TestCheckRunPhraseNamesSourceAndDispositionInWords(t *testing.T) {
 		if got := CheckRunPhrase(&c.run); got != c.want {
 			t.Errorf("got %q, want %q", got, c.want)
 		}
+	}
+}
+
+func TestRunnersWithoutInterpreterNamesRegisteredRunnersOnly(t *testing.T) {
+	missing := ReadInterpreter(func(string) (string, error) { return "", errors.New("not found") })
+	found := ReadInterpreter(func(string) (string, error) { return "/usr/bin/python3", nil })
+	masters := []MasterRuntime{
+		{Harness: "claude-code", Scope: "global", State: MasterCurrent, Path: "/h/.steer/hooks/steer-hooks.py"},
+		{Harness: "codex", Scope: "global", State: MasterDetached, Store: "/h/.steer/hooks/steer-hooks.py"},
+	}
+	if got := RunnersWithoutInterpreter(masters, missing); len(got) != 1 || got[0].Harness != "claude-code" {
+		t.Fatalf("with python3 missing, got %+v; want the one registered runner", got)
+	}
+	if got := RunnersWithoutInterpreter(masters, found); got != nil {
+		t.Fatalf("with python3 found, got %+v", got)
+	}
+	if got := RunnersWithoutInterpreter(masters[1:], missing); got != nil {
+		t.Fatalf("with no runner registered, got %+v", got)
 	}
 }

@@ -9,6 +9,7 @@ package status
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -70,7 +71,7 @@ import (
 // answer `steer status` prints, so an agent reads trust and resolution with it.
 // v29 adds posture.plugins: each harness's cached plugin copy, read against the
 // stable executable.
-const StatusVersion = 30
+const StatusVersion = 31
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20
@@ -376,6 +377,9 @@ type Posture struct {
 	Plugins []PluginCopy `json:"plugins"`
 	// Mods is each enabled Claude Code mod read against its cached inspection.
 	Mods []mods.Exposure `json:"mods"`
+	// GuardInterpreter is whether this process finds the interpreter every guard
+	// runner starts under.
+	GuardInterpreter InterpreterReading `json:"guard_interpreter"`
 	// HookTimeout is the harness timeout, in seconds, a commit-gate registration
 	// needs under the current reviewer timeout.
 	HookTimeout int `json:"-"`
@@ -636,17 +640,18 @@ func recentChains(chains []mine.Chain, limit int) []ChainSummary {
 func collectPosture(cfg gate.Config, ev mine.EvidenceSet) Posture {
 	observed := observedChannels(ev)
 	p := Posture{
-		Instrument:  cfg.InstrumentID(),
-		Reviewer:    cfg.ReviewerModel,
-		Ledger:      cfg.LogFile(),
-		CommitGate:  []ScopeArming{},
-		Resolver:    []ScopeArming{},
-		Masters:     []MasterRuntime{},
-		Rules:       []RulesPresence{},
-		Plugins:     PluginCopies(),
-		Mods:        ModExposures(),
-		Unresolved:  resolve.CountUnresolved(cfg),
-		HookTimeout: cfg.HookTimeout(),
+		Instrument:       cfg.InstrumentID(),
+		Reviewer:         cfg.ReviewerModel,
+		Ledger:           cfg.LogFile(),
+		CommitGate:       []ScopeArming{},
+		Resolver:         []ScopeArming{},
+		Masters:          []MasterRuntime{},
+		Rules:            []RulesPresence{},
+		Plugins:          PluginCopies(),
+		Mods:             ModExposures(),
+		GuardInterpreter: ReadInterpreter(exec.LookPath),
+		Unresolved:       resolve.CountUnresolved(cfg),
+		HookTimeout:      cfg.HookTimeout(),
 	}
 	cwd, _ := os.Getwd()
 	claudeID := string(harness.ClaudeCode)

@@ -180,7 +180,7 @@ A correction occurrence can carry two context fields, each `{text, cut}` with `c
 
 An `after_interrupt` occurrence carries the same two fields, read from before the interrupt.
 
-### The `steer status --json` contract (`status_version: 30`)
+### The `steer status --json` contract (`status_version: 31`)
 
 Step 1 reads this snapshot for posture and the full class inventory. The unit is
 the failure class and what the corpus recorded about it, not the hook count. This
@@ -222,7 +222,8 @@ match or coverage maps, which `steer fix score --json` carries by the same `id`;
 `chains` is gone. v28 adds `posture.readiness`: the answer `steer status` prints.
 v29 adds `posture.plugins`: each harness's cached plugin copy, read against the
 stable executable. v30 adds `posture.mods`: each enabled Claude Code mod, read
-against the cache `steer mods inspect` writes.
+against the cache `steer mods inspect` writes. v31 adds `posture.guard_interpreter`:
+whether this process finds the interpreter every guard runner starts under.
 
 - `status_version` — the schema version. `--json` is a stable agent contract.
 - `posture` — the arming state: `instrument` (reviewer model / runs / prompt
@@ -323,6 +324,12 @@ against the cache `steer mods inspect` writes.
   Built-in mods and `--plugin-dir` plugins have no install record and are absent.
   **Act on `uninspected`, `stale` or `failed`:** run `steer mods inspect`. A
   `tool-hooks` row is the operator's decision: the mod may be one they trust.
+  `guard_interpreter` is `command` (`python3`) and `found`, whether it is on this
+  process's PATH. Every guard runner starts under it, and a runner that cannot
+  start allows every call. The commit gate and the check runner do not need it.
+  Like `resolvable`, it can prove the interpreter absent and never prove a hook
+  runs. **Act on `found: false` when a `masters[]` row has a `path`:** tell the
+  user that their guards enforce nothing until Python 3 is installed.
 - `checks` — this repository's check tier on this machine, with an empty reading
   when `steer status` ran outside a repository. `repo` is the resolved Git root,
   `manifest` says whether it declares checks, and `adopted` / `adopted_at` say

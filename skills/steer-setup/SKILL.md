@@ -48,6 +48,12 @@ could not be resolved. Do not try to install it by another route.
 Read the status file with the Read tool, to its end. Its `posture.commit_gate[]` has
 one row per harness per scope, with `harness`, `scope` and `registered`.
 
+When `posture.guard_interpreter.found` is false, tell the user once: guards run
+under `python3`, which this shell cannot find, and a guard that cannot start allows
+every call. If the harness cannot find it either, any guard already installed, or
+added later, enforces nothing until they install Python 3. Setup continues, because
+the commit gate and repository checks do not need it.
+
 Read both before you write anything. They tell you which of two paths you are on:
 
 - **First-time setup** — `config show` reports every value as the shipped default and

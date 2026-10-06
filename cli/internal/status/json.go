@@ -32,17 +32,18 @@ type statusJSON struct {
 
 // postureJSON is Posture with each resolver row cut to its arming readings.
 type postureJSON struct {
-	Instrument string          `json:"instrument"`
-	Reviewer   string          `json:"reviewer"`
-	Ledger     string          `json:"ledger"`
-	CommitGate []ScopeArming   `json:"commit_gate"`
-	Resolver   []resolverJSON  `json:"resolver"`
-	Unresolved int             `json:"unresolved_rows"`
-	Masters    []MasterRuntime `json:"masters"`
-	Rules      []RulesPresence `json:"rules"`
-	Plugins    []PluginCopy    `json:"plugins"`
-	Mods       []mods.Exposure `json:"mods"`
-	Readiness  readinessJSON   `json:"readiness"`
+	Instrument       string             `json:"instrument"`
+	Reviewer         string             `json:"reviewer"`
+	Ledger           string             `json:"ledger"`
+	CommitGate       []ScopeArming      `json:"commit_gate"`
+	Resolver         []resolverJSON     `json:"resolver"`
+	Unresolved       int                `json:"unresolved_rows"`
+	Masters          []MasterRuntime    `json:"masters"`
+	Rules            []RulesPresence    `json:"rules"`
+	Plugins          []PluginCopy       `json:"plugins"`
+	Mods             []mods.Exposure    `json:"mods"`
+	GuardInterpreter InterpreterReading `json:"guard_interpreter"`
+	Readiness        readinessJSON      `json:"readiness"`
 }
 
 // readinessJSON is ReadinessOf, the answer `steer status` prints: whether a commit
@@ -130,17 +131,18 @@ func (s *SystemStatus) contract() statusJSON {
 		StatusVersion: s.StatusVersion,
 		GeneratedAt:   s.GeneratedAt,
 		Posture: postureJSON{
-			Instrument: s.Posture.Instrument,
-			Reviewer:   s.Posture.Reviewer,
-			Ledger:     s.Posture.Ledger,
-			CommitGate: nonNil(s.Posture.CommitGate),
-			Resolver:   []resolverJSON{},
-			Unresolved: s.Posture.Unresolved,
-			Masters:    nonNil(s.Posture.Masters),
-			Rules:      nonNil(s.Posture.Rules),
-			Plugins:    nonNil(s.Posture.Plugins),
-			Mods:       nonNil(s.Posture.Mods),
-			Readiness:  readinessRow(ReadinessOf(s, s.ReviewerProbe)),
+			Instrument:       s.Posture.Instrument,
+			Reviewer:         s.Posture.Reviewer,
+			Ledger:           s.Posture.Ledger,
+			CommitGate:       nonNil(s.Posture.CommitGate),
+			Resolver:         []resolverJSON{},
+			Unresolved:       s.Posture.Unresolved,
+			Masters:          nonNil(s.Posture.Masters),
+			Rules:            nonNil(s.Posture.Rules),
+			Plugins:          nonNil(s.Posture.Plugins),
+			Mods:             nonNil(s.Posture.Mods),
+			GuardInterpreter: s.Posture.GuardInterpreter,
+			Readiness:        readinessRow(ReadinessOf(s, s.ReviewerProbe)),
 		},
 		Checks:        s.Checks,
 		Interventions: []fixSummaryJSON{},

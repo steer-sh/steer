@@ -112,6 +112,7 @@ func renderStatus(s *status.SystemStatus, probe reviewers.Probe) {
 	renderReadiness(status.ReadinessOf(s, probe), width)
 	fmt.Println()
 	renderStoreProblems(s, width)
+	renderGuardInterpreter(s, width)
 	renderPluginCopies(s, width)
 	fmt.Print(styles.Wrap(styles.MutedText.Render("Fixes, recorded problems and arming: steer dashboard"), "  ", width))
 	fmt.Print(styles.Wrap(styles.MutedText.Render("An agent reads the whole loop: steer status --json"), "  ", width))
@@ -133,6 +134,30 @@ func renderStoreProblems(s *status.SystemStatus, width int) {
 				{"Next", []string{"edit the entry named above; the guards already installed keep running"}},
 			}, width))
 	}
+	fmt.Println()
+}
+
+// renderGuardInterpreter prints the registered guard runners when python3 is not on
+// PATH. Such a runner allows every call, and nothing else in this report says so.
+func renderGuardInterpreter(s *status.SystemStatus, width int) {
+	runners := status.RunnersWithoutInterpreter(s.Posture.Masters, s.Posture.GuardInterpreter)
+	if len(runners) == 0 {
+		return
+	}
+	where := make([]string, len(runners))
+	for i, m := range runners {
+		where[i] = status.HarnessLabel(m.Harness) + " " + m.Scope + ": " + m.Path
+	}
+	fmt.Println(styles.SectionHeader.Render("Guard runner"))
+	fmt.Print(problemEntry(
+		styles.WarningText.Render("Guards may allow every call: "+status.GuardInterpreter+" is not on this PATH"),
+		[]problemField{
+			{"Where", where},
+			{"Why", []string{"each guard runner starts under " + status.GuardInterpreter +
+				", and a runner that cannot start allows every call; the harness runs it under its own PATH",
+				"the commit gate and repository checks do not need it"}},
+			{"Next", []string{"install Python 3, then run: steer status"}},
+		}, width))
 	fmt.Println()
 }
 

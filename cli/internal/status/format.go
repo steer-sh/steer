@@ -478,3 +478,36 @@ func CheckStatePhrase(c CheckRow) string {
 	}
 	return phrase
 }
+
+// GuardInterpreter is the interpreter every registered guard runner starts under.
+const GuardInterpreter = "python3"
+
+// InterpreterReading is whether this process finds the guard interpreter on PATH. The
+// harness runs a hook under its own PATH, so a found interpreter proves nothing about
+// the hook and only a missing one is worth reporting.
+type InterpreterReading struct {
+	Command string `json:"command"`
+	Found   bool   `json:"found"`
+}
+
+// ReadInterpreter looks GuardInterpreter up with lookPath.
+func ReadInterpreter(lookPath func(string) (string, error)) InterpreterReading {
+	_, err := lookPath(GuardInterpreter)
+	return InterpreterReading{Command: GuardInterpreter, Found: err == nil}
+}
+
+// RunnersWithoutInterpreter lists the registered guard runners when the interpreter
+// is missing, and nil when it is found or none is registered. A runner whose
+// interpreter is missing allows every call, so its guards enforce nothing.
+func RunnersWithoutInterpreter(masters []MasterRuntime, interp InterpreterReading) []MasterRuntime {
+	var registered []MasterRuntime
+	for _, m := range masters {
+		if m.Path != "" {
+			registered = append(registered, m)
+		}
+	}
+	if len(registered) == 0 || interp.Found {
+		return nil
+	}
+	return registered
+}

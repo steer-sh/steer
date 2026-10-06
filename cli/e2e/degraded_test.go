@@ -71,6 +71,9 @@ func TestGuardsWithoutPython3DoNotBlock(t *testing.T) {
 			if r.Code == 2 || strings.Contains(r.Stdout, `"deny"`) {
 				t.Errorf("a master that cannot start blocks the tool call (exit %d):\n%s", r.Code, r.Output())
 			}
+			if out := s.MustSteer("status").Output(); !strings.Contains(out, "Guards may allow every call: python3 is not on this PATH") {
+				t.Errorf("status does not name the missing python3:\n%s", out)
+			}
 		})
 	}
 }

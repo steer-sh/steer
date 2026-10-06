@@ -820,6 +820,12 @@ reads that cache by a file fingerprint and starts no process, so a mod without a
 current inspection reads as uninspected, never as safe. Readiness lists bypass-capable
 and uninspected mods as unverified beside a Claude Code registration.
 
+Every guard runner starts under `python3`, and a runner that cannot start allows
+every call. `posture.guard_interpreter` is a PATH lookup in the status process, a
+proxy like a registration's `resolvable`: it can prove the interpreter absent and
+never prove a hook runs. The JSON always carries it; the text `steer status` prints a
+section for it only when it is missing and a runner is registered.
+
 The check tier is one section of that snapshot, read through
 `checks.StateOf`, the single reader of a repository's check state that `steer
 check list` and the queue share. A repository's declaration, this machine's

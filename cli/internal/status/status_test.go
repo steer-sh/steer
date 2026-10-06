@@ -190,7 +190,7 @@ func intPtr(n int) *int           { return &n }
 // so a renamed or reordered json tag fails here, the agent-contract guard.
 func TestJSONContractIsStable(t *testing.T) {
 	s := &SystemStatus{
-		StatusVersion: 30,
+		StatusVersion: 31,
 		GeneratedAt:   "2026-01-01T00:00:00Z",
 		Posture: Posture{
 			Instrument: "agy@sha", Reviewer: "gemini", Ledger: "/l.jsonl",
@@ -237,7 +237,8 @@ func TestJSONContractIsStable(t *testing.T) {
 					State: mods.StateToolHooks, Handlers: []string{"tool.call{tool=Bash}", "tool.check"}, InspectedAt: 1720},
 				{ID: "pane@m", Path: "/h/.claude/plugins/cache/m/pane/0.1.0", Enabled: "project", State: mods.StateUninspected},
 			},
-			Unresolved: 4,
+			GuardInterpreter: InterpreterReading{Command: "python3", Found: true},
+			Unresolved:       4,
 		},
 		Checks: CheckTier{
 			Repo: "/w/steer", Manifest: true, Adopted: true, AdoptedAt: 1600,
@@ -341,7 +342,7 @@ func TestJSONContractIsStable(t *testing.T) {
 }
 
 const goldenStatusJSON = `{
-  "status_version": 30,
+  "status_version": 31,
   "generated_at": "2026-01-01T00:00:00Z",
   "posture": {
     "instrument": "agy@sha",
@@ -492,6 +493,10 @@ const goldenStatusJSON = `{
         "state": "uninspected"
       }
     ],
+    "guard_interpreter": {
+      "command": "python3",
+      "found": true
+    },
     "readiness": {
       "reviewing": true,
       "headline": "Commits here are reviewed before they land — Claude Code global.",
