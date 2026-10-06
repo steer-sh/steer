@@ -19,6 +19,10 @@ func TestPresetDisableRemovesTheInternalPresetItsBlockNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	_, visible := loadCatalogAndOneVisiblePreset(t)
+	if _, err := presets.EnablePreset(claude.ProjectScope, catalog, visible, false); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := presets.EnsureAutoManagedFactoryPresets(claude.ProjectScope, catalog, false); err != nil {
 		t.Fatal(err)
 	}

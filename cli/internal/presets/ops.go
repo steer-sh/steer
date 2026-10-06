@@ -35,6 +35,7 @@ type SyncResult struct {
 	MissingFile     int
 	ContentDrift    int
 	InternalEnsured int
+	InternalRemoved int
 	DryRunPlanned   int
 	OrphansKept     int
 	OrphansPruned   int
@@ -160,8 +161,22 @@ func InstallFactoryPreset(scope string, catalog *Catalog, item CatalogItem, forc
 	return result, nil
 }
 
-// DisablePreset removes one factory preset from the scope's managed hooks.
-func DisablePreset(scope string, item CatalogItem, force bool, targets ...harness.Registrar) (string, error) {
+// DisablePreset removes one factory preset from the scope's managed hooks. When it
+// removes the last visible factory preset, it also removes the internal presets
+// that exist only beside one, and returns them.
+func DisablePreset(scope string, catalog *Catalog, item CatalogItem, force bool, targets ...harness.Registrar) (string, []CatalogItem, error) {
+	status, err := disablePreset(scope, item, force, targets...)
+	if err != nil || item.Internal {
+		return status, nil, err
+	}
+	removed, err := RemoveAutoManagedFactoryPresets(scope, catalog, false, targets...)
+	if err != nil {
+		return status, removed, fmt.Errorf("%s is %s, but removing the internal presets beside it failed: %w", item.Name, status, err)
+	}
+	return status, removed, nil
+}
+
+func disablePreset(scope string, item CatalogItem, force bool, targets ...harness.Registrar) (string, error) {
 	hookName := strings.TrimSuffix(item.HookFile, ".py")
 	if hookName == "" {
 		return "", fmt.Errorf("invalid preset hook_file for %s", item.Name)
@@ -217,6 +232,10 @@ func EnsureAutoManagedFactoryPresets(scope string, catalog *Catalog, dryRun bool
 		return nil, err
 	}
 
+	if !factoryPresetEnabled(manifest, catalog, true) {
+		return nil, nil
+	}
+
 	var ensured []CatalogItem
 	for _, item := range catalog.InternalAutoEnabled() {
 		hookName := strings.TrimSuffix(item.HookFile, ".py")
@@ -257,6 +276,57 @@ func EnsureAutoManagedFactoryPresets(scope string, catalog *Catalog, dryRun bool
 	return ensured, nil
 }
 
+// RemoveAutoManagedFactoryPresets removes the internal auto-managed presets when no
+// visible factory preset is enabled, and returns the ones it removed, or would remove
+// under dryRun. Each removal syncs the rules, so their Steer Rules lines go too.
+func RemoveAutoManagedFactoryPresets(scope string, catalog *Catalog, dryRun bool, targets ...harness.Registrar) ([]CatalogItem, error) {
+	manifest, err := claude.LoadManifest(scope)
+	if err != nil {
+		return nil, err
+	}
+	if factoryPresetEnabled(manifest, catalog, true) {
+		return nil, nil
+	}
+	return removeAutoManaged(scope, catalog, manifest, dryRun, targets...)
+}
+
+func removeAutoManaged(scope string, catalog *Catalog, manifest *claude.Manifest, dryRun bool, targets ...harness.Registrar) ([]CatalogItem, error) {
+	var removed []CatalogItem
+	for _, item := range catalog.InternalAutoEnabled() {
+		hookName := strings.TrimSuffix(item.HookFile, ".py")
+		entry, ok := manifest.Hooks[hookName]
+		if !ok || !strings.EqualFold(strings.TrimSpace(entry.Source), claude.SourceFactory) || strings.TrimSpace(entry.SourceID) != item.Name {
+			continue
+		}
+		removed = append(removed, item)
+		if dryRun {
+			continue
+		}
+		opts := claude.RemoveOptions{CatalogCopy: true, Reason: "no factory preset remains enabled"}
+		if _, err := claude.RemoveManagedHook(scope, hookName, opts, targets...); err != nil {
+			return removed, err
+		}
+	}
+	return removed, nil
+}
+
+// factoryPresetEnabled reports whether the manifest holds a factory guard other than
+// an internal preset: a visible preset, or, when orphans count, an orphan whose
+// preset left the catalog. Internal auto-managed presets exist only beside one.
+func factoryPresetEnabled(manifest *claude.Manifest, catalog *Catalog, orphans bool) bool {
+	for _, entry := range manifest.Hooks {
+		if !strings.EqualFold(strings.TrimSpace(entry.Source), claude.SourceFactory) {
+			continue
+		}
+		sourceID := strings.TrimSpace(entry.SourceID)
+		item, ok := catalog.Find(sourceID)
+		if (ok && !item.Internal) || (!ok && orphans) {
+			return true
+		}
+	}
+	return false
+}
+
 // SyncFactoryPresets reconciles enabled factory presets with the embedded catalog.
 func SyncFactoryPresets(scope string, catalog *Catalog, options SyncOptions, targets ...harness.Registrar) (*SyncResult, error) {
 	result := &SyncResult{}
@@ -274,6 +344,8 @@ func SyncFactoryPresets(scope string, catalog *Catalog, options SyncOptions, tar
 		factoryHookNames = append(factoryHookNames, hookName)
 	}
 	sort.Strings(factoryHookNames)
+	// A pruned orphan is gone by the end of this sync, so it keeps nothing installed.
+	visibleEnabled := factoryPresetEnabled(manifest, catalog, !options.PruneOrphans)
 
 	ensuredInternal := map[string]struct{}{}
 	for _, hookName := range factoryHookNames {
@@ -305,6 +377,9 @@ func SyncFactoryPresets(scope string, catalog *Catalog, options SyncOptions, tar
 		}
 
 		if item.Internal && item.AutoEnableWithFactory {
+			if !visibleEnabled {
+				continue
+			}
 			ensuredInternal[item.Name] = struct{}{}
 		}
 
@@ -338,7 +413,20 @@ func SyncFactoryPresets(scope string, catalog *Catalog, options SyncOptions, tar
 		result.Reinstalled++
 	}
 
+	if !visibleEnabled {
+		removed, err := removeAutoManaged(scope, catalog, manifest, options.DryRun, targets...)
+		result.InternalRemoved = len(removed)
+		if options.DryRun {
+			result.DryRunPlanned += len(removed)
+		}
+		if err != nil {
+			return result, err
+		}
+	}
 	for _, item := range catalog.InternalAutoEnabled() {
+		if !visibleEnabled {
+			break
+		}
 		if _, seen := ensuredInternal[item.Name]; seen {
 			continue
 		}

@@ -9,6 +9,7 @@ import (
 
 	"github.com/steer-sh/steer-cli/internal/archive"
 	"github.com/steer-sh/steer-cli/internal/claude"
+	"github.com/steer-sh/steer-cli/internal/harness"
 )
 
 func withPresetProjectTempDir(t *testing.T) string {
@@ -53,13 +54,13 @@ func loadCatalogAndOneVisiblePreset(t *testing.T) (*Catalog, CatalogItem) {
 	return catalog, item
 }
 
-func installVisibleAndInternal(t *testing.T, scope string, catalog *Catalog, visible CatalogItem) {
+func installVisibleAndInternal(t *testing.T, scope string, catalog *Catalog, visible CatalogItem, targets ...harness.Registrar) {
 	t.Helper()
 
-	if _, err := EnablePreset(scope, catalog, visible, false); err != nil {
+	if _, err := EnablePreset(scope, catalog, visible, false, targets...); err != nil {
 		t.Fatalf("EnablePreset returned error: %v", err)
 	}
-	if _, err := EnsureAutoManagedFactoryPresets(scope, catalog, false); err != nil {
+	if _, err := EnsureAutoManagedFactoryPresets(scope, catalog, false, targets...); err != nil {
 		t.Fatalf("EnsureAutoManagedFactoryPresets returned error: %v", err)
 	}
 }
@@ -397,7 +398,7 @@ func TestDisablingAFactoryPresetWritesNoArchive(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := DisablePreset(claude.ProjectScope, item, false); err != nil {
+	if _, _, err := DisablePreset(claude.ProjectScope, catalog, item, false); err != nil {
 		t.Fatal(err)
 	}
 	hooksDir, err := claude.GetHooksDir(claude.ProjectScope)
@@ -431,5 +432,134 @@ func TestPruningAnOrphanArchivesIt(t *testing.T) {
 	}
 	if len(entries) != 1 || entries[0].ID != "orphan-prune" {
 		t.Fatalf("the pruned orphan has no archive entry: %+v", entries)
+	}
+}
+
+func selfProtectionHook(t *testing.T, catalog *Catalog) string {
+	t.Helper()
+	item, ok := catalog.Find("steer-self-protection")
+	if !ok {
+		t.Fatal("expected internal preset steer-self-protection")
+	}
+	return strings.TrimSuffix(item.HookFile, ".py")
+}
+
+func manifestHas(t *testing.T, hookName string) bool {
+	t.Helper()
+	manifest, err := claude.LoadManifest(claude.ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, ok := manifest.Hooks[hookName]
+	return ok
+}
+
+func TestDisablingTheLastFactoryPresetRemovesSelfProtectionAndItsRules(t *testing.T) {
+	withPresetProjectTempDir(t)
+	catalog, visible := loadCatalogAndOneVisiblePreset(t)
+	installVisibleAndInternal(t, claude.ProjectScope, catalog, visible, claude.Registrar{})
+	if data, _ := os.ReadFile("CLAUDE.md"); !strings.Contains(string(data), "## Steer Rules") {
+		t.Fatalf("setup wrote no rules section:\n%s", data)
+	}
+
+	_, removed, err := DisablePreset(claude.ProjectScope, catalog, visible, false, claude.Registrar{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(removed) != 1 || removed[0].Name != "steer-self-protection" {
+		t.Fatalf("removed = %+v, want steer-self-protection", removed)
+	}
+	if manifestHas(t, selfProtectionHook(t, catalog)) {
+		t.Fatal("self-protection stayed after the last factory preset was disabled")
+	}
+	if data, _ := os.ReadFile("CLAUDE.md"); strings.Contains(string(data), "## Steer Rules") {
+		t.Fatalf("the rules section stayed with no rule left:\n%s", data)
+	}
+}
+
+func TestDisablingOneOfTwoFactoryPresetsKeepsSelfProtection(t *testing.T) {
+	withPresetProjectTempDir(t)
+	catalog, visible := loadCatalogAndOneVisiblePreset(t)
+	names, err := catalog.BundleMembers(BundleSecurity)
+	if err != nil || len(names) < 2 {
+		t.Fatalf("need two security presets, got %v (%v)", names, err)
+	}
+	sort.Strings(names)
+	second, _ := catalog.Find(names[1])
+	installVisibleAndInternal(t, claude.ProjectScope, catalog, visible)
+	if _, err := EnablePreset(claude.ProjectScope, catalog, second, false); err != nil {
+		t.Fatal(err)
+	}
+
+	_, removed, err := DisablePreset(claude.ProjectScope, catalog, visible, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(removed) != 0 || !manifestHas(t, selfProtectionHook(t, catalog)) {
+		t.Fatalf("self-protection went while %s stayed enabled (removed %+v)", second.Name, removed)
+	}
+}
+
+func TestPresetSyncInstallsNoSelfProtectionWithoutAFactoryPreset(t *testing.T) {
+	withPresetProjectTempDir(t)
+	catalog, visible := loadCatalogAndOneVisiblePreset(t)
+
+	result, err := SyncFactoryPresets(claude.ProjectScope, catalog, SyncOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.InternalEnsured != 0 || manifestHas(t, selfProtectionHook(t, catalog)) {
+		t.Fatalf("sync installed self-protection with no factory preset: %+v", result)
+	}
+
+	installVisibleAndInternal(t, claude.ProjectScope, catalog, visible)
+	hookName := strings.TrimSuffix(visible.HookFile, ".py")
+	if _, err := claude.RemoveManagedHook(claude.ProjectScope, hookName, claude.RemoveOptions{CatalogCopy: true}); err != nil {
+		t.Fatal(err)
+	}
+	result, err = SyncFactoryPresets(claude.ProjectScope, catalog, SyncOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.InternalRemoved != 1 || manifestHas(t, selfProtectionHook(t, catalog)) {
+		t.Fatalf("sync kept self-protection with no factory preset: %+v", result)
+	}
+}
+
+func TestPresetSyncKeepsSelfProtectionBesideAnOrphan(t *testing.T) {
+	withPresetProjectTempDir(t)
+	catalog, visible := loadCatalogAndOneVisiblePreset(t)
+	installVisibleAndInternal(t, claude.ProjectScope, catalog, visible)
+	hookName := strings.TrimSuffix(visible.HookFile, ".py")
+	if _, err := claude.RemoveManagedHook(claude.ProjectScope, hookName, claude.RemoveOptions{CatalogCopy: true}); err != nil {
+		t.Fatal(err)
+	}
+	addOrphanFactoryHook(t, claude.ProjectScope, "orphan-guard", "left-the-catalog", "orphan guard rule")
+
+	result, err := SyncFactoryPresets(claude.ProjectScope, catalog, SyncOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.InternalRemoved != 0 || !manifestHas(t, selfProtectionHook(t, catalog)) {
+		t.Fatalf("sync removed self-protection while an orphan factory guard stayed: %+v", result)
+	}
+}
+
+func TestPresetSyncPruningTheLastOrphanRemovesSelfProtection(t *testing.T) {
+	withPresetProjectTempDir(t)
+	catalog, visible := loadCatalogAndOneVisiblePreset(t)
+	installVisibleAndInternal(t, claude.ProjectScope, catalog, visible)
+	hookName := strings.TrimSuffix(visible.HookFile, ".py")
+	if _, err := claude.RemoveManagedHook(claude.ProjectScope, hookName, claude.RemoveOptions{CatalogCopy: true}); err != nil {
+		t.Fatal(err)
+	}
+	addOrphanFactoryHook(t, claude.ProjectScope, "orphan-last", "left-the-catalog", "orphan last rule")
+
+	result, err := SyncFactoryPresets(claude.ProjectScope, catalog, SyncOptions{PruneOrphans: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.OrphansPruned != 1 || result.InternalRemoved != 1 || manifestHas(t, selfProtectionHook(t, catalog)) {
+		t.Fatalf("one sync must prune the orphan and remove self-protection: %+v", result)
 	}
 }

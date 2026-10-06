@@ -209,12 +209,15 @@ var presetDisableCmd = &cobra.Command{
 			return fmt.Errorf("preset not found: %s", name)
 		}
 
-		status, err := presets.DisablePreset(scope, item, force, targets...)
+		status, removed, err := presets.DisablePreset(scope, catalog, item, force, targets...)
 		if err != nil {
 			return err
 		}
 
 		message := fmt.Sprintf("Preset: %s\nStatus: %s\nScope: %s", name, status, scope)
+		if line := removedInternalLine(removed); line != "" {
+			message += "\n" + line
+		}
 		fmt.Println(styles.SuccessBox.Render(message))
 		return nil
 	},
@@ -333,7 +336,10 @@ var presetDisableBundleCmd = &cobra.Command{
 				continue
 			}
 			utils.Working(fmt.Sprintf("Disabling %s...", name))
-			status, err := presets.DisablePreset(scope, item, force, targets...)
+			status, removed, err := presets.DisablePreset(scope, catalog, item, force, targets...)
+			if line := removedInternalLine(removed); line != "" {
+				fmt.Println(styles.SuccessText.Render("✓ " + line))
+			}
 			if err != nil {
 				failureCount++
 				fmt.Println(styles.ErrorText.Render(fmt.Sprintf("✗ %s: %s", name, err)))
@@ -396,7 +402,7 @@ var presetSyncCmd = &cobra.Command{
 		}
 
 		summary := fmt.Sprintf(
-			"Scope: %s\nChecked factory presets: %d\nUp-to-date: %d\nReinstalled: %d\nMetadata drift: %d\nMissing file: %d\nContent drift: %d\nInternal ensured: %d\nOrphans kept: %d\nOrphans pruned: %d",
+			"Scope: %s\nChecked factory presets: %d\nUp-to-date: %d\nReinstalled: %d\nMetadata drift: %d\nMissing file: %d\nContent drift: %d\nInternal ensured: %d\nInternal removed: %d\nOrphans kept: %d\nOrphans pruned: %d",
 			scope,
 			result.CheckedFactory,
 			result.UpToDate,
@@ -405,6 +411,7 @@ var presetSyncCmd = &cobra.Command{
 			result.MissingFile,
 			result.ContentDrift,
 			result.InternalEnsured,
+			result.InternalRemoved,
 			result.OrphansKept,
 			result.OrphansPruned,
 		)
@@ -467,6 +474,16 @@ func internalPresetsLine(installed []presets.CatalogItem) string {
 	lines := make([]string, len(installed))
 	for i, item := range installed {
 		lines[i] = "Also installed: " + item.Name + "\n  " + item.Description
+	}
+	return strings.Join(lines, "\n")
+}
+
+// removedInternalLine names the internal presets a disable removed with the last
+// factory preset, or "" when it removed none.
+func removedInternalLine(removed []presets.CatalogItem) string {
+	lines := make([]string, len(removed))
+	for i, item := range removed {
+		lines[i] = "Also removed: " + item.Name + " (no factory preset remains enabled)"
 	}
 	return strings.Join(lines, "\n")
 }

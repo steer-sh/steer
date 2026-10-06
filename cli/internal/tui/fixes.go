@@ -688,20 +688,27 @@ func (m *Model) togglePreset(name string, on bool) {
 		m.note("%s is not a built-in guard in this Steer; x archives it instead", name)
 		return
 	}
+	var removed []presets.CatalogItem
 	if on {
-		_, err = presets.DisablePreset(m.scope, item, false, m.targets...)
+		_, removed, err = presets.DisablePreset(m.scope, catalog, item, false, m.targets...)
 	} else {
 		_, err = presets.EnablePreset(m.scope, catalog, item, false, m.targets...)
 		if err == nil {
 			_, err = presets.EnsureAutoManagedFactoryPresets(m.scope, catalog, false, m.targets...)
 		}
 	}
+	// A disable can fail after it removed the guard, so the panel reads the store
+	// before it reports the error.
+	m.refresh()
 	if err != nil {
 		m.note("error: %v", err)
 		return
 	}
-	m.refresh()
 	if on {
+		if len(removed) > 0 {
+			m.note("%s is off in %s; %s went with it, as no built-in guard remains", name, scopeReach(m.scope), removed[0].Name)
+			return
+		}
 		m.note("%s is off in %s", name, scopeReach(m.scope))
 		return
 	}
