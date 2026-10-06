@@ -217,10 +217,10 @@ changes the answer. Nothing else installs it. Ask the user; on yes:
 "${STEER_BIN}" statusline install --scope global
 ```
 
-Read what it prints, not its exit status. When the user already has a status line,
-it writes nothing and names two choices: `--wrap` keeps their row above Steer's, and
-`--replace` discards it. Relay both and run the one the user picks; never choose
-`--replace` for them. Codex has no status line, so skip this in Codex.
+When the user already has a status line, it writes nothing, exits 1 and names two
+choices: `--wrap` keeps their row above Steer's, and `--replace` discards it. That
+exit is the question, not a failed setup: do not retry it. Relay both choices and
+run the one the user picks; never choose `--replace` for them. Codex has no status line, so skip this in Codex.
 
 Finish by reading the answer back:
 

@@ -444,7 +444,7 @@ func SaveSettings(scope string, settings *Settings) error {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
-	if err := createBackup(settingsPath); err != nil {
+	if err := createBackup(scope, settingsPath); err != nil {
 		return fmt.Errorf("failed to create backup: %w", err)
 	}
 
@@ -460,24 +460,27 @@ func SaveSettings(scope string, settings *Settings) error {
 	return nil
 }
 
-// refuseSettingsOutsideBound refuses a settings file, or its backup, that
-// resolves outside the scope's bound. A project's .claude directory is
-// committed, so a link at the directory or at either file is one the repository
-// carried.
+// refuseSettingsOutsideBound refuses a settings file that resolves outside the
+// scope's bound. A project's .claude directory is committed, so a link at the
+// directory or at the file is one the repository carried.
 func refuseSettingsOutsideBound(scope, settingsPath string) error {
 	within, err := steerpath.LinkBound(scope)
 	if err != nil || within == "" {
 		return err
 	}
-	for _, path := range []string{settingsPath, settingsPath + BackupExtension} {
-		if !steerpath.Within(within, path) {
-			return fmt.Errorf("%s resolves outside %s; Steer writes a project's settings only inside its repository", path, within)
-		}
+	if !steerpath.Within(within, settingsPath) {
+		return fmt.Errorf("%s resolves outside %s; Steer writes a project's settings only inside its repository", settingsPath, within)
 	}
 	return nil
 }
 
-func createBackup(settingsPath string) error {
+// createBackup copies a global settings file beside itself before a write. A
+// project's file lives in a repository, whose history is its backup, so it gets
+// no copy.
+func createBackup(scope, settingsPath string) error {
+	if normalizeScope(scope) != GlobalScope {
+		return nil
+	}
 	if _, err := os.Stat(settingsPath); os.IsNotExist(err) {
 		return nil
 	}

@@ -135,9 +135,32 @@ func TestLoadSettingsMissingFileReturnsEmpty(t *testing.T) {
 	}
 }
 
+// A rewrite of the global settings file keeps the earlier bytes beside it; a
+// project's file gets no copy, which would sit untracked in the repository.
+func TestSaveSettingsBacksUpOnlyTheGlobalFile(t *testing.T) {
+	withProjectTempDir(t)
+	spacedHome(t)
+	for _, scope := range []string{ProjectScope, GlobalScope} {
+		if err := SaveSettings(scope, &Settings{}); err != nil {
+			t.Fatal(err)
+		}
+		if err := SaveSettings(scope, &Settings{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	project, _ := GetSettingsFile(ProjectScope)
+	if _, err := os.Stat(project + BackupExtension); !os.IsNotExist(err) {
+		t.Fatalf("project save left %s", project+BackupExtension)
+	}
+	global, _ := GetSettingsFile(GlobalScope)
+	if _, err := os.Stat(global + BackupExtension); err != nil {
+		t.Fatalf("global save left no backup: %v", err)
+	}
+}
+
 // A project settings file is written only where it resolves inside the
-// repository: a linked .claude directory, settings file or backup that leads
-// outside is refused and its target left as it was, and a link inside is kept.
+// repository: a linked .claude directory or settings file that leads outside
+// is refused and its target left as it was, and a link inside is kept.
 func TestSaveSettingsBoundsAProjectLinkByTheRepository(t *testing.T) {
 	const kept = "kept\n"
 	setup := map[string]func(t *testing.T, outside string){
@@ -151,17 +174,6 @@ func TestSaveSettingsBoundsAProjectLinkByTheRepository(t *testing.T) {
 				t.Fatal(err)
 			}
 			if err := os.Symlink(filepath.Join(outside, SettingsName), filepath.Join(ClaudeDirName, SettingsName)); err != nil {
-				t.Fatal(err)
-			}
-		},
-		"linked backup": func(t *testing.T, outside string) {
-			if err := os.Mkdir(ClaudeDirName, 0o755); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(filepath.Join(ClaudeDirName, SettingsName), []byte("{}\n"), 0o644); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.Symlink(filepath.Join(outside, SettingsName), filepath.Join(ClaudeDirName, SettingsName+BackupExtension)); err != nil {
 				t.Fatal(err)
 			}
 		},

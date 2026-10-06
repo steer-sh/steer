@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/steer-sh/steer-cli/internal/guard"
 	"github.com/steer-sh/steer-cli/internal/hookstore"
@@ -17,7 +18,7 @@ func asCommittedClone(t *testing.T) {
 	t.Helper()
 	settings, _ := GetSettingsFile(ProjectScope)
 	doc, _ := GetClaudeMDFile(ProjectScope)
-	for _, path := range []string{settings, settings + BackupExtension, doc} {
+	for _, path := range []string{settings, doc} {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			t.Fatalf("remove %s: %v", path, err)
 		}
@@ -171,8 +172,8 @@ func TestSyncStoreWritesNothingForATargetInSync(t *testing.T) {
 	withProjectTempDir(t)
 	installTestHook(t, "no-bare-python", "use python3 instead")
 	settings, _ := GetSettingsFile(ProjectScope)
-	backup := settings + BackupExtension
-	if err := os.Remove(backup); err != nil && !os.IsNotExist(err) {
+	past := time.Now().Add(-time.Hour).Truncate(time.Second)
+	if err := os.Chtimes(settings, past, past); err != nil {
 		t.Fatal(err)
 	}
 
@@ -183,7 +184,7 @@ func TestSyncStoreWritesNothingForATargetInSync(t *testing.T) {
 	if len(result.Synced) != 0 || len(result.Current) != 1 {
 		t.Fatalf("result = %#v", result)
 	}
-	if _, err := os.Stat(backup); !os.IsNotExist(err) {
+	if info, err := os.Stat(settings); err != nil || !info.ModTime().Equal(past) {
 		t.Fatal("sync saved settings.json for a target already in sync")
 	}
 }

@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/claude"
@@ -65,5 +67,31 @@ func TestStatusLineWrapTarget(t *testing.T) {
 					got, ok, tc.want, tc.wantOK)
 			}
 		})
+	}
+}
+
+// An occupied slot is refused with a failing exit, so a script that installs the
+// row can tell that nothing was written; the operator's entry stays as it was.
+func TestStatusLineInstallRefusesAnOccupiedSlot(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	settings := filepath.Join(home, claude.ClaudeDirName, claude.SettingsName)
+	if err := os.MkdirAll(filepath.Dir(settings), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const foreign = `{"statusLine": {"type": "command", "command": "~/.claude/statusline.sh"}}`
+	if err := os.WriteFile(settings, []byte(foreign), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := statusLineScope
+	statusLineScope = claude.GlobalScope
+	t.Cleanup(func() { statusLineScope = old })
+
+	if err := statusLineInstallCmd.RunE(statusLineInstallCmd, nil); err == nil {
+		t.Fatal("install over a foreign status line returned no error")
+	}
+	if raw, _ := os.ReadFile(settings); string(raw) != foreign {
+		t.Fatalf("install changed the settings file: %s", raw)
 	}
 }

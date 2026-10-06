@@ -124,7 +124,8 @@ prose. Rebuild and removal retries also synchronize it. Handwritten lines inside
 the managed section do not survive regeneration. A symlinked document is written
 at its target so the link survives; under project scope `steerpath.LinkBound`
 bounds that target to the repository, which carries the link. `claude.SaveSettings`
-applies the same bound to a project `.claude/settings.json` and its backup.
+applies the same bound to a project `.claude/settings.json`, and keeps a backup
+only of the global file: a project's file has its repository's history.
 `steerpath.Within` places a file not yet written by its directory, so a linked
 `.claude` leads outside too.
 

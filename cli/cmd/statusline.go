@@ -86,8 +86,8 @@ var statusLineInstallCmd = &cobra.Command{
 	Long: `install writes steer's status line into settings.json.
 
 The status line is one slot per scope, so an occupied slot is never taken silently.
-With a status line already registered, install writes nothing and names the two
-flags:
+With a status line already registered, install writes nothing, names the two
+flags and exits 1:
 
   --wrap     steer runs the existing command on the same payload, prints its rows,
              and adds its own row underneath. remove restores the command exactly.
@@ -124,7 +124,7 @@ allowManagedHooksOnly in managed settings.`,
 			fmt.Println("  steer statusline install --scope " + statusLineScope + " --wrap      keep it, add steer's row below")
 			fmt.Println("  steer statusline install --scope " + statusLineScope + " --replace   discard it")
 			fmt.Println("\nOr leave the slot alone and call `steer statusline` from your own script.")
-			return nil
+			return fmt.Errorf("the %s status line slot is taken; pass --wrap or --replace", statusLineScope)
 		}
 		if target, ok := statusLineWrapTarget(existing.Command, mine, statusLineWrap, statusLineReplace); ok {
 			command += " " + claude.EncodeWrapped(target)

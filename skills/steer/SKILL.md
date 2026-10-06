@@ -2,7 +2,7 @@
 name: steer
 description: Turns a natural-language rule into the fix that can enforce it — a repository check, a PreToolUse Python guard, or an instruction rule — and installs it. Use when enforcing coding standards, blocking insecure patterns, making sure checks pass before a turn ends, managing hook lifecycle, or running steer CLI commands (register, remove, list, test, preset, verify, git-hooks).
 user-invocable: true
-prompt_version: 19
+prompt_version: 20
 compatibility: Requires Claude Code or Codex with tool-call hook support. Hooks are installed into .steer/hooks/ and registered in every installed harness (settings.json for Claude Code, hooks.json for Codex). steer CLI must be available on PATH or bundled under scripts/.
 allowed-tools: Bash(steer *), Bash(python3 *), Bash(echo *), Read, Write, Edit
 ---
@@ -499,6 +499,11 @@ Expected: no stdout, exit code 0
 - Run 1 irrelevant tool test
 - If ANY test fails, fix the hook and retest ALL cases
 - Continue iterating until all tests pass
+- A Bash case whose command holds a `git commit` never goes inside `echo '...'`:
+  Steer's commit gate refuses a shell command that quotes commit text, and runs
+  none of it. Write that payload to a file with Write and run
+  `python3 <store>/hooks/<rule-name>-hook.py < <payload-file>`, or keep it only in
+  the cases file, which `steer test` replays from the file
 
 **Critical: Negative tests must stress the boundary.** Simple "obviously clean" code is not enough. At least one negative test MUST use the same construct as the positive tests but in a safe way. Examples:
 - If blocking `shell=True` with dynamic args, a negative test MUST include `shell=True` with `shlex.quote()` via an **intermediate variable** (not just inline):
