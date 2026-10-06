@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/config"
+	"github.com/steer-sh/steer-cli/internal/gate/mine"
 	"github.com/steer-sh/steer-cli/internal/gate/reviewers"
 	"github.com/steer-sh/steer-cli/internal/settings"
 	"github.com/steer-sh/steer-cli/internal/steerpath"
@@ -153,12 +154,16 @@ func reportReviewerImpact(next config.Config) {
 		utils.Warning(err.Error())
 		return
 	}
-	impacts := settings.Impact(cfg)
+	printImpacts("This reviewer change", settings.Impact(cfg))
+}
+
+// printImpacts lists the measurements a change lands in, or nothing when it moves none.
+func printImpacts(change string, impacts []mine.InstrumentImpact) {
 	if len(impacts) == 0 {
 		return
 	}
-	utils.Warning(fmt.Sprintf("This reviewer change lands in %d measurement(s) already collecting:",
-		len(impacts)))
+	utils.Warning(fmt.Sprintf("%s lands in %d measurement(s) already collecting:",
+		change, len(impacts)))
 	width := settings.ImpactWidth(impacts)
 	for _, im := range impacts {
 		fmt.Printf("    %-6s %-*s %s\n", im.Grade, width, im.Class,

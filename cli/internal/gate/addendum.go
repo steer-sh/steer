@@ -41,6 +41,35 @@ type Addendum struct {
 // review cannot change the instructions its reviewer gets.
 func LoadAddendum(repo string) Addendum {
 	var a Addendum
+	a.addGlobal()
+	if data, ok := projectManifestAtHead(repo); ok {
+		a.add(steerpath.ProjectScope, data)
+	}
+	return a
+}
+
+// PendingAddendum is the addendum the gate will read in repo once the project store
+// on disk is committed: the global store, then the project store from the working
+// tree. A repo of "" has no project entries.
+func PendingAddendum(repo string) Addendum {
+	var a Addendum
+	a.addGlobal()
+	if repo == "" {
+		return a
+	}
+	texts, _, ok := workingTreeProjectAddendum(repo)
+	if !ok {
+		a.Errors = append(a.Errors, "review addendum: project store: unreadable in the working tree")
+		a.projectUnread = true
+		return a
+	}
+	for _, id := range sortedIDs(texts) {
+		a.Entries = append(a.Entries, AddendumEntry{Scope: steerpath.ProjectScope, ID: id, Text: texts[id]})
+	}
+	return a
+}
+
+func (a *Addendum) addGlobal() {
 	if dir, err := hookstore.Resolve(steerpath.GlobalScope); err != nil {
 		a.Errors = append(a.Errors, fmt.Sprintf("review addendum: global store: %v", err))
 	} else if data, err := os.ReadFile(filepath.Join(dir, hookstore.ManifestName)); err == nil {
@@ -48,10 +77,6 @@ func LoadAddendum(repo string) Addendum {
 	} else if !os.IsNotExist(err) {
 		a.Errors = append(a.Errors, fmt.Sprintf("review addendum: global store: %v", err))
 	}
-	if data, ok := projectManifestAtHead(repo); ok {
-		a.add(steerpath.ProjectScope, data)
-	}
-	return a
 }
 
 // projectManifestAtHead reads the project manifest from HEAD, neutral store first and

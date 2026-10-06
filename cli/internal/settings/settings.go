@@ -7,6 +7,8 @@ package settings
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -370,6 +372,55 @@ func Impact(cfg gate.Config) []mine.InstrumentImpact {
 	// A settings edit has no repository, so each record keeps its own review addendum.
 	fields.AddendumKnown = false
 	return mine.ImpactOf(records, ev.Chains, mine.InstrumentUse{ID: cfg.InstrumentID(), Fields: fields})
+}
+
+// AddendumImpact names the measurements a review addendum change, already written to
+// its store, lands in: each record graded against the configured reviewer run with
+// the addendum its chains will get. A project change (project set) takes effect in
+// repo once committed, so it moves only records whose scope admits repo, graded with
+// the global store plus repo's working-tree entries. A global change moves every
+// record; one scoped to a repository root is graded with what the gate reads there,
+// and any other with the global entries alone.
+func AddendumImpact(cfg gate.Config, repo string, project bool) []mine.InstrumentImpact {
+	records, err := mine.Load(cfg.StateDir)
+	if err != nil || len(records) == 0 {
+		return nil
+	}
+	pending := gate.PendingAddendum("").Digest()
+	if project {
+		pending = gate.PendingAddendum(repo).Digest()
+	}
+	sub := mine.Subject{Repo: filepath.Base(repo), RepoKnown: true, RepoRoot: repo, RepoRootKnown: true}
+	groups := map[string][]mine.Record{}
+	for _, record := range records {
+		scope, ok, err := mine.ParseScope(record)
+		scoped := err == nil && ok
+		digest := pending
+		switch {
+		case project && scoped && scope.ClassifySubject(sub) == mine.Ineligible:
+			continue
+		case !project && scoped && scope.RepoRoot != "":
+			digest = gate.LoadAddendum(scope.RepoRoot).Digest()
+		}
+		groups[digest] = append(groups[digest], record)
+	}
+	ev := evidence.Gather(evidence.Options{GateStateDir: cfg.StateDir})
+	var out []mine.InstrumentImpact
+	for _, digest := range sortedKeys(groups) {
+		fields, _ := mine.InstrumentFieldsFrom(cfg.InstrumentFieldsWith(digest))
+		out = append(out, mine.ImpactOf(groups[digest], ev.Chains,
+			mine.InstrumentUse{ID: cfg.InstrumentIDWith(digest), Fields: fields})...)
+	}
+	return out
+}
+
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // ImpactWidth is the class column an impact list renders over: the widest class in

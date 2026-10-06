@@ -8,10 +8,13 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/claude"
+	"github.com/steer-sh/steer-cli/internal/config"
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/hookstore"
+	"github.com/steer-sh/steer-cli/internal/settings"
 	"github.com/steer-sh/steer-cli/internal/status"
 	"github.com/steer-sh/steer-cli/internal/tier"
+	"github.com/steer-sh/steer-cli/internal/utils"
 )
 
 var addendumText string
@@ -58,6 +61,7 @@ var commitGateAddendumAddCmd = &cobra.Command{
 		if result.Overwritten {
 			fmt.Printf("  was: %s\n", result.PreviousText)
 		}
+		reportAddendumImpact(scope)
 		if scope == claude.ProjectScope {
 			fmt.Printf("The commit gate reads project entries from HEAD. Commit %s on its own, before the change "+
 				"this entry is for: a commit that carries both is reviewed without the entry.\n", projectManifestPath())
@@ -124,12 +128,35 @@ var commitGateAddendumRemoveCmd = &cobra.Command{
 		}
 		fmt.Printf("Removed addendum entry %s from the %s store: %s\n", args[0], scope, result.Text)
 		fmt.Printf("Archived: %s\n", result.ArchivePath)
+		reportAddendumImpact(scope)
 		if scope == claude.ProjectScope {
 			fmt.Printf("The commit gate reads project entries from HEAD. Commit %s for the removal to take effect.\n",
 				projectManifestPath())
 		}
 		return nil
 	},
+}
+
+// reportAddendumImpact names the measurements the addendum change just written in
+// scope lands in. A project change takes effect in this repository once committed.
+func reportAddendumImpact(scope string) {
+	file, err := config.Load()
+	if err != nil {
+		utils.Warning("Could not check which measurements this change lands in: " + err.Error())
+		return
+	}
+	cfg, err := settings.Preview(file, warnOnce)
+	if err != nil {
+		utils.Warning("Could not check which measurements this change lands in: " + err.Error())
+		return
+	}
+	repo := repoRootOrNone()
+	project := scope == claude.ProjectScope
+	if project && repo == "" {
+		return
+	}
+	fmt.Println()
+	printImpacts("This review addendum change", settings.AddendumImpact(cfg, repo, project))
 }
 
 func projectManifestPath() string {

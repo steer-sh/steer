@@ -4,6 +4,7 @@ package e2e
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -179,5 +180,54 @@ func TestAnAddendumChangeMovesTheReviewerIdentity(t *testing.T) {
 	s.MustSteer("commit-gate", "addendum", "remove", "vague-claims", "--scope", "global")
 	if got := instrument("c.py"); got != stock {
 		t.Errorf("after the removal the instrument is %q, want the stock %q", got, stock)
+	}
+}
+
+// TestAnAddendumChangeNamesTheMeasurementsItLandsIn checks that an addendum change
+// warns like a reviewer setting edit: a global entry names the chain record it moves,
+// a project entry in another repository names no record scoped to this one, and a
+// removal that restores the record's baseline names nothing.
+//
+// pins existing behaviour
+func TestAnAddendumChangeNamesTheMeasurementsItLandsIn(t *testing.T) {
+	t.Parallel()
+	s, g := newNativeGate(t, "claude-code", ".claude/settings.json", "commit-gate review")
+	s.RegisterNoVar("claude-code")
+	id := g.DenyThenRetry("sess-1", "mod.py", "add mod")
+	s.SeedReplies("sess-1", time.Now(), chainLedger(id, "add mod", "the change declares a variable with var"))
+	s.MustSteer("commit-gate", "backfill", "--apply")
+	s.MustSteer("fix", "register", "--tier", "guard", "--hook-id", noVarHook,
+		"--corpus", "review-findings", "--kind", "false-positive", "--class", "var-finding",
+		"--match", "declares a variable with var",
+		"--problem", "Reviewers flag var declarations the agent then rejects.",
+		"--intervention", "A guard blocks var declarations before they reach review.",
+		"--target", ".steer/hooks/"+noVarHook+".py",
+		"--scope-repo-root", s.Repo, "--scope-harness", "claude-code", "--installed-ts", fmt.Sprint(nextSecond()))
+
+	r := s.MustSteer("commit-gate", "addendum", "add", "vague-claims", "--scope", "global",
+		"--text", "Raise a finding only when you can name the input that fails.")
+	for _, want := range []string{"This review addendum change lands in 1 measurement(s)", "major",
+		"var-finding", "review addendum — a different reviewer counts the window after this change"} {
+		if !strings.Contains(r.Output(), want) {
+			t.Errorf("the global addendum entry's warning lacks %q:\n%s", want, r.Output())
+		}
+	}
+
+	other := s.path("other")
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if r := s.Run(other, "", nil, "git", "init", "-q"); r.Code != 0 {
+		t.Fatalf("git init: %s", r.Stderr)
+	}
+	r = s.Run(other, "", nil, "steer", "commit-gate", "addendum", "add", "local-only", "--scope", "project",
+		"--text", "Only this repository.")
+	if r.Code != 0 || strings.Contains(r.Output(), "lands in") {
+		t.Errorf("a project entry in another repository exited %d or named the record scoped here:\n%s", r.Code, r.Output())
+	}
+
+	r = s.MustSteer("commit-gate", "addendum", "remove", "vague-claims", "--scope", "global")
+	if strings.Contains(r.Output(), "lands in") {
+		t.Errorf("the removal restored the baseline addendum and still named a measurement:\n%s", r.Output())
 	}
 }
