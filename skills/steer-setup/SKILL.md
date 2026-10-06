@@ -84,6 +84,13 @@ rather than filtering the list. Step 5 runs one test review, which is the proof.
 The reviewer is independent of the agent writing the code. A user working in Codex
 may prefer the Claude Code reviewer. Ask; do not infer from the harness.
 
+When the user chooses `agy`, tell them two things before you write the choice:
+
+- Their own `agy` permission rules apply to every review. Steer passes no flag that
+  limits what an `agy` reviewer may read or run, so those rules are its boundary.
+- Every review stays in their `agy` history: each gated commit adds one
+  conversation per reviewer run.
+
 Then ask for the model. Suggest one per provider and accept whatever the user types:
 
 | Provider | Suggested model |
