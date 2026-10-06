@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -164,6 +165,32 @@ func TestRemovePreservesOtherHooks(t *testing.T) {
 	}
 	if CommitGateArming("global", "").Registered {
 		t.Fatal("gate remains registered")
+	}
+}
+
+// Status and guardscope read a project runner with cwd ".", but Codex keys its
+// approval by the absolute hooks.json path.
+func TestProjectRunnerTrustIsReadAtTheAbsolutePath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	repo := t.TempDir()
+	t.Chdir(repo)
+	if _, err := RegisterMaster("project", "."); err != nil {
+		t.Fatal(err)
+	}
+	if a := MasterArming("project", "."); !a.Registered || a.TrustRecordPresent {
+		t.Fatalf("before approval: %#v", a)
+	}
+	abs, err := filepath.Abs(filepath.Join(".codex", "hooks.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := "[hooks.state." + strconv.Quote(abs+":pre_tool_use:0:0") + "]\nenabled = true\n"
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if a := MasterArming("project", "."); !a.TrustStateKnown || !a.TrustRecordPresent {
+		t.Fatalf("an approved project runner read as unapproved: %#v", a)
 	}
 }
 

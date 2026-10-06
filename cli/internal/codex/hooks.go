@@ -68,7 +68,13 @@ func (a Arming) Effective() bool { return a.Registered && a.Matcher == CommitGat
 
 func trustSection(key string) string { return "[hooks.state." + strconv.Quote(key) + "]" }
 
+// trustKey spells the config.toml key Codex records for a handler. Codex names the
+// hooks.json by its absolute path, so a project path relative to the working
+// directory is resolved first.
 func trustKey(path, event string, entry, handler int) string {
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
 	return fmt.Sprintf("%s:%s:%d:%d", path, trustEvent[event], entry, handler)
 }
 
