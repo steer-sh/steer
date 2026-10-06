@@ -54,6 +54,9 @@ const (
 type Concern struct {
 	Verdict string `json:"verdict"`
 	Concern string `json:"concern"`
+	// Qualifier is the text the agent wrote after the verdict word inside the bold
+	// marker, such as "not fixed" in `**ACCEPTED, not fixed**`.
+	Qualifier string `json:"qualifier,omitempty"`
 }
 
 // RoundBlocks returns each per-round ledger inside one message, header line first. An
@@ -85,8 +88,9 @@ func LedgerRound(text string) (int, bool) {
 	return n, true
 }
 
-// parseLedgerLine is `^[ \t]*[-*][ \t]*\*\*(ACCEPTED|REJECTED)\*\*[ \t]*(?:[—–:]|-(?!>))?[ \t]*(.+?)[ \t]*$`
-// hand-rolled. The separator alternative needs `-(?!>)`, which RE2 cannot express: a
+// parseLedgerLine is `^[ \t]*[-*][ \t]*\*\*(ACCEPTED|REJECTED)(?:[ ,;:(][^*]*)?\*\*[ \t]*(?:[—–:]|-(?!>))?[ \t]*(.+?)[ \t]*$`
+// hand-rolled. The verdict is the first word inside the bold marker; text after it
+// becomes the concern's Qualifier. The separator alternative needs `-(?!>)`, which RE2 cannot express: a
 // hyphen followed by `>` is the head of an ASCII `->` arrow, and consuming it leaves
 // the concern parsed as `> ...` with the arrow split never firing.
 func parseLedgerLine(line string) (Concern, bool) {
@@ -109,8 +113,14 @@ func parseLedgerLine(line string) (Concern, bool) {
 		return Concern{}, false
 	}
 	rest = rest[len(verdict):]
+	qualifier := ""
 	if !strings.HasPrefix(rest, "**") {
-		return Concern{}, false
+		end := strings.Index(rest, "**")
+		if end < 0 || !strings.ContainsRune(" ,;:(", rune(rest[0])) || strings.Contains(rest[:end], "*") {
+			return Concern{}, false
+		}
+		qualifier = strings.Trim(rest[:end], " \t,;:()")
+		rest = rest[end:]
 	}
 	rest = strings.TrimLeft(rest[2:], " \t")
 	for _, sep := range []string{"—", "–", ":"} {
@@ -129,7 +139,7 @@ separatorDone:
 	if rest == "" {
 		return Concern{}, false
 	}
-	return Concern{Verdict: verdict, Concern: rest}, true
+	return Concern{Verdict: verdict, Concern: rest, Qualifier: qualifier}, true
 }
 
 // arrowSplit is the template's delimiter between the concern and its resolution. Both
@@ -157,7 +167,7 @@ func ParseLedgerText(text string) Row {
 		if r := []rune(claim); len(r) > maxConcernChars {
 			claim = string(r[:maxConcernChars])
 		}
-		concerns = append(concerns, Concern{Verdict: parsed.Verdict, Concern: claim})
+		concerns = append(concerns, Concern{Verdict: parsed.Verdict, Concern: claim, Qualifier: parsed.Qualifier})
 		if parsed.Verdict == "ACCEPTED" {
 			accepted++
 		} else {

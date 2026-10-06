@@ -26,8 +26,11 @@ Two things follow from this being terminal rather than blocking:
 **Round {firing}, terminal** — <N> reviewers, <M> raw findings, <K> distinct concerns. Commit not blocked.
 
 - **ACCEPTED** — <the concern in one clause> → <the fix, and whether it needs a follow-up commit>
+- **ACCEPTED, not fixed** — <the concern in one clause> → <why it stays unfixed, such as the user's instruction>
 - **REJECTED** — <the concern in one clause> → <the premise, and why it is false>
 - Weakest surviving: <the concern> — <why it still stands, or that none survived>
+
+A finding whose premise holds is ACCEPTED even when you leave it unfixed. REJECTED means its premise is false, never that fixing it is out of scope.
 
 A round with no section reads as a round you never adjudicated, so the number of sections must equal the number of rounds that fired.
 

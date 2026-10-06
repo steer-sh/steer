@@ -31,8 +31,11 @@ Emit exactly this shape, ahead of your other commentary. Copy the header line as
 **Round 1, blocking** — <N> reviewers, <M> raw findings, <K> distinct concerns.
 
 - **ACCEPTED** — <the concern in one clause> → <the change you made, file:line>
+- **ACCEPTED, not fixed** — <the concern in one clause> → <why it stays unfixed, such as the user's instruction>
 - **REJECTED** — <the concern in one clause> → <the premise, and why it is false>
 - Weakest surviving: <the concern> — <why it still stands, or that none survived>
+
+A finding whose premise holds is ACCEPTED even when you leave it unfixed. REJECTED means its premise is false, never that fixing it is out of scope.
 
 **Round 2, blocking** — <N> reviewers, <M> raw findings, <K> distinct concerns.
 
