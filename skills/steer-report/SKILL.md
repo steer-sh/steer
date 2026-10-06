@@ -569,6 +569,8 @@ no disclaimer after it.
   repository, and the check then blocks any Claude Code or Codex turn here that
   fails it. Say that a yes needs substantial cleanup first when it does, and that
   it creates `check.sh` only when the evidence shows the repository has none.
+  Say that adoption trusts the repository, not this version of `check.sh`: a
+  later pull that changes it runs at the next Stop with no new approval.
 - **Outcome.** A yes buys this: Steer tells the user if the problem comes back.
   Never promise that the problem becomes less frequent; no count here can show that.
 - **Decisions.** Ask for the decisions actually needed, and group related actions.

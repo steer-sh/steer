@@ -187,6 +187,12 @@ receipt, then runs `check.sh` with isolated evidence that stays out of the
 live records. It is refused unless every check validated and `check.sh`
 passed with every declared check reported. Adoption survives later edits; a
 check whose detector changed keeps running with stale validation.
+
+Adoption trusts the repository, not one version of its scripts. A pull, merge
+or checkout that changes `check.sh` or a detector runs the new code at the next
+Stop, with no new approval. Adopt only a repository whose committers you would
+let run code on this machine, and run `steer check unadopt` before you pull
+from a source you do not trust.
 `steer check unadopt [repo]` withdraws it and keeps all evidence.
 
 One `check.sh` run at a time holds a repository. A run started while another

@@ -261,7 +261,10 @@ Three separate facts arm a repository, and none implies another:
 2. **The repository is adopted** on this machine: `"${STEER_BIN}" check adopt`
    inside it. Adoption replays each declared check and runs `check.sh` in
    isolation first, and it refuses on any failure. A registration alone runs
-   nothing, and a clone at another path is not adopted.
+   nothing, and a clone at another path is not adopted. Tell the user that
+   adoption trusts the repository, not this version of `check.sh`: a later pull
+   that changes `check.sh` or a detector runs at the next Stop with no new
+   approval.
 3. **A run is observed**: `"${STEER_BIN}" check list` shows the latest `check.sh`
    run and each check's latest execution.
 
