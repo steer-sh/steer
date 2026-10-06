@@ -798,6 +798,15 @@ sizing its ungrouped pile, never one row per item, and carries a few
 strength-ranked examples for a reader. Naming classes is the skill's work on both
 corpora, over the full dumps.
 
+A pile can stay undecided after a pass reads it: a one-off finding gets no
+class. `steer report mark-read` stores, per corpus, the size of the pile the pass
+left in the queue (`cadence.ReadMarks`), and a refresh drops the mark of a pile
+that emptied. The status line and the nudge count a pointer only when its size
+differs, and `steer status` reads it as `unread`. A new item, or a chain a retired
+class returns, changes the size; a pile where one item was decided as another
+arrived keeps its size and reads unchanged. The dumps and `steer status --json` still list the whole pile,
+so a later repeat of a one-off can still join it into a class.
+
 The queue also carries the open steps in the repository the refresh ran in. The
 deterministic tier reads the check stores only, so no harness adapter enters it;
 the runner's registration reaches a reader through the status snapshot. A stale

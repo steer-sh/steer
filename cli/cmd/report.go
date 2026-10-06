@@ -312,6 +312,54 @@ queue, so the skill's nudge can hash the queue for change detection.`,
 	},
 }
 
+var reportMarkReadCorpora []string
+
+var reportMarkReadCmd = &cobra.Command{
+	Use:   "mark-read",
+	Short: "Record that a /steer-report pass read the candidate evidence",
+	Long: `mark-read records each candidate row in the queue as read. A finding the
+pass reads and leaves as a one-off stays in its pile, so after the mark the status
+line and the session nudge count a row only when it changes: a new item, or one
+that returns to the pile. steer status --json and the dumps still list the whole
+pile.
+
+Run it at the end of a pass, after any refresh the pass ran. --corpus names a pile
+the pass read (review-findings or transcript-friction); the default is both.`,
+	Example: `  steer report mark-read
+  steer report mark-read --corpus review-findings`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		for _, corpus := range reportMarkReadCorpora {
+			if corpus != cadence.CorpusReviewFindings && corpus != cadence.CorpusTranscript {
+				return fmt.Errorf("--corpus %q: name %s or %s", corpus, cadence.CorpusReviewFindings, cadence.CorpusTranscript)
+			}
+		}
+		if err := prepareState(); err != nil {
+			return err
+		}
+		dir, err := cadence.PrepareStateDir()
+		if err != nil {
+			return err
+		}
+		q, err := cadence.ReadQueue(dir)
+		if err != nil {
+			return err
+		}
+		marks, err := cadence.MarkRead(dir, q.Candidates, reportMarkReadCorpora)
+		if err != nil {
+			return err
+		}
+		for _, corpus := range reportMarkReadCorpora {
+			if _, ok := marks[corpus]; ok {
+				fmt.Printf("%s: marked read. The status line counts this pile again when it changes.\n", corpus)
+			} else {
+				fmt.Printf("%s: no pile in the queue; nothing to mark.\n", corpus)
+			}
+		}
+		return nil
+	},
+}
+
 // sessionStartOutput is the SessionStart hook's stdout contract. The docs do not
 // confirm SessionStart shows systemMessage ("some events discard it"), so the nudge
 // rides hookSpecificOutput.additionalContext — the documented SessionStart channel,
@@ -380,7 +428,7 @@ func runCadence() {
 			hash := cadence.QueueHash(queueBytes)
 			emit, next := cadence.ShouldNudge(dir, q, hash, cadence.LastRefresh(dir))
 			if emit {
-				candidates, ineffective := cadence.PendingCounts(q)
+				candidates, ineffective := cadence.PendingCounts(q, cadence.LoadReadMarks(dir))
 				// A queued row is one source of evidence nobody has grouped yet, so
 				// the count names sources. Calling them problems reported the size of
 				// the raw pile as the number of problems found.
@@ -514,6 +562,9 @@ func init() {
 	rootCmd.AddCommand(reportCmd)
 	reportCmd.AddCommand(reportRefreshCmd)
 	reportCmd.AddCommand(reportCadenceCmd)
+	reportCmd.AddCommand(reportMarkReadCmd)
+	reportMarkReadCmd.Flags().StringSliceVar(&reportMarkReadCorpora, "corpus",
+		[]string{cadence.CorpusReviewFindings, cadence.CorpusTranscript}, "A pile the pass read; repeat for both (default both)")
 	reportRefreshCmd.Flags().IntVar(&reportDays, "days", 30, "Transcript look-back window in days")
 	reportRefreshCmd.Flags().BoolVar(&reportProjectOnly, "project-only", false, "Restrict the transcript scan to the current working directory")
 	reportRefreshCmd.Flags().BoolVar(&reportRepoOnly, "repo-only", false, "Restrict the transcript scan to the current checkout")

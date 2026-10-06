@@ -180,7 +180,7 @@ A correction occurrence can carry two context fields, each `{text, cut}` with `c
 
 An `after_interrupt` occurrence carries the same two fields, read from before the interrupt.
 
-### The `steer status --json` contract (`status_version: 31`)
+### The `steer status --json` contract (`status_version: 32`)
 
 Step 1 reads this snapshot for posture and the full class inventory. The unit is
 the failure class and what the corpus recorded about it, not the hook count. This
@@ -223,7 +223,8 @@ match or coverage maps, which `steer fix score --json` carries by the same `id`;
 v29 adds `posture.plugins`: each harness's cached plugin copy, read against the
 stable executable. v30 adds `posture.mods`: each enabled Claude Code mod, read
 against the cache `steer mods inspect` writes. v31 adds `posture.guard_interpreter`:
-whether this process finds the interpreter every guard runner starts under.
+whether this process finds the interpreter every guard runner starts under. v32
+adds `unread` to each `attention.candidates[]` row.
 
 - `status_version` — the schema version. `--json` is a stable agent contract.
 - `posture` — the arming state: `instrument` (reviewer model / runs / prompt
@@ -369,7 +370,8 @@ whether this process finds the interpreter every guard runner starts under.
   `observe`).
 - `attention` — the subset asking for a reader: `interventions[]` (the ids of
   records with a recurrence, an absent audit log or check evidence, or no frozen
-  scope; the queue carries their full rows), `candidates[]` (no `match` yet),
+  scope; the queue carries their full rows), `candidates[]` (no `match` yet;
+  `unread` is false when the row is unchanged since the last pass read it),
   `unscored[]` (ids of records no engine reads), and `checks[]` — the open steps
   in this repository's check tier, the same rows the queue carries.
 - `telemetry` — corpus sizes: `review_chains`, `audit_firings`, `check_blocks`
@@ -793,6 +795,14 @@ steer report refresh --days 30
 ```
 
 This rewrites the queue and its timestamp from the new state, so the SessionStart nudge stops pointing at work you just finished. Skip it only when you changed nothing this pass.
+
+Then record that this pass read the candidate piles, whether or not it made a class from them:
+
+```bash
+steer report mark-read
+```
+
+A one-off finding stays in its pile after you read it, so without the mark the status line counts that pile as a decision after every pass. Run it last, after any pass that read the dumps in Step 2, including one that changed nothing. When you read only one pile, or read the transcript pile with a filter, name the pile you read in full: `--corpus review-findings` or `--corpus transcript-friction`. A pile whose `unread` is false is unchanged since the last pass: say so in one line, and do not present its old items again as new evidence.
 
 ## Reading the numbers honestly
 

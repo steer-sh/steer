@@ -99,6 +99,9 @@ type Candidate struct {
 	// Transcript-friction pointer: the correction clusters no problem covers. A
 	// count here counts phrasings, so it is never a recurrence of one problem.
 	UngroupedClusters int `json:"ungrouped_clusters,omitempty"`
+	// Unread is set only by a reader that applied the read marks; the queue file
+	// leaves it unset.
+	Unread *bool `json:"unread,omitempty"`
 }
 
 // CorpusStatus reports one corpus's presence and size on this machine. A corpus

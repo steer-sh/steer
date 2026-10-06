@@ -120,3 +120,20 @@ func TestCandidateTitleNamesThePileNotItsContents(t *testing.T) {
 		t.Errorf("title = %q", got)
 	}
 }
+
+// A row the last /steer-report pass read, unchanged since, must stop sending the
+// reader back to /steer-report; a changed row still sends them.
+func TestCandidateHandoffFollowsTheReadMark(t *testing.T) {
+	read := cadence.Candidate{Corpus: cadence.CorpusReviewFindings, UndecidedChains: 3}
+	marks := cadence.ReadMarks{cadence.CorpusReviewFindings: 3}
+	rows := markUnread([]cadence.Candidate{
+		read,
+		{Corpus: cadence.CorpusTranscript, UngroupedClusters: 1},
+	}, marks)
+	if got := CandidateNextFor(rows[0]); got != CandidateNextRead {
+		t.Errorf("read row handoff = %q", got)
+	}
+	if got := CandidateNextFor(rows[1]); got != CandidateNext {
+		t.Errorf("unread row handoff = %q", got)
+	}
+}

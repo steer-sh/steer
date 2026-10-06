@@ -137,3 +137,15 @@ func CandidateEvidence(c cadence.Candidate) string {
 // CandidateNext is the handoff every queued row shares. Nothing in the terminal
 // or the dashboard authors a record, so the text names the one thing that does.
 const CandidateNext = "run /steer-report in your coding agent to read these and decide each one"
+
+// CandidateNextRead is the handoff for a row the last /steer-report pass read and
+// that holds nothing newer.
+const CandidateNextRead = "nothing new since the last /steer-report pass read this pile"
+
+// CandidateNextFor picks the handoff by the row's unread reading.
+func CandidateNextFor(c cadence.Candidate) string {
+	if c.Unread != nil && !*c.Unread {
+		return CandidateNextRead
+	}
+	return CandidateNext
+}

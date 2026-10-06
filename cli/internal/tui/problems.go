@@ -258,7 +258,7 @@ type summaryField struct{ label, value string }
 func candidateFields(c cadence.Candidate) []summaryField {
 	return []summaryField{
 		{"Evidence", candidateEvidence(c)},
-		{"Next", status.CandidateNext},
+		{"Next", status.CandidateNextFor(c)},
 	}
 }
 

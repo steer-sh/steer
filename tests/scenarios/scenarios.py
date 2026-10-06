@@ -205,7 +205,8 @@ def _snapshot(records=(), candidates=(), unresolved=0):
     snap["attention"] = {
         "interventions": [r["id"] for r in _queued(records)],
         "unscored": [],
-        "candidates": list(candidates),
+        # A scenario's pile is new to the reader, so steer status reads it unread.
+        "candidates": [dict(c, unread=True) for c in candidates],
         "checks": [],
     }
     snap["posture"]["unresolved_rows"] = unresolved

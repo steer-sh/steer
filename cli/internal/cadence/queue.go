@@ -54,7 +54,13 @@ func WriteQueue(dir string, q *Queue, now time.Time) error {
 		return err
 	}
 	stamp := now.UTC().Format(time.RFC3339) + "\n"
-	return writeAtomic(TimestampPath(dir), []byte(stamp))
+	if err := writeAtomic(TimestampPath(dir), []byte(stamp)); err != nil {
+		return err
+	}
+	// The queue is already written; a stale read mark only costs a quiet status
+	// line, so it never fails the refresh.
+	_ = pruneReadMarks(dir, q)
+	return nil
 }
 
 // LastRefresh reads the timestamp of the last successful refresh. A missing or

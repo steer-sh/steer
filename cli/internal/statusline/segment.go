@@ -102,7 +102,7 @@ func Collect() Inputs {
 	}
 
 	if q, err := cadence.ReadQueue(cadence.StateDir()); err == nil {
-		candidates, flagged := cadence.PendingCounts(q)
+		candidates, flagged := cadence.PendingCounts(q, cadence.LoadReadMarks(cadence.StateDir()))
 		in.Decisions = candidates + flagged
 	}
 	return in

@@ -71,7 +71,7 @@ import (
 // answer `steer status` prints, so an agent reads trust and resolution with it.
 // v29 adds posture.plugins: each harness's cached plugin copy, read against the
 // stable executable.
-const StatusVersion = 31
+const StatusVersion = 32
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20
@@ -500,7 +500,7 @@ func Collect(opts Options) (*SystemStatus, error) {
 		s.Attention = AttentionQueue{
 			Interventions: q.Interventions,
 			Unscored:      q.Unscored,
-			Candidates:    q.Candidates,
+			Candidates:    markUnread(q.Candidates, cadence.LoadReadMarks(cadence.StateDir())),
 			Checks:        q.Checks,
 		}
 		s.Corpora = corpusRows(q.Corpora, opts)
@@ -1226,4 +1226,16 @@ func collectTeam() TeamState {
 		HooksLocked:    len(lf.Hooks),
 		CatalogVersion: lf.CatalogVersion,
 	}
+}
+
+// markUnread sets each candidate row's unread reading against the mark the last
+// /steer-report pass left.
+func markUnread(rows []cadence.Candidate, marks cadence.ReadMarks) []cadence.Candidate {
+	out := make([]cadence.Candidate, len(rows))
+	for i, c := range rows {
+		unread := cadence.Unread(c, marks)
+		c.Unread = &unread
+		out[i] = c
+	}
+	return out
 }

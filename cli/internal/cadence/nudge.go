@@ -50,17 +50,18 @@ func QueueHash(queueBytes []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// PendingCounts returns the two numbers the nudge names: candidates needing a rule
-// and interventions scored as needing attention.
-func PendingCounts(q *Queue) (candidates, ineffective int) {
-	return len(q.Candidates), len(q.Interventions)
+// PendingCounts returns the two numbers the nudge names: candidate rows that
+// changed since the last pass read them, and interventions scored as needing
+// attention.
+func PendingCounts(q *Queue, marks ReadMarks) (candidates, ineffective int) {
+	return unreadCandidates(q, marks), len(q.Interventions)
 }
 
 // hasPending reports whether the queue holds work worth a nudge. Unscored rows and
-// the corpus sweep are informational — only candidates and flagged interventions
-// are actionable, so a pure sweep never nudges.
-func hasPending(q *Queue) bool {
-	return len(q.Candidates) > 0 || len(q.Interventions) > 0
+// the corpus sweep are informational — only unread candidates and flagged
+// interventions are actionable, so a pure sweep never nudges.
+func hasPending(q *Queue, marks ReadMarks) bool {
+	return unreadCandidates(q, marks) > 0 || len(q.Interventions) > 0
 }
 
 // ShouldNudge decides whether to emit the nudge and returns the record to persist.
@@ -70,7 +71,7 @@ func ShouldNudge(dir string, q *Queue, queueHash string, refresh time.Time) (boo
 	prev := readNudge(dir)
 	rec := prev
 	rec.Hash, rec.Refresh = queueHash, refresh.UTC().Format(time.RFC3339)
-	if !hasPending(q) {
+	if !hasPending(q, LoadReadMarks(dir)) {
 		return false, rec
 	}
 	if prev.Hash != queueHash {

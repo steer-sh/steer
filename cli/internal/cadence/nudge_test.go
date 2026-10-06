@@ -89,9 +89,55 @@ func TestPendingCounts(t *testing.T) {
 		Interventions: []Intervention{{ID: "a"}, {ID: "b"}},
 		Candidates:    []Candidate{{Corpus: CorpusTranscript}},
 	}
-	cand, ineff := PendingCounts(q)
+	cand, ineff := PendingCounts(q, ReadMarks{})
 	if cand != 1 || ineff != 2 {
 		t.Errorf("want 1 candidate and 2 ineffective, got %d and %d", cand, ineff)
+	}
+}
+
+// A one-off finding stays in the review pile after a pass reads it, so the count
+// that sends the user to /steer-report must stop at the read mark, and resume when
+// the row changes: a new chain, or one a retired class returns to the pile.
+func TestReadMarkStopsCountingAPileAPassRead(t *testing.T) {
+	dir := t.TempDir()
+	q := &Queue{Candidates: []Candidate{
+		{Corpus: CorpusReviewFindings, UndecidedChains: 1, Dump: "d"},
+		{Corpus: CorpusTranscript, UngroupedClusters: 2, Examples: []string{"x"}},
+	}}
+	if cand, _ := PendingCounts(q, LoadReadMarks(dir)); cand != 2 {
+		t.Fatalf("before any pass: %d unread rows, want 2", cand)
+	}
+	// A pass that read only the review pile leaves the transcript pile unread.
+	if _, err := MarkRead(dir, q.Candidates, []string{CorpusReviewFindings}); err != nil {
+		t.Fatal(err)
+	}
+	if cand, _ := PendingCounts(q, LoadReadMarks(dir)); cand != 1 {
+		t.Errorf("after a pass read one pile: %d unread rows, want 1", cand)
+	}
+	if _, err := MarkRead(dir, q.Candidates, []string{CorpusReviewFindings, CorpusTranscript}); err != nil {
+		t.Fatal(err)
+	}
+	if cand, _ := PendingCounts(q, LoadReadMarks(dir)); cand != 0 {
+		t.Errorf("after the pass read both: %d unread rows, want 0", cand)
+	}
+	if ok, _ := ShouldNudge(dir, q, "h", time.Now()); ok {
+		t.Error("a pile the pass read must not nudge")
+	}
+	q.Candidates[0].UndecidedChains = 2
+	if cand, _ := PendingCounts(q, LoadReadMarks(dir)); cand != 1 {
+		t.Errorf("a changed review row: %d unread rows, want 1", cand)
+	}
+	if ok, _ := ShouldNudge(dir, q, "h2", time.Now()); !ok {
+		t.Error("a changed pile must nudge")
+	}
+	// A pile that empties drops its mark at the next refresh, so a later pile of
+	// the read size is new.
+	if err := WriteQueue(dir, &Queue{Candidates: q.Candidates[1:]}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	q.Candidates[0].UndecidedChains = 1
+	if cand, _ := PendingCounts(q, LoadReadMarks(dir)); cand != 1 {
+		t.Errorf("a pile after an empty refresh: %d unread rows, want 1", cand)
 	}
 }
 
