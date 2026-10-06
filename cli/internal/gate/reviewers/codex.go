@@ -60,6 +60,6 @@ func (c *Codex) Review(ctx context.Context, prompt, cwd string) gate.RawRun {
 	return gate.RawRun{
 		Response: strings.TrimSpace(stdout),
 		Status:   "SUCCESS",
-		Error:    strings.TrimSpace(stderr),
+		Error:    stderrTail(stderr),
 	}
 }

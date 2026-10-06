@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/procgroup"
@@ -47,7 +48,7 @@ func runProcess(ctx context.Context, cwd string, argv []string, stdin string) (s
 		if errors.As(err, &exitErr) {
 			return stdout, stderr, gate.RawRun{
 				Outcome: gate.OutcomeExit,
-				Detail:  "rc=" + strconv.Itoa(exitErr.ExitCode()) + " " + strings.TrimSpace(stderr),
+				Detail:  "rc=" + strconv.Itoa(exitErr.ExitCode()) + " " + stderrTail(stderr),
 			}, true
 		}
 		return stdout, stderr, gate.RawRun{
@@ -55,4 +56,28 @@ func runProcess(ctx context.Context, cwd string, argv []string, stdin string) (s
 			Detail:  err.Error(),
 		}, true
 	}
+}
+
+// stderrTailChars bounds, in bytes, the stderr a run's detail keeps: inside the
+// ledger's byte limit on a detail, with room for the exit code.
+const stderrTailChars = 240
+
+// stderrTail keeps the end of a reviewer's stderr. A CLI writes its banner and the
+// echoed prompt first and its error last, so a head cut drops the cause.
+func stderrTail(stderr string) string {
+	text := strings.TrimSpace(stderr)
+	if len(text) <= stderrTailChars {
+		return text
+	}
+	start := len(text) - stderrTailChars
+	tail := text[start:]
+	if text[start-1] != '\n' {
+		if i := strings.IndexByte(tail, '\n'); i >= 0 && i < len(tail)-1 {
+			tail = tail[i+1:]
+		}
+	}
+	for tail != "" && !utf8.RuneStart(tail[0]) {
+		tail = tail[1:]
+	}
+	return "…" + strings.TrimSpace(tail)
 }
