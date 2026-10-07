@@ -17,7 +17,7 @@ var promptDigests = map[string]struct {
 	want string
 }{
 	"review":     {reviewPrompt, "956536885eab8804f8029edc29953336a7c4664e09a0a09a58f59cf48df00b2c"},
-	"deny":       {denyTemplate, "b53d7b0ffd7a190d418d3e12bd2bccb83f93814ac8b0428243e0e1e21cdf2dc2"},
+	"deny":       {denyTemplate, "30eabb2f085641d46846ade183a66de0adcd89f35634383fbb3f39adbcff69a8"},
 	"cap":        {capTemplate, "adda1603a26b6bac90a4ff5159c4dbd8802a17f8984e307c7269d87fadb36989"},
 	"round-note": {roundNote, "f40acabd50e95481f309c08ccacf4cac025835d79e8e265601170f7c4a4d34c3"},
 	"rerun-note": {rerunNoteText, "27d14c6916336301abd551b90d82d5fc799e027ae7d95b0520ef501c0efa9f1b"},

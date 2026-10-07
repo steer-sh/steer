@@ -284,10 +284,10 @@ func (e *Engine) handleRetry(ctx context.Context, req Request, chain *Chain, sta
 				logErr = err
 			}
 		}
-		return proceed(ContextOnly, req, after.Raw, firing, fmt.Sprintf(
+		return ledgerDue(proceed(ContextOnly, req, after.Raw, firing, fmt.Sprintf(
 			"the review sequence ended after %d block(s) — this diff is identical to the "+
 				"one the reviewers already read, so a new review would read no new code. The "+
-				"gate does not block it.%s", firing, separated(notice)), logErr)
+				"gate does not block it.%s", firing, separated(notice)), logErr), req, firing)
 	}
 
 	next := firing + 1
@@ -299,7 +299,7 @@ func (e *Engine) handleRetry(ctx context.Context, req Request, chain *Chain, sta
 	if firing >= e.cfg.MaxFirings {
 		// The cap stops the BLOCKING chain, not the reading of the last round's fixes.
 		d := e.terminalReview(ctx, req, chain, p, status, next)
-		return withLedgerError(d, logErr)
+		return ledgerDue(withLedgerError(d, logErr), req, firing)
 	}
 	if status != "" {
 		if notice != "" && status == "empty" {
@@ -313,10 +313,28 @@ func (e *Engine) handleRetry(ctx context.Context, req Request, chain *Chain, sta
 			// about the round the chain still awaits an answer for.
 			return proceed(ContextOnly, req, state.Diff, firing, notice, logErr)
 		}
-		return e.skipped(req, status, p.chars, logErr)
+		return ledgerDue(e.skipped(req, status, p.chars, logErr), req, firing)
 	}
 	// The diff changed, so this round reviews code no reviewer has read.
-	return withLedgerError(e.reviewCommit(ctx, req, chain, p, next), logErr)
+	return ledgerDue(withLedgerError(e.reviewCommit(ctx, req, chain, p, next), logErr), req, firing)
+}
+
+// ledgerDue appends the ledger instruction to a receipt that ends a chain which blocked
+// `blocks` times. A deny continues the chain, and the cap's terminal review carries
+// the instruction in its own template; neither is a receipt.
+func ledgerDue(d Decision, req Request, blocks int) Decision {
+	if !d.Receipt {
+		return d
+	}
+	subject := CommitSubject(req.Message)
+	if subject == "" {
+		subject = NoSubject
+	}
+	d.Reason += fmt.Sprintf("\n\nThis commit ends the review sequence, so its ledger is due NOW: "+
+		"write it as text in this reply, before your next tool call, with one section for "+
+		"each of the %d round(s) that blocked. Copy this header line as it stands:\n\n"+
+		"**%s — review sequence%s, %s**", blocks, LedgerHeader, chainSlot(req.chainID), subject)
+	return d
 }
 
 // skipped answers a commit the gate chose not to review, with one receipt that names

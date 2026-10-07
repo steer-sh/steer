@@ -18,7 +18,7 @@ Reporting — this is not optional
 --------------------------------
 THE USER CANNOT SEE ANY OF THIS. The reviews above went to you alone; the user gets no review text and has no way to read it. To the user, a commit simply took longer. So this chain MUST end with the ledger below, written to be understood by someone who has read NONE of the review text.
 
-ONE LEDGER PER CHAIN, and it is the last thing the chain produces. Do not write it now. Write it in the reply where the commit SUCCEEDS, with one section per round the chain fired, in order. Round {firing} is a section of that ledger, never a ledger of its own.
+ONE LEDGER PER CHAIN, and it is the last thing the chain produces. Do not write it now. Write it as soon as the commit SUCCEEDS, as text in that reply and before your next tool call, with one section per round the chain fired, in order. The gate's note on that commit repeats the header line. Round {firing} is a section of that ledger, never a ledger of its own.
 
 Keep your round-{firing} verdicts where you can find them again. A round reconstructed from memory two rounds later is how a section ends up under the wrong number.
 

@@ -197,7 +197,7 @@ func TestUnchangedRetryEndsChain(t *testing.T) {
 	if !strings.Contains(d.SystemMessage, "identical to the one the reviewers already read") {
 		t.Errorf("the receipt must say why the chain ended: %q", d.SystemMessage)
 	}
-	if receiptSentence(d.Reason) != receiptSentence(d.SystemMessage) {
+	if !strings.HasPrefix(receiptSentence(d.Reason), receiptSentence(d.SystemMessage)+"\n\n") {
 		t.Errorf("both channels carry one sentence: %q vs %q", d.Reason, d.SystemMessage)
 	}
 	rows := h.rows()
@@ -606,6 +606,87 @@ func TestACleanReviewReachesTheAgentWithItsIdentity(t *testing.T) {
 func receiptSentence(receipt string) string {
 	_, sentence, _ := strings.Cut(receipt, ": ")
 	return sentence
+}
+
+// headerLine is the ledger header line a gate message hands the agent.
+func headerLine(t *testing.T, text string) string {
+	t.Helper()
+	for _, line := range strings.Split(text, "\n") {
+		if strings.HasPrefix(line, "**"+LedgerHeader) {
+			return line
+		}
+	}
+	t.Fatalf("no ledger header line in:\n%s", text)
+	return ""
+}
+
+// Every receipt that ends a chain which blocked says the ledger is due now and repeats
+// the deny's header line; a clean first review blocked nothing and owes no ledger, and
+// the cap's terminal review carries the instruction in its own template only.
+func TestChainEndReceiptsSayTheLedgerIsDue(t *testing.T) {
+	const due = "its ledger is due NOW"
+	clean := newHarness(t, findingReply("NO FINDINGS"))
+	if d := clean.handle(); d.Kind != Allow || strings.Contains(d.Reason, due) {
+		t.Errorf("clean first review = %v / %q, want Allow with no ledger instruction", d.Kind, d.Reason)
+	}
+
+	stage := func(h *harness) {
+		writeFileAt(t, h.repo, "a.py", lines(160))
+		gitCmd(t, h.repo, "add", "-A")
+	}
+	for _, tc := range []struct {
+		name  string
+		cap   int
+		retry RawRun
+		edit  func(h *harness)
+		phase string
+		note  bool
+	}{
+		{"unchanged retry", 0, findingReply(oneFinding), func(*harness) {}, "retry", true},
+		{"clean re-review", 0, findingReply("NO FINDINGS"), stage, "clean", true},
+		{"no reviewer answered", 0, RawRun{Outcome: OutcomeTimeout, Detail: "no response"}, stage, "ungated", true},
+		{"prose-only retry", 0, findingReply(oneFinding), func(h *harness) {
+			gitCmd(t, h.repo, "rm", "-q", "-f", "a.py")
+			writeFileAt(t, h.repo, "NOTES.md", lines(160))
+			gitCmd(t, h.repo, "add", "-A")
+		}, "skip-prose", true},
+		{"cap, final review clean", 1, findingReply("NO FINDINGS"), stage, "cap", true},
+		{"cap, final review finds", 1, findingReply(oneFinding), stage, "cap", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, findingReply(oneFinding))
+			if tc.cap > 0 {
+				h.cfg.MaxFirings = tc.cap
+			}
+			deny := h.handle()
+			if deny.Kind != Deny {
+				t.Fatalf("first round Kind = %v, want Deny", deny.Kind)
+			}
+			h.reviewer.replies = []RawRun{tc.retry}
+			h.reviewer.calls = 0
+			tc.edit(h)
+			d := h.handle()
+			if got := h.lastRow()["phase"]; got != tc.phase {
+				t.Fatalf("phase = %v, want %s", got, tc.phase)
+			}
+			if d.Kind == Deny || strings.Contains(d.SystemMessage, due) {
+				t.Fatalf("chain end = %v / %q, want a non-blocking end with the instruction "+
+					"for the agent alone", d.Kind, d.SystemMessage)
+			}
+			if got := strings.Count(d.Reason, due); got != map[bool]int{true: 1, false: 0}[tc.note] {
+				t.Fatalf("ledger instructions = %d in %q", got, d.Reason)
+			}
+			if !tc.note {
+				return
+			}
+			if !strings.Contains(d.Reason, "each of the 1 round(s) that blocked") {
+				t.Errorf("the instruction must count the blocking rounds: %q", d.Reason)
+			}
+			if got, want := headerLine(t, d.Reason), headerLine(t, deny.Reason); got != want {
+				t.Errorf("header line = %q, want the deny's %q", got, want)
+			}
+		})
+	}
 }
 
 // A retry that reads the WORKING TREE sees every edit the last round saw and more. It
