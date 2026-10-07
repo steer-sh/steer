@@ -57,9 +57,9 @@ func TestCollectListsTheInventoryScopesItIsGiven(t *testing.T) {
 	}
 }
 
-// TestContractNamesEveryFixWithinItsSizeCeiling: an eight-record snapshot with guards
-// in both scopes names every record and every guard, carries no per-fix observation,
-// and stays under 30KB indented and 20KB compact.
+// TestContractNamesEveryFixWithinItsSizeCeiling: an eight-record snapshot with eight
+// guards in two scopes, each with a full fixture receipt, names every record and every
+// guard, carries no per-fix observation, and stays under 30KB indented and 20KB compact.
 func TestContractNamesEveryFixWithinItsSizeCeiling(t *testing.T) {
 	s := eightRecordSnapshot()
 	pretty, err := s.MarshalIndent()
@@ -125,8 +125,13 @@ func eightRecordSnapshot() *SystemStatus {
 				Path: "/home/u/.claude/CLAUDE.md", Expected: 2, Missing: []string{}, Extra: []string{}, State: RulesCurrent})
 		}
 		for i := 0; i < 4; i++ {
+			cases, shadowed := 14, 1
 			s.Hooks = append(s.Hooks, HookInfo{Name: fmt.Sprintf("guard-%d", i), Scope: scope,
-				Source: "generated", Rule: "never run the command this guard names in a shell"})
+				Source: "generated", Rule: "never run the command this guard names in a shell",
+				Fixtures: &mine.FixtureReceipt{Applicable: true, State: mine.FixtureStale, Cases: &cases,
+					Shadowed: &shadowed, VerifiedAt: "2026-01-01T00:00:00Z",
+					Changed: []string{"fixtures", "hook", "rule", "master"},
+					Reason:  "the master hook could not be read: permission denied"}})
 		}
 		for i := 0; i < 12; i++ {
 			s.Presets = append(s.Presets, PresetInfo{Name: fmt.Sprintf("preset-%d", i), Scope: scope,

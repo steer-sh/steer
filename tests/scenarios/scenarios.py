@@ -410,6 +410,19 @@ def _agent_feedback():
     return _snapshot([rec]), _scores([rec]), _queue([rec])
 
 
+def _guard_without_record():
+    # A guard installed through /steer: its stored cases pass, and no record
+    # tracks a problem against a baseline.
+    snap = _snapshot()
+    snap["hooks"] = [{
+        "name": "no-bare-python", "scope": "global", "source": "generated",
+        "rule": "never use bare python in bash commands | use python3",
+        "fixtures": {"applicable": True, "state": "current", "cases": 14,
+                     "verified_at": "2026-10-05T14:02:11Z", "shadowed": 0},
+    }]
+    return snap, _scores(), _queue()
+
+
 def supporting_evidence(name):
     """Saved audit output and inspected facts supplied instead of live commands."""
     if name == "busy-report":
@@ -454,6 +467,7 @@ SCENARIOS = {
     "busy-report": _busy_report,
     "agent-feedback": _agent_feedback,
     "agent-feedback-confirmed": _agent_feedback,
+    "guard-without-record": _guard_without_record,
 }
 
 

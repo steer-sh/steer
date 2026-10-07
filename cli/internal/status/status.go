@@ -20,6 +20,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/checks"
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/codex"
+	"github.com/steer-sh/steer-cli/internal/evidence"
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
 	"github.com/steer-sh/steer-cli/internal/gate/resolve"
@@ -70,8 +71,9 @@ import (
 // arming readings, scope.repo_root, and no chains. v28 adds posture.readiness: the
 // answer `steer status` prints, so an agent reads trust and resolution with it.
 // v29 adds posture.plugins: each harness's cached plugin copy, read against the
-// stable executable.
-const StatusVersion = 32
+// stable executable. v33 adds hooks[].fixtures: every guard's stored cases, with or
+// without a record.
+const StatusVersion = 33
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20
@@ -154,6 +156,10 @@ type HookInfo struct {
 	Scope  string `json:"scope"`
 	Source string `json:"source"`
 	Rule   string `json:"rule,omitempty"`
+	// Fixtures is the guard's stored cases read against the guard installed now,
+	// in the shape a guard-tier record's score row carries, whether or not a record
+	// names the guard. It is absent only when the guard left the store mid-read.
+	Fixtures *mine.FixtureReceipt `json:"fixtures,omitempty"`
 }
 
 // PresetInfo is one catalog preset with its enable and drift state in a scope.
@@ -1138,12 +1144,16 @@ func collectHooks(scope string) ([]HookInfo, []StoreProblem) {
 		if source == "" {
 			source = "manual"
 		}
-		out = append(out, HookInfo{
+		row := HookInfo{
 			Name:   name,
 			Scope:  scope,
 			Source: source,
 			Rule:   entry.Rule,
-		})
+		}
+		if receipt, ok := evidence.GuardFixtureReceipt(scope, name); ok {
+			row.Fixtures = &receipt
+		}
+		out = append(out, row)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil

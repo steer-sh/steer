@@ -8,7 +8,7 @@ the skill headlessly and writes the reports into `out/`.
 There is no mechanical oracle for prose quality. The runner explicitly requests
 a Read of the working-tree skill and records successful skill-file reads in each
 report's first line. A missing `SKILL.md` read invalidates the run; `audit.md` is
-also required when the snapshot holds an `interventions[]` row or nonzero
+also required when the snapshot holds an `interventions[]` or `hooks[]` row or nonzero
 `telemetry.audit_firings` or `telemetry.check_blocks`, and the steer skill's
 `prompts/routing.md`, copied in beside it, when the queue holds candidates. Model errors and sandbox
 leaks invalidate the run too. The runner exits nonzero and writes no replacement
@@ -26,6 +26,7 @@ report on failure; an older output may still be present. A person judges valid r
 | `busy-report` | What needs attention among several quiet fixes, a fresh fix, a tracking error and a weak candidate? |
 | `agent-feedback` | Is the agent's report of blocked valid work confirmed or still unchecked? |
 | `agent-feedback-confirmed` | What should change after inspection confirms a wrong block? |
+| `guard-without-record` | I installed this guard myself: is it working, and why is nothing tracked? |
 
 ## The comprehension checklist
 

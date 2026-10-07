@@ -121,7 +121,7 @@ Read the linked architecture section before changing the corresponding boundary:
   `TestJSONContractIsStable` pins the contract and
   `TestContractNamesEveryFixWithinItsSizeCeiling` its size. The scenario builder
   `tests/scenarios/scenarios.py` emits the same three documents.
-  Step 1 loads `audit.md` only when `interventions[]` holds a row or
+  Step 1 loads `audit.md` only when `interventions[]` or `hooks[]` holds a row or
   `telemetry.audit_firings` or `telemetry.check_blocks` is above zero, so a change
   to any of those fields changes when the audit runs. A skill names a file of its own as `./<name>`, which
   `TestSkillOwnFileReferencesResolve` resolves.

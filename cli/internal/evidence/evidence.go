@@ -186,19 +186,29 @@ func FixtureReceipts(records []mine.Record, host, projectRoot string) map[mine.F
 			continue
 		}
 		seen[key] = true
-		snapshot, err := claude.ReadHookFixtureSnapshot(fix.Scope, fix.ID)
-		switch {
-		case err != nil:
-			out[key] = mine.FixtureReceipt{
-				Applicable: true,
-				State:      mine.FixtureUnavailable,
-				Reason:     err.Error(),
-			}
-		case snapshot != nil:
-			out[key] = receiptOf(snapshot)
+		if receipt, ok := GuardFixtureReceipt(fix.Scope, fix.ID); ok {
+			out[key] = receipt
 		}
 	}
 	return out
+}
+
+// GuardFixtureReceipt reads one guard's fixture state in the store this machine
+// resolves for scope. ok is false when the store or the guard is not there; an
+// unreadable one is a receipt naming the failure.
+func GuardFixtureReceipt(scope, hook string) (mine.FixtureReceipt, bool) {
+	snapshot, err := claude.ReadHookFixtureSnapshot(scope, hook)
+	switch {
+	case err != nil:
+		return mine.FixtureReceipt{
+			Applicable: true,
+			State:      mine.FixtureUnavailable,
+			Reason:     err.Error(),
+		}, true
+	case snapshot == nil:
+		return mine.FixtureReceipt{}, false
+	}
+	return receiptOf(snapshot), true
 }
 
 // receiptOf reads one snapshot into the reported state. Precedence is attribution,

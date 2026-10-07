@@ -108,12 +108,12 @@ Each record reports before/after incidence over its own unit — the fraction of
 ### The audit lives in `audit.md`
 
 Decide this from the snapshot, never from what you expect to find. **When
-`interventions[]` holds a row, or `telemetry.audit_firings` or
+`interventions[]` or `hooks[]` holds a row, or `telemetry.audit_firings` or
 `telemetry.check_blocks` is above zero, Read `./audit.md` from this skill's
 directory now, and finish its audit before Step 2.** It holds how to read each
-record's fields, the contests blocked agents filed, the sampled reading of recorded
-guard and check.sh blocks, the repair of a block judged wrong, and the field
-reference for an `interventions[]` row.
+record's fields, the stored cases of a guard no record names, the contests blocked
+agents filed, the sampled reading of recorded guard and check.sh blocks, the repair
+of a block judged wrong, and the field reference for an `interventions[]` row.
 
 When none holds, this machine has no fix to audit and no recorded block to read.
 Say so in one line and go to Step 2:
@@ -180,7 +180,7 @@ A correction occurrence can carry two context fields, each `{text, cut}` with `c
 
 An `after_interrupt` occurrence carries the same two fields, read from before the interrupt.
 
-### The `steer status --json` contract (`status_version: 32`)
+### The `steer status --json` contract (`status_version: 33`)
 
 Step 1 reads this snapshot for posture and the full class inventory. The unit is
 the failure class and what the corpus recorded about it, not the hook count. This
@@ -224,7 +224,8 @@ v29 adds `posture.plugins`: each harness's cached plugin copy, read against the
 stable executable. v30 adds `posture.mods`: each enabled Claude Code mod, read
 against the cache `steer mods inspect` writes. v31 adds `posture.guard_interpreter`:
 whether this process finds the interpreter every guard runner starts under. v32
-adds `unread` to each `attention.candidates[]` row.
+adds `unread` to each `attention.candidates[]` row. v33 adds `fixtures` to each
+`hooks[]` row.
 
 - `status_version` — the schema version. `--json` is a stable agent contract.
 - `posture` — the arming state: `instrument` (reviewer model / runs / prompt
@@ -381,8 +382,10 @@ adds `unread` to each `attention.candidates[]` row.
   nothing reads differently from one that was never mined.
 - `corpora[]` — one row per corpus with `present`, `size` and `path`.
 - `hooks[]` — the registered managed hooks in both scopes: `name`, `scope`,
-  `source`, `rule`. One name can appear once per scope; `scope` and `name`
-  together identify a guard.
+  `source`, `rule`, and `fixtures`, the guard's stored cases read against the
+  guard installed now, in the shape `audit.md` gives for a score row's `fixtures`.
+  Every guard carries it, whether or not a record names the guard. One name can
+  appear once per scope; `scope` and `name` together identify a guard.
 - `presets[]` — the catalog roster, one row per preset: `name`, `bundle`,
   `description`, and `enabled_scopes` / `drifted_scopes`, the scopes it is enabled
   in and the scopes whose installed copy drifted from the catalog.

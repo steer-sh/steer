@@ -115,7 +115,8 @@ def run_scenario(name: str, model: str) -> tuple[str, float, list[str]]:
         shutil.copy2(ROUTING_SRC, routing)
         snapshot = json.loads(status.read_text())
         telemetry = snapshot.get("telemetry", {})
-        needs_audit = bool(snapshot.get("interventions") or telemetry.get("audit_firings", 0)
+        needs_audit = bool(snapshot.get("interventions") or snapshot.get("hooks")
+                           or telemetry.get("audit_firings", 0)
                            or telemetry.get("check_blocks", 0))
         needs_routing = bool(json.loads(queue.read_text()).get("candidates"))
         extra_reads = []

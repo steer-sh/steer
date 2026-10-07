@@ -190,7 +190,7 @@ func intPtr(n int) *int           { return &n }
 // so a renamed or reordered json tag fails here, the agent-contract guard.
 func TestJSONContractIsStable(t *testing.T) {
 	s := &SystemStatus{
-		StatusVersion: 31,
+		StatusVersion: 33,
 		GeneratedAt:   "2026-01-01T00:00:00Z",
 		Posture: Posture{
 			Instrument: "agy@sha", Reviewer: "gemini", Ledger: "/l.jsonl",
@@ -318,8 +318,12 @@ func TestJSONContractIsStable(t *testing.T) {
 			{Corpus: "transcript-friction", Present: true, Size: 40, Path: "/state/sessions"},
 		},
 		Hooks: []HookInfo{
-			{Name: "no-console", Scope: "project", Source: "manual", Rule: "no console.log here"},
-			{Name: "no-console", Scope: "global", Source: "generated", Rule: "no console.log"},
+			{Name: "no-console", Scope: "project", Source: "manual", Rule: "no console.log here",
+				Fixtures: &mine.FixtureReceipt{Applicable: true, State: mine.FixtureCurrent,
+					Cases: intPtr(14), Shadowed: intPtr(0), VerifiedAt: "2026-01-01T00:00:00Z"}},
+			{Name: "no-console", Scope: "global", Source: "generated", Rule: "no console.log",
+				Fixtures: &mine.FixtureReceipt{Applicable: true, State: mine.FixtureStale,
+					Cases: intPtr(6), Shadowed: intPtr(1), VerifiedAt: "2025-12-01T00:00:00Z", Changed: []string{"master"}}},
 		},
 		Presets: []PresetInfo{
 			{Name: "shell-safety", Scope: "project", Bundle: "security", Description: "block risky shell", Enabled: false},
@@ -342,7 +346,7 @@ func TestJSONContractIsStable(t *testing.T) {
 }
 
 const goldenStatusJSON = `{
-  "status_version": 31,
+  "status_version": 33,
   "generated_at": "2026-01-01T00:00:00Z",
   "posture": {
     "instrument": "agy@sha",
@@ -696,13 +700,30 @@ const goldenStatusJSON = `{
       "name": "no-console",
       "scope": "project",
       "source": "manual",
-      "rule": "no console.log here"
+      "rule": "no console.log here",
+      "fixtures": {
+        "applicable": true,
+        "state": "current",
+        "cases": 14,
+        "verified_at": "2026-01-01T00:00:00Z",
+        "shadowed": 0
+      }
     },
     {
       "name": "no-console",
       "scope": "global",
       "source": "generated",
-      "rule": "no console.log"
+      "rule": "no console.log",
+      "fixtures": {
+        "applicable": true,
+        "state": "stale",
+        "cases": 6,
+        "changed": [
+          "master"
+        ],
+        "verified_at": "2025-12-01T00:00:00Z",
+        "shadowed": 1
+      }
     }
   ],
   "presets": [
@@ -981,6 +1002,40 @@ func TestCollectCarriesTheArtifactOfEachRecord(t *testing.T) {
 	if len(s.Attention.Interventions) != 1 || s.Attention.Interventions[0].Artifact == nil ||
 		s.Attention.Interventions[0].Artifact.State != cadence.ArtifactAbsent {
 		t.Fatalf("attention = %+v; want the record queued with its artifact", s.Attention.Interventions)
+	}
+}
+
+// Every guard row carries its fixture receipt, whether or not a record names the
+// guard, from the conversion a guard-tier record's score row uses.
+func TestCollectCarriesEachGuardsFixtureReceipt(t *testing.T) {
+	isolate(t)
+	home, _ := os.UserHomeDir()
+	store := filepath.Join(home, ".steer", "hooks")
+	if err := os.MkdirAll(store, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"hooks":{
+		"no-pass":{"file":"no-pass.py","rule":"never run foo","fixtures":{"digest":"d","cases":3,"tested":false}},
+		"no-master":{"file":"no-master.py","rule":"never run bar","fixtures":{"digest":"d","cases":14,"tested":true,"verified_at":"2026-10-05T00:00:00Z"}}
+	},"rules":{}}`
+	if err := os.WriteFile(filepath.Join(store, "steer-manifest.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := Collect(Options{GateStateDir: t.TempDir(), Scope: claude.GlobalScope})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]*mine.FixtureReceipt{}
+	for _, h := range s.Hooks {
+		got[h.Name] = h.Fixtures
+	}
+	if r := got["no-pass"]; r == nil || !r.Applicable || r.State != mine.FixtureNone || r.Cases != nil {
+		t.Errorf("no-pass fixtures = %+v; want an applicable none with no cases", r)
+	}
+	if r := got["no-master"]; r == nil || r.State != mine.FixtureUnavailable || r.Cases == nil || *r.Cases != 14 ||
+		r.VerifiedAt != "2026-10-05T00:00:00Z" {
+		t.Errorf("no-master fixtures = %+v; want unavailable with the pass's 14 cases", r)
 	}
 }
 

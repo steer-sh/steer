@@ -42,6 +42,33 @@ For every record with a recurrence you confirmed by reading its matches, open th
 
 A gate that never fires is not free. It costs oracle runtime on every commit and, worse, it reads as coverage that does not exist.
 
+## Read the stored cases of a guard no record names
+
+A guard needs no record. A record names a defined problem and tracks it against a
+baseline, and a guard installed as a preference has no "before" to compare. A
+`hooks[]` row is such a guard when no `interventions[]` row carries its `name` as
+`hook_id` with its `scope` as `artifact.scope`. Every installed guard-tier record
+has an `artifact`; a null one is a declined record, which installed nothing and
+names no guard. The guard row's `fixtures` has the shape and states of a score
+row's `fixtures` (the field reference below), and it is the guard's whole audit
+here. Say what the state shows, then that no comparison is kept:
+
+> Stored cases: 14 passing against the guard as installed now. No before/after
+> tracking is available for it here.
+
+- `current` gives `cases`, and `shadowed` when above zero: those cases another
+  guard stopped first, which this guard's pass did not establish.
+- `stale` names each `changed` component and the rerun:
+  `steer test <name> --scope <scope>`.
+- `none` says no stored pass is kept for the current guard. Never say the guard
+  failed.
+- `unavailable` gives its `reason`.
+
+Group the guards whose cases pass into one line. Never call a guard "untracked",
+and never say how or why it was installed beyond what its `source` shows. Do not
+offer to register a record for a guard that already runs: `register` splits its
+windows at registration, so the "before" would count time the guard already ran.
+
 ## Read feedback from blocked agents
 
 A guard block's message offers the blocked agent `steer contest FIRING_ID "reason"`,
