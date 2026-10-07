@@ -9,7 +9,6 @@ import (
 
 	"github.com/steer-sh/steer-cli/internal/config"
 	"github.com/steer-sh/steer-cli/internal/gate"
-	"github.com/steer-sh/steer-cli/internal/gate/mine"
 	"github.com/steer-sh/steer-cli/internal/gate/reviewers"
 	"github.com/steer-sh/steer-cli/internal/settings"
 	"github.com/steer-sh/steer-cli/internal/status"
@@ -65,7 +64,6 @@ func TestReviewerPanelNamesEverySetting(t *testing.T) {
 func TestReviewerPanelWritesTheSettingsFile(t *testing.T) {
 	tempSettingsHome(t)
 	m := New(gate.Defaults(), "global")
-	m.impactOf = func(gate.Config) []mine.InstrumentImpact { return nil }
 	m.active = panelReviewer
 	m.cursor[panelReviewer] = indexOfField(t, "reviewer.model")
 
@@ -91,7 +89,6 @@ func TestReviewerPanelWritesTheSettingsFile(t *testing.T) {
 func TestReviewerPanelChoosesTheCLIFromAList(t *testing.T) {
 	tempSettingsHome(t)
 	m := New(gate.Defaults(), "global")
-	m.impactOf = func(gate.Config) []mine.InstrumentImpact { return nil }
 	m.active = panelReviewer
 	m.cursor[panelReviewer] = indexOfField(t, "reviewer.provider")
 
@@ -125,7 +122,6 @@ func TestChangingTheCLIAsksAboutTheModelAndTheEffort(t *testing.T) {
 		t.Fatalf("config.Save: %v", err)
 	}
 	m := New(gate.Defaults(), "global")
-	m.impactOf = func(gate.Config) []mine.InstrumentImpact { return nil }
 	m.active = panelReviewer
 	m.cursor[panelReviewer] = indexOfField(t, "reviewer.provider")
 
@@ -163,7 +159,6 @@ func TestReviewerPanelReturnsAFieldToItsDefault(t *testing.T) {
 		t.Fatalf("config.Save: %v", err)
 	}
 	m := New(gate.Defaults(), "global")
-	m.impactOf = func(gate.Config) []mine.InstrumentImpact { return nil }
 	m.active = panelReviewer
 	m.cursor[panelReviewer] = indexOfField(t, "reviewer.model")
 
@@ -199,41 +194,6 @@ func TestReviewerPanelNamesAPinnedRegistration(t *testing.T) {
 		if !strings.Contains(view, want) {
 			t.Errorf("the reviewer panel is missing %q", want)
 		}
-	}
-}
-
-// An identity change moves the instrument the ledger stamps, so the panel names the
-// measurements it lands in and takes a second enter before it writes.
-func TestReviewerPanelConfirmsAnIdentityChangeThatLandsInAMeasurement(t *testing.T) {
-	tempSettingsHome(t)
-	m := New(gate.Defaults(), "global")
-	m.impactOf = func(gate.Config) []mine.InstrumentImpact {
-		return []mine.InstrumentImpact{{ID: "bare-python", Class: "bare python call", Grade: mine.DriftMinor, Dims: []string{"effort"}}}
-	}
-	m.active = panelReviewer
-	m.cursor[panelReviewer] = indexOfField(t, "reviewer.effort")
-
-	m.Update(key("enter"))
-	m.input.SetValue("high")
-	m.Update(key("enter"))
-
-	if got, err := config.Load(); err != nil || got != (config.Config{}) {
-		t.Fatalf("the first enter wrote %#v (err %v); want the confirmation first", got, err)
-	}
-	view := m.View()
-	for _, want := range []string{"lands in 1 measurement(s)", "bare python call", "effort — the same reviewer, set differently"} {
-		if !strings.Contains(view, want) {
-			t.Errorf("the confirmation is missing %q", want)
-		}
-	}
-
-	m.Update(key("enter"))
-	got, err := config.Load()
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-	if got.Reviewer.Effort != "high" {
-		t.Fatalf("stored effort %q, want high after the confirmation", got.Reviewer.Effort)
 	}
 }
 

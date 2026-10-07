@@ -98,11 +98,6 @@ type Model struct {
 
 	// reviewer is the pending settings edit, nil unless the Reviewer panel is editing.
 	reviewer *reviewerEdit
-	// impactOf grades a pending reviewer identity against the measurements still
-	// collecting. It is a field so a test can drive the confirmation step without
-	// authoring a corpus; every construction sets it to settings.Impact.
-	impactOf func(gate.Config) []mine.InstrumentImpact
-
 	quitting bool
 }
 
@@ -110,7 +105,7 @@ type Model struct {
 func New(cfg gate.Config, scope string, targets ...harness.Registrar) *Model {
 	in := textinput.New()
 	in.CharLimit = 200
-	m := &Model{cfg: cfg, scope: scope, targets: targets, input: in, impactOf: settings.Impact}
+	m := &Model{cfg: cfg, scope: scope, targets: targets, input: in}
 	m.refresh()
 	return m
 }

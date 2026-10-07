@@ -7,7 +7,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/config"
-	"github.com/steer-sh/steer-cli/internal/gate/mine"
 	"github.com/steer-sh/steer-cli/internal/gate/reviewers"
 	"github.com/steer-sh/steer-cli/internal/settings"
 	"github.com/steer-sh/steer-cli/internal/steerpath"
@@ -86,13 +85,12 @@ to see what an environment variable overrides.`,
 
 var configSetCmd = &cobra.Command{
 	Use:   "set <key> <value>",
-	Short: "Write one value, naming the measurements the change lands in",
+	Short: "Write one value",
 	Long: `set writes one key to ~/.steer/config.json. An empty value clears the key,
 which returns it to the shipped default.
 
 A change to the reviewer's identity — its provider, model, effort or run count —
-changes the instrument the ledger stamps. Every class still collecting evidence is
-then measured across two instruments, so set names those classes before it writes.`,
+changes the instrument the ledger stamps on every later review row.`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		f, err := settings.Find(args[0])
@@ -117,9 +115,9 @@ then measured across two instruments, so set names those classes before it write
 		fmt.Println(styles.MainHeader.Render("Steer Settings"))
 		fmt.Println()
 		// An effort no provider documents is warned about by the reviewer resolver,
-		// which reportReviewerImpact runs; warning here too would print it twice.
+		// which previewReviewer runs; warning here too would print it twice.
 		if f.Identity {
-			reportReviewerImpact(next)
+			previewReviewer(next)
 		}
 		if err := config.Save(next); err != nil {
 			return err
@@ -146,30 +144,12 @@ then measured across two instruments, so set names those classes before it write
 	},
 }
 
-// reportReviewerImpact names the classes whose measurement the pending reviewer change
-// lands in, before the change is written.
-func reportReviewerImpact(next config.Config) {
-	cfg, err := settings.Preview(next, warnOnce)
-	if err != nil {
+// previewReviewer resolves the reviewer the pending change would run, so its warnings
+// print before the change is written.
+func previewReviewer(next config.Config) {
+	if _, err := settings.Preview(next, warnOnce); err != nil {
 		utils.Warning(err.Error())
-		return
 	}
-	printImpacts("This reviewer change", settings.Impact(cfg))
-}
-
-// printImpacts lists the measurements a change lands in, or nothing when it moves none.
-func printImpacts(change string, impacts []mine.InstrumentImpact) {
-	if len(impacts) == 0 {
-		return
-	}
-	utils.Warning(fmt.Sprintf("%s lands in %d measurement(s) already collecting:",
-		change, len(impacts)))
-	width := settings.ImpactWidth(impacts)
-	for _, im := range impacts {
-		fmt.Printf("    %-6s %-*s %s\n", im.Grade, width, im.Class,
-			styles.MutedText.Render(settings.ImpactNote(im)))
-	}
-	fmt.Println()
 }
 
 // configProvidersCmd lists the reviewer CLIs and whether each resolves here. It is

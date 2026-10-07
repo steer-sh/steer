@@ -1,5 +1,5 @@
 // Package settings owns the editable surface of ~/.steer/config.json: the one key
-// table, the reviewer it resolves, and the measurements a reviewer edit lands in.
+// table and the reviewer it resolves.
 // The CLI's `steer config` and the dashboard's Reviewer panel both read this table,
 // so a key can never exist in one editor only.
 package settings
@@ -7,15 +7,11 @@ package settings
 import (
 	"fmt"
 	"os"
-	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/steer-sh/steer-cli/internal/config"
-	"github.com/steer-sh/steer-cli/internal/evidence"
 	"github.com/steer-sh/steer-cli/internal/gate"
-	"github.com/steer-sh/steer-cli/internal/gate/mine"
 	"github.com/steer-sh/steer-cli/internal/gate/reviewers"
 )
 
@@ -52,8 +48,7 @@ type Field struct {
 	// Numeric marks a key whose environment override counts only when it parses
 	// above zero, the same test gate.WithEnv applies.
 	Numeric bool
-	// Identity marks a key the ledger stamps as part of the reviewer instrument, so
-	// changing it drifts every measurement still collecting evidence.
+	// Identity marks a key the ledger stamps as part of the reviewer instrument.
 	Identity bool
 	Usage    string
 	Get      func(config.Config) string
@@ -358,90 +353,4 @@ func Resolve(cfg gate.Config, warn func(string)) (gate.Config, gate.Reviewer, er
 func Preview(next config.Config, warn func(string)) (gate.Config, error) {
 	cfg, _, err := Resolve(gate.WithEnv(gate.WithFile(gate.Defaults(), next)), warn)
 	return cfg, err
-}
-
-// Impact names the measurements a pending reviewer identity lands in, graded by
-// mine.ImpactOf against each record's before-window reviewer.
-func Impact(cfg gate.Config) []mine.InstrumentImpact {
-	records, err := mine.Load(cfg.StateDir)
-	if err != nil || len(records) == 0 {
-		return nil
-	}
-	ev := evidence.Gather(evidence.Options{GateStateDir: cfg.StateDir})
-	fields, _ := mine.InstrumentFieldsFrom(cfg.InstrumentFields())
-	// A settings edit has no repository, so each record keeps its own review addendum.
-	fields.AddendumKnown = false
-	return mine.ImpactOf(records, ev.Chains, mine.InstrumentUse{ID: cfg.InstrumentID(), Fields: fields})
-}
-
-// AddendumImpact names the measurements a written addendum change lands in. A project
-// change (project set) moves only records whose scope admits repo, graded with the
-// global entries plus repo's working-tree entries. A global change grades a record
-// scoped to a repository root with what the gate reads there, and any other with the
-// global entries alone.
-func AddendumImpact(cfg gate.Config, repo string, project bool) []mine.InstrumentImpact {
-	records, err := mine.Load(cfg.StateDir)
-	if err != nil || len(records) == 0 {
-		return nil
-	}
-	pending := gate.PendingAddendum("").Digest()
-	if project {
-		pending = gate.PendingAddendum(repo).Digest()
-	}
-	sub := mine.Subject{Repo: filepath.Base(repo), RepoKnown: true, RepoRoot: repo, RepoRootKnown: true}
-	groups := map[string][]mine.Record{}
-	for _, record := range records {
-		scope, ok, err := mine.ParseScope(record)
-		scoped := err == nil && ok
-		digest := pending
-		switch {
-		case project && scoped && scope.ClassifySubject(sub) == mine.Ineligible:
-			continue
-		case !project && scoped && scope.RepoRoot != "":
-			digest = gate.LoadAddendum(scope.RepoRoot).Digest()
-		}
-		groups[digest] = append(groups[digest], record)
-	}
-	ev := evidence.Gather(evidence.Options{GateStateDir: cfg.StateDir})
-	var out []mine.InstrumentImpact
-	for _, digest := range sortedKeys(groups) {
-		fields, _ := mine.InstrumentFieldsFrom(cfg.InstrumentFieldsWith(digest))
-		out = append(out, mine.ImpactOf(groups[digest], ev.Chains,
-			mine.InstrumentUse{ID: cfg.InstrumentIDWith(digest), Fields: fields})...)
-	}
-	return out
-}
-
-func sortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
-}
-
-// ImpactWidth is the class column an impact list renders over: the widest class in
-// the list, so a long class name pushes the column rather than colliding with it.
-func ImpactWidth(impacts []mine.InstrumentImpact) int {
-	width := 0
-	for _, im := range impacts {
-		if n := len([]rune(im.Class)); n > width {
-			width = n
-		}
-	}
-	return width
-}
-
-// ImpactNote says what a grade means for the record's counts: the window after the
-// change is counted by another reviewer, or by the same one set differently.
-func ImpactNote(im mine.InstrumentImpact) string {
-	consequence := "the same reviewer, set differently, counts the window after this change"
-	if im.Grade == mine.DriftMajor {
-		consequence = "a different reviewer counts the window after this change"
-	}
-	if len(im.Dims) == 0 {
-		return consequence
-	}
-	return strings.Join(im.Dims, ", ") + " — " + consequence
 }

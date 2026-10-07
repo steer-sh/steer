@@ -4,14 +4,11 @@ import (
 	"encoding/json"
 	"io"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/config"
-	"github.com/steer-sh/steer-cli/internal/gate"
-	"github.com/steer-sh/steer-cli/internal/gate/mine"
 )
 
 // tempSettingsHome points the settings file at a temporary home, so a test never reads
@@ -109,33 +106,8 @@ func captureStdout(t *testing.T, fn func()) string {
 	return string(out)
 }
 
-// A reviewer change is measured across two instruments by every class still
-// collecting, so set names those classes before it writes.
-func TestConfigSetNamesTheMeasurementsAReviewerChangeLandsIn(t *testing.T) {
-	tempSettingsHome(t)
-	state := t.TempDir()
-	t.Setenv("COMMIT_GATE_STATE_DIR", state)
-	authored := gate.Defaults().InstrumentID()
-	writeLine(t, filepath.Join(state, "interventions.jsonl"), map[string]any{
-		"id": "bare-except-1", "class": "bare-except", "match": "boom", "tier": "check",
-		"status": "active", "installed_ts": 4000, "instrument": authored,
-		"scope": map[string]any{"version": mine.ScopeVersion, "all": true},
-	})
-	writeLine(t, filepath.Join(state, "adjudication.test.jsonl"), map[string]any{
-		"ts": 1000, "phase": "deny", "firing": 1, "files": 1, "instrument": authored,
-	})
-
-	out := captureStdout(t, func() { setSetting(t, "reviewer.effort", "high") })
-	if !strings.Contains(out, "bare-except") {
-		t.Errorf("set did not name the class it lands in:\n%s", out)
-	}
-	if !strings.Contains(out, "minor") {
-		t.Errorf("an effort change is a minor drift; got:\n%s", out)
-	}
-}
-
-// A timeout is not part of the reviewer's identity, so it drifts no measurement and
-// says so about the harness wall clock instead.
+// A timeout is not part of the reviewer's identity, so set names the harness wall
+// clock it does not reach.
 func TestConfigSetTimeoutNamesTheRegistrationItDoesNotReach(t *testing.T) {
 	tempSettingsHome(t)
 	out := captureStdout(t, func() { setSetting(t, "reviewer.timeout", "300") })

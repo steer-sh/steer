@@ -404,13 +404,11 @@ entries render into the template's context slot, leaving the prompt digest
 unchanged. The addendum's digest joins the instrument string as
 `<prompt>+<addendum>` inside the digest segment, because a fifth segment is read
 as effort, and rides `instrument_fields` as `addendum_digest`. An absent addendum
-reads as known and empty. A settings preview has no repository, so `ImpactOf`
-gives it each record's own addendum.
+reads as known and empty.
 
 `gate.Load` resolves defaults, `~/.steer/config.json`, then environment overrides;
 command flags override those values. `internal/settings/` shares setting metadata
-and mutation previews between CLI and TUI. `mine.ImpactOf` warns about reviewer
-identity changes across live review-corpus records. The observation scorer reports
+and mutation previews between CLI and TUI. The observation scorer reports
 identity provenance without grading efficacy from it.
 
 Engine timeout and harness hook timeout are separately stored. Registration gives

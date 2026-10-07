@@ -9,23 +9,17 @@ import (
 
 	"github.com/steer-sh/steer-cli/internal/config"
 	"github.com/steer-sh/steer-cli/internal/gate"
-	"github.com/steer-sh/steer-cli/internal/gate/mine"
 	"github.com/steer-sh/steer-cli/internal/gate/reviewers"
 	"github.com/steer-sh/steer-cli/internal/settings"
 	"github.com/steer-sh/steer-cli/internal/status"
 	"github.com/steer-sh/steer-cli/internal/steerbin"
 )
 
-// reviewerEdit is one setting's pending write. A change to the reviewer's identity
-// moves how the evidence is produced, so the panel names the measurements it lands
-// in and takes a second enter before it writes — the order `steer config set`
-// prints in.
+// reviewerEdit is one setting's pending write.
 type reviewerEdit struct {
-	field   settings.Field
-	next    config.Config
-	value   string
-	impacts []mine.InstrumentImpact
-	confirm bool
+	field settings.Field
+	next  config.Config
+	value string
 	// choice is the highlighted row of a closed-set editor, -1 for a typed one.
 	choice int
 	// carry is the pending answer to what happens to the model and the effort when
@@ -103,19 +97,14 @@ func (m *Model) reviewerEditing(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if n := len(ed.field.Choices()); n > 0 {
 			ed.choice = (ed.choice%n + n) % n
 		}
-		ed.confirm = false
 		return m, nil
 	}
 	if msg.String() == "d" && m.input.Value() == "" && ed.field.DefaultLabel != "" {
 		// Nothing was typed, so d asks for the default rather than typing a letter.
-		ed.confirm = false
 		return m.saveReviewerValue("")
 	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
-	// A keystroke invalidates the confirmation: what is on screen was graded
-	// against the value the operator has just moved away from.
-	ed.confirm = false
 	return m, cmd
 }
 
@@ -133,7 +122,7 @@ func (m *Model) commitReviewerEdit() (tea.Model, tea.Cmd) {
 }
 
 // saveReviewerValue validates the value, asks what happens to the settings that
-// travel with it, reports the measurements the change lands in, and then writes.
+// travel with it, and then writes.
 func (m *Model) saveReviewerValue(value string) (tea.Model, tea.Cmd) {
 	ed := m.reviewer
 	file, err := config.Load()
@@ -163,16 +152,6 @@ func (m *Model) saveReviewerValue(value string) (tea.Model, tea.Cmd) {
 		next.Reviewer.Effort = ""
 	}
 	ed.next, ed.value = next, value
-	if ed.field.Identity && !ed.confirm {
-		if cfg, err := settings.Preview(next, nil); err == nil {
-			ed.impacts = m.impactOf(cfg)
-		}
-		if len(ed.impacts) > 0 {
-			ed.confirm = true
-			m.note("enter again to save, esc to cancel")
-			return m, nil
-		}
-	}
 	if err := config.Save(next); err != nil {
 		m.note("error: %v", err)
 		return m, nil
@@ -356,7 +335,7 @@ func (m *Model) viewReviewerEditor(file config.Config, width int) string {
 	if ed.carry != carryUnasked {
 		out += wrapTo(carryNote(ed.carry), "  ", width)
 	}
-	return out + m.viewReviewerImpact(width)
+	return out
 }
 
 // editorHint names the keys this editor answers and the value that clears it.
@@ -380,20 +359,6 @@ func carryNote(carry string) string {
 	}
 	return "The current model and effort will be kept. A model name from another CLI " +
 		"may not be one this CLI accepts."
-}
-
-// viewReviewerImpact names the measurements the pending change lands in, graded by
-// the scorer's own computation rather than by a second opinion about it.
-func (m *Model) viewReviewerImpact(width int) string {
-	if len(m.reviewer.impacts) == 0 {
-		return ""
-	}
-	out := wrapTo(warn(fmt.Sprintf("This change lands in %d measurement(s) still gathering evidence:",
-		len(m.reviewer.impacts))), "  ", width)
-	for _, im := range m.reviewer.impacts {
-		out += wrapTo(fmt.Sprintf("%s — %s", im.Class, settings.ImpactNote(im)), "    ", width)
-	}
-	return out
 }
 
 // pinnedReviewerRow is one registered commit-gate command still naming the reviewer.

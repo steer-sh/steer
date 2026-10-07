@@ -12,10 +12,9 @@ This skill takes a machine from "the plugin is installed" to "a commit here gets
 reviewed". It writes only what is missing.
 
 **Never overwrite a reviewer that is already configured.** The reviewer's provider,
-model, effort and run count are the instrument the ledger stamps. Changing one splits
-every class still collecting evidence across two instruments. A user who set steer up
-in Claude Code and is now adding Codex needs the new harness registered and the
-reviewer left exactly as it is.
+model, effort and run count are the user's choice, and the ledger stamps them on every
+review. A user who set steer up in Claude Code and is now adding Codex needs the new
+harness registered and the reviewer left exactly as it is.
 
 ## Step 0: Resolve the CLI
 
@@ -111,7 +110,7 @@ Write the choice:
 "${STEER_BIN}" config set reviewer.model <model>
 ```
 
-`config set` names any measurement the change lands in. Show the user what it prints.
+Show the user any warning `config set` prints.
 Leave `reviewer.effort` and `reviewer.runs` alone unless the user asks: three parallel
 runs is the shipped design, and each run costs their reviewer account.
 
@@ -292,5 +291,4 @@ the approval list or the hook script.
   `/steer` or `/steer-report` routes a rule or a recurring problem to a check.
 - It never registers an intervention or reads the evidence corpora. `/steer-report`
   does that once there is evidence to read.
-- It never changes an existing reviewer. `steer config set` is the user's own command,
-  and it warns about the measurements the change lands in.
+- It never changes an existing reviewer. `steer config set` is the user's own command.
