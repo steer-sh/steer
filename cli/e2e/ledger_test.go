@@ -237,12 +237,16 @@ func TestGuardChainReviewFindingsCorpus(t *testing.T) {
 	if !strings.Contains(match.Stdout, "registration baseline: 1/1 chains") {
 		t.Errorf("fix match did not preview a 1/1 chain baseline:\n%s", match.Stdout)
 	}
-	s.MustSteer(append([]string{"fix", "register", "--tier", "guard", "--hook-id", noVarHook,
+	register := append([]string{"fix", "register", "--tier", "guard", "--hook-id", noVarHook,
 		"--corpus", "review-findings", "--kind", "false-positive", "--class", "var-finding",
 		"--match", "declares a variable with var",
 		"--problem", "Reviewers flag var declarations the agent then rejects.",
 		"--intervention", "A guard blocks var declarations before they reach review.",
-		"--target", ".steer/hooks/" + noVarHook + ".py"}, scope...)...)
+		"--target", ".steer/hooks/" + noVarHook + ".py"}, scope...)
+	if r := s.Steer(register...); r.Code == 0 || !strings.Contains(r.Output(), "already blocked work on this machine") {
+		t.Fatalf("register accepted a guard whose block precedes the cutoff:\n%s", r.Output())
+	}
+	s.MustSteer(append(register, "--force")...)
 
 	s.FireNoVar("sess-after")
 	id = g.DenyThenRetry("sess-2", "mod2.py", "add mod2")

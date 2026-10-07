@@ -600,14 +600,17 @@ type RegisterOpts struct {
 	Corpus     string
 	SignalKind string
 	Sessions   []SessionUnit
-	Tier       string
-	Target     string
-	Note       string
-	Prose      Prose
-	HookID     string
-	HookScope  string
-	RuleID     string
-	RuleScope  string
+	// Firings is this machine's guard audit stream less excluded rows. A guard
+	// record is refused while it holds a block from that guard before the cutoff.
+	Firings   []Firing
+	Tier      string
+	Target    string
+	Note      string
+	Prose     Prose
+	HookID    string
+	HookScope string
+	RuleID    string
+	RuleScope string
 	// AddendumID names the review addendum entry a review-tier record binds.
 	AddendumID    string
 	AddendumScope string
@@ -803,10 +806,18 @@ func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 			return err
 		}
 		if facts != nil {
+			fix := GuardFix{ID: o.HookID, Scope: str(facts[HookScopeKey])}
+			if err := refuseRunningGuard(o, records, fix, scope, installed); err != nil {
+				return err
+			}
 			for k, v := range facts {
 				record[k] = v
 			}
 		} else {
+			unbound := GuardFix{ID: o.HookID, Scope: o.HookScope}
+			if err := refuseRunningGuard(o, records, unbound, scope, installed); err != nil {
+				return err
+			}
 			fmt.Fprintf(os.Stderr, "steer commit-gate mine: %s is not in steer-manifest.json — "+
 				"recording the id anyway, but confirm it matches the audit log's hook_name\n", pyRepr(o.HookID))
 		}
@@ -868,6 +879,46 @@ func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 	}
 	fmt.Fprintln(w, pyDumps(record, 2))
 	return nil
+}
+
+// refuseRunningGuard refuses a guard record whose before window holds blocks the
+// same guard already made on this machine: those blocks lowered the incidence the
+// record would take as its baseline. A fix with no scope is a guard the manifest
+// does not hold, and its blocks from either store count. A block the record's scope
+// excludes never reached its baseline. A replacement for a record
+// bound to the same guard opens a fresh window by design, and Force records anyway.
+func refuseRunningGuard(o RegisterOpts, records []Record, fix GuardFix, scope *Scope, installed int64) error {
+	if o.Force || !tier.IsGuard(o.Tier) {
+		return nil
+	}
+	if prior := findRecord(records, o.Supersedes); o.Supersedes != "" && prior != nil {
+		bound, ok := GuardFixOf(prior)
+		if ok && bound.ID == fix.ID && (bound.Scope == "" || bound.Scope == fix.Scope) {
+			return nil
+		}
+	}
+	var blocks int
+	var first float64
+	for _, f := range o.Firings {
+		if f.HookID != fix.ID || (fix.Scope != "" && f.Scope != fix.Scope) || f.TS >= float64(installed) {
+			continue
+		}
+		if scope != nil && scope.ClassifySubject(f.Subject()) == Ineligible {
+			continue
+		}
+		if blocks == 0 || f.TS < first {
+			first = f.TS
+		}
+		blocks++
+	}
+	if blocks == 0 {
+		return nil
+	}
+	return fmt.Errorf("guard %s already blocked work on this machine: %d recorded block(s) before "+
+		"the cutoff %s, the first at %s. Its before window would count time the guard already "+
+		"ran. Pass --installed-ts %d to split at its first block, previewing it with "+
+		"`steer fix match` under the same flag, or record anyway with --force",
+		pyRepr(fix.ID), blocks, stamp(float64(installed)), stamp(first), int64(first))
 }
 
 // RejectOpts are the flags of `mine reject`.

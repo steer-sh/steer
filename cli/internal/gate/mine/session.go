@@ -104,6 +104,22 @@ type Firing struct {
 	// Scope is the scope of the store the row was read from. The runtime writes a
 	// row into its master's own store, so the store names the guard that fired.
 	Scope string `json:"scope,omitempty"`
+	// Repository is the repository root the block ran in, empty on a row that
+	// recorded none.
+	Repository string `json:"repository,omitempty"`
+}
+
+// Subject reduces a block to the metadata a scope reads. A block records no changed
+// paths, so a path predicate is undecidable for it.
+func (f Firing) Subject() Subject {
+	return Subject{
+		Harness:       f.Harness,
+		HarnessKnown:  f.Harness != "",
+		Repo:          slashBase(f.Repository),
+		RepoKnown:     f.Repository != "",
+		RepoRoot:      f.Repository,
+		RepoRootKnown: f.Repository != "",
+	}
 }
 
 // AuditStore is one guard store directory and the scope it was resolved under.
@@ -162,6 +178,7 @@ func LoadStoreFirings(stores ...AuditStore) (firings []Firing, present bool) {
 				HookDigest        string `json:"hook_digest"`
 				RuleHash          string `json:"rule_hash"`
 				MasterBuildDigest string `json:"master_build_digest"`
+				Repository        string `json:"repository"`
 			}
 			if err := json.Unmarshal([]byte(line), &row); err != nil {
 				continue
@@ -189,6 +206,7 @@ func LoadStoreFirings(stores ...AuditStore) (firings []Firing, present bool) {
 				MasterBuildDigest: row.MasterBuildDigest,
 				RowDigest:         RowDigest(line),
 				Scope:             store.Scope,
+				Repository:        row.Repository,
 			})
 		}
 	}

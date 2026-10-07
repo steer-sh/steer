@@ -66,8 +66,8 @@ here. Say what the state shows, then that no comparison is kept:
 
 Group the guards whose cases pass into one line. Never call a guard "untracked",
 and never say how or why it was installed beyond what its `source` shows. Do not
-offer to register a record for a guard that already runs: `register` splits its
-windows at registration, so the "before" would count time the guard already ran.
+offer to register a record for a guard on its stored cases alone: a record names a
+defined problem, and stored cases are no evidence of one.
 
 ## Read feedback from blocked agents
 

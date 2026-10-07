@@ -171,6 +171,13 @@ func storedSessions() []mine.SessionUnit {
 	return units
 }
 
+// liveFirings reads this machine's guard audit streams less the rows an exclusion
+// retires.
+func liveFirings() []mine.Firing {
+	firings, _ := mine.LoadStoreFirings(evidence.AuditStores()...)
+	return evidence.WithoutExcluded(firings, evidence.Exclusions())
+}
+
 // interventionCommands builds one tree's subcommands. withFindings adds `findings`,
 // which reads the review corpus rather than managing an intervention, so it belongs to
 // the commit-gate tree alone.
@@ -241,6 +248,7 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 				Corpus:     v.registerCorpus,
 				SignalKind: v.registerSignalKind,
 				Sessions:   storedSessions(),
+				Firings:    liveFirings(),
 				Tier:       v.registerTier,
 				Target:     v.registerTarget,
 				Note:       v.registerNote,
@@ -298,7 +306,7 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 	r.StringVar(&v.registerIntervent, "intervention", "", interventionUsage)
 	r.StringVar(&v.registerSupersedes, "supersedes", "", "id of a record this replaces")
 	r.Int64Var(&v.registerInstalledTS, "installed-ts", 0, "install timestamp (default now)")
-	r.BoolVar(&v.registerForce, "force", false, "record despite a zero baseline or a blocking rejection")
+	r.BoolVar(&v.registerForce, "force", false, "record despite a zero baseline, a blocking rejection or the guard's earlier blocks")
 	r.BoolVar(&v.registerScopeAll, "scope-all", false, "eligibility scope: every unit (exclusive with the scope predicates)")
 	r.StringSliceVar(&v.registerScopeHrn, "scope-harness", nil, scopeHarnessUsage)
 	r.StringVar(&v.registerScopeRepo, "scope-repo", "", "eligibility scope: regex on the repository root basename")

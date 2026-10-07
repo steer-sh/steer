@@ -106,3 +106,69 @@ func TestSteerHookFactsReportsACorruptManifestRatherThanAnAbsentHook(t *testing.
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestRegisterRefusesAGuardThatAlreadyBlockedBeforeTheCutoff(t *testing.T) {
+	home := t.TempDir()
+	testhome.Set(t, home)
+	t.Chdir(t.TempDir())
+	writeStore(t, filepath.Join(home, ".steer", "hooks"), "no-bare-python", "use python3", "v1", "g")
+	opts := func(firings ...Firing) RegisterOpts {
+		return RegisterOpts{
+			Prose: testProse, Class: "bare", Match: "bare python", Corpus: CorpusTranscript,
+			Sessions: []SessionUnit{friction(1000, "claude-code", "proj", "bare python here")},
+			Firings:  firings, Tier: "guard", HookID: "no-bare-python", Target: "no-bare-python.py",
+			ScopeAll: true, InstalledTS: 2000,
+		}
+	}
+	block := func(scope string, ts float64) Firing {
+		return Firing{HookID: "no-bare-python", Scope: scope, Harness: "claude-code", SessionID: "s", TS: ts}
+	}
+
+	dir := t.TempDir()
+	err := Register(discard{}, dir, opts(block("global", 1700), block("global", 1500)))
+	if err == nil || !strings.Contains(err.Error(), "--installed-ts 1500") ||
+		!strings.Contains(err.Error(), "2 recorded block(s)") {
+		t.Fatalf("err = %v, want a refusal naming the first block", err)
+	}
+	if records, _ := Load(dir); len(records) != 0 {
+		t.Fatalf("a refused register wrote %d record(s)", len(records))
+	}
+
+	// A namesake's block, or one at the cutoff, is not this guard's before window.
+	if err := Register(discard{}, dir, opts(block("project", 1500), block("global", 2000))); err != nil {
+		t.Fatalf("blocks outside the before window refused the record: %v", err)
+	}
+	// A replacement for a record bound to the same guard opens a fresh window.
+	replace := opts(block("global", 1500))
+	replace.Supersedes = "bare"
+	if err := Register(discard{}, dir, replace); err != nil {
+		t.Fatalf("a same-guard replacement was refused: %v", err)
+	}
+	forced := opts(block("global", 1500))
+	forced.Force = true
+	if err := Register(discard{}, dir, forced); err != nil {
+		t.Fatalf("--force did not record anyway: %v", err)
+	}
+
+	// A block the record's scope excludes never reached its baseline.
+	elsewhere := block("global", 1500)
+	elsewhere.Repository = "/work/other-repo"
+	repo := opts(elsewhere)
+	repo.ScopeAll, repo.ScopeRepo = false, "^proj$"
+	if err := Register(discard{}, dir, repo); err != nil {
+		t.Fatalf("a block in another repository refused the record: %v", err)
+	}
+	other := opts(block("global", 1500))
+	other.ScopeAll, other.ScopeHarness = false, []string{"codex"}
+	other.Sessions = []SessionUnit{friction(1000, "codex", "proj", "bare python here")}
+	if err := Register(discard{}, dir, other); err != nil {
+		t.Fatalf("a Claude Code block refused a Codex-scoped record: %v", err)
+	}
+
+	// A guard the manifest no longer holds is matched by id in either store.
+	gone := opts(Firing{HookID: "removed-guard", Scope: "project", TS: 1500})
+	gone.HookID = "removed-guard"
+	if err := Register(discard{}, dir, gone); err == nil || !strings.Contains(err.Error(), "--installed-ts 1500") {
+		t.Fatalf("err = %v, want an unmanifested guard's earlier block refused", err)
+	}
+}

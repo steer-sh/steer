@@ -200,9 +200,9 @@ func dig(m map[string]any, keys ...string) any {
 }
 
 // TestGuardChainSessionCorpus drives Suite A's guard chain on the transcript-friction
-// corpus: a firing before registration lands in the baseline window, the match
-// preview equals the frozen baseline, and the firing after registration joins its
-// root session.
+// corpus: register refuses a guard that blocked before the cutoff unless forced, a
+// firing before registration lands in the baseline window, the match preview equals
+// the frozen baseline, and the firing after registration joins its root session.
 //
 // pins existing behaviour
 func TestGuardChainSessionCorpus(t *testing.T) {
@@ -227,7 +227,11 @@ func TestGuardChainSessionCorpus(t *testing.T) {
 		t.Errorf("fix match did not preview a 1/1 baseline:\n%s", match.Stdout)
 	}
 
-	s.MustSteer(noVarFixArgs(installed, "--scope-harness", "claude-code")...)
+	refused := s.Steer(noVarFixArgs(installed, "--scope-harness", "claude-code")...)
+	if refused.Code == 0 || !strings.Contains(refused.Output(), "already blocked work on this machine") {
+		t.Fatalf("register accepted a guard whose block precedes the cutoff:\n%s", refused.Output())
+	}
+	s.MustSteer(noVarFixArgs(installed, "--scope-harness", "claude-code", "--force")...)
 	records := s.Records()
 	if len(records) != 1 {
 		t.Fatalf("inventory holds %d records, want 1", len(records))
