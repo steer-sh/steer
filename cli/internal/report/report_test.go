@@ -532,6 +532,31 @@ func TestCorrectionCandidates(t *testing.T) {
 	}
 }
 
+// A turn that invokes the steer skill hands it a rule; the rule is the request, not a
+// correction. A turn that names Steer or another Steer skill is still read.
+func TestCorrectionSkipsASteerInvocation(t *testing.T) {
+	cases := []struct {
+		text string
+		want string
+	}{
+		{"$steer:steer never use bare python in bash commands | use python3", ""},
+		{"$steer never use bare python", ""},
+		{"/steer:steer don't use eval", ""},
+		{"/steer\ndon't use eval", ""},
+		{"$steer", ""},
+		{"$steerage don't use eval", "$steerage don't use eval"},
+		{"$steer:steer-report don't use eval", "$steer:steer-report don't use eval"},
+		{"/steer-setup never use agy", "/steer-setup never use agy"},
+		{"why does $steer:steer keep blocking? don't use it here", "why does $steer:steer keep blocking? don't use it here"},
+	}
+	for _, c := range cases {
+		sig, ok := NewClassifier().Classify(transcript.Event{Kind: transcript.KindHumanTurn, Text: c.text})
+		if got := map[bool]string{true: sig.Key}[ok]; got != c.want {
+			t.Errorf("%q: key %q, want %q", c.text, got, c.want)
+		}
+	}
+}
+
 // TestCorrectionIgnoresPastedBlocks: text the harness marks as pasted is not what the
 // person said, so it raises no correction, and a correction typed beside it still does,
 // even when the paste opens the turn.

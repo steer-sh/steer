@@ -543,6 +543,8 @@ is munged.
 distinguishes executed programs from source-printing commands and extracts causal
 failure keys, including traceback exception lines. The correction matcher removes
 `<pasted_content>` blocks first, because pasted text is not what the person said.
+It reads no turn that invokes the steer skill (`/steer`, `$steer:steer` and their
+bare forms): the whole turn is the skill's input.
 Parser identity includes these rules. Session snapshots stamp parser plus adapter identity, so readers can show
 which pipeline produced their evidence.
 

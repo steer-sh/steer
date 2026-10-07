@@ -68,6 +68,11 @@ var pastedBlock = regexp.MustCompile(`(?s)<pasted_content\b[^>]*>(?:.*?</pasted_
 // the section header or a "- rule | instead" bullet.
 var steerRuleLine = regexp.MustCompile(`^(## Steer Rules$|- .+ \| .+)`)
 
+// steerInvocation matches a turn that invokes the steer skill: `/steer`, `/steer:steer`,
+// `$steer` or `$steer:steer`, alone or before its input. The harness hands the whole
+// turn to the skill, so every line of it is the request, not a correction of the agent.
+var steerInvocation = regexp.MustCompile(`^[/$]steer(?::steer)?(?:\s|$)`)
+
 // failurePattern matches lint/test/compile failures in Bash tool output.
 var failurePattern = regexp.MustCompile(`(?i)(error TS\d+|\beslint\b|\bFAILED\b|\bFAIL:|AssertionError|SyntaxError|Traceback \(most recent call last\)|panic:|\bruff\b|\bflake8\b|\bmypy\b|npm ERR!|ERROR in |error\[E\d+\])`)
 
@@ -121,7 +126,7 @@ func (c *Classifier) Classify(e transcript.Event) (Signal, bool) {
 // blocks are removed first: they are text the person brought in, not what they said.
 func (c *Classifier) correction(text string) (Signal, bool) {
 	trimmed, ok := typedText(text)
-	if !ok {
+	if !ok || steerInvocation.MatchString(trimmed) {
 		return Signal{}, false
 	}
 	for _, p := range correctionPatterns {
@@ -233,6 +238,8 @@ func ParserInstrument() string {
 	h.Write([]byte("correction-skip:" + steerRuleLine.String()))
 	h.Write([]byte{0})
 	h.Write([]byte("correction-skip:" + askedOpinion.String()))
+	h.Write([]byte{0})
+	h.Write([]byte("correction-skip:" + steerInvocation.String()))
 	h.Write([]byte{0})
 	h.Write([]byte("correction-skip:" + pastedBlock.String()))
 	h.Write([]byte{0})
