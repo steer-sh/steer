@@ -172,8 +172,8 @@ func chainObservation(record Record, before, after []Chain, beforeCov, afterCov 
 		},
 		Provenance: ObservationProvenance{
 			Kind:   ProvenanceReviewer,
-			Before: emptyIfNil(InstrumentsIn(before)),
-			After:  emptyIfNil(InstrumentsIn(after)),
+			Before: emptyIfNil(instrumentLabels(before)),
+			After:  emptyIfNil(instrumentLabels(after)),
 		},
 		Declined: IsRejected(record),
 	}

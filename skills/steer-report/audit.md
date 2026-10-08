@@ -33,7 +33,7 @@ still distinguish absent opportunity, absent evidence and no observed recurrence
 > The tracked problem has not appeared again in subsequent work. Leave this fix
 > in place; that observation alone does not establish how much it helped.
 
-Read `provenance` before you weigh the two windows against each other. When the `before` and `after` lists differ, two instruments counted them — a different reviewer, or a different transcript parser — and the counts describe two measurements rather than one. Equal lists do not prove the reverse: a session keeps the signals of a transcript file its latest read did not reach, counted by the instrument of that earlier read.
+Read `provenance` before you weigh the two windows against each other. When the `before` and `after` lists differ, two instruments counted them — a different reviewer, or a different transcript parser — and the counts describe two measurements rather than one. One difference is undecided rather than a second instrument: a bare reviewer string on one side and the same string followed by `(provider <name>)` on the other means the older rows did not record a provider, so the pair cannot tell whether the provider changed. Equal lists do not prove the reverse: a session keeps the signals of a transcript file its latest read did not reach, counted by the instrument of that earlier read.
 
 For every record with a recurrence you confirmed by reading its matches, open the target file and decide between:
 
@@ -455,7 +455,10 @@ its measurement conditions:
     not an observed quiet window.
   - `provenance` — `{kind, before, after}`. `kind` is `reviewer` (the reviewer
     identities that counted a chain window) or `parser` (the parser-and-adapter
-    identities that produced a session window). Labels only: no rule here
+    identities that produced a session window). A reviewer identity is the row's
+    instrument string, followed by `(provider <name>)` when the row recorded one;
+    a row without the provider shows the string alone, and its provider is
+    unknown. Labels only: no rule here
     compares them. A window whose two lists differ was counted by two
     instruments, which is a reason to read the examples rather than the counts.
   - `declined` — true on a refused record. Its after-window is the period since

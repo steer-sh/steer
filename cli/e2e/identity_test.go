@@ -86,8 +86,8 @@ func TestPrecommitAmendIsReviewedAndLands(t *testing.T) {
 }
 
 // TestAReviewerChangeSplitsTheProvenanceLists checks that a record's provenance lists
-// the reviewer that counted each window, so a reviewer edit after registration reads
-// as two identities at read time.
+// the reviewer that counted each window, with its provider, so a reviewer edit after
+// registration reads as two identities at read time.
 //
 // pins existing behaviour
 func TestAReviewerChangeSplitsTheProvenanceLists(t *testing.T) {
@@ -121,8 +121,8 @@ func TestAReviewerChangeSplitsTheProvenanceLists(t *testing.T) {
 	obs := s.scoredObservation()
 	before := fmt.Sprint(dig(obs, "provenance", "before"))
 	after := fmt.Sprint(dig(obs, "provenance", "after"))
-	if dig(obs, "provenance", "kind") != "reviewer" || before != "["+baseline+"]" ||
-		!strings.HasPrefix(after, "[opus/3/") || !strings.HasSuffix(after, "/high]") {
+	if dig(obs, "provenance", "kind") != "reviewer" || before != "["+baseline+" (provider claude-code)]" ||
+		!strings.HasPrefix(after, "[opus/3/") || !strings.HasSuffix(after, "/high (provider claude-code)]") {
 		t.Errorf("provenance = %v, want the sonnet baseline before and the opus panel at high after",
 			dig(obs, "provenance"))
 	}

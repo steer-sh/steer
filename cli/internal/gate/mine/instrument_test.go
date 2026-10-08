@@ -25,6 +25,8 @@ func TestParseInstrumentIDRecoversTheDimensions(t *testing.T) {
 
 // Two rows that share an instrument string but name different providers are two
 // identities, and each label names its provider.
+//
+// pins existing behaviour
 func TestInstrumentUsesKeepsAProviderSwapAtOneString(t *testing.T) {
 	const id = "sonnet/3/abc/go"
 	row := func(provider string) gate.Row {

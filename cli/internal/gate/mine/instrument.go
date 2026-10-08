@@ -132,3 +132,13 @@ func InstrumentUses(windows ...[]Chain) []InstrumentUse {
 	})
 	return uses
 }
+
+// instrumentLabels names the reviewer identities a window's rows carry, each with its
+// provider where the row recorded one.
+func instrumentLabels(chains []Chain) []string {
+	var labels []string
+	for _, u := range InstrumentUses(chains) {
+		labels = append(labels, u.Label())
+	}
+	return labels
+}

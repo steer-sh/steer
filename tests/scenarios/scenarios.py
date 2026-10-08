@@ -109,9 +109,9 @@ def _observe(rec, before_ids=None, after_ids=None):
                      "zero_eligible_after": rec["after"]["units"] == 0},
         "provenance": {"kind": "parser" if session else "reviewer",
                        "before": before_ids or (["scan-example|codex:adapter-example"] if session
-                                                else ["reviewer-example/3/prompt-example"]),
+                                                else ["reviewer-example/3/prompt-example (provider claude-code)"]),
                        "after": (after_ids or (["scan-example|codex:adapter-example"] if session
-                                               else ["reviewer-example/3/prompt-example"]))
+                                               else ["reviewer-example/3/prompt-example (provider claude-code)"]))
                                 if rec["after"]["units"] else []},
         "declined": rec["status"] == "rejected",
     }

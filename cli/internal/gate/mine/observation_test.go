@@ -50,6 +50,25 @@ func observationOf(t *testing.T, scored map[string]any) Observation {
 	return obs
 }
 
+// A provider swap at one instrument string reads as two identities in provenance.
+func TestChainProvenanceNamesTheProvider(t *testing.T) {
+	const id = "sonnet/3/aaa/v1"
+	stamped := func(ts int, provider string) Chain {
+		ch := obsChain(t, ts, id, "unrelated nit")
+		for _, r := range ch.Rows {
+			r["instrument_fields"] = map[string]any{"provider": provider, "model": "sonnet"}
+		}
+		return ch
+	}
+	chains := []Chain{stamped(1000, "agy"), stamped(3000, "claude-code")}
+	var obs Observation
+	withClock(9000, func() {
+		obs = observationOf(t, scoreOK(t, obsRecord("check", "", 2000), chains))
+	})
+	check(t, "the before window names its provider", obs.Provenance.Before, []string{id + " (provider agy)"})
+	check(t, "the after window names its provider", obs.Provenance.After, []string{id + " (provider claude-code)"})
+}
+
 // The chain observation reports the period, the counts, the activity bounds, the
 // recurrence, the coverage and the identities — and claims nothing.
 func TestChainObservationPinsEveryField(t *testing.T) {
