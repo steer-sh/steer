@@ -1,6 +1,6 @@
 {
   "name": "steer",
-  "description": "Generate Claude Code and Codex hooks from natural language rules to enforce coding standards, security policies, and best practices",
+  "description": "Reviews your coding agent’s commits before they land and proposes checks and guards for the mistakes that keep coming back",
   "version": "0.1.0",
   "author": {
     "name": "Jeremy Janzen"
@@ -8,7 +8,7 @@
   "homepage": "https://steer.sh",
   "repository": "https://github.com/steer-sh/steer-skill",
   "license": "MIT",
-  "keywords": ["hooks", "code-quality", "security", "linting", "enforcement"],
+  "keywords": ["code-review", "commit-review", "checks", "guards", "hooks"],
   "skills": ["./skills/steer", "./skills/steer-report", "./skills/steer-setup"],
   "hooks": "./hooks/hooks.json"
 }
