@@ -38,6 +38,9 @@ Read the linked architecture section before changing the corresponding boundary:
   `scripts/steer` dispatches to committed `bin/<os>-<arch>/` builds;
   `cli/internal/plugindist/` checks the four plugin/marketplace manifests together
   and the README's install commands against their repository and marketplace.
+  Before publishing, `python3 scripts/preflight-release.py [--ref <branch-or-tag>]`
+  checks anonymous access and the published bundle against this candidate,
+  including executable bytes and contained support files; it stays outside `check.sh`.
   The working skills live under `skills/`, including `steer`, `steer-report` and
   `steer-setup`; there is no root generation `SKILL.md`.
   A harness runs skills and the launcher from its cached plugin copy, which an
@@ -236,6 +239,11 @@ and write firings into the live audit log. The runners use it; a manual run is
 `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` exported, because the sandbox home
 holds no login. A run fails if it changed a real Steer or harness file or wrote a
 firing to the real audit log or a review to the real ledger; nothing is restored.
+
+For live reviewer verification, `tests/live_reviewers.py` requires an explicit
+provider, model, effort and new output directory; see `tests/live-reviewers/README.md`.
+It captures real CLI invocations through a registered native gate in the sandbox.
+`tests/test_release_tools.py` checks this runner with fake replies in `check.sh`.
 
 After a change to how the runtime renders a block, `tests/block_delivery.py` runs a
 real agent per harness against a probe guard and requires the guard's reason and
