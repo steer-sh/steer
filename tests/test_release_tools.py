@@ -67,9 +67,11 @@ class ReleasePreflight(unittest.TestCase):
             target.write_text("fixture skill")
         self.expected = preflight.identity(self.root)
         self.digests = preflight.artifact_digests(self.root)
+        self.skill_digests = preflight.artifact_digests(self.root, preflight.SKILL_FILES)
 
     def inspect(self):
-        return preflight.inspect_checkout(self.root, self.expected, expected_digests=self.digests)
+        return preflight.inspect_checkout(self.root, self.expected, expected_digests=self.digests,
+                                          expected_skill_digests=self.skill_digests)
 
     def test_checkout_and_missing_executable(self):
         self.inspect()
@@ -119,6 +121,15 @@ class ReleasePreflight(unittest.TestCase):
                 path.write_bytes(data)
                 with self.assertRaisesRegex(ValueError, "executable bytes differ"):
                     self.inspect()
+
+    def test_stale_skill_contents_are_refused(self):
+        for name in ("skills/steer/prompts/routing.md", "skills/steer-report/audit.md"):
+            with self.subTest(name=name):
+                path = self.root / name
+                path.write_text("stale published skill")
+                with self.assertRaisesRegex(ValueError, "skill bytes differ"):
+                    self.inspect()
+                path.write_text("fixture skill")
 
     def test_private_repository_is_refused_before_clone(self):
         with patch.object(preflight, "urlopen", return_value=io.BytesIO(b'{"private":true}')), \

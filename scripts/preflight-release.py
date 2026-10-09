@@ -33,9 +33,9 @@ def contained_file(root, name):
     return path.is_file() and path.resolve().is_relative_to(root.resolve())
 
 
-def artifact_digests(root):
+def artifact_digests(root, names=EXECUTABLES):
     digests = {}
-    for name in EXECUTABLES:
+    for name in names:
         if not contained_file(root, name):
             raise ValueError(f"candidate artifact is missing or outside the bundle: {name}")
         digest = hashlib.sha256()
@@ -70,7 +70,7 @@ def identity(root):
     return entries[0]
 
 
-def inspect_checkout(root, expected, expected_hooks=None, expected_digests=None):
+def inspect_checkout(root, expected, expected_hooks=None, expected_digests=None, expected_skill_digests=None):
     for name in (*MARKETS, *PLUGINS, "README.md", "hooks/hooks.json", *SKILL_FILES):
         if not contained_file(root, name):
             raise ValueError(f"published bundle file is missing or outside the bundle: {name}")
@@ -95,6 +95,10 @@ def inspect_checkout(root, expected, expected_hooks=None, expected_digests=None)
         expected_digests = artifact_digests(ROOT)
     if artifact_digests(root) != expected_digests:
         raise ValueError("published executable bytes differ from the candidate bundle")
+    if expected_skill_digests is None:
+        expected_skill_digests = artifact_digests(ROOT, SKILL_FILES)
+    if artifact_digests(root, SKILL_FILES) != expected_skill_digests:
+        raise ValueError("published skill bytes differ from the candidate bundle")
     if expected_hooks is None:
         expected_hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text())
     if json.loads((root / "hooks" / "hooks.json").read_text()) != expected_hooks:
@@ -105,6 +109,7 @@ def preflight(root, ref=None):
     expected = identity(root)
     expected_hooks = json.loads((root / "hooks" / "hooks.json").read_text())
     expected_digests = artifact_digests(root)
+    expected_skill_digests = artifact_digests(root, SKILL_FILES)
     repository = expected[1]["repository"]
     slug = repository.removeprefix("https://github.com/")
     request = Request(f"https://api.github.com/repos/{slug}",
@@ -124,7 +129,7 @@ def preflight(root, ref=None):
         subprocess.run(["git", "-c", "credential.helper=", "clone", "--depth", "1",
                         "--single-branch", "--branch", selected, "--", repository, str(checkout)],
                        cwd=scratch, env=env, check=True, timeout=180)
-        inspect_checkout(checkout, expected, expected_hooks, expected_digests)
+        inspect_checkout(checkout, expected, expected_hooks, expected_digests, expected_skill_digests)
         sha = subprocess.check_output(["git", "-C", str(checkout), "rev-parse", "HEAD"],
                                       env=env, text=True, timeout=10).strip()
     return {"repository": repository, "ref": selected, "commit": sha,

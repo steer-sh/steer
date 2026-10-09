@@ -40,7 +40,7 @@ Read the linked architecture section before changing the corresponding boundary:
   and the README's install commands against their repository and marketplace.
   Before publishing, `python3 scripts/preflight-release.py [--ref <branch-or-tag>]`
   checks anonymous access and the published bundle against this candidate,
-  including executable bytes and contained support files; it stays outside `check.sh`.
+  including executable and skill bytes and contained support files; it stays outside `check.sh`.
   The working skills live under `skills/`, including `steer`, `steer-report` and
   `steer-setup`; there is no root generation `SKILL.md`.
   A harness runs skills and the launcher from its cached plugin copy, which an
