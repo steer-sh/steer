@@ -31,9 +31,15 @@ ran. A test that times out under a variant is not failed by it. Panic probes run
 only for the reported tests, to show whether a probe in a changed function makes
 each one fail. A test whose doc comment carries MARKER is exempt.
 
+Variants run on WORKERS copies of the repository at once (REVERT_TEST_WORKERS
+overrides the default). Variant i always runs in copy i % WORKERS, so each copy
+compiles the same mutations on every run. Results are taken in variant order, so
+the lowest-index decisive failure decides each test; a test that a later variant
+ran before an earlier one decided it records that attempt as ignored.
+
 Each go command runs in its own process group, and go test with -timeout
 TEST_TIMEOUT. BUDGET starts before the lock wait; when it runs out, the running
-command's group is killed, and the run writes incomplete evidence, records no
+commands' groups are killed, and the run writes incomplete evidence, records no
 pass and exits 1. A run that finishes every variant keeps its result however
 long it took.
 
@@ -50,6 +56,8 @@ when its test side changes, not when only the code under test changes. Files
 outside the package that a test reads are not in the digest.
 """
 
+import collections
+import concurrent.futures
 import difflib
 import fcntl
 import hashlib
@@ -62,6 +70,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 MODULE = "cli"
@@ -87,6 +96,8 @@ SITE_LABELS = {"copy": "copy statement suppressed", "alias": "copy replaced by i
                "guard": "guard clause suppressed", "suppress": "statement suppressed"}
 TEST_TIMEOUT = 60
 BUDGET = 240
+WORKERS = max(1, int(os.environ.get("REVERT_TEST_WORKERS") or min(4, os.cpu_count() or 1)))
+POLL = 0.2
 SCRUB = []
 HELD = []
 EXPIRED = []
@@ -97,26 +108,41 @@ class BudgetExpired(Exception):
     pass
 
 
-def bounded(args, cwd, deadline, stdin=None, fds=()):
+class Cancelled(Exception):
+    pass
+
+
+def bounded(args, cwd, deadline, stdin=None, fds=(), cancel=None):
     """Run args in its own process group and kill the group at deadline, a
-    time.monotonic() value; fds are inherited. Return (returncode, stdout, stderr);
-    raise BudgetExpired when the deadline passes first."""
-    remaining = deadline - time.monotonic()
-    if remaining <= 0:
+    time.monotonic() value, or once cancel, a threading.Event, is set; fds are
+    inherited. Return (returncode, stdout, stderr); raise BudgetExpired when the
+    deadline passes first and Cancelled when cancel is set first."""
+    if deadline - time.monotonic() <= 0:
         raise BudgetExpired("before %s" % " ".join(args[:2]))
     process = subprocess.Popen(args, cwd=cwd, stdin=subprocess.PIPE if stdin is not None else None,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                                pass_fds=fds, start_new_session=True)
     try:
-        stdout, stderr = process.communicate(stdin, timeout=remaining)
-    except subprocess.TimeoutExpired:
+        while True:
+            remaining = max(0, deadline - time.monotonic())
+            try:
+                stdout, stderr = process.communicate(
+                    stdin, timeout=remaining if cancel is None else min(remaining, POLL))
+                return process.returncode, stdout, stderr
+            except subprocess.TimeoutExpired:
+                # communicate() refuses input once it has started.
+                stdin = None
+                if time.monotonic() >= deadline:
+                    raise BudgetExpired("%s killed at the time budget" % " ".join(args[:2]))
+                if cancel is not None and cancel.is_set():
+                    raise Cancelled()
+    except BaseException:
         try:
             os.killpg(process.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
         process.communicate()
-        raise BudgetExpired("%s killed at the time budget" % " ".join(args[:2]))
-    return process.returncode, stdout, stderr
+        raise
 
 
 def git(*args, check=True):
@@ -468,11 +494,13 @@ def hold_lock(directory, deadline=None):
             time.sleep(1)
 
 
-def scratch_path(root):
-    """Return this worktree's copy location: outside the repository, private to this
-    user, and the same on every run, so Go reuses compiled packages across runs."""
+def scratch_paths(root):
+    """Return this worktree's copy locations, one per worker: outside the repository,
+    private to this user, and the same on every run, so Go reuses compiled packages
+    across runs."""
     digest = hashlib.sha256(os.path.realpath(root).encode()).hexdigest()[:12]
-    return os.path.join(tempfile.gettempdir(), "revert-test-%d-%s" % (os.getuid(), digest))
+    base = os.path.join(tempfile.gettempdir(), "revert-test-%d-%s" % (os.getuid(), digest))
+    return ["%s-w%d" % (base, n) for n in range(WORKERS)]
 
 
 def clear_scratch(path):
@@ -533,15 +561,19 @@ def diagnosis(package, notes):
     return "no result", notes["output"].get(package, []) + notes["stderr"]
 
 
-def run_tests(module_dir, prefix, by_package, deadline):
-    """Return (outcome, notes). outcome maps (package, test) to {result, output}.
-    notes holds "build" and "output" (lines by package) and "stderr" (lines).
-    A panic ends its package's binary, so tests left without an outcome are run
-    again until none makes progress or the deadline passes."""
+def run_tests(module_dir, prefix, by_package, deadline, cancel=None):
+    """Return (outcome, notes, expired). outcome maps (package, test) to {result,
+    output}. notes holds "build" and "output" (lines by package) and "stderr" (lines).
+    expired names the command the deadline stopped, or is None. A panic ends its
+    package's binary, so tests left without an outcome are run again until none
+    makes progress or the deadline passes. Cancelled propagates from cancel."""
     outcome, notes = {}, {"build": {}, "output": {}, "stderr": []}
     pending = {p: list(ns) for p, ns in by_package.items()}
-    while pending and not EXPIRED:
-        found, found_notes = run_once(module_dir, prefix, pending, deadline)
+    while pending:
+        try:
+            found, found_notes = run_once(module_dir, prefix, pending, deadline, cancel)
+        except BudgetExpired as expired:
+            return outcome, notes, str(expired)
         for key in ("build", "output"):
             for package, lines in found_notes[key].items():
                 notes[key].setdefault(package, []).extend(lines)
@@ -551,25 +583,20 @@ def run_tests(module_dir, prefix, by_package, deadline):
         outcome.update(found)
         pending = {p: [n for n in ns if (p, n) not in outcome] for p, ns in pending.items()}
         pending = {p: ns for p, ns in pending.items() if ns}
-    return outcome, notes
+    return outcome, notes, None
 
 
-def go_test(args, module_dir, deadline):
-    """Run go test under the deadline. Return (stdout, stderr); an expired budget
-    appends to EXPIRED and returns no output."""
-    try:
-        return bounded(args, module_dir, deadline, fds=tuple(HELD))[1:]
-    except BudgetExpired as expired:
-        EXPIRED.append(str(expired))
-        return "", ""
+def go_test(args, module_dir, deadline, cancel=None):
+    """Run go test under the deadline and cancel. Return (stdout, stderr)."""
+    return bounded(args, module_dir, deadline, fds=tuple(HELD), cancel=cancel)[1:]
 
 
-def run_once(module_dir, prefix, by_package, deadline):
+def run_once(module_dir, prefix, by_package, deadline, cancel=None):
     names = sorted({n for ns in by_package.values() for n in ns})
     stdout, stderr = go_test(
         ["go", "test", "-count=1", "-vet=off", "-json", "-timeout", "%ds" % TEST_TIMEOUT,
          "-run", "^(%s)$" % "|".join(names)] + ["./" + p for p in sorted(by_package)],
-        module_dir, deadline)
+        module_dir, deadline, cancel)
     outcome, output, built, stream, started = {}, {}, {}, {}, {}
     notes = {"build": {}, "output": {}, "stderr": [scrub(l) for l in stderr.splitlines()]}
     for line in stdout.splitlines():
@@ -620,64 +647,130 @@ def run_once(module_dir, prefix, by_package, deadline):
     return outcome, notes
 
 
-def judge(tmp, module_dir, prefix, by_package, deps, changes, targets, decisive, deadline):
-    """Run targets under each variant and return {test: [attempt]} with one attempt
-    per variant. An attempt's result is pass, fail, timed out, build failed, no
-    result, not linked, not run (the test already had a decisive failure), or not
-    run: time budget (the run's deadline passed first)."""
-    attempts = {t: [] for t in targets}
-    done = set()
-    for index, change in enumerate(changes):
-        if EXPIRED:
-            break
-        imported = None if change["kind"] == "file" else import_path(prefix, change["path"])
-        linked = set()
-        for test in targets:
-            if test in done:
-                attempts[test].append({"variant": index, "result": "not run"})
-            elif imported and imported not in deps[test[0]]:
-                attempts[test].append({"variant": index, "result": "not linked"})
-            else:
-                linked.add(test)
-        if not linked:
-            continue
-        reachable = {}
-        for package, name in sorted(linked):
-            reachable.setdefault(package, []).append(name)
-        target = os.path.join(tmp, change["path"])
-        with open(target, "rb") as handle:
-            original = handle.read()
+def run_variant(root, change, by_package, prefix, deadline, cancel):
+    """Apply change in the copy at root, run by_package's tests there and restore the
+    file. Return run_tests's result, or None when cancel stopped the run."""
+    target = os.path.join(root, change["path"])
+    with open(target, "rb") as handle:
+        original = handle.read()
+    try:
         if change["data"] is None:
             os.remove(target)
         else:
             with open(target, "wb") as handle:
                 handle.write(change["data"])
-        outcome, notes = run_tests(module_dir, prefix, reachable, deadline)
+        return run_tests(os.path.join(root, MODULE), prefix, by_package, deadline, cancel)
+    except Cancelled:
+        return None
+    finally:
         with open(target, "wb") as handle:
             handle.write(original)
-        for test in linked:
+
+
+def judge(roots, prefix, deps, changes, targets, decisive, deadline):
+    """Run targets under each variant and return {test: [attempt]} with one attempt
+    per variant. An attempt's result is pass, fail, timed out, build failed, no
+    result, not linked, not run (the test already had a decisive failure), ignored
+    (it ran, but an earlier variant decided it first; outcome holds its result),
+    cancelled (an earlier variant decided it while it ran, and the run was killed),
+    or not run: time budget (the run's deadline passed first).
+
+    Variant i runs in roots[i % len(roots)], at most one variant per root at a time.
+    Results are taken in variant order; a running variant whose tests an earlier
+    one decided is cancelled."""
+    recorded = {t: {} for t in targets}
+    done, busy, flight, upcoming = set(), set(), collections.deque(), 0
+
+    def take(entry, result):
+        """Record entry's attempts from result, run_variant's return or None, add the
+        tests they decide to done and return the expiry result names. A test still
+        open in a run that never returned is left unrecorded."""
+        index = entry["index"]
+        outcome, notes, expired = result or ({}, None, None)
+        decided = set()
+        for test in targets:
             attempt = {"variant": index}
-            if test in outcome:
+            if test in done and result and test in entry["linked"]:
+                if test in outcome:
+                    ran = outcome[test]["result"]
+                else:
+                    ran = "not run: time budget" if expired else diagnosis(test[0], notes)[0]
+                attempt.update(result="ignored", outcome=ran)
+            elif test in done:
+                killed = "future" in entry and test in entry["linked"]
+                attempt["result"] = "cancelled" if killed else "not run"
+            elif test not in entry["linked"]:
+                attempt["result"] = "not linked"
+            elif not result:
+                continue
+            elif test in outcome:
                 attempt["result"] = outcome[test]["result"]
                 attempt["output"] = outcome[test]["output"]
                 if attempt["result"] == "fail":
                     attempt["kind"], attempt["excerpt"] = classify(attempt["output"])
                 elif attempt["result"] == "timed out":
                     attempt["excerpt"] = timeout_excerpt(attempt["output"])
-            elif EXPIRED:
+            elif expired:
                 attempt.update(result="not run: time budget", output=lines_of(notes, test))
             else:
-                result, lines = diagnosis(test[0], notes)
-                attempt.update(result=result, output=lines, excerpt=excerpt(lines))
-            attempts[test].append(attempt)
+                result_name, lines = diagnosis(test[0], notes)
+                attempt.update(result=result_name, output=lines, excerpt=excerpt(lines))
+            recorded[test][index] = attempt
             if decisive(attempt):
-                done.add(test)
-        if done >= targets:
-            break
+                decided.add(test)
+        done.update(decided)
+        return expired
+
+    pool = concurrent.futures.ThreadPoolExecutor(len(roots))
+    try:
+        while True:
+            while (upcoming < len(changes) and not EXPIRED and not done >= targets
+                   and upcoming % len(roots) not in busy):
+                change = changes[upcoming]
+                imported = None if change["kind"] == "file" else import_path(prefix, change["path"])
+                entry = {"index": upcoming, "imported": imported,
+                         "linked": {t for t in targets if t not in done
+                                    and (not imported or imported in deps[t[0]])}}
+                if entry["linked"]:
+                    reachable = {}
+                    for package, name in sorted(entry["linked"]):
+                        reachable.setdefault(package, []).append(name)
+                    slot = upcoming % len(roots)
+                    busy.add(slot)
+                    entry["cancel"] = threading.Event()
+                    entry["future"] = pool.submit(run_variant, roots[slot], change, reachable,
+                                                  prefix, deadline, entry["cancel"])
+                flight.append(entry)
+                upcoming += 1
+            if not flight:
+                break
+            # The awaited entry stays in flight, so an interrupt here still cancels it.
+            entry = flight[0]
+            result = entry["future"].result() if "future" in entry else None
+            flight.popleft()
+            if "future" in entry:
+                busy.discard(entry["index"] % len(roots))
+            expired = take(entry, result)
+            if expired:
+                EXPIRED.append(expired)
+                break
+            if done >= targets:
+                break
+            for later in flight:
+                if "cancel" in later and later["linked"] <= done:
+                    later["cancel"].set()
+    finally:
+        for entry in flight:
+            if "cancel" in entry:
+                entry["cancel"].set()
+        pool.shutdown(wait=True)
+    for entry in flight:
+        take(entry, entry["future"].result() if "future" in entry else None)
+    attempts = {}
     for test in targets:
-        seen = len(attempts[test])
         rest = "not run" if test in done else "not run: time budget"
-        attempts[test].extend({"variant": i, "result": rest} for i in range(seen, len(changes)))
+        attempts[test] = [recorded[test].get(i, {"variant": i, "result": rest})
+                          for i in range(len(changes))]
     return attempts
 
 
@@ -697,6 +790,8 @@ def counts(attempts):
              ("timed out", "timed out"), ("no result", "gave no result"),
              ("not linked", "not linked into the test binary"),
              ("not run", "not run after the decisive failure"),
+             ("ignored", "run but ignored after an earlier decisive failure"),
+             ("cancelled", "cancelled after an earlier decisive failure"),
              ("not run: time budget", "not run before the time budget ran out")]
     tally = {}
     for attempt in attempts:
@@ -786,7 +881,7 @@ def write_evidence(directory, key, base, behavioural, panics, omitted, incomplet
     path = os.path.join(directory, key[:16] + ".json")
     listed = [{k: v for k, v in change.items() if k != "data"} for change in behavioural + panics]
     limits = {"function_cap": FUNCTION_CAP, "run_cap": RUN_CAP, "test_timeout": TEST_TIMEOUT,
-              "budget": BUDGET}
+              "budget": BUDGET, "workers": WORKERS}
     with open(path, "w", encoding="utf-8") as handle:
         json.dump({"base": base, "key": key, "incomplete": incomplete, "limits": limits,
                    "behavioural_variants": listed[:len(behavioural)],
@@ -859,31 +954,38 @@ def main():
     selected = {(p, n) for p, ns in by_package.items() for n in ns}
     baseline, baseline_notes, linked = {}, {"build": {}, "output": {}, "stderr": []}, set()
     behavioural, panics, omitted, attempts, probes = [], [], [], {}, {}
-    tmp = scratch_path(root)
-    clear_scratch(tmp)
-    os.mkdir(tmp, 0o700)
+    roots = scratch_paths(root)
+    for tmp in roots:
+        clear_scratch(tmp)
     try:
+        for tmp in roots:
+            os.mkdir(tmp, 0o700)
         deps = test_deps(prefix, by_package, deadline)
-        SCRUB.extend([os.path.realpath(tmp) + "/", tmp + "/"])
-        copy_repository(root, tmp, {p.split("/")[0] for p in data})
-        module_dir = os.path.join(tmp, MODULE)
+        SCRUB.extend(os.path.realpath(tmp) + "/" for tmp in roots)
+        SCRUB.extend(tmp + "/" for tmp in roots)
+        for tmp in roots:
+            copy_repository(root, tmp, {p.split("/")[0] for p in data})
 
-        baseline, baseline_notes = run_tests(module_dir, prefix, by_package, deadline)
+        baseline, baseline_notes, expired = run_tests(os.path.join(roots[0], MODULE), prefix,
+                                                      by_package, deadline)
+        if expired:
+            raise BudgetExpired(expired)
         live = {t for t in selected if baseline.get(t, {}).get("result") == "pass"}
         early, late, panics, omitted = variants(base, paths, untracked, deadline)
         mutated_packages = {import_path(prefix, c["path"]) for c in early + late + panics}
         behavioural = early + data_variants(base, data) + late
         linked = {t for t in live if data or mutated_packages & deps[t[0]]}
-        attempts = judge(tmp, module_dir, prefix, by_package, deps, behavioural, linked,
+        attempts = judge(roots, prefix, deps, behavioural, linked,
                          lambda a: a["result"] == "fail" and a["kind"] == "assertion", deadline)
         survivors = {t for t in linked
                      if not any(a["result"] == "fail" for a in attempts[t])}
-        probes = judge(tmp, module_dir, prefix, by_package, deps, panics, survivors,
+        probes = judge(roots, prefix, deps, panics, survivors,
                        lambda a: a["result"] == "fail", deadline)
     except BudgetExpired as expired:
         EXPIRED.append(str(expired))
     finally:
-        clear_scratch(tmp)
+        for tmp in roots:
+            clear_scratch(tmp)
     incomplete = bool(EXPIRED)
     records = [assess(t, baseline, baseline_notes, t in linked, behavioural, attempts.get(t, []),
                       panics, probes.get(t, []), incomplete) for t in sorted(selected)]

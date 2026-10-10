@@ -202,8 +202,10 @@ is judged again only when its package's test-side files or the checker change
 (`.git/revert-test/accepted`), so unpushed commits do not slow later runs. Its per-test
 evidence (deciding variant, failure excerpt, diffs, full output) is written to
 `.git/revert-test/<key>.json`, and the console names the file. It copies the module
-to one scratch path per worktree and holds `.git/revert-test/lock` for the whole run,
-so two runs in one worktree are serialized and a blocked run fails naming the lock.
+to one scratch path per worker per worktree (`REVERT_TEST_WORKERS`, default up to four)
+and holds `.git/revert-test/lock` for the whole run, so two runs in one worktree are
+serialized and a blocked run fails naming the lock. Workers run the new tests of
+different variants at once, so a test must not share a fixed path with another process.
 The variant kinds, their caps and the time budget are in the script's docstring; a
 run that the budget stops before it finishes records no pass. When no variant can violate the
 property a correct test checks, extend the generator (`scripts/revert-test-funcs.go`

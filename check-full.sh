@@ -6,7 +6,7 @@ root="$(cd "$(dirname "$0")" && pwd)"
 
 "$root/check.sh"
 
-# revert-test's scratch copy, lock and variant generation, over fixture repositories;
+# revert-test's scratch copies, lock and variant generation, over fixture repositories;
 # two cases kill a run mid-test.
 python3 "$root/scripts/revert-test-verify.py"
 

@@ -23,6 +23,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -99,15 +100,18 @@ def entries(cache):
     return len(glob.glob(os.path.join(cache, "*/*-d")))
 
 
-def run_script(root, cache, reuse=False):
+def run_script(root, cache, reuse=False, workers=None):
     """Run revert-test.py over root with its own build cache, ignoring the pass stamp
-    and, unless reuse, the acceptance records."""
+    and, unless reuse, the acceptance records; workers sets REVERT_TEST_WORKERS."""
     for name in ("pass",) if reuse else ("pass", "accepted"):
         stamp = os.path.join(evidence_dir(root), name)
         if os.path.exists(stamp):
             os.remove(stamp)
+    env = dict(os.environ, GOCACHE=cache, GOFLAGS="")
+    if workers:
+        env["REVERT_TEST_WORKERS"] = str(workers)
     return subprocess.run([sys.executable, SCRIPT], cwd=root, capture_output=True, text=True,
-                          env=dict(os.environ, GOCACHE=cache, GOFLAGS=""))
+                          env=env)
 
 
 def run_with(root, cache, **settings):
@@ -134,12 +138,13 @@ def module():
 
 
 def check_reuse(work, cache):
-    """A repeated run must reuse every compiled package and still run the test."""
+    """A repeated run with one worker must reuse every compiled package and still run
+    the test. With more workers, cancelled speculative builds vary between runs."""
     root = fixture(work, "reuse")
-    first = run_script(root, cache)
-    run_script(root, cache)
+    first = run_script(root, cache, workers=1)
+    run_script(root, cache, workers=1)
     before = entries(cache)
-    last = run_script(root, cache)
+    last = run_script(root, cache, workers=1)
     report("run exits 0", first.returncode == 0 and last.returncode == 0,
            first.stderr + last.stderr)
     report("a repeated run adds no cache entries", entries(cache) == before,
@@ -150,7 +155,8 @@ def check_reuse(work, cache):
            record["baseline"]["result"] == "pass"
            and any(a["result"] == "fail" for a in record.get("attempts", [])),
            "verdict=%s" % record.get("verdict"))
-    report("the scratch copy is removed", not os.path.exists(module().scratch_path(root)))
+    report("the scratch copies are removed",
+           not any(os.path.exists(p) for p in module().scratch_paths(root)))
     report("a symlinked entry's target is kept",
            open(os.path.join(root, "docs/readme.txt")).read() == "keep me\n")
     return root
@@ -235,7 +241,7 @@ def check_refusal(work, root, cache):
     victim = os.path.join(work, "victim")
     os.makedirs(victim)
     open(os.path.join(victim, "file"), "w").close()
-    scratch = module().scratch_path(root)
+    scratch = module().scratch_paths(root)[0]
     os.symlink(victim, scratch)
     try:
         planted = run_script(root, cache)
@@ -574,8 +580,16 @@ def check_kills(work, cache):
         zero = [a for a in record.get("attempts", [])
                 if evidence["behavioural_variants"][a["variant"]]["kind"] == "zero"]
         report("%s is decided by a %s variant" % (test, kind),
-               decided == kind and all(a["result"] in ("pass", "not run") for a in zero),
+               decided == kind and all(a["result"] in ("pass", "not run", "cancelled")
+                                       or a.get("outcome") == "pass" for a in zero),
                "decided by %s; %s" % (decided, record.get("verdict")))
+    serial = run_script(root, cache, workers=1)
+    alone = {r["test"]: r.get("decisive", {}).get("variant") for r in latest_evidence(root)["tests"]}
+    pooled = {test: r.get("decisive", {}).get("variant") for test, r in records.items()}
+    report("one worker and %d workers decide each test by the same variant"
+           % evidence["limits"]["workers"],
+           serial.returncode == run.returncode and alone == pooled,
+           repr({t: (pooled[t], alone.get(t)) for t in pooled if pooled[t] != alone.get(t)}))
     touch = records.get("TestTouchRuns", {})
     report("a test with no assertion stays rejected",
            run.returncode == 1 and touch.get("verdict") == "rejected"
@@ -681,13 +695,99 @@ def check_alarm_attribution():
     for name, alarm in cases.items():
         stdout = events("t", *(runs + [{"Action": "pass", "Test": "TestFast"}] + alarm
                                + [{"Action": "fail"}]))
-        loaded.go_test = lambda args, cwd, deadline, stdout=stdout: (stdout, "")
+        loaded.go_test = lambda args, cwd, deadline, cancel=None, stdout=stdout: (stdout, "")
         outcome, _ = loaded.run_once("cli", "example.com/fx", selected, 0)
         results = {test: row["result"] for (_, test), row in outcome.items()}
         other = outcome.get(("t", "TestOther"), {}).get("output", [])
         report("an alarm attributed to %s times out both running tests" % name,
                results == {"TestFast": "pass", "TestHang": "timed out", "TestOther": "timed out"}
                and ALARM[0].rstrip("\n") in other, repr(results))
+
+
+def check_scheduling():
+    """A variant that links no test frees no copy, and a run that finished before an
+    earlier variant decided its test is recorded as ignored with its outcome."""
+    loaded = module()
+    active, clashes, guard = set(), [], threading.Lock()
+
+    def stub(root, change, by_package, prefix, deadline, cancel):
+        if change["hang"]:
+            cancel.wait(10)
+            return None
+        if change["result"] == "expire":
+            time.sleep(change["delay"])
+            return {}, {"build": {}, "output": {}, "stderr": []}, "go test killed at the time budget"
+        if change["result"] == "build":
+            return {}, {"build": {package: ["x.go:1: undefined: y"] for package in by_package},
+                        "output": {}, "stderr": []}, None
+        with guard:
+            if root in active:
+                clashes.append(change["path"])
+            active.add(root)
+        time.sleep(change["delay"])
+        with guard:
+            active.discard(root)
+        outcome = {test: {"result": change["result"].get(test, "pass")
+                          if isinstance(change["result"], dict) else change["result"], "output": []}
+                   for package, names in by_package.items() for test in
+                   ((package, n) for n in names)}
+        return outcome, {"build": {}, "output": {}, "stderr": []}, None
+
+    loaded.run_variant = stub
+    target = {("t", "TestT")}
+
+    def change(path, delay, result="pass", kind="file", hang=False):
+        return {"kind": kind, "path": path, "delay": delay, "result": result, "hang": hang}
+
+    unlinked = [change("cli/other/o.go", 0, kind="revert")] + [
+        change("f%d" % i, d) for i, d in enumerate([0.05, 0.4, 0.05, 0.05])]
+    loaded.judge(["r0", "r1"], "example.com/fx", {"t": set()}, unlinked, target,
+                 lambda a: False, time.monotonic() + 30)
+    report("a variant that links no test frees no copy in use", not clashes, repr(clashes))
+
+    raced = [change("slow", 0.3, "fail"), change("fast", 0.02, "pass")]
+    attempts = loaded.judge(["r0", "r1"], "example.com/fx", {"t": set()}, raced, target,
+                            lambda a: a["result"] == "fail", time.monotonic() + 30)
+    later = attempts[("t", "TestT")][1]
+    report("a run that finished after the decisive variant is recorded as ignored",
+           later.get("result") == "ignored" and later.get("outcome") == "pass", repr(later))
+
+    hung = [change("slow", 0.3, "fail"), change("hung", 0, hang=True)]
+    attempts = loaded.judge(["r0", "r1"], "example.com/fx", {"t": set()}, hung, target,
+                            lambda a: a["result"] == "fail", time.monotonic() + 30)
+    report("a run killed once every test is decided is recorded as cancelled",
+           attempts[("t", "TestT")][1].get("result") == "cancelled",
+           repr(attempts[("t", "TestT")][1]))
+
+    pair = {("a", "TestA"), ("b", "TestB")}
+    mixed = [change("slow", 0.3, {("a", "TestA"): "fail"}), change("cli/x/x.go", 0, kind="revert",
+             hang=True), change("quick", 0.02)]
+    attempts = loaded.judge(["r0", "r1"], "example.com/fx",
+                            {"a": {"example.com/fx/x"}, "b": set()}, mixed, pair,
+                            lambda a: a["result"] == "fail", time.monotonic() + 30)
+    report("a run killed while other tests stay open is recorded as cancelled",
+           attempts[("a", "TestA")][1].get("result") == "cancelled"
+           and attempts[("b", "TestB")][2].get("result") == "pass",
+           repr([attempts[("a", "TestA")][1], attempts[("b", "TestB")][2]]))
+    report("a decided test that a later run did not select is recorded as not run",
+           attempts[("a", "TestA")][2].get("result") == "not run",
+           repr(attempts[("a", "TestA")][2]))
+
+    broken = [change("slow", 0.3, "fail"), change("unbuilt", 0, "build")]
+    attempts = loaded.judge(["r0", "r1"], "example.com/fx", {"t": set()}, broken, target,
+                            lambda a: a["result"] == "fail", time.monotonic() + 30)
+    report("an ignored run keeps a build failure as its outcome",
+           attempts[("t", "TestT")][1].get("outcome") == "build failed",
+           repr(attempts[("t", "TestT")][1]))
+
+    del loaded.EXPIRED[:]
+    expiring = [change("expiring", 0.3, "expire"), change("fast", 0.02, "fail")]
+    attempts = loaded.judge(["r0", "r1"], "example.com/fx", {"t": set()}, expiring, target,
+                            lambda a: a["result"] == "fail", time.monotonic() + 30)
+    del loaded.EXPIRED[:]
+    report("a run that finished after an earlier variant expired still decides its test",
+           [a["result"] for a in attempts[("t", "TestT")]] == ["not run: time budget", "fail"],
+           repr([a["result"] for a in attempts[("t", "TestT")]]))
 
 
 def hang_repo(work, name):
@@ -760,6 +860,7 @@ def main():
         check_refusal(work, root, cache)
         check_sites(work)
         check_alarm_attribution()
+        check_scheduling()
         check_caps(work)
         check_references(work, cache)
         check_kills(work, cache)
