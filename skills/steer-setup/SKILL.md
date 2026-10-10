@@ -208,7 +208,8 @@ answers, every commit goes through unreviewed. The usual causes are a reviewer C
 that is not signed in and a model name the CLI does not know. Run it again after the
 user fixes the cause. Do not report setup as complete while it fails.
 
-**Claude Code only: offer the status line.** Steer's row shows, at every prompt,
+**When Claude Code is armed, offer the status line**, in either harness. Steer's row
+shows, at every Claude Code prompt,
 whether a commit here is reviewed, by which reviewer, and the one command that
 changes the answer. Nothing else installs it. Ask the user; on yes:
 
@@ -219,7 +220,8 @@ changes the answer. Nothing else installs it. Ask the user; on yes:
 When the user already has a status line, it writes nothing, exits 1 and names two
 choices: `--wrap` keeps their row above Steer's, and `--replace` discards it. That
 exit is the question, not a failed setup: do not retry it. Relay both choices and
-run the one the user picks; never choose `--replace` for them. Codex has no status line, so skip this in Codex.
+run the one the user picks; never choose `--replace` for them. Codex has no status line; skip this step only
+when Claude Code is not armed.
 
 Finish by reading the answer back:
 
