@@ -261,6 +261,36 @@ func TestBundledHookResolvesEitherHarnessPluginRoot(t *testing.T) {
 	}
 }
 
+// Codex lists a hook in /hooks by its statusMessage and shows "Unnamed hook" for one
+// without, so every bundled handler carries one.
+func TestBundledHooksCarryAStatusMessage(t *testing.T) {
+	root := repoRoot(t)
+	var bundle struct {
+		Hooks map[string][]struct {
+			Hooks []struct {
+				Command       string `json:"command"`
+				StatusMessage string `json:"statusMessage"`
+			} `json:"hooks"`
+		} `json:"hooks"`
+	}
+	raw, err := os.ReadFile(filepath.Join(root, "hooks", "hooks.json"))
+	if err != nil {
+		t.Fatalf("read hooks/hooks.json: %v", err)
+	}
+	if err := json.Unmarshal(raw, &bundle); err != nil {
+		t.Fatalf("parse hooks/hooks.json: %v", err)
+	}
+	for event, entries := range bundle.Hooks {
+		for _, entry := range entries {
+			for _, hook := range entry.Hooks {
+				if strings.TrimSpace(hook.StatusMessage) == "" {
+					t.Errorf("%s hook %q has no statusMessage", event, hook.Command)
+				}
+			}
+		}
+	}
+}
+
 var claudeRootExpansion = regexp.MustCompile(`\$\{?CLAUDE_PLUGIN_ROOT\b[^}"\s]*\}?`)
 
 // Claude Code exports no plugin root to the Bash tool; it substitutes only the

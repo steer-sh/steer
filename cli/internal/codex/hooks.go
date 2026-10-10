@@ -20,6 +20,8 @@ const (
 	CommitGateStatusMessage = "red-teaming the commit ..."
 	// resolverIdentity marks the resolver's handlers so removal finds them again.
 	resolverIdentity = "commit-gate backfill"
+	// ResolverStatusMessage names the resolver's handlers in /hooks and while they run.
+	ResolverStatusMessage = "recording review outcomes ..."
 )
 
 // resolverEvents are the two turn-end events the resolver runs on. A gate that fires
@@ -306,7 +308,8 @@ func RegisterCommitGateAndResolver(scope, cwd, review string, reviewTimeout int,
 		// No matcher: Stop ignores one outright, and every subagent type owes the same
 		// reconciliation.
 		hooks[event] = upsertEntry(eventEntries(root, event), isSteerOwned, entryValue(hookEntry{
-			Hooks: []commandHook{{Type: "command", Command: resolver, Timeout: resolverTimeout}},
+			Hooks: []commandHook{{Type: "command", Command: resolver, Timeout: resolverTimeout,
+				StatusMessage: ResolverStatusMessage}},
 		}))
 	}
 	return path, save(scope, path, root)

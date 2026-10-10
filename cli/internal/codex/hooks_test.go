@@ -253,6 +253,13 @@ func TestRegisterArmsBothResolverEventsAndRemovesThemTogether(t *testing.T) {
 	if len(hooks["Stop"].([]any)) != 2 || len(hooks["SubagentStop"].([]any)) != 1 {
 		t.Fatalf("resolver entries not upserted once per event: %s", raw)
 	}
+	for _, event := range resolverEvents {
+		entries := hooks[event].([]any)
+		handler := entries[len(entries)-1].(map[string]any)["hooks"].([]any)[0].(map[string]any)
+		if handler["statusMessage"] != ResolverStatusMessage {
+			t.Fatalf("%s resolver handler has no name for /hooks: %s", event, raw)
+		}
+	}
 
 	if _, err := RemoveCommitGateAndResolver("global", ""); err != nil {
 		t.Fatal(err)
