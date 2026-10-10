@@ -287,3 +287,217 @@ func TestGuardChainReviewFindingsCorpus(t *testing.T) {
 		}
 	}
 }
+
+// backstopSession is the session the backstop cases run in; Codex reads it as the
+// rollout's own id.
+const backstopSession = "0199a000-0000-7000-8000-000000000042"
+
+// sessionTranscript is where the harness keeps session's transcript, which its
+// payloads name as transcript_path.
+func (g *NativeGate) sessionTranscript(session string) string {
+	if g.harness == "codex" {
+		now := time.Now().UTC()
+		return filepath.Join(g.s.Home, ".codex", "sessions", now.Format("2006/01/02"),
+			"rollout-"+now.Format("2006-01-02T15-04-05")+"-"+session+".jsonl")
+	}
+	return g.s.SessionPath(session)
+}
+
+// turnEntry is one assistant message: reply text, or reasoning when thought is set.
+type turnEntry struct {
+	text    string
+	thought bool
+}
+
+// writeTurn writes session's transcript in the harness's shape: one user prompt, then
+// one assistant message per entry.
+func (g *NativeGate) writeTurn(session string, entries ...turnEntry) {
+	g.s.t.Helper()
+	ts := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
+	var lines []map[string]any
+	if g.harness == "codex" {
+		lines = append(lines, map[string]any{"timestamp": ts, "ordinal": 0, "type": "session_meta",
+			"payload": map[string]any{"id": session, "session_id": session, "cwd": g.s.Repo}})
+		for i, e := range entries {
+			payload := map[string]any{"type": "message", "role": "assistant", "phase": "final_answer",
+				"content": []any{map[string]any{"type": "output_text", "text": e.text}}}
+			if e.thought {
+				payload = map[string]any{"type": "reasoning",
+					"summary": []any{map[string]any{"type": "summary_text", "text": e.text}}}
+			}
+			lines = append(lines, map[string]any{"timestamp": ts, "ordinal": i + 1, "type": "response_item", "payload": payload})
+		}
+	} else {
+		lines = append(lines, map[string]any{"type": "user", "sessionId": session, "cwd": g.s.Repo, "timestamp": ts,
+			"message": map[string]any{"role": "user", "content": "commit both changes"}})
+		for _, e := range entries {
+			block := map[string]any{"type": "text", "text": e.text}
+			if e.thought {
+				block = map[string]any{"type": "thinking", "thinking": e.text}
+			}
+			lines = append(lines, map[string]any{"type": "assistant", "sessionId": session, "cwd": g.s.Repo, "timestamp": ts,
+				"message": map[string]any{"role": "assistant", "content": []any{block}}})
+		}
+	}
+	g.s.writeTranscript(g.transcript, lines)
+}
+
+// releaseChain runs one review sequence: a staged file draws a finding from every
+// reviewer, then the unchanged retry releases the commit. It returns the header line
+// the deny told the agent to copy, and the retry's reply.
+func (g *NativeGate) releaseChain(session, file, subject string) (string, HookReply) {
+	g.s.t.Helper()
+	g.s.Script("finding", "finding", "finding")
+	g.s.StageCode(file)
+	command := "git -C " + g.s.Repo + " commit -m '" + subject + "'"
+	deny := g.hookAs(session, command, g.s.Repo)
+	m := ledgerHeaderRe.FindString(deny.Text())
+	if !deny.Denied() || m == "" {
+		g.s.t.Fatalf("the first review did not deny with a ledger header for %q:\n%s", subject, deny.Text())
+	}
+	g.s.Script("clean")
+	retry := g.hookAs(session, command, g.s.Repo)
+	if retry.Denied() || !strings.Contains(retry.Text(), "the review sequence ended") {
+		g.s.t.Fatalf("the unchanged retry did not end the sequence:\n%s", retry.Text())
+	}
+	return m, retry
+}
+
+// ResolverStopReply is the parsed reply of the resolver's Stop hook, and its raw stdout.
+type ResolverStopReply struct {
+	Decision string `json:"decision"`
+	Reason   string `json:"reason"`
+	System   string `json:"systemMessage"`
+	Raw      string `json:"-"`
+}
+
+// stop sends a Stop payload through the registered resolver command. fields override
+// a root Stop of the gate's turn with stop_hook_active false; a nil value drops a field.
+func (g *NativeGate) stop(session string, fields map[string]any) ResolverStopReply {
+	g.s.t.Helper()
+	config := ".claude/settings.json"
+	if g.harness == "codex" {
+		config = ".codex/hooks.json"
+	}
+	command := g.s.RegisteredCommand(filepath.Join(g.s.Repo, config), "commit-gate backfill")
+	payload := map[string]any{"hook_event_name": "Stop", "session_id": session, "cwd": g.s.Repo,
+		"transcript_path": g.transcript, g.turnKey(): g.turn, "stop_hook_active": false}
+	for k, v := range fields {
+		if v == nil {
+			delete(payload, k)
+		} else {
+			payload[k] = v
+		}
+	}
+	raw, _ := json.Marshal(payload)
+	r := g.s.Run(g.s.Repo, string(raw), nil, "sh", "-c", command)
+	if r.Code != 0 {
+		g.s.t.Fatalf("the Stop hook exited %d:\n%s", r.Code, r.Output())
+	}
+	reply := ResolverStopReply{Raw: r.Stdout}
+	out := strings.TrimSpace(r.Stdout)
+	if out == "" {
+		return reply
+	}
+	if strings.Count(out, "\n") != 0 || json.Unmarshal([]byte(out), &reply) != nil {
+		g.s.t.Fatalf("the Stop hook's stdout is not one JSON reply:\n%s", r.Stdout)
+	}
+	reply.Raw = r.Stdout
+	return reply
+}
+
+// TestStopBackstopAsksOnceForLedgersLeftInReasoning drives two review sequences to
+// release in one turn on each harness, with their ledgers only in reasoning. The root
+// Stop refuses once and names both headers; a final reply holding both ledgers ends the
+// turn and reconciles each row; a later turn and a subagent Stop are never refused.
+//
+// pins existing behaviour
+func TestStopBackstopAsksOnceForLedgersLeftInReasoning(t *testing.T) {
+	t.Parallel()
+	for _, h := range nativeHarnesses {
+		t.Run(h.harness, func(t *testing.T) {
+			t.Parallel()
+			s, g := newNativeGate(t, h.harness, h.config, h.sub)
+			g.turn, g.transcript = "turn-1", g.sessionTranscript(backstopSession)
+			first, _ := g.releaseChain(backstopSession, "mod.py", "add mod")
+			second, _ := g.releaseChain(backstopSession, "mod2.py", "add mod2")
+			idOf := func(header string) string { return ledgerHeaderRe.FindStringSubmatch(header)[1] }
+			ledgerA := chainLedger(idOf(first), "add mod", "the first concern")
+			ledgerB := chainLedger(idOf(second), "add mod2", "the second concern")
+			g.writeTurn(backstopSession, turnEntry{ledgerA, true}, turnEntry{ledgerB, true}, turnEntry{"Both commits are in.", false})
+
+			// A resolver lock another run holds does not delay or stop the check.
+			lock := filepath.Join(s.Home, ".steer", "state", "commit-review", "backfill.lock")
+			if err := os.WriteFile(lock, []byte("1"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			block := g.stop(backstopSession, nil)
+			os.Remove(lock)
+			if block.Decision != "block" || !strings.Contains(block.Reason, first) || !strings.Contains(block.Reason, second) {
+				t.Fatalf("the root Stop did not block naming both headers:\n%s", block.Raw)
+			}
+			if !strings.Contains(block.Reason, "Thinking text does not count") {
+				t.Errorf("the reason does not say reasoning is not a reply:\n%s", block.Reason)
+			}
+			for name, fields := range map[string]map[string]any{
+				"a continued Stop":    {"stop_hook_active": true},
+				"an unflagged Stop":   {"stop_hook_active": nil},
+				"a later turn's Stop": {g.turnKey(): "turn-2"},
+				"a subagent Stop":     {"hook_event_name": "SubagentStop", "agent_id": "agent-1"},
+			} {
+				if r := g.stop(backstopSession, fields); r.Decision == "block" {
+					t.Errorf("%s was refused:\n%s", name, r.Raw)
+				}
+			}
+			if r := g.stop(backstopSession, map[string]any{g.turnKey(): nil}); r.Decision == "block" ||
+				!strings.Contains(r.System, "Ledger backstop unavailable at this Stop") {
+				t.Errorf("a Stop naming no turn = %+v, want the unavailable notice and no block", r)
+			}
+
+			g.writeTurn(backstopSession, turnEntry{ledgerA, true}, turnEntry{ledgerB, true}, turnEntry{"Both commits are in.", false},
+				turnEntry{"The ledgers:\n\n" + ledgerA + "\n" + ledgerB, false})
+			if r := g.stop(backstopSession, nil); r.Decision == "block" || r.System != "" {
+				t.Fatalf("a final reply holding both ledgers still drew a reply:\n%s", r.Raw)
+			}
+			s.MustSteer("commit-gate", "backfill", "--apply")
+			found := map[string]string{}
+			for _, row := range s.LedgerRows() {
+				if row["phase"] == "retry" {
+					found[row["chain_id"].(string)] = fmt.Sprint(row["ledger_found"], " ", concernsOf(row))
+				}
+			}
+			want := map[string]string{
+				idOf(first):  "true [REJECTED: the first concern]",
+				idOf(second): "true [REJECTED: the second concern]",
+			}
+			if fmt.Sprint(found) != fmt.Sprint(want) {
+				t.Errorf("reconciled retry rows = %v, want %v", found, want)
+			}
+		})
+	}
+}
+
+// TestAReleaseWithoutATurnIDTellsTheOperator checks that a release whose PreToolUse
+// payload names no turn tells the operator the backstop cannot act on it, and that the
+// root Stop then refuses nothing.
+//
+// pins existing behaviour
+func TestAReleaseWithoutATurnIDTellsTheOperator(t *testing.T) {
+	t.Parallel()
+	for _, h := range nativeHarnesses {
+		t.Run(h.harness, func(t *testing.T) {
+			t.Parallel()
+			_, g := newNativeGate(t, h.harness, h.config, h.sub)
+			g.transcript = g.sessionTranscript(backstopSession)
+			_, retry := g.releaseChain(backstopSession, "mod.py", "add mod")
+			if !strings.Contains(retry.System, "Ledger backstop unavailable for this sequence: PreToolUse supplied no usable "+g.turnKey()+".") {
+				t.Errorf("the release's operator line does not name the missing turn:\n%s", retry.Raw)
+			}
+			g.writeTurn(backstopSession, turnEntry{"Committed.", false})
+			g.turn = "turn-1"
+			if r := g.stop(backstopSession, nil); r.Decision == "block" {
+				t.Errorf("a release with no recorded turn was enforced:\n%s", r.Raw)
+			}
+		})
+	}
+}

@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -290,14 +289,7 @@ to the operator. Subagent Stop events are ignored. Always exits 0.`,
 			raw = nil
 		}
 		_, reply := checks.StopHook(string(target), raw, checks.StopHookOptions{Timeout: timeout, SteerBin: steerBinForOracle()})
-		if reply == nil {
-			return nil
-		}
-		encoded, err := json.Marshal(reply)
-		if err != nil {
-			return nil
-		}
-		fmt.Fprintln(cmd.OutOrStdout(), string(encoded))
+		checks.WriteStopReply(cmd.OutOrStdout(), reply)
 		return nil
 	},
 }

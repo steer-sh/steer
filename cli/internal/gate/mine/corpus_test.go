@@ -1,6 +1,7 @@
 package mine
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/gate"
@@ -40,4 +41,24 @@ func TestChainCarriesHarness(t *testing.T) {
 	bare := chain(t, 2000, row(2000, "deny"))
 	check(t, "an unstamped chain knows no harness", bare.HarnessKnown, false)
 	check(t, "an unstamped chain names no harness", bare.Harness, "")
+}
+
+// A release row joins no chain: the chains, their rows and their end times read the
+// same with and without one.
+func TestReleaseRowsJoinNoChain(t *testing.T) {
+	rows := func(released bool) []gate.Row {
+		out := []gate.Row{
+			withHarness(gate.Row{"ts": 1000, "phase": "deny", "firing": 1, "files": 1, "chain_id": "aaaa0001"}, "codex"),
+			concerns(gate.Row{"ts": 1010, "phase": "retry", "firing": 1, "files": 1, "chain_id": "aaaa0001"}, "chain", c("x")),
+		}
+		if released {
+			out = append(out, withHarness(gate.Row{"ts": 1011, "phase": gate.PhaseChainEnd, "chain_id": "aaaa0001",
+				"blocks": 1, "session_id": "s1", "repo": "/elsewhere"}, "claude-code"))
+		}
+		return append(out, withHarness(gate.Row{"ts": 2000, "phase": "clean", "firing": 1, "files": 1, "chain_id": "bbbb0002"}, "codex"))
+	}
+	plain, withRelease := BuildChains(rows(false), false), BuildChains(rows(true), false)
+	if !reflect.DeepEqual(plain, withRelease) {
+		t.Errorf("a release row changed the chains:\n without %#v\n with    %#v", plain, withRelease)
+	}
 }

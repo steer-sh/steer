@@ -18,6 +18,10 @@ type Payload struct {
 	SessionID      string `json:"session_id"`
 	TranscriptPath string `json:"transcript_path"`
 	CWD            string `json:"cwd"`
+	// PromptID identifies the user prompt whose turn made the call.
+	PromptID string `json:"prompt_id"`
+	// AgentID names the subagent the call came from, and is absent on the main thread.
+	AgentID string `json:"agent_id"`
 }
 
 // Output is the hook's reply. Every field is omitted when unset, so a note-only reply
@@ -136,6 +140,9 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, stdin io.
 	// writes. They are gathered once, because reading the transcript is the expensive
 	// half and it does not change mid-decision.
 	rowExtra := gate.Row{"client": "claude-code", "harness": "claude-code"}
+	if payload.PromptID != "" {
+		rowExtra["prompt_id"] = payload.PromptID
+	}
 	for key, value := range AuthorFields(engine.Ledger(), cfg, payload.TranscriptPath, session) {
 		rowExtra[key] = value
 	}
@@ -152,6 +159,9 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, stdin io.
 		Message:   ExtractMessage(cmd, cwd),
 		RerunNote: RerunNote(cmd),
 		RowExtra:  rowExtra,
+		TurnKey:   "prompt_id",
+		TurnID:    payload.PromptID,
+		ThreadID:  payload.AgentID,
 		LedgerHook: func(row gate.Row, state gate.ChainState) {
 			attachLedger(row, payload.TranscriptPath, state)
 		},

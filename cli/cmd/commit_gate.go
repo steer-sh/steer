@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steer-sh/steer-cli/internal/checks"
 	"github.com/steer-sh/steer-cli/internal/claude"
 	codexhooks "github.com/steer-sh/steer-cli/internal/codex"
 	"github.com/steer-sh/steer-cli/internal/gate"
@@ -20,6 +22,7 @@ import (
 	gatepi "github.com/steer-sh/steer-cli/internal/gate/pi"
 	"github.com/steer-sh/steer-cli/internal/gate/resolve"
 	"github.com/steer-sh/steer-cli/internal/gate/reviewers"
+	"github.com/steer-sh/steer-cli/internal/gate/stophook"
 	"github.com/steer-sh/steer-cli/internal/harness"
 	pihooks "github.com/steer-sh/steer-cli/internal/pi"
 	"github.com/steer-sh/steer-cli/internal/settings"
@@ -700,7 +703,11 @@ idempotent and, without --apply, writes nothing.
   --reresolve  re-examine rows already stamped as a miss (never removes a ledger)
   --rejoin     also re-judge every link the resolver made under the current rules;
                a link with no ledger left to read is kept, others may change or
-               become a miss`,
+               become a miss
+
+As a Stop hook it reads the payload on stdin. On a root Stop it first checks that
+the reply text holds the ledger of each review sequence the gate released in that
+turn, and refuses the Stop once, naming each missing ledger, when one is absent.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// A dry run writes nothing, and migrating the corpus is a write.
 		if backfillApply {
@@ -716,9 +723,63 @@ idempotent and, without --apply, writes nothing.
 			Reresolve: backfillReresolve,
 			Rejoin:    backfillRejoin,
 		}
-		resolve.RunBackfill(cfg, ledgerHarvests(), opts, os.Stdout, nil)
+		out := cmd.OutOrStdout()
+		// A root Stop payload gets the ledger backstop first. Its stdout carries one JSON
+		// reply, so the resolver's narration goes to stderr.
+		if res := stophook.Check(cfg.LogFile(), hookInput(os.Stdin)); res.RootStop {
+			checks.WriteStopReply(out, stopReply(res))
+			if res.Block {
+				return nil
+			}
+			out = cmd.ErrOrStderr()
+		}
+		resolve.RunBackfill(cfg, ledgerHarvests(), opts, out, nil)
 		return nil
 	},
+}
+
+const (
+	// maxHookInput bounds the hook payload read; a larger one is not a payload.
+	maxHookInput = 16 << 20
+	// hookInputWait bounds the wait for stdin to close, so a run from a shell whose
+	// stdin stays open does not hang.
+	hookInputWait = 2 * time.Second
+)
+
+// hookInput reads a hook payload from stdin. It returns nil when stdin is a terminal,
+// fails, exceeds maxHookInput, or stays open past hookInputWait.
+func hookInput(stdin *os.File) []byte {
+	info, err := stdin.Stat()
+	if err != nil || info.Mode()&os.ModeCharDevice != 0 {
+		return nil
+	}
+	done := make(chan []byte, 1)
+	go func() {
+		data, err := io.ReadAll(io.LimitReader(stdin, maxHookInput+1))
+		if err != nil || len(data) > maxHookInput {
+			data = nil
+		}
+		done <- data
+	}()
+	select {
+	case data := <-done:
+		return data
+	case <-time.After(hookInputWait):
+		return nil
+	}
+}
+
+// stopReply renders the backstop's result in the Stop hook reply shape, or nil when it
+// has nothing to say.
+func stopReply(res stophook.Result) *checks.StopReply {
+	reply := checks.StopReply{SystemMessage: res.SystemMessage}
+	if res.Block {
+		reply.Decision, reply.Reason = "block", res.Reason
+	}
+	if reply == (checks.StopReply{}) {
+		return nil
+	}
+	return &reply
 }
 
 // ledgerHarvests is the set both resolve callers read. It lives in its own package

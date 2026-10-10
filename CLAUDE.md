@@ -84,6 +84,9 @@ Read the linked architecture section before changing the corresponding boundary:
   `cli/internal/gate/`; its adapters own harness payloads and replies.
   Codex hook payloads can omit a nested shell workdir: select the repository
   explicitly with `git -C /absolute/path commit` when committing through code mode.
+  The root-Stop ledger backstop (`cli/internal/gate/stophook/`, run by
+  `commit-gate backfill`) reads only the `chain-end` rows `Engine.release` writes,
+  so a new path that ends a blocked sequence must go through `release`.
 - Transcript ingestion, classification, or snapshots:
   [transcripts](ARCHITECTURE.md#transcripts-and-session-evidence).
   `cli/internal/transcript/` owns normalization; `cli/internal/report/` classifies

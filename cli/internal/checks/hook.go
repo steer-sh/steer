@@ -2,6 +2,8 @@ package checks
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"time"
 )
 
@@ -51,6 +53,18 @@ type StopReply struct {
 	Decision      string `json:"decision,omitempty"`
 	Reason        string `json:"reason,omitempty"`
 	SystemMessage string `json:"systemMessage,omitempty"`
+}
+
+// WriteStopReply writes reply as one JSON line, or nothing when reply is nil.
+func WriteStopReply(w io.Writer, reply *StopReply) {
+	if reply == nil {
+		return
+	}
+	encoded, err := json.Marshal(reply)
+	if err != nil {
+		return
+	}
+	fmt.Fprintln(w, string(encoded))
 }
 
 // hookRecordingMargin is the time a Stop hook needs past the run deadline to

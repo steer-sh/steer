@@ -1132,3 +1132,150 @@ func TestResolverThreadedRowRefusesTheParentLedger(t *testing.T) {
 		t.Fatalf("the thread claimed the parent's ledger: %v", row)
 	}
 }
+
+// sequenceWithRelease is a two-round sequence whose cap handed the agent findings, then
+// a one-round sequence, each followed by its release row when released is true.
+func sequenceWithRelease(released bool) []resolverRow {
+	first := stampChainID(chainRows(fixCT, 2, "feat: first commit"), "aaaa0001")
+	first = append(first, resolverRow{"phase": "cap", "ts": fixCT + 300, "firing": 3, "chain_id": "aaaa0001",
+		"session_id": fixSession, "subject": "feat: first commit", "finding_slots": 1})
+	second := stampChainID(chainRows(fixCT+1000, 1, "fix: second commit"), "bbbb0002")
+	release := func(id string, ts float64) resolverRow {
+		return resolverRow{"phase": gate.PhaseChainEnd, "ts": ts, "chain_id": id, "session_id": fixSession,
+			"blocks": 2, "ledger_header": "**Commit gate fired — review sequence #" + id + ", x**"}
+	}
+	var rows []resolverRow
+	rows = append(rows, first...)
+	if released {
+		rows = append(rows, release("aaaa0001", fixCT+301))
+	}
+	rows = append(rows, second...)
+	if released {
+		rows = append(rows, release("bbbb0002", fixCT+1011))
+	}
+	return rows
+}
+
+// repairedLedger is one final reply answering both sequences, each round with its own
+// concern.
+func repairedLedger() LedgerMsg {
+	text := "**Commit gate fired — review sequence #aaaa0001, feat: the first one, reworded**\n\n" +
+		"**Round 1, blocking** — 3 reviewers.\n\n- **REJECTED** — round one concern → false premise\n\n" +
+		"**Round 2, blocking** — 3 reviewers.\n\n- **ACCEPTED** — round two concern → fixed\n\n" +
+		"**Round 3, terminal** — 3 reviewers. Commit not blocked.\n\n- **ACCEPTED, not fixed** — terminal concern → left\n\n" +
+		"**Commit gate fired — review sequence #bbbb0002, fix: second commit**\n\n" +
+		"**Round 1, blocking** — 3 reviewers.\n\n- **REJECTED** — second sequence concern → false premise\n"
+	return LedgerMsg{When: fixCT + 1100, Key: fixSession, Path: "/t.jsonl", Text: text}
+}
+
+// Release rows are non-review rows: beside a sequence's rows they move no join and no
+// unresolved count, and a backfill rewrite keeps them.
+//
+// pins existing behaviour
+func TestResolverReleaseRowsChangeNoJoin(t *testing.T) {
+	resolved := func(released bool) map[string][]string {
+		r := testResolver()
+		r.quiet = true
+		r.harvests = []Harvest{func() []LedgerMsg { return []LedgerMsg{repairedLedger()} }}
+		rows := sequenceWithRelease(released)
+		r.resolveAndWrite(rows, len(rows), false)
+		out := map[string][]string{}
+		for _, row := range rows {
+			if ExpectsLedger(row) {
+				key := fmt.Sprint(row["chain_id"], "/", row["firing"])
+				var concerns []string
+				list, _ := row["concerns"].([]gate.Concern)
+				for _, c := range list {
+					concerns = append(concerns, c.Verdict+": "+c.Concern)
+				}
+				out[key] = append(concerns, fmt.Sprint(row["ledger_found"], row["ledger_join"]))
+			}
+		}
+		return out
+	}
+	plain, withRelease := resolved(false), resolved(true)
+	if fmt.Sprint(plain) != fmt.Sprint(withRelease) {
+		t.Errorf("release rows changed the joins:\n without %v\n with    %v", plain, withRelease)
+	}
+	want := map[string]string{
+		"aaaa0001/1": "[REJECTED: round one concern truechain]",
+		"aaaa0001/2": "[ACCEPTED: round two concern truechain]",
+		"aaaa0001/3": "[ACCEPTED: terminal concern truechain]",
+		"bbbb0002/1": "[REJECTED: second sequence concern truechain]",
+	}
+	for key, w := range want {
+		if got := fmt.Sprint(withRelease[key]); got != w {
+			t.Errorf("%s resolved to %s, want %s", key, got, w)
+		}
+	}
+
+	counts := map[bool]int{}
+	for _, released := range []bool{false, true} {
+		cfg := gate.Config{StateDir: t.TempDir(), HostID: "testhost", StaleAfter: 30 * time.Minute}
+		var sb strings.Builder
+		for _, row := range sequenceWithRelease(released) {
+			line, _ := json.Marshal(row)
+			sb.Write(line)
+			sb.WriteByte('\n')
+		}
+		if err := os.WriteFile(cfg.LogFile(), []byte(sb.String()), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		counts[released] = CountUnresolved(cfg)
+		harvest := []Harvest{func() []LedgerMsg { return []LedgerMsg{repairedLedger()} }}
+		Backfill(cfg, harvest, BackfillOptions{Apply: true, Quiet: true}, nil, func() float64 { return 2_000_000_000 })
+		if !released {
+			continue
+		}
+		kept := 0
+		for _, row := range readShard(t, cfg.LogFile()) {
+			if row["phase"] == gate.PhaseChainEnd {
+				kept++
+			}
+		}
+		if kept != 2 {
+			t.Errorf("the rewrite kept %d release rows, want 2", kept)
+		}
+	}
+	if counts[false] != counts[true] || counts[true] != 4 {
+		t.Errorf("unresolved counts = %v, want 4 with and without release rows", counts)
+	}
+}
+
+// An exact chain ID does not carry a ledger across thread keys: a parent's reply never
+// resolves a child thread's rows.
+//
+// pins existing behaviour
+func TestResolverChainIDStaysInsideItsThread(t *testing.T) {
+	r := testResolver()
+	rows := stampChainID(chainRows(fixCT, 1, "fix: thread commit"), "aaaa0001")
+	for _, row := range rows {
+		row["thread_id"] = "agent-9"
+	}
+	parent := withChainID(chainLedgerFix(fixCT+50, []int{1}, "fix: thread commit", 0), "aaaa0001")
+	if cand, _, _ := r.pickLedger(rows, 1, fixCT, []LedgerMsg{parent}); cand != nil {
+		t.Fatal("the parent's ledger resolved the child thread's row by its chain ID")
+	}
+	parent.Key = "agent-9"
+	if cand, _, _ := r.pickLedger(rows, 1, fixCT, []LedgerMsg{parent}); cand == nil {
+		t.Fatal("the thread's own ledger did not resolve its row")
+	}
+}
+
+// An exact chain ID joins only inside the chain window, 8 x StaleAfter from the deny
+// the row answers.
+//
+// pins existing behaviour
+func TestResolverChainIDJoinsInsideTheChainWindow(t *testing.T) {
+	r := testResolver()
+	rows := stampChainID(chainRows(fixCT, 1, "feat: commit"), "aaaa0001")
+	span := 8 * r.cfg.StaleAfter.Seconds()
+	inside := withChainID(chainLedgerFix(fixCT+span, []int{1}, "feat: commit", 0), "aaaa0001")
+	if cand, _, _ := r.pickLedger(rows, 1, fixCT, []LedgerMsg{inside}); cand == nil {
+		t.Fatal("a ledger at the window's edge did not join")
+	}
+	past := withChainID(chainLedgerFix(fixCT+span+1, []int{1}, "feat: commit", 0), "aaaa0001")
+	if cand, _, _ := r.pickLedger(rows, 1, fixCT, []LedgerMsg{past}); cand != nil {
+		t.Fatal("a ledger past the chain window joined by its ID")
+	}
+}

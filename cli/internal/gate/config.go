@@ -85,11 +85,15 @@ const (
 // parser semantics that decide which reviewer findings enter the corpus.
 const InstrumentSuffix = "go-findings-v3-shell"
 
+// PhaseChainEnd is the row the engine writes when it releases a review sequence that
+// blocked: from then on the agent owes that sequence's ledger.
+const PhaseChainEnd = "chain-end"
+
 // Phases where no reviewer ran. They open no chain and close none, so a reader of
 // the log must not treat one as a boundary.
 var NonReviewPhases = map[string]bool{
 	"skip-prose": true, "skip-binary": true, "skip-empty": true, "skip-cleared": true, "ungated": true,
-	"ungated-partial": true,
+	"ungated-partial": true, PhaseChainEnd: true,
 }
 
 // Defaults returns the shipped configuration.

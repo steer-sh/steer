@@ -67,6 +67,7 @@ type invocation struct {
 	workdirGiven bool
 	actor        string
 	sessionID    string
+	turnID       string
 	threadID     string
 	agentType    string
 	model        string
@@ -118,6 +119,7 @@ func parsePayload(raw []byte) (invocation, bool) {
 		workdirGiven: workdirGiven,
 		actor:        actor,
 		sessionID:    payload.SessionID,
+		turnID:       payload.TurnID,
 		threadID:     payload.AgentID,
 		agentType:    payload.AgentType,
 		model:        payload.Model,
@@ -220,6 +222,9 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, stdin io.
 
 	engine := gate.NewEngine(cfg, reviewer)
 	rowExtra := gate.Row{"client": "codex", "harness": "codex"}
+	if invocation.turnID != "" {
+		rowExtra["turn_id"] = invocation.turnID
+	}
 	if invocation.threadID != "" {
 		rowExtra["thread_id"] = invocation.threadID
 		rowExtra["agent_type"] = invocation.agentType
@@ -237,6 +242,7 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, stdin io.
 		Spec:      spec,
 		Message:   cc.ExtractMessage(command, cwd), RowExtra: rowExtra,
 		RerunNote: cc.RerunNote(command),
+		TurnKey:   "turn_id", TurnID: invocation.turnID, ThreadID: invocation.threadID,
 	})
 	out, ok := Render(decision)
 	if !ok {

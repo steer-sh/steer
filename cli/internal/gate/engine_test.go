@@ -56,6 +56,8 @@ type harness struct {
 	// spec is the tree the gate reads, which the real adapter takes from the shape of
 	// the command. Varying it between rounds is what a dropped staging step looks like.
 	spec DiffSpec
+	// turnKey and turnID are the turn identity the adapter would pass.
+	turnKey, turnID string
 }
 
 func newHarness(t *testing.T, replies ...RawRun) *harness {
@@ -78,6 +80,8 @@ func (h *harness) handle() Decision {
 		SessionID: "session-1",
 		Spec:      h.spec,
 		Message:   "subject",
+		TurnKey:   h.turnKey,
+		TurnID:    h.turnID,
 	})
 }
 
@@ -102,12 +106,35 @@ func (h *harness) rows() []map[string]any {
 	return out
 }
 
+// lastRow is the last row written other than a release row.
 func (h *harness) lastRow() map[string]any {
-	rows := h.rows()
+	rows := h.reviewRows()
 	if len(rows) == 0 {
 		h.t.Fatal("no adjudication row was written")
 	}
 	return rows[len(rows)-1]
+}
+
+// reviewRows is every row except the release rows.
+func (h *harness) reviewRows() []map[string]any {
+	var out []map[string]any
+	for _, row := range h.rows() {
+		if row["phase"] != PhaseChainEnd {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
+// releases is every release row written so far.
+func (h *harness) releases() []map[string]any {
+	var out []map[string]any
+	for _, row := range h.rows() {
+		if row["phase"] == PhaseChainEnd {
+			out = append(out, row)
+		}
+	}
+	return out
 }
 
 func TestCleanPassAllows(t *testing.T) {
@@ -200,8 +227,7 @@ func TestUnchangedRetryEndsChain(t *testing.T) {
 	if !strings.HasPrefix(receiptSentence(d.Reason), receiptSentence(d.SystemMessage)+"\n\n") {
 		t.Errorf("both channels carry one sentence: %q vs %q", d.Reason, d.SystemMessage)
 	}
-	rows := h.rows()
-	retry := rows[len(rows)-1]
+	retry := h.lastRow()
 	if retry["phase"] != "retry" || retry["diff_changed"] != false {
 		t.Errorf("retry row = %v, want phase retry with diff_changed false", retry)
 	}
@@ -866,5 +892,127 @@ func TestAnAllowCarriesNoPendingAddendumNotice(t *testing.T) {
 	writeFileAt(t, h.repo, ".steer/hooks/steer-manifest.json", addendumManifest(t, map[string]string{"nit": "ignore foo"}))
 	if d := h.handle(); d.Kind != Allow || strings.Contains(d.Reason, "review-addendum") {
 		t.Fatalf("Kind = %v, Reason = %q", d.Kind, d.Reason)
+	}
+}
+
+// Each path that lets a blocked sequence's commit through writes one release row naming
+// the ledger the agent owes; a path that blocks again, rules nothing, or keeps the
+// sequence pending writes none.
+func TestReleaseRowsMarkEachEndOfABlockedSequence(t *testing.T) {
+	stage := func(h *harness) {
+		writeFileAt(t, h.repo, "a.py", lines(160))
+		gitCmd(t, h.repo, "add", "-A")
+	}
+	unavailable := RawRun{Outcome: OutcomeTimeout, Detail: "no response"}
+	for _, tc := range []struct {
+		name     string
+		cap      int
+		retry    RawRun
+		edit     func(h *harness)
+		released bool
+		terminal int
+	}{
+		{"unchanged retry", 0, findingReply(oneFinding), func(*harness) {}, true, 0},
+		{"clean re-review", 0, findingReply("NO FINDINGS"), stage, true, 0},
+		{"no reviewer answered", 0, unavailable, stage, true, 0},
+		{"prose-only retry", 0, findingReply(oneFinding), func(h *harness) {
+			gitCmd(t, h.repo, "rm", "-q", "-f", "a.py")
+			writeFileAt(t, h.repo, "NOTES.md", lines(160))
+			gitCmd(t, h.repo, "add", "-A")
+		}, true, 0},
+		{"another denial", 0, findingReply(oneFinding), stage, false, 0},
+		{"cap, final review clean", 1, findingReply("NO FINDINGS"), stage, true, 0},
+		{"cap, every reviewer unavailable", 1, unavailable, stage, true, 0},
+		{"cap, final review finds", 1, findingReply(oneFinding), stage, true, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, findingReply(oneFinding))
+			h.turnKey, h.turnID = "prompt_id", "turn-7"
+			if tc.cap > 0 {
+				h.cfg.MaxFirings = tc.cap
+			}
+			deny := h.handle()
+			if deny.Kind != Deny || len(h.releases()) != 0 {
+				t.Fatalf("first round = %v with %d release rows, want a deny and none", deny.Kind, len(h.releases()))
+			}
+			h.reviewer.replies = []RawRun{tc.retry}
+			h.reviewer.calls = 0
+			tc.edit(h)
+			d := h.handle()
+			rows := h.releases()
+			if !tc.released {
+				if len(rows) != 0 {
+					t.Fatalf("%v wrote release rows %v", d.Kind, rows)
+				}
+				return
+			}
+			if len(rows) != 1 {
+				t.Fatalf("%d release rows, want 1: %v", len(rows), h.rows())
+			}
+			row := rows[0]
+			chainID := h.lastRow()["chain_id"]
+			want := map[string]any{
+				"blocks": float64(1), "chain_id": chainID, "session_id": "session-1", "actor": "session-1",
+				"release_turn_key": "prompt_id", "release_turn": "turn-7", "release_turn_present": true,
+				"release_thread": "", "subject": "subject", "repo": h.repo, "channel": ChannelPreToolUse,
+				"ledger_header": headerLine(t, deny.Reason),
+			}
+			for key, value := range want {
+				if row[key] != value {
+					t.Errorf("%s = %v, want %v", key, row[key], value)
+				}
+			}
+			if got, _ := row["terminal_round"].(float64); int(got) != tc.terminal {
+				t.Errorf("terminal_round = %v, want %d", row["terminal_round"], tc.terminal)
+			}
+			if strings.Contains(d.SystemMessage, "Ledger backstop unavailable") {
+				t.Errorf("a release with a turn ID carries the unavailable notice: %q", d.SystemMessage)
+			}
+		})
+	}
+}
+
+// A first review that passes blocked nothing, and an empty-index pass keeps the
+// sequence pending; neither owes a ledger yet.
+//
+// pins existing behaviour
+func TestNoReleaseRowWithoutAnEndedBlockedSequence(t *testing.T) {
+	clean := newHarness(t, findingReply("NO FINDINGS"))
+	if d := clean.handle(); d.Kind != Allow || len(clean.releases()) != 0 {
+		t.Errorf("clean first review = %v with release rows %v", d.Kind, clean.releases())
+	}
+
+	h := newHarness(t, findingReply(oneFinding))
+	h.withHistory()
+	gitCmd(t, h.repo, "reset", "-q")
+	h.spec = DiffSpec{}
+	if d := h.handle(); d.Kind != Deny {
+		t.Fatalf("first firing Kind = %v, want Deny", d.Kind)
+	}
+	h.spec = DiffSpec{StagedOnly: true}
+	h.handle()
+	if rows := h.releases(); len(rows) != 0 {
+		t.Errorf("the empty-index pass wrote release rows %v", rows)
+	}
+}
+
+// A release whose request names a turn field but carries no value records the absence
+// and tells the operator the backstop cannot act on the sequence.
+func TestAReleaseWithoutATurnIDSaysTheBackstopIsUnavailable(t *testing.T) {
+	h := newHarness(t, findingReply(oneFinding))
+	h.turnKey = "turn_id"
+	if d := h.handle(); d.Kind != Deny || strings.Contains(d.SystemMessage, "backstop") {
+		t.Fatalf("deny = %v / %q, want a deny with no backstop notice", d.Kind, d.SystemMessage)
+	}
+	d := h.handle()
+	if !strings.Contains(d.SystemMessage, "Ledger backstop unavailable for this sequence: PreToolUse supplied no usable turn_id.") {
+		t.Errorf("system message = %q, want the unavailable notice", d.SystemMessage)
+	}
+	if strings.Contains(d.Reason, "backstop") {
+		t.Errorf("the agent's copy carries the operator notice: %q", d.Reason)
+	}
+	rows := h.releases()
+	if len(rows) != 1 || rows[0]["release_turn_present"] != false || rows[0]["release_turn"] != "" {
+		t.Errorf("release rows = %v, want one recording an absent turn", rows)
 	}
 }

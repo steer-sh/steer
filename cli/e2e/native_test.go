@@ -19,6 +19,10 @@ var nativeHarnesses = []struct{ harness, config, sub string }{
 type NativeGate struct {
 	s       *Sandbox
 	command string
+	harness string
+	// turn and transcript, when set, ride every payload as the harness's turn field
+	// and transcript_path.
+	turn, transcript string
 }
 
 // HookReply is the parsed reply of a PreToolUse hook.
@@ -39,7 +43,7 @@ func newNativeGate(t *testing.T, harness, config, sub string, opts ...SandboxOpt
 	s.Reviewer("claude-code", "sonnet", "", 3, 3)
 	s.MustSteer("bin", "install")
 	s.MustSteer("commit-gate", "install", "--harness", harness)
-	return s, &NativeGate{s: s, command: s.RegisteredCommand(filepath.Join(s.Repo, config), sub)}
+	return s, &NativeGate{s: s, harness: harness, command: s.RegisteredCommand(filepath.Join(s.Repo, config), sub)}
 }
 
 // Hook sends a Bash tool call through the registered command, as the harness does.
@@ -56,11 +60,18 @@ func (g *NativeGate) hookAs(session, command, workdir string) HookReply {
 	if workdir != "" {
 		input["workdir"] = workdir
 	}
-	payload, _ := json.Marshal(map[string]any{
+	fields := map[string]any{
 		"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": input,
 		"session_id": session, "cwd": g.s.Repo,
 		"transcript_path": filepath.Join(g.s.Root, "none.jsonl"),
-	})
+	}
+	if g.transcript != "" {
+		fields["transcript_path"] = g.transcript
+	}
+	if g.turn != "" {
+		fields[g.turnKey()] = g.turn
+	}
+	payload, _ := json.Marshal(fields)
 	r := g.s.Run(g.s.Repo, string(payload), nil, "sh", "-c", g.command)
 	if r.Code != 0 {
 		g.s.t.Fatalf("the registered hook exited %d:\n%s", r.Code, r.Output())
@@ -82,6 +93,14 @@ func (g *NativeGate) hookAs(session, command, workdir string) HookReply {
 	}
 	reply.Decision, reply.Reason, reply.Context, reply.System = out.Hook.Decision, out.Hook.Reason, out.Hook.Context, out.System
 	return reply
+}
+
+// turnKey is the payload field that names the turn on this harness.
+func (g *NativeGate) turnKey() string {
+	if g.harness == "codex" {
+		return "turn_id"
+	}
+	return "prompt_id"
 }
 
 // offeredExample is the command a refusal ends with, pointed at repo.

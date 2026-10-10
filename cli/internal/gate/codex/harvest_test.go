@@ -104,3 +104,53 @@ func TestHarvestOfAMissingTreeIsEmpty(t *testing.T) {
 		t.Fatalf("harvest = %#v", msgs)
 	}
 }
+
+// messageLine is an assistant message line with the given payload phase and content item type.
+func messageLine(ordinal int, phase, itemType, text string) string {
+	return fmt.Sprintf(`{"timestamp":"2026-08-31T02:05:00.000Z","ordinal":%d,"type":"response_item",`+
+		`"payload":{"type":"message","role":"assistant","phase":%q,"content":[{"type":%q,"text":"%s"}]}}`,
+		ordinal, phase, itemType, text)
+}
+
+func TestReadRolloutTakesReplyTextOnly(t *testing.T) {
+	for _, tc := range []struct {
+		name, phase, itemType string
+		want                  int
+	}{
+		{"final answer", "final_answer", "output_text", 1},
+		{"commentary", "commentary", "output_text", 1},
+		{"older plain text item", "", "text", 1},
+		{"analysis channel", "analysis", "output_text", 0},
+		{"reasoning item", "", "reasoning_text", 0},
+		{"summary item", "", "summary_text", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := writeSessions(t, map[string]string{
+				"rollout.jsonl": metaLine("session-1", "session-1", 0) + "\n" +
+					messageLine(3, tc.phase, tc.itemType, ledgerText) + "\n",
+			})
+			rollout, err := ReadRollout(filepath.Join(root, "2026", "08", "31", "rollout.jsonl"))
+			if err != nil || len(rollout.Ledgers) != tc.want || rollout.Key != "session-1" || rollout.Threaded {
+				t.Errorf("rollout = %+v, err %v; want %d ledgers keyed on session-1", rollout, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestReadRolloutReportsAnUnreadableLedgerLine(t *testing.T) {
+	line := assistantLine(4, "2026-08-31T02:05:00.000Z", ledgerText)
+	root := writeSessions(t, map[string]string{
+		"rollout.jsonl": metaLine("session-1", "session-1", 0) + "\n" +
+			assistantLine(3, "2026-08-31T02:04:00.000Z", ledgerText) + "\n" + line[:len(line)-20],
+	})
+	rollout, err := ReadRollout(filepath.Join(root, "2026", "08", "31", "rollout.jsonl"))
+	if err != ErrUnreadableLine || len(rollout.Ledgers) != 1 {
+		t.Errorf("rollout = %+v, err %v; want the whole ledger and the truncation error", rollout, err)
+	}
+	if _, err := ReadRollout(filepath.Join(root, "missing.jsonl")); err == nil {
+		t.Error("a missing rollout read without error")
+	}
+	if msgs := Harvest(root)(); len(msgs) != 1 {
+		t.Errorf("the harvest kept %d ledgers beside an unreadable line, want 1", len(msgs))
+	}
+}

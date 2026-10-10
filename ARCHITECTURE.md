@@ -491,6 +491,29 @@ again only when a row was written or a miss deadline passed since the last appli
 scan (recorded in `backfill.scanned`), or after `rescanAfter`; a run without it,
 including the dashboard's, always harvests.
 
+When the gate lets through the commit of a sequence that blocked, `Engine.release`
+writes a `chain-end` row (`gate.PhaseChainEnd`). It names the header line the agent
+was told to copy, the blocking rounds, the terminal round when the cap's final review
+handed the agent findings, and the PreToolUse turn (`prompt_id` on Claude Code,
+`turn_id` on Codex) with a presence flag. It records gate release, not git success.
+The phase is in `NonReviewPhases`, so chains, mining and the resolver skip it. At a
+root Stop, the same `commit-gate backfill` hook first runs `internal/gate/stophook/`.
+It streams the local log once for release rows of this session's root thread, the
+Stop's turn and its transcript. It reads the ledger text blocks the resolver's own
+harvest reads (`cc.ReadLedgers`, `codex.ReadRollout`) under this session's key, so a
+ledger split across text blocks does not count, with `last_assistant_message` as a
+separate candidate. It applies no time window: a ledger written more than the
+resolver's chain span after its deny satisfies the Stop and still misses. A
+torn last line, an unparsable ledger line or an undated ledger makes the read
+incomplete; a torn log line fails open when it is the last or names a release or
+this session. A sequence is answered when one `ChainBlocks` block carries its ID and a
+verdict bullet in each required round section. Otherwise, when `stop_hook_active` is
+explicitly false, the Stop is refused once, naming each missing header and its
+sections. Every read doubt fails open, and a release or Stop with no turn ID gets an
+operator notice. The check does not depend on `--if-due`, the resolver lock or
+`backfill.scanned`; after it the ordinary resolver runs, narrating on stderr. A
+ledger found only in the payload satisfies the check and creates no resolver link.
+
 Each row's transcript prefix is stored once per session under `prefixes/`: the
 session file grows by appended gzip members, and a row names its slice with
 `prefix_lines` and `prefix_sha`. Read it through `gate.ReadPrefix`, which also

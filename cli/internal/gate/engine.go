@@ -65,6 +65,13 @@ type Request struct {
 	// LedgerHook, when set, is called on the retry row so an adapter can attach the
 	// agent's self-reported ledger before the row is written.
 	LedgerHook func(row Row, state ChainState)
+	// TurnKey names the payload field that identifies the agent's turn: "prompt_id" or
+	// "turn_id". Empty for a channel that has no turns.
+	TurnKey string
+	// TurnID is that field's value, empty when the payload carried none.
+	TurnID string
+	// ThreadID names the child thread the commit came from, empty on the root thread.
+	ThreadID string
 
 	// addendum is loaded once by Handle, and every row and prompt of the request reads it.
 	addendum Addendum
@@ -284,10 +291,10 @@ func (e *Engine) handleRetry(ctx context.Context, req Request, chain *Chain, sta
 				logErr = err
 			}
 		}
-		return ledgerDue(proceed(ContextOnly, req, after.Raw, firing, fmt.Sprintf(
+		return e.release(proceed(ContextOnly, req, after.Raw, firing, fmt.Sprintf(
 			"the review sequence ended after %d block(s) — this diff is identical to the "+
 				"one the reviewers already read, so a new review would read no new code. The "+
-				"gate does not block it.%s", firing, separated(notice)), logErr), req, firing)
+				"gate does not block it.%s", firing, separated(notice)), logErr), req, firing, 0)
 	}
 
 	next := firing + 1
@@ -298,8 +305,8 @@ func (e *Engine) handleRetry(ctx context.Context, req Request, chain *Chain, sta
 	}
 	if firing >= e.cfg.MaxFirings {
 		// The cap stops the BLOCKING chain, not the reading of the last round's fixes.
-		d := e.terminalReview(ctx, req, chain, p, status, next)
-		return ledgerDue(withLedgerError(d, logErr), req, firing)
+		d, terminal := e.terminalReview(ctx, req, chain, p, status, next)
+		return e.release(withLedgerError(d, logErr), req, firing, terminal)
 	}
 	if status != "" {
 		if notice != "" && status == "empty" {
@@ -313,28 +320,64 @@ func (e *Engine) handleRetry(ctx context.Context, req Request, chain *Chain, sta
 			// about the round the chain still awaits an answer for.
 			return proceed(ContextOnly, req, state.Diff, firing, notice, logErr)
 		}
-		return ledgerDue(e.skipped(req, status, p.chars, logErr), req, firing)
+		return e.release(e.skipped(req, status, p.chars, logErr), req, firing, 0)
 	}
 	// The diff changed, so this round reviews code no reviewer has read.
-	return ledgerDue(withLedgerError(e.reviewCommit(ctx, req, chain, p, next), logErr), req, firing)
+	return e.release(withLedgerError(e.reviewCommit(ctx, req, chain, p, next), logErr), req, firing, 0)
 }
 
-// ledgerDue appends the ledger instruction to a receipt that ends a chain which blocked
-// `blocks` times. A deny continues the chain, and the cap's terminal review carries
-// the instruction in its own template; neither is a receipt.
-func ledgerDue(d Decision, req Request, blocks int) Decision {
-	if !d.Receipt {
+// release finishes a decision that ends a sequence which blocked `blocks` times. A
+// receipt gets the ledger instruction; the cap's terminal review carries it in its own
+// template and passes the round it names as terminal. Either way the release row records
+// the ledger the agent now owes. A deny continues the sequence and a silent decision
+// rules nothing, so neither is a release.
+func (e *Engine) release(d Decision, req Request, blocks, terminal int) Decision {
+	if d.Kind == Deny || d.Kind == Silent || (!d.Receipt && terminal == 0) {
 		return d
 	}
+	header := ledgerHeaderLine(req)
+	if d.Receipt {
+		d.Reason += fmt.Sprintf("\n\nThis commit ends the review sequence, so its ledger is due NOW: "+
+			"write it as text in this reply, before your next tool call, with one section for "+
+			"each of the %d round(s) that blocked. Copy this header line as it stands:\n\n%s",
+			blocks, header)
+	}
+	row := Row{"ts": time.Now().Unix(), "phase": PhaseChainEnd, "blocks": blocks,
+		"ledger_header": header, "session_id": req.SessionID, "actor": req.Actor,
+		"release_thread": req.ThreadID, "release_turn_key": req.TurnKey,
+		"release_turn": req.TurnID, "release_turn_present": req.TurnID != ""}
+	if terminal > 0 {
+		row["terminal_round"] = terminal
+	}
+	if _, ok := req.RowExtra["repo"]; !ok {
+		row["repo"] = req.Repo
+	}
+	if err := e.log(req, row); err != nil && d.LedgerError == nil {
+		d.LedgerError = err
+	}
+	if req.TurnKey != "" && req.TurnID == "" {
+		d.SystemMessage = joinNote(d.SystemMessage, "Ledger backstop unavailable for this sequence: "+
+			"PreToolUse supplied no usable "+req.TurnKey+".")
+	}
+	return d
+}
+
+// ledgerHeaderLine is the header line the agent is told to copy for this request's
+// sequence, in the form the deny and cap templates render.
+func ledgerHeaderLine(req Request) string {
 	subject := CommitSubject(req.Message)
 	if subject == "" {
 		subject = NoSubject
 	}
-	d.Reason += fmt.Sprintf("\n\nThis commit ends the review sequence, so its ledger is due NOW: "+
-		"write it as text in this reply, before your next tool call, with one section for "+
-		"each of the %d round(s) that blocked. Copy this header line as it stands:\n\n"+
-		"**%s — review sequence%s, %s**", blocks, LedgerHeader, chainSlot(req.chainID), subject)
-	return d
+	return fmt.Sprintf("**%s — review sequence%s, %s**", LedgerHeader, chainSlot(req.chainID), subject)
+}
+
+// joinNote appends an operator note to a system message.
+func joinNote(message, note string) string {
+	if message == "" {
+		return note
+	}
+	return message + " " + note
 }
 
 // skipped answers a commit the gate chose not to review, with one receipt that names
@@ -473,13 +516,14 @@ func (e *Engine) reviewCommit(ctx context.Context, req Request, chain *Chain, p 
 
 // terminalReview reviews the capped chain's last fixes without ruling on this commit.
 // The commit keeps its normal permission path while the findings reach the agent as
-// context and the operator gets the count.
-func (e *Engine) terminalReview(ctx context.Context, req Request, chain *Chain, p prepared, status string, firing int) Decision {
+// context and the operator gets the count. terminal is the round the agent's ledger
+// must answer as terminal: firing when the findings reached the agent, else 0.
+func (e *Engine) terminalReview(ctx context.Context, req Request, chain *Chain, p prepared, status string, firing int) (d Decision, terminal int) {
 	capped := fmt.Sprintf("the review sequence reached its limit of %d blocks", e.cfg.MaxFirings)
 	if status != "" {
 		return proceed(ContextOnly, req, p.raw, firing, fmt.Sprintf(
 			"%s. The final review did not run (%s), so round %d's fixes are UNREVIEWED.%s",
-			capped, status, e.cfg.MaxFirings, separated(p.notice)), nil)
+			capped, status, e.cfg.MaxFirings, separated(p.notice)), nil), 0
 	}
 	result := e.review(ctx, req, p)
 	row := mergeRows(
@@ -494,7 +538,7 @@ func (e *Engine) terminalReview(ctx context.Context, req Request, chain *Chain, 
 		return proceed(ContextOnly, req, p.raw, firing, fmt.Sprintf(
 			"%s and every reviewer was unavailable for the final pass, so round %d's "+
 				"fixes are UNREVIEWED — %s.%s", capped, e.cfg.MaxFirings,
-			ReviewerTrouble(result.Runs), separated(p.notice)), err)
+			ReviewerTrouble(result.Runs), separated(p.notice)), err), 0
 	}
 
 	// Below this line a reviewer read the diff and the commit proceeds, which is what
@@ -515,7 +559,7 @@ func (e *Engine) terminalReview(ctx context.Context, req Request, chain *Chain, 
 		return proceed(ContextOnly, req, p.raw, firing, fmt.Sprintf(
 			"%s. The final non-blocking review read round %d's fixes and %d reviewers "+
 				"found nothing.%s", capped, e.cfg.MaxFirings, result.Answered,
-			separated(p.notice)), err)
+			separated(p.notice)), err), 0
 	}
 
 	review, findings := ComposeReview(result.Reviews)
@@ -541,7 +585,7 @@ func (e *Engine) terminalReview(ctx context.Context, req Request, chain *Chain, 
 		Reason:        p.notice + BuildCap(result.Answered, review, firing, e.cfg.MaxFirings, CommitSubject(req.Message), req.chainID, e.cfg.ReviewerLabel()),
 		SystemMessage: note,
 		LedgerError:   err,
-	}
+	}, firing
 }
 
 func mergeRows(rows ...Row) Row {
