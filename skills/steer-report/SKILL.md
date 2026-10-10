@@ -63,10 +63,13 @@ Then read the whole loop's posture and full class inventory in one snapshot, and
 each live record's detail beside it:
 
 ```bash
-"${STEER_BIN}" status --json > "${TMPDIR:-/tmp}/steer-status.json"
-"${STEER_BIN}" fix score --json > "${TMPDIR:-/tmp}/steer-score.json"
+"${STEER_BIN}" status --json --to-file
+"${STEER_BIN}" fix score --json --to-file
 ```
 
+`--to-file` writes a command's output to a new file and prints only that file's
+path; the first is the status file, the second the score file. Never redirect a
+dump to a path of your own: a shared path is overwritten by another session.
 Read each file **once**, with the Read tool, to its end. The `interventions[]`
 array of the snapshot is the **full** inventory — one summary row per live class
 across every tier. This is your dedup source: when you cluster new candidates in
@@ -134,15 +137,15 @@ STEER_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}"
 STEER_ROOT="${STEER_ROOT:-<SKILL_DIR>/../..}"
 STEER_BIN="${STEER_ROOT}/scripts/steer"
 [ -x "${STEER_BIN}" ] || STEER_BIN=steer
-"${STEER_BIN}" report --days 30 > "${TMPDIR:-/tmp}/steer-index.json"
+"${STEER_BIN}" report --days 30 --to-file
 ```
 
-Then Read `${TMPDIR:-/tmp}/steer-index.json`. It is the first page of the report's index. The scan stored the whole report — every occurrence of every cluster — and `steer report show` reads the rest of that stored report without scanning again. Pass `--report` with the index's `report_id` on every `show`: a later scan replaces the stored report, and `show` refuses to mix the two.
+Then Read the file whose path it prints. It is the first page of the report's index. The scan stored the whole report — every occurrence of every cluster — and `steer report show` reads the rest of that stored report without scanning again. Pass `--report` with the index's `report_id` on every `show`: a later scan replaces the stored report, and `show` refuses to mix the two.
 
 ```bash
-"${STEER_BIN}" report show --report ID --cursor N > "${TMPDIR:-/tmp}/steer-show.json"          # the next index page
-"${STEER_BIN}" report show SIGNAL --match 'RE' --report ID > "${TMPDIR:-/tmp}/steer-show.json" # one signal's clusters
-"${STEER_BIN}" report show c3 r1 i1 --report ID > "${TMPDIR:-/tmp}/steer-show.json"            # every occurrence or directive
+"${STEER_BIN}" report show --report ID --cursor N --to-file          # the next index page
+"${STEER_BIN}" report show SIGNAL --match 'RE' --report ID --to-file # one signal's clusters
+"${STEER_BIN}" report show c3 r1 i1 --report ID --to-file            # every occurrence or directive
 ```
 
 All projects and every harness are scanned by default (cross-project, cross-harness habits are the strongest candidates). Pass through any flags the user supplied (`--days N`, `--project-only`, `--repo-only`, `--harness claude-code|codex`, `--max-digest-bytes N`). `--project-only` reads the working directory alone; `--repo-only` reads every session launched anywhere inside the current checkout, and the two are mutually exclusive.
@@ -413,11 +416,11 @@ adds `unread` to each `attention.candidates[]` row. v33 adds `fixtures` to each
 If this machine has a commit-review ledger, dump the findings. If not, skip to Step 3 and add nothing: Step 1's sweep sentence already told the reader that review history is absent, and what comes next.
 
 ```bash
-steer commit-gate mine findings --kind accepted --undecided > "${TMPDIR:-/tmp}/gate-findings.txt"
-steer commit-gate mine findings --kind rejected > "${TMPDIR:-/tmp}/gate-rejected.txt"
+steer commit-gate mine findings --kind accepted --undecided --to-file
+steer commit-gate mine findings --kind rejected --to-file
 ```
 
-Read each file **once**. Do not cat them and do not re-read.
+Read each file whose path they print **once**. Do not cat them and do not re-read.
 
 The queue's review candidate names how many chains carry an accepted finding that no class regex — active or rejected — yet covers (`undecided_chains`). A class counts as covering one only when it is live (active or rejected, never removed or reworked), mined from this corpus, and authored against that finding's verdict — a false-positive class decides rejected findings and leaves an accepted defect undecided. A transcript-friction class names a pattern in a session transcript, so its regex meeting a finding's text here is a coincidence. A record stored before the corpus tags existed reads as review-findings. That is the pool the classes below come from; the review side has no per-class threshold the tier can compute, because a new class has no regex until you author one.
 

@@ -229,11 +229,12 @@ STEER_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}"
 STEER_ROOT="${STEER_ROOT:-<SKILL_DIR>/../..}"
 STEER_BIN="${STEER_ROOT}/scripts/steer"
 [ -x "${STEER_BIN}" ] || STEER_BIN=steer
-"${STEER_BIN}" status --json > "${TMPDIR:-/tmp}/steer-preflight-status.json"
+"${STEER_BIN}" status --json --to-file
 ```
 
-Read `${TMPDIR:-/tmp}/steer-preflight-status.json` with the Read tool, to its
-end. Never read it from command output: a harness can show only the start of a
+`--to-file` writes the output to a new file and prints only that file's path.
+Read that file with the Read tool, to its end; never redirect it to a path of
+your own. Never read it from command output: a harness can show only the start of a
 long output. The snapshot lists guards and presets in both scopes; each row
 names its scope.
 
@@ -257,10 +258,10 @@ user's rule against each row's `problem`. When a row matches, read that record's
 detail before you decide:
 
 ```bash
-"${STEER_BIN}" fix score --json --id <id> > "${TMPDIR:-/tmp}/steer-preflight-fix.json"
+"${STEER_BIN}" fix score --json --id <id> --to-file
 ```
 
-Read that file the same way. Its one row carries the record's `observation`, and
+Read the file whose path it prints the same way. Its one row carries the record's `observation`, and
 `reason` and `reopen` on a refused record. Then:
 
 - A record does not show that its fix stands here: read its `artifact` and

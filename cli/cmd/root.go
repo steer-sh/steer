@@ -41,7 +41,9 @@ Steer supports Claude Code and Codex on macOS and Linux, plus a Git pre-commit c
 
 func Execute() error {
 	requireKnownSubcommands(rootCmd)
-	if err := rootCmd.Execute(); err != nil {
+	err := rootCmd.Execute()
+	finishDump()
+	if err != nil {
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, styles.ErrorBox.Render(fmt.Sprintf("Error: %s", err.Error())))
 		fmt.Fprintln(os.Stderr, styles.InfoText.Render(helpHint(os.Args[1:])))

@@ -41,10 +41,12 @@ could not be resolved. Do not try to install it by another route.
 
 ```bash
 "${STEER_BIN}" config show
-"${STEER_BIN}" status --json > "${TMPDIR:-/tmp}/steer-setup-status.json"
+"${STEER_BIN}" status --json --to-file
 ```
 
-Read the status file with the Read tool, to its end. Its `posture.commit_gate[]` has
+`--to-file` writes the output to a new file and prints only that file's path;
+never redirect it to a path of your own. Read that status file with the Read
+tool, to its end. Its `posture.commit_gate[]` has
 one row per harness per scope, with `harness`, `scope` and `registered`.
 
 When `posture.guard_interpreter.found` is false, tell the user once: guards run
@@ -160,10 +162,10 @@ is in the same state when the teammate used a different harness or did not commi
 their harness configuration. Read the two readings that name this:
 
 ```bash
-"${STEER_BIN}" status --json > "${TMPDIR:-/tmp}/steer-setup-status.json"
+"${STEER_BIN}" status --json --to-file
 ```
 
-Read that file with the Read tool, to its end; a harness can show only the start
+Read the file whose path it prints with the Read tool, to its end; a harness can show only the start
 of a long command output.
 
 In `posture.masters`, a row whose `state` is `detached` is an installed harness
