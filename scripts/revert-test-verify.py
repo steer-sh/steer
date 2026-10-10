@@ -726,9 +726,16 @@ def check_scheduling():
             active.add(root)
         time.sleep(change["delay"])
         with guard:
+            crowded = len(active) > 1
             active.discard(root)
-        outcome = {test: {"result": change["result"].get(test, "pass")
-                          if isinstance(change["result"], dict) else change["result"], "output": []}
+        result = change["result"]
+        output = []
+        if result == "contended":
+            result = "fail" if crowded else "pass"
+        elif result == "shifting":
+            result, output = "fail", ["panic: collided\n"] if crowded else ["    k_test.go:9: wrong\n"]
+        outcome = {test: {"result": result.get(test, "pass")
+                          if isinstance(result, dict) else result, "output": output}
                    for package, names in by_package.items() for test in
                    ((package, n) for n in names)}
         return outcome, {"build": {}, "output": {}, "stderr": []}, None
@@ -779,6 +786,34 @@ def check_scheduling():
     report("an ignored run keeps a build failure as its outcome",
            attempts[("t", "TestT")][1].get("outcome") == "build failed",
            repr(attempts[("t", "TestT")][1]))
+
+    contended = [change("shared", 0.2, "contended"), change("slow", 0.35),
+                 change("real", 0.02, "fail")]
+    attempts = loaded.confirm(["r0", "r1"], "example.com/fx", {"t": set()}, contended, target,
+                              lambda a: a["result"] == "fail", time.monotonic() + 30)
+    results = [a["result"] for a in attempts[("t", "TestT")]]
+    report("a failure that does not happen alone is unconfirmed and the test judged again",
+           results == ["unconfirmed", "pass", "fail"]
+           and attempts[("t", "TestT")][0]["confirmation"]["result"] == "pass", repr(results))
+
+    crashed = [change("shared", 0.2, "contended"), change("slow", 0.35)]
+    attempts = loaded.confirm(["r0", "r1"], "example.com/fx", {"t": set()}, crashed, target,
+                              lambda a: a["result"] == "fail" and a["kind"] == "assertion",
+                              time.monotonic() + 30)
+    results = [a["result"] for a in attempts[("t", "TestT")]]
+    report("a failure with no assertion that does not happen alone is unconfirmed",
+           results == ["unconfirmed", "pass"], repr(results))
+
+    shifting = [change("shared", 0.2, "shifting"), change("slow", 0.35)]
+    attempts = loaded.confirm(["r0", "r1"], "example.com/fx", {"t": set()}, shifting, target,
+                              lambda a: a["result"] == "fail" and a["kind"] == "assertion",
+                              time.monotonic() + 30)
+    first = attempts[("t", "TestT")][0]
+    report("a confirmed failure carries the second run's kind, the first run's under pooled",
+           first.get("kind") == "assertion"
+           and first.get("confirmation", {}).get("pooled", {}).get("kind") == "crash"
+           and first["confirmation"]["pooled"].get("output") == ["panic: collided\n"],
+           repr({k: first.get(k) for k in ("result", "kind", "excerpt", "confirmation")}))
 
     del loaded.EXPIRED[:]
     expiring = [change("expiring", 0.3, "expire"), change("fast", 0.02, "fail")]

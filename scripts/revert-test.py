@@ -35,7 +35,11 @@ Variants run on WORKERS copies of the repository at once (REVERT_TEST_WORKERS
 overrides the default). Variant i always runs in copy i % WORKERS, so each copy
 compiles the same mutations on every run. Results are taken in variant order, so
 the lowest-index decisive failure decides each test; a test that a later variant
-ran before an earlier one decided it records that attempt as ignored.
+ran before an earlier one decided it records that attempt as ignored. The
+failure that would accept each test then runs again alone, because two processes
+that run one test at once can collide on a path they share. A failure that does
+not happen again is unconfirmed; when it was decisive, its tests are judged again
+on one copy from the next variant on.
 
 Each go command runs in its own process group, and go test with -timeout
 TEST_TIMEOUT. BUDGET starts before the lock wait; when it runs out, the running
@@ -667,7 +671,7 @@ def run_variant(root, change, by_package, prefix, deadline, cancel):
             handle.write(original)
 
 
-def judge(roots, prefix, deps, changes, targets, decisive, deadline):
+def judge(roots, prefix, deps, changes, targets, decisive, deadline, starts=None):
     """Run targets under each variant and return {test: [attempt]} with one attempt
     per variant. An attempt's result is pass, fail, timed out, build failed, no
     result, not linked, not run (the test already had a decisive failure), ignored
@@ -677,7 +681,9 @@ def judge(roots, prefix, deps, changes, targets, decisive, deadline):
 
     Variant i runs in roots[i % len(roots)], at most one variant per root at a time.
     Results are taken in variant order; a running variant whose tests an earlier
-    one decided is cancelled."""
+    one decided is cancelled. starts maps a test to the first variant that runs it;
+    the attempts before that index are not meaningful."""
+    starts = starts or {}
     recorded = {t: {} for t in targets}
     done, busy, flight, upcoming = set(), set(), collections.deque(), 0
 
@@ -730,6 +736,7 @@ def judge(roots, prefix, deps, changes, targets, decisive, deadline):
                 imported = None if change["kind"] == "file" else import_path(prefix, change["path"])
                 entry = {"index": upcoming, "imported": imported,
                          "linked": {t for t in targets if t not in done
+                                    and upcoming >= starts.get(t, 0)
                                     and (not imported or imported in deps[t[0]])}}
                 if entry["linked"]:
                     reachable = {}
@@ -774,6 +781,66 @@ def judge(roots, prefix, deps, changes, targets, decisive, deadline):
     return attempts
 
 
+def confirm(roots, prefix, deps, changes, targets, decisive, deadline):
+    """Judge targets under changes, then run again in roots[0], with no other variant
+    running, the failure assess would accept for each test: its first decisive
+    failure, else its first failure. A decisive failure must be decisive again, any
+    other failure must fail again; the attempt then carries the second run's output,
+    kind and excerpt, and confirmation.pooled keeps the first run's. One that does
+    not becomes unconfirmed, with the second run in its confirmation, and the next
+    candidate is checked. A test whose decisive failure was unconfirmed is judged
+    again on roots[0] alone from the next variant on; those runs need no second
+    run. Return {test: [attempt]} as judge does."""
+    attempts = judge(roots, prefix, deps, changes, targets, decisive, deadline)
+    if len(roots) == 1:
+        return attempts
+    alone = {}
+    while True:
+        picks = {}
+        for test in targets:
+            fails = [a for a in attempts[test] if a["result"] == "fail"]
+            hit = next((a for a in fails if decisive(a)), None) or (fails[0] if fails else None)
+            if hit and "confirmation" not in hit and hit["variant"] < alone.get(test, len(changes)):
+                picks.setdefault(hit["variant"], []).append(test)
+        if not picks:
+            return attempts
+        starts = {}
+        for index in sorted(picks):
+            outcome, expired = {}, "not run: time budget"
+            if not EXPIRED:
+                reachable = {}
+                for package, name in sorted(picks[index]):
+                    reachable.setdefault(package, []).append(name)
+                outcome, _, expired = run_variant(roots[0], changes[index], reachable, prefix,
+                                                  deadline, None)
+                if expired:
+                    EXPIRED.append(expired)
+            for test in picks[index]:
+                hit = attempts[test][index]
+                again = outcome.get(test) or {
+                    "result": "not run: time budget" if expired else "no result", "output": []}
+                check = {"result": again["result"]}
+                if check["result"] == "fail":
+                    check["kind"] = classify(again["output"])[0]
+                hit["confirmation"] = {"result": again["result"]}
+                if decisive(check) if decisive(hit) else check["result"] == "fail":
+                    hit["confirmation"]["pooled"] = {"kind": hit["kind"], "excerpt": hit["excerpt"],
+                                                     "output": hit["output"]}
+                    hit["kind"], hit["excerpt"] = classify(again["output"])
+                    hit["output"] = again["output"]
+                    continue
+                if decisive(hit) and not expired:
+                    starts[test] = index + 1
+                hit["confirmation"]["output"] = again["output"]
+                hit["result"] = "unconfirmed"
+        if starts:
+            serial = judge(roots[:1], prefix, deps, changes, set(starts), decisive, deadline,
+                           starts)
+            for test, begin in starts.items():
+                attempts[test] = attempts[test][:begin] + serial[test][begin:]
+            alone.update(starts)
+
+
 def timeout_excerpt(lines):
     running = [m.group(1) for m in map(RUNNING.match, lines) if m]
     alarm = next((l.strip() for l in lines if TIMED_OUT.match(l)), "test timed out")
@@ -792,6 +859,7 @@ def counts(attempts):
              ("not run", "not run after the decisive failure"),
              ("ignored", "run but ignored after an earlier decisive failure"),
              ("cancelled", "cancelled after an earlier decisive failure"),
+             ("unconfirmed", "failed, but not again when run alone"),
              ("not run: time budget", "not run before the time budget ran out")]
     tally = {}
     for attempt in attempts:
@@ -838,7 +906,8 @@ def assess(test, baseline, notes, linked, behavioural, attempts, panics, probes,
         return record
     record["verdict"] = "rejected"
     ran = [a for a in attempts if a["result"] == "pass"]
-    if incomplete and any(a["result"] == "not run: time budget" for a in attempts):
+    if incomplete and any(a["result"] == "not run: time budget" or a.get("confirmation", {})
+                          .get("result") == "not run: time budget" for a in attempts):
         record["reason"] = BUDGET_REASON
     else:
         record["reason"] = ("passes under every variant that ran" if ran
@@ -975,12 +1044,12 @@ def main():
         mutated_packages = {import_path(prefix, c["path"]) for c in early + late + panics}
         behavioural = early + data_variants(base, data) + late
         linked = {t for t in live if data or mutated_packages & deps[t[0]]}
-        attempts = judge(roots, prefix, deps, behavioural, linked,
-                         lambda a: a["result"] == "fail" and a["kind"] == "assertion", deadline)
+        asserts = lambda a: a["result"] == "fail" and a["kind"] == "assertion"
+        attempts = confirm(roots, prefix, deps, behavioural, linked, asserts, deadline)
         survivors = {t for t in linked
                      if not any(a["result"] == "fail" for a in attempts[t])}
-        probes = judge(roots, prefix, deps, panics, survivors,
-                       lambda a: a["result"] == "fail", deadline)
+        probes = confirm(roots, prefix, deps, panics, survivors,
+                         lambda a: a["result"] == "fail", deadline)
     except BudgetExpired as expired:
         EXPIRED.append(str(expired))
     finally:
