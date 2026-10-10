@@ -2,7 +2,7 @@
 name: steer
 description: Turns a natural-language rule into the fix that can enforce it — a repository check, a PreToolUse Python guard, or an instruction rule — and installs it. Use when enforcing coding standards, blocking insecure patterns, making sure checks pass before a turn ends, managing hook lifecycle, or running steer CLI commands (register, remove, list, test, preset, verify, git-hooks).
 user-invocable: true
-prompt_version: 20
+prompt_version: 21
 compatibility: Requires Claude Code or Codex with tool-call hook support. Hooks are installed into .steer/hooks/ and registered in every installed harness (settings.json for Claude Code, hooks.json for Codex). steer CLI must be available on PATH or bundled under scripts/.
 allowed-tools: Bash(steer *), Bash(python3 *), Bash(echo *), Read, Write, Edit
 ---
@@ -467,6 +467,13 @@ is a rule about the operator's work, not about one agent, so all get it. Add
 `--all-harnesses` to write to every hook-supporting harness whether or not it is
 installed here. On a machine with no harness directory, `register` writes to
 Claude Code.
+
+When `register` writes a Codex guard runner whose approval record is missing from
+Codex's `config.toml`, its output carries a line that starts "Codex runs no".
+Relay that line verbatim in your reply to the user; until they approve that
+scope's runner in `/hooks`, Codex runs none of that scope's guards. In headless
+mode, put it in `pending`. Steer cannot read Codex's approval itself, so a
+missing line is no proof that the runner is approved.
 
 Installing is not measuring. Where the guard runs and which units get counted are
 separate decisions: install everywhere, then score each harness on its own record

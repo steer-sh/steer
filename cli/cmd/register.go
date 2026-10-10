@@ -10,7 +10,9 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/claude"
+	"github.com/steer-sh/steer-cli/internal/codex"
 	"github.com/steer-sh/steer-cli/internal/guard/fixture"
+	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/styles"
 	"github.com/steer-sh/steer-cli/internal/utils"
 )
@@ -119,9 +121,31 @@ Optional provenance flags can be used to persist generation metadata.`,
 			scope,
 			harnessNames(targets),
 		)))
+		if line := codexApprovalLine(scope, targets); line != "" {
+			utils.Info(line)
+		}
 		printFixtureVerification(result.Verification)
 		return nil
 	},
+}
+
+// codexApprovalLine names the /hooks approval Codex needs before it runs the scope's
+// guard runner just written, or "" when Codex is not a target or its config.toml
+// holds a record for the runner or cannot be read. Each scope's runner is approved
+// on its own, so the line speaks for this scope only.
+func codexApprovalLine(scope string, targets []harness.Registrar) string {
+	for _, target := range targets {
+		if target.Harness().ID != harness.Codex {
+			continue
+		}
+		a := codex.MasterArming(scope, ".")
+		if !a.Registered || !a.TrustStateKnown || a.TrustRecordPresent {
+			return ""
+		}
+		return fmt.Sprintf("Codex runs no %s-scope guard until you approve that runner: restart Codex, "+
+			"open /hooks and approve %q.", scope, codex.MasterStatusMessage)
+	}
+	return ""
 }
 
 func parseCommaList(raw string) []string {
