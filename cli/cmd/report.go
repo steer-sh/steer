@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/cadence"
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/evidence"
+	"github.com/steer-sh/steer-cli/internal/gate/resolve"
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/report"
 	"github.com/steer-sh/steer-cli/internal/status"
@@ -274,6 +276,12 @@ queue, so the skill's nudge can hash the queue for change detection.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := prepareState(); err != nil {
 			return err
+		}
+		// A ledger the agent wrote since the last turn-end resolver run joins its row
+		// before the review corpus is read. The resolver fails open.
+		if res := resolve.Backfill(gateConfig(), ledgerHarvests(),
+			resolve.BackfillOptions{Apply: true, Quiet: true}, io.Discard, nil); res.Err != nil {
+			fmt.Fprintln(os.Stderr, "steer report refresh: review outcomes not read:", res.Err)
 		}
 		// refresh is the one writer of the snapshot store: it rebuilds the session
 		// corpus from the harnesses' transcripts before scoring over it.

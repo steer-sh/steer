@@ -258,8 +258,8 @@ adds `unread` to each `attention.candidates[]` row. v33 adds `fixtures` to each
   have verified a harness's internal hash. The resolver is the Stop hook that
   joins ledger rows to transcripts; it arms with the commit gate on the same
   scope. `unresolved_rows` counts the rows still owing that join — a window
-  cannot count them until the resolver reads them, and `steer commit-gate backfill --apply`
-  reads them now.
+  cannot count them until the resolver reads them. `steer report refresh` runs the
+  resolver before it writes the queue, and `steer commit-gate backfill --apply` reads them now.
   `masters[]` is the guard master's runtime provenance, one row per harness per
   scope: `path`, `runtime` (the digest of the Python runtime spliced into it),
   `version` (the steer that wrote it), `expected` (this binary's runtime digest)

@@ -151,6 +151,23 @@ func TestReviewFindingsJoinByChainID(t *testing.T) {
 	}
 }
 
+// TestReportRefreshReadsALedgerNoStopHookReadYet checks that a refresh run right after a
+// review joins the agent's ledger before it writes the queue, as no turn-end resolver
+// has run since the ledger was written.
+//
+// pins existing behaviour
+func TestReportRefreshReadsALedgerNoStopHookReadYet(t *testing.T) {
+	t.Parallel()
+	s, g := newNativeGate(t, "claude-code", ".claude/settings.json", "commit-gate review")
+	id := g.DenyThenRetry("sess-1", "mod.py", "add mod")
+	s.SeedReplies("sess-1", time.Now(), chainLedger(id, "add mod", "the finding names no failing input"))
+
+	s.MustSteer("report", "refresh", "--days", "7")
+	if row := s.LedgerRow(); row["ledger_found"] != true || row["chain_id"] != id {
+		t.Fatalf("refresh wrote the queue before the ledger joined chain %s: %v", id, row)
+	}
+}
+
 // TestALedgerNamingAnUnfiredRoundIsAMiss checks that once the ledger window closes, a
 // reply whose per-round headers name a round the chain never fired is stamped
 // rounds-unmatched rather than joined.
