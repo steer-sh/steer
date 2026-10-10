@@ -127,7 +127,8 @@ func ReadinessOf(s *SystemStatus, probe reviewers.Probe) Readiness {
 	if reviewerMissing {
 		r.Steps = append(r.Steps, reviewerStep)
 	}
-	var enforcing []string
+	var enforcing, observedUnverified []string
+	namedObserved := map[string]bool{}
 	registered := false
 	observed := false
 	unknownTrust := false
@@ -136,6 +137,9 @@ func ReadinessOf(s *SystemStatus, probe reviewers.Probe) Readiness {
 			continue
 		}
 		registered = true
+		if a.Observed > 0 {
+			observed = true
+		}
 		open := false
 		if !a.Effective {
 			r.Steps = append(r.Steps, Step{
@@ -162,6 +166,14 @@ func ReadinessOf(s *SystemStatus, probe reviewers.Probe) Readiness {
 			r.Unverified = append(r.Unverified, note)
 			if !open {
 				unknownTrust = true
+				// A review is recorded per harness, not per scope, so the harness is named
+				// once beside an enforcing channel and never counted as one: the trust its
+				// review ran under may since have lapsed.
+				if a.Observed > 0 && a.ObservedCorpus == ledgerCorpus && !namedObserved[a.Harness] {
+					namedObserved[a.Harness] = true
+					observedUnverified = append(observedUnverified, fmt.Sprintf("%s (%s, hook trust unverified)",
+						HarnessLabel(a.Harness), ObservedPhrase(a)))
+				}
 			}
 			open = true
 		}
@@ -169,9 +181,6 @@ func ReadinessOf(s *SystemStatus, probe reviewers.Probe) Readiness {
 			continue
 		}
 		enforcing = append(enforcing, fmt.Sprintf("%s %s", HarnessLabel(a.Harness), a.Scope))
-		if a.Observed > 0 {
-			observed = true
-		}
 	}
 	if registered {
 		steps, unverified := resolverSteps(s.Posture)
@@ -188,7 +197,8 @@ func ReadinessOf(s *SystemStatus, probe reviewers.Probe) Readiness {
 	r.Reviewing = len(enforcing) > 0 && !reviewerMissing
 	switch {
 	case r.Reviewing:
-		r.Headline = "Commits here are reviewed before they land — " + strings.Join(enforcing, ", ") + "."
+		r.Headline = "Commits here are reviewed before they land — " +
+			strings.Join(append(enforcing, observedUnverified...), ", ") + "."
 		r.StepsLead = "Setup problems:"
 	case unknownTrust && len(r.Steps) == 0:
 		r.Headline = "Commit review is configured; current hook trust cannot be verified by Steer."

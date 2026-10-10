@@ -176,6 +176,28 @@ func TestUnknownTrustDoesNotClaimNonEnforcement(t *testing.T) {
 	}
 }
 
+// A review Codex recorded is named once in the headline, with its trust still
+// unverified, however many Codex scopes carry it; it settles the note for every channel.
+func TestAnObservedUnverifiedRegistrationIsNamedNotCounted(t *testing.T) {
+	quiet := armed(string(harness.ClaudeCode))
+	quiet.Observed = 0
+	codex := armed(string(harness.Codex))
+	codex.Trust = TrustMissing
+	codex.ObservedCorpus = ledgerCorpus
+	project := codex
+	project.Scope = "project"
+	named := "Codex (" + ObservedPhrase(codex) + ", hook trust unverified)"
+
+	r := ReadinessOf(snapshot(quiet, project, codex), available())
+	if !r.Reviewing || !strings.Contains(r.Headline, "Claude Code global") || strings.Count(r.Headline, named) != 1 {
+		t.Fatalf("Headline = %q; want both harnesses, Codex once with its review and trust", r.Headline)
+	}
+	if r.Note != "" {
+		t.Fatalf("Note = %q; a Codex review was observed", r.Note)
+	}
+
+}
+
 func TestMixedTrustAndSetupFailureNamesBoth(t *testing.T) {
 	unknown := armed(string(harness.Codex))
 	unknown.Trust = TrustRecordPresent
