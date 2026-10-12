@@ -4,7 +4,7 @@
 # is fresh when that commit's shipped CLI source equals HEAD's.
 set -euo pipefail
 
-source_paths=(cli ':(exclude)cli/e2e' ':(exclude)*_test.go' ':(exclude)*/testdata/*')
+source_paths=(cli ':(exclude)cli/e2e' ':(exclude)cli/tools' ':(exclude)*_test.go' ':(exclude)*/testdata/*')
 
 newest="$(git log -1 --format=%H -- "${source_paths[@]}")"
 if [ -z "$newest" ]; then

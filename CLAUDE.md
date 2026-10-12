@@ -229,7 +229,7 @@ VERSION=0.1.0 ./build.sh
 
 The `binary-freshness` check (`scripts/binary-freshness.sh`) fails `./check.sh` while
 any binary committed at HEAD lacks the short hash of the newest commit to `cli/` outside
-tests, `testdata/` and `cli/e2e/`, or of a later commit; `build.sh` stamps the HEAD it
+tests, `testdata/`, `cli/e2e/` and `cli/tools/`, or of a later commit; `build.sh` stamps the HEAD it
 built at. `.github/workflows/check.yml` runs `./check.sh` on Linux and
 macOS with full history, which that check needs, and cross-compiles every shipped target.
 
@@ -250,6 +250,11 @@ For live reviewer verification, `tests/live_reviewers.py` requires an explicit
 provider, model, effort and new output directory; see `tests/live-reviewers/README.md`.
 It captures real CLI invocations through a registered native gate in the sandbox.
 `tests/test_release_tools.py` checks this runner with fake replies in `check.sh`.
+
+To compare reviewer arms on recorded chains, `tests/replay_reviewers.py` stages each
+round's saved diff on its `base_sha` and runs `cli/tools/replay-review` (the gate's
+own context, prompt and panel; no ledger write) in the sandbox. Keep its rounds,
+markers and outputs outside the repository: they quote the reviewed code.
 
 After a change to how the runtime renders a block, `tests/block_delivery.py` runs a
 real agent per harness against a probe guard and requires the guard's reason and
