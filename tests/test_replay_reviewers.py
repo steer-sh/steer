@@ -107,6 +107,40 @@ class StageTest(unittest.TestCase):
             self.assertEqual(replay_reviewers.stage(repo, wt, head, diff, GIT_ENV, binaries), head)
             self.assertEqual((wt / "b.txt").read_text(), "ho\n")
 
+    def test_binary_exclusion_leaves_a_glob_match_staged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            self.git(repo, "init", "-q")
+            (repo / "x*.png").write_bytes(b"x\0")
+            (repo / "xy.png").write_text("hi\n")
+            self.git(repo, "add", ".")
+            self.git(repo, "commit", "-qm", "one")
+            head = self.git(repo, "rev-parse", "HEAD")
+            (repo / "x*.png").write_bytes(b"y\0")
+            (repo / "xy.png").write_text("ho\n")
+            diff = Path(tmp) / "bin.diff"
+            diff.write_text(self.git(repo, "diff") + "\n")
+            wt = Path(tmp) / "wt"
+            self.assertEqual(replay_reviewers.stage(repo, wt, head, diff, GIT_ENV, ["x*.png"]), head)
+            self.assertEqual((wt / "xy.png").read_text(), "ho\n")
+
+    def test_binary_paths_keep_non_utf8_bytes(self):
+        name = replay_reviewers.binary_paths('Binary files "a/bad\\377.png" and "b/bad\\377.png" differ\n')[0]
+        self.assertEqual(os.fsencode(name), b"bad\xff.png")
+
+    def test_binary_paths_decode_git_quoting(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            self.git(repo, "init", "-q")
+            (repo / "café.png").write_bytes(b"x\0")
+            self.git(repo, "add", ".")
+            self.git(repo, "commit", "-qm", "one")
+            (repo / "café.png").write_bytes(b"y\0")
+            text = self.git(repo, "diff")
+        self.assertIn('"a/caf\\303\\251.png"', text)
+        self.assertEqual(replay_reviewers.binary_paths(text), ["café.png"])
+
     def test_elision_names_what_the_budget_left_out(self):
         self.assertEqual(replay_reviewers.elision("[diff is 90000 chars — too large"), "stat only")
         self.assertIn("dropped", replay_reviewers.elision("[The review harness dropped 2 file(s)"))

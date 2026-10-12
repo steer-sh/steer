@@ -14,6 +14,7 @@
 """
 
 import argparse
+import codecs
 import glob
 import itertools
 import json
@@ -69,11 +70,19 @@ EMPTY_TREE = "empty-tree"
 BINARY_RE = re.compile(r"^Binary files (.+) and (.+) differ$", re.M)
 
 
+def unquote_path(side):
+    """A diff header path with Git's C-style quoting, as core.quotePath writes a
+    non-ASCII or special name, removed."""
+    if len(side) > 1 and side[0] == side[-1] == '"':
+        return codecs.escape_decode(side[1:-1].encode("utf-8"))[0].decode("utf-8", "surrogateescape")
+    return side
+
+
 def binary_paths(diff_text):
     """The paths of a diff's binary sections, which carry no applicable patch."""
     paths = set()
     for m in BINARY_RE.finditer(diff_text):
-        for side in m.groups():
+        for side in map(unquote_path, m.groups()):
             if side[:2] in ("a/", "b/"):
                 paths.add(side[2:])
     return sorted(paths)
@@ -87,7 +96,8 @@ def stage(repo, wt, base, diff, env, exclude=()):
     paths left unstaged. Returns the revision the diff was applied to, or None."""
     subprocess.run(["git", "clone", "-q", "--shared", "--no-checkout", str(repo), str(wt)], check=True, env=env)
     git = ["git", "-C", str(wt)]
-    excludes = ["--exclude=" + p for p in exclude]
+    # --exclude takes a wildmatch pattern; escape so it names exactly one path.
+    excludes = ["--exclude=" + re.sub(r"([][*?\\])", r"\\\1", p) for p in exclude]
     root = False
     for rev in (base, base + "^", EMPTY_TREE):
         if rev == EMPTY_TREE:

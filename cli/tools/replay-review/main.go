@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,18 +25,20 @@ var omittedRe = regexp.MustCompile(`(?s)NOT (?:by )?the commit: (.*?)\. These fi
 // binaryRe matches a binary section, which the replay leaves unstaged.
 var binaryRe = regexp.MustCompile(`(?m)^Binary files (.+) and (.+) differ$`)
 
-// changedPaths is the commit's file list: the staged changes against base, plus the
+// changedPaths is the commit's file list, with renames split into a deletion and an
+// addition as the live gate lists them: the staged changes against base, plus the
 // files the gate's notices say it excluded or dropped from the saved diff and its
 // binary sections, which the staged tree lacks.
 func changedPaths(wt, base, diff string) ([]string, error) {
-	out, err := exec.Command("git", "-C", wt, "diff", "--cached", "--name-only", "-z", base).Output()
+	out, err := exec.Command("git", "-C", wt, "diff", "--cached", "--name-only",
+		"--no-relative", "--no-renames", "-z", base).Output()
 	if err != nil {
 		return nil, fmt.Errorf("listing staged paths against %s: %w", base, err)
 	}
 	var paths []string
 	seen := map[string]bool{}
 	add := func(p string) {
-		if p = strings.TrimSpace(p); p != "" && !seen[p] {
+		if p != "" && !seen[p] {
 			seen[p] = true
 			paths = append(paths, p)
 		}
@@ -51,6 +54,9 @@ func changedPaths(wt, base, diff string) ([]string, error) {
 	}
 	for _, m := range binaryRe.FindAllStringSubmatch(diff, -1) {
 		for _, side := range m[1:] {
+			if unquoted, err := strconv.Unquote(side); err == nil && strings.HasPrefix(side, `"`) {
+				side = unquoted
+			}
 			if strings.HasPrefix(side, "a/") || strings.HasPrefix(side, "b/") {
 				add(side[2:])
 			}
