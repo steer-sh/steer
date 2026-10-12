@@ -256,6 +256,11 @@ round's saved diff on its `base_sha` and runs `cli/tools/replay-review` (the gat
 own context, prompt and panel; no ledger write) in the sandbox. Keep its rounds,
 markers and outputs outside the repository: they quote the reviewed code.
 
+To compare author-side wording (`deny.md`, `cap.md`) on a recorded round 1,
+`tests/repair_rulings.py` stages its diff in the sandbox and asks the author model,
+with read-only tools, for one ruling per concern under a given deny text. It edits
+and commits nothing. Its starts and outputs quote the session: keep them outside the repository.
+
 After a change to how the runtime renders a block, `tests/block_delivery.py` runs a
 real agent per harness against a probe guard and requires the guard's reason and
 footer in the agent's recorded tool result. A unit test sees only the master's JSON,
