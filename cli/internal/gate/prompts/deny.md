@@ -12,7 +12,7 @@ If two findings cannot both be true, at least one of them is false. Say so and r
 
 For each finding: state its load-bearing premise in one sentence, then test THAT premise against the code — not against whether the finding sounds plausible. Open the file where the answer is in the file.
 
-{rerun_note}Then fix what survives and commit again.
+{rerun_note}For each true finding, separately decide whether repair is necessary for this task's supported use. Cite the caller, contract, or operator requirement that makes it necessary; absence from inspected examples does not establish unreachability. Fix necessary defects, preferring a narrower truthful contract or explicit refusal over adding unneeded support. Record true concerns deliberately left unfixed as ACCEPTED, not fixed; REJECTED means a false premise. If no repairs are necessary, retry the reviewed diff unchanged. Acceptance and the reviewer's severity label do not themselves require a repair.
 
 Reporting — this is not optional
 --------------------------------
@@ -31,7 +31,7 @@ Emit exactly this shape, ahead of your other commentary. Copy the header line as
 **Round 1, blocking** — <N> reviewers, <M> raw findings, <K> distinct concerns.
 
 - **ACCEPTED** — <the concern in one clause> → <the change you made, file:line>
-- **ACCEPTED, not fixed** — <the concern in one clause> → <why it stays unfixed, such as the user's instruction>
+- **ACCEPTED, not fixed** — <the concern in one clause> → <why no supported use needs the repair, or the user's instruction>
 - **REJECTED** — <the concern in one clause> → <the premise, and why it is false>
 - Weakest surviving: <the concern> — <why it still stands, or that none survived>
 
@@ -47,6 +47,6 @@ A round with no section reads as a round you never adjudicated, so the number of
 
 Do NOT put this ledger in the commit message.
 
-This gate re-fires on your next `git commit` if the diff CHANGED, because the reviewers then read code none of them has seen — your fixes. It stops the moment a retry's diff is identical to the one already reviewed, and after {cap} firings in any case. So rejecting every finding ends the chain immediately: it costs you nothing and buys you nothing, and the only reader of that decision is the user.
+This gate re-fires on your next `git commit` if the diff CHANGED, because the reviewers then read code none of them has seen — your fixes. It stops the moment a retry's diff is identical to the one already reviewed, and after {cap} firings in any case. So an unchanged retry ends the chain immediately, whether you rejected every finding or accepted some and left them unfixed: it costs you nothing and buys you nothing, and the only reader of that decision is the user.
 
 Ending the chain at the {cap}-firing cap does not skip the review of your last fixes. That round gets one final review which cannot block the commit, and which you must adjudicate and report in the same way.
