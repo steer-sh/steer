@@ -77,6 +77,8 @@ func TestALongNoteLeavesTheBodyRoomAndMarksTheCut(t *testing.T) {
 // reading it: an off-by-one pushes the key legend off the screen.
 func TestNoPanelOverflowsTheTerminal(t *testing.T) {
 	m := New(gate.Defaults(), "global")
+	// New reads the archive of the checkout the test runs in.
+	m.archived = nil
 	var gates []status.ScopeArming
 	var cands []cadence.Candidate
 	var scored []status.ScoredIntervention
