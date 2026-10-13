@@ -438,9 +438,17 @@ Pass `--since 60` to limit the window, `--strict-joins` to restrict to rows whos
 
 Both corpora are mechanical evidence. All semantic judgment — what is hookable, how to phrase it — happens now, in this session. Tag every candidate with the corpus it came from.
 
+Read the routing guide before you cluster. It decides which candidates qualify here and which tier each one takes in Step 4. It is shared with the `steer` skill, beside this one. An installed skill directory can be a link, and the Read tool shortens `..` before it follows a link, so resolve the directory first:
+
+```bash
+realpath "<this skill's base directory>"
+```
+
+Then Read the whole of `../steer/prompts/routing.md` beside the path it prints, with the Read tool. Claude Code refuses a shell `cat` of a file outside the session's working directories, which is where a plugin's skills live.
+
 ### Transcript candidates — what some tier can fix
 
-A transcript candidate qualifies when some tier in the routing guide (Step 4) can address it.
+A transcript candidate qualifies when some tier in the routing guide can address it.
 
 - A concrete pattern in an edit or a command: a pre-tool guard. "don't use console.log", "always python3 not python", "never commit .env files", "no rm -rf".
 - A property of the finished tree: a repository check. "tests must pass before the turn ends", "no literal test counts in scripts".
@@ -473,17 +481,11 @@ Cap the whole report at the **top 5–7 candidates across both corpora**. Findin
 
 ## Step 4: Route each candidate to the strongest tier that can catch it
 
-The routing guide is shared with the `steer` skill. Read it from this skill's
-directory with symlinks resolved, because an installed skill directory can be a
-link:
-
-```bash
-cat "$(cd "<this skill's base directory>" && pwd -P)/../steer/prompts/routing.md"
-```
-
-Route each candidate with it: name the enforcement point, then take the strongest
-tier that meets it. An instruction-rule candidate also needs the recurrence Step 3
-asks for.
+Route each candidate with the routing guide you read in Step 3: name the
+enforcement point, then take the strongest tier that meets it. Write both down for
+each candidate before Step 5. A tier chosen without the guide is a guess, and the
+guide is where a repository check outranks a guard. An instruction-rule candidate
+also needs the recurrence Step 3 asks for.
 
 The `--tier` flag takes either vocabulary and refuses anything else. Say the type,
 not the flag value.

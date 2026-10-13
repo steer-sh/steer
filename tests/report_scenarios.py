@@ -109,7 +109,7 @@ def run_scenario(name: str, model: str) -> tuple[str, float, list[str]]:
         # anything writes it into the temp directory.
         skill_dir = work / ".claude" / "skills" / "steer-report"
         shutil.copytree(SKILL_SRC, skill_dir)
-        # Step 4 reads the routing guide from the sibling steer skill.
+        # Step 3 reads the routing guide from the sibling steer skill.
         routing = work / ".claude" / "skills" / "steer" / "prompts" / "routing.md"
         routing.parent.mkdir(parents=True)
         shutil.copy2(ROUTING_SRC, routing)
@@ -125,7 +125,7 @@ def run_scenario(name: str, model: str) -> tuple[str, float, list[str]]:
                                "this snapshot requires the audit instructions.")
         if needs_routing:
             extra_reads.append(f"Read {routing} with the Read tool as the routing guide "
-                               "Step 4 names; the queue holds candidates to route.")
+                               "Step 3 names; the queue holds candidates to route.")
         cmd = [
             "claude", "-p", PROMPT.format(
                 skill=skill_dir / "SKILL.md",
