@@ -35,7 +35,10 @@ can affect both even when they live in different directories.
 Read the linked architecture section before changing the corresponding boundary:
 
 - Plugin packaging or setup: [distribution](ARCHITECTURE.md#distribution-and-installation).
-  `scripts/steer` dispatches to committed `bin/<os>-<arch>/` builds;
+  `scripts/steer` dispatches to `bin/<os>-<arch>/` builds, which `main` does not
+  track. Both marketplace entries install the `release` branch, which a `v*` tag
+  replaces through `.github/workflows/release.yml`; the tag must equal every
+  manifest version, because a harness refreshes its copy only on a version change.
   `cli/internal/plugindist/` checks the four plugin/marketplace manifests together
   and the README's install commands against their repository and marketplace.
   Before publishing, `python3 scripts/preflight-release.py [--ref <branch-or-tag>]`
@@ -220,18 +223,10 @@ test carries `// pins existing behaviour`.
 copy, lock and variant generation over fixture repositories, then the slow headless skill-generation
 harness that invokes `claude -p`; it is separate from the turn-end gate.
 
-After CLI changes, rebuild the committed platform binaries before committing:
-
-```bash
-cd cli
-VERSION=0.1.0 ./build.sh
-```
-
-The `binary-freshness` check (`scripts/binary-freshness.sh`) fails `./check.sh` while
-any binary committed at HEAD lacks the short hash of the newest commit to `cli/` outside
-tests, `testdata/`, `cli/e2e/` and `cli/tools/`, or of a later commit; `build.sh` stamps the HEAD it
-built at. `.github/workflows/check.yml` runs `./check.sh` on Linux and
-macOS with full history, which that check needs, and cross-compiles every shipped target.
+`cd cli && ./build.sh` writes the untracked `bin/` that this checkout's launcher runs;
+`steer bin install` then updates `~/.steer/bin/steer` from it.
+`.github/workflows/check.yml` runs `./check.sh` on Linux and macOS and cross-compiles
+every shipped target; the release workflow runs it before it publishes.
 
 The model-driven tests under `tests/` need PyYAML in `tests/.venv`. Read the
 runner's help for options and select the model explicitly. Focused generation:

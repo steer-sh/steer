@@ -2,11 +2,6 @@
   "version": 1,
   "checks": [
     {
-      "id": "binary-freshness",
-      "kind": "script",
-      "script": "scripts/binary-freshness.sh"
-    },
-    {
       "id": "home-isolation",
       "kind": "script",
       "script": "scripts/home-isolation.sh"

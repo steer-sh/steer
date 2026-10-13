@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Check that the manifest repository supplies a publicly installable plugin.
 
-Run before publication with --ref <release branch or tag> when testing a ref other
-than the default branch. Network checks stay outside the turn-end oracle.
+The default branch carries the marketplace listing; the ref its url source names
+carries the bundle. Run before publication with --ref <branch or tag> to check a
+bundle ref other than the listed one. Network checks stay outside the turn-end oracle.
 """
 
 import argparse
@@ -24,8 +25,21 @@ SKILL_FILES = ("skills/steer/SKILL.md", "skills/steer/prompts/routing.md",
                "skills/steer-setup/SKILL.md", *("skills/steer/prompts/" + name for name in (
                    "simple-regex.md", "python-security.md", "python-style.md", "terraform-hcl.md",
                    "generic-html.md", "shell-lint.md", "react-jsx.md", "security-layer2.md")))
-EXECUTABLES = ("scripts/steer", *(f"bin/{osname}-{arch}/steer"
-               for osname in ("darwin", "linux") for arch in ("amd64", "arm64")))
+LAUNCHER = "scripts/steer"
+BINARIES = tuple(f"bin/{osname}-{arch}/steer" for osname in ("darwin", "linux") for arch in ("amd64", "arm64"))
+EXECUTABLES = (LAUNCHER, *BINARIES)
+# Each binary's leading bytes: the Mach-O magic and CPU type, or the ELF magic and machine.
+HEADERS = {
+    "bin/darwin-amd64/steer": (b"\xcf\xfa\xed\xfe\x07\x00\x00\x01", 0, None),
+    "bin/darwin-arm64/steer": (b"\xcf\xfa\xed\xfe\x0c\x00\x00\x01", 0, None),
+    "bin/linux-amd64/steer": (b"\x7fELF", 18, b"\x3e\x00"),
+    "bin/linux-arm64/steer": (b"\x7fELF", 18, b"\xb7\x00"),
+}
+
+
+def built_for(data, name):
+    magic, offset, machine = HEADERS[name]
+    return data.startswith(magic) and (machine is None or data[offset:offset + 2] == machine)
 
 
 def contained_file(root, name):
@@ -33,7 +47,7 @@ def contained_file(root, name):
     return path.is_file() and path.resolve().is_relative_to(root.resolve())
 
 
-def artifact_digests(root, names=EXECUTABLES):
+def artifact_digests(root, names=(LAUNCHER,)):
     digests = {}
     for name in names:
         if not contained_file(root, name):
@@ -59,6 +73,11 @@ def identity(root):
     entry = entries[0][1]
     if not re.fullmatch(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", entry["repository"]):
         raise ValueError("repository must be an HTTPS GitHub repository URL")
+    source = entry.get("source")
+    if not (isinstance(source, dict) and set(source) == {"source", "url", "ref"}
+            and source["source"] == "url" and source["url"] == entry["repository"] + ".git"
+            and isinstance(source["ref"], str) and source["ref"]):
+        raise ValueError("source must be a url source on the repository with a ref")
     for name in PLUGINS:
         plugin = json.loads((root / name).read_text())
         expected = {k: v for k, v in entry.items() if k not in ("source", "strict")}
@@ -70,10 +89,15 @@ def identity(root):
     return entries[0]
 
 
-def inspect_checkout(root, expected, expected_hooks=None, expected_digests=None, expected_skill_digests=None):
-    for name in (*MARKETS, *PLUGINS, "README.md", "hooks/hooks.json", *SKILL_FILES):
+def candidate_stamp(root):
+    return subprocess.check_output(["git", "-C", str(root), "rev-parse", "--short=7", "HEAD"],
+                                   text=True, timeout=10).strip()
+
+
+def inspect_listing(root, expected):
+    for name in (*MARKETS, *PLUGINS, "README.md"):
         if not contained_file(root, name):
-            raise ValueError(f"published bundle file is missing or outside the bundle: {name}")
+            raise ValueError(f"published listing file is missing or outside the checkout: {name}")
     if identity(root) != expected:
         raise ValueError("published manifests differ from this checkout")
     marketplace, entry = expected
@@ -85,8 +109,14 @@ def inspect_checkout(root, expected, expected_hooks=None, expected_digests=None,
         raise ValueError("published README marketplace commands disagree with the repository")
     if not installs or any(i.rstrip(".,;:)") != marketplace for i in installs):
         raise ValueError("published README plugin commands disagree with the marketplace")
-    if entry["source"] != "./":
-        raise ValueError("pre-flight currently supports the bundled ./ plugin source only")
+
+
+def inspect_checkout(root, expected, expected_hooks=None, expected_digests=None, expected_skill_digests=None,
+                     expected_stamp=None):
+    for name in ("hooks/hooks.json", *SKILL_FILES):
+        if not contained_file(root, name):
+            raise ValueError(f"published bundle file is missing or outside the bundle: {name}")
+    inspect_listing(root, expected)
     for name in EXECUTABLES:
         path = root / name
         if not path.is_file() or path.is_symlink() or not os.access(path, os.X_OK):
@@ -94,7 +124,15 @@ def inspect_checkout(root, expected, expected_hooks=None, expected_digests=None,
     if expected_digests is None:
         expected_digests = artifact_digests(ROOT)
     if artifact_digests(root) != expected_digests:
-        raise ValueError("published executable bytes differ from the candidate bundle")
+        raise ValueError("published launcher bytes differ from the candidate bundle")
+    if expected_stamp is None:
+        expected_stamp = candidate_stamp(ROOT)
+    for name in BINARIES:
+        data = (root / name).read_bytes()
+        if not built_for(data, name):
+            raise ValueError(f"published executable is not built for its target: {name}")
+        if expected_stamp.encode() not in data:
+            raise ValueError(f"published executable lacks the candidate build stamp {expected_stamp}: {name}")
     if expected_skill_digests is None:
         expected_skill_digests = artifact_digests(ROOT, SKILL_FILES)
     if artifact_digests(root, SKILL_FILES) != expected_skill_digests:
@@ -118,27 +156,35 @@ def preflight(root, ref=None):
         public = json.load(response)
     if public.get("private") is not False:
         raise ValueError("repository is not public")
-    selected = ref or public["default_branch"]
+    expected_stamp = candidate_stamp(root)
+    listing = public["default_branch"]
+    selected = ref or expected[1]["source"]["ref"]
     with tempfile.TemporaryDirectory(prefix="steer-preflight-") as scratch:
         home = Path(scratch) / "home"
         home.mkdir()
         env = {"PATH": os.environ.get("PATH", os.defpath), "HOME": str(home),
                "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
                "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "/usr/bin/false"}
-        checkout = Path(scratch) / "plugin"
-        subprocess.run(["git", "-c", "credential.helper=", "clone", "--depth", "1",
-                        "--single-branch", "--branch", selected, "--", repository, str(checkout)],
-                       cwd=scratch, env=env, check=True, timeout=180)
-        inspect_checkout(checkout, expected, expected_hooks, expected_digests, expected_skill_digests)
+        def clone(branch, name):
+            checkout = Path(scratch) / name
+            subprocess.run(["git", "-c", "credential.helper=", "clone", "--depth", "1",
+                            "--single-branch", "--branch", branch, "--", repository, str(checkout)],
+                           cwd=scratch, env=env, check=True, timeout=180)
+            return checkout
+
+        inspect_listing(clone(listing, "listing"), expected)
+        checkout = clone(selected, "plugin")
+        inspect_checkout(checkout, expected, expected_hooks, expected_digests, expected_skill_digests,
+                         expected_stamp)
         sha = subprocess.check_output(["git", "-C", str(checkout), "rev-parse", "HEAD"],
                                       env=env, text=True, timeout=10).strip()
-    return {"repository": repository, "ref": selected, "commit": sha,
+    return {"repository": repository, "listing": listing, "ref": selected, "commit": sha,
             "version": expected[1]["version"]}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--ref", help="Published branch or tag (default: repository default branch)")
+    parser.add_argument("--ref", help="Bundle branch or tag (default: the ref the manifests' url source names)")
     args = parser.parse_args()
     try:
         print(json.dumps(preflight(ROOT, args.ref), indent=2))

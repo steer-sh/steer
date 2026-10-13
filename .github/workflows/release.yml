@@ -1,0 +1,63 @@
+name: release
+
+# A version tag publishes the plugin bundle: the tagged tree plus the four built
+# binaries, as one parentless commit on the release branch that both marketplace
+# entries name.
+on:
+  push:
+    tags: ["v*"]
+
+# Releases publish one at a time, and only the highest tag publishes, so a late
+# or rerun older release cannot replace a newer bundle.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  check:
+    uses: ./.github/workflows/check.yml
+
+  publish:
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+      - name: Tag is the highest release
+        shell: bash
+        run: |
+          set -euo pipefail
+          highest="$(git -c versionsort.suffix=- tag -l 'v*' --sort=-v:refname | head -n 1)"
+          test "$GITHUB_REF_NAME" = "$highest" || { echo "$GITHUB_REF_NAME is not the highest tag ($highest)" >&2; exit 1; }
+      # A harness refreshes its cached plugin copy only when the version changes.
+      - name: Tag matches every manifest version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          for f in .claude-plugin/plugin.json .codex-plugin/plugin.json; do
+            test "$(jq -r .version "$f")" = "$version" || { echo "$f is not $version" >&2; exit 1; }
+          done
+          for f in .claude-plugin/marketplace.json .agents/plugins/marketplace.json; do
+            test "$(jq -r '.plugins[] | select(.name=="steer") | .version' "$f")" = "$version" \
+              || { echo "$f is not $version" >&2; exit 1; }
+          done
+      - name: Build every shipped target
+        shell: bash
+        run: VERSION="${GITHUB_REF_NAME#v}" cli/build.sh
+      - name: Replace the release branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f bin
+          commit="$(git commit-tree "$(git write-tree)" -m "release $GITHUB_REF_NAME from $GITHUB_SHA")"
+          git push --force origin "$commit:refs/heads/release"

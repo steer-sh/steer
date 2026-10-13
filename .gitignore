@@ -22,3 +22,4 @@ codex-hooks.md
 .DS_Store
 tests/scenarios/out/
 tests/live-reviewers/out/
+/bin/

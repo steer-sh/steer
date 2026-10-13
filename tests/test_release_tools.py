@@ -59,7 +59,9 @@ class ReleasePreflight(unittest.TestCase):
                      ("darwin-amd64", "darwin-arm64", "linux-amd64", "linux-arm64"))):
             target = self.root / name
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text("fixture executable " + name)
+            header = preflight.HEADERS.get(name)
+            data = b"#!/bin/sh\n" if header is None else header[0].ljust(header[1]) + (header[2] or b"")
+            target.write_bytes(data + b" fixture executable stamp abc1234")
             target.chmod(0o755)
         for name in preflight.SKILL_FILES:
             target = self.root / name
@@ -71,7 +73,7 @@ class ReleasePreflight(unittest.TestCase):
 
     def inspect(self):
         return preflight.inspect_checkout(self.root, self.expected, expected_digests=self.digests,
-                                          expected_skill_digests=self.skill_digests)
+                                          expected_skill_digests=self.skill_digests, expected_stamp="abc1234")
 
     def test_checkout_and_missing_executable(self):
         self.inspect()
@@ -114,13 +116,35 @@ class ReleasePreflight(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "outside the bundle"):
                 self.inspect()
 
-    def test_truncated_and_wrong_target_executables_are_refused(self):
+    def test_wrong_target_unstamped_executable_and_changed_launcher_are_refused(self):
         path = self.root / "bin/linux-arm64/steer"
-        for data in (b"", (self.root / "bin/linux-amd64/steer").read_bytes()):
+        good = path.read_bytes()
+        for data in (b"", (self.root / "bin/linux-amd64/steer").read_bytes(),
+                     (self.root / "bin/darwin-arm64/steer").read_bytes()):
             with self.subTest(data=data):
                 path.write_bytes(data)
-                with self.assertRaisesRegex(ValueError, "executable bytes differ"):
+                with self.assertRaisesRegex(ValueError, "not built for its target"):
                     self.inspect()
+        path.write_bytes(good.replace(b"abc1234", b"def5678"))
+        with self.assertRaisesRegex(ValueError, "lacks the candidate build stamp"):
+            self.inspect()
+        path.write_bytes(good)
+        (self.root / "scripts/steer").write_text("changed launcher")
+        with self.assertRaisesRegex(ValueError, "launcher bytes differ"):
+            self.inspect()
+
+    def test_source_other_than_a_repository_ref_is_refused(self):
+        repository = self.expected[1]["repository"]
+        for source in ("./", {"source": "url", "url": repository + ".git"},
+                       {"source": "url", "url": "https://github.com/other/steer-skill.git", "ref": "release"}):
+            with self.subTest(source=source):
+                for name in preflight.MARKETS:
+                    path = self.root / name
+                    doc = json.loads(path.read_text())
+                    doc["plugins"][0]["source"] = source
+                    path.write_text(json.dumps(doc))
+                with self.assertRaisesRegex(ValueError, "url source on the repository"):
+                    preflight.identity(self.root)
 
     def test_stale_skill_contents_are_refused(self):
         for name in ("skills/steer/prompts/routing.md", "skills/steer-report/audit.md"):
@@ -139,6 +163,8 @@ class ReleasePreflight(unittest.TestCase):
             clone.assert_not_called()
 
     def test_public_ref_is_checked_without_operator_git_settings(self):
+        branches = []
+
         def clone(argv, **kwargs):
             env = kwargs["env"]
             self.assertNotIn("GIT_CONFIG_COUNT", env)
@@ -147,18 +173,21 @@ class ReleasePreflight(unittest.TestCase):
             self.assertEqual(env["GIT_CONFIG_NOSYSTEM"], "1")
             self.assertEqual(env["GIT_TERMINAL_PROMPT"], "0")
             self.assertIn("credential.helper=", argv)
-            self.assertEqual(argv[argv.index("--branch") + 1], "release-fixture")
+            branches.append(argv[argv.index("--branch") + 1])
             self.assertNotEqual(Path(kwargs["cwd"]), ROOT)
             shutil.copytree(self.root, argv[-1])
 
         with patch.object(preflight, "urlopen", return_value=io.BytesIO(
                 b'{"private":false,"default_branch":"main"}')), \
              patch.object(preflight.subprocess, "run", side_effect=clone), \
-             patch.object(preflight.subprocess, "check_output", return_value="fixture-sha\n"), \
+             patch.object(preflight.subprocess, "check_output", side_effect=lambda argv, **_:
+                          "abc1234\n" if "--short=7" in argv else "fixture-sha\n"), \
              patch.dict(os.environ, {"GIT_CONFIG_COUNT": "1", "GH_TOKEN": "fixture-token"}):
             result = preflight.preflight(self.root, "release-fixture")
+        self.assertEqual(branches, ["main", "release-fixture"])
         self.assertEqual(result["commit"], "fixture-sha")
         self.assertEqual(result["ref"], "release-fixture")
+        self.assertEqual(result["listing"], "main")
 
 
 class LiveReviewerRunner(unittest.TestCase):
