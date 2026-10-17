@@ -14,6 +14,8 @@ that is expensive to reconstruct from the codebase, and when to consult it.
   constraint. Prefer a short pointer over an implementation walkthrough.
 - Put current component relationships, data flow and design invariants in
   [ARCHITECTURE.md](ARCHITECTURE.md); keep the trigger for reading them here.
+  ARCHITECTURE.md is public and written for contributors: it describes the design
+  and carries no instructions to its writer.
 - Put decision rationale, rejected alternatives and superseded approaches in the
   relevant commit body/trailers. Neither document is a session log, a changelog,
   or a list of completed work.

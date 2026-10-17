@@ -96,15 +96,17 @@ To remove a custom guard, run `steer remove <hook-name>`. For a factory preset, 
 
 ## Development and reference
 
-Run the standard checks from the repository root:
+Build the CLI with `cd cli && ./build.sh`, then run the standard checks from the repository root against that build:
 
 ```bash
-./check.sh
+STEER_BIN="$PWD/scripts/steer" ./check.sh
 ```
 
 This checks Go formatting, builds the CLI, runs vet, and runs the tests. `./check-full.sh` also runs the slower model-backed skill-generation tests.
 
-- [Project reference](CLAUDE.md): architecture, storage, configuration, builds, and test setup.
+- [Contributing](CONTRIBUTING.md): how to propose a change and what a pull request needs.
+- [Architecture](ARCHITECTURE.md): component boundaries and the invariants between them.
+- [Project map](CLAUDE.md): files that change together, builds, test setup, and storage locations.
 - [Guard skill](skills/steer/SKILL.md): rule generation and installation workflow.
 - [Report skill](skills/steer-report/SKILL.md): evidence review and the fix workflow.
 - `steer <command> --help`: command options, including team policy and verification.

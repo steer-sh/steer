@@ -1,13 +1,8 @@
 # Steer architecture
 
-This is a public repository document. Include contributor-facing architecture
-only; keep private development workflows, personal context and internal discussions
-out of this file.
-
-This document describes current component boundaries and the invariants that cross
-those boundaries. CLAUDE.md supplies task-specific reading triggers. Keep this
-file focused on current design, with source/test pointers; decision history belongs
-in commits. Read constants and wire schemas from their owning code.
+This document describes Steer's current component boundaries and the invariants
+that cross them, with pointers to the owning source and tests. Constants and wire
+schemas live in that code; the reasons behind a design live in its commits.
 
 ## Distribution and installation
 
