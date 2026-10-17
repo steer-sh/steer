@@ -2,9 +2,15 @@ name: check
 
 on:
   push:
-    branches: ["**"]
+    # release holds generated bundles, not source changes.
+    branches: ["**", "!release"]
   pull_request:
   workflow_call:
+    inputs:
+      revert_base_policy:
+        description: How scripts/ci-revert-base.py picks revert-test's base ("event" or "release").
+        type: string
+        default: event
 
 jobs:
   check:
@@ -13,12 +19,29 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version-file: cli/go.mod
           cache-dependency-path: cli/go.sum
+      - name: Resolve the revert-test base
+        shell: bash
+        env:
+          BASE_POLICY: ${{ inputs.revert_base_policy || 'event' }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          BEFORE: ${{ github.event.before }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REPOSITORY: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci-revert-base.py
       - name: Build steer for check.sh
         shell: bash
         run: go build -C cli -o "$RUNNER_TEMP/steer" .

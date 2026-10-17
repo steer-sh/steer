@@ -213,7 +213,12 @@ serialized and a blocked run fails naming the lock. Workers run the new tests of
 different variants at once; a decisive failure counts only after it happens again with
 no other variant running, and evidence records one that does not as unconfirmed.
 The variant kinds, their caps and the time budget are in the script's docstring; a
-run that the budget stops before it finishes records no pass. When no variant can violate the
+run that the budget stops before it finishes records no pass. A CI checkout has no
+upstream, so `check.yml` runs `scripts/ci-revert-base.py` to set `REVERT_TEST_BASE`
+from the event, and revert-test fails under GitHub Actions without it. A release
+checks no range: it requires a passing `check.yml` push run on `main` for the
+tagged commit, so a tag pushed before that run finishes fails until the release
+is rerun. `tests/test_ci_base.py` covers both scripts. When no variant can violate the
 property a correct test checks, extend the generator (`scripts/revert-test-funcs.go`
 finds statement sites) rather than the test.
 `./check.sh` also runs `cli/e2e/` (`go test -tags e2e ./e2e/...` from `cli/`): the

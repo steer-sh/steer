@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Revert-test check: each Go test added by the unpushed change must fail under a variant of it.
 
-The change is the working tree against the merge base with the upstream branch
-(HEAD when there is none). The script builds variants of the change in a copy of
+The change is the working tree against REVERT_TEST_BASE when it is set, which
+must name a commit. Otherwise it is against the merge base with the upstream
+branch (HEAD when there is none), except under GitHub Actions, where an unset
+REVERT_TEST_BASE fails the run: a CI checkout has no upstream, and HEAD as the
+base would check nothing. The script builds variants of the change in a copy of
 the repository and runs the new top-level test functions under each one:
 
   revert    one changed block of non-test code put back to its base version
@@ -78,6 +81,7 @@ import threading
 import time
 
 MODULE = "cli"
+BASE_ENV = "REVERT_TEST_BASE"
 MARKER = "// pins existing behaviour"
 TEST_FUNC = re.compile(r"^func (Test\w+)\(\w+ \*testing\.T\)", re.MULTILINE)
 HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
@@ -157,6 +161,19 @@ def git(*args, check=True):
 
 
 def base_revision():
+    """Return the base commit of the change, or None after printing why there is none."""
+    explicit = os.environ.get(BASE_ENV)
+    if explicit is not None:
+        resolved = subprocess.run(["git", "rev-parse", "--verify", "--quiet", explicit + "^{commit}"],
+                                  capture_output=True, text=True)
+        if not explicit.strip() or resolved.returncode != 0:
+            print("revert-test: %s=%r names no commit" % (BASE_ENV, explicit), file=sys.stderr)
+            return None
+        return resolved.stdout.strip()
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        print("revert-test: %s is unset under GitHub Actions; the workflow must resolve the base"
+              % BASE_ENV, file=sys.stderr)
+        return None
     upstream = subprocess.run(["git", "merge-base", "HEAD", "@{upstream}"],
                               capture_output=True, text=True)
     if upstream.returncode == 0 and upstream.stdout.strip():
@@ -978,6 +995,8 @@ def main():
     # Each go test inherits the lock, so a successor cannot replace the copy under it.
     HELD.append(lock)
     base = base_revision()
+    if base is None:
+        return 1
     paths, untracked = changed_paths(base)
 
     by_package = {}

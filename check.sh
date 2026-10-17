@@ -33,6 +33,7 @@ cd "$root"
 # Release preparation tools use fixture repositories and fake reviewer replies.
 python3 tests/test_release_tools.py
 python3 tests/test_replay_reviewers.py
+python3 tests/test_ci_base.py
 status=0
 "$steer" check exec --all || status=1
 exit "$status"
