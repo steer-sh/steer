@@ -12,7 +12,7 @@
       "name": "steer",
       "source": {
         "source": "url",
-        "url": "https://github.com/steer-sh/steer-skill.git",
+        "url": "https://github.com/steer-sh/steer.git",
         "ref": "release"
       },
       "strict": true,
@@ -22,7 +22,7 @@
         "name": "Jeremy Janzen"
       },
       "homepage": "https://steer.sh",
-      "repository": "https://github.com/steer-sh/steer-skill",
+      "repository": "https://github.com/steer-sh/steer",
       "license": "MIT",
       "keywords": ["code-review", "commit-review", "checks", "guards", "hooks"]
     }

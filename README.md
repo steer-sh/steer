@@ -11,14 +11,14 @@ Steer supports Claude Code and Codex on macOS and Linux.
 For Claude Code:
 
 ```bash
-claude plugin marketplace add steer-sh/steer-skill
+claude plugin marketplace add steer-sh/steer
 claude plugin install steer@steer-marketplace
 ```
 
 For Codex:
 
 ```bash
-codex plugin marketplace add steer-sh/steer-skill
+codex plugin marketplace add steer-sh/steer
 codex plugin add steer@steer-marketplace
 ```
 

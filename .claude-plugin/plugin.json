@@ -6,7 +6,7 @@
     "name": "Jeremy Janzen"
   },
   "homepage": "https://steer.sh",
-  "repository": "https://github.com/steer-sh/steer-skill",
+  "repository": "https://github.com/steer-sh/steer",
   "license": "MIT",
   "keywords": ["code-review", "commit-review", "checks", "guards", "hooks"],
   "skills": ["./skills/steer", "./skills/steer-report", "./skills/steer-setup"],

@@ -24,7 +24,7 @@ that is expensive to reconstruct from the codebase, and when to consult it.
   architecture section and retain only its navigation value here. An ordinary
   implementation change needs no CLAUDE.md addition.
 
-# steer-skill
+# steer
 
 Steer reviews commits, mines recurring failures, installs guards or instructions,
 and reports recurrence. The Go CLI and bundled skills share contracts; a change
