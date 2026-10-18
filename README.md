@@ -102,7 +102,7 @@ Setup writes hook registrations into each agent's own settings, and those regist
 2. Stop turn-end checks: `steer check uninstall --harness <claude-code|codex> --scope <global|project>`, then `steer check unadopt` in each adopted repository.
 3. Remove guards and instructions: `steer list --scope global` and `steer rules list --scope global` name them; `steer remove <hook-name> --scope global` and `steer rules remove <rule-id> --scope global` remove them. Run `steer preset disable <preset>` yourself for factory presets. Removing the last guard removes the guard registration. Repeat with `--scope project` in each repository that has a `.steer/` directory.
 4. Remove the status line: `steer statusline remove`. A status line that Steer wrapped comes back as it was.
-5. Check that nothing remains: `steer status`.
+5. Check the removal: `steer commit-gate status` must show every channel as not armed, and `steer statusline status` must show no Steer row. The first reads the project scope of the repository you run it in.
 6. Remove the plugin: `claude plugin uninstall steer@steer-marketplace` or `codex plugin remove steer@steer-marketplace`.
 
 Local data stays in `~/.steer` until you delete it:
