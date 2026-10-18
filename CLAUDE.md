@@ -231,9 +231,12 @@ copy, lock and variant generation over fixture repositories, then the slow headl
 harness that invokes `claude -p`; it is separate from the turn-end gate.
 
 `cd cli && ./build.sh` writes the untracked `bin/` that this checkout's launcher runs;
-`steer bin install` then updates `~/.steer/bin/steer` from it.
-`.github/workflows/check.yml` runs `./check.sh` on Linux and macOS and cross-compiles
-every shipped target; the release workflow runs it before it publishes.
+`steer bin install` then updates `~/.steer/bin/steer` from it; `BIN_DIR` writes elsewhere.
+`./check.sh` builds every shipped target into a scratch `BIN_DIR` and runs
+`scripts/check-binaries.py` over it: target, `CGO_ENABLED=0`, version stamps, and the
+host binary's `--help`. The release workflow runs the same checker on the tagged
+build before it publishes. `.github/workflows/check.yml` runs `./check.sh` on Linux
+and macOS; the release workflow runs that workflow first.
 
 The model-driven tests under `tests/` need PyYAML in `tests/.venv`. Read the
 runner's help for options and select the model explicitly. Focused generation:

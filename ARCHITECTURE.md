@@ -20,8 +20,9 @@ The two marketplace manifests and two root plugin manifests describe one identit
 `cli/internal/plugindist/` pins identity, declared paths and bundled hook wiring.
 `scripts/steer` selects `bin/<os>-<arch>/steer` on macOS and Linux and refuses
 any other OS in one line; `scripts/steer.cmd` is the same refusal.
-`cli/build.sh` builds those artifacts and stamps `internal/version`; `main` does
-not track them. Both marketplace entries use a `url` source with `ref: release`, a
+`cli/build.sh` builds those artifacts with cgo disabled and stamps
+`internal/version`; `main` does not track them. `scripts/check-binaries.py` checks
+each artifact's target, cgo setting and stamps before a release publishes it. Both marketplace entries use a `url` source with `ref: release`, a
 branch `.github/workflows/release.yml` replaces on each `v*` tag with one parentless
 commit: the tagged tree plus `bin/`. `scripts/preflight-release.py` checks the listing
 on the default branch and the bundle on that ref. The Windows

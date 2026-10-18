@@ -1,18 +1,22 @@
 #!/bin/bash
 #
 # Cross-platform build script for steer CLI.
-# Outputs binaries into ../bin/<os>-<arch>/steer[.exe]
+# Outputs binaries into ../bin/<os>-<arch>/steer[.exe], or into $BIN_DIR.
 #
 # Usage:
 #   ./build.sh                    # build all platforms
 #   ./build.sh --install          # build all + copy current platform to /usr/local/bin
 #   VERSION=1.2.0 ./build.sh     # set version
+#   BIN_DIR=/tmp/out ./build.sh  # write somewhere other than ../bin
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PLUGIN_DIR="$(dirname "$SCRIPT_DIR")"
-BIN_DIR="${PLUGIN_DIR}/bin"
+BIN_DIR="${BIN_DIR:-${PLUGIN_DIR}/bin}"
+# Absolute, because go build -C resolves a relative -o from the cli directory.
+mkdir -p "$BIN_DIR"
+BIN_DIR="$(cd "$BIN_DIR" && pwd)"
 
 # Version info
 VERSION="${VERSION:-dev}"
@@ -27,17 +31,16 @@ LDFLAGS="$LDFLAGS -X 'github.com/steer-sh/steer-cli/internal/version.BuildDate=$
 echo "Building steer ${VERSION} (${GIT_COMMIT})..."
 echo ""
 
-# Clean previous builds
-rm -rf "${BIN_DIR}"
-
 build_target() {
     local os="$1" arch="$2" dir_name="$3" binary="$4"
 
     local target_dir="${BIN_DIR}/${dir_name}"
+    rm -rf "$target_dir"
     mkdir -p "$target_dir"
 
     echo -n "  ${dir_name}..."
-    GOOS="$os" GOARCH="$arch" go build \
+    # Disable cgo so no binary depends on the build host's libc.
+    CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build \
         -C "$SCRIPT_DIR" \
         -ldflags="${LDFLAGS}" \
         -o "${target_dir}/${binary}" .

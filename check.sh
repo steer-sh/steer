@@ -30,6 +30,13 @@ go test ./...
 go test -tags e2e ./e2e/...
 
 cd "$root"
+# The shipped binaries as build.sh writes them, into a scratch directory.
+built="$(mktemp -d)"
+trap 'rm -rf "$built"' EXIT
+VERSION=check-build BIN_DIR="$built" cli/build.sh >/dev/null
+python3 scripts/check-binaries.py --bin-dir "$built" --version check-build \
+  --commit "$(git rev-parse --short=7 HEAD)"
+python3 tests/test_check_binaries.py
 # Release preparation tools use fixture repositories and fake reviewer replies.
 python3 tests/test_release_tools.py
 python3 tests/test_replay_reviewers.py

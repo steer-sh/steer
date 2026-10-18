@@ -50,19 +50,3 @@ jobs:
         env:
           STEER_BIN: ${{ runner.temp }}/steer
         run: ./check.sh
-
-  cross-compile:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: cli/go.mod
-          cache-dependency-path: cli/go.sum
-      - name: Build every shipped target
-        shell: bash
-        run: |
-          set -euo pipefail
-          for target in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64; do
-            GOOS="${target%/*}" GOARCH="${target#*/}" go build -C cli -o /dev/null .
-          done
