@@ -6,6 +6,8 @@ Steer is an agentic feedback loop. Independent reviewers check your agent's code
 
 Steer supports Claude Code and Codex on macOS and Linux.
 
+Website: [steer.sh](https://steer.sh)
+
 ## Install
 
 For Claude Code:
