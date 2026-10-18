@@ -164,9 +164,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--harness", action="append", choices=["claude", "codex"],
                         help="Harness to check; repeatable (default: both)")
-    parser.add_argument("--claude-model", default="sonnet", help="Claude Code model (default: sonnet)")
-    parser.add_argument("--codex-model", default="gpt-5.6-luna",
-                        help="Codex model (default: gpt-5.6-luna)")
+    parser.add_argument("--claude-model", default="claude-haiku-5-5",
+                        help="Claude Code model (default: claude-haiku-5-5)")
+    parser.add_argument("--codex-model", default="gpt-6-luna",
+                        help="Codex model (default: gpt-6-luna)")
     parser.add_argument("--keep", action="store_true", help="Keep each sandbox directory")
     args = parser.parse_args()
     failures = []
