@@ -94,6 +94,26 @@ To remove a custom guard, run `steer remove <hook-name>`. For a factory preset, 
 - **One repository only:** run `steer commit-gate install --harness <claude-code|codex> --scope project` in that repository instead of the global gate that setup installs.
 - **Git pre-commit:** for other workflows, run `steer commit-gate install --precommit` in the repository. Choose one channel per repository to avoid reviewing commits twice.
 
+## Uninstall
+
+Setup writes hook registrations into each agent's own settings, and those registrations call `~/.steer/bin/steer`. Removing the plugin removes neither. Run these commands with `~/.steer/bin/steer` before you delete it, once for each agent you set up (`--harness claude-code` or `--harness codex`).
+
+1. Stop reviews: `steer commit-gate remove --harness <claude-code|codex> --scope global`. Add `--scope project` in each repository where you armed a project gate. For the Git pre-commit channel, delete the hook file that `git rev-parse --git-path hooks/pre-commit` names.
+2. Stop turn-end checks: `steer check uninstall --harness <claude-code|codex> --scope <global|project>`, then `steer check unadopt` in each adopted repository.
+3. Remove guards and instructions: `steer list --scope global` and `steer rules list --scope global` name them; `steer remove <hook-name> --scope global` and `steer rules remove <rule-id> --scope global` remove them. Run `steer preset disable <preset>` yourself for factory presets. Removing the last guard removes the guard registration. Repeat with `--scope project` in each repository that has a `.steer/` directory.
+4. Remove the status line: `steer statusline remove`. A status line that Steer wrapped comes back as it was.
+5. Check that nothing remains: `steer status`.
+6. Remove the plugin: `claude plugin uninstall steer@steer-marketplace` or `codex plugin remove steer@steer-marketplace`.
+
+Local data stays in `~/.steer` until you delete it:
+
+- `~/.steer/state`: review ledgers, audit logs and session snapshots. Keep it if you might reinstall, because reports and fix scores read it.
+- `~/.steer/hooks`: global guards with their fixtures and audit log, instruction rules, and the archive of removed fixes.
+- `~/.steer/config.json`: reviewer settings.
+- `~/.steer/bin`: the stable executable.
+
+To delete everything, run `rm -rf ~/.steer` after step 5. A repository's `.steer/` directory is part of that repository; remove it with a commit.
+
 ## Development and reference
 
 Build the CLI with `cd cli && ./build.sh`, then run the standard checks from the repository root against that build:
