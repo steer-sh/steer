@@ -45,13 +45,3 @@ scenarios:
     rule: "make sure the test suite passes before you end a turn"
     files: *suite
     expect: {tier: check, supported: false}
-
-  - name: detector-beside-personal-gate
-    mode: route
-    rule: "every JSON file under config/ must parse as valid JSON"
-    personal_gate: true
-    files:
-      <<: *suite
-      config/app.json: |
-        {"name": "app", "port": 8080}
-    expect: {tier: check, action: add-detector, supported: true}

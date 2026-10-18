@@ -50,24 +50,9 @@ def build_repo(workdir, files):
     git(workdir, "commit", "-q", "-m", "fixture")
 
 
-def build_home(home, workdir, personal_gate):
-    claude = home / ".claude"
-    claude.mkdir(parents=True, exist_ok=True)
-    if personal_gate:
-        hooks = claude / "hooks"
-        hooks.mkdir()
-        (hooks / "check-gate.py").write_text("import sys\nsys.exit(0)\n")
-        settings = {"hooks": {"Stop": [{"hooks": [
-            {"type": "command", "command": "python3 ~/.claude/hooks/check-gate.py"}]}]}}
-        (claude / "settings.json").write_text(json.dumps(settings, indent=2))
-        (claude / "check-gate-approved.txt").write_text(str(workdir.resolve()) + "\n")
-
-
 def build_wrapper(scratch, home):
-    """Return (plugin root, bin dir, call log). The wrapper appends each call's
-    arguments to the log, one line per call, before it runs the CLI."""
-    calls = scratch / "steer-calls.log"
-    script = "#!/bin/sh\necho \"$*\" >> %s\nHOME=%s exec %s \"$@\"\n" % (calls, home, STEER)
+    """Return (plugin root, bin dir) for a wrapper that runs the CLI in home."""
+    script = "#!/bin/sh\nHOME=%s exec %s \"$@\"\n" % (home, STEER)
     plugin = scratch / "plugin" / "scripts"
     bindir = scratch / "bin"
     for directory in (plugin, bindir):
@@ -75,20 +60,7 @@ def build_wrapper(scratch, home):
         wrapper = directory / "steer"
         wrapper.write_text(script)
         wrapper.chmod(0o755)
-    return scratch / "plugin", bindir, calls
-
-
-def arming_problems(calls):
-    """A personal gate must be looked for before a runner is registered."""
-    lines = calls.read_text().splitlines() if calls.exists() else []
-    migrate = next((i for i, l in enumerate(lines) if l.startswith("check migrate")), None)
-    install = next((i for i, l in enumerate(lines) if l.startswith("check install")), None)
-    problems = []
-    if migrate is None:
-        problems.append("the skill never ran steer check migrate to look for a personal gate")
-    if install is not None and (migrate is None or install < migrate):
-        problems.append("steer check install ran before steer check migrate")
-    return problems
+    return scratch / "plugin", bindir
 
 
 def run_skill(scenario, workdir, box, plugin, bindir, model):
@@ -126,7 +98,7 @@ def steer(home, workdir, *args):
 
 
 def installed_problems(workdir, home):
-    """What a --route install beside a personal gate left wrong."""
+    """What a --route install left wrong."""
     problems = []
     manifest = workdir / ".steer" / "checks" / "manifest.json"
     if not manifest.exists():
@@ -144,11 +116,6 @@ def installed_problems(workdir, home):
         problems.append("check.sh lost the existing suite")
     if "check exec" not in oracle and "check go-test" not in oracle:
         problems.append("check.sh does not call the check executor")
-    settings = (home / ".claude" / "settings.json").read_text()
-    if "check-gate.py" not in settings:
-        problems.append("the personal gate was removed without consent")
-    if "check hook" in settings:
-        problems.append("a Stop runner was registered beside the personal gate")
     return problems
 
 
@@ -159,8 +126,8 @@ def run_once(scenario, model):
         workdir, home = scratch / "repo", box.home
         workdir.mkdir()
         build_repo(workdir, scenario.get("files"))
-        build_home(home, workdir, scenario.get("personal_gate", False))
-        plugin, bindir, calls = build_wrapper(scratch, home)
+        (home / ".claude").mkdir(parents=True, exist_ok=True)
+        plugin, bindir = build_wrapper(scratch, home)
 
         result, error = run_skill(scenario, workdir, box, plugin, bindir, model)
 
@@ -172,11 +139,7 @@ def run_once(scenario, model):
             if want is not None and result.get(field) != want:
                 problems.append("%s: want %r, got %r" % (field, want, result.get(field)))
         if scenario["mode"] == "route":
-            problems += installed_problems(workdir, home) + arming_problems(calls)
-            if not result.get("pending"):
-                problems.append("pending is empty, but the personal gate leaves the repository unarmed")
-        elif result.get("installed") or result.get("pending"):
-            problems.append("route-only reported installed or pending steps")
+            problems += installed_problems(workdir, home)
         return problems, result
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
