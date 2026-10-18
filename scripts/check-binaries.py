@@ -6,7 +6,9 @@ publishes them.
 
 For each shipped target, DIR/<os>-<arch>/steer must exist and `go version -m` must
 report that GOOS and GOARCH, CGO_ENABLED=0, and -X stamps of Version=V and
-GitCommit=C. The binary for this host then runs `--help` and must exit 0 within the
+GitCommit=C. Each target in SIGNED_TARGETS must be a Mach-O that carries an
+LC_CODE_SIGNATURE whose data starts with the embedded-signature magic, since
+Apple Silicon refuses to start an unsigned binary. The binary for this host then runs `--help` and must exit 0 within the
 timeout. GO names the go command (default "go"). Exits 1 naming every failure.
 """
 
@@ -14,12 +16,17 @@ import argparse
 import os
 import platform
 import shlex
+import struct
 import subprocess
 import sys
 from pathlib import Path
 
 TARGETS = ("darwin-amd64", "darwin-arm64", "linux-amd64", "linux-arm64")
 VERSION_PKG = "github.com/steer-sh/steer-cli/internal/version"
+SIGNED_TARGETS = ("darwin-arm64",)
+MACHO_MAGIC_64 = 0xFEEDFACF
+LC_CODE_SIGNATURE = 0x1D
+CSMAGIC_EMBEDDED_SIGNATURE = 0xFADE0CC0
 ARCH_NAMES = {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}
 
 
@@ -67,6 +74,34 @@ def target_errors(target, meta, version, commit):
     return errors
 
 
+def signature_error(data):
+    """Return why a thin 64-bit Mach-O image carries no code signature, or None."""
+    if len(data) < 32 or struct.unpack_from("<I", data)[0] != MACHO_MAGIC_64:
+        return "is not a little-endian 64-bit Mach-O"
+    ncmds = struct.unpack_from("<I", data, 16)[0]
+    offset = 32
+    for _ in range(ncmds):
+        if offset + 8 > len(data):
+            return "load commands run past the end of the file"
+        cmd, size = struct.unpack_from("<II", data, offset)
+        if offset + size > len(data):
+            return "load commands run past the end of the file"
+        if cmd == LC_CODE_SIGNATURE:
+            if size < 16:
+                return f"LC_CODE_SIGNATURE has size {size}"
+            dataoff, datasize = struct.unpack_from("<II", data, offset + 8)
+            if datasize < 4 or dataoff + datasize > len(data):
+                return (f"LC_CODE_SIGNATURE points at {datasize} bytes at offset {dataoff}, "
+                        f"outside the {len(data)}-byte file")
+            if struct.unpack_from(">I", data, dataoff)[0] != CSMAGIC_EMBEDDED_SIGNATURE:
+                return "LC_CODE_SIGNATURE points at no embedded signature blob"
+            return None
+        if size < 8:
+            return f"load command at offset {offset} has size {size}"
+        offset += size
+    return "carries no LC_CODE_SIGNATURE, so Apple Silicon will not start it"
+
+
 def host_target():
     """Return this host's <os>-<arch> name."""
     arch = ARCH_NAMES.get(platform.machine().lower(), platform.machine().lower())
@@ -102,6 +137,10 @@ def check(bin_dir, version, commit, go, host, timeout):
             continue
         failures += [f"{target}: {e}" for e in target_errors(target, meta.stdout,
                                                               version, commit)]
+        if target in SIGNED_TARGETS:
+            error = signature_error(binary.read_bytes())
+            if error:
+                failures.append(f"{target}: {error}")
     if host not in TARGETS:
         failures.append(f"host {host} is not a shipped target, so no binary ran")
     elif (bin_dir / host / "steer").is_file():
@@ -117,14 +156,16 @@ def main():
     parser.add_argument("--version", required=True)
     parser.add_argument("--commit", required=True)
     parser.add_argument("--timeout", type=float, default=30)
+    parser.add_argument("--host", default=host_target(),
+                        help="the <os>-<arch> target whose binary runs --help")
     args = parser.parse_args()
     failures = check(args.bin_dir, args.version, args.commit,
-                     os.environ.get("GO", "go"), host_target(), args.timeout)
+                     os.environ.get("GO", "go"), args.host, args.timeout)
     for failure in failures:
         print(f"check-binaries: {failure}", file=sys.stderr)
     if failures:
         return 1
-    print(f"check-binaries: {len(TARGETS)} targets match; {host_target()} --help ran")
+    print(f"check-binaries: {len(TARGETS)} targets match; {', '.join(SIGNED_TARGETS)} signed; {args.host} --help ran")
     return 0
 
 

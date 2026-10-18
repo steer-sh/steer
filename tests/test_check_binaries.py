@@ -4,6 +4,7 @@ fake host binary stand in for real builds."""
 
 import importlib.util
 import os
+import struct
 import subprocess
 import sys
 import tempfile
@@ -72,6 +73,47 @@ class TargetErrors(unittest.TestCase):
         self.assertTrue(errors[0].startswith("-ldflags does not parse"), errors)
 
 
+def macho(*cmds, blob=None):
+    """Return a thin arm64 Mach-O header, bare 16-byte load commands, then a trailing
+    signature blob that each LC_CODE_SIGNATURE points at."""
+    if blob is None:
+        blob = struct.pack(">II", cb.CSMAGIC_EMBEDDED_SIGNATURE, 12) + bytes(4)
+    blob_offset = 32 + 16 * len(cmds)
+    body = b"".join(
+        struct.pack("<IIII", cmd, 16, blob_offset, len(blob))
+        if cmd == cb.LC_CODE_SIGNATURE else struct.pack("<II", cmd, 16) + bytes(8)
+        for cmd in cmds)
+    return struct.pack("<IiiIIIII", cb.MACHO_MAGIC_64, 0x0100000C, 0, 2, len(cmds),
+                       len(body), 0, 0) + body + blob
+
+
+class SignatureError(unittest.TestCase):
+    def test_signed_image_passes(self):
+        self.assertIsNone(cb.signature_error(macho(0x19, cb.LC_CODE_SIGNATURE)))
+
+    def test_unsigned_image_fails(self):
+        self.assertIn("no LC_CODE_SIGNATURE", cb.signature_error(macho(0x19, 0x2)))
+
+    def test_signature_past_end_of_file_fails(self):
+        image = macho(cb.LC_CODE_SIGNATURE)
+        self.assertIn("outside the", cb.signature_error(image[:-8]))
+
+    def test_zeroed_signature_blob_fails(self):
+        self.assertIn("no embedded signature blob",
+                      cb.signature_error(macho(cb.LC_CODE_SIGNATURE, blob=bytes(16))))
+
+    def test_truncated_signature_command_fails(self):
+        image = macho(cb.LC_CODE_SIGNATURE)
+        self.assertIn("past the end", cb.signature_error(image[:40]))
+
+    def test_non_macho_fails(self):
+        self.assertIn("not a little-endian 64-bit Mach-O",
+                      cb.signature_error(b"#!/bin/sh\nexit 0\n" + bytes(32)))
+
+    def test_truncated_commands_fail(self):
+        self.assertIn("past the end", cb.signature_error(macho(0x19)[:36]))
+
+
 FAKE_GO = '''#!/usr/bin/env python3
 import os, sys
 target = os.path.basename(os.path.dirname(sys.argv[3]))
@@ -94,11 +136,16 @@ class Check(unittest.TestCase):
         self.bin = self.tmp / "bin"
         for target in cb.TARGETS:
             self.binary(target, "#!/bin/sh\nexit 0\n")
+        for target in cb.SIGNED_TARGETS:
+            self.write(target, macho(cb.LC_CODE_SIGNATURE))
 
     def binary(self, target, script):
+        self.write(target, script.encode())
+
+    def write(self, target, data):
         path = self.bin / target / "steer"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(script)
+        path.write_bytes(data)
         path.chmod(0o755)
 
     def check(self, host="linux-amd64", timeout=5):
@@ -118,6 +165,11 @@ class Check(unittest.TestCase):
         self.addCleanup(os.environ.pop, "FAKE_CGO_linux_amd64")
         self.assertEqual(self.check(), ["linux-amd64: CGO_ENABLED=1, want 0"])
 
+    def test_unsigned_arm64_target_fails(self):
+        self.write("darwin-arm64", macho(0x19))
+        self.assertEqual(self.check(), ["darwin-arm64: carries no LC_CODE_SIGNATURE, "
+                                        "so Apple Silicon will not start it"])
+
     def test_failing_host_binary_fails(self):
         self.binary("linux-amd64", "#!/bin/sh\necho broken >&2\nexit 3\n")
         self.assertEqual(self.check(), ["linux-amd64: --help exited 3: broken"])
@@ -128,7 +180,7 @@ class Check(unittest.TestCase):
                          ["linux-amd64: --help did not exit within 0.5s"])
 
     def test_only_host_binary_runs(self):
-        self.binary("darwin-arm64", "#!/bin/sh\nexit 3\n")
+        self.binary("darwin-amd64", "#!/bin/sh\nexit 3\n")
         self.assertEqual(self.check(host="linux-amd64"), [])
 
     def test_unshipped_host_fails(self):
@@ -138,7 +190,7 @@ class Check(unittest.TestCase):
     def test_command_line_exit_status(self):
         env = {**os.environ, "GO": str(self.go)}
         args = [sys.executable, str(CHECKER), "--bin-dir", str(self.bin),
-                "--version", "1.2.3", "--commit"]
+                "--host", "linux-amd64", "--version", "1.2.3", "--commit"]
         ok = subprocess.run(args + ["abc1234"], env=env, capture_output=True, text=True)
         self.assertEqual(ok.returncode, 0, ok.stderr)
         bad = subprocess.run(args + ["fffffff"], env=env, capture_output=True, text=True)
