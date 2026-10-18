@@ -24,7 +24,10 @@ any other OS in one line; `scripts/steer.cmd` is the same refusal.
 `internal/version`; `main` does not track them. `scripts/check-binaries.py` checks
 each artifact's target, cgo setting and stamps before a release publishes it. Both marketplace entries use a `url` source with `ref: release`, a
 branch `.github/workflows/release.yml` replaces on each `v*` tag with one parentless
-commit: the tagged tree plus `bin/`. `scripts/preflight-release.py` checks the listing
+commit: the tagged tree plus `bin/`. The same run publishes a GitHub Release whose
+notes are the tag's `CHANGELOG.md` section, with one archive per binary and their
+checksums; a tag with no changelog section fails before the branch moves.
+`scripts/preflight-release.py` checks the listing
 on the default branch and the bundle on that ref. The Windows
 build-tag files stay, and `check.sh` vets the module under `GOOS=windows`.
 Bundled commands resolve the plugin root through
