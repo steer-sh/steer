@@ -1,4 +1,4 @@
-# Routing scenarios for /steer --headless --route-only and --route.
+# Routing scenarios for /steer --headless --route-only.
 # tests/routing_scenarios.py runs each one in a fresh git repository holding
 # `files`, with the steer CLI pointed at a temporary home.
 

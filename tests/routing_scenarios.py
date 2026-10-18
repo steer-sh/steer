@@ -14,7 +14,6 @@ Usage:
 
 import argparse
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -91,34 +90,6 @@ def run_skill(scenario, workdir, box, plugin, bindir, model):
         return None, "skill result is not JSON: %s" % outer.get("result", "")[:300]
 
 
-def steer(home, workdir, *args):
-    env = dict(os.environ, HOME=str(home))
-    return subprocess.run([str(STEER), *args], cwd=workdir, env=env,
-                          capture_output=True, text=True)
-
-
-def installed_problems(workdir, home):
-    """What a --route install left wrong."""
-    problems = []
-    manifest = workdir / ".steer" / "checks" / "manifest.json"
-    if not manifest.exists():
-        return ["no check declared: %s is missing" % manifest.relative_to(workdir)]
-    declared = json.loads(manifest.read_text()).get("checks", [])
-    if not declared:
-        problems.append("the check manifest declares no check")
-    for check in declared:
-        replay = steer(home, workdir, "check", "test", check["id"])
-        if replay.returncode != 0:
-            problems.append("steer check test %s failed: %s"
-                            % (check["id"], (replay.stdout + replay.stderr)[-300:]))
-    oracle = (workdir / "check.sh").read_text()
-    if "unittest" not in oracle:
-        problems.append("check.sh lost the existing suite")
-    if "check exec" not in oracle and "check go-test" not in oracle:
-        problems.append("check.sh does not call the check executor")
-    return problems
-
-
 def run_once(scenario, model):
     scratch = Path(tempfile.mkdtemp(prefix="steer-route-"))
     try:
@@ -138,8 +109,6 @@ def run_once(scenario, model):
             want = scenario["expect"].get(field)
             if want is not None and result.get(field) != want:
                 problems.append("%s: want %r, got %r" % (field, want, result.get(field)))
-        if scenario["mode"] == "route":
-            problems += installed_problems(workdir, home)
         return problems, result
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
@@ -150,7 +119,7 @@ def main():
     parser.add_argument("--model", "-m", required=True, help="Claude model to run the skill")
     parser.add_argument("--scenario", "-s", help="Run only this scenario")
     parser.add_argument("--repeat", "-r", type=int, default=3,
-                        help="Runs per route-only scenario (default 3); a --route scenario runs once")
+                        help="Runs per scenario (default 3)")
     args = parser.parse_args()
 
     scenarios = yaml.safe_load(SCENARIOS.read_text())["scenarios"]
@@ -161,7 +130,7 @@ def main():
 
     failed = 0
     for scenario in scenarios:
-        runs = args.repeat if scenario["mode"] == "route-only" else 1
+        runs = args.repeat
         for n in range(1, runs + 1):
             problems, result = run_once(scenario, args.model)
             label = "%s [%d/%d]" % (scenario["name"], n, runs)

@@ -2,7 +2,7 @@
 name: steer
 description: Turns a natural-language rule into the fix that can enforce it — a repository check, a PreToolUse Python guard, or an instruction rule — and installs it. Use when enforcing coding standards, blocking insecure patterns, making sure checks pass before a turn ends, managing hook lifecycle, or running steer CLI commands (register, remove, list, test, preset, verify, git-hooks).
 user-invocable: true
-prompt_version: 21
+prompt_version: 22
 compatibility: Requires Claude Code or Codex with tool-call hook support. Hooks are installed into .steer/hooks/ and registered in every installed harness (settings.json for Claude Code, hooks.json for Codex). steer CLI must be available on PATH or bundled under scripts/.
 allowed-tools: Bash(steer *), Bash(python3 *), Bash(echo *), Read, Write, Edit
 ---
@@ -119,11 +119,10 @@ result above:
   `add-detector` when the rule needs a detector that `check.sh` does not run
   yet.
 - `installed` lists what `--route` installed, each item with its path or id.
-  `route-only` leaves it empty.
 - `pending` lists each step left for the user, such as a migration or a `/hooks`
   approval. A repository check that is not armed yet always leaves a step here:
   name the command that arms it, or `steer check migrate --apply` when a
-  personal check gate must move first. `route-only` leaves it empty.
+  personal check gate must move first.
 
 ## Specialist Prompts
 
