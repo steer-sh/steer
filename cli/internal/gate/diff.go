@@ -79,6 +79,8 @@ type diffPlan struct {
 	cwd  string
 	spec DiffSpec
 
+	// base is the argument vector before any pathspec, shared by every git diff call.
+	base     []string
 	diffArgs []string
 	nameArgs []string
 	statArgs []string
@@ -166,8 +168,12 @@ func newDiffPlan(cfg Config, cwd string, spec DiffSpec) *diffPlan {
 	// function reaches the reviewer as a fragment — and a reviewer that cannot see the
 	// rest of the function infers it, which is where hallucinated findings come from.
 	base = append(base, "--function-context")
+	// --submodule=short pins git's default gitlink stanza. A `diff.submodule` setting
+	// of log or diff drops the `diff --git` header that budgetSections, IsBinaryOnly
+	// and the ledger's diff readers split on.
+	base = append(base, "--submodule=short")
 
-	p := &diffPlan{cfg: cfg, cwd: cwd, spec: spec}
+	p := &diffPlan{cfg: cfg, cwd: cwd, spec: spec, base: base}
 	p.included = trackedSelector(cwd, spec)
 	excluded, specs := p.noisePathspecs(base)
 	p.excluded = excluded
@@ -555,6 +561,13 @@ func GetDiffSized(cfg Config, cwd string, spec DiffSpec) (DiffResult, bool) {
 }
 
 func renderDiff(cfg Config, plan *diffPlan, diff, names string, newPaths []string) string {
+	if diff == "" {
+		return ""
+	}
+	return renderBody(cfg, plan, diff, names, newPaths) + plan.submoduleLog(diff)
+}
+
+func renderBody(cfg Config, plan *diffPlan, diff, names string, newPaths []string) string {
 	if len(diff) > cfg.MaxDiffChars {
 		stat := plan.stat(newPaths)
 		kept, dropped, ok := budgetSections(diff, names, cfg.MaxDiffChars)
@@ -575,11 +588,6 @@ func renderDiff(cfg Config, plan *diffPlan, diff, names string, newPaths []strin
 				"as missing because its file is one of them. Full stat:]\n\n%s\n\n%s",
 				len(dropped), strings.Join(dropped, ", "), stat, kept)
 		}
-	} else if len(diff) < cfg.MinDiffChars {
-		// Return it bare. The preamble below is several hundred chars, so prepending
-		// it to a tiny diff would carry it over MinDiffChars and buy a review of
-		// nothing — and a commit touching ONLY lock files would review an empty diff.
-		return diff
 	}
 	if len(plan.excluded) > 0 {
 		// Say what was dropped, or the message-vs-diff rule fires on it: "bump deps"
@@ -592,6 +600,68 @@ func renderDiff(cfg Config, plan *diffPlan, diff, names string, newPaths []strin
 			"the message describes is not visible in one of them.]\n\n" + diff
 	}
 	return diff
+}
+
+// maxSubmoduleLogChars bounds the commit list that submoduleLog appends.
+const maxSubmoduleLogChars = 8_000
+
+// submoduleLog returns a note listing the commits each moved submodule pin spans, or
+// "" when raw moves no pin. A gitlink stanza shows only the two commit IDs, so the
+// note is what lets a reviewer check the pin against the commit message.
+func (p *diffPlan) submoduleLog(raw string) string {
+	if !hasGitlink(raw) {
+		return ""
+	}
+	// The plan's own diff, so no path is parsed or requoted; the later --submodule=log
+	// overrides the plan's --submodule=short.
+	args := append(append([]string{}, p.base...), "--submodule=log")
+	args = append(args, p.diffArgs[len(p.base):]...)
+	out, ok := Git(p.cwd, gitLong, args...)
+	if !ok {
+		return ""
+	}
+	log := submoduleBlocks(out)
+	if log == "" {
+		return ""
+	}
+	if len(log) > maxSubmoduleLogChars {
+		cut := strings.LastIndexByte(log[:maxSubmoduleLogChars], '\n') + 1
+		log = log[:cut] + fmt.Sprintf("... [truncated at %d of %d chars]\n", cut, len(log))
+	}
+	return "\n[Submodule pins moved. The commits each pin spans, from " +
+		"`git diff --submodule=log`; the submodules' code is NOT shown:]\n" + log
+}
+
+// hasGitlink reports whether raw adds, removes or moves a gitlink (mode 160000). A
+// header line sits at column 0, where no hunk body line can, since each carries a
+// leading ' ', '+', '-' or '\'.
+func hasGitlink(raw string) bool {
+	for _, line := range strings.Split(raw, "\n") {
+		if strings.HasSuffix(line, " 160000") && (strings.HasPrefix(line, "index ") ||
+			strings.HasPrefix(line, "new file mode ") || strings.HasPrefix(line, "deleted file mode ")) {
+			return true
+		}
+	}
+	return false
+}
+
+// submoduleBlocks returns the `Submodule <path> ...` blocks of a --submodule=log diff:
+// each runs from its column-0 header to the next `diff --git ` or `Submodule ` header.
+func submoduleBlocks(diff string) string {
+	var sb strings.Builder
+	in := false
+	for _, line := range splitKeepEnds(diff) {
+		switch {
+		case strings.HasPrefix(line, "Submodule "):
+			in = true
+		case strings.HasPrefix(line, "diff --git "):
+			in = false
+		}
+		if in {
+			sb.WriteString(line)
+		}
+	}
+	return sb.String()
 }
 
 // SlashPaths returns the paths with OS separators normalised to forward slashes, the

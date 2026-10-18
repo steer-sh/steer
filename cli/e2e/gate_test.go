@@ -116,7 +116,7 @@ func TestPrecommitSkipReceipts(t *testing.T) {
 	t.Parallel()
 	cases := []struct{ file, content, want string }{
 		{"NOTES.md", strings.Repeat("prose line\n", 80), "not reviewed — every changed file is prose"},
-		{"tiny.py", "x = 1\n", "under the 400-character minimum for a review"},
+		{"package-lock.json", "lock\n", "not reviewed — the diff is empty"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.file, func(t *testing.T) {

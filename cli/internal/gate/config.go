@@ -28,9 +28,8 @@ type Config struct {
 	ReviewerRuns          int
 	ReviewTimeout         time.Duration
 
-	StaleAfter   time.Duration
-	MaxFirings   int
-	MinDiffChars int
+	StaleAfter time.Duration
+	MaxFirings int
 
 	MaxDiffChars        int
 	MaxContextFiles     int
@@ -59,9 +58,6 @@ const (
 	// converging, not the expected stop.
 	defaultMaxFirings = 4
 
-	// Below this the round trip costs more than it returns.
-	defaultMinDiffChars = 400
-
 	// Above this, whole file-diffs are dropped smallest-first until the rest fits;
 	// only a commit whose every single file overruns the budget alone falls back to
 	// stat-only.
@@ -82,7 +78,7 @@ const (
 // flags any change as drift, and a per-release suffix would fire that flag on every
 // patch release. Bump it only when gate behaviour changes reviewer inputs or the
 // parser semantics that decide which reviewer findings enter the corpus.
-const InstrumentSuffix = "go-findings-v3-shell"
+const InstrumentSuffix = "go-findings-v4-shell"
 
 // PhaseChainEnd is the row the engine writes when it releases a review sequence that
 // blocked: from then on the agent owes that sequence's ledger.
@@ -111,9 +107,8 @@ func Defaults() Config {
 		ReviewerRuns:     defaultReviewerRuns,
 		ReviewTimeout:    defaultReviewTimeout,
 
-		StaleAfter:   defaultStaleAfter,
-		MaxFirings:   defaultMaxFirings,
-		MinDiffChars: defaultMinDiffChars,
+		StaleAfter: defaultStaleAfter,
+		MaxFirings: defaultMaxFirings,
 
 		MaxDiffChars:        defaultMaxDiffChars,
 		MaxContextFiles:     defaultMaxContextFiles,

@@ -171,7 +171,7 @@ func TestTheEngineStampsTheAddendumOnTheRow(t *testing.T) {
 
 	digest := LoadAddendum(h.repo).Digest()
 	row := h.lastRow()
-	if want := "stub-model/2/" + PromptDigest() + "+" + digest + "/go-findings-v3-shell"; row["instrument"] != want {
+	if want := "stub-model/2/" + PromptDigest() + "+" + digest + "/go-findings-v4-shell"; row["instrument"] != want {
 		t.Fatalf("instrument = %v, want %s", row["instrument"], want)
 	}
 	fields, _ := row["instrument_fields"].(map[string]any)

@@ -154,7 +154,7 @@ func TestCleanPassAllows(t *testing.T) {
 		t.Errorf("channel = %v, want %s — a reader must be able to tell an absent "+
 			"field from a lost one", row["channel"], ChannelPreToolUse)
 	}
-	if row["instrument"] != "stub-model/2/"+PromptDigest()+"/go-findings-v3-shell" {
+	if row["instrument"] != "stub-model/2/"+PromptDigest()+"/go-findings-v4-shell" {
 		t.Errorf("instrument = %v — it must name the reviewer that actually ran", row["instrument"])
 	}
 	if row["diff_file"] == nil {
@@ -167,7 +167,7 @@ func TestRowCarriesTheInstrumentByDimension(t *testing.T) {
 	h.cfg.ReviewerEffort = "high"
 	h.handle()
 	row := h.lastRow()
-	if row["instrument"] != "stub-model/2/"+PromptDigest()+"/go-findings-v3-shell/high" {
+	if row["instrument"] != "stub-model/2/"+PromptDigest()+"/go-findings-v4-shell/high" {
 		t.Errorf("instrument = %v — a set effort is the fifth segment", row["instrument"])
 	}
 	fields, ok := row["instrument_fields"].(map[string]any)
@@ -176,7 +176,7 @@ func TestRowCarriesTheInstrumentByDimension(t *testing.T) {
 	}
 	want := map[string]any{
 		"provider": "stub", "model": "stub-model", "effort": "high",
-		"runs": float64(2), "prompt_digest": PromptDigest(), "engine": "go-findings-v3-shell",
+		"runs": float64(2), "prompt_digest": PromptDigest(), "engine": "go-findings-v4-shell",
 	}
 	for key, value := range want {
 		if fields[key] != value {
@@ -405,23 +405,36 @@ func TestProseOnlySkips(t *testing.T) {
 	}
 }
 
-// A diff under the minimum is skipped, and the operator line names the size and the
-// configured minimum rather than a constant.
-func TestASmallDiffSkipNamesTheConfiguredMinimum(t *testing.T) {
+// Any non-empty diff is reviewed: a one-character change can carry the most
+// consequence.
+func TestAOneLineDiffIsReviewed(t *testing.T) {
 	cfg := Defaults()
 	cfg.StateDir = t.TempDir()
-	cfg.MinDiffChars = 5000
-	repo := buildRepo(t, map[string]string{"a.py": lines(120)})
+	repo := buildRepo(t, map[string]string{"a.py": "x\n"})
+	reviewer := &stubReviewer{replies: []RawRun{findingReply("NO FINDINGS")}}
+	NewEngine(cfg, reviewer).Handle(context.Background(), Request{
+		Repo: repo, Actor: "s", Channel: ChannelPreToolUse, SessionID: "s",
+		Spec: DiffSpec{StagedOnly: true}, Message: "small",
+	})
+	if reviewer.calls == 0 {
+		t.Fatal("a one-line diff was not reviewed")
+	}
+}
+
+// An empty diff is skipped with a receipt and a row.
+func TestAnEmptyDiffSkipIsLoggedAndNamed(t *testing.T) {
+	cfg := Defaults()
+	cfg.StateDir = t.TempDir()
+	repo := buildRepo(t, map[string]string{"package-lock.json": "lock\n"})
 	reviewer := &stubReviewer{replies: []RawRun{findingReply(oneFinding)}}
 	d := NewEngine(cfg, reviewer).Handle(context.Background(), Request{
 		Repo: repo, Actor: "s", Channel: ChannelPreToolUse, SessionID: "s",
-		Spec: DiffSpec{StagedOnly: true}, Message: "small",
+		Spec: DiffSpec{StagedOnly: true}, Message: "locks",
 	})
 	if d.Kind != ContextOnly || reviewer.calls != 0 {
 		t.Fatalf("Kind = %v after %d reviewer calls; want an unreviewed ContextOnly skip", d.Kind, reviewer.calls)
 	}
-	chars := len(stagedDiff(t, cfg, repo))
-	for _, want := range []string{"not reviewed", fmt.Sprintf("%d characters", chars), "5000-character minimum", `"small"`} {
+	for _, want := range []string{"not reviewed", "the diff is empty", `"locks"`} {
 		if !strings.Contains(d.SystemMessage, want) {
 			t.Errorf("SystemMessage = %q; missing %q", d.SystemMessage, want)
 		}
@@ -495,9 +508,8 @@ func TestLedgerRowAfterATruncatedLineParses(t *testing.T) {
 	}
 }
 
-// The stat-only fallback renders SHORTER than the raw diff it replaces, so testing the
-// rendered length against MinDiffChars made the smallest-commit filter discard the
-// largest commits: a one-file change too big to inline was never reviewed.
+// The stat-only fallback renders SHORTER than the raw diff it replaces, so a one-file
+// change too big to inline must still be reviewed.
 func TestOverBudgetSingleFileIsReviewed(t *testing.T) {
 	h := newHarness(t, findingReply("NO FINDINGS"))
 	h.cfg.MaxDiffChars = 500
@@ -798,8 +810,8 @@ func TestTheEmptyIndexNoticeKeepsTheChain(t *testing.T) {
 	quiet := h.handle()
 	chain := NewChain(h.cfg, ChainKey{Actor: "session-1", Repo: h.repo})
 	state := chain.Load()
-	// The receipt names the DENIED round, both halves. This pass read a diff under
-	// MinDiffChars, so its own digest would name nothing.
+	// The receipt names the DENIED round, both halves. This pass read an empty diff,
+	// so its own digest would name nothing.
 	if !strings.Contains(quiet.Reason, Digest(state.Diff)) {
 		t.Errorf("receipt %q does not name the denied round's diff", quiet.Reason)
 	}

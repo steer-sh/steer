@@ -208,19 +208,77 @@ func TestDropTier(t *testing.T) {
 
 func fileName(i int) string { return "f0" + string(rune('0'+i)) + ".py" }
 
-func TestSmallDiffsAreNotPaddedPastTheSkip(t *testing.T) {
+func TestExclusionNoteOnlyRidesANonEmptyDiff(t *testing.T) {
 	cfg := Defaults()
-	// The exclusion note is several hundred chars, so prepending it unconditionally
-	// would carry an empty diff over the minimum and buy a review of no code at all.
+	// A lock-only commit leaves nothing after the noise filter, and the note alone
+	// would hand the reviewers a diff of no code at all.
 	lockOnly := buildRepo(t, map[string]string{"package-lock.json": strings.Repeat("lock\n", 200)})
-	if got := len(stagedDiff(t, cfg, lockOnly)); got >= cfg.MinDiffChars {
-		t.Errorf("lock-only diff = %d chars, want < %d — it must skip, not review an "+
-			"empty diff", got, cfg.MinDiffChars)
+	if got := stagedDiff(t, cfg, lockOnly); got != "" {
+		t.Errorf("lock-only diff = %q, want empty", got)
 	}
+	// A one-line change is reviewed, so it must say what the filter dropped beside it.
 	tiny := buildRepo(t, map[string]string{"a.py": "x = 1\n", "go.sum": strings.Repeat("sum\n", 200)})
-	if got := len(stagedDiff(t, cfg, tiny)); got >= cfg.MinDiffChars {
-		t.Errorf("tiny diff = %d chars, want < %d — the note must not inflate a "+
-			"below-threshold diff past the skip", got, cfg.MinDiffChars)
+	if got := stagedDiff(t, cfg, tiny); !strings.Contains(got, "Excluded from the diff below") ||
+		!strings.Contains(got, "go.sum") || !strings.Contains(got, "+x = 1") {
+		t.Errorf("tiny diff = %q; want the exclusion note naming go.sum above the change", got)
+	}
+}
+
+// pinBump returns a repo whose index moves submodule `name` one commit forward, with
+// the given `diff.submodule` setting.
+func pinBump(t *testing.T, name, diffSubmodule string) string {
+	t.Helper()
+	parent := t.TempDir()
+	sub := filepath.Join(parent, "sub")
+	top := filepath.Join(parent, "top")
+	for _, dir := range []string{sub, top} {
+		if err := os.Mkdir(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		gitCmd(t, dir, "init", "-q", ".")
+	}
+	gitCmd(t, sub, "commit", "-q", "--allow-empty", "-m", "one")
+	gitCmd(t, top, "-c", "protocol.file.allow=always", "submodule", "add", "-q", sub, name)
+	gitCmd(t, top, "commit", "-q", "-m", "base")
+	gitCmd(t, filepath.Join(top, name), "commit", "-q", "--allow-empty", "-m", "two: the pinned fix")
+	gitCmd(t, top, "add", name)
+	if diffSubmodule != "" {
+		gitCmd(t, top, "config", "diff.submodule", diffSubmodule)
+	}
+	return top
+}
+
+// A pin bump reaches the reviewers with the commits it spans, and the raw diff keeps
+// the gitlink stanza that the section splitter and the ledger readers parse. git
+// quotes a non-ASCII path in the stanza header.
+func TestSubmodulePinCarriesItsCommitLog(t *testing.T) {
+	cases := []struct{ name, setting string }{{"sub", ""}, {"sub", "log"}, {"café", ""}}
+	for _, tc := range cases {
+		repo := pinBump(t, tc.name, tc.setting)
+		d, ok := GetDiffSized(Defaults(), repo, DiffSpec{StagedOnly: true})
+		if !ok {
+			t.Fatal("GetDiffSized failed")
+		}
+		if !strings.HasPrefix(d.Raw, "diff --git ") || !strings.Contains(d.Raw, "Subproject commit") {
+			t.Errorf("%s, diff.submodule=%q: raw = %q; want the gitlink stanza", tc.name, tc.setting, d.Raw)
+		}
+		if !strings.Contains(d.Text, "Submodule ") || !strings.Contains(d.Text, "> two: the pinned fix") {
+			t.Errorf("%s, diff.submodule=%q: text = %q; want the commit the pin spans", tc.name, tc.setting, d.Text)
+		}
+	}
+}
+
+func TestSubmoduleBlocksKeepsOnlySubmoduleBlocks(t *testing.T) {
+	diff := "diff --git a/a.py b/a.py\n@@ -1 +1 @@\n-x\n+  > not a log line\n" +
+		"Submodule sub 1..2:\n  > two\n  > three\n" +
+		"diff --git a/b.py b/b.py\n+y\n" +
+		"Submodule other 3..4 (commits not present)\n"
+	want := "Submodule sub 1..2:\n  > two\n  > three\nSubmodule other 3..4 (commits not present)\n"
+	if got := submoduleBlocks(diff); got != want {
+		t.Errorf("submoduleBlocks = %q, want %q", got, want)
+	}
+	if hasGitlink("diff --git a/a.py b/a.py\n@@ -1 +1 @@\n-index 1..2 160000\n") {
+		t.Error("a hunk body line is not a gitlink header")
 	}
 }
 

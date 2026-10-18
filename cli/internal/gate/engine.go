@@ -131,8 +131,6 @@ type prepared struct {
 	// the chain state and the changed-since-last-round test all key on it — because
 	// two different over-budget versions of one file render to the same stat block.
 	raw string
-	// chars is the raw diff's length on a round skipped as too small.
-	chars int
 }
 
 // prepare resolves the diff for this round, logging the skip rows itself so both
@@ -157,17 +155,16 @@ func (e *Engine) prepare(req Request, firing int, d *DiffResult) (prepared, stri
 			"files": len(paths), "firing": firing})
 		return prepared{}, "binary", err
 	}
-	// The RAW length decides, not the rendered one. They differ only when rendering
-	// makes the diff shorter, which is exactly the over-budget branches — so testing
-	// the rendered length made the smallest-commit filter discard the largest commits.
-	if len(d.Raw) < e.cfg.MinDiffChars {
+	// The RAW diff decides, not the rendered one: rendering adds notes and shortens an
+	// over-budget diff. Any non-empty diff is reviewed, whatever its size.
+	if d.Raw == "" {
 		// Logged, not silent. This was the only skip path writing no row, so a staging
 		// bypass read as "no commit happened" rather than "a commit went ungated" —
 		// the log is the experiment's data, and an invisible skip corrupts it in the
 		// direction that flatters the gate.
 		err := e.log(req, Row{"ts": time.Now().Unix(), "phase": "skip-empty",
 			"files": len(paths), "chars": len(d.Raw), "firing": firing})
-		return prepared{chars: len(d.Raw)}, "empty", err
+		return prepared{}, "empty", err
 	}
 	return prepared{paths: paths, diff: d.Text, raw: d.Raw}, "", nil
 }
@@ -199,7 +196,7 @@ func (e *Engine) Handle(ctx context.Context, req Request) Decision {
 func (e *Engine) handleFirst(ctx context.Context, req Request, chain *Chain) Decision {
 	p, status, err := e.prepare(req, 1, nil)
 	if status != "" {
-		return e.skipped(req, status, p.chars, err)
+		return e.skipped(req, status, err)
 	}
 	// The cleared record is read once the diff is in hand, because it is keyed on the
 	// diff's own content. That is also one `git diff` cheaper than probing first.
@@ -315,12 +312,12 @@ func (e *Engine) handleRetry(ctx context.Context, req Request, chain *Chain, sta
 			if err := chain.Save(state); err != nil && logErr == nil {
 				logErr = err
 			}
-			// The identity is the DENIED round's, both halves. This pass read a diff
-			// under MinDiffChars, so its own digest names nothing, and the notice is
+			// The identity is the DENIED round's, both halves. This pass read an empty
+			// diff, so its own digest names nothing, and the notice is
 			// about the round the chain still awaits an answer for.
 			return proceed(ContextOnly, req, state.Diff, firing, notice, logErr)
 		}
-		return e.release(e.skipped(req, status, p.chars, logErr), req, firing, 0)
+		return e.release(e.skipped(req, status, logErr), req, firing, 0)
 	}
 	// The diff changed, so this round reviews code no reviewer has read.
 	return e.release(withLedgerError(e.reviewCommit(ctx, req, chain, p, next), logErr), req, firing, 0)
@@ -384,7 +381,7 @@ func joinNote(message, note string) string {
 // the reason on both channels: a skip otherwise looks exactly like a gate that never
 // ran. It rules nothing, so the commit keeps its own permission path. A repository git
 // could not read is the fail-open case and stays silent.
-func (e *Engine) skipped(req Request, status string, chars int, err error) Decision {
+func (e *Engine) skipped(req Request, status string, err error) Decision {
 	var why string
 	switch {
 	case status == "prose":
@@ -392,11 +389,8 @@ func (e *Engine) skipped(req Request, status string, chars int, err error) Decis
 	case status == "binary":
 		why = "only the content of existing binary files changed, with paths and modes " +
 			"unchanged, and a reviewer cannot read binary content"
-	case status == "empty" && chars == 0:
-		why = "the diff is empty"
 	case status == "empty":
-		why = fmt.Sprintf("the diff is %d characters, under the %d-character minimum for a review",
-			chars, e.cfg.MinDiffChars)
+		why = "the diff is empty"
 	default:
 		return Decision{Kind: Silent, LedgerError: err}
 	}
