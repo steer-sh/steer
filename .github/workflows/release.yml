@@ -62,6 +62,7 @@ jobs:
         run: |
           python3 scripts/check-binaries.py --bin-dir bin --version "${GITHUB_REF_NAME#v}" \
             --commit "$(git rev-parse --short=7 HEAD)"
+          python3 scripts/third-party-licenses.py --bin-dir bin
       # The GitHub Release carries the tag's CHANGELOG section; a tag without one fails here.
       - name: Release notes from the changelog
         shell: bash
@@ -96,7 +97,9 @@ jobs:
           mkdir -p "$dist"
           for dir in bin/*/; do
             target="$(basename "$dir")"
-            tar -C "$dir" -czf "$dist/steer-$version-$target.tar.gz" steer
+            cp LICENSE THIRD_PARTY_LICENSES "$dir"
+            tar -C "$dir" -czf "$dist/steer-$version-$target.tar.gz" \
+              steer LICENSE THIRD_PARTY_LICENSES
           done
           (cd "$dist" && sha256sum *.tar.gz > SHA256SUMS)
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then

@@ -26,7 +26,7 @@ each artifact's target, cgo setting and stamps before a release publishes it. Bo
 branch `.github/workflows/release.yml` replaces on each `v*` tag with one parentless
 commit: the tagged tree plus `bin/`. The same run publishes a GitHub Release whose
 notes are the tag's `CHANGELOG.md` section, with one archive per binary and their
-checksums; a tag with no changelog section fails before the branch moves.
+checksums; each archive carries `LICENSE` and `THIRD_PARTY_LICENSES` beside the binary; a tag with no changelog section fails before the branch moves.
 `scripts/preflight-release.py` checks the listing
 on the default branch and the bundle on that ref. The Windows
 build-tag files stay, and `check.sh` vets the module under `GOOS=windows`.

@@ -234,8 +234,10 @@ harness that invokes `claude -p`; it is separate from the turn-end gate.
 `steer bin install` then updates `~/.steer/bin/steer` from it; `BIN_DIR` writes elsewhere.
 `./check.sh` builds every shipped target into a scratch `BIN_DIR` and runs
 `scripts/check-binaries.py` over it: target, `CGO_ENABLED=0`, version stamps, and the
-host binary's `--help`. The release workflow runs the same checker on the tagged
-build before it publishes. `.github/workflows/check.yml` runs `./check.sh` on Linux
+host binary's `--help`. `scripts/third-party-licenses.py` then requires the tracked
+`THIRD_PARTY_LICENSES` to equal the license files of the modules those binaries link;
+a dependency change needs its `--write`. The release workflow runs both checkers on
+the tagged build before it publishes. `.github/workflows/check.yml` runs `./check.sh` on Linux
 and macOS; the release workflow runs that workflow first.
 
 The model-driven tests under `tests/` need PyYAML in `tests/.venv`. Read the

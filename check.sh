@@ -37,6 +37,8 @@ VERSION=check-build BIN_DIR="$built" cli/build.sh >/dev/null
 python3 scripts/check-binaries.py --bin-dir "$built" --version check-build \
   --commit "$(git rev-parse --short=7 HEAD)"
 python3 tests/test_check_binaries.py
+python3 scripts/third-party-licenses.py --bin-dir "$built"
+python3 tests/test_third_party_licenses.py
 # Release preparation tools use fixture repositories and fake reviewer replies.
 python3 tests/test_release_tools.py
 python3 tests/test_replay_reviewers.py
