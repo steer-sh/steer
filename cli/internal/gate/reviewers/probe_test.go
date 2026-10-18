@@ -6,7 +6,7 @@ import "testing"
 // reviewer as unknown when it could have said "missing" and named the fix.
 func TestEveryResolvableProviderNamesAnExecutable(t *testing.T) {
 	for _, provider := range []string{"", "agy", "codex", "claude", "claude-code"} {
-		if _, err := Resolve(provider, "", "", "m"); err != nil {
+		if _, err := Resolve(provider, "", ""); err != nil {
 			t.Fatalf("Resolve(%q) = %v", provider, err)
 		}
 		if got := ProbeProvider(provider).State; got == ProbeUnknown {

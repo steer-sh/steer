@@ -71,9 +71,9 @@ func TestLoadMissingFileKeepsShippedDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.ReviewerProvider != "agy" || cfg.ReviewerModel != defaultReviewerModel {
-		t.Fatalf("reviewer defaults = %q/%q; want agy/%s",
-			cfg.ReviewerProvider, cfg.ReviewerModel, defaultReviewerModel)
+	if cfg.ReviewerProvider != "claude-code" || cfg.ReviewerModel != "claude-haiku-5-5" {
+		t.Fatalf("reviewer defaults = %q/%q; want claude-code/claude-haiku-5-5",
+			cfg.ReviewerProvider, cfg.ReviewerModel)
 	}
 	if cfg.ReviewerEffort != "" {
 		t.Fatalf("ReviewerEffort = %q; want the provider's own", cfg.ReviewerEffort)
@@ -100,7 +100,7 @@ func TestLoadReportsAMalformedSettingsFile(t *testing.T) {
 		t.Fatal("Load returned no error over a malformed settings file")
 	}
 	// The gate still has to answer, and the environment still outranks the file.
-	if cfg.ReviewerProvider != "agy" || cfg.ReviewerRuns != 9 {
-		t.Fatalf("cfg = %s/%d; want agy/9", cfg.ReviewerProvider, cfg.ReviewerRuns)
+	if cfg.ReviewerProvider != "claude-code" || cfg.ReviewerRuns != 9 {
+		t.Fatalf("cfg = %s/%d; want claude-code/9", cfg.ReviewerProvider, cfg.ReviewerRuns)
 	}
 }

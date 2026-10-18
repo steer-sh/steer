@@ -101,13 +101,14 @@ func TestEveryCountCarriesItsNoun(t *testing.T) {
 }
 
 // TestCollectNamesTheModelTheConfiguredProviderRuns reads the reviewer through the
-// settings file, where a provider other than agy must not report agy's shipped model.
+// settings file, where each provider reports its own default model.
 func TestCollectNamesTheModelTheConfiguredProviderRuns(t *testing.T) {
 	cases := []struct {
 		name, reviewer, want string
 	}{
 		{"a configured model", `{"provider":"claude-code","model":"claude-sonnet-5-5"}`, "claude-sonnet-5-5"},
-		{"the provider's own default", `{"provider":"claude-code"}`, "claude-code"},
+		{"Steer's default for the provider", `{"provider":"codex"}`, "gpt-6-luna"},
+		{"the CLI's own default", `{"provider":"agy"}`, "agy"},
 		{"no reviewer for an unknown provider", `{"provider":"nonesuch"}`, ""},
 	}
 	for _, tc := range cases {

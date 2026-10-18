@@ -92,23 +92,21 @@ When the user chooses `agy`, tell them two things before you write the choice:
 - Every review stays in their `agy` history: each gated commit adds one
   conversation per reviewer run.
 
-Then ask for the model. Suggest one per provider and accept whatever the user types:
-
-| Provider | Suggested model |
-|---|---|
-| `claude-code` | `sonnet` |
-| `codex` | `gpt-5.6-luna` |
-| `agy` | `gemini-3.7-flash-high` |
-
-**These are suggestions, never a list to validate against.** A newer model must be
-accepted the day it ships. If the user prefers the reviewer CLI's own default, leave
-the model empty — the ledger then records `claude-code-default` or `codex-default`, a
-label that stays stable while the model behind it changes.
-
-Write the choice:
+Then ask for the model. Write the provider first, then read the model Steer would use
+for it when none is set:
 
 ```bash
 "${STEER_BIN}" config set reviewer.provider <provider>
+"${STEER_BIN}" config show
+```
+
+Offer the `reviewer.model` value `config show` prints as the default, and accept any
+model name the user types instead: Steer keeps no model list, so a newer model works
+the day it ships. A user who accepts the default needs no model written; a value
+ending in `-default`, such as `agy-default`, names the CLI's own default and is never
+a model to write. Write a model only when the user names a different one:
+
+```bash
 "${STEER_BIN}" config set reviewer.model <model>
 ```
 

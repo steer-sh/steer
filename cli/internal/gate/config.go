@@ -25,7 +25,6 @@ type Config struct {
 	ReviewerModel         string
 	ReviewerModelOverride string
 	ReviewerEffort        string
-	ReviewerCommand       []string
 	ReviewerRuns          int
 	ReviewTimeout         time.Duration
 
@@ -45,8 +44,8 @@ type Config struct {
 }
 
 const (
-	defaultReviewerModel = "gemini-3.7-flash-high"
-	defaultReviewerRuns  = 3
+	defaultReviewerProvider = "claude-code"
+	defaultReviewerRuns     = 3
 
 	// Per-reviewer wall clock. The reviewers run in parallel, so an adapter's own
 	// timeout must stay above this. A tool-using reviewer over a large diff takes
@@ -96,13 +95,19 @@ var NonReviewPhases = map[string]bool{
 	"ungated-partial": true, PhaseChainEnd: true,
 }
 
+// DefaultReviewerModels is the model each provider reviews with when no model is
+// configured. A provider absent here runs its CLI's own default.
+var DefaultReviewerModels = map[string]string{
+	"claude-code": "claude-haiku-5-5",
+	"codex":       "gpt-6-luna",
+}
+
 // Defaults returns the shipped configuration.
 func Defaults() Config {
 	return Config{
 		StateDir:         defaultStateDir(),
-		ReviewerProvider: "agy",
-		ReviewerModel:    defaultReviewerModel,
-		ReviewerCommand:  []string{"agy", "--model", defaultReviewerModel, "--output-format", "json", "-p"},
+		ReviewerProvider: defaultReviewerProvider,
+		ReviewerModel:    DefaultReviewerModels[defaultReviewerProvider],
 		ReviewerRuns:     defaultReviewerRuns,
 		ReviewTimeout:    defaultReviewTimeout,
 
@@ -181,7 +186,6 @@ func WithEnv(c Config) Config {
 	if v := os.Getenv("COMMIT_GATE_MODEL"); v != "" {
 		c.ReviewerModel = v
 		c.ReviewerModelOverride = v
-		c.ReviewerCommand = []string{"agy", "--model", v, "--output-format", "json", "-p"}
 	}
 	return c
 }

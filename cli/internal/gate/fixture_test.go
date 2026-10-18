@@ -49,7 +49,10 @@ func TestFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg := gate.Defaults()
+	cfg, err := gate.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
 	cfg.StateDir = t.TempDir()
 	cfg.ReviewerRuns = 1
 	if runs, err := strconv.Atoi(os.Getenv("COMMIT_GATE_FIXTURE_RUNS")); err == nil && runs > 0 {
@@ -74,7 +77,11 @@ func TestFixture(t *testing.T) {
 			"which makes repo access decorative")
 	}
 
-	panel := gate.NewPanel(cfg, reviewers.NewAgy(cfg.ReviewerModel, cfg.ReviewerEffort))
+	reviewer, err := reviewers.Resolve(cfg.ReviewerProvider, cfg.ReviewerModelOverride, cfg.ReviewerEffort)
+	if err != nil {
+		t.Fatal(err)
+	}
+	panel := gate.NewPanel(cfg, reviewer)
 	prompt := gate.BuildReviewPrompt(gate.NeutralizeTags(string(message)), gate.NeutralizeTags(diff), contextBlock, gate.Addendum{})
 	result := panel.Run(context.Background(), prompt, repo)
 

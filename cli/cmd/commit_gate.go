@@ -924,7 +924,7 @@ func init() {
 	commitGateBackfillCmd.Flags().BoolVar(&backfillRejoin, "rejoin", false, "Re-judge resolver links and stamped misses under the current rules")
 
 	commitGateCmd.PersistentFlags().StringVar(&commitGateProvider, "provider", "",
-		"Reviewer provider (agy|codex|claude-code); default agy")
+		"Reviewer provider (agy|codex|claude-code); default claude-code")
 	commitGateCmd.PersistentFlags().StringVar(&commitGateModel, "model", "",
 		"Reviewer model; default is the provider's shipped pin")
 	commitGateCmd.PersistentFlags().StringVar(&commitGateEffort, "effort", "",

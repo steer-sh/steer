@@ -89,14 +89,14 @@ var Fields = []Field{
 			return out
 		},
 		Display: func(c gate.Config) string { return reviewers.ProviderLabel(c.ReviewerProvider) },
-		Usage:   "Reviewer CLI (agy|codex|claude-code); unset means agy",
+		Usage:   "Reviewer CLI (agy|codex|claude-code); unset means claude-code",
 		Get:     func(c config.Config) string { return c.Reviewer.Provider },
 		Set: func(c *config.Config, v string) error {
 			// The provider set is closed, so a typo is a write-time error rather than
 			// a hook that fails open on every commit. reviewers.Resolve is the one
 			// resolver, so this can never accept a spelling the gate rejects.
 			if v != "" {
-				if _, err := reviewers.Resolve(v, "", "", ""); err != nil {
+				if _, err := reviewers.Resolve(v, "", ""); err != nil {
 					return err
 				}
 			}
@@ -110,8 +110,8 @@ var Fields = []Field{
 		Label:        "Model",
 		Help:         "Which model that CLI reviews with. Steer keeps no model list, so type any name the CLI accepts.",
 		Kind:         KindText,
-		DefaultLabel: "Provider default",
-		Usage:        "Reviewer model; unset means the provider's own default",
+		DefaultLabel: "Steer default",
+		Usage:        "Reviewer model; unset means Steer's default for the provider",
 		Get:          func(c config.Config) string { return c.Reviewer.Model },
 		Set: func(c *config.Config, v string) error {
 			// No model list. A list becomes a gate that refuses the new model on the
@@ -329,7 +329,7 @@ func BuildReviewer(cfg gate.Config, warn func(string)) (gate.Reviewer, error) {
 	if warning := reviewers.EffortWarning(cfg.ReviewerProvider, cfg.ReviewerEffort); warning != "" && warn != nil {
 		warn(warning)
 	}
-	return reviewers.Resolve(cfg.ReviewerProvider, cfg.ReviewerModelOverride, cfg.ReviewerEffort, cfg.ReviewerModel)
+	return reviewers.Resolve(cfg.ReviewerProvider, cfg.ReviewerModelOverride, cfg.ReviewerEffort)
 }
 
 // Resolve returns the configuration with ReviewerModel naming the model that would

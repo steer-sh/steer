@@ -9,7 +9,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/gate"
 )
 
-// Agy is the default reviewer: `agy --model <m> --output-format json -p <prompt>`.
+// Agy reviews through `agy --model <m> --output-format json -p <prompt>`.
 //
 // agy calls tools on its own, and the gate grants it no permission to: the operator's
 // agy settings are the only boundary. A denial does not stop the run. It leaves either

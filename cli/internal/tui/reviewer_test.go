@@ -173,7 +173,7 @@ func TestReviewerPanelReturnsAFieldToItsDefault(t *testing.T) {
 	if got.Reviewer.Model != "" {
 		t.Errorf("the model is still %q", got.Reviewer.Model)
 	}
-	if !strings.Contains(m.message, "Provider default") {
+	if !strings.Contains(m.message, "Steer default") {
 		t.Errorf("the note does not name the default: %q", m.message)
 	}
 }

@@ -392,8 +392,9 @@ in `--sandbox read-only` with the built-in `codex_apps` connectors off
 (`--disable apps`) and with `--ignore-user-config`, so no MCP server from the user's
 `config.toml` or from a project it trusts starts outside the sandbox. The `auth.json`
 login still applies; no `config.toml` setting does, including `model_provider`,
-profiles, a credential store that keeps the login elsewhere, and the model and effort
-a reviewer setting leaves unset. agy has no flag
+profiles, a credential store that keeps the login elsewhere, and the effort a
+reviewer setting leaves unset. An unset model takes the provider's entry in
+`gate.DefaultReviewerModels`; agy has none and runs its own default. agy has no flag
 to skip the operator's hooks or to sandbox its tools: the operator's agy hooks and
 permissions are its only boundary. In print mode agy denies any tool call that no
 allow rule names, because it cannot prompt, so an allow rule the operator keeps for

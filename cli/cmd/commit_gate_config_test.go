@@ -9,7 +9,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/gate/reviewers"
 )
 
-func TestBuildReviewerDoesNotHandAgyPinToConfiguredCodex(t *testing.T) {
+func TestBuildReviewerGivesConfiguredCodexItsOwnDefault(t *testing.T) {
 	oldProvider, oldModel := commitGateProvider, commitGateModel
 	commitGateProvider, commitGateModel = "", ""
 	t.Cleanup(func() {
@@ -22,8 +22,8 @@ func TestBuildReviewerDoesNotHandAgyPinToConfiguredCodex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildReviewer: %v", err)
 	}
-	if reviewer.Name() != "codex" || reviewer.ModelLabel() != "codex-default" {
-		t.Fatalf("reviewer = %s/%s; want codex/codex-default",
+	if reviewer.Name() != "codex" || reviewer.ModelLabel() != "gpt-6-luna" {
+		t.Fatalf("reviewer = %s/%s; want codex/gpt-6-luna",
 			reviewer.Name(), reviewer.ModelLabel())
 	}
 }
@@ -61,17 +61,17 @@ func TestResolvedGateConfigNamesTheModelThatWouldRun(t *testing.T) {
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("COMMIT_GATE_MODEL", "")
 
-	// A status view reads ReviewerModel. Without resolution it holds the shipped agy
-	// pin, so every render target names a Gemini model under a Codex reviewer.
-	if pin := gateConfig().ReviewerModel; pin != "gemini-3.7-flash-high" {
+	// A status view reads ReviewerModel. Without resolution it holds the default
+	// provider's model, so every render target names a Claude model under Codex.
+	if pin := gateConfig().ReviewerModel; pin != "claude-haiku-5-5" {
 		t.Fatalf("unresolved ReviewerModel = %q; want the shipped pin", pin)
 	}
 	resolved, _, err := resolvedGateConfig()
 	if err != nil {
 		t.Fatalf("resolvedGateConfig: %v", err)
 	}
-	if got := resolved.ReviewerModel; got != "codex-default" {
-		t.Fatalf("resolved ReviewerModel = %q; want codex-default", got)
+	if got := resolved.ReviewerModel; got != "gpt-6-luna" {
+		t.Fatalf("resolved ReviewerModel = %q; want gpt-6-luna", got)
 	}
 }
 

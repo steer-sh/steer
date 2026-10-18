@@ -21,32 +21,26 @@ type Provider struct {
 	Efforts []string
 	// Executable is the command this provider runs, which a probe looks for.
 	Executable string
-	// build makes the reviewer. agyDefault is a model pin that names something on
-	// agy alone, so every other provider ignores it.
-	build func(model, effort, agyDefault string) gate.Reviewer
+	// build makes the reviewer from a resolved model and effort.
+	build func(model, effort string) gate.Reviewer
 }
 
 // providers is the supported set, in the order an editor lists it.
 var providers = []Provider{
 	{
-		ID: "agy", Label: "Antigravity", Aliases: []string{""}, Executable: "agy",
+		ID: "agy", Label: "Antigravity", Executable: "agy",
 		Efforts: []string{"low", "medium", "high"},
-		build: func(model, effort, agyDefault string) gate.Reviewer {
-			if model == "" {
-				model = agyDefault
-			}
-			return NewAgy(model, effort)
-		},
+		build:   func(model, effort string) gate.Reviewer { return NewAgy(model, effort) },
 	},
 	{
 		ID: "codex", Label: "Codex", Executable: "codex",
-		build: func(model, effort, _ string) gate.Reviewer { return NewCodex(model, effort) },
+		build: func(model, effort string) gate.Reviewer { return NewCodex(model, effort) },
 	},
 	{
-		ID: "claude-code", Label: "Claude Code", Aliases: []string{"claude"},
+		ID: "claude-code", Label: "Claude Code", Aliases: []string{"", "claude"},
 		Executable: "claude",
 		Efforts:    []string{"low", "medium", "high", "xhigh", "max"},
-		build:      func(model, effort, _ string) gate.Reviewer { return NewClaudeCode(model, effort) },
+		build:      func(model, effort string) gate.Reviewer { return NewClaudeCode(model, effort) },
 	},
 }
 

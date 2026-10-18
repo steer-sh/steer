@@ -262,7 +262,7 @@ func TestEffortWarningNamesOnlyADocumentedSet(t *testing.T) {
 	}{
 		{"agy", "high", false},
 		{"agy", "xhigh", true},
-		{"", "max", true},
+		{"", "turbo", true},
 		{"claude-code", "max", false},
 		{"claude", "xhigh", false},
 		{"codex", "anything", false},
@@ -279,8 +279,8 @@ func TestEffortWarningNamesOnlyADocumentedSet(t *testing.T) {
 // An empty provider is the default reviewer. The warning must still name it, or the
 // line reads "is not one of 's documented levels".
 func TestEffortWarningNamesTheResolvedProvider(t *testing.T) {
-	got := EffortWarning("", "max")
-	if !strings.Contains(got, `"agy"`) && !strings.Contains(got, "agy's") {
-		t.Fatalf("EffortWarning = %q; want it to name agy", got)
+	got := EffortWarning("", "turbo")
+	if !strings.Contains(got, `"claude-code"`) && !strings.Contains(got, "claude-code's") {
+		t.Fatalf("EffortWarning = %q; want it to name claude-code", got)
 	}
 }
