@@ -200,7 +200,8 @@ Read the linked architecture section before changing the corresponding boundary:
 ## Build and verification
 
 Run `./check.sh` before reporting a change complete. It checks gofmt, builds,
-vets and runs Go tests, then `scripts/revert-test.py`: each Go test added since
+vets, runs `govulncheck` (the `tool` in `cli/go.mod`; it reads vuln.go.dev) and
+Go tests, then `scripts/revert-test.py`: each Go test added since
 the upstream branch must fail under some variant of the change, and
 `// pins existing behaviour` in a test's doc comment exempts it. A test it accepted
 is judged again only when its package's test-side files or the checker change
