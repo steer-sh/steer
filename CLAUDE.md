@@ -274,7 +274,7 @@ footer in the agent's recorded tool result. A unit test sees only the master's J
 not what a harness passes to the model.
 
 For routing changes, `tests/routing_scenarios.py --model <model>` runs the
-`/steer --headless --route-only` and `--route` scenarios in
+`/steer --headless --route-only` scenarios in
 `tests/test_data/routing.yaml`.
 
 For report prose changes, `tests/report_scenarios.py` copies the working-tree
