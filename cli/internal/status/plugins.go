@@ -46,6 +46,11 @@ type PluginCopy struct {
 // Differs reports a copy that bundles a build other than the stable executable.
 func (p PluginCopy) Differs() bool { return p.State == PluginDifferentBinary }
 
+// BinInstallCommand places this copy's build at the stable executable.
+func (p PluginCopy) BinInstallCommand() string {
+	return steerbin.Quote(filepath.Join(p.Path, "scripts", "steer")) + " bin install"
+}
+
 // PluginCopies reads every cached Steer plugin copy in the Claude Code and Codex
 // global plugin caches. A harness with no cache yields no row.
 func PluginCopies() []PluginCopy {

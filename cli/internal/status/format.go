@@ -113,6 +113,20 @@ func RebuildCommand(scope string) string {
 	return "steer hooks rebuild --scope " + scope
 }
 
+// StaleScopes names each scope with a registered master that needs a rebuild,
+// once, in the order the rows list them.
+func StaleScopes(rows []MasterRuntime) []string {
+	var scopes []string
+	seen := map[string]bool{}
+	for _, m := range rows {
+		if m.Stale() && !seen[m.Scope] {
+			seen[m.Scope] = true
+			scopes = append(scopes, m.Scope)
+		}
+	}
+	return scopes
+}
+
 // SyncCommand registers a scope's existing master and rules in every installed
 // harness without regenerating the master.
 func SyncCommand(scope string) string {

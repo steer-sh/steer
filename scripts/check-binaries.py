@@ -9,7 +9,7 @@ report that GOOS and GOARCH, CGO_ENABLED=0, and -X stamps of Version=V and
 GitCommit=C. Each target in SIGNED_TARGETS must be a Mach-O that carries an
 LC_CODE_SIGNATURE whose data starts with the embedded-signature magic, since
 Apple Silicon refuses to start an unsigned binary. The binary for this host then runs `--help` and must exit 0 within the
-timeout. GO names the go command (default "go"). Exits 1 naming every failure.
+timeout, and runs `--version`, which must exit 0 and print `steer V (C, ...`. GO names the go command (default "go"). Exits 1 naming every failure.
 """
 
 import argparse
@@ -108,17 +108,31 @@ def host_target():
     return f"{platform.system().lower()}-{arch}"
 
 
-def smoke_error(binary, timeout):
-    """Run the binary with --help; return the failure, or None."""
+def run_error(binary, flag, timeout):
+    """Run the binary with one flag; return (failure or None, stdout)."""
     try:
-        run = subprocess.run([str(binary), "--help"], capture_output=True, text=True,
+        run = subprocess.run([str(binary), flag], capture_output=True, text=True,
                              timeout=timeout)
     except subprocess.TimeoutExpired:
-        return f"--help did not exit within {timeout}s"
+        return f"{flag} did not exit within {timeout}s", ""
     except OSError as exc:
-        return f"--help did not start: {exc}"
+        return f"{flag} did not start: {exc}", ""
     if run.returncode != 0:
-        return f"--help exited {run.returncode}: {run.stderr.strip()[:200]}"
+        return f"{flag} exited {run.returncode}: {run.stderr.strip()[:200]}", ""
+    return None, run.stdout
+
+
+def smoke_error(binary, timeout, version, commit):
+    """Run the binary with --help, then --version; return the failure, or None."""
+    error, _ = run_error(binary, "--help", timeout)
+    if error:
+        return error
+    error, out = run_error(binary, "--version", timeout)
+    if error:
+        return error
+    want = f"steer {version} ({commit},"
+    if not out.startswith(want):
+        return f"--version printed {out.strip()[:200]!r}, want it to start with {want!r}"
     return None
 
 
@@ -144,7 +158,7 @@ def check(bin_dir, version, commit, go, host, timeout):
     if host not in TARGETS:
         failures.append(f"host {host} is not a shipped target, so no binary ran")
     elif (bin_dir / host / "steer").is_file():
-        error = smoke_error((bin_dir / host / "steer").resolve(), timeout)
+        error = smoke_error((bin_dir / host / "steer").resolve(), timeout, version, commit)
         if error:
             failures.append(f"{host}: {error}")
     return failures
@@ -165,7 +179,7 @@ def main():
         print(f"check-binaries: {failure}", file=sys.stderr)
     if failures:
         return 1
-    print(f"check-binaries: {len(TARGETS)} targets match; {', '.join(SIGNED_TARGETS)} signed; {args.host} --help ran")
+    print(f"check-binaries: {len(TARGETS)} targets match; {', '.join(SIGNED_TARGETS)} signed; {args.host} --help and --version ran")
     return 0
 
 

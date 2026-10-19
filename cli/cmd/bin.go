@@ -8,6 +8,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/claude"
 	codexhooks "github.com/steer-sh/steer-cli/internal/codex"
 	pihooks "github.com/steer-sh/steer-cli/internal/pi"
+	"github.com/steer-sh/steer-cli/internal/status"
 	"github.com/steer-sh/steer-cli/internal/steerbin"
 	"github.com/steer-sh/steer-cli/internal/styles"
 	"github.com/steer-sh/steer-cli/internal/utils"
@@ -42,7 +43,17 @@ is skipped, and nothing says so. The gate reads as armed while the commits land
 unreviewed.
 
 The copy and the re-registration are one operation, because a path written into a
-config is stranded the moment the file it names moves.`,
+config is stranded the moment the file it names moves.
+
+A guard master embeds the runtime it was built with, so install then rebuilds a
+global master whose runtime differs from this binary's. A project master is
+committed and shared: install names its rebuild command and leaves the file as
+it is.
+
+After a plugin update, run install from the updated plugin's launcher; the
+plugin update alone changes neither the stable executable nor any master.`,
+	Example: `  steer bin install
+  ~/.claude/plugins/cache/<marketplace>/steer/<version>/scripts/steer bin install`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path, err := steerbin.Ensure()
 		if err != nil {
@@ -53,17 +64,43 @@ config is stranded the moment the file it names moves.`,
 		fmt.Println()
 		utils.Success("Installed " + path)
 
+		utils.Info(versionLine())
+
 		rewritten, err := repointRegistrations(path)
 		if err != nil {
 			return err
 		}
 		if rewritten == 0 {
 			utils.Info("No registration needed rewriting.")
-			return nil
+		} else {
+			utils.Info(fmt.Sprintf("Repointed %d registration(s) at the stable executable.", rewritten))
 		}
-		utils.Info(fmt.Sprintf("Repointed %d registration(s) at the stable executable.", rewritten))
-		return nil
+		return rebuildStaleMasters()
 	},
+}
+
+// rebuildStaleMasters rebuilds the global guard master when its runtime is not
+// this binary's, and names the rebuild of a stale project master without running
+// it, because that master is committed for the whole repository.
+func rebuildStaleMasters() error {
+	for _, s := range status.StaleScopes(status.MasterRuntimes(claude.GlobalScope, claude.ProjectScope)) {
+		if s != claude.GlobalScope {
+			utils.Info(fmt.Sprintf("The %s guard master runs an older runtime and is committed; "+
+				"to rebuild it for the repository, run: %s", s, status.RebuildCommand(s)))
+			continue
+		}
+		targets, err := currentRegistrars()
+		if err != nil {
+			return err
+		}
+		result, err := claude.RebuildMaster(s, targets...)
+		if err != nil {
+			return fmt.Errorf("rebuild the %s guard master: %w", s, err)
+		}
+		utils.Info(fmt.Sprintf("The %s guard master ran an older runtime; rebuilt it:", s))
+		printRebuild(s, result)
+	}
+	return nil
 }
 
 // relinkClaude repoints this scope's Claude Code registrations, reporting how many

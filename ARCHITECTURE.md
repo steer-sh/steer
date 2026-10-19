@@ -37,7 +37,11 @@ Bundled commands resolve the plugin root through
 `~/.steer/bin/steer`. `HookCommand` supplies commands to CLI and dashboard
 registrations, with a reported PATH fallback if installation fails.
 `steer bin install` copies the binary and relinks Steer-owned registrations;
-custom wrapper commands retain their ownership. Guard master registration is
+custom wrapper commands retain their ownership. It then rebuilds a global guard
+master whose runtime differs from the installed binary's, and only names the
+rebuild of a stale project master, which the repository commits. A plugin
+update refreshes the harness's cached copy alone, so this install is the
+upgrade step. Guard master registration is
 separate: project store paths can remain relative, while global and bridge paths
 can be absolute. Reviewer flags in older registrations are stripped
 when repointing because those flags would override operator settings.

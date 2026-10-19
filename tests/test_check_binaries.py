@@ -125,6 +125,10 @@ print(f"\\tbuild\\tCGO_ENABLED={cgo}\\n\\tbuild\\tGOARCH={goarch}\\n\\tbuild\\tG
 '''
 
 
+HOST_BINARY = ('#!/bin/sh\n[ "$1" = --version ] && echo "steer 1.2.3 (abc1234, built now)"\n'
+               "exit 0\n")
+
+
 class Check(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
@@ -135,7 +139,7 @@ class Check(unittest.TestCase):
         self.go.chmod(0o755)
         self.bin = self.tmp / "bin"
         for target in cb.TARGETS:
-            self.binary(target, "#!/bin/sh\nexit 0\n")
+            self.binary(target, HOST_BINARY)
         for target in cb.SIGNED_TARGETS:
             self.write(target, macho(cb.LC_CODE_SIGNATURE))
 
@@ -178,6 +182,16 @@ class Check(unittest.TestCase):
         self.binary("linux-amd64", "#!/bin/sh\nexec sleep 5\n")
         self.assertEqual(self.check(timeout=0.5),
                          ["linux-amd64: --help did not exit within 0.5s"])
+
+    def test_wrong_version_output_fails(self):
+        self.binary("linux-amd64", '#!/bin/sh\necho "steer dev (unknown, built unknown)"\n')
+        self.assertEqual(self.check(), ["linux-amd64: --version printed 'steer dev (unknown, "
+                                        "built unknown)', want it to start with "
+                                        "'steer 1.2.3 (abc1234,'"])
+
+    def test_failing_version_flag_fails(self):
+        self.binary("linux-amd64", '#!/bin/sh\n[ "$1" = --version ] && exit 4\nexit 0\n')
+        self.assertEqual(self.check(), ["linux-amd64: --version exited 4: "])
 
     def test_only_host_binary_runs(self):
         self.binary("darwin-amd64", "#!/bin/sh\nexit 3\n")

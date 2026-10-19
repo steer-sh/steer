@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 	"unicode"
 
@@ -183,7 +182,7 @@ func renderPluginCopies(s *status.SystemStatus, width int) {
 				{"Why", []string{"its skills and launcher come from that copy, and the hooks run ~/.steer/bin/steer"}},
 				{"Next", []string{
 					"if the copy is older, update the plugin in " + status.HarnessLabel(p.Harness),
-					"if the copy is newer, run: " + filepath.Join(p.Path, "scripts", "steer") + " bin install",
+					"if the copy is newer, run: " + p.BinInstallCommand(),
 				}},
 			}, width))
 	}

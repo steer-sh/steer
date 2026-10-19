@@ -451,11 +451,15 @@ func runCadence() {
 	// A stale guard master is a standing condition, not a queue change: the store
 	// keeps whatever runtime it was last built with, and upgrading the CLI
 	// repairs nothing until something rebuilds it.
-	key, labels, scope := staleMasters()
-	if cadence.ShouldNudgeMaster(dir, key) {
-		lines = append(lines, fmt.Sprintf(
-			"steer: the guard master runs an older runtime (%s) — run: steer hooks rebuild --scope %s",
-			strings.Join(labels, ", "), scope))
+	key, labels, scopes := staleMasters()
+	// The plugin line's install rebuilds the global master, so the master line
+	// reads the plugin copies before it chooses its repair.
+	pluginCopies := status.PluginCopies()
+	pluginKey, pluginLabels := status.DifferingPlugins(pluginCopies)
+	install := runningCopyInstall(pluginCopies, runningExecutable())
+	masterDue := cadence.ShouldNudgeMaster(dir, key)
+	if masterDue {
+		lines = append(lines, staleMasterLine(labels, scopes, install != ""))
 	}
 	// A drifted rules section is the same kind of standing condition: nothing
 	// rewrites it until a sync, and meanwhile an agent does not read the rule.
@@ -493,11 +497,8 @@ func runCadence() {
 	}
 	// A harness runs skills and the launcher from its cached plugin copy, and
 	// nothing refreshes that copy when the stable executable changes.
-	pluginKey, pluginLabels := status.DifferingPlugins(status.PluginCopies())
-	if cadence.ShouldNudgePlugins(dir, pluginKey) {
-		lines = append(lines, fmt.Sprintf(
-			"steer: a harness's plugin copy bundles another Steer build than ~/.steer/bin/steer (%s) — run: steer status",
-			strings.Join(pluginLabels, "; ")))
+	if pluginLineDue(cadence.ShouldNudgePlugins(dir, pluginKey), masterDue, install) {
+		lines = append(lines, pluginCopyLine(pluginLabels, install))
 	}
 	if len(lines) == 0 {
 		// Nothing to say, but a repaired condition still has to clear its key: a
@@ -529,27 +530,103 @@ func runCadence() {
 	_ = cadence.WriteNudge(dir, rec)
 }
 
-// staleMasters names the scopes whose registered guard master carries a runtime
-// other than this binary's, and a key that changes with them. An empty key means
+// staleMasters names the masters whose registered runtime differs from this
+// binary's, the scopes that hold them, and a key that changes with them. An empty key means
 // nothing is stale. Every read fails soft: an unreadable configuration reports no
 // master rather than a false alarm.
-func staleMasters() (key string, labels []string, scope string) {
+func staleMasters() (key string, labels []string, scopes []string) {
+	rows := status.MasterRuntimes(claude.GlobalScope, claude.ProjectScope)
 	parts := []string{}
-	for _, m := range status.MasterRuntimes(claude.GlobalScope, claude.ProjectScope) {
+	for _, m := range rows {
 		if !m.Stale() {
 			continue
 		}
 		parts = append(parts, fmt.Sprintf("%s/%s:%s:%s", m.Harness, m.Scope, m.State, m.Runtime))
 		labels = append(labels, fmt.Sprintf("%s %s scope", m.Harness, m.Scope))
-		if scope == "" {
-			scope = m.Scope
-		}
 	}
 	if len(parts) == 0 {
-		return "", nil, ""
+		return "", nil, nil
 	}
 	sort.Strings(parts)
-	return strings.Join(parts, "|"), labels, scope
+	return strings.Join(parts, "|"), labels, status.StaleScopes(rows)
+}
+
+// staleMasterLine names the stale masters and a rebuild for each scope. When a
+// plugin copy bundles another build, a rebuild from the terminal's steer would
+// embed the old runtime again, so the line defers to the plugin line's install,
+// which rebuilds the global master itself.
+func staleMasterLine(labels, scopes []string, pluginsDiffer bool) string {
+	repairs := make([]string, 0, len(scopes))
+	for _, s := range scopes {
+		if pluginsDiffer && s == claude.GlobalScope {
+			continue
+		}
+		repairs = append(repairs, status.RebuildCommand(s))
+	}
+	line := fmt.Sprintf("steer: the guard master runs an older runtime (%s)", strings.Join(labels, ", "))
+	switch {
+	case !pluginsDiffer:
+		return line + " — run: " + strings.Join(repairs, " and ")
+	case len(repairs) == 0:
+		return line + " — the bin install below rebuilds it"
+	case len(repairs) < len(scopes):
+		return line + " — the bin install below rebuilds the global master; after it, run: " + strings.Join(repairs, " and ")
+	}
+	return line + " — after the bin install below, run: " + strings.Join(repairs, " and ")
+}
+
+// runningExecutable is this process's binary with its links resolved, "" when
+// it cannot be read.
+func runningExecutable() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		return resolved
+	}
+	return exe
+}
+
+// runningCopyInstall names the install for the differing plugin copy that holds
+// the running binary, "" when none does. The SessionStart hook runs from the copy
+// the harness loads, and a cache can keep older version directories beside it,
+// whose install would place an older build.
+func runningCopyInstall(copies []status.PluginCopy, running string) string {
+	if running == "" {
+		return ""
+	}
+	for _, p := range copies {
+		if !p.Differs() {
+			continue
+		}
+		root := p.Path
+		if resolved, err := filepath.EvalSymlinks(root); err == nil {
+			root = resolved
+		}
+		if strings.HasPrefix(running, root+string(filepath.Separator)) {
+			return p.BinInstallCommand()
+		}
+	}
+	return ""
+}
+
+// pluginLineDue reports whether the plugin line prints: when its own key
+// changed, or when a printed master line defers its repair to the line's install.
+func pluginLineDue(pluginDue, masterDue bool, install string) bool {
+	return pluginDue || (masterDue && install != "")
+}
+
+// pluginCopyLine names the plugin copies that bundle another build. The
+// comparison cannot tell which build is newer, so an install is conditioned on a
+// plugin update and status keeps both repairs.
+func pluginCopyLine(labels []string, install string) string {
+	line := fmt.Sprintf("steer: a harness's plugin copy bundles another Steer build than ~/.steer/bin/steer (%s)",
+		strings.Join(labels, "; "))
+	if install == "" {
+		return line + " — run: steer status"
+	}
+	return line + " — after a plugin update, run: " + install + "; otherwise run: steer status"
 }
 
 // spawnRefresh starts 'steer report refresh' detached, so a stale queue refreshes

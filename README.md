@@ -96,6 +96,12 @@ To remove a custom guard, run `steer remove <hook-name>`. For a factory preset, 
 - **One repository only:** run `steer commit-gate install --harness <claude-code|codex> --scope project` in that repository instead of the global gate that setup installs.
 - **Git pre-commit:** for other workflows, run `steer commit-gate install --precommit` in the repository. Choose one channel per repository to avoid reviewing commits twice.
 
+## Update
+
+A plugin update refreshes the skills and the plugin's own copy of `steer`. It does not change `~/.steer/bin/steer`, which your hooks run, or the guard runners that Steer generated. After the update, the next session's start-up message names the command for your machine: the updated plugin's `scripts/steer bin install`. That command copies the new build to `~/.steer/bin/steer`, repoints Steer's hook registrations at it, and rebuilds your global guard runner. A repository's guard runner is committed, so `bin install` prints `steer hooks rebuild --scope project` for you to run in that repository when you choose.
+
+`steer --version` names the build you run, with its commit and build date.
+
 ## Uninstall
 
 Setup writes hook registrations into each agent's own settings, and those registrations call `~/.steer/bin/steer`. Removing the plugin removes neither. Run these commands with `~/.steer/bin/steer` before you delete it, once for each agent you set up (`--harness claude-code` or `--harness codex`).

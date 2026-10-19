@@ -74,7 +74,8 @@ Read the linked architecture section before changing the corresponding boundary:
   installer, so a change to an installer's refusals changes restore too.
 - Guard execution or fixture mining: [runtime and fixtures](ARCHITECTURE.md#guard-runtime-and-fixtures).
   `cli/internal/guard/runtime.py` is embedded in generated masters. A CLI upgrade
-  needs `steer hooks rebuild --scope <scope>` to update an installed master;
+  updates an installed master only through `steer hooks rebuild --scope <scope>`,
+  which `steer bin install` runs for a stale global master alone;
   fixture runs must keep synthetic firings out of the live audit log.
   To probe a guard, use `steer test` or `tests/sandbox.py`; never pipe a payload
   into the installed master or run an agent against the real home. The runtime

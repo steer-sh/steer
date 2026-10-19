@@ -141,7 +141,8 @@ channel. Choose one channel per repository, or a commit gets reviewed twice.
 ```
 
 This copies the binary to `~/.steer/bin/steer` and repoints every registration at
-that absolute path. A registration naming the bare word `steer` is resolved on PATH
+that absolute path. It also rebuilds a global guard runner built by an older
+Steer, and prints the rebuild command for a stale project runner; relay that line. A registration naming the bare word `steer` is resolved on PATH
 at hook time, and neither harness reports a command it cannot resolve: the tool call
 runs, the hook is skipped, and nothing says so.
 
