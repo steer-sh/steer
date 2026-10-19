@@ -140,7 +140,10 @@ func TestCheckRefusesACodexRunnerWithNoApprovalRecord(t *testing.T) {
 		t.Fatalf("--force: %v", err)
 	}
 
-	hooks := filepath.Join(home, ".codex", "hooks.json")
+	hooks, err := filepath.EvalSymlinks(filepath.Join(home, ".codex", "hooks.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	key := strconv.Quote(hooks + ":pre_tool_use:0:0")
 	config := "[hooks.state." + key + "]\nenabled = true\n"
 	if err := os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte(config), 0o644); err != nil {

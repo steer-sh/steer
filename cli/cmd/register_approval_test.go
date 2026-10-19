@@ -32,7 +32,11 @@ func TestRegisterNamesTheCodexApprovalUntilARecordExists(t *testing.T) {
 		t.Fatalf("unapproved runner: got %q", line)
 	}
 
-	key := fmt.Sprintf("%s:pre_tool_use:0:0", filepath.Join(codexHome, "hooks.json"))
+	hooksFile, err := filepath.EvalSymlinks(filepath.Join(codexHome, "hooks.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := fmt.Sprintf("%s:pre_tool_use:0:0", hooksFile)
 	record := fmt.Sprintf("[hooks.state.%q]\ntrusted_hash = \"x\"\n", key)
 	if err := os.WriteFile(filepath.Join(codexHome, "config.toml"), []byte(record), 0o644); err != nil {
 		t.Fatal(err)

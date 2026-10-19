@@ -70,19 +70,42 @@ func (a Arming) Effective() bool { return a.Registered && a.Matcher == CommitGat
 
 func trustSection(key string) string { return "[hooks.state." + strconv.Quote(key) + "]" }
 
-// trustKey spells the config.toml key Codex records for a handler. Codex names the
-// hooks.json by its absolute path, so a project path relative to the working
-// directory is resolved first.
-func trustKey(path, event string, entry, handler int) string {
+// trustKeys spells the config.toml keys Codex may record for a handler: the
+// hooks.json path joined to the folder Codex loaded it from. Codex keeps the folder
+// as it reached it, which for a project is its working directory: a shell that
+// entered through a symlink hands it the resolved path, and -C a linked path keeps
+// the link. Both spellings count, as written first. The .codex folder and the file
+// name keep their spelling, links included.
+func trustKeys(path, event string, entry, handler int) []string {
 	if abs, err := filepath.Abs(path); err == nil {
 		path = abs
 	}
-	return fmt.Sprintf("%s:%s:%d:%d", path, trustEvent[event], entry, handler)
+	paths := []string{path}
+	dir := filepath.Dir(filepath.Dir(path))
+	for {
+		if real, err := filepath.EvalSymlinks(dir); err == nil {
+			if resolved := filepath.Join(real, strings.TrimPrefix(path, dir)); resolved != path {
+				paths = append(paths, resolved)
+			}
+			break
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	keys := make([]string, len(paths))
+	for i, p := range paths {
+		keys[i] = fmt.Sprintf("%s:%s:%d:%d", p, trustEvent[event], entry, handler)
+	}
+	return keys
 }
 
 // trustRecords reports whether config.toml could be read, and whether it holds a trust
-// record for every key.
-func trustRecords(keys []string) (known, present bool) {
+// record for every handler under one spelling: handlers[h][s] is handler h's key in
+// spelling s, and every handler names the same hooks.json.
+func trustRecords(handlers [][]string) (known, present bool) {
 	home, err := codexHome()
 	if err != nil {
 		return false, false
@@ -91,12 +114,19 @@ func trustRecords(keys []string) (known, present bool) {
 	if err != nil && !os.IsNotExist(err) {
 		return false, false
 	}
-	for _, key := range keys {
-		if !strings.Contains(string(raw), trustSection(key)) {
-			return true, false
+	if len(handlers) == 0 {
+		return true, true
+	}
+	for s := range handlers[0] {
+		all := true
+		for _, keys := range handlers {
+			all = all && s < len(keys) && strings.Contains(string(raw), trustSection(keys[s]))
+		}
+		if all {
+			return true, true
 		}
 	}
-	return true, true
+	return true, false
 }
 
 func hooksPath(scope, cwd string) (string, error) {
@@ -383,9 +413,9 @@ func ResolverArmingRow(scope, cwd string) Arming {
 	}
 	timeout := 0
 	command := ""
-	var keys []string
+	var keys [][]string
 	for _, event := range resolverEvents {
-		key := ""
+		var key []string
 		for i, raw := range eventEntries(root, event) {
 			entry, _ := raw.(map[string]any)
 			hooks, _ := entry["hooks"].([]any)
@@ -395,14 +425,14 @@ func ResolverArmingRow(scope, cwd string) Arming {
 				if !isResolver(cmdText) {
 					continue
 				}
-				key = trustKey(path, event, i, j)
+				key = trustKeys(path, event, i, j)
 				command = cmdText
 				if t, ok := hook["timeout"].(float64); ok {
 					timeout = int(t)
 				}
 			}
 		}
-		if key == "" {
+		if key == nil {
 			return Arming{Path: path}
 		}
 		keys = append(keys, key)
@@ -446,7 +476,7 @@ func armingFor(scope, cwd string, owns func(string) bool) Arming {
 			if timeout, ok := hook["timeout"].(float64); ok {
 				a.Timeout = int(timeout)
 			}
-			a.TrustStateKnown, a.TrustRecordPresent = trustRecords([]string{trustKey(path, "PreToolUse", i, j)})
+			a.TrustStateKnown, a.TrustRecordPresent = trustRecords([][]string{trustKeys(path, "PreToolUse", i, j)})
 			return a
 		}
 	}

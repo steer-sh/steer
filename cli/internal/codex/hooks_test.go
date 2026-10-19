@@ -119,7 +119,7 @@ func TestRegisterPreservesUnrelatedKeysAndIsIdempotent(t *testing.T) {
 	if !arming.Effective() || arming.Timeout != 210 || arming.TrustRecordPresent || !arming.TrustStateKnown {
 		t.Fatalf("arming = %#v", arming)
 	}
-	key := filepath.Join(home, "hooks.json") + ":pre_tool_use:1:0"
+	key := realPath(t, filepath.Join(home, "hooks.json")) + ":pre_tool_use:1:0"
 	config := "[hooks.state.\"" + key + "\"]\ntrusted_hash = \"sha256:codex-validates-this\"\n"
 	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(config), 0o644); err != nil {
 		t.Fatal(err)
@@ -185,7 +185,7 @@ func TestProjectRunnerTrustIsReadAtTheAbsolutePath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	config := "[hooks.state." + strconv.Quote(abs+":pre_tool_use:0:0") + "]\nenabled = true\n"
+	config := "[hooks.state." + strconv.Quote(realPath(t, abs)+":pre_tool_use:0:0") + "]\nenabled = true\n"
 	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(config), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -374,7 +374,7 @@ func TestResolverTrustIsReadAtItsOwnHandlers(t *testing.T) {
 	if _, err := RegisterCommitGateAndResolver("global", "", "steer commit-gate review-codex", 240, "steer commit-gate backfill", 30); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(home, "hooks.json")
+	path := realPath(t, filepath.Join(home, "hooks.json"))
 	approve := func(keys ...string) {
 		t.Helper()
 		config := ""
@@ -400,5 +400,99 @@ func TestResolverTrustIsReadAtItsOwnHandlers(t *testing.T) {
 	}
 	if a := CommitGateArming("global", ""); a.TrustRecordPresent {
 		t.Fatalf("the resolver's approval was read as the gate's: %#v", a)
+	}
+}
+
+// TestTrustKeysNameBothSpellingsOfALinkedRepository: Codex keys a project by the
+// working directory it was given, the link or its target, so either record counts.
+func TestTrustKeysNameBothSpellingsOfALinkedRepository(t *testing.T) {
+	dir := realPath(t, t.TempDir())
+	repo := filepath.Join(dir, "repo")
+	if err := os.MkdirAll(filepath.Join(repo, ".codex"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "repo-link")
+	if err := os.Symlink(repo, link); err != nil {
+		t.Fatal(err)
+	}
+	linked := filepath.Join(link, ".codex", "hooks.json")
+	got := trustKeys(linked, "PreToolUse", 0, 0)
+	want := []string{linked + ":pre_tool_use:0:0", filepath.Join(repo, ".codex", "hooks.json") + ":pre_tool_use:0:0"}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("trustKeys = %q; want %q", got, want)
+	}
+}
+
+// TestTrustKeyKeepsTheHooksFileLink: Codex keys a hooks.json by the folder it loaded
+// it from, so a link at the file itself stays in the key.
+func TestTrustKeyKeepsTheHooksFileLink(t *testing.T) {
+	home := realPath(t, t.TempDir())
+	target := filepath.Join(home, "shared.json")
+	if err := os.WriteFile(target, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	hooks := filepath.Join(home, "hooks.json")
+	if err := os.Symlink(target, hooks); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := trustKeys(hooks, "Stop", 0, 0), hooks+":stop:0:0"; len(got) != 1 || got[0] != want {
+		t.Errorf("trustKeys = %q; want only %q", got, want)
+	}
+}
+
+// realPath is path with symlinks resolved.
+func realPath(t *testing.T, path string) string {
+	t.Helper()
+	real, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return real
+}
+
+// TestTrustRecordsNeedOneSpellingForEveryHandler: Codex loads one spelling of a
+// hooks.json, so approvals split across two spellings approve neither.
+func TestTrustRecordsNeedOneSpellingForEveryHandler(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	handlers := [][]string{{"/link/h.json:stop:0:0", "/real/h.json:stop:0:0"},
+		{"/link/h.json:subagent_stop:0:0", "/real/h.json:subagent_stop:0:0"}}
+	write := func(keys ...string) {
+		t.Helper()
+		config := ""
+		for _, key := range keys {
+			config += trustSection(key) + "\nenabled = true\n"
+		}
+		if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(config), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(handlers[0][0], handlers[1][1])
+	if _, present := trustRecords(handlers); present {
+		t.Error("approvals split across spellings read as present")
+	}
+	write(handlers[0][1], handlers[1][1])
+	if _, present := trustRecords(handlers); !present {
+		t.Error("both handlers approved under the resolved spelling read as absent")
+	}
+}
+
+// TestTrustKeysKeepALinkedCodexFolder: Codex joins hooks.json to the .codex folder as
+// spelled, so a link at that folder adds no resolved spelling.
+func TestTrustKeysKeepALinkedCodexFolder(t *testing.T) {
+	dir := realPath(t, t.TempDir())
+	shared := filepath.Join(dir, "shared")
+	repo := filepath.Join(dir, "repo")
+	for _, d := range []string{shared, repo} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(shared, filepath.Join(repo, ".codex")); err != nil {
+		t.Fatal(err)
+	}
+	hooks := filepath.Join(repo, ".codex", "hooks.json")
+	if got := trustKeys(hooks, "PreToolUse", 0, 0); len(got) != 1 || got[0] != hooks+":pre_tool_use:0:0" {
+		t.Errorf("trustKeys = %q; want only the spelling as written", got)
 	}
 }
