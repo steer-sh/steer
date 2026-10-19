@@ -302,12 +302,21 @@ func renderTrial(r gate.TrialResult, cfg gate.Config) (string, bool) {
 	if r.Run.Detail != "" {
 		detail += ": " + truncateDetail(r.Run.Detail, 400)
 	}
+	hint := "Check that the reviewer CLI is signed in and that the model name is correct: steer config show"
+	if os.Getenv(codexNoNetworkEnv) == "1" {
+		hint = "This shell runs in Codex's sandbox with the network off, which stops a reviewer that needs its service. " +
+			"Codex's commit hook runs outside that sandbox, so run this test again with escalated permissions first. " + hint
+	}
 	return styles.WarningBox.Render("The reviewer did not answer.\n"+
 			"Until it answers, every commit goes through unreviewed.") + "\n" +
 			styles.Wrap("Reviewer output: "+detail, "  ", width) +
-			styles.Wrap("Check that the reviewer CLI is signed in and that the model name is correct: steer config show", "  ", width),
+			styles.Wrap(hint, "  ", width),
 		false
 }
+
+// codexNoNetworkEnv is set to "1" by Codex in a command it runs in its sandbox with
+// the network off.
+const codexNoNetworkEnv = "CODEX_SANDBOX_NETWORK_DISABLED"
 
 func truncateDetail(text string, n int) string {
 	text = strings.TrimSpace(text)

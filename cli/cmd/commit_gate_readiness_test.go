@@ -56,6 +56,23 @@ func TestTrialFailureSaysCommitsGoUnreviewed(t *testing.T) {
 	}
 }
 
+// TestTrialFailureInCodexSandboxNamesTheNetwork: a trial run from a Codex sandbox
+// with the network off names that sandbox beside the sign-in and model causes.
+func TestTrialFailureInCodexSandboxNamesTheNetwork(t *testing.T) {
+	t.Setenv(codexNoNetworkEnv, "1")
+	out, ok := renderTrial(gate.TrialResult{Run: gate.ReviewRun{
+		Outcome: gate.OutcomeExit, Detail: "rc=1 workspace routing discovery failed"}}, gate.Defaults())
+	if ok {
+		t.Fatal("ok = true for a reviewer that did not answer")
+	}
+	flat := strings.Join(strings.Fields(out), " ")
+	for _, want := range []string{"network off", "escalated permissions", "signed in"} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("output = %q; missing %q", flat, want)
+		}
+	}
+}
+
 // stripBox drops the border lipgloss draws, so a test reads the first line of the
 // message rather than the top edge of the frame.
 func stripBox(out string) string {

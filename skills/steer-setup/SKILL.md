@@ -203,6 +203,10 @@ configured reviewer and writes no review record:
 "${STEER_BIN}" commit-gate test-reviewer
 ```
 
+In Codex, when its output says the shell runs in Codex's sandbox with the network
+off, run it again once with escalated permissions: Codex's commit hook runs outside
+that sandbox.
+
 If it exits non-zero, relay its output verbatim and stop here: until the reviewer
 answers, every commit goes through unreviewed. The usual causes are a reviewer CLI
 that is not signed in and a model name the CLI does not know. Run it again after the
