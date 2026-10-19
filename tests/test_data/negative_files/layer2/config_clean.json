@@ -1,0 +1,6 @@
+{
+  "service": "api",
+  "config_file": "config/app.json",
+  "cache_dir": "/tmp/app-cache",
+  "docs": "docs/security-guidelines.md"
+}

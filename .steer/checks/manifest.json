@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "checks": [
+    {
+      "id": "home-isolation",
+      "kind": "script",
+      "script": "scripts/home-isolation.sh"
+    },
+    {
+      "id": "revert-test",
+      "kind": "script",
+      "script": "scripts/revert-test.py",
+      "inputs": [
+        "scripts/revert-test-funcs.go"
+      ]
+    }
+  ]
+}

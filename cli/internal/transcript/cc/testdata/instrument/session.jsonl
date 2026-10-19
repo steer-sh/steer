@@ -1,0 +1,11 @@
+{"type":"user","sessionId":"s1","timestamp":"2026-07-10T00:00:00Z","message":{"content":"stop using var"}}
+{"type":"user","sessionId":"s1","isMeta":true,"timestamp":"2026-07-10T00:00:01Z","message":{"content":"Caveat: resumed"}}
+{"type":"assistant","sessionId":"s1","timestamp":"2026-07-10T00:00:02Z","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"go test ./..."}},{"type":"tool_use","id":"t2","name":"Write","input":{"file_path":"/repo/a.go"}}]}}
+{"type":"user","sessionId":"s1","timestamp":"2026-07-10T00:00:03Z","message":{"content":[{"type":"tool_result","tool_use_id":"t1","is_error":true,"content":[{"type":"text","text":"FAIL: a_test.go:14"}]}]}}
+{"type":"user","sessionId":"s1","timestamp":"2026-07-10T00:00:04Z","message":{"content":[{"type":"tool_result","tool_use_id":"t2","is_error":true,"content":"Claude Code blocked this call\nsteer hook: no-bare-python · rm /repo/.steer/hooks/no-bare-python.py"}]}}
+{"type":"user","sessionId":"s1","timestamp":"2026-07-10T00:00:05Z","message":{"content":[{"type":"tool_result","tool_use_id":"t2","content":"ok"}]}}
+not json at all
+{"type":"summary","sessionId":"s1"}
+{"type":"user","sessionId":"s1","isSidechain":true,"timestamp":"2026-07-10T00:00:06Z","message":{"content":"sub-agent turn"}}
+{"type":"user","sessionId":"s1","timestamp":"2026-07-10T00:00:07Z","message":{"content":[{"type":"text","text":"[Request interrupted by user]"}]}}
+{"type":"user","sessionId":"s1","timestamp":"2026-07-10T00:00:08Z","message":{"content":[{"type":"text","text":"[Request interrupted by user for tool use]"}]}}

@@ -1,0 +1,112 @@
+name: release
+
+# A version tag publishes the plugin bundle: the tagged tree plus the four built
+# binaries, as one parentless commit on the release branch that both marketplace
+# entries name.
+on:
+  push:
+    tags: ["v*"]
+
+# Releases publish one at a time, and only the highest tag publishes, so a late
+# or rerun older release cannot replace a newer bundle.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  check:
+    uses: ./.github/workflows/check.yml
+    permissions:
+      contents: read
+      actions: read
+    with:
+      revert_base_policy: release
+
+  publish:
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+      - name: Tag is the highest release
+        shell: bash
+        run: |
+          set -euo pipefail
+          highest="$(git -c versionsort.suffix=- tag -l 'v*' --sort=-v:refname | head -n 1)"
+          test "$GITHUB_REF_NAME" = "$highest" || { echo "$GITHUB_REF_NAME is not the highest tag ($highest)" >&2; exit 1; }
+      # A harness refreshes its cached plugin copy only when the version changes.
+      - name: Tag matches every manifest version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          for f in .claude-plugin/plugin.json .codex-plugin/plugin.json; do
+            test "$(jq -r .version "$f")" = "$version" || { echo "$f is not $version" >&2; exit 1; }
+          done
+          for f in .claude-plugin/marketplace.json .agents/plugins/marketplace.json; do
+            test "$(jq -r '.plugins[] | select(.name=="steer") | .version' "$f")" = "$version" \
+              || { echo "$f is not $version" >&2; exit 1; }
+          done
+      - name: Build every shipped target
+        shell: bash
+        run: VERSION="${GITHUB_REF_NAME#v}" cli/build.sh
+      - name: Check the built binaries
+        shell: bash
+        run: |
+          python3 scripts/check-binaries.py --bin-dir bin --version "${GITHUB_REF_NAME#v}" \
+            --commit "$(git rev-parse --short=7 HEAD)"
+          python3 scripts/third-party-licenses.py --bin-dir bin
+      # The GitHub Release carries the tag's CHANGELOG section; a tag without one fails here.
+      - name: Release notes from the changelog
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          awk -v head="## [$version]" '
+            index($0, head) == 1 { found = 1; next }
+            found && (/^## / || /^\[[^]]+\]: /) { exit }
+            found { print }
+          ' CHANGELOG.md | sed -e '/./,$!d' > "$RUNNER_TEMP/notes.md"
+          grep -q . "$RUNNER_TEMP/notes.md" || { echo "CHANGELOG.md has no entry for $version" >&2; exit 1; }
+      - name: Replace the release branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f bin
+          commit="$(git commit-tree "$(git write-tree)" -m "release $GITHUB_REF_NAME from $GITHUB_SHA")"
+          git push --force origin "$commit:refs/heads/release"
+      # A moved tag leaves its old Release behind as a draft. The step replaces that
+      # draft's assets, then publishes it, rather than creating a second Release.
+      - name: Publish the GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          dist="$RUNNER_TEMP/dist"
+          mkdir -p "$dist"
+          for dir in bin/*/; do
+            target="$(basename "$dir")"
+            cp LICENSE THIRD_PARTY_LICENSES "$dir"
+            tar -C "$dir" -czf "$dist/steer-$version-$target.tar.gz" \
+              steer LICENSE THIRD_PARTY_LICENSES
+          done
+          (cd "$dist" && sha256sum *.tar.gz > SHA256SUMS)
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$dist"/* --clobber
+            gh release edit "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" \
+              --notes-file "$RUNNER_TEMP/notes.md" --draft=false --latest
+          else
+            gh release create "$GITHUB_REF_NAME" "$dist"/* --verify-tag \
+              --title "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md" --latest
+          fi

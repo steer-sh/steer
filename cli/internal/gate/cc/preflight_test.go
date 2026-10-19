@@ -1,0 +1,460 @@
+package cc
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/steer-sh/steer-cli/internal/gate"
+)
+
+// TestPreflightDenyRefusesRepositoryOverrides checks options on git and its wrappers.
+func TestPreflightDenyRefusesRepositoryOverrides(t *testing.T) {
+	c := "co" + "mmit"
+	for _, cmd := range []string{
+		"git --git-dir=/other/.git --work-tree=/repo " + c + " -m x",
+		"git --work-tree /repo --git-dir /other/.git " + c + " -m x",
+		"git --work-tree=/other " + c + " -am x",
+		"git --work-tree /other " + c + " -am x",
+		"git --bare " + c + " -m x",
+		"env -C /other git " + c + " -m x",
+		"env -C/other git " + c + " -m x",
+		"env --chdir /other git " + c + " -m x",
+		"env --chdir=/other git " + c + " -m x",
+		"command env -u FOO -C /other env -- git " + c + " -m x",
+		"env --chdir=/other git -C /repo " + c + " -m x",
+		"git --work-tree=/other add . && git " + c + " -m x",
+		"env -C /other git add . && git " + c + " -m x",
+	} {
+		if reason, receipt := PreflightDeny(cmd, "/cwd"); receipt != GitLocationReceipt ||
+			!strings.Contains(reason, "git -C /absolute/path/to/repo") {
+			t.Errorf("%q must refuse the override and name the supported form, got %q / %q", cmd, reason, receipt)
+		}
+	}
+	for _, cmd := range []string{
+		"git -C /repo " + c + " -m x",
+		"cd /repo && git " + c + " -m x",
+		"env -u FOO git -C /repo " + c + " -m x",
+		"env -u -C git -C /repo " + c + " -m x",
+		"sudo -C 3 git -C /repo " + c + " -m x",
+		"env -- git -C /repo " + c + " -m x",
+		"git -c alias.sample=--work-tree " + c + " -m x",
+		"git " + c + " -m 'env -C /other --git-dir=/meta --work-tree=/other'",
+		"git " + c + " -m x && env -C /other git status",
+	} {
+		if reason, _ := PreflightDeny(cmd, "/cwd"); reason != "" {
+			t.Errorf("%q must reach review, got %q", cmd, reason)
+		}
+	}
+}
+
+// TestPreflightDenyBlocksAnotherIndexBehindAProseOnlyTree uses separate staged indexes.
+func TestPreflightDenyBlocksAnotherIndexBehindAProseOnlyTree(t *testing.T) {
+	prose, code := t.TempDir(), t.TempDir()
+	run := func(root string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	for root, name := range map[string]string{prose: "README.md", code: "bug.go"} {
+		run(root, "init", "-q")
+		if err := os.WriteFile(filepath.Join(root, name), []byte("staged content\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		run(root, "add", name)
+	}
+	paths, ok := gate.ChangedFiles(gate.Defaults(), prose, gate.DiffSpec{StagedOnly: true})
+	if !ok || !gate.IsProseOnly(paths) {
+		t.Fatalf("prose repository paths %v, ok %v", paths, ok)
+	}
+	gitDir := filepath.Join(code, ".git")
+	if got := run(prose, "--git-dir="+gitDir, "--work-tree="+prose, "diff", "--cached", "--name-only"); got != "bug.go" {
+		t.Fatalf("overridden index paths %q; want bug.go", got)
+	}
+	for _, cmd := range []string{
+		fmt.Sprintf("git --git-dir=%q --work-tree=%q co"+"mmit -m x", gitDir, prose),
+		fmt.Sprintf("env -C %q git co"+"mmit -m x", code),
+	} {
+		if reason, receipt := PreflightDeny(cmd, prose); reason == "" || receipt != GitLocationReceipt {
+			t.Errorf("%q must be refused before the prose exemption, got %q / %q", cmd, reason, receipt)
+		}
+	}
+}
+
+// TestPreflightDenyRefusesACommitThatSelectsItsOwnPaths: `git commit <paths>` lands
+// those paths from the working tree and --include adds them to the index, while the
+// gate reviews the index alone.
+func TestPreflightDenyRefusesACommitThatSelectsItsOwnPaths(t *testing.T) {
+	c := "co" + "mmit"
+	for _, cmd := range []string{
+		"git " + c + " -m x file.go",
+		"git " + c + " -m x -- file.go",
+		"git " + c + " --only -m x file.go",
+		"git " + c + " -o -m x",
+		"git " + c + " --include -m x",
+		"git " + c + " -im x",
+		"git " + c + " --pathspec-from-file=list -m x",
+		"git " + c + " --pathspec-from-file list -m x",
+		`git ` + c + ` -m x "$FILE"`,
+		`git ` + c + ` -Sm "release message"`,
+	} {
+		if reason, receipt := PreflightDeny(cmd, "/cwd"); receipt != SelectedPathsReceipt {
+			t.Errorf("%q selects its own paths and must be refused, got %q", cmd, reason)
+		}
+	}
+	for _, cmd := range []string{
+		"git " + c + " -m x",
+		"git " + c + " -qm x",
+		"git " + c + " -am x",
+		"git " + c + " -F msg",
+		"git " + c + " -m x --",
+		"git " + c + " -S -m x",
+		"git " + c + " -C HEAD",
+		"git " + c + ` --author "A <a@b>" -m x`,
+		"git " + c + ` -m "gate: refuse -i and file.go"`,
+		"git " + c + " -uno -m x",
+		"git " + c + ` --author="$A" -m x`,
+	} {
+		if reason, _ := PreflightDeny(cmd, "/cwd"); reason != "" {
+			t.Errorf("%q commits the index and must go to review, got %q", cmd, reason)
+		}
+	}
+	if CommitsAllTracked("git " + c + " -uall -m x") {
+		t.Error("-uall sets the untracked-files mode; its `a` is not -a")
+	}
+}
+
+// TestPreflightDenyRefusesABundledAddOverAPartlyStagedFile: a bundled add is reviewed
+// from the working tree, so a file with staged and unstaged edits would reach the
+// reviewers with edits the commit does not carry.
+func TestPreflightDenyRefusesABundledAddOverAPartlyStagedFile(t *testing.T) {
+	root := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	write := func(path, body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(root, path), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	base := strings.Repeat("line x\n", 80)
+	write("code.go", base)
+	write("ARCH.md", base)
+	run("init", "-q", ".")
+	run("add", ".")
+	run("co"+"mmit", "-qm", "init")
+	write("code.go", base+"changed\n")
+
+	bundled := "git add code.go && git -C " + root + " co" + "mmit -m x"
+	if reason, _ := PreflightDeny(bundled, root); reason != "" {
+		t.Fatalf("no file is partly staged, so the bundle must go to review: %s", reason)
+	}
+
+	write("ARCH.md", base+"staged paragraph\n")
+	run("add", "ARCH.md")
+	write("ARCH.md", base+"staged paragraph\nunstaged paragraph\n")
+
+	reason, receipt := PreflightDeny(bundled, root)
+	if !strings.Contains(reason, "ARCH.md") {
+		t.Errorf("the refusal must name the partly staged file, got %q", reason)
+	}
+	if receipt != PartlyStagedReceipt {
+		t.Errorf("the receipt must say no review ran, got %q", receipt)
+	}
+
+	for _, cmd := range []string{
+		"git -C " + root + " co" + "mmit -m x",
+		"git add code.go && git -C " + root + " co" + "mmit -am x",
+	} {
+		if reason, _ := PreflightDeny(cmd, root); reason != "" {
+			t.Errorf("%q reviews the tree it lands, so it must not be refused: %s", cmd, reason)
+		}
+	}
+}
+
+// TestPreflightDenyRefusesAStepThatRunsBeforeTheCommit: the gate reads the tree before
+// the command starts, so an edit the same command makes before git commits lands
+// unreviewed.
+func TestPreflightDenyRefusesAStepThatRunsBeforeTheCommit(t *testing.T) {
+	c := "co" + "mmit"
+	for _, cmd := range []string{
+		"python3 edit.py && git add a && git " + c + " -m x",
+		"python3 - <<'EOF'\nopen('a', 'w')\nEOF\ngit add a && git " + c + " -m x",
+		"sed -i s/a/b/ f && git add f && git " + c + " -m x",
+		"git stash && git " + c + " -m x",
+		"echo x > a && git add a && git " + c + " -m x",
+		"{ echo x; } > a; git " + c + " -m x",
+		"echo x >& a; git " + c + " -m x",
+		`git ` + c + ` -m x --author="$(touch a; echo A)"`,
+		`git ` + c + ` -m x <<< "$(touch a)"`,
+	} {
+		reason, receipt := PreflightDeny(cmd, "/cwd")
+		if receipt != StepBeforeCommitReceipt {
+			t.Errorf("%q changes the tree before git commits and must be refused, got %q", cmd, reason)
+		}
+	}
+	for _, cmd := range []string{
+		"git " + c + " -m x",
+		"cd /repo && git add a b && git " + c + " -m x",
+		"git -C /repo add -A && git -C /repo " + c + " -m x",
+		"git add a 2>/dev/null && git " + c + " -m x",
+		"git status --short && git " + c + " -m x",
+		"git " + c + " -F - <<'EOF'\nsubject\n\nbody\nEOF",
+		"git " + c + " -m x && git log --oneline -1 && python3 after.py > out.txt",
+		"git " + c + " -F - <<'EOF' && git status -sb | head -2 && python3 after.py\nsubject\nEOF",
+		"cat > /tmp/msg <<'EOF'\nsubject\nEOF\ngit " + c + " -F /tmp/msg",
+	} {
+		if reason, _ := PreflightDeny(cmd, "/cwd"); reason != "" {
+			t.Errorf("%q changes nothing before git commits and must go to review, got %q", cmd, reason)
+		}
+	}
+}
+
+// TestPreflightDenyRefusesARedirectOnTheCommitItself: the shell opens a commit's own
+// output redirect before git reads the tree, so `git commit -a > code.go` lands
+// code.go empty after the reviewers read it whole.
+func TestPreflightDenyRefusesARedirectOnTheCommitItself(t *testing.T) {
+	c := "co" + "mmit"
+	for cmd, redir := range map[string]string{
+		"git " + c + " -a -m x > code.go":                    "> code.go",
+		"git " + c + " -m x > out.log":                       "> out.log",
+		"git " + c + " --all -m x 2> code.go":                "2> code.go",
+		"git " + c + " -am x &> code.go":                     "&> code.go",
+		"git " + c + " -am x >| code.go":                     ">| code.go",
+		"git " + c + " -am x >> code.go":                     ">> code.go",
+		"git " + c + " -am x >& code.go":                     ">& code.go",
+		"git " + c + " -am x 2>&1 >code.go":                  ">code.go",
+		`git ` + c + ` -am x > "$OUT"`:                       `> "$OUT"`,
+		"git add a && git " + c + " -m x > a":                "> a",
+		"git " + c + " -F - > code.go <<'EOF'\nsubject\nEOF": "> code.go",
+	} {
+		reason, receipt := PreflightDeny(cmd, "/cwd")
+		if receipt != StepBeforeCommitReceipt || reason != fmt.Sprintf(commitRedirectReason, redir) {
+			t.Errorf("%q writes %q before git reads the tree and must be refused naming it, got %q", cmd, redir, reason)
+		}
+	}
+	for _, cmd := range []string{
+		"git " + c + " -am x > /dev/null",
+		"git " + c + " -am x 2>/dev/null",
+		"git " + c + " -am x > /tmp/commit.log 2>&1",
+		"git " + c + " -am x 2>&1",
+		"git " + c + " -am x >&2",
+		"git " + c + " -am x 2>&-",
+		"git " + c + " -F - <<'EOF'\nsubject\nEOF",
+	} {
+		if reason, _ := PreflightDeny(cmd, "/cwd"); reason != "" {
+			t.Errorf("%q writes no file git reads and must go to review, got %q", cmd, reason)
+		}
+	}
+}
+
+// TestPreflightDenyJudgesAScratchPathAgainstTheResolvedRepository: a scratch root can
+// hold the repository itself, and a link under one can point into it, so a redirect
+// target is scratch only when it lies outside the repository's top level with its
+// links resolved.
+func TestPreflightDenyJudgesAScratchPathAgainstTheResolvedRepository(t *testing.T) {
+	c := "co" + "mmit"
+	tmp := t.TempDir()
+	repo := filepath.Join(tmp, "repo")
+	sub := filepath.Join(repo, "sub")
+	if out, err := exec.Command("git", "init", "-q", repo).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link, dangling := filepath.Join(tmp, "link"), filepath.Join(tmp, "dangling")
+	if err := os.Symlink(repo, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(repo, "new.go"), dangling); err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{
+		filepath.Join(repo, "code.go"),
+		filepath.Join(link, "code.go"),
+		dangling,
+	} {
+		cmd := "git " + c + " -am x > " + target
+		if reason, receipt := PreflightDeny(cmd, sub); receipt != StepBeforeCommitReceipt {
+			t.Errorf("%q writes inside the repository and must be refused, got %q", cmd, reason)
+		}
+	}
+	cmd := "git " + c + " -am x > " + filepath.Join(tmp, "commit.log")
+	if reason, _ := PreflightDeny(cmd, sub); reason != "" {
+		t.Errorf("%q writes outside the repository and must go to review, got %q", cmd, reason)
+	}
+}
+
+// TestPreflightDenyRefusesAStepThatRunsBesideTheCommit: a pipeline member or a
+// background job runs while git reads the tree, so it can change what lands after the
+// reviewers read it.
+func TestPreflightDenyRefusesAStepThatRunsBesideTheCommit(t *testing.T) {
+	c := "co" + "mmit"
+	for cmd, step := range map[string]string{
+		"git " + c + " -am x | tee code.go":                    "tee code.go",
+		"git " + c + " -am x |& tee code.go":                   "tee code.go",
+		"git " + c + " -am x 2>&1 | sed -i s/a/b/ code.go":     "sed -i s/a/b/ code.go",
+		"git add a | git " + c + " -m x":                       "git add a",
+		"git " + c + " -am x | tail -3 > code.go":              "tail -3 > code.go",
+		"git " + c + " -am x | { tail -3; } > code.go":         "{ tail -3; } > code.go",
+		"(git " + c + " -am x | tail -3) | tee code.go":        "tee code.go",
+		"git " + c + " -am x | tail -$(sed -i s/a/b/ code.go)": "sed -i s/a/b/ code.go",
+		"git " + c + " -am x &":                                "git " + c + " -am x &",
+		"git " + c + " -am x | tail -3 &":                      "git " + c + " -am x | tail -3 &",
+		"git " + c + " -m x && echo done &":                    "git " + c + " -m x && echo done &",
+		"{ git " + c + " -am x; } &":                           "{ git " + c + " -am x; } &",
+		"git add a & git " + c + " -m x":                       "git add a &",
+		"coproc git " + c + " -am x":                           "coproc git " + c + " -am x",
+	} {
+		reason, receipt := PreflightDeny(cmd, "/cwd")
+		if receipt != StepBeforeCommitReceipt || reason != fmt.Sprintf(concurrentStepReason, step) {
+			t.Errorf("%q runs %q beside git and must be refused naming it, got %q", cmd, step, reason)
+		}
+	}
+	for _, cmd := range []string{
+		"git " + c + " -am x 2>&1 | tail -3",
+		"git " + c + " -m x | head -2",
+		"git " + c + " -m x |& grep -v hint",
+		"git " + c + " -m x | tail -3 > /tmp/commit.log",
+		"git " + c + " -m x; sleep 5 &",
+		"git status | head -2 && git " + c + " -m x",
+	} {
+		if reason, _ := PreflightDeny(cmd, "/cwd"); reason != "" {
+			t.Errorf("%q runs nothing beside git that writes the tree and must go to review, got %q", cmd, reason)
+		}
+	}
+}
+
+// TestPreflightDenyRefusesACommitThatSetsGitsEnvironment: the gate's own git calls read
+// the hook's environment, so an index, repository or work tree the command selects by
+// variable is a tree the reviewers never see.
+func TestPreflightDenyRefusesACommitThatSetsGitsEnvironment(t *testing.T) {
+	c := "co" + "mmit"
+	for _, cmd := range []string{
+		"GIT_INDEX_FILE=/tmp/alt git " + c + " -m x",
+		"env GIT_INDEX_FILE=/tmp/alt git " + c + " -m x",
+		"env -u PAGER GIT_DIR=/other/.git git " + c + " -m x",
+		`GIT_INDEX_FILE="$IDX" git ` + c + ` -m x`,
+		"GIT_WORK_TREE=/other git add . && git " + c + " -m x",
+		"export GIT_INDEX_FILE=/tmp/alt && git " + c + " -m x",
+		"set -a; GIT_INDEX_FILE=/tmp/alt; git " + c + " -m x",
+		"GIT_CONFIG_PARAMETERS=\"'core.worktree'='/other'\" git " + c + " -m x",
+	} {
+		if reason, receipt := PreflightDeny(cmd, "/cwd"); receipt != GitEnvironmentReceipt {
+			t.Errorf("%q sets git's environment and must be refused, got %q", cmd, reason)
+		}
+	}
+	for _, cmd := range []string{
+		"GIT_AUTHOR_DATE=2026-01-01 GIT_COMMITTER_DATE=2026-01-01 git " + c + " -m x",
+		"env LC_ALL=C GIT_EDITOR=true git " + c + " -m x",
+		"git " + c + " -m x && GIT_DIR=/other/.git git log -1",
+	} {
+		if reason, _ := PreflightDeny(cmd, "/cwd"); reason != "" {
+			t.Errorf("%q leaves the tree git commits unchanged and must go to review, got %q", cmd, reason)
+		}
+	}
+}
+
+// Claude Code's own commit form passes its message through a quoted cat heredoc. The
+// gate reads that message and reviews the commit; an unquoted tag expands the body,
+// so its message stays unknown and the commit is refused.
+func TestPreflightDenyReadsAQuotedCatHeredocMessage(t *testing.T) {
+	c := "co" + "mmit"
+	cmd := "git add a && git " + c + " -m \"$(cat <<'EOF'\nsubject\n\nbody naming git " + c + " -m x\nEOF\n)\""
+	if reason, _ := PreflightDeny(cmd, "/cwd"); reason != "" {
+		t.Errorf("%q must go to review, got %q", cmd, reason)
+	}
+	if got := ExtractMessage(cmd, "/cwd"); got != "subject\n\nbody naming git "+c+" -m x" {
+		t.Errorf("message = %q", got)
+	}
+	expanded := "git " + c + " -m \"$(cat <<EOF\nsubject $USER\nEOF\n)\""
+	if _, receipt := PreflightDeny(expanded, "/cwd"); receipt != AmbiguousShellReceipt {
+		t.Errorf("%q has an expanded message and must be refused, got %q", expanded, receipt)
+	}
+}
+
+// The commit forms Claude Code and Codex sessions on the author's machine ran most
+// often go to review. A refusal of any of them stops a first user's first commit.
+func TestPreflightDenyPassesTheFormsAgentsUse(t *testing.T) {
+	c := "co" + "mmit"
+	repo := t.TempDir()
+	for _, cmd := range []string{
+		"git " + c + " -m 'subject'",
+		"git add a && git " + c + " -m \"$(cat <<'EOF'\nsubject\n\nbody\nEOF\n)\"",
+		"git " + c + " -q -F - <<'MSG' && git log --oneline -1\nsubject\n\nthe " + c + " gate\nMSG",
+		"git " + c + " -q -F - <<'MSG' && git push -q\nsubject\nMSG",
+		"git " + c + " -F /tmp/msg.txt",
+		"git add -A && git " + c + " -m 'x' && git push",
+		"cd " + repo + " && git add a && git " + c + " -m 'x'",
+		"git -C " + repo + " " + c + " -m 'x'",
+	} {
+		if reason, _ := PreflightDeny(cmd, repo); reason != "" {
+			t.Errorf("%q must go to review, got %q", cmd, reason)
+		}
+	}
+}
+
+// TestRefusalReasonsNameFormsTheGateReviews: an agent follows a refusal's text, so
+// every form a reason offers must pass preflight, and the commit form must keep a
+// message body.
+func TestRefusalReasonsNameFormsTheGateReviews(t *testing.T) {
+	c := "co" + "mmit"
+	possible, _ := DetectionDeny(`echo "git ` + c + `"`)
+	for name, reason := range map[string]string{
+		"dynamic-message": AmbiguousShellReason(`git `+c+` -F "$MSG"`, "/cwd"),
+		"possible-commit": possible,
+	} {
+		_, example, ok := strings.Cut(reason, "\n\n")
+		if !ok {
+			t.Errorf("the %s refusal offers no commit form: %q", name, reason)
+			continue
+		}
+		if denied, _ := PreflightDeny(example, "/cwd"); denied != "" {
+			t.Errorf("the %s refusal offers %q, which is itself refused: %s", name, example, denied)
+		}
+		if msg := ExtractMessage(example, "/cwd"); msg != "subject\n\nbody" {
+			t.Errorf("the %s refusal offers a form that drops the message body: %q", name, msg)
+		}
+	}
+	if !strings.Contains(possible, selfSafeSearchExample) {
+		t.Errorf("the possible-commit refusal does not offer its search form: %q", possible)
+	}
+	if denied, _ := DetectionDeny(selfSafeSearchExample); denied != "" {
+		t.Errorf("the offered search %q is itself refused: %s", selfSafeSearchExample, denied)
+	}
+
+	reason := fmt.Sprintf(stepBeforeCommitReason, "python3 edit.py")
+	for step, cmd := range map[string]string{
+		"cd":         "cd /repo",
+		"git add":    "git add a",
+		"git status": "git status",
+		"git diff":   "git diff --cached",
+		"cat":        "cat a",
+		"grep":       "grep x a",
+	} {
+		if !strings.Contains(reason, step) {
+			t.Errorf("the step refusal does not name %q: %q", step, reason)
+		}
+		full := cmd + " && git " + c + " -m x"
+		if denied, _ := PreflightDeny(full, "/cwd"); denied != "" {
+			t.Errorf("the step refusal permits %q, but %q is refused: %s", step, full, denied)
+		}
+	}
+}

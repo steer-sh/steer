@@ -1,0 +1,11 @@
+package resp
+
+import (
+	"testing"
+
+	_ "embed"
+	_ "example.com/driver"
+	"gopkg.in/yaml.v2"
+)
+
+func TestDecode(t *testing.T) { _ = yaml.Unmarshal }

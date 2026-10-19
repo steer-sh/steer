@@ -1,0 +1,4 @@
+{"type": "session", "version": 3, "id": "session-malformed", "timestamp": "2026-04-19T03:17:25.911Z", "cwd": "/repo/demo"}
+{not json at all
+{"id": "e0000009", "parentId": null, "timestamp": "2026-04-19T03:17:26.000Z"}
+{"type": "message", "id": "e0000001", "parentId": null, "timestamp": "2026-04-19T03:17:26.000Z", "message": {"role": "user", "content": [{"type": "text", "text": "still counted"}], "timestamp": 1776568645970}}
