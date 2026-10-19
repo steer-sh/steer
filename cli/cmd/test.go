@@ -121,12 +121,21 @@ func parseHookDecision(output string) (bool, string) {
 		return false, ""
 	}
 
-	var parsed map[string]any
+	var parsed struct {
+		Decision           string `json:"decision"`
+		StopReason         string `json:"stopReason"`
+		HookSpecificOutput struct {
+			PermissionDecision       string `json:"permissionDecision"`
+			PermissionDecisionReason string `json:"permissionDecisionReason"`
+		} `json:"hookSpecificOutput"`
+	}
 	if err := json.Unmarshal([]byte(output), &parsed); err == nil {
-		decision, _ := parsed["decision"].(string)
-		if decision == "block" {
-			reason, _ := parsed["stopReason"].(string)
-			return true, reason
+		if parsed.Decision == "block" {
+			return true, parsed.StopReason
+		}
+		// The master renders a block as a PreToolUse deny.
+		if parsed.HookSpecificOutput.PermissionDecision == "deny" {
+			return true, parsed.HookSpecificOutput.PermissionDecisionReason
 		}
 		return false, ""
 	}

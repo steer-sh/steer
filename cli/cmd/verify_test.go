@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 )
@@ -105,5 +107,25 @@ func TestVerificationScopes(t *testing.T) {
 	want = []string{"global"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("scope mismatch: got %v, want %v", got, want)
+	}
+}
+
+// TestVerifyCountsAMasterDenyAsABlock runs verification against a master that
+// answers the way the generated master does: a PreToolUse deny.
+func TestVerifyCountsAMasterDenyAsABlock(t *testing.T) {
+	master := filepath.Join(t.TempDir(), "steer-hooks.py")
+	script := `import json, sys
+sys.stdin.read()
+print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "no f-string SQL"}}))
+`
+	if err := os.WriteFile(master, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	blocked, reason, _, err := runMasterHookVerification(master, verifyTarget{Path: "q.py", Content: "x = 1\n"})
+	if err != nil {
+		t.Fatalf("verification failed: %v", err)
+	}
+	if !blocked || reason != "no f-string SQL" {
+		t.Fatalf("blocked=%v reason=%q, want a block with the master's reason", blocked, reason)
 	}
 }
