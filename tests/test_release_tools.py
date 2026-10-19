@@ -190,6 +190,23 @@ class ReleasePreflight(unittest.TestCase):
         self.assertEqual(result["listing"], "main")
 
 
+class SandboxClaudeLogin(unittest.TestCase):
+    def test_login_reaches_settings_env_and_leaves_with_the_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            box = sandbox.Sandbox(Path(tmp), guarded=[], audit_log=Path(tmp) / "none",
+                                  ledger_dir=Path(tmp) / "none")
+            path = box.home / ".claude" / "settings.json"
+            path.write_text(json.dumps({"hooks": {}}))
+            with patch.dict(os.environ, {"CLAUDE_CODE_OAUTH_TOKEN": "tok"}, clear=True):
+                box.write_claude_login()
+            settings = json.loads(path.read_text())
+            self.assertEqual(settings["env"], {"CLAUDE_CODE_OAUTH_TOKEN": "tok"})
+            self.assertEqual(settings["hooks"], {})
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            box.drop_claude_login()
+            self.assertEqual(json.loads(path.read_text()), {"hooks": {}})
+
+
 class LiveReviewerRunner(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

@@ -9,7 +9,9 @@ no hook registered and an empty guard store, and loads the working tree's plugin
 
 Claude Code takes its login from CLAUDE_CODE_OAUTH_TOKEN (`claude setup-token`)
 or ANTHROPIC_API_KEY in the environment; an empty home carries no login of its
-own. Codex takes a copy of the operator's `~/.codex/auth.json`, and agy a copy
+own. Claude Code passes neither variable to its tool or hook commands, so a
+claude-code reviewer the gate starts there has no login; `--claude` also writes
+the login into the sandbox's user settings `env`, which that reviewer reads. Codex takes a copy of the operator's `~/.codex/auth.json`, and agy a copy
 of its OAuth token file. Git reads a sandbox global configuration that carries a
 fixed author identity, and never the system configuration.
 
@@ -146,6 +148,35 @@ class Sandbox:
         env.update(GIT_IDENTITY)
         return env
 
+    def write_claude_login(self):
+        """Put the environment's Claude login into the sandbox user settings' env,
+        readable only by the user. Returns the settings path."""
+        login = {v: os.environ[v] for v in CLAUDE_LOGIN_VARS if os.environ.get(v)}
+        path = self.home / ".claude" / "settings.json"
+        settings = json.loads(path.read_text()) if path.exists() else {}
+        settings.setdefault("env", {}).update(login)
+        path.write_text(json.dumps(settings, indent=2))
+        path.chmod(0o600)
+        return path
+
+    def drop_claude_login(self):
+        """Remove the Claude login write_claude_login put into the user settings, or
+        the whole file when the run left it unreadable."""
+        path = self.home / ".claude" / "settings.json"
+        if not path.exists():
+            return
+        try:
+            settings = json.loads(path.read_text())
+        except ValueError:
+            path.unlink()
+            return
+        env = settings.get("env", {})
+        for v in CLAUDE_LOGIN_VARS:
+            env.pop(v, None)
+        if not env:
+            settings.pop("env", None)
+        path.write_text(json.dumps(settings, indent=2))
+
     @staticmethod
     def claude_args():
         """Arguments that load the working tree's plugin into a sandboxed claude."""
@@ -195,7 +226,8 @@ def main():
                         help="Fail when any harness saved a session inside the sandbox")
     parser.add_argument("--keep", action="store_true", help="Keep the sandbox directory")
     parser.add_argument("--claude", action="store_true",
-                        help="Refuse to start without a Claude login in the environment")
+                        help="Refuse to start without a Claude login in the environment, "
+                             "and write it into the sandbox user settings for the reviewer")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
@@ -208,7 +240,14 @@ def main():
         work = box.root / "work"
         work.mkdir()
         print("sandbox: %s" % box.root, file=sys.stderr)
-        code = subprocess.run(command, cwd=work, env=box.env(claude=args.claude)).returncode
+        env = box.env(claude=args.claude)
+        if args.claude:
+            box.write_claude_login()
+        try:
+            code = subprocess.run(command, cwd=work, env=env).returncode
+        finally:
+            if args.claude:
+                box.drop_claude_login()
         leaks = box.leaks()
         for leak in leaks:
             print("sandbox LEAK: %s" % leak, file=sys.stderr)
