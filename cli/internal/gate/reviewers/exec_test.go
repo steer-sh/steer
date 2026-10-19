@@ -2,6 +2,8 @@ package reviewers
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -40,5 +42,27 @@ func TestStderrTailCutsOnlyAPartialLine(t *testing.T) {
 	got := stderrTail(long)
 	if !strings.HasSuffix(got, "ERROR: end") || !utf8.ValidString(got) {
 		t.Errorf("one long line = %q", got)
+	}
+}
+
+// Claude Code answers a missing login on stdout as a JSON reply and exits 1 with an
+// empty stderr, so the failed run's detail must carry the reply's result text.
+func TestClaudeCodeExitDetailNamesTheReplyResult(t *testing.T) {
+	binary := filepath.Join(t.TempDir(), "claude")
+	script := "#!/bin/sh\ncat >/dev/null\necho '{\"is_error\":true,\"subtype\":\"success\",\"result\":\"Not logged in · Please run /login\"}'\nexit 1\n"
+	if err := os.WriteFile(binary, []byte(script), 0o755); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	reviewer := NewClaudeCode("", "")
+	reviewer.Binary = binary
+	reviewer.UserSettings = filepath.Join(t.TempDir(), "absent.json")
+	raw := reviewer.Review(context.Background(), "PROMPT", t.TempDir())
+	if raw.Outcome != gate.OutcomeExit || raw.Detail != "rc=1 Not logged in · Please run /login" {
+		t.Fatalf("run = %#v", raw)
+	}
+	line := gate.ReviewerReport(gate.Defaults(), []gate.ReviewRun{gate.Classify(raw)})
+	errs, _ := line["reviewer_errors"].([]string)
+	if len(errs) != 1 || !strings.Contains(errs[0], "Not logged in") {
+		t.Fatalf("the ledger detail lost the login error: %q", errs)
 	}
 }

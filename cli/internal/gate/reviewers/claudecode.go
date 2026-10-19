@@ -97,6 +97,22 @@ type claudeReply struct {
 	Subtype string `json:"subtype"`
 }
 
+// exitDetail puts the result text of a failed run's JSON reply, such as a missing
+// login, right after the exit code, ahead of the stderr tail that readers cut first.
+// It returns detail unchanged when stdout holds no reply text.
+func exitDetail(detail, stdout string) string {
+	var reply claudeReply
+	if json.Unmarshal([]byte(stdout), &reply) != nil {
+		return detail
+	}
+	result := stderrTail(reply.Result)
+	if result == "" {
+		return detail
+	}
+	code, rest, _ := strings.Cut(detail, " ")
+	return strings.TrimSpace(code + " " + result + " " + rest)
+}
+
 func (c *ClaudeCode) Review(ctx context.Context, prompt, cwd string) gate.RawRun {
 	// --no-session-persistence keeps the run out of the user's session history: its
 	// prompt is a diff, not anything the user said. --safe-mode drops the operator's
@@ -119,6 +135,9 @@ func (c *ClaudeCode) Review(ctx context.Context, prompt, cwd string) gate.RawRun
 	}
 	stdout, stderr, raw, failed := runProcess(ctx, cwd, argv, prompt)
 	if failed {
+		if raw.Outcome == gate.OutcomeExit {
+			raw.Detail = exitDetail(raw.Detail, stdout)
+		}
 		return raw
 	}
 	var reply claudeReply
