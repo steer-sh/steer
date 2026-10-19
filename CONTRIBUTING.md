@@ -28,6 +28,20 @@ back to its base version. The variants are listed in the script's docstring. A
 test that pins behaviour that already existed says so with
 `// pins existing behaviour` in its doc comment.
 
+## Running your build
+
+The marketplaces install the published `release` branch, never this checkout.
+To try your build in Claude Code, build it, place the stable executable, and
+load this directory as the plugin for one session:
+
+```bash
+cd cli && ./build.sh && cd ..
+./scripts/steer bin install
+claude --plugin-dir "$PWD"
+```
+
+Codex has no equivalent; it runs the marketplace copy.
+
 ## Commit messages
 
 You do not need to follow this repository's commit message format. Pull requests
