@@ -33,7 +33,7 @@ func TestSetRulesCreatesTheFileAndTheSection(t *testing.T) {
 		t.Fatalf("SetRules: %v", err)
 	}
 
-	want := "## Steer Rules\n<!-- managed-by-steer -->\n- rule A\n- rule B\n"
+	want := "## Steer Rules\n<!-- managed-by-steer -->\n- rule A\n- rule B\n<!-- end-managed-by-steer -->\n"
 	if got := read(t, path); got != want {
 		t.Fatalf("want:\n%q\ngot:\n%q", want, got)
 	}
@@ -48,7 +48,7 @@ func TestSetRulesKeepsTheSurroundingDocument(t *testing.T) {
 	}
 
 	got := read(t, path)
-	want := "# Project\n\nSome prose.\n\n## Steer Rules\n<!-- managed-by-steer -->\n- new rule\n\n## Other\n\nMore prose.\n"
+	want := "# Project\n\nSome prose.\n\n## Steer Rules\n<!-- managed-by-steer -->\n- new rule\n<!-- end-managed-by-steer -->\n\n## Other\n\nMore prose.\n"
 	if got != want {
 		t.Fatalf("want:\n%q\ngot:\n%q", want, got)
 	}
@@ -166,7 +166,7 @@ func TestSetRulesWritesThroughASymlink(t *testing.T) {
 	if err != nil || info.Mode()&os.ModeSymlink == 0 {
 		t.Fatalf("the link was replaced: %v, %v", info, err)
 	}
-	want := "# Project\n\n## Steer Rules\n<!-- managed-by-steer -->\n- rule A\n"
+	want := "# Project\n\n## Steer Rules\n<!-- managed-by-steer -->\n- rule A\n<!-- end-managed-by-steer -->\n"
 	if got := read(t, target); got != want {
 		t.Fatalf("want:\n%q\ngot:\n%q", want, got)
 	}
@@ -243,8 +243,121 @@ func TestSetRulesFollowsALinkInsideItsBound(t *testing.T) {
 	if info, err := os.Lstat(link); err != nil || info.Mode()&os.ModeSymlink == 0 {
 		t.Fatalf("the link was replaced: %v, %v", info, err)
 	}
-	want := "# Project\n\n## Steer Rules\n<!-- managed-by-steer -->\n- rule A\n"
+	want := "# Project\n\n## Steer Rules\n<!-- managed-by-steer -->\n- rule A\n<!-- end-managed-by-steer -->\n"
 	if got := read(t, target); got != want {
 		t.Fatalf("want:\n%q\ngot:\n%q", want, got)
+	}
+}
+
+// A section written before EndMarker ends at the next level-1 or level-2
+// heading, and gains the marker; the document after it is kept whole.
+func TestSetRulesKeepsWhatFollowsALegacySection(t *testing.T) {
+	for _, tail := range []string{"# Appendix\n\nkeep me\n", "## Other\n\nkeep me\n"} {
+		path := filepath.Join(t.TempDir(), "CLAUDE.md")
+		write(t, path, "# Top\n\n## Steer Rules\n<!-- managed-by-steer -->\n- old rule\n\n"+tail)
+
+		if err := SetRules(path, []string{"new rule"}, ""); err != nil {
+			t.Fatalf("SetRules: %v", err)
+		}
+		want := "# Top\n\n## Steer Rules\n<!-- managed-by-steer -->\n- new rule\n<!-- end-managed-by-steer -->\n\n" + tail
+		if got := read(t, path); got != want {
+			t.Fatalf("want:\n%q\ngot:\n%q", want, got)
+		}
+	}
+}
+
+// Prose, a lower heading or a fence in a section without EndMarker may be the
+// user's: SetRules refuses, names the line, and leaves the document unchanged,
+// for a removal as for a replacement.
+func TestSetRulesRefusesAnAmbiguousLegacySection(t *testing.T) {
+	for _, tail := range []string{"notes I added\n", "### Sub\n", "```\ncode\n```\n"} {
+		for _, rules := range [][]string{{"new rule"}, nil} {
+			path := filepath.Join(t.TempDir(), "CLAUDE.md")
+			before := "# Top\n\n## Steer Rules\n<!-- managed-by-steer -->\n- old rule\n\n" + tail
+			write(t, path, before)
+
+			err := SetRules(path, rules, "")
+			if err == nil || !strings.Contains(err.Error(), "line 7") || !strings.Contains(err.Error(), EndMarker) {
+				t.Fatalf("tail %q rules %q: want a refusal naming line 7 and the marker, got %v", tail, rules, err)
+			}
+			if got := read(t, path); got != before {
+				t.Fatalf("tail %q: the document changed:\n%q", tail, got)
+			}
+		}
+	}
+}
+
+// Everything after EndMarker is the user's, bullets included, and a repeated
+// sync writes the same bytes.
+func TestSetRulesKeepsWhatFollowsTheEndMarker(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "CLAUDE.md")
+	if err := SetRules(path, []string{"rule A"}, ""); err != nil {
+		t.Fatalf("SetRules: %v", err)
+	}
+	write(t, path, read(t, path)+"\nappended prose\n- my own bullet\n### Sub\n")
+
+	if err := SetRules(path, []string{"rule B"}, ""); err != nil {
+		t.Fatalf("SetRules: %v", err)
+	}
+	first := read(t, path)
+	want := "## Steer Rules\n<!-- managed-by-steer -->\n- rule B\n<!-- end-managed-by-steer -->\n\nappended prose\n- my own bullet\n### Sub\n"
+	if first != want {
+		t.Fatalf("want:\n%q\ngot:\n%q", want, first)
+	}
+	if err := SetRules(path, []string{"rule B"}, ""); err != nil {
+		t.Fatalf("SetRules: %v", err)
+	}
+	if second := read(t, path); second != first {
+		t.Fatalf("second write differs:\n%q", second)
+	}
+	if got, _ := SectionRules(path); strings.Join(got, "|") != "rule B" {
+		t.Fatalf("SectionRules read past the marker: %q", got)
+	}
+
+	if err := SetRules(path, nil, ""); err != nil {
+		t.Fatalf("SetRules: %v", err)
+	}
+	if got := read(t, path); got != "appended prose\n- my own bullet\n### Sub\n" {
+		t.Fatalf("removal kept the marker or lost the tail:\n%q", got)
+	}
+}
+
+// A legacy section ends at its first heading even when a second Steer Rules
+// section further down has a marker; the text between them is the user's.
+func TestSetRulesStopsAtASecondSection(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "CLAUDE.md")
+	tail := "## Other\n\nkeep me\n\n## Steer Rules\n- copy\n<!-- end-managed-by-steer -->\n"
+	write(t, path, "## Steer Rules\n- old rule\n\n"+tail)
+
+	if err := SetRules(path, []string{"new rule"}, ""); err != nil {
+		t.Fatalf("SetRules: %v", err)
+	}
+	want := "## Steer Rules\n<!-- managed-by-steer -->\n- new rule\n<!-- end-managed-by-steer -->\n\n" + tail
+	if got := read(t, path); got != want {
+		t.Fatalf("want:\n%q\ngot:\n%q", want, got)
+	}
+}
+
+// An EndMarker past the heading that ends a section without one may belong to
+// the section or to an example below it, so SetRules refuses either way rather
+// than strand a rule or delete what lies between.
+func TestSetRulesRefusesAMarkerPastTheSectionsHeading(t *testing.T) {
+	for _, tail := range []string{
+		"## Notes\n- stale rule\n<!-- end-managed-by-steer -->\n",
+		"# Appendix\n\n```\n<!-- end-managed-by-steer -->\n```\n",
+	} {
+		for _, rules := range [][]string{{"new rule"}, nil} {
+			path := filepath.Join(t.TempDir(), "CLAUDE.md")
+			before := "## Steer Rules\n<!-- managed-by-steer -->\n- old rule\n" + tail
+			write(t, path, before)
+
+			err := SetRules(path, rules, "")
+			if err == nil || !strings.Contains(err.Error(), "past the heading on line 4") {
+				t.Fatalf("tail %q rules %q: want a refusal naming the heading, got %v", tail, rules, err)
+			}
+			if got := read(t, path); got != before {
+				t.Fatalf("tail %q: the document changed:\n%q", tail, got)
+			}
+		}
 	}
 }

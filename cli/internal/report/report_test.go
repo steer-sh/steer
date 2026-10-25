@@ -592,3 +592,23 @@ func TestScannerReadsNoCorrectionInAHeadlessRun(t *testing.T) {
 		t.Fatalf("a headless prompt produced corrections: %+v", got)
 	}
 }
+
+// A bullet after the section's end marker is the user's directive, not a Steer rule.
+func TestExtractInstructionFileStopsAtTheEndMarker(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "CLAUDE.md")
+	content := "## Steer Rules\n<!-- managed-by-steer -->\n- steer rule\n<!-- end-managed-by-steer -->\n\n- my own bullet\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	md, err := ExtractInstructionFile(harness.ClaudeCode, path, []string{"my own bullet"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(md.SteerRules, "|") != "steer rule" || len(md.GuardRules) != 0 {
+		t.Errorf("steer rules = %q, guard rules = %q", md.SteerRules, md.GuardRules)
+	}
+	if len(md.Directives) != 1 || md.Directives[0].Text != "my own bullet" || md.Directives[0].Section != "" {
+		t.Errorf("directives = %+v", md.Directives)
+	}
+}

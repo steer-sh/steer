@@ -5,19 +5,19 @@ import (
 	"strings"
 
 	"github.com/steer-sh/steer-cli/internal/harness"
+	"github.com/steer-sh/steer-cli/internal/instructions"
 )
 
 const (
 	maxDirectiveLen   = 200
 	maxDirectivesFile = 150
-	steerRulesHeader  = "## Steer Rules"
 )
 
 // ExtractInstructionFile parses one harness instruction document — CLAUDE.md
 // or AGENTS.md — into the lines Steer wrote and the directives it did not.
-// Bullets under "## Steer Rules" are Steer's; the ones whose text is in
-// guardRules are also enforced by a guard, and the rest are instruction rules
-// that no guard backs. Top-level bullets elsewhere are candidates for
+// Bullets in the Steer Rules section, over the range instructions.SectionRange
+// gives, are Steer's; the ones whose text is in guardRules are also enforced by
+// a guard, and the rest are instruction rules that no guard backs. Top-level bullets elsewhere are candidates for
 // enforcement. A missing file yields an empty result, not an error.
 func ExtractInstructionFile(id harness.ID, path string, guardRules []string) (InstructionFile, error) {
 	out := InstructionFile{Harness: id, Path: path, SteerRules: []string{}, GuardRules: []string{}, Directives: []Directive{}}
@@ -34,13 +34,17 @@ func ExtractInstructionFile(id harness.ID, path string, guardRules []string) (In
 		return out, err
 	}
 
+	lines := strings.Split(string(data), "\n")
+	start, end := instructions.SectionRange(lines)
 	section := ""
-	inSteerRules := false
-	for _, line := range strings.Split(string(data), "\n") {
+	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
+		inSteerRules := start < i && i < end
+		if i == end {
+			section = ""
+		}
 
 		if strings.HasPrefix(trimmed, "## ") || strings.HasPrefix(trimmed, "# ") {
-			inSteerRules = trimmed == strings.TrimSpace(steerRulesHeader)
 			section = strings.TrimLeft(trimmed, "# ")
 			continue
 		}

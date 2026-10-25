@@ -128,7 +128,13 @@ with harness updates. These are sequential writes across artifacts and targets,
 not one transaction; synchronization and rebuild are retry paths. `SyncTargets` derives `## Steer Rules` from `ManifestRules`;
 `internal/instructions/` replaces that managed section while preserving surrounding
 prose. Rebuild and removal retries also synchronize it. Handwritten lines inside
-the managed section do not survive regeneration. A symlinked document is written
+the managed section do not survive regeneration. The section ends at its
+`<!-- end-managed-by-steer -->` marker. A section written before that marker ends at
+the next level-1 or level-2 heading, and is rewritten only while it holds nothing
+but blank lines, the open marker and bullets; any other line there, or an end
+marker past that heading, refuses the write, because it may be the user's. The
+boundary search reads lines, not Markdown, so a fenced example of the section is
+not told apart from the section. A symlinked document is written
 at its target so the link survives; under project scope `steerpath.LinkBound`
 bounds that target to the repository, which carries the link. `claude.SaveSettings`
 applies the same bound to a project `.claude/settings.json`, and keeps a backup

@@ -16,12 +16,17 @@ import (
 const (
 	steerRulesHeader = "## Steer Rules"
 	managedByComment = "<!-- managed-by-steer -->"
+	// EndMarker closes the Steer Rules section; every line after it is the user's.
+	EndMarker = "<!-- end-managed-by-steer -->"
 )
 
 // SetRules replaces the Steer Rules section of the document at path with
 // exactly these rules, creating the section, and the file, when either is
 // absent. An empty set removes the section. A line written by hand inside the
 // section does not survive; the section is Steer's, as the marker says. A
+// section without EndMarker is rewritten only when it holds nothing but blank
+// lines, the marker and bullets, and no EndMarker follows the heading that ends
+// it; otherwise the document is left as it was and the error names the line. A
 // symlinked document is written at its target, so the link survives. within,
 // when not empty, bounds that target: a link that resolves outside it is
 // refused. steerpath.LinkBound names the bound for a scope.
@@ -46,7 +51,10 @@ func SetRules(path string, rules []string, within string) error {
 		return fmt.Errorf("failed to read %s: %w", path, err)
 	}
 
-	updated, changed := setRulesContent(content, wanted)
+	updated, changed, err := setRulesContent(content, wanted)
+	if err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
 	if !changed {
 		return nil
 	}
@@ -85,7 +93,7 @@ func SectionRules(path string) ([]string, error) {
 		return nil, fmt.Errorf("failed to read %s: %w", path, err)
 	}
 	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
-	start, end := findSteerSection(lines)
+	start, end, _, _ := findSteerSection(lines)
 	if start == -1 {
 		return nil, nil
 	}
@@ -116,27 +124,40 @@ func normalizeRules(rules []string) []string {
 }
 
 func sectionLines(rules []string) []string {
-	lines := make([]string, 0, len(rules)+2)
+	lines := make([]string, 0, len(rules)+3)
 	lines = append(lines, steerRulesHeader, managedByComment)
 	for _, rule := range rules {
 		lines = append(lines, "- "+rule)
 	}
-	return lines
+	return append(lines, EndMarker)
 }
 
-func setRulesContent(content string, rules []string) (string, bool) {
+func setRulesContent(content string, rules []string) (string, bool, error) {
 	trimmed := strings.TrimRight(content, "\n")
 	lines := strings.Split(trimmed, "\n")
 	if trimmed == "" {
 		lines = []string{}
 	}
 
-	start, end := findSteerSection(lines)
+	start, end, closed, stray := findSteerSection(lines)
+	if stray != -1 {
+		return "", false, fmt.Errorf("line %d holds %s past the heading on line %d, which ends the %s section "+
+			"that has no marker of its own; move the marker to where the section should end, or remove it",
+			stray+1, EndMarker, end+1, steerRulesHeader)
+	}
+	if start != -1 && !closed {
+		for i := start + 1; i < end; i++ {
+			if !legacySectionLine(lines[i]) {
+				return "", false, fmt.Errorf("the %s section has no %s and line %d is not one Steer wrote: %q; "+
+					"insert %s where the section should end", steerRulesHeader, EndMarker, i+1, lines[i], EndMarker)
+			}
+		}
+	}
 
 	var kept []string
 	switch {
 	case start == -1 && len(rules) == 0:
-		return content, false
+		return content, false, nil
 	case start == -1:
 		kept = append(kept, lines...)
 		if len(kept) > 0 {
@@ -144,26 +165,33 @@ func setRulesContent(content string, rules []string) (string, bool) {
 		}
 		kept = append(kept, sectionLines(rules)...)
 	default:
+		rest := lines[end:]
+		for len(rest) > 0 && strings.TrimSpace(rest[0]) == "" {
+			rest = rest[1:]
+		}
 		kept = append(kept, lines[:start]...)
 		if len(rules) > 0 {
 			kept = append(kept, sectionLines(rules)...)
-			if end < len(lines) {
-				kept = append(kept, "")
-			}
 		} else {
 			kept = trimTrailingBlanks(kept)
-			if len(kept) > 0 && end < len(lines) {
-				kept = append(kept, "")
-			}
 		}
-		kept = append(kept, lines[end:]...)
+		if len(kept) > 0 && len(rest) > 0 {
+			kept = append(kept, "")
+		}
+		kept = append(kept, rest...)
 	}
 
 	updated := ensureTrailingNewline(strings.Join(kept, "\n"))
 	if updated == content {
-		return content, false
+		return content, false, nil
 	}
-	return updated, true
+	return updated, true, nil
+}
+
+// legacySectionLine reports a line a section written before EndMarker can hold.
+func legacySectionLine(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	return trimmed == "" || trimmed == managedByComment || strings.HasPrefix(trimmed, "- ")
 }
 
 func trimTrailingBlanks(lines []string) []string {
@@ -218,28 +246,47 @@ func writeAtomic(path string, data []byte) error {
 	return nil
 }
 
-func findSteerSection(lines []string) (int, int) {
-	start := -1
-	for i, line := range lines {
-		if strings.TrimSpace(line) == steerRulesHeader {
-			start = i
-			break
-		}
-	}
-
-	if start == -1 {
-		return -1, -1
-	}
-
-	end := len(lines)
-	for i := start + 1; i < len(lines); i++ {
-		if strings.HasPrefix(strings.TrimSpace(lines[i]), "## ") {
-			end = i
-			break
-		}
-	}
-
+// SectionRange returns the line range [start, end) of the Steer Rules section in
+// a document split on "\n", or -1, -1. It is the boundary SetRules writes to.
+func SectionRange(lines []string) (start, end int) {
+	start, end, _, _ = findSteerSection(lines)
 	return start, end
+}
+
+// findSteerSection returns the line range [start, end) of the Steer Rules
+// section, or -1, -1. A closed section ends after its EndMarker. One without it
+// ends at the next level-1 or level-2 heading or second Steer Rules heading, or
+// at the end of the document; stray is then the line of an EndMarker past that
+// heading and before any second Steer Rules heading, or -1.
+func findSteerSection(lines []string) (start, end int, closed bool, stray int) {
+	start, end, stray = -1, len(lines), -1
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case start == -1:
+			if trimmed == steerRulesHeader {
+				start = i
+			}
+		case trimmed == steerRulesHeader:
+			if end == len(lines) {
+				end = i
+			}
+			return start, end, false, stray
+		case trimmed == EndMarker:
+			if end == len(lines) {
+				return start, i + 1, true, -1
+			}
+			if stray == -1 {
+				stray = i
+			}
+		case end == len(lines) && (strings.HasPrefix(trimmed, "# ") || strings.HasPrefix(trimmed, "## ")):
+			end = i
+		}
+	}
+	if start == -1 {
+		return -1, -1, false, -1
+	}
+	return start, end, false, stray
 }
 
 func ensureTrailingNewline(content string) string {
