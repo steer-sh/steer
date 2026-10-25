@@ -16,12 +16,14 @@ const Instrument = "mvdan-sh-v3.13.1-calls-v2"
 
 // Word is one shell word. Static is false when evaluating it requires expansion;
 // a static Value is the word after quote removal, as the command receives it.
+// Splits is true when an expansion can make the word several words.
 // Start and End are the word's byte range in the source; a word built by a caller
 // rather than the parser leaves both zero.
 type Word struct {
 	Value  string
 	Raw    string
 	Static bool
+	Splits bool
 	Start  int
 	End    int
 }
@@ -165,7 +167,40 @@ func normalizeWord(source string, word *syntax.Word) Word {
 	if start >= 0 && end >= start && end <= len(source) {
 		raw = source[start:end]
 	}
-	return Word{Value: value, Raw: raw, Static: static, Start: start, End: end}
+	return Word{Value: value, Raw: raw, Static: static, Splits: splits(word.Parts), Start: start, End: end}
+}
+
+// splits reports an unquoted parameter, command or arithmetic expansion, whose
+// result the shell splits into fields, or a double-quoted `@` expansion such as
+// "$@", "${a[@]}" or "${!prefix@}", which gives one word per element.
+func splits(parts []syntax.WordPart) bool {
+	for _, part := range parts {
+		switch p := part.(type) {
+		case *syntax.ParamExp, *syntax.CmdSubst, *syntax.ArithmExp:
+			return true
+		case *syntax.DblQuoted:
+			found := false
+			syntax.Walk(p, func(node syntax.Node) bool {
+				if exp, ok := node.(*syntax.ParamExp); ok && elementWords(exp) {
+					found = true
+				}
+				return !found
+			})
+			if found {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func elementWords(exp *syntax.ParamExp) bool {
+	if exp.Length {
+		return false
+	}
+	index, _ := exp.Index.(*syntax.Word)
+	return exp.Param.Value == "@" || (index != nil && index.Lit() == "@") ||
+		exp.Names == syntax.NamesPrefixWords
 }
 
 // StaticWord returns a word's value when it holds only literals and quotes.

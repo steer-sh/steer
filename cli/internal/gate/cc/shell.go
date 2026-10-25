@@ -157,8 +157,10 @@ const (
 // Detect classifies a command by the commits its text shows. The parser reads a call
 // whose command words are a static `git` (by name or path, behind command, env, sudo or
 // nohup) and a static `commit`; the loose scan matches `git ... commit` text at any
-// command boundary, as inside bash -c or eval or behind a backslash. A command word
-// neither reads, such as $GIT, $'g\x69t', an alias or a function, is not covered.
+// command boundary, as inside bash -c or eval or behind a backslash. A git call whose
+// subcommand word is dynamic, or a dynamic command word before a static `commit`, is a
+// possible commit (hiddenCommit). A command that hides both words, such as
+// `$GIT "$SUB"`, an alias or a function, is not covered.
 func Detect(cmd string) Detection {
 	spans := commitSpans(cmd)
 	program, err := shellsyntax.Parse(cmd)
@@ -177,6 +179,7 @@ func Detect(cmd string) Detection {
 	for _, span := range spans {
 		possible = possible || !slices.ContainsFunc(calls, func(call commitCall) bool { return call.owns(span) })
 	}
+	possible = possible || slices.ContainsFunc(program.Calls, hiddenCommit)
 	switch {
 	case parsed && possible:
 		return ParsedAndPossible

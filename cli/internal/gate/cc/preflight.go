@@ -65,7 +65,9 @@ func DetectionDeny(cmd string) (reason, receipt string) {
 
 const possibleCommitReason = "[commit-gate] BLOCKED: this command holds a possible " +
 	"commit: `git ... commit` text that the gate cannot read as a plain command, such as " +
-	"a commit inside bash -c or eval, or the words inside a quoted argument. NOTHING IN " +
+	"a commit inside bash -c or eval, the words inside a quoted argument, or a git " +
+	"subcommand or command word that the shell expands from a variable or an escape. " +
+	"NOTHING IN " +
 	"THE COMMAND RAN. To search for the text, write a pattern that does not match " +
 	"itself, for example `" + selfSafeSearchExample + "`. To commit, run git commit as " +
 	"a plain command with the full intended message. This form keeps a multi-line " +

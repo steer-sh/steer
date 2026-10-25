@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -255,6 +256,50 @@ func commitCalls(program *shellsyntax.Program) []commitCall {
 	}
 	return out
 }
+
+// hiddenCommit reports a call whose commit only the shell's expansion can show: a
+// static git with a dynamic word where an option or the subcommand goes (`git "$X"`),
+// or a dynamic command word before a static `commit` (`$G commit`). A dynamic option
+// value that stays one word (`-C "$D"`, `--work-tree="$W"`) is skipped; one that can
+// split (`$D`, "$@") is not.
+func hiddenCommit(call shellsyntax.Call) bool {
+	args := call.Args
+	if len(args) > 0 && !args[0].Static {
+		return slices.ContainsFunc(args[1:], func(w shellsyntax.Word) bool {
+			return w.Static && w.Value == "commit"
+		})
+	}
+	gitArg, ok := gitExecutable(args)
+	if !ok {
+		return false
+	}
+	for i := gitArg + 1; i < len(args); i++ {
+		if !args[i].Static {
+			if !args[i].Splits && attachedLongOption.MatchString(args[i].Raw) {
+				continue
+			}
+			return true
+		}
+		token := args[i].Value
+		if token == "--" {
+			return i+1 < len(args) && !args[i+1].Static
+		}
+		if !strings.HasPrefix(token, "-") {
+			return false
+		}
+		if name, _, attached := strings.Cut(token, "="); takesGitValue(name) && !attached {
+			i++
+			if i < len(args) && args[i].Splits {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// attachedLongOption matches a word whose literal start is `--name=`, so the word is
+// one option whatever its value expands to.
+var attachedLongOption = regexp.MustCompile(`^--[A-Za-z][A-Za-z-]*=`)
 
 // owns reports that a loose match ends at this call's own subcommand word, or lies
 // inside one of its static arguments or static heredoc bodies. The match may start at

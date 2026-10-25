@@ -6,8 +6,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/steer-sh/steer-cli/internal/shellsyntax"
 )
 
 // A differential replay of the hand-rolled scanners against the Python originals, whose
@@ -41,6 +44,13 @@ func exemptedByText(cmd string) bool {
 	return strings.Contains(cmd, "--dry-run")
 }
 
+// hiddenByShell reports a call whose commit only the shell's expansion can show, which
+// Python did not look for; Go may add a match there.
+func hiddenByShell(cmd string) bool {
+	program, err := shellsyntax.Parse(cmd)
+	return err == nil && slices.ContainsFunc(program.Calls, hiddenCommit)
+}
+
 func TestLooseCommitDetectorMatchesPython(t *testing.T) {
 	var raw []byte
 	if path := os.Getenv("COMMIT_GATE_SCAN_CORPUS"); path != "" {
@@ -69,7 +79,7 @@ func TestLooseCommitDetectorMatchesPython(t *testing.T) {
 	}
 	for _, tc := range cases {
 		got := IsCommitCommand(tc.Cmd)
-		if got == tc.IsCommit || (got && (matchedBehindWideBoundary(tc.Cmd) || exemptedByText(tc.Cmd))) {
+		if got == tc.IsCommit || (got && (matchedBehindWideBoundary(tc.Cmd) || exemptedByText(tc.Cmd) || hiddenByShell(tc.Cmd))) {
 			continue
 		}
 		t.Errorf("IsCommitCommand(%q) = %v, python %v", tc.Cmd, got, tc.IsCommit)
