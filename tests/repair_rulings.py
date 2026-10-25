@@ -15,6 +15,7 @@ import argparse
 import glob
 import gzip
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -83,12 +84,17 @@ def commit_command(start, work):
     raise ValueError("no round-1 deny after prefix line %d" % start["prefix_lines"])
 
 
+JSON_BLOCK = re.compile(r"^```json[ \t]*\n(.*?)^```[ \t]*$", re.MULTILINE | re.DOTALL)
+
+
 def last_json_block(text):
-    block = text.rsplit("```json", 1)
-    if len(block) < 2:
+    """The last ```json block, closed by a fence on its own line, so backticks inside
+    a JSON string do not end it."""
+    blocks = JSON_BLOCK.findall(text)
+    if not blocks:
         return None
     try:
-        return json.loads(block[1].split("```", 1)[0])
+        return json.loads(blocks[-1])
     except json.JSONDecodeError:
         return None
 
