@@ -19,17 +19,20 @@ type DiffSpec struct {
 	Amend bool
 	// IncludeUntracked adds files git has never seen, rendered as additions.
 	IncludeUntracked bool
-	// UntrackedPathspecs narrows those files to what the command's own staging step
-	// names. Empty means every untracked file in the repo.
-	UntrackedPathspecs []string
+	// UntrackedAddPathspecs narrows those files to what the command's own staging
+	// steps name, one list per add. Empty means every untracked file in the repo.
+	UntrackedAddPathspecs [][]string
 	// ForcedUntrackedPathspecs selects additions a bundled force-add may stage even
 	// when ignored. Each add keeps its exclusions separate; :/ selects the whole repository.
 	ForcedUntrackedPathspecs [][]string
-	// TrackedPathspecs narrows the tracked diff to the same paths, joined with the
-	// index. Empty means every tracked change. The two lists differ for a command
-	// that stages a path AND commits with -a: the add bounds what new files can land,
+	// TrackedAddPathspecs narrows the tracked diff to the same paths, joined with the
+	// index. Empty means every tracked change. The two differ for a command that
+	// stages a path AND commits with -a: the add bounds what new files can land,
 	// while -a lands tracked files it never named.
-	TrackedPathspecs []string
+	//
+	// An add's exclusion subtracts only from that add's own paths, so each add keeps
+	// its own list and git resolves each list in a separate call.
+	TrackedAddPathspecs [][]string
 }
 
 // Equal compares two specs by value. The pathspec list makes DiffSpec uncomparable
@@ -40,9 +43,9 @@ func (s DiffSpec) Equal(other DiffSpec) bool {
 		s.Amend != other.Amend {
 		return false
 	}
-	return equalPathspecs(s.UntrackedPathspecs, other.UntrackedPathspecs) &&
+	return equalAddPathspecs(s.UntrackedAddPathspecs, other.UntrackedAddPathspecs) &&
 		equalAddPathspecs(s.ForcedUntrackedPathspecs, other.ForcedUntrackedPathspecs) &&
-		equalPathspecs(s.TrackedPathspecs, other.TrackedPathspecs)
+		equalAddPathspecs(s.TrackedAddPathspecs, other.TrackedAddPathspecs)
 }
 
 func equalAddPathspecs(a, b [][]string) bool {
@@ -217,16 +220,20 @@ func pathspecTail(included, excluded []string) []string {
 // git resolves the command's specs to files first, so an exclusion among them cannot
 // drop an index path. A spec git rejects widens, like the untracked scan.
 func trackedSelector(cwd string, spec DiffSpec) []string {
-	if spec.StagedOnly || len(spec.TrackedPathspecs) == 0 {
+	if spec.StagedOnly || len(spec.TrackedAddPathspecs) == 0 {
 		return nil
 	}
 	// Both halves read the same base as the diff, so an amend's selector covers every
 	// file the replacing commit lands, not only the ones this round touched.
 	worktree := append(diffBaseArgs(cwd, DiffSpec{Amend: spec.Amend}),
 		"--name-only", "--no-relative", "--no-renames", "-z", "--")
-	named, ok := Git(cwd, gitMedium, append(worktree, spec.TrackedPathspecs...)...)
-	if !ok {
-		return nil
+	var named []string
+	for _, specs := range spec.TrackedAddPathspecs {
+		out, ok := Git(cwd, gitMedium, append(append([]string{}, worktree...), specs...)...)
+		if !ok {
+			return nil
+		}
+		named = append(named, strings.Split(out, "\x00")...)
 	}
 	index := append(diffBaseArgs(cwd, DiffSpec{StagedOnly: true, Amend: spec.Amend}),
 		"--name-only", "--no-relative", "--no-renames", "-z")
@@ -236,17 +243,17 @@ func trackedSelector(cwd string, spec DiffSpec) []string {
 	}
 	seen := map[string]bool{}
 	var specs []string
-	for _, path := range append(strings.Split(named, "\x00"), strings.Split(staged, "\x00")...) {
+	for _, path := range append(named, strings.Split(staged, "\x00")...) {
 		if path == "" || seen[path] {
 			continue
 		}
 		seen[path] = true
 		specs = append(specs, ":(top,literal)"+path)
 	}
-	// Nil would widen an empty selection to the whole tree; the command's own specs
-	// keep it empty.
+	// Nil would widen an empty selection to the whole tree; one add's own specs
+	// keep it empty, since they matched nothing above.
 	if len(specs) == 0 {
-		return append([]string{}, spec.TrackedPathspecs...)
+		return append([]string{}, spec.TrackedAddPathspecs[0]...)
 	}
 	return specs
 }
@@ -335,15 +342,19 @@ func (p *diffPlan) stat(newPaths []string) string {
 // from `sub/` would report every new file outside sub as nonexistent.
 func (p *diffPlan) untrackedPaths() []string {
 	base := []string{"ls-files", "--others", "--exclude-standard", "--full-name", "-z", "--"}
-	out, ok := Git(p.cwd, gitMedium, append(append([]string{}, base...), p.untrackedSelector()...)...)
-	if !ok {
-		// A pathspec git rejects leaves the intent unresolved, so widen rather than
-		// drop: a review missing a new file the commit lands is the worse direction.
-		out, ok = Git(p.cwd, gitMedium, append(append([]string{}, base...), ":/")...)
-	}
-	if !ok {
-		p.incomplete = true
-		return nil
+	var out string
+	for _, specs := range p.untrackedSelectors() {
+		listed, ok := Git(p.cwd, gitMedium, append(append([]string{}, base...), specs...)...)
+		if !ok {
+			// A pathspec git rejects leaves the intent unresolved, so widen rather than
+			// drop: a review missing a new file the commit lands is the worse direction.
+			listed, ok = Git(p.cwd, gitMedium, append(append([]string{}, base...), ":/")...)
+		}
+		if !ok {
+			p.incomplete = true
+			return nil
+		}
+		out += listed
 	}
 	for _, specs := range p.spec.ForcedUntrackedPathspecs {
 		forcedBase := []string{"ls-files", "--others", "--full-name", "-z", "--"}
@@ -370,13 +381,13 @@ func (p *diffPlan) untrackedPaths() []string {
 	return paths
 }
 
-// untrackedSelector is the pathspec list that limits the untracked scan. `:/` is the
-// whole repo, which is what an unnarrowed spec means.
-func (p *diffPlan) untrackedSelector() []string {
-	if len(p.spec.UntrackedPathspecs) == 0 {
-		return []string{":/"}
+// untrackedSelectors are the pathspec lists that limit the untracked scan, one per
+// add. `:/` is the whole repo, which is what an unnarrowed spec means.
+func (p *diffPlan) untrackedSelectors() [][]string {
+	if len(p.spec.UntrackedAddPathspecs) == 0 {
+		return [][]string{{":/"}}
 	}
-	return p.spec.UntrackedPathspecs
+	return p.spec.UntrackedAddPathspecs
 }
 
 // untrackedSections renders `paths` as additions and reports which it covered and which

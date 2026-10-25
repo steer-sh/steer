@@ -13,7 +13,7 @@ func TestLargeUntrackedReviewAndClearance(t *testing.T) {
 	gitCmd(t, h.repo, verb, "-qm", "base")
 	body := lines(300)
 	writeFileAt(t, h.repo, "new.py", body)
-	h.spec = DiffSpec{IncludeUntracked: true, UntrackedPathspecs: []string{"new.py"}}
+	h.spec = DiffSpec{IncludeUntracked: true, UntrackedAddPathspecs: [][]string{{"new.py"}}}
 	first, ok := GetDiffSized(h.cfg, h.repo, h.spec)
 	if !ok || !strings.Contains(first.Raw, "+line x\n") {
 		t.Fatalf("raw addition is missing: %+v, ok=%t", first, ok)

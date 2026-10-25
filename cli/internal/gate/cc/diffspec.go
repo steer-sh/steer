@@ -17,21 +17,21 @@ func DiffSpecFor(cmd, cwd string) gate.DiffSpec {
 	spec := gate.DiffSpec{StagedOnly: stagedOnly, IncludeUntracked: includeUntracked,
 		Amend: Amends(cmd)}
 	if includeUntracked {
-		spec.UntrackedPathspecs = StagedPathspecs(cmd, cwd)
+		spec.UntrackedAddPathspecs = StagedPathspecs(cmd, cwd)
 		if parsed, err := parseCommit(cmd, cwd); err == nil && parsed != nil {
 			spec.ForcedUntrackedPathspecs = parsedAddPathspecs(parsed.program, parsed, true)
 		}
 	}
 	if !stagedOnly && !CommitsAllTracked(cmd) {
-		spec.TrackedPathspecs = StagedPathspecs(cmd, cwd)
+		spec.TrackedAddPathspecs = StagedPathspecs(cmd, cwd)
 	}
 	return spec
 }
 
 // StagedPathspecs returns the literal paths named by structurally preceding adds,
-// each call's directory resolved from cwd. Nil means the command stages the whole
-// repo or uses an unresolved path form.
-func StagedPathspecs(cmd, cwd string) []string {
+// one list per add, each call's directory resolved from cwd. Nil means the command
+// stages the whole repo or uses an unresolved path form.
+func StagedPathspecs(cmd, cwd string) [][]string {
 	if parsed, err := parseCommit(cmd, cwd); err == nil && parsed != nil {
 		return parsedStagedPathspecs(parsed.program, parsed)
 	}

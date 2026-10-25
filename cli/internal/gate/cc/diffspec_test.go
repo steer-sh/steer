@@ -90,47 +90,130 @@ func TestABareAddInTheShellDirectoryKeepsAStrayOutOfTheReview(t *testing.T) {
 	}
 }
 
+// newRepo makes a repository holding the tracked files and returns its root and a git
+// runner for it.
+func newRepo(t *testing.T, tracked ...string) (string, func(args ...string)) {
+	t.Helper()
+	root := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	run("init", "-q", ".")
+	for _, path := range tracked {
+		writeLines(t, root, path, "line x\n")
+	}
+	run("add", ".")
+	run("co"+"mmit", "-qm", "init")
+	return root, run
+}
+
+func writeLines(t *testing.T, root, path, line string) {
+	t.Helper()
+	full := filepath.Join(root, path)
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(full, []byte(strings.Repeat(line, 80)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestAnAddExclusionSubtractsOnlyFromItsOwnAdd: git applies an exclusion to the
+// paths of the add that names it, so a later add of the excluded path stages it.
+func TestAnAddExclusionSubtractsOnlyFromItsOwnAdd(t *testing.T) {
+	root, _ := newRepo(t, "a.go", "b.go")
+	writeLines(t, root, "a.go", "changed\n")
+	writeLines(t, root, "c.go", "new\n")
+
+	cmd := "git add . ':!a.go' ':!c.go' && git add a.go c.go && git co" + "mmit -m x"
+	diff, ok := gate.GetDiff(gate.Defaults(), RepoDir(cmd, root), DiffSpecFor(cmd, root))
+	if !ok {
+		t.Fatal("GetDiff failed")
+	}
+	if !strings.Contains(diff, "a/a.go") {
+		t.Error("the tracked file the second add stages must reach the reviewer")
+	}
+	if !strings.Contains(diff, "b/c.go") {
+		t.Error("the new file the second add stages must reach the reviewer")
+	}
+}
+
+// TestAnExclusionOnlyAddInASubdirectoryCoversTheRepository: `git add -A ':!x'` from a
+// subdirectory stages new files across the repository, not only below the cwd.
+func TestAnExclusionOnlyAddInASubdirectoryCoversTheRepository(t *testing.T) {
+	root, _ := newRepo(t, "sub/main.go")
+	writeLines(t, root, "sub/main.go", "changed\n")
+	writeLines(t, root, "top.go", "new\n")
+	sub := filepath.Join(root, "sub")
+
+	cmd := "git add -A ':!main.go' && git co" + "mmit -m x"
+	diff, ok := gate.GetDiff(gate.Defaults(), RepoDir(cmd, sub), DiffSpecFor(cmd, sub))
+	if !ok {
+		t.Fatal("GetDiff failed")
+	}
+	if !strings.Contains(diff, "b/top.go") {
+		t.Error("a new file outside the cwd that the add stages must reach the reviewer")
+	}
+	if strings.Contains(diff, "sub/main.go") {
+		t.Error("the change the add excludes does not land in this commit")
+	}
+}
+
 func TestStagedPathspecs(t *testing.T) {
 	cases := []struct {
 		cmd  string
-		want []string
+		want [][]string
 		why  string
 	}{
-		{"git add cli/cmd && git commit -F -", []string{"cli/cmd"},
+		{"git add cli/cmd && git commit -F -", [][]string{{"cli/cmd"}},
 			"the reported defect: one subtree staged, the whole repo reviewed"},
-		{"git add a.go b.go && git commit -m x", []string{"a.go", "b.go"}, "every named path"},
-		{"git add -- -weird.go && git commit -m x", []string{"-weird.go"},
+		{"git add a.go b.go && git commit -m x", [][]string{{"a.go", "b.go"}}, "every named path"},
+		{"git add -- -weird.go && git commit -m x", [][]string{{"-weird.go"}},
 			"past `--` a leading dash is a path, not an option"},
-		{"git add 'my file.go' && git commit -m x", []string{"my file.go"},
+		{"git add 'my file.go' && git commit -m x", [][]string{{"my file.go"}},
 			"a quoted path holding a space is one token"},
-		{"git add cli && git add docs && git commit -m x", []string{"cli", "docs"},
+		{"git add cli && git add docs && git commit -m x", [][]string{{"cli"}, {"docs"}},
 			"two staging steps both name paths"},
-		{"git add . && git commit -m x", []string{"."}, "`.` is a pathspec git resolves itself"},
+		{"git add . && git commit -m x", [][]string{{"."}}, "`.` is a pathspec git resolves itself"},
 		{"git add -A && git commit -m x", nil, "no pathspec means the whole repo"},
 		{"git add && git commit -m x", nil, "no pathspec means the whole repo"},
-		{"git add -A cli && git commit -m x", []string{"cli"}, "-A still obeys a pathspec"},
+		{"git add -A cli && git commit -m x", [][]string{{"cli"}}, "-A still obeys a pathspec"},
 		{"git add $FILES && git commit -m x", nil, "a variable expands to text this does not have"},
 		{"git add \"$(ls)\" && git commit -m x", nil, "a substitution expands to text this does not have"},
 		{"git add --pathspec-from-file=list && git commit -m x", nil,
 			"the paths live in a file, so the command text does not name them"},
 		{"git -C /other add cli && git commit -m x", nil,
 			"the paths resolve against a directory the plan does not read"},
-		{"git -C /r add a.go b.go && git -C /r commit -F msg", []string{"a.go", "b.go"},
+		{"git -C /r add a.go b.go && git -C /r commit -F msg", [][]string{{"a.go", "b.go"}},
 			"the form the gate's own refusal asks for: add and commit share one directory"},
 		{"git -C /r add a.go && git -C /s commit -m x", nil, "add and commit name different repositories"},
-		{"git add a.go && git -C /w commit -F msg", []string{"a.go"},
+		{"git add a.go && git -C /w commit -F msg", [][]string{{"a.go"}},
 			"a bare add runs in the shell's directory, and -C names that same directory"},
 		{"git add a.go && git -C /r commit -F msg", nil,
 			"a bare add runs in the shell's directory, and -C names another"},
-		{"cd /r && git add a.go && git commit -m x", []string{"a.go"}, "one cd moves both"},
-		{"git -C /r add a.go && cd /r && git commit -m x", []string{"a.go"},
+		{"cd /r && git add a.go && git commit -m x", [][]string{{"a.go"}}, "one cd moves both"},
+		{"git -C /r add a.go && cd /r && git commit -m x", [][]string{{"a.go"}},
 			"cd and -C that land in one directory"},
 		{"git add a.go && cd sub && git commit -m x", nil,
 			"the paths resolve against the directory above the commit's"},
-		{"git -C sub add a.go && git -C sub commit -m x", []string{"a.go"},
+		{"git -C sub add a.go && git -C sub commit -m x", [][]string{{"a.go"}},
 			"a relative -C that both calls share"},
 		{"git commit -am x", nil, "no staging step at all"},
-		{"git add cli; git commit -m x", []string{"cli"}, "`;` separates, it does not join"},
+		{"git add cli; git commit -m x", [][]string{{"cli"}}, "`;` separates, it does not join"},
+		{"git add . ':!a.go' && git add a.go && git commit -m x", [][]string{{".", ":!a.go"}, {"a.go"}},
+			"an exclusion subtracts from its own add only"},
+		{"git add -A ':!a.go' ':(exclude)b.go' ':/^c.go' && git commit -m x",
+			[][]string{{":/", ":!a.go", ":(exclude)b.go", ":/^c.go"}},
+			"exclusions alone stage the whole repository less them"},
+		{"git add ':/a.go' ':!b.go' && git commit -m x", [][]string{{":/a.go", ":!b.go"}},
+			"top magic is no exclusion"},
 	}
 	for _, tc := range cases {
 		got := StagedPathspecs(tc.cmd, "/w")
@@ -145,26 +228,26 @@ func TestDiffSpecForCarriesPathspecsOnlyWithUntracked(t *testing.T) {
 	if spec.StagedOnly || !spec.IncludeUntracked {
 		t.Fatalf("a staging step reads the working tree and opts into untracked files: %+v", spec)
 	}
-	if !reflect.DeepEqual(spec.UntrackedPathspecs, []string{"cli/cmd"}) {
-		t.Errorf("UntrackedPathspecs = %v", spec.UntrackedPathspecs)
+	if !reflect.DeepEqual(spec.UntrackedAddPathspecs, [][]string{{"cli/cmd"}}) {
+		t.Errorf("UntrackedAddPathspecs = %v", spec.UntrackedAddPathspecs)
 	}
-	if !reflect.DeepEqual(spec.TrackedPathspecs, []string{"cli/cmd"}) {
-		t.Errorf("TrackedPathspecs = %v", spec.TrackedPathspecs)
+	if !reflect.DeepEqual(spec.TrackedAddPathspecs, [][]string{{"cli/cmd"}}) {
+		t.Errorf("TrackedAddPathspecs = %v", spec.TrackedAddPathspecs)
 	}
 	// -a stages tracked files only, so there is no untracked half to narrow.
 	bare := DiffSpecFor("git com"+"mit -am x", "/w")
-	if bare.IncludeUntracked || bare.UntrackedPathspecs != nil || bare.TrackedPathspecs != nil {
+	if bare.IncludeUntracked || bare.UntrackedAddPathspecs != nil || bare.TrackedAddPathspecs != nil {
 		t.Errorf("commit -a: %+v", bare)
 	}
 	// The one form where the two halves disagree: the add bounds which NEW files can
 	// land, while -a lands every tracked modification, named or not.
 	both := DiffSpecFor("git add cli/cmd && git com"+"mit -am x", "/w")
-	if !reflect.DeepEqual(both.UntrackedPathspecs, []string{"cli/cmd"}) {
-		t.Errorf("add + commit -a: UntrackedPathspecs = %v", both.UntrackedPathspecs)
+	if !reflect.DeepEqual(both.UntrackedAddPathspecs, [][]string{{"cli/cmd"}}) {
+		t.Errorf("add + commit -a: UntrackedAddPathspecs = %v", both.UntrackedAddPathspecs)
 	}
-	if both.TrackedPathspecs != nil {
+	if both.TrackedAddPathspecs != nil {
 		t.Errorf("add + commit -a: narrowing the tracked half hides a file -a stages: %v",
-			both.TrackedPathspecs)
+			both.TrackedAddPathspecs)
 	}
 }
 

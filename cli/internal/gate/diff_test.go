@@ -407,7 +407,7 @@ func TestUntrackedPathspecsNarrowTheScan(t *testing.T) {
 		t.Fatal("regression guard: an unnarrowed spec must still see every untracked file")
 	}
 
-	narrow, ok := GetDiff(cfg, root, DiffSpec{IncludeUntracked: true, UntrackedPathspecs: []string{"cli"}})
+	narrow, ok := GetDiff(cfg, root, DiffSpec{IncludeUntracked: true, UntrackedAddPathspecs: [][]string{{"cli"}}})
 	if !ok {
 		t.Fatal("GetDiff failed")
 	}
@@ -438,9 +438,9 @@ func TestTrackedPathspecsNarrowTheTrackedHalf(t *testing.T) {
 	gitCmd(t, root, "add", "earlier.py")
 
 	spec := DiffSpec{
-		IncludeUntracked:   true,
-		UntrackedPathspecs: []string{"cli/code.py"},
-		TrackedPathspecs:   []string{"cli/code.py"},
+		IncludeUntracked:      true,
+		UntrackedAddPathspecs: [][]string{{"cli/code.py"}},
+		TrackedAddPathspecs:   [][]string{{"cli/code.py"}},
 	}
 	diff, ok := GetDiff(cfg, root, spec)
 	if !ok {
@@ -482,7 +482,7 @@ func TestAnAddExclusionKeepsAnEarlierStagedFileInTheReview(t *testing.T) {
 	writeFileAt(t, root, "code.py", code+"changed = 1\n")
 	writeFileAt(t, root, "PLAN.md", code+"note = 1\n")
 
-	diff, ok := GetDiff(cfg, root, DiffSpec{TrackedPathspecs: []string{"code.py", ":!keep.py"}})
+	diff, ok := GetDiff(cfg, root, DiffSpec{TrackedAddPathspecs: [][]string{{"code.py", ":!keep.py"}}})
 	if !ok {
 		t.Fatal("GetDiff failed")
 	}
@@ -508,7 +508,7 @@ func TestAStagedRenameKeepsItsDeletionInTheReview(t *testing.T) {
 	writeFileAt(t, root, "code.py", code+"changed = 1\n")
 	writeFileAt(t, root, "PLAN.md", code+"note = 1\n")
 
-	diff, ok := GetDiff(cfg, root, DiffSpec{TrackedPathspecs: []string{"code.py"}})
+	diff, ok := GetDiff(cfg, root, DiffSpec{TrackedAddPathspecs: [][]string{{"code.py"}}})
 	if !ok {
 		t.Fatal("GetDiff failed")
 	}
@@ -530,7 +530,7 @@ func TestUnreadablePathspecWidens(t *testing.T) {
 	writeFileAt(t, root, "new.py", code)
 
 	bogus := []string{":(bogusmagic)x"}
-	diff, ok := GetDiff(cfg, root, DiffSpec{IncludeUntracked: true, UntrackedPathspecs: bogus})
+	diff, ok := GetDiff(cfg, root, DiffSpec{IncludeUntracked: true, UntrackedAddPathspecs: [][]string{bogus}})
 	if !ok {
 		t.Fatal("GetDiff failed")
 	}
@@ -542,7 +542,7 @@ func TestUnreadablePathspecWidens(t *testing.T) {
 	// pathspec would stop the diff and the review with it.
 	writeFileAt(t, root, "old.py", code+"changed = 1\n")
 	tracked, ok := GetDiff(cfg, root, DiffSpec{IncludeUntracked: true,
-		UntrackedPathspecs: bogus, TrackedPathspecs: bogus})
+		UntrackedAddPathspecs: [][]string{bogus}, TrackedAddPathspecs: [][]string{bogus}})
 	if !ok {
 		t.Fatal("a pathspec git cannot read must widen the tracked half, never fail it")
 	}

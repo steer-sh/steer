@@ -1124,16 +1124,12 @@ func parsedStagesBefore(program *shellsyntax.Program, commit *parsedGit) bool {
 	return false
 }
 
-// parsedStagedPathspecs returns the paths the adds before the commit name. An add's
-// paths resolve against its own directory and the diff runs in the commit's, so an
-// add whose directory, after cd and -C, differs from the commit's yields nil.
-func parsedStagedPathspecs(program *shellsyntax.Program, commit *parsedGit) []string {
-	adds := parsedAddPathspecs(program, commit, false)
-	var paths []string
-	for _, specs := range adds {
-		paths = append(paths, specs...)
-	}
-	return paths
+// parsedStagedPathspecs returns the paths the adds before the commit name, one list
+// per add. An add's paths resolve against its own directory and the diff runs in the
+// commit's, so an add whose directory, after cd and -C, differs from the commit's
+// yields nil.
+func parsedStagedPathspecs(program *shellsyntax.Program, commit *parsedGit) [][]string {
+	return parsedAddPathspecs(program, commit, false)
 }
 
 // parsedAddPathspecs preserves the selection of forced adds independently of ordinary adds.
@@ -1181,12 +1177,53 @@ func parsedAddPathspecs(program *shellsyntax.Program, commit *parsedGit, forcedO
 		if len(specs) == 0 {
 			return wide()
 		}
+		// git add reads a list of exclusions alone as the whole repository less them,
+		// while ls-files reads it as the cwd's subtree less them.
+		if allExclusions(specs) {
+			specs = append([]string{":/"}, specs...)
+		}
 		out = append(out, specs)
 	}
 	if len(out) == 0 {
 		return nil
 	}
 	return out
+}
+
+// allExclusions reports whether every pathspec carries exclude magic: `:!`, `:^`, or
+// `exclude` in the long form.
+func allExclusions(specs []string) bool {
+	for _, spec := range specs {
+		if !isExclusion(spec) {
+			return false
+		}
+	}
+	return true
+}
+
+func isExclusion(spec string) bool {
+	if magic, ok := strings.CutPrefix(spec, ":("); ok {
+		names, _, _ := strings.Cut(magic, ")")
+		for _, name := range strings.Split(names, ",") {
+			if strings.TrimSpace(name) == "exclude" {
+				return true
+			}
+		}
+		return false
+	}
+	if !strings.HasPrefix(spec, ":") {
+		return false
+	}
+	for _, r := range spec[1:] {
+		switch r {
+		case '!', '^':
+			return true
+		case '/':
+		default:
+			return false
+		}
+	}
+	return false
 }
 
 // forcesAdd reads the last force option before a literal path delimiter.
