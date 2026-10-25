@@ -121,11 +121,11 @@ print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permiss
 	if err := os.WriteFile(master, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	blocked, reason, _, err := runMasterHookVerification(master, verifyTarget{Path: "q.py", Content: "x = 1\n"})
-	if err != nil {
-		t.Fatalf("verification failed: %v", err)
+	result := runMasterHookVerification(master, verifyTarget{Path: "q.py", Content: "x = 1\n"})
+	if result.Err != nil {
+		t.Fatalf("verification failed: %v", result.Err)
 	}
-	if !blocked || reason != "no f-string SQL" {
-		t.Fatalf("blocked=%v reason=%q, want a block with the master's reason", blocked, reason)
+	if !result.Blocked || result.Reason != "no f-string SQL" {
+		t.Fatalf("blocked=%v reason=%q, want a block with the master's reason", result.Blocked, result.Reason)
 	}
 }

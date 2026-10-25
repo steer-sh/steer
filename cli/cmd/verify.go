@@ -3,12 +3,16 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steer-sh/steer-cli/internal/adjudication"
 	"github.com/steer-sh/steer-cli/internal/claude"
+	"github.com/steer-sh/steer-cli/internal/guard"
 	"github.com/steer-sh/steer-cli/internal/styles"
 	"github.com/steer-sh/steer-cli/internal/utils"
 )
@@ -72,6 +76,7 @@ global hooks after project hooks.`,
 		totalBlocked := 0
 		totalErrors := 0
 		verifiedScopes := 0
+		unscrubbed := false
 
 		for _, verifyScope := range scopes {
 			managed, err := claude.ListHooks(verifyScope)
@@ -100,19 +105,34 @@ global hooks after project hooks.`,
 			scopeErrors := 0
 			utils.Working(fmt.Sprintf("Scope %s: verifying %d files with %d managed hooks...", verifyScope, len(targets), len(managed)))
 
-			for _, target := range targets {
-				blocked, reason, _, execErr := runMasterHookVerification(masterHookPath, target)
-				if execErr != nil {
+			results, err := verifyAgainstMaster(masterHookPath, targets)
+			if err != nil {
+				return fmt.Errorf("scope %s: %w", verifyScope, err)
+			}
+			diagnostics := map[string]bool{}
+			for i, result := range results {
+				target := targets[i]
+				for _, line := range strings.Split(result.Stderr, "\n") {
+					if line = strings.TrimSpace(line); line != "" && !diagnostics[line] {
+						diagnostics[line] = true
+						utils.Warning(fmt.Sprintf("[%s] %s", verifyScope, line))
+					}
+				}
+				if result.Err != nil {
 					scopeErrors++
 					totalErrors++
-					fmt.Println(styles.ErrorText.Render(fmt.Sprintf("✗ [%s] %s: %s", verifyScope, target.Path, execErr)))
+					fmt.Println(styles.ErrorText.Render(fmt.Sprintf("✗ [%s] %s: %s", verifyScope, target.Path, result.Err)))
 					continue
 				}
-				if blocked {
+				if result.Blocked {
 					scopeBlocked++
 					totalBlocked++
+					reason := result.Reason
 					if strings.TrimSpace(reason) == "" {
 						reason = "policy violation"
+					}
+					if !result.FiringRemoved {
+						unscrubbed = true
 					}
 					fmt.Println(styles.ErrorText.Render(fmt.Sprintf("✗ [%s] %s: %s", verifyScope, target.Path, reason)))
 				}
@@ -138,6 +158,10 @@ global hooks after project hooks.`,
 			totalBlocked,
 			totalErrors,
 		)
+
+		if unscrubbed {
+			utils.Warning("These firings are temporary: verification discards its audit rows, so do not run a contest command shown above.")
+		}
 
 		fmt.Println()
 		if totalBlocked > 0 || totalErrors > 0 {
@@ -231,7 +255,89 @@ func loadChangedTargets(base, head string) ([]verifyTarget, error) {
 	return targets, nil
 }
 
-func runMasterHookVerification(masterHookPath string, target verifyTarget) (bool, string, string, error) {
+// verifyResult is one file's outcome under a scope's master.
+type verifyResult struct {
+	Blocked bool
+	// Reason is the block's reason without the lines that name its firing.
+	Reason string
+	// FiringRemoved reports that the reason's firing lines were found and removed.
+	FiringRemoved bool
+	// Stderr is the master's diagnostics, such as a guard it could not load.
+	Stderr string
+	Err    error
+}
+
+// verifyAgainstMaster runs every target through a copy of the master at
+// masterHookPath, never the master itself: the runtime appends each block to the
+// audit log beside the running master, and a verification block is no live
+// firing. The copy sits beside a copy of the rest of the store, so a guard's own
+// source, sibling modules and data files resolve as they do in place. The
+// runtime's own outputs stay behind. A symlink is made again with the target it
+// resolves to in place, never read through. A path a guard reaches outside the
+// store is not mirrored. A copy that fails stops verification; nothing falls
+// back to the live store.
+func verifyAgainstMaster(masterHookPath string, targets []verifyTarget) ([]verifyResult, error) {
+	store, err := guard.NewSandbox("steer-verify-")
+	if err != nil {
+		return nil, err
+	}
+	defer store.Close()
+
+	masterName := filepath.Base(masterHookPath)
+	masterCopy, err := store.Copy(masterHookPath, masterName)
+	if err != nil {
+		return nil, err
+	}
+	live, err := filepath.EvalSymlinks(filepath.Dir(masterHookPath))
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve the guard store: %w", err)
+	}
+	err = filepath.WalkDir(live, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(live, path)
+		if err != nil {
+			return err
+		}
+		name := filepath.ToSlash(rel)
+		switch {
+		case name == guard.PayloadsDirName && entry.IsDir():
+			return filepath.SkipDir
+		case name == "." || name == masterName || name == guard.AuditLogName:
+			return nil
+		case entry.IsDir():
+			return store.Mkdir(name)
+		case entry.Type()&fs.ModeSymlink != 0:
+			target, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			if !filepath.IsAbs(target) {
+				// Not filepath.Join: cleaning "link/.." lexically names another file.
+				target = filepath.Dir(path) + string(filepath.Separator) + target
+			}
+			return store.Link(target, name)
+		case !entry.Type().IsRegular():
+			return nil
+		}
+		_, err = store.Copy(path, name)
+		return err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to copy the guard store: %w", err)
+	}
+
+	results := make([]verifyResult, 0, len(targets))
+	for _, target := range targets {
+		results = append(results, runMasterHookVerification(masterCopy, target))
+	}
+	return results, nil
+}
+
+// runMasterHookVerification runs the master at masterHookPath on one target. It
+// clears that master's audit log first, so the firing it reads back is this run's.
+func runMasterHookVerification(masterHookPath string, target verifyTarget) verifyResult {
 	payload := map[string]any{
 		"tool_name": "Write",
 		"tool_input": map[string]any{
@@ -242,20 +348,71 @@ func runMasterHookVerification(masterHookPath string, target verifyTarget) (bool
 
 	inputJSON, err := json.Marshal(payload)
 	if err != nil {
-		return false, "", "", fmt.Errorf("failed to marshal hook payload: %w", err)
+		return verifyResult{Err: fmt.Errorf("failed to marshal hook payload: %w", err)}
 	}
 
+	auditPath := filepath.Join(filepath.Dir(masterHookPath), guard.AuditLogName)
+	if err := os.Remove(auditPath); err != nil && !os.IsNotExist(err) {
+		return verifyResult{Err: fmt.Errorf("failed to clear the verification audit log: %w", err)}
+	}
+
+	var stdout, stderr strings.Builder
 	execCmd := exec.Command("python3", masterHookPath)
 	execCmd.Stdin = strings.NewReader(string(inputJSON))
-	output, err := execCmd.CombinedOutput()
-	outputStr := strings.TrimSpace(string(output))
+	execCmd.Stdout = &stdout
+	execCmd.Stderr = &stderr
+	err = execCmd.Run()
+	result := verifyResult{Stderr: strings.TrimSpace(stderr.String())}
 
-	blocked, reason := parseHookDecision(outputStr)
+	blocked, reason := parseHookDecision(strings.TrimSpace(stdout.String()))
 	if err != nil && !blocked {
-		return false, "", outputStr, fmt.Errorf("hook execution failed: %w", err)
+		output := strings.TrimSpace(stdout.String() + "\n" + result.Stderr)
+		result.Err = fmt.Errorf("hook execution failed: %w: %s", err, output)
+		return result
 	}
+	result.Blocked = blocked
+	result.Reason = reason
+	if blocked {
+		result.Reason, result.FiringRemoved = withoutFiring(reason, recordedFiringID(auditPath))
+	}
+	return result
+}
 
-	return blocked, reason, outputStr, nil
+// recordedFiringID is the firing_id of the last row in the audit log at path, or
+// "" when there is no row or no well-formed identifier.
+func recordedFiringID(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	var row struct {
+		FiringID string `json:"firing_id"`
+	}
+	if json.Unmarshal([]byte(lines[len(lines)-1]), &row) != nil || !adjudication.ValidFiringID(row.FiringID) {
+		return ""
+	}
+	return row.FiringID
+}
+
+// withoutFiring drops every line of reason that names firingID, which a discarded
+// verification store cannot answer for, and keeps the rest. It reports whether
+// any line was dropped.
+func withoutFiring(reason, firingID string) (string, bool) {
+	if firingID == "" {
+		return reason, false
+	}
+	lines := strings.Split(reason, "\n")
+	kept := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if !strings.Contains(line, firingID) {
+			kept = append(kept, line)
+		}
+	}
+	if len(kept) == len(lines) {
+		return reason, false
+	}
+	return strings.TrimSpace(strings.Join(kept, "\n")), true
 }
 
 func init() {

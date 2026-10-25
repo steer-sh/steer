@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/steer-sh/steer-cli/internal/guard"
 )
 
 // Outcome is what a run answered.
@@ -215,32 +217,27 @@ func (r Runner) Run(guardPath, masterPath string, file File) (Report, error) {
 		return Report{}, err
 	}
 
-	root, err := os.MkdirTemp("", "steer-fixture-")
+	store, err := guard.NewSandbox("steer-fixture-")
 	if err != nil {
-		return Report{}, fmt.Errorf("failed to create fixture sandbox: %w", err)
+		return Report{}, err
 	}
-	defer os.RemoveAll(root)
+	defer store.Close()
+	root := store.Root()
 
-	storeDir := filepath.Join(root, "store")
-	if err := os.MkdirAll(storeDir, 0o755); err != nil {
-		return Report{}, fmt.Errorf("failed to create fixture store: %w", err)
-	}
-
-	guardCopy := filepath.Join(storeDir, file.Hook+".py")
-	if err := copyFile(guardPath, guardCopy); err != nil {
+	guardCopy, err := store.Copy(guardPath, file.Hook+".py")
+	if err != nil {
 		return Report{}, err
 	}
 
 	masterCopy := ""
 	if strings.TrimSpace(masterPath) != "" {
-		masterCopy = filepath.Join(storeDir, "steer-hooks.py")
-		if err := copyFile(masterPath, masterCopy); err != nil {
+		if masterCopy, err = store.Copy(masterPath, "steer-hooks.py"); err != nil {
 			return Report{}, err
 		}
 	}
 
 	report := Report{Hook: file.Hook, MasterDigest: FileDigest(masterPath)}
-	auditPath := filepath.Join(storeDir, "steer-audit.jsonl")
+	auditPath := store.AuditPath()
 
 	for i, c := range file.Cases {
 		row := CaseResult{Name: c.Name, Expect: c.Expect, Origin: c.Origin, MasterState: MasterNotRun}
@@ -488,15 +485,4 @@ func clone(value map[string]any) map[string]any {
 		out[k] = v
 	}
 	return out
-}
-
-func copyFile(src, dst string) error {
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return fmt.Errorf("failed to read %s: %w", filepath.Base(src), err)
-	}
-	if err := os.WriteFile(dst, data, 0o755); err != nil {
-		return fmt.Errorf("failed to write %s: %w", filepath.Base(dst), err)
-	}
-	return nil
 }

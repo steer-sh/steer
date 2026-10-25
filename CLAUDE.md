@@ -76,7 +76,8 @@ Read the linked architecture section before changing the corresponding boundary:
   `cli/internal/guard/runtime.py` is embedded in generated masters. A CLI upgrade
   updates an installed master only through `steer hooks rebuild --scope <scope>`,
   which `steer bin install` runs for a stale global master alone;
-  fixture runs must keep synthetic firings out of the live audit log.
+  fixture runs and `steer verify` must keep synthetic firings out of the live
+  audit log, so both run a copy of the master in a `guard.Sandbox`.
   To probe a guard, use `steer test` or `tests/sandbox.py`; never pipe a payload
   into the installed master or run an agent against the real home. The runtime
   cannot tell that block from real work, so it lands in the live log as a firing

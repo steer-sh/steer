@@ -290,8 +290,11 @@ temporary file and a rename for the same reason.
 
 `internal/guard/fixture/` stores replayable cases at `fixtures/<hook-id>.json`.
 Each case has payload, expected result, optional filesystem context and provenance.
-The runner copies the guard and master into a temporary store so synthetic firings
-cannot enter the live audit log. Individual guards must pass both allow and block
+The runner copies the guard and master into a temporary store (`guard.Sandbox`) so
+synthetic firings cannot enter the live audit log. `steer verify` runs the same way:
+a copy of each scope's master beside a copy of the rest of the store, less the
+audit log and its payload directory, with each symlink made again to its target,
+with the reason lines that name the discarded firing removed. Individual guards must pass both allow and block
 cases. Master positives distinguish interception by the intended guard, shadowing
 by an earlier guard, and failure to block. Shadowing leaves integration unverified.
 
