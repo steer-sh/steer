@@ -184,7 +184,7 @@ func newDiffPlan(cfg Config, cwd string, spec DiffSpec) *diffPlan {
 	// payload MaxDiffChars exists to prevent.
 	p.diffArgs = append([]string{}, base...)
 	p.statArgs = append(append([]string{}, base...), "--stat")
-	p.nameArgs = append(append([]string{}, base...), "--name-only")
+	p.nameArgs = append(append([]string{}, base...), "--name-only", "-z")
 	if tail := pathspecTail(p.included, specs); len(tail) > 0 {
 		p.diffArgs = append(p.diffArgs, tail...)
 		p.statArgs = append(p.statArgs, tail...)
@@ -258,14 +258,14 @@ func trackedSelector(cwd string, spec DiffSpec) []string {
 // pathspec silently narrows the whole diff to that subtree. `literal` because a real
 // path may contain glob metacharacters, and `:!:` treats its argument as a pattern.
 func (p *diffPlan) noisePathspecs(base []string) (excluded, specs []string) {
-	args := append(append([]string{}, base...), "--name-only")
+	args := append(append([]string{}, base...), "--name-only", "-z")
 	args = append(args, pathspecTail(p.included, nil)...)
 	out, ok := Git(p.cwd, gitMedium, args...)
 	if !ok || out == "" {
 		return nil, nil
 	}
 	var dropped []string
-	for _, path := range nonEmptyLines(out) {
+	for _, path := range nulFields(out) {
 		if IsNoise(path) {
 			excluded = append(excluded, path)
 			dropped = append(dropped, path)
@@ -283,7 +283,7 @@ func (p *diffPlan) noisePathspecs(base []string) (excluded, specs []string) {
 	return excluded, specs
 }
 
-// run executes the plan and returns the diff text, the matching name list, and the
+// run executes the plan and returns the diff text, the matching NUL-separated name list, and the
 // paths of any untracked files rendered into both. The untracked append happens here
 // so the two streams cannot drift apart.
 func (p *diffPlan) run() (diff, names string, newPaths []string, ok bool) {
@@ -312,13 +312,14 @@ func (p *diffPlan) run() (diff, names string, newPaths []string, ok bool) {
 	}
 	diff += text
 	for _, path := range used {
-		names += path + "\n"
+		names += path + "\x00"
 	}
 	return diff, names, used, true
 }
 
 func (p *diffPlan) stat(newPaths []string) string {
-	stat, _ := Git(p.cwd, gitLong, p.statArgs...)
+	// --stat has no -z; quotepath off makes it name a non-ASCII path as the preamble does.
+	stat, _ := Git(p.cwd, gitLong, append([]string{"-c", "core.quotepath=false"}, p.statArgs...)...)
 	// --stat is blind to untracked files for the same reason the diff was. Naming
 	// them keeps the "Full stat" claim true.
 	if len(newPaths) > 0 {
@@ -333,7 +334,7 @@ func (p *diffPlan) stat(newPaths []string) string {
 // subdirectory, bare `ls-files --others` lists that subtree ALONE, so a commit made
 // from `sub/` would report every new file outside sub as nonexistent.
 func (p *diffPlan) untrackedPaths() []string {
-	base := []string{"ls-files", "--others", "--exclude-standard", "--full-name", "--"}
+	base := []string{"ls-files", "--others", "--exclude-standard", "--full-name", "-z", "--"}
 	out, ok := Git(p.cwd, gitMedium, append(append([]string{}, base...), p.untrackedSelector()...)...)
 	if !ok {
 		// A pathspec git rejects leaves the intent unresolved, so widen rather than
@@ -345,17 +346,17 @@ func (p *diffPlan) untrackedPaths() []string {
 		return nil
 	}
 	for _, specs := range p.spec.ForcedUntrackedPathspecs {
-		forcedBase := []string{"ls-files", "--others", "--full-name", "--"}
+		forcedBase := []string{"ls-files", "--others", "--full-name", "-z", "--"}
 		forced, forcedOK := Git(p.cwd, gitMedium, append(forcedBase, specs...)...)
 		if !forcedOK {
-			forced, forcedOK = Git(p.cwd, gitMedium, "ls-files", "--others", "--full-name", "--", ":/")
+			forced, forcedOK = Git(p.cwd, gitMedium, "ls-files", "--others", "--full-name", "-z", "--", ":/")
 			if !forcedOK {
 				p.incomplete = true
 			}
 		}
 		out += forced
 	}
-	paths := dropCruft(nonEmptyLines(out))
+	paths := dropCruft(nulFields(out))
 	seen := map[string]bool{}
 	unique := paths[:0]
 	for _, path := range paths {
@@ -445,12 +446,12 @@ func budgetSections(diff, names string, maxChars int) (kept string, dropped []st
 	if cur.Len() > 0 {
 		sections = append(sections, cur.String())
 	}
-	// Paths come from --name-only rather than from parsing the `diff --git a/x b/x`
+	// Paths come from `--name-only -z` rather than from parsing the `diff --git a/x b/x`
 	// header, whose two-path form is ambiguous for any path containing a space and is
 	// quoted for any path containing a non-ASCII byte. Both commands walk the same
 	// diff queue under the same pathspecs, so they agree in order; a length mismatch
 	// means that assumption broke and is a fail-closed, not something to reconcile.
-	paths := nonEmptyLines(names)
+	paths := nulFields(names)
 	if len(paths) != len(sections) {
 		return "", nil, false
 	}
@@ -515,13 +516,13 @@ func splitKeepEnds(text string) []string {
 // fail every "is this file in the diff" comparison and attach changed files as
 // unchanged callers. ok=false means git could not answer — fail open.
 func ChangedFiles(cfg Config, cwd string, spec DiffSpec) (paths []string, ok bool) {
-	args := append(diffBaseArgs(cwd, spec), "--name-only", "--no-relative")
+	args := append(diffBaseArgs(cwd, spec), "--name-only", "--no-relative", "-z")
 	args = append(args, pathspecTail(trackedSelector(cwd, spec), nil)...)
 	out, ok := Git(cwd, gitMedium, args...)
 	if !ok {
 		return nil, false
 	}
-	paths = dropCruft(nonEmptyLines(out))
+	paths = dropCruft(nulFields(out))
 	if spec.IncludeUntracked {
 		plan := &diffPlan{cfg: cfg, cwd: cwd, spec: spec}
 		paths = append(paths, plan.untrackedPaths()...)

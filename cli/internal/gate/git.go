@@ -74,6 +74,17 @@ func nonEmptyLines(text string) []string {
 	return out
 }
 
+// nulFields splits git's -z output into its non-empty paths.
+func nulFields(text string) []string {
+	var out []string
+	for _, field := range strings.Split(text, "\x00") {
+		if field != "" {
+			out = append(out, field)
+		}
+	}
+	return out
+}
+
 func fileSize(path string) (int64, bool) {
 	info, err := os.Stat(path)
 	if err != nil {

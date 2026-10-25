@@ -60,9 +60,9 @@ func TestReplayTier1(t *testing.T) {
 			continue
 		}
 		diff := string(diffBytes)
-		names := strings.Join(tc.Paths, "\n")
+		names := strings.Join(tc.Paths, "\x00")
 		if len(tc.Paths) > 0 {
-			names += "\n"
+			names += "\x00"
 		}
 
 		if got := IsProseOnly(tc.Paths); got != tc.ProseOnly {

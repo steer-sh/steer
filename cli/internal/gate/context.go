@@ -141,7 +141,7 @@ func referencingFiles(cfg Config, cwd string, symbols map[string]bool, changed [
 	if len(symbols) == 0 {
 		return nil
 	}
-	args := []string{"grep", "--cached", "-l", "-w", "-F", "-I"}
+	args := []string{"grep", "--cached", "-l", "-z", "-w", "-F", "-I"}
 	for _, s := range sortedKeys(symbols) {
 		args = append(args, "-e", s)
 	}
@@ -154,7 +154,7 @@ func referencingFiles(cfg Config, cwd string, symbols map[string]bool, changed [
 		changedSet[p] = true
 	}
 	var hits []string
-	for _, p := range nonEmptyLines(out) {
+	for _, p := range nulFields(out) {
 		if !changedSet[p] {
 			hits = append(hits, p)
 		}
