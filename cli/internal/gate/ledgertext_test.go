@@ -57,3 +57,44 @@ func TestTemplateVerdictLinesParse(t *testing.T) {
 		}
 	}
 }
+
+// The resolution after the arrow is kept beside the concern, and the concern, which is
+// the measurement key, stays the text before the arrow.
+func TestLedgerTextKeepsTheResolution(t *testing.T) {
+	row := ParseLedgerText("- **ACCEPTED** — a split value hides a commit → needed by the user's request; refused at syntax.go:12\n" +
+		"- **REJECTED** — no arrow on this line\n")
+	concerns := row["concerns"].([]Concern)
+	if len(concerns) != 2 {
+		t.Fatalf("concerns = %d, want 2", len(concerns))
+	}
+	if got, want := concerns[0].Concern, "a split value hides a commit"; got != want {
+		t.Errorf("concern = %q, want %q", got, want)
+	}
+	if got, want := concerns[0].Resolution, "needed by the user's request; refused at syntax.go:12"; got != want {
+		t.Errorf("resolution = %q, want %q", got, want)
+	}
+	if got := concerns[1].Resolution; got != "" {
+		t.Errorf("resolution = %q, want empty for a line without an arrow", got)
+	}
+}
+
+// A fixed finding's ledger line names the requirement that needed the repair, so the
+// ledger records the necessity ruling and not only the change.
+func TestTemplateFixedLinesNameTheRequirement(t *testing.T) {
+	for name, text := range map[string]string{"deny": denyTemplate, "cap": capTemplate} {
+		found := false
+		for _, line := range strings.Split(text, "\n") {
+			got, ok := parseLedgerLine(line)
+			if !ok || got.Verdict != "ACCEPTED" || got.Qualifier != "" {
+				continue
+			}
+			found = true
+			if !strings.Contains(line, "→ needed by ") {
+				t.Errorf("%s.md fixed line does not name the requirement: %q", name, line)
+			}
+		}
+		if !found {
+			t.Errorf("%s.md shows no fixed line", name)
+		}
+	}
+}

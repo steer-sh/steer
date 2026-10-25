@@ -57,6 +57,9 @@ type Concern struct {
 	// Qualifier is the text the agent wrote after the verdict word inside the bold
 	// marker, such as "not fixed" in `**ACCEPTED, not fixed**`.
 	Qualifier string `json:"qualifier,omitempty"`
+	// Resolution is the text after the arrow: the change made and the requirement
+	// that needed it, or why the concern stays unfixed or is false.
+	Resolution string `json:"resolution,omitempty"`
 }
 
 // RoundBlocks returns each per-round ledger inside one message, header line first. An
@@ -147,6 +150,15 @@ separatorDone:
 // text rather than silently changing its measurement key.
 var arrowSplitRe = regexp.MustCompile(`[ \t]+(?:→|->)[ \t]+`)
 
+// capRunes caps s at maxConcernChars by rune, as Python slices a str by code point; a
+// byte cap splits a multibyte char and drops a different last word on the same text.
+func capRunes(s string) string {
+	if r := []rune(s); len(r) > maxConcernChars {
+		return string(r[:maxConcernChars])
+	}
+	return s
+}
+
 // ParseLedgerText turns the verdict bullets of one ledger message into the row fields
 // they become.
 func ParseLedgerText(text string) Row {
@@ -158,16 +170,16 @@ func ParseLedgerText(text string) Row {
 		if !ok {
 			continue
 		}
-		// Keep the concern, not the resolution: an integer alone is unreadable a month
-		// later. Everything downstream of the arrow is what was done, not the claim.
-		claim := arrowSplitRe.Split(parsed.Concern, 2)[0]
-		claim = strings.TrimSpace(claim)
-		// Cap by rune, as Python slices a str by code point; a byte cap splits a
-		// multibyte char and drops a different last word on the same text.
-		if r := []rune(claim); len(r) > maxConcernChars {
-			claim = string(r[:maxConcernChars])
+		// The concern is the claim before the arrow and is the measurement key; the
+		// resolution after it is what was done and why, kept apart so it never moves
+		// that key.
+		parts := arrowSplitRe.Split(parsed.Concern, 2)
+		claim := capRunes(strings.TrimSpace(parts[0]))
+		resolution := ""
+		if len(parts) == 2 {
+			resolution = capRunes(strings.TrimSpace(parts[1]))
 		}
-		concerns = append(concerns, Concern{Verdict: parsed.Verdict, Concern: claim, Qualifier: parsed.Qualifier})
+		concerns = append(concerns, Concern{Verdict: parsed.Verdict, Concern: claim, Qualifier: parsed.Qualifier, Resolution: resolution})
 		if parsed.Verdict == "ACCEPTED" {
 			accepted++
 		} else {

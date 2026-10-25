@@ -10,14 +10,14 @@ Read the reviews the same way you read a fired gate: state each distinct concern
 
 Two things follow from this being terminal rather than blocking:
 
-1. There is no retry to fold fixes into. Apply the same repair policy: make a follow-up commit only for a defect whose repair is necessary for this task's supported use. Record other true concerns as ACCEPTED, not fixed. Acceptance or a BLOCKING label alone does not require a follow-up.
+1. There is no retry to fold fixes into. Apply the same repair policy: make a follow-up commit only for a defect whose repair a requirement needs, and the requirement must exist before this change: the user's request, or code, docs or tests at the base commit. This change's own commit message, comments or tests never count. Record other true concerns as ACCEPTED, not fixed. Acceptance or a BLOCKING label alone does not require a follow-up.
 2. The user sees only a one-line count of these findings, never the text. So the ledger is how the user learns what they said and what you did about it, and it is mandatory here exactly as it is on a fired gate. The chain is over and this commit is proceeding, so THIS reply is where the chain ledger goes — one section per round the chain fired, in order, ending with this terminal round. Copy the header line as it stands, sequence ID and subject included: it is what files this ledger against THIS commit, and one turn often commits more than once to the same repo. Every line self-contained:
 
 **Commit gate fired — review sequence{chain}, {subject}**
 
 **Round 1, blocking** — <N> reviewers, <M> raw findings, <K> distinct concerns.
 
-- **ACCEPTED** — <the concern in one clause> → <the change you made, file:line>
+- **ACCEPTED** — <the concern in one clause> → needed by <the requirement>; <the change you made, file:line>
 - **REJECTED** — <the concern in one clause> → <the premise, and why it is false>
 - Weakest surviving: <the concern> — <why it still stands, or that none survived>
 
@@ -25,7 +25,7 @@ Two things follow from this being terminal rather than blocking:
 
 **Round {firing}, terminal** — <N> reviewers, <M> raw findings, <K> distinct concerns. Commit not blocked.
 
-- **ACCEPTED** — <the concern in one clause> → <the fix, and whether it needs a follow-up commit>
+- **ACCEPTED** — <the concern in one clause> → needed by <the requirement>; <the fix, and whether it needs a follow-up commit>
 - **ACCEPTED, not fixed** — <the concern in one clause> → <why no supported use needs the repair, or the user's instruction>
 - **REJECTED** — <the concern in one clause> → <the premise, and why it is false>
 - Weakest surviving: <the concern> — <why it still stands, or that none survived>

@@ -12,7 +12,13 @@ If two findings cannot both be true, at least one of them is false. Say so and r
 
 For each finding: state its load-bearing premise in one sentence, then test THAT premise against the code — not against whether the finding sounds plausible. Open the file where the answer is in the file.
 
-{rerun_note}For each true finding, separately decide whether repair is necessary for this task's supported use. Cite the caller, contract, or operator requirement that makes it necessary; absence from inspected examples does not establish unreachability. Fix necessary defects, preferring a narrower truthful contract or explicit refusal over adding unneeded support. Record true concerns deliberately left unfixed as ACCEPTED, not fixed; REJECTED means a false premise. If no repairs are necessary, retry the reviewed diff unchanged. Acceptance and the reviewer's severity label do not themselves require a repair.
+{rerun_note}For each true finding, decide the response BEFORE you edit anything, and write that decision in your reply:
+
+- Needed by: <the existing caller, contract, or operator requirement this change must serve, with file:line or the user's words>. It must exist before this change: the user's request, or code, docs or tests at the base commit. This change's own commit message, comments or tests never count, and neither does a test or contract you add to justify the repair. Absence from inspected examples does not establish unreachability.
+- Failure if unchanged: <what a supported use gets wrong>.
+- Response: repair | narrow the contract or refuse explicitly | remove an optional mechanism this change introduced | leave unfixed.
+
+When the defect sits in a mechanism your change introduced by choice, and the requirement does not demand that mechanism, removing or narrowing it beats repairing it. Then make only the decided changes. Record true concerns left unfixed as ACCEPTED, not fixed; REJECTED means a false premise. If no repairs are necessary, retry the reviewed diff unchanged. Acceptance and the reviewer's severity label do not themselves require a repair.
 
 Reporting — this is not optional
 --------------------------------
@@ -30,7 +36,7 @@ Emit exactly this shape, ahead of your other commentary. Copy the header line as
 
 **Round 1, blocking** — <N> reviewers, <M> raw findings, <K> distinct concerns.
 
-- **ACCEPTED** — <the concern in one clause> → <the change you made, file:line>
+- **ACCEPTED** — <the concern in one clause> → needed by <the requirement>; <the change you made, file:line>
 - **ACCEPTED, not fixed** — <the concern in one clause> → <why no supported use needs the repair, or the user's instruction>
 - **REJECTED** — <the concern in one clause> → <the premise, and why it is false>
 - Weakest surviving: <the concern> — <why it still stands, or that none survived>
