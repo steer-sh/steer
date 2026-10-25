@@ -860,10 +860,171 @@ func (p *parsedGit) source(node syntax.Node) string {
 
 // commitStatement returns the statement whose call is the commit, or nil.
 func (p *parsedGit) commitStatement(file *syntax.File) *syntax.Stmt {
+	return statementAt(file, p.call.Start)
+}
+
+// uncertainCD returns the source of the first cd that resolvedDirs applies to the
+// commit although it may not have run when git commits: a cd in a pipeline member,
+// after `||`, in the background, or inside a compound command the commit is not in.
+// Empty means every applied cd ran, or a later absolute cd or the commit's own
+// absolute -C makes the directory independent of it.
+func (p *parsedGit) uncertainCD() string {
+	file, err := syntax.NewParser().Parse(strings.NewReader(p.program.Source), "command")
+	if err != nil {
+		return ""
+	}
+	commitPath := nodePath(file, p.commitStatement(file))
+	if commitPath == nil {
+		return ""
+	}
+	uncertain := ""
+	for _, call := range p.program.Calls[:p.callIndex] {
+		if !scopeAffects(call.Scopes, p.call.Scopes) || len(call.Args) == 0 || call.Args[0].Base() != "cd" {
+			continue
+		}
+		ran := ranBefore(nodePath(file, statementAt(file, call.Start)), commitPath)
+		if !ran && uncertain == "" {
+			uncertain = p.program.Source[call.Start:call.End]
+		}
+		if path, ok := cdPath(call.Args[1:]); ran && ok && knownDir(path.Value, path.TildePrefix()) {
+			uncertain = ""
+		}
+	}
+	if uncertain == "" || p.absoluteGitC() {
+		return ""
+	}
+	return uncertain
+}
+
+// absoluteGitC reports a -C on the commit's git call whose path no cd can move.
+func (p *parsedGit) absoluteGitC() bool {
+	for i := p.gitArg + 1; i < p.subcommand; i++ {
+		name, _, attached := strings.Cut(p.call.Args[i].Value, "=")
+		if name != "-C" || attached {
+			if takesGitValue(name) && !attached {
+				i++
+			}
+			continue
+		}
+		i++
+		if i < p.subcommand && p.call.Args[i].Static &&
+			knownDir(p.call.Args[i].Value, p.call.Args[i].TildePrefix()) {
+			return true
+		}
+	}
+	return false
+}
+
+// ranBefore reports whether the statement at the end of step has run whenever the
+// statement at the end of commit runs. Both paths start at the file.
+func ranBefore(step, commit []syntax.Node) bool {
+	i := 0
+	for i < len(step) && i < len(commit) && step[i] == commit[i] {
+		i++
+	}
+	if i == 0 || i >= len(step) || i >= len(commit) {
+		return false
+	}
+	// A loop around both repeats a relative cd before each later pass.
+	for _, shared := range step[:i] {
+		switch shared.(type) {
+		case *syntax.WhileClause, *syntax.ForClause:
+			return false
+		}
+	}
+	// succeeded: the node at hand must have exited zero for the commit to run.
+	succeeded := false
+	switch shared := step[i-1].(type) {
+	case *syntax.File, *syntax.Block, *syntax.Subshell, *syntax.CmdSubst, *syntax.CaseItem:
+	case *syntax.IfClause:
+		// Every condition statement runs before either branch; a then statement runs
+		// before a later one in the same branch.
+		inCond := holdsNode(shared.Cond, step[i])
+		if !inCond && !(holdsNode(shared.Then, step[i]) && holdsNode(shared.Then, commit[i])) {
+			return false
+		}
+		// The then branch runs only when the last condition statement succeeded.
+		last := len(shared.Cond) > 0 && step[i] == syntax.Node(shared.Cond[len(shared.Cond)-1])
+		succeeded = last && holdsNode(shared.Then, commit[i])
+	case *syntax.BinaryCmd:
+		if shared.Op != syntax.AndStmt {
+			return false
+		}
+		succeeded = true
+	default:
+		return false
+	}
+	for j := i; j < len(step); j++ {
+		// A negated statement that must succeed is one whose command failed.
+		if stmt, ok := step[j].(*syntax.Stmt); ok && (asynchronous(stmt) || stmt.Negated && succeeded) {
+			return false
+		}
+		if j == i {
+			continue
+		}
+		switch parent := step[j-1].(type) {
+		case *syntax.Stmt:
+		case *syntax.Block:
+			last := len(parent.Stmts) > 0 && step[j] == syntax.Node(parent.Stmts[len(parent.Stmts)-1])
+			succeeded = succeeded && last
+		case *syntax.BinaryCmd:
+			switch {
+			case parent.Op == syntax.AndStmt && step[j] == syntax.Node(parent.Y):
+				if !succeeded {
+					return false
+				}
+			case parent.Op == syntax.AndStmt:
+			case parent.Op == syntax.OrStmt && step[j] == syntax.Node(parent.X):
+				succeeded = false
+			default:
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// holdsNode reports whether node is one of stmts.
+func holdsNode(stmts []*syntax.Stmt, node syntax.Node) bool {
+	for _, stmt := range stmts {
+		if syntax.Node(stmt) == node {
+			return true
+		}
+	}
+	return false
+}
+
+// nodePath returns the nodes from file down to target, or nil when target is absent.
+func nodePath(file *syntax.File, target *syntax.Stmt) []syntax.Node {
+	if target == nil {
+		return nil
+	}
+	var stack, found []syntax.Node
+	syntax.Walk(file, func(node syntax.Node) bool {
+		if found != nil {
+			return false
+		}
+		if node == nil {
+			stack = stack[:len(stack)-1]
+			return true
+		}
+		stack = append(stack, node)
+		if node == syntax.Node(target) {
+			found = append([]syntax.Node{}, stack...)
+		}
+		return true
+	})
+	return found
+}
+
+// statementAt returns the statement whose call starts at a source offset, or nil.
+func statementAt(file *syntax.File, start int) *syntax.Stmt {
 	var found *syntax.Stmt
 	syntax.Walk(file, func(node syntax.Node) bool {
 		if stmt, ok := node.(*syntax.Stmt); ok {
-			if call, ok := stmt.Cmd.(*syntax.CallExpr); ok && int(call.Pos().Offset()) == p.call.Start {
+			if call, ok := stmt.Cmd.(*syntax.CallExpr); ok && int(call.Pos().Offset()) == start {
 				found = stmt
 			}
 		}
@@ -1262,6 +1423,11 @@ func shellAmbiguity(cmd, cwd string) string {
 	}
 	if _, ok := p.repoDir(); !ok {
 		return "the commit's repository is dynamic or selected only by --git-dir"
+	}
+	if cd := p.uncertainCD(); cd != "" {
+		return fmt.Sprintf("`%s` may not have run when git commits, so the commit's "+
+			"directory is unknown; run cd on its own or as `cd /path && git commit`, or "+
+			"select the repository with git -C", shortStep(cd))
 	}
 	if _, ok := p.message(); !ok {
 		return "the commit message path or value is dynamic"
