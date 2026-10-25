@@ -161,7 +161,9 @@ func gitSubcommand(args []shellsyntax.Word, gitArg int, cwd string) (sub int, gi
 		if !strings.HasPrefix(token, "-") {
 			return i, gitCWD, workTree, gitDir && workTree == "", true
 		}
+		// The shell leaves a `~` after an option's `=` as it is.
 		name, value, attached := strings.Cut(token, "=")
+		tilde := false
 		switch name {
 		case "-C", "-c", "--config-env", "--git-dir", "--work-tree", "--namespace":
 			if !attached {
@@ -169,13 +171,13 @@ func gitSubcommand(args []shellsyntax.Word, gitArg int, cwd string) (sub int, gi
 				if i >= len(args) || !args[i].Static {
 					return 0, "", "", false, false
 				}
-				value = args[i].Value
+				value, tilde = args[i].Value, args[i].TildePrefix()
 			}
 			switch name {
 			case "-C":
-				gitCWD = resolveDir(value, gitCWD)
+				gitCWD = resolveDir(value, tilde, gitCWD)
 			case "--work-tree":
-				workTree = resolveDir(value, gitCWD)
+				workTree = resolveDir(value, tilde, gitCWD)
 			case "--git-dir":
 				gitDir = true
 			}
@@ -334,7 +336,7 @@ func (p *parsedGit) resolvedDirs() (gitCWD, workTree string, ok bool) {
 		if !ok {
 			return "", "", false
 		}
-		base = resolveDir(path, base)
+		base = resolveDir(path.Value, path.TildePrefix(), base)
 	}
 	// Git applies -C after the shell has applied cd. Re-evaluate it from that base.
 	_, gitCWD, workTree, gitDirOnly, ok := gitSubcommand(p.call.Args, p.gitArg, base)
@@ -356,17 +358,22 @@ func scopeAffects(candidate, target []int) bool {
 	return true
 }
 
-func cdPath(args []shellsyntax.Word) (string, bool) {
+func cdPath(args []shellsyntax.Word) (shellsyntax.Word, bool) {
 	for _, arg := range args {
 		if !arg.Static {
-			return "", false
+			return shellsyntax.Word{}, false
 		}
 		if arg.Value == "--" || strings.HasPrefix(arg.Value, "-") {
 			continue
 		}
-		return arg.Value, true
+		return arg, true
 	}
-	return "", false
+	return shellsyntax.Word{}, false
+}
+
+// knownDir reports a directory that does not depend on the tool's cwd.
+func knownDir(value string, tilde bool) bool {
+	return filepath.IsAbs(expandToken(value, tilde)) || (tilde && strings.HasPrefix(value, "~/"))
 }
 
 func (p *parsedGit) explicitlySelectsRepo() bool {
@@ -382,7 +389,7 @@ func (p *parsedGit) explicitlySelectsRepo() bool {
 		if !ok {
 			return false
 		}
-		known = known || filepath.IsAbs(expandToken(path)) || strings.HasPrefix(path, "~/")
+		known = known || knownDir(path.Value, path.TildePrefix())
 	}
 	for i := p.gitArg + 1; i < p.subcommand; i++ {
 		if !p.call.Args[i].Static {
@@ -390,6 +397,7 @@ func (p *parsedGit) explicitlySelectsRepo() bool {
 		}
 		token := p.call.Args[i].Value
 		name, value, attached := strings.Cut(token, "=")
+		tilde := false
 		if name != "-C" && name != "--work-tree" {
 			if takesGitValue(name) && !attached {
 				i++
@@ -401,9 +409,9 @@ func (p *parsedGit) explicitlySelectsRepo() bool {
 			if i >= p.subcommand || !p.call.Args[i].Static {
 				return false
 			}
-			value = p.call.Args[i].Value
+			value, tilde = p.call.Args[i].Value, p.call.Args[i].TildePrefix()
 		}
-		known = known || filepath.IsAbs(expandToken(value)) || strings.HasPrefix(value, "~/")
+		known = known || knownDir(value, tilde)
 	}
 	return known
 }

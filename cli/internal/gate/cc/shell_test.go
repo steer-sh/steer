@@ -58,6 +58,14 @@ func TestRepoDir(t *testing.T) {
 			"a nested scope inherits the outer shell's directory"},
 		{"(cd /tmp/other) && git " + c + " -m y", testCWD,
 			"a sibling subshell cannot relocate the committing shell"},
+		{`git -C my\ repo ` + c + " -m y", testCWD + "/my repo", "a backslash-escaped space is one path"},
+		{`cd /tmp/my\ dir && git ` + c + " -m y", "/tmp/my dir", "...in a cd too"},
+		{`git -C \~/r ` + c + " -m y", testCWD + "/~/r", "a quoted tilde is a directory name"},
+		{`cd '~/r' && git ` + c + " -m y", testCWD + "/~/r", "...in a cd too"},
+		{`git -C ~"/r" ` + c + " -m y", testCWD + "/~/r", "quoting inside the tilde prefix stops expansion"},
+		{"git --work-tree=~/r " + c + " -m y", testCWD + "/~/r", "the shell does not expand a tilde after an option's ="},
+		{"git -C ~\\\n/r " + c + " -m y", filepath.Join(filepath.Dir(hc), "r"), "a line continuation inside the tilde prefix"},
+		{`git -C /tmp/\"r\" ` + c + " -m y", `/tmp/"r"`, "a quote character the shell kept is part of the name"},
 	}
 	for _, tc := range cases {
 		if got := RepoDir(tc.cmd, testCWD); got != tc.want {
@@ -121,7 +129,6 @@ func TestWrappedCommitIsRefused(t *testing.T) {
 	for _, cmd := range []string{
 		"bash -c 'git " + c + " -m x'",
 		"eval \"git " + c + " -m x\"",
-		"\\git " + c + " -m x",
 		"sh -c \"cd /r && git " + c + " -m x\"",
 	} {
 		if !IsCommitCommand(cmd) {
@@ -190,6 +197,9 @@ func TestDetectClassifiesLooseMatches(t *testing.T) {
 		{"git " + c + " -m x && bash -c 'git " + c + " -m y'", ParsedAndPossible, "a second, wrapped commit"},
 		{"git " + c + " -F - <<EOF\n$(bash -c 'git " + c + " -m y')\nEOF", ParsedAndPossible, "a wrapper in an expanded heredoc"},
 		{"(git " + c + " -m x", UnparsedCommit, "the parser rejects the text"},
+		{`g\it c\o` + c[2:] + " -m x", ParsedCommit, "bash removes a backslash before an ordinary letter"},
+		{`git "c\o` + c[2:] + `" -m x`, NoCommit, "in double quotes that backslash stays"},
+		{"\\git " + c + " -m x", ParsedCommit, "a leading backslash only skips an alias"},
 	}
 	for _, tc := range cases {
 		if got := Detect(tc.cmd); got != tc.want {
@@ -256,6 +266,9 @@ func TestExtractMessage(t *testing.T) {
 			"D=/tmp/s\ncat > $D/msg.txt <<'MSG'\nsubject line\n\nbody line\nMSG\ngit add -A && git " + c + " -q -F $D/msg.txt",
 			"subject line\n\nbody line",
 			"the command writes the path it commits, so the heredoc IS the message"},
+		{"escaped-quote", "git " + c + ` -m "a\"b \\ \x"`, `a"b \ \x`,
+			"double quotes drop a backslash only before $, `, \" and \\"},
+		{"ansi-c", "git " + c + ` -m $'subject\n\nbody'`, "subject\n\nbody", "$'...' decodes its escapes"},
 		{"stdin-heredoc", "git " + c + " -F - <<'MSG'\nfrom stdin\nMSG", "from stdin",
 			"-F - keeps its own path to the heredoc body"},
 		{"dash-m-wins", "cat > m.txt <<'MSG'\nheredoc\nMSG\ngit " + c + " -m 'inline'", "inline",

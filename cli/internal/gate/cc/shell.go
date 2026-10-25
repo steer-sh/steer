@@ -226,9 +226,11 @@ func RepoSelectedExplicitly(cmd string) bool {
 }
 
 // expandToken strips the shell quoting and expands a leading `~`.
-func expandToken(token string) string {
-	path := strings.Trim(token, `'"`)
-	if strings.HasPrefix(path, "~") {
+// expandToken expands a leading `~` when tilde is set, as the shell does for an
+// unquoted one. The token is a word's value, after quote removal.
+func expandToken(token string, tilde bool) string {
+	path := token
+	if tilde && strings.HasPrefix(path, "~") {
 		if home, err := os.UserHomeDir(); err == nil {
 			if path == "~" {
 				path = home
@@ -240,8 +242,8 @@ func expandToken(token string) string {
 	return path
 }
 
-func resolveDir(token, base string) string {
-	path := expandToken(token)
+func resolveDir(token string, tilde bool, base string) string {
+	path := expandToken(token, tilde)
 	if filepath.IsAbs(path) {
 		return path
 	}

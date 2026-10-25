@@ -7,13 +7,15 @@ import (
 	"sort"
 	"strings"
 
+	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/syntax"
 )
 
 // Instrument identifies the parser and the normalized representation consumers read.
-const Instrument = "mvdan-sh-v3.13.1-calls-v1"
+const Instrument = "mvdan-sh-v3.13.1-calls-v2"
 
-// Word is one shell word. Static is false when evaluating it requires expansion.
+// Word is one shell word. Static is false when evaluating it requires expansion;
+// a static Value is the word after quote removal, as the command receives it.
 // Start and End are the word's byte range in the source; a word built by a caller
 // rather than the parser leaves both zero.
 type Word struct {
@@ -141,7 +143,7 @@ func parse(source string, parser *syntax.Parser) (*Program, error) {
 					r.Target = normalizeWord(source, redir.Word)
 				}
 				if redir.Hdoc != nil {
-					r.Heredoc, r.HeredocStatic = staticWord(redir.Hdoc)
+					r.Heredoc, r.HeredocStatic = heredocBody(redir.Hdoc)
 					r.HeredocStart, r.HeredocEnd = offset(redir.Hdoc.Pos()), offset(redir.Hdoc.End())
 				}
 				call.Redirects = append(call.Redirects, r)
@@ -171,6 +173,18 @@ func StaticWord(word *syntax.Word) (string, bool) { return staticWord(word) }
 
 func staticWord(word *syntax.Word) (string, bool) { return wordValue(word, false) }
 
+// heredocBody returns a heredoc body that needs no expansion, with its backslashes
+// kept as written.
+func heredocBody(word *syntax.Word) (string, bool) {
+	var b strings.Builder
+	for _, part := range word.Parts {
+		if !staticPart(&b, part, inHeredoc, false) {
+			return "", false
+		}
+	}
+	return b.String(), true
+}
+
 // FixedValue returns a word's value when running no command but cat is needed to know
 // it: a static word, or one whose double-quoted parts include `$(cat <<'TAG' ... TAG)`,
 // whose output is the heredoc body. Static stays false for the second kind, so a
@@ -193,19 +207,39 @@ func FixedValue(w Word) (string, bool) {
 func wordValue(word *syntax.Word, catHeredocs bool) (string, bool) {
 	var b strings.Builder
 	for _, part := range word.Parts {
-		if !staticPart(&b, part, catHeredocs) {
+		if !staticPart(&b, part, bare, catHeredocs) {
 			return "", false
 		}
 	}
 	return b.String(), true
 }
 
-func staticPart(b *strings.Builder, part syntax.WordPart, catHeredocs bool) bool {
+// quoting is where a literal sits, which decides the backslashes quote removal drops.
+type quoting int
+
+const (
+	bare quoting = iota
+	inDouble
+	inHeredoc
+)
+
+func staticPart(b *strings.Builder, part syntax.WordPart, q quoting, catHeredocs bool) bool {
 	switch p := part.(type) {
 	case *syntax.Lit:
-		b.WriteString(p.Value)
+		writeLit(b, p.Value, q)
 	case *syntax.SglQuoted:
-		b.WriteString(p.Value)
+		if !p.Dollar {
+			b.WriteString(p.Value)
+			break
+		}
+		if !plainEscapes(p.Value) {
+			return false
+		}
+		value, err := expand.Literal(nil, &syntax.Word{Parts: []syntax.WordPart{p}})
+		if err != nil {
+			return false
+		}
+		b.WriteString(value)
 	case *syntax.DblQuoted:
 		for _, nested := range p.Parts {
 			if subst, ok := nested.(*syntax.CmdSubst); ok && catHeredocs {
@@ -216,7 +250,7 @@ func staticPart(b *strings.Builder, part syntax.WordPart, catHeredocs bool) bool
 				b.WriteString(body)
 				continue
 			}
-			if !staticPart(b, nested, catHeredocs) {
+			if !staticPart(b, nested, inDouble, catHeredocs) {
 				return false
 			}
 		}
@@ -224,6 +258,39 @@ func staticPart(b *strings.Builder, part syntax.WordPart, catHeredocs bool) bool
 		return false
 	}
 	return true
+}
+
+// plainEscapes reports that every escape in a $'...' body is one that
+// expand.Literal decodes as bash does. Octal, hex, Unicode and control escapes
+// are left out: expand.Literal and bash disagree on some of them.
+func plainEscapes(body string) bool {
+	for i := 0; i < len(body); i++ {
+		if body[i] != '\\' {
+			continue
+		}
+		i++
+		if i >= len(body) || strings.IndexByte(`abeEfnrtv\'"?`, body[i]) < 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// writeLit writes a literal after quote removal. Unquoted, a backslash quotes the
+// next character; in double quotes, only `$`, a backtick, `"` and `\`. The parser
+// has already removed line continuations. A heredoc body keeps its backslashes.
+func writeLit(b *strings.Builder, value string, q quoting) {
+	if q == inHeredoc {
+		b.WriteString(value)
+		return
+	}
+	for i := 0; i < len(value); i++ {
+		if value[i] == '\\' && i+1 < len(value) &&
+			(q == bare || strings.IndexByte("$`\"\\", value[i+1]) >= 0) {
+			i++
+		}
+		b.WriteByte(value[i])
+	}
 }
 
 // catHeredoc returns the value of a double-quoted `$(cat <<'TAG' ... TAG)`: the
@@ -249,7 +316,7 @@ func catHeredoc(subst *syntax.CmdSubst) (string, bool) {
 	if redir.Op != syntax.Hdoc || redir.N != nil || redir.Hdoc == nil || !quotedTag(redir.Word) {
 		return "", false
 	}
-	body, ok := staticWord(redir.Hdoc)
+	body, ok := heredocBody(redir.Hdoc)
 	if !ok {
 		return "", false
 	}
@@ -268,6 +335,14 @@ func quotedTag(tag *syntax.Word) bool {
 		}
 	}
 	return false
+}
+
+// TildePrefix reports a static word written as `~` or `~/...`, whose `~` the shell
+// expands to the home directory. Any quoting before the first `/` stops it; a
+// line continuation does not.
+func (w Word) TildePrefix() bool {
+	raw := strings.ReplaceAll(w.Raw, "\\\n", "")
+	return w.Static && (raw == "~" || strings.HasPrefix(raw, "~/"))
 }
 
 // Base returns the executable basename when a word is statically known.

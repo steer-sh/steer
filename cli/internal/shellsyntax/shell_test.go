@@ -117,3 +117,30 @@ func TestParsePartialKeepsATruncatedHeredocInvocation(t *testing.T) {
 		t.Fatalf("calls = %#v", p.Calls)
 	}
 }
+
+// A static word is the value after quote removal; a heredoc body keeps its backslashes.
+func TestStaticWordRemovesQuotingButHeredocKeepsBackslashes(t *testing.T) {
+	p, err := Parse("cat my\\ file \"a\\\"b\\x\" $'x\\ty' <<'EOF'\na\\$b \\x\nEOF")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"cat", "my file", `a"b\x`, "x\ty"}
+	for i, arg := range p.Calls[0].Args {
+		if !arg.Static || arg.Value != want[i] {
+			t.Errorf("arg %d = %#v, want %q", i, arg, want[i])
+		}
+	}
+	if got := p.Calls[0].Redirects[0].Heredoc; got != "a\\$b \\x\n" {
+		t.Errorf("heredoc = %q", got)
+	}
+	// expand.Literal and bash disagree on octal overflow and control escapes.
+	p, err = Parse(`x $'a\400b' $'a\cAb'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, arg := range p.Calls[0].Args[1:] {
+		if arg.Static {
+			t.Errorf("%s is static: %q", arg.Raw, arg.Value)
+		}
+	}
+}
