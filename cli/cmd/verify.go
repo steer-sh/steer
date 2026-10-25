@@ -268,14 +268,10 @@ type verifyResult struct {
 }
 
 // verifyAgainstMaster runs every target through a copy of the master at
-// masterHookPath, never the master itself: the runtime appends each block to the
-// audit log beside the running master, and a verification block is no live
-// firing. The copy sits beside a copy of the rest of the store, so a guard's own
-// source, sibling modules and data files resolve as they do in place. The
-// runtime's own outputs stay behind. A symlink is made again with the target it
-// resolves to in place, never read through. A path a guard reaches outside the
-// store is not mirrored. A copy that fails stops verification; nothing falls
-// back to the live store.
+// masterHookPath, so its audit rows land in a discarded store. The rest of the
+// store is mirrored beside the copy, less the audit log and payload directory;
+// symlinks are recreated, never read through. Paths outside the store are not
+// mirrored. A failed copy is an error; nothing falls back to the live store.
 func verifyAgainstMaster(masterHookPath string, targets []verifyTarget) ([]verifyResult, error) {
 	store, err := guard.NewSandbox("steer-verify-")
 	if err != nil {
