@@ -221,6 +221,55 @@ func TestResolverChainMissingSection(t *testing.T) {
 	}
 }
 
+// A round heading with no verdict bullet under it adjudicated nothing, so it answers
+// no row: stamping it would file zero concerns as that round's report.
+func TestResolverEmptyRoundAnswersNothing(t *testing.T) {
+	r := testResolver()
+	rows := chainRows(fixCT, 2, "")
+	led := chainLedgerFix(fixCT+300, []int{1}, "", 0)
+	led.Text += "\n**Round 2/4** — 3 reviewers, 1 raw finding, 1 concern. (see above)\n"
+	cand, join, why := r.pickLedger(rows, retryIndexes(rows)[1], fixCT+100, []LedgerMsg{led})
+	if cand != nil || join != "chain" || why != MissEmptyRound {
+		t.Fatalf("round 2's section is empty; got (cand!=nil=%v, join=%s, why=%q), want (nil, chain, %q)",
+			cand != nil, join, why, MissEmptyRound)
+	}
+	if cand, _, _ := r.pickLedger(rows, retryIndexes(rows)[0], fixCT, []LedgerMsg{led}); cand == nil {
+		t.Fatal("round 1's section has a bullet and still resolves")
+	}
+	roundOneOnly := chainLedgerFix(fixCT+250, []int{1}, "", 0)
+	if _, _, why := r.pickLedger(rows, retryIndexes(rows)[1], fixCT+100, []LedgerMsg{roundOneOnly, led}); why != MissEmptyRound {
+		t.Fatalf("an empty section outranks a missing one; got why=%q", why)
+	}
+	full := chainLedgerFix(fixCT+250, []int{1, 2}, "", 0)
+	if cand, _, _ := r.pickLedger(rows, retryIndexes(rows)[1], fixCT+100, []LedgerMsg{full, led}); cand == nil || cand.Text != full.Text {
+		t.Fatal("a later empty section must not hide an earlier full one")
+	}
+	perRoundFirst := ledgerFix(fixCT+250, 2)
+	if cand, join, _ := r.pickLedger(rows, retryIndexes(rows)[1], fixCT+100, []LedgerMsg{perRoundFirst, led}); cand == nil || join != "round" || cand.Text != perRoundFirst.Text {
+		t.Fatalf("an empty section must leave the round's own ledger to answer; got join=%s", join)
+	}
+
+	rows = chainRows(fixT, 2, "")
+	perRound := ledgerFix(fixT+300, 1)
+	perRound.Text += "\n**Commit gate fired (round 2/4)** — (see above)\n"
+	cand, join, why = r.pickLedger(rows, retryIndexes(rows)[1], fixT+100, []LedgerMsg{perRound})
+	if cand != nil || join != "round" || why != MissEmptyRound {
+		t.Fatalf("round 2's block is empty; got (cand!=nil=%v, join=%s, why=%q), want (nil, round, %q)",
+			cand != nil, join, why, MissEmptyRound)
+	}
+	if cand, _, _ := r.pickLedger(rows, retryIndexes(rows)[0], fixT, []LedgerMsg{perRound}); cand == nil {
+		t.Fatal("round 1's block has a bullet and still resolves")
+	}
+	// An empty block still names its round, so a second chain's full block beside it
+	// leaves the reply shared rather than this chain's.
+	shared := ledgerFix(fixT+300, 1)
+	shared.Text += "\n**Commit gate fired (round 2/4)** — (see above)\n" +
+		"\n**Commit gate fired (round 2/4)** — *(other repo)*\n- **ACCEPTED** — x → y\n"
+	if cand, _, why := r.pickLedger(rows, retryIndexes(rows)[1], fixT+100, []LedgerMsg{shared}); cand != nil || why != MissRoundShared {
+		t.Fatalf("two blocks name round 2; got (cand!=nil=%v, why=%q), want (nil, %q)", cand != nil, why, MissRoundShared)
+	}
+}
+
 func TestResolverSectionRounds(t *testing.T) {
 	if got := gate.LedgerRounds(chainLedgerFix(0, []int{1, 2}, "", 0).Text); !sameSet(got, 1, 2) {
 		t.Fatalf("section rounds = %v, want {1,2}", got)

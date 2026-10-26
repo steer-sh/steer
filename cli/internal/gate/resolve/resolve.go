@@ -476,10 +476,11 @@ const (
 	MissRoundShared      = "round-shared"      // one message has two blocks for this round
 	MissRoundsUnmatched  = "rounds-unmatched"  // the message names a round this chain never fired
 	MissIDConflict       = "id-conflict"       // the header's chain ID is another chain's
+	MissEmptyRound       = "empty-round"       // a ledger names this round but has no verdict bullet under it
 )
 
 var missRank = map[string]int{
-	MissNoLedger: 0, MissNoHeader: 1, MissNoRound: 1, MissNoSection: 2, MissPastBound: 3,
+	MissNoLedger: 0, MissNoHeader: 1, MissNoRound: 1, MissNoSection: 2, MissEmptyRound: 3, MissPastBound: 3,
 	MissSubjectUnmatched: 4, MissRoundsUnmatched: 4, MissSubjectShared: 5, MissRoundShared: 5,
 	MissIDConflict: 6,
 }
@@ -500,6 +501,25 @@ func (r *resolver) pickLedger(rows []resolverRow, i int, denyTS float64, ledgers
 	firing, _ := pyInt(row["firing"])
 	join := joinFor(row, denyTS)
 	why := missWhy(MissNoLedger)
+
+	// answered is the latest candidate whose text for this round holds a verdict bullet,
+	// the test the Stop backstop applies; a round under "(see above)" adjudicated nothing,
+	// so a list of only such rounds is no list and the next join is tried. An empty block
+	// is dropped only here, after it has counted toward the refusals that choose among
+	// one message's blocks.
+	answered := func(cands []LedgerMsg, sections bool) *LedgerMsg {
+		for k := len(cands) - 1; k >= 0; k-- {
+			text := cands[k].Text
+			if sections {
+				text = gate.LedgerSection(text, firing)
+			}
+			if gate.HasLedgerLine(text) {
+				return &cands[k]
+			}
+			why.note(MissEmptyRound)
+		}
+		return nil
+	}
 
 	inWindow := func(span float64) []LedgerMsg {
 		var out []LedgerMsg
@@ -607,14 +627,14 @@ func (r *resolver) pickLedger(rows []resolverRow, i int, denyTS float64, ledgers
 				}
 			}
 		}
-		if len(named) > 0 {
-			return &named[len(named)-1], "chain", ""
+		if cand := answered(named, true); cand != nil {
+			return cand, "chain", ""
 		}
-		if len(bounded) > 0 {
-			return &bounded[len(bounded)-1], "chain", ""
+		if cand := answered(bounded, true); cand != nil {
+			return cand, "chain", ""
 		}
-		if mine := roundLedgers(bound); len(mine) > 0 {
-			return &mine[len(mine)-1], "round", ""
+		if cand := answered(roundLedgers(bound), false); cand != nil {
+			return cand, "round", ""
 		}
 		return nil, "chain", string(why)
 	}
@@ -623,8 +643,8 @@ func (r *resolver) pickLedger(rows []resolverRow, i int, denyTS float64, ledgers
 		if len(inWindow(r.spanFor("round"))) > 0 {
 			why.note(MissNoRound)
 		}
-		if mine := roundLedgers(r.chainEndTS(rows, i, session, firing)); len(mine) > 0 {
-			return &mine[len(mine)-1], "round", ""
+		if cand := answered(roundLedgers(r.chainEndTS(rows, i, session, firing)), false); cand != nil {
+			return cand, "round", ""
 		}
 		return nil, "round", string(why)
 	}
