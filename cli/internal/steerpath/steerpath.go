@@ -22,6 +22,10 @@ const steerHome = ".steer"
 // configFileName is the global, harness-neutral settings file inside steerHome.
 const configFileName = "config.json"
 
+// credentialsDirName holds the secrets Steer reads, apart from configFileName,
+// which every user on the machine may read.
+const credentialsDirName = "credentials"
+
 // legacyHome is where the guard store and the corpora lived while Claude Code
 // was the only harness.
 const legacyHome = ".claude"
@@ -52,6 +56,21 @@ func ConfigFile() string {
 		return filepath.Join(steerHome, configFileName)
 	}
 	return filepath.Join(home, steerHome, configFileName)
+}
+
+// CredentialsDir returns the directory that holds Steer's secrets. Unlike
+// ConfigFile, it never falls back to a path relative to the working directory: a
+// secret written into a repository could be committed.
+func CredentialsDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve the home directory for steer credentials: %w", err)
+	}
+	// UserHomeDir returns $HOME as set, and a relative one is the same trap.
+	if !filepath.IsAbs(home) {
+		return "", fmt.Errorf("the home directory %q is not an absolute path; steer keeps no credentials relative to the working directory", home)
+	}
+	return filepath.Join(home, steerHome, credentialsDirName), nil
 }
 
 // LegacyStateDir returns the directory Steer wrote a component's state to

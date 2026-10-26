@@ -24,6 +24,15 @@ type Reviewer struct {
 	Effort   string `json:"effort,omitempty"`
 	Runs     int    `json:"runs,omitempty"`
 	Timeout  int    `json:"timeout,omitempty"`
+	API      API    `json:"api,omitzero"`
+}
+
+// API configures the openai-compatible provider. It holds no key: Save writes this
+// file readable by every user, so the key lives in its own file (internal/apikey) or
+// in the environment variable KeyEnv names.
+type API struct {
+	BaseURL string `json:"base_url,omitempty"`
+	KeyEnv  string `json:"key_env,omitempty"`
 }
 
 // Load reads the global settings. A missing file contributes no overrides and is

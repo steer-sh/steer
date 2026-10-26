@@ -28,6 +28,11 @@ type Config struct {
 	ReviewerRuns          int
 	ReviewTimeout         time.Duration
 
+	// ReviewerAPIBaseURL and ReviewerAPIKeyEnv configure the openai-compatible
+	// provider; every other provider ignores them.
+	ReviewerAPIBaseURL string
+	ReviewerAPIKeyEnv  string
+
 	StaleAfter time.Duration
 	MaxFirings int
 
@@ -153,6 +158,12 @@ func WithFile(c Config, file steerconfig.Config) Config {
 	}
 	if file.Reviewer.Timeout > 0 {
 		c.ReviewTimeout = time.Duration(file.Reviewer.Timeout) * time.Second
+	}
+	if v := strings.TrimSpace(file.Reviewer.API.BaseURL); v != "" {
+		c.ReviewerAPIBaseURL = v
+	}
+	if v := strings.TrimSpace(file.Reviewer.API.KeyEnv); v != "" {
+		c.ReviewerAPIKeyEnv = v
 	}
 	return c
 }
