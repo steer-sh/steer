@@ -2,6 +2,7 @@ package status
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -52,7 +53,9 @@ func (p PluginCopy) BinInstallCommand() string {
 }
 
 // PluginCopies reads every cached Steer plugin copy in the Claude Code and Codex
-// global plugin caches. A harness with no cache yields no row.
+// global plugin caches. A harness with no cache yields no row. Claude Code keeps an
+// updated plugin's earlier version directory, so a Claude Code copy counts only
+// when its install record names it.
 func PluginCopies() []PluginCopy {
 	stable, _ := steerbin.Path()
 	out := []PluginCopy{}
@@ -67,7 +70,14 @@ func PluginCopies() []PluginCopy {
 		}
 		roots, _ := filepath.Glob(filepath.Join(dir, "plugins", "cache", "*", pluginName, "*"))
 		sort.Strings(roots)
+		installed, recorded := map[string]bool{}, false
+		if id == harness.ClaudeCode {
+			installed, recorded = claudeInstallPaths(dir)
+		}
 		for _, root := range roots {
+			if recorded && !installed[filepath.Clean(root)] {
+				continue
+			}
 			info, err := os.Stat(root)
 			if err != nil || !info.IsDir() {
 				continue
@@ -89,6 +99,33 @@ func PluginCopies() []PluginCopy {
 		}
 	}
 	return out
+}
+
+// claudeInstallPaths returns the install paths Claude Code's plugin record names for
+// the Steer plugin from any marketplace. ok is false when the record is missing or
+// unreadable.
+func claudeInstallPaths(configDir string) (paths map[string]bool, ok bool) {
+	var installed struct {
+		Plugins map[string][]struct {
+			InstallPath string `json:"installPath"`
+		} `json:"plugins"`
+	}
+	data, err := os.ReadFile(filepath.Join(configDir, "plugins", "installed_plugins.json"))
+	if err != nil || json.Unmarshal(data, &installed) != nil {
+		return nil, false
+	}
+	paths = map[string]bool{}
+	for id, records := range installed.Plugins {
+		if name, _, _ := strings.Cut(id, "@"); name != pluginName {
+			continue
+		}
+		for _, r := range records {
+			if r.InstallPath != "" {
+				paths[filepath.Clean(r.InstallPath)] = true
+			}
+		}
+	}
+	return paths, true
 }
 
 // ModExposures reads each enabled Claude Code mod against the inspection cache that

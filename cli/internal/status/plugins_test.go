@@ -105,3 +105,52 @@ func TestDifferingPluginsKeysOnlyTheCopiesThatDiffer(t *testing.T) {
 		t.Errorf("a same-binary copy keyed %q with labels %q", key, labels)
 	}
 }
+
+// TestPluginCopiesSkipAClaudeCopyItsInstallRecordDropped: Claude Code keeps an
+// updated plugin's earlier version directory, so only the directory its install
+// record names is a copy; with no readable record every cached directory counts.
+func TestPluginCopiesSkipAClaudeCopyItsInstallRecordDropped(t *testing.T) {
+	home := t.TempDir()
+	testhome.Set(t, home)
+	t.Setenv("CODEX_HOME", "")
+	write := func(path, body string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	platform := runtime.GOOS + "-" + runtime.GOARCH
+	stable, err := steerpath.BinPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(stable, "build-new")
+	cache := filepath.Join(home, ".claude", "plugins", "cache", "m", "steer")
+	old, current := filepath.Join(cache, "0.1.1"), filepath.Join(cache, "0.1.2")
+	write(filepath.Join(old, "bin", platform, steerpath.BinName), "build-old")
+	write(filepath.Join(current, "bin", platform, steerpath.BinName), "build-new")
+
+	paths := func() []string {
+		var out []string
+		for _, p := range PluginCopies() {
+			out = append(out, p.Path)
+		}
+		return out
+	}
+	if got := paths(); len(got) != 2 {
+		t.Fatalf("with no install record, copies %q, want both directories", got)
+	}
+	record := filepath.Join(home, ".claude", "plugins", "installed_plugins.json")
+	write(record, `{"version":2,"plugins":{"steer@m":[{"scope":"user","installPath":"`+current+`"}],`+
+		`"other@m":[{"scope":"user","installPath":"`+old+`"}]}}`)
+	if got := paths(); len(got) != 1 || got[0] != current {
+		t.Errorf("copies %q, want only the recorded %q", got, current)
+	}
+	write(record, `{"version":2,"plugins":{}}`)
+	if got := paths(); len(got) != 0 {
+		t.Errorf("an uninstalled plugin's cache gave copies %q", got)
+	}
+}
