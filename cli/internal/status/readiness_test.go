@@ -308,3 +308,28 @@ func TestModsQualifyOnlyAClaudeCodeRegistration(t *testing.T) {
 		t.Fatalf("a Codex-only gate reports Claude Code mods: %q", got)
 	}
 }
+
+// An API reviewer names no executable, so each unset part needs its own repair; the
+// key's repair is the command that keeps the key out of shell history.
+func TestAMissingAPIReviewerPartNamesItsRepair(t *testing.T) {
+	cases := map[string]string{
+		reviewers.UnsetKey:      "steer reviewer key set",
+		"reviewer.api.base_url": "steer config set reviewer.api.base_url",
+		"reviewer.model":        "steer config set reviewer.model",
+	}
+	for unset, fix := range cases {
+		step, ok := ReviewerStep(reviewers.Probe{Provider: reviewers.APIProviderID, State: reviewers.ProbeMissing, Unset: unset})
+		if !ok || !strings.HasPrefix(step.Fix, fix) {
+			t.Errorf("Unset %s: step = %+v, %v; want a fix starting %q", unset, step, ok, fix)
+		}
+	}
+}
+
+// The provider list in a repair comes from the provider table, so a new provider is
+// offered wherever the old three were.
+func TestTheReviewerRepairListsEveryProvider(t *testing.T) {
+	step, _ := ReviewerStep(reviewers.Probe{Provider: "nope", State: reviewers.ProbeMissing})
+	if !strings.Contains(step.Fix, reviewers.APIProviderID) {
+		t.Errorf("Fix = %q, want it to offer %s", step.Fix, reviewers.APIProviderID)
+	}
+}

@@ -8,7 +8,10 @@
           <out>/<tag>-<chain>-r<firing>.json. The ledger keeps only the
           subject, so the panel reviews without the commit body. The global
           review addendum is the operator's current one, not the round's. Claude Code
-          needs an exported sandbox login, as in tests/sandbox.py.
+          needs an exported sandbox login, as in tests/sandbox.py. The
+          openai-compatible provider needs --base-url; its key comes from the
+          variable --key-env names, passed through on purpose, or else from a copy
+          of the operator's key file.
   tally   Count, per output, which panel runs matched each marker regex in a
           markers JSON {"accepted": {name: regex}, "rejected": {name: regex}}.
 """
@@ -31,6 +34,31 @@ from sandbox import REPO, Sandbox
 
 STATE = Path.home() / ".steer" / "state" / "commit-review"
 REVIEW_PHASES = ("deny", "clean", "cap")
+
+
+def api_setup(home, base_url, key_env, environ=os.environ, key_file=None):
+    """Write the openai-compatible reviewer's settings into a sandbox home and return
+    the environment the run adds: the one key variable, or nothing when the key file
+    is copied instead."""
+    api = {"base_url": base_url}
+    if key_env:
+        api["key_env"] = key_env
+    config = Path(home) / ".steer" / "config.json"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text(json.dumps({"reviewer": {"api": api}}, indent=2) + "\n")
+    if key_env:
+        if not environ.get(key_env, "").strip():
+            raise SystemExit("replay: --key-env %s names a variable that is unset or empty" % key_env)
+        return {key_env: environ[key_env]}
+    source = Path(key_file) if key_file else Path.home() / ".steer" / "credentials" / "reviewer-api-key"
+    if not source.is_file():
+        raise SystemExit("replay: no --key-env and no key file at %s; run steer reviewer key set" % source)
+    target = Path(home) / ".steer" / "credentials" / source.name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    os.chmod(target.parent, 0o700)
+    shutil.copyfile(source, target)
+    os.chmod(target, 0o600)
+    return {}
 
 
 def chain_rounds(state, chains):
@@ -161,6 +189,9 @@ def run(args):
         env = {k: v for k, v in env.items()
                if not k.startswith(("STEER_", "COMMIT_GATE_", "COMMIT_REVIEW_", "GIT_"))}
         env.update(GIT_CONFIG_GLOBAL=str(box.gitconfig), GIT_CONFIG_NOSYSTEM="1")
+        if args.provider == "openai-compatible":
+            # After the filter above, so a key variable named STEER_* still passes.
+            env.update(api_setup(box.home, args.base_url, args.key_env))
         diffs = args.diffs.resolve()
         for chain, firing, base, diff_file, subject in rounds:
             label = "%s r%s" % (chain, firing)
@@ -255,7 +286,9 @@ def main(argv=None):
     p = sub.add_parser("run")
     p.add_argument("--rounds", type=Path, required=True)
     p.add_argument("--repo", type=Path, required=True, help="the repository the chains committed to")
-    p.add_argument("--provider", required=True, choices=("agy", "claude-code", "codex"))
+    p.add_argument("--provider", required=True, choices=("agy", "claude-code", "codex", "openai-compatible"))
+    p.add_argument("--base-url", help="the endpoint, for --provider openai-compatible")
+    p.add_argument("--key-env", help="the variable holding the API key, passed into the sandbox")
     p.add_argument("--model", required=True)
     p.add_argument("--effort", required=True, help="'' for the provider's own")
     p.add_argument("--runs", type=int, default=3)
@@ -267,6 +300,8 @@ def main(argv=None):
     p.add_argument("--markers", type=Path, required=True)
     p.add_argument("--tags", nargs="*")
     args = parser.parse_args(argv)
+    if args.cmd == "run" and args.provider == "openai-compatible" and not args.base_url:
+        parser.error("--provider openai-compatible needs --base-url")
     if args.cmd == "rounds":
         for row in chain_rounds(args.state, args.chains):
             print("\t".join(map(str, row)))

@@ -6,7 +6,16 @@ import (
 	"github.com/steer-sh/steer-cli/internal/gate"
 )
 
-// Provider is one reviewer CLI Steer can run. It is the one definition of the
+// Options is what a provider builds its reviewer from. A CLI provider reads only
+// Model and Effort.
+type Options struct {
+	Model   string
+	Effort  string
+	BaseURL string
+	KeyEnv  string
+}
+
+// Provider is one reviewer Steer can run. It is the one definition of the
 // supported set: Resolve builds from it, EffortWarning reads its levels, and an
 // editor offering a choice lists it rather than carrying its own copy.
 type Provider struct {
@@ -19,28 +28,43 @@ type Provider struct {
 	// Efforts are the reasoning levels this CLI's own --help documents. An empty
 	// list means the CLI documents none, so no value can be checked against it.
 	Efforts []string
-	// Executable is the command this provider runs, which a probe looks for.
+	// Executable is the command this provider runs, which a probe looks for. It is
+	// empty for a provider that sends to an endpoint.
 	Executable string
-	// build makes the reviewer from a resolved model and effort.
-	build func(model, effort string) gate.Reviewer
+	// API marks a provider that sends to an endpoint with a key, which a probe reads
+	// from the configuration rather than PATH.
+	API bool
+	// validate refuses options the reviewer cannot run with. It is nil when every
+	// option has a default.
+	validate func(Options) error
+	// build makes the reviewer from resolved options.
+	build func(Options) gate.Reviewer
 }
+
+// APIProviderID is the provider that sends to an OpenAI-compatible endpoint.
+const APIProviderID = "openai-compatible"
 
 // providers is the supported set, in the order an editor lists it.
 var providers = []Provider{
 	{
 		ID: "agy", Label: "Antigravity", Executable: "agy",
 		Efforts: []string{"low", "medium", "high"},
-		build:   func(model, effort string) gate.Reviewer { return NewAgy(model, effort) },
+		build:   func(o Options) gate.Reviewer { return NewAgy(o.Model, o.Effort) },
 	},
 	{
 		ID: "codex", Label: "Codex", Executable: "codex",
-		build: func(model, effort string) gate.Reviewer { return NewCodex(model, effort) },
+		build: func(o Options) gate.Reviewer { return NewCodex(o.Model, o.Effort) },
 	},
 	{
 		ID: "claude-code", Label: "Claude Code", Aliases: []string{"", "claude"},
 		Executable: "claude",
 		Efforts:    []string{"low", "medium", "high", "xhigh", "max"},
-		build:      func(model, effort string) gate.Reviewer { return NewClaudeCode(model, effort) },
+		build:      func(o Options) gate.Reviewer { return NewClaudeCode(o.Model, o.Effort) },
+	},
+	{
+		ID: APIProviderID, Label: "OpenAI-compatible API", API: true,
+		validate: validateChatAPI,
+		build:    func(o Options) gate.Reviewer { return NewChatAPI(o) },
 	},
 }
 

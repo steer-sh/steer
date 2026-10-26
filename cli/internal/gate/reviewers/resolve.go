@@ -9,16 +9,25 @@ import (
 
 // Resolve builds the reviewer a provider name spells. An empty model takes the
 // provider's entry in gate.DefaultReviewerModels, or the CLI's own default when the
-// provider has none.
-func Resolve(provider, model, effort string) (gate.Reviewer, error) {
+// provider has none. A provider whose options are incomplete is refused here, so a
+// gate never sends a request it cannot make.
+func Resolve(provider string, opts Options) (gate.Reviewer, error) {
 	p, ok := FindProvider(provider)
 	if !ok {
 		return nil, fmt.Errorf("unknown reviewer provider %q: expected %s",
 			provider, strings.Join(ProviderNames(), ", "))
 	}
-	model = strings.TrimSpace(model)
-	if model == "" {
-		model = gate.DefaultReviewerModels[p.ID]
+	opts.Model = strings.TrimSpace(opts.Model)
+	if opts.Model == "" {
+		opts.Model = gate.DefaultReviewerModels[p.ID]
 	}
-	return p.build(model, strings.TrimSpace(effort)), nil
+	opts.Effort = strings.TrimSpace(opts.Effort)
+	opts.BaseURL = strings.TrimSpace(opts.BaseURL)
+	opts.KeyEnv = strings.TrimSpace(opts.KeyEnv)
+	if p.validate != nil {
+		if err := p.validate(opts); err != nil {
+			return nil, err
+		}
+	}
+	return p.build(opts), nil
 }

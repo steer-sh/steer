@@ -415,6 +415,22 @@ permissions are its only boundary. In print mode agy denies any tool call that n
 allow rule names, because it cannot prompt, so an allow rule the operator keeps for
 interactive use applies to every review.
 
+The `openai-compatible` provider (`reviewers/chatapi.go`) runs no process: it sends
+the rendered prompt in one `POST {base_url}/chat/completions` and reads no file, so
+the prompt is its whole review input. It has no default model. `Resolve` refuses it
+without a base URL or a model; the key is read at review time, so a missing key is a
+`no_key` run outcome in the ledger rather than a gate that fails open with no row.
+The key comes from the variable `reviewer.api.key_env` names, when it is non-empty
+in the gate's own process, and otherwise from `~/.steer/credentials/reviewer-api-key`
+(`internal/apikey/`), which the reader refuses when it is a symlink, another user's,
+or readable by others. `config.json` holds no key field: `config.Save` writes it
+readable by every user. Only a `stop` finish reaches `Classify` with a response, so
+salvage never reads a reply cut at the output limit (`truncated`). The adapter
+removes the key from every detail before the cut that bounds it. The instrument
+records the base URL's host as `endpoint`, and each row counts the models the
+endpoint reported as `reviewer_response_models`, because a router can answer one
+configured name with another model.
+
 The stock review prompt is embedded and fixed; the review addendum is the
 operator-writable addition to it (`internal/gate/addendum.go`). Each request
 loads global entries from disk and project entries from the repository's HEAD —

@@ -166,6 +166,10 @@ func (c Config) InstrumentFieldsWith(addendumDigest string) map[string]any {
 	if addendumDigest != "" {
 		fields["addendum_digest"] = addendumDigest
 	}
+	// Written only for an API reviewer, so a CLI reviewer's fields stay as they were.
+	if c.ReviewerEndpoint != "" {
+		fields["endpoint"] = c.ReviewerEndpoint
+	}
 	return fields
 }
 

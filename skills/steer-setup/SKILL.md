@@ -1,8 +1,8 @@
 ---
 name: steer-setup
-description: Set up steer after installing the plugin — pick a reviewer CLI and model, arm the commit gate for this agent, and place the stable executable. Use for first-time steer setup, when adding a second harness (Claude Code or Codex) to an existing steer install, or when the user asks to configure, arm or repair the commit gate. Also arms repository checks at turn end and moves a personal check gate into Steer.
+description: Set up steer after installing the plugin — pick a reviewer (a CLI or an OpenAI-compatible API) and model, arm the commit gate for this agent, and place the stable executable. Use for first-time steer setup, when adding a second harness (Claude Code or Codex) to an existing steer install, or when the user asks to configure, arm or repair the commit gate. Also arms repository checks at turn end and moves a personal check gate into Steer.
 user-invocable: true
-compatibility: Runs the bundled launcher at the plugin root (CLAUDE_PLUGIN_ROOT on Claude Code, two directories above this skill on Codex), or the steer CLI from PATH. Writes ~/.steer/config.json and the invoking harness's hook registration. Needs an installed, authenticated reviewer CLI — claude, codex or agy.
+compatibility: Runs the bundled launcher at the plugin root (CLAUDE_PLUGIN_ROOT on Claude Code, two directories above this skill on Codex), or the steer CLI from PATH. Writes ~/.steer/config.json and the invoking harness's hook registration. Needs an installed, authenticated reviewer CLI — claude, codex or agy — or an OpenAI-compatible endpoint and an API key the user stores in their own terminal.
 allowed-tools: Bash(steer *), Read
 ---
 
@@ -77,7 +77,10 @@ what they actually have installed.
 ```
 
 Each row is a provider id, its name, the executable it calls and whether that
-executable resolves here. Present the `available` ones first. An executable that
+executable resolves here. Present the `available` ones first. The
+`openai-compatible` row calls no executable: it sends each review to an
+OpenAI-compatible endpoint, such as OpenRouter, with an API key, and needs no
+reviewer CLI. When no reviewer CLI is `available`, offer it first. An executable that
 resolves is not proof the reviewer runs — it may be unauthenticated — and a `missing`
 one is still a valid choice if the user is about to install it. Say both plainly
 rather than filtering the list. Step 5 runs one test review, which is the proof.
@@ -91,6 +94,9 @@ When the user chooses `agy`, tell them two things before you write the choice:
   limits what an `agy` reviewer may read or run, so those rules are its boundary.
 - Every review stays in their `agy` history: each gated commit adds one
   conversation per reviewer run.
+
+When the user chooses `openai-compatible`, follow **The API reviewer** below
+instead of the rest of this step.
 
 Then ask for the model. Write the provider first, then read the model Steer would use
 for it when none is set:
@@ -113,6 +119,57 @@ a model to write. Write a model only when the user names a different one:
 Show the user any warning `config set` prints.
 Leave `reviewer.effort` and `reviewer.runs` alone unless the user asks: three parallel
 runs is the shipped design, and each run costs their reviewer account.
+
+### The API reviewer
+
+Tell the user once, before you write anything: every reviewed diff goes to the
+endpoint they name. Through a router such as OpenRouter, it can also go to the
+model provider the router picks.
+
+1. Ask for the base URL, up to but not including `/chat/completions`, for example
+   `https://openrouter.ai/api/v1`. Write the provider and the URL:
+
+   ```bash
+   "${STEER_BIN}" config set reviewer.provider openai-compatible
+   "${STEER_BIN}" config set reviewer.api.base_url <url>
+   ```
+
+2. Ask for the model, as the endpoint names it, and write it. This provider has no
+   default model, so the model is required:
+
+   ```bash
+   "${STEER_BIN}" config set reviewer.model <model>
+   ```
+
+3. Ask whether the user keeps the key in an environment variable. If yes, write the
+   variable's name, never its value:
+
+   ```bash
+   "${STEER_BIN}" config set reviewer.api.key_env <VARIABLE_NAME>
+   ```
+
+4. Otherwise tell the user to run this in a separate terminal of their own, not
+   through this agent and not with the `!` prefix:
+
+   ```bash
+   steer reviewer key set
+   ```
+
+   It reads the key with no echo into a file only they can read, and refuses input
+   that is not a terminal. Wait until the user says it is done.
+
+5. Check where the key comes from. The command prints `env <NAME>`, `file` or
+   `missing`, and never the key:
+
+   ```bash
+   "${STEER_BIN}" reviewer key status
+   ```
+
+Step 5 runs `commit-gate test-reviewer` as for every reviewer. A pass there proves
+the endpoint, the model and the key from this agent's shell. The gate runs in the
+harness's hook process, whose environment can lack a variable this shell has, so an
+`env` key is proven only by the first real review. Say so to the user. A `no_key`
+outcome in `steer status` is that case; the key file has no such gap.
 
 ## Step 3: Arm the gate
 
@@ -299,3 +356,5 @@ the approval list or the hook script.
 - It never registers an intervention or reads the evidence corpora. `/steer-report`
   does that once there is evidence to read.
 - It never changes an existing reviewer. `steer config set` is the user's own command.
+- It never asks for, reads, prints or writes an API key. The user stores it with
+  `steer reviewer key set` in their own terminal.

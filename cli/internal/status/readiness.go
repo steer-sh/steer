@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/steer-sh/steer-cli/internal/apikey"
 	"github.com/steer-sh/steer-cli/internal/gate/reviewers"
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/mods"
@@ -21,23 +22,41 @@ type Step struct {
 	Fix string
 }
 
-// ReviewerStep reports the reviewer CLI as a missing step. A probe that checked
+// ReviewerStep reports the reviewer as a missing step. A probe that checked
 // nothing raises none: an unknown provider is not a claim of absence. A probe naming
-// no executable is the caller's report that the provider itself does not resolve, so
-// it names the setting rather than an install.
+// no executable and no unset setting is the caller's report that the provider itself
+// does not resolve, so it names the setting rather than an install.
 func ReviewerStep(p reviewers.Probe) (Step, bool) {
 	if p.State != reviewers.ProbeMissing {
 		return Step{}, false
 	}
+	providers := "<" + strings.Join(reviewers.ProviderNames(), "|") + ">"
+	switch p.Unset {
+	case reviewers.UnsetKey:
+		return Step{
+			Title: "the reviewer API key is not found here, so every review ends no_key",
+			Fix:   apikey.SetCommand + " (in your own terminal), or steer config set reviewer.api.key_env <VARIABLE>",
+		}, true
+	case "reviewer.api.base_url":
+		return Step{
+			Title: "the API reviewer has no usable base URL, so every review fails",
+			Fix:   "steer config set reviewer.api.base_url <url>",
+		}, true
+	case "reviewer.model":
+		return Step{
+			Title: "the API reviewer has no model, so every review fails",
+			Fix:   "steer config set reviewer.model <model>",
+		}, true
+	}
 	if p.Executable == "" {
 		return Step{
-			Title: fmt.Sprintf("the configured reviewer provider %q resolves to no CLI, so every review fails", p.Provider),
-			Fix:   "steer config set reviewer.provider <agy|codex|claude-code>",
+			Title: fmt.Sprintf("the configured reviewer provider %q resolves to no reviewer, so every review fails", p.Provider),
+			Fix:   "steer config set reviewer.provider " + providers,
 		}, true
 	}
 	return Step{
 		Title: fmt.Sprintf("the reviewer CLI %q does not resolve here, so every review fails", p.Executable),
-		Fix:   fmt.Sprintf("put %s on PATH, or name another provider: steer config set reviewer.provider <agy|codex|claude-code>", p.Executable),
+		Fix:   fmt.Sprintf("put %s on PATH, or name another provider: steer config set reviewer.provider %s", p.Executable, providers),
 	}, true
 }
 

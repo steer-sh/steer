@@ -1028,3 +1028,19 @@ func TestAReleaseWithoutATurnIDSaysTheBackstopIsUnavailable(t *testing.T) {
 		t.Errorf("release rows = %v, want one recording an absent turn", rows)
 	}
 }
+
+type endpointStub struct{ stubReviewer }
+
+func (*endpointStub) Endpoint() string { return "api.example.com" }
+
+// The engine stamps the endpoint the reviewer reports, the same way it stamps the
+// model: the instrument names what ran.
+func TestNewEngineStampsTheReviewersEndpoint(t *testing.T) {
+	cfg := Defaults()
+	if got := NewEngine(cfg, &stubReviewer{}).Config().ReviewerEndpoint; got != "" {
+		t.Errorf("a CLI reviewer's endpoint = %q", got)
+	}
+	if got := NewEngine(cfg, &endpointStub{}).Config().ReviewerEndpoint; got != "api.example.com" {
+		t.Errorf("an API reviewer's endpoint = %q", got)
+	}
+}

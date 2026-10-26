@@ -91,6 +91,7 @@ func NewEngine(cfg Config, reviewer Reviewer) *Engine {
 	// The instrument names what ran, not what was configured.
 	cfg.ReviewerProvider = reviewer.Name()
 	cfg.ReviewerModel = reviewer.ModelLabel()
+	cfg.ReviewerEndpoint = EndpointOf(reviewer)
 	return &Engine{cfg: cfg, panel: NewPanel(cfg, reviewer), ledger: NewLedger(cfg)}
 }
 

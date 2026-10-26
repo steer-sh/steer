@@ -45,7 +45,7 @@ var configShowCmd = &cobra.Command{
 		fmt.Printf("  File  %s%s\n", steerpath.ConfigFile(), configFileNote())
 		fmt.Println()
 		for _, f := range settings.Fields {
-			fmt.Printf("  %-18s %-24s %s\n", f.Name, f.Effective(cfg), styles.MutedText.Render(settings.Source(f, file)))
+			fmt.Printf("  %-22s %-24s %s\n", f.Name, f.Effective(cfg), styles.MutedText.Render(settings.Source(f, file)))
 		}
 		fmt.Println()
 		if resolveErr != nil {
@@ -152,30 +152,37 @@ func previewReviewer(next config.Config) {
 	}
 }
 
-// configProvidersCmd lists the reviewer CLIs and whether each resolves here. It is
+// configProvidersCmd lists the reviewers and whether each can run here. It is
 // what an install flow offers a chooser from, so it reads the one provider set
 // rather than carrying its own copy of the names.
 var configProvidersCmd = &cobra.Command{
 	Use:   "providers",
-	Short: "List the reviewer CLIs and whether each one is installed here",
+	Short: "List the reviewers and whether each one can run here",
 	Long: `providers lists every reviewer Steer can run, with the executable it calls and
-whether that executable resolves on this process's PATH.
+whether that executable resolves on this process's PATH. The openai-compatible
+reviewer calls no executable: its row reads the configured base URL and model, and
+whether this process finds the API key. It sends no request.
 
-The reviewer runs from the harness's environment, whose PATH may differ. So a
-"missing" reading proves the executable is absent from this process; an
-"available" one can never prove the reviewer runs.
+The reviewer runs from the harness's environment, whose PATH and variables may
+differ. So a "missing" reading proves the executable or key is absent from this
+process; an "available" one can never prove the reviewer runs.
 
 The reviewer is independent of the agent writing the code: any of these may
 review commits made from any harness.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		fmt.Println()
-		fmt.Println(styles.MainHeader.Render("Reviewer CLIs"))
+		fmt.Println(styles.MainHeader.Render("Reviewers"))
 		fmt.Println()
+		cfg := gateConfig()
 		for _, p := range reviewers.Providers() {
-			probe := reviewers.ProbeProvider(p.ID)
-			fmt.Printf("  %-14s %-14s %-10s %s\n", p.ID, p.Label, probe.Executable,
-				styles.MutedText.Render(probe.State))
+			probe := reviewers.ProbeConfig(p.ID, settings.ReviewerOptions(cfg))
+			state := probe.State
+			if p.API && probe.Unset != "" {
+				state += " (" + probe.Unset + ")"
+			}
+			fmt.Printf("  %-18s %-22s %-10s %s\n", p.ID, p.Label, probe.Executable,
+				styles.MutedText.Render(state))
 		}
 		fmt.Println()
 		return nil

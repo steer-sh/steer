@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/steer-sh/steer-cli/internal/apikey"
 	"github.com/steer-sh/steer-cli/internal/config"
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/reviewers"
@@ -231,10 +232,10 @@ func (m *Model) reloadReviewer() {
 	// run, which for an unset model is the provider's own label.
 	if loaded, err := gate.Load(); err == nil {
 		loaded.StateDir = m.cfg.StateDir
-		cfg, _, err := settings.Resolve(loaded, nil)
-		if err == nil {
-			m.cfg = cfg
-		}
+		// An API reviewer whose URL is not written yet does not resolve, and its
+		// panel must still show the values just written.
+		cfg, _, _ := settings.Resolve(loaded, nil)
+		m.cfg = cfg
 	}
 	m.refresh()
 }
@@ -262,6 +263,7 @@ func (m *Model) viewReviewer() string {
 			out += wrapTo(secondary(f.Help), "    ", width)
 		}
 	}
+	out += m.viewReviewerKey(width)
 
 	if m.editing && m.reviewer != nil {
 		out += inset(m.viewReviewerEditor(file, width-3), width, true)
@@ -276,6 +278,18 @@ func (m *Model) viewReviewer() string {
 			"here changes nothing for it. Repair with: steer bin install"), "   ", width)
 	}
 	return out + m.viewReviewerDetails(width)
+}
+
+// viewReviewerKey is the read-only key row an API reviewer adds. The dashboard takes
+// no key: a key typed here would pass through the terminal the agent may be reading.
+func (m *Model) viewReviewerKey(width int) string {
+	p, ok := reviewers.FindProvider(m.cfg.ReviewerProvider)
+	if !ok || !p.API {
+		return ""
+	}
+	_, st := apikey.Find(m.cfg.ReviewerAPIKeyEnv)
+	out := selectedRow(reviewerLabel("API key", false), " "+st.Label(), false, width)
+	return out + wrapTo(dim("Set it in your own terminal: "+apikey.SetCommand), "    ", width)
 }
 
 // viewReviewerDetails is where the file itself and its stored key names live. A

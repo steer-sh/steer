@@ -7,9 +7,11 @@ package settings
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 
+	"github.com/steer-sh/steer-cli/internal/apikey"
 	"github.com/steer-sh/steer-cli/internal/config"
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/reviewers"
@@ -77,8 +79,8 @@ type Choice struct {
 var Fields = []Field{
 	{
 		Name: "reviewer.provider", Identity: true,
-		Label:        "Reviewer CLI",
-		Help:         "The command Steer runs to review a change before it commits.",
+		Label:        "Reviewer",
+		Help:         "The CLI or API Steer runs to review a change before it commits.",
 		Kind:         KindChoice,
 		DefaultLabel: reviewers.ProviderLabel(""),
 		Choices: func() []Choice {
@@ -89,15 +91,18 @@ var Fields = []Field{
 			return out
 		},
 		Display: func(c gate.Config) string { return reviewers.ProviderLabel(c.ReviewerProvider) },
-		Usage:   "Reviewer CLI (agy|codex|claude-code); unset means claude-code",
+		Usage:   "Reviewer (" + strings.Join(reviewers.ProviderNames(), "|") + "); unset means claude-code",
 		Get:     func(c config.Config) string { return c.Reviewer.Provider },
 		Set: func(c *config.Config, v string) error {
 			// The provider set is closed, so a typo is a write-time error rather than
-			// a hook that fails open on every commit. reviewers.Resolve is the one
-			// resolver, so this can never accept a spelling the gate rejects.
+			// a hook that fails open on every commit. reviewers.FindProvider is the
+			// one reader of a name, so this can never accept a spelling the gate
+			// rejects. Whether the provider's other settings are complete is not
+			// asked here: a provider is named before its URL is.
 			if v != "" {
-				if _, err := reviewers.Resolve(v, "", ""); err != nil {
-					return err
+				if _, ok := reviewers.FindProvider(v); !ok {
+					return fmt.Errorf("unknown reviewer provider %q: expected %s",
+						v, strings.Join(reviewers.ProviderNames(), ", "))
 				}
 			}
 			c.Reviewer.Provider = v
@@ -108,7 +113,7 @@ var Fields = []Field{
 	{
 		Name: "reviewer.model", Env: "COMMIT_GATE_MODEL", Identity: true,
 		Label:        "Model",
-		Help:         "Which model that CLI reviews with. Steer keeps no model list, so type any name the CLI accepts.",
+		Help:         "Which model the reviewer uses. Steer keeps no model list, so type any name the CLI or API accepts.",
 		Kind:         KindText,
 		DefaultLabel: "Steer default",
 		Usage:        "Reviewer model; unset means Steer's default for the provider",
@@ -153,6 +158,47 @@ var Fields = []Field{
 			}
 			return c.ReviewerEffort
 		},
+	},
+	{
+		Name: "reviewer.api.base_url", Identity: true,
+		Label: "API base URL",
+		Help: "Where the " + reviewers.APIProviderID + " reviewer sends each review, up to " +
+			"but not including /chat/completions. The diff goes to this server.",
+		Kind:         KindText,
+		DefaultLabel: "not set",
+		Usage:        "Base URL of an OpenAI-compatible endpoint, for reviewer.provider " + reviewers.APIProviderID,
+		Get:          func(c config.Config) string { return c.Reviewer.API.BaseURL },
+		Set: func(c *config.Config, v string) error {
+			if v != "" {
+				if err := reviewers.CheckBaseURL(v); err != nil {
+					return err
+				}
+			}
+			c.Reviewer.API.BaseURL = v
+			return nil
+		},
+		Effective: func(c gate.Config) string { return c.ReviewerAPIBaseURL },
+	},
+	{
+		Name:  "reviewer.api.key_env",
+		Label: "API key variable",
+		Help: "The environment variable that holds the API key. Steer stores the name, " +
+			"never the key; with none set it reads the key file " + apikey.SetCommand + " writes.",
+		Kind:         KindText,
+		DefaultLabel: "not set",
+		Usage:        "Name of the environment variable holding the API key (not the key)",
+		Get:          func(c config.Config) string { return c.Reviewer.API.KeyEnv },
+		Set: func(c *config.Config, v string) error {
+			if v != "" && !envNameRe.MatchString(v) {
+				// A key pasted here would land in a file every user can read, so
+				// the value is refused rather than stored.
+				return fmt.Errorf("reviewer.api.key_env takes a variable name in capitals, such as OPENROUTER_API_KEY, "+
+					"not the key itself; to store the key run %s", apikey.SetCommand)
+			}
+			c.Reviewer.API.KeyEnv = v
+			return nil
+		},
+		Effective: func(c gate.Config) string { return c.ReviewerAPIKeyEnv },
 	},
 	{
 		Name: "reviewer.runs", Env: "COMMIT_GATE_RUNS", Numeric: true, Identity: true,
@@ -245,12 +291,23 @@ func plural(word string, n int) string {
 	return word + "s"
 }
 
+// envNameRe is a conventional environment variable name: capitals, digits and
+// underscores. Most keys mix cases, so a pasted key fails it.
+var envNameRe = regexp.MustCompile(`^[A-Z_][A-Z0-9_]{0,63}$`)
+
 // Find names the key, refusing an unknown one by listing the surface.
 func Find(name string) (Field, error) {
 	for _, f := range Fields {
 		if f.Name == name {
 			return f, nil
 		}
+	}
+	// A person who guesses a key setting has the key on the command line already;
+	// the error names the command that keeps it out of shell history next time.
+	if strings.HasPrefix(name, "reviewer.api.key") || name == "reviewer.key" || name == "reviewer.api_key" {
+		return Field{}, fmt.Errorf("unknown setting %q: Steer never stores the API key in config.json; "+
+			"run %s in your own terminal, or set reviewer.api.key_env to the name of a variable that holds it",
+			name, apikey.SetCommand)
 	}
 	return Field{}, fmt.Errorf("unknown setting %q: expected one of %s",
 		name, strings.Join(Names(), ", "))
@@ -269,7 +326,7 @@ func Names() []string {
 func KeyHelp() string {
 	var b strings.Builder
 	for _, f := range Fields {
-		fmt.Fprintf(&b, "  %-18s %s\n", f.Name, f.Usage)
+		fmt.Fprintf(&b, "  %-22s %s\n", f.Name, f.Usage)
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
@@ -329,7 +386,17 @@ func BuildReviewer(cfg gate.Config, warn func(string)) (gate.Reviewer, error) {
 	if warning := reviewers.EffortWarning(cfg.ReviewerProvider, cfg.ReviewerEffort); warning != "" && warn != nil {
 		warn(warning)
 	}
-	return reviewers.Resolve(cfg.ReviewerProvider, cfg.ReviewerModelOverride, cfg.ReviewerEffort)
+	return reviewers.Resolve(cfg.ReviewerProvider, ReviewerOptions(cfg))
+}
+
+// ReviewerOptions is the part of a configuration a provider builds its reviewer from.
+func ReviewerOptions(cfg gate.Config) reviewers.Options {
+	return reviewers.Options{
+		Model:   cfg.ReviewerModelOverride,
+		Effort:  cfg.ReviewerEffort,
+		BaseURL: cfg.ReviewerAPIBaseURL,
+		KeyEnv:  cfg.ReviewerAPIKeyEnv,
+	}
 }
 
 // Resolve returns the configuration with ReviewerModel naming the model that would
@@ -345,6 +412,7 @@ func Resolve(cfg gate.Config, warn func(string)) (gate.Config, gate.Reviewer, er
 		return cfg, nil, err
 	}
 	cfg.ReviewerModel = reviewer.ModelLabel()
+	cfg.ReviewerEndpoint = gate.EndpointOf(reviewer)
 	return cfg, reviewer, nil
 }
 

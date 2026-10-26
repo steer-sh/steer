@@ -922,7 +922,7 @@ func init() {
 	commitGateBackfillCmd.Flags().BoolVar(&backfillRejoin, "rejoin", false, "Re-judge resolver links and stamped misses under the current rules")
 
 	commitGateCmd.PersistentFlags().StringVar(&commitGateProvider, "provider", "",
-		"Reviewer provider (agy|codex|claude-code); default claude-code")
+		"Reviewer provider ("+strings.Join(reviewers.ProviderNames(), "|")+"); default claude-code")
 	commitGateCmd.PersistentFlags().StringVar(&commitGateModel, "model", "",
 		"Reviewer model; default is the provider's shipped pin")
 	commitGateCmd.PersistentFlags().StringVar(&commitGateEffort, "effort", "",
@@ -944,8 +944,12 @@ func init() {
 
 // reviewerProbe reads whether the configured reviewer can actually run. An
 // unresolvable provider is reported as missing with no executable: it names no CLI,
-// so no review can run, and the repair is the setting rather than an install.
+// so no review can run, and the repair is the setting rather than an install. An API
+// provider's probe reads its own configuration, which names the setting to repair.
 func reviewerProbe(cfg gate.Config, err error) reviewers.Probe {
+	if p, ok := reviewers.FindProvider(cfg.ReviewerProvider); ok && p.API {
+		return reviewers.ProbeConfig(cfg.ReviewerProvider, settings.ReviewerOptions(cfg))
+	}
 	if err != nil {
 		return reviewers.Probe{Provider: cfg.ReviewerProvider, State: reviewers.ProbeMissing}
 	}

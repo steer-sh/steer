@@ -53,3 +53,53 @@ func TestConfigHelpNamesEverySetting(t *testing.T) {
 		}
 	}
 }
+
+// A person who guesses a key setting must be sent to the command that reads the key
+// with no echo, not shown the list of settings.
+func TestAKeySettingNamesTheKeyCommand(t *testing.T) {
+	for _, name := range []string{"reviewer.api.key", "reviewer.api_key", "reviewer.key"} {
+		_, err := settings.Find(name)
+		if err == nil || !strings.Contains(err.Error(), "steer reviewer key set") {
+			t.Errorf("Find(%q) = %v, want it to name steer reviewer key set", name, err)
+		}
+	}
+}
+
+// The variable setting holds a name. A key pasted into it would be written to a file
+// every user can read.
+func TestKeyEnvRefusesAValueThatIsNotAVariableName(t *testing.T) {
+	f, err := settings.Find("reviewer.api.key_env")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c config.Config
+	if err := f.Set(&c, "OPENROUTER_API_KEY"); err != nil || c.Reviewer.API.KeyEnv != "OPENROUTER_API_KEY" {
+		t.Fatalf("Set(OPENROUTER_API_KEY) = %v, stored %q", err, c.Reviewer.API.KeyEnv)
+	}
+	for _, v := range []string{"sk-or-v1-0123456789abcdef", "AIzaSyD0123456789abcdefGHIJKLmnopqrstu", strings.Repeat("A", 80)} {
+		c := config.Config{}
+		if err := f.Set(&c, v); err == nil || c.Reviewer.API.KeyEnv != "" {
+			t.Errorf("Set(%q) stored %q, err %v; want refused", v, c.Reviewer.API.KeyEnv, err)
+		}
+	}
+}
+
+// A provider is chosen before its URL is written, so naming the API provider must
+// not require the rest of its configuration.
+func TestTheAPIProviderCanBeNamedBeforeItsURL(t *testing.T) {
+	f, err := settings.Find("reviewer.provider")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c config.Config
+	if err := f.Set(&c, "openai-compatible"); err != nil {
+		t.Fatalf("Set(openai-compatible) = %v", err)
+	}
+	if err := f.Set(&c, "openai-compatibel"); err == nil {
+		t.Error("Set accepted a misspelt provider")
+	}
+	url, _ := settings.Find("reviewer.api.base_url")
+	if err := url.Set(&c, "http://api.example.com/v1"); err == nil {
+		t.Error("base_url accepted plain http to a remote host")
+	}
+}

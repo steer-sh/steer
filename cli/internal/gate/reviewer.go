@@ -27,6 +27,13 @@ const (
 	OutcomeSpawn         RunOutcome = "spawn"
 	OutcomeExit          RunOutcome = "exit"
 	OutcomeUnparseable   RunOutcome = "unparseable"
+	// The outcomes below come from an API reviewer, which reads a status code where a
+	// CLI exits. truncated is a reply cut at the output limit, kept apart from salvage
+	// because a cut reply can drop the finding that decides the commit.
+	OutcomeTruncated   RunOutcome = "truncated"
+	OutcomeAuth        RunOutcome = "auth"
+	OutcomeRateLimited RunOutcome = "rate_limited"
+	OutcomeNoKey       RunOutcome = "no_key"
 )
 
 // ReviewRun is one reviewer run. Text is the usable review or empty.
@@ -34,6 +41,8 @@ type ReviewRun struct {
 	Text    string
 	Outcome RunOutcome
 	Detail  string
+	// ResponseModel is the model the provider says answered, "" when it says none.
+	ResponseModel string
 }
 
 // RawRun is what a Reviewer returns before outcome classification: the model's reply,
@@ -46,6 +55,10 @@ type RawRun struct {
 	// (timeout, spawn, exit, unparseable). Classify honours it and stops.
 	Outcome RunOutcome
 	Detail  string
+	// ResponseModel is the model the provider says answered. An API endpoint can
+	// route a configured name to another model, so this is recorded beside the
+	// configured one rather than in place of it.
+	ResponseModel string
 }
 
 // Reviewer runs one red-team pass over a prompt. Implementations live in
@@ -63,11 +76,31 @@ type Reviewer interface {
 	Review(ctx context.Context, prompt, cwd string) RawRun
 }
 
+// EndpointReviewer is a Reviewer that sends the prompt to a network endpoint.
+type EndpointReviewer interface {
+	// Endpoint is the host the prompt goes to, never the full URL.
+	Endpoint() string
+}
+
+// EndpointOf is the host a reviewer sends to, "" for one that runs a CLI.
+func EndpointOf(r Reviewer) string {
+	if e, ok := r.(EndpointReviewer); ok {
+		return e.Endpoint()
+	}
+	return ""
+}
+
 // Classify turns a provider's raw result into a run outcome. A body that conforms to
 // the review protocol — findings, or the clean reply — is a completed review whatever
 // the status says: `salvaged` and `salvaged_clean`. Only a body conforming to neither
 // is dropped as `lost`.
 func Classify(raw RawRun) ReviewRun {
+	run := classify(raw)
+	run.ResponseModel = raw.ResponseModel
+	return run
+}
+
+func classify(raw RawRun) ReviewRun {
 	if raw.Outcome != "" {
 		return ReviewRun{Outcome: raw.Outcome, Detail: raw.Detail}
 	}
@@ -160,8 +193,12 @@ func (p *Panel) Run(ctx context.Context, prompt, cwd string) PanelResult {
 func ReviewerReport(cfg Config, runs []ReviewRun) Row {
 	outcomes := map[string]int{}
 	var errors []string
+	models := map[string]int{}
 	for _, run := range runs {
 		outcomes[string(run.Outcome)]++
+		if run.ResponseModel != "" {
+			models[run.ResponseModel]++
+		}
 		if run.Detail != "" && run.Outcome != OutcomeOK {
 			errors = append(errors, string(run.Outcome)+": "+truncate(run.Detail, cfg.MaxDetailChars))
 		}
@@ -169,6 +206,9 @@ func ReviewerReport(cfg Config, runs []ReviewRun) Row {
 	row := Row{"reviewer_outcomes": outcomes}
 	if len(errors) > 0 {
 		row["reviewer_errors"] = errors
+	}
+	if len(models) > 0 {
+		row["reviewer_response_models"] = models
 	}
 	return row
 }

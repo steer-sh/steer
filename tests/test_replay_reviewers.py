@@ -189,5 +189,32 @@ class TallyTest(unittest.TestCase):
         self.assertIn("expected cells by panel size: 1:0.33  2:0.67  3:1.00 of 1", text)
 
 
+
+class APISetupTest(unittest.TestCase):
+    def test_writes_the_endpoint_and_passes_only_the_named_variable(self):
+        with tempfile.TemporaryDirectory() as home:
+            extra = replay_reviewers.api_setup(home, "https://x.example/v1", "STEER_REPLAY_KEY",
+                                               environ={"STEER_REPLAY_KEY": "sk-1", "OTHER": "y"})
+            self.assertEqual(extra, {"STEER_REPLAY_KEY": "sk-1"})
+            config = json.loads((Path(home) / ".steer" / "config.json").read_text())
+            self.assertEqual(config["reviewer"]["api"], {"base_url": "https://x.example/v1", "key_env": "STEER_REPLAY_KEY"})
+            self.assertNotIn("sk-1", (Path(home) / ".steer" / "config.json").read_text())
+
+    def test_refuses_an_unset_variable(self):
+        with tempfile.TemporaryDirectory() as home:
+            with self.assertRaises(SystemExit):
+                replay_reviewers.api_setup(home, "https://x.example/v1", "NOPE", environ={})
+
+    def test_copies_the_key_file_private(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "reviewer-api-key"
+            source.write_text("sk-file\n")
+            home = Path(tmp) / "home"
+            self.assertEqual(replay_reviewers.api_setup(home, "https://x.example/v1", None, key_file=source), {})
+            copy = home / ".steer" / "credentials" / "reviewer-api-key"
+            self.assertEqual(copy.read_text(), "sk-file\n")
+            self.assertEqual(copy.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(copy.parent.stat().st_mode & 0o777, 0o700)
+
 if __name__ == "__main__":
     unittest.main()

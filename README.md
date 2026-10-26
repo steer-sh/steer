@@ -34,9 +34,9 @@ Codex trusts no hook until you approve it in `/hooks`. Approve the plugin's remi
 /steer-setup
 ```
 
-The skill asks which reviewer CLI and model to use, suggesting from the ones installed on your machine. It then arms the commit gate for your agent in every repository and places `steer` at `~/.steer/bin/steer`. Add that directory to your `PATH` to run `steer` from your own shell.
+The skill asks which reviewer and model to use, suggesting from the ones installed on your machine. It then arms the commit gate for your agent in every repository and places `steer` at `~/.steer/bin/steer`. Add that directory to your `PATH` to run `steer` from your own shell.
 
-Reviews run through an installed, authenticated CLI: `claude`, `codex`, or `agy` (Google Antigravity). The reviewer can be different from the agent that writes your code. By default, three reviewers run in parallel. CLI reviews take time and use your reviewer's account or API allowance. If latency is too high, it's recommended to use a smaller model or use less reasoning effort.
+Reviews run through an installed, authenticated CLI: `claude`, `codex`, or `agy` (Google Antigravity). They can also go to any OpenAI-compatible chat-completions endpoint, such as OpenRouter, with an API key that you store with `steer reviewer key set` in your own terminal; every reviewed diff is then sent to that endpoint. The reviewer can be different from the agent that writes your code. By default, three reviewers run in parallel. CLI reviews take time and use your reviewer's account or API allowance. If latency is too high, it's recommended to use a smaller model or use less reasoning effort.
 
 Due to the current state of `agy`, it's not possible to block tool usage with command-line flags, nor is it possible to have ephemeral runs that do not create conversation history. With `agy`, your own `agy` permission rules stored in CLI configuration are the reviewer's only boundary, and each review stays in your `agy` conversation history.
 

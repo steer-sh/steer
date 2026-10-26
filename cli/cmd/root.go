@@ -20,7 +20,7 @@ var rootCmd = &cobra.Command{
 prevent recurring mistakes.
 
 Set up the commit gate:
-  1. steer config set reviewer.provider claude-code   # claude-code | codex | agy
+  1. steer config set reviewer.provider claude-code   # claude-code | codex | agy | openai-compatible
   2. steer commit-gate install --harness claude-code --scope global
   3. steer status                                     # whether commits here are reviewed, and what to repair
 

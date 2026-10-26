@@ -43,3 +43,24 @@ func TestInstrumentUsesKeepsAProviderSwapAtOneString(t *testing.T) {
 	}
 	check(t, "labels", labels, []string{id, id + " (provider agy)", id + " (provider codex)"})
 }
+
+// One API model served by two endpoints is two identities: an endpoint can route the
+// same name to different weights, so a list must not merge them.
+func TestInstrumentUsesKeepsAnEndpointSwapAtOneString(t *testing.T) {
+	const id = "vendor/model/3/abc/go"
+	row := func(endpoint string) gate.Row {
+		return gate.Row{"instrument": id, "instrument_fields": map[string]any{
+			"provider": "openai-compatible", "model": "vendor/model", "runs": 3,
+			"prompt_digest": "abc", "engine": "go", "endpoint": endpoint,
+		}}
+	}
+	chains := []Chain{{Rows: []gate.Row{row("openrouter.ai"), row("localhost:8080")}}}
+	var labels []string
+	for _, u := range InstrumentUses(chains) {
+		labels = append(labels, u.Label())
+	}
+	check(t, "labels", labels, []string{
+		id + " (provider openai-compatible, endpoint localhost:8080)",
+		id + " (provider openai-compatible, endpoint openrouter.ai)",
+	})
+}

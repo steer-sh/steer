@@ -119,3 +119,34 @@ func TestPanelDropsDecoratedCleanReply(t *testing.T) {
 		}
 	}
 }
+
+// An endpoint can answer a configured model name with another model, so the ledger
+// row counts the models that answered beside the configured one.
+func TestReviewerReportCountsTheModelsThatAnswered(t *testing.T) {
+	runs := []ReviewRun{
+		Classify(RawRun{Response: "NO FINDINGS", Status: "SUCCESS", ResponseModel: "m-1"}),
+		Classify(RawRun{Outcome: OutcomeTruncated, Detail: "cut", ResponseModel: "m-1"}),
+		Classify(RawRun{Outcome: OutcomeNoKey, Detail: "no key"}),
+	}
+	row := ReviewerReport(Defaults(), runs)
+	models, _ := row["reviewer_response_models"].(map[string]int)
+	if models["m-1"] != 2 || len(models) != 1 {
+		t.Fatalf("reviewer_response_models = %v, want m-1 twice", row["reviewer_response_models"])
+	}
+	if _, ok := ReviewerReport(Defaults(), runs[2:])["reviewer_response_models"]; ok {
+		t.Error("a panel with no reported model wrote the field")
+	}
+}
+
+// The endpoint joins the instrument only for an API reviewer, so a CLI reviewer's
+// rows keep the fields they always had.
+func TestInstrumentFieldsNameTheEndpointOnlyWhenSet(t *testing.T) {
+	cfg := Defaults()
+	if _, ok := cfg.InstrumentFields()["endpoint"]; ok {
+		t.Error("a CLI reviewer's instrument names an endpoint")
+	}
+	cfg.ReviewerEndpoint = "openrouter.ai"
+	if got := cfg.InstrumentFields()["endpoint"]; got != "openrouter.ai" {
+		t.Errorf("endpoint = %v", got)
+	}
+}

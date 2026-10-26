@@ -77,7 +77,8 @@ func TestFixture(t *testing.T) {
 			"which makes repo access decorative")
 	}
 
-	reviewer, err := reviewers.Resolve(cfg.ReviewerProvider, cfg.ReviewerModelOverride, cfg.ReviewerEffort)
+	reviewer, err := reviewers.Resolve(cfg.ReviewerProvider, reviewers.Options{Model: cfg.ReviewerModelOverride, Effort: cfg.ReviewerEffort,
+		BaseURL: cfg.ReviewerAPIBaseURL, KeyEnv: cfg.ReviewerAPIKeyEnv})
 	if err != nil {
 		t.Fatal(err)
 	}

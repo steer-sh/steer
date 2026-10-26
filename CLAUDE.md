@@ -91,6 +91,9 @@ Read the linked architecture section before changing the corresponding boundary:
   `cli/internal/gate/`; its adapters own harness payloads and replies.
   Codex hook payloads can omit a nested shell workdir: select the repository
   explicitly with `git -C /absolute/path commit` when committing through code mode.
+  The API reviewer's key never goes in `~/.steer/config.json`; it lives in the
+  variable `reviewer.api.key_env` names or in the file `internal/apikey/` owns, and
+  only `steer reviewer key set` writes that file.
   The root-Stop ledger backstop (`cli/internal/gate/stophook/`, run by
   `commit-gate backfill`) reads only the `chain-end` rows `Engine.release` writes,
   so a new path that ends a blocked sequence must go through `release`.

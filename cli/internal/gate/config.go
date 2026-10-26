@@ -32,6 +32,9 @@ type Config struct {
 	// provider; every other provider ignores them.
 	ReviewerAPIBaseURL string
 	ReviewerAPIKeyEnv  string
+	// ReviewerEndpoint is the host an API reviewer sends to, which the instrument
+	// records. It is the reviewer's own answer, "" for a CLI reviewer.
+	ReviewerEndpoint string
 
 	StaleAfter time.Duration
 	MaxFirings int

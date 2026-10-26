@@ -1,6 +1,6 @@
-// Package reviewers holds the reviewer providers the commit gate can drive: agy
-// (default), Codex, and `claude -p`. Each turns one prompt into one raw run; the
-// engine classifies and pools them.
+// Package reviewers holds the reviewer providers the commit gate can drive: agy,
+// Codex, `claude -p` (default), and an OpenAI-compatible endpoint. Each turns one
+// prompt into one raw run; the engine classifies and pools them.
 package reviewers
 
 import (
