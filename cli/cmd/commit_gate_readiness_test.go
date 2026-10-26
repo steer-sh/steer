@@ -88,6 +88,19 @@ func TestTrialRateLimitOfAnAPIReviewerSaysToWait(t *testing.T) {
 	}
 }
 
+// TestTrialUnreachableAPIReviewerNamesTheServer: no reply at all points at the URL
+// and the server, not at the key.
+func TestTrialUnreachableAPIReviewerNamesTheServer(t *testing.T) {
+	cfg := gate.Defaults()
+	cfg.ReviewerProvider = reviewers.APIProviderID
+	out, _ := renderTrial(gate.TrialResult{Run: gate.ReviewRun{
+		Outcome: gate.OutcomeUnreachable, Detail: "request failed: connection refused"}}, cfg)
+	flat := strings.Join(strings.Fields(out), " ")
+	if !strings.Contains(flat, "server runs") || strings.Contains(flat, "key status") {
+		t.Errorf("output = %q; want the unreachable hint", flat)
+	}
+}
+
 // TestTrialFailureInCodexSandboxNamesTheNetwork: a trial run from a Codex sandbox
 // with the network off names that sandbox beside the sign-in and model causes.
 func TestTrialFailureInCodexSandboxNamesTheNetwork(t *testing.T) {

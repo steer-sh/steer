@@ -9,9 +9,11 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/steer-sh/steer-cli/internal/apikey"
 	"github.com/steer-sh/steer-cli/internal/gate"
@@ -101,7 +103,8 @@ func CheckBaseURL(raw string) error {
 	default:
 		return fmt.Errorf("reviewer.api.base_url %q must use https", raw)
 	}
-	if u.RawQuery != "" || u.Fragment != "" {
+	// A bare "?" or "#" parses to an empty query or fragment, so the raw text decides.
+	if strings.ContainsAny(raw, "?#") {
 		return fmt.Errorf("reviewer.api.base_url %q carries a query or fragment; give the base path only", raw)
 	}
 	// The reviewer appends the endpoint path itself; providers' docs often show the full URL.
@@ -192,7 +195,13 @@ func (c *ChatAPI) send(ctx context.Context, prompt, key string) gate.RawRun {
 		return gate.RawRun{Outcome: gate.OutcomeExit, Detail: "encode the request: " + err.Error()}
 	}
 	endpoint := strings.TrimRight(c.BaseURL, "/") + chatCompletionsPath
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	// replied tells an endpoint that sent any HTTP reply, a redirect included,
+	// from one that sent none.
+	var replied atomic.Bool
+	traced := httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+		GotFirstResponseByte: func() { replied.Store(true) },
+	})
+	req, err := http.NewRequestWithContext(traced, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return gate.RawRun{Outcome: gate.OutcomeExit, Detail: "build the request: " + err.Error()}
 	}
@@ -204,7 +213,10 @@ func (c *ChatAPI) send(ctx context.Context, prompt, key string) gate.RawRun {
 		if ctx.Err() != nil {
 			return gate.RawRun{Outcome: gate.OutcomeTimeout, Detail: "no response before the deadline"}
 		}
-		return gate.RawRun{Outcome: gate.OutcomeExit, Detail: "request failed: " + err.Error()}
+		if replied.Load() {
+			return gate.RawRun{Outcome: gate.OutcomeExit, Detail: "request failed: " + err.Error()}
+		}
+		return gate.RawRun{Outcome: gate.OutcomeUnreachable, Detail: "request failed: " + err.Error()}
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
@@ -246,7 +258,7 @@ func (c *ChatAPI) send(ctx context.Context, prompt, key string) gate.RawRun {
 	// Only a complete reply reaches Classify. A cut or filtered reply carries no
 	// Response, so salvage can never count a half review as a review.
 	switch choice.FinishReason {
-	case "stop":
+	case "stop", "":
 	case "length":
 		return gate.RawRun{Outcome: gate.OutcomeTruncated,
 			Detail: "the reply reached the output limit", ResponseModel: parsed.Model}
@@ -259,7 +271,14 @@ func (c *ChatAPI) send(ctx context.Context, prompt, key string) gate.RawRun {
 		return gate.RawRun{Outcome: gate.OutcomeUnparseable,
 			Detail: "the reply content is neither text nor text parts", ResponseModel: parsed.Model}
 	}
-	return gate.RawRun{Response: strings.TrimSpace(text), Status: "SUCCESS", ResponseModel: parsed.Model}
+	text = strings.TrimSpace(text)
+	// Some local servers send no finish_reason; only a reply with text then counts
+	// as complete.
+	if choice.FinishReason == "" && text == "" {
+		return gate.RawRun{Outcome: gate.OutcomeExit,
+			Detail: `finish_reason="" with no reply text`, ResponseModel: parsed.Model}
+	}
+	return gate.RawRun{Response: text, Status: "SUCCESS", ResponseModel: parsed.Model}
 }
 
 // messageText reads a message's content: a string, or the array of typed parts some
@@ -288,9 +307,6 @@ func messageText(raw json.RawMessage) (string, bool) {
 	return b.String(), true
 }
 
-// errorMessage is the `error.message` field of a reply, with the key removed before
-// the cut, so that a cut cannot leave part of it; "" when the reply has none. The
-// rest of the body stays out of the ledger.
 // withMessage appends the endpoint's error message, if any, to code.
 func withMessage(code string, data []byte, key string) string {
 	if msg := errorMessage(data, key); msg != "" {
@@ -299,6 +315,9 @@ func withMessage(code string, data []byte, key string) string {
 	return code
 }
 
+// errorMessage is the `error.message` field of a reply, with the key removed before
+// the cut, so that a cut cannot leave part of it; "" when the reply has none. The
+// rest of the body stays out of the ledger.
 func errorMessage(data []byte, key string) string {
 	var body struct {
 		Error struct {

@@ -324,6 +324,8 @@ func apiTrialHint(outcome gate.RunOutcome) string {
 		return "The endpoint refused the request under a rate limit. Wait and run this test again, or choose another model."
 	case gate.OutcomeAuth, gate.OutcomeNoKey:
 		return "Check where the key comes from and that the endpoint accepts it: steer reviewer key status"
+	case gate.OutcomeUnreachable:
+		return "No reply came from the endpoint. Check reviewer.api.base_url, and that the server runs and this host reaches it: steer config show"
 	}
 	return "Check reviewer.api.base_url and that the endpoint serves the model: steer config show. " +
 		"Check where the key comes from: steer reviewer key status"

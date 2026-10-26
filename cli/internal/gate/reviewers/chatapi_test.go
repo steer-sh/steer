@@ -64,6 +64,8 @@ func TestChatAPIMapsEachEndpointResult(t *testing.T) {
 		{"complete reply", 200, reply("stop", "NO FINDINGS"), "", "NO FINDINGS"},
 		{"cut at the limit", 200, reply("length", "1. [HIGH] half a fin"), gate.OutcomeTruncated, ""},
 		{"filtered", 200, reply("content_filter", "1. [HIGH] x"), gate.OutcomeExit, ""},
+		{"no finish reason", 200, reply("", "NO FINDINGS"), "", "NO FINDINGS"},
+		{"no finish reason, no text", 200, reply("", " "), gate.OutcomeExit, ""},
 		{"no choices", 200, `{"choices":[]}`, gate.OutcomeUnparseable, ""},
 		{"not JSON", 200, `<html>`, gate.OutcomeUnparseable, ""},
 		{"unauthorized", 401, `{"error":{"message":"bad key"}}`, gate.OutcomeAuth, ""},
@@ -213,6 +215,31 @@ func TestChatAPIRefusesARedirectToAnotherOrigin(t *testing.T) {
 	}
 }
 
+// TestChatAPIUnreachableEndpoint: a request with no HTTP reply is unreachable, apart
+// from an endpoint that answered with an error.
+func TestChatAPIUnreachableEndpoint(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler())
+	addr := srv.URL
+	srv.Close()
+	raw := chatReviewer(addr).Review(context.Background(), "p", "")
+	if raw.Outcome != gate.OutcomeUnreachable {
+		t.Fatalf("Outcome = %q, want unreachable (detail %q)", raw.Outcome, raw.Detail)
+	}
+}
+
+// TestChatAPIRedirectLoopIsNotUnreachable: an endpoint that answered with redirects
+// sent a reply, so its failure is exit.
+func TestChatAPIRedirectLoopIsNotUnreachable(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, r.URL.Path, http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(srv.Close)
+	raw := chatReviewer(srv.URL).Review(context.Background(), "p", "")
+	if raw.Outcome != gate.OutcomeExit {
+		t.Fatalf("Outcome = %q, want exit (detail %q)", raw.Outcome, raw.Detail)
+	}
+}
+
 func TestChatAPIJoinsTextParts(t *testing.T) {
 	body := `{"choices":[{"finish_reason":"stop","message":{"content":[` +
 		`{"type":"text","text":"NO "},{"type":"reasoning","text":"hidden"},{"type":"text","text":"FINDINGS"}]}}]}`
@@ -225,7 +252,7 @@ func TestChatAPIJoinsTextParts(t *testing.T) {
 
 func TestCheckBaseURL(t *testing.T) {
 	ok := []string{"https://chat/completions", "https://openrouter.ai/api/v1", "http://localhost:11434/v1", "http://127.0.0.1:8080", "http://[::1]:8080/v1"}
-	bad := []string{"http://openrouter.ai/api/v1", "https://user:pw@openrouter.ai/api/v1", "ftp://x", "https://", "https://x/v1?key=1", "not a url", "https://api.groq.com/openai/v1/chat/completions/"}
+	bad := []string{"http://openrouter.ai/api/v1", "https://user:pw@openrouter.ai/api/v1", "ftp://x", "https://", "https://x/v1?key=1", "https://x/v1/chat/completions?", "https://x/v1/chat/completions#", "not a url", "https://api.groq.com/openai/v1/chat/completions/"}
 	for _, u := range ok {
 		if err := CheckBaseURL(u); err != nil {
 			t.Errorf("CheckBaseURL(%q) = %v, want accepted", u, err)

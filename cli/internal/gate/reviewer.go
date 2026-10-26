@@ -34,6 +34,8 @@ const (
 	OutcomeAuth        RunOutcome = "auth"
 	OutcomeRateLimited RunOutcome = "rate_limited"
 	OutcomeNoKey       RunOutcome = "no_key"
+	// unreachable is a request that got no HTTP reply: refused, DNS, TLS.
+	OutcomeUnreachable RunOutcome = "unreachable"
 )
 
 // ReviewRun is one reviewer run. Text is the usable review or empty.
