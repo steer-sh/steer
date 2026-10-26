@@ -51,7 +51,7 @@ func NewCommitView(cfg Config, cwd string, spec DiffSpec) (*CommitView, bool) {
 	// An intent-to-add entry (`git add -N`) holds an empty blob that a commit leaves
 	// out; the index-to-worktree diff names it as an addition. A spec that stages it
 	// puts it back below, from disk.
-	intents, ok := Git(root, gitMedium, "diff", "--name-only", "--no-relative", "--diff-filter=A", "-z")
+	intents, ok := Git(root, gitMedium, "diff", "--name-only", "--no-relative", "--no-renames", "--diff-filter=A", "-z")
 	if !ok {
 		return nil, false
 	}
@@ -138,8 +138,31 @@ func (v *CommitView) regularOnDisk(path string) bool {
 		return false
 	}
 	defer root.Close()
+	return regularAt(root, path) == nil
+}
+
+// regularAt refuses a path that is not a regular file or that a symlinked parent
+// reaches. os.Root follows a symlink that stays inside the root, where git would
+// stage the link and delete the tracked file under it.
+func regularAt(root *os.Root, path string) error {
+	parts := strings.Split(path, "/")
+	for i := 1; i < len(parts); i++ {
+		info, err := root.Lstat(strings.Join(parts[:i], "/"))
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("%s: %w", path, ErrNotInView)
+		}
+	}
 	info, err := root.Lstat(path)
-	return err == nil && info.Mode().IsRegular()
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("%s: %w", path, ErrNotInView)
+	}
+	return nil
 }
 
 // readDisk opens path through an os.Root, so a symlinked parent directory cannot lead
@@ -150,10 +173,8 @@ func (v *CommitView) readDisk(path string) ([]byte, error) {
 		return nil, err
 	}
 	defer root.Close()
-	if info, err := root.Lstat(path); err != nil {
+	if err := regularAt(root, path); err != nil {
 		return nil, err
-	} else if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("%s: %w", path, ErrNotInView)
 	}
 	f, err := root.Open(path)
 	if err != nil {

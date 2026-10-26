@@ -196,6 +196,36 @@ func TestCommitViewLeavesOutAnIntentToAdd(t *testing.T) {
 	}
 }
 
+// TestCommitViewLeavesOutAnIntentToAddThatMatchesADeletion: an intent-to-add entry
+// identical to a deleted tracked file is still left out, not read as a rename.
+func TestCommitViewLeavesOutAnIntentToAddThatMatchesADeletion(t *testing.T) {
+	body := "the same content in both files, long enough to pair as a rename\n"
+	root := committedRepo(t, map[string]string{"old.txt": body})
+	if err := os.Remove(filepath.Join(root, "old.txt")); err != nil {
+		t.Fatal(err)
+	}
+	writeFileAt(t, root, "new.txt", body)
+	gitCmd(t, root, "add", "-N", "new.txt")
+	if viewOf(t, root, DiffSpec{StagedOnly: true}).Has("new.txt") {
+		t.Error("a staged-only view holds the intent-to-add entry")
+	}
+}
+
+// TestCommitViewRefusesAnInTreeSymlinkedParent: a tracked directory replaced by a
+// symlink to another directory of the work tree lands as a deletion of its files.
+func TestCommitViewRefusesAnInTreeSymlinkedParent(t *testing.T) {
+	root := committedRepo(t, map[string]string{"dir/a.txt": "dir\n", "other/a.txt": "other\n"})
+	if err := os.RemoveAll(filepath.Join(root, "dir")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("other", filepath.Join(root, "dir")); err != nil {
+		t.Fatal(err)
+	}
+	if v := viewOf(t, root, DiffSpec{}); v.Has("dir/a.txt") {
+		t.Error("the view reads dir/a.txt through the symlinked parent")
+	}
+}
+
 // TestCommitViewHoldsNoSymlink: a tracked symlink and an added symlink to a directory
 // outside the repository are not files in the view.
 func TestCommitViewHoldsNoSymlink(t *testing.T) {
