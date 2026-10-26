@@ -99,6 +99,9 @@ type diffPlan struct {
 	// incomplete records that an untracked file the commit may land is missing from
 	// the diff: enumeration failed, or a listed file did not render.
 	incomplete bool
+	// keepCruft lists OS cruft among the untracked files. The diff leaves it out;
+	// the commit view keeps it, because an add that names it lands it.
+	keepCruft bool
 }
 
 // emptyTreeSHA1 is git's empty-tree object under SHA-1. A repository created with
@@ -367,7 +370,10 @@ func (p *diffPlan) untrackedPaths() []string {
 		}
 		out += forced
 	}
-	paths := dropCruft(nulFields(out))
+	paths := nulFields(out)
+	if !p.keepCruft {
+		paths = dropCruft(paths)
+	}
 	seen := map[string]bool{}
 	unique := paths[:0]
 	for _, path := range paths {
