@@ -128,7 +128,7 @@ func (v *CommitView) Read(path string) ([]byte, error) {
 		}
 		return []byte(blob), nil
 	}
-	return v.readDisk(path)
+	return v.readDisk(path, -1)
 }
 
 // regularOnDisk reports whether path names a regular file inside the work tree.
@@ -166,8 +166,9 @@ func regularAt(root *os.Root, path string) error {
 }
 
 // readDisk opens path through an os.Root, so a symlinked parent directory cannot lead
-// the read out of the work tree, and refuses anything but a regular file at open.
-func (v *CommitView) readDisk(path string) ([]byte, error) {
+// the read out of the work tree, and refuses anything but a regular file at open. A
+// limit of 0 or more reads at most limit+1 bytes, so a file that grew past it shows.
+func (v *CommitView) readDisk(path string, limit int64) ([]byte, error) {
 	root, err := os.OpenRoot(v.root)
 	if err != nil {
 		return nil, err
@@ -185,6 +186,9 @@ func (v *CommitView) readDisk(path string) ([]byte, error) {
 		return nil, err
 	} else if !info.Mode().IsRegular() {
 		return nil, &fs.PathError{Op: "read", Path: path, Err: ErrNotInView}
+	}
+	if limit >= 0 {
+		return io.ReadAll(io.LimitReader(f, limit+1))
 	}
 	return io.ReadAll(f)
 }

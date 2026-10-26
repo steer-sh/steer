@@ -1,7 +1,9 @@
 package gate
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -223,6 +225,27 @@ func TestCommitViewRefusesAnInTreeSymlinkedParent(t *testing.T) {
 	}
 	if v := viewOf(t, root, DiffSpec{}); v.Has("dir/a.txt") {
 		t.Error("the view reads dir/a.txt through the symlinked parent")
+	}
+}
+
+// TestCommitViewScanReadsBothSourcesWithinTheLimit: one scan returns index and
+// working-tree content in path order, and a file over the limit comes without data.
+func TestCommitViewScanReadsBothSourcesWithinTheLimit(t *testing.T) {
+	root := committedRepo(t, map[string]string{"a.txt": "a1\n", "b.txt": "b1\n", "big.txt": "0123456789\n", "c.txt": "c1\n"})
+	writeFileAt(t, root, "a.txt", "a2\n")
+	v := viewOf(t, root, DiffSpec{})
+	var got []string
+	err := v.Scan(context.Background(), []string{"a.txt", "b.txt", "big.txt", "missing.txt", "c.txt"}, 5,
+		func(path string, data []byte, size int64) bool {
+			got = append(got, fmt.Sprintf("%s=%q/%d", path, data, size))
+			return true
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{`a.txt="a2\n"/3`, `b.txt="b1\n"/3`, `big.txt=""/11`, `c.txt="c1\n"/3`}
+	if !slices.Equal(got, want) {
+		t.Errorf("Scan = %v, want %v", got, want)
 	}
 }
 
