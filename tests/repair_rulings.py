@@ -8,7 +8,9 @@ write <out>/<label>-r<n>/ with the stream, the parsed rulings and the usage.
 
 A start is a JSON file: {"session_id", "base_sha", "diff", "bundle", "prefix",
 "prefix_lines", "chain", "tasks"}: the round-1 diff, frozen review bundle, saved session
-prefix and task-turn file from the commit-review state directory, and the chain id. Claude Code needs CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY.
+prefix and task-turn file from the commit-review state directory, and the chain id. An
+optional "files" maps a repository-relative path to a source file: an untracked or ignored
+file the author could read at round 1, copied into both trees. Claude Code needs CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY.
 """
 
 import argparse
@@ -125,6 +127,15 @@ def run_one(args, start, out):
         subprocess.run(["git", "-C", str(work), "checkout", "-q", "--detach", start["base_sha"]], check=True, env=env)
         subprocess.run(["git", "-C", str(work), "apply", "--index", start["diff"]], check=True, env=env)
         snapshot(work, start["base_sha"], base)
+        for rel, source in start.get("files", {}).items():
+            for tree in (work, base):
+                dest = tree / rel
+                if not dest.resolve().is_relative_to(tree.resolve()):
+                    raise ValueError("start file %s resolves outside %s" % (rel, tree))
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, dest)
+                if tree == base:
+                    dest.chmod(0o444)
         diff = work / ".round1.diff"
         shutil.copy2(start["diff"], diff)
         cutoff = round1_ts(start["chain"])
