@@ -143,6 +143,14 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, stdin io.
 	if payload.PromptID != "" {
 		rowExtra["prompt_id"] = payload.PromptID
 	}
+	// The subagent thread keys the chain. A subagent and its parent commit under one
+	// session id, so the session alone would read the subagent's first commit as the
+	// parent's retry.
+	actor := session
+	if payload.AgentID != "" {
+		actor = payload.AgentID
+		rowExtra["thread_id"] = payload.AgentID
+	}
 	for key, value := range AuthorFields(engine.Ledger(), cfg, payload.TranscriptPath, session) {
 		rowExtra[key] = value
 	}
@@ -150,9 +158,9 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, stdin io.
 		rowExtra[key] = value
 	}
 
-	decision := engine.Handle(ctx, gate.Request{
+	request := gate.Request{
 		Repo:      repo,
-		Actor:     session,
+		Actor:     actor,
 		Channel:   gate.ChannelPreToolUse,
 		SessionID: session,
 		Spec:      spec,
@@ -162,10 +170,14 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, stdin io.
 		TurnKey:   "prompt_id",
 		TurnID:    payload.PromptID,
 		ThreadID:  payload.AgentID,
-		LedgerHook: func(row gate.Row, state gate.ChainState) {
+	}
+	// The transcript holds only the main thread's ledgers, which are never a subagent's.
+	if payload.AgentID == "" {
+		request.LedgerHook = func(row gate.Row, state gate.ChainState) {
 			attachLedger(row, payload.TranscriptPath, state)
-		},
-	})
+		}
+	}
+	decision := engine.Handle(ctx, request)
 
 	out, ok := Render(decision)
 	if !ok {
