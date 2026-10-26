@@ -11,6 +11,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/checks"
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/codex"
+	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/harvests"
 	"github.com/steer-sh/steer-cli/internal/gate/resolve"
 	"github.com/steer-sh/steer-cli/internal/harness"
@@ -228,7 +229,7 @@ func (m *Model) toggleChannel(row channelRow) error {
 		// error. Register that rather than nothing, exactly as the CLI does: the
 		// posture then reports whether the command resolves.
 		resolver, _ := steerbin.HookCommand("commit-gate backfill --if-due --apply --quiet")
-		cwd, _ := os.Getwd()
+		cwd, _ := gate.ProjectDir()
 		switch harness.ID(row.armed.Harness) {
 		case harness.Codex:
 			if on {

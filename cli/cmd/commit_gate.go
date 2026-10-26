@@ -363,7 +363,7 @@ func installReviewChannel(cfg gate.Config) error {
 	var path, hookCommand string
 	switch target {
 	case harness.Codex:
-		cwd, cwdErr := codexProjectDir()
+		cwd, cwdErr := gate.ProjectDir()
 		if cwdErr != nil {
 			return cwdErr
 		}
@@ -371,7 +371,7 @@ func installReviewChannel(cfg gate.Config) error {
 		path, err = codexhooks.RegisterCommitGateAndResolver(scope, cwd,
 			hookCommand, timeout, backfillCommand(), backfillHookTimeout)
 	case harness.Pi:
-		cwd, cwdErr := codexProjectDir()
+		cwd, cwdErr := gate.ProjectDir()
 		if cwdErr != nil {
 			return cwdErr
 		}
@@ -571,7 +571,7 @@ func pinnedRegistrations() []pinnedRegistration {
 			add("claude-code "+scope+" scope", arming.Command, "steer bin install")
 		}
 	}
-	cwd, _ := codexProjectDir()
+	cwd, _ := gate.ProjectDir()
 	for _, scope := range []string{claude.ProjectScope, claude.GlobalScope} {
 		if arming := pihooks.CommitGateArming(scope, cwd); arming.Registered {
 			add("pi "+scope+" scope", arming.Command, "steer bin install")
@@ -631,7 +631,7 @@ func reviewChannelArmed() (bool, string) {
 			return true, scope
 		}
 	}
-	cwd, _ := codexProjectDir()
+	cwd, _ := gate.ProjectDir()
 	for _, scope := range []string{claude.ProjectScope, claude.GlobalScope} {
 		if codexhooks.CommitGateArming(scope, cwd).Registered {
 			return true, "codex " + scope
@@ -656,7 +656,7 @@ var commitGateRemoveCmd = &cobra.Command{
 		}
 		switch target {
 		case harness.Codex:
-			cwd, err := codexProjectDir()
+			cwd, err := gate.ProjectDir()
 			if err != nil {
 				return err
 			}
@@ -666,7 +666,7 @@ var commitGateRemoveCmd = &cobra.Command{
 			}
 			return err
 		case harness.Pi:
-			cwd, err := codexProjectDir()
+			cwd, err := gate.ProjectDir()
 			if err != nil {
 				return err
 			}
@@ -814,7 +814,7 @@ var commitGateStatusCmd = &cobra.Command{
 			cfg.ReviewerRuns, cfg.ReviewerModel, effortNote(cfg.ReviewerEffort),
 			reviewer.Name(), cfg.ReviewTimeout)
 		fmt.Printf("  Cap          %d firings\n", cfg.MaxFirings)
-		cwd, _ := codexProjectDir()
+		cwd, _ := gate.ProjectDir()
 		for _, scope := range []string{claude.ProjectScope, claude.GlobalScope} {
 			arming := claude.CommitGateHookArmed(scope)
 			state := "not armed"
@@ -907,17 +907,6 @@ func effortNote(effort string) string {
 		return ""
 	}
 	return " @ " + effort
-}
-
-func codexProjectDir() (string, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	if repo := gate.Toplevel(cwd); repo != "" {
-		return repo, nil
-	}
-	return cwd, nil
 }
 
 func init() {

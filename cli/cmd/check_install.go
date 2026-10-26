@@ -11,6 +11,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/checkscope"
 	"github.com/steer-sh/steer-cli/internal/claude"
 	codexhooks "github.com/steer-sh/steer-cli/internal/codex"
+	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/status"
 	"github.com/steer-sh/steer-cli/internal/steerbin"
@@ -41,7 +42,7 @@ func checkHookCommand(target harness.ID) string {
 func checkRunnerArming(target harness.ID, scope string) (checkscope.Arming, error) {
 	cwd := ""
 	if target == harness.Codex {
-		dir, err := codexProjectDir()
+		dir, err := gate.ProjectDir()
 		if err != nil && scope != claude.GlobalScope {
 			return checkscope.Arming{}, err
 		}
@@ -90,7 +91,7 @@ func registerCheckRunner(target harness.ID, scope string) (checkscope.Arming, er
 	timeout := checks.RegisteredHookTimeout()
 	var err error
 	if target == harness.Codex {
-		cwd, cwdErr := codexProjectDir()
+		cwd, cwdErr := gate.ProjectDir()
 		if cwdErr != nil {
 			return checkscope.Arming{}, cwdErr
 		}
@@ -154,7 +155,7 @@ var checkUninstallCmd = &cobra.Command{
 		var path string
 		var removed bool
 		if target == harness.Codex {
-			cwd, cwdErr := codexProjectDir()
+			cwd, cwdErr := gate.ProjectDir()
 			if cwdErr != nil {
 				return cwdErr
 			}
@@ -220,7 +221,7 @@ func relinkCheckRunners(scope, path string) (int, error) {
 			rewritten++
 		}
 	}
-	cwd, err := codexProjectDir()
+	cwd, err := gate.ProjectDir()
 	if err != nil && scope != claude.GlobalScope {
 		return rewritten, nil
 	}

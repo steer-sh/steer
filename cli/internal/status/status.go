@@ -659,7 +659,7 @@ func collectPosture(cfg gate.Config, ev mine.EvidenceSet) Posture {
 		Unresolved:       resolve.CountUnresolved(cfg),
 		HookTimeout:      cfg.HookTimeout(),
 	}
-	cwd, _ := os.Getwd()
+	cwd, _ := gate.ProjectDir()
 	claudeID := string(harness.ClaudeCode)
 	codexID := string(harness.Codex)
 	piID := string(harness.Pi)

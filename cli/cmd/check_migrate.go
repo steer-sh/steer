@@ -10,6 +10,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/checkscope"
 	"github.com/steer-sh/steer-cli/internal/claude"
 	codexhooks "github.com/steer-sh/steer-cli/internal/codex"
+	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/status"
 	"github.com/steer-sh/steer-cli/internal/styles"
@@ -239,7 +240,7 @@ func personalGates() []migrationGate {
 func personalGateAt(target harness.ID, scope string) (migrationGate, bool) {
 	g := migrationGate{Harness: target, Scope: scope}
 	if target == harness.Codex {
-		cwd, err := codexProjectDir()
+		cwd, err := gate.ProjectDir()
 		if err != nil && scope != claude.GlobalScope {
 			return g, false
 		}
@@ -261,7 +262,7 @@ func personalGateAt(target harness.ID, scope string) (migrationGate, bool) {
 // puts the runner in the first entry a runner or the personal hook holds alone.
 func replacePersonalGate(target harness.ID, scope string) (checkscope.Arming, error) {
 	if target == harness.Codex {
-		cwd, err := codexProjectDir()
+		cwd, err := gate.ProjectDir()
 		if err != nil {
 			return checkscope.Arming{}, err
 		}

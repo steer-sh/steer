@@ -49,6 +49,18 @@ func Toplevel(dir string) string {
 	return Canonical(dir)
 }
 
+// ProjectDir is the directory a project-scope harness registration lives under:
+// the working directory's work-tree root, or the working directory outside one.
+// Every reader and writer of such a registration resolves it here, so a command
+// run from a subdirectory finds what one run from the root wrote.
+func ProjectDir() (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	return Toplevel(cwd), nil
+}
+
 // Canonical is path as absolute and symlink-free: the one spelling of a repository
 // root that evidence carries. It returns the best form it reached when a step fails,
 // because a caller that needs a path to open must still get one.

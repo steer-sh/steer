@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/claude"
 	codexhooks "github.com/steer-sh/steer-cli/internal/codex"
+	"github.com/steer-sh/steer-cli/internal/gate"
 	pihooks "github.com/steer-sh/steer-cli/internal/pi"
 	"github.com/steer-sh/steer-cli/internal/status"
 	"github.com/steer-sh/steer-cli/internal/steerbin"
@@ -132,7 +133,7 @@ func relinkClaude(scope, path string) (int, error) {
 func relinkCodex(scope, path string) (int, error) {
 	// Only the project scope needs a working directory: the global registration
 	// lives under CODEX_HOME. So an unreadable cwd skips project scope alone.
-	cwd, err := codexProjectDir()
+	cwd, err := gate.ProjectDir()
 	if err != nil && scope != claude.GlobalScope {
 		return 0, nil
 	}
@@ -181,7 +182,7 @@ func relinkCodex(scope, path string) (int, error) {
 func relinkPi(scope, path string) (int, error) {
 	// Only the project scope needs a working directory: the global extension lives
 	// under the Pi config directory. So an unreadable cwd skips project scope alone.
-	cwd, err := codexProjectDir()
+	cwd, err := gate.ProjectDir()
 	if err != nil && scope != claude.GlobalScope {
 		return 0, nil
 	}
