@@ -57,3 +57,26 @@ func TestCallerContextFromASubdirectory(t *testing.T) {
 		t.Error("a file in the diff must never be attached as an unchanged caller")
 	}
 }
+
+// TestCallerContextSkipsOnlyTheFileThatOverruns: callers rank by mentions, not size,
+// so a higher-ranked file that overruns the budget must not shut out a later one that fits.
+func TestCallerContextSkipsOnlyTheFileThatOverruns(t *testing.T) {
+	cfg := Defaults()
+	cfg.MaxContextChars = 400
+	root := buildRepo(t, map[string]string{
+		"api.go":   "func Fetch() {}\nfunc Store() {}\n",
+		"large.go": "func both() { Fetch(); Store() }\n" + strings.Repeat("// pad\n", 200),
+		"small.go": "func one() { Fetch() }\n",
+	})
+	gitCmd(t, root, verb, "-qm", "init")
+	writeFileAt(t, root, "api.go", "func Fetch(id int) {}\nfunc Store(id int) {}\n")
+	gitCmd(t, root, "add", "api.go")
+
+	block := BuildContext(cfg, root, map[string]bool{"Fetch": true, "Store": true}, []string{"api.go"})
+	if strings.Contains(block, "large.go") {
+		t.Error("a caller larger than the whole budget must not be attached")
+	}
+	if !strings.Contains(block, "small.go") {
+		t.Error("a later caller that fits must still reach the reviewer")
+	}
+}

@@ -231,8 +231,9 @@ func BuildContext(cfg Config, cwd string, symbols map[string]bool, changed []str
 			text = text[:cfg.MaxContextFileChars] +
 				fmt.Sprintf("\n... [truncated at %d chars]\n", cfg.MaxContextFileChars)
 		}
+		// Ranking is by mentions, not size: a later, smaller caller may still fit.
 		if spent+len(text) > cfg.MaxContextChars {
-			break
+			continue
 		}
 		spent += len(text)
 		chunks = append(chunks, fmt.Sprintf("--- %s (unchanged; references: %s) ---\n%s",
