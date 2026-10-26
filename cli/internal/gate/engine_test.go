@@ -20,17 +20,15 @@ import (
 type stubReviewer struct {
 	replies []RawRun
 	calls   int
-	prompts []string
 	mu      sync.Mutex
 }
 
 func (s *stubReviewer) Name() string       { return "stub" }
 func (s *stubReviewer) ModelLabel() string { return "stub-model" }
 
-func (s *stubReviewer) Review(_ context.Context, prompt, _ string) RawRun {
+func (s *stubReviewer) Review(context.Context, string, string) RawRun {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.prompts = append(s.prompts, prompt)
 	reply := s.replies[min(s.calls, len(s.replies)-1)]
 	s.calls++
 	return reply
@@ -1028,35 +1026,5 @@ func TestAReleaseWithoutATurnIDSaysTheBackstopIsUnavailable(t *testing.T) {
 	rows := h.releases()
 	if len(rows) != 1 || rows[0]["release_turn_present"] != false || rows[0]["release_turn"] != "" {
 		t.Errorf("release rows = %v, want one recording an absent turn", rows)
-	}
-}
-
-// TestCallersOfADroppedFileReachTheReviewer: a file dropped from an over-budget diff
-// still changed, so the names it defines must still pull in their callers.
-func TestCallersOfADroppedFileReachTheReviewer(t *testing.T) {
-	cfg := Defaults()
-	cfg.StateDir = t.TempDir()
-	cfg.MaxDiffChars = 2000
-	repo := buildRepo(t, map[string]string{
-		"caller.go": "func use() { Dropped() }\n",
-	})
-	gitCmd(t, repo, verb, "-qm", "init")
-	writeFileAt(t, repo, "huge.go", "func Dropped() {}\n"+strings.Repeat("// pad\n", 500))
-	writeFileAt(t, repo, "tiny.go", "func Kept() {}\n")
-	gitCmd(t, repo, "add", "huge.go", "tiny.go")
-	reviewer := &stubReviewer{replies: []RawRun{findingReply("NO FINDINGS")}}
-	NewEngine(cfg, reviewer).Handle(context.Background(), Request{
-		Repo: repo, Actor: "s", Channel: ChannelPreToolUse, SessionID: "s",
-		Spec: DiffSpec{StagedOnly: true}, Message: "split",
-	})
-	if len(reviewer.prompts) == 0 {
-		t.Fatal("the diff was not reviewed")
-	}
-	prompt := reviewer.prompts[0]
-	if strings.Contains(prompt, "func Dropped") {
-		t.Fatal("huge.go must be dropped from the rendered diff for this test to mean anything")
-	}
-	if !strings.Contains(prompt, "--- caller.go (unchanged; references: Dropped) ---") {
-		t.Error("a caller of a name defined in a dropped file must reach the reviewer")
 	}
 }
