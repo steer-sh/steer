@@ -277,6 +277,47 @@ func TestDeduplication(t *testing.T) {
 	}, false)
 	hits, _, _ = Incidence(distinct, mustCompile(t, "real recurrence"), "accepted")
 	check(t, "distinct ledger writes stay two occurrences", hits, 2)
+
+	// Two chains ledgered in one reply each took their own block, so each adjudicated
+	// its own finding; one block joined to two chains is still one adjudication.
+	resolved := func(text, resolution string) map[string]any {
+		return map[string]any{"concern": text, "verdict": "ACCEPTED", "resolution": resolution}
+	}
+	for _, join := range []string{"round", "chain"} {
+		oneReply := BuildChains([]gate.Row{
+			row(900, "deny"),
+			ledgerTS(concerns(row(910, "retry"), join, resolved("same text, two chains", "fixed at a.go:1")), 5000),
+			row(920, "deny"),
+			ledgerTS(concerns(row(930, "retry"), join, resolved("same text, two chains", "fixed at b.go:9")), 5000),
+		}, false)
+		hits, _, _ = Incidence(oneReply, mustCompile(t, "same text, two chains"), "accepted")
+		check(t, join+" blocks of one reply stay two occurrences", hits, 2)
+	}
+	oneBlock := BuildChains([]gate.Row{
+		row(900, "deny"),
+		ledgerTS(concerns(row(910, "retry"), "round", resolved("one block", "fixed at a.go:1")), 5000),
+		row(920, "deny"),
+		ledgerTS(concerns(row(930, "retry"), "round", resolved("one block", "fixed at a.go:1")), 5000),
+	}, false)
+	hits, _, _ = Incidence(oneBlock, mustCompile(t, "one block"), "accepted")
+	check(t, "one block joined to two chains counts once", hits, 1)
+
+	// Across the round-join cutover one reply joins one chain whole and the next by its
+	// block; the bullet they share is one adjudication in either order.
+	whole := []any{resolved("first round", "x"), resolved("shared bullet", "y")}
+	for _, windowFirst := range []bool{true, false} {
+		windowRow := ledgerTS(concerns(row(0, "retry"), "window"), 5000)
+		windowRow["concerns"] = whole
+		roundRow := ledgerTS(concerns(row(0, "retry"), "round", resolved("shared bullet", "y")), 5000)
+		first, second := windowRow, roundRow
+		if !windowFirst {
+			first, second = roundRow, windowRow
+		}
+		first["ts"], second["ts"] = 910, 930
+		straddling := BuildChains([]gate.Row{row(900, "deny"), first, row(920, "deny"), second}, false)
+		hits, _, _ = Incidence(straddling, mustCompile(t, "shared bullet"), "accepted")
+		check(t, fmt.Sprintf("a window and a round row of one reply count once (window first %v)", windowFirst), hits, 1)
+	}
 }
 
 func TestStrictJoins(t *testing.T) {

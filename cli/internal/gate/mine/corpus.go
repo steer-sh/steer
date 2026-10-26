@@ -205,7 +205,9 @@ func chainsForHost(rows []gate.Row, strictJoins bool) []Chain {
 	var chains []Chain
 	current := -1
 	byID := map[string]int{}
-	ledgerSeen := map[string]bool{}
+	// A concern taken from one reply, keyed by the reply alone (any join), by the
+	// reply under a window join, and by the reply's block the row took.
+	replySeen, windowSeen, blockSeen := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	open := func(row gate.Row) int {
 		chains = append(chains, Chain{
 			Host:    rowHost(row),
@@ -275,6 +277,19 @@ func chainsForHost(rows []gate.Row, strictJoins bool) []Chain {
 		if strictJoins && str(row["ledger_join"]) != "round" {
 			continue
 		}
+		// A reply is its ledger_ts, and a block of it is the bullets a row took. A window
+		// join took the whole reply, so it shares every concern any row took from that
+		// reply. A round or chain join took one block: two chains' own blocks of one
+		// reply are two adjudications, and only the same block or a window row's copy
+		// of the reply is the same one.
+		reply, block := "", ""
+		window := false
+		if truthy(row["ledger_ts"]) {
+			reply = numString(row["ledger_ts"])
+			block = reply + "\x1f" + ledgerPrint(row["concerns"])
+			join := str(row["ledger_join"])
+			window = join != "round" && join != "chain"
+		}
 		for _, raw := range asList(row["concerns"]) {
 			concern, ok := raw.(map[string]any)
 			if !ok {
@@ -287,14 +302,17 @@ func chainsForHost(rows []gate.Row, strictJoins bool) []Chain {
 			}
 			// Register the ledger write before any skip: a finding dropped as an
 			// intra-chain duplicate must still block the next chain from counting it.
-			var across string
-			hasAcross := truthy(row["ledger_ts"])
-			if hasAcross {
-				across = numString(row["ledger_ts"]) + "\x1f" + key
-			}
-			countedElsewhere := hasAcross && ledgerSeen[across]
-			if hasAcross {
-				ledgerSeen[across] = true
+			countedElsewhere := false
+			if reply != "" {
+				inReply, inBlock := reply+"\x1f"+key, block+"\x1f"+key
+				if window {
+					countedElsewhere = replySeen[inReply]
+					windowSeen[inReply] = true
+				} else {
+					countedElsewhere = windowSeen[inReply] || blockSeen[inBlock]
+				}
+				replySeen[inReply] = true
+				blockSeen[inBlock] = true
 			}
 			if countedElsewhere || ch.seen[key] {
 				continue
@@ -319,6 +337,21 @@ func chainsForHost(rows []gate.Row, strictJoins bool) []Chain {
 		ch.Rounds = maxRowInt(ch.Rows, "firing", 1)
 	}
 	return chains
+}
+
+// ledgerPrint is the bullets of one row's ledger text, in order, as one string.
+func ledgerPrint(raw any) string {
+	var b strings.Builder
+	for _, item := range asList(raw) {
+		concern, _ := item.(map[string]any)
+		b.WriteString(strings.ToUpper(str(concern["verdict"])))
+		b.WriteByte('\x1e')
+		b.WriteString(Norm(str(concern["concern"])))
+		b.WriteByte('\x1e')
+		b.WriteString(Norm(str(concern["resolution"])))
+		b.WriteByte('\x1d')
+	}
+	return b.String()
 }
 
 // normWhitespaceRe matches Python's Unicode `\s`: ASCII whitespace plus the Unicode
