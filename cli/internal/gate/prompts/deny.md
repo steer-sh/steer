@@ -12,13 +12,21 @@ If two findings cannot both be true, at least one of them is false. Say so and r
 
 For each finding: state its load-bearing premise in one sentence, then test THAT premise against the code — not against whether the finding sounds plausible. Open the file where the answer is in the file.
 
-{rerun_note}For each true finding, decide the response BEFORE you edit anything, and write that decision in your reply:
+{rerun_note}Before editing, record:
 
-- Needed by: <the existing caller, contract, or operator requirement this change must serve, with file:line or the user's words>. It must exist before this change: the user's request, or code, docs or tests at the base commit. This change's own commit message, comments or tests never count, and neither does a test or contract you add to justify the repair. Absence from inspected examples does not establish unreachability.
-- Failure if unchanged: <what a supported use gets wrong>.
-- Response: repair | narrow the contract or refuse explicitly | remove an optional mechanism this change introduced | leave unfixed.
+- **Needed by:** the user's requirement or a requirement at the base commit, with its source, affected input class and caller path. This change's own claims, comments, notes or tests cannot establish necessity, including notes written while making it. A general correctness statement is insufficient.
+- **Failure if unchanged:** the concrete consequence, including harmful side effects and recoverability.
+- **Response:** repair | safely refuse or narrow | remove optional machinery | leave unfixed.
 
-When the defect sits in a mechanism your change introduced by choice, and the requirement does not demand that mechanism, removing or narrowing it beats repairing it. Then make only the decided changes. Record true concerns left unfixed as ACCEPTED, not fixed; REJECTED means a false premise. If no repairs are necessary, retry the reviewed diff unchanged. Acceptance and the reviewer's severity label do not themselves require a repair.
+Repair failures of required use, including false refusals. Include crafted inputs at relevant untrusted boundaries without requiring an observed attack; respect explicit threat-model exclusions.
+
+A constructed input with no demonstrated support obligation may remain ACCEPTED, not fixed when it safely stops before harmful effects and permits recovery. A failure that completes a harmful effect, such as committing wrong or incomplete data, is not a safe stop, even when a later run could repair it. Check the relevant caller and contract first; missing examples establish neither unreachability nor a support obligation.
+
+Prefer the smallest response that addresses the failure class while preserving required behavior. Refusal, narrowing or removal of optional machinery can qualify; rejecting required inputs or merely documenting harmful behavior cannot. When the defect sits in a mechanism this change introduced by choice, and the requirement does not demand that mechanism, removing or narrowing it beats repairing it.
+
+Investigate uncertainty during adjudication by reading the relevant code and requirements. Remaining uncertainty alone does not justify new machinery: ask the user or record the concern and uncertainty. Where that investigation establishes a credible path to irreversible harm within scope, withhold the affected operation or use the smallest safe containment, preferably an explicit refusal.
+
+Record deferred true concerns as ACCEPTED, not fixed. REJECTED means a false premise. Then make only the decided changes. If no repairs are necessary, retry the reviewed diff unchanged. Acceptance and the reviewer's severity label do not themselves require a repair.
 
 Reporting — this is not optional
 --------------------------------
