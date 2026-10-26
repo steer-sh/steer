@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/gate"
+	"github.com/steer-sh/steer-cli/internal/gate/reviewers"
 	"github.com/steer-sh/steer-cli/internal/status"
 )
 
@@ -53,6 +54,24 @@ func TestTrialFailureSaysCommitsGoUnreviewed(t *testing.T) {
 	out, ok = renderTrial(gate.TrialResult{Run: gate.ReviewRun{Text: "NO FINDINGS", Outcome: gate.OutcomeOK}}, cfg)
 	if !ok || !strings.Contains(out, "no findings") {
 		t.Errorf("ok = %v, output = %q; want an answer with no findings", ok, out)
+	}
+}
+
+// TestTrialFailureOfAnAPIReviewerNamesItsSettings: an API reviewer has no CLI to
+// sign in, so its hint names the base URL, the model and the key source.
+func TestTrialFailureOfAnAPIReviewerNamesItsSettings(t *testing.T) {
+	cfg := gate.Defaults()
+	cfg.ReviewerProvider = reviewers.APIProviderID
+	out, _ := renderTrial(gate.TrialResult{Run: gate.ReviewRun{
+		Outcome: gate.OutcomeExit, Detail: "HTTP 404"}}, cfg)
+	flat := strings.Join(strings.Fields(out), " ")
+	for _, want := range []string{"reviewer.api.base_url", "steer reviewer key status"} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("output = %q; missing %q", flat, want)
+		}
+	}
+	if strings.Contains(flat, "signed in") {
+		t.Errorf("output = %q; names a CLI sign-in", flat)
 	}
 }
 

@@ -211,8 +211,8 @@ func TestChatAPIJoinsTextParts(t *testing.T) {
 }
 
 func TestCheckBaseURL(t *testing.T) {
-	ok := []string{"https://openrouter.ai/api/v1", "http://localhost:11434/v1", "http://127.0.0.1:8080", "http://[::1]:8080/v1"}
-	bad := []string{"http://openrouter.ai/api/v1", "https://user:pw@openrouter.ai/api/v1", "ftp://x", "https://", "https://x/v1?key=1", "not a url"}
+	ok := []string{"https://chat/completions", "https://openrouter.ai/api/v1", "http://localhost:11434/v1", "http://127.0.0.1:8080", "http://[::1]:8080/v1"}
+	bad := []string{"http://openrouter.ai/api/v1", "https://user:pw@openrouter.ai/api/v1", "ftp://x", "https://", "https://x/v1?key=1", "not a url", "https://api.groq.com/openai/v1/chat/completions/"}
 	for _, u := range ok {
 		if err := CheckBaseURL(u); err != nil {
 			t.Errorf("CheckBaseURL(%q) = %v, want accepted", u, err)
@@ -222,6 +222,19 @@ func TestCheckBaseURL(t *testing.T) {
 		if err := CheckBaseURL(u); err == nil {
 			t.Errorf("CheckBaseURL(%q) accepted", u)
 		}
+	}
+}
+
+// TestCheckBaseURLNamesTheBaseOfAFullEndpoint: a pasted endpoint URL is refused
+// with the base URL the reviewer needs.
+func TestCheckBaseURLNamesTheBaseOfAFullEndpoint(t *testing.T) {
+	err := CheckBaseURL("https://api.groq.com/openai/v1/chat/completions")
+	if err == nil || !strings.Contains(err.Error(), "use https://api.groq.com/openai/v1") {
+		t.Errorf("err = %v; want the base URL named", err)
+	}
+	err = CheckBaseURL("https://proxy.example/tenant%2Fname/v1/chat/completions")
+	if err == nil || !strings.Contains(err.Error(), "use https://proxy.example/tenant%2Fname/v1") {
+		t.Errorf("err = %v; want the escaped path kept", err)
 	}
 }
 

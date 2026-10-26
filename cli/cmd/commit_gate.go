@@ -303,6 +303,10 @@ func renderTrial(r gate.TrialResult, cfg gate.Config) (string, bool) {
 		detail += ": " + truncateDetail(r.Run.Detail, 400)
 	}
 	hint := "Check that the reviewer CLI is signed in and that the model name is correct: steer config show"
+	if cfg.ReviewerProvider == reviewers.APIProviderID {
+		hint = "Check reviewer.api.base_url and that the endpoint serves the model: steer config show. " +
+			"Check where the key comes from: steer reviewer key status"
+	}
 	if os.Getenv(codexNoNetworkEnv) == "1" {
 		hint = "This shell runs in Codex's sandbox with the network off, which stops a reviewer that needs its service. " +
 			"Codex's commit hook runs outside that sandbox, so run this test again with escalated permissions first. " + hint

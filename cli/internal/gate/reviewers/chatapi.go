@@ -75,8 +75,12 @@ func validateChatAPI(o Options) error {
 	return nil
 }
 
+// chatCompletionsPath is the endpoint path the reviewer appends to the base URL.
+const chatCompletionsPath = "/chat/completions"
+
 // CheckBaseURL requires https, except on the loopback host a local model server
-// uses, and refuses user info, which would put a secret in the config file.
+// uses, and refuses user info, which would put a secret in the config file, and
+// a path that already ends in the endpoint path.
 func CheckBaseURL(raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -99,6 +103,13 @@ func CheckBaseURL(raw string) error {
 	}
 	if u.RawQuery != "" || u.Fragment != "" {
 		return fmt.Errorf("reviewer.api.base_url %q carries a query or fragment; give the base path only", raw)
+	}
+	// The reviewer appends the endpoint path itself; providers' docs often show the full URL.
+	// raw carries no query or fragment here, so it ends in the path, and trimming
+	// it keeps the path's escapes.
+	if strings.HasSuffix(strings.TrimRight(u.EscapedPath(), "/"), chatCompletionsPath) {
+		return fmt.Errorf("reviewer.api.base_url %q ends in %s, which the reviewer adds itself; use %s",
+			raw, chatCompletionsPath, strings.TrimSuffix(strings.TrimRight(raw, "/"), chatCompletionsPath))
 	}
 	return nil
 }
@@ -180,7 +191,7 @@ func (c *ChatAPI) send(ctx context.Context, prompt, key string) gate.RawRun {
 	if err != nil {
 		return gate.RawRun{Outcome: gate.OutcomeExit, Detail: "encode the request: " + err.Error()}
 	}
-	endpoint := strings.TrimRight(c.BaseURL, "/") + "/chat/completions"
+	endpoint := strings.TrimRight(c.BaseURL, "/") + chatCompletionsPath
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return gate.RawRun{Outcome: gate.OutcomeExit, Detail: "build the request: " + err.Error()}
