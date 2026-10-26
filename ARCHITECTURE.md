@@ -366,7 +366,9 @@ with nothing missing. `checks.Stop` is the harness-neutral Stop runner and
 `checks.StopHook` its one adapter, because Claude Code and Codex share the payload
 fields and reply shape. It acts on a root Stop in an adopted repository only,
 blocks a failure once, and yields when the tree, outcome and per-check results
-repeat in the same session. Each run records its disposition and the
+repeat in the same session. A block names each other session, of any harness,
+whose Stop run in the same working tree finished within the last hour, because
+a whole-tree check cannot attribute a failure to one session's edits. Each run records its disposition and the
 working-tree signature it judged. A Stop run also records the payload's
 transcript locators by key presence (`transcript_path`, and the turn as Claude
 Code's `prompt_id` or Codex's `turn_id`) and `stop_hook_active`; a block records

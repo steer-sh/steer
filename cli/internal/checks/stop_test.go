@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/steer-sh/steer-cli/internal/statestore"
 )
 
 // testLockHolderEnv makes the test binary hold the named repository's lock
@@ -125,6 +127,43 @@ func TestStopRetryStateIsPerSessionAndHarness(t *testing.T) {
 	}
 	if d := Stop(req); d.Disposition != DispositionYield {
 		t.Fatalf("the first session again: %s; want a yield", d.Disposition)
+	}
+}
+
+// A block names every other session with a recent Stop run in the same tree,
+// from any harness, and leaves out its own session and a stale one.
+func TestStopBlockNamesOtherSessionsInTheSameTree(t *testing.T) {
+	identity, req := stopRepo(t, map[string]string{"a": "exit 1\n"}, "")
+	stale := OracleRun{Version: OracleRunVersion, RunID: "stale-run", Repo: identity, Source: SourceStop,
+		Harness: "claude-code", Session: "session-old", Finished: time.Now().Add(-2 * sharedTreeWindow).UTC()}
+	if err := appendJSONL(runsPath(statestore.Resolve(StateComponent), identity), stale); err != nil {
+		t.Fatal(err)
+	}
+	first := Stop(req)
+	if first.Disposition != DispositionBlock || strings.Contains(first.Reason, "Other agent sessions") {
+		t.Fatalf("first stop: %+v; want a block that names no other session", first)
+	}
+	codex := req
+	codex.Harness = "codex"
+	if d := Stop(codex); d.Disposition != DispositionBlock {
+		t.Fatalf("codex stop: %s; want a block", d.Disposition)
+	}
+	other := req
+	other.Session = "session-b"
+	d := Stop(other)
+	if d.Disposition != DispositionBlock {
+		t.Fatalf("other session: %s; want a block", d.Disposition)
+	}
+	want := "in this working tree in the last 60 minutes: claude-code session session-a, codex session session-a."
+	if !strings.Contains(d.Reason, want) || !strings.Contains(d.Reason, "Do not edit their work") {
+		t.Errorf("reason lacks the shared-tree notice %q:\n%s", want, d.Reason)
+	}
+	if strings.Contains(d.Reason, "session-old") || strings.Contains(d.Reason, "session session-b") {
+		t.Errorf("reason names a stale session or its own:\n%s", d.Reason)
+	}
+	lines := strings.Split(d.Reason, "\n")
+	if lines[len(lines)-1] != RunIDLine(d.Run.RunID) || lines[len(lines)-3] != "" {
+		t.Errorf("reason tail = %q; want the notice above a blank line, the contest line and the run line", lines[len(lines)-3:])
 	}
 }
 

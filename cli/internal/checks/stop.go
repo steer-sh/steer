@@ -50,6 +50,9 @@ const (
 	diagnosticLines = 60
 	// stopSessionTTL is how long an idle session's retry state is kept.
 	stopSessionTTL = 30 * 24 * time.Hour
+	// sharedTreeWindow is how recent another session's Stop run must be for a
+	// block to name it as active in the same working tree.
+	sharedTreeWindow = time.Hour
 )
 
 // StopRequest is a root Stop event in harness-neutral form.
@@ -113,8 +116,8 @@ func Stop(req StopRequest) StopDecision {
 			if disposition != DispositionBlock {
 				return Verdict{Disposition: disposition}
 			}
-			return Verdict{Disposition: disposition, ContestProtocol: ContestProtocol,
-				BlockReason: blockReason(identity, run, records, tail.excerpt())}
+			reason := blockReason(identity, run, records, tail.excerpt(), otherStopSessions(identity, req, run.Finished))
+			return Verdict{Disposition: disposition, ContestProtocol: ContestProtocol, BlockReason: reason}
 		},
 	})
 	switch {
@@ -260,7 +263,43 @@ func treeSignature(root string) string {
 // text that joins the transcript entry holding the reason to the run's record.
 func RunIDLine(runID string) string { return runIDLabel + runID }
 
-func blockReason(identity string, run OracleRun, records []Execution, output string) string {
+// otherStopSessions names, as "<harness> session <id>", each other session with
+// a Stop run in identity that finished within sharedTreeWindow before now.
+func otherStopSessions(identity string, req StopRequest, now time.Time) []string {
+	runs, err := OracleRuns(identity)
+	if err != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, r := range runs {
+		if r.Source != SourceStop || r.Session == "" || now.Sub(r.Finished) > sharedTreeWindow ||
+			(r.Harness == req.Harness && r.Session == req.Session) {
+			continue
+		}
+		name := r.Harness + " session " + r.Session
+		if !seen[name] {
+			seen[name] = true
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// sharedTreeNotice tells a blocked agent that other sessions work in the same
+// working tree, so the failure may not come from its own edits.
+func sharedTreeNotice(others []string) string {
+	if len(others) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("\n\nOther agent sessions ran %s in this working tree in the last %d minutes: %s. "+
+		"This failure may come from their uncommitted edits. Do not edit their work to clear it. "+
+		"If the failure is not from your task, say so, change nothing, and record a contest.",
+		OracleName, int(sharedTreeWindow.Minutes()), strings.Join(others, ", "))
+}
+
+func blockReason(identity string, run OracleRun, records []Execution, output string, others []string) string {
 	var b strings.Builder
 	if run.IntegrationFailure && len(run.Missing) > 0 {
 		fmt.Fprintf(&b, "%s passed in %s without running these declared checks: %s.\n", OracleName, identity, strings.Join(run.Missing, ", "))
@@ -282,6 +321,9 @@ func blockReason(identity string, run OracleRun, records []Execution, output str
 		}
 		if run.Reason != "" {
 			fmt.Fprintf(&b, "\n%s.\n", run.Reason)
+		}
+		if notice := sharedTreeNotice(others); notice != "" {
+			fmt.Fprintf(&b, "%s\n", strings.TrimPrefix(notice, "\n"))
 		}
 		fmt.Fprintf(&b, "\n%s\n%s%s", contestLine(run.RunID), runIDLabel, run.RunID)
 		return b.String()
@@ -327,6 +369,7 @@ func blockReason(identity string, run OracleRun, records []Execution, output str
 	b.WriteString("\nFix the code so check.sh passes. Do not weaken a check, loosen an assertion, skip a test, or add a suppression to reach green.\n")
 	b.WriteString("If this failure is not yours to clear (a flaky test, a missing credential, a network dependency), say so and change nothing: " +
 		"the turn ends when the tree and the failure are unchanged.")
+	b.WriteString(sharedTreeNotice(others))
 	fmt.Fprintf(&b, "\n\n%s\n%s%s", contestLine(run.RunID), runIDLabel, run.RunID)
 	return b.String()
 }
