@@ -88,6 +88,19 @@ func TestChatAPIMapsEachEndpointResult(t *testing.T) {
 	}
 }
 
+// TestChatAPIRateLimitKeepsTheEndpointMessage: a 429 names its cause, a quota on
+// the key or a limit upstream, with the key removed.
+func TestChatAPIRateLimitKeepsTheEndpointMessage(t *testing.T) {
+	srv, _, _ := chatServer(t, 429, `{"error":{"message":"model is rate-limited upstream for `+testKey+`"}}`)
+	raw := chatReviewer(srv.URL).Review(context.Background(), "prompt", "")
+	if raw.Outcome != gate.OutcomeRateLimited || !strings.Contains(raw.Detail, "HTTP 429 model is rate-limited upstream") {
+		t.Errorf("run = %q %q; want the endpoint message", raw.Outcome, raw.Detail)
+	}
+	if strings.Contains(raw.Detail, testKey) {
+		t.Errorf("Detail = %q; carries the key", raw.Detail)
+	}
+}
+
 func TestChatAPISendsTheKeyModelPromptAndEffort(t *testing.T) {
 	srv, seen, payload := chatServer(t, 200, reply("stop", "NO FINDINGS"))
 	r := chatReviewer(srv.URL + "/api/v1/")

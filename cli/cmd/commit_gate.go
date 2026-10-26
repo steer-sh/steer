@@ -304,8 +304,7 @@ func renderTrial(r gate.TrialResult, cfg gate.Config) (string, bool) {
 	}
 	hint := "Check that the reviewer CLI is signed in and that the model name is correct: steer config show"
 	if cfg.ReviewerProvider == reviewers.APIProviderID {
-		hint = "Check reviewer.api.base_url and that the endpoint serves the model: steer config show. " +
-			"Check where the key comes from: steer reviewer key status"
+		hint = apiTrialHint(r.Run.Outcome)
 	}
 	if os.Getenv(codexNoNetworkEnv) == "1" {
 		hint = "This shell runs in Codex's sandbox with the network off, which stops a reviewer that needs its service. " +
@@ -316,6 +315,18 @@ func renderTrial(r gate.TrialResult, cfg gate.Config) (string, bool) {
 			styles.Wrap("Reviewer output: "+detail, "  ", width) +
 			styles.Wrap(hint, "  ", width),
 		false
+}
+
+// apiTrialHint names the likely fix for an API reviewer's failed run.
+func apiTrialHint(outcome gate.RunOutcome) string {
+	switch outcome {
+	case gate.OutcomeRateLimited:
+		return "The endpoint refused the request under a rate limit. Wait and run this test again, or choose another model."
+	case gate.OutcomeAuth, gate.OutcomeNoKey:
+		return "Check where the key comes from and that the endpoint accepts it: steer reviewer key status"
+	}
+	return "Check reviewer.api.base_url and that the endpoint serves the model: steer config show. " +
+		"Check where the key comes from: steer reviewer key status"
 }
 
 // codexNoNetworkEnv is set to "1" by Codex in a command it runs in its sandbox with

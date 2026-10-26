@@ -75,6 +75,19 @@ func TestTrialFailureOfAnAPIReviewerNamesItsSettings(t *testing.T) {
 	}
 }
 
+// TestTrialRateLimitOfAnAPIReviewerSaysToWait: a rate limit is not a setting to
+// check, so its hint names waiting or another model.
+func TestTrialRateLimitOfAnAPIReviewerSaysToWait(t *testing.T) {
+	cfg := gate.Defaults()
+	cfg.ReviewerProvider = reviewers.APIProviderID
+	out, _ := renderTrial(gate.TrialResult{Run: gate.ReviewRun{
+		Outcome: gate.OutcomeRateLimited, Detail: "HTTP 429"}}, cfg)
+	flat := strings.Join(strings.Fields(out), " ")
+	if !strings.Contains(flat, "another model") || strings.Contains(flat, "base_url") {
+		t.Errorf("output = %q; want the rate-limit hint", flat)
+	}
+}
+
 // TestTrialFailureInCodexSandboxNamesTheNetwork: a trial run from a Codex sandbox
 // with the network off names that sandbox beside the sign-in and model causes.
 func TestTrialFailureInCodexSandboxNamesTheNetwork(t *testing.T) {

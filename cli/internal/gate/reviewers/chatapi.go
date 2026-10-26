@@ -225,13 +225,10 @@ func (c *ChatAPI) send(ctx context.Context, prompt, key string) gate.RawRun {
 		// The status code alone: an auth error body can echo part of the key.
 		return gate.RawRun{Outcome: gate.OutcomeAuth, Detail: code}
 	case resp.StatusCode == http.StatusTooManyRequests:
-		return gate.RawRun{Outcome: gate.OutcomeRateLimited, Detail: code}
+		// The message tells a quota on the key from a limit upstream of a router.
+		return gate.RawRun{Outcome: gate.OutcomeRateLimited, Detail: withMessage(code, data, key)}
 	case resp.StatusCode != http.StatusOK:
-		detail := code
-		if msg := errorMessage(data, key); msg != "" {
-			detail += " " + msg
-		}
-		return gate.RawRun{Outcome: gate.OutcomeExit, Detail: detail}
+		return gate.RawRun{Outcome: gate.OutcomeExit, Detail: withMessage(code, data, key)}
 	}
 
 	var parsed chatResponse
@@ -294,6 +291,14 @@ func messageText(raw json.RawMessage) (string, bool) {
 // errorMessage is the `error.message` field of a reply, with the key removed before
 // the cut, so that a cut cannot leave part of it; "" when the reply has none. The
 // rest of the body stays out of the ledger.
+// withMessage appends the endpoint's error message, if any, to code.
+func withMessage(code string, data []byte, key string) string {
+	if msg := errorMessage(data, key); msg != "" {
+		return code + " " + msg
+	}
+	return code
+}
+
 func errorMessage(data []byte, key string) string {
 	var body struct {
 		Error struct {
