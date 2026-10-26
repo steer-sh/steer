@@ -5,8 +5,9 @@ Builds tests/docker/Dockerfile, then for each harness runs the commands under
 README `## Install` in a new container, places the stable executable with the
 installed copy's `scripts/steer bin install`, and requires every version it reads
 to equal the manifest version. --snapshot saves the container as a local image, so
-a later release can run its update commands against this install. Network checks
-stay outside the turn-end oracle.
+a later release can run its update commands against this install: --update-from
+runs README `## Update` in each saved image instead. Network checks stay outside
+the turn-end oracle.
 """
 
 import argparse
@@ -25,17 +26,22 @@ CACHES = {
     "claude-code": "~/.claude/plugins/cache/steer-marketplace/steer",
     "codex": "~/.codex/plugins/cache/steer-marketplace/steer",
 }
+# The marketplace clone each harness renames during an update.
+MARKETPLACES = {
+    "claude-code": "~/.claude/plugins/marketplaces/steer-marketplace",
+    "codex": "~/.codex/.tmp/marketplaces/steer-marketplace",
+}
 
 
-def install_commands(readme, harness):
-    """Return the commands in the bash block after the harness's lead-in under ## Install."""
-    section = re.search(r"^## Install\n(.*?)^## ", readme, re.S | re.M)
+def install_commands(readme, harness, heading="Install"):
+    """Return the commands in the bash block after the harness's lead-in under ## <heading>."""
+    section = re.search(rf"^## {heading}\n(.*?)^## ", readme, re.S | re.M)
     if not section:
-        raise ValueError("README has no ## Install section")
+        raise ValueError(f"README has no ## {heading} section")
     lead = re.escape(HARNESSES[harness])
     block = re.search(lead + r"\s*```bash\n(.*?)```", section.group(1), re.S)
     if not block:
-        raise ValueError(f"README ## Install has no bash block after {HARNESSES[harness]!r}")
+        raise ValueError(f"README ## {heading} has no bash block after {HARNESSES[harness]!r}")
     return [line.strip() for line in block.group(1).splitlines() if line.strip()]
 
 
@@ -43,9 +49,16 @@ def manifest_version():
     return json.loads((ROOT / ".codex-plugin" / "plugin.json").read_text())["version"]
 
 
-def script(commands, harness, version):
-    """Return the bash program the container runs for one harness."""
+def script(commands, harness, version, update=False):
+    """Return the bash program the container runs for one harness.
+
+    With update, the program first copies the marketplace clone into the container's
+    own layer: overlayfs refuses to rename a directory an image layer holds (EXDEV).
+    """
     lines = ["set -euo pipefail", "mkdir -p ~/.codex"]
+    if update:
+        m = MARKETPLACES[harness]
+        lines.append(f"cp -a {m} {m}.layer && rm -rf {m} && mv {m}.layer {m}")
     for command in commands:
         lines += [f"echo '$ '{shlex.quote(command)}", command]
     lines += [
@@ -69,9 +82,11 @@ def main():
     parser.add_argument("--no-build", action="store_true", help="run the existing image")
     parser.add_argument("--version", default=manifest_version(), help="expected plugin version (default: the manifest's)")
     parser.add_argument("--snapshot", metavar="TAG", help="save each harness's container as TAG-<harness>")
+    parser.add_argument("--update-from", metavar="TAG",
+                        help="run README ## Update in each saved TAG-<harness> image instead of installing")
     args = parser.parse_args()
 
-    if not args.no_build:
+    if not args.no_build and not args.update_from:
         subprocess.run(["docker", "build", "-t", args.image, "-f", str(DOCKERFILE), str(DOCKERFILE.parent)], check=True)
     readme = (ROOT / "README.md").read_text()
     failed = []
@@ -79,8 +94,11 @@ def main():
         print(f"=== {harness}", flush=True)
         name = f"steer-fresh-{harness}"
         subprocess.run(["docker", "rm", "-f", name], capture_output=True)
-        run = subprocess.run(["docker", "run", "--name", name, args.image, "bash", "-c",
-                              script(install_commands(readme, harness), harness, args.version)])
+        image = f"{args.update_from}-{harness}" if args.update_from else args.image
+        heading = "Update" if args.update_from else "Install"
+        run = subprocess.run(["docker", "run", "--name", name, image, "bash", "-c",
+                              script(install_commands(readme, harness, heading), harness, args.version,
+                                     update=bool(args.update_from))])
         if run.returncode != 0:
             failed.append(harness)
         elif args.snapshot:
@@ -88,10 +106,11 @@ def main():
             subprocess.run(["docker", "commit", name, tag], check=True, capture_output=True)
             print(f"saved {tag}")
         subprocess.run(["docker", "rm", "-f", name], capture_output=True)
+    verb = f"update from {args.update_from}" if args.update_from else "fresh install"
     if failed:
-        print("fresh install failed: " + ", ".join(failed), file=sys.stderr)
+        print(f"{verb} failed: " + ", ".join(failed), file=sys.stderr)
         return 1
-    print(f"fresh install of {args.version} passed")
+    print(f"{verb} of {args.version} passed")
     return 0
 
 

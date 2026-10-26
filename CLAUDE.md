@@ -280,8 +280,8 @@ After a release, `python3 tests/fresh_install.py` builds `tests/docker/Dockerfil
 and runs the README's `## Install` commands per harness on a fresh Linux host, then
 the copy's `bin install`; every version must equal the manifest's. It reads the
 commands from the README, so a change to that section changes the test.
-`--snapshot <tag>` keeps each installed container as a local image for testing the
-next release's update. It needs Docker and the network and stays outside `check.sh`.
+`--snapshot <tag>` keeps each installed container as a local image, and the next
+release's `--update-from <tag>` runs the README's `## Update` commands in it. It needs Docker and the network and stays outside `check.sh`.
 
 For routing changes, `tests/routing_scenarios.py --model <model>` runs the
 `/steer --headless --route-only` scenarios in

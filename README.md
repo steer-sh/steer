@@ -105,6 +105,12 @@ claude plugin marketplace update steer-marketplace
 claude plugin update steer@steer-marketplace
 ```
 
+For Codex:
+
+```bash
+codex plugin marketplace upgrade steer-marketplace
+```
+
 A plugin update refreshes the skills and the plugin's own copy of `steer`. It does not change `~/.steer/bin/steer`, which your hooks run, or the guard runners that Steer generated. After the update, the next session's start-up message names the command for your machine: the updated plugin's `scripts/steer bin install`. That command copies the new build to `~/.steer/bin/steer`, repoints Steer's hook registrations at it, and rebuilds your global guard runner. A repository's guard runner is committed, so `bin install` prints `steer hooks rebuild --scope project` for you to run in that repository when you choose.
 
 `steer --version` names the build you run, with its commit and build date.

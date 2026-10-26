@@ -335,6 +335,20 @@ class FreshInstallRunner(unittest.TestCase):
             "codex plugin marketplace add steer-sh/steer",
             "codex plugin add steer@steer-marketplace"])
 
+    def test_reads_each_harness_update_block_from_the_readme(self):
+        readme = (ROOT / "README.md").read_text()
+        self.assertEqual(fresh_install.install_commands(readme, "claude-code", "Update"), [
+            "claude plugin marketplace update steer-marketplace",
+            "claude plugin update steer@steer-marketplace"])
+        self.assertEqual(fresh_install.install_commands(readme, "codex", "Update"), [
+            "codex plugin marketplace upgrade steer-marketplace"])
+
+    def test_an_update_moves_the_marketplace_clone_out_of_the_image_layer(self):
+        program = fresh_install.script(["true"], "codex", "9.9.9", update=True)
+        marketplace = fresh_install.MARKETPLACES["codex"]
+        self.assertLess(program.index(f"mv {marketplace}.layer {marketplace}"), program.index("true"))
+        self.assertNotIn(".layer", fresh_install.script(["true"], "codex", "9.9.9"))
+
     def test_a_block_outside_install_is_not_read(self):
         readme = "## Install\n\nNothing.\n\n## Update\n\nFor Codex:\n\n```bash\ncodex x\n```\n"
         with self.assertRaises(ValueError):
