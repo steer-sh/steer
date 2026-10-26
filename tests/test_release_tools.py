@@ -15,6 +15,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import fresh_install
 import live_reviewers
 import sandbox
 
@@ -322,6 +323,27 @@ class LiveReviewerRunner(unittest.TestCase):
             with self.subTest(kind=kind):
                 code, result = self.cell("codex", git_override=kind)
                 self.assertEqual(code, 0, result["failures"])
+
+
+class FreshInstallRunner(unittest.TestCase):
+    def test_reads_each_harness_install_block_from_the_readme(self):
+        readme = (ROOT / "README.md").read_text()
+        self.assertEqual(fresh_install.install_commands(readme, "claude-code"), [
+            "claude plugin marketplace add steer-sh/steer",
+            "claude plugin install steer@steer-marketplace"])
+        self.assertEqual(fresh_install.install_commands(readme, "codex"), [
+            "codex plugin marketplace add steer-sh/steer",
+            "codex plugin add steer@steer-marketplace"])
+
+    def test_a_block_outside_install_is_not_read(self):
+        readme = "## Install\n\nNothing.\n\n## Update\n\nFor Codex:\n\n```bash\ncodex x\n```\n"
+        with self.assertRaises(ValueError):
+            fresh_install.install_commands(readme, "codex")
+
+    def test_the_script_requires_the_expected_version(self):
+        program = fresh_install.script(["true"], "codex", "9.9.9")
+        self.assertIn("~/.codex/plugins/cache/steer-marketplace/steer/9.9.9", program)
+        self.assertIn('"steer 9.9.9 "*', program)
 
 
 if __name__ == "__main__":
