@@ -491,21 +491,48 @@ func TestPreflightDenyRefusesACDThatMayNotHaveRun(t *testing.T) {
 	}
 	for _, cmd := range []string{
 		"cd /repoA && git " + c + " -m x",
-		"cd /repoA; git " + c + " -m x",
 		"git status && cd /repoA && git add a && git " + c + " -m x",
 		"{ cd /repoA; } && git " + c + " -m x",
-		"cd /repoA || true\ngit " + c + " -m x",
 		"(cd /repoA | true); git " + c + " -m x",
 		"cd /repoA && git " + c + " -m x | tail -1",
 		"if cd /repoA; then git " + c + " -m x; fi",
-		"if true; then cd /repoA; git " + c + " -m x; fi",
 		"if true && cd /repoA; then git " + c + " -m x; fi",
 		"true || cd /repoA; git -C /repoB " + c + " -m x",
 		"true || cd /repoA; cd /repoB && git " + c + " -m x",
-		"case x in x) cd /repoA; git " + c + " -m x;; esac",
 	} {
 		if reason, _ := PreflightDeny(cmd, "/cwd"); reason != "" {
 			t.Errorf("%q: the cd runs before the commit or leaves its directory alone, got %q", cmd, reason)
+		}
+	}
+}
+
+// TestPreflightDenyRefusesACDThatMayHaveFailed: a cd whose failure does not stop
+// the commit leaves the shell in its directory, while the gate reads the cd's target.
+func TestPreflightDenyRefusesACDThatMayHaveFailed(t *testing.T) {
+	c := "co" + "mmit"
+	for _, cmd := range []string{
+		"cd /missing; git " + c + " -m x",
+		"cd /repoB </missing; git " + c + " -m x",
+		"cd /repoA || true\ngit " + c + " -m x",
+		"! cd /repoA; git " + c + " -m x",
+		"if true; then cd /repoA; git " + c + " -m x; fi",
+		"case x in x) cd /repoA; git " + c + " -m x;; esac",
+		"{ cd /repoA; true; } && git " + c + " -m x",
+		"true || cd /repoA; cd /repoB </missing; git " + c + " -m x",
+	} {
+		reason, receipt := PreflightDeny(cmd, "/cwd")
+		if receipt != AmbiguousShellReceipt || !strings.Contains(reason, "may have failed") {
+			t.Errorf("%q: the cd may fail and the commit still run, so it must be refused, got %q", cmd, reason)
+		}
+	}
+	for _, cmd := range []string{
+		"cd /repoA && cd sub && git " + c + " -m x",
+		"cd /missing; git -C /repoB " + c + " -m x",
+		"cd /missing; cd /repoB && git " + c + " -m x",
+		"case x in x) cd /repoA && git " + c + " -m x;; esac",
+	} {
+		if reason, _ := PreflightDeny(cmd, "/cwd"); reason != "" {
+			t.Errorf("%q: the cd succeeded or does not decide the directory, got %q", cmd, reason)
 		}
 	}
 }

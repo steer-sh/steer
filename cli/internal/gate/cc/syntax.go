@@ -864,10 +864,11 @@ func (p *parsedGit) commitStatement(file *syntax.File) *syntax.Stmt {
 }
 
 // uncertainCD returns the source of the first cd that resolvedDirs applies to the
-// commit although it may not have run when git commits: a cd in a pipeline member,
-// after `||`, in the background, or inside a compound command the commit is not in.
-// Empty means every applied cd ran, or a later absolute cd or the commit's own
-// absolute -C makes the directory independent of it.
+// commit although it may not have run, or may have failed, when git commits: a cd in
+// a pipeline member, after `||`, in the background, inside a compound command the
+// commit is not in, or one whose failure does not stop the commit (`cd /x; git commit`).
+// Empty means every applied cd succeeded, or a later absolute cd that succeeded or
+// the commit's own absolute -C makes the directory independent of it.
 func (p *parsedGit) uncertainCD() string {
 	file, err := syntax.NewParser().Parse(strings.NewReader(p.program.Source), "command")
 	if err != nil {
@@ -882,11 +883,11 @@ func (p *parsedGit) uncertainCD() string {
 		if !scopeAffects(call.Scopes, p.call.Scopes) || len(call.Args) == 0 || call.Args[0].Base() != "cd" {
 			continue
 		}
-		ran := ranBefore(nodePath(file, statementAt(file, call.Start)), commitPath)
-		if !ran && uncertain == "" {
+		ran, succeeded := ranBefore(nodePath(file, statementAt(file, call.Start)), commitPath)
+		if !(ran && succeeded) && uncertain == "" {
 			uncertain = p.program.Source[call.Start:call.End]
 		}
-		if path, ok := cdPath(call.Args[1:]); ran && ok && knownDir(path.Value, path.TildePrefix()) {
+		if path, ok := cdPath(call.Args[1:]); ran && succeeded && ok && knownDir(path.Value, path.TildePrefix()) {
 			uncertain = ""
 		}
 	}
@@ -916,24 +917,24 @@ func (p *parsedGit) absoluteGitC() bool {
 }
 
 // ranBefore reports whether the statement at the end of step has run whenever the
-// statement at the end of commit runs. Both paths start at the file.
-func ranBefore(step, commit []syntax.Node) bool {
+// statement at the end of commit runs, and whether it must also have exited zero.
+// Both paths start at the file.
+func ranBefore(step, commit []syntax.Node) (ran, succeeded bool) {
 	i := 0
 	for i < len(step) && i < len(commit) && step[i] == commit[i] {
 		i++
 	}
 	if i == 0 || i >= len(step) || i >= len(commit) {
-		return false
+		return false, false
 	}
 	// A loop around both repeats a relative cd before each later pass.
 	for _, shared := range step[:i] {
 		switch shared.(type) {
 		case *syntax.WhileClause, *syntax.ForClause:
-			return false
+			return false, false
 		}
 	}
 	// succeeded: the node at hand must have exited zero for the commit to run.
-	succeeded := false
 	switch shared := step[i-1].(type) {
 	case *syntax.File, *syntax.Block, *syntax.Subshell, *syntax.CmdSubst, *syntax.CaseItem:
 	case *syntax.IfClause:
@@ -941,23 +942,23 @@ func ranBefore(step, commit []syntax.Node) bool {
 		// before a later one in the same branch.
 		inCond := holdsNode(shared.Cond, step[i])
 		if !inCond && !(holdsNode(shared.Then, step[i]) && holdsNode(shared.Then, commit[i])) {
-			return false
+			return false, false
 		}
 		// The then branch runs only when the last condition statement succeeded.
 		last := len(shared.Cond) > 0 && step[i] == syntax.Node(shared.Cond[len(shared.Cond)-1])
 		succeeded = last && holdsNode(shared.Then, commit[i])
 	case *syntax.BinaryCmd:
 		if shared.Op != syntax.AndStmt {
-			return false
+			return false, false
 		}
 		succeeded = true
 	default:
-		return false
+		return false, false
 	}
 	for j := i; j < len(step); j++ {
 		// A negated statement that must succeed is one whose command failed.
 		if stmt, ok := step[j].(*syntax.Stmt); ok && (asynchronous(stmt) || stmt.Negated && succeeded) {
-			return false
+			return false, false
 		}
 		if j == i {
 			continue
@@ -971,19 +972,19 @@ func ranBefore(step, commit []syntax.Node) bool {
 			switch {
 			case parent.Op == syntax.AndStmt && step[j] == syntax.Node(parent.Y):
 				if !succeeded {
-					return false
+					return false, false
 				}
 			case parent.Op == syntax.AndStmt:
 			case parent.Op == syntax.OrStmt && step[j] == syntax.Node(parent.X):
 				succeeded = false
 			default:
-				return false
+				return false, false
 			}
 		default:
-			return false
+			return false, false
 		}
 	}
-	return true
+	return true, succeeded
 }
 
 // holdsNode reports whether node is one of stmts.
@@ -1425,8 +1426,8 @@ func shellAmbiguity(cmd, cwd string) string {
 		return "the commit's repository is dynamic or selected only by --git-dir"
 	}
 	if cd := p.uncertainCD(); cd != "" {
-		return fmt.Sprintf("`%s` may not have run when git commits, so the commit's "+
-			"directory is unknown; run cd on its own or as `cd /path && git commit`, or "+
+		return fmt.Sprintf("`%s` may not have run, or may have failed, when git commits, so the "+
+			"commit's directory is unknown; run cd on its own or as `cd /path && git commit`, or "+
 			"select the repository with git -C", shortStep(cd))
 	}
 	if _, ok := p.message(); !ok {
