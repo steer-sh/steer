@@ -13,6 +13,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/hookstore"
 	"github.com/steer-sh/steer-cli/internal/presets"
+	"github.com/steer-sh/steer-cli/internal/steerpath"
 	"github.com/steer-sh/steer-cli/internal/styles"
 )
 
@@ -81,13 +82,17 @@ var teamLockCmd = &cobra.Command{
 			return err
 		}
 
-		if err := writeTeamLockfile(TeamLockfileName, lockfile); err != nil {
+		path, err := teamLockfilePath()
+		if err != nil {
+			return err
+		}
+		if err := writeTeamLockfile(path, lockfile); err != nil {
 			return err
 		}
 
 		fmt.Println(styles.SuccessBox.Render(fmt.Sprintf(
 			"Lockfile: %s\nHooks locked: %d\nCatalog version: %s",
-			TeamLockfileName,
+			path,
 			len(lockfile.Hooks),
 			lockfile.CatalogVersion,
 		)))
@@ -115,7 +120,11 @@ lockfile are untouched: team policy is a floor, not a ceiling.
 			return err
 		}
 
-		lockfile, err := readTeamLockfile(TeamLockfileName)
+		path, err := teamLockfilePath()
+		if err != nil {
+			return err
+		}
+		lockfile, err := readTeamLockfile(path)
 		if err != nil {
 			return err
 		}
@@ -190,7 +199,11 @@ var teamVerifyCmd = &cobra.Command{
 			return err
 		}
 
-		lockfile, err := readTeamLockfile(TeamLockfileName)
+		path, err := teamLockfilePath()
+		if err != nil {
+			return err
+		}
+		lockfile, err := readTeamLockfile(path)
 		if err != nil {
 			return err
 		}
@@ -303,6 +316,16 @@ func buildTeamLockfile(scope string, catalog *presets.Catalog) (*teamLockfile, e
 		CatalogVersion:  catalog.CatalogVersion,
 		Hooks:           locked,
 	}, nil
+}
+
+// teamLockfilePath is the lockfile beside the project guard store it locks: at
+// the root that store resolves against, whichever directory the command runs in.
+func teamLockfilePath() (string, error) {
+	root, err := steerpath.ProjectRoot()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, TeamLockfileName), nil
 }
 
 func writeTeamLockfile(path string, lockfile *teamLockfile) error {

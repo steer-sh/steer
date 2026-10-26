@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -251,5 +252,33 @@ func TestReadTeamLockfileRejectsTamper(t *testing.T) {
 	}
 	if _, err := readTeamLockfile(TeamLockfileName); err == nil || !strings.Contains(err.Error(), "content_sha256 mismatch") {
 		t.Fatalf("expected content_sha256 integrity error, got: %v", err)
+	}
+}
+
+// TestTeamLockfileLivesAtTheProjectRoot pins that lock run from a subdirectory
+// writes the lockfile beside the project store it locks, at the repository root.
+// A lockfile at the working directory is one a clone's verify never finds.
+func TestTeamLockfileLivesAtTheProjectRoot(t *testing.T) {
+	root := withCmdProjectTempDir(t)
+	if out, err := exec.Command("git", "init", "-q", root).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+	installGeneratedHook(t, claude.ProjectScope, "team-rule", "no team rule violations")
+	sub := filepath.Join(root, "sub")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(sub); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := teamLockCmd.RunE(teamLockCmd, nil); err != nil {
+		t.Fatalf("lock from a subdirectory: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(sub, TeamLockfileName)); !os.IsNotExist(err) {
+		t.Fatalf("lock wrote %s in the subdirectory (stat err %v)", TeamLockfileName, err)
+	}
+	if _, err := readTeamLockfile(filepath.Join(root, TeamLockfileName)); err != nil {
+		t.Fatalf("no lockfile at the project root: %v", err)
 	}
 }
