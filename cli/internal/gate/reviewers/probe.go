@@ -70,6 +70,8 @@ func ProbeConfig(provider string, opts Options) Probe {
 		switch {
 		case opts.BaseURL == "" || CheckBaseURL(opts.BaseURL) != nil:
 			probe.Unset = "reviewer.api.base_url"
+		case strings.TrimSpace(opts.Model) != "":
+			probe.Unset = "reviewer.api.tools"
 		default:
 			probe.Unset = "reviewer.model"
 		}

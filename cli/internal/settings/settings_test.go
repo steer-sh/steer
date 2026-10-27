@@ -103,3 +103,22 @@ func TestTheAPIProviderCanBeNamedBeforeItsURL(t *testing.T) {
 		t.Error("base_url accepted plain http to a remote host")
 	}
 }
+
+// TestToolsTakesOnlyAKnownMode: a typo in the tool mode is a write-time error, not a
+// review that fails on every commit.
+func TestToolsTakesOnlyAKnownMode(t *testing.T) {
+	f, err := settings.Find("reviewer.api.tools")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range []string{"off", "auto", "required", ""} {
+		var c config.Config
+		if err := f.Set(&c, v); err != nil || c.Reviewer.API.Tools != v {
+			t.Errorf("Set(%q) = %v, stored %q", v, err, c.Reviewer.API.Tools)
+		}
+	}
+	var c config.Config
+	if err := f.Set(&c, "on"); err == nil || c.Reviewer.API.Tools != "" {
+		t.Errorf("Set(on) stored %q, err %v; want refused", c.Reviewer.API.Tools, err)
+	}
+}

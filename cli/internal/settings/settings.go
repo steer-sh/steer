@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -199,6 +200,39 @@ var Fields = []Field{
 			return nil
 		},
 		Effective: func(c gate.Config) string { return c.ReviewerAPIKeyEnv },
+	},
+	{
+		Name: "reviewer.api.tools", Identity: true,
+		Label: "API file tools",
+		Help: "Whether the " + reviewers.APIProviderID + " reviewer may read files of the commit " +
+			"beyond the diff. Each file read is sent to the endpoint and adds a turn.",
+		Kind:         KindChoice,
+		DefaultLabel: "off",
+		Choices: func() []Choice {
+			labels := map[string]string{"off": "Off", "auto": "Auto (fall back without tools)",
+				"required": "Required (fail without tools)"}
+			out := []Choice{}
+			for _, m := range reviewers.ToolModes {
+				out = append(out, Choice{Value: m, Label: labels[m]})
+			}
+			return out
+		},
+		Usage: "File tools for reviewer.provider " + reviewers.APIProviderID + " (" +
+			strings.Join(reviewers.ToolModes, "|") + "); unset means off",
+		Get: func(c config.Config) string { return c.Reviewer.API.Tools },
+		Set: func(c *config.Config, v string) error {
+			if v != "" && !slices.Contains(reviewers.ToolModes, v) {
+				return fmt.Errorf("reviewer.api.tools takes %s", strings.Join(reviewers.ToolModes, ", "))
+			}
+			c.Reviewer.API.Tools = v
+			return nil
+		},
+		Effective: func(c gate.Config) string {
+			if c.ReviewerAPITools == "" {
+				return "off"
+			}
+			return c.ReviewerAPITools
+		},
 	},
 	{
 		Name: "reviewer.runs", Env: "COMMIT_GATE_RUNS", Numeric: true, Identity: true,
@@ -396,6 +430,7 @@ func ReviewerOptions(cfg gate.Config) reviewers.Options {
 		Effort:  cfg.ReviewerEffort,
 		BaseURL: cfg.ReviewerAPIBaseURL,
 		KeyEnv:  cfg.ReviewerAPIKeyEnv,
+		Tools:   cfg.ReviewerAPITools,
 	}
 }
 

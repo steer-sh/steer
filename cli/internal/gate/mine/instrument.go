@@ -30,6 +30,8 @@ type InstrumentFields struct {
 	AddendumKnown  bool
 	// Endpoint is the host an API reviewer sent to, "" for a CLI reviewer.
 	Endpoint string
+	// Tools is an API reviewer's tool mode, "" when off or for a CLI reviewer.
+	Tools string
 }
 
 // ParseInstrumentID recovers the dimensions the instrument string carries:
@@ -81,6 +83,7 @@ func InstrumentFieldsFrom(raw any) (InstrumentFields, bool) {
 		AddendumDigest: str(m["addendum_digest"]),
 		AddendumKnown:  true,
 		Endpoint:       str(m["endpoint"]),
+		Tools:          str(m["tools"]),
 	}, true
 }
 
@@ -100,7 +103,11 @@ func (u InstrumentUse) Label() string {
 		return u.ID
 	}
 	if u.Fields.Endpoint != "" {
-		return u.ID + " (provider " + u.Fields.Provider + ", endpoint " + u.Fields.Endpoint + ")"
+		label := u.ID + " (provider " + u.Fields.Provider + ", endpoint " + u.Fields.Endpoint
+		if u.Fields.Tools != "" {
+			label += ", tools " + u.Fields.Tools
+		}
+		return label + ")"
 	}
 	return u.ID + " (provider " + u.Fields.Provider + ")"
 }
@@ -137,7 +144,10 @@ func InstrumentUses(windows ...[]Chain) []InstrumentUse {
 		if uses[i].Fields.Provider != uses[j].Fields.Provider {
 			return uses[i].Fields.Provider < uses[j].Fields.Provider
 		}
-		return uses[i].Fields.Endpoint < uses[j].Fields.Endpoint
+		if uses[i].Fields.Endpoint != uses[j].Fields.Endpoint {
+			return uses[i].Fields.Endpoint < uses[j].Fields.Endpoint
+		}
+		return uses[i].Fields.Tools < uses[j].Fields.Tools
 	})
 	return uses
 }

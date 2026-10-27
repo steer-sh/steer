@@ -24,6 +24,7 @@ func Resolve(provider string, opts Options) (gate.Reviewer, error) {
 	opts.Effort = strings.TrimSpace(opts.Effort)
 	opts.BaseURL = strings.TrimSpace(opts.BaseURL)
 	opts.KeyEnv = strings.TrimSpace(opts.KeyEnv)
+	opts.Tools = strings.TrimSpace(opts.Tools)
 	if p.validate != nil {
 		if err := p.validate(opts); err != nil {
 			return nil, err

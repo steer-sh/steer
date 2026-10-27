@@ -2,6 +2,7 @@ package gate
 
 import (
 	"context"
+	"sync"
 	"testing"
 )
 
@@ -81,7 +82,7 @@ func TestPanelCountsCleanSalvagedRunAsAnswered(t *testing.T) {
 	cfg.ReviewerRuns = 1
 	panel := NewPanel(cfg, &stubReviewer{replies: []RawRun{
 		{Response: "NO FINDINGS", Status: "ERROR", Error: "denied"}}})
-	result := panel.Run(context.Background(), "prompt", t.TempDir())
+	result := panel.Run(context.Background(), "prompt", t.TempDir(), DiffSpec{})
 	if result.Answered != 1 {
 		t.Errorf("Answered = %d, want 1", result.Answered)
 	}
@@ -97,7 +98,7 @@ func TestPanelKeepsFindingsUnderACleanOpener(t *testing.T) {
 	cfg.ReviewerRuns = 1
 	body := "NO FINDINGS in a.py, but in b.py:\n\n" + oneFinding
 	panel := NewPanel(cfg, &stubReviewer{replies: []RawRun{findingReply(body)}})
-	result := panel.Run(context.Background(), "prompt", t.TempDir())
+	result := panel.Run(context.Background(), "prompt", t.TempDir(), DiffSpec{})
 	if len(result.Reviews) != 1 {
 		t.Fatalf("Reviews = %v, want the finding kept", result.Reviews)
 	}
@@ -110,7 +111,7 @@ func TestPanelDropsDecoratedCleanReply(t *testing.T) {
 	cfg.ReviewerRuns = 1
 	for _, body := range []string{"**NO FINDINGS**", "`NO FINDINGS`", "**NO FINDINGS.**", "NO FINDINGS\n"} {
 		panel := NewPanel(cfg, &stubReviewer{replies: []RawRun{findingReply(body)}})
-		result := panel.Run(context.Background(), "prompt", t.TempDir())
+		result := panel.Run(context.Background(), "prompt", t.TempDir(), DiffSpec{})
 		if len(result.Reviews) != 0 {
 			t.Errorf("body %q: Reviews = %v, want none", body, result.Reviews)
 		}
@@ -148,5 +149,84 @@ func TestInstrumentFieldsNameTheEndpointOnlyWhenSet(t *testing.T) {
 	cfg.ReviewerEndpoint = "openrouter.ai"
 	if got := cfg.InstrumentFields()["endpoint"]; got != "openrouter.ai" {
 		t.Errorf("endpoint = %v", got)
+	}
+}
+
+// viewStub records the view a panel hands it.
+type viewStub struct {
+	wants bool
+	mu    sync.Mutex
+	views []*CommitView
+	plain int
+}
+
+func (v *viewStub) Name() string       { return "view-stub" }
+func (v *viewStub) ModelLabel() string { return "m" }
+func (v *viewStub) WantsView() bool    { return v.wants }
+func (v *viewStub) Review(context.Context, string, string) RawRun {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.plain++
+	return RawRun{Response: "NO FINDINGS", Status: "SUCCESS"}
+}
+func (v *viewStub) ReviewView(_ context.Context, _, _ string, view *CommitView) RawRun {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.views = append(v.views, view)
+	return RawRun{Response: "NO FINDINGS", Status: "SUCCESS"}
+}
+
+// TestPanelBuildsOneViewOnlyForAReviewerThatWantsIt: every run of a reviewer that
+// reads files gets the same view of the spec; one that does not is never handed one.
+func TestPanelBuildsOneViewOnlyForAReviewerThatWantsIt(t *testing.T) {
+	root := committedRepo(t, map[string]string{"a.txt": "a\n"})
+	cfg := Defaults()
+	cfg.ReviewerRuns = 3
+	wants := &viewStub{wants: true}
+	NewPanel(cfg, wants).Run(context.Background(), "p", root, DiffSpec{StagedOnly: true})
+	if len(wants.views) != 3 || wants.views[0] == nil || wants.views[0] != wants.views[2] || !wants.views[0].Has("a.txt") {
+		t.Errorf("views = %v, want one shared view of the repository", wants.views)
+	}
+	off := &viewStub{}
+	NewPanel(cfg, off).Run(context.Background(), "p", root, DiffSpec{StagedOnly: true})
+	if len(off.views) != 0 || off.plain != 3 {
+		t.Errorf("a reviewer that wants no view got %d views and %d plain runs", len(off.views), off.plain)
+	}
+}
+
+// TestReviewerReportListsAPIRuns: token usage and tool use reach the row per run, and
+// a panel of CLI runs writes no such field.
+func TestReviewerReportListsAPIRuns(t *testing.T) {
+	runs := []ReviewRun{
+		Classify(RawRun{Response: "NO FINDINGS", Status: "SUCCESS",
+			Usage: &TokenUsage{Prompt: 10, Completion: 2}, Tools: &ToolUse{Mode: "tools", Calls: 1}}),
+		Classify(RawRun{Outcome: OutcomeToolBudget, Tools: &ToolUse{Mode: "tools", Calls: 24}}),
+	}
+	api, ok := ReviewerReport(Defaults(), runs)["reviewer_api_runs"].([]Row)
+	if !ok || len(api) != 2 || api[0]["usage"] != (TokenUsage{Prompt: 10, Completion: 2}) ||
+		api[1]["outcome"] != "tool_budget" || api[1]["tools"].(ToolUse).Calls != 24 {
+		t.Errorf("reviewer_api_runs = %v", api)
+	}
+	cli := []ReviewRun{Classify(RawRun{Response: "NO FINDINGS", Status: "SUCCESS"})}
+	if _, ok := ReviewerReport(Defaults(), cli)["reviewer_api_runs"]; ok {
+		t.Error("a CLI panel wrote reviewer_api_runs")
+	}
+}
+
+// TestInstrumentRecordsAnAPIToolMode: an API reviewer with tools on stamps the mode;
+// tools off and a CLI reviewer stamp nothing new.
+func TestInstrumentRecordsAnAPIToolMode(t *testing.T) {
+	c := Defaults()
+	c.ReviewerEndpoint, c.ReviewerAPITools = "openrouter.ai", "auto"
+	if got := c.InstrumentFieldsWith("")["tools"]; got != "auto" {
+		t.Errorf("tools = %v, want auto", got)
+	}
+	c.ReviewerAPITools = "off"
+	if _, ok := c.InstrumentFieldsWith("")["tools"]; ok {
+		t.Error("tools off stamped a tools field")
+	}
+	c.ReviewerEndpoint, c.ReviewerAPITools = "", "auto"
+	if _, ok := c.InstrumentFieldsWith("")["tools"]; ok {
+		t.Error("a CLI reviewer stamped a tools field")
 	}
 }

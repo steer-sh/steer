@@ -47,6 +47,11 @@ func ReviewerStep(p reviewers.Probe) (Step, bool) {
 			Title: "the API reviewer has no model, so every review fails",
 			Fix:   "steer config set reviewer.model <model>",
 		}, true
+	case "reviewer.api.tools":
+		return Step{
+			Title: "the API reviewer's tool mode is not one Steer knows, so every review fails",
+			Fix:   "steer config set reviewer.api.tools <" + strings.Join(reviewers.ToolModes, "|") + ">",
+		}, true
 	}
 	if p.Executable == "" {
 		return Step{

@@ -165,6 +165,14 @@ model provider the router picks.
    "${STEER_BIN}" reviewer key status
    ```
 
+Leave `reviewer.api.tools` unset (off) unless the user asks for it. With `auto` or
+`required` the reviewer can read further files of the commit beyond the diff, and each
+file it reads also goes to the endpoint and adds a request:
+
+```bash
+"${STEER_BIN}" config set reviewer.api.tools auto
+```
+
 Step 5 runs `commit-gate test-reviewer` as for every reviewer. A pass there proves
 the endpoint, the model and the key from this agent's shell. The gate runs in the
 harness's hook process, whose environment can lack a variable this shell has, so an

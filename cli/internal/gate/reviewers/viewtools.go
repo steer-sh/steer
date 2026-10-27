@@ -78,6 +78,15 @@ type viewTools struct {
 	bytes int
 }
 
+// spent reports whether the run's output budget is gone: a remainder that cannot
+// hold the cut note counts as spent.
+func (t *viewTools) spent() bool {
+	return maxRunToolBytes-t.bytes <= 2*cutNoteBytes
+}
+
+// toolErrorPrefix opens a result that reports a failed call.
+const toolErrorPrefix = "error: "
+
 // cutNoteBytes is the room a result leaves for the note that says where it stopped,
 // so the note survives the cut at the limit.
 const cutNoteBytes = 96
@@ -89,14 +98,13 @@ var errToolBudget = errors.New("the tool output budget of this review is spent; 
 // the model reads it; refused is true when the run's budget refused it.
 func (t *viewTools) call(ctx context.Context, name string, rawArgs string) (result string, refused bool) {
 	remaining := maxRunToolBytes - t.bytes
-	// A remainder that cannot hold the cut note is spent.
-	if remaining <= 2*cutNoteBytes {
+	if t.spent() {
 		return errToolBudget.Error(), true
 	}
 	limit := min(maxCallBytes, remaining)
 	text, err := t.run(ctx, name, rawArgs, limit-cutNoteBytes)
 	if err != nil {
-		text = "error: " + err.Error()
+		text = toolErrorPrefix + err.Error()
 	}
 	if len(text) > limit {
 		note := fmt.Sprintf("\n[cut at %d bytes]", limit)
@@ -147,7 +155,7 @@ func (t *viewTools) readFile(ctx context.Context, p string, start, end, limit in
 		return "", fmt.Errorf("%s could not be read", p)
 	}
 	if data == nil {
-		return "", fmt.Errorf("%s is %d bytes, over the %d MiB read_file limit; use grep on it", p, size, maxReadFileBytes>>20)
+		return "", fmt.Errorf("%s is %d bytes, over the %d MiB read_file limit; the tools cannot read it", p, size, maxReadFileBytes>>20)
 	}
 	if isBinary(data) {
 		return fmt.Sprintf("%s is a binary file of %d bytes", p, len(data)), nil

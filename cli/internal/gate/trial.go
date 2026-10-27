@@ -59,9 +59,23 @@ func TrialReview(ctx context.Context, cfg Config, reviewer Reviewer) (TrialResul
 		return TrialResult{}, err
 	}
 	prompt := BuildReviewPrompt(NeutralizeTags(trialMessage), NeutralizeTags(trialDiff), "", Addendum{})
+	review := reviewer.Review
+	if vr, ok := wantsView(reviewer); ok {
+		// A reviewer that reads files reads the sample through a view, as a commit
+		// review would: the directory becomes a repository with the file staged.
+		var view *CommitView
+		_, initOK := Git(dir, gitMedium, "init", "-q", ".")
+		_, addOK := Git(dir, gitMedium, "add", trialFile)
+		if initOK && addOK {
+			view, _ = NewCommitView(cfg, dir, DiffSpec{StagedOnly: true})
+		}
+		review = func(ctx context.Context, prompt, cwd string) RawRun {
+			return vr.ReviewView(ctx, prompt, cwd, view)
+		}
+	}
 	runCtx, cancel := context.WithTimeout(ctx, cfg.ReviewTimeout)
 	defer cancel()
 	start := time.Now()
-	run := Classify(reviewer.Review(runCtx, prompt, dir))
+	run := Classify(review(runCtx, prompt, dir))
 	return TrialResult{Run: run, Findings: CountFindings(run.Text), Elapsed: time.Since(start)}, nil
 }

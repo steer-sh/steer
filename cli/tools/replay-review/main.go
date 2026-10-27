@@ -113,7 +113,8 @@ func replay(provider, model, effort, base string, runs int, wt, diffFile, subjec
 	prompt := gate.BuildReviewPrompt(gate.NeutralizeTags(subject), gate.NeutralizeTags(diff),
 		ctxBlock, gate.LoadAddendum(wt))
 	start := time.Now()
-	result := gate.NewPanel(cfg, reviewer).Run(context.Background(), prompt, wt)
+	// The round's diff is staged on its base, so the index is what the commit lands.
+	result := gate.NewPanel(cfg, reviewer).Run(context.Background(), prompt, wt, gate.DiffSpec{StagedOnly: true})
 	elapsed := time.Since(start)
 	_, findings := gate.ComposeReview(result.Reviews)
 	verdict := "deny"

@@ -169,6 +169,10 @@ func (c Config) InstrumentFieldsWith(addendumDigest string) map[string]any {
 	// Written only for an API reviewer, so a CLI reviewer's fields stay as they were.
 	if c.ReviewerEndpoint != "" {
 		fields["endpoint"] = c.ReviewerEndpoint
+		// The configured mode; each run's ledger entry records the mode that ran.
+		if mode := c.ReviewerAPITools; mode != "" && mode != "off" {
+			fields["tools"] = mode
+		}
 	}
 	return fields
 }

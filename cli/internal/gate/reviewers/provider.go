@@ -13,7 +13,14 @@ type Options struct {
 	Effort  string
 	BaseURL string
 	KeyEnv  string
+	// Tools is the API reviewer's tool mode, one of ToolModes; "" is off.
+	Tools string
 }
+
+// ToolModes are the values reviewer.api.tools takes: off sends the prompt alone,
+// auto offers the tools and falls back once when the endpoint refuses them, and
+// required fails the run instead.
+var ToolModes = []string{"off", "auto", "required"}
 
 // Provider is one reviewer Steer can run. It is the one definition of the
 // supported set: Resolve builds from it, EffortWarning reads its levels, and an

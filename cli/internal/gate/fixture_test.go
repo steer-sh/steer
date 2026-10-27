@@ -78,13 +78,13 @@ func TestFixture(t *testing.T) {
 	}
 
 	reviewer, err := reviewers.Resolve(cfg.ReviewerProvider, reviewers.Options{Model: cfg.ReviewerModelOverride, Effort: cfg.ReviewerEffort,
-		BaseURL: cfg.ReviewerAPIBaseURL, KeyEnv: cfg.ReviewerAPIKeyEnv})
+		BaseURL: cfg.ReviewerAPIBaseURL, KeyEnv: cfg.ReviewerAPIKeyEnv, Tools: cfg.ReviewerAPITools})
 	if err != nil {
 		t.Fatal(err)
 	}
 	panel := gate.NewPanel(cfg, reviewer)
 	prompt := gate.BuildReviewPrompt(gate.NeutralizeTags(string(message)), gate.NeutralizeTags(diff), contextBlock, gate.Addendum{})
-	result := panel.Run(context.Background(), prompt, repo)
+	result := panel.Run(context.Background(), prompt, repo, gate.DiffSpec{StagedOnly: true})
 
 	t.Logf("answered %d/%d, outcomes %v", result.Answered, cfg.ReviewerRuns,
 		gate.ReviewerReport(cfg, result.Runs))

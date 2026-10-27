@@ -64,3 +64,28 @@ func TestInstrumentUsesKeepsAnEndpointSwapAtOneString(t *testing.T) {
 		id + " (provider openai-compatible, endpoint openrouter.ai)",
 	})
 }
+
+// A tool mode change at one model and endpoint is two identities: the reviewer that
+// reads files is a different instrument from the one that reads the prompt alone.
+func TestInstrumentUsesKeepsAToolModeSwapAtOneString(t *testing.T) {
+	const id = "vendor/model/3/abc/go"
+	row := func(tools string) gate.Row {
+		fields := map[string]any{
+			"provider": "openai-compatible", "model": "vendor/model", "runs": 3,
+			"prompt_digest": "abc", "engine": "go", "endpoint": "openrouter.ai",
+		}
+		if tools != "" {
+			fields["tools"] = tools
+		}
+		return gate.Row{"instrument": id, "instrument_fields": fields}
+	}
+	chains := []Chain{{Rows: []gate.Row{row("auto"), row("")}}}
+	var labels []string
+	for _, u := range InstrumentUses(chains) {
+		labels = append(labels, u.Label())
+	}
+	check(t, "labels", labels, []string{
+		id + " (provider openai-compatible, endpoint openrouter.ai)",
+		id + " (provider openai-compatible, endpoint openrouter.ai, tools auto)",
+	})
+}

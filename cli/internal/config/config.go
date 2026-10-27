@@ -33,6 +33,7 @@ type Reviewer struct {
 type API struct {
 	BaseURL string `json:"base_url,omitempty"`
 	KeyEnv  string `json:"key_env,omitempty"`
+	Tools   string `json:"tools,omitempty"`
 }
 
 // Load reads the global settings. A missing file contributes no overrides and is

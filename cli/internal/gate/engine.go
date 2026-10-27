@@ -178,7 +178,7 @@ func (e *Engine) review(ctx context.Context, req Request, p prepared) PanelResul
 	contextBlock := BuildContext(e.cfg, req.Repo, ChangedSymbols(p.diff, p.paths), p.paths)
 	prompt := BuildReviewPrompt(
 		NeutralizeTags(req.Message), NeutralizeTags(p.diff), contextBlock, req.addendum)
-	return e.panel.Run(ctx, prompt, req.Repo)
+	return e.panel.Run(ctx, prompt, req.Repo, req.Spec)
 }
 
 // Handle rules on one commit.

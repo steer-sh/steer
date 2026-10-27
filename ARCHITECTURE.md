@@ -415,9 +415,21 @@ permissions are its only boundary. In print mode agy denies any tool call that n
 allow rule names, because it cannot prompt, so an allow rule the operator keeps for
 interactive use applies to every review.
 
-The `openai-compatible` provider (`reviewers/chatapi.go`) runs no process: it sends
-the rendered prompt in one `POST {base_url}/chat/completions` and reads no file, so
-the prompt is its whole review input. It has no default model. `Resolve` refuses it
+The `openai-compatible` provider (`reviewers/chatapi.go`) runs no process. With
+`reviewer.api.tools` off (the default) it sends the rendered prompt in one
+`POST {base_url}/chat/completions` and reads no file, so the prompt is its whole
+review input. With `auto` or `required` it is a `gate.ViewReviewer`: the panel builds
+one `CommitView` per round from the round's `DiffSpec`, and the reviewer runs a tool
+loop whose `read_file`, `grep` and `list_files` (`reviewers/viewtools.go`) read that
+view, so a file reads as the commit lands it: the working copy where the command
+stages it, the index blob everywhere else, so an unstaged edit the commit leaves out
+is never what a tool returns. The CLI reviewers read the disk. The loop's call, turn and byte caps hold inside the review
+timeout; past them one request without tools asks for the review, and a reply that
+still calls tools is `tool_budget`. Under `auto` a first-request 4xx that names tools
+repeats the request once without them; under `required` it fails the run. Each run's
+token usage and tool use (the mode that ran, calls, refusals, bytes, files read) go
+to the row as `reviewer_api_runs`, and the instrument records a mode other than off
+as `tools`. It has no default model. `Resolve` refuses it
 without a base URL or a model; the key is read at review time, so a missing key is a
 `no_key` run outcome in the ledger rather than a gate that fails open with no row.
 The key comes from the variable `reviewer.api.key_env` names, when it is non-empty

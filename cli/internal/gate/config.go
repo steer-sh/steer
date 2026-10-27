@@ -32,6 +32,8 @@ type Config struct {
 	// provider; every other provider ignores them.
 	ReviewerAPIBaseURL string
 	ReviewerAPIKeyEnv  string
+	// ReviewerAPITools is the tool mode: off, auto or required; "" is off.
+	ReviewerAPITools string
 	// ReviewerEndpoint is the host an API reviewer sends to, which the instrument
 	// records. It is the reviewer's own answer, "" for a CLI reviewer.
 	ReviewerEndpoint string
@@ -167,6 +169,9 @@ func WithFile(c Config, file steerconfig.Config) Config {
 	}
 	if v := strings.TrimSpace(file.Reviewer.API.KeyEnv); v != "" {
 		c.ReviewerAPIKeyEnv = v
+	}
+	if v := strings.TrimSpace(file.Reviewer.API.Tools); v != "" {
+		c.ReviewerAPITools = v
 	}
 	return c
 }

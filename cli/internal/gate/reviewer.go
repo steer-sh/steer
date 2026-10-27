@@ -34,6 +34,8 @@ const (
 	OutcomeAuth        RunOutcome = "auth"
 	OutcomeRateLimited RunOutcome = "rate_limited"
 	OutcomeNoKey       RunOutcome = "no_key"
+	// tool_budget is a tool loop that spent its caps and still gave no review.
+	OutcomeToolBudget RunOutcome = "tool_budget"
 	// unreachable is a request that got no HTTP reply: refused, DNS, TLS.
 	OutcomeUnreachable RunOutcome = "unreachable"
 )
@@ -45,7 +47,35 @@ type ReviewRun struct {
 	Detail  string
 	// ResponseModel is the model the provider says answered, "" when it says none.
 	ResponseModel string
+	// Usage and Tools are what an API run reported and did; nil for a CLI run.
+	Usage *TokenUsage
+	Tools *ToolUse
 }
+
+// TokenUsage sums the tokens an endpoint reported over one run's requests.
+type TokenUsage struct {
+	Prompt     int `json:"prompt_tokens"`
+	Completion int `json:"completion_tokens"`
+	// Reasoning is the part of Completion the endpoint reports as reasoning.
+	Reasoning int `json:"reasoning_tokens,omitempty"`
+}
+
+// ToolUse is what one run's tool loop did.
+type ToolUse struct {
+	// Mode is what ran: "tools", or "none" when auto fell back or no view existed.
+	Mode string `json:"mode"`
+	// Fallback says why an auto run sent no tools.
+	Fallback string `json:"fallback,omitempty"`
+	Turns    int    `json:"turns"`
+	Calls    int    `json:"calls"`
+	Refused  int    `json:"refused,omitempty"`
+	Bytes    int    `json:"bytes"`
+	// Files are the paths read_file read, in order, at most MaxToolFiles.
+	Files []string `json:"files,omitempty"`
+}
+
+// MaxToolFiles bounds the read_file paths one run's ledger entry lists.
+const MaxToolFiles = 50
 
 // RawRun is what a Reviewer returns before outcome classification: the model's reply,
 // the provider's own status and error strings, and how the process ended.
@@ -61,6 +91,8 @@ type RawRun struct {
 	// route a configured name to another model, so this is recorded beside the
 	// configured one rather than in place of it.
 	ResponseModel string
+	Usage         *TokenUsage
+	Tools         *ToolUse
 }
 
 // Reviewer runs one red-team pass over a prompt. Implementations live in
@@ -84,6 +116,21 @@ type EndpointReviewer interface {
 	Endpoint() string
 }
 
+// ViewReviewer is a Reviewer that can read the commit's files through a CommitView.
+type ViewReviewer interface {
+	// WantsView reports whether this configuration reads files, so a view is built
+	// only for a reviewer that uses it.
+	WantsView() bool
+	// ReviewView is Review with the view; view is nil when git could not build one.
+	ReviewView(ctx context.Context, prompt, cwd string, view *CommitView) RawRun
+}
+
+// wantsView reports whether r reads files through a view.
+func wantsView(r Reviewer) (ViewReviewer, bool) {
+	v, ok := r.(ViewReviewer)
+	return v, ok && v.WantsView()
+}
+
 // EndpointOf is the host a reviewer sends to, "" for one that runs a CLI.
 func EndpointOf(r Reviewer) string {
 	if e, ok := r.(EndpointReviewer); ok {
@@ -99,6 +146,7 @@ func EndpointOf(r Reviewer) string {
 func Classify(raw RawRun) ReviewRun {
 	run := classify(raw)
 	run.ResponseModel = raw.ResponseModel
+	run.Usage, run.Tools = raw.Usage, raw.Tools
 	return run
 }
 
@@ -160,8 +208,16 @@ type PanelResult struct {
 	Runs     []ReviewRun
 }
 
-// Run fires the panel.
-func (p *Panel) Run(ctx context.Context, prompt, cwd string) PanelResult {
+// Run fires the panel. spec selects the commit view for a reviewer that reads
+// files; the view is built once and shared, since a run only reads it.
+func (p *Panel) Run(ctx context.Context, prompt, cwd string, spec DiffSpec) PanelResult {
+	review := p.reviewer.Review
+	if vr, ok := wantsView(p.reviewer); ok {
+		view, _ := NewCommitView(p.cfg, cwd, spec)
+		review = func(ctx context.Context, prompt, cwd string) RawRun {
+			return vr.ReviewView(ctx, prompt, cwd, view)
+		}
+	}
 	runs := make([]ReviewRun, p.cfg.ReviewerRuns)
 	var wg sync.WaitGroup
 	for i := range runs {
@@ -170,7 +226,7 @@ func (p *Panel) Run(ctx context.Context, prompt, cwd string) PanelResult {
 			defer wg.Done()
 			runCtx, cancel := context.WithTimeout(ctx, p.cfg.ReviewTimeout)
 			defer cancel()
-			runs[i] = Classify(p.reviewer.Review(runCtx, prompt, cwd))
+			runs[i] = Classify(review(runCtx, prompt, cwd))
 		}(i)
 	}
 	wg.Wait()
@@ -212,7 +268,33 @@ func ReviewerReport(cfg Config, runs []ReviewRun) Row {
 	if len(models) > 0 {
 		row["reviewer_response_models"] = models
 	}
+	if api := apiRuns(runs); api != nil {
+		row["reviewer_api_runs"] = api
+	}
 	return row
+}
+
+// apiRuns lists each run's token usage and tool use, in run order, or nil when no run
+// reported either.
+func apiRuns(runs []ReviewRun) []Row {
+	var out []Row
+	reported := false
+	for _, run := range runs {
+		entry := Row{"outcome": string(run.Outcome)}
+		if run.Usage != nil {
+			entry["usage"] = *run.Usage
+			reported = true
+		}
+		if run.Tools != nil {
+			entry["tools"] = *run.Tools
+			reported = true
+		}
+		out = append(out, entry)
+	}
+	if !reported {
+		return nil
+	}
+	return out
 }
 
 // ReviewerTrouble is one line naming why runs did not answer, for the operator channel.
