@@ -57,6 +57,31 @@ func TestTrialFailureSaysCommitsGoUnreviewed(t *testing.T) {
 	}
 }
 
+// TestTrialToolFallbackIsShown: an auto run that the endpoint answered without tools
+// still passes, but says that it read only the diff, and why.
+func TestTrialToolFallbackIsShown(t *testing.T) {
+	cfg := gate.Defaults()
+	cfg.ReviewerProvider = reviewers.APIProviderID
+	fallback := "HTTP 400 Function tools with reasoning_effort are not supported"
+	out, ok := renderTrial(gate.TrialResult{Run: gate.ReviewRun{Text: "NO FINDINGS", Outcome: gate.OutcomeOK,
+		Tools: &gate.ToolUse{Mode: "none", Fallback: fallback}}}, cfg)
+	flat := strings.Join(strings.Fields(out), " ")
+	if !ok || !strings.Contains(flat, "read only the diff") || !strings.Contains(flat, fallback) {
+		t.Errorf("ok = %v, output = %q; want the fallback and its reason", ok, flat)
+	}
+	out, _ = renderTrial(gate.TrialResult{Run: gate.ReviewRun{Text: "NO FINDINGS", Outcome: gate.OutcomeOK,
+		Tools: &gate.ToolUse{Mode: "none", Fallback: reviewers.NoViewFallback}}}, cfg)
+	flat = strings.Join(strings.Fields(out), " ")
+	if strings.Contains(flat, "endpoint refused") || !strings.Contains(flat, "no commit view") {
+		t.Errorf("output = %q; want the missing view named, not the endpoint", flat)
+	}
+	out, _ = renderTrial(gate.TrialResult{Run: gate.ReviewRun{Text: "NO FINDINGS", Outcome: gate.OutcomeOK,
+		Tools: &gate.ToolUse{Mode: "tools", Calls: 2}}}, cfg)
+	if strings.Contains(out, "refused") {
+		t.Errorf("output = %q; names a fallback for a run that used tools", out)
+	}
+}
+
 // TestTrialFailureOfAnAPIReviewerNamesItsSettings: an API reviewer has no CLI to
 // sign in, so its hint names the base URL, the model and the key source.
 func TestTrialFailureOfAnAPIReviewerNamesItsSettings(t *testing.T) {

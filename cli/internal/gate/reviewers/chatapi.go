@@ -277,6 +277,10 @@ func (c *ChatAPI) once(ctx context.Context, prompt, key string, usage *gate.Toke
 	return finalRun(parsed)
 }
 
+// NoViewFallback is the fallback reason of a run that had no commit view, so it
+// offered the endpoint no tools.
+const NoViewFallback = "git could not build the commit view"
+
 // converse is the tool loop. Each turn that calls tools gets every call answered; a
 // turn without calls ends the run through finalRun. After the caps, one request
 // without tools asks for the review, and a reply that still calls tools is
@@ -286,10 +290,10 @@ func (c *ChatAPI) converse(ctx context.Context, prompt, key string, view *gate.C
 		if c.Tools == "required" {
 			return gate.RawRun{Outcome: gate.OutcomeExit,
 				Detail: "reviewer.api.tools is required, and git could not build the commit view",
-				Tools:  &gate.ToolUse{Mode: "none", Fallback: "git could not build the commit view"}}
+				Tools:  &gate.ToolUse{Mode: "none", Fallback: NoViewFallback}}
 		}
 		run := c.once(ctx, prompt, key, usage)
-		run.Tools = &gate.ToolUse{Mode: "none", Fallback: "git could not build the commit view"}
+		run.Tools = &gate.ToolUse{Mode: "none", Fallback: NoViewFallback}
 		return run
 	}
 	use := &gate.ToolUse{Mode: "tools"}

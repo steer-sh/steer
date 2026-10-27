@@ -292,10 +292,18 @@ func renderTrial(r gate.TrialResult, cfg gate.Config) (string, bool) {
 		} else if r.Findings > 1 {
 			found = fmt.Sprintf("%d findings", r.Findings)
 		}
-		return styles.SuccessBox.Render(fmt.Sprintf(
+		text := styles.SuccessBox.Render(fmt.Sprintf(
 			"The reviewer answered in %s with %s on the sample diff.\n"+
 				"Each commit review runs it %d times in parallel.",
-			r.Elapsed.Round(time.Second), found, cfg.ReviewerRuns)) + "\n", true
+			r.Elapsed.Round(time.Second), found, cfg.ReviewerRuns)) + "\n"
+		if t := r.Run.Tools; t != nil && t.Fallback == reviewers.NoViewFallback {
+			text += styles.Wrap("The trial's sample repository had no commit view, so this run read only the diff. "+
+				"So this test does not show whether the endpoint accepts the tools.", "  ", styles.Width())
+		} else if t != nil && t.Fallback != "" {
+			text += styles.Wrap("The endpoint refused the request that offered file tools, so this run read only the diff. Endpoint: "+truncateDetail(t.Fallback, 400), "  ", styles.Width()) +
+				styles.Wrap("Some endpoints refuse tools together with reasoning; a lower reviewer.effort can let them through.", "  ", styles.Width())
+		}
+		return text, true
 	}
 	width := styles.Width()
 	detail := string(r.Run.Outcome)
