@@ -165,13 +165,20 @@ model provider the router picks.
    "${STEER_BIN}" reviewer key status
    ```
 
-Leave `reviewer.api.tools` unset (off) unless the user asks for it. With `auto` or
-`required` the reviewer can read further files of the commit beyond the diff, and each
-file it reads also goes to the endpoint and adds a request:
+Offer file tools, and let the user decide. With `reviewer.api.tools` set to `auto`, the
+reviewer can read further files of the commit beyond the diff, so it can find a defect
+that the diff alone does not show. Say what that costs before you write the setting:
+each file it reads also goes to the endpoint, and each turn sends the conversation again,
+so a review can use many times the input tokens of a diff-only review. Leave the setting
+unset (off) if the user declines:
 
 ```bash
 "${STEER_BIN}" config set reviewer.api.tools auto
 ```
+
+A model can answer empty after a tool call. An `empty` count in `reviewer_outcomes` on
+real commits means that this model does not suit tools: choose another model or turn
+tools off.
 
 Step 5 runs `commit-gate test-reviewer` as for every reviewer. A pass there proves
 the endpoint, the model and the key from this agent's shell. The gate runs in the
