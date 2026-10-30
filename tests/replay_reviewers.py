@@ -11,7 +11,10 @@
           needs an exported sandbox login, as in tests/sandbox.py. The
           openai-compatible provider needs --base-url; its key comes from the
           variable --key-env names, passed through on purpose, or else from a copy
-          of the operator's key file.
+          of the operator's key file. --tools sets its tool mode, and
+          --whole-diffs-only leaves out rounds whose saved diff lacks a changed file
+          (budget cut, excluded generated file, binary), where a tool reads it at
+          its base version.
   tally   Count, per output, which panel runs matched each marker regex in a
           markers JSON {"accepted": {name: regex}, "rejected": {name: regex}}.
 """
@@ -36,13 +39,15 @@ STATE = Path.home() / ".steer" / "state" / "commit-review"
 REVIEW_PHASES = ("deny", "clean", "cap")
 
 
-def api_setup(home, base_url, key_env, environ=os.environ, key_file=None):
+def api_setup(home, base_url, key_env, environ=os.environ, key_file=None, tools=None):
     """Write the openai-compatible reviewer's settings into a sandbox home and return
     the environment the run adds: the one key variable, or nothing when the key file
     is copied instead."""
     api = {"base_url": base_url}
     if key_env:
         api["key_env"] = key_env
+    if tools:
+        api["tools"] = tools
     config = Path(home) / ".steer" / "config.json"
     config.parent.mkdir(parents=True, exist_ok=True)
     config.write_text(json.dumps({"reviewer": {"api": api}}, indent=2) + "\n")
@@ -163,6 +168,13 @@ def elision(diff_text):
     return ""
 
 
+def whole_diff(diff_text):
+    """Whether staging diff_text lands every changed file: no budget cut, no excluded
+    generated file, no binary section."""
+    preamble = diff_text.split("diff --git ", 1)[0]
+    return not (elision(diff_text) or "[Excluded from the diff below" in preamble or binary_paths(diff_text))
+
+
 def run(args):
     rounds = read_rounds(args.rounds)
     out = args.out.resolve()
@@ -191,7 +203,7 @@ def run(args):
         env.update(GIT_CONFIG_GLOBAL=str(box.gitconfig), GIT_CONFIG_NOSYSTEM="1")
         if args.provider == "openai-compatible":
             # After the filter above, so a key variable named STEER_* still passes.
-            env.update(api_setup(box.home, args.base_url, args.key_env))
+            env.update(api_setup(box.home, args.base_url, args.key_env, tools=args.tools))
         diffs = args.diffs.resolve()
         for chain, firing, base, diff_file, subject in rounds:
             label = "%s r%s" % (chain, firing)
@@ -199,6 +211,9 @@ def run(args):
             text = diff.read_text(errors="replace")
             elided = elision(text)
             binaries = binary_paths(text)
+            if args.whole_diffs_only and not whole_diff(text):
+                print("%s left out: staging its saved diff lands only part of the commit" % label, file=sys.stderr)
+                continue
             if elided == "stat only":
                 failed += 1
                 print("%s skipped: the saved diff is %s" % (label, elided), file=sys.stderr)
@@ -289,6 +304,10 @@ def main(argv=None):
     p.add_argument("--provider", required=True, choices=("agy", "claude-code", "codex", "openai-compatible"))
     p.add_argument("--base-url", help="the endpoint, for --provider openai-compatible")
     p.add_argument("--key-env", help="the variable holding the API key, passed into the sandbox")
+    p.add_argument("--tools", choices=("off", "auto", "required"),
+                   help="reviewer.api.tools, for --provider openai-compatible")
+    p.add_argument("--whole-diffs-only", action="store_true",
+                   help="leave out rounds whose staged tree lacks a changed file")
     p.add_argument("--model", required=True)
     p.add_argument("--effort", required=True, help="'' for the provider's own")
     p.add_argument("--runs", type=int, default=3)

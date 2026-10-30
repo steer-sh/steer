@@ -141,6 +141,22 @@ class StageTest(unittest.TestCase):
         self.assertIn('"a/caf\\303\\251.png"', text)
         self.assertEqual(replay_reviewers.binary_paths(text), ["café.png"])
 
+    def test_api_setup_writes_the_tool_mode(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            source = home / "key"
+            source.write_text("k")
+            replay_reviewers.api_setup(home, "https://x.example/v1", None, key_file=source, tools="auto")
+            config = json.loads((home / ".steer" / "config.json").read_text())
+            self.assertEqual(config["reviewer"]["api"]["tools"], "auto")
+
+    def test_whole_diff_refuses_each_kind_of_absent_file(self):
+        body = "diff --git a/x b/x\n+[diff is quoted]\n"
+        self.assertTrue(replay_reviewers.whole_diff(body))
+        for head in ("[The review harness dropped 1 file(s)]\n", "[Excluded from the diff below]\n"):
+            self.assertFalse(replay_reviewers.whole_diff(head + body))
+        self.assertFalse(replay_reviewers.whole_diff(body + "Binary files a/y.png and b/y.png differ\n"))
+
     def test_elision_names_what_the_budget_left_out(self):
         self.assertEqual(replay_reviewers.elision("[diff is 90000 chars — too large"), "stat only")
         self.assertIn("dropped", replay_reviewers.elision("[The review harness dropped 2 file(s)"))
