@@ -424,7 +424,8 @@ loop whose `read_file`, `grep` and `list_files` (`reviewers/viewtools.go`) read 
 view, so a file reads as the commit lands it: the working copy where the command
 stages it, the index blob everywhere else, so an unstaged edit the commit leaves out
 is never what a tool returns. The CLI reviewers read the disk. The loop's call, turn and byte caps hold inside the review
-timeout; past them one request without tools asks for the review, and a reply that
+timeout; an assistant turn goes back with the `reasoning` and `reasoning_details` the
+endpoint sent, because a reasoning model can answer empty without them. Past the caps one request without tools asks for the review, and a reply that
 still calls tools is `tool_budget`. Under `auto` a first-request 4xx that names tools
 repeats the request once without them; under `required` it fails the run. Each run's
 token usage and tool use (the mode that ran, calls, refusals, bytes, files read) go

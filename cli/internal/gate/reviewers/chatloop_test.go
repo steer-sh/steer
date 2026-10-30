@@ -304,3 +304,45 @@ func TestToolLoopAsksForTheReviewOnceTheBytesAreSpent(t *testing.T) {
 		t.Errorf("run = %+v after %d requests; the second must offer no tools", raw, len(s.requests))
 	}
 }
+
+func TestChatAPILoopSendsReasoningBackOnTheAssistantTurn(t *testing.T) {
+	first := `{"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","content":null,` +
+		`"reasoning":"look at a.go","reasoning_details":[{"type":"reasoning.text","text":"look at a.go"}],` +
+		`"tool_calls":[{"id":"c1","type":"function","function":{"name":"list_files","arguments":"{}"}}]}}]}`
+	srv, s := scriptedServer(t, ok(first), ok(reply("stop", "NO FINDINGS")))
+	raw := loopReviewer(srv.URL, "required").ReviewView(context.Background(), "p", "", loopView(t))
+	if raw.Response != "NO FINDINGS" {
+		t.Fatalf("run = %+v", raw)
+	}
+	assistant := s.requests[1]["messages"].([]any)[2].(map[string]any)
+	if assistant["reasoning"] != "look at a.go" {
+		t.Errorf("reasoning = %v", assistant["reasoning"])
+	}
+	details, _ := assistant["reasoning_details"].([]any)
+	if len(details) != 1 || details[0].(map[string]any)["type"] != "reasoning.text" {
+		t.Errorf("reasoning_details = %v", assistant["reasoning_details"])
+	}
+}
+
+func TestChatAPILoopSendsNoReasoningFieldsTheEndpointDidNotFill(t *testing.T) {
+	first := `{"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","content":null,` +
+		`"reasoning":null,` +
+		`"tool_calls":[{"id":"c1","type":"function","function":{"name":"list_files","arguments":"{}"}}]}}]}`
+	srv, s := scriptedServer(t, ok(first), ok(reply("stop", "NO FINDINGS")))
+	loopReviewer(srv.URL, "required").ReviewView(context.Background(), "p", "", loopView(t))
+	assistant := s.requests[1]["messages"].([]any)[2].(map[string]any)
+	for _, field := range []string{"reasoning", "reasoning_details"} {
+		if _, sent := assistant[field]; sent {
+			t.Errorf("%s was sent: %v", field, assistant[field])
+		}
+	}
+}
+
+func TestChatAPISystemPromptOpensTheFilesTheDiffBudgetHid(t *testing.T) {
+	srv, s := scriptedServer(t, ok(reply("stop", "NO FINDINGS")))
+	loopReviewer(srv.URL, "required").ReviewView(context.Background(), "p", "", loopView(t))
+	system := s.requests[0]["messages"].([]any)[0].(map[string]any)["content"].(string)
+	if !strings.Contains(system, "hunks are not visible") || !strings.Contains(system, "a defect in this commit's change") {
+		t.Errorf("system prompt = %q", system)
+	}
+}

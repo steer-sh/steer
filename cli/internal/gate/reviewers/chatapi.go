@@ -164,6 +164,9 @@ type chatMessage struct {
 	Content    *string    `json:"content"`
 	ToolCalls  []toolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
+	// Reasoning and ReasoningDetails go back on an assistant turn as the endpoint sent them.
+	Reasoning        json.RawMessage `json:"reasoning,omitempty"`
+	ReasoningDetails json.RawMessage `json:"reasoning_details,omitempty"`
 }
 
 func textMessage(role, text string) chatMessage {
@@ -195,8 +198,10 @@ type chatResponse struct {
 	Choices []struct {
 		FinishReason string `json:"finish_reason"`
 		Message      struct {
-			Content   json.RawMessage `json:"content"`
-			ToolCalls []toolCall      `json:"tool_calls"`
+			Content          json.RawMessage `json:"content"`
+			ToolCalls        []toolCall      `json:"tool_calls"`
+			Reasoning        json.RawMessage `json:"reasoning"`
+			ReasoningDetails json.RawMessage `json:"reasoning_details"`
 		} `json:"message"`
 	} `json:"choices"`
 	Usage *struct {
@@ -222,7 +227,10 @@ const (
 // is unchanged, so the prompt digest still names it.
 const toolsSystemPrompt = "You can call read_file, grep and list_files to read the repository " +
 	"as this commit lands it. Read only what the review needs, then answer in the format " +
-	"the user message asks for."
+	"the user message asks for. A note in the diff that a file's hunks are not visible, or that " +
+	"forbids a finding about that file, describes the diff text only: you can read that file " +
+	"with the tools. Its contents include code this commit did not change, so raise a finding " +
+	"on it only when what you read shows a defect in this commit's change."
 
 // budgetSpentPrompt asks for the review once the tool caps are reached.
 const budgetSpentPrompt = "The tool budget of this review is spent. Give the review now, " +
@@ -345,7 +353,8 @@ func (c *ChatAPI) converse(ctx context.Context, prompt, key string, view *gate.C
 				Detail: fmt.Sprintf("the model asked for %d tool calls in one turn", len(calls))}
 		}
 		use.Turns++
-		assistant := chatMessage{Role: "assistant", ToolCalls: echoed(calls)}
+		assistant := chatMessage{Role: "assistant", ToolCalls: echoed(calls),
+			Reasoning: sentValue(choice.Message.Reasoning), ReasoningDetails: sentValue(choice.Message.ReasoningDetails)}
 		if text, ok := messageText(choice.Message.Content); ok && text != "" {
 			assistant.Content = &text
 		}
@@ -390,6 +399,14 @@ func echoed(calls []toolCall) []toolCall {
 		out[i].Function.Arguments = text
 	}
 	return out
+}
+
+// sentValue is raw, or nil for a JSON null, which then stays out of the next request.
+func sentValue(raw json.RawMessage) json.RawMessage {
+	if string(raw) == "null" {
+		return nil
+	}
+	return raw
 }
 
 // refusesTools reads a first-request failure as the endpoint refusing the tools
@@ -560,11 +577,27 @@ func errorMessage(data []byte, key string) string {
 	if json.Unmarshal(data, &body) != nil {
 		return ""
 	}
-	msg := redact(strings.Join(strings.Fields(body.Error.Message), " "), key)
+	msg := redactMasked(redact(strings.Join(strings.Fields(body.Error.Message), " "), key), key)
 	if len(msg) > maxErrorChars {
 		msg = strings.ToValidUTF8(msg[:maxErrorChars], "") + "…"
 	}
 	return msg
+}
+
+// redactMasked replaces each word of a single-spaced message that holds the start of
+// the key, or a mask character and the end of the key. An end alone can be a plain word.
+func redactMasked(text, key string) string {
+	if len(key) < 12 {
+		return text
+	}
+	words := strings.Split(text, " ")
+	for i, word := range words {
+		masked := strings.ContainsAny(word, "*…") || strings.Contains(word, "...")
+		if strings.Contains(word, key[:6]) || (masked && strings.Contains(word, key[len(key)-4:])) {
+			words[i] = "[redacted]"
+		}
+	}
+	return strings.Join(words, " ")
 }
 
 // redact removes the key from a string that leaves the adapter.

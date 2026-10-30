@@ -335,3 +335,25 @@ func TestChatAPIKeepsTheKeyOutOfTheResponse(t *testing.T) {
 		}
 	}
 }
+
+func TestChatAPIKeepsAWordThatOnlyEndsLikeTheKey(t *testing.T) {
+	word := "build" + testKey[len(testKey)-4:]
+	body, _ := json.Marshal(map[string]any{"error": map[string]any{"message": word + " does not support tools"}})
+	srv, _, _ := chatServer(t, 400, string(body))
+	raw := chatReviewer(srv.URL).Review(context.Background(), "p", "")
+	if want := "HTTP 400 " + word + " does not support tools"; raw.Detail != want {
+		t.Errorf("Detail = %q, want %q", raw.Detail, want)
+	}
+}
+
+func TestChatAPIKeepsAMaskedKeyOutOfEveryDetail(t *testing.T) {
+	masked := testKey[:6] + "***" + testKey[len(testKey)-4:]
+	for _, msg := range []string{"invalid key " + masked + " for this model", "invalid key ****" + testKey[len(testKey)-4:] + " for this model"} {
+		body, _ := json.Marshal(map[string]any{"error": map[string]any{"message": msg}})
+		srv, _, _ := chatServer(t, 400, string(body))
+		raw := chatReviewer(srv.URL).Review(context.Background(), "p", "")
+		if want := "HTTP 400 invalid key [redacted] for this model"; raw.Detail != want {
+			t.Errorf("Detail = %q, want %q", raw.Detail, want)
+		}
+	}
+}
