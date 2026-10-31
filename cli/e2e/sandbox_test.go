@@ -66,7 +66,7 @@ func exe(name string) string {
 }
 
 // Sandbox is one case's home, repository and PATH. Nothing in it reads the
-// operator's environment except the locations of git, python3, sh and bash.
+// operator's environment except the locations of git, python3, sh, bash and dirname.
 type Sandbox struct {
 	t     *testing.T
 	Root  string
@@ -140,7 +140,7 @@ func NewSandbox(t *testing.T, opts ...SandboxOption) *Sandbox {
 			t.Fatal(err)
 		}
 	}
-	for _, name := range append([]string{"git", "python3", "sh", "bash"}, o.tools...) {
+	for _, name := range append([]string{"git", "python3", "sh", "bash", "dirname"}, o.tools...) {
 		real, err := exec.LookPath(name)
 		if err != nil {
 			t.Fatalf("e2e needs %s on PATH: %v", name, err)
