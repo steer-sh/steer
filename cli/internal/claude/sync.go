@@ -207,7 +207,13 @@ func SyncStore(scope string, targets ...harness.Registrar) (*SyncResult, error) 
 		if err != nil {
 			return nil, err
 		}
-		register := len(hooks) > 0 && !SamePath(registered, registration)
+		stale := false
+		if reader, ok := target.(masterCommandStaleReader); ok {
+			if stale, err = reader.MasterCommandStale(scope); err != nil {
+				return nil, err
+			}
+		}
+		register := len(hooks) > 0 && (stale || !SamePath(registered, registration))
 		deregister := len(hooks) == 0 && registered != ""
 		presence, readErr := TargetRulesPresence(scope, target)
 		rewrite := readErr != nil || presence.Drifted()
@@ -233,6 +239,12 @@ func SyncStore(scope string, targets ...harness.Registrar) (*SyncResult, error) 
 		}
 	}
 	return result, nil
+}
+
+// masterCommandStaleReader is implemented by a harness whose registered command can
+// name the right master in a form that needs a rewrite.
+type masterCommandStaleReader interface {
+	MasterCommandStale(scope string) (bool, error)
 }
 
 // SamePath reports whether two master paths name one file. A project path is

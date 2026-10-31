@@ -337,10 +337,14 @@ func GetMasterHookPath(scope string) (string, error) {
 	return hookstore.MasterPath(scope)
 }
 
+// projectDirPrefix anchors a project registration at the directory holding the
+// .claude that carries it. Claude Code sets the variable for every hook.
+const projectDirPrefix = "$CLAUDE_PROJECT_DIR/"
+
 // GetMasterHookCommand returns the settings.json command value for the master hook.
 // Project scope names the master relative to the settings.json that carries it,
-// which Claude Code reads at the working directory, so the registration carries no
-// absolute path of this machine.
+// anchored by projectDirPrefix because a hook runs in the session's current
+// directory, so the registration carries no absolute path of this machine.
 func GetMasterHookCommand(scope string) (string, error) {
 	scope = normalizeScope(scope)
 	if err := ValidateScope(scope); err != nil {
@@ -358,6 +362,11 @@ func GetMasterHookCommand(scope string) (string, error) {
 	masterPath = filepath.ToSlash(masterPath)
 	if err := shellword.Encodable(masterPath); err != nil {
 		return "", fmt.Errorf("cannot register the guard master: %w", err)
+	}
+	if scope == ProjectScope && !filepath.IsAbs(masterPath) {
+		// The relative part holds only "..", .steer or .claude, and hooks, so the
+		// double quotes expand the variable and protect the directory it names.
+		return fmt.Sprintf(`python3 "%s%s"`, projectDirPrefix, masterPath), nil
 	}
 	return fmt.Sprintf("python3 %s", shellword.Quote(masterPath)), nil
 }
@@ -552,6 +561,33 @@ func RegisterMasterHook(scope string) error {
 
 	settings.Hooks.PreToolUse = updatedEntries
 	return SaveSettings(scope, settings)
+}
+
+// MasterCommandStale reports a project registration that names the store's master
+// in a form other than the one GetMasterHookCommand writes. A path comparison
+// cannot see it: the bare relative form and the anchored form read as one path.
+func MasterCommandStale(scope string) (bool, error) {
+	scope = normalizeScope(scope)
+	if scope != ProjectScope {
+		return false, nil
+	}
+	command, err := Registrar{}.RegisteredMasterCommand(scope)
+	if err != nil || command == "" {
+		return false, err
+	}
+	registered := registeredMasterPath(command)
+	current, err := hookstore.MasterRegistration(scope, "")
+	if err != nil {
+		return false, err
+	}
+	if !SamePath(registered, current) {
+		return false, nil
+	}
+	want, err := GetMasterHookCommand(scope)
+	if err != nil {
+		return false, err
+	}
+	return command != want, nil
 }
 
 // RemoveMasterHook removes steer master hook commands and preserves non-steer hooks.

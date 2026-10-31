@@ -87,7 +87,9 @@ migration ownership:
   `hookstore.MasterRegistration` is what a registration names: relative to the
   directory holding the harness config, because a harness resolves a project
   registration against that directory. A comparison against a registered value uses
-  it on both sides. Each resolver has an `…In`/`…Of` form taking that directory, so
+  it on both sides. Claude Code runs a hook in the session's current directory, which
+  a `cd` moves, so its command prefixes the path with `$CLAUDE_PROJECT_DIR` and
+  `Registrar.RegisteredMasterPath` removes the prefix on read. Each resolver has an `…In`/`…Of` form taking that directory, so
   a registrar handed another checkout resolves that checkout's store rather than
   the process's.
   `steerpath.ProjectHooksRel` is the repository-relative path a git object read or
