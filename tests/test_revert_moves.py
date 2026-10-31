@@ -44,11 +44,14 @@ class Moves(unittest.TestCase):
         git(self.work, "-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false",
             "commit", "-qm", "base")
 
-    def run_check(self):
+    def run_python(self, *args):
         env = {k: v for k, v in os.environ.items()
                if k not in ("REVERT_TEST_BASE", "GITHUB_ACTIONS", "GOFLAGS")}
-        return subprocess.run([sys.executable, str(REVERT_TEST)], cwd=self.work, env=env,
+        return subprocess.run([sys.executable, *args], cwd=self.work, env=env,
                               capture_output=True, text=True)
+
+    def run_check(self):
+        return self.run_python(str(REVERT_TEST))
 
     def assertNothingNew(self, result):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -204,8 +207,7 @@ class Moves(unittest.TestCase):
         load = ("import importlib.util,sys;s=importlib.util.spec_from_file_location('r',%r);"
                 "m=importlib.util.module_from_spec(s);s.loader.exec_module(m);m.BUDGET=0;"
                 "sys.exit(m.main())" % str(REVERT_TEST))
-        result = subprocess.run([sys.executable, "-c", load], cwd=self.work, capture_output=True,
-                                text=True)
+        result = self.run_python("-c", load)
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertIn("incomplete", result.stderr)
         self.assertIn("Undecided: p: TestFoo", result.stderr)
