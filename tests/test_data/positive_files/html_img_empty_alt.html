@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Images With Empty Alt Attributes</title>
+</head>
+<body>
+    <header>
+        <h1>News Website</h1>
+        <!-- Bad: img tag with empty alt attribute -->
+        <img src="news-logo.png" alt="" class="logo">
+    </header>
+    
+    <main>
+        <article>
+            <h2>Breaking News Story</h2>
+            <!-- Bad: news image with empty alt -->
+            <img src="breaking-news.jpg" alt="">
+            <p>This is an important news story that requires description.</p>
+        </article>
+        
+        <aside class="sidebar">
+            <h3>Weather</h3>
+            <!-- Bad: weather icon with empty alt -->
+            <img src="weather/sunny.png" alt="" width="50" height="50">
+            <p>Sunny, 75°F</p>
+            
+            <h3>Advertisement</h3>
+            <!-- Bad: ad image with empty alt -->
+            <img src="ads/special-offer.jpg" alt="" class="ad-banner">
+        </aside>
+        
+        <section class="gallery">
+            <h2>Photo Gallery</h2>
+            <!-- Bad: gallery images with empty alt attributes -->
+            <img src="gallery/photo1.jpg" alt="" class="gallery-item">
+            <img src="gallery/photo2.jpg" alt="" class="gallery-item">
+            <img src="gallery/photo3.jpg" alt="" class="gallery-item">
+            <img src="gallery/photo4.jpg" alt="" class="gallery-item">
+        </section>
+        
+        <section class="social">
+            <h2>Follow Us</h2>
+            <!-- Bad: social media icons with empty alt -->
+            <a href="#"><img src="icons/facebook.png" alt=""></a>
+            <a href="#"><img src="icons/twitter.png" alt=""></a>
+            <a href="#"><img src="icons/instagram.png" alt=""></a>
+        </section>
+    </main>
+    
+    <footer>
+        <div class="partners">
+            <h3>Our Partners</h3>
+            <!-- Bad: partner logos with empty alt -->
+            <img src="partners/partner1.png" alt="">
+            <img src="partners/partner2.png" alt="">
+            <img src="partners/partner3.png" alt="">
+        </div>
+    </footer>
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "name": "steer",
+  "description": "Reviews your coding agent’s commits before they land and proposes checks and guards for the mistakes that keep coming back",
+  "version": "0.1.4",
+  "author": {
+    "name": "Jeremy Janzen"
+  },
+  "homepage": "https://steer.sh",
+  "repository": "https://github.com/steer-sh/steer",
+  "license": "MIT",
+  "keywords": ["code-review", "commit-review", "checks", "guards", "hooks"],
+  "skills": ["./skills/steer", "./skills/steer-report", "./skills/steer-setup"],
+  "hooks": "./hooks/hooks.json"
+}
