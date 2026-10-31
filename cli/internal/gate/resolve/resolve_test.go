@@ -1328,3 +1328,219 @@ func TestResolverChainIDJoinsInsideTheChainWindow(t *testing.T) {
 		t.Fatal("a ledger past the chain window joined by its ID")
 	}
 }
+
+// lockTestShard writes rows that resolve with no ledger, each owing a stamp.
+func lockTestShard(t *testing.T, extra ...string) gate.Config {
+	t.Helper()
+	cfg := gate.Config{StateDir: t.TempDir(), HostID: "testhost", StaleAfter: 30 * time.Minute, LogLockWait: 30 * time.Second}
+	stale := float64(ledgerRequiredTS - 1000)
+	var sb strings.Builder
+	for _, row := range []resolverRow{
+		{"phase": "deny", "ts": stale, "firing": 1},
+		{"phase": "retry", "ts": stale + 10, "deny_ts": stale, "firing": 1},
+	} {
+		line, _ := json.Marshal(row)
+		sb.Write(line)
+		sb.WriteByte('\n')
+	}
+	for _, line := range extra {
+		sb.WriteString(line + "\n")
+	}
+	if err := os.WriteFile(cfg.LogFile(), []byte(sb.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
+
+func lockTestApply(cfg gate.Config, ifDue bool, now func() float64) Result {
+	return Backfill(cfg, []Harvest{func() []LedgerMsg { return nil }},
+		BackfillOptions{Apply: true, IfDue: ifDue, Quiet: true}, nil, now)
+}
+
+func shardPhases(t *testing.T, cfg gate.Config) string {
+	t.Helper()
+	var out []string
+	for _, row := range readShard(t, cfg.LogFile()) {
+		out = append(out, pyStr(row["phase"]))
+	}
+	return strings.Join(out, ",")
+}
+
+// A run that begins while another is past its read must hold off: the first drops the
+// undecodable line, so the second's line count would skip the row appended after it.
+func TestBackfillReadsTheShardUnderTheResolverLock(t *testing.T) {
+	cfg := lockTestShard(t, "{not json")
+	const fixed = float64(2_000_000_000)
+	calls, inner := 0, Result{}
+	outer := func() float64 {
+		// The call after the run's start time is --if-due's look at the snapshot.
+		if calls++; calls == 2 {
+			inner = lockTestApply(cfg, false, func() float64 { return fixed })
+			if err := gate.NewLedger(cfg).Log(gate.Row{"phase": "chain-end"}); err != nil {
+				t.Error(err)
+			}
+		}
+		return fixed
+	}
+	res := lockTestApply(cfg, true, outer)
+	if res.Err != nil || res.Locked {
+		t.Fatalf("outer run: %+v", res)
+	}
+	if !inner.Locked {
+		t.Fatalf("a second run while the first holds its snapshot must stand down: %+v", inner)
+	}
+	if got := shardPhases(t, cfg); got != "deny,retry,chain-end" {
+		t.Fatalf("shard phases = %s", got)
+	}
+}
+
+func TestBackfillLockIsHeldNotMerelyPresent(t *testing.T) {
+	cfg := lockTestShard(t)
+	now := func() float64 { return 2_000_000_000 }
+	lock := filepath.Join(cfg.StateDir, "backfill.lock")
+	// A crashed holder leaves the file behind and holds nothing.
+	if err := os.WriteFile(lock, []byte("1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if res := lockTestApply(cfg, false, now); res.Locked || res.Changed == 0 {
+		t.Fatalf("a leftover file must not lock the resolver out: %+v", res)
+	}
+	if _, err := os.Stat(lock); err != nil {
+		t.Fatalf("the lock file stays so every run locks one inode: %v", err)
+	}
+	// A live holder excludes a run however old its file looks.
+	cfg = lockTestShard(t)
+	lock = filepath.Join(cfg.StateDir, "backfill.lock")
+	release, held, err := gate.TryLockFile(lock)
+	if err != nil || !held {
+		t.Fatalf("held=%v err=%v", held, err)
+	}
+	defer release()
+	old := time.Unix(1_000_000_000, 0)
+	if err := os.Chtimes(lock, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if res := lockTestApply(cfg, false, now); !res.Locked {
+		t.Fatalf("a held lock must stop the run: %+v", res)
+	}
+}
+
+func TestBackfillWritesNothingWhenItCannotLock(t *testing.T) {
+	now := func() float64 { return 2_000_000_000 }
+	// The resolver's lock cannot open.
+	cfg := lockTestShard(t)
+	before, _ := os.ReadFile(cfg.LogFile())
+	if err := os.Mkdir(filepath.Join(cfg.StateDir, "backfill.lock"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if res := lockTestApply(cfg, false, now); res.Err == nil {
+		t.Fatalf("an applied run with no resolver lock must report it: %+v", res)
+	}
+	if res := Backfill(cfg, nil, BackfillOptions{Quiet: true}, nil, now); res.Err != nil || res.Changed == 0 {
+		t.Fatalf("a preview needs no lock: %+v", res)
+	}
+	// The shard's lock stays held past the wait.
+	cfg = lockTestShard(t)
+	cfg.LogLockWait = 20 * time.Millisecond
+	release, err := gate.LockLog(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	if res := lockTestApply(cfg, false, now); res.Err == nil {
+		t.Fatalf("an applied run must not read past a busy shard lock: %+v", res)
+	}
+	if res := Backfill(cfg, nil, BackfillOptions{Quiet: true}, nil, now); res.Err != nil || res.Changed == 0 {
+		t.Fatalf("a preview reads through a busy shard lock: %+v", res)
+	}
+	if after, _ := os.ReadFile(cfg.LogFile()); string(after) != string(before) {
+		t.Fatalf("the shard changed:\n%s", after)
+	}
+}
+
+// A writeRows that cannot take the shard's lock leaves the shard as it was.
+func TestWriteRowsNeedsTheShardLock(t *testing.T) {
+	cfg := lockTestShard(t)
+	cfg.LogLockWait = 20 * time.Millisecond
+	before, _ := os.ReadFile(cfg.LogFile())
+	release, err := gate.LockLog(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	r := &resolver{cfg: cfg, quiet: true, now: func() float64 { return 2_000_000_000 }}
+	if err := r.writeRows([]resolverRow{{"phase": "rewritten"}}, 2); err == nil {
+		t.Fatal("a rewrite must not run without the shard lock")
+	}
+	if after, _ := os.ReadFile(cfg.LogFile()); string(after) != string(before) {
+		t.Fatalf("the shard changed:\n%s", after)
+	}
+}
+
+func setBeforeSwap(t *testing.T, hook func()) {
+	t.Helper()
+	beforeSwap = hook
+	t.Cleanup(func() { beforeSwap = func() {} })
+}
+
+// An append arriving after the rewrite read its tail waits for the rename, so it lands
+// on the new shard rather than the unlinked one.
+func TestAppendDuringRewriteLandsOnTheNewShard(t *testing.T) {
+	cfg := lockTestShard(t)
+	done := make(chan error, 1)
+	setBeforeSwap(t, func() {
+		go func() { done <- gate.NewLedger(cfg).Log(gate.Row{"phase": "chain-end"}) }()
+		select {
+		case <-done:
+			t.Error("Log finished inside the rewrite's window")
+			done <- nil
+		case <-time.After(150 * time.Millisecond):
+		}
+	})
+	res := lockTestApply(cfg, false, func() float64 { return 2_000_000_000 })
+	if res.Err != nil || res.Changed == 0 {
+		t.Fatalf("rewrite: %+v", res)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	rows := readShard(t, cfg.LogFile())
+	if got := shardPhases(t, cfg); got != "deny,retry,chain-end" {
+		t.Fatalf("shard phases = %s", got)
+	}
+	if rows[1]["backfilled"] != true {
+		t.Fatal("the rewrite's stamp is missing")
+	}
+}
+
+// An append that gave up waiting goes in unlocked; the rewrite must see it and stand
+// down, and the next run must carry it.
+func TestUnlockedAppendStopsTheSwap(t *testing.T) {
+	cfg := lockTestShard(t)
+	now := func() float64 { return 2_000_000_000 }
+	setBeforeSwap(t, func() {
+		beforeSwap = func() {}
+		f, err := os.OpenFile(cfg.LogFile(), os.O_APPEND|os.O_WRONLY, 0o644)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer f.Close()
+		f.WriteString(`{"phase":"chain-end"}` + "\n")
+	})
+	if res := lockTestApply(cfg, false, now); res.Err == nil {
+		t.Fatalf("the rewrite must refuse a shard that grew: %+v", res)
+	}
+	if _, err := os.Stat(cfg.LogFile() + ".tmp"); !os.IsNotExist(err) {
+		t.Fatalf("the refused rewrite left its temp file: %v", err)
+	}
+	if got := shardPhases(t, cfg); got != "deny,retry,chain-end" {
+		t.Fatalf("shard phases = %s", got)
+	}
+	if res := lockTestApply(cfg, false, now); res.Err != nil || res.Changed == 0 {
+		t.Fatalf("the next run must complete: %+v", res)
+	}
+	if got := shardPhases(t, cfg); got != "deny,retry,chain-end" {
+		t.Fatalf("shard phases = %s", got)
+	}
+}

@@ -20,6 +20,8 @@ import (
 // Python hook shipped with; Load() applies environment overrides on top.
 type Config struct {
 	StateDir string
+	// LogLockWait bounds a shard writer's wait for the shard's lock; zero is the default.
+	LogLockWait time.Duration
 
 	ReviewerProvider      string
 	ReviewerModel         string

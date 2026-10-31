@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/steer-sh/steer-cli/internal/gate"
 )
 
 // ledgerHeaderRe reads the chain ID and subject from the header line a deny tells the
@@ -428,11 +430,12 @@ func TestStopBackstopAsksOnceForLedgersLeftInReasoning(t *testing.T) {
 
 			// A resolver lock another run holds does not delay or stop the check.
 			lock := filepath.Join(s.Home, ".steer", "state", "commit-review", "backfill.lock")
-			if err := os.WriteFile(lock, []byte("1"), 0o644); err != nil {
-				t.Fatal(err)
+			release, held, err := gate.TryLockFile(lock)
+			if err != nil || !held {
+				t.Fatalf("hold the resolver lock: held=%v err=%v", held, err)
 			}
 			block := g.stop(backstopSession, nil)
-			os.Remove(lock)
+			release()
 			if block.Decision != "block" || !strings.Contains(block.Reason, first) || !strings.Contains(block.Reason, second) {
 				t.Fatalf("the root Stop did not block naming both headers:\n%s", block.Raw)
 			}

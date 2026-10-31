@@ -31,9 +31,6 @@ const (
 	ledgerRoundTS    = 1786301489
 	ledgerChainTS    = 1787541947
 
-	// A lock older than this is a crashed run's leftover and is taken over.
-	backfillLockStale = 300 // seconds
-
 	// backupKeep is how many shard backups a rewrite leaves beside the shard.
 	backupKeep = 10
 
@@ -108,10 +105,27 @@ func Backfill(cfg gate.Config, harvests []Harvest, opts BackfillOptions, out io.
 		r.say("no log at %s", log)
 		return Result{}
 	}
+	// The whole run holds the resolver lock, so its snapshot is still the shard's prefix
+	// when it writes. A preview writes nothing, so a lock that cannot open does not stop it.
+	release, held, err := gate.TryLockFile(r.lockPath())
+	switch {
+	case err != nil && opts.Apply:
+		r.say("cannot lock the resolver: %v", err)
+		return Result{Err: err}
+	case err == nil && !held:
+		r.say("another resolver run holds the lock")
+		return Result{Locked: true}
+	case err == nil:
+		defer release()
+	}
 	// Taken before the log is read, so a row appended after the read is newer than the
 	// scan the record names.
 	started := r.now()
-	lines := splitLedgerLines(log)
+	lines, err := r.readLog(opts.Apply)
+	if err != nil {
+		r.say("cannot lock the ledger: %v", err)
+		return Result{Err: err}
+	}
 	seen := len(lines)
 	rows := make([]resolverRow, 0, len(lines))
 	for _, line := range lines {
@@ -132,11 +146,6 @@ func Backfill(cfg gate.Config, harvests []Harvest, opts BackfillOptions, out io.
 		r.say("nothing due")
 		return Result{}
 	}
-	if !r.acquireLock() {
-		r.say("another resolver run holds the lock")
-		return Result{Locked: true}
-	}
-	defer r.releaseLock()
 	res := r.resolveAndWrite(rows, seen, opts.Apply)
 	if opts.Apply && res.Err == nil {
 		r.recordScan(started)
@@ -228,31 +237,19 @@ func (r *resolver) spanFor(join string) float64 {
 
 func (r *resolver) lockPath() string { return filepath.Join(r.cfg.StateDir, "backfill.lock") }
 
-// acquireLock reports whether this run may rewrite the log. A stale lock is taken over;
-// an unlockable state behaves as before the lock existed.
-func (r *resolver) acquireLock() bool {
-	path := r.lockPath()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return true
-	}
-	if info, err := os.Stat(path); err == nil {
-		if r.now()-float64(info.ModTime().Unix()) > backfillLockStale {
-			os.Remove(path)
-		}
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+// readLog reads the shard's lines under its lock, so no append is mid-write. A run that
+// will rewrite the shard needs that; a preview reads without it when the lock is busy.
+func (r *resolver) readLog(apply bool) ([]string, error) {
+	release, err := gate.LockLog(r.cfg)
 	if err != nil {
-		if os.IsExist(err) {
-			return false
+		if apply {
+			return nil, err
 		}
-		return true
+		return splitLedgerLines(r.cfg.LogFile()), nil
 	}
-	fmt.Fprintf(f, "%d", os.Getpid())
-	f.Close()
-	return true
+	defer release()
+	return splitLedgerLines(r.cfg.LogFile()), nil
 }
-
-func (r *resolver) releaseLock() { os.Remove(r.lockPath()) }
 
 // ExpectsLedger reports whether a row demanded a ledger: every retry, and a cap whose
 // terminal review reached the agent. Findings written as prose score zero slots and are
@@ -882,17 +879,29 @@ func (r *resolver) resolveAndWrite(rows []resolverRow, seenLines int, apply bool
 	return Result{Changed: changed}
 }
 
+// beforeSwap runs between writing the replacement shard and checking the live one.
+var beforeSwap = func() {}
+
 // writeRows rewrites the shard, backing it up first and carrying through any rows the
-// hook appended under the snapshot.
+// hook appended under the snapshot. It holds the shard's lock throughout, and refuses
+// to swap when the shard grew anyway: an append that outlasted its wait for the lock
+// goes in unlocked, and the next run carries it.
 func (r *resolver) writeRows(rows []resolverRow, seenLines int) error {
+	release, err := gate.LockLog(r.cfg)
+	if err != nil {
+		return err
+	}
+	defer release()
 	log := r.cfg.LogFile()
 	backup := log + fmt.Sprintf(".bak.%d", int64(r.now()))
-	if data, err := os.ReadFile(log); err == nil {
-		if err := os.WriteFile(backup, data, 0o644); err != nil {
-			return err
-		}
+	data, err := os.ReadFile(log)
+	if err != nil {
+		return err
 	}
-	tail := splitLedgerLines(log)
+	if err := os.WriteFile(backup, data, 0o644); err != nil {
+		return err
+	}
+	tail := splitLines(string(data))
 	if seenLines < len(tail) {
 		tail = tail[seenLines:]
 	} else {
@@ -916,6 +925,16 @@ func (r *resolver) writeRows(rows []resolverRow, seenLines int) error {
 	tmp := log + ".tmp"
 	if err := os.WriteFile(tmp, []byte(sb.String()), 0o644); err != nil {
 		return err
+	}
+	beforeSwap()
+	info, err := os.Stat(log)
+	if err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	if info.Size() != int64(len(data)) {
+		os.Remove(tmp)
+		return fmt.Errorf("%s grew during the rewrite", filepath.Base(log))
 	}
 	if err := os.Rename(tmp, log); err != nil {
 		return err
@@ -975,7 +994,10 @@ func splitLedgerLines(path string) []string {
 	if err != nil {
 		return nil
 	}
-	text := string(data)
+	return splitLines(string(data))
+}
+
+func splitLines(text string) []string {
 	if text == "" {
 		return nil
 	}

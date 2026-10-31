@@ -78,7 +78,16 @@ func (l *Ledger) Errors() []string { return l.errs }
 //
 // The gate is an ephemeral process, so an error cannot be carried to a later
 // invocation — the carry would need the disk that just failed.
+//
+// A lock it cannot take does not stop the append: the row rides out noting that, since
+// a commit cannot wait on the lock and a missing row is the worse record.
 func (l *Ledger) Log(row Row) error {
+	release, lockErr := LockLog(l.cfg)
+	if lockErr != nil {
+		l.noteErr("ledger_lock: %v", lockErr)
+	} else {
+		defer release()
+	}
 	setDefault(row, "instrument", l.cfg.InstrumentID())
 	setDefault(row, "instrument_fields", l.cfg.InstrumentFields())
 	setDefault(row, "host", l.cfg.HostID)
@@ -93,15 +102,42 @@ func (l *Ledger) Log(row Row) error {
 	if err != nil {
 		return fmt.Errorf("encode row: %w", err)
 	}
-	f, err := os.OpenFile(l.cfg.LogFile(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	path := l.cfg.LogFile()
+	for attempt := 0; ; attempt++ {
+		current, err := appendLine(path, line)
+		if err != nil {
+			return err
+		}
+		// Only an append without the lock can land on a shard a rewrite has replaced.
+		if lockErr == nil || current || attempt == maxUnlockedAppends-1 {
+			return nil
+		}
+	}
+}
+
+// maxUnlockedAppends bounds how many replaced shards one unlocked append follows.
+const maxUnlockedAppends = 3
+
+// afterAppend runs between a row's write and the check that its shard is still current.
+var afterAppend = func() {}
+
+// appendLine appends one row and reports whether path still names the file written.
+func appendLine(path string, line []byte) (bool, error) {
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
-		return fmt.Errorf("open ledger: %w", err)
+		return false, fmt.Errorf("open ledger: %w", err)
 	}
 	defer f.Close()
-	if _, err := f.Write(jsonl.Separated(l.cfg.LogFile(), append(line, '\n'))); err != nil {
-		return fmt.Errorf("append ledger: %w", err)
+	if _, err := f.Write(jsonl.Separated(path, append(line, '\n'))); err != nil {
+		return false, fmt.Errorf("append ledger: %w", err)
 	}
-	return nil
+	afterAppend()
+	written, err := f.Stat()
+	if err != nil {
+		return true, nil
+	}
+	named, err := os.Stat(path)
+	return err == nil && os.SameFile(written, named), nil
 }
 
 func setDefault(row Row, key string, value any) {

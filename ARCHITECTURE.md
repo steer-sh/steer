@@ -528,8 +528,15 @@ a row with a thread, a header naming no other chain handed findings takes the
 chain bound. A miss records why in `ledger_miss` (the
 `Miss*` constants in `resolve.go`); a recheck refreshes it and a link removes it.
 `steer commit-gate backfill` previews; `--apply` rewrites the
-local host shard with backup (the ten newest are kept) and concurrent-append
-preservation. `--rejoin` re-judges the links the resolver made (a row with
+local host shard with backup (the ten newest are kept). A run holds `backfill.lock`
+from before its read through its write, and a second run stands down. `Ledger.Log`
+and the rewrite share `gate.LockLog`, a short lock on `<shard>.lock`, so an append
+waits out the swap instead of landing on the unlinked inode, and a row appended
+during a harvest is carried through. Both are OS locks, which a dead holder releases.
+The wait is bounded so a commit never stalls: a `Log` that outlasts it appends anyway,
+notes that in `gate_errors`, and writes again if the shard was replaced under it; a
+rewrite refuses to swap a shard that grew.
+`--rejoin` re-judges the links the resolver made (a row with
 `ledger_ts`; a hook-time capture has none) under the current rules, and keeps a
 link with no ledger left to read. Stop hooks run
 the resolver; Codex also registers SubagentStop, and Pi uses turn_end.
