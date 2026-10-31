@@ -4,16 +4,20 @@
 // 1-based lines of the declaration, body is the byte offset just after the body's
 // opening brace, and zero is a return of zero values. sites lists the statements
 // a variant can suppress or alias, each with the byte edits that make the variant.
+// The argument "tests" selects the mode that identities documents.
 package main
 
 import (
 	"encoding/json"
 	"fmt"
 	"go/ast"
+	"go/build/constraint"
 	"go/parser"
 	"go/token"
 	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -44,7 +48,21 @@ type edit struct {
 	Text  string `json:"text"`
 }
 
+// identity is what identifies a file's functions for a moved test. Build holds the
+// file's build constraint lines and the platform its name selects; Functions maps
+// each top-level function to its source from `func` to its closing brace, then the
+// imports that source can reach.
+type identity struct {
+	Package   string            `json:"package"`
+	Build     string            `json:"build"`
+	Functions map[string]string `json:"functions"`
+}
+
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "tests" {
+		identities()
+		return
+	}
 	paths, err := io.ReadAll(os.Stdin)
 	if err != nil {
 		fail(err)
@@ -85,6 +103,123 @@ func main() {
 	if err := json.NewEncoder(os.Stdout).Encode(out); err != nil {
 		fail(err)
 	}
+}
+
+// identities reads {"<path>": "<source>"} from stdin and prints {"<path>": identity}.
+// A file that does not parse has no entry.
+func identities() {
+	var sources map[string]string
+	if err := json.NewDecoder(os.Stdin).Decode(&sources); err != nil {
+		fail(err)
+	}
+	listed, err := exec.Command("go", "tool", "dist", "list").Output()
+	if err != nil {
+		fail(err)
+	}
+	oses, arches := map[string]bool{}, map[string]bool{}
+	for _, pair := range strings.Fields(string(listed)) {
+		goos, goarch, _ := strings.Cut(pair, "/")
+		oses[goos], arches[goarch] = true, true
+	}
+	out := map[string]identity{}
+	for path, source := range sources {
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, path, source,
+			parser.SkipObjectResolution|parser.ParseComments)
+		if err != nil {
+			continue
+		}
+		functions := map[string]string{}
+		for _, decl := range file.Decls {
+			if fn, ok := decl.(*ast.FuncDecl); ok && fn.Recv == nil && fn.Body != nil {
+				functions[fn.Name.Name] = text(fset, []byte(source), fn) + "\n" + reached(file, fn)
+			}
+		}
+		build := append(constraints(file), platform(filepath.Base(path), oses, arches))
+		out[path] = identity{file.Name.Name, strings.Join(build, "\n"), functions}
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(out); err != nil {
+		fail(err)
+	}
+}
+
+// reached lists the imports of file that fn's source can refer to: those a selector
+// in it names, each dot import, and each import whose name its path does not give.
+func reached(file *ast.File, fn *ast.FuncDecl) string {
+	roots := map[string]bool{}
+	ast.Inspect(fn, func(node ast.Node) bool {
+		if selector, ok := node.(*ast.SelectorExpr); ok {
+			if root, ok := selector.X.(*ast.Ident); ok {
+				roots[root.Name] = true
+			}
+		}
+		return true
+	})
+	imports := []string{}
+	for _, spec := range file.Imports {
+		name := importName(spec)
+		if name == "." || name == "" || roots[name] {
+			imports = append(imports, name+" "+spec.Path.Value)
+		}
+	}
+	sort.Strings(imports)
+	return strings.Join(imports, "\n")
+}
+
+// importName returns an import's alias, or the last path element that names it
+// after any major version, or "" when that element is no identifier.
+func importName(spec *ast.ImportSpec) string {
+	if spec.Name != nil {
+		return spec.Name.Name
+	}
+	parts := strings.Split(strings.Trim(spec.Path.Value, `"`), "/")
+	last := parts[len(parts)-1]
+	if len(parts) > 1 && len(last) > 1 && last[0] == 'v' && strings.Trim(last[1:], "0123456789") == "" {
+		last = parts[len(parts)-2]
+	}
+	if !token.IsIdentifier(last) {
+		return ""
+	}
+	return last
+}
+
+// constraints returns the build constraint lines above the package clause.
+func constraints(file *ast.File) []string {
+	lines := []string{}
+	for _, group := range file.Comments {
+		if group.Pos() > file.Package {
+			break
+		}
+		for _, comment := range group.List {
+			if constraint.IsGoBuild(comment.Text) || constraint.IsPlusBuild(comment.Text) {
+				lines = append(lines, comment.Text)
+			}
+		}
+	}
+	return lines
+}
+
+// platform returns the _GOOS, _GOARCH or _GOOS_GOARCH that a file name selects,
+// by the go command's rule: text before the first underscore never counts. A name
+// the go command ignores returns "ignored".
+func platform(name string, oses, arches map[string]bool) string {
+	if strings.HasPrefix(name, "_") || strings.HasPrefix(name, ".") {
+		return "ignored"
+	}
+	name, _, _ = strings.Cut(name, ".")
+	_, rest, found := strings.Cut(name, "_")
+	if !found {
+		return ""
+	}
+	parts := strings.Split(strings.TrimSuffix("_"+rest, "_test"), "_")
+	last := parts[len(parts)-1]
+	if len(parts) >= 2 && oses[parts[len(parts)-2]] && arches[last] {
+		return parts[len(parts)-2] + "_" + last
+	}
+	if oses[last] || arches[last] {
+		return last
+	}
+	return ""
 }
 
 // zeroReturn writes `*new(T)` for each unnamed result; named results need a bare return.

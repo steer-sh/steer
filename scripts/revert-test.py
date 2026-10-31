@@ -34,6 +34,12 @@ ran. A test that times out under a variant is not failed by it. Panic probes run
 only for the reported tests, to show whether a probe in a changed function makes
 each one fail. A test whose doc comment carries MARKER is exempt.
 
+A test is new when its name is absent from its file at the base, unless the base
+holds it in another file of the same directory with the same package clause, the
+same build constraint, the same source text from `func` to its closing brace and
+the same imports behind that text. A move that changes any of those, or that
+crosses packages, is judged as new.
+
 Variants run on WORKERS copies of the repository at once (REVERT_TEST_WORKERS
 overrides the default). Variant i always runs in copy i % WORKERS, so each copy
 compiles the same mutations on every run. Results are taken in variant order, so
@@ -218,13 +224,55 @@ def marked(source, func_start):
     return False
 
 
-def new_tests(base, path):
+def identities(sources, deadline):
+    """Map each path in sources, {path: source}, to the package, build constraint
+    and function sources that revert-test-funcs.go prints for it."""
+    code, stdout, stderr = bounded(["go", "run", FUNCS, "tests"], None, deadline,
+                                   json.dumps(sources))
+    if code != 0:
+        raise RuntimeError("revert-test-funcs: %s" % stderr.strip())
+    return json.loads(stdout)
+
+
+def moved_tests(base, path, current, names, deadline):
+    """Return the tests in names that the base holds unchanged in another file of
+    path's package. The parser runs only when a sibling at the base names one of them."""
+    listed = git("ls-tree", "-z", "--name-only", base, os.path.dirname(path) + "/").split("\0")
+    siblings = {}
+    for sibling in listed:
+        if sibling.endswith("_test.go") and sibling != path:
+            source = git("show", "%s:%s" % (base, sibling), check=False)
+            if set(names) & set(TEST_FUNC.findall(source)):
+                siblings[sibling] = source
+    if not siblings:
+        return set()
+    try:
+        parsed = identities(dict(siblings, **{path: current}), deadline)
+    except BudgetExpired:
+        # Unclassified tests stay new; the spent budget reports them as undecided.
+        return set()
+    here = parsed.get(path)
+    if here is None:
+        return set()
+    moved = set()
+    for sibling in siblings:
+        there = parsed.get(sibling)
+        if there is None or (there["package"], there["build"]) != (here["package"], here["build"]):
+            continue
+        moved.update(n for n in names if n in here["functions"]
+                     and there["functions"].get(n) == here["functions"][n])
+    return moved
+
+
+def new_tests(base, path, deadline):
     with open(path, encoding="utf-8") as handle:
         current = handle.read()
     old = git("show", "%s:%s" % (base, path), check=False)
     before = set(TEST_FUNC.findall(old))
-    return [m.group(1) for m in TEST_FUNC.finditer(current)
-            if m.group(1) not in before and not marked(current, m.start())]
+    names = [m.group(1) for m in TEST_FUNC.finditer(current)
+             if m.group(1) not in before and not marked(current, m.start())]
+    moved = moved_tests(base, path, current, names, deadline) if names else set()
+    return [name for name in names if name not in moved]
 
 
 def is_trivia(lines):
@@ -1002,7 +1050,7 @@ def main():
     by_package = {}
     for path in paths:
         if path.endswith("_test.go"):
-            names = new_tests(base, path)
+            names = new_tests(base, path, deadline)
             if names:
                 package = os.path.relpath(os.path.dirname(path), MODULE)
                 by_package.setdefault(package, []).extend(names)

@@ -211,7 +211,8 @@ Run `./check.sh` before reporting a change complete. It checks gofmt, builds,
 vets, runs `govulncheck` (the `tool` in `cli/go.mod`; it reads vuln.go.dev) and
 Go tests, then `scripts/revert-test.py`: each Go test added since
 the upstream branch must fail under some variant of the change, and
-`// pins existing behaviour` in a test's doc comment exempts it. A test it accepted
+`// pins existing behaviour` in a test's doc comment exempts it. A test moved
+unchanged between files of one package is not added (`moved_tests`). A test it accepted
 is judged again only when its package's test-side files or the checker change
 (`.git/revert-test/accepted`), so unpushed commits do not slow later runs. Its per-test
 evidence (deciding variant, failure excerpt, diffs, full output) is written to
