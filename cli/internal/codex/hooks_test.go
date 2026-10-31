@@ -525,8 +525,9 @@ func TestRemoveCommitGateLeavesAnUnrelatedEmptyEvent(t *testing.T) {
 	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, removed, err := RemoveCommitGateAndResolver("project", dir); err != nil || removed {
-		t.Fatalf("removed, err = %v, %v", removed, err)
+	got, removed, err := RemoveCommitGateAndResolver("project", dir)
+	if err != nil || removed || got != path {
+		t.Fatalf("path, removed, err = %q, %v, %v; want %q, false, nil", got, removed, err, path)
 	}
 	if got, _ := os.ReadFile(path); string(got) != text {
 		t.Errorf("file rewritten to %s", got)

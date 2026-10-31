@@ -39,6 +39,9 @@ func TestHandlerHashMatchesCodexSavedHashes(t *testing.T) {
 }
 
 func TestHandlerHashRefusesAShapeItDoesNotCover(t *testing.T) {
+	if _, ok := handlerHash(handlerSlot{event: "Stop", hook: map[string]any{"type": "command", "command": "x"}}); !ok {
+		t.Error("a plain command handler got no hash")
+	}
 	for name, hook := range map[string]map[string]any{
 		"mcp":   {"type": "mcp_tool", "server": "s", "tool": "t"},
 		"async": {"type": "command", "command": "x", "async": true},
