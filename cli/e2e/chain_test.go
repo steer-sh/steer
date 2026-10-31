@@ -121,9 +121,10 @@ func (s *Sandbox) writeTranscript(path string, lines []map[string]any) {
 }
 
 // nextSecond waits for the next whole second and returns it, so a split at that
-// second falls strictly after everything already written.
+// second falls strictly after everything already written, including the 2 ms that
+// SeedBashSession stamps ahead of the clock.
 func nextSecond() int64 {
-	next := time.Now().Unix() + 1
+	next := time.Now().Add(2*time.Millisecond).Unix() + 1
 	time.Sleep(time.Until(time.Unix(next, 0)))
 	return next
 }
