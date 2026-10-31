@@ -235,3 +235,14 @@ func TestBuildIssuesOfferOnlyTheNewestInstall(t *testing.T) {
 		t.Errorf("issues = %+v", issues)
 	}
 }
+
+// The install comes before a rebuild, which would otherwise embed the old runtime.
+func TestHealthPutsTheInstallFirst(t *testing.T) {
+	s := healthyFixture()
+	s.Posture.Masters[0].State = MasterStale
+	s.Posture.Plugins[0] = PluginCopy{Harness: "codex", Path: "/p", State: PluginDifferentBinary, Version: "0.1.5", Commit: "b"}
+	h := HealthOf(s, availableProbe())
+	if len(h.Issues) < 2 || !strings.HasPrefix(h.Issues[0].Title, hooksBehindPrefix) {
+		t.Errorf("issues = %+v", h.Issues)
+	}
+}

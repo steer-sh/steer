@@ -103,7 +103,7 @@ func HealthOf(s *SystemStatus, probe reviewers.Probe) Health {
 		}
 	}
 	sort.SliceStable(h.Issues, func(i, j int) bool {
-		return severityOrder(h.Issues[i].Severity) < severityOrder(h.Issues[j].Severity)
+		return issueOrder(h.Issues[i]) < issueOrder(h.Issues[j])
 	})
 	h.Headline = headline(h, buildsDiffer(builds))
 	if h.Verdict == VerdictHealthy {
@@ -119,14 +119,18 @@ func capitalize(s string) string {
 	return strings.ToUpper(s[:1]) + s[1:]
 }
 
-func severityOrder(severity string) int {
-	switch severity {
-	case SeverityAttention:
+// issueOrder puts the install first, because a rebuild run before it embeds the old
+// runtime, then the rest by severity.
+func issueOrder(issue Issue) int {
+	switch {
+	case strings.HasPrefix(issue.Title, hooksBehindPrefix):
 		return 0
-	case SeverityUnchecked:
+	case issue.Severity == SeverityAttention:
 		return 1
+	case issue.Severity == SeverityUnchecked:
+		return 2
 	}
-	return 2
+	return 3
 }
 
 func headline(h Health, differ bool) string {
@@ -193,7 +197,10 @@ func readyLines(s *SystemStatus, r Readiness, agree bool) []string {
 	return out
 }
 
-const buildsDifferTitle = "Builds differ"
+const (
+	buildsDifferTitle = "Builds differ"
+	hooksBehindPrefix = "Hooks are behind the "
+)
 
 // BuildIssues compares the active plugin copies with the hooks' build, and names the
 // running CLI when it differs. An issue with a direction names the one action; a
@@ -212,7 +219,7 @@ func BuildIssues(plugins []PluginCopy, hooks, running BuildIdentity) []Issue {
 			if p.Path != newest.Path {
 				continue
 			}
-			out = append(out, Issue{Severity: SeverityAttention, Title: "Hooks are behind the " + label + " plugin",
+			out = append(out, Issue{Severity: SeverityAttention, Title: hooksBehindPrefix + label + " plugin",
 				Detail: pair, Fix: p.BinInstallCommand()})
 		case BuildOlder:
 			out = append(out, Issue{Severity: SeverityAttention, Title: "The " + label + " plugin is behind the hooks",
@@ -401,7 +408,7 @@ func checkIssues(c CheckTier) []Issue {
 	}
 	if !c.Armed() {
 		out = append(out, Issue{Severity: SeverityAttention, Title: "This repository's checks are adopted, but no harness runs them",
-			Fix: "steer check install --harness <claude-code|codex>"})
+			Detail: []string{"For Codex, use --harness codex."}, Fix: "steer check install --harness claude-code"})
 	}
 	for _, a := range c.Runner {
 		if !a.Registered {
