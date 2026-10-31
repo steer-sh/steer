@@ -72,8 +72,10 @@ import (
 // answer `steer status` prints, so an agent reads trust and resolution with it.
 // v29 adds posture.plugins: each harness's cached plugin copy, read against the
 // stable executable. v33 adds hooks[].fixtures: every guard's stored cases, with or
-// without a record.
-const StatusVersion = 33
+// without a record. v34 adds the trust states approved, disabled, hooks-off and modified: Codex
+// approval reads the saved hash and the enabled state.
+// v35 adds posture.health: the verdict `steer status` prints, with its issues.
+const StatusVersion = 35
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20
@@ -104,6 +106,9 @@ type Options struct {
 	// ReviewerProbe is whether the configured reviewer CLI resolves, which the
 	// readiness answer reads. The zero value checked nothing and raises no step.
 	ReviewerProbe reviewers.Probe
+	// PreCommit reports the git pre-commit channel armed in RepoRoot; the caller reads
+	// it, because Collect runs no git command.
+	PreCommit bool
 }
 
 // ScoredIntervention is one live intervention with its recomputed observation. It
@@ -213,11 +218,18 @@ type VerdictSummary struct {
 	Counts map[string]int `json:"counts"`
 }
 
-// Trust states a harness reports for a registered hook. Steer never claims to have
-// verified a harness's internal hash: a record's presence is all it can read.
+// Trust states a harness reports for a registered hook. Approved means the saved hash
+// equals the computed one, which is one prerequisite of a hook running and no proof
+// that it ran. Modified means the two hashes differ, and names no cause: the handler
+// changed or the harness hashes it another way. RecordPresent is a saved hash this
+// comparison cannot cover.
 const (
 	TrustNotApplicable = "not-applicable"
 	TrustUnknown       = "unknown"
+	TrustApproved      = "approved"
+	TrustDisabled      = "disabled"
+	TrustHooksOff      = "hooks-off"
+	TrustModified      = "modified"
 	TrustRecordPresent = "record-present-unverified"
 	TrustMissing       = "missing"
 )
@@ -365,6 +377,12 @@ type RulesPresence struct {
 // section could not be read at all.
 func (r RulesPresence) NeedsSync() bool { return r.State != RulesCurrent }
 
+// Builds names the two binaries a reader can be running against each other.
+type Builds struct {
+	Running BuildIdentity
+	Hooks   BuildIdentity
+}
+
 // Posture is the arming and instrument state — what is guarding, and with what.
 type Posture struct {
 	Instrument string        `json:"instrument"`
@@ -389,6 +407,10 @@ type Posture struct {
 	// HookTimeout is the harness timeout, in seconds, a commit-gate registration
 	// needs under the current reviewer timeout.
 	HookTimeout int `json:"-"`
+	// Builds is the running CLI's identity and the hooks' identity.
+	Builds Builds `json:"-"`
+	// PreCommit reports the git pre-commit channel armed in this repository.
+	PreCommit bool `json:"-"`
 }
 
 // AttentionQueue is the subset of the loop needing action: the cadence queue
@@ -520,6 +542,7 @@ func Collect(opts Options) (*SystemStatus, error) {
 	}
 
 	s.Posture = collectPosture(opts.Config, ev)
+	s.Posture.PreCommit = opts.PreCommit
 	s.Checks = collectChecks(opts.RepoRoot)
 	s.Telemetry = telemetry(ev, checkBlocks())
 	inventory := opts.InventoryScopes
@@ -654,6 +677,7 @@ func collectPosture(cfg gate.Config, ev mine.EvidenceSet) Posture {
 		Masters:          []MasterRuntime{},
 		Rules:            []RulesPresence{},
 		Plugins:          PluginCopies(),
+		Builds:           Builds{Running: RunningBuild(), Hooks: HooksBuild()},
 		Mods:             ModExposures(),
 		GuardInterpreter: ReadInterpreter(exec.LookPath),
 		Unresolved:       resolve.CountUnresolved(cfg),
@@ -681,7 +705,7 @@ func collectPosture(cfg gate.Config, ev mine.EvidenceSet) Posture {
 			Registered: cg.Registered,
 			Effective:  cg.Effective(),
 			Timeout:    cg.Timeout,
-			Trust:      trustState(harness.Codex, cg.TrustStateKnown, cg.TrustRecordPresent),
+			Trust:      CodexTrust(cg),
 			Command:    cg.Command,
 		}, ledgerCorpus, observed.gate[codexID]))
 		// Pi is unlisted: its rows appear only where its extension registers
@@ -722,7 +746,7 @@ func collectPosture(cfg gate.Config, ev mine.EvidenceSet) Posture {
 			Registered: cr.Registered,
 			Effective:  cr.Registered,
 			Timeout:    cr.Timeout,
-			Trust:      trustState(harness.Codex, cr.TrustStateKnown, cr.TrustRecordPresent),
+			Trust:      CodexTrust(cr),
 			Command:    cr.Command,
 		}, "", 0))
 		if piListed {
@@ -868,8 +892,9 @@ func masterRuntimes(scope string) []MasterRuntime {
 			continue
 		}
 		row.Path = path
-		row.Sources = compareStore(scope, path, "no registered guard runner")
-		detached := store != "" && registrar.Harness().Installed() && !claude.SamePath(path, store)
+		resolved := resolveRegistered(path, scope)
+		row.Sources = compareStore(scope, resolved, "no registered guard runner")
+		detached := store != "" && registrar.Harness().Installed() && !sameFilePath(resolved, store)
 		if detached {
 			// Both readings, because they choose different repairs: a registered
 			// master can carry matching source while pointing elsewhere, and a
@@ -884,8 +909,8 @@ func masterRuntimes(scope string) []MasterRuntime {
 			continue
 		}
 		row.Trust = runnerTrust(registrar.Harness().ID, scope)
-		row.Observed = newestFiring(filepath.Dir(path))
-		stamp, ok := guard.ReadStamp(path)
+		row.Observed = newestFiring(filepath.Dir(resolved))
+		stamp, ok := guard.ReadStamp(resolved)
 		if !ok {
 			row.State = MasterUnknown
 			out = append(out, row)
@@ -899,6 +924,43 @@ func masterRuntimes(scope string) []MasterRuntime {
 		out = append(out, row)
 	}
 	return out
+}
+
+// resolveRegistered makes a registered master path absolute. A project registration
+// names it relative to the repository root, so it resolves there first and against the
+// working directory only when that file is absent.
+func resolveRegistered(path, scope string) string {
+	if path == "" || filepath.IsAbs(path) {
+		return path
+	}
+	master, err := claude.GetMasterHookPath(scope)
+	if err != nil {
+		return path
+	}
+	root := filepath.Dir(filepath.Dir(filepath.Dir(master)))
+	resolved := filepath.Join(root, filepath.FromSlash(path))
+	if _, err := os.Stat(resolved); err != nil {
+		// A registration written from a subdirectory is relative to that directory.
+		if abs, err := filepath.Abs(filepath.FromSlash(path)); err == nil {
+			return abs
+		}
+	}
+	return resolved
+}
+
+// sameFilePath compares two paths with their links resolved, so one directory reached
+// by two spellings reads as one place.
+func sameFilePath(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	if real, err := filepath.EvalSymlinks(a); err == nil {
+		a = real
+	}
+	if real, err := filepath.EvalSymlinks(b); err == nil {
+		b = real
+	}
+	return filepath.Clean(a) == filepath.Clean(b)
 }
 
 // compareStore reads one master against the scope's guard store. absent is the
@@ -939,13 +1001,40 @@ func storeMaster(scope string) string {
 	return path
 }
 
+// CodexTrust reads a Codex registration's trust state: its approval when registered,
+// and otherwise what the record search found.
+func CodexTrust(a codex.Arming) string {
+	if a.Registered && a.Approval != "" {
+		return approvalTrust(a.Approval)
+	}
+	return trustState(harness.Codex, a.TrustStateKnown, a.TrustRecordPresent)
+}
+
+// approvalTrust maps a Codex approval state to its trust state.
+func approvalTrust(approval string) string {
+	switch approval {
+	case codex.ApprovalApproved:
+		return TrustApproved
+	case codex.ApprovalDisabled:
+		return TrustDisabled
+	case codex.ApprovalHooksOff:
+		return TrustHooksOff
+	case codex.ApprovalModified:
+		return TrustModified
+	case codex.ApprovalMissing:
+		return TrustMissing
+	case codex.ApprovalUnverifiable:
+		return TrustRecordPresent
+	}
+	return TrustUnknown
+}
+
 // runnerTrust reads a harness's approval of its registered guard runner. Codex
 // is the one harness whose approval record Steer reads; any other harness that
 // reviews hook trust reads as unknown.
 func runnerTrust(id harness.ID, scope string) string {
 	if id == harness.Codex {
-		a := codex.MasterArming(scope, ".")
-		return trustState(id, a.TrustStateKnown, a.TrustRecordPresent)
+		return CodexTrust(codex.MasterArming(scope, "."))
 	}
 	return trustState(id, false, false)
 }
@@ -967,9 +1056,8 @@ func newestFiring(dir string) float64 {
 	return newest
 }
 
-// trustState reports what this machine can honestly say about a registration's trust.
-// A harness that never reviews hook trust is not-applicable; one that does reports
-// record presence, never a verified hash.
+// trustState reports a registration's trust from a record search alone. A harness that
+// never reviews hook trust is not-applicable.
 func trustState(id harness.ID, known, present bool) string {
 	h, ok := harness.Get(id)
 	if !ok || !h.Capabilities.TrustReview {

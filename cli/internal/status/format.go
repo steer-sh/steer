@@ -71,12 +71,19 @@ func CoveragePhrase(c cadence.Coverage) string {
 	return s
 }
 
-// TrustPhrase names a harness's posture on a registration. Registration alone does not
-// prove enforcement on a harness that reviews hook trust itself.
+// TrustPhrase names a harness's posture on a registration, "" when nothing needs
+// saying. Registration alone does not prove enforcement on a harness that reviews hook
+// trust itself.
 func TrustPhrase(trust string) string {
 	switch trust {
 	case TrustRecordPresent:
-		return "trust record present, unverified"
+		return "approval could not be compared"
+	case TrustModified:
+		return "approval needs checking"
+	case TrustDisabled:
+		return "turned off"
+	case TrustHooksOff:
+		return "all Codex hooks are turned off"
 	case TrustMissing:
 		return "no trust record"
 	case TrustUnknown:
@@ -335,12 +342,16 @@ func ObservedPhrase(a ScopeArming) string {
 // RunnerUnapproved reports a registered runner the harness is known not to have
 // approved, so it runs no guard there while the rule's text still reaches the agent.
 func (m MasterRuntime) RunnerUnapproved() bool {
-	return m.State != MasterNotRegistered && !m.Detached() && m.Trust == TrustMissing
+	return m.State != MasterNotRegistered && !m.Detached() &&
+		(m.Trust == TrustMissing || m.Trust == TrustDisabled || m.Trust == TrustHooksOff)
 }
 
 // RunnerTrustPhrase names a registered runner's approval, "" where the harness
 // reviews no hook trust.
 func RunnerTrustPhrase(m MasterRuntime) string {
+	if m.RunnerUnapproved() && m.Trust != TrustMissing {
+		return TrustPhrase(m.Trust) + ", so the harness runs no guard — turn it on in /hooks"
+	}
 	if m.RunnerUnapproved() {
 		return "no approval record, so the harness runs no guard — approve the definitions in /hooks"
 	}

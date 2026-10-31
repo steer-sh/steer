@@ -891,12 +891,18 @@ deterministic tier reads the check stores only, so no harness adapter enters it;
 the runner's registration reaches a reader through the status snapshot. A stale
 receipt is not an open step: a stale check keeps running.
 
-`internal/status/` composes the read-only `SystemStatus` for the TUI; the terminal
-renders only its readiness answer (`status.ReadinessOf`) and a guard store it could
-not read.
+`internal/status/` composes the read-only `SystemStatus` for the TUI. The terminal
+renders only the verdict and its issues (`status.HealthOf`), which also read
+`status.ReadinessOf`. Healthy covers installation and configuration: an issue is
+attention, could-not-check, or information that leaves the verdict alone, and a
+required reading Steer cannot make blocks healthy. `status.BuildIssues` orders releases
+by version from stamps read with `debug/buildinfo`, without running a binary; a
+difference involving a development build has no order and no repair. The startup
+notice reads the same comparison.
 `--json` is a projection of it (`status/json.go`): one summary row per record, whose
 observation `steer fix score --json` carries under the same id, guards and
-presets from both scopes, and the readiness answer as `posture.readiness`. The TUI lists one scope because it mutates that scope.
+presets from both scopes, the readiness answer as `posture.readiness`, and the verdict
+as `posture.health`. The TUI lists one scope because it mutates that scope.
 Shared problem, evidence and formatting helpers keep human summaries aligned;
 wire version constants and schema tests own machine compatibility.
 `vocabulary_test.go` checks display literals; dynamic stored values also need

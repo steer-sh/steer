@@ -233,7 +233,7 @@ func (m *Model) toggleChannel(row channelRow) error {
 		switch harness.ID(row.armed.Harness) {
 		case harness.Codex:
 			if on {
-				_, err := codex.RemoveCommitGateAndResolver(row.scope, cwd)
+				_, _, err := codex.RemoveCommitGateAndResolver(row.scope, cwd)
 				return err
 			}
 			review, _ := steerbin.HookCommand("commit-gate review-codex")
@@ -242,7 +242,7 @@ func (m *Model) toggleChannel(row channelRow) error {
 			return err
 		case harness.Pi:
 			if on {
-				_, err := pi.RemoveCommitGateAndResolver(row.scope, cwd)
+				_, _, err := pi.RemoveCommitGateAndResolver(row.scope, cwd)
 				return err
 			}
 			review, _ := steerbin.HookCommand("commit-gate review-pi")
@@ -251,7 +251,8 @@ func (m *Model) toggleChannel(row channelRow) error {
 			return err
 		default:
 			if on {
-				return claude.RemoveCommitGateAndResolver(row.scope)
+				_, err := claude.RemoveCommitGateAndResolver(row.scope)
+				return err
 			}
 			review, _ := steerbin.HookCommand("commit-gate review")
 			return claude.RegisterCommitGateAndResolver(row.scope, review, timeout, resolver, backfillTimeout)

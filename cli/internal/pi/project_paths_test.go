@@ -29,7 +29,7 @@ func TestProjectBridgeMutationsRefuseLinkedConfiguration(t *testing.T) {
 			return err
 		}},
 		{"remove gate", gateBridgeName, func(project string) error {
-			_, err := RemoveCommitGateAndResolver(harness.ProjectScope, project)
+			_, _, err := RemoveCommitGateAndResolver(harness.ProjectScope, project)
 			return err
 		}},
 	}
@@ -122,7 +122,7 @@ func TestGlobalBridgeMutationsKeepOperatorLinkedDirectories(t *testing.T) {
 			if _, err := RemoveMaster(harness.GlobalScope, "."); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := RemoveCommitGateAndResolver(harness.GlobalScope, "."); err != nil {
+			if _, _, err := RemoveCommitGateAndResolver(harness.GlobalScope, "."); err != nil {
 				t.Fatal(err)
 			}
 			for _, path := range []string{guard, gate} {

@@ -454,9 +454,14 @@ func runCadence() {
 	key, labels, scopes := staleMasters()
 	// The plugin line's install rebuilds the global master, so the master line
 	// reads the plugin copies before it chooses its repair.
-	pluginCopies := status.PluginCopies()
-	pluginKey, pluginLabels := status.DifferingPlugins(pluginCopies)
-	install := runningCopyInstall(pluginCopies, runningExecutable())
+	hooksBuild := status.HooksBuild()
+	pluginCopies := status.ActionablePlugins(status.PluginCopies(), hooksBuild)
+	pluginKey, _ := status.DifferingPlugins(pluginCopies)
+	if pluginKey != "" {
+		// The hooks' build sets the direction, so a change on either side is a new notice.
+		pluginKey += "|hooks=" + hooksBuild.DetailLabel()
+	}
+	install := hooksBehindInstall(pluginCopies, hooksBuild)
 	masterDue := cadence.ShouldNudgeMaster(dir, key)
 	if masterDue {
 		lines = append(lines, staleMasterLine(labels, scopes, install != ""))
@@ -498,7 +503,7 @@ func runCadence() {
 	// A harness runs skills and the launcher from its cached plugin copy, and
 	// nothing refreshes that copy when the stable executable changes.
 	if pluginLineDue(cadence.ShouldNudgePlugins(dir, pluginKey), masterDue, install) {
-		lines = append(lines, pluginCopyLine(pluginLabels, install))
+		lines = append(lines, pluginCopyLines(pluginCopies, hooksBuild)...)
 	}
 	if len(lines) == 0 {
 		// Nothing to say, but a repaired condition still has to clear its key: a
@@ -575,37 +580,12 @@ func staleMasterLine(labels, scopes []string, pluginsDiffer bool) string {
 	return line + " — after the bin install below, run: " + strings.Join(repairs, " and ")
 }
 
-// runningExecutable is this process's binary with its links resolved, "" when
-// it cannot be read.
-func runningExecutable() string {
-	exe, err := os.Executable()
-	if err != nil {
-		return ""
-	}
-	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
-		return resolved
-	}
-	return exe
-}
-
-// runningCopyInstall names the install for the differing plugin copy that holds
-// the running binary, "" when none does. The SessionStart hook runs from the copy
-// the harness loads, and a cache can keep older version directories beside it,
-// whose install would place an older build.
-func runningCopyInstall(copies []status.PluginCopy, running string) string {
-	if running == "" {
-		return ""
-	}
-	for _, p := range copies {
-		if !p.Differs() {
-			continue
-		}
-		root := p.Path
-		if resolved, err := filepath.EvalSymlinks(root); err == nil {
-			root = resolved
-		}
-		if strings.HasPrefix(running, root+string(filepath.Separator)) {
-			return p.BinInstallCommand()
+// hooksBehindInstall names the install from the newest plugin copy the hooks are behind,
+// "" when they are behind none.
+func hooksBehindInstall(copies []status.PluginCopy, hooks status.BuildIdentity) string {
+	for _, issue := range status.BuildIssues(copies, hooks, hooks) {
+		if strings.HasPrefix(issue.Title, "Hooks are behind") {
+			return issue.Fix
 		}
 	}
 	return ""
@@ -617,16 +597,20 @@ func pluginLineDue(pluginDue, masterDue bool, install string) bool {
 	return pluginDue || (masterDue && install != "")
 }
 
-// pluginCopyLine names the plugin copies that bundle another build. The
-// comparison cannot tell which build is newer, so an install is conditioned on a
-// plugin update and status keeps both repairs.
-func pluginCopyLine(labels []string, install string) string {
-	line := fmt.Sprintf("steer: a harness's plugin copy bundles another Steer build than ~/.steer/bin/steer (%s)",
-		strings.Join(labels, "; "))
-	if install == "" {
-		return line + " — run: steer status"
+// pluginCopyLines words the build issues with a known action as startup notices.
+func pluginCopyLines(copies []status.PluginCopy, hooks status.BuildIdentity) []string {
+	var lines []string
+	for _, issue := range status.BuildIssues(copies, hooks, hooks) {
+		fix := issue.Fix
+		switch {
+		case fix == "":
+			fix = "run: steer status"
+		case strings.HasPrefix(issue.Title, "Hooks are behind"):
+			fix = "run: " + fix
+		}
+		lines = append(lines, "steer: "+issue.Title+" ("+strings.Join(issue.Detail, ", ")+") — "+fix)
 	}
-	return line + " — after a plugin update, run: " + install + "; otherwise run: steer status"
+	return lines
 }
 
 // spawnRefresh starts 'steer report refresh' detached, so a stale queue refreshes

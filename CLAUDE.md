@@ -126,7 +126,8 @@ Read the linked architecture section before changing the corresponding boundary:
 - Queue, status, status line, or dashboard:
   [readers and controls](ARCHITECTURE.md#cadence-status-and-controls).
   `cli/internal/status/` owns shared phrasing; the TUI calls shared mutation
-  functions. Registration, executable resolution and observed activity are
+  functions. `status.HealthOf` is the one verdict the text view, `posture.health` and
+  build notices read, so a new required reading adds its issue there. Registration, executable resolution and observed activity are
   distinct facts. A Claude Code mod can skip a registered hook; `posture.mods`
   (`cli/internal/mods/`) reads only the cache `steer mods inspect` writes.
 

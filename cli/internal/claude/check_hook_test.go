@@ -1,6 +1,9 @@
 package claude
 
 import (
+	"github.com/steer-sh/steer-cli/internal/testhome"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -82,7 +85,7 @@ func TestCommitGateWritesKeepTheCheckHook(t *testing.T) {
 	if a, _ := CheckHookArming(ProjectScope); !a.Registered {
 		t.Fatal("installing the commit gate removed the check runner")
 	}
-	if err := RemoveCommitGateAndResolver(ProjectScope); err != nil {
+	if _, err := RemoveCommitGateAndResolver(ProjectScope); err != nil {
 		t.Fatal(err)
 	}
 	if a, _ := CheckHookArming(ProjectScope); !a.Registered || a.Timeout != 330 {
@@ -96,5 +99,34 @@ func TestRegisterCheckHookRefusesAnUnrecognisableCommand(t *testing.T) {
 
 	if err := RegisterCheckHook(ProjectScope, "bash check.sh", 330); err == nil {
 		t.Fatal("expected a refusal for a command that cannot be recognised again")
+	}
+}
+
+// TestRemoveCommitGateReportsAndSkipsTheWriteWhenAbsent: a removal with nothing to
+// remove reports false and leaves the file alone.
+func TestRemoveCommitGateReportsAndSkipsTheWriteWhenAbsent(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	testhome.Set(t, dir)
+	path := filepath.Join(dir, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const text = "{\n   \"hooks\": {}\n}\n"
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := RemoveCommitGateAndResolver(ProjectScope)
+	if err != nil || removed {
+		t.Fatalf("removed, err = %v, %v; want false, nil", removed, err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != text {
+		t.Errorf("settings rewritten to %q", got)
+	}
+	if err := RegisterCommitGateAndResolver(ProjectScope, "steer commit-gate review", 460, "steer commit-gate backfill --if-due --apply --quiet", 30); err != nil {
+		t.Fatal(err)
+	}
+	if removed, err := RemoveCommitGateAndResolver(ProjectScope); err != nil || !removed {
+		t.Fatalf("removed, err = %v, %v; want true, nil", removed, err)
 	}
 }

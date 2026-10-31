@@ -190,7 +190,7 @@ func intPtr(n int) *int           { return &n }
 // so a renamed or reordered json tag fails here, the agent-contract guard.
 func TestJSONContractIsStable(t *testing.T) {
 	s := &SystemStatus{
-		StatusVersion: 33,
+		StatusVersion: 35,
 		GeneratedAt:   "2026-01-01T00:00:00Z",
 		Posture: Posture{
 			Instrument: "agy@sha", Reviewer: "gemini", Ledger: "/l.jsonl",
@@ -346,7 +346,7 @@ func TestJSONContractIsStable(t *testing.T) {
 }
 
 const goldenStatusJSON = `{
-  "status_version": 33,
+  "status_version": 35,
   "generated_at": "2026-01-01T00:00:00Z",
   "posture": {
     "instrument": "agy@sha",
@@ -509,11 +509,65 @@ const goldenStatusJSON = `{
           "title": "Codex global scope: the registered command does not resolve here — the hook is skipped silently",
           "fix": "steer bin install"
         }
-      ],
-      "unverified": [
-        "Codex global scope: trust record present, unverified; current hook trust cannot be verified · never observed",
-        "Claude Code mod guard@m handles tool.call{tool=Bash}, tool.check, so it can skip or override Steer's hooks",
-        "Claude Code mod pane@m is not inspected, so whether it can skip Steer's hooks is unknown — run steer mods inspect"
+      ]
+    },
+    "health": {
+      "verdict": "needs-attention",
+      "headline": "steer unknown build — needs attention",
+      "issues": [
+        {
+          "severity": "attention",
+          "title": "Codex global scope: the registered command does not resolve here — the hook is skipped silently",
+          "fix": "steer bin install"
+        },
+        {
+          "severity": "attention",
+          "title": "Claude Code global guard runner is out of date",
+          "fix": "steer hooks rebuild --scope global"
+        },
+        {
+          "severity": "attention",
+          "title": "Codex project runs none of this scope's guards",
+          "fix": "steer hooks sync --scope project"
+        },
+        {
+          "severity": "attention",
+          "title": "Codex global instructions do not match Steer's rules",
+          "fix": "steer hooks sync --scope global"
+        },
+        {
+          "severity": "attention",
+          "title": "Steer cannot read the project guard list: guard manifest /w/.steer/hooks/steer-manifest.json gives entry \"x\" the file \"../y\", which is not a plain file name; edit the manifest entry",
+          "fix": "edit the entry named above; the guards already installed keep running"
+        },
+        {
+          "severity": "unchecked",
+          "title": "Steer could not check Codex global hook approval",
+          "detail": [
+            "Hooks: commit review"
+          ],
+          "fix": "Inspect /hooks in Codex."
+        },
+        {
+          "severity": "unchecked",
+          "title": "Claude Code mod pane@m is not inspected, so whether it can skip Steer's hooks is unknown",
+          "fix": "steer mods inspect"
+        },
+        {
+          "severity": "unchecked",
+          "title": "Steer could not read the Claude Code plugin's build",
+          "detail": [
+            "/h/.claude/plugins/cache/m/steer/0.1.0"
+          ]
+        },
+        {
+          "severity": "unchecked",
+          "title": "Steer could not read the build the hooks run"
+        },
+        {
+          "severity": "info",
+          "title": "Claude Code mod guard@m handles tool.call{tool=Bash}, tool.check, so it can skip or override Steer's hooks"
+        }
       ]
     }
   },

@@ -333,3 +333,21 @@ func TestTheReviewerRepairListsEveryProvider(t *testing.T) {
 		t.Errorf("Fix = %q, want it to offer %s", step.Fix, reviewers.APIProviderID)
 	}
 }
+
+// An approved Codex hook counts as enforcing and raises no line; a hook that is turned
+// off keeps the commit out of the enforcing list and names the repair.
+func TestReadinessReadsCodexApproval(t *testing.T) {
+	gate := ScopeArming{Harness: "codex", Scope: "global", Registered: true, Effective: true,
+		Resolvable: ResolveResolvable, Trust: TrustApproved}
+	s := &SystemStatus{Posture: Posture{CommitGate: []ScopeArming{gate}}}
+	r := ReadinessOf(s, available())
+	if !r.Reviewing || len(r.Unverified) != 0 {
+		t.Errorf("approved: reviewing %v, unverified %q", r.Reviewing, r.Unverified)
+	}
+	s.Posture.CommitGate[0].Trust = TrustDisabled
+	r = ReadinessOf(s, available())
+	if r.Reviewing || len(r.Steps) == 0 || !strings.Contains(r.Steps[0].Title, "turned off") ||
+		!strings.Contains(r.Steps[0].Fix, "turn the hook on") {
+		t.Errorf("disabled: reviewing %v, steps %+v", r.Reviewing, r.Steps)
+	}
+}

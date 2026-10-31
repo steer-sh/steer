@@ -97,7 +97,7 @@ func GateTimeoutStep(a ScopeArming, need int) (Step, bool) {
 // not prove enforcement there, and only the operator can clear it.
 func TrustStep(harnessID, trust, path string) (Step, bool) {
 	switch trust {
-	case TrustRecordPresent, TrustMissing, TrustUnknown:
+	case TrustRecordPresent, TrustMissing, TrustUnknown, TrustModified, TrustDisabled, TrustHooksOff:
 	default:
 		return Step{}, false
 	}
@@ -106,6 +106,12 @@ func TrustStep(harnessID, trust, path string) (Step, bool) {
 	switch harness.ID(harnessID) {
 	case harness.Codex:
 		step.Fix = "restart Codex and approve the definitions in /hooks"
+		switch trust {
+		case TrustDisabled:
+			step.Fix = "turn the hook on in Codex /hooks"
+		case TrustHooksOff:
+			step.Fix = "turn the hooks feature on under [features] in Codex's config.toml"
+		}
 		if path != "" {
 			step.Title += ": " + path
 		}
@@ -113,6 +119,20 @@ func TrustStep(harnessID, trust, path string) (Step, bool) {
 		step.Fix = "trust this project in Pi; a project extension runs only after that"
 	}
 	return step, true
+}
+
+// knownOffStep reports a hook config.toml is known to turn off. Unlike an unconfirmed
+// trust state, the cause is known, so it is a setup problem with a repair.
+func knownOffStep(a ScopeArming, what string) (Step, bool) {
+	if a.Trust != TrustDisabled && a.Trust != TrustHooksOff {
+		return Step{}, false
+	}
+	step, _ := TrustStep(a.Harness, a.Trust, "")
+	step.Title = what + " is turned off"
+	if a.Trust == TrustHooksOff {
+		step.Title = TrustPhrase(TrustHooksOff) + ", including " + what
+	}
+	return prefixHarness(step, a), true
 }
 
 // HarnessLabel is the display name, falling back to the id an unregistered harness
@@ -182,7 +202,10 @@ func ReadinessOf(s *SystemStatus, probe reviewers.Probe) Readiness {
 		if step, ok := GateTimeoutStep(a, s.Posture.HookTimeout); ok {
 			r.Steps = append(r.Steps, step)
 		}
-		if _, ok := TrustStep(a.Harness, a.Trust, ""); ok {
+		if step, ok := knownOffStep(a, "the commit review hook"); ok {
+			r.Steps = append(r.Steps, step)
+			open = true
+		} else if _, ok := TrustStep(a.Harness, a.Trust, ""); ok {
 			note := fmt.Sprintf("%s %s scope: %s; current hook trust cannot be verified", HarnessLabel(a.Harness), a.Scope, TrustPhrase(a.Trust))
 			if phrase := ObservedPhrase(a); phrase != "" {
 				note += " · " + phrase
@@ -206,13 +229,17 @@ func ReadinessOf(s *SystemStatus, probe reviewers.Probe) Readiness {
 		}
 		enforcing = append(enforcing, fmt.Sprintf("%s %s", HarnessLabel(a.Harness), a.Scope))
 	}
+	if s.Posture.PreCommit {
+		// The git channel reviews with no harness hook, so the absence of one is no gap.
+		enforcing = append(enforcing, "git pre-commit")
+	}
 	if registered {
 		steps, unverified := resolverSteps(s.Posture)
 		r.Steps = append(r.Steps, steps...)
 		r.Unverified = append(r.Unverified, unverified...)
 		r.Unverified = append(r.Unverified, modLines(s.Posture)...)
 	}
-	if !registered {
+	if !registered && !s.Posture.PreCommit {
 		r.Steps = append([]Step{{
 			Title: "no commit gate is registered, so nothing reviews a commit here",
 			Fix:   "/steer-setup in a Claude Code or Codex session",
@@ -257,7 +284,9 @@ func resolverSteps(p Posture) (steps []Step, unverified []string) {
 			continue
 		}
 		candidate = true
-		if _, ok := TrustStep(a.Harness, a.Trust, ""); ok {
+		if step, ok := knownOffStep(a, "the review-outcome reader"); ok {
+			steps = append(steps, step)
+		} else if _, ok := TrustStep(a.Harness, a.Trust, ""); ok {
 			unverified = append(unverified, fmt.Sprintf("%s %s scope: review-outcome reader: %s; current hook trust cannot be verified",
 				HarnessLabel(a.Harness), a.Scope, TrustPhrase(a.Trust)))
 		}

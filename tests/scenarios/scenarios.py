@@ -22,7 +22,20 @@ BASE = Path(__file__).with_name("base_status.json")
 
 
 def _base():
-    return json.loads(BASE.read_text())
+    snap = json.loads(BASE.read_text())
+    snap["status_version"] = 35
+    snap["posture"]["readiness"].pop("unverified", None)
+    return snap
+
+
+def _with_health(snap):
+    """Add the posture.health the CLI derives, from the scenario's readiness."""
+    readiness = snap["posture"]["readiness"]
+    issues = [{"severity": "attention", "title": step["title"], "fix": step.get("fix", "")}
+              for step in readiness.get("steps", [])]
+    state, verdict = ("needs attention", "needs-attention") if issues else ("healthy", "healthy")
+    snap["posture"]["health"] = {"verdict": verdict, "headline": "steer 0.1.4 — " + state, "issues": issues}
+    return snap
 
 
 def _coverage(total, eligible, **kw):
@@ -354,9 +367,6 @@ def _first_run():
     for m in snap["posture"]["masters"]:
         m.pop("observed", None)
     readiness = snap["posture"]["readiness"]
-    readiness["unverified"] = [
-        line.split(" · ")[0] + " · never observed" if " · " in line else line
-        for line in readiness["unverified"]]
     readiness["note"] = "no review observed yet — that is expected until the first commit in scope"
     return snap, _scores(), _queue(candidates=cands, review_size=0)
 
@@ -479,7 +489,7 @@ def write(name, outdir):
     status_path = outdir / "status.json"
     score_path = outdir / "score.json"
     queue_path = outdir / "queue.json"
-    status_path.write_text(json.dumps(snap, indent=2) + "\n")
+    status_path.write_text(json.dumps(_with_health(snap), indent=2) + "\n")
     score_path.write_text(json.dumps(scores, indent=2) + "\n")
     queue_path.write_text(json.dumps(queue, indent=2) + "\n")
     return status_path, score_path, queue_path

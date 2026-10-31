@@ -186,7 +186,11 @@ func TestJSONReadinessWithholdsReviewingFromAnUntrustedCodexGate(t *testing.T) {
 	if r.Reviewing {
 		t.Fatalf("readiness = %+v; an untrusted Codex hook is not reviewing", r)
 	}
-	if len(r.Unverified) != 1 || !strings.Contains(r.Unverified[0], "no trust record") {
-		t.Errorf("unverified = %q; want the Codex trust line", r.Unverified)
+	found := false
+	for _, issue := range decoded.Posture.Health.Issues {
+		found = found || strings.Contains(issue.Title, "need approval")
+	}
+	if !found {
+		t.Errorf("health issues = %+v; want the Codex approval issue", decoded.Posture.Health.Issues)
 	}
 }
