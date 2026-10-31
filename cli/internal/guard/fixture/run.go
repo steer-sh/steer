@@ -342,8 +342,9 @@ func (r Runner) Run(guardPath, masterPath string, file File) (Report, error) {
 	return report, nil
 }
 
-// invoke runs one script on one payload. auditPath is truncated first when set,
-// so the rows a run leaves are that run's alone.
+// invoke runs one script on one payload and reads the decision from stdout alone;
+// stderr only explains a non-zero exit. auditPath is truncated first when set, so
+// the rows a run leaves are that run's alone.
 func (r Runner) invoke(script string, payload []byte, cwd, auditPath string) (Outcome, error) {
 	if auditPath != "" {
 		if err := os.Remove(auditPath); err != nil && !os.IsNotExist(err) {
@@ -351,12 +352,12 @@ func (r Runner) invoke(script string, payload []byte, cwd, auditPath string) (Ou
 		}
 	}
 
-	var buf strings.Builder
+	var stdout, stderr strings.Builder
 	cmd := exec.Command(r.python(), script)
 	cmd.Dir = cwd
 	cmd.Stdin = strings.NewReader(string(payload))
-	cmd.Stdout = &buf
-	cmd.Stderr = &buf
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
 	if err := cmd.Start(); err != nil {
 		return "", fmt.Errorf("failed to start %s: %w", filepath.Base(script), err)
 	}
@@ -372,8 +373,7 @@ func (r Runner) invoke(script string, payload []byte, cwd, auditPath string) (Ou
 		return "", fmt.Errorf("%s exceeded %s", filepath.Base(script), r.timeout())
 	}
 
-	text := strings.TrimSpace(buf.String())
-	if blocked := parseBlock(text); blocked {
+	if blocked := parseBlock(strings.TrimSpace(stdout.String())); blocked {
 		return OutcomeBlock, nil
 	}
 	var exitErr *exec.ExitError
@@ -381,12 +381,13 @@ func (r Runner) invoke(script string, payload []byte, cwd, auditPath string) (Ou
 		return "", fmt.Errorf("%s failed: %w", filepath.Base(script), runErr)
 	}
 	if runErr != nil {
+		text := strings.TrimSpace(stdout.String() + "\n" + stderr.String())
 		return "", fmt.Errorf("%s exited non-zero: %s", filepath.Base(script), text)
 	}
 	return OutcomeAllow, nil
 }
 
-// parseBlock reads both replies a run can produce: a guard's own block, which
+// parseBlock reads both replies a run's stdout can hold: a guard's own block, which
 // mirrors runtime.py's steer_parse_block with its compact-text fallback, and
 // the master's rendered PreToolUse deny.
 func parseBlock(output string) bool {

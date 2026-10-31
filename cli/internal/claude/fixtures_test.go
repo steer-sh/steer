@@ -503,3 +503,27 @@ func TestFixtureSaveRefusesALinkedFixturesDirectory(t *testing.T) {
 		t.Fatalf("a fixture landed outside the store: %v", err)
 	}
 }
+
+// A guard's stderr reaches a real master's stderr beside its deny on stdout. The
+// master pass still reads the block, for both labels a case can carry.
+func TestFixtureMasterPassReadsADenyPastStderr(t *testing.T) {
+	noisy := strings.Replace(blockingHook("BANNED"), "def main():\n", "def main():\n    sys.stderr.write(\"guard diagnostic\\n\")\n", 1)
+	store := fixtureProject(t, map[string]string{"noisy": noisy})
+	guardPath := filepath.Join(store, "noisy.py")
+
+	report, err := (fixture.Runner{}).Run(guardPath, filepath.Join(store, MasterHookName), fixture.File{
+		Version: fixture.Version, Hook: "noisy", Cases: []fixture.Case{
+			bashCase("expected block", "echo BANNED", fixture.ExpectBlock),
+			bashCase("labelled allow", "echo BANNED", fixture.ExpectAllow),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := report.Cases[0]; got.Master != fixture.OutcomeBlock || got.MasterState != fixture.MasterVerified {
+		t.Errorf("expected block = %+v, want a block verified against this guard", got)
+	}
+	if got := report.Cases[1]; got.Master != fixture.OutcomeBlock || got.MasterState != fixture.MasterBlockedAllow {
+		t.Errorf("labelled allow = %+v, want the master's block reported", got)
+	}
+}

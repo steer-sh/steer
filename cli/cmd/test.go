@@ -86,12 +86,7 @@ input.`,
 		}
 
 		utils.Working("Executing hook...")
-		execCmd := exec.Command("python3", hook.Path)
-		execCmd.Stdin = strings.NewReader(string(inputJSON))
-		output, err := execCmd.CombinedOutput()
-		outputStr := strings.TrimSpace(string(output))
-
-		blocked, reason := parseHookDecision(outputStr)
+		blocked, reason, outputStr, err := runHookOnce(hook.Path, inputJSON)
 		if err != nil && !blocked {
 			return fmt.Errorf("hook execution failed: %w\nOutput: %s", err, outputStr)
 		}
@@ -114,6 +109,19 @@ input.`,
 
 		return nil
 	},
+}
+
+// runHookOnce runs the guard at path on one payload. The decision and reason come
+// from stdout alone; raw holds stdout and then stderr for display.
+func runHookOnce(path string, input []byte) (blocked bool, reason, raw string, err error) {
+	var stdout, stderr strings.Builder
+	execCmd := exec.Command("python3", path)
+	execCmd.Stdin = strings.NewReader(string(input))
+	execCmd.Stdout = &stdout
+	execCmd.Stderr = &stderr
+	err = execCmd.Run()
+	blocked, reason = parseHookDecision(strings.TrimSpace(stdout.String()))
+	return blocked, reason, strings.TrimSpace(stdout.String() + "\n" + stderr.String()), err
 }
 
 func parseHookDecision(output string) (bool, string) {
