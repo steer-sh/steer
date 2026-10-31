@@ -206,6 +206,14 @@ class RevertTestBase(Fixture):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("since %s" % self.second[:8], result.stdout)
 
+    def test_new_branch_without_upstream_uses_the_default_branch(self):
+        git(self.work, "remote", "set-head", "origin", "main")
+        git(self.work, "switch", "-qc", "fix/a")
+        self.commit("b.txt", "1")
+        result = self.revert_test()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("since %s" % self.second[:8], result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
