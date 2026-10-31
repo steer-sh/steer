@@ -3,7 +3,8 @@
 
 The change is the working tree against REVERT_TEST_BASE when it is set, which
 must name a commit. Otherwise it is against the merge base with the upstream
-branch (HEAD when there is none), except under GitHub Actions, where an unset
+branch, or with origin/HEAD on a branch with no upstream (HEAD when neither
+exists), except under GitHub Actions, where an unset
 REVERT_TEST_BASE fails the run: a CI checkout has no upstream, and HEAD as the
 base would check nothing. The script builds variants of the change in a copy of
 the repository and runs the new top-level test functions under each one:
@@ -180,10 +181,11 @@ def base_revision():
         print("revert-test: %s is unset under GitHub Actions; the workflow must resolve the base"
               % BASE_ENV, file=sys.stderr)
         return None
-    upstream = subprocess.run(["git", "merge-base", "HEAD", "@{upstream}"],
-                              capture_output=True, text=True)
-    if upstream.returncode == 0 and upstream.stdout.strip():
-        return upstream.stdout.strip()
+    for ref in ("@{upstream}", "refs/remotes/origin/HEAD"):
+        merge_base = subprocess.run(["git", "merge-base", "HEAD", ref],
+                                    capture_output=True, text=True)
+        if merge_base.returncode == 0 and merge_base.stdout.strip():
+            return merge_base.stdout.strip()
     return git("rev-parse", "HEAD").strip()
 
 
