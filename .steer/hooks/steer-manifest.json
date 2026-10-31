@@ -27,8 +27,16 @@
         "hook_digest": "5937d381dc3f99b1",
         "master_digest": "12f90a1daf4bb8b5",
         "rule_hash": "219d4203914a9d920a1e0d83ba4b21c7373d55f4c1c181a31fdfa5af077d6d62",
-        "verified_at": "2026-10-31T17:51:28Z"
+        "verified_at": "2026-10-31T18:05:57Z"
       }
+    }
+  },
+  "review_addendum": {
+    "no-windows-pi-findings": {
+      "text": "Windows and the Pi harness are out of scope in this repository: Steer ships for Claude Code and Codex on macOS and Linux. Do not report a defect that occurs only on Windows or only under Pi. A defect that also occurs on macOS or Linux under Claude Code or Codex stays reportable, and you describe it there.",
+      "text_hash": "505487528b7e265d7853359a14963719f7eb783234e619df13b7eb10c2a6db34",
+      "created": "2026-10-31",
+      "updated": "2026-10-31"
     }
   }
 }
