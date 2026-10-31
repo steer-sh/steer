@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/steer-sh/steer-cli/internal/claude"
+	"github.com/steer-sh/steer-cli/internal/testhome"
 )
 
 type selfProtectionRuntime struct {
@@ -265,6 +268,109 @@ func TestSelfProtectionBlocksProtectedFileMutationsViaEditWriteMultiEdit(t *test
 			}
 			if !blocked {
 				t.Fatalf("expected protected file mutation to be blocked, reason=%q output=%s", reason, output)
+			}
+		})
+	}
+}
+
+func TestSelfProtectionReadsEverySteerInvocationPastFlagsAndPunctuation(t *testing.T) {
+	rt := setupSelfProtectionRuntime(t)
+
+	tests := []struct {
+		name    string
+		command string
+		blocked bool
+	}{
+		{"second invocation", "steer list && steer remove sql-injection-prevention", true},
+		{"second invocation after a semicolon", "steer preset sync; steer preset disable sql-injection-prevention", true},
+		{"invocation with no space before it", "steer list;steer remove sql-injection-prevention", true},
+		{"invocation in a subshell", "(steer remove sql-injection-prevention)", true},
+		{"path to the binary", "steer list && ./bin/steer remove sql-injection-prevention", true},
+		{"root value flag before the subcommand", "steer --harness claude-code preset disable sql-injection-prevention", true},
+		{"root scope flag before the subcommand", "steer --scope global remove sql-injection-prevention", true},
+		{"root boolean flag before the subcommand", "steer --all-harnesses preset disable sql-injection-prevention", true},
+		{"root flag after the group", "steer preset --harness codex disable sql-injection-prevention", true},
+		{"remove value flag before the name", "steer remove --reason cleanup sql-injection-prevention", true},
+		{"root value flag after remove", "steer remove --scope project sql-injection-prevention", true},
+		{"attached flag value before the name", "steer remove --reason=cleanup sql-injection-prevention", true},
+		{"register value flag before the path", "steer register --rule x .steer/hooks/sql-injection-prevention.py", true},
+		{"quoted register value before the path", "steer register --rule \"a; b\" --source manual .steer/hooks/sql-injection-prevention.py", true},
+		{"quoted value holding a separator", "steer remove --reason \";\" sql-injection-prevention", true},
+		{"trailing semicolon on the name", "steer remove sql-injection-prevention; true", true},
+		{"no space after the name", "steer remove sql-injection-prevention;true", true},
+		{"trailing ampersands on the name", "steer remove sql-injection-prevention&& true", true},
+		{"trailing semicolon on the preset action", "steer preset disable; true", true},
+		{"redirection before the name", "steer remove 2>/dev/null sql-injection-prevention", true},
+		{"redirection between a flag and its value", "steer remove --reason >/dev/null cleanup sql-injection-prevention", true},
+		{"descriptor redirection between a flag and its value", "steer remove --reason 2>/dev/null cleanup sql-injection-prevention", true},
+		{"redirection between a root flag and its value", "steer --harness 2>/dev/null codex preset disable sql-injection-prevention", true},
+		{"quoted redirection as a flag value", "steer remove --reason \">\" sql-injection-prevention", true},
+		{"numeric flag value before a redirection", "steer remove --reason 2 >/dev/null sql-injection-prevention", true},
+		{"redirection between a flag and its value for a user hook", "steer remove --reason >/dev/null cleanup user-custom", false},
+		{"unbalanced quote later in the command", "steer remove sql-injection-prevention; echo \"", true},
+		{"list then a user hook", "steer list && steer remove user-custom", false},
+		{"sync then list", "steer preset sync && steer list", false},
+		{"sync with a root flag", "steer --harness codex preset sync", false},
+		{"team commands chained", "steer team apply --force && steer team verify --ci", false},
+		{"user hook with a reason naming a factory hook", "steer remove --reason sql-injection-prevention user-custom", false},
+		{"user hook with its redirection", "steer remove user-custom 2>&1 && steer list", false},
+		{"user register with a rule naming a removal", "steer register --rule \"steer remove sql-injection-prevention\" .steer/hooks/user-custom.py", false},
+		{"directory named steer", "cd steer && steer list", false},
+		{"factory name in the next command", "steer remove --force; echo sql-injection-prevention", false},
+		{"disable word in the next command", "steer preset --help && echo disable", false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			blocked, reason, output, err := runSelfProtectionHook(t, rt, bashPayload(tc.command))
+			if err != nil {
+				t.Fatalf("hook execution failed: %v output=%s", err, output)
+			}
+			if blocked != tc.blocked {
+				t.Fatalf("blocked = %v, want %v, reason=%q output=%s", blocked, tc.blocked, reason, output)
+			}
+		})
+	}
+}
+
+func TestSelfProtectionInstallsItsCommandReadingAtNewVersionIntoMaster(t *testing.T) {
+	dir := withPresetProjectTempDir(t)
+	testhome.Set(t, dir)
+	catalog, err := LoadCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, ok := catalog.Find("sql-injection-prevention")
+	if !ok {
+		t.Fatal("sql-injection-prevention missing from catalog")
+	}
+	if _, err := EnablePreset(claude.ProjectScope, catalog, item, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := EnsureAutoManagedFactoryPresets(claude.ProjectScope, catalog, false); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := claude.LoadManifest(claude.ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := manifest.Hooks["steer-self-protection"].HookVersion; got != "factory-hook-v3" {
+		t.Fatalf("manifest hook version = %q, want factory-hook-v3", got)
+	}
+
+	master := filepath.Join(dir, ".steer", "hooks", "steer-hooks.py")
+	cases := []struct {
+		command string
+		blocked bool
+	}{
+		{"steer list && steer remove --reason cleanup sql-injection-prevention; true", true},
+		{"steer --harness claude-code preset disable sql-injection-prevention", true},
+		{"steer list && steer preset sync", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.command, func(t *testing.T) {
+			if got := runGuardPayload(t, master, dir, "Bash", map[string]any{"command": tc.command}); got != tc.blocked {
+				t.Fatalf("blocked = %v, want %v", got, tc.blocked)
 			}
 		})
 	}

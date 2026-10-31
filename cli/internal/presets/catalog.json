@@ -142,7 +142,7 @@
       "os": ["all"],
       "prompt_version": "factory-prompt-v1",
       "prompt_modules": ["security-layer2"],
-      "hook_version": "factory-hook-v2",
+      "hook_version": "factory-hook-v3",
       "internal": true,
       "auto_enable_with_factory": true
     }

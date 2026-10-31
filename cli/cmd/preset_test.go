@@ -1,12 +1,70 @@
 package cmd
 
 import (
+	"regexp"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/presets"
 )
+
+// The self-protection guard skips a flag's value by name, so its table must hold
+// every value-taking flag of the commands it reads, and only those.
+func TestSelfProtectionValueFlagTableMatchesTheCLI(t *testing.T) {
+	want := map[string]bool{}
+	collect := func(flag *pflag.Flag) {
+		if flag.NoOptDefVal != "" {
+			return
+		}
+		want["--"+flag.Name] = true
+		if flag.Shorthand != "" {
+			want["-"+flag.Shorthand] = true
+		}
+	}
+	rootCmd.PersistentFlags().VisitAll(collect)
+	commands := []*cobra.Command{removeCmd, registerCmd, presetCmd}
+	commands = append(commands, presetCmd.Commands()...)
+	for _, command := range commands {
+		command.PersistentFlags().VisitAll(collect)
+		command.Flags().VisitAll(collect)
+	}
+
+	catalog, err := presets.LoadCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, ok := catalog.Find("steer-self-protection")
+	if !ok {
+		t.Fatal("steer-self-protection missing from catalog")
+	}
+	source, err := catalog.ReadHookContent(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	table := regexp.MustCompile(`(?s)STEER_VALUE_FLAGS = \{(.*?)\n\}`).FindSubmatch(source)
+	if table == nil {
+		t.Fatal("STEER_VALUE_FLAGS missing from the guard source")
+	}
+	var got []string
+	for _, match := range regexp.MustCompile(`"(-[^"]+)"`).FindAllSubmatch(table[1], -1) {
+		got = append(got, string(match[1]))
+	}
+	sort.Strings(got)
+
+	var expected []string
+	for flag := range want {
+		expected = append(expected, flag)
+	}
+	sort.Strings(expected)
+	if !slices.Equal(got, expected) {
+		t.Fatalf("guard table = %v, CLI value-taking flags = %v", got, expected)
+	}
+}
 
 // The self-protection block names `steer preset disable steer-self-protection` as the
 // user's removal command, so that command must remove the internal preset.
