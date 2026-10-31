@@ -205,6 +205,16 @@ Read the linked architecture section before changing the corresponding boundary:
   `cli/internal/status/vocabulary_test.go`. Stored tokens and human labels have
   different compatibility obligations.
 
+## Branches and merges
+
+All changes reach `main` through a pull request; a ruleset requires both `check.yml`
+jobs, and the guard `.steer/hooks/no-direct-main-hook.py` blocks a commit on or push
+to `main` earlier. A clone needs `steer hooks sync --scope project` to run that guard.
+The maintainer's branches merge with a merge commit (`gh pr merge --merge
+--delete-branch`) because trailers cite commit hashes; a contributor's pull request
+is squash-merged. A release tag goes on the merged commit on `main` after its push
+run of `check.yml` passes.
+
 ## Build and verification
 
 Run `./check.sh` before reporting a change complete. It checks gofmt, builds,
@@ -315,3 +325,8 @@ has no mechanical pass/fail oracle for comprehension.
 - Stable hook executable: `~/.steer/bin/steer`; `steer bin install` updates it and
   repairs Steer-owned registrations. Reviewer timeout changes need channel
   re-registration to update the harness timeout too.
+
+## Steer Rules
+<!-- managed-by-steer -->
+- never commit on main or push to main in this repository | work on a branch and merge through a pull request
+<!-- end-managed-by-steer -->

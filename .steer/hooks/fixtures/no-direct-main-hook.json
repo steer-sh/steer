@@ -1,0 +1,539 @@
+{
+  "version": 1,
+  "hook": "no-direct-main-hook",
+  "cases": [
+    {
+      "name": "bare push on main is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "git push"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/main\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "cd into another repository on main is allowed",
+      "payload": {
+        "tool_input": {
+          "command": "cd sub \u0026\u0026 git commit -m x"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "allow",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "sub/.git/HEAD": "ref: refs/heads/main\n",
+        "sub/.git/config": "[remote \"origin\"]\n\turl = git@github.com:example/notes.git\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "checkout -b then commit is allowed",
+      "payload": {
+        "tool_input": {
+          "command": "git checkout -b fix/a \u0026\u0026 git commit -m x"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "allow",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/main\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "checkout of a file does not count as a move",
+      "payload": {
+        "tool_input": {
+          "command": "git checkout -- a.txt \u0026\u0026 git commit -m x"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/main\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "commit after a bare file checkout is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "git checkout a.txt \u0026\u0026 git commit -m x"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/main\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "commit after a failable switch with a semicolon is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "git switch nope; git commit -m x"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/main\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "commit after a failed switch with || is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "git switch nope || git commit -m x"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/main\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "commit after a successful switch to a branch is allowed",
+      "payload": {
+        "tool_input": {
+          "command": "git switch feat \u0026\u0026 git commit -m x"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "allow",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/main\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "commit after an env assignment is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "GIT_AUTHOR_NAME=a git commit -m x"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/main\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "commit after switching back to main is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "git switch main \u0026\u0026 git commit -m x"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "commit from a subdirectory after switching to main is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "git switch main \u0026\u0026 git -C cli commit -m x"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "cli/x.txt": "x\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "commit in a worktree on main is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "git commit -m x"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git": "gitdir: real/worktrees/w\n",
+        "real/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "real/worktrees/w/HEAD": "ref: refs/heads/main\n",
+        "real/worktrees/w/commondir": "../..\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "commit on a branch is allowed",
+      "payload": {
+        "tool_input": {
+          "command": "git commit -m x"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "allow",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "commit on main in a same-named repository on another host is allowed",
+      "payload": {
+        "tool_input": {
+          "command": "git commit -m x"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "allow",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/main\n",
+        ".git/config": "[remote \"origin\"]\n\turl = https://example.com/steer-sh/steer.git\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "commit on main is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "git commit -m \"x\""
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/main\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "commit on main of a similarly named owner is allowed",
+      "payload": {
+        "tool_input": {
+          "command": "git commit -m x"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "allow",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/main\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:other-steer-sh/steer.git\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "commit on main of another repository is allowed",
+      "payload": {
+        "tool_input": {
+          "command": "git commit -m x"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "allow",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/main\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:example/notes.git\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "commit through -C on main is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "git -C sub commit -m x"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "sub/.git/HEAD": "ref: refs/heads/main\n",
+        "sub/.git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "echo of the command is allowed",
+      "payload": {
+        "tool_input": {
+          "command": "echo \"git push origin main\""
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "allow",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/main\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "edit is ignored",
+      "payload": {
+        "tool_input": {
+          "content": "git push origin main",
+          "file_path": "a.sh"
+        },
+        "tool_name": "Write"
+      },
+      "expect": "allow",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/main\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "explicit push to main is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "git push origin main"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "forced refspec push to main is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "git push origin +feat:main"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "heredoc body is allowed",
+      "payload": {
+        "tool_input": {
+          "command": "cat \u003e f \u003c\u003c'EOF'\ngit commit -m x\ngit push origin main\nEOF"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "allow",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/main\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "main as a source only is allowed",
+      "payload": {
+        "tool_input": {
+          "command": "git push origin main:fix/a"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "allow",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/main\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "new branch then commit is allowed",
+      "payload": {
+        "tool_input": {
+          "command": "git switch -c fix/a \u0026\u0026 git commit -m x"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "allow",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/main\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "push of HEAD on main is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "git push -u origin HEAD"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/main\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "push of a branch is allowed",
+      "payload": {
+        "tool_input": {
+          "command": "git push -u origin HEAD"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "allow",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "push of a named branch from main is allowed",
+      "payload": {
+        "tool_input": {
+          "command": "git push origin fix/a"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "allow",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/main\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "push of a tag from main is allowed",
+      "payload": {
+        "tool_input": {
+          "command": "git push origin v0.1.5"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "allow",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/main\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "push of all branches is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "git push --all origin"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "push of tags from main is allowed",
+      "payload": {
+        "tool_input": {
+          "command": "git push --tags"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "allow",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/main\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "push with the remote in --repo is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "git push --repo origin HEAD:main"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "push with the remote in --repo= is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "git push --repo=origin feat:main"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "read-only git on main is allowed",
+      "payload": {
+        "tool_input": {
+          "command": "git log main"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "allow",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/main\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "refspec push to main is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "git push origin HEAD:refs/heads/main"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "synthetic"
+    }
+  ]
+}
