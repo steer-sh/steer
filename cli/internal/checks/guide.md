@@ -162,6 +162,8 @@ timeout, or not executed (the deadline came first). A `go-test` binding can
 also read skipped, passed-cached (the toolchain replayed a cached pass; this
 is not a fresh run), or unavailable (its package ran but did not build, or
 reported no result for the test, for example because `-run` excluded it). A
+test that had started and had no result when its test binary exited, through a
+crash of its own or of a parallel test, reads failed. A
 binding whose package the run never reached gets no record from the adapter.
 A passing `check.sh` alone never shows that a particular check ran.
 

@@ -134,11 +134,14 @@ type goSuiteEvent struct {
 type goPackageState struct {
 	cached      bool
 	failedBuild bool
+	// failedAt is the time of the package's final fail action, zero otherwise.
+	failedAt time.Time
 }
 
 type boundGoTest struct {
 	record   Execution
 	action   string
+	running  bool
 	started  time.Time
 	finished time.Time
 	output   *outputRecorder
@@ -230,9 +233,9 @@ func (r *goSuiteReader) line(line []byte) {
 		if ev.Test == top {
 			switch ev.Action {
 			case "run":
-				bt.started = ev.Time
+				bt.started, bt.running = ev.Time, true
 			case "pass", "fail", "skip":
-				bt.action, bt.finished = ev.Action, ev.Time
+				bt.action, bt.finished, bt.running = ev.Action, ev.Time, false
 			}
 		}
 	}
@@ -275,6 +278,9 @@ func (r *goSuiteReader) packageEvent(ev goSuiteEvent, ps *goPackageState) {
 		if ev.FailedBuild != "" {
 			ps.failedBuild = true
 		}
+		if ev.Action == "fail" {
+			ps.failedAt = ev.Time
+		}
 		prefix := ev.Package + "\x00"
 		keys := make([]string, 0)
 		for key := range r.pending {
@@ -292,7 +298,9 @@ func (r *goSuiteReader) packageEvent(ev goSuiteEvent, ps *goPackageState) {
 	}
 }
 
-// records turns each bound test in a reported package into an execution.
+// records turns each bound test in a reported package into an execution. A
+// test still running when its package failed took the test binary down or went
+// down with it, and reads as failed.
 func (r *goSuiteReader) records(end time.Time, timedOut bool) []Execution {
 	var out []Execution
 	for importPath, tests := range r.bound {
@@ -309,7 +317,15 @@ func (r *goSuiteReader) records(end time.Time, timedOut bool) []Execution {
 			if bt.finished.IsZero() {
 				rec.Finished = end.UTC()
 			}
-			switch bt.action {
+			crashed := bt.running && !ps.failedAt.IsZero()
+			action := bt.action
+			if crashed {
+				action = "crashed"
+			}
+			switch action {
+			case "crashed":
+				rec.Outcome, rec.Reason = OutcomeFailed, "the test binary exited before the test reported a result"
+				rec.Finished = ps.failedAt.UTC()
 			case "pass":
 				rec.Outcome = OutcomePassed
 				if ps.cached {
@@ -329,7 +345,7 @@ func (r *goSuiteReader) records(end time.Time, timedOut bool) []Execution {
 					rec.Outcome, rec.Reason = OutcomeUnavailable, "the package ran without a result for the test: it may be renamed, or excluded by -run"
 				}
 			}
-			if bt.action != "" {
+			if crashed || bt.action != "" {
 				rec.OutputDigest, rec.Excerpt = bt.output.digest(), bt.output.excerpt()
 			}
 			out = append(out, rec)
