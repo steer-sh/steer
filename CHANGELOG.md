@@ -5,6 +5,45 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4] - 2026-10-30
+
+### Added
+
+- Commit gate: an `openai-compatible` reviewer provider reviews through an API key,
+  with no reviewer CLI installed. It works with an OpenAI-compatible endpoint, such
+  as OpenRouter, over https (plain http only on a loopback host). Set
+  `reviewer.api.base_url` and a model; `/steer-setup` covers the path.
+- `steer reviewer key set` stores the API key in
+  `~/.steer/credentials/reviewer-api-key`. It reads from a terminal with no echo and
+  refuses a pipe. The key can also come from the variable that
+  `reviewer.api.key_env` names, and it never goes in `config.json`.
+- `reviewer.api.tools` (`off`, `auto`, `required`; default `off`) lets an API
+  reviewer call `read_file`, `grep` and `list_files` over each file as the commit
+  lands it. Tools send more code to the endpoint and multiply the input tokens.
+
+### Changed
+
+- The commit-review ledger now has one lock for appends and rewrites, and the
+  resolver reads under it. A binary older than 0.1.4 honours neither lock, so run
+  `steer bin install` after the plugin update to keep the plugin copy and the stable
+  executable on one version.
+- The Go toolchain moves to 1.27.3 for GO-2026-6809 in `crypto/x509`.
+
+### Fixed
+
+- `steer git-hooks install` writes where git runs hooks. It reported success for a
+  hook git never ran under `core.hooksPath`, and it failed in a linked worktree.
+- Fixture runs and `steer test` read a guard's decision from stdout alone. A warning
+  on stderr could turn a deny into an allow, and stderr that quoted a block could
+  read as one.
+- Presets: the postinstall guard checks the raw text of content that decodes to any
+  JSON shape. Content that decoded to a non-object allowed the edit silently.
+- Presets: the injection guard forgets a shell-safe proof when its name is rebound.
+- Presets: self-protection reads every `steer` word in a command past its flags and
+  shell punctuation, so those forms no longer hide the removal of a factory hook.
+- Repository checks: a Go test unfinished when its test binary exits reads as failed
+  and keeps the crash output. It read as unavailable before.
+
 ## [0.1.3] - 2026-10-26
 
 ### Changed
@@ -83,6 +122,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 First public release.
 
+[0.1.4]: https://github.com/steer-sh/steer/releases/tag/v0.1.4
 [0.1.3]: https://github.com/steer-sh/steer/releases/tag/v0.1.3
 [0.1.2]: https://github.com/steer-sh/steer/releases/tag/v0.1.2
 [0.1.1]: https://github.com/steer-sh/steer/releases/tag/v0.1.1
