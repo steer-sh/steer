@@ -26,8 +26,9 @@ var gitHooksCmd = &cobra.Command{
 var gitHooksInstallCmd = &cobra.Command{
 	Use:   "install",
 	Short: "Install a pre-commit hook that runs steer verify",
-	Long: `Install writes .git/hooks/pre-commit in the current repository.
-The hook runs:
+	Long: `Install writes pre-commit in the directory git runs hooks from for the current
+repository: core.hooksPath when it is set, otherwise .git/hooks. Every repository that
+shares that directory runs the hook. The hook runs:
   steer verify --staged --scope project
 
 Use --include-global to also run global hooks.`,
@@ -35,12 +36,10 @@ Use --include-global to also run global hooks.`,
   steer git-hooks install --include-global
   steer git-hooks install --force`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		repoRoot, err := gitTopLevel()
+		hooksDir, err := workTreeHooksDir()
 		if err != nil {
 			return err
 		}
-
-		hooksDir := filepath.Join(repoRoot, ".git", "hooks")
 		if err := os.MkdirAll(hooksDir, 0o755); err != nil {
 			return fmt.Errorf("failed to create hooks directory: %w", err)
 		}
@@ -76,6 +75,15 @@ Use --include-global to also run global hooks.`,
 		utils.Tip("Add `steer verify --changed --base <sha> --head <sha>` as a required CI check.")
 		return nil
 	},
+}
+
+// workTreeHooksDir is gitHooksDir for a command run from a work tree. It refuses
+// anywhere else: inside .git a relative core.hooksPath would resolve under .git.
+func workTreeHooksDir() (string, error) {
+	if _, err := gitTopLevel(); err != nil {
+		return "", err
+	}
+	return gitHooksDir()
 }
 
 func preCommitVerifyArgs(includeGlobal bool) string {

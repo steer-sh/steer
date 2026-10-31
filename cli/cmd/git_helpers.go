@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -10,15 +11,18 @@ import (
 
 func runGit(args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		msg := strings.TrimSpace(string(output))
+	// Stderr stays out of the result: GIT_TRACE and warnings write there on success.
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
 		if msg == "" {
 			return "", fmt.Errorf("git %s failed: %w", strings.Join(args, " "), err)
 		}
 		return "", fmt.Errorf("git %s failed: %s", strings.Join(args, " "), msg)
 	}
-	return string(output), nil
+	return stdout.String(), nil
 }
 
 func gitTopLevel() (string, error) {
@@ -53,7 +57,7 @@ func gitChangedFiles(args ...string) ([]string, error) {
 	return paths, nil
 }
 
-// gitHooksDir is the hooks directory git itself would run, created if absent.
+// gitHooksDir is the hooks directory git itself would run. It may not exist yet.
 //
 // It is resolved with `rev-parse --git-path` rather than joined onto the work tree,
 // because a linked worktree and a submodule carry a `.git` FILE: joining `.git/hooks`
@@ -64,7 +68,8 @@ func gitHooksDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	dir := strings.TrimSpace(out)
+	// Only the final newline is git's: the rest is the directory's name, whitespace included.
+	dir := strings.TrimSuffix(out, "\n")
 	if dir == "" {
 		return "", fmt.Errorf("git could not resolve the hooks directory")
 	}
