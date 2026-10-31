@@ -3,6 +3,7 @@ package claude
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -186,5 +187,92 @@ func TestSyncStoreWritesNothingForATargetInSync(t *testing.T) {
 	}
 	if info, err := os.Stat(settings); err != nil || !info.ModTime().Equal(past) {
 		t.Fatal("sync saved settings.json for a target already in sync")
+	}
+}
+
+// runRegisteredMaster runs the registered command through a shell as Claude Code
+// does: in dir, with the variable naming root.
+func runRegisteredMaster(t *testing.T, root, dir string) ([]byte, error) {
+	t.Helper()
+	command, err := Registrar{}.RegisteredMasterCommand(ProjectScope)
+	if err != nil || command == "" {
+		t.Fatalf("registered command %q, %v", command, err)
+	}
+	run := exec.Command("sh", "-c", command)
+	run.Dir = dir
+	run.Env = append(os.Environ(), "CLAUDE_PROJECT_DIR="+root)
+	run.Stdin = strings.NewReader(`{"tool_name":"Read","tool_input":{"file_path":"x"}}`)
+	return run.CombinedOutput()
+}
+
+// A session's cd into a subdirectory moves the directory a hook runs in. The guard
+// must still run there, or python3's exit 2 blocks every tool call.
+func TestARegisteredMasterRunsFromASubdirectory(t *testing.T) {
+	withProjectTempDir(t)
+	installTestHook(t, "no-bare-python", "use python3 instead")
+	root, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub := filepath.Join(root, "cli", "deep")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := runRegisteredMaster(t, root, sub); err != nil {
+		t.Fatalf("the master failed from a subdirectory: %v\n%s", err, out)
+	}
+}
+
+// A registration written before the anchor names the same path, so only the command
+// text shows it needs the rewrite. Sync repoints it and a second sync changes nothing.
+func TestSyncStoreRepointsABareProjectRegistration(t *testing.T) {
+	withProjectTempDir(t)
+	installTestHook(t, "no-bare-python", "use python3 instead")
+	settings, err := LoadSettings(ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const timeout = 77
+	for i := range settings.Hooks.PreToolUse {
+		for j := range settings.Hooks.PreToolUse[i].Hooks {
+			settings.Hooks.PreToolUse[i].Hooks[j].Command = "python3 .steer/hooks/" + MasterHookName
+			settings.Hooks.PreToolUse[i].Hooks[j].Timeout = timeout
+		}
+	}
+	if err := SaveSettings(ProjectScope, settings); err != nil {
+		t.Fatal(err)
+	}
+	if stale, err := MasterCommandStale(ProjectScope); err != nil || !stale {
+		t.Fatalf("MasterCommandStale = %v, %v; want true", stale, err)
+	}
+
+	result, err := SyncStore(ProjectScope, Registrar{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Synced) != 1 {
+		t.Fatalf("result = %#v; want one synced target", result)
+	}
+	want, err := GetMasterHookCommand(ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := (Registrar{}).RegisteredMasterCommand(ProjectScope); got != want {
+		t.Fatalf("command = %q, want %q", got, want)
+	}
+	settings, err = LoadSettings(ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := settings.Hooks.PreToolUse[0].Hooks[0].Timeout; got != timeout {
+		t.Fatalf("timeout = %d, want %d", got, timeout)
+	}
+
+	again, err := SyncStore(ProjectScope, Registrar{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(again.Synced) != 0 || len(again.Current) != 1 {
+		t.Fatalf("second sync = %#v; want the target current", again)
 	}
 }

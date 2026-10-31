@@ -125,6 +125,21 @@ func relinkClaude(scope, path string) (int, error) {
 		reportRelink("claude-code", scope, "resolver", next)
 		rewritten++
 	}
+	stale, err := claude.MasterCommandStale(scope)
+	if err != nil {
+		return rewritten, err
+	}
+	if stale {
+		if err := claude.RegisterMasterHook(scope); err != nil {
+			return rewritten, err
+		}
+		command, err := claude.GetMasterHookCommand(scope)
+		if err != nil {
+			return rewritten, err
+		}
+		reportRelink("claude-code", scope, "guard master", command)
+		rewritten++
+	}
 	return rewritten, nil
 }
 
