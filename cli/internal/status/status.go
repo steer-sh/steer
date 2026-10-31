@@ -72,8 +72,9 @@ import (
 // answer `steer status` prints, so an agent reads trust and resolution with it.
 // v29 adds posture.plugins: each harness's cached plugin copy, read against the
 // stable executable. v33 adds hooks[].fixtures: every guard's stored cases, with or
-// without a record.
-const StatusVersion = 33
+// without a record. v34 adds the trust states approved, disabled, hooks-off and modified: Codex
+// approval reads the saved hash and the enabled state.
+const StatusVersion = 34
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20
@@ -213,11 +214,18 @@ type VerdictSummary struct {
 	Counts map[string]int `json:"counts"`
 }
 
-// Trust states a harness reports for a registered hook. Steer never claims to have
-// verified a harness's internal hash: a record's presence is all it can read.
+// Trust states a harness reports for a registered hook. Approved means the saved hash
+// equals the computed one, which is one prerequisite of a hook running and no proof
+// that it ran. Modified means the two hashes differ, and names no cause: the handler
+// changed or the harness hashes it another way. RecordPresent is a saved hash this
+// comparison cannot cover.
 const (
 	TrustNotApplicable = "not-applicable"
 	TrustUnknown       = "unknown"
+	TrustApproved      = "approved"
+	TrustDisabled      = "disabled"
+	TrustHooksOff      = "hooks-off"
+	TrustModified      = "modified"
 	TrustRecordPresent = "record-present-unverified"
 	TrustMissing       = "missing"
 )
@@ -681,7 +689,7 @@ func collectPosture(cfg gate.Config, ev mine.EvidenceSet) Posture {
 			Registered: cg.Registered,
 			Effective:  cg.Effective(),
 			Timeout:    cg.Timeout,
-			Trust:      trustState(harness.Codex, cg.TrustStateKnown, cg.TrustRecordPresent),
+			Trust:      CodexTrust(cg),
 			Command:    cg.Command,
 		}, ledgerCorpus, observed.gate[codexID]))
 		// Pi is unlisted: its rows appear only where its extension registers
@@ -722,7 +730,7 @@ func collectPosture(cfg gate.Config, ev mine.EvidenceSet) Posture {
 			Registered: cr.Registered,
 			Effective:  cr.Registered,
 			Timeout:    cr.Timeout,
-			Trust:      trustState(harness.Codex, cr.TrustStateKnown, cr.TrustRecordPresent),
+			Trust:      CodexTrust(cr),
 			Command:    cr.Command,
 		}, "", 0))
 		if piListed {
@@ -939,13 +947,40 @@ func storeMaster(scope string) string {
 	return path
 }
 
+// CodexTrust reads a Codex registration's trust state: its approval when registered,
+// and otherwise what the record search found.
+func CodexTrust(a codex.Arming) string {
+	if a.Registered && a.Approval != "" {
+		return approvalTrust(a.Approval)
+	}
+	return trustState(harness.Codex, a.TrustStateKnown, a.TrustRecordPresent)
+}
+
+// approvalTrust maps a Codex approval state to its trust state.
+func approvalTrust(approval string) string {
+	switch approval {
+	case codex.ApprovalApproved:
+		return TrustApproved
+	case codex.ApprovalDisabled:
+		return TrustDisabled
+	case codex.ApprovalHooksOff:
+		return TrustHooksOff
+	case codex.ApprovalModified:
+		return TrustModified
+	case codex.ApprovalMissing:
+		return TrustMissing
+	case codex.ApprovalUnverifiable:
+		return TrustRecordPresent
+	}
+	return TrustUnknown
+}
+
 // runnerTrust reads a harness's approval of its registered guard runner. Codex
 // is the one harness whose approval record Steer reads; any other harness that
 // reviews hook trust reads as unknown.
 func runnerTrust(id harness.ID, scope string) string {
 	if id == harness.Codex {
-		a := codex.MasterArming(scope, ".")
-		return trustState(id, a.TrustStateKnown, a.TrustRecordPresent)
+		return CodexTrust(codex.MasterArming(scope, "."))
 	}
 	return trustState(id, false, false)
 }
@@ -967,9 +1002,8 @@ func newestFiring(dir string) float64 {
 	return newest
 }
 
-// trustState reports what this machine can honestly say about a registration's trust.
-// A harness that never reviews hook trust is not-applicable; one that does reports
-// record presence, never a verified hash.
+// trustState reports a registration's trust from a record search alone. A harness that
+// never reviews hook trust is not-applicable.
 func trustState(id harness.ID, known, present bool) string {
 	h, ok := harness.Get(id)
 	if !ok || !h.Capabilities.TrustReview {

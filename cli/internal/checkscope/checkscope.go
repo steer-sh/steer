@@ -35,6 +35,8 @@ type Arming struct {
 	Timeout    int
 	Command    string
 	Path       string
+	// Approval is Codex's approval state, "" on a harness that reviews no hook trust.
+	Approval string
 }
 
 // RunnerArming reads one harness's registration at one scope. projectDir is the
@@ -42,7 +44,7 @@ type Arming struct {
 func RunnerArming(target harness.ID, scope, projectDir string) (Arming, error) {
 	if target == harness.Codex {
 		a := codexhooks.CheckHookArming(scope, projectDir)
-		return Arming{Registered: a.Registered, Timeout: a.Timeout, Command: a.Command, Path: a.Path}, nil
+		return Arming{Registered: a.Registered, Timeout: a.Timeout, Command: a.Command, Path: a.Path, Approval: a.Approval}, nil
 	}
 	a, err := claude.CheckHookArming(scope)
 	if err != nil {

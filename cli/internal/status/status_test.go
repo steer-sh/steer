@@ -190,7 +190,7 @@ func intPtr(n int) *int           { return &n }
 // so a renamed or reordered json tag fails here, the agent-contract guard.
 func TestJSONContractIsStable(t *testing.T) {
 	s := &SystemStatus{
-		StatusVersion: 33,
+		StatusVersion: 34,
 		GeneratedAt:   "2026-01-01T00:00:00Z",
 		Posture: Posture{
 			Instrument: "agy@sha", Reviewer: "gemini", Ledger: "/l.jsonl",
@@ -346,7 +346,7 @@ func TestJSONContractIsStable(t *testing.T) {
 }
 
 const goldenStatusJSON = `{
-  "status_version": 33,
+  "status_version": 34,
   "generated_at": "2026-01-01T00:00:00Z",
   "posture": {
     "instrument": "agy@sha",
@@ -511,7 +511,7 @@ const goldenStatusJSON = `{
         }
       ],
       "unverified": [
-        "Codex global scope: trust record present, unverified; current hook trust cannot be verified · never observed",
+        "Codex global scope: approval could not be compared; current hook trust cannot be verified · never observed",
         "Claude Code mod guard@m handles tool.call{tool=Bash}, tool.check, so it can skip or override Steer's hooks",
         "Claude Code mod pane@m is not inspected, so whether it can skip Steer's hooks is unknown — run steer mods inspect"
       ]

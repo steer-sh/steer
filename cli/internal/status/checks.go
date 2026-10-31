@@ -11,6 +11,7 @@ import (
 
 	"github.com/steer-sh/steer-cli/internal/checks"
 	"github.com/steer-sh/steer-cli/internal/checkscope"
+	"github.com/steer-sh/steer-cli/internal/harness"
 )
 
 // checkCorpus is the stream the Stop runner writes: one record per oracle run.
@@ -180,8 +181,7 @@ func CheckRunOf(latest, refused *checks.OracleRun) *CheckRun {
 
 // runnerArming reads the Stop runner's registration in each harness and scope.
 // Observed is the newest run that harness's own runner recorded here, so a
-// manual run and another harness's run leave it alone. Steer reads no Stop trust
-// record on any harness, so trust is unknown wherever trust is reviewed.
+// manual run and another harness's run leave it alone.
 func runnerArming(root string, observed map[string]time.Time) []ScopeArming {
 	out := []ScopeArming{}
 	for _, target := range checkscope.Harnesses {
@@ -196,13 +196,21 @@ func runnerArming(root string, observed map[string]time.Time) []ScopeArming {
 				Registered: a.Registered,
 				Effective:  a.Registered && (a.Timeout == 0 || a.Timeout >= checks.RegisteredHookTimeout()),
 				Timeout:    a.Timeout,
-				Trust:      trustState(target, false, false),
+				Trust:      runnerApprovalTrust(target, a),
 				Command:    a.Command,
 			}
 			out = append(out, withEvidence(row, checkCorpus, checkTimeUnix(observed[string(target)])))
 		}
 	}
 	return out
+}
+
+// runnerApprovalTrust reads the check runner's approval where the harness reviews one.
+func runnerApprovalTrust(target harness.ID, a checkscope.Arming) string {
+	if a.Registered && a.Approval != "" {
+		return approvalTrust(a.Approval)
+	}
+	return trustState(target, false, false)
 }
 
 // BindingPhrase names what a declaration binds to: the script Steer runs, or the

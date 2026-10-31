@@ -553,3 +553,17 @@ func TestRemoveCommitGateFindsAHandlerInASharedEntry(t *testing.T) {
 		t.Errorf("file = %s", got)
 	}
 }
+
+// A registered handler's arming carries its approval, on every channel.
+func TestArmingCarriesApproval(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	if _, err := RegisterCommitGateAndResolver("global", "", "steer commit-gate review-codex", 460, "steer commit-gate backfill --if-due", 30); err != nil {
+		t.Fatal(err)
+	}
+	if got := CommitGateArming("global", "").Approval; got != ApprovalMissing {
+		t.Errorf("gate approval = %q", got)
+	}
+	if got := ResolverArmingRow("global", "").Approval; got != ApprovalMissing {
+		t.Errorf("resolver approval = %q", got)
+	}
+}

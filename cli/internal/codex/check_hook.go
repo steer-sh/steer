@@ -98,16 +98,17 @@ func StopHookMatching(scope, cwd string, match func(string) bool) Arming {
 	if err != nil {
 		return a
 	}
-	for _, raw := range eventEntries(root, "Stop") {
+	for i, raw := range eventEntries(root, "Stop") {
 		entry, _ := raw.(map[string]any)
 		hooks, _ := entry["hooks"].([]any)
-		for _, rawHook := range hooks {
+		for j, rawHook := range hooks {
 			hook, _ := rawHook.(map[string]any)
 			command, _ := hook["command"].(string)
 			if !match(command) {
 				continue
 			}
 			a.Registered, a.Command = true, command
+			a.Approval = approvalOf([]handlerSlot{slotAt(path, "Stop", i, j, entry, hook)})
 			if timeout, ok := hook["timeout"].(float64); ok {
 				a.Timeout = int(timeout)
 			}

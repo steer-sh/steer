@@ -51,15 +51,16 @@ type hookEntry struct {
 	Hooks   []commandHook `json:"hooks"`
 }
 
-// Arming describes the gate entry and whether config.toml contains a trust record at
-// its current event/entry/handler index. Codex's handler hash algorithm is internal;
-// record presence alone does not prove that the current definition is trusted.
+// Arming describes the gate entry and what config.toml says about its approval.
+// Approval compares the saved hash with the handler's computed one; the Trust fields
+// report only whether a record exists at the current event/entry/handler index.
 type Arming struct {
 	Registered         bool
 	Matcher            string
 	Timeout            int
 	TrustRecordPresent bool
 	TrustStateKnown    bool
+	Approval           string
 	Path               string
 	// Command is the registered hook command verbatim, so a reader can name the
 	// file this harness actually invokes rather than the one a store resolves to.
@@ -439,8 +440,10 @@ func ResolverArmingRow(scope, cwd string) Arming {
 	timeout := 0
 	command := ""
 	var keys [][]string
+	var slots []handlerSlot
 	for _, event := range resolverEvents {
 		var key []string
+		var slot handlerSlot
 		for i, raw := range eventEntries(root, event) {
 			entry, _ := raw.(map[string]any)
 			hooks, _ := entry["hooks"].([]any)
@@ -451,6 +454,7 @@ func ResolverArmingRow(scope, cwd string) Arming {
 					continue
 				}
 				key = trustKeys(path, event, i, j)
+				slot = slotAt(path, event, i, j, entry, hook)
 				command = cmdText
 				if t, ok := hook["timeout"].(float64); ok {
 					timeout = int(t)
@@ -461,22 +465,21 @@ func ResolverArmingRow(scope, cwd string) Arming {
 			return Arming{Path: path}
 		}
 		keys = append(keys, key)
+		slots = append(slots, slot)
 	}
 	a.Registered, a.Timeout, a.Command = true, timeout, command
 	a.TrustStateKnown, a.TrustRecordPresent = trustRecords(keys)
+	a.Approval = approvalOf(slots)
 	return a
 }
 
-// CommitGateArming reads registration and checks whether config.toml has a trust
-// record at the handler's current index. It does not interpret trusted_hash.
+// CommitGateArming reads registration and the handler's approval in config.toml.
 func CommitGateArming(scope, cwd string) Arming {
 	return armingFor(scope, cwd, isGate)
 }
 
 // armingFor finds the first PreToolUse handler this channel owns and reports its
-// matcher, its timeout, and whether config.toml carries a trust record at the
-// handler's current event/entry/handler index. Codex's handler hash algorithm is
-// internal, so record presence is all Steer can honestly report.
+// matcher, its timeout, and its approval in config.toml.
 func armingFor(scope, cwd string, owns func(string) bool) Arming {
 	path, err := hooksPath(scope, cwd)
 	if err != nil {
@@ -502,6 +505,7 @@ func armingFor(scope, cwd string, owns func(string) bool) Arming {
 				a.Timeout = int(timeout)
 			}
 			a.TrustStateKnown, a.TrustRecordPresent = trustRecords([][]string{trustKeys(path, "PreToolUse", i, j)})
+			a.Approval = approvalOf([]handlerSlot{slotAt(path, "PreToolUse", i, j, entry, hook)})
 			return a
 		}
 	}

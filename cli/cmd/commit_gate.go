@@ -923,11 +923,9 @@ var commitGateStatusCmd = &cobra.Command{
 			state := "not armed"
 			switch {
 			case arming.Effective():
-				trust := "no trust record — approval required"
-				if !arming.TrustStateKnown {
-					trust = "trust state unavailable"
-				} else if arming.TrustRecordPresent {
-					trust = "trust record present, handler hash unverified"
+				trust := status.TrustPhrase(status.CodexTrust(arming))
+				if trust == "" {
+					trust = "approved"
 				}
 				state = fmt.Sprintf("registered, timeout %ds, %s", arming.Timeout, trust)
 			case arming.Registered:
@@ -939,7 +937,10 @@ var commitGateStatusCmd = &cobra.Command{
 			resolver := codexhooks.ResolverArmingRow(scope, cwd)
 			resolverState := "not armed"
 			if resolver.Registered {
-				resolverState = fmt.Sprintf("Stop and SubagentStop armed, timeout %ds", resolver.Timeout)
+				resolverState = fmt.Sprintf("Stop and SubagentStop registered, timeout %ds", resolver.Timeout)
+				if trust := status.TrustPhrase(status.CodexTrust(resolver)); trust != "" {
+					resolverState += ", " + trust
+				}
 			}
 			fmt.Printf("  Resolver     codex %s scope: %s%s\n", scope, resolverState,
 				commandNote(resolver.Registered, resolver.Command))

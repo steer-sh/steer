@@ -183,7 +183,7 @@ A correction occurrence can carry two context fields, each `{text, cut}` with `c
 
 An `after_interrupt` occurrence carries the same two fields, read from before the interrupt.
 
-### The `steer status --json` contract (`status_version: 33`)
+### The `steer status --json` contract (`status_version: 34`)
 
 Step 1 reads this snapshot for posture and the full class inventory. The unit is
 the failure class and what the corpus recorded about it, not the hook count. This
@@ -228,7 +228,7 @@ stable executable. v30 adds `posture.mods`: each enabled Claude Code mod, read
 against the cache `steer mods inspect` writes. v31 adds `posture.guard_interpreter`:
 whether this process finds the interpreter every guard runner starts under. v32
 adds `unread` to each `attention.candidates[]` row. v33 adds `fixtures` to each
-`hooks[]` row.
+`hooks[]` row. v34 adds the `trust` states `approved`, `disabled`, `hooks-off` and `modified`.
 
 - `status_version` — the schema version. `--json` is a stable agent contract.
 - `posture` — the arming state: `instrument` (reviewer model / runs / prompt
@@ -257,8 +257,10 @@ adds `unread` to each `attention.candidates[]` row. v33 adds `fixtures` to each
   evidence. One guard store serves both harnesses but each harness holds its
   own registration, so a scope alone does not identify a row: `commit_gate` and
   `resolver` report one row per harness per scope. `trust` is `not-applicable` (the harness reviews no hook trust),
-  `record-present-unverified`, `missing` or `unknown` — Steer never claims to
-  have verified a harness's internal hash. The resolver is the Stop hook that
+  `approved` (Codex's saved hash equals the computed one and nothing turned the hook
+  off), `disabled`, `hooks-off` (Codex's whole hooks feature is off), `modified` (the
+  hashes differ, cause unknown), `missing`,
+  `record-present-unverified` (a saved hash Steer cannot compare) or `unknown`. The resolver is the Stop hook that
   joins ledger rows to transcripts; it arms with the commit gate on the same
   scope. `unresolved_rows` counts the rows still owing that join — a window
   cannot count them until the resolver reads them. `steer report refresh` runs the
@@ -343,8 +345,7 @@ adds `unread` to each `attention.candidates[]` row. v33 adds `fixtures` to each
   and a clone carries none of the second. `runner[]` is the Stop runner's
   registration in the same shape as a `posture` row, one per harness per scope;
   its `observed` is the newest run that harness's runner recorded, and its
-  `trust` is `unknown` wherever a harness reviews hook trust, because Steer reads
-  no Stop trust record for that event. `checks[]` is one row per declaration:
+  `trust` reads as on the `commit_gate` rows. `checks[]` is one row per declaration:
   `id`, `kind` (`script` or `go-test`), `binding` (the script, or the package and
   test), `validation` (`current`, `stale` or `none`) with `changed` naming what
   moved since the receipt in `receipt` / `validated_at`, and `execution` /

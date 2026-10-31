@@ -71,12 +71,19 @@ func CoveragePhrase(c cadence.Coverage) string {
 	return s
 }
 
-// TrustPhrase names a harness's posture on a registration. Registration alone does not
-// prove enforcement on a harness that reviews hook trust itself.
+// TrustPhrase names a harness's posture on a registration, "" when nothing needs
+// saying. Registration alone does not prove enforcement on a harness that reviews hook
+// trust itself.
 func TrustPhrase(trust string) string {
 	switch trust {
 	case TrustRecordPresent:
-		return "trust record present, unverified"
+		return "approval could not be compared"
+	case TrustModified:
+		return "approval needs checking"
+	case TrustDisabled:
+		return "turned off"
+	case TrustHooksOff:
+		return "all Codex hooks are turned off"
 	case TrustMissing:
 		return "no trust record"
 	case TrustUnknown:
