@@ -97,26 +97,30 @@ func RegisterCommitGateAndResolver(scope, cwd, review string, reviewSeconds int,
 }
 
 // RemoveCommitGateAndResolver removes only Steer's stamped Pi gate extension.
-func RemoveCommitGateAndResolver(scope, cwd string) (string, error) {
+// It reports whether the extension was there.
+func RemoveCommitGateAndResolver(scope, cwd string) (string, bool, error) {
 	dir, err := ExtensionsDir(scope, cwd)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	path := filepath.Join(dir, gateBridgeName)
 	if err := refuseLinkedBridge(scope, path); err != nil {
-		return path, err
+		return path, false, err
 	}
 	content, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return path, nil
+		return path, false, nil
 	}
 	if err != nil {
-		return path, err
+		return path, false, err
 	}
 	if got, ok := parseBridge(content); !ok || got.Channel != "commit-gate" {
-		return path, fmt.Errorf("refusing to remove unowned Pi extension %s", path)
+		return path, false, fmt.Errorf("refusing to remove unowned Pi extension %s", path)
 	}
-	return path, os.Remove(path)
+	if err := os.Remove(path); err != nil {
+		return path, false, err
+	}
+	return path, true, nil
 }
 
 // CommitGateArming reads the review half of Pi's atomic extension registration.

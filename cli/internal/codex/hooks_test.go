@@ -19,7 +19,7 @@ func TestProjectHookMutationsRefuseSymlinks(t *testing.T) {
 			return err
 		}},
 		{"remove gate and resolver", func(dir string) error {
-			_, err := RemoveCommitGateAndResolver("project", dir)
+			_, _, err := RemoveCommitGateAndResolver("project", dir)
 			return err
 		}},
 		{"register master", func(dir string) error {
@@ -261,7 +261,7 @@ func TestRegisterArmsBothResolverEventsAndRemovesThemTogether(t *testing.T) {
 		}
 	}
 
-	if _, err := RemoveCommitGateAndResolver("global", ""); err != nil {
+	if _, _, err := RemoveCommitGateAndResolver("global", ""); err != nil {
 		t.Fatal(err)
 	}
 	if armed, _ = ResolverArming("global", ""); armed {
@@ -494,5 +494,62 @@ func TestTrustKeysKeepALinkedCodexFolder(t *testing.T) {
 	hooks := filepath.Join(repo, ".codex", "hooks.json")
 	if got := trustKeys(hooks, "PreToolUse", 0, 0); len(got) != 1 || got[0] != hooks+":pre_tool_use:0:0" {
 		t.Errorf("trustKeys = %q; want only the spelling as written", got)
+	}
+}
+
+// TestRemoveCommitGateReportsWhetherAHandlerWasThere: only a real removal reports true.
+func TestRemoveCommitGateReportsWhetherAHandlerWasThere(t *testing.T) {
+	dir := t.TempDir()
+	if _, removed, err := RemoveCommitGateAndResolver("project", dir); err != nil || removed {
+		t.Fatalf("empty: removed, err = %v, %v", removed, err)
+	}
+	if _, err := RegisterCommitGateAndResolver("project", dir, "steer commit-gate review-codex", 460, "steer commit-gate backfill --if-due", 30); err != nil {
+		t.Fatal(err)
+	}
+	if _, removed, err := RemoveCommitGateAndResolver("project", dir); err != nil || !removed {
+		t.Fatalf("armed: removed, err = %v, %v", removed, err)
+	}
+	if _, removed, err := RemoveCommitGateAndResolver("project", dir); err != nil || removed {
+		t.Fatalf("again: removed, err = %v, %v", removed, err)
+	}
+}
+
+// TestRemoveCommitGateLeavesAnUnrelatedEmptyEvent: an empty event list is not a removal.
+func TestRemoveCommitGateLeavesAnUnrelatedEmptyEvent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".codex", "hooks.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const text = `{"hooks":{"PreToolUse":[]}}`
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, removed, err := RemoveCommitGateAndResolver("project", dir); err != nil || removed {
+		t.Fatalf("removed, err = %v, %v", removed, err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != text {
+		t.Errorf("file rewritten to %s", got)
+	}
+}
+
+// TestRemoveCommitGateFindsAHandlerInASharedEntry: a Steer handler beside another
+// handler is still a removal, and the other handler stays.
+func TestRemoveCommitGateFindsAHandlerInASharedEntry(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".codex", "hooks.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const text = `{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"steer commit-gate review-codex"},{"type":"command","command":"echo mine"}]}]}}`
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, removed, err := RemoveCommitGateAndResolver("project", dir); err != nil || !removed {
+		t.Fatalf("removed, err = %v, %v", removed, err)
+	}
+	got, _ := os.ReadFile(path)
+	if strings.Contains(string(got), "review-codex") || !strings.Contains(string(got), "echo mine") {
+		t.Errorf("file = %s", got)
 	}
 }

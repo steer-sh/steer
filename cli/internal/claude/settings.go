@@ -802,18 +802,34 @@ func RemoveBackfillHook(scope string) error {
 
 // RemoveCommitGateAndResolver takes down both steer-owned Claude Code entries in ONE
 // write, preserving unrelated PreToolUse and Stop hooks.
-func RemoveCommitGateAndResolver(scope string) error {
+// It reports whether an entry was there, and writes nothing when none was.
+func RemoveCommitGateAndResolver(scope string) (bool, error) {
 	settings, err := LoadSettings(scope)
 	if err != nil {
-		return err
+		return false, err
 	}
-	removeCommitGateHooks(settings)
-	settings.Hooks.Stop = stripBackfillHooks(settings.Hooks.Stop)
-	return SaveSettings(scope, settings)
+	removed := removeCommitGateHooks(settings)
+	stop := stripBackfillHooks(settings.Hooks.Stop)
+	if countStopHooks(stop) != countStopHooks(settings.Hooks.Stop) {
+		removed = true
+	}
+	if !removed {
+		return false, nil
+	}
+	settings.Hooks.Stop = stop
+	return true, SaveSettings(scope, settings)
 }
 
 // stripBackfillHooks returns the Stop groups with every resolver hook removed and any
 // group left empty dropped.
+func countStopHooks(groups []StopHookEntry) int {
+	n := 0
+	for _, g := range groups {
+		n += len(g.Hooks)
+	}
+	return n
+}
+
 func stripBackfillHooks(groups []StopHookEntry) []StopHookEntry {
 	return stripStopHooks(groups, IsBackfillCommand)
 }

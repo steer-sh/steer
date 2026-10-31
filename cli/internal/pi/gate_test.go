@@ -43,7 +43,7 @@ func TestCommitGateBridgeRoundTrip(t *testing.T) {
 			t.Errorf("generated bridge is missing %q", want)
 		}
 	}
-	if _, err := RemoveCommitGateAndResolver(harness.GlobalScope, "."); err != nil {
+	if _, _, err := RemoveCommitGateAndResolver(harness.GlobalScope, "."); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -65,7 +65,7 @@ func TestGateAndGuardBridgesAreIndependent(t *testing.T) {
 	if guardPath == gatePath {
 		t.Fatal("both channels registered into one file")
 	}
-	if _, err := RemoveCommitGateAndResolver(harness.GlobalScope, "."); err != nil {
+	if _, _, err := RemoveCommitGateAndResolver(harness.GlobalScope, "."); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(guardPath); err != nil {
@@ -86,7 +86,7 @@ func TestGateRemovalRefusesAnUnstampedExtension(t *testing.T) {
 	if err := os.WriteFile(path, []byte("export default function () {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := RemoveCommitGateAndResolver(harness.GlobalScope, "."); err == nil {
+	if _, _, err := RemoveCommitGateAndResolver(harness.GlobalScope, "."); err == nil {
 		t.Fatal("removed an unstamped Pi extension")
 	}
 }

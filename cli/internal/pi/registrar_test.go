@@ -101,7 +101,7 @@ func TestProjectRegistrarNamesTheMasterRelativeToTheRepository(t *testing.T) {
 	if _, err := RemoveMaster(harness.ProjectScope, target); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := RemoveCommitGateAndResolver(harness.ProjectScope, target); err != nil {
+	if _, _, err := RemoveCommitGateAndResolver(harness.ProjectScope, target); err != nil {
 		t.Fatal(err)
 	}
 	for _, bridge := range []string{path, gate} {

@@ -88,7 +88,7 @@ func TestCommitGateWritesKeepTheCheckHook(t *testing.T) {
 	if !CheckHookArming("global", "").Registered {
 		t.Fatal("installing the commit gate removed the check runner")
 	}
-	if _, err := RemoveCommitGateAndResolver("global", ""); err != nil {
+	if _, _, err := RemoveCommitGateAndResolver("global", ""); err != nil {
 		t.Fatal(err)
 	}
 	if a := CheckHookArming("global", ""); !a.Registered || a.Timeout != 330 {

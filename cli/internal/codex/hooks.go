@@ -366,29 +366,54 @@ func setOrDrop(hooks map[string]any, event string, entries []any) {
 
 // RemoveCommitGate removes only this gate's handlers.
 func RemoveCommitGate(scope, cwd string) (string, error) {
-	return RemoveCommitGateAndResolver(scope, cwd)
+	path, _, err := RemoveCommitGateAndResolver(scope, cwd)
+	return path, err
 }
 
-// RemoveCommitGateAndResolver takes both steer-owned channels out in one save and
+// RemoveCommitGateAndResolver reports whether a handler was there and writes nothing
+// when none was. It takes both steer-owned channels out in one save and
 // leaves unrelated hooks alone.
-func RemoveCommitGateAndResolver(scope, cwd string) (string, error) {
+func RemoveCommitGateAndResolver(scope, cwd string) (string, bool, error) {
 	path, err := hooksPath(scope, cwd)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	root, err := load(path)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	hooks, _ := root["hooks"].(map[string]any)
 	if hooks == nil {
-		return path, nil
+		return path, false, nil
+	}
+	found := steerHandlers(preToolUse(root))
+	for _, event := range resolverEvents {
+		found += steerHandlers(eventEntries(root, event))
+	}
+	if found == 0 {
+		return path, false, nil
 	}
 	setOrDrop(hooks, "PreToolUse", filterBy(preToolUse(root), isSteerOwned))
 	for _, event := range resolverEvents {
 		setOrDrop(hooks, event, filterBy(eventEntries(root, event), isSteerOwned))
 	}
-	return path, save(scope, path, root)
+	return path, true, save(scope, path, root)
+}
+
+// steerHandlers counts the Steer-owned handlers in an event's entries.
+func steerHandlers(entries []any) int {
+	n := 0
+	for _, raw := range entries {
+		entry, _ := raw.(map[string]any)
+		hooks, _ := entry["hooks"].([]any)
+		for _, rawHook := range hooks {
+			hook, _ := rawHook.(map[string]any)
+			if command, _ := hook["command"].(string); isSteerOwned(command) {
+				n++
+			}
+		}
+	}
+	return n
 }
 
 // ResolverArming reports whether the resolver is registered on both turn-end events,

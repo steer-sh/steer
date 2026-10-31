@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -670,49 +671,79 @@ func reviewChannelArmed() (bool, string) {
 	return false, ""
 }
 
+// commitGateRemoveHarness has no default, so a removal always names its harness.
+var commitGateRemoveHarness string
+
 var commitGateRemoveCmd = &cobra.Command{
 	Use:   "remove",
-	Short: "Remove one harness's PreToolUse commit gate",
+	Short: "Remove one harness's commit gate from one scope; --harness and --scope are required",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if commitGateRemoveHarness == "" || !cmd.Flags().Changed("scope") || strings.TrimSpace(scope) == "" {
+			return errors.New(commitGateRemoveUsage())
+		}
 		scope := currentScope()
-		target, err := harness.Parse(commitGateHarness)
+		target, err := harness.Parse(commitGateRemoveHarness)
 		if err != nil {
 			return err
 		}
+		cwd, err := gate.ProjectDir()
+		if err != nil {
+			return err
+		}
+		var path string
+		var removed bool
 		switch target {
 		case harness.Codex:
-			cwd, err := gate.ProjectDir()
-			if err != nil {
-				return err
-			}
-			path, err := codexhooks.RemoveCommitGateAndResolver(scope, cwd)
-			if err == nil {
-				fmt.Println("Removed Codex commit gate from " + path)
-			}
-			return err
+			path, removed, err = codexhooks.RemoveCommitGateAndResolver(scope, cwd)
 		case harness.Pi:
-			cwd, err := gate.ProjectDir()
-			if err != nil {
-				return err
-			}
-			path, err := pihooks.RemoveCommitGateAndResolver(scope, cwd)
+			path, removed, err = pihooks.RemoveCommitGateAndResolver(scope, cwd)
+		default:
+			// Both steer-owned Claude Code entries come down in one write, preserving
+			// unrelated PreToolUse and Stop hooks.
+			removed, err = claude.RemoveCommitGateAndResolver(scope)
 			if err == nil {
-				fmt.Println("Removed Pi commit gate from " + path)
+				path, err = claude.GetSettingsFile(scope)
 			}
-			return err
 		}
-		// Both steer-owned Claude Code entries come down in one write, preserving
-		// unrelated PreToolUse and Stop hooks.
-		if err := claude.RemoveCommitGateAndResolver(scope); err != nil {
-			return err
-		}
-		path, err := claude.GetSettingsFile(scope)
 		if err != nil {
 			return err
 		}
-		fmt.Println("Removed Claude Code commit gate from " + path)
+		fmt.Println(commitGateRemoveResult(status.HarnessLabel(string(target)), scope, path, removed))
 		return nil
 	},
+}
+
+// commitGateRemoveResult says what a removal changed.
+func commitGateRemoveResult(label, scope, path string, removed bool) string {
+	if !removed {
+		return fmt.Sprintf("No %s commit review hooks in %s scope; nothing changed.", label, scope)
+	}
+	return fmt.Sprintf("Removed %s commit review hooks from %s", label, path)
+}
+
+// commitGateRemoveUsage is the refusal for a removal that names no target. It lists
+// what could be removed.
+func commitGateRemoveUsage() string {
+	var found []string
+	cwd, _ := gate.ProjectDir()
+	for _, scope := range []string{claude.GlobalScope, claude.ProjectScope} {
+		if claude.CommitGateHookArmed(scope).Registered || claude.BackfillHookArming(scope).Registered {
+			found = append(found, string(harness.ClaudeCode)+" "+scope)
+		}
+		if codexhooks.CommitGateArming(scope, cwd).Registered || codexhooks.ResolverArmingRow(scope, cwd).Registered {
+			found = append(found, string(harness.Codex)+" "+scope)
+		}
+		if pihooks.CommitGateArming(scope, cwd).Registered {
+			found = append(found, string(harness.Pi)+" "+scope)
+		}
+	}
+	registered := "none"
+	if len(found) > 0 {
+		registered = strings.Join(found, ", ")
+	}
+	return "commit-gate remove needs both --harness and --scope\n" +
+		"Registered: " + registered + "\n" +
+		"Example: steer commit-gate remove --harness codex --scope global"
 }
 
 var (
@@ -963,8 +994,8 @@ func init() {
 		"Overwrite an existing non-steer pre-commit hook")
 	commitGateInstallCmd.Flags().StringVar(&commitGateHarness, "harness", "claude-code",
 		"PreToolUse harness (claude-code|codex)")
-	commitGateRemoveCmd.Flags().StringVar(&commitGateHarness, "harness", "claude-code",
-		"PreToolUse harness (claude-code|codex)")
+	commitGateRemoveCmd.Flags().StringVar(&commitGateRemoveHarness, "harness", "",
+		"PreToolUse harness (claude-code|codex), required")
 }
 
 // reviewerProbe reads whether the configured reviewer can actually run. An

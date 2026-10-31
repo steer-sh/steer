@@ -136,8 +136,8 @@ func TestRemovalLeavesOnlyTheOperatorsHooks(t *testing.T) {
 	for _, h := range []string{"claude-code", "codex"} {
 		s.MustSteer("check", "uninstall", "--harness", h)
 	}
-	for h, want := range map[string]string{"claude-code": "Removed Claude Code commit gate from ", "codex": "Removed Codex commit gate from "} {
-		if r := s.MustSteer("commit-gate", "remove", "--harness", h); !strings.Contains(r.Stdout, want) {
+	for h, want := range map[string]string{"claude-code": "Removed Claude Code commit review hooks from ", "codex": "Removed Codex commit review hooks from "} {
+		if r := s.MustSteer("commit-gate", "remove", "--harness", h, "--scope", "project"); !strings.Contains(r.Stdout, want) {
 			t.Errorf("commit-gate remove --harness %s printed %q, want %q", h, r.Stdout, want)
 		}
 	}
