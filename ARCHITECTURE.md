@@ -727,6 +727,13 @@ missing coverage; an unbound record's attribution is unavailable. The binding's
 host and this machine has no evidence, the activity is unknown but no coverage is
 missing here. A binding without it keeps the missing-coverage reading.
 
+`gate.HostID` is the name in `~/.steer/host`, pinned from the hostname on first use,
+so a hostname change opens no new ledger or session shard. Later lines of that file
+are this machine's former names, which `steer host --former` adds: a record frozen
+under one reads as this machine's, while a shard under another name stays another
+machine's stream. `COMMIT_REVIEW_HOST` overrides the pinned name and turns the
+former names off.
+
 `mine.MissingCoverage` and `UnitsExcluded` share coverage interpretation among
 scorers and readers. `status.ActionFor` orders actions as inspect, repair, observe:
 recurrence outranks missing scope and coverage, while zero eligible after-units or a

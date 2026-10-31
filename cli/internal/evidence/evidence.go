@@ -175,7 +175,7 @@ func FixtureReceipts(records []mine.Record, host, projectRoot string) map[mine.F
 		if !bound || fix.Scope == "" {
 			continue
 		}
-		if fix.Host != "" && host != "" && fix.Host != host {
+		if fix.Host != "" && host != "" && fix.Host != host && !gate.IsFormerHost(fix.Host) {
 			continue
 		}
 		if fix.Scope == steerpath.ProjectScope && (fix.Repo == "" || fix.Repo != projectRoot) {

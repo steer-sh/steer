@@ -22,6 +22,9 @@ const steerHome = ".steer"
 // configFileName is the global, harness-neutral settings file inside steerHome.
 const configFileName = "config.json"
 
+// hostFileName holds this machine's stable name inside steerHome.
+const hostFileName = "host"
+
 // credentialsDirName holds the secrets Steer reads, apart from configFileName,
 // which every user on the machine may read.
 const credentialsDirName = "credentials"
@@ -40,6 +43,16 @@ const (
 	ProjectScope = "project"
 	GlobalScope  = "global"
 )
+
+// HostFile returns the file that holds this machine's stable name and its former
+// names, or "" when the home directory cannot be resolved.
+func HostFile() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, steerHome, hostFileName)
+}
 
 // StateDir returns the neutral directory holding one component's state, such as
 // "commit-review" or "steer-report". When the home directory cannot be

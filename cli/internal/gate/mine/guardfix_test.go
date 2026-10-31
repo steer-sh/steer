@@ -1,6 +1,12 @@
 package mine
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/steer-sh/steer-cli/internal/testhome"
+)
 
 func guardRecord(scope, repo, host string) Record {
 	return Record{
@@ -74,5 +80,31 @@ func TestANonGuardRecordIsNotApplicable(t *testing.T) {
 	record["tier"] = "check"
 	if got := fixtureReceiptOf(record, receiptEvidence()); got.Applicable {
 		t.Errorf("a check-tier record claimed a fixture receipt: %+v", got)
+	}
+}
+
+// A rename leaves a record frozen under the old name; a declared former name still
+// owns the store, while an undeclared one stays another machine's.
+func TestAFormerHostNameKeepsItsRecordsOwnership(t *testing.T) {
+	home := t.TempDir()
+	testhome.Set(t, home)
+	t.Setenv("COMMIT_REVIEW_HOST", "")
+	if err := os.MkdirAll(filepath.Join(home, ".steer"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".steer", "host"), []byte("here\nold-name\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ev := receiptEvidence()
+	if gap := storeOwnershipGap(GuardFix{ID: "alpha", Scope: "global", Host: "old-name"}, ev); gap != "" {
+		t.Errorf("a former name read as another machine: %s", gap)
+	}
+	if gap := storeOwnershipGap(GuardFix{ID: "alpha", Scope: "global", Host: "elsewhere"}, ev); gap == "" {
+		t.Error("an undeclared name read as this machine")
+	}
+	fix := boundCheckRecord(2000)
+	fix[CheckHostKey] = "old-name"
+	if act, _, bound := checkActivityBase(fix, EvidenceSet{}); !bound || act.OtherHost {
+		t.Errorf("a former name's check read as another machine: %+v", act)
 	}
 }

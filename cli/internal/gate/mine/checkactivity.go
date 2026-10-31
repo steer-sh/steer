@@ -87,7 +87,7 @@ func checkActivityBase(record Record, ev EvidenceSet) (CheckActivity, CheckFix, 
 	act.CheckID, act.Repo = fix.ID, fix.Repo
 	act.StreamPresent = ev.CheckRepos[fix.Repo]
 	act.RegisteredHost = fix.Host
-	act.OtherHost = fix.Host != "" && fix.Host != gate.HostID()
+	act.OtherHost = fix.Host != "" && fix.Host != gate.HostID() && !gate.IsFormerHost(fix.Host)
 	return act, fix, true
 }
 
