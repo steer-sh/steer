@@ -33,11 +33,19 @@ def main():
 
     if tool_name == 'MultiEdit':
         edits = tool_input.get('edits', [])
-        content_to_check = '\n'.join(e.get('new_string', '') for e in edits)
+        if not isinstance(edits, list):
+            edits = []
+        content_to_check = '\n'.join(
+            e['new_string'] for e in edits
+            if isinstance(e, dict) and isinstance(e.get('new_string'), str)
+        )
     else:
         new_string = tool_input.get('new_string', '')
         content = tool_input.get('content', '')
-        content_to_check = new_string or content or ''
+        content_to_check = next(
+            (text for text in (new_string, content) if isinstance(text, str) and text),
+            ''
+        )
 
     if not content_to_check.strip():
         sys.exit(0)
@@ -49,11 +57,13 @@ def main():
     # Try JSON parse first (works for Write tool with full package.json)
     try:
         package_data = json.loads(content_to_check)
-        scripts = package_data.get('scripts', {})
-        if 'postinstall' in scripts:
+    except (ValueError, RecursionError):
+        package_data = None
+    # Content that decodes to any other shape is left to the raw-text check
+    if isinstance(package_data, dict):
+        scripts = package_data.get('scripts')
+        if isinstance(scripts, dict) and 'postinstall' in scripts:
             found = True
-    except json.JSONDecodeError:
-        pass
 
     # Also check raw text for Edit tool (partial content containing postinstall key)
     if not found:

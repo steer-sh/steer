@@ -20,25 +20,62 @@ class CommandInjectionVisitor(ast.NodeVisitor):
 
     def visit_Import(self, node):
         for alias in node.names:
+            self._forget(alias.asname or alias.name.split('.')[0])
             if alias.name == 'shlex':
                 self.shlex_aliases.add(alias.asname or alias.name)
         self.generic_visit(node)
 
     def visit_ImportFrom(self, node):
+        for alias in node.names:
+            self._forget(alias.asname or alias.name)
         if node.module == 'shlex':
             for alias in node.names:
                 if alias.name == 'quote':
                     self.quote_aliases.add(alias.asname or alias.name)
         self.generic_visit(node)
 
-    def visit_Assign(self, node):
-        for target in node.targets:
-            if isinstance(target, ast.Name):
-                if self._value_is_shlex_safe(node.value):
-                    self.safe_vars.add(target.id)
-                if self._is_static_string(node.value):
-                    self.literal_string_vars.add(target.id)
+    def _forget(self, name):
+        self.safe_vars.discard(name)
+        self.literal_string_vars.discard(name)
+
+    def visit_Name(self, node):
+        # Any store or delete of a name ends what was proven about its old value
+        if isinstance(node.ctx, (ast.Store, ast.Del)):
+            self._forget(node.id)
+
+    def visit_arg(self, node):
+        self._forget(node.arg)
         self.generic_visit(node)
+
+    def visit_ExceptHandler(self, node):
+        if node.name:
+            self._forget(node.name)
+        self.generic_visit(node)
+
+    def visit_Assign(self, node):
+        # The value runs before the targets bind, so it is visited and judged first
+        self.visit(node.value)
+        value_is_safe = self._value_is_shlex_safe(node.value)
+        value_is_static = self._is_static_string(node.value)
+        for target in node.targets:
+            self.visit(target)
+            if isinstance(target, ast.Name):
+                if value_is_safe:
+                    self.safe_vars.add(target.id)
+                if value_is_static:
+                    self.literal_string_vars.add(target.id)
+
+    def visit_AugAssign(self, node):
+        if not isinstance(node.target, ast.Name):
+            # A subscript or attribute target is evaluated before the value
+            self.generic_visit(node)
+            return
+        self.visit(node.value)
+        self.visit(node.target)
+
+    def visit_NamedExpr(self, node):
+        self.visit(node.value)
+        self.visit(node.target)
 
     def _is_shlex_quote_call(self, node):
         if isinstance(node, ast.Call):

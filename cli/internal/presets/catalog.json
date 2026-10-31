@@ -65,7 +65,7 @@
       "os": ["all"],
       "prompt_version": "factory-prompt-v1",
       "prompt_modules": ["python-security"],
-      "hook_version": "factory-hook-v1"
+      "hook_version": "factory-hook-v2"
     },
     {
       "name": "hardcoded-secret-reference-prevention",
@@ -87,7 +87,7 @@
       "os": ["all"],
       "prompt_version": "factory-prompt-v1",
       "prompt_modules": ["security-layer2"],
-      "hook_version": "factory-hook-v1"
+      "hook_version": "factory-hook-v2"
     },
     {
       "name": "environment-variable-enumeration-prevention",
