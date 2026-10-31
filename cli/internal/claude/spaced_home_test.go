@@ -127,10 +127,10 @@ func TestASpacedHomeReplacesAnOlderUnquotedRegistration(t *testing.T) {
 	}
 }
 
-// TestAProjectRegistrationIsUnchangedByQuoting: a project registration names a
-// repository-relative path, which carries no machine's home and needs no quotes.
-// Rewriting one would void a Codex approval for nothing.
-func TestAProjectRegistrationIsUnchangedByQuoting(t *testing.T) {
+// TestAProjectRegistrationIsAnchoredAtItsConfig: the command names the master
+// through the variable Claude Code sets, then the config-relative path, and reading
+// it back returns that relative path, which the path comparisons use.
+func TestAProjectRegistrationIsAnchoredAtItsConfig(t *testing.T) {
 	command, err := GetMasterHookCommand(ProjectScope)
 	if err != nil {
 		t.Fatal(err)
@@ -139,11 +139,12 @@ func TestAProjectRegistrationIsUnchangedByQuoting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "python3 " + filepath.ToSlash(registration); command != want {
+	relative := filepath.ToSlash(registration)
+	if want := `python3 "$CLAUDE_PROJECT_DIR/` + relative + `"`; command != want {
 		t.Fatalf("project command = %q, want %q", command, want)
 	}
-	if strings.ContainsAny(command, `'"`) {
-		t.Fatalf("project command %q carries quoting it does not need", command)
+	if got := registeredMasterPath(command); got != relative {
+		t.Fatalf("read back %q, want %q", got, relative)
 	}
 }
 

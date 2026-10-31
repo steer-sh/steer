@@ -144,3 +144,43 @@ func TestCodexRelinkWritesNoEmptyResolver(t *testing.T) {
 		t.Fatalf("a resolver event was written with no resolver registered:\n%s", raw)
 	}
 }
+
+// TestRelinkRepointsABareGuardMaster: an install repairs a project registration that
+// a session's cd would break, and a second install changes nothing.
+func TestRelinkRepointsABareGuardMaster(t *testing.T) {
+	testhome.Set(t, t.TempDir())
+	t.Chdir(t.TempDir())
+	if err := claude.RegisterMasterHook(claude.ProjectScope); err != nil {
+		t.Fatal(err)
+	}
+	settings, err := claude.LoadSettings(claude.ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings.Hooks.PreToolUse[0].Hooks[0].Command = "python3 .steer/hooks/" + claude.MasterHookName
+	if err := claude.SaveSettings(claude.ProjectScope, settings); err != nil {
+		t.Fatal(err)
+	}
+
+	path, err := steerbin.Ensure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewritten, err := relinkClaude(claude.ProjectScope, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rewritten != 1 {
+		t.Fatalf("rewrote %d registration(s), want 1", rewritten)
+	}
+	want, err := claude.GetMasterHookCommand(claude.ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := (claude.Registrar{}).RegisteredMasterCommand(claude.ProjectScope); got != want {
+		t.Fatalf("command = %q, want %q", got, want)
+	}
+	if rewritten, err = relinkClaude(claude.ProjectScope, path); err != nil || rewritten != 0 {
+		t.Fatalf("second pass rewrote %d, %v; want 0", rewritten, err)
+	}
+}

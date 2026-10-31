@@ -1,6 +1,8 @@
 package claude
 
 import (
+	"strings"
+
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/hookstore"
 )
@@ -39,12 +41,23 @@ func (Registrar) RegisteredMasterPath(scope string) (string, error) {
 	}
 	for _, entry := range settings.Hooks.PreToolUse {
 		for _, hook := range entry.Hooks {
-			if path := hookstore.MasterPathFromCommand(hook.Command); path != "" {
+			if path := registeredMasterPath(hook.Command); path != "" {
 				return path, nil
 			}
 		}
 	}
 	return "", nil
+}
+
+// registeredMasterPath reads the master path out of a settings.json command,
+// without the anchor, so a project path stays relative to the config carrying it.
+func registeredMasterPath(command string) string {
+	return strings.TrimPrefix(hookstore.MasterPathFromCommand(command), projectDirPrefix)
+}
+
+// MasterCommandStale reports a registration naming the right master in an old form.
+func (Registrar) MasterCommandStale(scope string) (bool, error) {
+	return MasterCommandStale(scope)
 }
 
 // RegisteredMasterCommand reads back the command settings.json runs the master
