@@ -74,7 +74,8 @@ import (
 // stable executable. v33 adds hooks[].fixtures: every guard's stored cases, with or
 // without a record. v34 adds the trust states approved, disabled, hooks-off and modified: Codex
 // approval reads the saved hash and the enabled state.
-const StatusVersion = 34
+// v35 adds posture.health: the verdict `steer status` prints, with its issues.
+const StatusVersion = 35
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20
@@ -105,6 +106,9 @@ type Options struct {
 	// ReviewerProbe is whether the configured reviewer CLI resolves, which the
 	// readiness answer reads. The zero value checked nothing and raises no step.
 	ReviewerProbe reviewers.Probe
+	// PreCommit reports the git pre-commit channel armed in RepoRoot; the caller reads
+	// it, because Collect runs no git command.
+	PreCommit bool
 }
 
 // ScoredIntervention is one live intervention with its recomputed observation. It
@@ -373,6 +377,12 @@ type RulesPresence struct {
 // section could not be read at all.
 func (r RulesPresence) NeedsSync() bool { return r.State != RulesCurrent }
 
+// Builds names the two binaries a reader can be running against each other.
+type Builds struct {
+	Running BuildIdentity
+	Hooks   BuildIdentity
+}
+
 // Posture is the arming and instrument state — what is guarding, and with what.
 type Posture struct {
 	Instrument string        `json:"instrument"`
@@ -397,6 +407,10 @@ type Posture struct {
 	// HookTimeout is the harness timeout, in seconds, a commit-gate registration
 	// needs under the current reviewer timeout.
 	HookTimeout int `json:"-"`
+	// Builds is the running CLI's identity and the hooks' identity.
+	Builds Builds `json:"-"`
+	// PreCommit reports the git pre-commit channel armed in this repository.
+	PreCommit bool `json:"-"`
 }
 
 // AttentionQueue is the subset of the loop needing action: the cadence queue
@@ -528,6 +542,7 @@ func Collect(opts Options) (*SystemStatus, error) {
 	}
 
 	s.Posture = collectPosture(opts.Config, ev)
+	s.Posture.PreCommit = opts.PreCommit
 	s.Checks = collectChecks(opts.RepoRoot)
 	s.Telemetry = telemetry(ev, checkBlocks())
 	inventory := opts.InventoryScopes
@@ -662,6 +677,7 @@ func collectPosture(cfg gate.Config, ev mine.EvidenceSet) Posture {
 		Masters:          []MasterRuntime{},
 		Rules:            []RulesPresence{},
 		Plugins:          PluginCopies(),
+		Builds:           Builds{Running: RunningBuild(), Hooks: HooksBuild()},
 		Mods:             ModExposures(),
 		GuardInterpreter: ReadInterpreter(exec.LookPath),
 		Unresolved:       resolve.CountUnresolved(cfg),
@@ -876,8 +892,9 @@ func masterRuntimes(scope string) []MasterRuntime {
 			continue
 		}
 		row.Path = path
-		row.Sources = compareStore(scope, path, "no registered guard runner")
-		detached := store != "" && registrar.Harness().Installed() && !claude.SamePath(path, store)
+		resolved := resolveRegistered(path, scope)
+		row.Sources = compareStore(scope, resolved, "no registered guard runner")
+		detached := store != "" && registrar.Harness().Installed() && !sameFilePath(resolved, store)
 		if detached {
 			// Both readings, because they choose different repairs: a registered
 			// master can carry matching source while pointing elsewhere, and a
@@ -892,8 +909,8 @@ func masterRuntimes(scope string) []MasterRuntime {
 			continue
 		}
 		row.Trust = runnerTrust(registrar.Harness().ID, scope)
-		row.Observed = newestFiring(filepath.Dir(path))
-		stamp, ok := guard.ReadStamp(path)
+		row.Observed = newestFiring(filepath.Dir(resolved))
+		stamp, ok := guard.ReadStamp(resolved)
 		if !ok {
 			row.State = MasterUnknown
 			out = append(out, row)
@@ -907,6 +924,43 @@ func masterRuntimes(scope string) []MasterRuntime {
 		out = append(out, row)
 	}
 	return out
+}
+
+// resolveRegistered makes a registered master path absolute. A project registration
+// names it relative to the repository root, so it resolves there first and against the
+// working directory only when that file is absent.
+func resolveRegistered(path, scope string) string {
+	if path == "" || filepath.IsAbs(path) {
+		return path
+	}
+	master, err := claude.GetMasterHookPath(scope)
+	if err != nil {
+		return path
+	}
+	root := filepath.Dir(filepath.Dir(filepath.Dir(master)))
+	resolved := filepath.Join(root, filepath.FromSlash(path))
+	if _, err := os.Stat(resolved); err != nil {
+		// A registration written from a subdirectory is relative to that directory.
+		if abs, err := filepath.Abs(filepath.FromSlash(path)); err == nil {
+			return abs
+		}
+	}
+	return resolved
+}
+
+// sameFilePath compares two paths with their links resolved, so one directory reached
+// by two spellings reads as one place.
+func sameFilePath(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	if real, err := filepath.EvalSymlinks(a); err == nil {
+		a = real
+	}
+	if real, err := filepath.EvalSymlinks(b); err == nil {
+		b = real
+	}
+	return filepath.Clean(a) == filepath.Clean(b)
 }
 
 // compareStore reads one master against the scope's guard store. absent is the

@@ -200,7 +200,7 @@ func TestAStalePluginCopyIsNamedOncePerChange(t *testing.T) {
 		s.WaitForRefresh()
 		return r.Stdout
 	}
-	const notice = "plugin copy bundles another Steer build"
+	const notice = "could not read the Claude Code plugin's build"
 
 	writeCopy([]byte("old build"))
 	if out := cadence(); !strings.Contains(out, notice) {

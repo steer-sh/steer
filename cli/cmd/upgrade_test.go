@@ -139,43 +139,38 @@ func TestStaleMasterLineNamesEveryScope(t *testing.T) {
 	}
 }
 
-// TestPluginInstallNamesOnlyTheRunningCopy pins that the nudge names the install
-// of the copy the harness runs, quoted, and never an older version directory the
-// cache kept beside it.
-func TestPluginInstallNamesOnlyTheRunningCopy(t *testing.T) {
-	cache := filepath.Join(t.TempDir(), "plugin cache")
-	old := filepath.Join(cache, "steer", "0.1.0")
-	current := filepath.Join(cache, "steer", "0.1.1")
-	copies := []status.PluginCopy{
-		{Harness: "claude-code", Path: old, State: status.PluginDifferentBinary},
-		{Harness: "claude-code", Path: current, State: status.PluginDifferentBinary},
+// TestPluginNoticeFollowsTheDirection: a newer copy names its quoted install, an older
+// copy names the plugin update, and a development difference raises no notice.
+func TestPluginNoticeFollowsTheDirection(t *testing.T) {
+	hooks := status.BuildIdentity{Version: "0.1.4", Commit: "aaa"}
+	path := filepath.Join(t.TempDir(), "plugin cache", "steer", "0.1.5")
+	newer := status.PluginCopy{Harness: "codex", Path: path, State: status.PluginDifferentBinary, Version: "0.1.5", Commit: "bbb"}
+	want := steerbin.Quote(filepath.Join(path, "scripts", "steer")) + " bin install"
+	if got := hooksBehindInstall([]status.PluginCopy{newer}, hooks); got != want {
+		t.Fatalf("install = %q, want %q", got, want)
 	}
-	for _, dir := range []string{old, current} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
+	if lines := pluginCopyLines([]status.PluginCopy{newer}, hooks); len(lines) != 1 || !strings.Contains(lines[0], "run: "+want) {
+		t.Errorf("newer notice = %q", lines)
 	}
-	running, err := filepath.EvalSymlinks(current)
-	if err != nil {
-		t.Fatal(err)
+	highest := newer
+	highest.Path = filepath.Join(filepath.Dir(path), "0.1.6")
+	highest.Version = "0.1.6"
+	if got := hooksBehindInstall([]status.PluginCopy{newer, highest}, hooks); !strings.Contains(got, "0.1.6") {
+		t.Errorf("install = %q, want the highest copy", got)
 	}
-	running = filepath.Join(running, "bin", "darwin-arm64", "steer")
-
-	install := runningCopyInstall(copies, running)
-	want := steerbin.Quote(filepath.Join(current, "scripts", "steer")) + " bin install"
-	if install != want {
-		t.Fatalf("install = %q, want %q", install, want)
+	older := newer
+	older.Version = "0.1.3"
+	if got := hooksBehindInstall([]status.PluginCopy{older}, hooks); got != "" {
+		t.Errorf("an older copy named install %q, which moves the hooks backward", got)
 	}
-	if runningCopyInstall(copies, "/usr/local/bin/steer") != "" {
-		t.Fatal("a binary outside every copy named an install")
+	if lines := pluginCopyLines([]status.PluginCopy{older}, hooks); len(lines) != 1 ||
+		!strings.Contains(lines[0], "update the Steer plugin in Codex") || strings.Contains(lines[0], "bin install") {
+		t.Errorf("older notice = %q", lines)
 	}
-
-	_, labels := status.DifferingPlugins(copies)
-	if line := pluginCopyLine(labels, install); !strings.Contains(line, want) {
-		t.Errorf("line = %q, want it to name %q", line, want)
-	}
-	if line := pluginCopyLine(labels, ""); strings.Contains(line, "bin install") {
-		t.Errorf("line = %q names an install with no running copy", line)
+	dev := newer
+	dev.Version = "dev"
+	if got := status.ActionablePlugins([]status.PluginCopy{dev}, hooks); len(got) != 0 {
+		t.Errorf("a development difference raised a notice: %+v", got)
 	}
 }
 
@@ -191,5 +186,22 @@ func TestPluginLinePrintsWhenTheMasterLineDefersToIt(t *testing.T) {
 	}
 	if pluginLineDue(false, false, "x bin install") {
 		t.Error("an already-nudged plugin line printed again on its own")
+	}
+}
+
+// A hook file git cannot run is not an armed channel.
+func TestExecutableFileReadsTheBit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pre-commit")
+	if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if executableFile(path) {
+		t.Error("a file with no executable bit read as runnable")
+	}
+	if err := os.Chmod(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if !executableFile(path) {
+		t.Error("an executable file read as not runnable")
 	}
 }

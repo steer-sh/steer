@@ -30,6 +30,9 @@ const (
 	PluginUnknown = "unknown"
 )
 
+// codexLocalVersion is the version directory Codex prefers over any numbered one.
+const codexLocalVersion = "local"
+
 // pluginName is the directory a harness caches the Steer plugin under.
 const pluginName = "steer"
 
@@ -42,6 +45,9 @@ type PluginCopy struct {
 	// Target is where Path resolves when it is a symbolic link, "" otherwise.
 	Target string `json:"target,omitempty"`
 	State  string `json:"state"`
+	// Version and Commit are the stamps of the copy's bundled binary.
+	Version string `json:"version,omitempty"`
+	Commit  string `json:"commit,omitempty"`
 }
 
 // Differs reports a copy that bundles a build other than the stable executable.
@@ -52,10 +58,10 @@ func (p PluginCopy) BinInstallCommand() string {
 	return steerbin.Quote(filepath.Join(p.Path, "scripts", "steer")) + " bin install"
 }
 
-// PluginCopies reads every cached Steer plugin copy in the Claude Code and Codex
-// global plugin caches. A harness with no cache yields no row. Claude Code keeps an
-// updated plugin's earlier version directory, so a Claude Code copy counts only
-// when its install record names it.
+// PluginCopies reads the active cached Steer plugin copy in the Claude Code and Codex
+// global plugin caches. A harness with no cache yields no row. Both keep an updated
+// plugin's earlier version directory: a Claude Code copy counts only when its install
+// record names it, and a Codex copy only when it is the version Codex loads.
 func PluginCopies() []PluginCopy {
 	stable, _ := steerbin.Path()
 	out := []PluginCopy{}
@@ -70,6 +76,9 @@ func PluginCopies() []PluginCopy {
 		}
 		roots, _ := filepath.Glob(filepath.Join(dir, "plugins", "cache", "*", pluginName, "*"))
 		sort.Strings(roots)
+		if id == harness.Codex {
+			roots = codexActiveRoots(roots)
+		}
 		installed, recorded := map[string]bool{}, false
 		if id == harness.ClaudeCode {
 			installed, recorded = claudeInstallPaths(dir)
@@ -89,6 +98,8 @@ func PluginCopies() []PluginCopy {
 				}
 			}
 			bundled := filepath.Join(root, "bin", runtime.GOOS+"-"+runtime.GOARCH, steerpath.BinName)
+			identity := ReadBuild(bundled)
+			row.Version, row.Commit = identity.Version, identity.Commit
 			if same, ok := sameFile(bundled, stable); ok {
 				row.State = PluginDifferentBinary
 				if same {
@@ -99,6 +110,40 @@ func PluginCopies() []PluginCopy {
 		}
 	}
 	return out
+}
+
+// codexActiveRoots keeps, per marketplace, the version directory Codex loads: "local"
+// when present, otherwise the highest version.
+func codexActiveRoots(roots []string) []string {
+	best := map[string]string{}
+	for _, root := range roots {
+		parent := filepath.Dir(root)
+		current, ok := best[parent]
+		if !ok || codexVersionWins(filepath.Base(root), filepath.Base(current)) {
+			best[parent] = root
+		}
+	}
+	out := make([]string, 0, len(best))
+	for _, root := range best {
+		out = append(out, root)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func codexVersionWins(candidate, current string) bool {
+	if candidate == codexLocalVersion || current == codexLocalVersion {
+		return candidate == codexLocalVersion
+	}
+	a, aOK := parseVersion(candidate)
+	b, bOK := parseVersion(current)
+	if aOK && bOK {
+		return compareVersions(a, b) > 0
+	}
+	if aOK != bOK {
+		return aOK
+	}
+	return candidate > current
 }
 
 // claudeInstallPaths returns the install paths Claude Code's plugin record names for
@@ -152,7 +197,12 @@ func DifferingPlugins(rows []PluginCopy) (key string, labels []string) {
 		if !p.Differs() {
 			continue
 		}
-		parts = append(parts, p.Harness+":"+p.Path)
+		part := p.Harness + ":" + p.Path
+		if p.Version != "" {
+			// A copy rebuilt in place can change direction at the same path.
+			part += "@" + p.Version + ":" + p.Commit
+		}
+		parts = append(parts, part)
 		labels = append(labels, HarnessLabel(p.Harness)+" "+p.Path)
 	}
 	if len(parts) == 0 {
@@ -160,6 +210,24 @@ func DifferingPlugins(rows []PluginCopy) (key string, labels []string) {
 	}
 	sort.Strings(parts)
 	return strings.Join(parts, "|"), labels
+}
+
+// ActionablePlugins keeps the copies worth a startup notice: a difference from the hooks'
+// build with a known direction, one that breaks release identity, or a differing binary
+// whose stamps cannot be read. A development build's difference asks nothing.
+func ActionablePlugins(rows []PluginCopy, hooks BuildIdentity) []PluginCopy {
+	var out []PluginCopy
+	for _, p := range rows {
+		switch p.CompareToHooks(hooks) {
+		case BuildOlder, BuildNewer, BuildConflict:
+			out = append(out, p)
+		case BuildUnknown:
+			if p.Differs() {
+				out = append(out, p)
+			}
+		}
+	}
+	return out
 }
 
 // sameFile compares two files byte for byte. ok is false when either cannot be read.

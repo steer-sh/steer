@@ -34,6 +34,10 @@ class LinkedModules(unittest.TestCase):
         meta = "\tdep\texample.com/lib\tv1.0.0\th1:x=\n\t=>\t../lib\t\t\n"
         self.assertEqual(tpl.linked_modules(meta), [("../lib", "")])
 
+    def test_notice_blocks_read_a_block_comment(self):
+        text = "/*\n * Header\n * Redistribution and use in source and binary forms\n */\npackage p\n/* other */\n"
+        self.assertEqual(tpl.notice_blocks(text), ["Header\nRedistribution and use in source and binary forms"])
+
     def test_notice_blocks_keep_only_comment_blocks_with_a_permission_notice(self):
         text = ("// Copyright 2009 The Go Authors.\n// license in the LICENSE file.\n\n"
                 "package math\n\n// ====\n// Copyright (C) 1993 Sun\n"

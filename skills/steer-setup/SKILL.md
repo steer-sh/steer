@@ -306,7 +306,7 @@ Finish by reading the answer back:
 "${STEER_BIN}" status
 ```
 
-Report its `Commit review` section verbatim. Do not claim the gate is armed on the strength
+Report its first line and each issue under it verbatim. Do not claim the gate is armed on the strength
 of the write alone: registration is the weakest of four states, and only an observed
 review proves the whole path. A passing test review proves the reviewer, not that the
 harness delivers the hook. Tell the user to make a code change and commit normally.

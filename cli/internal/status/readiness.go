@@ -229,13 +229,17 @@ func ReadinessOf(s *SystemStatus, probe reviewers.Probe) Readiness {
 		}
 		enforcing = append(enforcing, fmt.Sprintf("%s %s", HarnessLabel(a.Harness), a.Scope))
 	}
+	if s.Posture.PreCommit {
+		// The git channel reviews with no harness hook, so the absence of one is no gap.
+		enforcing = append(enforcing, "git pre-commit")
+	}
 	if registered {
 		steps, unverified := resolverSteps(s.Posture)
 		r.Steps = append(r.Steps, steps...)
 		r.Unverified = append(r.Unverified, unverified...)
 		r.Unverified = append(r.Unverified, modLines(s.Posture)...)
 	}
-	if !registered {
+	if !registered && !s.Posture.PreCommit {
 		r.Steps = append([]Step{{
 			Title: "no commit gate is registered, so nothing reviews a commit here",
 			Fix:   "/steer-setup in a Claude Code or Codex session",

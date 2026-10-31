@@ -7,12 +7,13 @@ import (
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/claude"
+	"github.com/steer-sh/steer-cli/internal/testhome"
 )
 
 // TestCommitGateRemoveNeedsATarget: a removal with a flag missing changes nothing.
 func TestCommitGateRemoveNeedsATarget(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("HOME", dir)
+	testhome.Set(t, dir)
 	t.Chdir(dir)
 	settings := filepath.Join(dir, ".claude", "settings.json")
 	if err := claude.RegisterCommitGateAndResolver(claude.GlobalScope, "steer commit-gate review", 460, "steer commit-gate backfill --if-due --apply --quiet", 30); err != nil {

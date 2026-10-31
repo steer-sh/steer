@@ -7,7 +7,7 @@ Reads the `dep` lines of `go version -m` for every shipped target under DIR, and
 renders the license, NOTICE and PATENTS files of each linked module, at any depth
 outside testdata, and of the Go standard library's root. A local directory
 replacement is refused. The standard library section also reproduces each
-// comment block with a permission notice in the standard library sources that
+comment block with a permission notice in the standard library sources that
 `go list -deps` compiles into the main package for a shipped target. A module whose non-test Go sources cite a unicode.org/Public
 data file is named in a closing section that reproduces licenses/Unicode-3.0.txt.
 Without --write, exits 1 when THIRD_PARTY_LICENSES at the
@@ -18,6 +18,7 @@ LICENSE, LICENCE or COPYING file. With --write, replaces the file. GO names the 
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -87,7 +88,7 @@ def unicode_section(modules):
 
 
 def notice_blocks(text):
-    """Return the // comment blocks of a source text that carry a permission notice."""
+    """Return the comment blocks of a source text that carry a permission notice."""
     blocks, lines = [], []
     for line in text.splitlines() + [""]:
         if line.lstrip().startswith("//"):
@@ -97,6 +98,10 @@ def notice_blocks(text):
         if any(phrase in block for phrase in PERMISSION_PHRASES):
             blocks.append(block)
         lines = []
+    for raw in re.findall(r"/\*(.*?)\*/", text, re.DOTALL):
+        block = "\n".join(line.strip().removeprefix("*").strip() for line in raw.splitlines()).strip()
+        if any(phrase in block for phrase in PERMISSION_PHRASES):
+            blocks.append(block)
     return blocks
 
 

@@ -22,7 +22,7 @@ func TestEmptyMachineReadings(t *testing.T) {
 		args []string
 		want []string
 	}{
-		{[]string{"status"}, []string{"Commits here are NOT reviewed.", "run: /steer-setup"}},
+		{[]string{"status"}, []string{"No commit gate is registered", "/steer-setup"}},
 		{[]string{"commit-gate", "status"}, []string{"not armed"}},
 		{[]string{"fix", "score", "--json"}, []string{"[]"}},
 		{[]string{"fix", "list", "--json"}, []string{"[]"}},

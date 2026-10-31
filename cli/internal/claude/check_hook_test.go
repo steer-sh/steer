@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"github.com/steer-sh/steer-cli/internal/testhome"
 	"os"
 	"path/filepath"
 	"testing"
@@ -106,7 +107,7 @@ func TestRegisterCheckHookRefusesAnUnrecognisableCommand(t *testing.T) {
 func TestRemoveCommitGateReportsAndSkipsTheWriteWhenAbsent(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
-	t.Setenv("HOME", dir)
+	testhome.Set(t, dir)
 	path := filepath.Join(dir, ".claude", "settings.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)

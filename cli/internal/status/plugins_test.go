@@ -38,7 +38,7 @@ func TestPluginCopiesReadEachCacheAgainstTheStableExecutable(t *testing.T) {
 
 	claudeCopy := filepath.Join(home, ".claude", "plugins", "cache", "m", "steer", "0.1.0")
 	write(bundled(claudeCopy), "build-a")
-	codexOld := filepath.Join(home, ".codex", "plugins", "cache", "m", "steer", "0.1.0")
+	codexOld := filepath.Join(home, ".codex", "plugins", "cache", "o", "steer", "0.1.0")
 	write(bundled(codexOld), "build-b")
 	codexEmpty := filepath.Join(home, ".codex", "plugins", "cache", "m", "steer", "0.2.0")
 	write(filepath.Join(codexEmpty, "README.md"), "no binary")
@@ -152,5 +152,54 @@ func TestPluginCopiesSkipAClaudeCopyItsInstallRecordDropped(t *testing.T) {
 	write(record, `{"version":2,"plugins":{}}`)
 	if got := paths(); len(got) != 0 {
 		t.Errorf("an uninstalled plugin's cache gave copies %q", got)
+	}
+}
+
+// TestCodexActiveRootsKeepTheVersionCodexLoads: "local" wins, then the highest version,
+// compared as numbers, per marketplace.
+func TestCodexActiveRootsKeepTheVersionCodexLoads(t *testing.T) {
+	got := codexActiveRoots([]string{"/c/m/steer/0.1.10", "/c/m/steer/0.1.9", "/c/n/steer/0.2.0", "/c/n/steer/local"})
+	want := []string{"/c/m/steer/0.1.10", "/c/n/steer/local"}
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("active roots = %v, want %v", got, want)
+	}
+}
+
+// TestCompareToHooks: releases order by version, dev builds have no order, and one
+// version with two commits conflicts.
+func TestCompareToHooks(t *testing.T) {
+	copyOf := func(v, c string) PluginCopy {
+		return PluginCopy{State: PluginDifferentBinary, Version: v, Commit: c}
+	}
+	release := BuildIdentity{Version: "0.1.4", Commit: "aaa"}
+	for name, tc := range map[string]struct {
+		copy  PluginCopy
+		hooks BuildIdentity
+		want  string
+	}{
+		"same bytes":    {PluginCopy{State: PluginSameBinary}, BuildIdentity{}, BuildSame},
+		"older":         {copyOf("0.1.3", "bbb"), release, BuildOlder},
+		"newer":         {copyOf("0.1.10", "bbb"), BuildIdentity{Version: "0.1.9", Commit: "aaa"}, BuildNewer},
+		"same release":  {copyOf("0.1.4", "aaa"), release, BuildSame},
+		"conflict":      {copyOf("0.1.4", "bbb"), release, BuildConflict},
+		"dev hooks":     {copyOf("0.1.4", "bbb"), BuildIdentity{Version: "dev", Commit: "aaa"}, BuildUnordered},
+		"dev copy":      {copyOf("dev", "bbb"), release, BuildUnordered},
+		"no stamps":     {PluginCopy{State: PluginDifferentBinary}, release, BuildUnknown},
+		"unknown state": {PluginCopy{State: PluginUnknown}, release, BuildUnknown},
+	} {
+		if got := tc.copy.CompareToHooks(tc.hooks); got != tc.want {
+			t.Errorf("%s: %s, want %s", name, got, tc.want)
+		}
+	}
+}
+
+// A copy that changes build at the same path changes the key, so a new notice prints.
+func TestDifferingPluginsKeyFollowsTheBuild(t *testing.T) {
+	row := PluginCopy{Harness: "codex", Path: "/p", State: PluginDifferentBinary, Version: "0.1.3", Commit: "a"}
+	first, _ := DifferingPlugins([]PluginCopy{row})
+	row.Version = "0.1.5"
+	second, _ := DifferingPlugins([]PluginCopy{row})
+	if first == second {
+		t.Errorf("both builds key as %q", first)
 	}
 }

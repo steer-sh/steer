@@ -44,17 +44,38 @@ type postureJSON struct {
 	Mods             []mods.Exposure    `json:"mods"`
 	GuardInterpreter InterpreterReading `json:"guard_interpreter"`
 	Readiness        readinessJSON      `json:"readiness"`
+	Health           healthJSON         `json:"health"`
 }
 
 // readinessJSON is ReadinessOf, the answer `steer status` prints: whether a commit
-// here is reviewed, each setup step with the command that clears it, and the trust
-// Steer cannot verify.
+// here is reviewed, and each setup step with the command that clears it.
 type readinessJSON struct {
-	Reviewing  bool       `json:"reviewing"`
-	Headline   string     `json:"headline"`
-	Steps      []stepJSON `json:"steps"`
-	Unverified []string   `json:"unverified"`
-	Note       string     `json:"note,omitempty"`
+	Reviewing bool       `json:"reviewing"`
+	Headline  string     `json:"headline"`
+	Steps     []stepJSON `json:"steps"`
+	Note      string     `json:"note,omitempty"`
+}
+
+// healthJSON is HealthOf, the verdict `steer status` prints.
+type healthJSON struct {
+	Verdict  string      `json:"verdict"`
+	Headline string      `json:"headline"`
+	Issues   []issueJSON `json:"issues"`
+}
+
+type issueJSON struct {
+	Severity string   `json:"severity"`
+	Title    string   `json:"title"`
+	Detail   []string `json:"detail,omitempty"`
+	Fix      string   `json:"fix,omitempty"`
+}
+
+func healthRow(h Health) healthJSON {
+	out := healthJSON{Verdict: h.Verdict, Headline: h.Headline, Issues: []issueJSON{}}
+	for _, issue := range h.Issues {
+		out.Issues = append(out.Issues, issueJSON{Severity: issue.Severity, Title: issue.Title, Detail: issue.Detail, Fix: issue.Fix})
+	}
+	return out
 }
 
 type stepJSON struct {
@@ -63,8 +84,7 @@ type stepJSON struct {
 }
 
 func readinessRow(r Readiness) readinessJSON {
-	out := readinessJSON{Reviewing: r.Reviewing, Headline: r.Headline, Steps: []stepJSON{},
-		Unverified: nonNil(r.Unverified), Note: r.Note}
+	out := readinessJSON{Reviewing: r.Reviewing, Headline: r.Headline, Steps: []stepJSON{}, Note: r.Note}
 	for _, step := range r.Steps {
 		out.Steps = append(out.Steps, stepJSON{Title: step.Title, Fix: step.Fix})
 	}
@@ -143,6 +163,7 @@ func (s *SystemStatus) contract() statusJSON {
 			Mods:             nonNil(s.Posture.Mods),
 			GuardInterpreter: s.Posture.GuardInterpreter,
 			Readiness:        readinessRow(ReadinessOf(s, s.ReviewerProbe)),
+			Health:           healthRow(HealthOf(s, s.ReviewerProbe)),
 		},
 		Checks:        s.Checks,
 		Interventions: []fixSummaryJSON{},

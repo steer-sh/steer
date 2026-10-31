@@ -2,8 +2,9 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
 	"strings"
-	"unicode"
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/claude"
@@ -23,10 +24,12 @@ var (
 
 var statusCmd = &cobra.Command{
 	Use:   "status",
-	Short: "Say whether commits here are reviewed; --json gives an agent the whole loop",
-	Long: `status answers whether a commit here will be reviewed, names each step that
-stands in the way with the command that clears it, and reports a guard list Steer
-cannot read. A person reads the rest of the loop — fixes, recorded problems,
+	Short: "Say which Steer you run and whether it is healthy; --json gives an agent the whole loop",
+	Long: `status prints the version you run and one answer: healthy, needs attention, or
+could not check everything. Each issue names what clears it. Healthy covers the
+installation and its configuration: commit review, guards, instructions, repository
+checks and the installed builds. It makes no network request, so it says nothing about
+newer releases. A person reads the rest of the loop — fixes, recorded problems,
 arming — in 'steer dashboard'. It writes no state.
 
 --json prints the versioned status contract on stdout, progress on stderr — the
@@ -61,6 +64,7 @@ a problem already decided; 'steer fix score --json' carries each fix's detail.`,
 			RepoRoot:        root,
 			ReviewerProbe:   reviewerProbe(cfg, resolveErr),
 			Addendum:        gateAddendum(root),
+			PreCommit:       statusPreCommit(root),
 			Evidence: evidence.Gather(evidence.Options{
 				GateStateDir: cfg.StateDir,
 				ScanScope:    scope,
@@ -99,168 +103,56 @@ func repoRootOrNone() string {
 	return root
 }
 
-// renderStatus prints the one answer a reader without the dashboard needs: will a
-// commit here be reviewed, and what stands in the way. The rest of the loop is the
-// dashboard's, for a person, and --json's, for an agent.
+// statusPreCommit reports the git pre-commit channel armed in this repository.
+func statusPreCommit(root string) bool {
+	if root == "" {
+		return false
+	}
+	armed, path := preCommitArmedHere()
+	if !armed || !executableFile(path) {
+		return false
+	}
+	// The hook exits cleanly with no review when steer does not resolve.
+	_, err := exec.LookPath("steer")
+	return err == nil
+}
+
+// executableFile reports a file git can run; git skips a hook without the bit.
+func executableFile(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode()&0o111 != 0
+}
+
+// renderStatus prints the verdict, then each issue with what clears it. A fix prints
+// whole on one line, because a wrap inserted into a command breaks the copy.
 func renderStatus(s *status.SystemStatus, probe reviewers.Probe) {
-	width := styles.Width()
-	fmt.Println()
-	fmt.Println(styles.MainHeader.Render(styles.Logo() + " status"))
-	fmt.Println()
-
-	renderReadiness(status.ReadinessOf(s, probe), width)
-	fmt.Println()
-	renderStoreProblems(s, width)
-	renderGuardInterpreter(s, width)
-	renderPluginCopies(s, width)
-	fmt.Print(styles.Wrap(styles.MutedText.Render("Fixes, recorded problems and arming: steer dashboard"), "  ", width))
-	fmt.Print(styles.Wrap(styles.MutedText.Render("An agent reads the whole loop: steer status --json"), "  ", width))
+	fmt.Print(renderHealth(status.HealthOf(s, probe), styles.Width()))
 }
 
-// renderStoreProblems prints the stores Steer refused to read. Nothing else in
-// this report would say so: every inventory below fails soft, so a refused store
-// reads exactly like a store holding nothing while its guards still run.
-func renderStoreProblems(s *status.SystemStatus, width int) {
-	if len(s.StoreProblems) == 0 {
-		return
+func renderHealth(h status.Health, width int) string {
+	head := styles.WarningText.Render(h.Headline)
+	if h.Verdict == status.VerdictHealthy {
+		head = styles.SuccessText.Render(h.Headline)
 	}
-	fmt.Println(styles.SectionHeader.Render("Guard files"))
-	for _, p := range s.StoreProblems {
-		fmt.Print(problemEntry(
-			styles.WarningText.Render("Steer cannot read the "+p.Scope+" guard list"),
-			[]problemField{
-				{"Why", []string{p.Error}},
-				{"Next", []string{"edit the entry named above; the guards already installed keep running"}},
-			}, width))
+	var b strings.Builder
+	b.WriteString("\n" + head + "\n")
+	for _, line := range h.Ready {
+		b.WriteString(styles.Wrap(line, "  ", width))
 	}
-	fmt.Println()
-}
-
-// renderGuardInterpreter prints the registered guard runners when python3 is not on
-// PATH. Such a runner allows every call, and nothing else in this report says so.
-func renderGuardInterpreter(s *status.SystemStatus, width int) {
-	runners := status.RunnersWithoutInterpreter(s.Posture.Masters, s.Posture.GuardInterpreter)
-	if len(runners) == 0 {
-		return
-	}
-	where := make([]string, len(runners))
-	for i, m := range runners {
-		where[i] = status.HarnessLabel(m.Harness) + " " + m.Scope + ": " + m.Path
-	}
-	fmt.Println(styles.SectionHeader.Render("Guard runner"))
-	fmt.Print(problemEntry(
-		styles.WarningText.Render("Guards may allow every call: "+status.GuardInterpreter+" is not on this PATH"),
-		[]problemField{
-			{"Where", where},
-			{"Why", []string{"each guard runner starts under " + status.GuardInterpreter +
-				", and a runner that cannot start allows every call; the harness runs it under its own PATH",
-				"the commit gate and repository checks do not need it"}},
-			{"Next", []string{"install Python 3, then run: steer status"}},
-		}, width))
-	fmt.Println()
-}
-
-// renderPluginCopies prints each harness's cached plugin copy that bundles a build
-// other than the stable executable. The skills that harness loads and the launcher
-// they call come from that copy, so the hooks and the skills run different builds.
-func renderPluginCopies(s *status.SystemStatus, width int) {
-	var differ []status.PluginCopy
-	for _, p := range s.Posture.Plugins {
-		if p.Differs() {
-			differ = append(differ, p)
+	for _, issue := range h.Issues {
+		b.WriteString("\n" + styles.Wrap(styles.Bold.Render(issue.Title), "", width))
+		for _, line := range issue.Detail {
+			b.WriteString(styles.Wrap(line, "  ", width))
+		}
+		if issue.Fix != "" {
+			b.WriteString("  " + issue.Fix + "\n")
 		}
 	}
-	if len(differ) == 0 {
-		return
+	if h.Note != "" {
+		b.WriteString(styles.Wrap(styles.MutedText.Render(h.Note), "  ", width))
 	}
-	fmt.Println(styles.SectionHeader.Render("Plugin copies"))
-	for _, p := range differ {
-		fmt.Print(problemEntry(
-			styles.WarningText.Render("the "+status.HarnessLabel(p.Harness)+" plugin copy bundles another Steer build"),
-			[]problemField{
-				{"Where", []string{p.Path}},
-				{"Why", []string{"its skills and launcher come from that copy, and the hooks run ~/.steer/bin/steer"}},
-				{"Next", []string{
-					"if the copy is older, update the plugin in " + status.HarnessLabel(p.Harness),
-					"if the copy is newer, run: " + p.BinInstallCommand(),
-				}},
-			}, width))
-	}
-	fmt.Println()
-}
-
-// renderReadiness prints the short answer and the steps that remain. Each step names
-// the command that clears it, so the reader never has to derive one from the
-// inventory below.
-func renderReadiness(r status.Readiness, width int) {
-	head := styles.SuccessText.Render(r.Headline)
-	if !r.Reviewing {
-		head = styles.WarningText.Render(r.Headline)
-	}
-	fmt.Println(styles.SectionHeader.Render("Commit review"))
-	fmt.Print(styles.Wrap(head, "  ", width))
-	if len(r.Steps) > 0 && r.StepsLead != "" {
-		fmt.Print(styles.Wrap(r.StepsLead, "  ", width))
-	}
-	for _, step := range r.Steps {
-		// The bullet is the label, so a step that runs past the terminal continues
-		// under its own text rather than under the marker.
-		fmt.Print(styles.Field("·", []string{step.Title}, "  ", 1, width))
-		if step.Fix != "" {
-			fmt.Print(styles.Wrap(styles.MutedText.Render("run: "+step.Fix), "    ", width))
-		}
-	}
-	if len(r.Unverified) > 0 {
-		fmt.Print(styles.Wrap(styles.Bold.Render("Trust unverified by Steer:"), "  ", width))
-		for _, note := range r.Unverified {
-			fmt.Print(styles.Field("·", []string{note}, "  ", 1, width))
-		}
-	}
-	if r.Note != "" {
-		fmt.Print(styles.Wrap(styles.MutedText.Render(r.Note), "  ", width))
-	}
-}
-
-// problemIndent is the column a problem's title sits in, and problemFieldIndent
-// the one its stacked labels sit in under it. They are the dashboard's own two
-// columns, so one entry reads the same in either place.
-const (
-	problemIndent      = "    "
-	problemFieldIndent = "      "
-	problemLabelWidth  = 9
-)
-
-// problemField is one labeled line of an entry, carrying every sentence that
-// files under that label.
-type problemField struct {
-	label  string
-	values []string
-}
-
-// problemEntry renders one entry: its title, then its stacked labels. A field
-// with nothing to say prints no label.
-func problemEntry(title string, fields []problemField, width int) string {
-	name := []rune(title)
-	for i, r := range name {
-		if unicode.IsLetter(r) {
-			name[i] = unicode.ToUpper(r)
-			break
-		}
-	}
-	out := "\n" + styles.Wrap(styles.BrandText.Render(string(name)), problemIndent, width)
-	for _, f := range fields {
-		values := make([]string, 0, len(f.values))
-		for _, v := range f.values {
-			if strings.TrimSpace(v) != "" {
-				values = append(values, v)
-			}
-		}
-		if len(values) == 0 {
-			continue
-		}
-		out += styles.Field(f.label, values, problemFieldIndent, problemLabelWidth, width)
-	}
-	return out
+	b.WriteString("\n" + styles.MutedText.Render("Details: steer dashboard") + "\n")
+	return b.String()
 }
 
 func init() {
