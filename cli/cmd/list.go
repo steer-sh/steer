@@ -44,7 +44,14 @@ Use --verbose to include provenance metadata (source, prompt_version, hook_versi
 			return err
 		}
 
-		sort.Slice(hooks, func(i, j int) bool {
+		entries := make(map[string]claude.ManifestEntry, len(hooks))
+		for i, hook := range hooks {
+			owned, entry := claude.OwnedEntry(manifest, hook)
+			hooks[i] = owned
+			entries[hook.FileName] = entry
+		}
+
+		sort.SliceStable(hooks, func(i, j int) bool {
 			return hooks[i].Name < hooks[j].Name
 		})
 
@@ -52,11 +59,8 @@ Use --verbose to include provenance metadata (source, prompt_version, hook_versi
 		fmt.Println()
 
 		for i, hook := range hooks {
-			entry, ok := manifest.Hooks[hook.Name]
-			rule := ""
-			if ok {
-				rule = entry.Rule
-			}
+			entry := entries[hook.FileName]
+			rule := entry.Rule
 			if rule == "" {
 				rule = "(no rule recorded)"
 			}

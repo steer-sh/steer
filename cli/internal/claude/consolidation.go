@@ -129,6 +129,20 @@ func ownedHook(manifest *Manifest, hook HookFile) HookFile {
 	return hook
 }
 
+// OwnedEntry returns hook under the id of the entry that owns its file, with that
+// entry. A file no entry owns keeps its stem and gets a zero entry.
+func OwnedEntry(manifest *Manifest, hook HookFile) (HookFile, ManifestEntry) {
+	owned := ownedHook(manifest, hook)
+	entry, ok := manifest.Hooks[owned.Name]
+	if !ok {
+		return owned, ManifestEntry{}
+	}
+	if file, err := hookstore.EntryFileName(hookstore.ManifestName, owned.Name, entry.File); err != nil || file != hook.FileName {
+		return owned, ManifestEntry{}
+	}
+	return owned, entry
+}
+
 // matchHook returns the hook an identifier names: a full path, a file name, a
 // stem, or the stem with its hyphens as spaces.
 func matchHook(hooks []HookFile, id string) (HookFile, bool) {
