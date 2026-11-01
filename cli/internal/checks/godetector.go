@@ -31,6 +31,8 @@ type goDecl struct {
 	node  ast.Decl
 	src   []byte
 	names []string
+	// embeds holds the patterns of the //go:embed directives bound to a var.
+	embeds []string
 }
 
 // goDetector is the part of a Go package's test files that one test depends
@@ -76,7 +78,7 @@ func analyzeGoTest(root string, d Declaration) (goDetector, error) {
 		if err != nil {
 			return goDetector{}, err
 		}
-		f, err := parser.ParseFile(fset, e.Name(), src, parser.SkipObjectResolution)
+		f, err := parser.ParseFile(fset, e.Name(), src, parser.SkipObjectResolution|parser.ParseComments)
 		if err != nil {
 			return goDetector{}, fmt.Errorf("check %s: %w", d.ID, err)
 		}
@@ -111,12 +113,20 @@ func analyzeGoTest(root string, d Declaration) (goDetector, error) {
 			continue
 		}
 		fileImports[f.name] = importNames(f.file)
+		prevEnd := f.file.Name.End()
 		for _, decl := range f.file.Decls {
+			leadFrom := prevEnd
+			prevEnd = decl.End()
 			if gd, ok := decl.(*ast.GenDecl); ok && gd.Tok == token.IMPORT {
 				continue
 			}
 			start, end := fset.Position(decl.Pos()).Offset, fset.Position(decl.End()).Offset
 			gd := goDecl{file: f.name, node: decl, src: f.src[start:end], names: declNames(decl)}
+			if v, ok := decl.(*ast.GenDecl); ok && v.Tok == token.VAR {
+				var lead []byte
+				lead, gd.embeds = embedDirectives(f.file.Comments, leadFrom, decl)
+				gd.src = append(lead, gd.src...)
+			}
 			gd.name = strings.Join(gd.names, ",")
 			idx := len(decls)
 			decls = append(decls, gd)
@@ -199,6 +209,11 @@ func analyzeGoTest(root string, d Declaration) (goDetector, error) {
 			return true
 		}
 		ast.Inspect(gd.node, visit)
+		for _, p := range gd.embeds {
+			if !embedCovered(dir, d, p) {
+				unresolved[fmt.Sprintf("embed pattern %q (declare the files it matches with --input)", strings.TrimPrefix(p, "all:"))] = true
+			}
+		}
 	}
 	for _, f := range files {
 		if f.file.Name.Name != pkgName {
@@ -338,6 +353,115 @@ func stdlib(p string) bool {
 func inputCovers(d Declaration, p string) bool {
 	for _, in := range d.Inputs {
 		if in == p || strings.HasPrefix(in, p+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// embedDirectives reads the //go:embed comments between from and the end of a
+// var declaration. It returns those above the declaration as source lines, which
+// its slice lacks, and the patterns of them all.
+func embedDirectives(comments []*ast.CommentGroup, from token.Pos, decl ast.Decl) (lead []byte, patterns []string) {
+	for _, group := range comments {
+		for _, c := range group.List {
+			if c.Pos() < from || c.Pos() >= decl.End() {
+				continue
+			}
+			args, ok := strings.CutPrefix(c.Text, "//go:embed")
+			if !ok || (args != "" && args[0] != ' ' && args[0] != '\t') {
+				continue
+			}
+			if c.Pos() < decl.Pos() {
+				lead = append(append(lead, c.Text...), '\n')
+			}
+			patterns = append(patterns, embedPatterns(args)...)
+		}
+	}
+	return lead, patterns
+}
+
+// embedPatterns splits a directive's arguments, which are bare or Go-quoted.
+// A malformed argument ends the list.
+func embedPatterns(args string) []string {
+	var patterns []string
+	for {
+		args = strings.TrimLeft(args, " \t")
+		if args == "" {
+			return patterns
+		}
+		var p string
+		if args[0] == '"' || args[0] == '`' {
+			quoted, err := strconv.QuotedPrefix(args)
+			if err != nil {
+				return patterns
+			}
+			args = args[len(quoted):]
+			if p, err = strconv.Unquote(quoted); err != nil {
+				return patterns
+			}
+		} else {
+			i := strings.IndexAny(args, " \t")
+			if i < 0 {
+				i = len(args)
+			}
+			p, args = args[:i], args[i:]
+		}
+		patterns = append(patterns, p)
+	}
+}
+
+// embedCovered reports that a declared input falls under a package-relative
+// embed pattern and that dir holds no matching file left undeclared.
+func embedCovered(dir string, d Declaration, raw string) bool {
+	pattern, all := strings.CutPrefix(raw, "all:")
+	declared := map[string]bool{}
+	covered := false
+	for _, in := range d.Inputs {
+		if rel, ok := strings.CutPrefix(in, d.Package+"/"); ok || d.Package == "." {
+			if d.Package == "." {
+				rel = in
+			}
+			declared[rel] = true
+			covered = covered || embedMatches(pattern, rel, all)
+		}
+	}
+	if !covered {
+		return false
+	}
+	undeclared := false
+	filepath.WalkDir(dir, func(p string, e os.DirEntry, err error) error {
+		if err != nil || !e.Type().IsRegular() {
+			return nil
+		}
+		rel, err := filepath.Rel(dir, p)
+		if err != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		if embedMatches(pattern, rel, all) && !declared[rel] {
+			undeclared = true
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	return !undeclared
+}
+
+// embedMatches reports a file go:embed would take for the pattern: one it names,
+// or one under a directory it names, where only all: admits a path element
+// starting with . or _.
+func embedMatches(pattern, rel string, all bool) bool {
+	if ok, _ := path.Match(pattern, rel); ok {
+		return true
+	}
+	for p := path.Dir(rel); p != "."; p = path.Dir(p) {
+		base := path.Base(rel)
+		rel = path.Dir(rel)
+		if !all && (base[0] == '.' || base[0] == '_') {
+			return false
+		}
+		if ok, _ := path.Match(pattern, p); ok {
 			return true
 		}
 	}
