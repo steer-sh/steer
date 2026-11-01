@@ -62,9 +62,7 @@ func ExtractInstructionFile(id harness.ID, path string, guardRules []string) (In
 			continue
 		}
 		backed := inSteerRules && guarded[text]
-		if len(text) > maxDirectiveLen {
-			text = text[:maxDirectiveLen]
-		}
+		text = clip(text, maxDirectiveLen)
 
 		if inSteerRules {
 			out.SteerRules = append(out.SteerRules, text)
