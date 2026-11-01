@@ -246,3 +246,120 @@ func TestABuildFailureDoesNotSatisfyAGoDefectCase(t *testing.T) {
 		t.Fatalf("a case adding a test file gave %+v; want invalid", run.Cases[0])
 	}
 }
+
+// A //go:embed directive replays with its variable, above it or inside a group,
+// so the embedded value reaches the named test. Other comments stay out of the
+// generated file.
+func TestAGoEmbedDirectiveReachesTheReplay(t *testing.T) {
+	const good = `{"id": 1}`
+	for _, tc := range []struct{ test, file string }{
+		{"TestGolden", "golden.json"},
+		{"TestGrouped", "grouped.json"},
+	} {
+		t.Run(tc.test, func(t *testing.T) {
+			root := goCheckRepo(t, readTestdata(t, "embed_test.go.txt"))
+			if _, _, err := Init(root); err != nil {
+				t.Fatalf("Init: %v", err)
+			}
+			input := "svc/resp/testdata/" + tc.file
+			writeFile(t, root, input, good)
+			d := Declaration{ID: "embeds", Kind: KindGoTest, Package: "svc/resp", Test: tc.test, Inputs: []string{input}}
+			writeCases(t, root, d.ID,
+				respCase("fixed", 0, "", "package resp\n\nfunc Response() string { return `"+good+"` }\n"),
+				respCase("differs", 1, "response differs", "package resp\n\nfunc Response() string { return `{}` }\n"))
+			run, err := Add(root, d)
+			if err != nil {
+				t.Fatalf("Add: %v (cases %+v)", err, run.Cases)
+			}
+			gd, err := analyzeGoTest(root, d)
+			if err != nil {
+				t.Fatalf("analyzeGoTest: %v", err)
+			}
+			if src := string(gd.source()); strings.Contains(src, "golden is the expected") || strings.Contains(src, "A comment between") {
+				t.Errorf("generated file keeps comment text:\n%s", src)
+			}
+		})
+	}
+}
+
+// Only a directive changes the detector: editing a pattern does, and editing or
+// adding other comments around a variable does not.
+func TestAGoEmbedDirectiveAloneMovesTheDetectorDigest(t *testing.T) {
+	src := readTestdata(t, "embed_test.go.txt")
+	root := goCheckRepo(t, src)
+	d := Declaration{ID: "embeds", Kind: KindGoTest, Package: "svc/resp", Test: "TestGolden"}
+	digest := func(content string) string {
+		t.Helper()
+		writeFile(t, root, "svc/resp/resp_test.go", content)
+		det, err := DetectorOf(root, d)
+		if err != nil {
+			t.Fatalf("DetectorOf: %v", err)
+		}
+		return det.Digest
+	}
+	base := digest(src)
+	if digest(strings.Replace(src, "golden is the expected", "golden holds the expected", 1)) != base {
+		t.Error("a comment edit changed the detector")
+	}
+	if digest(strings.Replace(src, "testdata/golden.json", "testdata/other.json", 1)) == base {
+		t.Error("a changed embed pattern left the detector unchanged")
+	}
+}
+
+// An embed pattern of a tracked declaration is named until declared inputs hold
+// every file it matches on disk: literal, directory, glob, quoted and all: forms
+// alike. An untracked declaration's pattern is not named.
+func TestAGoEmbedPatternIsADetectorInput(t *testing.T) {
+	for _, tc := range []struct {
+		directive string
+		inputs    []string
+		missing   []string
+		disk      []string
+	}{
+		{"testdata/*.json", []string{"svc/resp/testdata/a.json"}, []string{"testdata/*.json"}, []string{"testdata/a.json", "testdata/b.json"}},
+		{"testdata/*.json", []string{"svc/resp/testdata/a.json", "svc/resp/testdata/b.json"}, nil, []string{"testdata/a.json", "testdata/b.json"}},
+		{"testdata", []string{"svc/resp/testdata/a.json"}, []string{"testdata"}, []string{"testdata/a.json", "testdata/sub/b.json"}},
+		{"testdata", []string{"svc/resp/testdata/a.json"}, nil, []string{"testdata/a.json", "testdata/_skip", "testdata/.d/b.json"}},
+		{"all:testdata", []string{"svc/resp/testdata/a.json"}, []string{"testdata"}, []string{"testdata/a.json", "testdata/_skip"}},
+		{"testdata/a.json", nil, []string{"testdata/a.json"}, nil},
+		{"testdata/a.json", []string{"svc/resp/testdata/a.json"}, nil, nil},
+		{"testdata/a.json", []string{"svc/resp/testdata/b.json"}, []string{"testdata/a.json"}, nil},
+		{"testdata", []string{"svc/resp/testdata/sub/a.json"}, nil, nil},
+		{"all:testdata", []string{"svc/resp/testdata/.hidden"}, nil, nil},
+		{"testdata/*.json", []string{"svc/resp/testdata/a.json"}, nil, nil},
+		{"testdata/*", []string{"svc/resp/testdata/sub/a.json"}, nil, nil},
+		{"testdata/*.json", []string{"svc/resp/testdata/a.txt"}, []string{"testdata/*.json"}, nil},
+		{`"testdata/a b.json" other.json`, []string{"svc/resp/other.json"}, []string{"testdata/a b.json"}, nil},
+		{"`testdata/c.json`\tother.json", []string{"svc/resp/testdata/c.json", "svc/resp/other.json"}, nil, nil},
+	} {
+		root := t.TempDir()
+		for _, rel := range tc.disk {
+			writeFile(t, root, "svc/resp/"+rel, "x")
+		}
+		writeFile(t, root, "svc/go.mod", respGoMod)
+		writeFile(t, root, "svc/resp/resp_test.go", "package resp\n\nimport (\n\t_ \"embed\"\n\t\"testing\"\n)\n\n//go:embed "+tc.directive+
+			"\nvar used string\n\n//go:embed untracked.json\nvar spare string\n\nfunc TestUsed(t *testing.T) { _ = used }\n")
+		gd, err := analyzeGoTest(root, Declaration{ID: "e", Kind: KindGoTest, Package: "svc/resp", Test: "TestUsed", Inputs: tc.inputs})
+		if err != nil {
+			t.Fatalf("%s: analyzeGoTest: %v", tc.directive, err)
+		}
+		var want []string
+		for _, p := range tc.missing {
+			want = append(want, `embed pattern "`+p+`" (declare the files it matches with --input)`)
+		}
+		if got := strings.Join(gd.unresolved, "|"); got != strings.Join(want, "|") {
+			t.Errorf("%s with %v: unresolved %q; want %q", tc.directive, tc.inputs, got, want)
+		}
+	}
+
+	root := t.TempDir()
+	writeFile(t, root, "svc/go.mod", respGoMod)
+	writeFile(t, root, "svc/resp/resp_test.go", readTestdata(t, "embed_test.go.txt"))
+	gd, err := analyzeGoTest(root, Declaration{ID: "e", Kind: KindGoTest, Package: "svc/resp", Test: "TestGrouped"})
+	if err != nil {
+		t.Fatalf("analyzeGoTest: %v", err)
+	}
+	if got := strings.Join(gd.unresolved, "|"); !strings.Contains(got, "testdata/grouped.json") {
+		t.Errorf("unresolved %q; want the pattern inside the group named", got)
+	}
+}
