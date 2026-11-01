@@ -65,6 +65,9 @@ type stopWalk struct {
 	turn         string
 	context      []transcript.ContinuationStep
 	found, done  bool
+	// inTurn holds from the block until its turn ends or another turn's row
+	// appears: a hook prompt with no inline id belongs to that turn while it holds.
+	inTurn bool
 }
 
 func (w *stopWalk) consider(raw []byte, out *transcript.StopBlockReading) {
@@ -91,6 +94,7 @@ func (w *stopWalk) consider(raw []byte, out *transcript.StopBlockReading) {
 		if carries && (w.turnID == "" || w.turn == w.turnID) {
 			out.Matches++
 			w.found = true
+			w.inTurn = true
 			out.Granularity = transcript.JoinEntry
 			out.Anchors.TurnID = w.turn
 			out.Anchors.DenialEntry = step.Entry
@@ -103,8 +107,14 @@ func (w *stopWalk) consider(raw []byte, out *transcript.StopBlockReading) {
 		return
 	}
 
-	if carries && (w.turnID == "" || id == w.turnID) {
+	if id != "" && id != w.turn {
+		w.inTurn = false
+	}
+	if carries && (w.turnID == "" || id == w.turnID || (id == "" && w.inTurn)) {
 		out.Matches++
+	}
+	if turnEnd(r, p) != "" {
+		w.inTurn = false
 	}
 	if w.done {
 		return

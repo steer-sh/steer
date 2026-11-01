@@ -107,6 +107,52 @@ func TestStopBlockReportsAnInterruptionAndARepeatedReason(t *testing.T) {
 	}
 }
 
+// A hook prompt with no inline turn id belongs to the turn in progress when it
+// appears: it counts inside the named turn and not after that turn is over,
+// including once the budget has ended the reading.
+func TestStopBlockCountsAHookPromptWithNoTurnIDByItsPosition(t *testing.T) {
+	bare := func(ordinal int) string {
+		return rolloutLine(ordinal, typeResponseItem, fmt.Sprintf(`{"type":"message","role":"user","content":[{"type":"input_text","text":%q}]}`,
+			`<hook_prompt hook_run_id="stop:0:/h/hooks.json">`+reason1+`</hook_prompt>`))
+	}
+	for name, tc := range map[string]struct {
+		budget transcript.ContinuationBudget
+		lines  []string
+		want   int
+	}{
+		"later in the turn": {
+			lines: []string{typed(1, "t1", "go"), hookPrompt(2, "t1", reason1), said(3, "t1", "fixing"), bare(4), event(5, "t1", "task_complete")},
+			want:  2,
+		},
+		"past a spent budget": {
+			budget: transcript.ContinuationBudget{Steps: 1},
+			lines:  []string{typed(1, "t1", "go"), hookPrompt(2, "t1", reason1), said(3, "t1", "fixing"), bare(4), event(5, "t1", "task_complete")},
+			want:   2,
+		},
+		"after the turn ended": {
+			lines: []string{typed(1, "t1", "go"), hookPrompt(2, "t1", reason1), event(3, "t1", "task_complete"), bare(4)},
+			want:  1,
+		},
+		"after a usage row of the ended turn": {
+			lines: []string{typed(1, "t1", "go"), hookPrompt(2, "t1", reason1), event(3, "t1", "task_complete"), rolloutLine(4, "token_usage_record", `{"turn_id":"t1","usage":{}}`), bare(5)},
+			want:  1,
+		},
+		"in a later turn": {
+			lines: []string{typed(1, "t1", "go"), hookPrompt(2, "t1", reason1), typed(3, "t2", "next"), bare(4)},
+			want:  1,
+		},
+	} {
+		path := writeTurns(t, strings.Join(tc.lines, "\n")+"\n")
+		got, err := StopBlock(path, "steer check run: 1a", "t1", tc.budget)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Matches != tc.want {
+			t.Errorf("%s: matches = %d; want %d", name, got.Matches, tc.want)
+		}
+	}
+}
+
 // A turn that is not the run's, or a line no hook prompt carries, reaches nothing.
 func TestStopBlockReachesNothingOutsideItsTurn(t *testing.T) {
 	path := writeTurns(t, strings.Join([]string{typed(1, "t1", "go"), hookPrompt(2, "t1", reason1)}, "\n")+"\n")
