@@ -2,6 +2,7 @@ package fixture
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -63,6 +64,8 @@ func ParseDiff(text string) ([]Hunk, Truncation, error) {
 	var path, oldPath string
 	var newFile, deletedFile bool
 	var current *Hunk
+	var oldLeft, newLeft int
+	var counted, filled bool
 
 	flush := func() {
 		if current == nil {
@@ -72,7 +75,8 @@ func ParseDiff(text string) ([]Hunk, Truncation, error) {
 		current = nil
 	}
 
-	for _, line := range strings.Split(text, "\n") {
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
 		switch {
 		case strings.HasPrefix(line, "diff --git "):
 			// A `diff --git ` at column 0 always starts a file: every line of a
@@ -104,15 +108,31 @@ func ParseDiff(text string) ([]Hunk, Truncation, error) {
 			}
 			current = &Hunk{Path: path, Index: countFor(hunks, path) + 1, Header: line,
 				NewFile: newFile, DeletedFile: deletedFile}
+			oldLeft, newLeft, counted = hunkCounts(line)
+			filled = counted && hunkFills(lines[i+1:], oldLeft, newLeft)
 		case current != nil && strings.HasPrefix(line, "+"):
 			// The marker is stripped, as the runtime does: a guard is handed
 			// the line's content, never the diff's rendering of it.
 			current.Added = append(current.Added, line[1:])
+			newLeft--
 		case current != nil && strings.HasPrefix(line, "-"):
 			current.Removed = append(current.Removed, line[1:])
-		case current != nil && (strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\\")):
-			// Context lines are in neither the added nor the removed text.
+			oldLeft--
+		case current != nil && strings.HasPrefix(line, "\\"):
+			// "\ No newline at end of file" describes the line before it.
+		case current != nil && (strings.HasPrefix(line, " ") ||
+			(line == "" && filled)):
+			// Context lines are in neither the added nor the removed text. An empty
+			// line is one blank context line, as diff.suppressBlankEmpty writes it,
+			// only when the body fills its header; otherwise it ends a hunk shorter
+			// than its header.
+			oldLeft--
+			newLeft--
 		case current != nil:
+			flush()
+		}
+		// A full hunk ends here, so a following "--- " is the next file's header.
+		if current != nil && counted && oldLeft <= 0 && newLeft <= 0 {
 			flush()
 		}
 	}
@@ -122,6 +142,57 @@ func ParseDiff(text string) ([]Hunk, Truncation, error) {
 		return nil, trunc, fmt.Errorf("the stored diff holds no hunks")
 	}
 	return hunks, trunc, nil
+}
+
+var hunkHeader = regexp.MustCompile(`^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@`)
+
+// hunkCounts reads the old and new line counts from a hunk header. ok is false
+// when the header is malformed or promises no lines.
+func hunkCounts(header string) (oldLines, newLines int, ok bool) {
+	m := hunkHeader.FindStringSubmatch(header)
+	if m == nil {
+		return 0, 0, false
+	}
+	oldLines, oldErr := countField(m[1])
+	newLines, newErr := countField(m[2])
+	if oldErr != nil || newErr != nil || (oldLines == 0 && newLines == 0) {
+		return 0, 0, false
+	}
+	return oldLines, newLines, true
+}
+
+// hunkFills reports whether lines, read as hunk body, reach exactly the counts
+// left, an empty line counting as context.
+func hunkFills(lines []string, oldLeft, newLeft int) bool {
+	for _, line := range lines {
+		switch {
+		case strings.HasPrefix(line, "+"):
+			newLeft--
+		case strings.HasPrefix(line, "-"):
+			oldLeft--
+		case strings.HasPrefix(line, "\\"):
+		case line == "" || strings.HasPrefix(line, " "):
+			oldLeft--
+			newLeft--
+		default:
+			return false
+		}
+		if oldLeft < 0 || newLeft < 0 {
+			return false
+		}
+		if oldLeft == 0 && newLeft == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// countField reads one header count, which git omits when it is 1.
+func countField(field string) (int, error) {
+	if field == "" {
+		return 1, nil
+	}
+	return strconv.Atoi(field)
 }
 
 // finish decides a hunk's payload, or why it has none.

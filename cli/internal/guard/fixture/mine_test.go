@@ -232,3 +232,96 @@ func TestBothBudgetPreamblesReadAsLossy(t *testing.T) {
 		t.Fatal("a stat-only diff read as complete")
 	}
 }
+
+// editStrings returns a hunk's old_string and new_string, or fails on a hunk with
+// no payload.
+func editStrings(t *testing.T, h Hunk) (string, string) {
+	t.Helper()
+	input, ok := h.Payload["tool_input"].(map[string]any)
+	if !ok {
+		t.Fatalf("%s #%d has no payload: %s", h.Path, h.Index, h.Skip)
+	}
+	return input["old_string"].(string), input["new_string"].(string)
+}
+
+// With diff.suppressBlankEmpty, git writes a blank context line as an empty line.
+func TestEmptyContextLineStaysInTheHunk(t *testing.T) {
+	hunks, _, err := ParseDiff("diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1,4 +1,4 @@\n a\n\n-b\n+B\n c\n")
+	if err != nil {
+		t.Fatalf("ParseDiff: %v", err)
+	}
+	if len(hunks) != 1 {
+		t.Fatalf("want 1 hunk, got %d", len(hunks))
+	}
+	if old, added := editStrings(t, hunks[0]); old != "b\n" || added != "B\n" {
+		t.Fatalf("hunk is %q -> %q", old, added)
+	}
+}
+
+// The second file's first removed line renders as "--- c": only the first hunk's
+// counts tell its header from a body line.
+func TestHeaderlessDiffReadsEachFile(t *testing.T) {
+	hunks, _, err := ParseDiff("--- a/one\n+++ b/one\n@@ -1 +1 @@\n-a\n+b\n\\ No newline at end of file\n--- a/two\n+++ b/two\n@@ -1,2 +1,2 @@\n--- c\n+d\n e\n")
+	if err != nil {
+		t.Fatalf("ParseDiff: %v", err)
+	}
+	if len(hunks) != 2 {
+		t.Fatalf("want 2 hunks, got %d", len(hunks))
+	}
+	if old, added := editStrings(t, hunks[0]); hunks[0].Path != "one" || old != "a\n" || added != "b\n" {
+		t.Fatalf("first hunk is %s %q -> %q", hunks[0].Path, old, added)
+	}
+	if old, added := editStrings(t, hunks[1]); hunks[1].Path != "two" || old != "-- c\n" || added != "d\n" {
+		t.Fatalf("second hunk is %s %q -> %q", hunks[1].Path, old, added)
+	}
+}
+
+// A hunk shorter than its header, or with a header holding no usable counts, ends
+// at the first line that cannot belong to it.
+func TestUncountableHunksEndAtTheFirstForeignLine(t *testing.T) {
+	const files = "diff --git a/f b/f\n--- a/f\n+++ b/f\n"
+	for name, tc := range map[string]struct {
+		body     string
+		old, add string
+	}{
+		"short at the end":  {"@@ -1,9 +1,9 @@\n-a\n+b\n", "a\n", "b\n"},
+		"short then prose":  {"@@ -1,9 +1,9 @@\n-a\n+b\nprose\n-c\n", "a\n", "b\n"},
+		"short then blank":  {"@@ -1,9 +1,9 @@\n-a\n+b\n\nprose\n-c\n", "a\n", "b\n"},
+		"short then a file": {"@@ -1,9 +1,9 @@\n-a\n+b\ndiff --git a/g b/g\n", "a\n", "b\n"},
+		"no counts":         {"@@ nonsense @@\n-a\n+b\n\n-c\n", "a\n", "b\n"},
+		"overflowing count": {"@@ -1,99999999999999999999 +1,1 @@\n-a\n+b\n\n-c\n", "a\n", "b\n"},
+		"zero counts":       {"@@ -0,0 +0,0 @@\n-a\n+b\n\n-c\n", "a\n", "b\n"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			hunks, _, err := ParseDiff(files + tc.body)
+			if err != nil {
+				t.Fatalf("ParseDiff: %v", err)
+			}
+			if len(hunks) != 1 {
+				t.Fatalf("want 1 hunk, got %d", len(hunks))
+			}
+			if old, added := editStrings(t, hunks[0]); old != tc.old || added != tc.add {
+				t.Fatalf("hunk is %q -> %q", old, added)
+			}
+		})
+	}
+}
+
+// The blank line cannot be context here: reading on from it meets the next hunk's
+// header with the counts unfilled, so it ends the short hunk and the next file's
+// header stays a header.
+func TestBlankLineAfterShortHunkLeavesNextFileHeader(t *testing.T) {
+	hunks, _, err := ParseDiff("--- a/one\n+++ b/one\n@@ -1,9 +1,9 @@\n-a\n+b\n\n--- a/two\n+++ b/two\n@@ -1 +1 @@\n-c\n+d\n")
+	if err != nil {
+		t.Fatalf("ParseDiff: %v", err)
+	}
+	if len(hunks) != 2 {
+		t.Fatalf("want 2 hunks, got %d", len(hunks))
+	}
+	if old, added := editStrings(t, hunks[0]); hunks[0].Path != "one" || old != "a\n" || added != "b\n" {
+		t.Fatalf("first hunk is %s %q -> %q", hunks[0].Path, old, added)
+	}
+	if old, added := editStrings(t, hunks[1]); hunks[1].Path != "two" || old != "c\n" || added != "d\n" {
+		t.Fatalf("second hunk is %s %q -> %q", hunks[1].Path, old, added)
+	}
+}
