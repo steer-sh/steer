@@ -100,10 +100,6 @@ func (m *Model) reviewerEditing(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	if msg.String() == "d" && m.input.Value() == "" && ed.field.DefaultLabel != "" {
-		// Nothing was typed, so d asks for the default rather than typing a letter.
-		return m.saveReviewerValue("")
-	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	return m, cmd
@@ -361,7 +357,7 @@ func editorHint(f settings.Field) string {
 		return "type a whole number of " + f.Unit + "s · enter save · esc cancel"
 	}
 	if f.DefaultLabel != "" {
-		return "enter save · d use " + strings.ToLower(f.DefaultLabel) + " · esc cancel"
+		return "enter save · empty means " + strings.ToLower(f.DefaultLabel) + " · esc cancel"
 	}
 	return "enter save · esc cancel"
 }
