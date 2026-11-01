@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/steer-sh/steer-cli/internal/instructions"
 )
 
 // An instruction rule reaches the agent's document the same way a guard's rule
@@ -261,5 +263,61 @@ func TestADuplicateRuleUnderAnotherIDIsRefused(t *testing.T) {
 	if _, err := InstallManagedRule(ProjectScope, "config-path",
 		"resolve a config path from the repo root"); err != nil {
 		t.Fatalf("rewriting the same id with its own text: %v", err)
+	}
+}
+
+// A hand-edited manifest can hold a rule across lines. The section still gets one
+// bullet, so nothing in the text can end the section, every sync writes the same
+// bytes, and the section reads as current.
+func TestAMultilineManifestRuleSyncsAsOneBullet(t *testing.T) {
+	for name, text := range map[string]string{
+		"plain":      "first\nsecond",
+		"heading":    "first\n## second",
+		"end marker": "first\n" + instructions.EndMarker + "\nsecond",
+		"crlf blank": "first \r\n\r\n second",
+	} {
+		t.Run(name, func(t *testing.T) {
+			withProjectTempDir(t)
+			if err := SaveManifest(ProjectScope, &Manifest{
+				Hooks: map[string]ManifestEntry{"a-guard": {File: "a-guard.py", Rule: text}},
+				Rules: map[string]RuleEntry{"b-rule": {Text: "other\n" + text}},
+			}); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := SyncTargets(ProjectScope); err != nil {
+				t.Fatal(err)
+			}
+			written := readRules(t, ProjectScope)
+			collapsed := strings.ReplaceAll(text, "\r\n\r\n ", "")
+			collapsed = strings.ReplaceAll(collapsed, "\n", " ")
+			for _, want := range []string{"\n- " + collapsed + "\n", "\n- other " + collapsed + "\n"} {
+				if !strings.Contains(written, want) {
+					t.Fatalf("document lacks %q:\n%s", want, written)
+				}
+			}
+
+			presence, err := TargetRulesPresence(ProjectScope, Registrar{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if presence.Drifted() || presence.Expected != 2 {
+				t.Fatalf("presence = %#v", presence)
+			}
+
+			if err := SyncTargets(ProjectScope); err != nil {
+				t.Fatal(err)
+			}
+			result, err := SyncStore(ProjectScope, Registrar{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Current) != 1 {
+				t.Fatalf("sync after a current section = %#v", result)
+			}
+			if again := readRules(t, ProjectScope); again != written {
+				t.Fatalf("a second sync changed the document:\n%s", again)
+			}
+		})
 	}
 }

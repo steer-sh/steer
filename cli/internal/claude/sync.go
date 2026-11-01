@@ -35,7 +35,8 @@ func ManifestRules(scope string) ([]string, error) {
 type ruleEntry struct{ id, text string }
 
 // manifestRuleEntries is ManifestRules keeping each line's id, with blank text
-// dropped the same way.
+// dropped the same way. Writers and TargetRulesPresence both read its text, which
+// singleLine has already reduced to the bullet the section holds.
 func manifestRuleEntries(scope string) ([]ruleEntry, error) {
 	manifest, err := LoadManifest(scope)
 	if err != nil {
@@ -62,11 +63,24 @@ func manifestRuleEntries(scope string) ([]ruleEntry, error) {
 
 	out := make([]ruleEntry, 0, len(entries))
 	for _, e := range entries {
-		if rule := strings.TrimSpace(e.text); rule != "" {
+		if rule := singleLine(e.text); rule != "" {
 			out = append(out, ruleEntry{e.id, rule})
 		}
 	}
 	return out, nil
+}
+
+// singleLine trims text and joins its nonblank lines with one space. Each rule is
+// one bullet of the section, so no line of a hand-edited rule can end the section.
+func singleLine(text string) string {
+	parts := strings.FieldsFunc(text, func(r rune) bool { return r == '\r' || r == '\n' })
+	lines := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if line := strings.TrimSpace(part); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return strings.Join(lines, " ")
 }
 
 // RulesPresence compares one harness's rules section with the manifest. The
