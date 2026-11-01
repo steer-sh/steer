@@ -21,7 +21,7 @@ import (
 // ExecutorVersion names the replay semantics. Raise it when a change to replay
 // could turn a stored outcome into a different one; a receipt from another
 // executor version is stale.
-const ExecutorVersion = 4
+const ExecutorVersion = 5
 
 // CaseTimeout bounds each setup script and each check run within a case.
 var CaseTimeout = 120 * time.Second
