@@ -333,11 +333,11 @@ func stdlib(p string) bool {
 	return !strings.Contains(first, ".")
 }
 
-// inputCovers reports a declared input that is the path, a directory holding
-// it, or a file under it when the path names a directory.
+// inputCovers reports a declared input that is the path, or a file under it
+// when the path names a directory. An input is always a file.
 func inputCovers(d Declaration, p string) bool {
 	for _, in := range d.Inputs {
-		if in == p || strings.HasPrefix(p, in+"/") || strings.HasPrefix(in, p+"/") {
+		if in == p || strings.HasPrefix(in, p+"/") {
 			return true
 		}
 	}
