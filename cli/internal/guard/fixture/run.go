@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/steer-sh/steer-cli/internal/guard"
+	"github.com/steer-sh/steer-cli/internal/hookstore"
 )
 
 // Outcome is what a run answered.
@@ -216,6 +217,9 @@ func (r Runner) Run(guardPath, masterPath string, file File) (Report, error) {
 	if err := file.Validate(); err != nil {
 		return Report{}, err
 	}
+	if filepath.Base(guardPath) == hookstore.MasterName {
+		return Report{}, fmt.Errorf("guard %q names the master %s as its file", file.Hook, hookstore.MasterName)
+	}
 
 	store, err := guard.NewSandbox("steer-fixture-")
 	if err != nil {
@@ -224,7 +228,8 @@ func (r Runner) Run(guardPath, masterPath string, file File) (Report, error) {
 	defer store.Close()
 	root := store.Root()
 
-	guardCopy, err := store.Copy(guardPath, file.Hook+".py")
+	// Its own directory keeps the copy clear of the master and the audit files.
+	guardCopy, err := store.Copy(guardPath, "guard/"+file.Hook+".py")
 	if err != nil {
 		return Report{}, err
 	}

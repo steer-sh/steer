@@ -389,6 +389,9 @@ func RekeyManagedHook(scope, from, to, fileName string) error {
 	if err := RefuseHookRekey(scope, from, to, fileName); err != nil {
 		return err
 	}
+	if err := EnsureDirectories(scope); err != nil {
+		return err
+	}
 	hooksDir, err := GetHooksDir(scope)
 	if err != nil {
 		return err

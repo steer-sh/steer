@@ -59,3 +59,44 @@ func TestInvokeNamesBothStreamsOnANonZeroExit(t *testing.T) {
 		}
 	}
 }
+
+// A hook that climbs out of the sandbox is refused before anything is copied.
+func TestRunWritesNothingForAnEscapingHook(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+	if _, err := (Runner{}).Run(writeScript(t, ""), "", oneCase("../../escaped")); err == nil {
+		t.Error("Run accepted an escaping hook")
+	}
+	if _, err := os.Stat(filepath.Join(tmp, "escaped.py")); err == nil {
+		t.Error("Run wrote the guard copy outside the sandbox")
+	}
+}
+
+// A guard whose id is the master's stem still has its own file tested: the master
+// copy cannot replace the guard copy.
+func TestRunTestsTheGuardWhenItsIdIsTheMastersStem(t *testing.T) {
+	guard := filepath.Join(t.TempDir(), "other-file.py")
+	if err := os.WriteFile(guard, []byte("import sys\nsys.stdin.read()\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	master := writeScript(t, masterDeny)
+	report, err := Runner{}.Run(guard, master, oneCase("steer-hooks"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := report.Cases[0].Individual; got != OutcomeAllow {
+		t.Fatalf("individual pass = %q: it ran the master, not the guard", got)
+	}
+}
+
+// A guard whose file is the master is refused: the guard pass would test the master.
+func TestRunRefusesAGuardFileNamedForTheMaster(t *testing.T) {
+	guard := filepath.Join(t.TempDir(), "steer-hooks.py")
+	if err := os.WriteFile(guard, []byte("pass\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Runner{}.Run(guard, "", oneCase("alpha"))
+	if err == nil || !strings.Contains(err.Error(), "steer-hooks.py") {
+		t.Fatalf("err = %v, want a refusal naming the master", err)
+	}
+}
