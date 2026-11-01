@@ -140,6 +140,11 @@ func scriptCommand(bash, root, script string) (string, []string) {
 	return bash, []string{rel}
 }
 
+// executableMode reports a mode with any execute bit set.
+func executableMode(mode os.FileMode) bool {
+	return mode&0o111 != 0
+}
+
 // runsItself reports whether the file at path is executable and opens with a
 // shebang. Windows has no shebang, so nothing there runs as itself.
 func runsItself(path string) bool {
@@ -147,7 +152,7 @@ func runsItself(path string) bool {
 		return false
 	}
 	info, err := os.Stat(path)
-	if err != nil || info.Mode()&0o111 == 0 {
+	if err != nil || !executableMode(info.Mode()) {
 		return false
 	}
 	file, err := os.Open(path)

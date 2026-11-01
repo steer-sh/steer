@@ -43,6 +43,8 @@ type goDetector struct {
 	imports    map[string]string
 	blank      []string
 	unresolved []string
+	// embedded lists the package-relative files the tracked embed patterns match.
+	embedded []string
 }
 
 func containsString(list []string, s string) bool {
@@ -151,6 +153,7 @@ func analyzeGoTest(root string, d Declaration) (goDetector, error) {
 	if modErr != nil {
 		unresolved["module path: "+modErr.Error()] = true
 	}
+	embedded := map[string]bool{}
 	seen := map[int]bool{}
 	var queue []int
 	enqueue := func(idxs ...int) {
@@ -222,7 +225,11 @@ func analyzeGoTest(root string, d Declaration) (goDetector, error) {
 		}
 		ast.Inspect(gd.node, visit)
 		for _, p := range gd.embeds {
-			if !embedCovered(dir, d, p) {
+			matched := embedFiles(dir, p)
+			for _, rel := range matched {
+				embedded[rel] = true
+			}
+			if !embedCovered(d, p, matched) {
 				unresolved[fmt.Sprintf("embed pattern %q (declare the files it matches with --input)", strings.TrimPrefix(p, "all:"))] = true
 			}
 		}
@@ -263,6 +270,10 @@ func analyzeGoTest(root string, d Declaration) (goDetector, error) {
 		det.unresolved = append(det.unresolved, u)
 	}
 	sort.Strings(det.unresolved)
+	for rel := range embedded {
+		det.embedded = append(det.embedded, rel)
+	}
+	sort.Strings(det.embedded)
 	return det, nil
 }
 
@@ -446,8 +457,9 @@ func embedPatterns(args string) []string {
 }
 
 // embedCovered reports that a declared input falls under a package-relative
-// embed pattern and that dir holds no matching file left undeclared.
-func embedCovered(dir string, d Declaration, raw string) bool {
+// embed pattern and that matched, the files the package holds for it, are all
+// declared.
+func embedCovered(d Declaration, raw string, matched []string) bool {
 	pattern, all := strings.CutPrefix(raw, "all:")
 	declared := map[string]bool{}
 	covered := false
@@ -463,9 +475,31 @@ func embedCovered(dir string, d Declaration, raw string) bool {
 	if !covered {
 		return false
 	}
-	undeclared := false
+	for _, rel := range matched {
+		if !declared[rel] {
+			return false
+		}
+	}
+	return true
+}
+
+// embedFiles lists the regular files under dir that a pattern matches, as
+// slash-separated paths relative to dir. go:embed refuses a version-control name
+// anywhere in a path, and those directories change with every commit.
+func embedFiles(dir, raw string) []string {
+	pattern, all := strings.CutPrefix(raw, "all:")
+	var matched []string
 	filepath.WalkDir(dir, func(p string, e os.DirEntry, err error) error {
-		if err != nil || !e.Type().IsRegular() {
+		if err != nil {
+			return nil
+		}
+		if versionControlName(e.Name()) {
+			if e.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !e.Type().IsRegular() {
 			return nil
 		}
 		rel, err := filepath.Rel(dir, p)
@@ -473,13 +507,20 @@ func embedCovered(dir string, d Declaration, raw string) bool {
 			return nil
 		}
 		rel = filepath.ToSlash(rel)
-		if embedMatches(pattern, rel, all) && !declared[rel] {
-			undeclared = true
-			return filepath.SkipAll
+		if embedMatches(pattern, rel, all) {
+			matched = append(matched, rel)
 		}
 		return nil
 	})
-	return !undeclared
+	return matched
+}
+
+func versionControlName(name string) bool {
+	switch name {
+	case ".git", ".hg", ".bzr", ".svn":
+		return true
+	}
+	return false
 }
 
 // embedMatches reports a file go:embed would take for the pattern: one it names,
@@ -538,8 +579,8 @@ func modulePath(gomod []byte) string {
 	return ""
 }
 
-// goDetectorOf digests a go-test binding: its tracked declarations and its
-// declared inputs.
+// goDetectorOf digests a go-test binding: its tracked declarations, the imports
+// they resolve to, the files their embed patterns match and its declared inputs.
 func goDetectorOf(root string, d Declaration) (Detector, goDetector, error) {
 	gd, err := analyzeGoTest(root, d)
 	if err != nil {
@@ -558,11 +599,22 @@ func goDetectorOf(root string, d Declaration) (Detector, goDetector, error) {
 		det.Decls = append(det.Decls, dd)
 		fmt.Fprintf(all, "decl\x00%s\x00%s\n", dd.Name, dd.SHA256)
 	}
+	names := make([]string, 0, len(gd.imports))
+	for n := range gd.imports {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		fmt.Fprintf(all, "import\x00%s\x00%s\n", n, gd.imports[n])
+	}
 	for _, p := range gd.blank {
 		fmt.Fprintf(all, "blank\x00%s\n", p)
 	}
+	for _, rel := range gd.embedded {
+		fmt.Fprintf(all, "embed\x00%s\n", rel)
+	}
 	for _, fd := range files {
-		fmt.Fprintf(all, "file\x00%s\x00%s\n", fd.Path, fd.SHA256)
+		fmt.Fprintf(all, "file\x00%s", fd.digestLine())
 	}
 	det.Digest = hex.EncodeToString(all.Sum(nil))
 	return det, gd, nil
