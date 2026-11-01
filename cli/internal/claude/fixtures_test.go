@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/guard/fixture"
+	"github.com/steer-sh/steer-cli/internal/hookstore"
 )
 
 // blockingHook blocks any Bash command holding the token it is built around.
@@ -525,5 +526,90 @@ func TestFixtureMasterPassReadsADenyPastStderr(t *testing.T) {
 	}
 	if got := report.Cases[1]; got.Master != fixture.OutcomeBlock || got.MasterState != fixture.MasterBlockedAllow {
 		t.Errorf("labelled allow = %+v, want the master's block reported", got)
+	}
+}
+
+func linkedSteerWithOldGuard(t *testing.T) string {
+	t.Helper()
+	withProjectTempDir(t)
+	outside := t.TempDir()
+	hooks := filepath.Join(outside, "hooks")
+	if err := os.MkdirAll(hooks, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"hooks":{"old":{"file":"old.py","rule":"r"}}}`
+	if err := os.WriteFile(filepath.Join(hooks, "steer-manifest.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.Save(hooks, fixture.File{Version: fixture.Version, Hook: "old", Cases: []fixture.Case{
+		bashCase("blocks", "x", fixture.ExpectBlock),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, ".steer"); err != nil {
+		t.Fatal(err)
+	}
+	return hooks
+}
+
+// A .steer the repository carries as a link is refused, so no fixture lands at
+// its target.
+func TestSaveFixturesRefusesALinkedSteerDirectory(t *testing.T) {
+	hooks := linkedSteerWithOldGuard(t)
+	err := SaveFixtures(ProjectScope, fixture.File{Version: fixture.Version, Hook: "alpha", Cases: []fixture.Case{
+		bashCase("blocks", "x", fixture.ExpectBlock),
+	}})
+	if err == nil {
+		t.Error("SaveFixtures accepted a linked .steer")
+	}
+	if _, err := os.Stat(filepath.Join(hooks, fixture.DirName, "alpha.json")); err == nil {
+		t.Error("SaveFixtures wrote through a linked .steer")
+	}
+}
+
+// A bad document is refused before the store is created.
+func TestSaveFixturesRefusesABadHookBeforeCreatingTheStore(t *testing.T) {
+	withProjectTempDir(t)
+	err := SaveFixtures(ProjectScope, fixture.File{Version: fixture.Version, Hook: "../x", Cases: []fixture.Case{
+		bashCase("blocks", "x", fixture.ExpectBlock),
+	}})
+	if err == nil {
+		t.Error("SaveFixtures accepted a hook that is not a guard name")
+	}
+	if _, err := os.Stat(".steer"); err == nil {
+		t.Error("SaveFixtures created the store before refusing the document")
+	}
+}
+
+// A refused rekey leaves a legacy store unmigrated.
+func TestRekeyManagedHookRefusalLeavesALegacyStoreInPlace(t *testing.T) {
+	withProjectTempDir(t)
+	legacy, err := hookstore.LegacyDir(ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(legacy, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"hooks":{"old":{"file":"old.py","rule":"r"}}}`
+	if err := os.WriteFile(filepath.Join(legacy, hookstore.ManifestName), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := RekeyManagedHook(ProjectScope, "missing", "new", "new.py"); err == nil {
+		t.Fatal("RekeyManagedHook accepted a missing source")
+	}
+	if _, err := os.Stat(".steer"); err == nil {
+		t.Error("a refused rekey migrated the legacy store")
+	}
+}
+
+// A rekey refuses a linked .steer before it writes the moved fixtures.
+func TestRekeyManagedHookRefusesALinkedSteerDirectory(t *testing.T) {
+	hooks := linkedSteerWithOldGuard(t)
+	if err := RekeyManagedHook(ProjectScope, "old", "new", "new.py"); err == nil {
+		t.Error("RekeyManagedHook accepted a linked .steer")
+	}
+	if _, err := os.Stat(filepath.Join(hooks, fixture.DirName, "new.json")); err == nil {
+		t.Error("RekeyManagedHook wrote through a linked .steer")
 	}
 }

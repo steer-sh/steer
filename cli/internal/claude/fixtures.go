@@ -32,6 +32,12 @@ func (v *FixtureVerification) Failed() bool {
 
 // SaveFixtures stores one guard's cases in the scope's store.
 func SaveFixtures(scope string, file fixture.File) error {
+	if err := file.Validate(); err != nil {
+		return err
+	}
+	if err := EnsureDirectories(scope); err != nil {
+		return err
+	}
 	dir, err := GetHooksDir(scope)
 	if err != nil {
 		return err

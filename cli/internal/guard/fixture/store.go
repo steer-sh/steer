@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -90,8 +91,8 @@ func (c Case) Validate() error {
 		return fmt.Errorf("case %q: payload cannot be empty", c.Name)
 	}
 	for path := range c.Files {
-		if filepath.IsAbs(path) || strings.Contains(path, "..") {
-			return fmt.Errorf("case %q: file path %q must be relative and hold no ..", c.Name, path)
+		if !filepath.IsLocal(path) || filepath.Clean(path) == "." || slices.Contains(strings.Split(path, "/"), "..") {
+			return fmt.Errorf("case %q: file path %q must name a file inside the case directory with no .. element", c.Name, path)
 		}
 	}
 	return nil
@@ -104,6 +105,9 @@ func (f File) Validate() error {
 	}
 	if strings.TrimSpace(f.Hook) == "" {
 		return fmt.Errorf("fixture file names no hook")
+	}
+	if !hookstore.GuardName(f.Hook) {
+		return fmt.Errorf("fixture hook %q is not a guard name: it holds only letters, digits, '_', '.' and '-', and starts with a letter or digit", f.Hook)
 	}
 	if len(f.Cases) == 0 {
 		return fmt.Errorf("fixture file holds no cases")
@@ -134,7 +138,8 @@ func Parse(data []byte) (File, error) {
 }
 
 // Load reads a guard's stored fixtures. A missing file is not an error: a guard
-// registered before fixtures existed simply has none.
+// registered before fixtures existed simply has none. A document naming another
+// guard is one.
 func Load(storeDir, hook string) (File, bool, error) {
 	data, err := os.ReadFile(Path(storeDir, hook))
 	if os.IsNotExist(err) {
@@ -146,6 +151,9 @@ func Load(storeDir, hook string) (File, bool, error) {
 	file, err := Parse(data)
 	if err != nil {
 		return File{}, false, err
+	}
+	if file.Hook != hook {
+		return File{}, false, fmt.Errorf("fixtures for %q name the hook %q", hook, file.Hook)
 	}
 	return file, true, nil
 }
