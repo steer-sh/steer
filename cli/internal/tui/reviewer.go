@@ -26,6 +26,8 @@ type reviewerEdit struct {
 	// carry is the pending answer to what happens to the model and the effort when
 	// the reviewer CLI changes: keepValues, or dropValues for the new CLI's own.
 	carry string
+	// asked says enter has put the question about the highlighted CLI, so an arrow answers it.
+	asked bool
 }
 
 // The answers to a reviewer-CLI change. Neither is a default: a model name is
@@ -88,12 +90,18 @@ func (m *Model) reviewerEditing(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "up", "k":
 			ed.choice--
+			m.forgetCarry()
 		case "down", "j":
 			ed.choice++
+			m.forgetCarry()
 		case "left", "h":
-			ed.carry = keepValues
+			if ed.asked {
+				ed.carry = keepValues
+			}
 		case "right", "l":
-			ed.carry = dropValues
+			if ed.asked {
+				ed.carry = dropValues
+			}
 		}
 		if n := len(ed.field.Choices()); n > 0 {
 			ed.choice = (ed.choice%n + n) % n
@@ -103,6 +111,18 @@ func (m *Model) reviewerEditing(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	return m, cmd
+}
+
+// forgetCarry withdraws the question and its answer, which were about the CLI the
+// selection just left.
+func (m *Model) forgetCarry() {
+	if m.reviewer.asked {
+		m.reviewer.asked, m.reviewer.carry = false, carryUnasked
+		// A background result from another panel may have replaced the question.
+		if m.messagePanel == panelReviewer {
+			m.message = ""
+		}
+	}
 }
 
 // commitReviewerEdit reads the editor's value and saves it.
@@ -140,6 +160,7 @@ func (m *Model) saveReviewerValue(value string) (tea.Model, tea.Cmd) {
 	// The model and the effort belong to the CLI that runs them, so a CLI change
 	// asks rather than carrying them forward or dropping them unseen.
 	if ed.field.Name == "reviewer.provider" && carriesValues(file) && ed.carry == carryUnasked {
+		ed.asked = true
 		m.note("← keep the current model and effort · → use %s's own · then enter",
 			reviewers.ProviderLabel(value))
 		return m, nil
