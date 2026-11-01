@@ -151,6 +151,140 @@ func TestChangingTheCLIAsksAboutTheModelAndTheEffort(t *testing.T) {
 	}
 }
 
+// openCarryingEditor stores a model and an effort under agy and opens the named
+// setting's editor.
+func openCarryingEditor(t *testing.T, field string) *Model {
+	t.Helper()
+	tempSettingsHome(t)
+	if err := config.Save(config.Config{Reviewer: config.Reviewer{
+		Provider: "agy", Model: "gemini-3.7-flash", Effort: "high"}}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	m := New(gate.Defaults(), "global")
+	m.width = 200
+	m.active = panelReviewer
+	m.cursor[panelReviewer] = indexOfField(t, field)
+	m.Update(key("enter"))
+	return m
+}
+
+// assertCarried requires the stored provider, with the model and the effort intact.
+func assertCarried(t *testing.T, provider string) {
+	t.Helper()
+	got, err := config.Load()
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if got.Reviewer.Provider != provider {
+		t.Errorf("stored provider %q, want %q", got.Reviewer.Provider, provider)
+	}
+	if got.Reviewer.Model != "gemini-3.7-flash" || got.Reviewer.Effort != "high" {
+		t.Errorf("stored model and effort %q / %q, want both kept",
+			got.Reviewer.Model, got.Reviewer.Effort)
+	}
+}
+
+// An arrow pressed before the question appears answers nothing, so the CLI change
+// still asks.
+func TestAnArrowBeforeTheQuestionAnswersNothing(t *testing.T) {
+	for name, keys := range map[string][]string{
+		"before choosing": {"right", "down", "enter"},
+		"after choosing":  {"down", "h", "enter"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			m := openCarryingEditor(t, "reviewer.provider")
+			for _, k := range keys {
+				m.Update(key(k))
+			}
+			assertCarried(t, "agy")
+			if !strings.Contains(m.message, "keep the current model") {
+				t.Errorf("the panel does not ask: %q", m.message)
+			}
+			if view := m.View(); strings.Contains(view, carryNote(dropValues)) ||
+				strings.Contains(view, carryNote(keepValues)) {
+				t.Error("the editor states an answer nobody gave")
+			}
+		})
+	}
+}
+
+// An answer belongs to the CLI it was given for, so moving to another asks again
+// and the question naming the old one leaves.
+func TestMovingToAnotherCLIDiscardsTheAnswer(t *testing.T) {
+	m := openCarryingEditor(t, "reviewer.provider")
+	m.Update(key("down"))
+	m.Update(key("enter"))
+	m.Update(key("right"))
+	m.Update(key("down"))
+
+	if m.message != "" {
+		t.Errorf("the question about the previous CLI is still showing: %q", m.message)
+	}
+	if strings.Contains(m.View(), carryNote(dropValues)) {
+		t.Error("the editor still states the answer given for the previous CLI")
+	}
+
+	m.Update(key("enter"))
+	assertCarried(t, "agy")
+	third := reviewers.Providers()[2]
+	if !strings.Contains(m.message, reviewers.ProviderLabel(third.ID)) {
+		t.Errorf("the panel does not ask about %s: %q", third.ID, m.message)
+	}
+
+	m.Update(key("left"))
+	m.Update(key("enter"))
+	assertCarried(t, third.ID)
+}
+
+// Moving the selection withdraws the Reviewer panel's question, never a result
+// another panel filed over it while the editor was open.
+func TestMovingTheSelectionKeepsAnotherPanelsResult(t *testing.T) {
+	m := openCarryingEditor(t, "reviewer.provider")
+	m.Update(key("down"))
+	m.Update(key("enter"))
+	m.Update(key("down"))
+	if m.message != "" {
+		t.Errorf("the question stayed after the selection moved: %q", m.message)
+	}
+
+	m.Update(key("enter"))
+	if !m.reviewer.asked {
+		t.Fatal("the third CLI did not ask")
+	}
+	m.noteFor(panelChannels, "outcomes read")
+	m.Update(key("down"))
+	if m.message != "outcomes read" {
+		t.Errorf("the other panel's result became %q", m.message)
+	}
+}
+
+// Returning to the current CLI with a drop answer pending changes nothing.
+//
+// pins existing behaviour
+func TestReturningToTheCurrentCLIKeepsTheValues(t *testing.T) {
+	m := openCarryingEditor(t, "reviewer.provider")
+	for _, k := range []string{"down", "enter", "right", "k", "enter"} {
+		m.Update(key(k))
+	}
+	assertCarried(t, "agy")
+	if m.editing {
+		t.Error("the editor is still open on the current value")
+	}
+}
+
+// Another closed-set setting has no carry question, so an arrow in its editor
+// cannot clear the model and the effort.
+func TestAnArrowInAnotherChoiceFieldKeepsTheValues(t *testing.T) {
+	m := openCarryingEditor(t, "reviewer.api.tools")
+	for _, k := range []string{"right", "down", "enter"} {
+		m.Update(key(k))
+	}
+	assertCarried(t, "agy")
+	if got, _ := config.Load(); got.Reviewer.API.Tools == "" {
+		t.Error("the setting itself was not saved")
+	}
+}
+
 // Saving an empty field returns a key to its default, and the open editor says so.
 func TestReviewerPanelReturnsAFieldToItsDefault(t *testing.T) {
 	tempSettingsHome(t)
