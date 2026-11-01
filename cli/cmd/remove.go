@@ -40,22 +40,28 @@ artifacts:
 		force, _ := cmd.Flags().GetBool("force")
 		reason, _ := cmd.Flags().GetString("reason")
 
-		hook, err := claude.ResolveHook(scope, identifier)
+		hook, err := claude.ResolveRemoval(scope, identifier)
 		if err != nil {
-			// A hook in the other scope is this tier's, so the other tiers'
-			// remove commands are not the reader's next step.
-			if errors.Is(err, claude.ErrHookInOtherScope) {
+			// A hook in the other scope or an unowned guard file is this tier's,
+			// so the other tiers' remove commands are not the reader's next step.
+			if errors.Is(err, claude.ErrHookInOtherScope) || errors.Is(err, claude.ErrUnownedGuardFile) || errors.Is(err, claude.ErrNotAGuardFile) {
 				return err
 			}
 			return fmt.Errorf("%w\n%s", err, otherTierRemoveHint(tier.Guard, identifier, scope))
 		}
 
+		stray := ""
+		if file := claude.StrayStemFile(scope, hook.Name); file != "" {
+			stray = fmt.Sprintf("\nStays: %s has no manifest entry and stays in the store, where the master still runs it", file)
+		}
+
 		if !force {
 			fmt.Println(styles.WarningBox.Render(fmt.Sprintf(
-				"Hook: %s\nPath: %s\nScope: %s",
+				"Hook: %s\nPath: %s\nScope: %s%s",
 				hook.Name,
 				hook.Path,
 				scope,
+				stray,
 			)))
 			fmt.Printf("%s ", styles.BrandText.Render("Are you sure? (y/N):"))
 			reader := bufio.NewReader(os.Stdin)
@@ -80,7 +86,7 @@ artifacts:
 
 		fmt.Println()
 		fmt.Println(styles.SuccessBox.Render(fmt.Sprintf(
-			"Removed hook: %s\nHarness: %s\nArchived: %s", hook.Name, harnessNames(targets), result.ArchivePath)))
+			"Removed hook: %s\nHarness: %s\nArchived: %s%s", hook.Name, harnessNames(targets), result.ArchivePath, stray)))
 		printFixtureVerification(result.Verification)
 		return nil
 	},

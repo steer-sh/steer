@@ -70,7 +70,19 @@ func otherScope(scope string) string {
 	return GlobalScope
 }
 
-// ResolveHook finds a hook by full path, file name, stem, or readable name.
+// ErrUnownedGuardFile matches an identifier that reaches a store file no entry
+// owns while that file's stem is the id of a guard in a different file.
+var ErrUnownedGuardFile = errors.New("guard file has no manifest entry")
+
+// ErrNotAGuardFile matches a manifest entry naming a store file that is no guard,
+// such as the manifest or the master, which a removal must not archive and delete.
+var ErrNotAGuardFile = errors.New("manifest entry names a file that is not a guard")
+
+// ResolveHook finds a hook by manifest key, full path, file name, stem, or
+// readable name. An exact key names its entry's file, even when another file has
+// that stem; if the file is gone that is an error, never the other file. A file no
+// entry owns whose stem is another guard's id is refused, since that id would
+// address the other guard's entry and fixtures.
 //
 // It reads one scope. A miss reports the scope it read, and names --scope when
 // the identifier resolves in the other one.
@@ -88,10 +100,27 @@ func ResolveHook(scope, identifier string) (HookFile, error) {
 	if err != nil {
 		return HookFile{}, err
 	}
+	if entry, keyed := manifest.Hooks[id]; keyed {
+		file, err := hookstore.EntryFileName(hookstore.ManifestName, id, entry.File)
+		if err != nil {
+			return HookFile{}, err
+		}
+		for _, hook := range hooks {
+			if hook.FileName == file {
+				hook.Name = id
+				return hook, nil
+			}
+		}
+		return HookFile{}, fmt.Errorf("guard %s names the file %s, which is not in the %s store", id, file, normalizeScope(scope))
+	}
 	for i := range hooks {
 		hooks[i] = ownedHook(manifest, hooks[i])
 	}
 	if hook, ok := matchHook(hooks, id); ok {
+		if entry, keyed := manifest.Hooks[hook.Name]; keyed && fileOwner(manifest, "", hook.FileName) == "" {
+			return HookFile{}, fmt.Errorf("%w: %s. Its stem is the id of the guard in %s: address that guard as %s, or move %s out of the store",
+				ErrUnownedGuardFile, hook.FileName, entry.File, hook.Name, hook.FileName)
+		}
 		return hook, nil
 	}
 
@@ -99,6 +128,9 @@ func ResolveHook(scope, identifier string) (HookFile, error) {
 	other := otherScope(scope)
 	if otherHooks, err := ListIndividualHooks(other); err == nil {
 		if otherManifest, err := LoadManifest(other); err == nil {
+			if _, keyed := otherManifest.Hooks[id]; keyed {
+				return HookFile{}, &HookScopeMiss{Identifier: identifier, Read: scope, Holds: other}
+			}
 			for i := range otherHooks {
 				otherHooks[i] = ownedHook(otherManifest, otherHooks[i])
 			}
@@ -112,6 +144,62 @@ func ResolveHook(scope, identifier string) (HookFile, error) {
 		return HookFile{}, fmt.Errorf("no hooks in the %s store; --scope %s reads the other one", scope, other)
 	}
 	return HookFile{}, fmt.Errorf("hook not found in the %s store: %s", scope, identifier)
+}
+
+// ResolveRemoval returns the guard RemoveManagedHook acts on for identifier. An
+// exact manifest key names its entry's file whether or not that file exists, since
+// a removal also clears an entry whose file is gone.
+func ResolveRemoval(scope, identifier string) (HookFile, error) {
+	id := strings.TrimSpace(identifier)
+	manifest, err := LoadManifest(scope)
+	if err != nil {
+		return HookFile{}, err
+	}
+	entry, keyed := manifest.Hooks[id]
+	if !keyed {
+		return ResolveHook(scope, identifier)
+	}
+	file, err := hookstore.EntryFileName(hookstore.ManifestName, id, entry.File)
+	if err != nil {
+		return HookFile{}, err
+	}
+	if err := refuseNonGuardFile(id, file); err != nil {
+		return HookFile{}, err
+	}
+	dir, err := GetHooksDir(scope)
+	if err != nil {
+		return HookFile{}, err
+	}
+	return HookFile{Name: id, FileName: file, Path: filepath.Join(dir, file)}, nil
+}
+
+// refuseNonGuardFile reports an entry naming a store file listHooksInDir excludes.
+func refuseNonGuardFile(id, file string) error {
+	if !strings.HasSuffix(file, ".py") || file == MasterHookName {
+		return fmt.Errorf("%w: guard %s names %s; edit the manifest entry", ErrNotAGuardFile, id, file)
+	}
+	return nil
+}
+
+// StrayStemFile returns the file named for guard id that no entry owns, when id's
+// entry owns a different file. A removal of id leaves that file in the store,
+// where the master still runs it. It returns "" when there is none.
+func StrayStemFile(scope, id string) string {
+	manifest, err := LoadManifest(scope)
+	if err != nil {
+		return ""
+	}
+	if _, keyed := manifest.Hooks[id]; !keyed || id+".py" == MasterHookName || fileOwner(manifest, "", id+".py") != "" {
+		return ""
+	}
+	dir, err := GetHooksDir(scope)
+	if err != nil {
+		return ""
+	}
+	if _, err := os.Stat(filepath.Join(dir, id+".py")); err != nil {
+		return ""
+	}
+	return id + ".py"
 }
 
 // ownedHook keeps a registered guard's id when its file has a different stem.
