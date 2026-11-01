@@ -344,6 +344,14 @@ func SyncFactoryPresets(scope string, catalog *Catalog, options SyncOptions, tar
 		factoryHookNames = append(factoryHookNames, hookName)
 	}
 	sort.Strings(factoryHookNames)
+	// A stale key can own the file its preset's current id installs, so it goes first.
+	stale := func(hookName string) bool {
+		item, found := catalog.Find(strings.TrimSpace(manifest.Hooks[hookName].SourceID))
+		return found && hookName != strings.TrimSuffix(item.HookFile, ".py")
+	}
+	sort.SliceStable(factoryHookNames, func(i, j int) bool {
+		return stale(factoryHookNames[i]) && !stale(factoryHookNames[j])
+	})
 	// A pruned orphan is gone by the end of this sync, so it keeps nothing installed.
 	visibleEnabled := factoryPresetEnabled(manifest, catalog, !options.PruneOrphans)
 
@@ -402,15 +410,19 @@ func SyncFactoryPresets(scope string, catalog *Catalog, options SyncOptions, tar
 			result.ContentDrift++
 		}
 
-		if options.DryRun {
-			result.Reinstalled++
-			result.DryRunPlanned++
-			continue
-		}
-		if _, err := InstallFactoryPreset(scope, catalog, item, true, targets...); err != nil {
-			return result, err
+		if hookName != strings.TrimSuffix(item.HookFile, ".py") {
+			if err := repairRename(scope, catalog, item, hookName, options.DryRun, targets...); err != nil {
+				return result, err
+			}
+		} else if !options.DryRun {
+			if _, err := InstallFactoryPreset(scope, catalog, item, true, targets...); err != nil {
+				return result, err
+			}
 		}
 		result.Reinstalled++
+		if options.DryRun {
+			result.DryRunPlanned++
+		}
 	}
 
 	if !visibleEnabled {
@@ -447,6 +459,40 @@ func SyncFactoryPresets(scope string, catalog *Catalog, options SyncOptions, tar
 	}
 
 	return result, nil
+}
+
+// repairRename moves a factory guard from oldName to the id the catalog now derives.
+// The entry moves before the reinstall, so a failed step leaves the guard registered
+// and the moved entry reads as metadata drift until a later sync finishes. When
+// the catalog's id already holds this preset, oldName is a duplicate and is removed.
+// That removal archives it: its file may hold bytes the catalog does not. Under dryRun
+// it returns the same refusals and changes nothing.
+func repairRename(scope string, catalog *Catalog, item CatalogItem, oldName string, dryRun bool, targets ...harness.Registrar) error {
+	desired, err := DesiredHookFromCatalogItem(catalog, item)
+	if err != nil {
+		return err
+	}
+	manifest, err := claude.LoadManifest(scope)
+	if err != nil {
+		return err
+	}
+	if current, taken := manifest.Hooks[desired.HookName]; taken &&
+		strings.EqualFold(strings.TrimSpace(current.Source), claude.SourceFactory) && strings.TrimSpace(current.SourceID) == item.Name {
+		if dryRun {
+			return nil
+		}
+		opts := claude.RemoveOptions{Reason: "preset " + item.Name + " now installs as " + desired.HookName}
+		_, err := claude.RemoveManagedHook(scope, oldName, opts, targets...)
+		return err
+	}
+	if dryRun {
+		return claude.RefuseHookRekey(scope, oldName, desired.HookName, desired.FileName)
+	}
+	if err := claude.RekeyManagedHook(scope, oldName, desired.HookName, desired.FileName); err != nil {
+		return err
+	}
+	_, err = InstallFactoryPreset(scope, catalog, item, true, targets...)
+	return err
 }
 
 // FactoryPresetNeedsReinstall reports whether a factory preset drifted from the catalog.

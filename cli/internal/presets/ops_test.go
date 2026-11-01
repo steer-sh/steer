@@ -563,3 +563,244 @@ func TestPresetSyncPruningTheLastOrphanRemovesSelfProtection(t *testing.T) {
 		t.Fatalf("one sync must prune the orphan and remove self-protection: %+v", result)
 	}
 }
+
+// seedRenamedFactoryKey moves an installed preset's manifest entry to an id the
+// catalog no longer derives, naming file as the entry's guard file.
+func seedRenamedFactoryKey(t *testing.T, visible CatalogItem, oldName, file string) {
+	t.Helper()
+	manifest, err := claude.LoadManifest(claude.ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := strings.TrimSuffix(visible.HookFile, ".py")
+	entry := manifest.Hooks[current]
+	delete(manifest.Hooks, current)
+	hooksDir, err := claude.GetHooksDir(claude.ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if file != visible.HookFile {
+		if err := os.Rename(filepath.Join(hooksDir, visible.HookFile), filepath.Join(hooksDir, file)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entry.File = file
+	manifest.Hooks[oldName] = entry
+	if err := claude.SaveManifest(claude.ProjectScope, manifest); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPresetSyncRepairsARename(t *testing.T) {
+	for _, keepsFile := range []bool{true, false} {
+		name := "changes the file"
+		if keepsFile {
+			name = "keeps the file"
+		}
+		t.Run(name, func(t *testing.T) {
+			withPresetProjectTempDir(t)
+			catalog, visible := loadCatalogAndOneVisiblePreset(t)
+			installVisibleAndInternal(t, claude.ProjectScope, catalog, visible)
+			file := "old-name.py"
+			if keepsFile {
+				file = visible.HookFile
+			}
+			seedRenamedFactoryKey(t, visible, "old-name", file)
+
+			dry, err := SyncFactoryPresets(claude.ProjectScope, catalog, SyncOptions{DryRun: true})
+			if err != nil {
+				t.Fatalf("dry run: %v", err)
+			}
+			if !manifestHas(t, "old-name") {
+				t.Fatal("the dry run changed the manifest")
+			}
+
+			real, err := SyncFactoryPresets(claude.ProjectScope, catalog, SyncOptions{})
+			if err != nil {
+				t.Fatalf("sync stopped at the rename: %v", err)
+			}
+			if dry.Reinstalled != real.Reinstalled || dry.MetadataDrift != real.MetadataDrift || dry.DryRunPlanned != real.Reinstalled {
+				t.Fatalf("dry run %+v disagrees with the sync %+v", dry, real)
+			}
+			if manifestHas(t, "old-name") || !manifestHas(t, strings.TrimSuffix(visible.HookFile, ".py")) {
+				t.Fatal("the entry did not move to the catalog's id")
+			}
+
+			hooksDir, err := claude.GetHooksDir(claude.ProjectScope)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(filepath.Join(hooksDir, visible.HookFile)); err != nil {
+				t.Fatalf("the catalog's file is gone: %v", err)
+			}
+			if !keepsFile {
+				if _, err := os.Stat(filepath.Join(hooksDir, "old-name.py")); !os.IsNotExist(err) {
+					t.Fatalf("the old file survived the rename: %v", err)
+				}
+			}
+
+			again, err := SyncFactoryPresets(claude.ProjectScope, catalog, SyncOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if again.Reinstalled != 0 {
+				t.Fatalf("a second sync still reinstalls: %+v", again)
+			}
+		})
+	}
+}
+
+func TestPresetSyncRenameFailureKeepsTheGuard(t *testing.T) {
+	withPresetProjectTempDir(t)
+	catalog, visible := loadCatalogAndOneVisiblePreset(t)
+	installVisibleAndInternal(t, claude.ProjectScope, catalog, visible)
+	seedRenamedFactoryKey(t, visible, "old-name", "old-name.py")
+	hooksDir, err := claude.GetHooksDir(claude.ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The store's writer refuses a symlink, which fails the reinstall.
+	blocked := filepath.Join(hooksDir, visible.HookFile)
+	if err := os.Symlink(filepath.Join(t.TempDir(), "elsewhere.py"), blocked); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := SyncFactoryPresets(claude.ProjectScope, catalog, SyncOptions{}); err == nil {
+		t.Fatal("the sync reported success through a failed reinstall")
+	}
+	manifest, err := claude.LoadManifest(claude.ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(hooksDir, "old-name.py")); err != nil {
+		t.Fatalf("the failed repair lost the guard file: %v", err)
+	}
+	if len(manifest.Hooks) == 0 || manifest.Hooks[strings.TrimSuffix(visible.HookFile, ".py")].File != "old-name.py" {
+		t.Fatalf("no entry names the guard after the failed repair: %+v", manifest.Hooks)
+	}
+
+	if err := os.Remove(blocked); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SyncFactoryPresets(claude.ProjectScope, catalog, SyncOptions{}); err != nil {
+		t.Fatalf("the retry did not finish the repair: %v", err)
+	}
+	if _, err := os.Stat(blocked); err != nil {
+		t.Fatalf("the retry did not install the catalog's file: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(hooksDir, "old-name.py")); !os.IsNotExist(err) {
+		t.Fatalf("the retry left the old file: %v", err)
+	}
+}
+
+func TestPresetSyncRenameRefusesAnIDAnotherGuardHolds(t *testing.T) {
+	withPresetProjectTempDir(t)
+	catalog, visible := loadCatalogAndOneVisiblePreset(t)
+	installVisibleAndInternal(t, claude.ProjectScope, catalog, visible)
+	seedRenamedFactoryKey(t, visible, "old-name", "old-name.py")
+	current := strings.TrimSuffix(visible.HookFile, ".py")
+	if _, err := claude.InstallManagedHook(claude.ProjectScope, claude.InstallManagedHookInput{
+		HookName: current,
+		FileName: visible.HookFile,
+		Rule:     "the operator's own rule",
+		Content:  []byte("#!/usr/bin/env python3\n\ndef main():\n    return\n"),
+		Metadata: claude.HookInstallMetadata{Source: claude.SourceManual},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, dryRun := range []bool{true, false} {
+		if _, err := SyncFactoryPresets(claude.ProjectScope, catalog, SyncOptions{DryRun: dryRun}); err == nil {
+			t.Fatalf("dryRun=%v: the rename took an id the operator's guard holds", dryRun)
+		}
+	}
+	manifest, err := claude.LoadManifest(claude.ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Hooks[current].Source != claude.SourceManual || !manifestHas(t, "old-name") {
+		t.Fatalf("the refusal changed the store: %+v", manifest.Hooks)
+	}
+}
+
+func TestPresetSyncRemovesADuplicateKeyBeforeRepairingTheCatalogEntry(t *testing.T) {
+	withPresetProjectTempDir(t)
+	catalog, visible := loadCatalogAndOneVisiblePreset(t)
+	installVisibleAndInternal(t, claude.ProjectScope, catalog, visible)
+	manifest, err := claude.LoadManifest(claude.ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := strings.TrimSuffix(visible.HookFile, ".py")
+	// The stale key sorts after the catalog's id and shares its file, and the
+	// catalog's entry has drifted, so repairing that entry first is refused.
+	entry := manifest.Hooks[current]
+	entry.HookVersion = "drifted"
+	manifest.Hooks[current] = entry
+	manifest.Hooks["zz-old-name"] = entry
+	if err := claude.SaveManifest(claude.ProjectScope, manifest); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := SyncFactoryPresets(claude.ProjectScope, catalog, SyncOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if manifestHas(t, "zz-old-name") {
+		t.Fatal("the duplicate key survived the sync")
+	}
+	hooksDir, err := claude.GetHooksDir(claude.ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(hooksDir, visible.HookFile)); err != nil {
+		t.Fatalf("removing the duplicate took the preset's file: %v", err)
+	}
+	entries, err := archive.List(hooksDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].ID != "zz-old-name" {
+		t.Fatalf("the removed duplicate has no archive entry: %+v", entries)
+	}
+}
+
+func TestPresetSyncFinishesARenameWhoseReinstallFailedOnAnUnchangedFile(t *testing.T) {
+	withPresetProjectTempDir(t)
+	catalog, visible := loadCatalogAndOneVisiblePreset(t)
+	installVisibleAndInternal(t, claude.ProjectScope, catalog, visible)
+	seedRenamedFactoryKey(t, visible, "old-name", visible.HookFile)
+	hooksDir, err := claude.GetHooksDir(claude.ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A symlink to the catalog's own bytes reads as current and refuses the write.
+	path := filepath.Join(hooksDir, visible.HookFile)
+	aside := filepath.Join(t.TempDir(), "aside.py")
+	if err := os.Rename(path, aside); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(aside, path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SyncFactoryPresets(claude.ProjectScope, catalog, SyncOptions{}); err == nil {
+		t.Fatal("the sync reported success through a failed reinstall")
+	}
+
+	content, err := os.ReadFile(aside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, content, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	result, err := SyncFactoryPresets(claude.ProjectScope, catalog, SyncOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Reinstalled == 0 {
+		t.Fatalf("the moved entry read as up to date, so the master keeps the old id: %+v", result)
+	}
+}

@@ -520,3 +520,208 @@ func TestInstallManagedHookRefusesAStoreHoldingAnUnsafeName(t *testing.T) {
 		t.Error("the refused install wrote a manifest entry")
 	}
 }
+
+// seedSharedGuardFile leaves foo.py on disk owned by the manifest entries given.
+func seedSharedGuardFile(t *testing.T, entries map[string]ManifestEntry) string {
+	t.Helper()
+	dir, err := GetHooksDir(ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "foo.py")
+	writeTestHook(t, path)
+	if err := SaveManifest(ProjectScope, &Manifest{Hooks: entries}); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestInstallManagedHookRefusesAFileAnEntryOwnsByItsKey(t *testing.T) {
+	withProjectTempDir(t)
+	path := seedSharedGuardFile(t, map[string]ManifestEntry{"foo": {Rule: "r1"}})
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = InstallManagedHook(ProjectScope, InstallManagedHookInput{
+		HookName: "bar",
+		FileName: "foo.py",
+		Rule:     "bar rule",
+		Content:  []byte(blockingHookContent),
+		Metadata: HookInstallMetadata{Source: SourceGenerated},
+	})
+	if err == nil || !strings.Contains(err.Error(), `"foo"`) {
+		t.Fatalf("install over foo's file: want a refusal naming foo, got %v", err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Fatal("the refused install rewrote foo's guard")
+	}
+}
+
+func TestRemovingOneOwnerKeepsASharedGuardFile(t *testing.T) {
+	for _, remove := range []string{"foo", "bar"} {
+		t.Run(remove, func(t *testing.T) {
+			withProjectTempDir(t)
+			path := seedSharedGuardFile(t, map[string]ManifestEntry{
+				"foo": {Rule: "r1"},
+				"bar": {File: "foo.py", Rule: "r2"},
+			})
+
+			if _, err := RemoveManagedHook(ProjectScope, remove, RemoveOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(path); err != nil {
+				t.Fatalf("removing %s took the file the other entry owns: %v", remove, err)
+			}
+			manifest, err := LoadManifest(ProjectScope)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, kept := manifest.Hooks[remove]; kept || len(manifest.Hooks) != 1 {
+				t.Fatalf("removing %s left entries %v", remove, manifest.Hooks)
+			}
+		})
+	}
+}
+
+func TestGuardFilenameReplacementKeepsAFileAnotherEntryOwns(t *testing.T) {
+	withProjectTempDir(t)
+	path := seedSharedGuardFile(t, map[string]ManifestEntry{
+		"foo": {Rule: "r1"},
+		"bar": {File: "foo.py", Rule: "r2"},
+	})
+
+	if _, err := InstallManagedHook(ProjectScope, InstallManagedHookInput{
+		HookName: "bar",
+		FileName: "bar.py",
+		Rule:     "r2",
+		Content:  []byte(blockingHookContent),
+		Metadata: HookInstallMetadata{Source: SourceGenerated},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("moving bar to its own file took the file foo owns: %v", err)
+	}
+}
+
+func TestRekeyManagedHookMovesTheEntryAndFixtures(t *testing.T) {
+	withProjectTempDir(t)
+	if _, err := InstallManagedHook(ProjectScope, InstallManagedHookInput{
+		HookName: "old",
+		FileName: "old.py",
+		Rule:     "r1",
+		Content:  []byte(blockingHookContent),
+		Metadata: HookInstallMetadata{Source: SourceFactory, SourceID: "p"},
+		Fixtures: &fixture.File{Version: fixture.Version, Cases: []fixture.Case{
+			bashCase("blocks the token", "run ALPHA now", fixture.ExpectBlock),
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := RekeyManagedHook(ProjectScope, "old", "new", "new.py"); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := LoadManifest(ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, kept := manifest.Hooks["old"]; kept || manifest.Hooks["new"].File != "old.py" {
+		t.Fatalf("the entry did not move whole: %+v", manifest.Hooks)
+	}
+	dir, err := GetHooksDir(ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := fixture.Load(dir, "old"); err != nil || ok {
+		t.Fatalf("the old fixtures survived: ok=%v err=%v", ok, err)
+	}
+	moved, ok, err := fixture.Load(dir, "new")
+	if err != nil || !ok || moved.Hook != "new" {
+		t.Fatalf("the fixtures did not move: %+v ok=%v err=%v", moved, ok, err)
+	}
+}
+
+func TestRefuseHookRekeyNamesEachConflict(t *testing.T) {
+	withProjectTempDir(t)
+	if err := SaveManifest(ProjectScope, &Manifest{
+		Hooks: map[string]ManifestEntry{
+			"old":   {Rule: "r1"},
+			"taken": {Rule: "r2"},
+		},
+		Rules: map[string]RuleEntry{"a-rule": {Text: "r3"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ from, to, file string }{
+		{"absent", "new", "new.py"},
+		{"old", "taken", "new.py"},
+		{"old", "a-rule", "new.py"},
+		{"old", "new", "taken.py"},
+	} {
+		if err := RefuseHookRekey(ProjectScope, tc.from, tc.to, tc.file); err == nil {
+			t.Errorf("%+v: no refusal", tc)
+		}
+	}
+	if err := RefuseHookRekey(ProjectScope, "old", "new", "old.py"); err != nil {
+		t.Errorf("a rename keeping its own file was refused: %v", err)
+	}
+}
+
+func TestRekeyManagedHookNamesTheFileAnEmptyEntryOwned(t *testing.T) {
+	withProjectTempDir(t)
+	if err := SaveManifest(ProjectScope, &Manifest{Hooks: map[string]ManifestEntry{"old": {Rule: "r1"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := RekeyManagedHook(ProjectScope, "old", "new", "new.py"); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := LoadManifest(ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := manifest.Hooks["new"].File; got != "old.py" {
+		t.Fatalf("the moved entry names %q, not the file it owned", got)
+	}
+}
+
+func TestRemovingAKeyLeavesTheGuardThatOwnsItsStem(t *testing.T) {
+	withProjectTempDir(t)
+	dir, err := GetHooksDir(ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTestHook(t, filepath.Join(dir, "old.py"))
+	writeTestHook(t, filepath.Join(dir, "shared.py"))
+	if err := SaveManifest(ProjectScope, &Manifest{Hooks: map[string]ManifestEntry{
+		"old": {File: "shared.py", Rule: "r1"},
+		"zed": {File: "old.py", Rule: "r2"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := RemoveManagedHook(ProjectScope, "old", RemoveOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := LoadManifest(ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, kept := manifest.Hooks["old"]; kept {
+		t.Fatal("the named entry survived its removal")
+	}
+	if _, kept := manifest.Hooks["zed"]; !kept {
+		t.Fatal("removing old took the guard that owns old.py")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "old.py")); err != nil {
+		t.Fatalf("removing old took zed's file: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "shared.py")); !os.IsNotExist(err) {
+		t.Fatalf("old's own file survived: %v", err)
+	}
+}
