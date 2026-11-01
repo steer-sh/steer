@@ -399,7 +399,8 @@ func GetClaudeMDFile(scope string) (string, error) {
 }
 
 // EnsureDirectories creates the guard directory for the scope and moves a legacy
-// store into it. Every mutating entry point calls this before it reads a path.
+// store into it. A write that only changes settings has no use for the store and
+// does not call this.
 func EnsureDirectories(scope string) error {
 	scope = normalizeScope(scope)
 	if err := ValidateScope(scope); err != nil {
@@ -438,10 +439,6 @@ func LoadSettings(scope string) (*Settings, error) {
 
 // SaveSettings writes the settings to settings.json with pretty formatting.
 func SaveSettings(scope string, settings *Settings) error {
-	if err := EnsureDirectories(scope); err != nil {
-		return err
-	}
-
 	settingsPath, err := GetSettingsFile(scope)
 	if err != nil {
 		return err
@@ -649,9 +646,6 @@ func RegisterCommitGateHook(scope, command string, timeout int) error {
 	if !IsCommitGateCommand(command) {
 		return commitGateIdentityErr(command)
 	}
-	if err := EnsureDirectories(scope); err != nil {
-		return err
-	}
 	settings, err := LoadSettings(scope)
 	if err != nil {
 		return err
@@ -670,9 +664,6 @@ func RegisterCommitGateAndResolver(scope, review string, reviewTimeout int, back
 	}
 	if !strings.Contains(backfill, backfillIdentity) {
 		return backfillIdentityErr(backfill)
-	}
-	if err := EnsureDirectories(scope); err != nil {
-		return err
 	}
 	settings, err := LoadSettings(scope)
 	if err != nil {
@@ -801,9 +792,6 @@ func backfillIdentityErr(command string) error {
 func RegisterBackfillHook(scope, command string, timeout int) error {
 	if !strings.Contains(command, backfillIdentity) {
 		return backfillIdentityErr(command)
-	}
-	if err := EnsureDirectories(scope); err != nil {
-		return err
 	}
 	settings, err := LoadSettings(scope)
 	if err != nil {

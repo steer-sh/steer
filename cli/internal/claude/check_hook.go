@@ -27,9 +27,6 @@ func RegisterCheckHook(scope, command string, timeout int) error {
 		return fmt.Errorf("refusing to register %q as the check runner: the command must "+
 			"contain %q or the hook cannot be recognised again", command, checkHookIdentity)
 	}
-	if err := EnsureDirectories(scope); err != nil {
-		return err
-	}
 	settings, err := LoadSettings(scope)
 	if err != nil {
 		return err
