@@ -1,0 +1,31 @@
+package resp
+
+import (
+	_ "embed"
+	"testing"
+)
+
+// golden is the expected response.
+//
+//go:embed testdata/golden.json
+
+// A comment between the directive and the variable leaves the directive bound.
+var golden string
+
+var (
+	unrelated = 1
+	//go:embed testdata/grouped.json
+	grouped string
+)
+
+func TestGolden(t *testing.T) {
+	if Response() != golden {
+		t.Errorf("response differs from golden %q", golden)
+	}
+}
+
+func TestGrouped(t *testing.T) {
+	if Response() != grouped {
+		t.Errorf("response differs from grouped %q", grouped)
+	}
+}

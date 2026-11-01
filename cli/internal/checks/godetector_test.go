@@ -1,0 +1,479 @@
+package checks
+
+import (
+	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sort"
+	"strings"
+	"testing"
+
+	"github.com/steer-sh/steer-cli/internal/testhome"
+)
+
+const respGoMod = "module example.com/svc\n\ngo 1.21\n"
+
+const respProduction = "package resp\n\nfunc Response() string { return `{\"id\": 1}` }\n\nfunc Unrelated() int { return 2 }\n"
+
+// readTestdata returns a fixture source file kept outside Go string literals.
+func readTestdata(t *testing.T, name string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("testdata", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+var respCheck = Declaration{ID: "resp-fields", Kind: KindGoTest, Package: "svc/resp", Test: "TestResponse"}
+
+// goCheckRepo makes a repository holding a Go module under svc/, keeping the
+// caller's build cache so replays do not rebuild the standard library.
+func goCheckRepo(t *testing.T, testSource string) string {
+	t.Helper()
+	cache, err := exec.Command("go", "env", "GOCACHE").Output()
+	if err != nil {
+		t.Skipf("go toolchain unavailable: %v", err)
+	}
+	modcache, _ := exec.Command("go", "env", "GOMODCACHE").Output()
+	t.Setenv("GOCACHE", strings.TrimSpace(string(cache)))
+	t.Setenv("GOMODCACHE", strings.TrimSpace(string(modcache)))
+	testhome.Set(t, t.TempDir())
+	root := t.TempDir()
+	writeFile(t, root, "svc/go.mod", respGoMod)
+	writeFile(t, root, "svc/resp/resp.go", respProduction)
+	writeFile(t, root, "svc/resp/resp_test.go", testSource)
+	return root
+}
+
+func declNamesOf(det Detector) []string {
+	var names []string
+	for _, d := range det.Decls {
+		names = append(names, d.Name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// The detector of a Go test is the test and the test-side declarations it
+// reaches, variables included; production code and unrelated tests are not.
+func TestAGoDetectorTracksTheTestSideDeclarationsItReaches(t *testing.T) {
+	respTests := readTestdata(t, "resp_test.go.txt")
+	root := goCheckRepo(t, respTests)
+	det, err := DetectorOf(root, respCheck)
+	if err != nil {
+		t.Fatalf("DetectorOf: %v", err)
+	}
+	if got := strings.Join(declNamesOf(det), ","); got != "TestResponse,assertFields,requiredFields" {
+		t.Fatalf("tracked %s; want TestResponse,assertFields,requiredFields", got)
+	}
+
+	digestAfter := func(rel, content string) string {
+		t.Helper()
+		writeFile(t, root, rel, content)
+		d, err := DetectorOf(root, respCheck)
+		if err != nil {
+			t.Fatalf("DetectorOf: %v", err)
+		}
+		return d.Digest
+	}
+	if digestAfter("svc/resp/resp.go", strings.Replace(respProduction, "return 2", "return 3", 1)) != det.Digest {
+		t.Errorf("a production edit changed the detector")
+	}
+	if digestAfter("svc/resp/resp_test.go", strings.Replace(respTests, "otherHelper() != 2", "otherHelper() != 3", 1)) != det.Digest {
+		t.Errorf("an edit to an unrelated test changed the detector")
+	}
+	if digestAfter("svc/resp/resp_test.go", strings.Replace(respTests, `[]string{"id"}`, `[]string{"id", "name"}`, 1)) == det.Digest {
+		t.Errorf("an edit to requiredFields left the detector unchanged")
+	}
+	if digestAfter("svc/resp/resp_test.go", strings.Replace(respTests, "\"testing\"\n", "\"testing\"\n\n\t_ \"embed\"\n", 1)) == det.Digest {
+		t.Errorf("an added side-effect import left the detector unchanged")
+	}
+}
+
+// What the analysis sees but cannot track is named: an imported helper
+// package and a testdata path no declared input covers. Methods of a reached
+// type are tracked.
+func TestAGoDetectorNamesWhatItCannotTrack(t *testing.T) {
+	src := readTestdata(t, "resp_test.go.txt") + "\n" + readTestdata(t, "loads_test.go.txt")
+	src = strings.Replace(src, "\"testing\"\n", "\"testing\"\n\n\t\"example.com/svc/testutil\"\n", 1)
+	root := goCheckRepo(t, src)
+	loads := Declaration{ID: "loads", Kind: KindGoTest, Package: "svc/resp", Test: "TestLoads"}
+	det, err := DetectorOf(root, loads)
+	if err != nil {
+		t.Fatalf("DetectorOf: %v", err)
+	}
+	if got := strings.Join(declNamesOf(det), ","); got != "TestLoads,fixture,fixture.body" {
+		t.Fatalf("tracked %s; want TestLoads,fixture,fixture.body", got)
+	}
+	got := strings.Join(det.Unresolved, "|")
+	if !strings.Contains(got, "import example.com/svc/testutil") || !strings.Contains(got, `testdata path "testdata/golden.json"`) {
+		t.Fatalf("unresolved %q; want the helper import and the testdata path", got)
+	}
+
+	writeFile(t, root, "svc/resp/testdata/golden.json", "{}")
+	loads.Inputs = []string{"svc/resp/testdata/golden.json"}
+	det, err = DetectorOf(root, loads)
+	if err != nil {
+		t.Fatalf("DetectorOf with input: %v", err)
+	}
+	if strings.Contains(strings.Join(det.Unresolved, "|"), "testdata") || len(det.Files) != 1 {
+		t.Fatalf("with the input declared: unresolved %q, files %+v; want the testdata path covered", det.Unresolved, det.Files)
+	}
+}
+
+// A module line may carry a comment, an unnamed import is referred to by its
+// assumed package name, and a side-effect import reaches the generated file.
+func TestGoImportsAndModulesInTheirUnusualForms(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "svc/go.mod", "module example.com/svc // main module\n\ngo 1.21\n")
+	if got, err := packageImportPath(root, "svc/resp"); err != nil || got != "example.com/svc/resp" {
+		t.Fatalf("packageImportPath = %q, %v; want example.com/svc/resp", got, err)
+	}
+
+	for p, want := range map[string]string{
+		"gopkg.in/yaml.v2":           "yaml",
+		"github.com/mattn/go-isatty": "isatty",
+		"example.com/m/v2":           "m",
+		"net/http":                   "http",
+	} {
+		if got := assumedName(p); got != want {
+			t.Errorf("assumedName(%q) = %q; want %q", p, got, want)
+		}
+	}
+
+	writeFile(t, root, "svc/resp/resp_test.go", readTestdata(t, "decode_test.go.txt"))
+	gd, err := analyzeGoTest(root, Declaration{ID: "decode", Kind: KindGoTest, Package: "svc/resp", Test: "TestDecode"})
+	if err != nil {
+		t.Fatalf("analyzeGoTest: %v", err)
+	}
+	src := string(gd.source())
+	for _, want := range []string{`yaml "gopkg.in/yaml.v2"`, `_ "embed"`, `_ "example.com/driver"`} {
+		if !strings.Contains(src, want) {
+			t.Errorf("generated file lacks %s:\n%s", want, src)
+		}
+	}
+	if !strings.Contains(strings.Join(gd.unresolved, "|"), "side-effect import example.com/driver") {
+		t.Errorf("unresolved %q; want the side-effect import named", gd.unresolved)
+	}
+}
+
+// A test-side method on a production type is tracked when the test calls it,
+// and a declared testdata file covers only its own literal.
+func TestAGoDetectorReachesMethodsOnProductionTypesAndOneTestdataFile(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "svc/go.mod", respGoMod)
+	writeFile(t, root, "svc/resp/resp_test.go", readTestdata(t, "client_test.go.txt"))
+	d := Declaration{ID: "client", Kind: KindGoTest, Package: "svc/resp", Test: "TestClient",
+		Inputs: []string{"svc/resp/testdata/a.json"}}
+	gd, err := analyzeGoTest(root, d)
+	if err != nil {
+		t.Fatalf("analyzeGoTest: %v", err)
+	}
+	var names []string
+	for _, decl := range gd.decls {
+		names = append(names, decl.name)
+	}
+	sort.Strings(names)
+	if got := strings.Join(names, ","); got != "Client.mustGet,TestClient" {
+		t.Fatalf("tracked %s; want Client.mustGet,TestClient", got)
+	}
+	got := strings.Join(gd.unresolved, "|")
+	if !strings.Contains(got, `"testdata/b.json"`) || strings.Contains(got, `"testdata/a.json"`) {
+		t.Fatalf("unresolved %q; want b.json named and a.json covered", got)
+	}
+}
+
+func respCase(name string, exit int, diagnostic, production string) Case {
+	return Case{Name: name, ExitCode: exitCode(exit), Diagnostic: diagnostic, Provenance: "planted",
+		Files: map[string]string{"svc/go.mod": respGoMod, "svc/resp/resp.go": production}}
+}
+
+// A Go test validates when the named test itself passes the known-good case
+// and fails the defect case with the diagnostic. The package's other tests are
+// not in the replay, so production they need is not required.
+func TestAGoTestValidatesWhenTheNamedTestRunsBothWays(t *testing.T) {
+	root := goCheckRepo(t, readTestdata(t, "resp_test.go.txt"))
+	if _, _, err := Init(root); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	fixed := "package resp\n\nfunc Response() string { return `{\"id\": 1}` }\n"
+	broken := "package resp\n\nfunc Response() string { return `{\"name\": 1}` }\n"
+	writeCases(t, root, respCheck.ID,
+		respCase("fixed", 0, "", fixed),
+		respCase("omits-id", 1, "missing field id", broken))
+	run, err := Add(root, respCheck)
+	if err != nil {
+		t.Fatalf("Add: %v (cases %+v)", err, run.Cases)
+	}
+	for _, c := range run.Cases {
+		if c.Outcome != OutcomeMatched {
+			t.Errorf("case %+v; want matched", c)
+		}
+	}
+	if len(run.Detector.Decls) != 3 {
+		t.Fatalf("receipt tracks %d declarations; want 3", len(run.Detector.Decls))
+	}
+}
+
+// A defect case whose production does not build never runs the named test, so
+// it cannot satisfy the expected failure; nor may a case add its own test file.
+func TestABuildFailureDoesNotSatisfyAGoDefectCase(t *testing.T) {
+	root := goCheckRepo(t, readTestdata(t, "resp_test.go.txt"))
+	if _, _, err := Init(root); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	fixed := "package resp\n\nfunc Response() string { return `{\"id\": 1}` }\n"
+	writeCases(t, root, respCheck.ID,
+		respCase("fixed", 0, "", fixed),
+		respCase("does-not-build", 1, "missing field id", "package resp\n\nfunc Response() string { return 1 }\n"))
+	run, err := Add(root, respCheck)
+	if !errors.Is(err, ErrNotValidated) || run.Verdict != VerdictUnavailable {
+		t.Fatalf("verdict %s err %v; want unavailable", run.Verdict, err)
+	}
+	for _, c := range run.Cases {
+		if c.Name == "does-not-build" && (c.Outcome != OutcomeInvalid || !strings.Contains(c.Reason, "did not run")) {
+			t.Errorf("case %+v; want invalid because the test did not run", c)
+		}
+	}
+
+	extra := respCase("fixed", 0, "", fixed)
+	extra.Files["svc/resp/extra_test.go"] = "package resp\n"
+	writeCases(t, root, respCheck.ID, extra, respCase("omits-id", 1, "missing field id", fixed))
+	run, _ = Add(root, respCheck)
+	if run.Cases[0].Outcome != OutcomeInvalid || !strings.Contains(run.Cases[0].Reason, "test file") {
+		t.Fatalf("a case adding a test file gave %+v; want invalid", run.Cases[0])
+	}
+}
+
+// A //go:embed directive replays with its variable, above it or inside a group,
+// so the embedded value reaches the named test. Other comments stay out of the
+// generated file.
+func TestAGoEmbedDirectiveReachesTheReplay(t *testing.T) {
+	const good = `{"id": 1}`
+	for _, tc := range []struct{ test, file string }{
+		{"TestGolden", "golden.json"},
+		{"TestGrouped", "grouped.json"},
+	} {
+		t.Run(tc.test, func(t *testing.T) {
+			root := goCheckRepo(t, readTestdata(t, "embed_test.go.txt"))
+			if _, _, err := Init(root); err != nil {
+				t.Fatalf("Init: %v", err)
+			}
+			input := "svc/resp/testdata/" + tc.file
+			writeFile(t, root, input, good)
+			d := Declaration{ID: "embeds", Kind: KindGoTest, Package: "svc/resp", Test: tc.test, Inputs: []string{input}}
+			writeCases(t, root, d.ID,
+				respCase("fixed", 0, "", "package resp\n\nfunc Response() string { return `"+good+"` }\n"),
+				respCase("differs", 1, "response differs", "package resp\n\nfunc Response() string { return `{}` }\n"))
+			run, err := Add(root, d)
+			if err != nil {
+				t.Fatalf("Add: %v (cases %+v)", err, run.Cases)
+			}
+			gd, err := analyzeGoTest(root, d)
+			if err != nil {
+				t.Fatalf("analyzeGoTest: %v", err)
+			}
+			if src := string(gd.source()); strings.Contains(src, "golden is the expected") || strings.Contains(src, "A comment between") {
+				t.Errorf("generated file keeps comment text:\n%s", src)
+			}
+		})
+	}
+}
+
+// Only a directive changes the detector: editing a pattern does, and editing or
+// adding other comments around a variable does not.
+func TestAGoEmbedDirectiveAloneMovesTheDetectorDigest(t *testing.T) {
+	src := readTestdata(t, "embed_test.go.txt")
+	root := goCheckRepo(t, src)
+	d := Declaration{ID: "embeds", Kind: KindGoTest, Package: "svc/resp", Test: "TestGolden"}
+	digest := func(content string) string {
+		t.Helper()
+		writeFile(t, root, "svc/resp/resp_test.go", content)
+		det, err := DetectorOf(root, d)
+		if err != nil {
+			t.Fatalf("DetectorOf: %v", err)
+		}
+		return det.Digest
+	}
+	base := digest(src)
+	if digest(strings.Replace(src, "golden is the expected", "golden holds the expected", 1)) != base {
+		t.Error("a comment edit changed the detector")
+	}
+	if digest(strings.Replace(src, "testdata/golden.json", "testdata/other.json", 1)) == base {
+		t.Error("a changed embed pattern left the detector unchanged")
+	}
+}
+
+// An embed pattern of a tracked declaration is named until declared inputs hold
+// every file it matches on disk: literal, directory, glob, quoted and all: forms
+// alike. An untracked declaration's pattern is not named.
+func TestAGoEmbedPatternIsADetectorInput(t *testing.T) {
+	for _, tc := range []struct {
+		directive string
+		inputs    []string
+		missing   []string
+		disk      []string
+	}{
+		{"testdata/*.json", []string{"svc/resp/testdata/a.json"}, []string{"testdata/*.json"}, []string{"testdata/a.json", "testdata/b.json"}},
+		{"testdata/*.json", []string{"svc/resp/testdata/a.json", "svc/resp/testdata/b.json"}, nil, []string{"testdata/a.json", "testdata/b.json"}},
+		{"testdata", []string{"svc/resp/testdata/a.json"}, []string{"testdata"}, []string{"testdata/a.json", "testdata/sub/b.json"}},
+		{"testdata", []string{"svc/resp/testdata/a.json"}, nil, []string{"testdata/a.json", "testdata/_skip", "testdata/.d/b.json"}},
+		{"all:testdata", []string{"svc/resp/testdata/a.json"}, []string{"testdata"}, []string{"testdata/a.json", "testdata/_skip"}},
+		{"testdata/a.json", nil, []string{"testdata/a.json"}, nil},
+		{"testdata/a.json", []string{"svc/resp/testdata/a.json"}, nil, nil},
+		{"testdata/a.json", []string{"svc/resp/testdata/b.json"}, []string{"testdata/a.json"}, nil},
+		{"testdata", []string{"svc/resp/testdata/sub/a.json"}, nil, nil},
+		{"all:testdata", []string{"svc/resp/testdata/.hidden"}, nil, nil},
+		{"testdata/*.json", []string{"svc/resp/testdata/a.json"}, nil, nil},
+		{"testdata/*", []string{"svc/resp/testdata/sub/a.json"}, nil, nil},
+		{"testdata/*.json", []string{"svc/resp/testdata/a.txt"}, []string{"testdata/*.json"}, nil},
+		{`"testdata/a b.json" other.json`, []string{"svc/resp/other.json"}, []string{"testdata/a b.json"}, nil},
+		{"`testdata/c.json`\tother.json", []string{"svc/resp/testdata/c.json", "svc/resp/other.json"}, nil, nil},
+	} {
+		root := t.TempDir()
+		for _, rel := range tc.disk {
+			writeFile(t, root, "svc/resp/"+rel, "x")
+		}
+		writeFile(t, root, "svc/go.mod", respGoMod)
+		writeFile(t, root, "svc/resp/resp_test.go", "package resp\n\nimport (\n\t_ \"embed\"\n\t\"testing\"\n)\n\n//go:embed "+tc.directive+
+			"\nvar used string\n\n//go:embed untracked.json\nvar spare string\n\nfunc TestUsed(t *testing.T) { _ = used }\n")
+		gd, err := analyzeGoTest(root, Declaration{ID: "e", Kind: KindGoTest, Package: "svc/resp", Test: "TestUsed", Inputs: tc.inputs})
+		if err != nil {
+			t.Fatalf("%s: analyzeGoTest: %v", tc.directive, err)
+		}
+		var want []string
+		for _, p := range tc.missing {
+			want = append(want, `embed pattern "`+p+`" (declare the files it matches with --input)`)
+		}
+		if got := strings.Join(gd.unresolved, "|"); got != strings.Join(want, "|") {
+			t.Errorf("%s with %v: unresolved %q; want %q", tc.directive, tc.inputs, got, want)
+		}
+	}
+
+	root := t.TempDir()
+	writeFile(t, root, "svc/go.mod", respGoMod)
+	writeFile(t, root, "svc/resp/resp_test.go", readTestdata(t, "embed_test.go.txt"))
+	gd, err := analyzeGoTest(root, Declaration{ID: "e", Kind: KindGoTest, Package: "svc/resp", Test: "TestGrouped"})
+	if err != nil {
+		t.Fatalf("analyzeGoTest: %v", err)
+	}
+	if got := strings.Join(gd.unresolved, "|"); !strings.Contains(got, "testdata/grouped.json") {
+		t.Errorf("unresolved %q; want the pattern inside the group named", got)
+	}
+}
+
+// A local, parameter or later binding named after an import is not that import:
+// the generated file builds, a test-side method is still reached through it, and
+// the name adds no untracked entry. A read before the binding is the import.
+func TestALocalNamedAfterAnImportIsNotThatImport(t *testing.T) {
+	src := readTestdata(t, "shadow_test.go.txt")
+	root := goCheckRepo(t, src)
+	if _, _, err := Init(root); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	d := Declaration{ID: "shadowed", Kind: KindGoTest, Package: "svc/resp", Test: "TestShadowed"}
+	gd, err := analyzeGoTest(root, d)
+	if err != nil {
+		t.Fatalf("analyzeGoTest: %v", err)
+	}
+	if text := string(gd.source()); strings.Contains(text, "net/url") || strings.Contains(text, "example.com/dep") {
+		t.Errorf("generated file imports a shadowed name:\n%s", text)
+	}
+	if len(gd.unresolved) != 0 {
+		t.Errorf("unresolved %q; want none", gd.unresolved)
+	}
+	writeCases(t, root, d.ID,
+		respCase("fixed", 0, "", respProduction),
+		respCase("omits-id", 1, "missing field id", "package resp\n\nfunc Response() string { return `{\"name\": 1}` }\n"))
+	if run, err := Add(root, d); err != nil {
+		t.Fatalf("Add: %v (cases %+v)", err, run.Cases)
+	}
+
+	rebinds, err := analyzeGoTest(root, Declaration{ID: "r", Kind: KindGoTest, Package: "svc/resp", Test: "TestRebinds"})
+	if err != nil {
+		t.Fatalf("analyzeGoTest: %v", err)
+	}
+	if !strings.Contains(string(rebinds.source()), `url "net/url"`) {
+		t.Errorf("the read before the binding lost its import:\n%s", rebinds.source())
+	}
+
+	method, err := analyzeGoTest(root, Declaration{ID: "m", Kind: KindGoTest, Package: "svc/resp", Test: "TestShadowedMethod"})
+	if err != nil {
+		t.Fatalf("analyzeGoTest: %v", err)
+	}
+	if !strings.Contains(string(method.source()), "reached()") {
+		t.Errorf("the method called through the local is not tracked:\n%s", method.source())
+	}
+}
+
+// One local name bound to two packages by the tracked declarations' files cannot
+// share a generated file, so analysis refuses and names both. A name only one
+// tracked file uses, or two names for one package, is ordinary.
+func TestALocalNameMeaningTwoPackagesIsRefused(t *testing.T) {
+	helper := func(name, imp, call string) string {
+		return "package resp\n\nimport \"" + imp + "\"\n\nfunc " + name + "() { " + call + " }\n"
+	}
+	const test = "package resp\n\nimport \"testing\"\n\nfunc TestBoth(t *testing.T) { first(); second() }\n\nfunc TestFirst(t *testing.T) { first() }\n"
+	root := t.TempDir()
+	writeFile(t, root, "svc/go.mod", respGoMod)
+	writeFile(t, root, "svc/resp/resp_test.go", test)
+	writeFile(t, root, "svc/resp/a_test.go", helper("first", "math/rand", "rand.Read(nil)"))
+	writeFile(t, root, "svc/resp/b_test.go", helper("second", "crypto/rand", "rand.Read(nil)"))
+
+	_, err := DetectorOf(root, Declaration{ID: "both", Kind: KindGoTest, Package: "svc/resp", Test: "TestBoth"})
+	if err == nil || !strings.Contains(err.Error(), "math/rand") || !strings.Contains(err.Error(), "crypto/rand") {
+		t.Fatalf("err %v; want a refusal naming both packages", err)
+	}
+
+	gd, err := analyzeGoTest(root, Declaration{ID: "first", Kind: KindGoTest, Package: "svc/resp", Test: "TestFirst"})
+	if err != nil {
+		t.Fatalf("one tracked meaning refused: %v", err)
+	}
+	if !strings.Contains(string(gd.source()), `rand "math/rand"`) {
+		t.Errorf("generated file lacks the one meaning:\n%s", gd.source())
+	}
+
+	writeFile(t, root, "svc/resp/b_test.go", helper("second", "math/rand", "rand.Read(nil)"))
+	if _, err := DetectorOf(root, Declaration{ID: "both", Kind: KindGoTest, Package: "svc/resp", Test: "TestBoth"}); err != nil {
+		t.Fatalf("one package imported twice refused: %v", err)
+	}
+}
+
+// An unnamed import its assumed name never refers to has another package name,
+// which analysis cannot read, so the generated file omits it and the import is
+// named once a tracked selector has a base nothing else explains.
+func TestAnImportWithAnotherPackageNameIsNamed(t *testing.T) {
+	const imp = "example.com/svc/lib"
+	src := func(body string) string {
+		return "package resp\n\nimport (\n\t\"testing\"\n\n\t\"" + imp + "\"\n)\n\nvar local struct{ X int }\n\n" +
+			"func TestUses(t *testing.T) { " + body + " }\n\nfunc TestSpare(t *testing.T) { other.Do() }\n"
+	}
+	root := t.TempDir()
+	writeFile(t, root, "svc/go.mod", respGoMod)
+	d := Declaration{ID: "uses", Kind: KindGoTest, Package: "svc/resp", Test: "TestUses"}
+	unresolved := func(body string) string {
+		t.Helper()
+		writeFile(t, root, "svc/resp/resp_test.go", src(body))
+		gd, err := analyzeGoTest(root, d)
+		if err != nil {
+			t.Fatalf("analyzeGoTest: %v", err)
+		}
+		return strings.Join(gd.unresolved, "|")
+	}
+	if got := unresolved("other.Do()"); !strings.Contains(got, imp) {
+		t.Errorf("unresolved %q; want the import named", got)
+	}
+	if got := unresolved("t.Log(local.X)"); got != "" {
+		t.Errorf("no unexplained base: unresolved %q; want none", got)
+	}
+	writeFile(t, root, "svc/resp/resp_test.go", "package resp\n\nimport (\n\t\"testing\"\n\n\t\"net/http\"\n)\n\nfunc TestUses(t *testing.T) { prod.Do(); _ = http.NoBody }\n")
+	gd, err := analyzeGoTest(root, d)
+	if err != nil {
+		t.Fatalf("analyzeGoTest: %v", err)
+	}
+	if len(gd.unresolved) != 0 {
+		t.Errorf("a used import was named: %q", gd.unresolved)
+	}
+}

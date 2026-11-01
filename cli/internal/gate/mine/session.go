@@ -1,0 +1,483 @@
+package mine
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+	"time"
+)
+
+// The signal kinds a transcript-friction class may be counted over. They are the
+// scanner's own cluster kinds; SignalAny counts a session carrying the class in any.
+const (
+	SignalAny         = "any"
+	SignalCorrection  = "user_corrections"
+	SignalRejection   = "user_rejections"
+	SignalToolFailure = "tool_failures"
+	SignalHookBlock   = "hook_blocks"
+)
+
+// SignalKinds lists the kinds a record may name, for a caller validating a flag.
+func SignalKinds() []string {
+	return []string{SignalAny, SignalCorrection, SignalRejection, SignalToolFailure, SignalHookBlock}
+}
+
+// SessionSignal is one classified friction event inside a session.
+type SessionSignal struct {
+	Kind string  `json:"kind"`
+	Text string  `json:"text"`
+	TS   float64 `json:"ts"`
+}
+
+// SessionUnit is one root session as the scorer reads it: the statistical unit of the
+// transcript-friction corpus. It carries no transcript format — a snapshot store
+// normalizes both harnesses into this before the engine sees it. Project is the
+// normalized project key, which a scope's repo predicate matches.
+type SessionUnit struct {
+	Harness   string `json:"harness"`
+	SessionID string `json:"session_id"`
+	Project   string `json:"project"`
+	// RepoRoot is the absolute git root of the directory this session ran in,
+	// resolved at ingestion. It is empty for a session ingested before this field
+	// existed and for one that ran outside a repository, which the scope reads as
+	// unknown rather than as a mismatch.
+	RepoRoot string          `json:"repo_root,omitempty"`
+	StartTS  float64         `json:"start_ts"`
+	EndTS    float64         `json:"end_ts"`
+	Signals  []SessionSignal `json:"signals"`
+	// Instrument is the pipeline of the most recent read that produced this
+	// session's signals: the classifier, and the adapter that normalized this
+	// harness's transcript. Signals kept from a source that read did not reach
+	// carry their own pipeline in Sources, so one label does not establish that
+	// one pipeline classified every signal.
+	Instrument string `json:"instrument,omitempty"`
+	// Sources are the per-file contributions the store derived StartTS, EndTS and
+	// Signals from. A session stored before this field existed has none.
+	Sources []SessionSource `json:"sources,omitempty"`
+}
+
+// SessionSource is what one transcript file contributed to a session. Path is
+// empty for a legacy contribution: a whole snapshot stored before sources were
+// recorded, whose file is unknown.
+type SessionSource struct {
+	Path       string          `json:"path,omitempty"`
+	StartTS    float64         `json:"start_ts"`
+	EndTS      float64         `json:"end_ts"`
+	Signals    []SessionSignal `json:"signals"`
+	Instrument string          `json:"instrument,omitempty"`
+}
+
+// Subject reduces a session to the metadata a scope reads. A session changes no known
+// file list, so the path predicate is undecidable here and a record naming one is
+// refused at write time.
+func (u SessionUnit) Subject() Subject {
+	return Subject{
+		Harness:       u.Harness,
+		HarnessKnown:  u.Harness != "",
+		Repo:          u.Project,
+		RepoKnown:     u.Project != "",
+		RepoRoot:      u.RepoRoot,
+		RepoRootKnown: u.RepoRoot != "",
+	}
+}
+
+// Firing is one guard block the master hook recorded. FiringID is the row's own
+// identifier and the only identity that names one row; the remaining stamps are
+// the implementation that ran. All four are absent on a row an older master wrote.
+type Firing struct {
+	HookID            string  `json:"hook_id"`
+	Harness           string  `json:"harness"`
+	SessionID         string  `json:"session_id"`
+	TS                float64 `json:"ts"`
+	FiringID          string  `json:"firing_id,omitempty"`
+	HookDigest        string  `json:"hook_digest,omitempty"`
+	RuleHash          string  `json:"rule_hash,omitempty"`
+	MasterBuildDigest string  `json:"master_build_digest,omitempty"`
+	// RowDigest is RowDigest of the line this firing was read from. Every row
+	// carries one, including a row with no FiringID.
+	RowDigest string `json:"row_digest,omitempty"`
+	// Scope is the scope of the store the row was read from. The runtime writes a
+	// row into its master's own store, so the store names the guard that fired.
+	Scope string `json:"scope,omitempty"`
+	// Repository is the repository root the block ran in, empty on a row that
+	// recorded none.
+	Repository string `json:"repository,omitempty"`
+}
+
+// Subject reduces a block to the metadata a scope reads. A block records no changed
+// paths, so a path predicate is undecidable for it.
+func (f Firing) Subject() Subject {
+	return Subject{
+		Harness:       f.Harness,
+		HarnessKnown:  f.Harness != "",
+		Repo:          slashBase(f.Repository),
+		RepoKnown:     f.Repository != "",
+		RepoRoot:      f.Repository,
+		RepoRootKnown: f.Repository != "",
+	}
+}
+
+// AuditStore is one guard store directory and the scope it was resolved under.
+type AuditStore struct {
+	Scope string
+	Dir   string
+}
+
+// RowDigest names one audit row by its own bytes: the SHA-256 of the line with
+// surrounding whitespace trimmed. Every reader of the stream computes it the same
+// way, so a correction keyed on it reaches all of them.
+func RowDigest(line string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(line)))
+	return hex.EncodeToString(sum[:])
+}
+
+// AuditLogName is the guard store's audit stream, one JSON row per block decision.
+const AuditLogName = "steer-audit.jsonl"
+
+// LoadFirings reads the guard audit streams in the named store directories. The bool
+// reports whether any store was readable, which separates "the guard never fired" from
+// "no audit evidence exists here".
+func LoadFirings(dirs ...string) (firings []Firing, present bool) {
+	stores := make([]AuditStore, 0, len(dirs))
+	for _, dir := range dirs {
+		stores = append(stores, AuditStore{Dir: dir})
+	}
+	return LoadStoreFirings(stores...)
+}
+
+// LoadStoreFirings is LoadFirings over scoped stores: each firing carries the scope of
+// the store it was read from. A row read from two stores keeps the first one's scope.
+func LoadStoreFirings(stores ...AuditStore) (firings []Firing, present bool) {
+	seen := map[string]bool{}
+	for _, store := range stores {
+		dir := store.Dir
+		if dir == "" {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, AuditLogName))
+		if err != nil {
+			continue
+		}
+		present = true
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			var row struct {
+				HookName          string `json:"hook_name"`
+				Harness           string `json:"harness"`
+				SessionID         string `json:"session_id"`
+				Timestamp         string `json:"timestamp"`
+				FiringID          string `json:"firing_id"`
+				HookDigest        string `json:"hook_digest"`
+				RuleHash          string `json:"rule_hash"`
+				MasterBuildDigest string `json:"master_build_digest"`
+				Repository        string `json:"repository"`
+			}
+			if err := json.Unmarshal([]byte(line), &row); err != nil {
+				continue
+			}
+			// The two scopes share one store on a migrated machine, so the same row can
+			// be read twice. A stamped row keys on its own identifier; an older row has
+			// none, so it keys on the whole row and two blocks in one turn can collapse.
+			key := row.FiringID
+			if key == "" {
+				key = row.HookName + "\x1f" + row.Harness + "\x1f" + row.SessionID + "\x1f" + row.Timestamp
+			}
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			firings = append(firings, Firing{
+				HookID:    row.HookName,
+				Harness:   row.Harness,
+				SessionID: row.SessionID,
+				TS:        parseISO(row.Timestamp),
+
+				FiringID:          row.FiringID,
+				HookDigest:        row.HookDigest,
+				RuleHash:          row.RuleHash,
+				MasterBuildDigest: row.MasterBuildDigest,
+				RowDigest:         RowDigest(line),
+				Scope:             store.Scope,
+				Repository:        row.Repository,
+			})
+		}
+	}
+	sort.SliceStable(firings, func(i, j int) bool { return firings[i].TS < firings[j].TS })
+	return firings, present
+}
+
+// SessionHits are the signals in one session matching the pattern and the signal kind.
+func SessionHits(u SessionUnit, pattern *regexp.Regexp, signalKind string) []SessionSignal {
+	var out []SessionSignal
+	for _, s := range u.Signals {
+		if signalKind != "" && signalKind != SignalAny && s.Kind != signalKind {
+			continue
+		}
+		if pattern.MatchString(s.Text) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// SessionHitSequence is one bool per session, in the order the sessions started.
+func SessionHitSequence(units []SessionUnit, pattern *regexp.Regexp, signalKind string) []bool {
+	seq := make([]bool, len(units))
+	for i, u := range units {
+		seq[i] = len(SessionHits(u, pattern, signalKind)) > 0
+	}
+	return seq
+}
+
+// SessionIncidence is session-level: a class either occurred in a session or it did not.
+func SessionIncidence(units []SessionUnit, pattern *regexp.Regexp, signalKind string) (hits, total int, rate float64) {
+	for _, hit := range SessionHitSequence(units, pattern, signalKind) {
+		if hit {
+			hits++
+		}
+	}
+	total = len(units)
+	if total > 0 {
+		rate = float64(hits) / float64(total)
+	}
+	return hits, total, rate
+}
+
+// SessionCoverage accounts for one window's sessions: Total == Eligible + Ineligible +
+// Unknown + Partial. Partial is its own category: Unknown means the scope could not
+// decide, Partial means the window could not.
+type SessionCoverage struct {
+	Total      int `json:"total"`
+	Eligible   int `json:"eligible"`
+	Ineligible int `json:"ineligible"`
+	Unknown    int `json:"unknown"`
+	Partial    int `json:"partial_exposure"`
+	units      []SessionUnit
+}
+
+// EligibleUnits is the subset that counts toward incidence.
+func (c SessionCoverage) EligibleUnits() []SessionUnit { return c.units }
+
+// SplitSessions partitions sessions into those wholly before ts, those wholly at or
+// after it, and those spanning it. A spanning session ran under both regimes.
+func SplitSessions(units []SessionUnit, ts float64) (before, after, partial []SessionUnit) {
+	for _, u := range units {
+		end := u.EndTS
+		if end < u.StartTS {
+			end = u.StartTS
+		}
+		switch {
+		case ts <= 0:
+			after = append(after, u)
+		case end < ts:
+			before = append(before, u)
+		case u.StartTS >= ts:
+			after = append(after, u)
+		default:
+			partial = append(partial, u)
+		}
+	}
+	return before, after, partial
+}
+
+// CoverSessions classifies a window against the scope. partial is the count
+// SplitSessions held out of this window, carried here so one row accounts for every
+// session the window started from.
+func CoverSessions(units []SessionUnit, scope *Scope, partial int) SessionCoverage {
+	cov := SessionCoverage{Total: len(units) + partial, Partial: partial}
+	for _, u := range units {
+		e := Eligible
+		if scope != nil {
+			e = scope.ClassifySubject(u.Subject())
+		}
+		switch e {
+		case Eligible:
+			cov.Eligible++
+			cov.units = append(cov.units, u)
+		case Ineligible:
+			cov.Ineligible++
+		case Unknown:
+			cov.Unknown++
+		}
+	}
+	return cov
+}
+
+// SessionBaselineWindow is the eligible before-window a writer freezes its baseline
+// over, the same pass ScoreSessionRecord runs.
+func SessionBaselineWindow(before []SessionUnit, scope *Scope) []SessionUnit {
+	return CoverSessions(before, scope, 0).EligibleUnits()
+}
+
+// Attribution is the audit-log join beside the range: whether the guard this record
+// installed fired inside the after-window.
+type Attribution struct {
+	// Applicable is false for a tier that writes no audit rows, and for a record
+	// naming no hook id. The verdict then reads the range alone.
+	Applicable bool `json:"applicable"`
+	// LogPresent reports that a guard audit stream was readable at all.
+	LogPresent bool   `json:"log_present"`
+	HookID     string `json:"hook_id,omitempty"`
+	// Firings is the join's row count; Sessions is how many distinct eligible
+	// after-window sessions those rows landed in.
+	Firings  int `json:"firings"`
+	Sessions int `json:"sessions"`
+}
+
+// joinFirings counts this record's guard's firings that landed in the window's eligible
+// sessions. The join is exact on hook id, store scope, harness and root session id.
+func joinFirings(units []SessionUnit, firings []Firing, fix GuardFix) (rows int, sessions int) {
+	if fix.ID == "" {
+		return 0, 0
+	}
+	index := map[string]string{} // session id -> harness
+	for _, u := range units {
+		index[u.SessionID] = u.Harness
+	}
+	hit := map[string]bool{}
+	for _, f := range firings {
+		if !fix.fired(f) || f.SessionID == "" {
+			continue
+		}
+		harnessOf, ok := index[f.SessionID]
+		if !ok || harnessOf != f.Harness {
+			continue
+		}
+		rows++
+		hit[f.SessionID] = true
+	}
+	return rows, len(hit)
+}
+
+// SessionSignalKind is the signal kind a record's regex was authored against. A record
+// naming none counts a session carrying the class in any kind.
+func SessionSignalKind(record Record) string {
+	if k := str(record["signal_kind"]); k != "" {
+		return k
+	}
+	return SignalAny
+}
+
+// ScoreSessionRecord is the session engine's scorer: it recomputes a transcript-class
+// record's before/after incidence over root sessions, joins the guard's audit firings,
+// and returns the scored shape the chain engine emits. The join rides in the
+// observation's firing block, which is where every reader looks for it.
+func ScoreSessionRecord(record Record, ev EvidenceSet) (map[string]any, error) {
+	pattern, err := compilePattern(str(record["match"]))
+	if err != nil {
+		return nil, err
+	}
+	signalKind := SessionSignalKind(record)
+	scope, _, err := ParseScope(record)
+	if err != nil {
+		return nil, err
+	}
+	splitTS := SplitTS(record)
+	afterStart := splitTS
+	if v := numFloat(record["scope_set_ts"]); v != 0 {
+		afterStart = v
+	}
+	beforeRaw, _, beforePartial := SplitSessions(ev.Sessions, splitTS)
+	_, afterRaw, afterPartial := SplitSessions(ev.Sessions, afterStart)
+	beforeCov := CoverSessions(beforeRaw, scope, len(beforePartial))
+	afterCov := CoverSessions(afterRaw, scope, len(afterPartial))
+	before, after := beforeCov.EligibleUnits(), afterCov.EligibleUnits()
+
+	bHits, bTotal, bRate := SessionIncidence(before, pattern, signalKind)
+	aHits, aTotal, aRate := SessionIncidence(after, pattern, signalKind)
+
+	hookID := str(record["hook_id"])
+	fix, _ := GuardFixOf(record)
+	attr := Attribution{
+		Applicable: firingsApplicable(str(record["tier"])) && hookID != "",
+		LogPresent: ev.AuditPresent && storeOwnershipGap(fix, ev) == "",
+		HookID:     hookID,
+	}
+	if attr.Applicable && attr.LogPresent {
+		attr.Firings, attr.Sessions = joinFirings(after, ev.Firings, fix)
+	}
+
+	afterInstruments := sessionInstruments(after)
+
+	beforeHarness, afterHarness := sessionHarnesses(before), sessionHarnesses(after)
+	return map[string]any{
+		"id":                str(record["id"]),
+		"class":             str(record["class"]),
+		"tier":              str(record["tier"]),
+		"target":            getString(record, "target", ""),
+		"hook_id":           hookID,
+		"status":            getString(record, "status", "active"),
+		"installed":         installedLabel(record),
+		"reason":            getString(record, "reason", ""),
+		"reopen":            getString(record, "reopen", ""),
+		"signal_kind":       signalKind,
+		"before":            incidenceMap(bHits, bTotal, bRate),
+		"after":             incidenceMap(aHits, aTotal, aRate),
+		"before_coverage":   sessionCoverageMap(beforeCov),
+		"after_coverage":    sessionCoverageMap(afterCov),
+		"scope":             record["scope"],
+		"instrument":        record["instrument"],
+		"after_instruments": emptyIfNil(afterInstruments),
+		"before_hosts":      emptyIfNil(beforeHarness),
+		"after_hosts":       emptyIfNil(afterHarness),
+		"observation": sessionObservation(record, before, after, beforeCov, afterCov,
+			pattern, signalKind, attr, ev, afterStart, float64(now())),
+	}, nil
+}
+
+func sessionCoverageMap(c SessionCoverage) map[string]any {
+	return map[string]any{
+		"total":            c.Total,
+		"eligible":         c.Eligible,
+		"ineligible":       c.Ineligible,
+		"unknown":          c.Unknown,
+		"partial_exposure": c.Partial,
+	}
+}
+
+// sessionInstruments lists the parser instruments a window's snapshots were normalized
+// by, in sorted order. A snapshot written before the stamp existed contributes nothing.
+func sessionInstruments(units []SessionUnit) []string {
+	var seen []string
+	for _, u := range units {
+		if u.Instrument != "" {
+			seen = appendUnique(seen, u.Instrument)
+		}
+	}
+	sort.Strings(seen)
+	return seen
+}
+
+func sessionHarnesses(units []SessionUnit) []string {
+	var seen []string
+	for _, u := range units {
+		if u.Harness != "" {
+			seen = appendUnique(seen, u.Harness)
+		}
+	}
+	sort.Strings(seen)
+	return seen
+}
+
+// firingsApplicable reports whether a tier writes guard audit rows. Only the master
+// PreToolUse hook does, under either spelling of its tier name.
+func firingsApplicable(tier string) bool { return tier == "guard" || tier == "steer" }
+
+// parseISO reads the RFC3339 timestamp the audit runtime writes into a unix float. An
+// unparsable stamp reads as 0, which joins on the id all the same.
+func parseISO(s string) float64 {
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02T15:04:05.999999-07:00"} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return float64(t.Unix())
+		}
+	}
+	return 0
+}

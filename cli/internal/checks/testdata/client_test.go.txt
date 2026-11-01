@@ -1,0 +1,11 @@
+package resp
+
+import "testing"
+
+func (c Client) mustGet(t *testing.T) string { return c.Get() }
+
+func TestClient(t *testing.T) {
+	var c Client
+	_ = c.mustGet(t)
+	_ = []string{"testdata/a.json", "testdata/b.json"}
+}

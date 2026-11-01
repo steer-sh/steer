@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Steer CLI shim — dispatches to the correct platform binary.
+# Works on macOS (Intel + Apple Silicon) and Linux (x64 + arm64).
+
+set -euo pipefail
+
+# Follow symlinks so a link on PATH still resolves bin/ inside the checkout.
+SOURCE="$0"
+while [[ -L "$SOURCE" ]]; do
+    TARGET="$(readlink "$SOURCE")"
+    if [[ "$TARGET" == /* ]]; then
+        SOURCE="$TARGET"
+    else
+        SOURCE="$(cd "$(dirname "$SOURCE")" && pwd)/${TARGET}"
+    fi
+done
+
+SCRIPT_DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
+PLUGIN_DIR="$(dirname "$SCRIPT_DIR")"
+BIN_DIR="${PLUGIN_DIR}/bin"
+
+OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+ARCH="$(uname -m)"
+
+case "$OS" in
+    darwin|linux) ;;
+    *)
+        echo "steer: $(uname -s) is not supported; Steer runs on macOS and Linux" >&2
+        exit 1
+        ;;
+esac
+
+case "$ARCH" in
+    x86_64)        ARCH="amd64" ;;
+    aarch64|arm64) ARCH="arm64" ;;
+    *)
+        echo "steer: unsupported architecture: $ARCH" >&2
+        exit 1
+        ;;
+esac
+
+BINARY="${BIN_DIR}/${OS}-${ARCH}/steer"
+
+if [[ ! -x "$BINARY" ]]; then
+    echo "steer: binary not found at ${BINARY}" >&2
+    echo "This repository normally ships prebuilt binaries under bin/." >&2
+    echo "Try updating this checkout, or as a fallback run:" >&2
+    echo "  cd ${PLUGIN_DIR}/cli && bash build.sh" >&2
+    exit 1
+fi
+
+exec "$BINARY" "$@"

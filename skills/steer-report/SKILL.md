@@ -1,0 +1,828 @@
+---
+name: steer-report
+description: Audits the fixes steer already installed, then mines Claude Code and Codex transcripts and the commit-review ledger for new fix candidates backed by evidence — repository checks, guards, instruction rules, or review prompt entries. Use for steer onboarding ("what hooks should I create?"), periodic review of installed hooks and fixes, or when the user asks to mine usage history for candidates.
+user-invocable: true
+compatibility: Requires the steer CLI (report, commit-gate and check subcommands) on PATH or bundled under scripts/. Reads transcripts from ~/.claude/projects and $CODEX_HOME/sessions, and, when present, the commit-review ledger under ~/.steer/state/commit-review (~/.claude/state/commit-review on a machine that has not yet migrated).
+allowed-tools: Bash(steer *), Read, Edit, Write
+---
+
+# Steer Report — audit installed fixes, then mine for new ones
+
+This skill closes the friction loop. It decides two things, in this order:
+
+1. **Is a problem the loop already answered still happening?** A class that came back gets reworked or removed.
+2. **Which new patterns recur often enough to deserve a hook?** Both corpora feed this — transcript friction and commit-review findings.
+
+The default output is an executive assessment: what needs attention, what can stay
+in place, what remains uncertain, and which new findings merit action. Complete
+the evidence gathering below; Step 5 governs what reaches the reader. Detailed
+counts, dates, commands and audit accounting are available on request, except when
+they materially change a recommendation or the scope of approval.
+
+The audit comes first on purpose. Proposing new hooks is the interesting half, and skipping the audit is how a log of interventions turns into a graveyard of unmeasured good intentions.
+
+Two corpora feed this skill, and either may be empty on a given machine:
+
+- **Transcript friction** — repeated corrections, rejected tool calls, recurring lint/test failures, and instruction-file rules (CLAUDE.md, AGENTS.md) not yet enforced. Mined by `steer report` across every harness with transcripts on this machine.
+- **Commit-review findings** — defects the commit-review gate found and adjudicated. Mined by `steer commit-gate mine`. Absent when there is no commit-review ledger on this machine.
+
+An empty corpus produces one line, never an error. An adopter with no commit-review ledger still gets the transcript half — the cold-start front door.
+
+## Example Invocations
+
+```
+/steer-report
+/steer-report --days 7
+/steer-report --project-only
+/steer-report --repo-only
+```
+
+## Step 0: Fresh-context gate (interactive mode only)
+
+The analysis reads a report index, its details and a finding dump, then reasons over both. If this conversation already contains substantial prior work — more than a few turns, or a large amount of loaded code and discussion — warn before proceeding:
+
+> "A usage report works best in a fresh session: the analysis gets the full context window, and cost is lower because each step doesn't re-pay for this conversation's history. I recommend running `/steer-report` as the first message of a new session. Proceed here anyway?"
+
+Respect the user's choice. If the conversation is fresh, skip the warning and proceed.
+
+## Step 1: Snapshot the loop, refresh the queue, then audit
+
+A deterministic tier runs this loop's mechanical half — scoring, corpus sweeps, threshold checks — with no model. It may have run on a schedule already; run it again now, synchronously, so you never read a stale queue. It takes seconds and spends no tokens. Run it first, so the snapshot and the scores below read the session history it refreshed.
+
+Every `steer` command in this skill runs the launcher bundled with the plugin, or `steer` on PATH when there is none. Replace `<SKILL_DIR>` with the absolute directory that holds this SKILL.md; the harness names it when it loads the skill. Codex gives a skill no plugin root, so there the launcher is found only through `<SKILL_DIR>`.
+
+```bash
+STEER_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}"
+STEER_ROOT="${STEER_ROOT:-<SKILL_DIR>/../..}"
+STEER_BIN="${STEER_ROOT}/scripts/steer"
+[ -x "${STEER_BIN}" ] || STEER_BIN=steer
+"${STEER_BIN}" report refresh --days 30
+```
+
+Then read the whole loop's posture and full class inventory in one snapshot, and
+each live record's detail beside it:
+
+```bash
+"${STEER_BIN}" status --json --to-file
+"${STEER_BIN}" fix score --json --to-file
+```
+
+`--to-file` writes a command's output to a new file and prints only that file's
+path; the first is the status file, the second the score file. Never redirect a
+dump to a path of your own: a shared path is overwritten by another session.
+Read each file **once**, with the Read tool, to its end. The `interventions[]`
+array of the snapshot is the **full** inventory — one summary row per live class
+across every tier. This is your dedup source: when you cluster new candidates in
+Step 3, drop any class already here. A class in this list is already decided, so a
+new hook for it is a rework of that record. The schema is documented in "The
+`steer status --json` contract" below.
+
+The score file is an array with one row per live record, carrying its
+`observation`, its coverage maps, and `reason` / `reopen` on a refused record.
+Join it to `interventions[]` by exact `id`, never by position. A summary row with
+no score row, or a score row with no summary row, is incomplete evidence: name the
+id and draw no audit conclusion for it. Fail soft — if a command errors, say so in
+one line, continue, and read `audit.md` anyway: without a snapshot, nothing shows
+that there is no fix to audit.
+
+Then Read the queue **once**: `~/.steer/state/steer-report/queue.json` (`version: 15`). It holds:
+
+- `interventions[]` — full contract records the tier flagged as **asking for a reader**: the class recurred after the split, an absent guard audit log or missing check evidence left the fix's activity unread, the record carries no frozen scope, the fix it binds is `absent` or `unreadable`, or the fix is in place but carries `artifact.removed`. These carry a `match`; they are the audit's action list, pre-filtered. Each carries `problem` and `intervention` — the record's own explanation of what goes wrong and what it does about it, authored when the class was found. Lead your report with those rather than with the class name or the regex, and correct one that no longer describes the evidence with `steer fix describe ID`, which changes no window. Each also carries the conditions the counts were taken under: `corpus` and `unit` (`review-findings` counts by `chain`, `transcript-friction` by `session` — never compare the two rates), `signal_kind` on a session-unit record, `scope` (the frozen eligibility rule, `null` on a legacy record), `before_coverage` / `after_coverage` (`total`, `eligible`, `ineligible`, `unknown`, `unknown_scope`, `unknown_evidence`, `pending`, `ledger_missed`, `ledger_overdue`, `partial_exposure`), `observation` — the seven field blocks documented in `audit.md` — and `artifact`, where the fix the record binds stands now.
+- `unscored[]` — ids of records no engine reads. Report their existence; do not read a result into them.
+- `candidates[]` — **one row per corpus**, each pointing at a pile of evidence no problem covers yet. The transcript row carries `ungrouped_clusters`; the review row carries `undecided_chains` and a `dump` command. The transcript row also carries a few `examples` — the strongest cluster keys, for a reader glancing at the row, never the pile itself; the review row carries none, because its `dump` command prints the findings in full. A row has **no** `match` and no title: grouping the pile and authoring the regex are your job, below. Read the full dumps for the pile; the row only sizes it.
+- `corpora[]` — one row per corpus (`review-findings`, `transcript-friction`) with `present` and `size`. Use this sweep to establish what history is available; surface a gap when it limits the assessment or requires action. When `review-findings` is absent or empty, a second sentence says what comes next. Read that from `posture.readiness`, never from a `commit_gate[]` row's `effective`, which holds before Codex trusts the hook. If `readiness.reviewing` is true, the commit gate reviews each commit from now on, and a later `/steer-report` can mine those reviews for problems. If it is false, no review history collects yet: relay `posture.health.headline` and each `posture.health.issues[]` entry with its `fix`. When no commit gate is registered, `/steer-setup` arms one.
+- `checks[]` — the open steps in the repository the refresh ran in, each with `kind`, `repo`, an optional `check_id`, a `detail` and the `fix` command. `not-adopted` is a repository declaring checks that this machine never authorized to run at the end of a turn (`steer check adopt`). `never-validated` is a declared check whose cases were never replayed here, so nothing shows it fails on the problem it names (`steer check test <id>`). `integration-failure` is a zero-exit `check.sh` with absent or nonpassing declared results. Missing records need executor wiring (`steer check init` prints the managed line); reported nonpassing results need inspection and repair (`steer check run` prints the results). Follow the row's `detail` and `fix`. A **stale** receipt is deliberately not here: a stale check keeps running, and `steer status --json` carries the label. These are states of a declaration, not recurrence measured over a window, so they carry no count and never enter a before/after reading.
+
+The queue tells you what is pending. The full dumps below are the raw material you cluster over. The score file holds every live record for the complete audit — the queue lists only the ones asking for a reader, not the quiet ones worth showing too. When the score file is `[]`, this machine records no fix. Guard evidence is a separate stream from review history, so an absent ledger says nothing about what the installed guards blocked: the rule under "The audit lives in `audit.md`" decides whether the audit runs.
+
+`steer fix` is the fix command set — `match`, `register`, `reject`, `scope`, `score`,
+`list`, `describe`, `retire`. `steer intervention` is the same set under its former
+name and still works, as does `steer commit-gate mine`; `findings`, which dumps the
+review corpus rather than managing a fix, lives only under the latter.
+
+Three kinds of evidence answer three different questions, and none of them establishes that a fix works:
+
+- **Stored fixtures.** A current passing result establishes that the stored cases produced their expected allow and block outcomes, under the recorded guard, rule, fixtures and master (`steer fix mine`, `steer test <hook>`). It establishes no field reach.
+- **Audited firings.** Reading a blocked action in its original task context supports a judgment about that one attempt: the action would have produced the failure the rule names, or the action was acceptable work, or the evidence does not settle it. These judgments establish no rate.
+- **Field counts.** A count reports matches to the recorded problem over eligible work. Read the matches before you call one a recurrence. A count attributes neither a recurrence nor its absence to the fix.
+
+Each record reports before/after incidence over its own unit — the fraction of reviewed commits on which the class appeared for a `review-findings` record, or the fraction of root sessions carrying it for a `transcript-friction` one — split at the install timestamp. **The comparison is uncontrolled and the record makes no efficacy claim.** An agent's standing instruction set — CLAUDE.md, AGENTS.md, imported globals, skills, hooks — can affect its behaviour, and no chain and no session records it, a person edits it by hand between sessions, and an instruction-tier fix edits it directly. So a fall between the two windows is a fact about the corpus and never a fact about the fix.
+
+### The audit lives in `audit.md`
+
+Decide this from the snapshot, never from what you expect to find. **When
+`interventions[]` or `hooks[]` holds a row, or `telemetry.audit_firings` or
+`telemetry.check_blocks` is above zero, Read `./audit.md` from this skill's
+directory now, and finish its audit before Step 2.** It holds how to read each
+record's fields, the stored cases of a guard no record names, the contests blocked
+agents filed, the sampled reading of recorded guard and check.sh blocks, the repair
+of a block judged wrong, and the field reference for an `interventions[]` row.
+
+When none holds, this machine has no fix to audit and no recorded block to read.
+Say so in one line and go to Step 2:
+
+> No fixes to audit on this machine.
+
+This is the report's one line about absent fixes. A failed snapshot is not this
+case: the fail-soft rule above reads `audit.md` anyway.
+
+## Step 2: Gather new evidence from both corpora
+
+### 2a. Transcript friction
+
+Resolve the CLI as in Step 1. Redirect every report output to a temp file and Read the file once — via Read, not via command output, which a harness can cut. Run a **single command** for the scan:
+
+```bash
+STEER_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}"
+STEER_ROOT="${STEER_ROOT:-<SKILL_DIR>/../..}"
+STEER_BIN="${STEER_ROOT}/scripts/steer"
+[ -x "${STEER_BIN}" ] || STEER_BIN=steer
+"${STEER_BIN}" report --days 30 --to-file
+```
+
+Then Read the file whose path it prints. It is the first page of the report's index. The scan stored the whole report — every occurrence of every cluster — and `steer report show` reads the rest of that stored report without scanning again. Pass `--report` with the index's `report_id` on every `show`: a later scan replaces the stored report, and `show` refuses to mix the two.
+
+```bash
+"${STEER_BIN}" report show --report ID --cursor N --to-file          # the next index page
+"${STEER_BIN}" report show SIGNAL --match 'RE' --report ID --to-file # one signal's clusters
+"${STEER_BIN}" report show c3 r1 i1 --report ID --to-file            # every occurrence or directive
+```
+
+All projects and every harness are scanned by default (cross-project, cross-harness habits are the strongest candidates). Pass through any flags the user supplied (`--days N`, `--project-only`, `--repo-only`, `--harness claude-code|codex`, `--max-digest-bytes N`). `--project-only` reads the working directory alone; `--repo-only` reads every session launched anywhere inside the current checkout, and the two are mutually exclusive.
+
+The report — not the queue — is the transcript corpus. The queue carries one row saying how many correction clusters are ungrouped; the clusters themselves are here. Most hold a single occurrence, because a cluster key is the user's own wording and merges verbatim repeats and nothing else: two complaints about one habit, phrased differently, arrive as two clusters. A cluster is therefore never a problem and its `count` is never a recurrence. Merging them into classes is your job, not the tier's.
+
+**Read the whole index before you merge.** While `page.next_cursor` is present, fetch the next page with `--cursor` and read it. A merge of paraphrases needs every row at once, so never group from one page. If you stop before the last page, say which rows you covered.
+
+Index schema (`digest_version: 6`):
+
+- `report_id` — pass it to every `show`.
+- `stats` — coverage: `sessions_scanned`, `threads_scanned`, `bytes_scanned`, `clusters_found`. Keep coverage and the sizes of signals outside the index available for a requested explanation. Disclose an incomplete scan when it limits a conclusion; routine scan totals do not belong in the executive view.
+- `stats.harnesses[]` — per harness: `harness`, `files_scanned`, `sessions_scanned`, `threads_scanned`, `bytes_scanned`, `entries_scanned`, `entries_skipped`. A harness missing from this list was never reached; a harness present with zeros has no evidence on this machine. Explain the distinction when it limits the assessment or the user asks about that harness.
+- The session is the unit and a subagent thread is provenance under its root session. `threads_scanned` reports how many threads rode along; it is never added to `sessions_scanned`.
+- `instruction_files[]` — per instruction document (CLAUDE.md or AGENTS.md): `id`, `harness`, `path`, `directives` (a count), `steer_rules` (every rule bullet of the `## Steer Rules` section) and `guard_rules` (the subset a guard in that scope enforces). A guard writes its rule into the section and so does an instruction rule, so a `steer_rules` line absent from `guard_rules` is an instruction rule: the loop decided on it, and nothing enforces it. The directives — standing instructions with their section heading, NOT yet enforced — are in the document's details (`show i1`).
+- `signals[]` — one summary per signal kind: `signal`, `clusters`, `sessions` (distinct sessions across its clusters) and `in_index`. The index lists the rows of `user_corrections`, `user_rejections`, `after_interrupt` and `repeated_wording`; `tool_failures` and `hook_blocks` are machine output, read only through the fixed steps in Step 3 or when the user asks.
+- `rows[]` — one per correction (`c…`), rejection (`r…`), after-interrupt (`a…`) and repeated wording (`w…`) cluster: `id`, `sessions`, `count` and `text`, the first occurrence cut at 120 bytes. A `w…` row also carries `send_groups`.
+- `page` — `cursor`, `shown`, `total`, `remaining`, and `next_cursor` while a page remains.
+
+The signal kinds:
+
+- `user_corrections` — heuristic correction candidates: user turns matching correction language. A match is not a confirmed correction, so read a cluster's details before you count it as evidence, and do not treat a missing cluster as proof that no correction happened.
+- `user_rejections` — tool calls the user declined at the permission prompt (text is `Tool: target`). Only Claude Code's decline is recognized, so an absent Codex rejection is no reading.
+- `after_interrupt` — the message the user typed right after pressing Esc to stop a running Claude Code turn, when no correction pattern matched it; a row groups identical messages. Most are redirections ("what is the path to the plan"), continuations ("continue") or new tasks, not corrections: in a hand-labelled sample about a third were corrections. Read each row with its details and make two separate judgments: is the message a complaint that the agent's last action or habit was wrong, and does the supplied context establish the action it concerns? `previous_human_text` shows what the user had asked before they stopped the agent; the report holds nothing of what the agent did. An explicit complaint counts. A question that reads equally as a correction or as a request for an explanation ("is the intention … that you remove tests that do not pass it?") stays unresolved: it adds no confirmed occurrence to a proposed fix and never becomes a rule on its own, and if it matters, name it as a possible correction and say that the context does not show whether the action happened. A correction here names a habit the correction patterns miss ("stop. no more commands. answer the question"), so merge it with corrections that say the same thing. A declined permission prompt is not here: its decline is already a `user_rejections` row. Codex records no interrupt this scan reads.
+- `repeated_wording` — the same typed message, whole and after whitespace normalization only, in two or more sessions: the user's own text with pasted blocks removed, from main threads, in turns of 400 characters or less. Most rows are routine ("run the tests", "continue") or test prompts; dismiss those silently. A row that states a standing habit the agent keeps needing to be told ("commit when complete (don't commit the plan file)") is a candidate the correction regexes missed. The same habit in other words arrives as other rows, so merge them as you merge corrections. `count` is every send and `sessions` the distinct sessions; `send_groups` treats identical text sent to other sessions within 10 minutes of a group's first send as one send. A group is a heuristic, not a proven duplicate, so report `sessions` and `send_groups` together.
+- `tool_failures` — recurring lint/test/compile failures from shell-tool output, whichever harness ran the shell.
+- `hook_blocks` — operations already blocked by existing hooks, Steer's or another's. These are enforcement *working*; use them only to avoid suggesting duplicates.
+
+Details (`show <id>…`): `items[]` heads each requested item — a cluster's `signal`, `pattern`, `count`, `sessions`, `first_seen`, `last_seen`, and `send_groups` on a repeated wording; a document's `path`, `steer_rules`, `guard_rules` — and `rows[]` holds every occurrence (`id`, `session`, `timestamp`, `text`) or every directive (`id`, `section`, `text`). A repeated wording occurrence adds its `group`, and a correction typed right after an interrupted turn carries `after_interrupt: true`. A signal listing (`show <signal>`) holds rows of the index's shape. Every `show` output pages like the index.
+
+A correction occurrence can carry two context fields, each `{text, cut}` with `cut` true when the text was shortened:
+
+- `previous_human_text` — the human message observed last before the correction, in the same session and thread. Use it to see what the correction answered, instead of reading the transcript. A pasted block in it reads `[pasted text]`, and harness wrappers such as slash-command output are skipped. It is context only: it never makes a correction, never joins a cluster, and `--match` never reads it. Its absence means none was observed within this scan, not that the correction opened its session.
+- `first_observed_human_text_in_scan` — the first human text observed within this scan in that session and thread, absent when it is the previous message. Call it that — the first human text observed within this scan — never "the session's first message": the scan window can start mid-session. It is never a filter or a rank; a correction in a session's opening message can be real ("you keep doing X").
+
+An `after_interrupt` occurrence carries the same two fields, read from before the interrupt.
+
+### The `steer status --json` contract (`status_version: 35`)
+
+Step 1 reads this snapshot for posture and the full class inventory. The unit is
+the failure class and what the corpus recorded about it, not the hook count. This
+and the `interventions[]` row fields in `audit.md` are the one copy of the schema
+in the bundled skills; change them with `cli/internal/status/status.go`. Fields:
+
+**Read every count here as an observation.** The windows are uncontrolled: the
+agent's standing instruction set can affect its behaviour, no chain and no
+session records it, a person edits it by hand between sessions, and an
+instruction-tier fix edits it directly. So the snapshot reports hits,
+eligible units, window bounds, coverage, guard firings and the identities that
+counted each window, and it reports no efficacy verdict. The intervention's
+contribution to any change in these counts is unresolved. v11 removes `verdict`,
+`p_value`, `effect`, `required_after`, `confounds`, `composition`,
+`instrument_drift`, `firings_applicable`, `attribution` and `chain_rate`, and adds
+`observation`. v12 adds `checks`: the repository check tier, whose registration,
+authorization and observed execution are three readings and not one. v13 adds
+`observation.checks`: a check-tier fix's executions in its window, counted on
+this machine only. v16 adds `observation.checks.registered_host` and
+`other_host`: a fix registered on another host is not missing coverage here.
+v17 adds `artifact`: the fix a record binds and where it stands now. v18 adds
+`rules` and `addenda`: the instruction and review entries each store holds.
+v19 adds `posture.masters[].state` `detached` and `store`: an installed harness
+that runs none of a scope's guards. v20 adds `artifact.removed`: a fix in place
+now that its store's archive records as removed after the record's split. v21
+removes `posture.denials`, `telemetry.denials_rows` and the `auto-denials` corpus.
+v25 adds `observation.fixtures`: what this machine knows about the stored
+cases behind a guard-tier fix.
+v22 adds coverage `ledger_missed` and `ledger_overdue`: a missing ledger is
+disclosed and no longer puts a record under repair. v23 does the same for an
+`unknown_scope` unit and a session with no project. v24 adds `store_problems`:
+a guard store whose manifest a reader refused, so an unreadable store no longer
+reads as a store holding nothing. v26 adds `posture.masters[].sources` and
+`store_sources`: the guard source a runner carries, read against the store's own
+guard files. v27 is a summary: one row per live record without its `observation`,
+match or coverage maps, which `steer fix score --json` carries by the same `id`;
+`attention.interventions` holds ids; `hooks` and `presets` read both scopes;
+`resolver` rows keep only their arming readings; `scope` carries `repo_root`; and
+`chains` is gone. v28 adds `posture.readiness`: the answer `steer status` prints.
+v29 adds `posture.plugins`: each harness's cached plugin copy, read against the
+stable executable. v30 adds `posture.mods`: each enabled Claude Code mod, read
+against the cache `steer mods inspect` writes. v31 adds `posture.guard_interpreter`:
+whether this process finds the interpreter every guard runner starts under. v32
+adds `unread` to each `attention.candidates[]` row. v33 adds `fixtures` to each
+`hooks[]` row. v34 adds the `trust` states `approved`, `disabled`, `hooks-off` and `modified`.
+v35 adds `posture.health`: the verdict `steer status` prints, with its issues.
+
+- `status_version` — the schema version. `--json` is a stable agent contract.
+- `posture` — the arming state: `instrument` (reviewer model / runs / prompt
+  digest), `reviewer`, `ledger` path, and `commit_gate[]` / `resolver[]`. A
+  `commit_gate` row carries `harness`, `scope`, `registered`, `effective`,
+  `timeout`, `trust`, `command`, `resolvable`, `observed` and `observed_corpus`; a
+  `resolver` row carries `harness`, `scope`, `registered`, `effective`, `trust` and
+  `resolvable`. `readiness` combines those rows with the reviewer CLI into one
+  answer: `reviewing` (a registration enforces and the reviewer CLI resolves),
+  `headline`, `steps[]` (`title` and the `fix` command that clears it) and `note`.
+  `health` is the verdict `steer status` prints: `verdict` (`healthy`,
+  `needs-attention` or `could-not-check`), `headline`, and `issues[]` (`severity`,
+  `title`, `detail`, `fix`). Read a hook approval problem from `health.issues[]`. A
+  registration is three separate readings, and only the first is what the
+  configuration says. `command` is the command the registration names, verbatim.
+  `resolvable` is whether that command resolves — `resolvable`, `missing`,
+  `unknown`, or `not-registered` when there is no command to test. Treat it as a
+  PROXY, never a proof: the hook runs under the harness's environment, whose
+  PATH may differ, so it can prove a command absent and never prove one runs.
+  **Act on `missing`:** neither harness reports a command it cannot resolve — the
+  tool call runs, the hook is skipped, and nothing says so — and
+  `steer bin install` repoints every registration at `~/.steer/bin/steer`.
+  `observed` is the epoch second of the newest row the channel wrote to
+  `observed_corpus`, 0 when it never wrote one, and both fields are absent when
+  the channel writes no corpus of its own (the resolver). Never observed is not
+  proof of breakage: nobody may have attempted the action the channel fires on.
+  A corpus records no scope, so both scopes of one harness report the same
+  evidence. One guard store serves both harnesses but each harness holds its
+  own registration, so a scope alone does not identify a row: `commit_gate` and
+  `resolver` report one row per harness per scope. `trust` is `not-applicable` (the harness reviews no hook trust),
+  `approved` (Codex's saved hash equals the computed one and nothing turned the hook
+  off), `disabled`, `hooks-off` (Codex's whole hooks feature is off), `modified` (the
+  hashes differ, cause unknown), `missing`,
+  `record-present-unverified` (a saved hash Steer cannot compare) or `unknown`. The resolver is the Stop hook that
+  joins ledger rows to transcripts; it arms with the commit gate on the same
+  scope. `unresolved_rows` counts the rows still owing that join — a window
+  cannot count them until the resolver reads them. `steer report refresh` runs the
+  resolver before it writes the queue, and `steer commit-gate backfill --apply` reads them now.
+  `masters[]` is the guard master's runtime provenance, one row per harness per
+  scope: `path`, `runtime` (the digest of the Python runtime spliced into it),
+  `version` (the steer that wrote it), `expected` (this binary's runtime digest)
+  `state` and `observed` (the epoch second of the last block in the audit log
+  beside this registered master; the log holds blocks only, so a master that
+  allowed every call reads as 0). `state` is `current`, `stale` (an older runtime, so a firing
+  writes fewer audit fields than the join reads), `unknown` (an unstamped
+  master — every store built before the stamp existed, which never reads as
+  current), `detached` or `not-registered`. `detached` is an installed harness
+  that runs none of the scope's guards: the store holds guards and the harness
+  registers no runner for them, or one other than the store's. A store with guards
+  and no runner file never reads `detached`: its repair is a rebuild.
+  Its `store` names the runner the store holds. `trust` is the harness's approval of the
+  registered runner, in the same values as a `posture` row's `trust`, and is
+  absent when no runner is registered. A Codex runner reading `missing` runs no
+  guard, while the guard's rule still reaches the agent as text; approve the
+  definitions in `/hooks`. The row reads the REGISTERED master, not the one
+  the store resolves to: a migrated machine holds a master at both paths. **Act
+  on `stale` or `unknown`:** run `steer hooks rebuild --scope <scope>`, which
+  regenerates the master AND re-registers it in one operation. **Act on
+  `detached`:** run `steer hooks sync --scope <scope>`, which registers the
+  runner the store already holds and writes nothing in the store; a clone of a
+  repository whose guards were committed reads `detached` until it runs.
+  `sources` reads the guard source the REGISTERED runner embeds against the
+  scope's store files, and is a fourth fact beside registration, runtime
+  freshness and detachment: a runner carrying this binary's runtime can still run
+  source the store file no longer holds. Its `state` is `complete`, `no-master`,
+  `unavailable` or `not-applicable`, and only `complete` supports a reading —
+  `guards[]` then names each guard `matches`, `differs`, `absent-from-master` or
+  `absent-from-store`. An `unavailable` comparison is not agreement. `differs` is
+  directionless: it says the runner runs something other than the file, never
+  which one is wanted, so read the guard file before rebuilding. A detached row
+  also carries `store_sources`, the same reading for the runner the store holds,
+  because the two choose different repairs: a store runner that already covers
+  the store needs `sync`, not `rebuild`.
+  `rules[]` reads each installed harness's `## Steer Rules` section against the
+  manifest, one row per installed harness per scope; a harness that is not
+  installed gets no row. `path` is the instruction file (CLAUDE.md or AGENTS.md),
+  `expected` counts the rules the manifest names in that scope, `missing` lists
+  the rule ids whose text the section does not carry, and `extra` lists section
+  lines the manifest does not name, which the next sync removes. `state` is
+  `current`, `drifted` or `unknown` (the file could not be read). A record whose
+  rule is missing from a harness's file stays live while that agent never reads
+  the rule: a harness installed after the rule was written, or a hand edit to the
+  file, causes it. **Act on `drifted`:** run `steer hooks sync --scope <scope>`,
+  which rewrites every installed harness's section from the manifest.
+  `plugins[]` is each cached copy of the Steer plugin in the Claude Code and Codex
+  plugin caches: `harness`, `path`, `target` (where `path` resolves when it is a
+  link) and `state` — `same-binary`, `different-binary` or `unknown` (a binary
+  could not be read). A harness loads the skills and runs the launcher from its
+  copy, while the hooks run `~/.steer/bin/steer`. `different-binary` says the two
+  are different builds, never which one is newer. **Act on `different-binary`:**
+  update the plugin in that harness when the copy is older, or run the copy's
+  `scripts/steer bin install` when it is newer.
+  `mods[]` is each enabled Claude Code plugin with a hooks module: `id`, `path`,
+  `enabled` (the settings scope that turned it on: `user`, `project` or `local`),
+  `state`, and `handlers`, `inspected_at` and `error` when an inspection says so. A
+  mod's `tool.call` handler runs before every settings-file hook, so it can stop a
+  Steer guard or the commit gate from running; its `tool.check` handler can approve
+  a call they blocked. `state` is `tool-hooks` (it handles a tool event, named in
+  `handlers`), `no-tool-hooks`, `uninspected`, `stale` (its files changed since the
+  inspection) or `failed` (Claude Code's validator refused it or could not run).
+  Status runs no process, so only `steer mods inspect` refreshes these readings.
+  Built-in mods and `--plugin-dir` plugins have no install record and are absent.
+  **Act on `uninspected`, `stale` or `failed`:** run `steer mods inspect`. A
+  `tool-hooks` row is the operator's decision: the mod may be one they trust.
+  `guard_interpreter` is `command` (`python3`) and `found`, whether it is on this
+  process's PATH. Every guard runner starts under it, and a runner that cannot
+  start allows every call. The commit gate and the check runner do not need it.
+  Like `resolvable`, it can prove the interpreter absent and never prove a hook
+  runs. **Act on `found: false` when a `masters[]` row has a `path`:** tell the
+  user that their guards enforce nothing until Python 3 is installed.
+- `checks` — this repository's check tier on this machine, with an empty reading
+  when `steer status` ran outside a repository. `repo` is the resolved Git root,
+  `manifest` says whether it declares checks, and `adopted` / `adopted_at` say
+  whether THIS machine authorized its `check.sh` to run at the end of a turn.
+  Registration, authorization and observed execution are three separate readings,
+  and a clone carries none of the second. `runner[]` is the Stop runner's
+  registration in the same shape as a `posture` row, one per harness per scope;
+  its `observed` is the newest run that harness's runner recorded, and its
+  `trust` reads as on the `commit_gate` rows. `checks[]` is one row per declaration:
+  `id`, `kind` (`script` or `go-test`), `binding` (the script, or the package and
+  test), `validation` (`current`, `stale` or `none`) with `changed` naming what
+  moved since the receipt in `receipt` / `validated_at`, and `execution` /
+  `executed_at` / `execution_run` from the newest execution record here. **A
+  stale check keeps running:** staleness is a label on the proof, never a repair
+  the loop demands, and `steer check test <id>` replays the cases when a fix
+  registration needs fresh proof. An absent `execution` is unobserved and never a
+  pass — an aggregate `check.sh` outcome attributes no result to one assertion.
+  `latest_run` is the newest run that did any work: `run_id`, `source`,
+  `harness`, `outcome`, `disposition`, `finished`, `missing[]`,
+  `integration_failure` and `refused_after`. A run the repository lock turned
+  away ran nothing, so it never stands in for the result of the run that held the
+  repository; `refused_after` is when such a run was turned away. **Act on
+  `integration_failure`:** a zero-exit `check.sh` with absent or nonpassing
+  declared results has incomplete verification. A nonempty `missing[]` names
+  absent records — add their managed executor lines. For reported nonpassing
+  results, inspect `steer check run` and restore a passing result; an unavailable
+  or skipped Go test does not satisfy its declaration. Cached passes do.
+- `interventions[]` — the **full** inventory, one summary row per live class:
+  `id`, `class`, `problem`, `intervention`, `tier`, `target`, `status`,
+  `hook_id`, `scope`, `artifact`, `corpus`, `unit`, `signal_kind`, `recurred`
+  (the record matched work after its split) and `before` / `after` (`hits`,
+  `units`, `rate`). Each row's detail is the `steer fix score --json` row with the
+  same `id`; both are documented in `audit.md`, which Step 1 reads whenever this
+  array holds a row.
+- `summary` — `total` plus `counts` by action section (`inspect`, `repair`,
+  `observe`).
+- `attention` — the subset asking for a reader: `interventions[]` (the ids of
+  records with a recurrence, an absent audit log or check evidence, or no frozen
+  scope; the queue carries their full rows), `candidates[]` (no `match` yet;
+  `unread` is false when the row is unchanged since the last pass read it),
+  `unscored[]` (ids of records no engine reads), and `checks[]` — the open steps
+  in this repository's check tier, the same rows the queue carries.
+- `telemetry` — corpus sizes: `review_chains`, `audit_firings`, `check_blocks`
+  (the check.sh Stop blocks recorded here that no exclusion retires),
+  `session_snapshots`, plus `harnesses[]` — one row per harness with its
+  `sessions`, `firings`, `check_blocks` and `chains`, so a harness that contributed
+  nothing reads differently from one that was never mined.
+- `corpora[]` — one row per corpus with `present`, `size` and `path`.
+- `hooks[]` — the registered managed hooks in both scopes: `name`, `scope`,
+  `source`, `rule`, and `fixtures`, the guard's stored cases read against the
+  guard installed now, in the shape `audit.md` gives for a score row's `fixtures`.
+  Every guard carries it, whether or not a record names the guard. One name can
+  appear once per scope; `scope` and `name` together identify a guard.
+- `presets[]` — the catalog roster, one row per preset: `name`, `bundle`,
+  `description`, and `enabled_scopes` / `drifted_scopes`, the scopes it is enabled
+  in and the scopes whose installed copy drifted from the catalog.
+- `rules[]` — the instruction-tier rules in both stores: `id`, `scope`, `text`.
+  Whether an agent's instructions carry one is `posture.rules[].missing`.
+- `addenda[]` — the review addendum entries in both stores: `id`, `scope`,
+  `text` (the store on disk), `head_text` (the committed text the commit gate
+  reads for a project entry) and `state`: `live`, `uncommitted` (on disk, not at
+  HEAD), `uncommitted-change` (the gate reads `head_text`), `uncommitted-removal`
+  (removed on disk, still read at HEAD) or `unreadable` with `detail`. A global
+  entry is read from disk, so it is `live` whenever the store holds it.
+- `store_problems[]` — the guard stores a reader refused, each `scope` with the
+  `error`. A row says `hooks`, `presets` and `rules` are INCOMPLETE for that
+  scope, not empty: the guards the store registered still run. A manifest naming
+  a file outside its store is refused this way, and an operator repairs it by
+  editing the named entry.
+- `team` — the repo-committed team lockfile summary: `present`, `path`,
+  `hooks_locked`, `catalog_version`, and `error`. v10 adds `error`: a project with
+  no lockfile is `present: false` and is not a fault, while a lockfile that exists
+  and cannot be read is `present: true` with `error` naming why. Before v10 both
+  read as absent.
+
+### 2b. Commit-review findings
+
+If this machine has a commit-review ledger, dump the findings. If not, skip to Step 3 and add nothing: Step 1's sweep sentence already told the reader that review history is absent, and what comes next.
+
+```bash
+steer commit-gate mine findings --kind accepted --undecided --to-file
+steer commit-gate mine findings --kind rejected --to-file
+```
+
+Read each file whose path they print **once**. Do not cat them and do not re-read.
+
+The queue's review candidate names how many chains carry an accepted finding that no class regex — active or rejected — yet covers (`undecided_chains`). A class counts as covering one only when it is live (active or rejected, never removed or reworked), mined from this corpus, and authored against that finding's verdict — a false-positive class decides rejected findings and leaves an accepted defect undecided. A transcript-friction class names a pattern in a session transcript, so its regex meeting a finding's text here is a coincidence. A record stored before the corpus tags existed reads as review-findings. That is the pool the classes below come from; the review side has no per-class threshold the tier can compute, because a new class has no regex until you author one.
+
+`--undecided` hands you the pool, not the corpus: it drops the chains whose every accepted finding a live class already covers, so what you cluster over is what is left to decide. A chain that carries one covered finding and one residual finding stays, with the covered one shown in place and marked `[covered-by=<class-id>]`. Quote the finding text without that marker — it is generated classification metadata, not part of the reviewer's words. The header names how many findings are covered, how many remain, and over how many chains, which is the arithmetic that tells you whether your classes are finished.
+
+Each chain header names the repository its rows recorded (`repo=`), so the project-or-global scope of a proposal is arithmetic over the chains in the class, not recall. Two checkouts sharing a directory name are both named by their whole path. A chain whose rows carried no repository metadata reads `repo=unknown`: it is a missing fact, so leave it out of the count rather than assigning it to the repository you are standing in. Counting where a class occurred tells you where it has been seen, never where it would occur — a class seen in one repository can still be a global rule.
+
+Output is grouped by chain — one chain per commit attempt, findings deduplicated within it. The header line gives the denominator (`N chains reviewed`), which is what every rate on the review side is over. `--undecided` does not move that denominator: it narrows what you are shown, never what a rate is over, so an incidence printed under it means the same thing it means without it.
+
+Above that header the dump lists every class already decided on this corpus, each with its incidence **now** and, for a rejection, its reason and reopen condition. Read that block before you cluster. It is the one place a past refusal reaches you at the moment you would otherwise re-derive it.
+
+Pass `--since 60` to limit the window, `--strict-joins` to restrict to rows whose ledger join is reliable, and drop `--undecided` to see the covered chains too. Default is the full corpus, which is right for a first pass.
+
+## Step 3: Analyze and cluster — this is your job, not the script's
+
+Both corpora are mechanical evidence. All semantic judgment — what is hookable, how to phrase it — happens now, in this session. Tag every candidate with the corpus it came from.
+
+Read the routing guide before you cluster. It decides which candidates qualify here and which tier each one takes in Step 4. It is shared with the `steer` skill, beside this one. An installed skill directory can be a link, and the Read tool shortens `..` before it follows a link, so resolve the directory first:
+
+```bash
+realpath "<this skill's base directory>"
+```
+
+Then Read the whole of `../steer/prompts/routing.md` beside the path it prints, with the Read tool. Claude Code refuses a shell `cat` of a file outside the session's working directories, which is where a plugin's skills live.
+
+### Transcript candidates — what some tier can fix
+
+A transcript candidate qualifies when some tier in the routing guide can address it.
+
+- A concrete pattern in an edit or a command: a pre-tool guard. "don't use console.log", "always python3 not python", "never commit .env files", "no rm -rf".
+- A property of the finished tree: a repository check. "tests must pass before the turn ends", "no literal test counts in scripts".
+- A judgment or workflow complaint with no mechanical test: an instruction rule, and only when it recurs across sessions and no instruction already says it. "ask before refactoring", "be more concise".
+
+Discard the rest silently — do not pad the report.
+
+Then:
+
+1. **CLAUDE.md gap analysis first.** Directives are the highest-precision source: the user already wrote the rule down; it just isn't enforced. Fetch the directives of every instruction document first (`show i1 i2 … --report ID`); the index carries only their count. Check each directive a check or guard could detect against `guard_rules` and the `checks` reading — skip anything a guard or check already covers. Before you propose a guard, fetch the hook blocks that match its terms (`show hook_blocks --match 'TERM' --report ID`): a matching block is a hook, Steer's or another's, that already enforces it. A directive no check or guard can detect is already in its strongest place; skip it. A directive that matches only an instruction rule (in `steer_rules`, not in `guard_rules`) is not enforced: propose a guard for it only with a reason why the instruction rule's `--not-mechanizable` argument no longer holds, and name the instruction rule the guard would replace.
+2. **Corrections, rejections, after-interrupt messages and repeated wording second.** Weight by `sessions` over `count` (friction across sessions beats one bad session). Fetch the details of every cluster you weigh (`show c3 r1 a2 w2 … --report ID`): a row's text is cut and the pattern is normalized; the occurrences carry the user's actual words, and a correction's `previous_human_text` shows what it answered. A repeated wording row is evidence only when it states a standing habit; its `send_groups` may be lower than its `sessions`. When a candidate is a repository check about a failure ("tests must pass before the turn ends"), fetch the matching failures as its evidence (`show tool_failures --match 'TERM' --report ID`). Drop a cluster that a `steer_rules` line (guards and instruction rules both write one) or a check in the `checks` reading already answers: a fix `/steer` installed has no record in `interventions[]`, and the friction from before its install stays in the window. Where it keeps recurring after the install, propose registering the installed fix with `steer fix register` and its `--hook-id`, `--rule-id` or `--check-id`, not a second fix. `register` refuses a guard that already blocked work on this machine before the cutoff and names the `--installed-ts` of its first block; preview with `steer fix match` under that flag before you register.
+3. **Deduplicate across sources.** A CLAUDE.md directive corroborated by correction clusters is one candidate with stronger evidence, not two.
+4. **Phrase each candidate as a rule.** A guard candidate uses `detect | suggest` syntax, e.g. `never use python bare | use python3 instead`. Reuse the user's own wording where possible.
+
+### Review candidates — class qualification
+
+The script does no semantic grouping by design. Read the findings and name the classes yourself. A review class qualifies only when all of these hold:
+
+- It appears on **2 or more distinct chains**, and you state the count in the proposal. Two occurrences justify showing the class to the reader; the reader decides whether to install it. Say where you drew the class boundary, because the count follows from it: one class split in half can read as 2 and 3 where the merged class reads as 5.
+- It spans **more than one commit and more than one file**. A defect that only ever hit one file is that file's bug, not a class.
+- It names a **concrete, detectable tell** — a pattern in the source or the commit message, not a quality ("insufficient error handling").
+
+Do the same pass over the rejected dump. A recurring **false-positive** class is equally actionable — it goes to the review addendum as a suppression, and it answers whether the rejected fraction is a prompt problem or reviewer noise.
+
+A rejection is the author's verdict on its own code, so a rejection that recurs can also be an author blind spot. Before you propose a false-positive class, re-read each member finding against the code at its commit, not only the author's reason. A member whose finding holds makes the class a defect candidate, never a suppression.
+
+Everything else is the irreducible cost of an independent reader. One-off findings are the gate working as designed; do not manufacture classes to fill a report.
+
+Cap the whole report at the **top 5–7 candidates across both corpora**. Finding fewer — or none — is a valid result; say so plainly rather than padding with weak candidates.
+
+## Step 4: Route each candidate to the strongest tier that can catch it
+
+Route each candidate with the routing guide you read in Step 3: name the
+enforcement point, then take the strongest tier that meets it. Write both down for
+each candidate before Step 5. A tier chosen without the guide is a guess, and the
+guide is where a repository check outranks a guard. An instruction-rule candidate
+also needs the recurrence Step 3 asks for.
+
+The `--tier` flag takes either vocabulary and refuses anything else. Say the type,
+not the flag value.
+
+| `--tier` | Say |
+|---|---|
+| `check` | repository check |
+| `steer` / `guard` | pre-tool guard |
+| `prose` / `instruction` | instruction rule |
+| `prompt` / `review` | review prompt |
+
+Scope a guard project vs global — a rule seen across projects or from global CLAUDE.md suggests global scope. If nothing routes, say so. It is a correct result:
+
+> No recurring problem was strong enough to propose a fix.
+
+A detector the guide keeps out of `check.sh` may still be suggested as a manual or CI check. Say plainly what that leaves:
+
+> Steer does not see this check run, so it cannot tell you if the problem comes back.
+
+## Step 5: Present, then act
+
+### Executive view by default
+
+Open with one sentence: the overall assessment. Then give each item that needs the
+reader as a **verdict, one reason, and the decision** you ask for, in two or three
+sentences. The reasoning behind the verdict waits for a request ("Evidence behind
+the assessment" below). Group the fixes that need no action into one line, with a
+few words of reason each. There is no word limit: more decisions make a longer
+report, never a longer item.
+
+- **Installed fixes:** leave in place, investigate, or tweak. The reason is the
+  evidence that decided it: the problem has not come back; the blocks you
+  inspected stopped real mistakes; too early, since no relevant work arrived; the
+  evidence is missing; or a block still awaits inspection.
+- **New findings:** the recurring problem, the response and where it applies, the
+  main tradeoff, and apply, investigate or hold off. Give evidence strength only
+  when it changes that recommendation. Finding nothing worth installing is a
+  complete outcome.
+- **Earlier refusals:** only when new evidence meets or misses the stored reopen
+  condition, or the reader must decide. Say which, and whether the recommendation
+  stands; a shorter report changes no threshold or routing rule.
+
+Leave out an item or section with nothing in it: what you did not find, a normal
+commit gate, or evidence you did not read. Keep it only if it changes a
+recommendation or asks the reader to act, or when the whole report found nothing.
+A limit every report shares is routine, such as stored test cases absent from the
+snapshot, or a harness's unverifiable hook trust while `readiness.reviewing` is true.
+Missing evidence or setup trouble belongs up front when it limits the assessment
+or needs action. Keep counts, dates, file lists, identifiers, commands, scan
+totals and audit budgets out of the default view unless the reader needs one to
+understand a decision or act. Explain technical terms through the behavior
+proposed, without a glossary. Apply this rule to every reporting instruction in
+this skill and `./audit.md`; it changes disclosure, not the evidence you inspect.
+
+A complete default report, to copy for shape; its fixes are invented:
+
+> One fix needs a change, and one new finding needs your answer; the rest can stay.
+>
+> - **Lockfile check: loosen it.** Both turns it blocked had updated the lockfile
+>   correctly after a dependency change. I'd let it accept a lockfile that changes
+>   with its manifest, though it would then miss a stray lockfile edit in that
+>   same turn. Apply?
+> - **Leave in place:** the generated-code rule (the problem has not come back) and
+>   the force-push guard (too early; no relevant work yet).
+> - **New: migrations that drop a column in the release that stops reading it.** A
+>   check at the end of each turn in this repository could block these, but 14
+>   existing migrations would fail it first. Do old and new code still run side by
+>   side during a deploy? If not, I'd drop it.
+
+#### What a sentence may claim
+
+These rules limit the sentences the default view already holds; they add none.
+State a limit on its own only where a reader would otherwise draw the wrong
+conclusion. "The problem has not come back" is the supported claim, and it needs
+no disclaimer after it.
+
+- **Scope.** A proposal names **project** (this repository alone) or **global**
+  (every repository on this machine), chosen from the evidence: one repository
+  scopes to project, several to global. The reason fits in a clause.
+  Name an agent the fix does not reach when coverage differs materially.
+- **Harm.** A proposal says what it blocks or changes and the legitimate work it
+  could obstruct, in the form that kind of fix's harm takes: a repository check
+  rejects valid repository content, a guard blocks an acceptable tool action, an
+  instruction rule discourages a valid approach, and a review prompt entry makes
+  the reviewer flag correct code or a deliberate design choice. Examine a concrete
+  boundary. Keep the tradeoff qualitative unless the evidence carries the rate,
+  with its denominator; "no history records this" limits the measurement and
+  answers nothing. With no harm established, say the harm is unknown; never invent
+  a tradeoff or call a proposal cost-free.
+- **Checks.** A repository check is always project scope. A yes adopts this
+  repository, and the check then blocks any Claude Code or Codex turn here that
+  fails it. Say that a yes needs substantial cleanup first when it does, and that
+  it creates `check.sh` only when the evidence shows the repository has none.
+  Say that adoption trusts the repository, not this version of `check.sh`: a
+  later pull that changes it runs at the next Stop with no new approval.
+- **Outcome.** A yes buys this: Steer tells the user if the problem comes back.
+  Never promise that the problem becomes less frequent; no count here can show that.
+- **Decisions.** Ask for the decisions actually needed, and group related actions.
+  Create nothing unasked.
+
+### Evidence behind the assessment
+
+Read and retain the evidence needed to explain each judgment on request: the
+matched examples, counts and dates, scope, validation, inspected blocks and
+unread work. Give the requested detail for that judgment without repeating the
+whole report or silently strengthening its conclusion. If additional inspection
+changes the recommendation, identify the new evidence and the change.
+
+Field counts never establish that a fix caused an improvement. A quiet history
+supports saying the problem has not appeared again. An inspected block supports
+saying that particular block stopped a real mistake. Stored cases establish their
+expected outcomes under the tested implementation. Use the supported statement;
+avoid broad claims that a fix works and repeated methodological disclaimers.
+State no direction: "fewer since the fix", "the drop" and "a 60% reduction" are
+causal claims these counts cannot carry. Compare rates only where a stored reopen
+condition names one. A block is an action a guard stopped; a count of blocks says
+nothing about whether those actions were wrong.
+
+> The blocks I inspected stopped real mistakes. I recommend leaving this guard
+> in place; other recorded blocks still await inspection.
+
+> No relevant work has arrived since this fix was installed, so it is too early
+> to assess it. Leave it in place for now.
+
+### Words the reader sees
+
+Use plain words in every explanation, heading and question, and in the stored
+descriptions (`--problem`, `--intervention`) a later report shows. Field names,
+measurement terms and the names of Steer's own files and stores (the queue, the
+snapshot, a record, the tracker, a regex) belong in these instructions and in
+commands, never in the reader's text: say what one means instead, such as "session
+history shows" or "Steer's tracking of this fix". That includes the names of the readings
+in `./audit.md` ("the window is quiet", "the record matched again", "the accounting
+is incomplete"): give the facts that produced one, not its name.
+
+Use **fix**, **recurring problem**, **review history**, **session history**,
+**review sequence**, **block**, and **decision** in place of intervention, class,
+corpus, chain, firing, and adjudication. Describe a contest as **agent feedback**,
+and a contested block as a block the agent reported as wrong:
+
+> An agent reported that this fix blocked valid work. That report has not yet
+> been checked; I recommend inspecting the blocked action before changing the fix.
+
+Distinguish a reported false positive from a confirmed one, and distinguish a
+tracking error from a guard that blocked valid work. Summarize the feedback
+faithfully; quote exact wording when it matters. Usually omit an empty feedback
+section. Absence of feedback establishes no agreement or correctness.
+
+Use commands, identifiers and quoted evidence verbatim when requested or needed
+for action. Write example reader-facing phrases in this skill as blockquotes;
+keep examples of forbidden wording inline.
+
+Applying a fix changes behavior. Stopping tracking leaves the fix installed.
+Removing a fix changes enforcement. Explain these differences when the proposed
+action makes them relevant.
+
+When the user has already decided an action, explain what it changes and ask only
+what carrying it out needs. Give contrary evidence once, as information, never as
+a condition. A prediction of what removal will cause is a causal claim the counts
+cannot carry, like "the fix worked".
+
+### After approved actions
+
+Report what changed, whether validation passed, and anything unfinished. State
+material consequences such as restarting tracking, a failed check, or changes
+still needing a commit. Keep implementation inventories and commands available
+on request. A queue refresh alone is routine accounting, not a user outcome.
+
+### Every record explains itself
+
+`--problem` and `--intervention` are required on `register` and on `reject`, and the
+CLI refuses a blank or a value that only repeats the class name. Author both **now**,
+while the evidence is on screen. You are the last reader who has it: months later the
+record is read from a status page by someone with the class name, the regex and
+nothing else, and neither of those says what the class is.
+
+- **`--problem`** — what goes wrong, in one sentence, in the vocabulary of the defect.
+  Write it for a reader who was not in this session, not as "within-chain re-raised
+  finding":
+
+  > The reviewer raises a concern an earlier round of the same review already settled.
+
+- **`--intervention`** — what this record does about it, as concrete behavior, not
+  "added a check":
+
+  > check.sh refuses a printed literal count.
+
+  On a `reject`, describe the fix you considered. If you found none worth installing,
+  say exactly:
+
+  > no suitable fix was identified
+
+  `--reason` still explains the decision; these two explain the class.
+- **`--note`** stays optional and is for implementation detail that fits neither.
+
+To correct a description on an existing record, use `steer fix describe ID
+--problem … --intervention …`. It writes the prose and nothing else — the id, the
+match, the scope, the baseline, the instrument and both windows are untouched, so a
+clearer sentence never restarts the measurement. Omit a flag to keep that half.
+
+### Transcript candidates — install through the tier's own workflow
+
+Install each accepted transcript candidate through its tier's section in the routing guide. A pre-tool guard goes through the steer skill's generation protocol with the phrased rule — specialist prompt selection, hook generation, registration via `steer register`, and mandatory self-testing all apply unchanged. Do not duplicate or shortcut that protocol here.
+
+A candidate routed to a repository check registers with `--tier check --check-id` under the same binding and `--scope-repo-root` rules as a review candidate.
+
+Then register the class over the transcript corpus, so the fix you just installed is measured rather than assumed:
+
+```bash
+steer fix match 'YOUR REGEX' --corpus transcript-friction --signal-kind user_corrections \
+  --scope-harness claude-code,codex
+
+steer fix register \
+  --class "bare python call" \
+  --match 'YOUR REGEX' \
+  --corpus transcript-friction --signal-kind user_corrections \
+  --tier steer --target hooks/no-bare-python.py --hook-id no-bare-python \
+  --scope-harness claude-code,codex \
+  --problem "the session runs bare python and the interpreter is missing" \
+  --intervention "a pre-tool guard refuses a bare python invocation" \
+  --note "why this tell was chosen"
+```
+
+Iterate until the regex matches the class members and nothing else, as on the review path. `match` prints every matched session with its signals; read them, not only the count. With the record's `--scope-*` flags it prints the `registration baseline` and marks each session `counted in baseline` or `outside baseline`. A false match in a counted session enters the baseline, and only a `--supersedes` record removes it.
+
+The unit here is the **root session**, not the chain: a class either occurred in a session or it did not, and a subagent thread is provenance on its root. `--signal-kind` names the classifier kind the regex is counted over — `any`, `user_corrections`, `user_rejections`, `tool_failures` or `hook_blocks` — and is frozen with the rest of the record. `--scope-path` is refused here, because a session carries no changed-path list; scope by harness or repo instead. The corpus lives in a snapshot store that `steer report refresh` writes, so a frozen baseline outlives the transcript the harness later rotates away.
+
+Pass `--tier steer --hook-id` for a generated guard. That is what gives the record an audit-log join, so `observation.firing` reports what the guard actually blocked over the window. A quiet window beside `firing.rows: 0` is silence the guard did not produce, and a recurrence beside `firing.rows: 0` points at the matcher. Neither reading is available from the incidence alone.
+
+### Review candidates — author the regex, install, register
+
+For each accepted review candidate:
+
+1. **Author the regex and test it before writing any fix:**
+
+   ```bash
+   steer fix match 'YOUR REGEX' --kind accepted
+   ```
+
+   `match` also reports every recorded class that covers chains your candidate matches. A high share against a rejected class means you are re-proposing it: read the reason before going further.
+
+   Add `--show-residue` to see what the regex leaves behind: the findings of that kind it does not match, and the terms recurring among them, each with its count in the residue and its count across the whole corpus. Where the two counts are equal the term is the corpus's own vocabulary and names nothing; where the residue count is well under the corpus count, the regex already reaches most of that term's chains. A residue term with a high count and few matches is the class you did not name — either widen the regex or author a second class for it. The residue is per finding, so a chain your regex matches still contributes the findings inside it that it misses. What it lists is unmatched by **this** regex, which is not the same as unclassified: another registered class may already cover it, and `mine findings --undecided` is what answers that.
+
+   Iterate until it matches the class members and nothing else. This regex is the class's permanent definition — `score` re-counts with it months from now, so an over-broad regex will report the class as recurring forever, and a commit-specific one will report a quiet window it did not earn. Prefer the defect's vocabulary over any single commit's identifiers.
+
+2. **Install the fix** through its tier's workflow, and verify it fires on the real case:
+
+   Follow the tier's section in the routing guide. For a repository check, the defect case reproduces the real finding. Step 3 accepts a check-tier record only once the check is validated, the repository adopted, and its Stop runner registered; `steer check list` shows all three.
+
+3. **Register it**, after the fix is in:
+
+   ```bash
+   steer fix register \
+     --class "stale test-count claim" \
+     --match 'YOUR REGEX' \
+     --kind defect \
+     --tier check --target check.sh \
+     --check-id no-literal-count \
+     --scope-repo-root "$(git rev-parse --show-toplevel)" \
+     --scope-harness claude-code --scope-path '\.go$' \
+     --problem "a check prints a literal test count and the number goes stale" \
+     --intervention "check.sh refuses a printed literal count" \
+     --note "why this tell was chosen"
+   ```
+
+   Before you register, run `steer fix match` again with the same `--scope-*` flags, and the same `--installed-ts` if you pass one. Without a scope, `match` counts the whole corpus, which is not the baseline. With one, its `registration baseline` line is the count `register` freezes, and it marks each listed unit `counted in baseline` or `outside baseline`. Read every counted unit: a false match there enters the baseline, and only a `--supersedes` record removes it.
+
+   `register` computes the pre-install baseline and refuses a regex with no baseline, since an unmatched class can never be scored. Use `--kind false-positive` for reviewer suppressions; it scores against rejected findings instead of accepted ones.
+
+   **A scope is required.** It names the opportunity window the class is measured over, and it is frozen at register time. Pass `--scope-all` for every chain, or any of `--scope-harness IDS` (exact harness ids — `claude-code`, `codex` — repeatable or comma-separated), `--scope-repo REGEX` (matches the repository root basename), `--scope-repo-root PATH` (the one exact repository root, which two checkouts sharing a basename do not share) and `--scope-path REGEX` (matches a repo-relative changed path); the predicates combine with AND. **A `--tier steer` record must name its harnesses with `--scope-harness`, and each one must already carry the guard** — `register` refuses the record otherwise, because a scope that admits an unguarded harness pools guarded and unguarded work and can never come back true. A Codex runner with no approval record in Codex's `config.toml` counts as unguarded: Codex runs no hook the user has not approved in `/hooks`, so its sessions would read the guard's rule as text with no guard behind it. Install the guard in every harness (`steer register` now does this by default), then register one record per harness: Codex and Claude Code run different models, so their chains carry different base rates and a single pooled rate measures the mix, not the fix. A `--tier check` record answers the same rule: it names the harnesses whose Stop runner is registered, and `--scope-repo-root` rather than `--scope-all`. `prose` and `prompt` tiers are harness-independent and keep `--scope-all`. Scope repo and path metadata only — never the finding text. Selecting chains on the failure content is the bias the scope exists to remove, so a `check`-tier fix in Go code scopes to `--scope-path '\.go$'`, not to the finding's words. The baseline `register` reports is restricted to the scope and to chains that carry an adjudication; widen the scope if it reads as zero, and check `steer commit-gate backfill --apply` first, because unresolved rows shrink the baseline the write can see.
+
+   **`--tier check` additionally requires `--check-id`** — the id in the repository's `.steer/checks/manifest.json`. `register` freezes that check's binding kind, resolved repository root, detector digest and current validation receipt onto the record, and refuses a check that is undeclared, has no current receipt (`steer check test <id>`), whose repository is not adopted on this machine (`steer check adopt`), or whose Stop runner is registered in no harness (`steer check install --harness <id>`). Without that binding the record can only be read beside an aggregate `check.sh` outcome, which attributes no result to its assertion. Records written before the binding existed stay readable as unbound, with execution attribution unavailable.
+
+   **`--tier steer` additionally requires `--hook-id`** — the steer-manifest key, which is also the `hook_name` in `hooks/steer-audit.jsonl`. That id makes the audit-log join deterministic. Reconstructing it later from `target` means searching the manifest for a path, and the manifest stops describing a hook the moment this loop renames or retires it. `register` also copies the rule text and `rule_hash` from the manifest, so the join survives a rename, plus `hook_version` and `hook_digest` — the identity of the implementation that ran. The rule hash names the policy text; a guard repaired without a rule change moves the digest alone, which is what says the treatment changed under a class still collecting. The lookup reads whichever store holds the id and refuses an id held by both; `--hook-scope project|global` names one.
+
+   **`--tier prose` additionally requires `--rule-id` and `--not-mechanizable`.** The prose has to exist before a record can name it: write it with `steer rules add <id> --rule "<text>"`, which prints the scope's rules first and refuses text a second id already holds, then pass that id. `register` copies the rule text and its `rule_hash` onto the record, and refuses an id the store does not hold. `--not-mechanizable` carries the argument the routing ladder asks for — one sentence naming why a repository check and a pre-tool guard cannot detect this class. It is refused blank and refused when it only restates the class name. Today that argument is made in a session and lost there, so no later reader can check it was made at all; the flag preserves its presence, and its soundness stays the reader's.
+
+   **`--tier prompt` additionally requires `--addendum-id` and `--kind false-positive`.** The stock review prompt is compiled into the binary and fixed; a fix on this tier is an entry the commit gate adds to it. Write it with `steer commit-gate addendum add <id> --text "<text>"`, then pass that id. `register` copies the entry text and its `addendum_hash` onto the record, refuses an id the store does not hold, and refuses an id held by both stores unless `--addendum-scope project|global` names one. A defect class is refused, because an entry that stops the reviewer raising a real defect would read as a falling count. A project entry reaches the reviewer only once the store's `steer-manifest.json` is committed: the gate reads project entries from HEAD, so `register` refuses a project entry that HEAD does not hold with the same text. Commit the manifest first; `steer commit-gate addendum list` names each entry's state at HEAD.
+
+   The audit log is a second, independent measurement: it says whether the hook ever *fired*. A steer fix with falling incidence and zero fires did not cause the fall, and incidence alone cannot tell you that.
+
+   `register` refuses a candidate that shares half or more of its chains with a rejected class. Two escapes, and they mean different things: `--supersedes <id>` says the refusal is overturned and marks that record `reopened`, while `--force` says the two classes only look alike. Prefer the first.
+
+For each review candidate you examine and refuse, record the refusal:
+
+```bash
+steer fix reject \
+  --class "within-chain repeat finding" \
+  --match 'YOUR REGEX' \
+  --scope-all \
+  --problem "the reviewer raises a concern an earlier round of the same review already settled" \
+  --intervention "no suitable fix was identified" \
+  --reason "why no gate was installed" \
+  --reopen "the observation that would change this answer"
+```
+
+Author the regex the same way as for `register`, and test it with `match` first — a rejection whose regex matches nothing cannot recognise the class when it returns, so `reject` refuses one, exactly as `register` does. A rejection also takes a frozen scope, on the same `--scope-all` / `--scope-harness` / `--scope-repo` / `--scope-path` rule as `register`: it is the window the class's growth is watched over if the refusal is ever revisited.
+
+A legacy record written before scopes existed carries no scope. `steer fix scope <id> --scope-…` installs one: it sets the scope once, recomputes the baseline over the eligible chains, and opens a fresh after-window at the migration moment so inspecting the record's own history cannot pick a scope that flatters it. An installed scope is frozen — correct one by retiring the record and registering afresh.
+
+`--reason` and `--reopen` are both required, and the second is the load-bearing one. "It is not mechanizable" is a verdict on today's instrument, not a permanent property of the class. Name what would have to change: a signal that starts being persisted, a rate that triples, a tier that becomes cheap. The durable version of that reasoning belongs in a durable design note; the record here is what fires at re-proposal time.
+
+**If your reason cites a count for a subset of the class, store that subset's regex.** Pass `--reopen-match '<regex>' --reopen-at <n>` together; either alone is refused. Without them the record keeps only the broad class regex, and a reason reading "only the numeric sub-case is detectable, and it is one chain" names a threshold no later pass can evaluate — the subset has no stored pattern to re-count. With them, the findings dump scores the subset on every run and prints `REOPEN CONDITION MET` when it reaches the threshold, so a refusal that time has overturned announces itself instead of waiting to be re-derived by hand.
+
+Record a refusal only for a candidate you actually examined against the corpus. Every one-off finding is not a rejected class, and a log padded with them buries the four or five refusals that matter.
+
+Register only after the fix exists. The install timestamp is the split point for every future measurement, so registering early credits the fix with commits it was never present for.
+
+### Clear the queue
+
+After you register, reject, rework, or remove anything, run the refresh once more:
+
+```bash
+steer report refresh --days 30
+```
+
+This rewrites the queue and its timestamp from the new state, so the SessionStart nudge stops pointing at work you just finished. Skip it only when you changed nothing this pass.
+
+Then record that this pass read the candidate piles, whether or not it made a class from them:
+
+```bash
+steer report mark-read
+```
+
+A one-off finding stays in its pile after you read it, so without the mark the status line counts that pile as a decision after every pass. Run it last, after any pass that read the dumps in Step 2, including one that changed nothing. When you read only one pile, or read the transcript pile with a filter, name the pile you read in full: `--corpus review-findings` or `--corpus transcript-friction`. A pile whose `unread` is false is unchanged since the last pass: say so in one line, and do not present its old items again as new evidence.
+
+## Reading the numbers honestly
+
+- **Keep the three kinds of evidence apart.** Fixtures establish expected outcomes on stored cases under the recorded identities; an audited firing supports a judgment about one attempted action; field counts describe matched recurrence over eligible work. None of them establishes efficacy.
+- **The comparison is uncontrolled, so no count here credits a fix.** The standing instruction set — CLAUDE.md, AGENTS.md, imported globals, skills, hooks — can affect the agent's behaviour, no corpus records it, and a person edits it by hand between sessions. Report what recurred and what did not.
+- **The adjudication is self-reported.** The review outcomes come from the agent that received the findings, so a class the agent systematically misjudges is invisible here. Treat incidence as a strong hint, never as ground truth.
+- **The instrument moves under the measurement.** Every ledger row is stamped with the reviewer that produced it (`model/runs/prompt-digest`, with the provider beside it), and `observation.provenance` lists every identity that counted each window. When the two lists differ, two instruments counted these windows — re-read the findings before weighing the counts against each other. A bare string beside the same string with `(provider <name>)` is undecided: the older rows did not record a provider, so the pair cannot tell whether it changed. A regex leaning on the reviewer's framing verbs ("hardcodes", "still advertises") is far more exposed than one leaning on code vocabulary, which is a reason to prefer the latter when authoring.
+  - The stamp cannot catch vendor-side drift. An external model alias whose behaviour changes with no local diff makes an unchanged instrument string weaker evidence than a changed one.
+- **Workload moves the split.** A `check`-tier fix scoped to Python cannot recur in a month of shell commits, and that reads as silence. Read `observation.counts` for each window's date bounds and eligible size before reading anything into a quiet after-window.
+- **A fresh record has an empty after-window.** The gate reviews on the order of a few commits a week, so `zero_eligible_after` is the normal state of a new record. Re-read on a cadence rather than the day after installing, and never read a fresh quiet window as success.
+- **Never inject this history into the reviewer or the authoring session.** A reviewer handed past findings re-finds them instead of searching, and a list of old defects is a gauge rather than a directive. The output of this loop is a gate, not a reminder.

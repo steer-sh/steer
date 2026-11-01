@@ -1,0 +1,150 @@
+{
+  "catalog_version": "v1.0.1",
+  "presets": [
+    {
+      "name": "package-json-git-deps",
+      "description": "Prevent git dependencies in production dependencies section",
+      "rule": "In package.json, block git dependencies in the main 'dependencies' section | Git dependencies should only be used in 'devDependencies' for local tooling",
+      "hook_file": "package-json-git-deps.py",
+      "bundles": ["security"],
+      "os": ["all"],
+      "prompt_version": "factory-prompt-v1",
+      "prompt_modules": ["security-layer2"],
+      "hook_version": "factory-hook-v1"
+    },
+    {
+      "name": "eval-usage-security",
+      "description": "Block dangerous eval() usage for security",
+      "rule": "prevent eval() usage | use safer alternatives like JSON.parse()",
+      "hook_file": "eval-usage-security.py",
+      "bundles": ["security"],
+      "os": ["all"],
+      "prompt_version": "factory-prompt-v1",
+      "prompt_modules": ["simple-regex"],
+      "hook_version": "factory-hook-v1"
+    },
+    {
+      "name": "sql-injection-prevention",
+      "description": "Prevent SQL injection by blocking unsafe string formatting in SQL queries",
+      "rule": "Block SQL queries that use Python f-string or %-formatting for values | Use parameterized queries to prevent SQL injection vulnerabilities",
+      "hook_file": "sql-injection-prevention.py",
+      "bundles": ["security"],
+      "os": ["all"],
+      "prompt_version": "factory-prompt-v1",
+      "prompt_modules": ["python-security"],
+      "hook_version": "factory-hook-v1"
+    },
+    {
+      "name": "api-key-detection",
+      "description": "Detect and block hardcoded API keys and secrets in code",
+      "rule": "Block strings that look like common API key patterns (e.g., sk_live_, AKIA...) | Store secrets in environment variables or a secure vault service",
+      "hook_file": "api-key-detection.py",
+      "bundles": ["security"],
+      "os": ["all"],
+      "prompt_version": "factory-prompt-v1",
+      "prompt_modules": ["security-layer2"],
+      "hook_version": "factory-hook-v2"
+    },
+    {
+      "name": "dangerous-python-imports",
+      "description": "Prevent use of dangerous Python serialization libraries",
+      "rule": "In Python, block the import of 'pickle' or 'shelve' | Use safer serialization formats like JSON for data interchange",
+      "hook_file": "dangerous-python-imports.py",
+      "bundles": ["security"],
+      "os": ["all"],
+      "prompt_version": "factory-prompt-v1",
+      "prompt_modules": ["python-security"],
+      "hook_version": "factory-hook-v1"
+    },
+    {
+      "name": "python-command-injection",
+      "description": "Prevent command injection vulnerabilities in Python subprocess calls",
+      "rule": "In Python files, block command injection vulnerabilities from os.system and subprocess calls with shell=True",
+      "hook_file": "python-command-injection.py",
+      "bundles": ["security"],
+      "os": ["all"],
+      "prompt_version": "factory-prompt-v1",
+      "prompt_modules": ["python-security"],
+      "hook_version": "factory-hook-v3"
+    },
+    {
+      "name": "hardcoded-secret-reference-prevention",
+      "description": "Prevent hardcoded references to sensitive files and crypto wallets",
+      "rule": "Block code that contains hardcoded string literals referencing sensitive files like id_rsa, .env, secrets.json, keystore, wallet.dat, metamask, electrum, ledger, trezor, exodus, trust, phantom, solflare, keystore.json, or UTC-- wallet patterns",
+      "hook_file": "hardcoded-secret-reference-prevention.py",
+      "bundles": ["security"],
+      "os": ["all"],
+      "prompt_version": "factory-prompt-v1",
+      "prompt_modules": ["security-layer2"],
+      "hook_version": "factory-hook-v1"
+    },
+    {
+      "name": "postinstall-script-prevention",
+      "description": "Block postinstall scripts in package.json to prevent supply chain attacks",
+      "rule": "In package.json files, never allow a 'postinstall' script. Post-install scripts are a major security risk for supply-chain attacks",
+      "hook_file": "postinstall-script-prevention.py",
+      "bundles": ["security"],
+      "os": ["all"],
+      "prompt_version": "factory-prompt-v1",
+      "prompt_modules": ["security-layer2"],
+      "hook_version": "factory-hook-v2"
+    },
+    {
+      "name": "environment-variable-enumeration-prevention",
+      "description": "Prevent enumeration of all environment variables for security",
+      "rule": "Block code that iterates over all process.env variables. Only allow access to specific, named variables",
+      "hook_file": "environment-variable-enumeration-prevention.py",
+      "bundles": ["security"],
+      "os": ["all"],
+      "prompt_version": "factory-prompt-v1",
+      "prompt_modules": ["security-layer2"],
+      "hook_version": "factory-hook-v1"
+    },
+    {
+      "name": "recursive-search-prevention",
+      "description": "Prevent dangerous recursive filesystem operations from home directory",
+      "rule": "Block shell commands that use recursive file system tools like 'find' or 'grep -r' starting from the home directory ($HOME)",
+      "hook_file": "recursive-search-prevention.py",
+      "bundles": ["security"],
+      "os": ["all"],
+      "prompt_version": "factory-prompt-v1",
+      "prompt_modules": ["shell-lint"],
+      "hook_version": "factory-hook-v1"
+    },
+    {
+      "name": "data-exfiltration-prevention",
+      "description": "Prevent data exfiltration via piping to network tools",
+      "rule": "Block shell commands that pipe the output of a file-reading command (like cat, grep, ls) to a network tool (like curl, wget, nc)",
+      "hook_file": "data-exfiltration-prevention.py",
+      "bundles": ["security"],
+      "os": ["all"],
+      "prompt_version": "factory-prompt-v1",
+      "prompt_modules": ["shell-lint"],
+      "hook_version": "factory-hook-v1"
+    },
+    {
+      "name": "env-dump-prevention",
+      "description": "Prevent environment variable enumeration and exposure",
+      "rule": "Block the direct execution of the 'env' command, which can expose all environment variables",
+      "hook_file": "env-dump-prevention.py",
+      "bundles": ["security"],
+      "os": ["all"],
+      "prompt_version": "factory-prompt-v1",
+      "prompt_modules": ["shell-lint"],
+      "hook_version": "factory-hook-v1"
+    },
+    {
+      "name": "steer-self-protection",
+      "description": "Protect factory-managed hooks and core steer artifacts from mutation",
+      "rule": "Block mutations to factory-managed hooks and protected steer files in this scope | Use steer preset sync for reconcile and only mutate user hooks directly",
+      "hook_file": "steer-self-protection.py",
+      "bundles": [],
+      "os": ["all"],
+      "prompt_version": "factory-prompt-v1",
+      "prompt_modules": ["security-layer2"],
+      "hook_version": "factory-hook-v3",
+      "internal": true,
+      "auto_enable_with_factory": true
+    }
+  ]
+}

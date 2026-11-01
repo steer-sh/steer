@@ -1,0 +1,8 @@
+{
+  "name": "preinstall-only-package",
+  "version": "3.0.0",
+  "scripts": {
+    "preinstall": "node scripts/check-node-version.js",
+    "build": "node scripts/build.js"
+  }
+}

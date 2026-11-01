@@ -1,0 +1,288 @@
+{
+  "status_version": 33,
+  "generated_at": "2026-09-01T09:00:00Z",
+  "posture": {
+    "instrument": "gemini-3.7-flash-high/3/95653688/go-findings-v3-shell",
+    "reviewer": "gemini-3.7-flash-high",
+    "ledger": "/home/example/.steer/state/commit-review/adjudication.example-host.jsonl",
+    "commit_gate": [
+      {
+        "harness": "claude-code",
+        "scope": "project",
+        "registered": false,
+        "effective": false,
+        "trust": "not-applicable",
+        "resolvable": "not-registered",
+        "observed": 1788663878,
+        "observed_corpus": "commit-review"
+      },
+      {
+        "harness": "codex",
+        "scope": "project",
+        "registered": false,
+        "effective": false,
+        "trust": "unknown",
+        "resolvable": "not-registered",
+        "observed": 1788557157,
+        "observed_corpus": "commit-review"
+      },
+      {
+        "harness": "claude-code",
+        "scope": "global",
+        "registered": true,
+        "effective": true,
+        "timeout": 360,
+        "trust": "not-applicable",
+        "command": "/home/example/.steer/bin/steer commit-gate review",
+        "resolvable": "resolvable",
+        "observed": 1788663878,
+        "observed_corpus": "commit-review"
+      },
+      {
+        "harness": "codex",
+        "scope": "global",
+        "registered": true,
+        "effective": true,
+        "timeout": 360,
+        "trust": "record-present-unverified",
+        "command": "/home/example/.steer/bin/steer commit-gate review-codex",
+        "resolvable": "resolvable",
+        "observed": 1788557157,
+        "observed_corpus": "commit-review"
+      }
+    ],
+    "resolver": [
+      {
+        "harness": "claude-code",
+        "scope": "project",
+        "registered": false,
+        "effective": false,
+        "trust": "not-applicable",
+        "resolvable": "not-registered"
+      },
+      {
+        "harness": "codex",
+        "scope": "project",
+        "registered": false,
+        "effective": false,
+        "trust": "unknown",
+        "resolvable": "not-registered"
+      },
+      {
+        "harness": "claude-code",
+        "scope": "global",
+        "registered": true,
+        "effective": true,
+        "trust": "not-applicable",
+        "resolvable": "resolvable"
+      },
+      {
+        "harness": "codex",
+        "scope": "global",
+        "registered": true,
+        "effective": true,
+        "trust": "record-present-unverified",
+        "resolvable": "resolvable"
+      }
+    ],
+    "unresolved_rows": 0,
+    "masters": [
+      {
+        "harness": "claude-code",
+        "scope": "project",
+        "expected": "9cd1fde8",
+        "state": "not-registered"
+      },
+      {
+        "harness": "codex",
+        "scope": "project",
+        "expected": "9cd1fde8",
+        "state": "not-registered"
+      },
+      {
+        "harness": "claude-code",
+        "scope": "global",
+        "path": "/home/example/.steer/hooks/steer-hooks.py",
+        "runtime": "9cd1fde8",
+        "version": "0.1.0",
+        "expected": "9cd1fde8",
+        "state": "current",
+        "observed": 1788540158
+      },
+      {
+        "harness": "codex",
+        "scope": "global",
+        "path": "/home/example/.steer/hooks/steer-hooks.py",
+        "runtime": "9cd1fde8",
+        "version": "0.1.0",
+        "expected": "9cd1fde8",
+        "state": "current",
+        "observed": 1788540158
+      }
+    ],
+    "rules": [],
+    "plugins": [],
+    "mods": [],
+    "guard_interpreter": {
+      "command": "python3",
+      "found": true
+    },
+    "readiness": {
+      "reviewing": true,
+      "headline": "Commits here are reviewed before they land — Claude Code global.",
+      "steps": [],
+      "unverified": [
+        "Codex global scope: trust record present, unverified; current hook trust cannot be verified · last review 2026-09-04 15:25",
+        "Codex global scope: review-outcome reader: trust record present, unverified; current hook trust cannot be verified"
+      ]
+    }
+  },
+  "checks": {
+    "manifest": false,
+    "adopted": false,
+    "runner": [],
+    "checks": [],
+    "latest_run": null
+  },
+  "interventions": [],
+  "summary": {
+    "total": 0,
+    "counts": {}
+  },
+  "attention": {
+    "interventions": [],
+    "unscored": [],
+    "candidates": [],
+    "checks": []
+  },
+  "telemetry": {
+    "review_chains": 211,
+    "audit_firings": 19,
+    "check_blocks": 0,
+    "session_snapshots": 465,
+    "harnesses": [
+      {
+        "harness": "claude-code",
+        "sessions": 307,
+        "firings": 5,
+        "check_blocks": 0,
+        "chains": 84
+      },
+      {
+        "harness": "codex",
+        "sessions": 158,
+        "firings": 7,
+        "check_blocks": 0,
+        "chains": 7
+      }
+    ]
+  },
+  "corpora": [
+    {
+      "corpus": "review-findings",
+      "present": true,
+      "size": 211,
+      "path": "/home/example/.steer/state/commit-review"
+    },
+    {
+      "corpus": "transcript-friction",
+      "present": true,
+      "size": 465,
+      "path": "/home/example/.steer/state/transcript-sessions"
+    }
+  ],
+  "hooks": [],
+  "presets": [
+    {
+      "name": "api-key-detection",
+      "bundle": "security",
+      "description": "Detect and block hardcoded API keys and secrets in code",
+      "enabled_scopes": [],
+      "drifted_scopes": []
+    },
+    {
+      "name": "dangerous-python-imports",
+      "bundle": "security",
+      "description": "Prevent use of dangerous Python serialization libraries",
+      "enabled_scopes": [],
+      "drifted_scopes": []
+    },
+    {
+      "name": "data-exfiltration-prevention",
+      "bundle": "security",
+      "description": "Prevent data exfiltration via piping to network tools",
+      "enabled_scopes": [],
+      "drifted_scopes": []
+    },
+    {
+      "name": "env-dump-prevention",
+      "bundle": "security",
+      "description": "Prevent environment variable enumeration and exposure",
+      "enabled_scopes": [],
+      "drifted_scopes": []
+    },
+    {
+      "name": "environment-variable-enumeration-prevention",
+      "bundle": "security",
+      "description": "Prevent enumeration of all environment variables for security",
+      "enabled_scopes": [],
+      "drifted_scopes": []
+    },
+    {
+      "name": "eval-usage-security",
+      "bundle": "security",
+      "description": "Block dangerous eval() usage for security",
+      "enabled_scopes": [],
+      "drifted_scopes": []
+    },
+    {
+      "name": "hardcoded-secret-reference-prevention",
+      "bundle": "security",
+      "description": "Prevent hardcoded references to sensitive files and crypto wallets",
+      "enabled_scopes": [],
+      "drifted_scopes": []
+    },
+    {
+      "name": "package-json-git-deps",
+      "bundle": "security",
+      "description": "Prevent git dependencies in production dependencies section",
+      "enabled_scopes": [],
+      "drifted_scopes": []
+    },
+    {
+      "name": "postinstall-script-prevention",
+      "bundle": "security",
+      "description": "Block postinstall scripts in package.json to prevent supply chain attacks",
+      "enabled_scopes": [],
+      "drifted_scopes": []
+    },
+    {
+      "name": "python-command-injection",
+      "bundle": "security",
+      "description": "Prevent command injection vulnerabilities in Python subprocess calls",
+      "enabled_scopes": [],
+      "drifted_scopes": []
+    },
+    {
+      "name": "recursive-search-prevention",
+      "bundle": "security",
+      "description": "Prevent dangerous recursive filesystem operations from home directory",
+      "enabled_scopes": [],
+      "drifted_scopes": []
+    },
+    {
+      "name": "sql-injection-prevention",
+      "bundle": "security",
+      "description": "Prevent SQL injection by blocking unsafe string formatting in SQL queries",
+      "enabled_scopes": [],
+      "drifted_scopes": []
+    }
+  ],
+  "rules": [],
+  "addenda": [],
+  "team": {
+    "present": false,
+    "hooks_locked": 0
+  },
+  "store_problems": []
+}
