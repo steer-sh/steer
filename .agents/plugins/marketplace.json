@@ -17,7 +17,7 @@
       },
       "strict": true,
       "description": "Reviews your coding agent’s commits before they land and proposes checks and guards for the mistakes that keep coming back",
-      "version": "0.1.4",
+      "version": "0.1.5",
       "author": {
         "name": "Jeremy Janzen"
       },

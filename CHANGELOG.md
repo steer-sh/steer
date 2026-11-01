@@ -5,6 +5,64 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.5] - 2026-11-01
+
+### Added
+
+- `steer status` leads with one verdict and the version: `healthy`, `needs attention`
+  or `could not check everything`. An issue with a known fix names it on one copyable
+  line, and `posture.health` in the JSON carries the same verdict.
+- `steer status` reads Codex hook approval from the saved hash and the enabled state,
+  so an approved hook no longer warns and a hook that is turned off shows as a setup
+  step. The check runner is covered too.
+- The machine name is pinned in `~/.steer/host`, so a hostname change no longer makes
+  this machine's fixes read as another machine's. `steer host --former` declares a
+  name the machine used before.
+
+### Changed
+
+- `steer commit-gate remove` needs `--harness` and `--scope`, and a refusal lists the
+  registered gates and resolvers. It reports whether it removed anything.
+- Repository checks: replay and the detector digest changed, so each Go detector needs
+  one `steer check test`. A check-tier fix reads as an edited check until it is
+  registered again.
+- `steer remove` refuses an entry that names the manifest, the master or a file that is
+  not `.py`, and it refuses a guard file with no id of its own.
+
+### Fixed
+
+- A Claude Code project guard runner works from any directory. A `cd` into a
+  subdirectory failed every later tool call. `steer hooks sync` or `steer bin install`
+  rewrites the registration.
+- `steer remove` and `steer test` take an exact id first. On a store where an entry
+  names another file, the confirmation and `steer test` could read the wrong guard.
+- `steer list` shows the id and rule of the entry that owns each file.
+- Guard file ownership follows the entry key, so a second id cannot overwrite a guard.
+  A preset whose id changed now converges on sync.
+- `steer verify --staged` and `--changed` read paths with non-ASCII characters. The
+  pre-commit hook refused such a commit even with no guards.
+- A multi-line manifest rule syncs as one bullet. It could grow the section on each
+  sync or stop later syncs.
+- Presets and the generation prompt: the injection reference visitor forgets a
+  shell-safe proof when its name is rebound, including `def`, `class` and match names.
+- Security: a project store refuses a linked `.gitignore`, `.steer/checks` or check
+  manifest, and fixture writes refuse a linked `.steer`. A fixture's hook must be a
+  guard name, and the audit reader treats a linked sidecar as damaged.
+- `steer check install`, `steer statusline install` and `steer commit-gate install` no
+  longer leave `.steer/hooks/.gitignore` in a repository with no guards.
+- Commit gate: a denied commit from a subdirectory no longer reports every committed
+  project addendum entry as removed.
+- Repository checks: Go detector replay keeps `//go:embed` lines, handles a local named
+  like an import, and refuses a name that means two packages. Replay keeps the
+  detector's mode and compares it again immediately before the check.
+- `steer status` prints the hooks install first, because a rebuild before it embedded
+  the old runtime. The fix for a check runner that never ran is now a real command.
+- Dashboard: the reviewer editor accepts a name that starts with `d`, and an arrow key
+  no longer answers the carry question before it is asked or clears the model.
+- Stored diffs keep hunk content across a blank context line, reviewer flag removal
+  reads shell escapes, a long instruction bullet is cut on a character boundary, and
+  `steer audit` counts a repeated Codex Stop block with no turn id.
+
 ## [0.1.4] - 2026-10-30
 
 ### Added
@@ -122,6 +180,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 First public release.
 
+[0.1.5]: https://github.com/steer-sh/steer/releases/tag/v0.1.5
 [0.1.4]: https://github.com/steer-sh/steer/releases/tag/v0.1.4
 [0.1.3]: https://github.com/steer-sh/steer/releases/tag/v0.1.3
 [0.1.2]: https://github.com/steer-sh/steer/releases/tag/v0.1.2
