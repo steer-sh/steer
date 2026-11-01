@@ -227,3 +227,111 @@ func TestSaveSettingsBoundsAProjectLinkByTheRepository(t *testing.T) {
 		}
 	})
 }
+
+// settingsOnlyWrites names the settings writes that write no store and register
+// no guard master.
+func settingsOnlyWrites() map[string]func() error {
+	const (
+		review   = "steer commit-gate review"
+		resolver = "steer commit-gate backfill"
+	)
+	return map[string]func() error{
+		"SaveSettings": func() error { return SaveSettings(ProjectScope, &Settings{}) },
+		"RegisterCommitGateHook": func() error {
+			return RegisterCommitGateHook(ProjectScope, review, 210)
+		},
+		"RegisterCommitGateAndResolver": func() error {
+			return RegisterCommitGateAndResolver(ProjectScope, review, 210, resolver, 30)
+		},
+		"RegisterBackfillHook": func() error {
+			return RegisterBackfillHook(ProjectScope, resolver, 30)
+		},
+		"RegisterCheckHook": func() error {
+			return RegisterCheckHook(ProjectScope, "steer check hook --harness claude-code", 30)
+		},
+		"RegisterStatusLine": func() error {
+			return RegisterStatusLine(ProjectScope, "steer statusline")
+		},
+		"RemoveMasterHook": func() error {
+			settings := &Settings{Hooks: Hooks{PreToolUse: []HookEntry{{
+				Matcher: ".*",
+				Hooks:   []CommandHook{{Type: "command", Command: "python3 .steer/hooks/" + MasterHookName}},
+			}}}}
+			if err := SaveSettings(ProjectScope, settings); err != nil {
+				return err
+			}
+			return RemoveMasterHook(ProjectScope)
+		},
+	}
+}
+
+// A settings write in a repository with no guards leaves no guard store behind.
+func TestSettingsWritesCreateNoGuardStore(t *testing.T) {
+	for name, write := range settingsOnlyWrites() {
+		t.Run(name, func(t *testing.T) {
+			withProjectTempDir(t)
+			if err := write(); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(filepath.Join(ClaudeDirName, SettingsName)); err != nil {
+				t.Fatalf("the settings file was not written: %v", err)
+			}
+			if _, err := os.Lstat(".steer"); !os.IsNotExist(err) {
+				t.Fatalf(".steer exists after a settings write: %v", err)
+			}
+		})
+	}
+}
+
+// A link at the store's .gitignore refuses store writes and never a settings
+// write, which reads and writes nothing through it.
+func TestSettingsWritesIgnoreALinkedStoreIgnoreFile(t *testing.T) {
+	for name, write := range settingsOnlyWrites() {
+		t.Run(name, func(t *testing.T) {
+			withProjectTempDir(t)
+			store := filepath.Join(".steer", "hooks")
+			if err := os.MkdirAll(store, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			const kept = "private\n"
+			target := filepath.Join(t.TempDir(), "private")
+			if err := os.WriteFile(target, []byte(kept), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(target, filepath.Join(store, ".gitignore")); err != nil {
+				t.Fatal(err)
+			}
+			if err := write(); err != nil {
+				t.Fatal(err)
+			}
+			if raw, _ := os.ReadFile(target); string(raw) != kept {
+				t.Fatalf("the link's target changed: %q", raw)
+			}
+		})
+	}
+}
+
+// Registering the guard master still prepares the store it names and refuses a
+// linked one.
+//
+// pins existing behaviour
+func TestRegisterMasterHookPreparesTheStore(t *testing.T) {
+	withProjectTempDir(t)
+	if err := RegisterMasterHook(ProjectScope); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(".steer", "hooks", ".gitignore")); err != nil {
+		t.Fatalf("the store was not prepared: %v", err)
+	}
+
+	withProjectTempDir(t)
+	if err := os.Symlink(t.TempDir(), ".steer"); err != nil {
+		t.Fatal(err)
+	}
+	if err := RegisterMasterHook(ProjectScope); err == nil {
+		t.Fatal("RegisterMasterHook accepted a linked .steer")
+	}
+	if _, err := os.Stat(filepath.Join(ClaudeDirName, SettingsName)); !os.IsNotExist(err) {
+		t.Fatalf("the settings file was written after the refusal: %v", err)
+	}
+}
