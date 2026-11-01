@@ -612,3 +612,29 @@ func TestExtractInstructionFileStopsAtTheEndMarker(t *testing.T) {
 		t.Errorf("directives = %+v", md.Directives)
 	}
 }
+
+// A bullet whose multi-byte character spans the length limit is cut before that
+// character, inside the Steer Rules section and outside it.
+func TestExtractInstructionFileCutsOnARuneBoundary(t *testing.T) {
+	want := strings.Repeat("a", maxDirectiveLen-1)
+	long := want + "\u2014 tail"
+	path := filepath.Join(t.TempDir(), "CLAUDE.md")
+	doc := "# Project\n- " + long + "\n\n## Steer Rules\n<!-- managed-by-steer -->\n- " + long + "\n"
+	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	md, err := ExtractInstructionFile(harness.Codex, path, []string{long})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(md.Directives) != 1 || md.Directives[0].Text != want {
+		t.Errorf("directives = %q, want the text before the split character", md.Directives)
+	}
+	if len(md.SteerRules) != 1 || md.SteerRules[0] != want {
+		t.Errorf("steer rules = %q, want the text before the split character", md.SteerRules)
+	}
+	if len(md.GuardRules) != 1 || md.GuardRules[0] != want {
+		t.Errorf("guard rules = %q, want the text before the split character", md.GuardRules)
+	}
+}
