@@ -21,7 +21,7 @@ import (
 // ExecutorVersion names the replay semantics. Raise it when a change to replay
 // could turn a stored outcome into a different one; a receipt from another
 // executor version is stale.
-const ExecutorVersion = 3
+const ExecutorVersion = 4
 
 // CaseTimeout bounds each setup script and each check run within a case.
 var CaseTimeout = 120 * time.Second
@@ -98,13 +98,18 @@ type CaseResult struct {
 	Excerpt      string `json:"excerpt,omitempty"`
 }
 
-// inputDigests digests repository-relative files. A missing file is an error.
+// inputDigests digests repository-relative files. A missing file or a directory
+// is an error.
 func inputDigests(root, id string, paths []string) ([]FileDigest, error) {
 	sorted := append([]string(nil), paths...)
 	sort.Strings(sorted)
 	var out []FileDigest
 	for _, p := range sorted {
-		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(p)))
+		full := filepath.Join(root, filepath.FromSlash(p))
+		if info, err := os.Stat(full); err == nil && info.IsDir() {
+			return nil, fmt.Errorf("check %s: detector input %s is a directory: declare each file it holds", id, p)
+		}
+		data, err := os.ReadFile(full)
 		if err != nil {
 			return nil, fmt.Errorf("check %s: detector input %s: %w", id, p, err)
 		}
@@ -233,7 +238,8 @@ func judge(res *CaseResult, code int, out []byte, diagnostic string) {
 }
 
 // changedDetectorFile returns the first detector file whose copy in tree no
-// longer matches the repository, or "" when every copy matches.
+// longer matches the repository in bytes or permissions, or "" when every copy
+// matches. Permissions count because the executable bit selects the interpreter.
 func changedDetectorFile(root, tree string, files []string) string {
 	for _, p := range files {
 		want, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(p)))
@@ -242,6 +248,14 @@ func changedDetectorFile(root, tree string, files []string) string {
 		}
 		got, err := os.ReadFile(filepath.Join(tree, filepath.FromSlash(p)))
 		if err != nil || !bytes.Equal(got, want) {
+			return p
+		}
+		wantInfo, err := os.Stat(filepath.Join(root, filepath.FromSlash(p)))
+		if err != nil {
+			return p
+		}
+		gotInfo, err := os.Stat(filepath.Join(tree, filepath.FromSlash(p)))
+		if err != nil || gotInfo.Mode().Perm() != wantInfo.Mode().Perm() {
 			return p
 		}
 	}
@@ -264,7 +278,8 @@ func copyDetectorFiles(root, tree string, files map[string]bool) error {
 
 // replayCase builds one case tree and runs the check in it. A snapshot case
 // restores its commit, then the current detector is copied over it, then its
-// patch is applied; a patch that changes a detector file makes it invalid.
+// patch is applied. A patch, case file or setup that changes a detector file
+// makes it invalid.
 func replayCase(root, bash string, runner caseRunner, c Case) CaseResult {
 	res := CaseResult{Name: c.Name, Snapshot: c.Snapshot, ExpectedExit: *c.ExitCode}
 	invalid := func(reason string) CaseResult {
@@ -338,6 +353,9 @@ func replayCase(root, bash string, runner caseRunner, c Case) CaseResult {
 			res.Excerpt = excerpt(out)
 			return invalid(fmt.Sprintf("setup exited %d", code))
 		}
+	}
+	if p := changedDetectorFile(root, tree, runner.detector); p != "" {
+		return invalid(fmt.Sprintf("the case's files or setup change detector file %s", p))
 	}
 	if reason := runner.run(tree, c, &res); reason != "" {
 		return invalid(reason)
@@ -420,6 +438,11 @@ func copyFile(src string, tree *os.Root, dst string) error {
 	}
 	out, err := tree.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode().Perm())
 	if err != nil {
+		return err
+	}
+	// The open's mode applies only to a file it creates.
+	if err := out.Chmod(info.Mode().Perm()); err != nil {
+		out.Close()
 		return err
 	}
 	if _, err := io.Copy(out, in); err != nil {
