@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -455,12 +456,9 @@ func RemoveManagedHook(scope, identifier string, opts RemoveOptions, targets ...
 	var manifestEntry ManifestEntry
 	var hasEntry bool
 
-	// An exact manifest key names its own entry, even when another guard's file
-	// has that stem.
-	_, keyed := manifest.Hooks[trimmedID]
-	resolved, err := HookFile{}, fmt.Errorf("hook not found: %s", identifier)
-	if !keyed {
-		resolved, err = ResolveHook(scope, trimmedID)
+	resolved, err := ResolveRemoval(scope, trimmedID)
+	if errors.Is(err, ErrUnownedGuardFile) || errors.Is(err, ErrNotAGuardFile) {
+		return nil, err
 	}
 	if err == nil {
 		hookName = resolved.Name
@@ -469,9 +467,6 @@ func RemoveManagedHook(scope, identifier string, opts RemoveOptions, targets ...
 		manifestEntry, hasEntry = manifest.Hooks[hookName]
 	} else {
 		hookName = normalizeHookName(trimmedID)
-		if keyed {
-			hookName = trimmedID
-		}
 		if hookName == "" {
 			return nil, err
 		}
@@ -495,6 +490,9 @@ func RemoveManagedHook(scope, identifier string, opts RemoveOptions, targets ...
 		fileName, nameErr := hookstore.EntryFileName(manifestFile, hookName, entryFile)
 		if nameErr != nil {
 			return nil, nameErr
+		}
+		if nonGuard := refuseNonGuardFile(hookName, fileName); nonGuard != nil {
+			return nil, nonGuard
 		}
 		hookFile = fileName
 		hookPath = filepath.Join(hooksDir, fileName)

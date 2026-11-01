@@ -2,6 +2,10 @@ package cmd
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -152,5 +156,121 @@ func TestGroupCommandRejectsUnknownSubcommand(t *testing.T) {
 	rootCmd.SetArgs([]string{"hooks"})
 	if err := Execute(); err != nil {
 		t.Errorf("steer hooks: err = %v, want its help", err)
+	}
+}
+
+// seedMovedGuard writes a global store whose entry a owns z.py beside an unowned
+// a.py, each guard blocking with its own file's name.
+func seedMovedGuard(t *testing.T) string {
+	t.Helper()
+	tempSettingsHome(t)
+	oldScope := scope
+	scope = claude.GlobalScope
+	t.Cleanup(func() { scope = oldScope })
+	if err := claude.EnsureDirectories(claude.GlobalScope); err != nil {
+		t.Fatal(err)
+	}
+	dir, err := claude.GetHooksDir(claude.GlobalScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"a", "z"} {
+		source := fmt.Sprintf("import json\n\ndef main():\n    print(json.dumps({\"decision\": \"block\", \"stopReason\": \"from %s.py\"}))\n\nmain()\n", name)
+		if err := os.WriteFile(filepath.Join(dir, name+".py"), []byte(source), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	manifest := &claude.Manifest{Hooks: map[string]claude.ManifestEntry{"a": {File: "z.py", Rule: "rule of a"}}}
+	if err := claude.SaveManifest(claude.GlobalScope, manifest); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// The confirmation names the file the removal acts on, not the file with the id's stem.
+func TestRemoveConfirmationNamesTheEntrysFile(t *testing.T) {
+	dir := seedMovedGuard(t)
+	stdin, feed, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := feed.WriteString("n\n"); err != nil {
+		t.Fatal(err)
+	}
+	feed.Close()
+	oldStdin := os.Stdin
+	os.Stdin = stdin
+	t.Cleanup(func() { os.Stdin = oldStdin; stdin.Close() })
+
+	out := captureStdout(t, func() {
+		if err := removeCmd.RunE(removeCmd, []string{"a"}); err != nil {
+			t.Fatalf("remove: %v", err)
+		}
+	})
+	flat := strings.Join(strings.Fields(out), "")
+	if !strings.Contains(flat, "z.py") || strings.Contains(flat, "/a.py") {
+		t.Errorf("the confirmation does not name z.py alone:\n%s", out)
+	}
+	if !strings.Contains(out, "Cancelled") {
+		t.Errorf("the declined removal did not cancel:\n%s", out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "z.py")); err != nil {
+		t.Errorf("the declined removal touched z.py: %v", err)
+	}
+}
+
+// An ad-hoc steer test runs the file the guard's entry names.
+func TestTestWithCodeRunsTheEntrysFile(t *testing.T) {
+	seedMovedGuard(t)
+	if err := testCmd.Flags().Set("code", "x"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = testCmd.Flags().Set("code", "") })
+
+	out := captureStdout(t, func() {
+		if err := testCmd.RunE(testCmd, []string{"a"}); err != nil {
+			t.Fatalf("test: %v", err)
+		}
+	})
+	if !strings.Contains(out, "from z.py") || strings.Contains(out, "from a.py") {
+		t.Errorf("steer test a did not run z.py alone:\n%s", out)
+	}
+}
+
+// The refusal of an unowned file offers no other tier's remove command.
+func TestRemoveOfAnUnownedFileCarriesNoTierHint(t *testing.T) {
+	seedMovedGuard(t)
+	err := removeCmd.RunE(removeCmd, []string{"a.py"})
+	if !errors.Is(err, claude.ErrUnownedGuardFile) {
+		t.Fatalf("remove a.py = %v, want ErrUnownedGuardFile", err)
+	}
+	if strings.Contains(err.Error(), "other tier") {
+		t.Errorf("the refusal carries the tier hint: %v", err)
+	}
+}
+
+// The removal reports the unowned file it leaves running, in the confirmation and
+// after a forced removal alike; the next removal by that name takes the file.
+func TestRemoveReportsTheStemFileItLeaves(t *testing.T) {
+	dir := seedMovedGuard(t)
+	if err := removeCmd.Flags().Set("force", "true"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = removeCmd.Flags().Set("force", "false") })
+	out := captureStdout(t, func() {
+		if err := removeCmd.RunE(removeCmd, []string{"a"}); err != nil {
+			t.Fatalf("remove: %v", err)
+		}
+	})
+	if !strings.Contains(strings.Join(strings.Fields(out), " "), "Stays: a.py") {
+		t.Errorf("the output does not report a.py:\n%s", out)
+	}
+	captureStdout(t, func() {
+		if err := removeCmd.RunE(removeCmd, []string{"a.py"}); err != nil {
+			t.Fatalf("second remove: %v", err)
+		}
+	})
+	if _, err := os.Stat(filepath.Join(dir, "a.py")); !os.IsNotExist(err) {
+		t.Errorf("a.py was not removed: %v", err)
 	}
 }
