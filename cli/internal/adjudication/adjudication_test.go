@@ -366,3 +366,30 @@ func TestContestsStateTheirSubject(t *testing.T) {
 		t.Errorf("guards %v, checks %v from %d lines; want the legacy guard contest and both check contests", guards, checks, len(contests))
 	}
 }
+
+// A negative extent is no reading at all, and the stream keeps whatever it takes.
+// A negative row already stored stays readable.
+func TestAppendRefusesANegativeInspectedExtent(t *testing.T) {
+	dir := t.TempDir()
+	for _, r := range []Receipt{
+		{Subject: SubjectGuard, FiringID: "aa", Judgment: Prevented, InspectedSteps: -1},
+		{Subject: SubjectCheck, RunID: "bb", InspectedSteps: -1, Failures: []Failure{
+			{Kind: FailureOracle, Validity: Valid, Attribution: Introduced}}},
+	} {
+		if err := Append(dir, r); err == nil {
+			t.Errorf("a negative extent was accepted on a %s receipt", r.Subject)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, LogName)); !os.IsNotExist(err) {
+		t.Error("a refused receipt still opened the stream")
+	}
+
+	stored := `{"subject":"guard","firing_id":"aa","judgment":"prevented","inspected_steps":-2}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, LogName), []byte(stored), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(dir)
+	if err != nil || len(got) != 1 || got[0].InspectedSteps != -2 {
+		t.Errorf("a stored negative row: got %+v, %v", got, err)
+	}
+}

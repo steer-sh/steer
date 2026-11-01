@@ -246,6 +246,9 @@ func Append(dir string, r Receipt) error {
 	if r.ContinuationInspected && (r.Join == "" || r.Join == transcript.JoinUnavailable) {
 		return fmt.Errorf("a receipt cannot report an inspected continuation at join %q", r.Join)
 	}
+	if r.InspectedSteps < 0 {
+		return fmt.Errorf("a receipt cannot report %d inspected continuation steps", r.InspectedSteps)
+	}
 	line, err := json.Marshal(r)
 	if err != nil {
 		return fmt.Errorf("failed to encode the receipt: %w", err)

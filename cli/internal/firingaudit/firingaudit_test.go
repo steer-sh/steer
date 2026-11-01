@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -267,5 +268,105 @@ func TestFindRefusesTheEmptyIdentifier(t *testing.T) {
 	}
 	if _, ok := Find(rows, "absent"); ok {
 		t.Error("an identifier no row carries must miss")
+	}
+}
+
+// A link below the store reads as damage and reports nothing about its target,
+// whether or not the target matches the row's stamps.
+func TestALinkedSidecarIsDamagedAndReportsNothingOfItsTarget(t *testing.T) {
+	const secret = `{"secret":"outside the store"}`
+	sum := sha256.Sum256([]byte(secret))
+	digest := hex.EncodeToString(sum[:])
+	ref := PayloadsDir + "/x.json"
+
+	cases := []struct {
+		name  string
+		link  func(t *testing.T, store, outside string)
+		bytes int
+		sha   string
+		named string
+	}{
+		{
+			name: "a link at the sidecar whose target matches the row",
+			link: func(t *testing.T, store, outside string) {
+				symlink(t, filepath.Join(outside, "secret.json"), filepath.Join(store, PayloadsDir, "x.json"))
+			},
+			bytes: len(secret), sha: digest, named: ref,
+		},
+		{
+			name: "a link at the sidecar whose target differs from the row",
+			link: func(t *testing.T, store, outside string) {
+				symlink(t, filepath.Join(outside, "secret.json"), filepath.Join(store, PayloadsDir, "x.json"))
+			},
+			bytes: 1, sha: "feed", named: ref,
+		},
+		{
+			name: "a link at the payload directory",
+			link: func(t *testing.T, store, outside string) {
+				write(t, filepath.Join(outside, "x.json"), secret)
+				if err := os.Remove(filepath.Join(store, PayloadsDir)); err != nil {
+					t.Fatal(err)
+				}
+				symlink(t, outside, filepath.Join(store, PayloadsDir))
+			},
+			bytes: len(secret), sha: digest, named: PayloadsDir,
+		},
+		{
+			name: "a link that stays inside the store",
+			link: func(t *testing.T, store, _ string) {
+				write(t, filepath.Join(store, "other.json"), secret)
+				symlink(t, filepath.Join("..", "other.json"), filepath.Join(store, PayloadsDir, "x.json"))
+			},
+			bytes: len(secret), sha: digest, named: ref,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			store, outside := t.TempDir(), t.TempDir()
+			if err := os.MkdirAll(filepath.Join(store, PayloadsDir), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			write(t, filepath.Join(outside, "secret.json"), secret)
+			c.link(t, store, outside)
+
+			row := Row{FiringID: "aa", EvidenceRef: ref, EvidenceBytes: c.bytes, EvidenceSHA256: c.sha}
+			got := row.Resolve(store)
+			if got.Source != Damaged {
+				t.Fatalf("got %q (%s), want %q", got.Source, got.Reason, Damaged)
+			}
+			if len(got.Bundle) != 0 {
+				t.Errorf("a linked sidecar handed back %q", got.Bundle)
+			}
+			if !strings.Contains(got.Reason, c.named+" is a symlink") {
+				t.Errorf("the reason does not name the link %s: %s", c.named, got.Reason)
+			}
+			for _, leak := range []string{digest, outside, strconv.Itoa(len(secret))} {
+				if strings.Contains(got.Reason, leak) {
+					t.Errorf("the reason reports %q about the target: %s", leak, got.Reason)
+				}
+			}
+		})
+	}
+}
+
+// The store directory itself may be the operator's link; only what lies below it
+// must be the store's own.
+//
+// pins existing behaviour
+func TestALinkedStoreDirectoryStillResolvesItsSidecar(t *testing.T) {
+	real := t.TempDir()
+	row := sidecarRow(t, real, "aa", `{"payload":{}}`)
+	link := filepath.Join(t.TempDir(), "hooks")
+	symlink(t, real, link)
+
+	if got := row.Resolve(link); got.Source != Sidecar {
+		t.Errorf("got %q (%s), want %q", got.Source, got.Reason, Sidecar)
+	}
+}
+
+func symlink(t *testing.T, target, path string) {
+	t.Helper()
+	if err := os.Symlink(target, path); err != nil {
+		t.Fatal(err)
 	}
 }

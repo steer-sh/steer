@@ -187,11 +187,21 @@ func (r Row) Resolve(storeDir string) Evidence {
 }
 
 func (r Row) resolveSidecar(storeDir string) Evidence {
-	path, err := sidecarPath(storeDir, r.EvidenceRef)
+	rel, err := sidecarPath(r.EvidenceRef)
 	if err != nil {
 		return Evidence{Source: Damaged, Reason: err.Error()}
 	}
-	data, err := os.ReadFile(path)
+	store, err := os.OpenRoot(storeDir)
+	if err != nil {
+		return Evidence{Source: Damaged,
+			Reason: fmt.Sprintf("the sidecar %s did not open: %v", r.EvidenceRef, err)}
+	}
+	defer store.Close()
+	if link := firstLink(store, rel); link != "" {
+		return Evidence{Source: Damaged, Reason: fmt.Sprintf(
+			"%s is a symlink; a sidecar must be the guard store's own file", filepath.ToSlash(link))}
+	}
+	data, err := store.ReadFile(rel)
 	if err != nil {
 		return Evidence{Source: Damaged,
 			Reason: fmt.Sprintf("the sidecar %s did not open: %v", r.EvidenceRef, err)}
@@ -222,15 +232,31 @@ func hasBundle(raw json.RawMessage) bool {
 	return trimmed != "" && trimmed != "null"
 }
 
-// sidecarPath resolves a row's reference inside the store. A reference that
-// escapes the store directory is refused rather than read.
-func sidecarPath(storeDir, ref string) (string, error) {
+// sidecarPath resolves a row's reference to a path relative to the store. A
+// reference that escapes the store directory is refused rather than read.
+func sidecarPath(ref string) (string, error) {
 	clean := filepath.Clean(filepath.FromSlash(ref))
 	if filepath.IsAbs(clean) || clean == ".." ||
 		strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("the evidence reference %q leaves the guard store", ref)
 	}
-	return filepath.Join(storeDir, clean), nil
+	return clean, nil
+}
+
+// firstLink returns the first component of rel that is a symlink, or "" if none is.
+func firstLink(store *os.Root, rel string) string {
+	path := ""
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		path = filepath.Join(path, part)
+		info, err := store.Lstat(path)
+		if err != nil {
+			return ""
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return path
+		}
+	}
+	return ""
 }
 
 // unretainedReason states which step of the write failed, in the master's terms.
