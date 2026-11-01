@@ -246,7 +246,8 @@ func Quote(path string) string { return shellword.Quote(path) }
 // consumes the following word, because a value may itself begin with a hyphen and
 // nothing in the string says whether it is a value or the next flag. A command
 // whose first word is not steer's own is returned unchanged, the same rule Relink
-// follows: a user's wrapper script is not ours to rewrite.
+// follows: a user's wrapper script is not ours to rewrite. So is one where a flag
+// would drop a word whose quote never closes, because that word may hold later flags.
 //
 // A flag on a registration outranks every configuration file, so one left on disk
 // pins the setting it names forever.
@@ -264,16 +265,26 @@ func StripFlags(command string, names ...string) string {
 	for _, name := range names {
 		wanted[name] = true
 	}
-	fields := shellFields(rest)
+	fields, open := shellFields(rest)
+	unclosed := -1
+	if open {
+		unclosed = len(fields) - 1
+	}
 	kept := make([]string, 0, len(fields))
 	dropped := false
 	for i := 0; i < len(fields); i++ {
 		field := fields[i]
 		if name, _, ok := strings.Cut(field, "="); ok && wanted[name] {
+			if i == unclosed {
+				return command
+			}
 			dropped = true
 			continue
 		}
 		if wanted[field] {
+			if i+1 == unclosed {
+				return command
+			}
 			dropped = true
 			i++
 			continue
@@ -292,37 +303,46 @@ func HasFlags(command string, names ...string) bool {
 }
 
 // shellFields splits a command's arguments into words, keeping a quoted run as one
-// word. strings.Fields would split `--model 'a b'` into three, and dropping the
-// flag would then leave half its value behind as an argument of its own.
-func shellFields(rest string) []string {
-	var fields []string
+// word and each word's original spelling. strings.Fields would split `--model 'a b'`
+// into three, and dropping the flag would then leave half its value behind as an
+// argument of its own. A backslash escapes the next byte except inside single
+// quotes, where it is literal. open is true when the last word's quote never closes.
+func shellFields(rest string) (fields []string, open bool) {
 	var word strings.Builder
-	var quote rune
-	started := false
-	for _, r := range rest {
+	var quote byte
+	started, escaped := false, false
+	for i := 0; i < len(rest); i++ {
+		c := rest[i]
 		switch {
+		case escaped:
+			word.WriteByte(c)
+			escaped = false
+		case c == '\\' && quote != '\'':
+			word.WriteByte(c)
+			escaped = true
+			started = true
 		case quote != 0:
-			word.WriteRune(r)
-			if r == quote {
+			word.WriteByte(c)
+			if c == quote {
 				quote = 0
 			}
-		case r == '\'' || r == '"':
-			quote = r
-			word.WriteRune(r)
+		case c == '\'' || c == '"':
+			quote = c
+			word.WriteByte(c)
 			started = true
-		case r == ' ' || r == '\t':
+		case c == ' ' || c == '\t':
 			if started {
 				fields = append(fields, word.String())
 				word.Reset()
 				started = false
 			}
 		default:
-			word.WriteRune(r)
+			word.WriteByte(c)
 			started = true
 		}
 	}
 	if started {
 		fields = append(fields, word.String())
 	}
-	return fields
+	return fields, quote != 0
 }

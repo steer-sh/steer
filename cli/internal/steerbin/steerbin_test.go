@@ -175,3 +175,90 @@ func TestAnUnencodablePathLeavesTheRegistrationAlone(t *testing.T) {
 		t.Fatalf("an unreadable command resolved to %q, want %q", got, Unknown)
 	}
 }
+
+// TestStripFlagsReadsAQuotedApostropheAsOneWord: Quote closes, escapes and reopens
+// around an embedded quote, and misreading that splits the argument and hides the
+// flags after it.
+func TestStripFlagsReadsAQuotedApostropheAsOneWord(t *testing.T) {
+	arg := Quote("it's a b")
+	cases := []struct {
+		name    string
+		command string
+		want    string
+	}{
+		{
+			name:    "a flag after the argument",
+			command: "steer commit-gate review --note " + arg + " --model x --harness codex",
+			want:    "steer commit-gate review --note " + arg + " --harness codex",
+		},
+		{
+			name:    "the flag's own value",
+			command: "steer commit-gate review --model " + arg + " --harness codex",
+			want:    "steer commit-gate review --harness codex",
+		},
+		{
+			name:    "the equals form",
+			command: "steer commit-gate review --model=" + arg + " --harness codex",
+			want:    "steer commit-gate review --harness codex",
+		},
+		{
+			name:    "an escaped space outside quotes",
+			command: `steer commit-gate review --model a\ b --harness codex`,
+			want:    `steer commit-gate review --harness codex`,
+		},
+		{
+			name:    "an escaped quote inside double quotes",
+			command: `steer commit-gate review --note "a\" b" --model x`,
+			want:    `steer commit-gate review --note "a\" b"`,
+		},
+		{
+			name:    "a backslash inside single quotes is literal",
+			command: `steer commit-gate review --note 'a\' --model x`,
+			want:    `steer commit-gate review --note 'a\'`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := StripFlags(tc.command, "--model"); got != tc.want {
+				t.Fatalf("StripFlags = %q, want %q", got, tc.want)
+			}
+			if !HasFlags(tc.command, "--model") {
+				t.Fatal("the flag must read as present")
+			}
+		})
+	}
+}
+
+// TestStripFlagsKeepsAWordWhoseQuoteNeverCloses: such a word may hold later flags,
+// so a flag that would drop it leaves the command alone. A flag before it still goes,
+// because a shell runs an apostrophe in a comment.
+func TestStripFlagsKeepsAWordWhoseQuoteNeverCloses(t *testing.T) {
+	for _, command := range []string{
+		"steer commit-gate review --model 'a b --harness codex",
+		`steer commit-gate review --model "a b --harness codex`,
+		"steer commit-gate review --model='a b --harness codex",
+	} {
+		if got := StripFlags(command, "--model"); got != command {
+			t.Fatalf("StripFlags(%q) = %q", command, got)
+		}
+	}
+	command := "steer commit-gate review --model x # user's hook"
+	want := "steer commit-gate review # user's hook"
+	if got := StripFlags(command, "--model"); got != want {
+		t.Fatalf("StripFlags(%q) = %q, want %q", command, got, want)
+	}
+}
+
+// TestStripFlagsReadsATrailingBackslashAsPartOfItsWord: a shell runs a command ending
+// in a backslash, so it ends its word and nothing is left unterminated.
+func TestStripFlagsReadsATrailingBackslashAsPartOfItsWord(t *testing.T) {
+	cases := map[string]string{
+		`steer commit-gate review --model x --note a\`: `steer commit-gate review --note a\`,
+		`steer commit-gate review --note b --model a\`: `steer commit-gate review --note b`,
+	}
+	for command, want := range cases {
+		if got := StripFlags(command, "--model"); got != want {
+			t.Fatalf("StripFlags(%q) = %q, want %q", command, got, want)
+		}
+	}
+}
