@@ -54,10 +54,18 @@ const (
 	VerdictUnavailable = "unavailable"
 )
 
-// FileDigest is one detector file and the SHA-256 of its bytes.
+// FileDigest is one detector file, the SHA-256 of its bytes and its executable
+// bit. Only that bit of the mode counts: it selects the interpreter, while the
+// rest of a mode varies with the umask of the checkout.
 type FileDigest struct {
-	Path   string `json:"path"`
-	SHA256 string `json:"sha256"`
+	Path       string `json:"path"`
+	SHA256     string `json:"sha256"`
+	Executable bool   `json:"executable,omitempty"`
+}
+
+// digestLine is the file's contribution to a detector digest.
+func (f FileDigest) digestLine() string {
+	return fmt.Sprintf("%s\x00%s\x00%t\n", f.Path, f.SHA256, f.Executable)
 }
 
 // Detector is the tracked inputs of a check and one digest over all of them.
@@ -106,7 +114,11 @@ func inputDigests(root, id string, paths []string) ([]FileDigest, error) {
 	var out []FileDigest
 	for _, p := range sorted {
 		full := filepath.Join(root, filepath.FromSlash(p))
-		if info, err := os.Stat(full); err == nil && info.IsDir() {
+		info, err := os.Stat(full)
+		if err != nil {
+			return nil, fmt.Errorf("check %s: detector input %s: %w", id, p, err)
+		}
+		if info.IsDir() {
 			return nil, fmt.Errorf("check %s: detector input %s is a directory: declare each file it holds", id, p)
 		}
 		data, err := os.ReadFile(full)
@@ -114,7 +126,7 @@ func inputDigests(root, id string, paths []string) ([]FileDigest, error) {
 			return nil, fmt.Errorf("check %s: detector input %s: %w", id, p, err)
 		}
 		sum := sha256.Sum256(data)
-		out = append(out, FileDigest{Path: p, SHA256: hex.EncodeToString(sum[:])})
+		out = append(out, FileDigest{Path: p, SHA256: hex.EncodeToString(sum[:]), Executable: executableMode(info.Mode())})
 	}
 	return out, nil
 }
@@ -132,7 +144,7 @@ func DetectorOf(root string, d Declaration) (Detector, error) {
 	}
 	all := sha256.New()
 	for _, fd := range files {
-		fmt.Fprintf(all, "%s\x00%s\n", fd.Path, fd.SHA256)
+		fmt.Fprint(all, fd.digestLine())
 	}
 	return Detector{Digest: hex.EncodeToString(all.Sum(nil)), Files: files}, nil
 }
