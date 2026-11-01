@@ -249,15 +249,10 @@ func InstallManagedHook(scope string, input InstallManagedHookInput, targets ...
 	// One file backs one id. Two ids sharing a file leave the second install's
 	// content under both names, and a removal of either deletes the file the
 	// other's manifest entry still points at.
-	for otherName, otherEntry := range manifest.Hooks {
-		if otherName == hookName {
-			continue
-		}
-		if strings.TrimSpace(otherEntry.File) == fileName {
-			return nil, fmt.Errorf("hook file %q already belongs to %q in the %s store. "+
-				"Remove it with `steer remove %s`, or name the file differently",
-				fileName, otherName, scope, otherName)
-		}
+	if otherName := fileOwner(manifest, hookName, fileName); otherName != "" {
+		return nil, fmt.Errorf("hook file %q already belongs to %q in the %s store. "+
+			"Remove it with `steer remove %s`, or name the file differently",
+			fileName, otherName, scope, otherName)
 	}
 
 	existingEntry, manifestExists := manifest.Hooks[hookName]
@@ -267,7 +262,7 @@ func InstallManagedHook(scope string, input InstallManagedHookInput, targets ...
 		if err != nil {
 			return nil, err
 		}
-		if previousFile != fileName {
+		if previousFile != fileName && fileOwner(manifest, hookName, previousFile) == "" {
 			previousPath = filepath.Join(hooksDir, previousFile)
 			if info, err := os.Lstat(previousPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
 				return nil, fmt.Errorf("%s is a symlink; the guard store replaces only its own files", previousPath)
@@ -348,9 +343,91 @@ func InstallManagedHook(scope string, input InstallManagedHookInput, targets ...
 	return result, nil
 }
 
+// fileOwner returns the lowest manifest id other than except whose entry owns
+// file, or "". An entry with no File owns <key>.py. LoadManifest has already
+// rejected a malformed entry, so one cannot hide an owner here.
+func fileOwner(manifest *Manifest, except, file string) string {
+	owner := ""
+	for name, entry := range manifest.Hooks {
+		if name == except {
+			continue
+		}
+		owned, err := hookstore.EntryFileName(hookstore.ManifestName, name, entry.File)
+		if err == nil && owned == file && (owner == "" || name < owner) {
+			owner = name
+		}
+	}
+	return owner
+}
+
+// RefuseHookRekey reports why RekeyManagedHook cannot give the guard from the id
+// to and the file fileName.
+func RefuseHookRekey(scope, from, to, fileName string) error {
+	manifest, err := LoadManifest(scope)
+	if err != nil {
+		return err
+	}
+	if _, ok := manifest.Hooks[from]; !ok {
+		return fmt.Errorf("hook not found in the %s store: %s", scope, from)
+	}
+	_, hookTaken := manifest.Hooks[to]
+	_, ruleTaken := manifest.Rules[to]
+	_, addendumTaken := manifest.Addendum[to]
+	if hookTaken || ruleTaken || addendumTaken {
+		return fmt.Errorf("cannot rename guard %q: %q is already in use in the %s store", from, to, scope)
+	}
+	if owner := fileOwner(manifest, from, fileName); owner != "" {
+		return fmt.Errorf("cannot rename guard %q: hook file %q belongs to %q in the %s store", from, fileName, owner, scope)
+	}
+	return nil
+}
+
+// RekeyManagedHook moves a guard's manifest entry and fixtures to a new id in one
+// manifest write. It deletes nothing the guard needs: the entry keeps naming the
+// same file, so the guard stays installed whatever follows.
+func RekeyManagedHook(scope, from, to, fileName string) error {
+	if err := RefuseHookRekey(scope, from, to, fileName); err != nil {
+		return err
+	}
+	hooksDir, err := GetHooksDir(scope)
+	if err != nil {
+		return err
+	}
+	fixtures, hasFixtures, err := fixture.Load(hooksDir, from)
+	if err != nil {
+		return err
+	}
+	if hasFixtures {
+		fixtures.Hook = to
+		if err := fixture.Save(hooksDir, fixtures); err != nil {
+			return err
+		}
+	}
+	manifest, err := LoadManifest(scope)
+	if err != nil {
+		return err
+	}
+	entry := manifest.Hooks[from]
+	// An entry with no File owns <key>.py, so the new key must name it outright.
+	entry.File, err = hookstore.EntryFileName(hookstore.ManifestName, from, entry.File)
+	if err != nil {
+		return err
+	}
+	// The master still carries the old id, so the moved entry reads as drift until
+	// a reinstall writes a whole entry and rebuilds the master.
+	entry.SourceVersion = ""
+	manifest.Hooks[to] = entry
+	delete(manifest.Hooks, from)
+	if err := SaveManifest(scope, manifest); err != nil {
+		return err
+	}
+	return RemoveFixtures(scope, from)
+}
+
 // RemoveManagedHook archives one hook, deletes it and re-syncs all managed
 // artifacts. The hook is deleted only after its archive entry is in place, so a
-// failed archive write leaves the hook installed.
+// failed archive write leaves the hook installed. A file another entry also owns
+// stays in the store for that entry.
 func RemoveManagedHook(scope, identifier string, opts RemoveOptions, targets ...harness.Registrar) (*RemoveManagedHookResult, error) {
 	scope = strings.ToLower(strings.TrimSpace(scope))
 	if err := ValidateScope(scope); err != nil {
@@ -375,13 +452,23 @@ func RemoveManagedHook(scope, identifier string, opts RemoveOptions, targets ...
 	var manifestEntry ManifestEntry
 	var hasEntry bool
 
-	if resolved, err := ResolveHook(scope, trimmedID); err == nil {
+	// An exact manifest key names its own entry, even when another guard's file
+	// has that stem.
+	_, keyed := manifest.Hooks[trimmedID]
+	resolved, err := HookFile{}, fmt.Errorf("hook not found: %s", identifier)
+	if !keyed {
+		resolved, err = ResolveHook(scope, trimmedID)
+	}
+	if err == nil {
 		hookName = resolved.Name
 		hookFile = resolved.FileName
 		hookPath = resolved.Path
 		manifestEntry, hasEntry = manifest.Hooks[hookName]
 	} else {
 		hookName = normalizeHookName(trimmedID)
+		if keyed {
+			hookName = trimmedID
+		}
 		if hookName == "" {
 			return nil, err
 		}
@@ -428,8 +515,10 @@ func RemoveManagedHook(scope, identifier string, opts RemoveOptions, targets ...
 		}
 	}
 
-	if err := os.Remove(hookPath); err != nil && !os.IsNotExist(err) {
-		return nil, fmt.Errorf("failed to delete hook file: %w", err)
+	if fileOwner(manifest, hookName, hookFile) == "" {
+		if err := os.Remove(hookPath); err != nil && !os.IsNotExist(err) {
+			return nil, fmt.Errorf("failed to delete hook file: %w", err)
+		}
 	}
 
 	if err := RemoveFixtures(scope, hookName); err != nil {

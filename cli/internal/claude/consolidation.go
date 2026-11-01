@@ -115,13 +115,16 @@ func ResolveHook(scope, identifier string) (HookFile, error) {
 }
 
 // ownedHook keeps a registered guard's id when its file has a different stem.
+// Of several entries sharing a file, the one named for the stem wins, then the
+// lowest id, so one identifier always resolves to one guard.
 func ownedHook(manifest *Manifest, hook HookFile) HookFile {
-	for name, entry := range manifest.Hooks {
-		file, err := hookstore.EntryFileName("manifest", name, entry.File)
-		if err == nil && file == hook.FileName {
-			hook.Name = name
-			break
+	if _, ok := manifest.Hooks[hook.Name]; ok {
+		if file, err := hookstore.EntryFileName("manifest", hook.Name, manifest.Hooks[hook.Name].File); err == nil && file == hook.FileName {
+			return hook
 		}
+	}
+	if owner := fileOwner(manifest, "", hook.FileName); owner != "" {
+		hook.Name = owner
 	}
 	return hook
 }
