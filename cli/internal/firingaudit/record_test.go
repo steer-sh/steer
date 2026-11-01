@@ -319,3 +319,24 @@ func TestRecordKeepsWhatWasReadApartFromWhatTheLookupReached(t *testing.T) {
 		t.Error("read steps were accepted beside an uninspected continuation")
 	}
 }
+
+// Neither recorder can put a negative extent in the stream.
+func TestRecordersRefuseANegativeInspectedExtent(t *testing.T) {
+	dir := t.TempDir()
+	row := ccRow(t, "a", "2026-09-20T01:00:00Z")
+	if _, err := Record([]Row{row}, dir, Judgment{
+		FiringID: "a", Judgment: adjudication.Prevented, InspectedSteps: -1,
+	}, transcript.ContinuationBudget{}); err == nil {
+		t.Error("Record accepted a negative extent")
+	}
+	if _, err := RecordCheck([]CheckCase{mixedCase(t)}, dir, CheckJudgment{
+		RunID: "1a", InspectedSteps: -1,
+		Failures: []adjudication.Failure{{Kind: adjudication.FailureCheck, Check: "go",
+			Validity: adjudication.Valid, Attribution: adjudication.Introduced}},
+	}, transcript.ContinuationBudget{}); err == nil {
+		t.Error("RecordCheck accepted a negative extent")
+	}
+	if stored, _ := adjudication.Load(dir); len(stored) != 0 {
+		t.Errorf("the stream holds %+v", stored)
+	}
+}
