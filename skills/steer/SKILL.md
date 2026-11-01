@@ -2,7 +2,7 @@
 name: steer
 description: Turns a natural-language rule into the fix that can enforce it — a repository check, a PreToolUse Python guard, or an instruction rule — and installs it. Use when enforcing coding standards, blocking insecure patterns, making sure checks pass before a turn ends, managing hook lifecycle, or running steer CLI commands (register, remove, list, test, preset, verify, git-hooks).
 user-invocable: true
-prompt_version: 22
+prompt_version: 23
 compatibility: Requires Claude Code or Codex with tool-call hook support. Hooks are installed into .steer/hooks/ and registered in every installed harness (settings.json for Claude Code, hooks.json for Codex). steer CLI must be available on PATH or bundled under scripts/.
 allowed-tools: Bash(steer *), Bash(python3 *), Bash(echo *), Read, Write, Edit
 ---
@@ -523,6 +523,13 @@ Expected: no stdout, exit code 0
 - If blocking f-string SQL, a negative test MUST include parameterized queries that still use f-strings for table names (a common safe pattern)
 
 The hardest bugs to find are false positives on safe code that *looks* like the dangerous pattern. Your negative tests must exercise this boundary.
+
+**If the guard remembers that a variable is safe, a positive test MUST rebind that variable to unproven data before the dangerous use.** For a `shell=True` rule:
+```python
+quoted = shlex.quote(user_input)
+quoted = input()
+subprocess.run(f"git clone {quoted}", shell=True)
+```
 
 **If the rule uses `|` suggestion syntax**, add one test that verifies the `stopReason` output contains the user's suggestion text. Pipe a positive test case and check that the JSON output includes the suggestion. The user chose those words deliberately — the stopReason must include them.
 

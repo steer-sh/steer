@@ -266,6 +266,8 @@ test_cases:
         description: "Python code with command injection vulnerabilities"
       - path: "shell_script_injection.py"
         description: "Python code with unsafe shell command execution"
+      - path: "python_stale_quoting_proof.py"
+        description: "Python code that quotes a variable, rebinds it, then runs it with shell=True"
     negative_files:
       - path: "python_safe_commands.py"
         description: "Python code with safe command execution practices"

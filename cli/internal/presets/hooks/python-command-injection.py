@@ -47,9 +47,28 @@ class CommandInjectionVisitor(ast.NodeVisitor):
         self._forget(node.arg)
         self.generic_visit(node)
 
-    def visit_ExceptHandler(self, node):
+    def _visit_named_binding(self, node):
+        # These nodes bind a name held as a string, not as a Name node
         if node.name:
             self._forget(node.name)
+        self.generic_visit(node)
+
+    visit_ExceptHandler = _visit_named_binding
+    visit_MatchAs = _visit_named_binding
+    visit_MatchStar = _visit_named_binding
+
+    def _visit_definition(self, node):
+        # Decorators and defaults run before the name binds; forgetting last also ends any proof the body made
+        self.generic_visit(node)
+        self._forget(node.name)
+
+    visit_FunctionDef = _visit_definition
+    visit_AsyncFunctionDef = _visit_definition
+    visit_ClassDef = _visit_definition
+
+    def visit_MatchMapping(self, node):
+        if node.rest:
+            self._forget(node.rest)
         self.generic_visit(node)
 
     def visit_Assign(self, node):
@@ -76,6 +95,14 @@ class CommandInjectionVisitor(ast.NodeVisitor):
     def visit_NamedExpr(self, node):
         self.visit(node.value)
         self.visit(node.target)
+
+    def visit_AnnAssign(self, node):
+        # A bare annotation binds nothing; otherwise the target binds before it runs
+        if node.value is not None:
+            self.visit(node.value)
+        if node.value is not None or not isinstance(node.target, ast.Name):
+            self.visit(node.target)
+        self.visit(node.annotation)
 
     def _is_shlex_quote_call(self, node):
         if isinstance(node, ast.Call):
