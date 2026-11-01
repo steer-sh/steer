@@ -78,7 +78,7 @@ func analyzeGoTest(root string, d Declaration) (goDetector, error) {
 		if err != nil {
 			return goDetector{}, err
 		}
-		f, err := parser.ParseFile(fset, e.Name(), src, parser.SkipObjectResolution|parser.ParseComments)
+		f, err := parser.ParseFile(fset, e.Name(), src, parser.ParseComments)
 		if err != nil {
 			return goDetector{}, fmt.Errorf("check %s: %w", d.ID, err)
 		}
@@ -103,6 +103,7 @@ func analyzeGoTest(root string, d Declaration) (goDetector, error) {
 	siblingNames := map[string]bool{}
 	var decls []goDecl
 	fileImports := map[string]map[string]string{}
+	fileMisnamed := map[string][]string{}
 	for _, f := range files {
 		if f.file.Name.Name != pkgName {
 			for _, decl := range f.file.Decls {
@@ -113,6 +114,7 @@ func analyzeGoTest(root string, d Declaration) (goDetector, error) {
 			continue
 		}
 		fileImports[f.name] = importNames(f.file)
+		fileMisnamed[f.name] = misnamedImports(f.file)
 		prevEnd := f.file.Name.End()
 		for _, decl := range f.file.Decls {
 			leadFrom := prevEnd
@@ -145,6 +147,7 @@ func analyzeGoTest(root string, d Declaration) (goDetector, error) {
 	pkgImport, modErr := packageImportPath(root, d.Package)
 	det := goDetector{pkgName: pkgName, imports: map[string]string{}}
 	unresolved := map[string]bool{}
+	var collision error
 	if modErr != nil {
 		unresolved["module path: "+modErr.Error()] = true
 	}
@@ -178,8 +181,12 @@ func analyzeGoTest(root string, d Declaration) (goDetector, error) {
 		visit = func(n ast.Node) bool {
 			switch x := n.(type) {
 			case *ast.SelectorExpr:
-				if id, ok := x.X.(*ast.Ident); ok {
+				// The parser binds locals and same-file declarations, never an import.
+				if id, ok := x.X.(*ast.Ident); ok && id.Obj == nil {
 					if p, isImport := imports[id.Name]; isImport {
+						if other, taken := det.imports[id.Name]; taken && other != p && collision == nil {
+							collision = fmt.Errorf("check %s: the generated test file cannot hold %s as both %s and %s; alias one import in the test files", d.ID, id.Name, other, p)
+						}
 						det.imports[id.Name] = p
 						switch {
 						case p == pkgImport && siblingNames[x.Sel.Name]:
@@ -188,6 +195,11 @@ func analyzeGoTest(root string, d Declaration) (goDetector, error) {
 							unresolved["import "+p] = true
 						}
 						return false
+					}
+					if len(byName[id.Name]) == 0 {
+						for _, p := range fileMisnamed[gd.file] {
+							unresolved[fmt.Sprintf("import %s (its package name differs from its path; alias it)", p)] = true
+						}
 					}
 				}
 				// A test-side method may sit on a production type, which no
@@ -214,6 +226,9 @@ func analyzeGoTest(root string, d Declaration) (goDetector, error) {
 				unresolved[fmt.Sprintf("embed pattern %q (declare the files it matches with --input)", strings.TrimPrefix(p, "all:"))] = true
 			}
 		}
+	}
+	if collision != nil {
+		return goDetector{}, collision
 	}
 	for _, f := range files {
 		if f.file.Name.Name != pkgName {
@@ -311,6 +326,25 @@ func importNames(f *ast.File) map[string]string {
 		names[name] = p
 	}
 	return names
+}
+
+// misnamedImports returns the unnamed imports the file never refers to by their
+// assumed name. A file must use each import, so their package names differ.
+func misnamedImports(f *ast.File) []string {
+	used := map[string]bool{}
+	for _, id := range f.Unresolved {
+		used[id.Name] = true
+	}
+	var paths []string
+	for _, imp := range f.Imports {
+		if imp.Name != nil {
+			continue
+		}
+		if p, err := strconv.Unquote(imp.Path.Value); err == nil && !used[assumedName(p)] {
+			paths = append(paths, p)
+		}
+	}
+	return paths
 }
 
 // assumedName is the package name an unnamed import is referred to by, under

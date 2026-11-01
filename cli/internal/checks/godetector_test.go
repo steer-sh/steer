@@ -363,3 +363,117 @@ func TestAGoEmbedPatternIsADetectorInput(t *testing.T) {
 		t.Errorf("unresolved %q; want the pattern inside the group named", got)
 	}
 }
+
+// A local, parameter or later binding named after an import is not that import:
+// the generated file builds, a test-side method is still reached through it, and
+// the name adds no untracked entry. A read before the binding is the import.
+func TestALocalNamedAfterAnImportIsNotThatImport(t *testing.T) {
+	src := readTestdata(t, "shadow_test.go.txt")
+	root := goCheckRepo(t, src)
+	if _, _, err := Init(root); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	d := Declaration{ID: "shadowed", Kind: KindGoTest, Package: "svc/resp", Test: "TestShadowed"}
+	gd, err := analyzeGoTest(root, d)
+	if err != nil {
+		t.Fatalf("analyzeGoTest: %v", err)
+	}
+	if text := string(gd.source()); strings.Contains(text, "net/url") || strings.Contains(text, "example.com/dep") {
+		t.Errorf("generated file imports a shadowed name:\n%s", text)
+	}
+	if len(gd.unresolved) != 0 {
+		t.Errorf("unresolved %q; want none", gd.unresolved)
+	}
+	writeCases(t, root, d.ID,
+		respCase("fixed", 0, "", respProduction),
+		respCase("omits-id", 1, "missing field id", "package resp\n\nfunc Response() string { return `{\"name\": 1}` }\n"))
+	if run, err := Add(root, d); err != nil {
+		t.Fatalf("Add: %v (cases %+v)", err, run.Cases)
+	}
+
+	rebinds, err := analyzeGoTest(root, Declaration{ID: "r", Kind: KindGoTest, Package: "svc/resp", Test: "TestRebinds"})
+	if err != nil {
+		t.Fatalf("analyzeGoTest: %v", err)
+	}
+	if !strings.Contains(string(rebinds.source()), `url "net/url"`) {
+		t.Errorf("the read before the binding lost its import:\n%s", rebinds.source())
+	}
+
+	method, err := analyzeGoTest(root, Declaration{ID: "m", Kind: KindGoTest, Package: "svc/resp", Test: "TestShadowedMethod"})
+	if err != nil {
+		t.Fatalf("analyzeGoTest: %v", err)
+	}
+	if !strings.Contains(string(method.source()), "reached()") {
+		t.Errorf("the method called through the local is not tracked:\n%s", method.source())
+	}
+}
+
+// One local name bound to two packages by the tracked declarations' files cannot
+// share a generated file, so analysis refuses and names both. A name only one
+// tracked file uses, or two names for one package, is ordinary.
+func TestALocalNameMeaningTwoPackagesIsRefused(t *testing.T) {
+	helper := func(name, imp, call string) string {
+		return "package resp\n\nimport \"" + imp + "\"\n\nfunc " + name + "() { " + call + " }\n"
+	}
+	const test = "package resp\n\nimport \"testing\"\n\nfunc TestBoth(t *testing.T) { first(); second() }\n\nfunc TestFirst(t *testing.T) { first() }\n"
+	root := t.TempDir()
+	writeFile(t, root, "svc/go.mod", respGoMod)
+	writeFile(t, root, "svc/resp/resp_test.go", test)
+	writeFile(t, root, "svc/resp/a_test.go", helper("first", "math/rand", "rand.Read(nil)"))
+	writeFile(t, root, "svc/resp/b_test.go", helper("second", "crypto/rand", "rand.Read(nil)"))
+
+	_, err := DetectorOf(root, Declaration{ID: "both", Kind: KindGoTest, Package: "svc/resp", Test: "TestBoth"})
+	if err == nil || !strings.Contains(err.Error(), "math/rand") || !strings.Contains(err.Error(), "crypto/rand") {
+		t.Fatalf("err %v; want a refusal naming both packages", err)
+	}
+
+	gd, err := analyzeGoTest(root, Declaration{ID: "first", Kind: KindGoTest, Package: "svc/resp", Test: "TestFirst"})
+	if err != nil {
+		t.Fatalf("one tracked meaning refused: %v", err)
+	}
+	if !strings.Contains(string(gd.source()), `rand "math/rand"`) {
+		t.Errorf("generated file lacks the one meaning:\n%s", gd.source())
+	}
+
+	writeFile(t, root, "svc/resp/b_test.go", helper("second", "math/rand", "rand.Read(nil)"))
+	if _, err := DetectorOf(root, Declaration{ID: "both", Kind: KindGoTest, Package: "svc/resp", Test: "TestBoth"}); err != nil {
+		t.Fatalf("one package imported twice refused: %v", err)
+	}
+}
+
+// An unnamed import its assumed name never refers to has another package name,
+// which analysis cannot read, so the generated file omits it and the import is
+// named once a tracked selector has a base nothing else explains.
+func TestAnImportWithAnotherPackageNameIsNamed(t *testing.T) {
+	const imp = "example.com/svc/lib"
+	src := func(body string) string {
+		return "package resp\n\nimport (\n\t\"testing\"\n\n\t\"" + imp + "\"\n)\n\nvar local struct{ X int }\n\n" +
+			"func TestUses(t *testing.T) { " + body + " }\n\nfunc TestSpare(t *testing.T) { other.Do() }\n"
+	}
+	root := t.TempDir()
+	writeFile(t, root, "svc/go.mod", respGoMod)
+	d := Declaration{ID: "uses", Kind: KindGoTest, Package: "svc/resp", Test: "TestUses"}
+	unresolved := func(body string) string {
+		t.Helper()
+		writeFile(t, root, "svc/resp/resp_test.go", src(body))
+		gd, err := analyzeGoTest(root, d)
+		if err != nil {
+			t.Fatalf("analyzeGoTest: %v", err)
+		}
+		return strings.Join(gd.unresolved, "|")
+	}
+	if got := unresolved("other.Do()"); !strings.Contains(got, imp) {
+		t.Errorf("unresolved %q; want the import named", got)
+	}
+	if got := unresolved("t.Log(local.X)"); got != "" {
+		t.Errorf("no unexplained base: unresolved %q; want none", got)
+	}
+	writeFile(t, root, "svc/resp/resp_test.go", "package resp\n\nimport (\n\t\"testing\"\n\n\t\"net/http\"\n)\n\nfunc TestUses(t *testing.T) { prod.Do(); _ = http.NoBody }\n")
+	gd, err := analyzeGoTest(root, d)
+	if err != nil {
+		t.Fatalf("analyzeGoTest: %v", err)
+	}
+	if len(gd.unresolved) != 0 {
+		t.Errorf("a used import was named: %q", gd.unresolved)
+	}
+}

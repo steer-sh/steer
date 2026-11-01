@@ -1,0 +1,46 @@
+package resp
+
+import (
+	"net/url"
+	"strings"
+	"testing"
+
+	"example.com/dep"
+)
+
+type page struct{ Path string }
+
+type shadowClient struct{}
+
+// TestShadowed names local bindings after imports; neither package is needed.
+func TestShadowed(t *testing.T) {
+	url := page{Path: Response()}
+	if !strings.Contains(url.Path, `"id"`) {
+		t.Error("missing field id")
+	}
+	func(dep page) {
+		if dep.Path == "" {
+			t.Error("empty path")
+		}
+	}(url)
+}
+
+// TestRebinds reads the import before a local takes its name.
+func TestRebinds(t *testing.T) {
+	url, err := url.Parse("http://example.com/p")
+	if err != nil || url.Path != "/p" {
+		t.Error("parse")
+	}
+}
+
+// TestShadowedMethod reaches a test-side method through a shadowing local.
+func TestShadowedMethod(t *testing.T) {
+	var url shadowClient
+	url.reached()
+}
+
+func (shadowClient) reached() {}
+
+func TestUntracked(t *testing.T) {
+	_, _ = url.Parse(dep.Base)
+}
