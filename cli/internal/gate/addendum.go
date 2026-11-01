@@ -195,18 +195,25 @@ func pendingProjectAddendumNotice(repo string, reviewed Addendum, reviewedPaths 
 		strings.Join(parts, "; "))
 	if !onlyManifests(reviewedPaths) {
 		notice += fmt.Sprintf(" To apply these changes before reviewing the code, stage only "+
-			"the intended changes to %s, commit with no paths or `-a`, then restage the code.", manifest)
+			"the intended changes to %s at the repository root, commit with no paths or `-a`, then restage the code.", manifest)
 	}
 	return notice
 }
 
-// workingTreeProjectAddendum reads the project manifest on disk, neutral store first,
-// falling back to legacy only when the neutral file does not exist. No manifest in
-// either store is an empty addendum; any other read or parse failure is not ok.
+// workingTreeProjectAddendum reads the project manifest at the work-tree root of the
+// repository holding repo, neutral store first, falling back to legacy only when the
+// neutral file does not exist. No manifest in either store is an empty addendum; a
+// root git cannot resolve, or any other read or parse failure, is not ok. The returned
+// path is root-relative.
 func workingTreeProjectAddendum(repo string) (map[string]string, string, bool) {
+	out, ok := Git(repo, gitShort, "rev-parse", "--show-toplevel")
+	root := strings.TrimSuffix(out, "\n")
+	if !ok || root == "" {
+		return nil, "", false
+	}
 	paths := projectManifestPaths()
 	for _, path := range paths {
-		data, err := os.ReadFile(filepath.Join(repo, filepath.FromSlash(path)))
+		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}

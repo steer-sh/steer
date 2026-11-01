@@ -297,3 +297,75 @@ func TestTheProjectAddendumIsReadFromASubdirectory(t *testing.T) {
 		t.Fatalf("entries = %v, want the committed entry", got)
 	}
 }
+
+func addendumSubdir(t *testing.T, repo string) string {
+	t.Helper()
+	sub := filepath.Join(repo, "cli", "internal")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return sub
+}
+
+// A commit from a subdirectory compares the same manifest HEAD holds, so an unchanged
+// addendum reads as unchanged.
+func TestASubdirectoryCommitGetsNoFalseAddendumNotice(t *testing.T) {
+	repo := committedAddendumRepo(t, map[string]string{"a": "entry"})
+	sub := addendumSubdir(t, repo)
+	if got := pendingProjectAddendumNotice(sub, LoadAddendum(sub), []string{"a.py"}); got != "" {
+		t.Fatalf("notice = %q, want none for an unchanged addendum", got)
+	}
+}
+
+// A real change seen from a subdirectory names the root-relative manifest, and the
+// root-relative reviewed paths still match it.
+func TestASubdirectoryCommitNamesARealAddendumChange(t *testing.T) {
+	repo := committedAddendumRepo(t, map[string]string{"a": "old"})
+	sub := addendumSubdir(t, repo)
+	const manifest = ".steer/hooks/steer-manifest.json"
+	writeFileAt(t, repo, manifest, addendumManifest(t, map[string]string{"a": "new"}))
+
+	got := pendingProjectAddendumNotice(sub, LoadAddendum(sub), []string{"a.py"})
+	if !strings.Contains(got, `changed: "a"`) || !strings.Contains(got, "stage only the intended changes to "+manifest+" at the repository root") {
+		t.Fatalf("notice = %q, want the change and the root-relative manifest", got)
+	}
+	got = pendingProjectAddendumNotice(sub, LoadAddendum(sub), []string{manifest})
+	if !strings.Contains(got, `changed: "a"`) || strings.Contains(got, "restage") {
+		t.Fatalf("notice = %q, want the change without the recovery step", got)
+	}
+}
+
+func TestThePendingAddendumIsReadFromASubdirectory(t *testing.T) {
+	repo := committedAddendumRepo(t, map[string]string{"a": "entry"})
+	a := PendingAddendum(addendumSubdir(t, repo))
+	if got := entryTexts(a); len(got) != 1 || got[0] != "project:a:entry" || len(a.Errors) != 0 {
+		t.Fatalf("addendum = %#v", a)
+	}
+}
+
+// Whitespace in the root's name is part of the path git reports.
+func TestARepositoryRootEndingInASpaceKeepsItsManifest(t *testing.T) {
+	repo := committedAddendumRepo(t, map[string]string{"a": "entry"})
+	spaced := repo + " "
+	if err := os.Rename(repo, spaced); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(spaced) })
+	sub := addendumSubdir(t, spaced)
+	if got := pendingProjectAddendumNotice(sub, LoadAddendum(sub), []string{"a.py"}); got != "" {
+		t.Fatalf("notice = %q, want none for an unchanged addendum", got)
+	}
+}
+
+// With no repository root there is no known manifest location, which is not the same
+// as a repository holding no manifest.
+func TestAnUnresolvedRootIsNotAnEmptyAddendum(t *testing.T) {
+	dir := t.TempDir()
+	writeFileAt(t, dir, ".steer/hooks/steer-manifest.json", addendumManifest(t, map[string]string{"a": "entry"}))
+	if texts, _, ok := workingTreeProjectAddendum(dir); ok {
+		t.Fatalf("texts = %v, want not ok outside a repository", texts)
+	}
+	if a := PendingAddendum(dir); !a.projectUnread || len(a.Entries) != 0 {
+		t.Fatalf("addendum = %#v, want the project store unread", a)
+	}
+}
