@@ -286,6 +286,30 @@ func TestRemoveRefusesALinkedArchive(t *testing.T) {
 	}
 }
 
+// A manifest linked out of the repository is refused before the archive is
+// written, so no entry records a removal of a check that stays declared.
+func TestRemoveOfALinkedManifestArchivesNothing(t *testing.T) {
+	root := checkRepo(t, noCountScript)
+	writeCases(t, root, "no-count", goodCase(), defectCase("literal test count"))
+	if _, err := Add(root, noCount); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	outside := filepath.Join(t.TempDir(), ManifestName)
+	if err := os.Rename(ManifestPath(root), outside); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, ManifestPath(root)); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := Remove(root, "no-count", ""); err == nil {
+		t.Fatal("Remove accepted a manifest outside the repository")
+	}
+	if entries, err := os.ReadDir(filepath.Join(Dir(root), archive.DirName)); err == nil && len(entries) != 0 {
+		t.Fatalf("Remove archived %d entries for a check that stays declared", len(entries))
+	}
+}
+
 // Removing a check archives its declaration with the reason.
 func TestRemoveArchivesTheDeclaration(t *testing.T) {
 	root := checkRepo(t, noCountScript)

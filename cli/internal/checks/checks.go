@@ -168,7 +168,9 @@ func Load(root string) (Manifest, error) {
 }
 
 // Save validates the manifest and writes it with checks sorted by id. The write
-// replaces the file in one rename, so a reader never sees a partial manifest.
+// replaces the file in one rename, so a reader never sees a partial manifest. A
+// manifest path that resolves outside root is refused: the repository carries any
+// link on the way to it.
 func Save(root string, m Manifest) error {
 	if m.Checks == nil {
 		m.Checks = []Declaration{}
@@ -179,6 +181,9 @@ func Save(root string, m Manifest) error {
 	sort.Slice(m.Checks, func(i, j int) bool { return m.Checks[i].ID < m.Checks[j].ID })
 	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
+		return err
+	}
+	if err := refuseOutsideManifest(root); err != nil {
 		return err
 	}
 	dir := Dir(root)
@@ -199,6 +204,18 @@ func Save(root string, m Manifest) error {
 	}
 	if err := os.Rename(tmp.Name(), ManifestPath(root)); err != nil {
 		return fmt.Errorf("write check manifest: %w", err)
+	}
+	return nil
+}
+
+// refuseOutsideManifest refuses a manifest, or a directory holding it, that
+// resolves outside root. The directory is tested apart because the temporary file
+// and the rename land there wherever a link at the manifest points.
+func refuseOutsideManifest(root string) error {
+	for _, path := range []string{Dir(root), ManifestPath(root)} {
+		if !steerpath.Within(root, path) {
+			return fmt.Errorf("%s does not resolve inside %s; the check store writes only inside its repository", path, root)
+		}
 	}
 	return nil
 }
