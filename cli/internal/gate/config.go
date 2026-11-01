@@ -7,7 +7,6 @@ package gate
 import (
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -215,24 +214,6 @@ func envInt(key string) int {
 }
 
 func defaultStateDir() string { return statestore.Resolve("commit-review") }
-
-var hostSlugRe = regexp.MustCompile(`[^a-z0-9]+`)
-
-// HostID names this machine for the ledger: lowercase, alphanumerics and dashes.
-// Stamped on every row and used as the shard suffix, so a merged log can still be
-// split back into the per-machine event streams mine.py segments into chains.
-func HostID() string {
-	raw := os.Getenv("COMMIT_REVIEW_HOST")
-	if raw == "" {
-		raw, _ = os.Hostname()
-	}
-	first, _, _ := strings.Cut(strings.ToLower(raw), ".")
-	slug := strings.Trim(hostSlugRe.ReplaceAllString(first, "-"), "-")
-	if slug == "" {
-		return "unknown"
-	}
-	return slug
-}
 
 // LogFile is the per-machine ledger shard, so two hosts never append to the same
 // file and any transport can merge the shards without conflict logic.

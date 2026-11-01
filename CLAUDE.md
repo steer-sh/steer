@@ -314,6 +314,8 @@ has no mechanical pass/fail oracle for comprehension.
 
 - Operator settings: `~/.steer/config.json`; use `steer config show` to see values
   and their source. `cli/internal/settings/` owns the shared settings metadata.
+- Machine name: `~/.steer/host` (`gate.HostID`); `steer host` reads it and
+  `--former` declares a name this machine used before.
 - Evidence: `~/.steer/state/<component>/`, resolved through `statestore` with
   legacy-path fallback. Ledgers, snapshots and logs are machine-local and partial.
 - Guard/rule stores: `.steer/hooks` and `~/.steer/hooks`, resolved through

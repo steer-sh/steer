@@ -1,6 +1,9 @@
 package mine
 
-import "github.com/steer-sh/steer-cli/internal/steerpath"
+import (
+	"github.com/steer-sh/steer-cli/internal/gate"
+	"github.com/steer-sh/steer-cli/internal/steerpath"
+)
 
 // The record fields a guard-tier record binds its fix through. A record carrying
 // all of them names one guard in one store on one machine; the adapters that read
@@ -50,7 +53,7 @@ func storeOwnershipGap(fix GuardFix, ev EvidenceSet) string {
 	switch {
 	case fix.Scope == "":
 		return "the record names no store"
-	case fix.Host != "" && ev.FixtureHost != "" && fix.Host != ev.FixtureHost:
+	case fix.Host != "" && ev.FixtureHost != "" && fix.Host != ev.FixtureHost && !gate.IsFormerHost(fix.Host):
 		return "registered on host " + fix.Host +
 			"; this command reads the stores on host " + ev.FixtureHost
 	}
