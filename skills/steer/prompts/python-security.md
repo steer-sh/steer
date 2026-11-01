@@ -66,6 +66,7 @@ To detect safe quoting, check if:
 3. **The argument is a variable (Name node)** → trace the variable assignment in the same function scope; allow only if it was built from safe quoted parts
 4. If safety cannot be proven structurally, **BLOCK**
 5. Never treat naming hints (e.g., `_safe`, `_quoted`) or file-level imports as proof of safety
+6. **A proof describes one value, so rebinding the name ends it.** Forget the proof on every rebinding: plain, tuple, starred, `for`, `with`, walrus, augmented and annotated targets, `del`, parameters, `except ... as` names, imports, `def` and `class` names, and `match` captures. Keeping one proof across `x += "'"` is also wrong: a static quote character changes the quoting of every later fragment. Judge the value before binding the target, so `x = f"ls {x}"` reads the old proof. Test this through `subprocess.run(f"ls {x}", shell=True)`: `os.system(f"ls {x}")` blocks every non-literal argument whatever the proof says, so it cannot expose a stale proof.
 
 ### Reference AST Visitor
 
@@ -80,26 +81,90 @@ class CommandInjectionVisitor(ast.NodeVisitor):
 
     def visit_Import(self, node):
         for alias in node.names:
+            self._forget(alias.asname or alias.name.split('.')[0])
             if alias.name == 'shlex':
                 self.shlex_aliases.add(alias.asname or alias.name)
         self.generic_visit(node)
 
     def visit_ImportFrom(self, node):
+        for alias in node.names:
+            self._forget(alias.asname or alias.name)
         if node.module == 'shlex':
             for alias in node.names:
                 if alias.name == 'quote':
                     self.quote_aliases.add(alias.asname or alias.name)
         self.generic_visit(node)
 
+    def _forget(self, name):
+        self.safe_vars.discard(name)
+        self.literal_string_vars.discard(name)
+
+    def visit_Name(self, node):
+        # Any store or delete of a name ends what was proven about its old value
+        if isinstance(node.ctx, (ast.Store, ast.Del)):
+            self._forget(node.id)
+
+    def visit_arg(self, node):
+        self._forget(node.arg)
+        self.generic_visit(node)
+
+    def _visit_named_binding(self, node):
+        # These nodes bind a name held as a string, not as a Name node
+        if node.name:
+            self._forget(node.name)
+        self.generic_visit(node)
+
+    visit_ExceptHandler = _visit_named_binding
+    visit_MatchAs = _visit_named_binding
+    visit_MatchStar = _visit_named_binding
+
+    def _visit_definition(self, node):
+        # Decorators and defaults run before the name binds; forgetting last also ends any proof the body made
+        self.generic_visit(node)
+        self._forget(node.name)
+
+    visit_FunctionDef = _visit_definition
+    visit_AsyncFunctionDef = _visit_definition
+    visit_ClassDef = _visit_definition
+
+    def visit_MatchMapping(self, node):
+        if node.rest:
+            self._forget(node.rest)
+        self.generic_visit(node)
+
     def visit_Assign(self, node):
         """Track variables assigned from safe shell expressions."""
+        # The value runs before the targets bind, so it is visited and judged first
+        self.visit(node.value)
+        value_is_safe = self._value_is_shlex_safe(node.value)
+        value_is_static = self._is_static_string(node.value)
         for target in node.targets:
+            self.visit(target)
             if isinstance(target, ast.Name):
-                if self._value_is_shlex_safe(node.value):
+                if value_is_safe:
                     self.safe_vars.add(target.id)
-                if self._is_static_string(node.value):
+                if value_is_static:
                     self.literal_string_vars.add(target.id)
-        self.generic_visit(node)
+
+    def visit_AugAssign(self, node):
+        if not isinstance(node.target, ast.Name):
+            # A subscript or attribute target is evaluated before the value
+            self.generic_visit(node)
+            return
+        self.visit(node.value)
+        self.visit(node.target)
+
+    def visit_NamedExpr(self, node):
+        self.visit(node.value)
+        self.visit(node.target)
+
+    def visit_AnnAssign(self, node):
+        # A bare annotation binds nothing; otherwise the target binds before it runs
+        if node.value is not None:
+            self.visit(node.value)
+        if node.value is not None or not isinstance(node.target, ast.Name):
+            self.visit(node.target)
+        self.visit(node.annotation)
 
     def _is_shlex_quote_call(self, node):
         if isinstance(node, ast.Call):
