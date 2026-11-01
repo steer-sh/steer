@@ -87,6 +87,11 @@ func Remove(root, id, reason string) (Declaration, string, error) {
 	if !ok {
 		return Declaration{}, "", fmt.Errorf("%w: %s", ErrNotDeclared, id)
 	}
+	// Save refuses this path after the archive is written, which would record a
+	// removal that never happened.
+	if err := refuseOutsideManifest(root); err != nil {
+		return Declaration{}, "", err
+	}
 	raw, err := json.Marshal(d)
 	if err != nil {
 		return Declaration{}, "", err

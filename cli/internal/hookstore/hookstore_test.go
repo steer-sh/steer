@@ -631,3 +631,60 @@ func TestPrepareRefusesALinkedProjectStore(t *testing.T) {
 		})
 	}
 }
+
+// A project's .gitignore that is a symlink is refused before its target's bytes
+// can be copied into a repository file, and the link stays as the repository
+// carried it.
+func TestPrepareRefusesALinkedProjectGitignore(t *testing.T) {
+	root := projectRoot(t)
+	secret := filepath.Join(t.TempDir(), "id_rsa")
+	if err := os.WriteFile(secret, []byte("private key\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store := filepath.Join(root, ".steer", "hooks")
+	if err := os.MkdirAll(store, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(store, IgnoreName)
+	if err := os.Symlink(secret, path); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Prepare("project")
+	if err == nil {
+		t.Fatal("Prepare accepted a linked .gitignore")
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Errorf("error %q does not name %s", err, path)
+	}
+	if !isLink(path) {
+		raw, _ := os.ReadFile(path)
+		t.Fatalf("the link became a regular file holding %q", raw)
+	}
+}
+
+// A global store's .gitignore link is the operator's own, so Prepare still
+// proceeds through it.
+//
+// pins existing behaviour
+func TestPrepareAcceptsALinkedGlobalGitignore(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	store, err := Dir("global")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(store, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "ignore")
+	if err := os.WriteFile(target, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(store, IgnoreName)); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Prepare("global"); err != nil {
+		t.Fatalf("Prepare refused the operator's own link: %v", err)
+	}
+}

@@ -141,3 +141,71 @@ func TestTheGuideCoversBindingsExclusionsAndDefectCases(t *testing.T) {
 		}
 	}
 }
+
+// A repository that commits a link on the way to the check manifest cannot make
+// Save replace a manifest outside the repository.
+func TestSaveRefusesAManifestOutsideTheRepository(t *testing.T) {
+	for _, linked := range []string{".steer", filepath.Join(".steer", "checks")} {
+		t.Run(linked, func(t *testing.T) {
+			root := t.TempDir()
+			outside := t.TempDir()
+			at := filepath.Join(root, linked)
+			if err := os.MkdirAll(filepath.Dir(at), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(outside, at); err != nil {
+				t.Fatal(err)
+			}
+			rel, err := filepath.Rel(at, ManifestPath(root))
+			if err != nil {
+				t.Fatal(err)
+			}
+			target := filepath.Join(outside, rel)
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(target, []byte("theirs\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			err = Save(root, Manifest{Version: ManifestVersion})
+			if err == nil {
+				t.Fatal("Save wrote through a link out of the repository")
+			}
+			if !strings.Contains(err.Error(), root) {
+				t.Errorf("error %q does not name a path under %s", err, root)
+			}
+			if got, _ := os.ReadFile(target); string(got) != "theirs\n" {
+				t.Fatalf("the manifest outside the repository now holds %q", got)
+			}
+		})
+	}
+}
+
+// A manifest link leading back into the repository does not excuse a linked store
+// directory: the rename would still replace the link in the outside directory.
+func TestSaveRefusesALinkedStoreWhoseManifestResolvesInside(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	inside := filepath.Join(root, "inside.json")
+	if err := os.WriteFile(inside, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".steer"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, Dir(root)); err != nil {
+		t.Fatal(err)
+	}
+	placed := filepath.Join(outside, ManifestName)
+	if err := os.Symlink(inside, placed); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Save(root, Manifest{Version: ManifestVersion}); err == nil {
+		t.Fatal("Save wrote into a linked store directory")
+	}
+	if info, err := os.Lstat(placed); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("the outside manifest link was replaced: %v, %v", info, err)
+	}
+}

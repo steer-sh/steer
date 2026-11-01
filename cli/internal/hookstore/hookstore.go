@@ -128,7 +128,7 @@ func Prepare(scope string) (string, error) {
 	if err := os.MkdirAll(neutral, 0o755); err != nil {
 		return "", fmt.Errorf("failed to create hooks directory: %w", err)
 	}
-	if err := ignoreEvidence(neutral); err != nil {
+	if err := ignoreEvidence(scope, neutral); err != nil {
 		return "", fmt.Errorf("failed to write %s: %w", IgnoreName, err)
 	}
 	legacy, err := LegacyDir(scope)
@@ -184,8 +184,13 @@ func isLink(path string) bool {
 // in a row. A project store is committed with its manifest, while the evidence
 // holds this machine's blocked commands, sessions and tool inputs. An existing
 // .gitignore keeps its lines and gains only the entries no line already names.
-func ignoreEvidence(dir string) error {
+// A symlink at the path is refused under project scope: the repository carries
+// it, and reading through it would copy its target's bytes into the store.
+func ignoreEvidence(scope, dir string) error {
 	path := filepath.Join(dir, IgnoreName)
+	if strings.EqualFold(strings.TrimSpace(scope), steerpath.ProjectScope) && isLink(path) {
+		return fmt.Errorf("%s is a symlink; the guard store writes only its own files", path)
+	}
 	raw, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
 		return err
