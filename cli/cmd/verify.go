@@ -214,7 +214,7 @@ func verificationScopes(primary string, includeGlobal bool) []string {
 }
 
 func loadStagedTargets() ([]verifyTarget, error) {
-	paths, err := gitChangedFiles("diff", "--cached", "--name-only", "--diff-filter=ACMR", "-M")
+	paths, err := gitChangedFiles("diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR", "-M")
 	if err != nil {
 		return nil, err
 	}
@@ -235,7 +235,7 @@ func loadStagedTargets() ([]verifyTarget, error) {
 }
 
 func loadChangedTargets(base, head string) ([]verifyTarget, error) {
-	paths, err := gitChangedFiles("diff", "--name-only", "--diff-filter=ACMR", "-M", base, head)
+	paths, err := gitChangedFiles("diff", "--name-only", "-z", "--diff-filter=ACMR", "-M", base, head)
 	if err != nil {
 		return nil, err
 	}

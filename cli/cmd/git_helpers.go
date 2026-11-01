@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 func runGit(args ...string) (string, error) {
@@ -33,6 +34,10 @@ func gitTopLevel() (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
+// gitChangedFiles runs a git name list and returns its paths verbatim, sorted and
+// without duplicates. args must include -z and --name-only, which names a rename by
+// its destination alone. A path that is not valid UTF-8 is an error: the guard
+// payload is JSON, which would hand a guard a different name.
 func gitChangedFiles(args ...string) ([]string, error) {
 	out, err := runGit(args...)
 	if err != nil {
@@ -41,10 +46,12 @@ func gitChangedFiles(args ...string) ([]string, error) {
 
 	seen := map[string]struct{}{}
 	paths := make([]string, 0)
-	for _, line := range strings.Split(out, "\n") {
-		path := strings.TrimSpace(line)
+	for _, path := range strings.Split(out, "\x00") {
 		if path == "" {
 			continue
+		}
+		if !utf8.ValidString(path) {
+			return nil, fmt.Errorf("cannot verify path %q: it is not valid UTF-8", path)
 		}
 		if _, ok := seen[path]; ok {
 			continue
