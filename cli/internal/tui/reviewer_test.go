@@ -151,8 +151,7 @@ func TestChangingTheCLIAsksAboutTheModelAndTheEffort(t *testing.T) {
 	}
 }
 
-// An explicit action returns a key to its default, so nobody has to learn that an
-// empty field clears it.
+// Saving an empty field returns a key to its default, and the open editor says so.
 func TestReviewerPanelReturnsAFieldToItsDefault(t *testing.T) {
 	tempSettingsHome(t)
 	if err := config.Save(config.Config{Reviewer: config.Reviewer{Model: "some-model"}}); err != nil {
@@ -160,11 +159,15 @@ func TestReviewerPanelReturnsAFieldToItsDefault(t *testing.T) {
 	}
 	m := New(gate.Defaults(), "global")
 	m.active = panelReviewer
+	m.width = 200
 	m.cursor[panelReviewer] = indexOfField(t, "reviewer.model")
 
 	m.Update(key("enter"))
+	if hint := "empty means steer default"; !strings.Contains(m.View(), hint) {
+		t.Errorf("the editor does not show %q", hint)
+	}
 	m.input.SetValue("")
-	m.Update(key("d"))
+	m.Update(key("enter"))
 
 	got, err := config.Load()
 	if err != nil {
@@ -175,6 +178,28 @@ func TestReviewerPanelReturnsAFieldToItsDefault(t *testing.T) {
 	}
 	if !strings.Contains(m.message, "Steer default") {
 		t.Errorf("the note does not name the default: %q", m.message)
+	}
+}
+
+// A typed name may begin with any letter, including on a field that starts empty.
+func TestReviewerEditorTypesANameStartingWithD(t *testing.T) {
+	tempSettingsHome(t)
+	m := New(gate.Defaults(), "global")
+	m.active = panelReviewer
+	m.cursor[panelReviewer] = indexOfField(t, "reviewer.model")
+
+	m.Update(key("enter"))
+	for _, r := range "deepseek-r1" {
+		m.Update(key(string(r)))
+	}
+	m.Update(key("enter"))
+
+	got, err := config.Load()
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if got.Reviewer.Model != "deepseek-r1" {
+		t.Errorf("the model is %q, want deepseek-r1", got.Reviewer.Model)
 	}
 }
 
