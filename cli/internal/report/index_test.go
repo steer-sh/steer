@@ -65,12 +65,13 @@ func TestIndexListsTheUserSignalsOnly(t *testing.T) {
 		t.Errorf("index carries a machine-output row or a directive:\n%s", data)
 	}
 	want := map[string]SignalSummary{
-		"user_corrections": {Signal: "user_corrections", Clusters: 2, Sessions: 2, InIndex: true},
-		"user_rejections":  {Signal: "user_rejections", Clusters: 1, Sessions: 1, InIndex: true},
-		"after_interrupt":  {Signal: "after_interrupt", Clusters: 1, Sessions: 1, InIndex: true},
-		"repeated_wording": {Signal: "repeated_wording", Clusters: 1, Sessions: 2, InIndex: true},
-		"tool_failures":    {Signal: "tool_failures", Clusters: 1, Sessions: 2},
-		"hook_blocks":      {Signal: "hook_blocks", Clusters: 1, Sessions: 1},
+		"user_corrections":      {Signal: "user_corrections", Clusters: 2, Sessions: 2, InIndex: true},
+		"user_rejections":       {Signal: "user_rejections", Clusters: 1, Sessions: 1, InIndex: true},
+		"after_interrupt":       {Signal: "after_interrupt", Clusters: 1, Sessions: 1, InIndex: true},
+		"repeated_wording":      {Signal: "repeated_wording", Clusters: 1, Sessions: 2, InIndex: true},
+		"correction_candidates": {Signal: "correction_candidates", InIndex: true},
+		"tool_failures":         {Signal: "tool_failures", Clusters: 1, Sessions: 2},
+		"hook_blocks":           {Signal: "hook_blocks", Clusters: 1, Sessions: 1},
 	}
 	if len(idx.Signals) != len(want) {
 		t.Fatalf("signals = %+v", idx.Signals)

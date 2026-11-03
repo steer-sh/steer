@@ -631,15 +631,15 @@ which pipeline produced their evidence.
 `report.json` in the steer-report state directory under a content-derived
 `report_id`, and prints the first page of an index: coverage, a summary per signal
 and per instruction document, and one row per cluster of each signal whose
-`signalList.inIndex` is set: corrections, rejections, after-interrupt messages
-and repeated wording.
+`signalList.inIndex` is set: corrections, rejections, after-interrupt messages,
+repeated wording and correction candidates.
 `steer report show` reads the stored report and never scans: later index pages, one
 signal's clusters filtered by `--match`, or the occurrences and directives of named
 items. Each output is one page within a byte bound and holds at least one row, so
 paging drops no evidence; `show` refuses a `--report` id that a later scan replaced.
 The refresh queue reads `report.Generate` in memory, never the stored report.
 
-Three report-only readings live in the `Scanner`, not the `Classifier`, because
+Four report-only readings live in the `Scanner`, not the `Classifier`, because
 they need more than one event: session snapshots and fix scores never carry them,
 and `ParserInstrument` does not cover them. `after_interrupt` takes the next real
 message after a `turn` interrupt in the same session and thread, unless a
@@ -650,6 +650,19 @@ sessions into heuristic send groups. A correction occurrence carries the previou
 and the first human text observed in its session and thread within the scan as
 details-only context, which no key, count or `--match` reads. All skip Meta turns
 and the harness wrappers the correction matcher skips; context text keeps a paste-only turn as a placeholder.
+
+`correction_candidates` (`candidates.go`) is the fourth: a root-thread typed turn that
+the embedded word-score list `correction_list.json` flags and no correction pattern
+matched. An author with no data and no knowledge of any user wrote the list, and it flags
+a turn at a score above zero with no tuned threshold. On one developer's turns the
+patterns measured about 5% recall and 35% precision, the list about 34% and 51%; no other
+person's turns have tested it. The steer-report reader can reject a false flag but never
+sees a missed correction, so the list widens what it reads and moves no count. A turn's score reads its typed text and the last three root-thread tool names
+since the previous typed turn; a Meta or paste-only turn leaves that window open. The
+occurrence carries the score, clusters rank by their highest score, and the report's
+`correction_list` stamp is a digest of the list, so a list change shows in the report
+without moving `ParserInstrument`. `testdata/correction_list_golden.py` regenerates
+the scoring expectations from a reference implementation.
 
 `internal/sessions/` persists `sessions.<host>.jsonl`. A session's row keeps one
 contribution per transcript file (`Sources`), and its bounds and signals derive from
