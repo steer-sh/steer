@@ -59,6 +59,7 @@ type Page struct {
 type Index struct {
 	DigestVersion    int                  `json:"digest_version"`
 	ReportID         string               `json:"report_id"`
+	CorrectionList   string               `json:"correction_list"`
 	GeneratedAt      string               `json:"generated_at"`
 	WindowDays       int                  `json:"window_days"`
 	ProjectsScanned  int                  `json:"projects_scanned"`
@@ -111,6 +112,7 @@ type DetailRow struct {
 	Section                      string        `json:"section,omitempty"`
 	Group                        int           `json:"group,omitempty"`
 	AfterInterrupt               bool          `json:"after_interrupt,omitempty"`
+	Score                        *float64      `json:"score,omitempty"`
 	Text                         string        `json:"text"`
 	PreviousHumanText            *ObservedText `json:"previous_human_text,omitempty"`
 	FirstObservedHumanTextInScan *ObservedText `json:"first_observed_human_text_in_scan,omitempty"`
@@ -142,6 +144,7 @@ func IndexPage(d *Digest, cursor, maxBytes int) ([]byte, error) {
 	head := Index{
 		DigestVersion:    d.DigestVersion,
 		ReportID:         d.ReportID,
+		CorrectionList:   d.CorrectionList,
 		GeneratedAt:      d.GeneratedAt,
 		WindowDays:       d.WindowDays,
 		ProjectsScanned:  len(d.ProjectsScanned),
@@ -229,7 +232,7 @@ func DetailPage(d *Digest, ids []string, cursor, maxBytes int) ([]byte, error) {
 			for _, o := range c.Occurrences {
 				rows = append(rows, DetailRow{
 					ID: id, Session: o.Session, Timestamp: o.Timestamp, Group: o.Group,
-					AfterInterrupt: o.AfterInterrupt, Text: o.Text,
+					AfterInterrupt: o.AfterInterrupt, Score: o.Score, Text: o.Text,
 					PreviousHumanText: o.PreviousHumanText, FirstObservedHumanTextInScan: o.FirstObservedHumanTextInScan,
 				})
 			}

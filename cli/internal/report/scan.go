@@ -22,6 +22,7 @@ const (
 
 	kindRepeatedWording = "repeated_wording"
 	kindAfterInterrupt  = "after_interrupt"
+	kindCandidate       = "correction_candidates"
 
 	// tool_result payloads can be huge (full test runs); only the head is
 	// needed to classify them.
@@ -46,8 +47,8 @@ const (
 )
 
 // correctionPatterns match user-turn language that can name a correction. A match
-// is a heuristic correction candidate, not a labelled correction: precision is
-// checked by hand and recall is unmeasured.
+// is a heuristic correction candidate, not a labelled correction, and most
+// corrections match none of them; correction_candidates reads a wider net.
 var correctionPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\b(don'?t|do not|stop|quit|never) (use|using|add|adding|write|writing|create|creating|put|putting|make|making|do|doing|hardcode|hardcoding)\b`),
 	regexp.MustCompile(`(?i)\bi (said|told you|asked you|already (said|told)( you)?)[,:]? (not to \w+|to (use|stop|avoid)|use|stop|avoid|don'?t|do not|never)\b`),
@@ -268,6 +269,7 @@ type Scanner struct {
 	coverage   map[harness.ID]*harnessScan
 	wording    map[string]*textGroup
 	interrupts map[string]*textGroup
+	candidates map[string]*textGroup
 }
 
 // textGroup is one normalized human text and every place it was typed.
@@ -277,10 +279,12 @@ type textGroup struct {
 }
 
 // threadContext is what one session's thread showed before its current event:
-// its human text, and whether the person just stopped a running turn.
+// its human text, whether the person just stopped a running turn, and the tool
+// names called since its last typed turn.
 type threadContext struct {
 	first, previous *ObservedText
 	afterInterrupt  bool
+	recentTools     []string
 }
 
 // harnessScan is one harness's running coverage. It keeps its own id sets: the
@@ -307,6 +311,7 @@ func NewScanner(since time.Time) *Scanner {
 		coverage:   map[harness.ID]*harnessScan{},
 		wording:    map[string]*textGroup{},
 		interrupts: map[string]*textGroup{},
+		candidates: map[string]*textGroup{},
 	}
 }
 
@@ -378,6 +383,9 @@ func (s *Scanner) classify(e transcript.Event, c *Classifier, hs *harnessScan, c
 		// makes the next message an after-interrupt one.
 		ctx.afterInterrupt = e.Interrupt == transcript.InterruptTurn
 	}
+	if e.Kind == transcript.KindToolCall && e.ThreadID == "" {
+		ctx.noteTool(e.Tool)
+	}
 	var observed *ObservedText
 	real := false
 	if e.Kind == transcript.KindHumanTurn && !e.Meta {
@@ -405,6 +413,9 @@ func (s *Scanner) classify(e transcript.Event, c *Classifier, hs *harnessScan, c
 	}
 	if answers && !corrected {
 		s.addAfterInterrupt(e, ctx)
+	}
+	if e.ThreadID == "" {
+		s.addCandidate(e, ctx, corrected, answers)
 	}
 	if ctx.first == nil {
 		ctx.first = observed
@@ -564,6 +575,7 @@ func (s *Scanner) Finalize(windowDays int, projects []string, instructionFiles [
 		interrupts[text] = textCluster(text, g)
 	}
 	d.Signals.AfterInterrupt = collect(interrupts)
+	d.Signals.CorrectionCandidates = correctionCandidates(s.candidates)
 
 	for _, list := range d.Signals.lists() {
 		d.Stats.ClustersFound += len(list.items)

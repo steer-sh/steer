@@ -153,8 +153,8 @@ var reportShowCmd = &cobra.Command{
 
 With no argument it prints the index page at --cursor. With a signal name
 (user_corrections, user_rejections, after_interrupt, repeated_wording,
-tool_failures, hook_blocks) it lists that signal's clusters, filtered by --match
-when given. With ids from the index (c3, r1, a4, w2, f12, h2, i1) it prints every occurrence of each cluster and every
+correction_candidates, tool_failures, hook_blocks) it lists that signal's clusters, filtered by --match
+when given. With ids from the index (c3, r1, a4, w2, k5, f12, h2, i1) it prints every occurrence of each cluster and every
 directive of each instruction document.
 
 Every output is one page within --max-bytes; page.next_cursor names the next
