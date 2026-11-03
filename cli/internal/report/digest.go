@@ -17,7 +17,7 @@ import (
 // DigestVersion is the schema version of the stored report and of every page
 // read from it. The steer-report skill prompt reads this field; bump it whenever
 // the shape or semantics change.
-const DigestVersion = 6
+const DigestVersion = 7
 
 // DefaultMaxDigestBytes bounds one page of index, listing or detail output.
 const DefaultMaxDigestBytes = 40960
@@ -45,6 +45,8 @@ type Occurrence struct {
 	// AfterInterrupt marks a correction typed right after the person stopped a
 	// running turn.
 	AfterInterrupt bool `json:"after_interrupt,omitempty"`
+	// Score is the word-score list's value for a correction candidate.
+	Score *float64 `json:"score,omitempty"`
 }
 
 // ObservedText is human text shown as context, cut to a bound.
@@ -81,7 +83,7 @@ func (c *Cluster) Score() int {
 type Signals struct {
 	// UserCorrections are heuristic correction candidates: user turns whose text
 	// matches correction language ("don't use X", "I said use Y", "stop adding", ...).
-	// Precision is checked by hand; recall is unmeasured.
+	// Most corrections match none of them; see CorrectionCandidates.
 	UserCorrections []*Cluster `json:"user_corrections"`
 	// UserRejections are tool calls the user declined at the permission prompt.
 	// Only Claude Code's decline result is recognized.
@@ -95,6 +97,10 @@ type Signals struct {
 	// normalization, in two or more sessions. It is report-only: no session
 	// snapshot or fix score reads it.
 	RepeatedWording []*Cluster `json:"repeated_wording"`
+	// CorrectionCandidates are typed root-thread turns the word-score list flags
+	// and no correction pattern matched. They are unconfirmed, and report-only: no
+	// session snapshot, fix score or recurrence count reads them.
+	CorrectionCandidates []*Cluster `json:"correction_candidates"`
 	// ToolFailures are tool results matching lint/test/compile failure patterns.
 	ToolFailures []*Cluster `json:"tool_failures"`
 	// HookBlocks are operations blocked by an existing PreToolUse hook —
@@ -119,6 +125,7 @@ func (s Signals) lists() []signalList {
 		{kindRejection, "r", s.UserRejections, true},
 		{kindAfterInterrupt, "a", s.AfterInterrupt, true},
 		{kindRepeatedWording, "w", s.RepeatedWording, true},
+		{kindCandidate, "k", s.CorrectionCandidates, true},
 		{kindFailure, "f", s.ToolFailures, false},
 		{kindHookBlock, "h", s.HookBlocks, false},
 	}
@@ -183,7 +190,9 @@ type Digest struct {
 	DigestVersion int `json:"digest_version"`
 	// ReportID names one stored scan, so a page or a detail request can refuse
 	// to mix evidence from two scans.
-	ReportID         string            `json:"report_id"`
+	ReportID string `json:"report_id"`
+	// CorrectionList identifies the list that flagged correction_candidates.
+	CorrectionList   string            `json:"correction_list"`
 	GeneratedAt      string            `json:"generated_at"`
 	WindowDays       int               `json:"window_days"`
 	ProjectsScanned  []string          `json:"projects_scanned"`
@@ -208,16 +217,18 @@ func (d *Digest) assignIDs() {
 // NewDigest returns an empty digest stamped with the current time.
 func NewDigest(windowDays int) *Digest {
 	return &Digest{
-		DigestVersion: DigestVersion,
-		GeneratedAt:   time.Now().UTC().Format(time.RFC3339),
-		WindowDays:    windowDays,
+		DigestVersion:  DigestVersion,
+		CorrectionList: CorrectionListDigest(),
+		GeneratedAt:    time.Now().UTC().Format(time.RFC3339),
+		WindowDays:     windowDays,
 		Signals: Signals{
-			UserCorrections: []*Cluster{},
-			UserRejections:  []*Cluster{},
-			AfterInterrupt:  []*Cluster{},
-			RepeatedWording: []*Cluster{},
-			ToolFailures:    []*Cluster{},
-			HookBlocks:      []*Cluster{},
+			UserCorrections:      []*Cluster{},
+			UserRejections:       []*Cluster{},
+			AfterInterrupt:       []*Cluster{},
+			RepeatedWording:      []*Cluster{},
+			CorrectionCandidates: []*Cluster{},
+			ToolFailures:         []*Cluster{},
+			HookBlocks:           []*Cluster{},
 		},
 		InstructionFiles: []InstructionFile{},
 		ProjectsScanned:  []string{},
