@@ -46,6 +46,7 @@ python3 tests/test_release_tools.py
 python3 tests/test_replay_reviewers.py
 python3 tests/test_ci_base.py
 python3 tests/test_revert_moves.py
+python3 tests/test_revert_rejudge.py
 status=0
 "$steer" check exec --all || status=1
 exit "$status"
