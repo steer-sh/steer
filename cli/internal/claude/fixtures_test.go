@@ -529,6 +529,33 @@ func TestFixtureMasterPassReadsADenyPastStderr(t *testing.T) {
 	}
 }
 
+// Output that bypasses sys.stdout, from a subprocess or a raw write to fd 1, at
+// load or during the call, leaves the master's deny the only text on its stdout.
+func TestFixtureMasterPassReadsADenyPastFd1Output(t *testing.T) {
+	cases := map[string]string{
+		"subprocess during the call": strings.Replace(blockingHook("BANNED"), "def main():\n",
+			"def main():\n    import subprocess\n    subprocess.run([\"echo\", \"child line\"])\n", 1),
+		"raw write at load": strings.Replace(blockingHook("BANNED"), "def main():\n",
+			"import os\nos.write(1, b\"load line\\n\")\n\ndef main():\n", 1),
+	}
+	for name, source := range cases {
+		t.Run(name, func(t *testing.T) {
+			store := fixtureProject(t, map[string]string{"noisy": source})
+			report, err := (fixture.Runner{}).Run(filepath.Join(store, "noisy.py"), filepath.Join(store, MasterHookName), fixture.File{
+				Version: fixture.Version, Hook: "noisy", Cases: []fixture.Case{
+					bashCase("expected block", "echo BANNED", fixture.ExpectBlock),
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := report.Cases[0]; got.Master != fixture.OutcomeBlock || got.MasterState != fixture.MasterVerified {
+				t.Errorf("expected block = %+v, want a block verified against this guard", got)
+			}
+		})
+	}
+}
+
 func linkedSteerWithOldGuard(t *testing.T) string {
 	t.Helper()
 	withProjectTempDir(t)
