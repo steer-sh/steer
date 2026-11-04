@@ -148,6 +148,11 @@ var reboundProofCases = []struct {
 	{"call in a walrus value reads the old proof", reboundQuoted + "print(x := subprocess.run(f\"ls {x}\", shell=True))\n", false},
 	{"call in the value sees no proof the assignment makes", "import shlex, subprocess\nx = shlex.quote(subprocess.check_output(f\"ls {x}\", shell=True))\n", true},
 	{"leading program name still trusted", "import shlex, subprocess\nq = [shlex.quote(a) for a in b]\ndef run(command):\n    subprocess.run(f\"{command} {' '.join(q)}\", shell=True)\n", false},
+	{"subprocess.run with shell", "import subprocess\nsubprocess.run(input(), shell=True)\n", true},
+	{"subprocess.Popen with shell", "import subprocess\nsubprocess.Popen(input(), shell=True)\n", true},
+	{"subprocess.check_output with shell", "import subprocess\nsubprocess.check_output(input(), shell=True)\n", true},
+	{"subprocess.check_call with shell", "import subprocess\nsubprocess.check_call(input(), shell=True)\n", true},
+	{"subprocess.call with shell", "import subprocess\nsubprocess.call(input(), shell=True)\n", true},
 }
 
 // reboundMatchCases need match syntax, which Python before 3.10 cannot parse.

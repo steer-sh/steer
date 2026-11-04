@@ -26,7 +26,7 @@ This is the most nuanced security rule. The detection logic MUST follow this exa
 ### Step 1: Handle os.system()
 `os.system()` always uses a shell. Block if the argument is anything other than a static string literal.
 
-### Step 2: Handle subprocess calls (run, Popen, check_output, check_call)
+### Step 2: Handle subprocess calls (run, Popen, check_output, check_call, call)
 
 **The `shell=True` parameter is the gatekeeper.** Check for it FIRST, before analyzing arguments.
 
@@ -250,7 +250,7 @@ class CommandInjectionVisitor(ast.NodeVisitor):
                 self.violations.append((node.lineno, "os.system() with dynamic input"))
 
         # subprocess calls
-        if module_name == 'subprocess' and func_name in ('run', 'Popen', 'check_output', 'check_call'):
+        if module_name == 'subprocess' and func_name in ('run', 'Popen', 'check_output', 'check_call', 'call'):
             # CRITICAL: Check shell=True FIRST
             shell_true = any(
                 kw.arg == 'shell' and isinstance(kw.value, ast.Constant) and kw.value.value is True
