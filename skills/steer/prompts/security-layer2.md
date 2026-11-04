@@ -43,21 +43,32 @@ def is_in_comment_or_example(content, pattern):
 
 ## Postinstall Script Detection
 
-For package.json files:
+For package.json files. An Edit's `new_string` is a fragment, so the parse only
+covers a whole file; every other shape reaches the raw-text check, with JSON
+`\uXXXX` escapes decoded so `"post\u0069nstall"` still matches. An escaped
+quote sits inside a string and delimits no key, so it stays escaped. A guard
+that raises allows the edit silently, so test each decoded value's type:
 ```python
 if not file_path.endswith('package.json'):
     sys.exit(0)
 
+found = False
 try:
     package_data = json.loads(content_to_check)
-    scripts = package_data.get('scripts', {})
-
-    if 'postinstall' in scripts:
-        # Optionally check for specific dangerous patterns:
-        # curl|sh, wget|sh, sudo, eval(), child_process, exec()
-        # Or block ALL postinstall scripts as a security policy
-except json.JSONDecodeError:
-    pass
+except (ValueError, RecursionError):
+    package_data = None
+if isinstance(package_data, dict):
+    scripts = package_data.get('scripts')
+    # Optionally check scripts['postinstall'] for curl|sh, wget|sh, sudo,
+    # eval(), child_process or exec() instead of blocking every postinstall
+    if isinstance(scripts, dict) and 'postinstall' in scripts:
+        found = True
+if not found:
+    def decode_escape(m):
+        char = chr(int(m.group(1), 16))
+        return m.group(0) if char in '"\'\\' else char
+    decoded = re.sub(r'\\u([0-9a-fA-F]{4})', decode_escape, content_to_check)
+    found = re.search(r'["\']postinstall["\']', decoded) is not None
 ```
 
 ## Environment Variable Enumeration
