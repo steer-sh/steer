@@ -553,6 +553,45 @@ def steer_load_note(hook_name, reason):
         pass
 
 
+def steer_flush_stdout():
+    for stream in (sys.stdout, sys.__stdout__):
+        try:
+            if stream is not None:
+                stream.flush()
+        except Exception:
+            pass
+
+
+def steer_divert_fd1():
+    """Point fd 1 at fd 2 while a guard runs, so output that bypasses sys.stdout
+    (a subprocess, os.write(1, ...)) lands on stderr rather than in the reply.
+
+    Returns the saved fd 1 for steer_restore_fd1, or None when it was not moved.
+    """
+    steer_flush_stdout()
+    try:
+        saved = os.dup(1)
+    except Exception:
+        return None
+    try:
+        os.dup2(2, 1)
+    except Exception:
+        os.close(saved)
+        return None
+    return saved
+
+
+def steer_restore_fd1(saved):
+    """Point fd 1 back at the reply stream steer_divert_fd1 saved."""
+    if saved is None:
+        return
+    steer_flush_stdout()
+    try:
+        os.dup2(saved, 1)
+    finally:
+        os.close(saved)
+
+
 def steer_without_entry_call(tree):
     """Drop a module's final bare main() statement, the script entrypoint."""
     if tree.body:
@@ -588,6 +627,7 @@ def steer_load(hook_name):
         return None
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), hook_name + ".py")
     namespace = {"__name__": "steer_guard_" + hook_name, "__file__": path}
+    saved_fd1 = steer_divert_fd1()
     old_stdout = sys.stdout
     old_stdin = sys.stdin
     sys.stdout = io.StringIO()
@@ -603,6 +643,7 @@ def steer_load(hook_name):
     finally:
         sys.stdout = old_stdout
         sys.stdin = old_stdin
+        steer_restore_fd1(saved_fd1)
     entry = namespace.get("main")
     if not callable(entry):
         steer_load_note(hook_name, "no callable main")
@@ -631,6 +672,7 @@ def steer_run(hook_names):
             continue
         for edit_index, (edit, edit_json) in enumerate(encoded):
             captured = io.StringIO()
+            saved_fd1 = steer_divert_fd1()
             old_stdout = sys.stdout
             old_stdin = sys.stdin
             sys.stdout = captured
@@ -644,6 +686,7 @@ def steer_run(hook_names):
             finally:
                 sys.stdout = old_stdout
                 sys.stdin = old_stdin
+                steer_restore_fd1(saved_fd1)
 
             output = captured.getvalue().strip()
             if not output:
