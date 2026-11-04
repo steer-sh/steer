@@ -21,9 +21,10 @@ the repository and runs the new top-level test functions under each one:
   suppress  an added expression, `=` assignment, ++/--, go or defer statement
             wrapped in `if false { }`
 
-Variants run in that order. copy, alias, guard and suppress come only from
-statements that intersect added lines; FUNCTION_CAP and RUN_CAP limit them,
-and the evidence lists each candidate a cap or a duplicate dropped. RUN_CAP
+Variants run in that order, except after a checker edit (below). copy, alias,
+guard and suppress come only from statements that intersect added lines;
+FUNCTION_CAP and RUN_CAP limit them, and the evidence lists each candidate a
+cap or a duplicate dropped. RUN_CAP
 spends its budget one site per function at a time, so a change in one file
 cannot starve the sites of another: without that, the order is alphabetical by
 path and a late path loses every site it had.
@@ -68,6 +69,14 @@ and every file under its testdata/. A later run of the same checker does not
 judge that test again while that digest is unchanged, so a test is judged again
 when its test side changes, not when only the code under test changes. Files
 outside the package that a test reads are not in the digest.
+
+The checker's digest covers this script and revert-test-funcs.go, and each record
+carries the digest it was judged under, so an edit to either judges every recorded
+test again. That run moves to the front each variant whose label decided a test
+it judges in an earlier record, keeping the order otherwise: in a run that
+finishes, the order changes which variant decides a test, not whether one does.
+A record from another checker is that hint alone; it stays for a test the run
+did not select and for one the budget left undecided.
 """
 
 import collections
@@ -497,25 +506,44 @@ def test_inputs(package):
     return digest.hexdigest()
 
 
-def read_accepted(directory, checker):
-    """Return the acceptance records by (package, test), or {} when the store is
-    missing, unreadable, or written by a different checker."""
+def read_accepted(directory):
+    """Return every acceptance record by (package, test), each carrying the digest of
+    the checker that wrote it under "checker", or {} when the store is missing or
+    unreadable. A record without its own digest takes the store's."""
     try:
         with open(os.path.join(directory, ACCEPTED), encoding="utf-8") as handle:
             store = json.load(handle)
-        if store["checker"] != checker:
-            return {}
-        return {(r["package"], r["test"]): r for r in store["tests"]}
-    except (OSError, ValueError, KeyError, TypeError):
+        return {(r["package"], r["test"]): dict(r, checker=r.get("checker", store.get("checker")))
+                for r in store["tests"]}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
         return {}
 
 
-def write_accepted(directory, checker, records):
+def next_store(records, checker, judged, kept, accepted, undecided):
+    """Return the records to store after a run of checker. judged holds the tests
+    this run selected; kept, the records it reused; accepted, the records it wrote.
+    Records of tests outside judged stay. A record another checker wrote also stays
+    for a test in undecided; such a record is an ordering hint only."""
+    store = {t: r for t, r in records.items()
+             if t not in judged or (t in undecided and r["checker"] != checker)}
+    store.update(kept)
+    store.update(accepted)
+    return store
+
+
+def write_accepted(directory, records):
     path = os.path.join(directory, ACCEPTED)
     with open(path + ".tmp", "w", encoding="utf-8") as handle:
-        json.dump({"checker": checker, "tests": [records[t] for t in sorted(records)]},
-                  handle, indent=1)
+        json.dump({"tests": [records[t] for t in sorted(records)]}, handle, indent=1)
     os.replace(path + ".tmp", path)
+
+
+def hinted_first(changes, records, tests):
+    """Return changes with each one whose label decided a test in tests, in an earlier
+    record, moved to the front; the order is otherwise kept."""
+    labels = {(r.get("decisive") or {}).get("variant") for t, r in records.items() if t in tests}
+    return ([c for c in changes if c["label"] in labels]
+            + [c for c in changes if c["label"] not in labels])
 
 
 def change_key(base, name_status, paths):
@@ -1077,9 +1105,10 @@ def main():
     checker = checker_digest()
     by_package_all = by_package
     inputs = {package: test_inputs(package) for package in by_package}
-    reused = {t: r for t, r in read_accepted(directory, checker).items()
-              if t[1] in by_package.get(t[0], []) and inputs[t[0]] is not None
-              and r.get("inputs") == inputs[t[0]]}
+    previous = read_accepted(directory)
+    reused = {t: r for t, r in previous.items()
+              if r["checker"] == checker and t[1] in by_package.get(t[0], [])
+              and inputs[t[0]] is not None and r.get("inputs") == inputs[t[0]]}
     by_package = {p: [n for n in ns if (p, n) not in reused] for p, ns in by_package.items()}
     by_package = {p: ns for p, ns in by_package.items() if ns}
     if not by_package:
@@ -1111,7 +1140,7 @@ def main():
         live = {t for t in selected if baseline.get(t, {}).get("result") == "pass"}
         early, late, panics, omitted = variants(base, paths, untracked, deadline)
         mutated_packages = {import_path(prefix, c["path"]) for c in early + late + panics}
-        behavioural = early + data_variants(base, data) + late
+        behavioural = hinted_first(early + data_variants(base, data) + late, previous, selected)
         linked = {t for t in live if data or mutated_packages & deps[t[0]]}
         asserts = lambda a: a["result"] == "fail" and a["kind"] == "assertion"
         attempts = confirm(roots, prefix, deps, behavioural, linked, asserts, deadline)
@@ -1135,17 +1164,17 @@ def main():
     accepted = [r for r in records if r["verdict"] != "rejected"]
     # Records of tests outside this run stay, so a branch switch does not discard them.
     # A test edited during the run keeps no acceptance: its judged bytes are gone.
-    store = {t: r for t, r in read_accepted(directory, checker).items()
-             if t[1] not in by_package_all.get(t[0], [])}
-    store.update(reused)
+    written = {}
     for record in accepted:
         digest = test_inputs(record["package"])
         if digest is not None and digest == inputs[record["package"]]:
-            store[(record["package"], record["test"])] = {
-                "package": record["package"], "test": record["test"], "inputs": digest,
-                "verdict": record["verdict"], "decisive": record["decisive"], "base": base,
-                "evidence": os.path.basename(path)}
-    write_accepted(directory, checker, store)
+            written[(record["package"], record["test"])] = {
+                "package": record["package"], "test": record["test"], "checker": checker,
+                "inputs": digest, "verdict": record["verdict"], "decisive": record["decisive"],
+                "base": base, "evidence": os.path.basename(path)}
+    judged = {(p, n) for p, ns in by_package_all.items() for n in ns}
+    write_accepted(directory, next_store(read_accepted(directory), checker, judged, reused,
+                                         written, {(r["package"], r["test"]) for r in undecided}))
     print("revert-test: base %s, %d new test(s): %d judged, %d accepted, %d previously "
           "accepted; %d variant(s), %d panic probe(s), %d omitted candidate(s), %.0fs; "
           "evidence: %s"
