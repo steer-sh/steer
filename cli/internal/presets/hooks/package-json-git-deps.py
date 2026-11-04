@@ -80,7 +80,7 @@ def main():
     # For Write tool, check the full content as JSON
     if tool_name == 'Write':
         content = tool_input.get('content', '')
-        if not content.strip():
+        if not isinstance(content, str) or not content.strip():
             sys.exit(0)
         violations = check_dependencies_json(content)
         if violations:
@@ -100,7 +100,7 @@ def main():
     # Since edits are partial, we check for git URL patterns in the new content
     if tool_name == 'Edit':
         new_string = tool_input.get('new_string', '')
-        if not new_string.strip():
+        if not isinstance(new_string, str) or not new_string.strip():
             sys.exit(0)
 
         # Check if any line in new_string contains a git dependency pattern
@@ -137,10 +137,12 @@ def main():
     # For MultiEdit tool
     if tool_name == 'MultiEdit':
         edits = tool_input.get('edits', [])
+        if not isinstance(edits, list):
+            edits = []
         all_found = []
         for edit in edits:
-            new_string = edit.get('new_string', '')
-            if not new_string.strip():
+            new_string = edit.get('new_string') if isinstance(edit, dict) else None
+            if not isinstance(new_string, str) or not new_string.strip():
                 continue
             if 'devDependencies' in new_string:
                 continue

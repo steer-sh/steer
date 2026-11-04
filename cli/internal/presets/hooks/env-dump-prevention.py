@@ -31,9 +31,18 @@ def main():
         file_path = tool_input.get('file_path', '')
         if tool_name == 'MultiEdit':
             edits = tool_input.get('edits', [])
-            content_to_check = '\n'.join(e.get('new_string', '') for e in edits)
+            if not isinstance(edits, list):
+                edits = []
+            content_to_check = '\n'.join(
+                e['new_string'] for e in edits
+                if isinstance(e, dict) and isinstance(e.get('new_string'), str)
+            )
         else:
-            content_to_check = tool_input.get('new_string', '') or tool_input.get('content', '') or ''
+            content_to_check = next(
+                (text for text in (tool_input.get('new_string'), tool_input.get('content'))
+                 if isinstance(text, str) and text),
+                ''
+            )
         # Only check shell-related files
         shell_extensions = ('.sh', '.bash', '.zsh', '.fish')
         shell_filenames = ('Dockerfile', 'Makefile')

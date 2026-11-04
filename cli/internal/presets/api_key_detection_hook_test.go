@@ -121,8 +121,8 @@ func TestAPIKeyDetectionV2InstallsIntoManifestAndMaster(t *testing.T) {
 	if !ok {
 		t.Fatal("api-key-detection missing from catalog")
 	}
-	if item.HookVersion != "factory-hook-v2" {
-		t.Fatalf("hook version = %q, want factory-hook-v2", item.HookVersion)
+	if item.HookVersion != "factory-hook-v3" {
+		t.Fatalf("hook version = %q, want factory-hook-v3", item.HookVersion)
 	}
 	if _, err := EnablePreset(claude.ProjectScope, catalog, item, false); err != nil {
 		t.Fatal(err)
@@ -131,8 +131,8 @@ func TestAPIKeyDetectionV2InstallsIntoManifestAndMaster(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := manifest.Hooks["api-key-detection"].HookVersion; got != "factory-hook-v2" {
-		t.Fatalf("manifest hook version = %q, want factory-hook-v2", got)
+	if got := manifest.Hooks["api-key-detection"].HookVersion; got != "factory-hook-v3" {
+		t.Fatalf("manifest hook version = %q, want factory-hook-v3", got)
 	}
 
 	master := filepath.Join(dir, ".steer", "hooks", "steer-hooks.py")

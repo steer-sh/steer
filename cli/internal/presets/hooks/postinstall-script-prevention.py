@@ -10,6 +10,12 @@ import sys
 import re
 
 
+def decode_escape(match):
+    """Decode one JSON \\uXXXX escape; an escaped quote or backslash stays escaped."""
+    char = chr(int(match.group(1), 16))
+    return match.group(0) if char in '"\'\\' else char
+
+
 def main():
     try:
         stdin_data = sys.stdin.read()
@@ -67,8 +73,9 @@ def main():
 
     # Also check raw text for Edit tool (partial content containing postinstall key)
     if not found:
-        # Match "postinstall" as a JSON key in scripts context
-        if re.search(r'["\']postinstall["\']', content_to_check):
+        # Match "postinstall" as a JSON key, with JSON \uXXXX escapes decoded
+        decoded = re.sub(r'\\u([0-9a-fA-F]{4})', decode_escape, content_to_check)
+        if re.search(r'["\']postinstall["\']', decoded):
             found = True
 
     if found:
