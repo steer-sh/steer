@@ -125,6 +125,33 @@ func TestAFileMatchingAnEmbedPatternMovesTheDigest(t *testing.T) {
 	}
 }
 
+// OS metadata a tracked pattern matches moves nothing and leaves the pattern
+// resolved, so one checkout reads one digest whichever machine wrote it.
+func TestOSMetadataAnEmbedPatternMatchesMovesNothing(t *testing.T) {
+	src := strings.Replace(readTestdata(t, "embed_test.go.txt"), "testdata/golden.json", "testdata/*", 1)
+	root := goCheckRepo(t, src)
+	writeFile(t, root, "svc/resp/testdata/a.golden", "a")
+	d := Declaration{ID: "embeds", Kind: KindGoTest, Package: "svc/resp", Test: "TestGolden",
+		Inputs: []string{"svc/resp/testdata/a.golden"}}
+	before, err := DetectorOf(root, d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{".DS_Store", "._a.golden", "Thumbs.db", "nested/.DS_Store"} {
+		writeFile(t, root, "svc/resp/testdata/"+rel, "x")
+	}
+	after, err := DetectorOf(root, d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Digest != before.Digest {
+		t.Error("OS metadata beside a matched file moved the detector")
+	}
+	if len(after.Unresolved) != 0 {
+		t.Errorf("unresolved %q; want OS metadata outside what the pattern matches", after.Unresolved)
+	}
+}
+
 // The import a tracked selector resolves to is detector input: the same source
 // over another package is another test. An import only an untracked test uses
 // moves nothing.

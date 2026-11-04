@@ -15,6 +15,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/steer-sh/steer-cli/internal/gate"
 )
 
 // DeclDigest is one tracked test-side declaration and the SHA-256 of its source.
@@ -485,7 +487,9 @@ func embedCovered(d Declaration, raw string, matched []string) bool {
 
 // embedFiles lists the regular files under dir that a pattern matches, as
 // slash-separated paths relative to dir. go:embed refuses a version-control name
-// anywhere in a path, and those directories change with every commit.
+// anywhere in a path, and those directories change with every commit. A file named
+// as OS metadata, such as .DS_Store, is left out: the operating system writes it
+// per machine.
 func embedFiles(dir, raw string) []string {
 	pattern, all := strings.CutPrefix(raw, "all:")
 	var matched []string
@@ -502,6 +506,9 @@ func embedFiles(dir, raw string) []string {
 		if !e.Type().IsRegular() {
 			return nil
 		}
+		if osMetadata(e.Name()) {
+			return nil
+		}
 		rel, err := filepath.Rel(dir, p)
 		if err != nil {
 			return nil
@@ -513,6 +520,12 @@ func embedFiles(dir, raw string) []string {
 		return nil
 	})
 	return matched
+}
+
+// osMetadata reports a file name the operating system writes on its own, such as
+// .DS_Store or Thumbs.db.
+func osMetadata(name string) bool {
+	return gate.IsOSCruft(name)
 }
 
 func versionControlName(name string) bool {
