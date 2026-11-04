@@ -218,7 +218,8 @@ func ownedHook(manifest *Manifest, hook HookFile) HookFile {
 }
 
 // OwnedEntry returns hook under the id of the entry that owns its file, with that
-// entry. A file no entry owns keeps its stem and gets a zero entry.
+// entry. A file no entry owns gets a zero entry and keeps its stem; when that stem
+// is the id of an entry naming another file, it gets unownedName instead.
 func OwnedEntry(manifest *Manifest, hook HookFile) (HookFile, ManifestEntry) {
 	owned := ownedHook(manifest, hook)
 	entry, ok := manifest.Hooks[owned.Name]
@@ -226,10 +227,16 @@ func OwnedEntry(manifest *Manifest, hook HookFile) (HookFile, ManifestEntry) {
 		return owned, ManifestEntry{}
 	}
 	if file, err := hookstore.EntryFileName(hookstore.ManifestName, owned.Name, entry.File); err != nil || file != hook.FileName {
+		owned.Name = unownedName(hook.FileName)
 		return owned, ManifestEntry{}
 	}
 	return owned, entry
 }
+
+// unownedName names a store file no entry owns whose stem is another guard's id.
+// It falls outside hookstore.GuardName, so it is no installed guard's id, and it
+// carries the file name, so no two files share it.
+func unownedName(fileName string) string { return fileName + " (unowned)" }
 
 // matchHook returns the hook an identifier names: a full path, a file name, a
 // stem, or the stem with its hyphens as spaces.
@@ -311,22 +318,13 @@ func ConsolidateHooks(scope string) error {
 		}
 		sources = append(sources, source)
 
-		rule := ""
-		origin := ""
-		sourceID := ""
-		ruleHash := ""
-		owner := ownedHook(manifest, hook).Name
-		if entry, ok := manifest.Hooks[owner]; ok {
-			rule = strings.TrimSpace(entry.Rule)
-			origin = strings.TrimSpace(entry.Source)
-			sourceID = strings.TrimSpace(entry.SourceID)
-			ruleHash = strings.TrimSpace(entry.RuleHash)
-		}
+		owned, entry := OwnedEntry(manifest, hook)
+		ruleHash := strings.TrimSpace(entry.RuleHash)
 		meta := map[string]string{
-			"hook_name": owner,
-			"rule":      rule,
-			"source":    origin,
-			"source_id": sourceID,
+			"hook_name": owned.Name,
+			"rule":      strings.TrimSpace(entry.Rule),
+			"source":    strings.TrimSpace(entry.Source),
+			"source_id": strings.TrimSpace(entry.SourceID),
 			// The digest is taken over the bytes this master carries, never over
 			// the file on disk: the standalone guard can change after the master
 			// is built, so only the embedded source identifies what ran.

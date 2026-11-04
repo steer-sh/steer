@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -585,5 +586,78 @@ func TestAnUnsafeManifestKeyStopsTheBuild(t *testing.T) {
 	err := ConsolidateHooks(ProjectScope)
 	if err == nil || !strings.Contains(err.Error(), "a guard name holds only") {
 		t.Fatalf("ConsolidateHooks = %v; want the guard-name refusal for the manifest key", err)
+	}
+}
+
+// A file no entry owns is stamped with no entry's identity, even when its stem is
+// the id of a guard whose entry names another file, and every file's stamped
+// name is its own.
+func TestConsolidateStampsAnUnownedFileWithNoEntrysIdentity(t *testing.T) {
+	withProjectTempDir(t)
+	hooksDir := mustHooksDir(t)
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, stem := range []string{"a", "a.py", "b", "z"} {
+		source := "def main():\n    return None  # " + stem + "\n"
+		if err := os.WriteFile(filepath.Join(hooksDir, stem+".py"), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m := &Manifest{Hooks: map[string]ManifestEntry{
+		"a":    {File: "z.py", Rule: "rule of a", Source: SourceManual, SourceID: "a", RuleHash: "hash-of-a"},
+		"a.py": {File: "b.py", Rule: "rule of a.py"},
+	}}
+	if err := SaveManifest(ProjectScope, m); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ConsolidateHooks(ProjectScope); err != nil {
+		t.Fatalf("ConsolidateHooks: %v", err)
+	}
+	master, err := os.ReadFile(filepath.Join(hooksDir, MasterHookName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	object, ok := pythonDictConst(string(master), masterMetaConst)
+	if !ok {
+		t.Fatalf("the master declares no %s", masterMetaConst)
+	}
+	var meta map[string]map[string]string
+	if err := json.Unmarshal([]byte(object), &meta); err != nil {
+		t.Fatal(err)
+	}
+
+	// The master keys each stamp by file stem.
+	want := map[string]string{"a": "a.py (unowned)", "a.py": "a.py.py (unowned)", "b": "a.py", "z": "a"}
+	for stem, name := range want {
+		if got := meta[stem]["hook_name"]; got != name {
+			t.Errorf("%s.py hook_name = %q, want %q", stem, got, name)
+		}
+	}
+	for _, stem := range []string{"a", "a.py"} {
+		stray := meta[stem]
+		for _, field := range []string{"rule", "source", "source_id"} {
+			if stray[field] != "" {
+				t.Errorf("%s.py %s = %q, want none", stem, field, stray[field])
+			}
+		}
+		if _, ok := stray["rule_hash"]; ok {
+			t.Errorf("%s.py carries rule_hash %q", stem, stray["rule_hash"])
+		}
+	}
+	if owned := meta["z"]; owned["rule"] != "rule of a" || owned["rule_hash"] != "hash-of-a" {
+		t.Errorf("z.py meta = %v, want entry a's rule", owned)
+	}
+
+	identity, err := ReadMasterIdentity(hooksDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(identity.Hooks) != len(want) {
+		t.Errorf("the master identity holds %d guards, want %d: %v", len(identity.Hooks), len(want), identity.Hooks)
+	}
+	if got := identity.Hooks["a"].HookDigest; got != meta["z"]["hook_digest"] {
+		t.Errorf("guard a's identity digest = %q, want z.py's %q", got, meta["z"]["hook_digest"])
 	}
 }

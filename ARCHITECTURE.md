@@ -168,7 +168,10 @@ reads them.
 A guard's registered id can differ from its file stem. Resolution, firing
 metadata and fixture verification keep the registered id; embedded sources keep
 file-stem keys. An exact id resolves to its entry's file ahead of any stem match,
-and a file no entry owns is refused when its stem is another guard's id. A filename replacement retires the previous file before updating
+and a file no entry owns is refused when its stem is another guard's id. Such a
+file is listed and stamped in the master as `<file> (unowned)`, a name outside
+the guard-name charset, with no entry's rule or source, so its firings never name
+that guard. A filename replacement retires the previous file before updating
 the manifest and leaves no removal archive, like a same-file upsert.
 A prose edit does not consolidate the master or invalidate unrelated guard tests.
 Removing a shared artifact removes its derived rule for every target, including
