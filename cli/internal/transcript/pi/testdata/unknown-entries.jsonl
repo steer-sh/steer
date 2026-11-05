@@ -1,0 +1,6 @@
+{"type": "session", "version": 3, "id": "session-unknown", "timestamp": "2026-04-19T03:17:25.911Z", "cwd": "/repo/demo"}
+{"type": "model_change", "id": "e0000001", "parentId": null, "timestamp": "2026-04-19T03:17:25.960Z", "provider": "openai", "modelId": "gpt-4o"}
+{"type": "label", "id": "e0000002", "parentId": "e0000001", "timestamp": "2026-04-19T03:17:25.970Z", "targetId": "e0000001", "label": "checkpoint"}
+{"type": "session_info", "id": "e0000003", "parentId": "e0000002", "timestamp": "2026-04-19T03:17:25.980Z", "name": "Refactor"}
+{"type": "a_type_pi_has_not_shipped_yet", "id": "e0000004", "parentId": "e0000003", "timestamp": "2026-04-19T03:17:25.990Z"}
+{"type": "message", "id": "e0000005", "parentId": "e0000004", "timestamp": "2026-04-19T03:17:26.000Z", "message": {"role": "user", "content": [{"type": "text", "text": "one turn"}], "timestamp": 1776568645970}}

@@ -1,0 +1,1114 @@
+package status
+
+import (
+	"bytes"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/steer-sh/steer-cli/internal/adjudication"
+	"github.com/steer-sh/steer-cli/internal/cadence"
+	"github.com/steer-sh/steer-cli/internal/checks"
+	"github.com/steer-sh/steer-cli/internal/claude"
+	"github.com/steer-sh/steer-cli/internal/gate"
+	"github.com/steer-sh/steer-cli/internal/gate/mine"
+	"github.com/steer-sh/steer-cli/internal/mods"
+	"github.com/steer-sh/steer-cli/internal/pi"
+)
+
+// isolate points both homes at a temp dir so the audit-log count
+// and every harness posture reader resolve inside the sandbox, never the real machine.
+func isolate(t *testing.T) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	// os.UserHomeDir reads USERPROFILE on Windows, which is a shipped binary target.
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
+	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(home, ".pi", "agent"))
+}
+
+// seedLedger writes a ledger of `n` before-install chains carrying beforeText and
+// `n` after-install chains carrying afterText, plus one intervention record for a
+// class matching beforeText, installed between the two windows.
+func seedLedger(t *testing.T, class, match, beforeText, afterText string, n int) string {
+	t.Helper()
+	stateDir := t.TempDir()
+	var rows []gate.Row
+	ts := 1000
+	push := func(text string) {
+		rows = append(rows,
+			gate.Row{"ts": ts, "phase": "deny", "firing": 1, "files": 1, "host": "h"},
+			gate.Row{"ts": ts + 1, "phase": "retry", "firing": 1, "files": 1, "host": "h",
+				"ledger_join": "round", "session_id": "s1",
+				"concerns": []any{map[string]any{"concern": text, "verdict": "ACCEPTED"}}},
+			gate.Row{"ts": ts + 2, "phase": "clean", "firing": 2, "files": 1, "host": "h"})
+		ts += 100
+	}
+	for i := 0; i < n; i++ {
+		push(beforeText)
+	}
+	installTS := ts
+	for i := 0; i < n; i++ {
+		push(afterText)
+	}
+
+	ledger := filepath.Join(stateDir, "adjudication.h.jsonl")
+	f, err := os.Create(ledger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rows {
+		data, _ := json.Marshal(r)
+		f.Write(append(data, '\n'))
+	}
+	f.Close()
+
+	rec := mine.Record{
+		"id": "widget-flag", "class": class, "match": match,
+		"kind": "defect", "tier": "check", "target": "check.sh",
+		"status": "active", "unit": mine.UnitChain, "corpus": mine.CorpusReviewFindings,
+		"installed_ts": installTS,
+	}
+	if err := mine.Save(stateDir, []mine.Record{rec}); err != nil {
+		t.Fatal(err)
+	}
+	return stateDir
+}
+
+func TestCollectFullInventoryAndTelemetry(t *testing.T) {
+	isolate(t)
+	stateDir := seedLedger(t, "widget parser flag loss", "widget parser",
+		"widget parser drops a flag", "unrelated naming nit", 12)
+
+	s, err := Collect(Options{GateStateDir: stateDir, WindowDays: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if s.StatusVersion != StatusVersion {
+		t.Errorf("status version: got %d, want %d", s.StatusVersion, StatusVersion)
+	}
+	if s.Summary.Total != 1 {
+		t.Fatalf("want 1 live intervention, got %d", s.Summary.Total)
+	}
+	if len(s.Interventions) != 1 {
+		t.Fatalf("want 1 inventory row, got %d", len(s.Interventions))
+	}
+	iv := s.Interventions[0]
+	// The class was absent after install; the observation records that fact without
+	// turning it into an efficacy claim.
+	if iv.Observation.Recurrence.Occurred {
+		t.Error("class should not recur in the after window")
+	}
+	if iv.Before.Hits == 0 {
+		t.Error("the before window should carry the class")
+	}
+	if iv.After.Hits != 0 {
+		t.Errorf("the after window eliminated the class, got %d hits", iv.After.Hits)
+	}
+	if s.Summary.Counts[ActionRepair] != 1 {
+		t.Errorf("summary should count the repair action once, got %+v", s.Summary.Counts)
+	}
+
+	// Telemetry: 24 chains total (12 before + 12 after), no audit log.
+	if s.Telemetry.ReviewChains != 24 {
+		t.Errorf("want 24 review chains, got %d", s.Telemetry.ReviewChains)
+	}
+	if s.Telemetry.AuditFirings != 0 {
+		t.Errorf("an empty machine should report zero firings, got %+v", s.Telemetry)
+	}
+	if len(s.Chains) == 0 {
+		t.Error("recent chains should not be empty")
+	}
+	// One corpus row per corpus, from the cadence sweep.
+	if len(s.Corpora) != 2 {
+		t.Errorf("want 2 corpus rows from the sweep, got %d", len(s.Corpora))
+	}
+}
+
+func TestCollectEmptyMachineFailsSoft(t *testing.T) {
+	isolate(t)
+	s, err := Collect(Options{GateStateDir: t.TempDir(), WindowDays: 7})
+	if err != nil {
+		t.Fatalf("an empty machine must not error: %v", err)
+	}
+	if s.Summary.Total != 0 || len(s.Interventions) != 0 {
+		t.Errorf("empty machine should carry no interventions, got %+v", s.Summary)
+	}
+	if len(s.Attention.Interventions) != 0 || len(s.Attention.Candidates) != 0 {
+		t.Error("empty machine should carry an empty attention queue")
+	}
+	// Posture is harness-qualified: the commit gate and its resolver report every
+	// listed harness in both scopes, and nothing is armed. Pi is unlisted and has
+	// no registration here, so no row names it.
+	if len(s.Posture.CommitGate) != 4 || len(s.Posture.Resolver) != 4 {
+		t.Errorf("gate posture should report the listed harnesses in both scopes, got %+v", s.Posture)
+	}
+	for _, row := range append(append([]ScopeArming{}, s.Posture.CommitGate...), s.Posture.Resolver...) {
+		if row.Harness == "pi" {
+			t.Errorf("an unregistered Pi must not appear, got %+v", row)
+		}
+	}
+	for _, m := range s.Posture.Masters {
+		if m.Harness == "pi" {
+			t.Errorf("an unregistered Pi master must not appear, got %+v", m)
+		}
+	}
+	for _, h := range s.Telemetry.Harnesses {
+		if h.Harness == "pi" {
+			t.Errorf("Pi telemetry without evidence must not appear, got %+v", h)
+		}
+	}
+	for _, row := range s.Posture.CommitGate {
+		if row.Harness == "" {
+			t.Errorf("every posture row names its harness, got %+v", row)
+		}
+		if row.Registered || row.Effective {
+			t.Errorf("an empty machine arms nothing, got %+v", row)
+		}
+	}
+	// Codex reviews hook trust, so a registration there proves no enforcement and
+	// Trust reads unknown. Effective is the registration's own shape, not trust.
+	for _, row := range s.Posture.CommitGate {
+		want := TrustNotApplicable
+		if row.Harness == "codex" {
+			want = TrustUnknown
+		}
+		if row.Trust != want {
+			t.Errorf("%s trust: got %q, want %q", row.Harness, row.Trust, want)
+		}
+	}
+}
+
+func floatPtr(f float64) *float64 { return &f }
+func intPtr(n int) *int           { return &n }
+
+// TestJSONContractIsStable pins the emitted key set and order. It marshals a fully
+// populated SystemStatus literal — no Config, no machine state — against a golden
+// so a renamed or reordered json tag fails here, the agent-contract guard.
+func TestJSONContractIsStable(t *testing.T) {
+	s := &SystemStatus{
+		StatusVersion: 35,
+		GeneratedAt:   "2026-01-01T00:00:00Z",
+		Posture: Posture{
+			Instrument: "agy@sha", Reviewer: "gemini", Ledger: "/l.jsonl",
+			CommitGate: []ScopeArming{
+				{Harness: "claude-code", Scope: "global", Registered: true, Effective: true, Timeout: 90,
+					Trust: TrustNotApplicable, Command: "/h/.steer/bin/steer commit-gate review",
+					Resolvable: ResolveResolvable, Observed: 1700, ObservedCorpus: ledgerCorpus},
+				{Harness: "codex", Scope: "global", Registered: true, Effective: true, Timeout: 90,
+					Trust: TrustRecordPresent, Command: "steer commit-gate review-codex",
+					Resolvable: ResolveMissing, ObservedCorpus: ledgerCorpus},
+			},
+			Resolver: []ScopeArming{
+				{Harness: "claude-code", Scope: "global", Registered: true, Effective: true, Timeout: 30,
+					Trust: TrustNotApplicable, Command: "/h/.steer/bin/steer commit-gate backfill",
+					Resolvable: ResolveResolvable},
+				{Harness: "codex", Scope: "global", Registered: false, Effective: false,
+					Trust: TrustMissing, Resolvable: ResolveNotRegistered},
+			},
+			Masters: []MasterRuntime{
+				{Harness: "claude-code", Scope: "global", Path: "/h/steer-hooks.py",
+					Runtime: "aaaaaaaa", Version: "0.1.0", Expected: "bbbbbbbb", State: MasterStale, Trust: TrustNotApplicable, Observed: 1690,
+					Sources: &claude.SourceComparison{StoreDir: "/h/hooks", MasterPath: "/h/steer-hooks.py",
+						State:  claude.ComparisonComplete,
+						Guards: []claude.GuardSource{{Name: "no-console", State: claude.SourceDiffers}}}},
+				{Harness: "codex", Scope: "global", Expected: "bbbbbbbb", State: MasterNotRegistered,
+					Sources: &claude.SourceComparison{State: claude.ComparisonNotApplicable, Reason: "no registered guard runner"}},
+				{Harness: "codex", Scope: "project", Expected: "bbbbbbbb", State: MasterDetached,
+					Store:   ".steer/hooks/steer-hooks.py",
+					Sources: &claude.SourceComparison{State: claude.ComparisonNotApplicable, Reason: "no registered guard runner"},
+					StoreSources: &claude.SourceComparison{StoreDir: ".steer/hooks", MasterPath: ".steer/hooks/steer-hooks.py",
+						State:  claude.ComparisonComplete,
+						Guards: []claude.GuardSource{{Name: "no-console", State: claude.SourceMatches}}}},
+			},
+			Rules: []RulesPresence{
+				{Harness: "codex", Scope: "global", Path: "/h/.codex/AGENTS.md", Expected: 3,
+					Missing: []string{"config-path"}, Extra: []string{}, State: RulesDrifted},
+			},
+			Plugins: []PluginCopy{
+				{Harness: "claude-code", Path: "/h/.claude/plugins/cache/m/steer/0.1.0", State: PluginDifferentBinary},
+				{Harness: "codex", Path: "/h/.codex/plugins/cache/m/steer/0.1.0", Target: "/w/steer", State: PluginSameBinary},
+			},
+			Mods: []mods.Exposure{
+				{ID: "guard@m", Path: "/h/.claude/plugins/cache/m/guard/0.1.0", Enabled: "user",
+					State: mods.StateToolHooks, Handlers: []string{"tool.call{tool=Bash}", "tool.check"}, InspectedAt: 1720},
+				{ID: "pane@m", Path: "/h/.claude/plugins/cache/m/pane/0.1.0", Enabled: "project", State: mods.StateUninspected},
+			},
+			GuardInterpreter: InterpreterReading{Command: "python3", Found: true},
+			Unresolved:       4,
+		},
+		Checks: CheckTier{
+			Repo: "/w/steer", Manifest: true, Adopted: true, AdoptedAt: 1600,
+			Runner: []ScopeArming{
+				{Harness: "claude-code", Scope: "global", Registered: true, Effective: true, Timeout: 330,
+					Trust: TrustNotApplicable, Command: "/h/.steer/bin/steer check hook --harness claude-code",
+					Resolvable: ResolveResolvable, Observed: 1710, ObservedCorpus: checkCorpus},
+				{Harness: "codex", Scope: "global", Registered: false, Effective: false,
+					Trust: TrustUnknown, Resolvable: ResolveNotRegistered, ObservedCorpus: checkCorpus},
+			},
+			Checks: []CheckRow{{
+				ID: "json-contract", Kind: "go-test", Binding: "cli/internal/status TestJSONContractIsStable",
+				Validation: CheckStale, Changed: []string{"detector"}, Receipt: "r1", ValidatedAt: 1500,
+				Execution: "passed", ExecutedAt: 1710, ExecutionRun: "run-2",
+			}},
+			LatestRun: &CheckRun{RunID: "run-2", Source: "stop", Harness: "claude-code",
+				Outcome: "passed", Disposition: "allow", Finished: 1710, RefusedAfter: 1712},
+		},
+		Interventions: []ScoredIntervention{{
+			ID: "widget-flag", Class: "widget flag loss",
+			Problem:      "the parser drops a flag and the reviewer catches it after the fact",
+			Intervention: "a guard refuses a parser branch that drops a flag",
+			LegacyNote:   "guard tier 2",
+			Match:        "widget.*flag", Tier: "guard", Target: "guard.py",
+			Status: "active", HookID: "no-widget-flag",
+			Corpus: mine.CorpusReviewFindings, Unit: mine.UnitChain,
+			Before: cadence.Incidence{Hits: 12, Units: 12, Rate: 1}, After: cadence.Incidence{Hits: 0, Units: 12, Rate: 0},
+			Observation: mine.Observation{
+				Recurrence: mine.Recurrence{Occurred: true, Matches: 1},
+				Firing:     mine.FiringActivity{Applicable: true, LogPresent: true, HookID: "no-widget-flag", Scope: mine.FiringScopeWindowPeriod, Rows: 3, Units: 2},
+				Coverage:   mine.ObservationCoverage{Before: map[string]any{"total": 14, "eligible": 12, "ineligible": 1, "unknown": 1, "unknown_scope": 1}, After: map[string]any{"total": 13, "eligible": 12, "unknown": 1, "unknown_evidence": 1, "pending": 1}, ZeroEligibleAfter: false},
+				Provenance: mine.ObservationProvenance{Kind: mine.ProvenanceReviewer, Before: []string{"a"}, After: []string{"a", "b"}},
+			},
+			Artifact: &cadence.Artifact{ID: "no-widget-flag", Scope: "global", State: cadence.ArtifactPresent,
+				Removed: "2026-01-02T03:04:05.000000000Z"},
+			Scope:          &cadence.Scope{Version: 3, Repo: "steer.*", RepoRoot: "/w/steer", Path: `\.go$`},
+			BeforeCoverage: cadence.Coverage{Total: 14, Eligible: 12, Ineligible: 1, Unknown: 1, UnknownScope: 1},
+			AfterCoverage:  cadence.Coverage{Total: 15, Eligible: 12, Unknown: 3, UnknownEvidence: 3, Pending: 1, LedgerMissed: 1, LedgerOverdue: 1, PartialExposure: 1},
+		}, {
+			ID: "taste-nit", Class: "taste nit",
+			Problem:      "the reviewer raises a wording preference with no defect behind it",
+			Intervention: "no suitable fix was identified",
+			Match:        "nit", Tier: "check", Target: "check.sh",
+			Status: "rejected",
+			Corpus: mine.CorpusTranscript, Unit: mine.UnitSession, SignalKind: mine.SignalCorrection,
+			Reason: "not mechanizable", Reopen: "incidence doubles", RejectedTS: 1700,
+			Scope: &cadence.Scope{Version: 1, All: true},
+			Observation: mine.Observation{Declined: true, Checks: mine.CheckActivity{
+				Applicable: true, Attribution: mine.AttributionCheckID, StreamPresent: true, RegisteredHost: "host-a",
+				CheckID: "json-contract", Repo: "/w/steer", Scope: mine.FiringScopeEligibleUnits, ClassScoped: true,
+				Executions: 4, Outcomes: map[string]int{"failed": 1, "passed": 3}, Blocked: 1, ChangedDetector: 1,
+				Units: 2, NewestTS: 1710,
+			}, Coverage: mine.ObservationCoverage{Before: map[string]any{}, After: map[string]any{}, ZeroEligibleAfter: true}, Provenance: mine.ObservationProvenance{Kind: mine.ProvenanceParser}},
+		}},
+		Summary: VerdictSummary{Total: 2, Counts: map[string]int{ActionRepair: 1, ActionObserve: 1}},
+		Chains: []ChainSummary{{
+			Host: "h", StartTS: 1000, Rounds: 2, Files: 1, Findings: 1, Accepted: 1, Sessions: 1, Terminal: "clean",
+		}},
+		Attention: AttentionQueue{
+			Interventions: []cadence.Intervention{{ID: "widget-flag", Class: "widget flag loss", Match: "widget.*flag"}},
+			Unscored:      []string{},
+			Candidates:    []cadence.Candidate{},
+			Checks: []cadence.CheckWork{{
+				Kind: cadence.CheckNeverValidated, Repo: "/w/steer", CheckID: "json-contract",
+				Detail: "no replay recorded here", Fix: "steer check test json-contract",
+			}},
+		},
+		Telemetry: Telemetry{
+			ReviewChains: 24, AuditFirings: 3, CheckBlocks: 2, SessionSnapshots: 40,
+			Harnesses: []HarnessTelemetry{
+				{Harness: "claude-code", Sessions: 30, Firings: 3, Chains: 24},
+				{Harness: "codex", Sessions: 10, CheckBlocks: 2},
+			},
+		},
+		Corpora: []CorpusRow{
+			{Corpus: "review-findings", Present: true, Size: 24, Path: "/state/review"},
+			{Corpus: "transcript-friction", Present: true, Size: 40, Path: "/state/sessions"},
+		},
+		Hooks: []HookInfo{
+			{Name: "no-console", Scope: "project", Source: "manual", Rule: "no console.log here",
+				Fixtures: &mine.FixtureReceipt{Applicable: true, State: mine.FixtureCurrent,
+					Cases: intPtr(14), Shadowed: intPtr(0), VerifiedAt: "2026-01-01T00:00:00Z"}},
+			{Name: "no-console", Scope: "global", Source: "generated", Rule: "no console.log",
+				Fixtures: &mine.FixtureReceipt{Applicable: true, State: mine.FixtureStale,
+					Cases: intPtr(6), Shadowed: intPtr(1), VerifiedAt: "2025-12-01T00:00:00Z", Changed: []string{"master"}}},
+		},
+		Presets: []PresetInfo{
+			{Name: "shell-safety", Scope: "project", Bundle: "security", Description: "block risky shell", Enabled: false},
+			{Name: "shell-safety", Scope: "global", Bundle: "security", Description: "block risky shell", Enabled: true, Drifted: true},
+			{Name: "env-files", Scope: "global", Bundle: "security", Description: "block .env reads", Enabled: true},
+		},
+		Rules: []RuleInfo{{ID: "config-path", Scope: "global", Text: "resolve config from the repo root"}},
+		Addenda: []AddendumInfo{{ID: "fp-sort", Scope: "project", Text: "sorted output is fine",
+			HeadText: "sorted output is not a finding", State: AddendumUncommittedChange}},
+		Team:          TeamState{Present: true, Path: "steer-team.lock.json", HooksLocked: 3, CatalogVersion: "v7"},
+		StoreProblems: []StoreProblem{{Scope: "project", Error: "guard manifest /w/.steer/hooks/steer-manifest.json gives entry \"x\" the file \"../y\", which is not a plain file name; edit the manifest entry"}},
+	}
+	got, err := s.MarshalIndent()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(bytes.TrimSpace(got), []byte(goldenStatusJSON)) {
+		t.Errorf("JSON contract drifted.\n--- got ---\n%s\n--- want ---\n%s", got, goldenStatusJSON)
+	}
+}
+
+const goldenStatusJSON = `{
+  "status_version": 35,
+  "generated_at": "2026-01-01T00:00:00Z",
+  "posture": {
+    "instrument": "agy@sha",
+    "reviewer": "gemini",
+    "ledger": "/l.jsonl",
+    "commit_gate": [
+      {
+        "harness": "claude-code",
+        "scope": "global",
+        "registered": true,
+        "effective": true,
+        "timeout": 90,
+        "trust": "not-applicable",
+        "command": "/h/.steer/bin/steer commit-gate review",
+        "resolvable": "resolvable",
+        "observed": 1700,
+        "observed_corpus": "commit-review"
+      },
+      {
+        "harness": "codex",
+        "scope": "global",
+        "registered": true,
+        "effective": true,
+        "timeout": 90,
+        "trust": "record-present-unverified",
+        "command": "steer commit-gate review-codex",
+        "resolvable": "missing",
+        "observed_corpus": "commit-review"
+      }
+    ],
+    "resolver": [
+      {
+        "harness": "claude-code",
+        "scope": "global",
+        "registered": true,
+        "effective": true,
+        "trust": "not-applicable",
+        "resolvable": "resolvable"
+      },
+      {
+        "harness": "codex",
+        "scope": "global",
+        "registered": false,
+        "effective": false,
+        "trust": "missing",
+        "resolvable": "not-registered"
+      }
+    ],
+    "unresolved_rows": 4,
+    "masters": [
+      {
+        "harness": "claude-code",
+        "scope": "global",
+        "path": "/h/steer-hooks.py",
+        "runtime": "aaaaaaaa",
+        "version": "0.1.0",
+        "expected": "bbbbbbbb",
+        "state": "stale",
+        "trust": "not-applicable",
+        "observed": 1690,
+        "sources": {
+          "store_dir": "/h/hooks",
+          "master_path": "/h/steer-hooks.py",
+          "state": "complete",
+          "guards": [
+            {
+              "name": "no-console",
+              "state": "differs"
+            }
+          ]
+        }
+      },
+      {
+        "harness": "codex",
+        "scope": "global",
+        "expected": "bbbbbbbb",
+        "state": "not-registered",
+        "sources": {
+          "state": "not-applicable",
+          "reason": "no registered guard runner"
+        }
+      },
+      {
+        "harness": "codex",
+        "scope": "project",
+        "expected": "bbbbbbbb",
+        "state": "detached",
+        "store": ".steer/hooks/steer-hooks.py",
+        "sources": {
+          "state": "not-applicable",
+          "reason": "no registered guard runner"
+        },
+        "store_sources": {
+          "store_dir": ".steer/hooks",
+          "master_path": ".steer/hooks/steer-hooks.py",
+          "state": "complete",
+          "guards": [
+            {
+              "name": "no-console",
+              "state": "matches"
+            }
+          ]
+        }
+      }
+    ],
+    "rules": [
+      {
+        "harness": "codex",
+        "scope": "global",
+        "path": "/h/.codex/AGENTS.md",
+        "expected": 3,
+        "missing": [
+          "config-path"
+        ],
+        "extra": [],
+        "state": "drifted"
+      }
+    ],
+    "plugins": [
+      {
+        "harness": "claude-code",
+        "path": "/h/.claude/plugins/cache/m/steer/0.1.0",
+        "state": "different-binary"
+      },
+      {
+        "harness": "codex",
+        "path": "/h/.codex/plugins/cache/m/steer/0.1.0",
+        "target": "/w/steer",
+        "state": "same-binary"
+      }
+    ],
+    "mods": [
+      {
+        "id": "guard@m",
+        "path": "/h/.claude/plugins/cache/m/guard/0.1.0",
+        "enabled": "user",
+        "state": "tool-hooks",
+        "handlers": [
+          "tool.call{tool=Bash}",
+          "tool.check"
+        ],
+        "inspected_at": 1720
+      },
+      {
+        "id": "pane@m",
+        "path": "/h/.claude/plugins/cache/m/pane/0.1.0",
+        "enabled": "project",
+        "state": "uninspected"
+      }
+    ],
+    "guard_interpreter": {
+      "command": "python3",
+      "found": true
+    },
+    "readiness": {
+      "reviewing": true,
+      "headline": "Commits here are reviewed before they land — Claude Code global.",
+      "steps": [
+        {
+          "title": "Codex global scope: the registered command does not resolve here — the hook is skipped silently",
+          "fix": "steer bin install"
+        }
+      ]
+    },
+    "health": {
+      "verdict": "needs-attention",
+      "headline": "steer unknown build — needs attention",
+      "issues": [
+        {
+          "severity": "attention",
+          "title": "Codex global scope: the registered command does not resolve here — the hook is skipped silently",
+          "fix": "steer bin install"
+        },
+        {
+          "severity": "attention",
+          "title": "Claude Code global guard runner is out of date",
+          "fix": "steer hooks rebuild --scope global"
+        },
+        {
+          "severity": "attention",
+          "title": "Codex project runs none of this scope's guards",
+          "fix": "steer hooks sync --scope project"
+        },
+        {
+          "severity": "attention",
+          "title": "Codex global instructions do not match Steer's rules",
+          "fix": "steer hooks sync --scope global"
+        },
+        {
+          "severity": "attention",
+          "title": "Steer cannot read the project guard list: guard manifest /w/.steer/hooks/steer-manifest.json gives entry \"x\" the file \"../y\", which is not a plain file name; edit the manifest entry",
+          "fix": "edit the entry named above; the guards already installed keep running"
+        },
+        {
+          "severity": "unchecked",
+          "title": "Steer could not check Codex global hook approval",
+          "detail": [
+            "Hooks: commit review"
+          ],
+          "fix": "Inspect /hooks in Codex."
+        },
+        {
+          "severity": "unchecked",
+          "title": "Claude Code mod pane@m is not inspected, so whether it can skip Steer's hooks is unknown",
+          "fix": "steer mods inspect"
+        },
+        {
+          "severity": "unchecked",
+          "title": "Steer could not read the Claude Code plugin's build",
+          "detail": [
+            "/h/.claude/plugins/cache/m/steer/0.1.0"
+          ]
+        },
+        {
+          "severity": "unchecked",
+          "title": "Steer could not read the build the hooks run"
+        },
+        {
+          "severity": "info",
+          "title": "Claude Code mod guard@m handles tool.call{tool=Bash}, tool.check, so it can skip or override Steer's hooks"
+        }
+      ]
+    }
+  },
+  "checks": {
+    "repo": "/w/steer",
+    "manifest": true,
+    "adopted": true,
+    "adopted_at": 1600,
+    "runner": [
+      {
+        "harness": "claude-code",
+        "scope": "global",
+        "registered": true,
+        "effective": true,
+        "timeout": 330,
+        "trust": "not-applicable",
+        "command": "/h/.steer/bin/steer check hook --harness claude-code",
+        "resolvable": "resolvable",
+        "observed": 1710,
+        "observed_corpus": "check-runs"
+      },
+      {
+        "harness": "codex",
+        "scope": "global",
+        "registered": false,
+        "effective": false,
+        "trust": "unknown",
+        "resolvable": "not-registered",
+        "observed_corpus": "check-runs"
+      }
+    ],
+    "checks": [
+      {
+        "id": "json-contract",
+        "kind": "go-test",
+        "binding": "cli/internal/status TestJSONContractIsStable",
+        "validation": "stale",
+        "changed": [
+          "detector"
+        ],
+        "receipt": "r1",
+        "validated_at": 1500,
+        "execution": "passed",
+        "executed_at": 1710,
+        "execution_run": "run-2"
+      }
+    ],
+    "latest_run": {
+      "run_id": "run-2",
+      "source": "stop",
+      "harness": "claude-code",
+      "outcome": "passed",
+      "disposition": "allow",
+      "finished": 1710,
+      "refused_after": 1712
+    }
+  },
+  "interventions": [
+    {
+      "id": "widget-flag",
+      "class": "widget flag loss",
+      "problem": "the parser drops a flag and the reviewer catches it after the fact",
+      "intervention": "a guard refuses a parser branch that drops a flag",
+      "tier": "guard",
+      "target": "guard.py",
+      "status": "active",
+      "hook_id": "no-widget-flag",
+      "scope": {
+        "version": 3,
+        "repo": "steer.*",
+        "repo_root": "/w/steer",
+        "path": "\\.go$"
+      },
+      "artifact": {
+        "id": "no-widget-flag",
+        "scope": "global",
+        "state": "present",
+        "removed": "2026-01-02T03:04:05.000000000Z"
+      },
+      "corpus": "review-findings",
+      "unit": "chain",
+      "recurred": true,
+      "before": {
+        "hits": 12,
+        "units": 12,
+        "rate": 1
+      },
+      "after": {
+        "hits": 0,
+        "units": 12,
+        "rate": 0
+      }
+    },
+    {
+      "id": "taste-nit",
+      "class": "taste nit",
+      "problem": "the reviewer raises a wording preference with no defect behind it",
+      "intervention": "no suitable fix was identified",
+      "tier": "check",
+      "target": "check.sh",
+      "status": "rejected",
+      "scope": {
+        "version": 1,
+        "all": true
+      },
+      "artifact": null,
+      "corpus": "transcript-friction",
+      "unit": "session",
+      "signal_kind": "user_corrections",
+      "recurred": false,
+      "before": {
+        "hits": 0,
+        "units": 0,
+        "rate": 0
+      },
+      "after": {
+        "hits": 0,
+        "units": 0,
+        "rate": 0
+      }
+    }
+  ],
+  "summary": {
+    "total": 2,
+    "counts": {
+      "observe": 1,
+      "repair": 1
+    }
+  },
+  "attention": {
+    "interventions": [
+      "widget-flag"
+    ],
+    "unscored": [],
+    "candidates": [],
+    "checks": [
+      {
+        "kind": "never-validated",
+        "repo": "/w/steer",
+        "check_id": "json-contract",
+        "detail": "no replay recorded here",
+        "fix": "steer check test json-contract"
+      }
+    ]
+  },
+  "telemetry": {
+    "review_chains": 24,
+    "audit_firings": 3,
+    "check_blocks": 2,
+    "session_snapshots": 40,
+    "harnesses": [
+      {
+        "harness": "claude-code",
+        "sessions": 30,
+        "firings": 3,
+        "check_blocks": 0,
+        "chains": 24
+      },
+      {
+        "harness": "codex",
+        "sessions": 10,
+        "firings": 0,
+        "check_blocks": 2,
+        "chains": 0
+      }
+    ]
+  },
+  "corpora": [
+    {
+      "corpus": "review-findings",
+      "present": true,
+      "size": 24,
+      "path": "/state/review"
+    },
+    {
+      "corpus": "transcript-friction",
+      "present": true,
+      "size": 40,
+      "path": "/state/sessions"
+    }
+  ],
+  "hooks": [
+    {
+      "name": "no-console",
+      "scope": "project",
+      "source": "manual",
+      "rule": "no console.log here",
+      "fixtures": {
+        "applicable": true,
+        "state": "current",
+        "cases": 14,
+        "verified_at": "2026-01-01T00:00:00Z",
+        "shadowed": 0
+      }
+    },
+    {
+      "name": "no-console",
+      "scope": "global",
+      "source": "generated",
+      "rule": "no console.log",
+      "fixtures": {
+        "applicable": true,
+        "state": "stale",
+        "cases": 6,
+        "changed": [
+          "master"
+        ],
+        "verified_at": "2025-12-01T00:00:00Z",
+        "shadowed": 1
+      }
+    }
+  ],
+  "presets": [
+    {
+      "name": "env-files",
+      "bundle": "security",
+      "description": "block .env reads",
+      "enabled_scopes": [
+        "global"
+      ],
+      "drifted_scopes": []
+    },
+    {
+      "name": "shell-safety",
+      "bundle": "security",
+      "description": "block risky shell",
+      "enabled_scopes": [
+        "global"
+      ],
+      "drifted_scopes": [
+        "global"
+      ]
+    }
+  ],
+  "rules": [
+    {
+      "id": "config-path",
+      "scope": "global",
+      "text": "resolve config from the repo root"
+    }
+  ],
+  "addenda": [
+    {
+      "id": "fp-sort",
+      "scope": "project",
+      "text": "sorted output is fine",
+      "head_text": "sorted output is not a finding",
+      "state": "uncommitted-change"
+    }
+  ],
+  "team": {
+    "present": true,
+    "path": "steer-team.lock.json",
+    "hooks_locked": 3,
+    "catalog_version": "v7"
+  },
+  "store_problems": [
+    {
+      "scope": "project",
+      "error": "guard manifest /w/.steer/hooks/steer-manifest.json gives entry \"x\" the file \"../y\", which is not a plain file name; edit the manifest entry"
+    }
+  ]
+}`
+
+// TestABrokenRegistrationIsNotArmed pins the reading item 14 measured: a gate
+// whose command does not resolve reads as registered and effective from the
+// configuration alone, so the posture has to carry the second reading. It also
+// pins the third: a channel that never wrote a row reports never observed.
+func TestABrokenRegistrationIsNotArmed(t *testing.T) {
+	isolate(t)
+	if err := claude.RegisterCommitGateHook(claude.GlobalScope,
+		"steer-not-real-xyz commit-gate review", 210); err != nil {
+		t.Fatal(err)
+	}
+
+	p := collectPosture(gate.Config{}, mine.EvidenceSet{})
+
+	var row ScopeArming
+	for _, a := range p.CommitGate {
+		if a.Harness == "claude-code" && a.Scope == claude.GlobalScope {
+			row = a
+		}
+	}
+	if !row.Registered || !row.Effective {
+		t.Fatalf("the configuration reads as %+v; the registration is present", row)
+	}
+	if row.Resolvable != ResolveMissing {
+		t.Fatalf("resolvable = %q, want %q", row.Resolvable, ResolveMissing)
+	}
+	if row.Command != "steer-not-real-xyz commit-gate review" {
+		t.Fatalf("command = %q, want the registered one verbatim", row.Command)
+	}
+	if got := ResolvePhrase(row); got == "" {
+		t.Fatal("a missing command renders no warning")
+	}
+	if row.ObservedCorpus != ledgerCorpus || row.Observed != 0 {
+		t.Fatalf("observed = %v/%q, want never observed over the ledger", row.Observed, row.ObservedCorpus)
+	}
+	if got := ObservedPhrase(row); got != "never observed" {
+		t.Fatalf("observed phrase = %q, want %q", got, "never observed")
+	}
+}
+
+// TestAnUnregisteredChannelResolvesToNothing: a scope with no registration has no
+// command to test, so it reports not-registered rather than missing — a missing
+// command is a broken install, and an absent one is not installed.
+func TestAnUnregisteredChannelResolvesToNothing(t *testing.T) {
+	isolate(t)
+
+	p := collectPosture(gate.Config{}, mine.EvidenceSet{})
+
+	for _, a := range p.CommitGate {
+		if a.Resolvable != ResolveNotRegistered {
+			t.Fatalf("%s %s scope: resolvable = %q, want %q", a.Harness, a.Scope, a.Resolvable, ResolveNotRegistered)
+		}
+	}
+}
+
+// TestObservedReadsTheNewestRowPerHarness pins that the commit gate's observed
+// reading is the ledger's newest chain for THAT harness. A chain with no harness
+// stamp counts for no harness rather than for every one.
+func TestObservedReadsTheNewestRowPerHarness(t *testing.T) {
+	isolate(t)
+	ev := mine.EvidenceSet{Chains: []mine.Chain{
+		{Harness: "claude-code", HarnessKnown: true, EndTS: 1000.0},
+		{Harness: "claude-code", HarnessKnown: true, EndTS: 2000.0},
+		{Harness: "codex", HarnessKnown: true, EndTS: 1500.0},
+		{EndTS: 9000.0},
+	}}
+
+	observed := observedChannels(ev)
+
+	if observed.gate["claude-code"] != 2000 {
+		t.Fatalf("claude-code observed = %v, want 2000", observed.gate["claude-code"])
+	}
+	if observed.gate["codex"] != 1500 {
+		t.Fatalf("codex observed = %v, want 1500", observed.gate["codex"])
+	}
+	if len(observed.gate) != 2 {
+		t.Fatalf("unstamped chain credited to %v", observed.gate)
+	}
+}
+
+// TestPiPostureReadsTheRegisteredExtension pins the Pi rows over an ARMED machine:
+// the empty-machine test proves only that they are absent. Pi writes the review and
+// the resolver into one extension file, so both rows read back from one write, and
+// the scope with no registration carries no Pi row.
+func TestPiPostureReadsTheRegisteredExtension(t *testing.T) {
+	isolate(t)
+	if _, err := pi.RegisterCommitGateAndResolver(claude.GlobalScope, t.TempDir(),
+		"steer commit-gate review-pi", 210,
+		"steer commit-gate backfill --if-due --apply --quiet", 30); err != nil {
+		t.Fatal(err)
+	}
+
+	p := collectPosture(gate.Config{}, mine.EvidenceSet{})
+
+	var gateRow, resolverRow ScopeArming
+	for _, a := range p.CommitGate {
+		if a.Harness == "pi" && a.Scope == claude.GlobalScope {
+			gateRow = a
+		}
+		if a.Harness == "pi" && a.Scope == claude.ProjectScope {
+			t.Errorf("unregistered pi project gate row = %+v", a)
+		}
+	}
+	for _, a := range p.Resolver {
+		if a.Harness == "pi" && a.Scope == claude.GlobalScope {
+			resolverRow = a
+		}
+		if a.Harness == "pi" && a.Scope == claude.ProjectScope {
+			t.Errorf("unregistered pi project resolver row = %+v", a)
+		}
+	}
+	if !gateRow.Registered || !gateRow.Effective || gateRow.Timeout != 210 ||
+		gateRow.Command != "steer commit-gate review-pi" {
+		t.Fatalf("pi gate row = %+v", gateRow)
+	}
+	if !resolverRow.Registered || !resolverRow.Effective || resolverRow.Timeout != 30 ||
+		resolverRow.Command != "steer commit-gate backfill --if-due --apply --quiet" {
+		t.Fatalf("pi resolver row = %+v", resolverRow)
+	}
+	if gateRow.Trust != TrustUnknown || resolverRow.Trust != TrustUnknown {
+		t.Fatalf("trust = %q/%q, want unknown: steer reads no Pi trust record",
+			gateRow.Trust, resolverRow.Trust)
+	}
+}
+
+// A team lockfile that is not there is not a fault. One that IS there and cannot
+// be parsed is, and reading the two as one absence told a reader nothing was
+// configured while a broken file sat at the path.
+func TestABrokenTeamLockfileIsNotAnAbsentOne(t *testing.T) {
+	t.Chdir(t.TempDir())
+	if got := collectTeam(); got.Present || got.Error != "" {
+		t.Errorf("no lockfile read as %#v, want absent with no error", got)
+	}
+
+	if err := os.WriteFile(teamLockfileName, []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := collectTeam()
+	if !got.Present {
+		t.Fatal("a broken lockfile read as absent")
+	}
+	if got.Error == "" {
+		t.Error("a broken lockfile reports no error")
+	}
+	if got.Path != teamLockfileName {
+		t.Errorf("the broken lockfile names no path: %q", got.Path)
+	}
+}
+
+// A record from a corpus no engine reads stays out of the scored inventory and
+// out of the summary total, and reports by id under Unscored.
+func TestAnUnreadableCorpusIsReportedUnscoredAndNotScored(t *testing.T) {
+	isolate(t)
+	stateDir := seedLedger(t, "widget parser flag loss", "widget parser",
+		"widget parser drops a flag", "unrelated naming nit", 12)
+	records, err := mine.Load(stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records = append(records, mine.Record{
+		"id": "orphan", "class": "an orphan class", "match": "orphan",
+		"tier": "check", "target": "check.sh", "status": "active",
+		"corpus": "made-up-corpus", "unit": "made-up-unit",
+	})
+	if err := mine.Save(stateDir, records); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := Collect(Options{GateStateDir: stateDir, WindowDays: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, iv := range s.Interventions {
+		if iv.ID == "orphan" {
+			t.Fatalf("an unreadable corpus must not reach the scored inventory: %+v", iv)
+		}
+	}
+	if s.Summary.Total != 1 {
+		t.Errorf("the total counts scored records only, got %d", s.Summary.Total)
+	}
+	found := false
+	for _, id := range s.Attention.Unscored {
+		if id == "orphan" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the record must still be reported, got unscored %v", s.Attention.Unscored)
+	}
+}
+
+// A record's binding survives scoring: the inventory and the attention queue both
+// carry where the fix stands, and a rule removed from its store reads as absent.
+func TestCollectCarriesTheArtifactOfEachRecord(t *testing.T) {
+	isolate(t)
+	stateDir := seedLedger(t, "widget parser flag loss", "widget parser",
+		"widget parser drops a flag", "unrelated naming nit", 3)
+	records, err := mine.Load(stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records[0]["tier"], records[0]["rule_id"], records[0]["rule_scope"] = "instruction", "config-path", "global"
+	if err := mine.Save(stateDir, records); err != nil {
+		t.Fatal(err)
+	}
+	home, _ := os.UserHomeDir()
+	store := filepath.Join(home, ".steer", "hooks")
+	if err := os.MkdirAll(store, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(store, "steer-manifest.json"), []byte(`{"rules":{}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := Collect(Options{GateStateDir: stateDir, WindowDays: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Interventions) != 1 || s.Interventions[0].Artifact == nil ||
+		s.Interventions[0].Artifact.State != cadence.ArtifactAbsent || s.Interventions[0].Artifact.ID != "config-path" {
+		t.Fatalf("inventory = %+v; want the rule read as absent", s.Interventions)
+	}
+	if len(s.Attention.Interventions) != 1 || s.Attention.Interventions[0].Artifact == nil ||
+		s.Attention.Interventions[0].Artifact.State != cadence.ArtifactAbsent {
+		t.Fatalf("attention = %+v; want the record queued with its artifact", s.Attention.Interventions)
+	}
+}
+
+// Every guard row carries its fixture receipt, whether or not a record names the
+// guard, from the conversion a guard-tier record's score row uses.
+func TestCollectCarriesEachGuardsFixtureReceipt(t *testing.T) {
+	isolate(t)
+	home, _ := os.UserHomeDir()
+	store := filepath.Join(home, ".steer", "hooks")
+	if err := os.MkdirAll(store, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"hooks":{
+		"no-pass":{"file":"no-pass.py","rule":"never run foo","fixtures":{"digest":"d","cases":3,"tested":false}},
+		"no-master":{"file":"no-master.py","rule":"never run bar","fixtures":{"digest":"d","cases":14,"tested":true,"verified_at":"2026-10-05T00:00:00Z"}}
+	},"rules":{}}`
+	if err := os.WriteFile(filepath.Join(store, "steer-manifest.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := Collect(Options{GateStateDir: t.TempDir(), Scope: claude.GlobalScope})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]*mine.FixtureReceipt{}
+	for _, h := range s.Hooks {
+		got[h.Name] = h.Fixtures
+	}
+	if r := got["no-pass"]; r == nil || !r.Applicable || r.State != mine.FixtureNone || r.Cases != nil {
+		t.Errorf("no-pass fixtures = %+v; want an applicable none with no cases", r)
+	}
+	if r := got["no-master"]; r == nil || r.State != mine.FixtureUnavailable || r.Cases == nil || *r.Cases != 14 ||
+		r.VerifiedAt != "2026-10-05T00:00:00Z" {
+		t.Errorf("no-master fixtures = %+v; want unavailable with the pass's 14 cases", r)
+	}
+}
+
+// Telemetry counts the Stop blocks a reading pass can take: a block, not a
+// yield or another source's failure, and never one an exclusion retires.
+func TestCountBlocksCountsReadableStopBlocksPerHarness(t *testing.T) {
+	runs := []checks.OracleRun{
+		{RunID: "1", Source: checks.SourceStop, Disposition: checks.DispositionBlock, Harness: "codex"},
+		{RunID: "2", Source: checks.SourceStop, Disposition: checks.DispositionBlock, Harness: "codex"},
+		{RunID: "3", Source: checks.SourceStop, Disposition: checks.DispositionBlock, Harness: "claude-code"},
+		{RunID: "4", Source: checks.SourceStop, Disposition: checks.DispositionYield, Harness: "codex"},
+		{RunID: "5", Source: checks.SourceRun, Disposition: checks.DispositionBlock, Harness: "codex"},
+	}
+	got := countBlocks(runs, map[string]adjudication.Exclusion{"2": {RunID: "2"}})
+	if len(got) != 2 || got["codex"] != 1 || got["claude-code"] != 1 {
+		t.Errorf("blocks = %v; want one per harness", got)
+	}
+	tel := telemetry(mine.EvidenceSet{}, got)
+	if tel.CheckBlocks != 2 {
+		t.Errorf("telemetry = %+v; want two check blocks", tel)
+	}
+}

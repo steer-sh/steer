@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Images Without Alt Attributes</title>
+</head>
+<body>
+    <header>
+        <h1>Company Website</h1>
+        <!-- Bad: img tag missing alt attribute -->
+        <img src="logo.png" width="200" height="100">
+    </header>
+    
+    <main>
+        <section class="hero">
+            <h2>Welcome to Our Service</h2>
+            <!-- Bad: another img without alt -->
+            <img src="hero-banner.jpg" class="hero-image">
+        </section>
+        
+        <section class="products">
+            <h2>Our Products</h2>
+            <div class="product-grid">
+                <div class="product">
+                    <h3>Product 1</h3>
+                    <!-- Bad: product image without alt -->
+                    <img src="product1.jpg" width="300" height="200">
+                    <p>Amazing product description</p>
+                </div>
+                
+                <div class="product">
+                    <h3>Product 2</h3>
+                    <!-- Bad: another product image without alt -->
+                    <img src="product2.jpg" class="product-image">
+                    <p>Another great product</p>
+                </div>
+            </div>
+        </section>
+        
+        <section class="team">
+            <h2>Meet Our Team</h2>
+            <!-- Bad: team member photo without alt -->
+            <img src="team/john.jpg" class="team-photo">
+            <p>John Smith, CEO</p>
+            
+            <!-- Bad: another team member photo without alt -->
+            <img src="team/jane.jpg" class="team-photo" width="150" height="150">
+            <p>Jane Doe, CTO</p>
+        </section>
+    </main>
+    
+    <footer>
+        <p>&copy; 2024 Company Name</p>
+        <!-- Bad: footer logo without alt -->
+        <img src="footer-logo.png">
+    </footer>
+</body>
+</html>

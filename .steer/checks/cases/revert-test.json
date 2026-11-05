@@ -1,0 +1,28 @@
+{
+ "version": 1,
+ "cases": [
+  {
+   "name": "test-fails-under-a-variant",
+   "exit_code": 0,
+   "provenance": "a new test that asserts the changed return value; scripts/revert-test-verify.py holds the exhaustive proof over fixture repositories; these two cases pin the accept and reject verdicts that check.sh gates on",
+   "setup": "set -eu\ngit init -q\ngit config user.email t@t\ngit config user.name t\nkeep=$(mktemp -d)\ncp cli/p/p.go \"$keep/p.go\"\ncp cli/p/p_test.go \"$keep/p_test.go\"\nprintf 'package p\\n\\nfunc F() int {\\n\\treturn 1\\n}\\n' > cli/p/p.go\nrm cli/p/p_test.go\ngit add -A\ngit -c commit.gpgsign=false commit -qm base\ncp \"$keep/p.go\" cli/p/p.go\ncp \"$keep/p_test.go\" cli/p/p_test.go\nrm -rf \"$keep\"\n",
+   "files": {
+    "cli/go.mod": "module example.com/fx\n\ngo 1.21\n",
+    "cli/p/p.go": "package p\n\nfunc F() int {\n\treturn 2\n}\n",
+    "cli/p/p_test.go": "package p\n\nimport \"testing\"\n\nfunc TestFReturnsTwo(t *testing.T) {\n\tif F() != 2 {\n\t\tt.Fatalf(\"F() = %d; want 2\", F())\n\t}\n}\n"
+   }
+  },
+  {
+   "name": "test-passes-under-every-variant",
+   "exit_code": 1,
+   "diagnostic": "passes under every variant that ran",
+   "provenance": "a new test that asserts nothing about the change; scripts/revert-test-verify.py holds the exhaustive proof over fixture repositories; these two cases pin the accept and reject verdicts that check.sh gates on",
+   "setup": "set -eu\ngit init -q\ngit config user.email t@t\ngit config user.name t\nkeep=$(mktemp -d)\ncp cli/p/p.go \"$keep/p.go\"\ncp cli/p/p_test.go \"$keep/p_test.go\"\nprintf 'package p\\n\\nfunc F() int {\\n\\treturn 1\\n}\\n' > cli/p/p.go\nrm cli/p/p_test.go\ngit add -A\ngit -c commit.gpgsign=false commit -qm base\ncp \"$keep/p.go\" cli/p/p.go\ncp \"$keep/p_test.go\" cli/p/p_test.go\nrm -rf \"$keep\"\n",
+   "files": {
+    "cli/go.mod": "module example.com/fx\n\ngo 1.21\n",
+    "cli/p/p.go": "package p\n\nfunc F() int {\n\treturn 2\n}\n",
+    "cli/p/p_test.go": "package p\n\nimport \"testing\"\n\nfunc TestArithmeticHolds(t *testing.T) {\n\tif 1+1 != 2 {\n\t\tt.Fatal(\"arithmetic\")\n\t}\n}\n"
+   }
+  }
+ ]
+}

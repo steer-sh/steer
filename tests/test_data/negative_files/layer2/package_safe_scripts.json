@@ -1,0 +1,9 @@
+{
+  "name": "safe-package",
+  "version": "1.2.3",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "start": "node dist/index.js"
+  }
+}

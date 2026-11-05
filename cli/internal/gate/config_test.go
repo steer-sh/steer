@@ -1,0 +1,106 @@
+package gate
+
+import (
+	"os"
+	"path/filepath"
+	"runtime"
+	"testing"
+	"time"
+
+	steerconfig "github.com/steer-sh/steer-cli/internal/config"
+	"github.com/steer-sh/steer-cli/internal/steerpath"
+)
+
+func tempConfigHome(t *testing.T) {
+	t.Helper()
+	home := t.TempDir()
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", home)
+	} else {
+		t.Setenv("HOME", home)
+	}
+	for _, key := range []string{
+		"COMMIT_GATE_STATE_DIR", "COMMIT_REVIEW_STATE", "COMMIT_GATE_RUNS",
+		"COMMIT_GATE_TIMEOUT", "COMMIT_GATE_MAX_FIRINGS", "COMMIT_GATE_MODEL",
+		"COMMIT_GATE_EFFORT",
+	} {
+		t.Setenv(key, "")
+	}
+}
+
+func TestLoadAppliesFileBetweenDefaultsAndEnvironment(t *testing.T) {
+	tempConfigHome(t)
+	if err := steerconfig.Save(steerconfig.Config{Reviewer: steerconfig.Reviewer{
+		Provider: "codex",
+		Model:    "file-model",
+		Effort:   "medium",
+		Runs:     5,
+		Timeout:  210,
+	}}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	t.Setenv("COMMIT_GATE_MODEL", "env-model")
+	t.Setenv("COMMIT_GATE_EFFORT", "high")
+	t.Setenv("COMMIT_GATE_RUNS", "7")
+	t.Setenv("COMMIT_GATE_TIMEOUT", "240")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.ReviewerProvider != "codex" {
+		t.Errorf("ReviewerProvider = %q; want codex", cfg.ReviewerProvider)
+	}
+	if cfg.ReviewerModelOverride != "env-model" {
+		t.Errorf("ReviewerModelOverride = %q; want env-model", cfg.ReviewerModelOverride)
+	}
+	if cfg.ReviewerEffort != "high" {
+		t.Errorf("ReviewerEffort = %q; want high", cfg.ReviewerEffort)
+	}
+	if cfg.ReviewerRuns != 7 {
+		t.Errorf("ReviewerRuns = %d; want 7", cfg.ReviewerRuns)
+	}
+	if cfg.ReviewTimeout != 240*time.Second {
+		t.Errorf("ReviewTimeout = %s; want 4m0s", cfg.ReviewTimeout)
+	}
+}
+
+func TestLoadMissingFileKeepsShippedDefaults(t *testing.T) {
+	tempConfigHome(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.ReviewerProvider != "claude-code" || cfg.ReviewerModel != "claude-haiku-5-5" {
+		t.Fatalf("reviewer defaults = %q/%q; want claude-code/claude-haiku-5-5",
+			cfg.ReviewerProvider, cfg.ReviewerModel)
+	}
+	if cfg.ReviewerEffort != "" {
+		t.Fatalf("ReviewerEffort = %q; want the provider's own", cfg.ReviewerEffort)
+	}
+	if cfg.ReviewerRuns != defaultReviewerRuns || cfg.ReviewTimeout != defaultReviewTimeout {
+		t.Fatalf("panel defaults = %d/%s; want %d/%s",
+			cfg.ReviewerRuns, cfg.ReviewTimeout, defaultReviewerRuns, defaultReviewTimeout)
+	}
+}
+
+func TestLoadReportsAMalformedSettingsFile(t *testing.T) {
+	tempConfigHome(t)
+	path := steerpath.ConfigFile()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("create config dir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("{not json"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("COMMIT_GATE_RUNS", "9")
+
+	cfg, err := Load()
+	if err == nil {
+		t.Fatal("Load returned no error over a malformed settings file")
+	}
+	// The gate still has to answer, and the environment still outranks the file.
+	if cfg.ReviewerProvider != "claude-code" || cfg.ReviewerRuns != 9 {
+		t.Fatalf("cfg = %s/%d; want claude-code/9", cfg.ReviewerProvider, cfg.ReviewerRuns)
+	}
+}
