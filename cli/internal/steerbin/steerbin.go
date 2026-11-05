@@ -248,6 +248,8 @@ func Quote(path string) string { return shellword.Quote(path) }
 // whose first word is not steer's own is returned unchanged, the same rule Relink
 // follows: a user's wrapper script is not ours to rewrite. So is one where a flag
 // would drop a word whose quote never closes, because that word may hold later flags.
+// A shell comment is no argument: its text is neither read for flags nor rewritten,
+// and the rewrite carries it after the kept words.
 //
 // A flag on a registration outranks every configuration file, so one left on disk
 // pins the setting it names forever.
@@ -265,7 +267,7 @@ func StripFlags(command string, names ...string) string {
 	for _, name := range names {
 		wanted[name] = true
 	}
-	fields, open := shellFields(rest)
+	fields, comment, open := shellFields(rest)
 	unclosed := -1
 	if open {
 		unclosed = len(fields) - 1
@@ -294,6 +296,9 @@ func StripFlags(command string, names ...string) string {
 	if !dropped {
 		return command
 	}
+	if comment != "" {
+		kept = append(kept, comment)
+	}
 	return strings.TrimSpace(Quote(head) + " " + strings.Join(kept, " "))
 }
 
@@ -306,8 +311,10 @@ func HasFlags(command string, names ...string) bool {
 // word and each word's original spelling. strings.Fields would split `--model 'a b'`
 // into three, and dropping the flag would then leave half its value behind as an
 // argument of its own. A backslash escapes the next byte except inside single
-// quotes, where it is literal. open is true when the last word's quote never closes.
-func shellFields(rest string) (fields []string, open bool) {
+// quotes, where it is literal. A `#` that begins a word starts a comment, returned
+// unparsed from the `#` to the end of rest. open is true when the last word's quote
+// never closes.
+func shellFields(rest string) (fields []string, comment string, open bool) {
 	var word strings.Builder
 	var quote byte
 	started, escaped := false, false
@@ -326,6 +333,8 @@ func shellFields(rest string) (fields []string, open bool) {
 			if c == quote {
 				quote = 0
 			}
+		case c == '#' && !started:
+			return fields, rest[i:], false
 		case c == '\'' || c == '"':
 			quote = c
 			word.WriteByte(c)
@@ -344,5 +353,5 @@ func shellFields(rest string) (fields []string, open bool) {
 	if started {
 		fields = append(fields, word.String())
 	}
-	return fields, quote != 0
+	return fields, "", quote != 0
 }
