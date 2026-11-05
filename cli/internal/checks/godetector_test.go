@@ -564,6 +564,33 @@ func TestACaseCannotSupplyAnUndeclaredEmbeddedFile(t *testing.T) {
 	if r := results[0]; r.Outcome != OutcomeInvalid || !strings.Contains(r.Reason, "svc/resp/testdata/mod/x.golden") {
 		t.Errorf("case %+v; want invalid naming the nested module's file", r)
 	}
+
+	// A declared OS metadata file the pattern names is embedded in both trees.
+	writeFile(t, root, "svc/resp/resp_test.go", strings.Replace(src, "testdata/*.golden", "testdata/._*.golden", 1))
+	writeFile(t, root, "svc/resp/testdata/._a.golden", good)
+	cruft := d
+	cruft.Inputs = []string{"svc/resp/testdata/._a.golden"}
+	_, results, err = Replay(root, cruft, CaseFile{Version: CasesVersion, Cases: []Case{plain}})
+	if err != nil {
+		t.Fatalf("Replay: %v", err)
+	}
+	if r := results[0]; r.Outcome != OutcomeMatched {
+		t.Errorf("a declared OS metadata input: case %+v; want matched", r)
+	}
+	// A case moving a declared OS metadata file into another module loses it.
+	writeFile(t, root, "svc/resp/testdata/sub/._b.golden", "b")
+	writeFile(t, root, "svc/resp/resp_test.go", strings.Replace(src, "testdata/*.golden", "all:testdata", 1))
+	hiding := d
+	hiding.Inputs = []string{"svc/resp/testdata/a.golden", "svc/resp/testdata/._a.golden", "svc/resp/testdata/sub/._b.golden"}
+	hidden := respCase("hides-cruft", 0, "", production)
+	hidden.Files["svc/resp/testdata/sub/go.mod"] = "module example.com/hidden\n"
+	_, results, err = Replay(root, hiding, CaseFile{Version: CasesVersion, Cases: []Case{hidden}})
+	if err != nil {
+		t.Fatalf("Replay: %v", err)
+	}
+	if r := results[0]; r.Outcome != OutcomeInvalid || !strings.Contains(r.Reason, "keeps svc/resp/testdata/sub/._b.golden out") {
+		t.Errorf("a case hiding a declared OS metadata input: %+v; want invalid naming it", r)
+	}
 }
 
 // An import whose package name differs from its path is left out of the

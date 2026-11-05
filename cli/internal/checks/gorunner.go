@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -73,7 +74,7 @@ func goRunner(root string, d Declaration, gd goDetector) (caseRunner, error) {
 			if err := caseTree.WriteFile(filepath.Join(pkg, generatedTestName), src, 0o644); err != nil {
 				return err.Error()
 			}
-			if reason := embedDrift(pkgDir, d.Package, gd, inputs); reason != "" {
+			if reason := embedDrift(filepath.Join(root, pkg), pkgDir, d.Package, gd, inputs); reason != "" {
 				return reason
 			}
 			_, out, timedOut, err := runCommand(pkgDir, goReplayEnv, goBin,
@@ -124,11 +125,14 @@ func goRunner(root string, d Declaration, gd goDetector) (caseRunner, error) {
 // case's go.mod moves into another module. A case file,
 // snapshot, patch or setup can cause either, and the replay would embed other
 // files than the detector's digest read.
-func embedDrift(pkgDir, pkg string, gd goDetector, inputs map[string]bool) string {
+func embedDrift(repoPkgDir, pkgDir, pkg string, gd goDetector, inputs map[string]bool) string {
 	matched := map[string]bool{}
 	inRepo := map[string]bool{}
-	for _, rel := range gd.embedded {
-		inRepo[rel] = true
+	for _, p := range gd.patterns {
+		repoFiles, _ := embedFiles(repoPkgDir, p, true)
+		for _, rel := range repoFiles {
+			inRepo[rel] = true
+		}
 	}
 	for _, p := range gd.patterns {
 		files, foreign := embedFiles(pkgDir, p, true)
@@ -148,7 +152,14 @@ func embedDrift(pkgDir, pkg string, gd goDetector, inputs map[string]bool) strin
 			}
 		}
 	}
-	for _, rel := range gd.embedded {
+	lost := append([]string{}, gd.embedded...)
+	for rel := range inRepo {
+		if inputs[path.Join(pkg, rel)] {
+			lost = append(lost, rel)
+		}
+	}
+	sort.Strings(lost)
+	for _, rel := range lost {
 		if !matched[rel] {
 			return fmt.Sprintf("the case tree keeps %s out of the tracked embed patterns", path.Join(pkg, rel))
 		}
