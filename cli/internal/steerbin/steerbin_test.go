@@ -262,3 +262,55 @@ func TestStripFlagsReadsATrailingBackslashAsPartOfItsWord(t *testing.T) {
 		}
 	}
 }
+
+// TestStripFlagsReadsNoFlagInAComment: a `#` that begins a word starts a shell
+// comment, so a flag named after it is no argument and an unclosed quote there leaves
+// no word open. A `#` inside a word or a quote is an ordinary character.
+func TestStripFlagsReadsNoFlagInAComment(t *testing.T) {
+	cases := []struct {
+		name    string
+		command string
+		want    string
+	}{
+		{
+			name:    "an unclosed quote in the comment",
+			command: "steer commit-gate review --model x # --model 'user hook",
+			want:    "steer commit-gate review # --model 'user hook",
+		},
+		{
+			name:    "a flag only in the comment",
+			command: "steer commit-gate review # --model x",
+			want:    "steer commit-gate review # --model x",
+		},
+		{
+			name:    "a hash inside a word",
+			command: "steer commit-gate review --note a#b --model x",
+			want:    "steer commit-gate review --note a#b",
+		},
+		{
+			name:    "a hash inside quotes",
+			command: "steer commit-gate review --note '# a' --model x",
+			want:    "steer commit-gate review --note '# a'",
+		},
+		{
+			name:    "an escaped hash",
+			command: `steer commit-gate review --note \# --model x`,
+			want:    `steer commit-gate review --note \#`,
+		},
+		{
+			name:    "a comment spanning lines is carried whole",
+			command: "steer commit-gate review --model x #a\n--model y",
+			want:    "steer commit-gate review #a\n--model y",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := StripFlags(tc.command, "--model"); got != tc.want {
+				t.Fatalf("StripFlags = %q, want %q", got, tc.want)
+			}
+		})
+	}
+	if HasFlags("steer commit-gate review # --model x", "--model") {
+		t.Fatal("a flag named only in a comment must not read as present")
+	}
+}
