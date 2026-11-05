@@ -26,8 +26,10 @@ type reviewerEdit struct {
 	// carry is the pending answer to what happens to the model and the effort when
 	// the reviewer CLI changes: keepValues, or dropValues for the new CLI's own.
 	carry string
-	// asked says enter has put the question about the highlighted CLI, so an arrow answers it.
-	asked bool
+	// asked says enter has put the question about the highlighted CLI, and question
+	// is its text. An arrow answers it only while that text is the note on screen.
+	asked    bool
+	question string
 }
 
 // The answers to a reviewer-CLI change. Neither is a default: a model name is
@@ -95,11 +97,11 @@ func (m *Model) reviewerEditing(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			ed.choice++
 			m.forgetCarry()
 		case "left", "h":
-			if ed.asked {
+			if m.carryQuestionShown() {
 				ed.carry = keepValues
 			}
 		case "right", "l":
-			if ed.asked {
+			if m.carryQuestionShown() {
 				ed.carry = dropValues
 			}
 		}
@@ -111,6 +113,12 @@ func (m *Model) reviewerEditing(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	return m, cmd
+}
+
+// carryQuestionShown says the carry question is the note on screen. A background
+// result filed under another panel replaces it, and an arrow then answers nothing.
+func (m *Model) carryQuestionShown() bool {
+	return m.reviewer.asked && m.visibleMessage() == m.reviewer.question
 }
 
 // forgetCarry withdraws the question and its answer, which were about the CLI the
@@ -161,8 +169,9 @@ func (m *Model) saveReviewerValue(value string) (tea.Model, tea.Cmd) {
 	// asks rather than carrying them forward or dropping them unseen.
 	if ed.field.Name == "reviewer.provider" && carriesValues(file) && ed.carry == carryUnasked {
 		ed.asked = true
-		m.note("← keep the current model and effort · → use %s's own · then enter",
+		ed.question = fmt.Sprintf("← keep the current model and effort · → use %s's own · then enter",
 			reviewers.ProviderLabel(value))
+		m.note("%s", ed.question)
 		return m, nil
 	}
 	if ed.carry == dropValues {

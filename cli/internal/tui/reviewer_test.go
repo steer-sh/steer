@@ -258,6 +258,38 @@ func TestMovingTheSelectionKeepsAnotherPanelsResult(t *testing.T) {
 	}
 }
 
+// A background result that replaces the question leaves an arrow answering
+// nothing, so the next enter puts the question again.
+func TestAnArrowAnswersNoQuestionABackgroundResultHid(t *testing.T) {
+	m := openCarryingEditor(t, "reviewer.provider")
+	m.Update(key("down"))
+	m.Update(key("enter"))
+	m.Update(checkActionMsg{action: "test", id: "lint", note: "lint passed"})
+	if strings.Contains(m.View(), "keep the current model") {
+		t.Fatal("the question is still on screen after the background result")
+	}
+
+	m.Update(key("right"))
+	if m.reviewer.carry != carryUnasked {
+		t.Errorf("the arrow recorded %q for a question not on screen", m.reviewer.carry)
+	}
+	if strings.Contains(m.View(), carryNote(dropValues)) {
+		t.Error("the editor states an answer to a question nobody saw")
+	}
+
+	m.Update(key("enter"))
+	assertCarried(t, "agy")
+	if !strings.Contains(m.View(), "keep the current model") {
+		t.Errorf("enter did not put the question again: %q", m.message)
+	}
+	m.Update(key("right"))
+	m.Update(key("enter"))
+	if got, _ := config.Load(); got.Reviewer.Provider != "codex" || got.Reviewer.Model != "" {
+		t.Errorf("stored %q / %q, want codex with its own model",
+			got.Reviewer.Provider, got.Reviewer.Model)
+	}
+}
+
 // Returning to the current CLI with a drop answer pending changes nothing.
 //
 // pins existing behaviour
