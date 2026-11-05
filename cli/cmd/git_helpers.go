@@ -65,16 +65,10 @@ func gitChangedFiles(args ...string) ([]string, error) {
 	return paths, nil
 }
 
-// gitHooksDir is the hooks directory git runs for the current work tree. It may not
-// exist yet, and it refuses outside a work tree.
-//
-// It is resolved with `rev-parse --git-path` rather than joined onto the work tree,
-// because a linked worktree and a submodule carry a `.git` FILE and core.hooksPath
-// moves the directory out of `.git` altogether. Git runs a pre-commit hook from the
-// work-tree root and resolves a relative core.hooksPath there. From a work-tree
-// subdirectory git answers relative to the current directory with that root
-// accounted for; outside the work tree, inside `.git` included, it answers relative
-// to the git directory, so that is refused.
+// gitHooksDir is the hooks directory git runs for the current work tree, from
+// `rev-parse --git-path hooks` (which honours worktrees, submodules and
+// core.hooksPath). It may not exist yet. It refuses outside a work tree, inside
+// `.git` included, where git answers relative to the git directory instead.
 func gitHooksDir() (string, error) {
 	// --show-toplevel is no test here: with GIT_WORK_TREE set it answers from anywhere.
 	inside, err := runGit("rev-parse", "--is-inside-work-tree")
