@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"go/ast"
+	"go/build"
 	"go/parser"
 	"go/token"
 	"os"
@@ -47,6 +48,14 @@ type goDetector struct {
 	unresolved []string
 	// embedded lists the package-relative files the tracked embed patterns match.
 	embedded []string
+	// patterns holds the tracked embed patterns.
+	patterns []string
+	// misnamed lists the imports named unresolved because their package name
+	// differs from the name their path suggests.
+	misnamed []string
+	// misnamedBases holds the selector bases that named them which no
+	// package-level declaration explains: the names those imports may carry.
+	misnamedBases map[string]bool
 }
 
 func containsString(list []string, s string) bool {
@@ -101,6 +110,17 @@ func analyzeGoTest(root string, d Declaration) (goDetector, error) {
 		return goDetector{}, fmt.Errorf("check %s: no test function %s in %s", d.ID, d.Test, d.Package)
 	}
 
+	pkgScope := productionNames(dir, entries, pkgName)
+	for _, f := range files {
+		if ok, err := build.Default.MatchFile(dir, f.name); err == nil && ok && f.file.Name.Name == pkgName {
+			for _, decl := range f.file.Decls {
+				for _, n := range declNames(decl) {
+					pkgScope[n] = true
+				}
+			}
+		}
+	}
+
 	byName := map[string][]int{}
 	methods := map[string][]int{}
 	methodsNamed := map[string][]int{}
@@ -108,6 +128,7 @@ func analyzeGoTest(root string, d Declaration) (goDetector, error) {
 	var decls []goDecl
 	fileImports := map[string]map[string]string{}
 	fileMisnamed := map[string][]string{}
+	fileDotImport := map[string]bool{}
 	for _, f := range files {
 		if f.file.Name.Name != pkgName {
 			for _, decl := range f.file.Decls {
@@ -118,7 +139,10 @@ func analyzeGoTest(root string, d Declaration) (goDetector, error) {
 			continue
 		}
 		fileImports[f.name] = importNames(f.file)
-		fileMisnamed[f.name] = misnamedImports(f.file)
+		fileMisnamed[f.name] = misnamedImports(f.file, pkgScope)
+		for _, imp := range f.file.Imports {
+			fileDotImport[f.name] = fileDotImport[f.name] || (imp.Name != nil && imp.Name.Name == ".")
+		}
 		prevEnd := f.file.Name.End()
 		for _, decl := range f.file.Decls {
 			leadFrom := prevEnd
@@ -149,13 +173,14 @@ func analyzeGoTest(root string, d Declaration) (goDetector, error) {
 	}
 
 	pkgImport, modErr := packageImportPath(root, d.Package)
-	det := goDetector{pkgName: pkgName, imports: map[string]string{}}
+	det := goDetector{pkgName: pkgName, imports: map[string]string{}, misnamedBases: map[string]bool{}}
 	unresolved := map[string]bool{}
 	var collision error
 	if modErr != nil {
 		unresolved["module path: "+modErr.Error()] = true
 	}
 	embedded := map[string]bool{}
+	misnamed := map[string]bool{}
 	seen := map[int]bool{}
 	var queue []int
 	enqueue := func(idxs ...int) {
@@ -202,8 +227,12 @@ func analyzeGoTest(root string, d Declaration) (goDetector, error) {
 						return false
 					}
 					if len(byName[id.Name]) == 0 {
+						if len(fileMisnamed[gd.file]) > 0 && !pkgScope[id.Name] && !fileDotImport[gd.file] {
+							det.misnamedBases[id.Name] = true
+						}
 						for _, p := range fileMisnamed[gd.file] {
-							unresolved[fmt.Sprintf("import %s (its package name differs from its path; alias it)", p)] = true
+							misnamed[p] = true
+							unresolved[misnamedReason(p)] = true
 						}
 					}
 				}
@@ -227,11 +256,16 @@ func analyzeGoTest(root string, d Declaration) (goDetector, error) {
 		}
 		ast.Inspect(gd.node, visit)
 		for _, p := range gd.embeds {
-			matched := embedFiles(dir, p)
+			if !containsString(det.patterns, p) {
+				det.patterns = append(det.patterns, p)
+			}
+			matched, foreign := embedFiles(dir, p, false)
 			for _, rel := range matched {
 				embedded[rel] = true
 			}
-			if !embedCovered(d, p, matched) {
+			if foreign {
+				unresolved[fmt.Sprintf("embed pattern %q (it names a path in another module, which go:embed refuses)", strings.TrimPrefix(p, "all:"))] = true
+			} else if !embedCovered(d, p, matched) {
 				unresolved[fmt.Sprintf("embed pattern %q (declare the files it matches with --input)", strings.TrimPrefix(p, "all:"))] = true
 			}
 		}
@@ -276,7 +310,15 @@ func analyzeGoTest(root string, d Declaration) (goDetector, error) {
 		det.embedded = append(det.embedded, rel)
 	}
 	sort.Strings(det.embedded)
+	for p := range misnamed {
+		det.misnamed = append(det.misnamed, p)
+	}
+	sort.Strings(det.misnamed)
 	return det, nil
+}
+
+func misnamedReason(p string) string {
+	return fmt.Sprintf("import %s (its package name differs from its path; alias it)", p)
 }
 
 func declNames(decl ast.Decl) []string {
@@ -341,12 +383,41 @@ func importNames(f *ast.File) map[string]string {
 	return names
 }
 
+// productionNames returns the top-level names the package's non-test files in
+// dir declare under pkgName, among the files the host's build context selects.
+// A file that does not parse adds nothing.
+func productionNames(dir string, entries []os.DirEntry, pkgName string) map[string]bool {
+	names := map[string]bool{}
+	fset := token.NewFileSet()
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		if ok, err := build.Default.MatchFile(dir, name); err != nil || !ok {
+			continue
+		}
+		f, err := parser.ParseFile(fset, filepath.Join(dir, name), nil, parser.SkipObjectResolution)
+		if err != nil || f.Name.Name != pkgName {
+			continue
+		}
+		for _, decl := range f.Decls {
+			for _, n := range declNames(decl) {
+				names[n] = true
+			}
+		}
+	}
+	return names
+}
+
 // misnamedImports returns the unnamed imports the file never refers to by their
-// assumed name. A file must use each import, so their package names differ.
-func misnamedImports(f *ast.File) []string {
+// assumed name, or whose assumed name a package-level declaration in pkgScope
+// holds. A file must use each import and an import may not share a name with
+// the package block, so their package names differ.
+func misnamedImports(f *ast.File, pkgScope map[string]bool) []string {
 	used := map[string]bool{}
 	for _, id := range f.Unresolved {
-		used[id.Name] = true
+		used[id.Name] = !pkgScope[id.Name]
 	}
 	var paths []string
 	for _, imp := range f.Imports {
@@ -487,12 +558,20 @@ func embedCovered(d Declaration, raw string, matched []string) bool {
 
 // embedFiles lists the regular files under dir that a pattern matches, as
 // slash-separated paths relative to dir. go:embed refuses a version-control name
-// anywhere in a path, and those directories change with every commit. A file named
-// as OS metadata, such as .DS_Store, is left out: the operating system writes it
-// per machine.
-func embedFiles(dir, raw string) []string {
+// anywhere in a path, and those directories change with every commit. Unless
+// cruft is set, a file named as OS metadata, such as .DS_Store, is left out: the
+// operating system writes it per machine. A subdirectory holding a go.mod is
+// another module: a directory walk skips it, and foreign reports that the pattern
+// names it or a path inside it, which go:embed refuses.
+func embedFiles(dir, raw string, cruft bool) (matched []string, foreign bool) {
 	pattern, all := strings.CutPrefix(raw, "all:")
-	var matched []string
+	relOf := func(p string) string {
+		rel, err := filepath.Rel(dir, p)
+		if err != nil {
+			return ""
+		}
+		return filepath.ToSlash(rel)
+	}
 	filepath.WalkDir(dir, func(p string, e os.DirEntry, err error) error {
 		if err != nil {
 			return nil
@@ -503,23 +582,30 @@ func embedFiles(dir, raw string) []string {
 			}
 			return nil
 		}
+		if e.IsDir() && p != dir {
+			if _, err := os.Stat(filepath.Join(p, "go.mod")); err == nil {
+				filepath.WalkDir(p, func(q string, _ os.DirEntry, err error) error {
+					if ok, _ := path.Match(pattern, relOf(q)); err == nil && ok {
+						foreign = true
+						return filepath.SkipAll
+					}
+					return nil
+				})
+				return filepath.SkipDir
+			}
+		}
 		if !e.Type().IsRegular() {
 			return nil
 		}
-		if osMetadata(e.Name()) {
+		if !cruft && osMetadata(e.Name()) {
 			return nil
 		}
-		rel, err := filepath.Rel(dir, p)
-		if err != nil {
-			return nil
-		}
-		rel = filepath.ToSlash(rel)
-		if embedMatches(pattern, rel, all) {
+		if rel := relOf(p); rel != "" && embedMatches(pattern, rel, all) {
 			matched = append(matched, rel)
 		}
 		return nil
 	})
-	return matched
+	return matched, foreign
 }
 
 // osMetadata reports a file name the operating system writes on its own, such as

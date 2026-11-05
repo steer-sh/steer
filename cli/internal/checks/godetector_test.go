@@ -477,3 +477,202 @@ func TestAnImportWithAnotherPackageNameIsNamed(t *testing.T) {
 		t.Errorf("a used import was named: %q", gd.unresolved)
 	}
 }
+
+// A subdirectory holding a go.mod is another module, which go:embed never
+// reaches: its files neither need declaring nor bind the digest.
+func TestAnEmbedPatternSkipsANestedModule(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "svc/go.mod", respGoMod)
+	writeFile(t, root, "svc/resp/resp_test.go", "package resp\n\nimport (\n\t_ \"embed\"\n\t\"testing\"\n)\n\n//go:embed testdata\nvar used string\n\nfunc TestUsed(t *testing.T) { _ = used }\n")
+	writeFile(t, root, "svc/resp/testdata/a.json", "a")
+	writeFile(t, root, "svc/resp/testdata/mod/go.mod", "module example.com/mod\n")
+	writeFile(t, root, "svc/resp/testdata/mod/b.json", "b")
+	gd, err := analyzeGoTest(root, Declaration{ID: "e", Kind: KindGoTest, Package: "svc/resp", Test: "TestUsed",
+		Inputs: []string{"svc/resp/testdata/a.json"}})
+	if err != nil {
+		t.Fatalf("analyzeGoTest: %v", err)
+	}
+	if len(gd.unresolved) != 0 {
+		t.Errorf("unresolved %q; want none", gd.unresolved)
+	}
+	if got := strings.Join(gd.embedded, ","); got != "testdata/a.json" {
+		t.Errorf("embedded %s; want testdata/a.json alone", got)
+	}
+
+	// A pattern naming the nested module itself is one go:embed refuses.
+	writeFile(t, root, "svc/resp/resp_test.go", "package resp\n\nimport (\n\t_ \"embed\"\n\t\"testing\"\n)\n\n//go:embed testdata/*\nvar used string\n\nfunc TestUsed(t *testing.T) { _ = used }\n")
+	gd, err = analyzeGoTest(root, Declaration{ID: "e", Kind: KindGoTest, Package: "svc/resp", Test: "TestUsed",
+		Inputs: []string{"svc/resp/testdata/a.json"}})
+	if err != nil {
+		t.Fatalf("analyzeGoTest: %v", err)
+	}
+	if got := strings.Join(gd.unresolved, "|"); !strings.Contains(got, "another module") {
+		t.Errorf("unresolved %q; want the pattern naming another module", got)
+	}
+}
+
+// A case's files or setup may not leave a file a tracked embed pattern matches
+// that no declared input holds, nor move a matched file into another module:
+// the replay would embed other files than the detector's digest read.
+func TestACaseCannotSupplyAnUndeclaredEmbeddedFile(t *testing.T) {
+	const good = `{"id": 1}`
+	src := strings.Replace(readTestdata(t, "embed_test.go.txt"), "testdata/golden.json", "testdata/*.golden", 1)
+	root := goCheckRepo(t, src)
+	writeFile(t, root, "svc/resp/testdata/a.golden", good)
+	d := Declaration{ID: "embeds", Kind: KindGoTest, Package: "svc/resp", Test: "TestGolden",
+		Inputs: []string{"svc/resp/testdata/a.golden"}}
+	production := "package resp\n\nfunc Response() string { return `" + good + "` }\n"
+	plain := respCase("plain", 0, "", production)
+	byFile := respCase("by-file", 0, "", production)
+	byFile.Files["svc/resp/testdata/b.golden"] = "b"
+	bySetup := respCase("by-setup", 0, "", production)
+	bySetup.Setup = "printf c > svc/resp/testdata/c.golden"
+	byCruft := respCase("by-cruft", 0, "", production)
+	byCruft.Files["svc/resp/testdata/._b.golden"] = "b"
+	byModule := respCase("by-module", 0, "", production)
+	byModule.Files["svc/resp/testdata/go.mod"] = "module example.com/hidden\n"
+	_, results, err := Replay(root, d, CaseFile{Version: CasesVersion, Cases: []Case{plain, byFile, bySetup, byCruft, byModule}})
+	if err != nil {
+		t.Fatalf("Replay: %v", err)
+	}
+	want := map[string]string{"by-file": "svc/resp/testdata/b.golden", "by-setup": "svc/resp/testdata/c.golden",
+		"by-cruft": "svc/resp/testdata/._b.golden", "by-module": "another module"}
+	for _, r := range results {
+		if r.Name == "plain" {
+			if r.Outcome != OutcomeMatched {
+				t.Errorf("plain case %+v; want matched", r)
+			}
+			continue
+		}
+		if r.Outcome != OutcomeInvalid || !strings.Contains(r.Reason, want[r.Name]) || !strings.Contains(r.Reason, "embed pattern") {
+
+			t.Errorf("case %+v; want invalid naming %s", r, want[r.Name])
+		}
+	}
+
+	// A declared input inside a nested module is not embedded in the
+	// repository; a tree without that go.mod would embed it.
+	writeFile(t, root, "svc/resp/resp_test.go", strings.Replace(src, "testdata/*.golden", "testdata", 1))
+	writeFile(t, root, "svc/resp/testdata/mod/go.mod", "module example.com/mod\n")
+	writeFile(t, root, "svc/resp/testdata/mod/x.golden", "x")
+	nested := d
+	nested.Inputs = []string{"svc/resp/testdata/a.golden", "svc/resp/testdata/mod/x.golden"}
+	_, results, err = Replay(root, nested, CaseFile{Version: CasesVersion, Cases: []Case{plain}})
+	if err != nil {
+		t.Fatalf("Replay: %v", err)
+	}
+	if r := results[0]; r.Outcome != OutcomeInvalid || !strings.Contains(r.Reason, "svc/resp/testdata/mod/x.golden") {
+		t.Errorf("case %+v; want invalid naming the nested module's file", r)
+	}
+
+	// A declared OS metadata file the pattern names is embedded in both trees.
+	writeFile(t, root, "svc/resp/resp_test.go", strings.Replace(src, "testdata/*.golden", "testdata/._*.golden", 1))
+	writeFile(t, root, "svc/resp/testdata/._a.golden", good)
+	cruft := d
+	cruft.Inputs = []string{"svc/resp/testdata/._a.golden"}
+	_, results, err = Replay(root, cruft, CaseFile{Version: CasesVersion, Cases: []Case{plain}})
+	if err != nil {
+		t.Fatalf("Replay: %v", err)
+	}
+	if r := results[0]; r.Outcome != OutcomeMatched {
+		t.Errorf("a declared OS metadata input: case %+v; want matched", r)
+	}
+	// A case moving a declared OS metadata file into another module loses it.
+	writeFile(t, root, "svc/resp/testdata/sub/._b.golden", "b")
+	writeFile(t, root, "svc/resp/resp_test.go", strings.Replace(src, "testdata/*.golden", "all:testdata", 1))
+	hiding := d
+	hiding.Inputs = []string{"svc/resp/testdata/a.golden", "svc/resp/testdata/._a.golden", "svc/resp/testdata/sub/._b.golden"}
+	hidden := respCase("hides-cruft", 0, "", production)
+	hidden.Files["svc/resp/testdata/sub/go.mod"] = "module example.com/hidden\n"
+	_, results, err = Replay(root, hiding, CaseFile{Version: CasesVersion, Cases: []Case{hidden}})
+	if err != nil {
+		t.Fatalf("Replay: %v", err)
+	}
+	if r := results[0]; r.Outcome != OutcomeInvalid || !strings.Contains(r.Reason, "keeps svc/resp/testdata/sub/._b.golden out") {
+		t.Errorf("a case hiding a declared OS metadata input: %+v; want invalid naming it", r)
+	}
+}
+
+// An import whose package name differs from its path is left out of the
+// generated file, so the replay names that import instead of blaming the case.
+func TestAMisnamedImportsReplayNamesTheImport(t *testing.T) {
+	const lib = "package other\n\nfunc Name() string { return \"x\" }\n"
+	root := goCheckRepo(t, "package resp\n\nimport (\n\t\"testing\"\n\n\t\"example.com/svc/lib\"\n)\n\nfunc TestNamed(t *testing.T) { _ = other.Name() }\n")
+	writeFile(t, root, "svc/lib/lib.go", lib)
+	d := Declaration{ID: "named", Kind: KindGoTest, Package: "svc/resp", Test: "TestNamed"}
+	c := respCase("good", 0, "", respProduction)
+	c.Files["svc/lib/lib.go"] = lib
+	_, results, err := Replay(root, d, CaseFile{Version: CasesVersion, Cases: []Case{c}})
+	if err != nil {
+		t.Fatalf("Replay: %v", err)
+	}
+	r := results[0]
+	if r.Outcome != OutcomeInvalid || !strings.Contains(r.Reason, "example.com/svc/lib") || r.Cause != "" {
+		t.Errorf("case %+v; want invalid naming the import with no case cause", r)
+	}
+}
+
+// An unnamed import whose assumed name a package-level declaration holds cannot
+// carry that name, so it is misnamed even though the file refers to the name.
+// A production file the build context leaves out declares nothing.
+func TestAnImportNamedLikeAPackageDeclarationIsMisnamed(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "svc/go.mod", respGoMod)
+	writeFile(t, root, "svc/resp/resp_test.go", "package resp\n\nimport (\n\t\"testing\"\n\n\t\"example.com/svc/lib\"\n)\n\nfunc TestUses(t *testing.T) { other.Do(); _ = lib.X }\n")
+	d := Declaration{ID: "uses", Kind: KindGoTest, Package: "svc/resp", Test: "TestUses"}
+	misnamed := func() bool {
+		t.Helper()
+		gd, err := analyzeGoTest(root, d)
+		if err != nil {
+			t.Fatalf("analyzeGoTest: %v", err)
+		}
+		return containsString(gd.unresolved, misnamedReason("example.com/svc/lib"))
+	}
+	writeFile(t, root, "svc/resp/ignored.go", "//go:build ignore\n\npackage resp\n\nvar lib struct{ X int }\n")
+	writeFile(t, root, "svc/resp/ignored_test.go", "//go:build ignore\n\npackage resp\n\nvar lib struct{ X int }\n")
+	if misnamed() {
+		t.Error("a declaration in a file the build leaves out marked the import misnamed")
+	}
+	writeFile(t, root, "svc/resp/resp.go", "package resp\n\nvar lib struct{ X int }\n")
+	if !misnamed() {
+		t.Error("an import sharing a package-level name was not named")
+	}
+
+	// Beside a dot import, an unexplained base may come from it, so no base
+	// is taken for the misnamed import's name.
+	writeFile(t, root, "svc/resp/resp_test.go", "package resp\n\nimport (\n\t\"testing\"\n\n\t. \"example.com/svc/conf\"\n\t\"example.com/svc/lib\"\n)\n\nfunc TestUses(t *testing.T) { other.Do(); _ = cfg.X }\n")
+	gd, err := analyzeGoTest(root, d)
+	if err != nil {
+		t.Fatalf("analyzeGoTest: %v", err)
+	}
+	if len(gd.misnamedBases) != 0 {
+		t.Errorf("bases %v beside a dot import; want none", gd.misnamedBases)
+	}
+}
+
+// A tracked pattern that matches the generated test file would embed it in the
+// replay, which the repository's match never held, so the case is invalid. An
+// undefined name outside the generated file is the case's own build failure.
+func TestTheReplayRefusesAnEmbedOfItsGeneratedFile(t *testing.T) {
+	src := strings.Replace(readTestdata(t, "embed_test.go.txt"), "testdata/golden.json", "steer*", 1)
+	root := goCheckRepo(t, src)
+	writeFile(t, root, "svc/resp/steer.json", "{}")
+	d := Declaration{ID: "embeds", Kind: KindGoTest, Package: "svc/resp", Test: "TestGolden", Inputs: []string{"svc/resp/steer.json"}}
+	_, results, err := Replay(root, d, CaseFile{Version: CasesVersion, Cases: []Case{respCase("good", 0, "", respProduction)}})
+	if err != nil {
+		t.Fatalf("Replay: %v", err)
+	}
+	if r := results[0]; r.Outcome != OutcomeInvalid || !strings.Contains(r.Reason, generatedTestName) {
+		t.Errorf("case %+v; want invalid naming the generated file", r)
+	}
+	bases := map[string]bool{"other": true}
+	if generatedUndefined([]byte("./resp.go:3:9: undefined: other\n./"+generatedTestName+":4:2: declared and not used: x\n"), bases) {
+		t.Error("an undefined name in a production file read as the generated file's")
+	}
+	if generatedUndefined([]byte("./"+generatedTestName+":4:2: undefined: cfg\n"), bases) {
+		t.Error("an undefined production name read as the misnamed import")
+	}
+	if !generatedUndefined([]byte("./"+generatedTestName+":4:2: undefined: other\n"), bases) {
+		t.Error("the misnamed import's name was not recognised")
+	}
+}
