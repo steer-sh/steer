@@ -277,3 +277,98 @@ func TestVerifyTargetsRefuseAPathThatIsNotUTF8(t *testing.T) {
 		assertRefused(t, err)
 	})
 }
+
+// A staged name that starts like a stage number is read as a path in both modes.
+func TestVerifyTargetsReadAStageLikeNameAsAPath(t *testing.T) {
+	want := map[string]string{"1:colon.py": "staged\n"}
+	setup := func(t *testing.T) string {
+		repo := hooksScratchRepo(t)
+		t.Chdir(repo)
+		if err := os.WriteFile(filepath.Join(repo, "1:colon.py"), []byte("staged\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		gitIn(t, repo, "add", "-A")
+		return repo
+	}
+
+	t.Run("staged", func(t *testing.T) {
+		setup(t)
+		targets, err := loadStagedTargets()
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertVerifyTargets(t, targets, want)
+	})
+
+	t.Run("changed", func(t *testing.T) {
+		repo := setup(t)
+		gitIn(t, repo, "commit", "-q", "-m", "head")
+		targets, err := loadChangedTargets("HEAD~1", "HEAD")
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertVerifyTargets(t, targets, want)
+	})
+}
+
+// diff.relative does not narrow verification run from a subdirectory: every path
+// is named and read from the repository root.
+func TestVerifyTargetsIgnoreDiffRelative(t *testing.T) {
+	want := map[string]string{"top.py": "top\n", "a/b/deep.py": "deep\n"}
+	setup := func(t *testing.T) string {
+		repo := hooksScratchRepo(t)
+		for name, content := range want {
+			if err := os.WriteFile(filepath.Join(repo, name), []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		gitIn(t, repo, "add", "-A")
+		gitIn(t, repo, "config", "diff.relative", "true")
+		t.Chdir(filepath.Join(repo, "a"))
+		return repo
+	}
+
+	t.Run("staged", func(t *testing.T) {
+		setup(t)
+		targets, err := loadStagedTargets()
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertVerifyTargets(t, targets, want)
+	})
+
+	t.Run("changed", func(t *testing.T) {
+		repo := setup(t)
+		gitIn(t, repo, "commit", "-q", "-m", "head")
+		targets, err := loadChangedTargets("HEAD~1", "HEAD")
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertVerifyTargets(t, targets, want)
+	})
+}
+
+// Content that is not UTF-8 reaches a guard with one U+FFFD per bad byte,
+// and the target says so; valid content is passed unchanged.
+func TestVerifyTargetsMarkSubstitutedContent(t *testing.T) {
+	repo := hooksScratchRepo(t)
+	t.Chdir(repo)
+	files := map[string]string{"latin1.py": "x = 'caf\xe9\xff\xfe'\n", "utf8.py": "x = 'café'\n"}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(repo, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gitIn(t, repo, "add", "-A")
+
+	targets, err := loadStagedTargets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertVerifyTargets(t, targets, map[string]string{"latin1.py": "x = 'caf\uFFFD\uFFFD\uFFFD'\n", "utf8.py": "x = 'café'\n"})
+	for _, target := range targets {
+		if want := target.Path == "latin1.py"; target.Substituted != want {
+			t.Fatalf("%s: Substituted = %v, want %v", target.Path, target.Substituted, want)
+		}
+	}
+}

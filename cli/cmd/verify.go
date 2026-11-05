@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/adjudication"
@@ -28,6 +29,18 @@ var (
 type verifyTarget struct {
 	Path    string
 	Content string
+	// Substituted reports that Content replaced bytes that are not UTF-8 with
+	// U+FFFD, since the JSON payload cannot carry them.
+	Substituted bool
+}
+
+// newVerifyTarget holds content read from git as payload text.
+func newVerifyTarget(path, content string) verifyTarget {
+	if utf8.ValidString(content) {
+		return verifyTarget{Path: path, Content: content}
+	}
+	// One U+FFFD per invalid byte, as json.Marshal would substitute.
+	return verifyTarget{Path: path, Content: string([]rune(content)), Substituted: true}
 }
 
 var verifyCmd = &cobra.Command{
@@ -72,6 +85,11 @@ global hooks after project hooks.`,
 
 		scopes := verificationScopes(currentScope(), verifyIncludeGlobal)
 		utils.Info(fmt.Sprintf("Mode: %s | Files: %d | Scopes: %s", mode, len(targets), strings.Join(scopes, ", ")))
+		for _, target := range targets {
+			if target.Substituted {
+				utils.Warning(fmt.Sprintf("%s is not valid UTF-8: guards read it with U+FFFD in place of those bytes.", target.Path))
+			}
+		}
 
 		totalBlocked := 0
 		totalErrors := 0
@@ -214,28 +232,26 @@ func verificationScopes(primary string, includeGlobal bool) []string {
 }
 
 func loadStagedTargets() ([]verifyTarget, error) {
-	paths, err := gitChangedFiles("diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR", "-M")
+	paths, err := gitChangedFiles("diff", "--cached", "--no-relative", "--name-only", "-z", "--diff-filter=ACMR", "-M")
 	if err != nil {
 		return nil, err
 	}
 
 	targets := make([]verifyTarget, 0, len(paths))
 	for _, path := range paths {
-		content, err := runGit("show", ":"+path)
+		// Stage 0 explicitly: ":1:name" would read stage 1 of "name".
+		content, err := runGit("show", ":0:"+path)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read staged content for %s: %w", path, err)
 		}
-		targets = append(targets, verifyTarget{
-			Path:    path,
-			Content: content,
-		})
+		targets = append(targets, newVerifyTarget(path, content))
 	}
 
 	return targets, nil
 }
 
 func loadChangedTargets(base, head string) ([]verifyTarget, error) {
-	paths, err := gitChangedFiles("diff", "--name-only", "-z", "--diff-filter=ACMR", "-M", base, head)
+	paths, err := gitChangedFiles("diff", "--no-relative", "--name-only", "-z", "--diff-filter=ACMR", "-M", base, head)
 	if err != nil {
 		return nil, err
 	}
@@ -246,10 +262,7 @@ func loadChangedTargets(base, head string) ([]verifyTarget, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to read %s at %s: %w", path, head, err)
 		}
-		targets = append(targets, verifyTarget{
-			Path:    path,
-			Content: content,
-		})
+		targets = append(targets, newVerifyTarget(path, content))
 	}
 
 	return targets, nil
