@@ -187,3 +187,96 @@ func TestContinuationEndsAtAnInterruption(t *testing.T) {
 		t.Errorf("end = %s; want %s", got.EndReason, transcript.EndInterrupted)
 	}
 }
+
+// A hook prompt with no inline turn id that follows an ended turn belongs to no
+// turn the walk has seen: it neither matches that turn's id nor takes its steps
+// as context, and a later row of the ended turn does not revive it.
+func TestStopBlockAnchorsNoBarePromptToAnEndedTurn(t *testing.T) {
+	bare := func(ordinal int) string {
+		return rolloutLine(ordinal, typeResponseItem, fmt.Sprintf(`{"type":"message","role":"user","content":[{"type":"input_text","text":%q}]}`,
+			`<hook_prompt hook_run_id="stop:0:/h/hooks.json">`+reason1+`</hook_prompt>`))
+	}
+	for name, lines := range map[string][]string{
+		"right after the end": {typed(1, "t1", "go"), said(2, "t1", "done"), event(3, "t1", "task_complete"), bare(4)},
+		"after a usage row":   {typed(1, "t1", "go"), said(2, "t1", "done"), event(3, "t1", "task_complete"), rolloutLine(4, "token_usage_record", `{"turn_id":"t1","usage":{}}`), bare(5)},
+		"after a second end":  {typed(1, "t1", "go"), said(2, "t1", "done"), event(3, "t1", "task_complete"), event(4, "t1", "turn_aborted"), rolloutLine(5, "token_usage_record", `{"turn_id":"t1","usage":{}}`), bare(6)},
+		"after a later turn":  {typed(1, "t1", "go"), said(2, "t1", "done"), event(3, "t1", "task_complete"), typed(4, "t2", "next"), event(5, "t2", "task_complete"), rolloutLine(6, "token_usage_record", `{"turn_id":"t1","usage":{}}`), bare(7)},
+	} {
+		path := writeTurns(t, strings.Join(lines, "\n")+"\n")
+		got, err := StopBlock(path, "steer check run: 1a", "t1", transcript.ContinuationBudget{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Reached() || got.Matches != 0 {
+			t.Errorf("%s, turn t1: reading %s with %d matches at turn %q; want none", name, got.Granularity, got.Matches, got.Anchors.TurnID)
+		}
+		got, err = StopBlock(path, "steer check run: 1a", "", transcript.ContinuationBudget{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Matches != 1 || got.Anchors.TurnID != "" || len(got.Context) != 0 {
+			t.Errorf("%s, no turn: %d matches at turn %q with context %s; want one match in no turn and no context",
+				name, got.Matches, got.Anchors.TurnID, stopKinds(got.Context))
+		}
+	}
+}
+
+// A hook prompt that names its turn matches that turn even after the turn's end
+// row, with the turn's steps as context.
+// pins existing behaviour
+func TestStopBlockMatchesANamedPromptAfterItsTurnEnded(t *testing.T) {
+	path := writeTurns(t, strings.Join([]string{
+		typed(1, "t1", "go"), said(2, "t1", "done"), event(3, "t1", "task_complete"), hookPrompt(4, "t1", reason1),
+	}, "\n")+"\n")
+	got, err := StopBlock(path, "steer check run: 1a", "t1", transcript.ContinuationBudget{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Matches != 1 || got.Anchors.TurnID != "t1" || stopKinds(got.Context) != "human_turn,assistant_text" {
+		t.Errorf("%d matches at turn %q with context %s; want one in t1 with its steps", got.Matches, got.Anchors.TurnID, stopKinds(got.Context))
+	}
+}
+
+// A bare hook prompt after a named prompt for an ended turn does not count for
+// that turn.
+func TestStopBlockCountsNoBarePromptAfterANamedPromptOfAnEndedTurn(t *testing.T) {
+	bare := rolloutLine(5, typeResponseItem, fmt.Sprintf(`{"type":"message","role":"user","content":[{"type":"input_text","text":%q}]}`,
+		`<hook_prompt hook_run_id="stop:0:/h/hooks.json">`+reason1+`</hook_prompt>`))
+	path := writeTurns(t, strings.Join([]string{
+		typed(1, "t1", "go"), event(2, "t1", "task_complete"), typed(3, "t2", "next"), hookPrompt(4, "t1", reason1), bare,
+	}, "\n")+"\n")
+	got, err := StopBlock(path, "steer check run: 1a", "t1", transcript.ContinuationBudget{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Matches != 1 || got.Anchors.TurnID != "t1" {
+		t.Errorf("%d matches at turn %q; want the named prompt alone", got.Matches, got.Anchors.TurnID)
+	}
+}
+
+// A row of a turn that already ended does not close, extend or end the turn in
+// progress.
+func TestStopBlockIgnoresAnEndedTurnsRowInALaterTurn(t *testing.T) {
+	bare := func(ordinal int) string {
+		return rolloutLine(ordinal, typeResponseItem, fmt.Sprintf(`{"type":"message","role":"user","content":[{"type":"input_text","text":%q}]}`,
+			`<hook_prompt hook_run_id="stop:0:/h/hooks.json">`+reason1+`</hook_prompt>`))
+	}
+	path := writeTurns(t, strings.Join([]string{
+		typed(1, "t1", "go"), event(2, "t1", "task_complete"),
+		typed(3, "t2", "next"), event(4, "t1", "turn_aborted"), said(5, "t1", "late"), bare(6),
+		event(7, "t1", "task_complete"), said(8, "t1", "late again"), said(9, "t2", "fixing"), event(10, "t2", "task_complete"),
+	}, "\n")+"\n")
+	got, err := StopBlock(path, "steer check run: 1a", "t2", transcript.ContinuationBudget{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Matches != 1 || got.Anchors.TurnID != "t2" {
+		t.Fatalf("%d matches at turn %q; want one in t2", got.Matches, got.Anchors.TurnID)
+	}
+	if k := stopKinds(got.Context); k != "human_turn" {
+		t.Errorf("context = %s; want t2's prompt only", k)
+	}
+	if k := stopKinds(got.Steps); k != "hook_feedback,assistant_text" || got.EndReason != transcript.EndTurn {
+		t.Errorf("continuation = %s ending %s; want the block and t2's reply to its end", k, got.EndReason)
+	}
+}
