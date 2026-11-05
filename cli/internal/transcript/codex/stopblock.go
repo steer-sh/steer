@@ -64,7 +64,11 @@ type stopWalk struct {
 	budget       transcript.ContinuationBudget
 	turn         string
 	context      []transcript.ContinuationStep
-	found, done  bool
+	// open holds while turn has not ended; ended names every turn that has, so
+	// a later row of one (a usage record) reopens nothing.
+	open        bool
+	ended       map[string]bool
+	found, done bool
 	// inTurn holds from the block until its turn ends or another turn's row
 	// appears: a hook prompt with no inline id belongs to that turn while it holds.
 	inTurn bool
@@ -84,34 +88,53 @@ func (w *stopWalk) consider(raw []byte, out *transcript.StopBlockReading) {
 	carries := r.Type == typeResponseItem && isPrompt && transcript.HasLine(text, w.line)
 
 	if !w.found {
-		if id != "" && id != w.turn {
-			w.turn, w.context = id, nil
+		if w.opens(id) {
+			w.turn, w.context, w.open = id, nil, true
+		}
+		stale := w.stale(id)
+		if turnEnd(r, p) != "" && !stale {
+			if w.ended == nil {
+				w.ended = map[string]bool{}
+			}
+			w.ended[w.turn], w.open = true, false
 		}
 		if r.Type != typeResponseItem {
 			return
 		}
 		step, ok := stepOf(r, p)
-		if carries && (w.turnID == "" || w.turn == w.turnID) {
+		// A hook prompt with no id belongs to the turn in progress, if any.
+		anchor := id
+		if anchor == "" && w.open {
+			anchor = w.turn
+		}
+		if carries && (w.turnID == "" || anchor == w.turnID) {
+			if anchor != w.turn {
+				w.context = nil
+			}
+			w.inTurn = w.open && anchor == w.turn
+			w.turn = anchor
 			out.Matches++
 			w.found = true
-			w.inTurn = true
 			out.Granularity = transcript.JoinEntry
 			out.Anchors.TurnID = w.turn
 			out.Anchors.DenialEntry = step.Entry
 			w.done = out.Append(step, w.budget)
 			return
 		}
-		if ok {
+		if ok && !stale {
 			w.context = append(w.context, step)
 		}
 		return
 	}
 
-	if id != "" && id != w.turn {
+	if w.opens(id) {
 		w.inTurn = false
 	}
 	if carries && (w.turnID == "" || id == w.turnID || (id == "" && w.inTurn)) {
 		out.Matches++
+	}
+	if w.stale(id) {
+		return
 	}
 	if turnEnd(r, p) != "" {
 		w.inTurn = false
@@ -119,7 +142,7 @@ func (w *stopWalk) consider(raw []byte, out *transcript.StopBlockReading) {
 	if w.done {
 		return
 	}
-	if id != "" && id != w.turn {
+	if w.opens(id) {
 		out.EndReason, w.done = transcript.EndTurn, true
 		return
 	}
@@ -133,4 +156,16 @@ func (w *stopWalk) consider(raw []byte, out *transcript.StopBlockReading) {
 	if step, ok := stepOf(r, p); ok {
 		w.done = out.Append(step, w.budget)
 	}
+}
+
+// opens reports whether a row's turn id names a turn other than the walk's
+// current one that has not already ended.
+func (w *stopWalk) opens(id string) bool {
+	return id != "" && id != w.turn && !w.ended[id]
+}
+
+// stale reports whether a row belongs to a turn that ended before the walk's
+// current one: such a row neither ends the current turn nor adds a step to it.
+func (w *stopWalk) stale(id string) bool {
+	return id != "" && id != w.turn && w.ended[id]
 }
