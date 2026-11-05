@@ -31,6 +31,22 @@ func ManifestRules(scope string) ([]string, error) {
 	return rules, nil
 }
 
+// GuardRules returns the rules the manifest's guards carry, each reduced to the
+// bullet sync writes for it, blank ones dropped.
+func GuardRules(scope string) ([]string, error) {
+	manifest, err := LoadManifest(scope)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(manifest.Hooks))
+	for _, hook := range manifest.Hooks {
+		if rule := singleLine(hook.Rule); rule != "" {
+			out = append(out, rule)
+		}
+	}
+	return out, nil
+}
+
 // ruleEntry is one line of the derived section and the id that names it.
 type ruleEntry struct{ id, text string }
 

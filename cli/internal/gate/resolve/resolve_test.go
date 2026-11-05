@@ -370,7 +370,7 @@ func TestResolverTwoChainsOneRepo(t *testing.T) {
 	rows := append(chainRows(fixCT, 2, "feat: first commit"), chainRows(fixCT+1000, 2, "fix: second commit")...)
 	both := chainLedgerFix(0, []int{1, 2}, "feat: first commit", 0).Text + "\n" +
 		chainLedgerFix(0, []int{1, 2}, "fix: second commit", 0).Text
-	leds := []LedgerMsg{{fixCT + 1400, fixSession, "/t.jsonl", both}}
+	leds := []LedgerMsg{{When: fixCT + 1400, Key: fixSession, Path: "/t.jsonl", Text: both}}
 	var got []string
 	for _, i := range retryIndexes(rows) {
 		cand, join, _ := r.pickLedger(rows, i, pyNumOr(rows[i]["deny_ts"]), leds)
@@ -424,7 +424,7 @@ func TestResolverChainAnswersToEverySubject(t *testing.T) {
 		chainRows(fixCT+1000, 1, "feat: other")...)
 	deferred := chainLedgerFix(0, []int{1}, "feat: other", 0).Text + "\n" +
 		chainLedgerFix(0, []int{1}, "fix: 24 leaks", 0).Text
-	leds := []LedgerMsg{{fixCT + 1400, fixSession, "/t.jsonl", deferred}}
+	leds := []LedgerMsg{{When: fixCT + 1400, Key: fixSession, Path: "/t.jsonl", Text: deferred}}
 	cand, _, _ := r.pickLedger(rows, 1, fixCT, leds)
 	if got := blockHead(cand); got != "fix: 24 leaks" {
 		t.Fatalf("a header copied from the deny names the chain its retry changed; got %q", got)
@@ -495,7 +495,7 @@ func TestResolverRewordedNameClaimsNoOtherChain(t *testing.T) {
 	a := chainLedgerFix(0, []int{1}, "feat: first commit", 0).Text
 	b := chainLedgerFix(0, []int{1}, "fix: the second one", 0).Text
 	for _, text := range []string{a + "\n" + b, b + "\n" + a} {
-		leds := []LedgerMsg{{fixCT + 1400, fixSession, "/t.jsonl", text}}
+		leds := []LedgerMsg{{When: fixCT + 1400, Key: fixSession, Path: "/t.jsonl", Text: text}}
 		cand, _, _ := r.pickLedger(rows, 1, fixCT, leds)
 		if got := blockHead(cand); got != "feat: first commit" {
 			t.Fatalf("the first chain takes its own deferred block; got %q", got)
@@ -806,8 +806,7 @@ func TestResolverMissReasons(t *testing.T) {
 		{"repeated subject", two(fixCT, "wip"), []LedgerMsg{chainLedgerFix(fixCT+1400, []int{1}, "wip", 0)}, MissSubjectShared},
 		{"another chain's ID", stampChainID(one("feat: x"), "aaaa0001"),
 			[]LedgerMsg{withChainID(chainLedgerFix(fixCT+50, []int{1}, "feat: x", 0), "bbbb0002")}, MissIDConflict},
-		{"strongest block wins", one("feat: x"), []LedgerMsg{{fixCT + 50, fixSession, "/t.jsonl",
-			chainLedgerFix(0, []int{1}, "feat: y", 0).Text + "\n" + chainLedgerFix(0, []int{2}, "feat: x", 0).Text}}, MissSubjectUnmatched},
+		{"strongest block wins", one("feat: x"), []LedgerMsg{{When: fixCT + 50, Key: fixSession, Path: "/t.jsonl", Text: chainLedgerFix(0, []int{1}, "feat: y", 0).Text + "\n" + chainLedgerFix(0, []int{2}, "feat: x", 0).Text}}, MissSubjectUnmatched},
 		{"round era, no header for the round", chainRows(fixT, 2, ""), []LedgerMsg{ledgerFix(fixT+150, 1)}, MissNoRound},
 		{"round era, after the next chain", two(fixT, ""), []LedgerMsg{ledgerFix(fixT+1100, 1)}, MissPastBound},
 		{"window era", chainRows(fixLegacyT, 1, ""), nil, MissNoLedger},
@@ -902,6 +901,32 @@ func TestResolverStampsTheMissReason(t *testing.T) {
 	}
 }
 
+// Two chains ledgered in one reply each take their own block, and the link names which,
+// so a reader can tell two blocks with identical bullets from one block twice.
+func TestResolverStampsTheBlockARowTook(t *testing.T) {
+	r := testResolver()
+	r.quiet = true
+	first := stampChainID(chainRows(fixCT, 1, "feat: first"), "aaaa0001")
+	second := stampChainID(chainRows(fixCT+100, 1, "fix: second"), "bbbb0002")
+	rows := append(first, second...)
+	firstText := withChainID(chainLedgerFix(0, []int{1}, "feat: first", 0), "aaaa0001").Text + "\n"
+	reply := LedgerMsg{When: fixCT + 400, Key: fixSession, Path: "/t.jsonl",
+		Text: firstText + withChainID(chainLedgerFix(0, []int{1}, "fix: second", 0), "bbbb0002").Text}
+	r.harvests = []Harvest{func() []LedgerMsg { return []LedgerMsg{reply} }}
+	r.resolveAndWrite(rows, len(rows), false)
+	for i, want := range map[int]int{1: 0, 3: len(firstText)} {
+		if rows[i]["ledger_join"] != "chain" || rows[i]["ledger_block"] != want {
+			t.Errorf("row %d: got join=%v block=%v, want chain block %d", i, rows[i]["ledger_join"], rows[i]["ledger_block"], want)
+		}
+	}
+	window := chainRows(ledgerRequiredTS+100, 1, "")
+	r.harvests = []Harvest{func() []LedgerMsg { return []LedgerMsg{ledgerFix(ledgerRequiredTS+150, 0)} }}
+	r.resolveAndWrite(window, len(window), false)
+	if _, ok := window[1]["ledger_block"]; ok || window[1]["ledger_join"] != "window" {
+		t.Errorf("a window join took the whole reply and names no block; got %v", window[1])
+	}
+}
+
 func TestResolverRejoinJudgesResolverLinksAgain(t *testing.T) {
 	dir := t.TempDir()
 	cfg := gate.Config{StateDir: dir, HostID: "testhost", StaleAfter: 30 * time.Minute}
@@ -924,11 +949,12 @@ func TestResolverRejoinJudgesResolverLinksAgain(t *testing.T) {
 	}
 	a := append(chainRows(fixT, 4, ""), resolverRow{"phase": "cap", "ts": fixT + 390, "firing": 5,
 		"session_id": fixSession, "finding_slots": 1})
-	blocks := gate.RoundBlocks(reply.Text)
+	blocks, starts := gate.RoundBlocks(reply.Text), gate.RoundBlockStarts(reply.Text)
 	link(a[1], reply.Text, int64(reply.When))
 	a[3]["ledger_found"], a[3]["backfilled"], a[3]["ledger_join"] = false, true, "round"
 	for row, block := range map[int]int{5: 2, 7: 3, 8: 4} {
 		link(a[row], blocks[block], int64(reply.When))
+		a[row]["ledger_block"] = starts[block]
 	}
 	delete(a[7], "concerns_total")
 	hook := inSession(chainRows(fixT+5000, 1, ""), "s2")
