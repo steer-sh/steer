@@ -639,3 +639,40 @@ func TestSpecEqualComparesAmend(t *testing.T) {
 		t.Error("a spec that changed its base must not compare equal")
 	}
 }
+
+// TestDiffIgnoresRepoRenderingSettings: the reviewers and every diff reader get
+// git's canonical patch whatever the repository configures for display.
+func TestDiffIgnoresRepoRenderingSettings(t *testing.T) {
+	root := buildRepo(t, map[string]string{"f.txt": "a\n\nb\nc\n"})
+	gitCmd(t, root, verb, "-q", "-m", "init")
+	writeFileAt(t, root, "f.txt", "a\n\nb\nC\n")
+	writeFileAt(t, root, "new.txt", "n\n")
+	gitCmd(t, root, "add", "f.txt")
+	for key, value := range map[string]string{
+		"diff.suppressBlankEmpty": "true",
+		"color.ui":                "always",
+		"diff.noprefix":           "true",
+		"diff.mnemonicPrefix":     "true",
+		"diff.external":           "false",
+	} {
+		gitCmd(t, root, "config", key, value)
+	}
+
+	for _, spec := range []DiffSpec{{StagedOnly: true}, {IncludeUntracked: true}} {
+		diff, ok := GetDiff(Defaults(), root, spec)
+		if !ok {
+			t.Fatalf("GetDiff(%+v) failed", spec)
+		}
+		for _, want := range []string{"diff --git a/f.txt b/f.txt\n", "\n a\n \n b\n-c\n+C\n"} {
+			if !strings.Contains(diff, want) {
+				t.Errorf("GetDiff(%+v) lacks %q:\n%s", spec, want, diff)
+			}
+		}
+		if spec.IncludeUntracked && !strings.Contains(diff, "+++ b/new.txt\n") {
+			t.Errorf("untracked section is not canonical:\n%s", diff)
+		}
+		if strings.Contains(diff, "\x1b[") {
+			t.Errorf("GetDiff(%+v) carries color escapes:\n%q", spec, diff)
+		}
+	}
+}

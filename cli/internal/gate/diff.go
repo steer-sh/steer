@@ -159,6 +159,17 @@ func diffBaseArgs(cwd string, spec DiffSpec) []string {
 	return args
 }
 
+// canonicalPatch pins the patch rendering a repository's settings can change, for
+// args that start with the `diff` subcommand. Reviewers read the patch and
+// budgetSections, IsBinaryOnly and the ledger's readers parse it: color escapes,
+// an external diff tool, a prefix other than a/ and b/, or a blank context line
+// written as an empty line (diff.suppressBlankEmpty) would each reach them.
+func canonicalPatch(args []string) []string {
+	out := []string{"-c", "diff.suppressBlankEmpty=false", args[0],
+		"--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/"}
+	return append(out, args[1:]...)
+}
+
 // newDiffPlan builds the argument vectors and the exclusion pathspecs.
 func newDiffPlan(cfg Config, cwd string, spec DiffSpec) *diffPlan {
 	base := diffBaseArgs(cwd, spec)
@@ -178,6 +189,7 @@ func newDiffPlan(cfg Config, cwd string, spec DiffSpec) *diffPlan {
 	// of log or diff drops the `diff --git` header that budgetSections, IsBinaryOnly
 	// and the ledger's diff readers split on.
 	base = append(base, "--submodule=short")
+	base = canonicalPatch(base)
 
 	p := &diffPlan{cfg: cfg, cwd: cwd, spec: spec, base: base}
 	p.included = trackedSelector(cwd, spec)
@@ -411,7 +423,8 @@ func (p *diffPlan) untrackedSections(paths []string) (text string, used, skipped
 	for _, path := range paths {
 		// Git() cannot run this: --no-index exits 1 whenever the two sides differ,
 		// which is every call here, and Git() reads any non-zero as failure.
-		out, code, err := runGitAllowingExit1(top, "diff", "--no-index", "--no-color", "--", os.DevNull, path)
+		args := canonicalPatch([]string{"diff", "--no-index"})
+		out, code, err := runGitAllowingExit1(top, append(args, "--", os.DevNull, path)...)
 		// budgetSections splits on a column-0 `diff --git ` and fails closed without
 		// one, so a header-less result is skipped rather than appended.
 		if err != nil || (code != 0 && code != 1) || !strings.HasPrefix(out, "diff --git ") {
