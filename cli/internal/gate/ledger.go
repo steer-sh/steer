@@ -3,6 +3,7 @@ package gate
 import (
 	"bytes"
 	"compress/gzip"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -80,7 +81,11 @@ func (l *Ledger) Errors() []string { return l.errs }
 // invocation — the carry would need the disk that just failed.
 //
 // A lock it cannot take does not stop the append: the row rides out noting that, since
-// a commit cannot wait on the lock and a missing row is the worse record.
+// a commit cannot wait on the lock and a missing row is the worse record. A rewrite that
+// replaced the shard after the write either carried the row or did not; Log waits for
+// the lock again and writes the row only if the current shard lacks its row_id, which a
+// rewrite keeps when it stamps the row. If that wait also runs out, the row may land
+// twice.
 func (l *Ledger) Log(row Row) error {
 	release, lockErr := LockLog(l.cfg)
 	if lockErr != nil {
@@ -91,6 +96,9 @@ func (l *Ledger) Log(row Row) error {
 	setDefault(row, "instrument", l.cfg.InstrumentID())
 	setDefault(row, "instrument_fields", l.cfg.InstrumentFields())
 	setDefault(row, "host", l.cfg.HostID)
+	if id := newRowID(); id != "" {
+		setDefault(row, "row_id", id)
+	}
 	if len(l.errs) > 0 {
 		setDefault(row, "gate_errors", l.errs)
 		l.errs = nil
@@ -103,20 +111,44 @@ func (l *Ledger) Log(row Row) error {
 		return fmt.Errorf("encode row: %w", err)
 	}
 	path := l.cfg.LogFile()
-	for attempt := 0; ; attempt++ {
-		current, err := appendLine(path, line)
-		if err != nil {
-			return err
-		}
-		// Only an append without the lock can land on a shard a rewrite has replaced.
-		if lockErr == nil || current || attempt == maxUnlockedAppends-1 {
-			return nil
+	current, err := appendLine(path, line)
+	if err != nil || current {
+		return err
+	}
+	// A rewrite holds the lock until it has carried what landed on the shard it
+	// replaced, so once the lock is held the current shard shows whether it has the row.
+	if lockErr != nil {
+		if release, err := LockLog(l.cfg); err == nil {
+			defer release()
 		}
 	}
+	mark := line
+	if id, ok := row["row_id"].(string); ok && id != "" {
+		mark, _ = json.Marshal(map[string]string{"row_id": id})
+		mark = bytes.TrimSuffix(bytes.TrimPrefix(mark, []byte("{")), []byte("}"))
+	}
+	for attempt := 0; attempt < maxReplacedShards; attempt++ {
+		if shardHolds(path, line, mark) {
+			return nil
+		}
+		if current, err = appendLine(path, line); err != nil || current {
+			return err
+		}
+	}
+	return nil
 }
 
-// maxUnlockedAppends bounds how many replaced shards one unlocked append follows.
-const maxUnlockedAppends = 3
+// newRowID returns sixteen random hex characters, or "" when the system has none.
+func newRowID() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(b[:])
+}
+
+// maxReplacedShards bounds how many replaced shards one append follows.
+const maxReplacedShards = 3
 
 // afterAppend runs between a row's write and the check that its shard is still current.
 var afterAppend = func() {}
@@ -138,6 +170,22 @@ func appendLine(path string, line []byte) (bool, error) {
 	}
 	named, err := os.Stat(path)
 	return err == nil && os.SameFile(written, named), nil
+}
+
+// shardHolds reports whether the shard at path has line, or a whole JSON line containing
+// mark, the row's "row_id":"<id>" pair. An unreadable shard reports false, so the caller
+// writes the row rather than lose it.
+func shardHolds(path string, line, mark []byte) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	for _, have := range bytes.Split(data, []byte{'\n'}) {
+		if bytes.Equal(have, line) || (bytes.Contains(have, mark) && json.Valid(have)) {
+			return true
+		}
+	}
+	return false
 }
 
 func setDefault(row Row, key string, value any) {
