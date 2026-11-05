@@ -364,8 +364,8 @@ func TestDigestReportsCoveragePerHarness(t *testing.T) {
 	scanner, projects := Scan(adapters, time.Time{}, transcript.Filter{AllProjects: true}, nil)
 	d := scanner.Finalize(30, projects, nil)
 
-	if d.DigestVersion != 7 {
-		t.Errorf("digest_version = %d; want 7", d.DigestVersion)
+	if d.DigestVersion != 8 {
+		t.Errorf("digest_version = %d; want 8", d.DigestVersion)
 	}
 	// Two root sessions and one thread: a thread is provenance, not a unit.
 	if d.Stats.SessionsScanned != 2 || d.Stats.ThreadsScanned != 1 {
@@ -613,28 +613,54 @@ func TestExtractInstructionFileStopsAtTheEndMarker(t *testing.T) {
 	}
 }
 
-// A bullet whose multi-byte character spans the length limit is cut before that
-// character, inside the Steer Rules section and outside it.
+// A directive whose multi-byte character spans the length limit is cut before
+// that character and ends in the cut marker, within the limit.
 func TestExtractInstructionFileCutsOnARuneBoundary(t *testing.T) {
-	want := strings.Repeat("a", maxDirectiveLen-1)
-	long := want + "\u2014 tail"
+	keep := maxDirectiveLen - len(directiveCutMarker)
+	long := strings.Repeat("a", keep-1) + "\u2014 tail"
 	path := filepath.Join(t.TempDir(), "CLAUDE.md")
-	doc := "# Project\n- " + long + "\n\n## Steer Rules\n<!-- managed-by-steer -->\n- " + long + "\n"
+	doc := "# Project\n- " + long + "\n"
 	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	md, err := ExtractInstructionFile(harness.Codex, path, []string{long})
+	md, err := ExtractInstructionFile(harness.Codex, path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	want := strings.Repeat("a", keep-1) + directiveCutMarker
 	if len(md.Directives) != 1 || md.Directives[0].Text != want {
-		t.Errorf("directives = %q, want the text before the split character", md.Directives)
+		t.Errorf("directives = %q, want %q", md.Directives, want)
+	}
+}
+
+// A bullet over the length limit ends in the cut marker inside the Steer Rules
+// section and outside it, so a reader can tell it from a whole one; a guard
+// still backs its cut rule.
+func TestExtractInstructionFileMarksCutBullets(t *testing.T) {
+	long := strings.Repeat("x", maxDirectiveLen) + " tail"
+	exact := strings.Repeat("y", maxDirectiveLen)
+	path := filepath.Join(t.TempDir(), "CLAUDE.md")
+	doc := "# Project\n- " + long + "\n- " + exact + "\n\n## Steer Rules\n<!-- managed-by-steer -->\n- " + long + "\n"
+	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	md, err := ExtractInstructionFile(harness.ClaudeCode, path, []string{long})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Repeat("x", maxDirectiveLen-len(directiveCutMarker)) + directiveCutMarker
+	if len(md.Directives) != 2 || md.Directives[0].Text != want {
+		t.Fatalf("directives = %q, want the first to be %q", md.Directives, want)
+	}
+	if md.Directives[1].Text != exact {
+		t.Errorf("directive at the limit = %q, want it whole", md.Directives[1].Text)
 	}
 	if len(md.SteerRules) != 1 || md.SteerRules[0] != want {
-		t.Errorf("steer rules = %q, want the text before the split character", md.SteerRules)
+		t.Errorf("steer rules = %q, want %q", md.SteerRules, want)
 	}
 	if len(md.GuardRules) != 1 || md.GuardRules[0] != want {
-		t.Errorf("guard rules = %q, want the text before the split character", md.GuardRules)
+		t.Errorf("guard rules = %q, want %q", md.GuardRules, want)
 	}
 }

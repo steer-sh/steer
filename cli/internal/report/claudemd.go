@@ -11,6 +11,8 @@ import (
 const (
 	maxDirectiveLen   = 200
 	maxDirectivesFile = 150
+	// directiveCutMarker ends a bullet that was cut to maxDirectiveLen.
+	directiveCutMarker = "…"
 )
 
 // ExtractInstructionFile parses one harness instruction document — CLAUDE.md
@@ -18,7 +20,8 @@ const (
 // Bullets in the Steer Rules section, over the range instructions.SectionRange
 // gives, are Steer's; the ones whose text is in guardRules are also enforced by
 // a guard, and the rest are instruction rules that no guard backs. Top-level bullets elsewhere are candidates for
-// enforcement. A missing file yields an empty result, not an error.
+// enforcement. A bullet longer than maxDirectiveLen bytes is cut and ends in
+// directiveCutMarker. A missing file yields an empty result, not an error.
 func ExtractInstructionFile(id harness.ID, path string, guardRules []string) (InstructionFile, error) {
 	out := InstructionFile{Harness: id, Path: path, SteerRules: []string{}, GuardRules: []string{}, Directives: []Directive{}}
 	guarded := make(map[string]bool, len(guardRules))
@@ -62,7 +65,7 @@ func ExtractInstructionFile(id harness.ID, path string, guardRules []string) (In
 			continue
 		}
 		backed := inSteerRules && guarded[text]
-		text = clip(text, maxDirectiveLen)
+		text = clipMarked(text, maxDirectiveLen)
 
 		if inSteerRules {
 			out.SteerRules = append(out.SteerRules, text)
@@ -75,4 +78,13 @@ func ExtractInstructionFile(id harness.ID, path string, guardRules []string) (In
 	}
 
 	return out, nil
+}
+
+// clipMarked cuts s to at most n bytes on a rune boundary, ending a cut string
+// in directiveCutMarker.
+func clipMarked(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return clip(s, n-len(directiveCutMarker)) + directiveCutMarker
 }
