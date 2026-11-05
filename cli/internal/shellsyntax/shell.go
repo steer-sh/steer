@@ -181,8 +181,12 @@ func splits(parts []syntax.WordPart) bool {
 		case *syntax.DblQuoted:
 			found := false
 			syntax.Walk(p, func(node syntax.Node) bool {
-				if exp, ok := node.(*syntax.ParamExp); ok && elementWords(exp) {
-					found = true
+				switch n := node.(type) {
+				case *syntax.CmdSubst, *syntax.ArithmExp:
+					// Its output is one field of the quoted word, whatever expands inside.
+					return false
+				case *syntax.ParamExp:
+					found = found || elementWords(n)
 				}
 				return !found
 			})
