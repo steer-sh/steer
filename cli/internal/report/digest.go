@@ -17,7 +17,7 @@ import (
 // DigestVersion is the schema version of the stored report and of every page
 // read from it. The steer-report skill prompt reads this field; bump it whenever
 // the shape or semantics change.
-const DigestVersion = 7
+const DigestVersion = 8
 
 // DefaultMaxDigestBytes bounds one page of index, listing or detail output.
 const DefaultMaxDigestBytes = 40960
