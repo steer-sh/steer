@@ -1,6 +1,7 @@
 package resolve
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -1626,6 +1627,42 @@ func shardTextOf(t *testing.T, cfg gate.Config) string {
 	t.Helper()
 	data, _ := os.ReadFile(cfg.LogFile())
 	return string(data)
+}
+
+// A whole last row with no newline is part of the run's snapshot, resolved and kept once.
+func TestRewriteKeepsAnUnterminatedLastRowOnce(t *testing.T) {
+	cfg := lockTestShard(t)
+	f, err := os.OpenFile(cfg.LogFile(), os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.WriteString(`{"phase":"chain-end"}`)
+	f.Close()
+	if res := lockTestApply(cfg, false, func() float64 { return 2_000_000_000 }); res.Err != nil || res.Changed == 0 {
+		t.Fatalf("rewrite: %+v", res)
+	}
+	if got := shardPhases(t, cfg); got != "deny,retry,chain-end" {
+		t.Fatalf("shard phases = %s\n%s", got, shardTextOf(t, cfg))
+	}
+}
+
+// A last retry with no newline still owes a ledger, and the run resolves it.
+func TestRewriteResolvesAnUnterminatedLastRow(t *testing.T) {
+	cfg := lockTestShard(t)
+	data, err := os.ReadFile(cfg.LogFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfg.LogFile(), bytes.TrimRight(data, "\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if res := lockTestApply(cfg, false, func() float64 { return 2_000_000_000 }); res.Err != nil || res.Changed == 0 {
+		t.Fatalf("the unterminated retry must be resolved: %+v", res)
+	}
+	rows := readShard(t, cfg.LogFile())
+	if len(rows) != 2 || rows[1]["backfilled"] != true {
+		t.Fatalf("shard:\n%s", shardTextOf(t, cfg))
+	}
 }
 
 // Appends that outwait a stalled rewrite's lock go in unlocked while rewrites keep

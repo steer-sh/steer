@@ -241,18 +241,39 @@ func (r *resolver) spanFor(join string) float64 {
 
 func (r *resolver) lockPath() string { return filepath.Join(r.cfg.StateDir, "backfill.lock") }
 
-// readLog reads the shard's lines under its lock, so no append is mid-write. A run that
-// will rewrite the shard needs that; a preview reads without it when the lock is busy.
+// readLog reads the shard's whole lines under its lock. A run that will rewrite the
+// shard needs the lock; a preview reads without it when the lock is busy. An
+// unterminated last line that is not valid JSON may be an unlocked append still being
+// written, so it is left past the snapshot, where writeRows carries it as its own line.
 func (r *resolver) readLog(apply bool) ([]string, error) {
 	release, err := gate.LockLog(r.cfg)
 	if err != nil {
 		if apply {
 			return nil, err
 		}
-		return splitLedgerLines(r.cfg.LogFile()), nil
+		return wholeLines(r.cfg.LogFile()), nil
 	}
 	defer release()
-	return splitLedgerLines(r.cfg.LogFile()), nil
+	return wholeLines(r.cfg.LogFile()), nil
+}
+
+// wholeLines returns the lines of the file at path up to snapshotEnd.
+func wholeLines(path string) []string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	return splitLines(string(data[:snapshotEnd(data)]))
+}
+
+// snapshotEnd is how much of the shard's bytes a resolver run takes as read: through the
+// last newline, and an unterminated last line too when it is valid JSON.
+func snapshotEnd(data []byte) int {
+	end := bytes.LastIndexByte(data, '\n') + 1
+	if rest := bytes.TrimSpace(data[end:]); len(rest) > 0 && json.Valid(rest) {
+		return len(data)
+	}
+	return end
 }
 
 // ExpectsLedger reports whether a row demanded a ledger: every retry, and a cap whose
@@ -908,7 +929,7 @@ func (r *resolver) writeRows(rows []resolverRow, seenLines int) error {
 		return err
 	}
 	// An unlocked append may be mid-write; the carry takes its partial line whole.
-	data = data[:bytes.LastIndexByte(data, '\n')+1]
+	data = data[:snapshotEnd(data)]
 	backup, linked, err := newBackup(log, int64(r.now()), data)
 	if err != nil {
 		return err
