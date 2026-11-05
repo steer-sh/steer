@@ -118,13 +118,10 @@ func goRunner(root string, d Declaration, gd goDetector) (caseRunner, error) {
 	}, nil
 }
 
-// embedDrift names a file whose embedding the case tree changes, or returns "":
-// one in the package directory that a tracked embed pattern matches and no
-// declared input holds, or that the repository's patterns do not match, or one
-// the repository's patterns match that the tree's do not, such as a file a
-// case's go.mod moves into another module. A case file,
-// snapshot, patch or setup can cause either, and the replay would embed other
-// files than the detector's digest read.
+// embedDrift names the first way the case tree's embedding disagrees with what
+// the detector's digest bound, or returns "". Examples: a match no declared
+// input holds, a match the repository's patterns lack, or a repository match
+// the tree loses (for example to a case's go.mod).
 func embedDrift(repoPkgDir, pkgDir, pkg string, gd goDetector, inputs map[string]bool) string {
 	matched := map[string]bool{}
 	inRepo := map[string]bool{}
