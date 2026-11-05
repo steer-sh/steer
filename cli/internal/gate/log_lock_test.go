@@ -2,7 +2,9 @@ package gate
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -180,5 +182,183 @@ func TestUnlockedAppendFollowsAReplacedShard(t *testing.T) {
 	}
 	if n := strings.Count(shardText(t, cfg), "chain-end"); n != 1 {
 		t.Fatalf("the current shard holds the row %d times, want once:\n%s", n, shardText(t, cfg))
+	}
+}
+
+// replaceShard renames content over the shard and returns the replaced file, still open.
+func replaceShard(t *testing.T, cfg Config, content string) *os.File {
+	t.Helper()
+	old, err := os.Open(cfg.LogFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmp := cfg.LogFile() + ".tmp"
+	if err := os.WriteFile(tmp, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(tmp, cfg.LogFile()); err != nil {
+		t.Fatal(err)
+	}
+	return old
+}
+
+// A rewrite that read the shard after the unlocked write carried the row, so Log must
+// not write it again.
+func TestUnlockedAppendCarriedByARewriteIsNotRepeated(t *testing.T) {
+	cfg := lockTestConfig(t)
+	cfg.LogLockWait = 20 * time.Millisecond
+	release, err := LockLog(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	afterAppend = func() {
+		afterAppend = func() {}
+		data, err := os.ReadFile(cfg.LogFile())
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		replaceShard(t, cfg, "{\"phase\":\"deny\"}\n"+string(data)).Close()
+	}
+	t.Cleanup(func() { afterAppend = func() {} })
+	if err := NewLedger(cfg).Log(Row{"phase": "chain-end"}); err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(shardText(t, cfg), "chain-end"); n != 1 {
+		t.Fatalf("the current shard holds the row %d times, want once:\n%s", n, shardText(t, cfg))
+	}
+}
+
+// A rewrite that has renamed but not yet carried the replaced file's growth still holds
+// the lock; Log must wait for it before deciding the row is missing.
+func TestUnlockedAppendWaitsForTheRewriteToCarry(t *testing.T) {
+	cfg := lockTestConfig(t)
+	cfg.LogLockWait = 300 * time.Millisecond
+	release, err := LockLog(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	carried := make(chan struct{})
+	afterAppend = func() {
+		afterAppend = func() {}
+		old := replaceShard(t, cfg, "{\"phase\":\"deny\"}\n")
+		go func() {
+			defer close(carried)
+			defer release()
+			defer old.Close()
+			time.Sleep(50 * time.Millisecond)
+			data, err := io.ReadAll(old)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			f, err := os.OpenFile(cfg.LogFile(), os.O_APPEND|os.O_WRONLY, 0o644)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			defer f.Close()
+			f.Write(data)
+		}()
+	}
+	t.Cleanup(func() { afterAppend = func() {} })
+	if err := NewLedger(cfg).Log(Row{"phase": "chain-end"}); err != nil {
+		t.Fatal(err)
+	}
+	<-carried
+	if n := strings.Count(shardText(t, cfg), "chain-end"); n != 1 {
+		t.Fatalf("the current shard holds the row %d times, want once:\n%s", n, shardText(t, cfg))
+	}
+}
+
+// Two rows with equal fields are two rows: a second one that a rewrite missed must not
+// be taken for the first.
+func TestUnlockedAppendKeepsAnEqualRow(t *testing.T) {
+	cfg := lockTestConfig(t)
+	cfg.LogLockWait = 20 * time.Millisecond
+	release, err := LockLog(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	row := func() Row { return Row{"ts": 1, "phase": "skip-empty"} }
+	if err := NewLedger(cfg).Log(row()); err != nil {
+		t.Fatal(err)
+	}
+	before := shardText(t, cfg)
+	afterAppend = func() {
+		afterAppend = func() {}
+		replaceShard(t, cfg, before).Close()
+	}
+	t.Cleanup(func() { afterAppend = func() {} })
+	if err := NewLedger(cfg).Log(row()); err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(shardText(t, cfg), "skip-empty"); n != 2 {
+		t.Fatalf("the current shard holds %d equal rows, want 2:\n%s", n, shardText(t, cfg))
+	}
+}
+
+// A rewrite that carried the row may have stamped it, so the line differs; the row_id
+// still names it.
+func TestUnlockedAppendKnowsItsRestampedRow(t *testing.T) {
+	cfg := lockTestConfig(t)
+	cfg.LogLockWait = 20 * time.Millisecond
+	release, err := LockLog(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	afterAppend = func() {
+		afterAppend = func() {}
+		data, err := os.ReadFile(cfg.LogFile())
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		stamped := strings.Replace(string(data), "{", `{"backfilled":true,`, 1)
+		replaceShard(t, cfg, stamped).Close()
+	}
+	t.Cleanup(func() { afterAppend = func() {} })
+	if err := NewLedger(cfg).Log(Row{"phase": "retry"}); err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(shardText(t, cfg), `"phase":"retry"`); n != 1 {
+		t.Fatalf("the current shard holds the row %d times, want once:\n%s", n, shardText(t, cfg))
+	}
+}
+
+// A carry cut short leaves a torn line holding the row_id; that is no copy of the row.
+func TestUnlockedAppendIgnoresATornCopy(t *testing.T) {
+	cfg := lockTestConfig(t)
+	cfg.LogLockWait = 20 * time.Millisecond
+	release, err := LockLog(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	afterAppend = func() {
+		afterAppend = func() {}
+		data, err := os.ReadFile(cfg.LogFile())
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		torn := strings.TrimSpace(string(data))
+		replaceShard(t, cfg, torn[:len(torn)-1]+"\n").Close()
+	}
+	t.Cleanup(func() { afterAppend = func() {} })
+	if err := NewLedger(cfg).Log(Row{"phase": "chain-end"}); err != nil {
+		t.Fatal(err)
+	}
+	whole := 0
+	for _, line := range strings.Split(shardText(t, cfg), "\n") {
+		if strings.Contains(line, "chain-end") && json.Valid([]byte(line)) {
+			whole++
+		}
+	}
+	if whole != 1 {
+		t.Fatalf("the shard holds %d whole copies of the row, want 1:\n%s", whole, shardText(t, cfg))
 	}
 }

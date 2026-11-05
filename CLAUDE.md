@@ -98,8 +98,9 @@ Read the linked architecture section before changing the corresponding boundary:
   `commit-gate backfill`) reads only the `chain-end` rows `Engine.release` writes,
   so a new path that ends a blocked sequence must go through `release`.
   A new writer of the ledger shard takes `gate.LockLog`: `Ledger.Log` appends and
-  `resolve.writeRows` renames over the file, and only that lock keeps a row off the
-  unlinked inode.
+  `resolve.writeRows` renames over the file. A rewrite carries what reached the
+  replaced file before it releases that lock, and `Log` checks for its row under it,
+  so a new rewriter must do both or a row is lost or written twice.
 - Transcript ingestion, classification, or snapshots:
   [transcripts](ARCHITECTURE.md#transcripts-and-session-evidence).
   `cli/internal/transcript/` owns normalization; `cli/internal/report/` classifies

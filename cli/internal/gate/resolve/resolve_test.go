@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1513,9 +1514,9 @@ func TestAppendDuringRewriteLandsOnTheNewShard(t *testing.T) {
 	}
 }
 
-// An append that gave up waiting goes in unlocked; the rewrite must see it and stand
-// down, and the next run must carry it.
-func TestUnlockedAppendStopsTheSwap(t *testing.T) {
+// An append that gave up waiting goes in unlocked, after the rewrite read the shard; the
+// rewrite carries it onto the shard it swaps in.
+func TestUnlockedAppendIsCarriedThroughTheSwap(t *testing.T) {
 	cfg := lockTestShard(t)
 	now := func() float64 { return 2_000_000_000 }
 	setBeforeSwap(t, func() {
@@ -1528,19 +1529,162 @@ func TestUnlockedAppendStopsTheSwap(t *testing.T) {
 		defer f.Close()
 		f.WriteString(`{"phase":"chain-end"}` + "\n")
 	})
-	if res := lockTestApply(cfg, false, now); res.Err == nil {
-		t.Fatalf("the rewrite must refuse a shard that grew: %+v", res)
+	if res := lockTestApply(cfg, false, now); res.Err != nil || res.Changed == 0 {
+		t.Fatalf("the rewrite must complete: %+v", res)
 	}
 	if _, err := os.Stat(cfg.LogFile() + ".tmp"); !os.IsNotExist(err) {
-		t.Fatalf("the refused rewrite left its temp file: %v", err)
+		t.Fatalf("the rewrite left its temp file: %v", err)
 	}
 	if got := shardPhases(t, cfg); got != "deny,retry,chain-end" {
 		t.Fatalf("shard phases = %s", got)
 	}
-	if res := lockTestApply(cfg, false, now); res.Err != nil || res.Changed == 0 {
-		t.Fatalf("the next run must complete: %+v", res)
+	if rows := readShard(t, cfg.LogFile()); rows[1]["backfilled"] != true {
+		t.Fatal("the rewrite's stamp is missing")
+	}
+}
+
+// A carry that cannot write the new shard leaves the late row in the backup, which no
+// pruning removes, even when newer-dated backups fill the quota.
+func TestFailedCarryKeepsTheRowInTheBackup(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes a read-only file")
+	}
+	cfg := lockTestShard(t)
+	for i := 1; i <= backupKeep; i++ {
+		later := cfg.LogFile() + fmt.Sprintf(".bak.%d", 2_000_000_000+int64(i)*1000)
+		if err := os.WriteFile(later, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setBeforeSwap(t, func() {
+		beforeSwap = func() {}
+		f, err := os.OpenFile(cfg.LogFile(), os.O_APPEND|os.O_WRONLY, 0o644)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		f.WriteString(`{"phase":"chain-end"}` + "\n")
+		f.Close()
+		if err := os.Chmod(cfg.LogFile()+".tmp", 0o444); err != nil {
+			t.Error(err)
+		}
+	})
+	if res := lockTestApply(cfg, false, func() float64 { return 2_000_000_000 }); res.Err == nil {
+		t.Fatalf("a failed carry must be reported: %+v", res)
+	}
+	data, err := os.ReadFile(cfg.LogFile() + ".bak.2000000000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "chain-end") {
+		t.Fatalf("the backup lost the late row:\n%s", data)
+	}
+}
+
+// A backup name already taken, as by a rewrite earlier in the same second, is left as it
+// was; the new backup takes the next free name.
+func TestRewriteNeverWritesOverABackup(t *testing.T) {
+	cfg := lockTestShard(t)
+	taken := cfg.LogFile() + ".bak.2000000000"
+	if err := os.WriteFile(taken, []byte("earlier\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(cfg.LogFile())
+	if res := lockTestApply(cfg, false, func() float64 { return 2_000_000_000 }); res.Err != nil || res.Changed == 0 {
+		t.Fatalf("rewrite: %+v", res)
+	}
+	if data, _ := os.ReadFile(taken); string(data) != "earlier\n" {
+		t.Fatalf("the earlier backup was overwritten:\n%s", data)
+	}
+	if data, _ := os.ReadFile(cfg.LogFile() + ".bak.2000000001"); string(data) != string(before) {
+		t.Fatalf("the new backup does not hold the shard:\n%s", data)
+	}
+}
+
+// A rewrite that reads the shard mid-append carries the row whole rather than split.
+func TestRewriteCarriesAPartlyReadRowWhole(t *testing.T) {
+	cfg := lockTestShard(t)
+	f, err := os.OpenFile(cfg.LogFile(), os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	f.WriteString(`{"phase":"chain-`)
+	setBeforeSwap(t, func() {
+		beforeSwap = func() {}
+		f.WriteString(`end"}` + "\n")
+	})
+	if res := lockTestApply(cfg, false, func() float64 { return 2_000_000_000 }); res.Err != nil || res.Changed == 0 {
+		t.Fatalf("rewrite: %+v", res)
 	}
 	if got := shardPhases(t, cfg); got != "deny,retry,chain-end" {
-		t.Fatalf("shard phases = %s", got)
+		t.Fatalf("shard phases = %s\n%s", got, shardTextOf(t, cfg))
+	}
+}
+
+func shardTextOf(t *testing.T, cfg gate.Config) string {
+	t.Helper()
+	data, _ := os.ReadFile(cfg.LogFile())
+	return string(data)
+}
+
+// Appends that outwait a stalled rewrite's lock go in unlocked while rewrites keep
+// replacing the shard; every row must end on the shard exactly once.
+func TestStalledRewritesKeepEveryRowOnce(t *testing.T) {
+	cfg := gate.Config{StateDir: t.TempDir(), HostID: "testhost", LogLockWait: 2 * time.Millisecond}
+	if err := os.WriteFile(cfg.LogFile(), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	setBeforeSwap(t, func() { time.Sleep(5 * time.Millisecond) })
+	stop := make(chan struct{})
+	rewrites := make(chan error, 1)
+	go func() {
+		rcfg := cfg
+		rcfg.LogLockWait = time.Minute
+		r := &resolver{cfg: rcfg, quiet: true, now: func() float64 { return 2_000_000_000 }}
+		for {
+			select {
+			case <-stop:
+				rewrites <- nil
+				return
+			default:
+			}
+			if err := r.writeRows(nil, 0); err != nil {
+				rewrites <- err
+				return
+			}
+		}
+	}()
+	const writers, each = 8, 25
+	var wg sync.WaitGroup
+	for w := 0; w < writers; w++ {
+		wg.Add(1)
+		go func(w int) {
+			defer wg.Done()
+			for i := 0; i < each; i++ {
+				if err := gate.NewLedger(cfg).Log(gate.Row{"id": fmt.Sprintf("%d-%d", w, i)}); err != nil {
+					t.Error(err)
+				}
+			}
+		}(w)
+	}
+	wg.Wait()
+	close(stop)
+	if err := <-rewrites; err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]int{}
+	for _, row := range readShard(t, cfg.LogFile()) {
+		seen[fmt.Sprint(row["id"])]++
+	}
+	for w := 0; w < writers; w++ {
+		for i := 0; i < each; i++ {
+			if id := fmt.Sprintf("%d-%d", w, i); seen[id] != 1 {
+				t.Errorf("row %s is on the shard %d times", id, seen[id])
+			}
+		}
+	}
+	if len(seen) != writers*each {
+		t.Errorf("the shard holds %d distinct rows, want %d", len(seen), writers*each)
 	}
 }

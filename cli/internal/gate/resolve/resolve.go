@@ -5,9 +5,12 @@
 package resolve
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"math"
 	"os"
 	"path/filepath"
@@ -17,6 +20,7 @@ import (
 	"time"
 
 	"github.com/steer-sh/steer-cli/internal/gate"
+	"github.com/steer-sh/steer-cli/internal/jsonl"
 )
 
 // The resolver rules only on rows whose transcript is local, and its neighbour scans
@@ -879,13 +883,14 @@ func (r *resolver) resolveAndWrite(rows []resolverRow, seenLines int, apply bool
 	return Result{Changed: changed}
 }
 
-// beforeSwap runs between writing the replacement shard and checking the live one.
+// beforeSwap runs between writing the replacement shard and renaming it over the live one.
 var beforeSwap = func() {}
 
 // writeRows rewrites the shard, backing it up first and carrying through any rows the
-// hook appended under the snapshot. It holds the shard's lock throughout, and refuses
-// to swap when the shard grew anyway: an append that outlasted its wait for the lock
-// goes in unlocked, and the next run carries it.
+// hook appended under the snapshot. It holds the shard's lock throughout. An append that
+// outlasted its wait for the lock goes in unlocked, so after the rename the bytes that
+// reached the replaced file past the read are appended to the new one; Log checks for
+// its row under this lock before writing it again.
 func (r *resolver) writeRows(rows []resolverRow, seenLines int) error {
 	release, err := gate.LockLog(r.cfg)
 	if err != nil {
@@ -893,12 +898,19 @@ func (r *resolver) writeRows(rows []resolverRow, seenLines int) error {
 	}
 	defer release()
 	log := r.cfg.LogFile()
-	backup := log + fmt.Sprintf(".bak.%d", int64(r.now()))
-	data, err := os.ReadFile(log)
+	old, err := os.Open(log)
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(backup, data, 0o644); err != nil {
+	defer old.Close()
+	data, err := io.ReadAll(old)
+	if err != nil {
+		return err
+	}
+	// An unlocked append may be mid-write; the carry takes its partial line whole.
+	data = data[:bytes.LastIndexByte(data, '\n')+1]
+	backup, linked, err := newBackup(log, int64(r.now()), data)
+	if err != nil {
 		return err
 	}
 	tail := splitLines(string(data))
@@ -927,25 +939,104 @@ func (r *resolver) writeRows(rows []resolverRow, seenLines int) error {
 		return err
 	}
 	beforeSwap()
-	info, err := os.Stat(log)
-	if err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	if info.Size() != int64(len(data)) {
-		os.Remove(tmp)
-		return fmt.Errorf("%s grew during the rewrite", filepath.Base(log))
-	}
 	if err := os.Rename(tmp, log); err != nil {
+		os.Remove(tmp)
 		return err
+	}
+	carried, extra, err := carryGrowth(old, int64(len(data)), log)
+	if err != nil {
+		kept := linked
+		if !kept && len(extra) > 0 {
+			kept = appendTo(backup, extra) == nil
+		}
+		// No pruning here: the epoch order could pick the backup that holds the rows.
+		if kept {
+			return fmt.Errorf("carry rows appended during the rewrite (they are in %s): %w", filepath.Base(backup), err)
+		}
+		return fmt.Errorf("carry rows appended during the rewrite: %w", err)
 	}
 	pruneBackups(log, backupKeep)
 	appended := ""
-	if len(tail) > 0 {
-		appended = fmt.Sprintf("; %d row(s) appended during the run", len(tail))
+	if n := len(tail) + carried; n > 0 {
+		appended = fmt.Sprintf("; %d row(s) appended during the run", n)
 	}
 	r.say("written; backup at %s%s", filepath.Base(backup), appended)
 	return nil
+}
+
+// carryGrowth appends to the file at log whatever old holds past read bytes. It returns
+// how many lines it carried and the bytes it read, which a failed append leaves uncarried.
+// old is the shard a rename just replaced.
+func carryGrowth(old *os.File, read int64, log string) (int, []byte, error) {
+	info, err := old.Stat()
+	if err != nil {
+		return 0, nil, err
+	}
+	if info.Size() <= read {
+		return 0, nil, nil
+	}
+	extra := make([]byte, info.Size()-read)
+	if _, err := old.ReadAt(extra, read); err != nil {
+		return 0, nil, err
+	}
+	if len(bytes.TrimSpace(extra)) == 0 {
+		return 0, nil, nil
+	}
+	if extra[len(extra)-1] != '\n' {
+		extra = append(extra, '\n')
+	}
+	if err := appendTo(log, extra); err != nil {
+		return 0, extra, err
+	}
+	n := 0
+	for _, x := range splitLines(string(extra)) {
+		if strings.TrimSpace(x) != "" {
+			n++
+		}
+	}
+	return n, extra, nil
+}
+
+// newBackup preserves the shard at log under the first free .bak.<epoch> name from ts
+// on, never writing over an existing file, which may still be a shard's inode. A hard
+// link is the shard itself, so it keeps whatever reaches that file after the read;
+// where linking is unsupported, it writes a copy of data. linked reports which.
+func newBackup(log string, ts int64, data []byte) (path string, linked bool, err error) {
+	for ; ; ts++ {
+		path = log + fmt.Sprintf(".bak.%d", ts)
+		err = os.Link(log, path)
+		if err == nil {
+			return path, true, nil
+		}
+		if errors.Is(err, fs.ErrExist) {
+			continue
+		}
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if errors.Is(err, fs.ErrExist) {
+			continue
+		}
+		if err != nil {
+			return "", false, err
+		}
+		_, err = f.Write(data)
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+		return path, false, err
+	}
+}
+
+// appendTo appends data to the existing file at path as whole lines.
+func appendTo(path string, data []byte) error {
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(jsonl.Separated(path, data))
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	return err
 }
 
 // pruneBackups removes all but the newest keep backups of the shard, ordered by the
