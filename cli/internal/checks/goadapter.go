@@ -136,12 +136,16 @@ type goPackageState struct {
 	failedBuild bool
 	// failedAt is the time of the package's final fail action, zero otherwise.
 	failedAt time.Time
+	// active holds the package's top-level tests that are running and not
+	// paused at t.Parallel, bound or not.
+	active map[string]bool
 }
 
 type boundGoTest struct {
 	record   Execution
 	action   string
 	running  bool
+	paused   bool
 	started  time.Time
 	finished time.Time
 	output   *outputRecorder
@@ -218,7 +222,7 @@ func (r *goSuiteReader) line(line []byte) {
 	}
 	ps := r.pkgs[ev.Package]
 	if ps == nil {
-		ps = &goPackageState{}
+		ps = &goPackageState{active: map[string]bool{}}
 		r.pkgs[ev.Package] = ps
 	}
 	if ev.Test == "" {
@@ -226,6 +230,14 @@ func (r *goSuiteReader) line(line []byte) {
 		return
 	}
 	top, _, _ := strings.Cut(ev.Test, "/")
+	if ev.Test == top {
+		switch ev.Action {
+		case "run", "cont":
+			ps.active[top] = true
+		case "pause", "pass", "fail", "skip":
+			delete(ps.active, top)
+		}
+	}
 	for _, bt := range r.bound[ev.Package][top] {
 		if ev.Action == "output" {
 			bt.output.Write([]byte(ev.Output))
@@ -233,9 +245,20 @@ func (r *goSuiteReader) line(line []byte) {
 		if ev.Test == top {
 			switch ev.Action {
 			case "run":
-				bt.started, bt.running = ev.Time, true
+				if bt.started.IsZero() {
+					bt.started = ev.Time
+				}
+				bt.running, bt.paused = true, false
+			case "pause":
+				bt.paused = true
+			case "cont":
+				bt.paused = false
 			case "pass", "fail", "skip":
-				bt.action, bt.finished, bt.running = ev.Action, ev.Time, false
+				// Under -count, one failed iteration fails the test.
+				if bt.action != "fail" {
+					bt.action = ev.Action
+				}
+				bt.finished, bt.running, bt.paused = ev.Time, false, false
 			}
 		}
 	}
@@ -299,8 +322,11 @@ func (r *goSuiteReader) packageEvent(ev goSuiteEvent, ps *goPackageState) {
 }
 
 // records turns each bound test in a reported package into an execution. A
-// test still running when its package failed took the test binary down or went
-// down with it, and reads as failed.
+// failed package with no result for a started test means its test binary
+// exited. The stream cannot name the test that exited it. A test reads as the
+// crasher when it was the one top-level test running, though a goroutine an
+// earlier test left behind looks the same; a test paused at t.Parallel, or
+// running beside another, reads unavailable unless an earlier iteration failed.
 func (r *goSuiteReader) records(end time.Time, timedOut bool) []Execution {
 	var out []Execution
 	for importPath, tests := range r.bound {
@@ -317,15 +343,27 @@ func (r *goSuiteReader) records(end time.Time, timedOut bool) []Execution {
 			if bt.finished.IsZero() {
 				rec.Finished = end.UTC()
 			}
-			crashed := bt.running && !ps.failedAt.IsZero()
+			exited := bt.running && !ps.failedAt.IsZero()
 			action := bt.action
-			if crashed {
+			switch {
+			case !exited:
+			case !bt.paused && len(ps.active) == 1:
 				action = "crashed"
+			case action != "fail" && bt.paused:
+				action = "paused"
+			case action != "fail":
+				action = "beside"
+			}
+			if exited {
+				rec.Finished = ps.failedAt.UTC()
 			}
 			switch action {
 			case "crashed":
 				rec.Outcome, rec.Reason = OutcomeFailed, "the test binary exited before the test reported a result"
-				rec.Finished = ps.failedAt.UTC()
+			case "paused":
+				rec.Outcome, rec.Reason = OutcomeUnavailable, "the test binary exited while the test waited at t.Parallel"
+			case "beside":
+				rec.Outcome, rec.Reason = OutcomeUnavailable, fmt.Sprintf("the test binary exited while %d tests ran at once; the stream cannot name the one that exited it", len(ps.active))
 			case "pass":
 				rec.Outcome = OutcomePassed
 				if ps.cached {
@@ -345,7 +383,7 @@ func (r *goSuiteReader) records(end time.Time, timedOut bool) []Execution {
 					rec.Outcome, rec.Reason = OutcomeUnavailable, "the package ran without a result for the test: it may be renamed, or excluded by -run"
 				}
 			}
-			if crashed || bt.action != "" {
+			if exited || bt.action != "" {
 				rec.OutputDigest, rec.Excerpt = bt.output.digest(), bt.output.excerpt()
 			}
 			out = append(out, rec)
