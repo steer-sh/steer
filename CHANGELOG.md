@@ -5,6 +5,43 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.7] - 2026-11-05
+
+### Changed
+
+- `steer report` marks an instruction bullet cut at 200 bytes with a trailing `…`,
+  and `digest_version` is now 8. Run `steer report` again: a stored report is refused.
+- Repository checks: the Go detector skips a subdirectory that holds its own `go.mod`
+  and refuses a case whose replay embeds files the repository does not. Each Go
+  detector needs one `steer check test`, and a check-tier fix reads as an edited
+  check until it is registered again.
+
+### Fixed
+
+- The commit gate's preflight accepts `cd /abs/path; git commit`,
+  `cd /abs/path || exit; git commit` and `set -e` scripts when the `cd` is plain and
+  its target is a directory it can enter.
+- The commit gate reads `git diff` with the repository's display settings pinned, so
+  `diff.suppressBlankEmpty`, `color.ui=always`, `diff.noprefix` and `diff.external`
+  no longer change or drop the diff that reviewers and the fixture miner read.
+- The pre-commit install and `steer git-hooks install` refuse to run from inside
+  `.git`, where a relative `core.hooksPath` resolved to a directory git never runs.
+  A hooks path such as `link/../hooks` resolves through the symlink, as git does.
+- `steer verify --staged` reads a staged file whose name starts with a digit and a
+  colon, and both modes read the right paths under `diff.relative=true`. Verify warns
+  when a file is not UTF-8, because the guard reads a substituted copy.
+- The review ledger no longer loses or duplicates a row that is appended while a
+  rewrite holds the shard, and two chains with identical blocks in one reply count
+  twice, not once.
+- `steer report` reads a multi-line guard rule as guard-backed, as sync writes it.
+- Repository checks: a Go test that did not finish reads as failed only when it ran
+  alone; a failed iteration under `-count` stays failed.
+- Codex: a check.sh Stop block after a turn ends no longer anchors to that turn.
+- Reviewer settings: a flag named only in a shell comment no longer reads as pinned,
+  and the comment's text is not rewritten.
+- The TUI reviewer editor records a keep or drop answer only while its question is
+  the note on screen.
+
 ## [0.1.6] - 2026-11-04
 
 ### Added
@@ -207,6 +244,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 First public release.
 
+[0.1.7]: https://github.com/steer-sh/steer/releases/tag/v0.1.7
 [0.1.6]: https://github.com/steer-sh/steer/releases/tag/v0.1.6
 [0.1.5]: https://github.com/steer-sh/steer/releases/tag/v0.1.5
 [0.1.4]: https://github.com/steer-sh/steer/releases/tag/v0.1.4
