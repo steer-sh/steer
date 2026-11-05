@@ -14,6 +14,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `/steer-report` reads each one against its context before it uses it. The index
   stamps a digest of the list as `correction_list`, and `digest_version` is now 7.
 
+### Fixed
+
+- A guard blocks even when it writes to the process's standard output directly, for
+  example through a subprocess. That output reached the harness before the deny, so
+  the call went through. Output that bypasses `sys.stdout` now goes to stderr, so a
+  guard that replied only through file descriptor 1 stops blocking. Run
+  `steer hooks rebuild --scope <scope>` to update an installed master.
+- Presets skip a malformed edit shape instead of raising, which allowed the edit with
+  no audit row. The postinstall guard matches a key written with `\u` escapes, and the
+  generation prompt's postinstall snippet gets the same treatment.
+- Presets and the generation prompt: the injection reference visitor treats
+  `subprocess.call` with `shell=True` as a shell sink, as the preset does.
+- A guard file that no manifest entry owns no longer carries another entry's rule and
+  identity. Its block footer offered `steer remove` for the wrong file. `steer list`
+  shows such a file as `<name>.py (unowned)`.
+- Repository checks: a Go detector's digest ignores OS metadata such as `.DS_Store`
+  beside an embedded file, so a receipt reads the same on every machine.
+
 ## [0.1.5] - 2026-11-01
 
 ### Added
