@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/testhome"
 )
 
@@ -88,6 +89,10 @@ func TestGitHooksInstall_GitRunsTheInstalledHook(t *testing.T) {
 		{"hooksPath ending in a newline", func(t *testing.T, repo string) (string, string) {
 			gitIn(t, repo, "config", "core.hooksPath", ".githooks\n")
 			return repo, filepath.Join(repo, ".githooks\n")
+		}},
+		{"hooksPath climbing out of a symlinked directory", func(t *testing.T, repo string) (string, string) {
+			linkedHooksPath(t, repo)
+			return filepath.Join(repo, "a", "b"), filepath.Join(repo, "real", "hooks")
 		}},
 		{"git tracing to stderr", func(t *testing.T, repo string) (string, string) {
 			t.Setenv("GIT_TRACE", "1")
@@ -175,6 +180,83 @@ func TestGitHooksInstall_RefusesInsideTheGitDirectory(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(repo, ".git", ".githooks")); !os.IsNotExist(err) {
 		t.Fatalf("install created a hooks directory under .git: %v", err)
+	}
+}
+
+// linkedHooksPath points core.hooksPath at link/../hooks, where link is a symlink to
+// real/sub: git reaches real/hooks, and a lexical join reaches <repo>/hooks.
+func linkedHooksPath(t *testing.T, repo string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(repo, "real", "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("real", "sub"), filepath.Join(repo, "link")); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, repo, "config", "core.hooksPath", "link/../hooks")
+}
+
+func TestPreCommitArmedHere_FindsTheHookGitRuns(t *testing.T) {
+	repo := hooksScratchRepo(t)
+	linkedHooksPath(t, repo)
+	hooks := filepath.Join(repo, "real", "hooks")
+	if err := os.MkdirAll(hooks, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(hooks, "pre-commit"), []byte(buildCommitGatePreCommitScript()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(repo)
+	armed, path := preCommitArmedHere()
+	if !armed || path != filepath.Join(hooks, "pre-commit") {
+		t.Fatalf("preCommitArmedHere() = %v, %q; want the hook in %s", armed, path, hooks)
+	}
+}
+
+func TestGitHooksDir_RefusesClimbingOutOfAMissingDirectory(t *testing.T) {
+	repo := hooksScratchRepo(t)
+	gitIn(t, repo, "config", "core.hooksPath", "missing/../hooks")
+	t.Chdir(repo)
+	if dir, err := gitHooksDir(); err == nil {
+		t.Fatalf("gitHooksDir() = %q; git cannot walk through a missing directory", dir)
+	}
+}
+
+func TestGitHooksDir_RefusesOutsideTheWorkTreeItNames(t *testing.T) {
+	repo := hooksScratchRepo(t)
+	gitIn(t, repo, "config", "core.hooksPath", ".githooks")
+	t.Setenv("GIT_DIR", filepath.Join(repo, ".git"))
+	t.Setenv("GIT_WORK_TREE", repo)
+	t.Chdir(t.TempDir())
+	if dir, err := gitHooksDir(); err == nil {
+		t.Fatalf("gitHooksDir() = %q from outside the work tree", dir)
+	}
+}
+
+func TestPreCommitChannel_RefusesInsideTheGitDirectory(t *testing.T) {
+	repo := hooksScratchRepo(t)
+	gitIn(t, repo, "config", "core.hooksPath", ".githooks")
+	// A hook where a relative hooksPath lands when resolved from .git, which git never runs.
+	misplaced := filepath.Join(repo, ".git", ".githooks")
+	if err := os.MkdirAll(misplaced, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(misplaced, "pre-commit"), []byte(buildCommitGatePreCommitScript()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(filepath.Join(repo, ".git"))
+
+	if armed, path := preCommitArmedHere(); armed {
+		t.Fatalf("reported a hook git never runs as armed: %s", path)
+	}
+	prevBoth, prevForce := commitGateBothChannels, commitGateForce
+	t.Cleanup(func() { commitGateBothChannels, commitGateForce = prevBoth, prevForce })
+	commitGateBothChannels, commitGateForce = true, true
+	if err := installPreCommitChannel(gate.Config{}); err == nil {
+		t.Fatal("install must refuse outside a work tree")
+	}
+	if _, err := os.Stat(filepath.Join(repo, ".githooks")); !os.IsNotExist(err) {
+		t.Fatalf("install wrote a hooks directory: %v", err)
 	}
 }
 

@@ -36,7 +36,7 @@ Use --include-global to also run global hooks.`,
   steer git-hooks install --include-global
   steer git-hooks install --force`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		hooksDir, err := workTreeHooksDir()
+		hooksDir, err := gitHooksDir()
 		if err != nil {
 			return err
 		}
@@ -75,15 +75,6 @@ Use --include-global to also run global hooks.`,
 		utils.Tip("Add `steer verify --changed --base <sha> --head <sha>` as a required CI check.")
 		return nil
 	},
-}
-
-// workTreeHooksDir is gitHooksDir for a command run from a work tree. It refuses
-// anywhere else: inside .git a relative core.hooksPath would resolve under .git.
-func workTreeHooksDir() (string, error) {
-	if _, err := gitTopLevel(); err != nil {
-		return "", err
-	}
-	return gitHooksDir()
 }
 
 func preCommitVerifyArgs(includeGlobal bool) string {
