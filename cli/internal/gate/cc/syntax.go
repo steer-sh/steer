@@ -661,7 +661,7 @@ func writesTarget(redir *syntax.Redirect) bool {
 var stepsBeforeCommit = map[string]bool{
 	"cd": true, "pwd": true, "echo": true, "printf": true, "cat": true, "head": true,
 	"tail": true, "grep": true, "wc": true, "true": true, ":": true, "set": true,
-	"unset": true,
+	"unset": true, "exit": true, "return": true,
 }
 
 var gitStepsBeforeCommit = map[string]bool{
@@ -866,9 +866,10 @@ func (p *parsedGit) commitStatement(file *syntax.File) *syntax.Stmt {
 // uncertainCD returns the source of the first cd that resolvedDirs applies to the
 // commit although it may not have run, or may have failed, when git commits: a cd in
 // a pipeline member, after `||`, in the background, inside a compound command the
-// commit is not in, or one whose failure does not stop the commit (`cd /x; git commit`).
-// Empty means every applied cd succeeded, or a later absolute cd that succeeded or
-// the commit's own absolute -C makes the directory independent of it.
+// commit is not in, or one whose failure does not stop the commit while its target is
+// not an enterable directory now (`cd /missing; git commit`) or a redirect can stop
+// it. Empty means every applied cd succeeded, or a later absolute cd that succeeded
+// or the commit's own absolute -C makes the directory independent of it.
 func (p *parsedGit) uncertainCD() string {
 	file, err := syntax.NewParser().Parse(strings.NewReader(p.program.Source), "command")
 	if err != nil {
@@ -879,15 +880,23 @@ func (p *parsedGit) uncertainCD() string {
 		return ""
 	}
 	uncertain := ""
+	base := p.baseCWD
 	for _, call := range p.program.Calls[:p.callIndex] {
 		if !scopeAffects(call.Scopes, p.call.Scopes) || len(call.Args) == 0 || call.Args[0].Base() != "cd" {
 			continue
 		}
-		ran, succeeded := ranBefore(nodePath(file, statementAt(file, call.Start)), commitPath)
+		step := nodePath(file, statementAt(file, call.Start))
+		ran, succeeded := ranBefore(step, commitPath)
+		path, ok := cdPath(call.Args[1:])
+		if ok {
+			base = resolveDir(path.Value, path.TildePrefix(), base)
+			// A plain cd into an enterable directory succeeds unless a redirect fails first.
+			succeeded = succeeded || ran && plainCD(call.Args[1:]) && !redirected(step) && enterableDir(base)
+		}
 		if !(ran && succeeded) && uncertain == "" {
 			uncertain = p.program.Source[call.Start:call.End]
 		}
-		if path, ok := cdPath(call.Args[1:]); ran && succeeded && ok && knownDir(path.Value, path.TildePrefix()) {
+		if ran && succeeded && ok && knownDir(path.Value, path.TildePrefix()) {
 			uncertain = ""
 		}
 	}
@@ -985,6 +994,43 @@ func ranBefore(step, commit []syntax.Node) (ran, succeeded bool) {
 		}
 	}
 	return true, succeeded
+}
+
+// plainCD reports cd arguments that are one clean absolute operand, optionally after
+// --: no option that can fail or change the target (-P), no second operand, no
+// relative operand that CDPATH can redirect, no ~ that a changed HOME moves, no . or
+// .. that a symlink makes differ from the logical path, and no glob or brace that
+// can expand to other operands.
+func plainCD(args []shellsyntax.Word) bool {
+	if len(args) == 2 && args[0].Static && args[0].Value == "--" {
+		args = args[1:]
+	}
+	if len(args) != 1 || !args[0].Static || args[0].TildePrefix() {
+		return false
+	}
+	v := args[0].Value
+	clean := filepath.Clean(v)
+	return filepath.IsAbs(v) && (v == clean || v == clean+"/") && !strings.ContainsAny(v, "*?[]{}()")
+}
+
+// redirected reports a redirect on any statement in path, which can fail and skip
+// the command beneath it.
+func redirected(path []syntax.Node) bool {
+	for _, node := range path {
+		if stmt, ok := node.(*syntax.Stmt); ok && len(stmt.Redirs) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// enterableDir reports an absolute path that names a directory cd can enter now.
+func enterableDir(path string) bool {
+	if !filepath.IsAbs(path) {
+		return false
+	}
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir() && searchable(path)
 }
 
 // holdsNode reports whether node is one of stmts.

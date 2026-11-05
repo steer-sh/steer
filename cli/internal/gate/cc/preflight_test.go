@@ -536,3 +536,78 @@ func TestPreflightDenyRefusesACDThatMayHaveFailed(t *testing.T) {
 		}
 	}
 }
+
+// TestPreflightDenyTrustsACDIntoAnEnterableDirectory: a cd whose failure would not stop
+// the commit still decides its directory when it names one clean absolute directory
+// cd can enter, with no option, and no redirect can skip it. A relative operand can follow
+// CDPATH, so only an `&&` chain trusts it.
+func TestPreflightDenyTrustsACDIntoAnEnterableDirectory(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "file"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, cmd := range []string{
+		"cd " + dir + "; git " + c + " -m x",
+		"cd " + dir + " || exit; git " + c + " -m x",
+		"set -e\ncd " + dir + "\ngit " + c + " -m x",
+		"cd " + dir + "; git add a b && git " + c + " -q -F - <<'EOF'\nsubject\nEOF",
+		"cd -- " + dir + "; git " + c + " -m x",
+		"cd " + dir + "/sub/; git " + c + " -m x",
+		"cd /missing; cd " + dir + "; git " + c + " -m x",
+		"cd " + dir + " && cd sub && git " + c + " -m x",
+	} {
+		if reason, _ := PreflightDeny(cmd, "/cwd"); reason != "" {
+			t.Errorf("%q: the cd enters an existing directory, got %q", cmd, reason)
+		}
+	}
+	for _, cmd := range []string{
+		"cd " + dir + "/missing; git " + c + " -m x",
+		"cd " + dir + "/file; git " + c + " -m x",
+		"cd " + dir + " </missing; git " + c + " -m x",
+		"{ cd " + dir + "; } </missing; git " + c + " -m x",
+		"cd " + dir + "; cd missing; git " + c + " -m x",
+		"cd " + dir + " && cd sub; git " + c + " -m x",
+		"cd -Z " + dir + "; git " + c + " -m x",
+		"cd -P " + dir + "; git " + c + " -m x",
+		"cd " + dir + " /extra; git " + c + " -m x",
+		"cd " + dir + "/sub/..; git " + c + " -m x",
+		"cd " + dir + "/s*; git " + c + " -m x",
+		"cd " + dir + "/{sub,file}; git " + c + " -m x",
+		"HOME=/elsewhere; cd ~/; git " + c + " -m x",
+		"true || cd " + dir + "; git " + c + " -m x",
+		"cd " + dir + " | true; git " + c + " -m x",
+		"cd " + dir + " & git " + c + " -m x",
+	} {
+		reason, receipt := PreflightDeny(cmd, "/cwd")
+		if receipt != AmbiguousShellReceipt || !strings.Contains(reason, "may not have run") {
+			t.Errorf("%q: the cd may not run or may fail, so it must be refused, got %q", cmd, reason)
+		}
+	}
+	if reason, _ := PreflightDeny("cd sub; git "+c+" -m x", "relative"); reason == "" {
+		t.Error("a cd resolved against a relative directory was trusted")
+	}
+	// The step rule still judges what runs between the cd and the commit.
+	cmd := "cd " + dir + " && ./check.sh 2>&1 | tail -3; git add a && git " + c + " -q -m x"
+	if _, receipt := PreflightDeny(cmd, "/cwd"); receipt != StepBeforeCommitReceipt {
+		t.Errorf("%q: the step before the commit must be refused, got receipt %q", cmd, receipt)
+	}
+}
+
+// TestPreflightDenyRefusesACDIntoADirectoryItCannotEnter: a directory without search
+// permission makes cd fail, so the commit stays where it was.
+func TestPreflightDenyRefusesACDIntoADirectoryItCannotEnter(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root enters any directory")
+	}
+	locked := filepath.Join(t.TempDir(), "locked")
+	if err := os.Mkdir(locked, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := "cd " + locked + "; git " + c + " -m x"
+	if _, receipt := PreflightDeny(cmd, "/cwd"); receipt != AmbiguousShellReceipt {
+		t.Errorf("%q: cd cannot enter the directory, so it must be refused, got receipt %q", cmd, receipt)
+	}
+}
