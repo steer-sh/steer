@@ -73,6 +73,9 @@ func goRunner(root string, d Declaration, gd goDetector) (caseRunner, error) {
 			if err := caseTree.WriteFile(filepath.Join(pkg, generatedTestName), src, 0o644); err != nil {
 				return err.Error()
 			}
+			if reason := embedDrift(pkgDir, d.Package, gd, inputs); reason != "" {
+				return reason
+			}
 			_, out, timedOut, err := runCommand(pkgDir, goReplayEnv, goBin,
 				"test", "-count=1", "-json", "-run", "^"+d.Test+"$", ".")
 			if timedOut {
@@ -104,11 +107,65 @@ func goRunner(root string, d Declaration, gd goDetector) (caseRunner, error) {
 					res.Cause = CauseEnvironment
 					return fmt.Sprintf("the named test %s did not run: this host lacks a module or toolchain the case needs", d.Test)
 				}
+				if len(gd.misnamed) > 0 && generatedUndefined(other, gd.misnamedBases) {
+					return fmt.Sprintf("the named test %s did not run: the generated test file omits import %s, whose package name differs from its path; alias it in the test files", d.Test, strings.Join(gd.misnamed, ", "))
+				}
 				res.Cause = CauseIncompatible
 				return fmt.Sprintf("the named test %s did not run: the case does not build with the current detector", d.Test)
 			}
 		},
 	}, nil
+}
+
+// embedDrift names a file whose embedding the case tree changes, or returns "":
+// one in the package directory that a tracked embed pattern matches and no
+// declared input holds, or that the repository's patterns do not match, or one
+// the repository's patterns match that the tree's do not, such as a file a
+// case's go.mod moves into another module. A case file,
+// snapshot, patch or setup can cause either, and the replay would embed other
+// files than the detector's digest read.
+func embedDrift(pkgDir, pkg string, gd goDetector, inputs map[string]bool) string {
+	matched := map[string]bool{}
+	inRepo := map[string]bool{}
+	for _, rel := range gd.embedded {
+		inRepo[rel] = true
+	}
+	for _, p := range gd.patterns {
+		files, foreign := embedFiles(pkgDir, p, true)
+		if foreign {
+			return fmt.Sprintf("embed pattern %q names a path in another module in the case tree", strings.TrimPrefix(p, "all:"))
+		}
+		for _, rel := range files {
+			matched[rel] = true
+			if rel == generatedTestName {
+				return fmt.Sprintf("embed pattern %q matches the generated test file %s, so the replay embeds other files than the detector's digest read", strings.TrimPrefix(p, "all:"), generatedTestName)
+			}
+			if !inputs[path.Join(pkg, rel)] {
+				return fmt.Sprintf("the case tree holds %s, which embed pattern %q matches and no declared input names", path.Join(pkg, rel), strings.TrimPrefix(p, "all:"))
+			}
+			if !inRepo[rel] {
+				return fmt.Sprintf("embed pattern %q takes %s in the case tree but not in the repository", strings.TrimPrefix(p, "all:"), path.Join(pkg, rel))
+			}
+		}
+	}
+	for _, rel := range gd.embedded {
+		if !matched[rel] {
+			return fmt.Sprintf("the case tree keeps %s out of the tracked embed patterns", path.Join(pkg, rel))
+		}
+	}
+	return ""
+}
+
+// generatedUndefined reports a build error in the generated test file naming
+// one of bases as undefined.
+func generatedUndefined(out []byte, bases map[string]bool) bool {
+	for _, line := range strings.Split(string(out), "\n") {
+		_, name, ok := strings.Cut(line, "undefined: ")
+		if ok && strings.Contains(line, generatedTestName+":") && bases[strings.TrimSpace(name)] {
+			return true
+		}
+	}
+	return false
 }
 
 func removeTestFiles(tree *os.Root, dir string) error {
