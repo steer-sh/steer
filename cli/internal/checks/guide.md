@@ -161,9 +161,11 @@ passed, failed, error (the check or a command it calls could not run),
 timeout, or not executed (the deadline came first). A `go-test` binding can
 also read skipped, passed-cached (the toolchain replayed a cached pass; this
 is not a fresh run), or unavailable (its package ran but did not build, or
-reported no result for the test, for example because `-run` excluded it). A
-test that had started and had no result when its test binary exited, through a
-crash of its own or of a parallel test, reads failed. A
+reported no result for the test, for example because `-run` excluded it). When
+a test binary exits mid-run, the stream cannot name the test that exited it: a
+started test with no result reads failed only when it was the one top-level test
+running (a goroutine an earlier test left behind looks the same), and
+unavailable when it was paused at `t.Parallel` or ran beside another. Under `-count`, any failed iteration makes the test read failed. A
 binding whose package the run never reached gets no record from the adapter.
 A passing `check.sh` alone never shows that a particular check ran.
 

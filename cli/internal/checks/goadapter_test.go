@@ -277,7 +277,7 @@ func TestGoSuiteReadsAnUnfinishedTestFromItsPackage(t *testing.T) {
 		{name: "deadline after a failed iteration", events: []goSuiteEvent{start, run, output, testFail, run}, timedOut: true,
 			outcome: OutcomeFailed, finished: t0, output: true},
 		{name: "exit while paused at t.Parallel", events: []goSuiteEvent{start, run, pause, output, fail},
-			outcome: OutcomeFailed, reason: "before the test reported", finished: failedAt, output: true},
+			outcome: OutcomeUnavailable, reason: "t.Parallel", finished: failedAt, output: true},
 		{name: "crash before a later deadline", events: []goSuiteEvent{start, run, output, fail, otherRun}, timedOut: true,
 			outcome: OutcomeFailed, reason: "before the test reported", finished: failedAt, output: true},
 		{name: "never started", events: []goSuiteEvent{start, fail},
@@ -319,5 +319,91 @@ func TestGoSuiteReadsAnUnfinishedTestFromItsPackage(t *testing.T) {
 				t.Errorf("digest %q excerpt %q; want output recorded: %v", rec.OutputDigest, rec.Excerpt, c.output)
 			}
 		})
+	}
+}
+
+// readBoundEvents feeds events to a reader with TestBound bound in example.com/p
+// and returns its one record.
+func readBoundEvents(t *testing.T, events []goSuiteEvent) Execution {
+	t.Helper()
+	r := newGoSuiteReader(&bytes.Buffer{})
+	r.bind("example.com/p", "TestBound", Execution{CheckID: "bound"})
+	for _, ev := range events {
+		line, err := json.Marshal(ev)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Write(append(line, '\n'))
+	}
+	records := r.records(time.Date(2026, 1, 2, 4, 0, 0, 0, time.UTC), false)
+	if len(records) != 1 {
+		t.Fatalf("records %+v; want one", records)
+	}
+	return records[0]
+}
+
+// When a test binary exits, a test reads as its crasher only when it was the one
+// top-level test running. The streams follow go test -json for a sequential
+// test's os.Exit beside a paused parallel test, and for two parallel tests that
+// had both continued.
+func TestGoSuiteNamesACrasherOnlyWhenItRanAlone(t *testing.T) {
+	const pkg = "example.com/p"
+	t0 := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	ev := func(action, test string) goSuiteEvent {
+		return goSuiteEvent{Time: t0, Action: action, Package: pkg, Test: test}
+	}
+	start, fail := ev("start", ""), ev("fail", "")
+	cases := []struct {
+		name    string
+		events  []goSuiteEvent
+		outcome string
+		reason  string
+	}{
+		{name: "paused while another test exited",
+			events:  []goSuiteEvent{start, ev("run", "TestBound"), ev("pause", "TestBound"), ev("run", "TestOther"), fail},
+			outcome: OutcomeUnavailable, reason: "t.Parallel"},
+		{name: "ran alone beside a paused test",
+			events:  []goSuiteEvent{start, ev("run", "TestOther"), ev("pause", "TestOther"), ev("run", "TestBound"), fail},
+			outcome: OutcomeFailed, reason: "before the test reported"},
+		{name: "continued beside another continued test",
+			events: []goSuiteEvent{start, ev("run", "TestBound"), ev("pause", "TestBound"), ev("run", "TestOther"),
+				ev("pause", "TestOther"), ev("cont", "TestBound"), ev("cont", "TestOther"), fail},
+			outcome: OutcomeUnavailable, reason: "2 tests ran at once"},
+		{name: "continued after the other test passed",
+			events: []goSuiteEvent{start, ev("run", "TestBound"), ev("pause", "TestBound"), ev("run", "TestOther"),
+				ev("pause", "TestOther"), ev("cont", "TestBound"), ev("cont", "TestOther"), ev("pass", "TestOther"), fail},
+			outcome: OutcomeFailed, reason: "before the test reported"},
+		{name: "an earlier iteration failed",
+			events: []goSuiteEvent{start, ev("run", "TestBound"), ev("fail", "TestBound"), ev("run", "TestBound"),
+				ev("pause", "TestBound"), ev("run", "TestOther"), fail},
+			outcome: OutcomeFailed},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rec := readBoundEvents(t, c.events)
+			if rec.Outcome != c.outcome || !strings.Contains(rec.Reason, c.reason) {
+				t.Errorf("%s (%s); want %s (%s)", rec.Outcome, rec.Reason, c.outcome, c.reason)
+			}
+		})
+	}
+}
+
+// Under -count, a test that fails in one iteration and passes in another reads
+// failed, and its record starts with the first iteration.
+func TestGoSuiteKeepsAFailedIterationOverALaterPass(t *testing.T) {
+	const pkg = "example.com/p"
+	t0 := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	ev := func(at time.Duration, action, test string) goSuiteEvent {
+		return goSuiteEvent{Time: t0.Add(at), Action: action, Package: pkg, Test: test}
+	}
+	for _, later := range []string{"pass", "skip"} {
+		rec := readBoundEvents(t, []goSuiteEvent{ev(0, "start", ""), ev(1, "run", "TestBound"), ev(2, "fail", "TestBound"),
+			ev(3, "run", "TestBound"), ev(4, later, "TestBound"), ev(5, "fail", "")})
+		if rec.Outcome != OutcomeFailed {
+			t.Errorf("fail then %s reads %s; want failed", later, rec.Outcome)
+		}
+		if !rec.Started.Equal(t0.Add(1)) || !rec.Finished.Equal(t0.Add(4)) {
+			t.Errorf("fail then %s spans %v to %v; want the first run to the last result", later, rec.Started, rec.Finished)
+		}
 	}
 }
