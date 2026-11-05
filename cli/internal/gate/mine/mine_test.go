@@ -227,6 +227,67 @@ func TestNonReviewPhases(t *testing.T) {
 	check(t, "ungated-partial joins no chain either", len(partial[0].Rows), 3)
 }
 
+// Two chains' own blocks of one reply are two adjudications even when their bullets are
+// byte-identical; the resolver's block stamp tells them apart from one block joined to
+// both chains.
+func TestLedgerBlockStampSeparatesIdenticalBlocks(t *testing.T) {
+	same := map[string]any{"concern": "identical bullet", "verdict": "ACCEPTED", "resolution": "fixed"}
+	stamped := func(r gate.Row, join string, at int) gate.Row {
+		r = ledgerTS(concerns(r, join, same), 5000)
+		r["ledger_block"] = at
+		return r
+	}
+	for _, join := range []string{"round", "chain"} {
+		for _, tc := range []struct {
+			label  string
+			blocks [2]int
+			want   int
+		}{
+			{"two blocks of one reply stay two occurrences", [2]int{0, 1}, 2},
+			{"one block joined to two chains counts once", [2]int{1, 1}, 1},
+		} {
+			chains := BuildChains([]gate.Row{
+				row(900, "deny"),
+				stamped(row(910, "retry"), join, tc.blocks[0]),
+				row(920, "deny"),
+				stamped(row(930, "retry"), join, tc.blocks[1]),
+			}, false)
+			hits, _, _ := Incidence(chains, mustCompile(t, "identical bullet"), "accepted")
+			check(t, join+": "+tc.label, hits, tc.want)
+		}
+	}
+
+	// A link made before the stamp names one block by its bullets, so beside a stamped
+	// link to the same reply the bullets decide, in either order.
+	for _, stampedFirst := range []bool{true, false} {
+		old := ledgerTS(concerns(row(0, "retry"), "round", same), 5000)
+		rows := []gate.Row{row(900, "deny"), nil, row(920, "deny"), nil}
+		rows[1], rows[3] = stamped(row(910, "retry"), "round", 0), old
+		if !stampedFirst {
+			rows[1], rows[3] = old, stamped(row(930, "retry"), "round", 0)
+		}
+		rows[1]["ts"], rows[3]["ts"] = 910, 930
+		hits, _, _ := Incidence(BuildChains(rows, false), mustCompile(t, "identical bullet"), "accepted")
+		check(t, fmt.Sprintf("stamped first=%v: an unstamped link to the same block counts once", stampedFirst), hits, 1)
+	}
+
+	// A header both splitters match is one offset, so a chain join and a round join of
+	// that block are one adjudication.
+	hits, _, _ := Incidence(BuildChains([]gate.Row{
+		row(900, "deny"), stamped(row(910, "retry"), "chain", 40), row(920, "deny"), stamped(row(930, "retry"), "round", 40),
+	}, false), mustCompile(t, "identical bullet"), "accepted")
+	check(t, "one block through a chain and a round join counts once", hits, 1)
+
+	// Two replies in one second at the same position differ in their other bullets.
+	other := map[string]any{"concern": "another bullet", "verdict": "REJECTED"}
+	second := stamped(row(930, "retry"), "chain", 0)
+	second["concerns"] = []any{same, other}
+	hits, _, _ = Incidence(BuildChains([]gate.Row{
+		row(900, "deny"), stamped(row(910, "retry"), "chain", 0), row(920, "deny"), second,
+	}, false), mustCompile(t, "identical bullet"), "accepted")
+	check(t, "different blocks at one position of one second stay two occurrences", hits, 2)
+}
+
 func TestDeduplication(t *testing.T) {
 	dupe := BuildChains([]gate.Row{
 		row(300, "deny"),

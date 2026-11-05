@@ -247,15 +247,11 @@ func collectInstructionFiles(only harness.ID) []report.InstructionFile {
 // section a guard enforces. An unreadable manifest yields none, so every line
 // reads as unenforced rather than as enforced.
 func guardRuleTexts(scope string) []string {
-	manifest, err := claude.LoadManifest(scope)
-	if err != nil || manifest == nil {
+	rules, err := claude.GuardRules(scope)
+	if err != nil {
 		return nil
 	}
-	out := make([]string, 0, len(manifest.Hooks))
-	for _, hook := range manifest.Hooks {
-		out = append(out, hook.Rule)
-	}
-	return out
+	return rules
 }
 
 var reportRefreshCmd = &cobra.Command{

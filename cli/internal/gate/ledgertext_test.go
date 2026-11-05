@@ -1,6 +1,7 @@
 package gate
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -95,6 +96,23 @@ func TestTemplateFixedLinesNameTheRequirement(t *testing.T) {
 		}
 		if !found {
 			t.Errorf("%s.md shows no fixed line", name)
+		}
+	}
+}
+
+// Each block starts where its splitter found it, and a header line both splitters
+// match starts at one offset in each, so the offset names a block whichever join cut it.
+func TestBlockStartsNameOneBlockAcrossSplitters(t *testing.T) {
+	first := "preamble\n**Commit gate fired (round 1/4) — chain ledger, feat: x**\n\n**Round 1/4** — one.\n- **ACCEPTED** — a → b\n"
+	text := first + "**Commit gate fired (round 1/4) — chain ledger, fix: y**\n- **REJECTED** — c → d\n"
+	chain, round := ChainBlockStarts(text), RoundBlockStarts(text)
+	want := []int{len("preamble\n"), len(first)}
+	if fmt.Sprint(chain) != fmt.Sprint(want) || fmt.Sprint(round) != fmt.Sprint(want) {
+		t.Fatalf("chain starts %v, round starts %v, want %v", chain, round, want)
+	}
+	for i, block := range ChainBlocks(text) {
+		if !strings.HasPrefix(text[chain[i]:], block) {
+			t.Fatalf("block %d does not begin at its start", i)
 		}
 	}
 }

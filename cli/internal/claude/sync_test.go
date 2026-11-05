@@ -8,6 +8,7 @@ import (
 
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/instructions"
+	"github.com/steer-sh/steer-cli/internal/report"
 )
 
 // failingRegistrar is a Claude Code registrar that stops at the instruction
@@ -208,5 +209,41 @@ func TestSyncTargetsDerivesTheSectionFromTheManifest(t *testing.T) {
 	}
 	if strings.Index(string(after), "- rule A") > strings.Index(string(after), "- rule B") {
 		t.Fatalf("expected the section ordered by hook name:\n%s", after)
+	}
+}
+
+// A guard whose manifest rule spans lines is still the guard behind the one bullet
+// sync wrote for it, so the report counts that bullet as guard-backed.
+func TestGuardRulesMatchTheBulletSyncWrites(t *testing.T) {
+	withProjectTempDir(t)
+	if err := SaveManifest(ProjectScope, &Manifest{
+		Hooks: map[string]ManifestEntry{
+			"a-guard": {File: "a-guard.py", Rule: "never do x\n  | do y instead"},
+			"b-guard": {File: "b-guard.py", Rule: " \n "},
+		},
+		Rules: map[string]RuleEntry{"c-rule": {Text: "an instruction\nacross lines"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := SyncTargets(ProjectScope); err != nil {
+		t.Fatal(err)
+	}
+	rules, err := GuardRules(ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rules) != 1 || rules[0] != "never do x | do y instead" {
+		t.Fatalf("guard rules: got %q", rules)
+	}
+	path, err := GetClaudeMDFile(ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	md, err := report.ExtractInstructionFile(harness.ClaudeCode, path, rules)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(md.SteerRules) != 2 || len(md.GuardRules) != 1 || md.GuardRules[0] != rules[0] {
+		t.Fatalf("section %q, guard-backed %q", md.SteerRules, md.GuardRules)
 	}
 }

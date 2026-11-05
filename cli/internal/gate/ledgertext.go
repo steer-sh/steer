@@ -66,14 +66,39 @@ type Concern struct {
 // agent that answered several rounds, or several chains, in one reply wrote a header
 // for each; text before the first header is dropped.
 func RoundBlocks(text string) []string {
-	locs := ledgerRoundRe.FindAllStringIndex(text, -1)
-	out := make([]string, len(locs))
+	return cutBlocks(text, RoundBlockStarts(text))
+}
+
+// RoundBlockStarts returns the byte offset in text where each of RoundBlocks begins.
+// A header line both splitters match begins at one offset in each.
+func RoundBlockStarts(text string) []int {
+	return matchStarts(ledgerRoundRe, text)
+}
+
+func matchStarts(re *regexp.Regexp, text string) []int {
+	locs := re.FindAllStringIndex(text, -1)
+	if len(locs) == 0 {
+		return nil
+	}
+	starts := make([]int, len(locs))
 	for i, loc := range locs {
+		starts[i] = loc[0]
+	}
+	return starts
+}
+
+// cutBlocks returns the text from each start to the next, the last to the end.
+func cutBlocks(text string, starts []int) []string {
+	if len(starts) == 0 {
+		return nil
+	}
+	out := make([]string, len(starts))
+	for i, s := range starts {
 		end := len(text)
-		if i+1 < len(locs) {
-			end = locs[i+1][0]
+		if i+1 < len(starts) {
+			end = starts[i+1]
 		}
-		out[i] = text[loc[0]:end]
+		out[i] = text[s:end]
 	}
 	return out
 }
@@ -250,23 +275,12 @@ func LedgerRounds(text string) map[int]bool {
 
 // ChainBlocks returns each chain ledger inside one message, header line first.
 func ChainBlocks(text string) []string {
-	locs := ledgerChainRe.FindAllStringIndex(text, -1)
-	if len(locs) == 0 {
-		return nil
-	}
-	starts := make([]int, len(locs))
-	for i, loc := range locs {
-		starts[i] = loc[0]
-	}
-	out := make([]string, len(starts))
-	for i, s := range starts {
-		end := len(text)
-		if i+1 < len(starts) {
-			end = starts[i+1]
-		}
-		out[i] = text[s:end]
-	}
-	return out
+	return cutBlocks(text, ChainBlockStarts(text))
+}
+
+// ChainBlockStarts returns the byte offset in text where each of ChainBlocks begins.
+func ChainBlockStarts(text string) []int {
+	return matchStarts(ledgerChainRe, text)
 }
 
 // BlockSubject returns the commit subject a chain ledger's HEADER names, or "". Only the

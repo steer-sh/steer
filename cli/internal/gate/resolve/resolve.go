@@ -63,6 +63,9 @@ type LedgerMsg struct {
 	// Path is the transcript file, kept for the operator, not for the join.
 	Path string
 	Text string
+	// block is the byte offset in the message where Text begins, set only on a block
+	// a chain or round join cut from a message.
+	block *int
 }
 
 // Harvest returns every ledger one harness's transcripts hold. Only a harvest knows a
@@ -543,11 +546,14 @@ func (r *resolver) pickLedger(rows []resolverRow, i int, denyTS float64, ledgers
 		var mine []LedgerMsg
 		for _, x := range inWindow(r.spanFor("round")) {
 			var hits []string
+			at := 0
+			starts := gate.RoundBlockStarts(x.Text)
 			foreign := false
-			for _, block := range gate.RoundBlocks(x.Text) {
+			for k, block := range gate.RoundBlocks(x.Text) {
 				n, ok := gate.LedgerRound(block)
 				if ok && n == firing {
 					hits = append(hits, block)
+					at = starts[k]
 				}
 				if ok && !firings[n] {
 					foreign = true
@@ -560,7 +566,7 @@ func (r *resolver) pickLedger(rows []resolverRow, i int, denyTS float64, ledgers
 			case foreign:
 				why.note(MissRoundsUnmatched)
 			case x.When < bound:
-				mine = append(mine, LedgerMsg{When: x.When, Key: x.Key, Path: x.Path, Text: hits[0]})
+				mine = append(mine, LedgerMsg{When: x.When, Key: x.Key, Path: x.Path, Text: hits[0], block: &at})
 			default:
 				why.note(MissPastBound)
 			}
@@ -579,12 +585,13 @@ func (r *resolver) pickLedger(rows []resolverRow, i int, denyTS float64, ledgers
 			why.note(MissNoHeader)
 		}
 		for _, x := range cands {
-			for _, block := range gate.ChainBlocks(x.Text) {
+			starts := gate.ChainBlockStarts(x.Text)
+			for k, block := range gate.ChainBlocks(x.Text) {
 				if !gate.LedgerRounds(block)[firing] {
 					why.note(MissNoSection)
 					continue
 				}
-				cand := LedgerMsg{When: x.When, Key: x.Key, Path: x.Path, Text: block}
+				cand := LedgerMsg{When: x.When, Key: x.Key, Path: x.Path, Text: block, block: &starts[k]}
 				// A chain ID names one chain outright. A header without one falls to the
 				// subject below; a header with one never answers a chain that has none.
 				if id := gate.BlockChainID(block); id != "" {
@@ -704,7 +711,7 @@ func (r *resolver) reopen(rows []resolverRow) {
 
 // linkFields are the fields a resolver link writes, so the fields a rejoin clears.
 var linkFields = []string{"ledger_found", "backfilled", "ledger_join", "ledger_round", "ledger_ts",
-	"ledger_miss", "concerns", "concerns_total", "self_reported_accepted", "self_reported_rejected"}
+	"ledger_block", "ledger_miss", "concerns", "concerns_total", "self_reported_accepted", "self_reported_rejected"}
 
 // rejoin clears every link the resolver made so the current rules judge it again. A
 // hook-time capture has no ledger_ts and is left alone. The cleared link is kept under
@@ -845,6 +852,11 @@ func (r *resolver) resolveAndWrite(rows []resolverRow, seenLines int, apply bool
 		row["ledger_found"] = true
 		row["ledger_ts"] = int64(cand.When)
 		row["ledger_join"] = join
+		if cand.block != nil {
+			row["ledger_block"] = *cand.block
+		} else {
+			delete(row, "ledger_block")
+		}
 		row["backfilled"] = true
 		if cand.Key != "" && pyStr(row["session_id"]) == "" && pyStr(row["thread_id"]) == "" {
 			row["session_id"] = cand.Key

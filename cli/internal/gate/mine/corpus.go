@@ -206,8 +206,10 @@ func chainsForHost(rows []gate.Row, strictJoins bool) []Chain {
 	current := -1
 	byID := map[string]int{}
 	// A concern taken from one reply, keyed by the reply alone (any join), by the
-	// reply under a window join, and by the reply's block the row took.
-	replySeen, windowSeen, blockSeen := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	// reply under a window join, by the bullets of the block the row took (any row),
+	// by those bullets from a row with no block stamp, and by the stamped block.
+	replySeen, windowSeen := map[string]bool{}, map[string]bool{}
+	printSeen, unstampedSeen, stampedSeen := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	open := func(row gate.Row) int {
 		chains = append(chains, Chain{
 			Host:    rowHost(row),
@@ -277,18 +279,24 @@ func chainsForHost(rows []gate.Row, strictJoins bool) []Chain {
 		if strictJoins && str(row["ledger_join"]) != "round" {
 			continue
 		}
-		// A reply is its ledger_ts, and a block of it is the bullets a row took. A window
+		// A reply is its ledger_ts, and a block of it is the one a row took. A window
 		// join took the whole reply, so it shares every concern any row took from that
 		// reply. A round or chain join took one block: two chains' own blocks of one
 		// reply are two adjudications, and only the same block or a window row's copy
-		// of the reply is the same one.
-		reply, block := "", ""
+		// of the reply is the same one. The resolver stamps the block's byte offset in
+		// the reply as ledger_block. A header both splitters match begins at one offset,
+		// so a chain join and a round join of it agree when their bullets do. A row linked before that stamp names its block by its bullets
+		// alone, so beside a stamped row of the same reply only the bullets compare.
+		reply, bullets, stamp := "", "", ""
 		window := false
 		if truthy(row["ledger_ts"]) {
 			reply = numString(row["ledger_ts"])
-			block = reply + "\x1f" + ledgerPrint(row["concerns"])
+			bullets = reply + "\x1f" + ledgerPrint(row["concerns"])
 			join := str(row["ledger_join"])
 			window = join != "round" && join != "chain"
+			if at, ok := row["ledger_block"]; ok && at != nil && !window {
+				stamp = bullets + "\x1f" + numString(at)
+			}
 		}
 		for _, raw := range asList(row["concerns"]) {
 			concern, ok := raw.(map[string]any)
@@ -304,15 +312,22 @@ func chainsForHost(rows []gate.Row, strictJoins bool) []Chain {
 			// intra-chain duplicate must still block the next chain from counting it.
 			countedElsewhere := false
 			if reply != "" {
-				inReply, inBlock := reply+"\x1f"+key, block+"\x1f"+key
-				if window {
+				inReply, inPrint := reply+"\x1f"+key, bullets+"\x1f"+key
+				switch {
+				case window:
 					countedElsewhere = replySeen[inReply]
 					windowSeen[inReply] = true
-				} else {
-					countedElsewhere = windowSeen[inReply] || blockSeen[inBlock]
+				case stamp != "":
+					countedElsewhere = windowSeen[inReply] || unstampedSeen[inPrint] || stampedSeen[stamp+"\x1f"+key]
+					stampedSeen[stamp+"\x1f"+key] = true
+				default:
+					countedElsewhere = windowSeen[inReply] || printSeen[inPrint]
+				}
+				if stamp == "" {
+					unstampedSeen[inPrint] = true
 				}
 				replySeen[inReply] = true
-				blockSeen[inBlock] = true
+				printSeen[inPrint] = true
 			}
 			if countedElsewhere || ch.seen[key] {
 				continue
