@@ -325,3 +325,74 @@ func TestBlankLineAfterShortHunkLeavesNextFileHeader(t *testing.T) {
 		t.Fatalf("second hunk is %s %q -> %q", hunks[1].Path, old, added)
 	}
 }
+
+// Body lines past both of a hunk's counts belong to no hunk, so the hunk they
+// follow is incomplete and yields no fixture.
+func TestABodyLongerThanItsHeaderSkipsTheHunk(t *testing.T) {
+	const files = "diff --git a/f b/f\n--- a/f\n+++ b/f\n"
+	for name, body := range map[string]string{
+		"added":   "@@ -1 +1 @@\n-a\n+b\n+c\n",
+		"removed": "@@ -1 +1 @@\n-a\n+b\n-c\n",
+		"context": "@@ -1 +1 @@\n-a\n+b\n c\n",
+		"marked":  "@@ -1 +1 @@\n-a\n+b\n\\ No newline at end of file\n+c\n",
+		"dashes":  "@@ -1 +1 @@\n-a\n+b\n--- c\n",
+		"blank":   "@@ -1 +1 @@\n-a\n+b\n\n+c\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			hunks, _, err := ParseDiff(files + body)
+			if err != nil {
+				t.Fatalf("ParseDiff: %v", err)
+			}
+			if len(hunks) != 1 || hunks[0].Skip == "" || hunks[0].Payload != nil {
+				t.Fatalf("want 1 skipped hunk, got %+v", hunks)
+			}
+		})
+	}
+
+	// A note after a whole hunk, as renderDiff appends one, is not hunk body.
+	hunks, _, err := ParseDiff(files + "@@ -1 +1 @@\n-a\n+b\n\n[Submodule pins moved:]\n  > commit\n")
+	if err != nil {
+		t.Fatalf("ParseDiff: %v", err)
+	}
+	if len(hunks) != 1 || hunks[0].Skip != "" {
+		t.Fatalf("want 1 usable hunk, got %+v", hunks)
+	}
+}
+
+// A header-less hunk short by exactly the next file's header pair reads that pair
+// as body, until the next hunk header starts at a line the previous hunk covers.
+func TestTruncatedHeaderlessHunkGivesBackTheNextHeader(t *testing.T) {
+	for name, diff := range map[string]string{
+		"short by the pair": "--- a/one\n+++ b/one\n@@ -3,2 +3,2 @@\n-a\n+b\n--- a/two\n+++ b/two\n@@ -1 +1 @@\n-c\n+d\n",
+		"and a blank line":  "--- a/one\n+++ b/one\n@@ -3,3 +3,3 @@\n-a\n+b\n\n--- a/two\n+++ b/two\n@@ -4 +4 @@\n-c\n+d\n",
+		"a new file":        "--- a/one\n+++ b/one\n@@ -3,2 +3,2 @@\n-a\n+b\n--- /dev/null\n+++ b/two\n@@ -0,0 +1 @@\n+d\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			hunks, _, err := ParseDiff(diff)
+			if err != nil {
+				t.Fatalf("ParseDiff: %v", err)
+			}
+			if len(hunks) != 2 {
+				t.Fatalf("want 2 hunks, got %d", len(hunks))
+			}
+			if old, added := editStrings(t, hunks[0]); hunks[0].Path != "one" || old != "a\n" || added != "b\n" {
+				t.Fatalf("first hunk is %s %q -> %q", hunks[0].Path, old, added)
+			}
+			if hunks[1].Path != "two" || hunks[1].Index != 1 {
+				t.Fatalf("second hunk is %s #%d", hunks[1].Path, hunks[1].Index)
+			}
+		})
+	}
+
+	// A later hunk of the same file starts past the first one, so the pair stays body.
+	hunks, _, err := ParseDiff("--- a/one\n+++ b/one\n@@ -3,2 +3,2 @@\n--- a\n+++ b\n@@ -9 +9 @@\n-c\n+d\n")
+	if err != nil {
+		t.Fatalf("ParseDiff: %v", err)
+	}
+	if len(hunks) != 2 || hunks[1].Path != "one" {
+		t.Fatalf("want two hunks of one, got %+v", hunks)
+	}
+	if old, added := editStrings(t, hunks[0]); old != "-- a\n" || added != "++ b\n" {
+		t.Fatalf("first hunk is %q -> %q", old, added)
+	}
+}

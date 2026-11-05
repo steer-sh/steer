@@ -63,9 +63,41 @@ func ParseDiff(text string) ([]Hunk, Truncation, error) {
 	var hunks []Hunk
 	var path, oldPath string
 	var newFile, deletedFile bool
+	// gitFile is set once a `diff --git ` line delimits files: a file's header
+	// pair then comes only before its first hunk.
+	var gitFile bool
 	var current *Hunk
 	var oldLeft, newLeft int
 	var counted, filled bool
+	// The current hunk's old start and count, and its last two body lines.
+	var start, span int
+	var tail [2]string
+	// overflow is the hunk that just filled its counts while the lines after it
+	// may still be its body; -1 otherwise.
+	overflow := -1
+	// pair is the hunk that just filled its counts on a "--- " then "+++ " body
+	// line, which may instead be the next file's header pair; -1 otherwise.
+	pair := -1
+	var pairEnd int
+	var pairLines [2]string
+
+	readOld := func(line string) {
+		old := strings.TrimSpace(strings.TrimPrefix(line, "--- "))
+		newFile = old == "/dev/null"
+		oldPath = stripPrefix(old, "a/")
+	}
+	readNew := func(line string) {
+		target := strings.TrimSpace(strings.TrimPrefix(line, "+++ "))
+		deletedFile = target == "/dev/null"
+		if deletedFile {
+			path = oldPath
+		} else {
+			path = stripPrefix(target, "b/")
+		}
+	}
+	body := func(line string) {
+		tail = [2]string{tail[1], line}
+	}
 
 	flush := func() {
 		if current == nil {
@@ -77,11 +109,29 @@ func ParseDiff(text string) ([]Hunk, Truncation, error) {
 
 	lines := strings.Split(text, "\n")
 	for i, line := range lines {
+		// After a full hunk, a body line belongs to no hunk: the hunk before it is
+		// missing lines. In a header-less diff a "--- " line may be the next file's
+		// header instead. An empty line may be blank context, so it neither marks
+		// the hunk nor ends the check, and neither does a "\" marker.
+		if overflow >= 0 && line != "" && !strings.HasPrefix(line, "\\") {
+			header := !gitFile && strings.HasPrefix(line, "--- ")
+			if strings.ContainsAny(line[:1], "+- ") && !header {
+				hunks[overflow].Payload = nil
+				hunks[overflow].Skip = "the hunk body runs past its header's line counts"
+				pair = -1
+				continue
+			}
+			overflow = -1
+		}
+		if pair >= 0 && !strings.HasPrefix(line, "@@") {
+			pair = -1
+		}
 		switch {
 		case strings.HasPrefix(line, "diff --git "):
 			// A `diff --git ` at column 0 always starts a file: every line of a
 			// hunk body carries a leading ' ', '+', '-' or '\'.
 			flush()
+			gitFile = true
 			path = ""
 			oldPath = ""
 			newFile = false
@@ -90,19 +140,24 @@ func ParseDiff(text string) ([]Hunk, Truncation, error) {
 			// The ---/+++ pair names the paths unambiguously; the diff --git
 			// header's two-path form is ambiguous for a path holding a space.
 			// Inside a hunk the same prefix is a removed line starting "-- ".
-			old := strings.TrimSpace(strings.TrimPrefix(line, "--- "))
-			newFile = old == "/dev/null"
-			oldPath = stripPrefix(old, "a/")
+			readOld(line)
 		case current == nil && strings.HasPrefix(line, "+++ "):
-			target := strings.TrimSpace(strings.TrimPrefix(line, "+++ "))
-			deletedFile = target == "/dev/null"
-			if deletedFile {
-				path = oldPath
-			} else {
-				path = stripPrefix(target, "b/")
-			}
+			readNew(line)
 		case strings.HasPrefix(line, "@@"):
 			flush()
+			if next, ok := hunkStart(line); pair >= 0 && ok && next < pairEnd {
+				// Hunks of one file run forward, so a hunk starting at a line the
+				// previous one covers belongs to the next file: the previous hunk
+				// was short, and its last two lines are this file's header.
+				h := hunks[pair]
+				h.Removed = h.Removed[:len(h.Removed)-1]
+				h.Added = h.Added[:len(h.Added)-1]
+				h.Payload, h.Skip = nil, ""
+				hunks[pair] = finish(h)
+				readOld(pairLines[0])
+				readNew(pairLines[1])
+			}
+			pair = -1
 			if path == "" {
 				continue
 			}
@@ -110,14 +165,19 @@ func ParseDiff(text string) ([]Hunk, Truncation, error) {
 				NewFile: newFile, DeletedFile: deletedFile}
 			oldLeft, newLeft, counted = hunkCounts(line)
 			filled = counted && hunkFills(lines[i+1:], oldLeft, newLeft)
+			start, _ = hunkStart(line)
+			span = oldLeft
+			tail = [2]string{}
 		case current != nil && strings.HasPrefix(line, "+"):
 			// The marker is stripped, as the runtime does: a guard is handed
 			// the line's content, never the diff's rendering of it.
 			current.Added = append(current.Added, line[1:])
 			newLeft--
+			body(line)
 		case current != nil && strings.HasPrefix(line, "-"):
 			current.Removed = append(current.Removed, line[1:])
 			oldLeft--
+			body(line)
 		case current != nil && strings.HasPrefix(line, "\\"):
 			// "\ No newline at end of file" describes the line before it.
 		case current != nil && (strings.HasPrefix(line, " ") ||
@@ -128,12 +188,18 @@ func ParseDiff(text string) ([]Hunk, Truncation, error) {
 			// than its header.
 			oldLeft--
 			newLeft--
+			body(line)
 		case current != nil:
 			flush()
 		}
 		// A full hunk ends here, so a following "--- " is the next file's header.
 		if current != nil && counted && oldLeft <= 0 && newLeft <= 0 {
 			flush()
+			overflow = len(hunks) - 1
+			if strings.HasPrefix(tail[0], "--- ") && strings.HasPrefix(tail[1], "+++ ") {
+				pair, pairLines = overflow, tail
+				pairEnd = start + max(span, 1)
+			}
 		}
 	}
 	flush()
@@ -144,7 +210,7 @@ func ParseDiff(text string) ([]Hunk, Truncation, error) {
 	return hunks, trunc, nil
 }
 
-var hunkHeader = regexp.MustCompile(`^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@`)
+var hunkHeader = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+\d+(?:,(\d+))? @@`)
 
 // hunkCounts reads the old and new line counts from a hunk header. ok is false
 // when the header is malformed or promises no lines.
@@ -153,12 +219,22 @@ func hunkCounts(header string) (oldLines, newLines int, ok bool) {
 	if m == nil {
 		return 0, 0, false
 	}
-	oldLines, oldErr := countField(m[1])
-	newLines, newErr := countField(m[2])
+	oldLines, oldErr := countField(m[2])
+	newLines, newErr := countField(m[3])
 	if oldErr != nil || newErr != nil || (oldLines == 0 && newLines == 0) {
 		return 0, 0, false
 	}
 	return oldLines, newLines, true
+}
+
+// hunkStart reads the old start line from a hunk header.
+func hunkStart(header string) (int, bool) {
+	m := hunkHeader.FindStringSubmatch(header)
+	if m == nil {
+		return 0, false
+	}
+	n, err := strconv.Atoi(m[1])
+	return n, err == nil
 }
 
 // hunkFills reports whether lines, read as hunk body, reach exactly the counts
