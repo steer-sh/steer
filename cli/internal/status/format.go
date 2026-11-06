@@ -71,6 +71,12 @@ func CoveragePhrase(c cadence.Coverage) string {
 	return s
 }
 
+// GuardCommandChangedPhrase names the re-approval a harness that hashes its hook
+// definitions needs after Steer rewrote the guard runner's command.
+func GuardCommandChangedPhrase(label string) string {
+	return fmt.Sprintf("%s: the guard command changed, so re-approve it in %s's /hooks.", label, label)
+}
+
 // TrustPhrase names a harness's posture on a registration, "" when nothing needs
 // saying. Registration alone does not prove enforcement on a harness that reviews hook
 // trust itself.

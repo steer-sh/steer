@@ -196,6 +196,9 @@ type SyncResult struct {
 	MasterPath string
 	Synced     []harness.Harness
 	Current    []harness.Harness
+	// CommandChanged holds each target whose registered command text this sync
+	// rewrote, which a harness that hashes its hooks no longer trusts.
+	CommandChanged []harness.Harness
 }
 
 // SyncStore registers the store's existing master in each target and writes each
@@ -249,9 +252,13 @@ func SyncStore(scope string, targets ...harness.Registrar) (*SyncResult, error) 
 		presence, readErr := TargetRulesPresence(scope, target)
 		rewrite := readErr != nil || presence.Drifted()
 
+		prior := registeredCommand(target, scope)
 		switch {
 		case register:
 			err = target.RegisterMaster(scope)
+			if err == nil && prior != "" && prior != registeredCommand(target, scope) {
+				result.CommandChanged = append(result.CommandChanged, target.Harness())
+			}
 		case deregister:
 			err = target.RemoveMaster(scope)
 		}

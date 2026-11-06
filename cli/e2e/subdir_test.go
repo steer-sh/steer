@@ -47,8 +47,15 @@ func TestProjectCommandsFromASubdirectoryWriteTheRoot(t *testing.T) {
 	if c := s.RegisteredCommand(filepath.Join(s.Repo, ".claude", "settings.json"), "steer-hooks.py"); !strings.Contains(c, `"$CLAUDE_PROJECT_DIR/.steer/hooks/steer-hooks.py"`) {
 		t.Errorf("the root's Claude Code registration = %q; want the root-relative master", c)
 	}
-	if c := s.RegisteredCommand(filepath.Join(s.Repo, ".codex", "hooks.json"), "steer-hooks.py"); !strings.Contains(c, " .steer/hooks/steer-hooks.py") {
-		t.Errorf("the root's Codex registration = %q; want the root-relative master", c)
+	codexCommand := s.RegisteredCommand(filepath.Join(s.Repo, ".codex", "hooks.json"), "steer-hooks.py")
+	if !strings.Contains(codexCommand, `/.steer/hooks/steer-hooks.py"`) {
+		t.Errorf("the root's Codex registration = %q; want the root-relative master", codexCommand)
+	}
+	// Codex runs the root's hook in a session's working directory, which may be the
+	// subdirectory: the guard must block there, not fail to find its runner.
+	payload := `{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"var x = 1"},"cwd":"` + sub + `"}`
+	if r := s.Run(sub, payload, nil, "sh", "-c", codexCommand); !strings.Contains(r.Output(), "never use var") {
+		t.Errorf("the Codex runner from the subdirectory exited %d without the guard's block:\n%s", r.Code, r.Output())
 	}
 	for _, doc := range []string{"CLAUDE.md", "AGENTS.md"} {
 		data, err := os.ReadFile(filepath.Join(s.Repo, doc))

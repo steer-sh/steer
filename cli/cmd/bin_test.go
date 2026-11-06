@@ -184,3 +184,35 @@ func TestRelinkRepointsABareGuardMaster(t *testing.T) {
 		t.Fatalf("second pass rewrote %d, %v; want 0", rewritten, err)
 	}
 }
+
+// TestRelinkRepointsABareCodexGuardMaster: an install repairs a Codex project
+// registration that a session started in a subdirectory would break, and a second
+// install changes nothing.
+func TestRelinkRepointsABareCodexGuardMaster(t *testing.T) {
+	testhome.Set(t, t.TempDir())
+	t.Setenv("CODEX_HOME", t.TempDir())
+	t.Chdir(t.TempDir())
+	if err := os.MkdirAll(".codex", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bare := `{"hooks":{"PreToolUse":[{"matcher":"Bash|apply_patch","hooks":[{"type":"command",` +
+		`"command":"python3 .steer/hooks/steer-hooks.py --harness codex"}]}]}}`
+	if err := os.WriteFile(filepath.Join(".codex", "hooks.json"), []byte(bare), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rewritten, err := relinkCodexMaster(claude.ProjectScope)
+	if err != nil || rewritten != 1 {
+		t.Fatalf("rewrote %d, %v; want 1", rewritten, err)
+	}
+	want, err := codexhooks.MasterCommand(claude.ProjectScope, ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := (codexhooks.Registrar{}).RegisteredMasterCommand(claude.ProjectScope); got != want {
+		t.Fatalf("command = %q, want %q", got, want)
+	}
+	if rewritten, err = relinkCodexMaster(claude.ProjectScope); err != nil || rewritten != 0 {
+		t.Fatalf("second pass rewrote %d, %v; want 0", rewritten, err)
+	}
+}

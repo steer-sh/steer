@@ -85,8 +85,11 @@ migration ownership:
   from a subdirectory reads and writes the same store as one run from the root.
   Three forms of that path are distinct. `HooksDir` is the filesystem path.
   `hookstore.MasterRegistration` is what a registration names: relative to the
-  directory holding the harness config, because a harness resolves a project
-  registration against that directory. That directory is the project root too:
+  directory holding the harness config. A harness runs a hook in the session's
+  working directory, not that directory, so a command must anchor the path itself
+  wherever the two can differ (Claude Code and Codex, below); Pi loads `.pi/` from
+  its working directory only, so its bridge's relative path holds. That directory
+  is the project root too:
   `steerpath.ProjectConfigDir` places every project `.claude`, `.codex`, `.pi` and
   instruction document there, so a command run from a subdirectory reads and
   rewrites the root's registrations and never creates a second set beside it.
@@ -94,7 +97,13 @@ migration ownership:
   directory. A comparison against a registered value uses
   it on both sides. Claude Code runs a hook in the session's current directory, which
   a `cd` moves, so its command prefixes the path with `$CLAUDE_PROJECT_DIR` and
-  `Registrar.RegisteredMasterPath` removes the prefix on read. Each resolver has an `…In`/`…Of` form taking that directory, so
+  `Registrar.RegisteredMasterPath` removes the prefix on read. Codex loads the root's
+  `.codex/hooks.json` in a session started from a subdirectory and runs the hook
+  there, with no variable naming the root, so its POSIX command prefixes the path
+  with `$(git rev-parse --show-toplevel 2>/dev/null || pwd)/`, the shell form of
+  `ProjectRootOf`; a Windows host keeps the bare path. Both harnesses' registrars
+  report `MasterCommandStale` for a registration naming the right master in an older
+  form, which sync and `steer bin install` rewrite. Each resolver has an `…In`/`…Of` form taking that directory, so
   a registrar handed another checkout resolves that checkout's store rather than
   the process's.
   `steerpath.ProjectHooksRel` is the repository-relative path a git object read or
