@@ -27,6 +27,9 @@ func isolate(t *testing.T) {
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
 	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(home, ".pi", "agent"))
+	// Project harness files resolve at the working directory's repository root,
+	// which for a package test is this checkout and its real registrations.
+	t.Chdir(t.TempDir())
 }
 
 // seedLedger writes a ledger of `n` before-install chains carrying beforeText and
