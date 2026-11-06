@@ -13,6 +13,7 @@ import (
 const (
 	CheckIDKey       = "check_id"
 	CheckKindKey     = "check_kind"
+	CheckTargetKey   = "check_target"
 	CheckRepoKey     = "check_repo"
 	CheckDigestKey   = "check_digest"
 	CheckReceiptKey  = "check_receipt"
@@ -24,7 +25,7 @@ const (
 
 // CheckBindingKeys is that contract in the order an error reports it.
 var CheckBindingKeys = []string{
-	CheckIDKey, CheckKindKey, CheckRepoKey, CheckDigestKey,
+	CheckIDKey, CheckKindKey, CheckTargetKey, CheckRepoKey, CheckDigestKey,
 	CheckReceiptKey, CheckHarnessKey, CheckAdoptedKey, CheckHostKey,
 }
 
@@ -43,8 +44,11 @@ const (
 // declared in, the detector the record was registered against, the receipt that
 // validated it, and the adoption and harness registration that let it run.
 type CheckFix struct {
-	ID        string
-	Kind      string
+	ID   string
+	Kind string
+	// Target is what the declaration ran at registration, checks.Declaration.Target.
+	// It is empty on a binding written without it.
+	Target    string
 	Repo      string
 	Digest    string
 	Receipt   string
@@ -62,6 +66,7 @@ func CheckFixOf(record Record) (CheckFix, bool) {
 	fix := CheckFix{
 		ID:        str(record[CheckIDKey]),
 		Kind:      str(record[CheckKindKey]),
+		Target:    str(record[CheckTargetKey]),
 		Repo:      str(record[CheckRepoKey]),
 		Digest:    str(record[CheckDigestKey]),
 		Receipt:   str(record[CheckReceiptKey]),
@@ -104,7 +109,7 @@ func requireCheckBinding(checkID string, facts map[string]any) error {
 	if len(missing) > 0 {
 		sort.Strings(missing)
 		return fmt.Errorf("the binding of check %s is missing %s — a check-tier record binds "+
-			"the check, its repository, its detector digest, a current receipt, and the "+
+			"the check, what it runs, its repository, its detector digest, a current receipt, and the "+
 			"adoption and harness registration that run it", pyRepr(checkID),
 			strings.Join(missing, ", "))
 	}

@@ -26,7 +26,7 @@ const (
 	// ArtifactPresent is the entry the record names, holding the text it froze.
 	ArtifactPresent = "present"
 	// ArtifactChanged is the entry under the same id with different text, or a check
-	// whose detector moved.
+	// declared under the same id with another binding kind.
 	ArtifactChanged = "changed"
 	// ArtifactAbsent is a readable store that no longer holds the entry.
 	ArtifactAbsent = "absent"
@@ -45,10 +45,12 @@ const (
 // guard, rule or addendum entry; Repo is the repository a project entry or a check
 // belongs to.
 type Artifact struct {
-	ID     string `json:"id,omitempty"`
-	Scope  string `json:"scope,omitempty"`
-	Repo   string `json:"repo,omitempty"`
-	State  string `json:"state"`
+	ID    string `json:"id,omitempty"`
+	Scope string `json:"scope,omitempty"`
+	Repo  string `json:"repo,omitempty"`
+	State string `json:"state"`
+	// Detail says why a store is unreadable, which binding kinds a changed check
+	// differs by, or DetectorMoved on a present check.
 	Detail string `json:"detail,omitempty"`
 	// Removed is the latest removal the owning store's archive records for a
 	// present or changed fix after the record's split, in archive.TimeLayout.
@@ -61,18 +63,17 @@ func (a *Artifact) Missing() bool {
 	return a != nil && (a.State == ArtifactAbsent || a.State == ArtifactUnreadable)
 }
 
-// Changed reports a fix in place under its recorded id, whose text or detector
+// Changed reports a fix in place under its recorded id, whose text or check binding
 // differs from the one the record froze.
 func (a *Artifact) Changed() bool {
 	return a != nil && a.State == ArtifactChanged
 }
 
-// NeedsBaseline reports a changed fix whose tier changes text only by an author's
-// edit, so the record's counts describe text nobody carries now. A check is never
-// one: its detector digest moves with every edit to the test it runs.
+// NeedsBaseline reports a changed fix, whose record counts work against a fix
+// nobody carries now.
 func (a *Artifact) NeedsBaseline(t string) bool {
-	kind, ok := tier.Of(t)
-	return ok && kind != tier.Check && a.Changed()
+	_, ok := tier.Of(t)
+	return ok && a.Changed()
 }
 
 // RemovalRecorded reports a fix that is in place now but was archived by a
@@ -336,7 +337,16 @@ func addendumArtifact(r mine.Record, src ArtifactSources) *Artifact {
 	return markRemoval(a, r, dir, tier.Review)
 }
 
-// checkArtifact reads a check declaration from the repository its record binds.
+// DetectorMoved is the Detail of a present check whose detector digest differs
+// from the one its record registered, by an edit or a new digest format. The
+// record follows the check by id, so a moved digest is lineage, never a different
+// fix.
+const DetectorMoved = "its detector digest differs from the one this record registered"
+
+// checkArtifact reads a check declaration from the repository its record binds. A
+// declaration under the record's id with the kind and target it registered is that
+// check; another kind or target is another check under a reused id. A binding
+// written without a target compares the kind alone.
 func checkArtifact(r mine.Record, repoRoot string) *Artifact {
 	fix, bound := mine.CheckFixOf(r)
 	a := &Artifact{ID: fix.ID, Repo: fix.Repo}
@@ -364,18 +374,38 @@ func checkArtifact(r mine.Record, repoRoot string) *Artifact {
 		if d.ID != fix.ID {
 			continue
 		}
+		if rebound(d, fix) {
+			a.State = ArtifactChanged
+			a.Detail = fmt.Sprintf("declared as %s where this record registered %s",
+				bindingName(d.Kind, d.Target(), fix.Target != ""), bindingName(fix.Kind, fix.Target, fix.Target != ""))
+			return markRemoval(a, r, checks.Dir(readRoot), tier.Check)
+		}
 		det, err := checks.DetectorOf(readRoot, d)
 		if err != nil {
 			return unreadable(a, err)
 		}
 		a.State = ArtifactPresent
 		if det.Digest != fix.Digest {
-			a.State = ArtifactChanged
+			a.Detail = DetectorMoved
 		}
 		return markRemoval(a, r, checks.Dir(readRoot), tier.Check)
 	}
 	a.State = ArtifactAbsent
 	return a
+}
+
+func rebound(d checks.Declaration, fix mine.CheckFix) bool {
+	if fix.Kind != "" && d.Kind != fix.Kind {
+		return true
+	}
+	return fix.Target != "" && d.Target() != fix.Target
+}
+
+func bindingName(kind, target string, withTarget bool) string {
+	if !withTarget {
+		return kind
+	}
+	return kind + " " + target
 }
 
 // boundRoot picks the checkout to read for a fix bound to identity: the inspected

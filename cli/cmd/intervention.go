@@ -586,6 +586,10 @@ func printRetiredFix(w io.Writer, stateDir, id string) {
 		unnamed := *a
 		unnamed.ID = ""
 		switch {
+		case a.Changed() && tier.IsCheck(t):
+			// The id now names another check, which this record never tracked.
+			fmt.Fprintf(w, "Retired %s: check %s is %s; that is another check, so this names nothing to remove.\n",
+				id, a.ID, a.Detail)
 		case !boundHere(a, root):
 			// The remove command acts on the checkout it runs in, so name the one holding the fix.
 			fmt.Fprintf(w, "Retired %s: %s; it stays installed in %s, so run its remove command there.\n",

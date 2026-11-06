@@ -15,7 +15,7 @@ func TestCheckActivityIsPhrasedAndItsMissingEvidenceIsTheGap(t *testing.T) {
 		StreamPresent: true, CheckID: "no-count", Scope: mine.FiringScopeWindowPeriod,
 		Executions: 3, Outcomes: map[string]int{"failed": 1, "passed": 2}, Blocked: 1, ChangedDetector: 1}
 	got := CheckActivityPhrase(mine.Observation{Checks: bound})
-	for _, want := range []string{"on this machine", "3 of no-count", "failed 1, passed 2", "1 stopped a turn", "1 ran an edited check"} {
+	for _, want := range []string{"on this machine", "3 of no-count", "failed 1, passed 2", "1 stopped a turn", "1 ran a detector digest other than the registered one"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("phrase %q lacks %q", got, want)
 		}

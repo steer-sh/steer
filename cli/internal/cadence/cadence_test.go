@@ -262,14 +262,18 @@ func TestNeedsAttention(t *testing.T) {
 	if !needsAttention(mine.Observation{}, nil, "instruction", nil) {
 		t.Error("a missing scope should need attention")
 	}
-	// A rule reworded under its own id leaves the record counting against text
-	// nobody carries, and a check's detector digest moves with the test it runs.
+	// A rule reworded under its own id, or a check id rebound to another kind, leaves
+	// the record counting against a fix nobody carries; an edited detector does not.
 	quiet := mine.Observation{Coverage: mine.ObservationCoverage{After: map[string]any{"eligible": 2}}}
 	drifted := &Artifact{ID: "my-fix", State: ArtifactChanged}
 	if !needsAttention(quiet, struct{}{}, "instruction", drifted) {
 		t.Error("a reworded rule should need attention")
 	}
-	if needsAttention(quiet, struct{}{}, "check", drifted) {
+	if !needsAttention(quiet, struct{}{}, "check", drifted) {
+		t.Error("a check rebound to another kind should need attention")
+	}
+	edited := &Artifact{ID: "my-fix", State: ArtifactPresent, Detail: DetectorMoved}
+	if needsAttention(quiet, struct{}{}, "check", edited) {
 		t.Error("an edited detector should not need attention")
 	}
 	if needsAttention(quiet, struct{}{}, "instruction", &Artifact{ID: "my-fix", State: ArtifactPresent}) {

@@ -132,8 +132,9 @@ func TestArtifactReadsAGuardEntry(t *testing.T) {
 	wantState(t, ArtifactOf(rec, ArtifactSources{}), ArtifactUnbound)
 }
 
-// A check is read from the repository its record binds, against the detector the
-// record registered.
+// A check is read from the repository its record binds. An edit to its detector
+// keeps it in place with the edit noted; another kind or target under its id does
+// not, and a record without a target compares the kind alone.
 func TestArtifactReadsACheckDeclaration(t *testing.T) {
 	testhome.Set(t, t.TempDir())
 	root, other := t.TempDir(), t.TempDir()
@@ -158,15 +159,41 @@ func TestArtifactReadsACheckDeclaration(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec := mine.Record{"tier": "check", "status": "active", mine.CheckIDKey: "no-count",
-		mine.CheckRepoKey: identity(t, root), mine.CheckDigestKey: det.Digest}
+		mine.CheckKindKey: checks.KindScript, mine.CheckRepoKey: identity(t, root), mine.CheckDigestKey: det.Digest}
 
-	wantState(t, ArtifactOf(rec, ArtifactSources{RepoRoot: root}), ArtifactPresent)
+	if got := ArtifactOf(rec, ArtifactSources{RepoRoot: root}); got.State != ArtifactPresent || got.Detail != "" {
+		t.Fatalf("artifact = %+v; want present with no detail", got)
+	}
 	wantState(t, ArtifactOf(rec, ArtifactSources{RepoRoot: other}), ArtifactElsewhere)
 
 	if err := os.WriteFile(script, []byte("exit 1\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if got := ArtifactOf(rec, ArtifactSources{RepoRoot: root}); got.State != ArtifactPresent || got.Detail != DetectorMoved {
+		t.Fatalf("an edited detector reads %+v; want present with the edit noted", got)
+	}
+
+	rec[mine.CheckTargetKey] = ".steer/checks/no-count.sh"
+	wantState(t, ArtifactOf(rec, ArtifactSources{RepoRoot: root}), ArtifactPresent)
+	rec[mine.CheckTargetKey] = ".steer/checks/other.sh"
+	if got := ArtifactOf(rec, ArtifactSources{RepoRoot: root}); got.State != ArtifactChanged ||
+		got.Detail != "declared as script .steer/checks/no-count.sh where this record registered script .steer/checks/other.sh" {
+		t.Fatalf("a retargeted declaration reads %+v; want changed naming both targets", got)
+	}
+	delete(rec, mine.CheckTargetKey)
+
+	rec[mine.CheckKindKey] = checks.KindGoTest
+	got := ArtifactOf(rec, ArtifactSources{RepoRoot: root})
+	wantState(t, got, ArtifactChanged)
+	if want := "declared as script where this record registered go-test"; got.Detail != want {
+		t.Fatalf("detail = %q; want %q", got.Detail, want)
+	}
+	if err := os.Remove(script); err != nil {
+		t.Fatal(err)
+	}
 	wantState(t, ArtifactOf(rec, ArtifactSources{RepoRoot: root}), ArtifactChanged)
+	rec[mine.CheckKindKey] = checks.KindScript
+	wantState(t, ArtifactOf(rec, ArtifactSources{RepoRoot: root}), ArtifactUnreadable)
 
 	m.Checks = nil
 	if err := checks.Save(root, m); err != nil {
