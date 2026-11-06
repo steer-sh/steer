@@ -99,3 +99,59 @@ func TestFixtureBindingsAcrossTheGuardLifecycle(t *testing.T) {
 		t.Errorf("the archive holds %d fixture files for the removed guard, want 1", len(archived))
 	}
 }
+
+// TestAReinstallWhoseRebuildFailedLeavesStaleStampsThatSyncRefuses drives a
+// re-registration that writes its new rule into the manifest and then fails to
+// rebuild the master. Once the store reads whole again, sync refuses the master
+// and status names the rebuild, because a firing would report the old rule.
+//
+// pins existing behaviour
+func TestAReinstallWhoseRebuildFailedLeavesStaleStampsThatSyncRefuses(t *testing.T) {
+	t.Parallel()
+	s := NewSandbox(t)
+	src := s.path(noVarHook + ".py")
+	if err := os.WriteFile(src, []byte(noVarSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s.MustSteer("register", src, "--rule", "rule one: no var", "--harness", "claude-code")
+	other := s.path("no-eval.py")
+	evalSrc := strings.ReplaceAll(noVarSrc, "var ", "eval ")
+	if err := os.WriteFile(other, []byte(evalSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s.MustSteer("register", other, "--rule", "never use eval | call it directly", "--harness", "claude-code")
+
+	stored := filepath.Join(s.Repo, ".steer", "hooks", "no-eval.py")
+	kept, err := os.ReadFile(stored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stored, []byte(strings.ReplaceAll(string(kept), "def main(", "def nomain(")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if r := s.Steer("register", src, "--rule", "rule two: no var ever", "--harness", "claude-code"); r.Code == 0 {
+		t.Fatalf("a store holding a guard with no main rebuilt:\n%s", r.Output())
+	}
+	if err := os.WriteFile(stored, kept, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := s.Steer("hooks", "sync", "--scope", "project")
+	if r.Code == 0 || !strings.Contains(r.Output(), "steer hooks rebuild --scope project") ||
+		!strings.Contains(r.Output(), noVarHook) {
+		t.Fatalf("sync accepted a master stamped with the old rule (exit %d):\n%s", r.Code, r.Output())
+	}
+	if out := s.MustSteer("status").Output(); !strings.Contains(out, "reports an old rule or identity") {
+		t.Errorf("status raised nothing about the stale stamps:\n%s", out)
+	}
+
+	s.MustSteer("hooks", "rebuild", "--scope", "project")
+	s.MustSteer("hooks", "sync", "--scope", "project")
+	master, err := os.ReadFile(filepath.Join(s.Repo, ".steer", "hooks", "steer-hooks.py"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(master), "rule two: no var ever") {
+		t.Errorf("the rebuild did not stamp the manifest's rule")
+	}
+}

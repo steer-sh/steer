@@ -114,7 +114,7 @@ func (m *Model) diagnosticIssues() []diagnosticIssue {
 			// naming sync alone would send the reader into that refusal.
 			detail += " The runner built from these guard files does not carry " +
 				strings.Join(master.StoreSources.Drifted(), ", ") +
-				" as the file holds it, and registering it would be refused. Read the guard " +
+				" as its guard file and rule now hold it, and registering it would be refused. Read the guard " +
 				"file, then run: " + status.RebuildCommand(master.Scope) +
 				", which rebuilds and registers in one operation."
 		} else if master.Scope == m.scope {
@@ -133,6 +133,16 @@ func (m *Model) diagnosticIssues() []diagnosticIssue {
 			continue
 		}
 		agent := status.HarnessLabel(master.Harness)
+		if master.Sources.StampsOnly() {
+			out = append(out, diagnosticIssue{
+				headline: "The guard runner for " + agent + " in " + scopeReach(master.Scope) +
+					" reports an old rule or identity for a guard",
+				detail: "The runner carries each guard's current source, but the manifest " +
+					"changed a guard's rule or identity after the runner was built, so a " +
+					"block records the old one in the audit log. For this one, run: " + status.RebuildCommand(master.Scope),
+			})
+			continue
+		}
 		detail := "A guard file was edited, and the runner still carries the " +
 			"source it was built with, so the edit changes nothing the agent runs. " +
 			"Rebuilding publishes the guard files; it does not establish that they " +

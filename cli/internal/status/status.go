@@ -77,7 +77,9 @@ import (
 // v35 adds posture.health: the verdict `steer status` prints, with its issues.
 // v36 adds corpora[].refreshed_at and fix: the transcript candidate reads stored
 // snapshots, and a row with fix has none.
-const StatusVersion = 36
+// v37 adds the guard source state stamps-differ and guards[].stamps: a runner
+// carrying a guard's current source under an old rule or identity.
+const StatusVersion = 37
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20

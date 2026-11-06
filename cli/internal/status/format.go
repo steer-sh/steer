@@ -153,7 +153,7 @@ func MasterSourcePhrase(m MasterRuntime) string {
 	if m.Detached() {
 		if m.StoreSourcesDrifted() {
 			return "the runner built from these guard files does not carry " +
-				strings.Join(m.StoreSources.Drifted(), ", ") + " as the file holds it"
+				strings.Join(m.StoreSources.Drifted(), ", ") + " as its guard file and rule now hold it"
 		}
 		return ""
 	}
@@ -166,12 +166,26 @@ func MasterSourcePhrase(m MasterRuntime) string {
 	case claude.ComparisonNoMaster:
 		return "no guard runner file to read"
 	}
-	drifted := m.Sources.Drifted()
-	if len(drifted) == 0 {
-		return ""
+	var source, stamped []string
+	for _, g := range m.Sources.Guards {
+		switch g.State {
+		case claude.SourceMatches:
+		case claude.SourceStampsDiffer:
+			stamped = append(stamped, g.Name+" ("+strings.Join(g.Stamps, ", ")+")")
+		default:
+			source = append(source, g.Name)
+		}
 	}
-	return fmt.Sprintf("it runs different source for %s than the guard file holds",
-		strings.Join(drifted, ", "))
+	var parts []string
+	if len(source) > 0 {
+		parts = append(parts, fmt.Sprintf("it runs different source for %s than the guard file holds",
+			strings.Join(source, ", ")))
+	}
+	if len(stamped) > 0 {
+		parts = append(parts, fmt.Sprintf("it reports an old manifest identity for %s",
+			strings.Join(stamped, ", ")))
+	}
+	return strings.Join(parts, "; ")
 }
 
 // DriftedMasters summarizes the rows whose registered runner carries different
@@ -183,8 +197,20 @@ func DriftedMasters(rows []MasterRuntime) (key string, labels, scopes []string) 
 		if !m.SourcesDrifted() {
 			continue
 		}
-		parts = append(parts, fmt.Sprintf("%s/%s:%s", m.Harness, m.Scope,
-			strings.Join(m.Sources.Drifted(), ",")))
+		// A stamp-only guard is keyed apart from a source difference, so a
+		// change from one to the other on the same guard is a new notice.
+		var names []string
+		for _, g := range m.Sources.Guards {
+			switch g.State {
+			case claude.SourceMatches:
+			case claude.SourceStampsDiffer:
+				names = append(names, g.Name+"~stamps")
+			default:
+				names = append(names, g.Name)
+			}
+		}
+		sort.Strings(names)
+		parts = append(parts, fmt.Sprintf("%s/%s:%s", m.Harness, m.Scope, strings.Join(names, ",")))
 		labels = append(labels, fmt.Sprintf("%s, %s scope", HarnessLabel(m.Harness), m.Scope))
 		if !seen[m.Scope] {
 			seen[m.Scope] = true

@@ -215,7 +215,12 @@ func LoadManifest(scope string) (*Manifest, error) {
 	if err != nil {
 		return nil, err
 	}
+	return loadManifestFile(manifestPath)
+}
 
+// loadManifestFile reads one manifest file. A file that does not exist is an
+// empty manifest.
+func loadManifestFile(manifestPath string) (*Manifest, error) {
 	manifest := &Manifest{Hooks: map[string]ManifestEntry{}}
 	if _, err := os.Stat(manifestPath); os.IsNotExist(err) {
 		return manifest, nil

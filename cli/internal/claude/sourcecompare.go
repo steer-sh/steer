@@ -21,6 +21,12 @@ const (
 	SourceAbsentFromMaster = "absent-from-master"
 	// SourceAbsentFromStore: a guard the master carries with no file behind it.
 	SourceAbsentFromStore = "absent-from-store"
+	// SourceStampsDiffer: the master embeds this guard's file byte for byte but
+	// stamps it with an identity the manifest no longer holds, so a firing
+	// reports a rule, owner or source other than the installed one. A stamp the
+	// master does not carry at all is unknown, never a difference: a master built
+	// before that stamp existed is not stale for lacking it.
+	SourceStampsDiffer = "stamps-differ"
 )
 
 // The state a whole comparison is in. Complete is reserved for a comparison
@@ -37,6 +43,8 @@ const (
 type GuardSource struct {
 	Name  string `json:"name"`
 	State string `json:"state"`
+	// Stamps names the manifest fields whose stamp differs, on SourceStampsDiffer.
+	Stamps []string `json:"stamps,omitempty"`
 }
 
 // SourceComparison is one store read against one master.
@@ -63,6 +71,22 @@ func (c SourceComparison) Drifted() []string {
 	return out
 }
 
+// StampsOnly reports a complete comparison whose every disagreeing guard
+// carries its current source under old manifest stamps. A rebuild repairs it
+// as it does a source difference, but no guard file was edited.
+func (c SourceComparison) StampsOnly() bool {
+	drifted := c.Drifted()
+	if !c.Complete() || len(drifted) == 0 {
+		return false
+	}
+	for _, g := range c.Guards {
+		if g.State != SourceMatches && g.State != SourceStampsDiffer {
+			return false
+		}
+	}
+	return true
+}
+
 // Complete reports whether every input was read.
 func (c SourceComparison) Complete() bool { return c.State == ComparisonComplete }
 
@@ -72,7 +96,8 @@ func (c SourceComparison) Agrees() bool { return c.Complete() && len(c.Drifted()
 
 // CompareMasterSources reads every guard file in storeDir against the source
 // masterPath embeds for it, comparing the source itself and not its recorded
-// digest.
+// digest. A guard whose source matches is then read against the identity the
+// store's manifest gives it, which the master stamps beside the source.
 func CompareMasterSources(storeDir, masterPath string) SourceComparison {
 	out := SourceComparison{StoreDir: storeDir, MasterPath: masterPath, State: ComparisonComplete}
 	if strings.TrimSpace(storeDir) == "" || strings.TrimSpace(masterPath) == "" {
@@ -105,6 +130,18 @@ func CompareMasterSources(storeDir, masterPath string) SourceComparison {
 		out.Reason = err.Error()
 		return out
 	}
+	stamped, err := embeddedStamps(masterPath, string(data))
+	if err != nil {
+		out.State = ComparisonUnavailable
+		out.Reason = err.Error()
+		return out
+	}
+	manifest, err := loadManifestFile(filepath.Join(storeDir, ManifestName))
+	if err != nil {
+		out.State = ComparisonUnavailable
+		out.Reason = err.Error()
+		return out
+	}
 
 	for _, hook := range hooks {
 		source, err := readHookSource(hook.Path)
@@ -120,7 +157,12 @@ func CompareMasterSources(storeDir, masterPath string) SourceComparison {
 		case held != source.Source:
 			out.Guards = append(out.Guards, GuardSource{Name: source.Name, State: SourceDiffers})
 		default:
-			out.Guards = append(out.Guards, GuardSource{Name: source.Name, State: SourceMatches})
+			g := GuardSource{Name: source.Name, State: SourceMatches}
+			if differ := staleStamps(manifestStamps(manifest, hook), stamped[source.Name]); len(differ) > 0 {
+				g.State = SourceStampsDiffer
+				g.Stamps = differ
+			}
+			out.Guards = append(out.Guards, g)
 		}
 		delete(embedded, source.Name)
 	}
@@ -143,6 +185,39 @@ func embeddedSources(path, text string) (map[string]string, error) {
 		return nil, fmt.Errorf("%s: unreadable guard sources: %w", path, err)
 	}
 	return out, nil
+}
+
+// embeddedStamps decodes STEER_HOOK_META, keyed by guard file stem. A master
+// that declares none yields no stamps, which reads as unknown; one that declares
+// it in a form this reader cannot decode is unreadable, never unstamped.
+func embeddedStamps(path, text string) (map[string]map[string]string, error) {
+	if _, declared := afterAssignment(text, masterMetaConst); !declared {
+		return map[string]map[string]string{}, nil
+	}
+	object, ok := pythonDictConst(text, masterMetaConst)
+	if !ok {
+		return nil, fmt.Errorf("%s: unreadable %s", path, masterMetaConst)
+	}
+	out := map[string]map[string]string{}
+	if err := json.Unmarshal([]byte(object), &out); err != nil {
+		return nil, fmt.Errorf("%s: unreadable %s: %w", path, masterMetaConst, err)
+	}
+	return out, nil
+}
+
+// staleStamps names the manifest fields whose stamp in held differs from want.
+// A field held does not carry is unknown and never named; a field want lacks
+// and held carries is named, because the master then reports a value the
+// manifest no longer backs.
+func staleStamps(want, held map[string]string) []string {
+	var out []string
+	for _, field := range manifestStampFields {
+		stamp, ok := held[field]
+		if ok && stamp != want[field] {
+			out = append(out, field)
+		}
+	}
+	return out
 }
 
 // MasterEmbedsGuard reports whether the scope's own master carries one guard's
@@ -168,7 +243,7 @@ func MasterEmbedsGuard(scope, hook string) (bool, error) {
 	stem := strings.TrimSuffix(resolved.FileName, ".py")
 	for _, g := range c.Guards {
 		if g.Name == stem {
-			return g.State == SourceMatches, nil
+			return g.State == SourceMatches || g.State == SourceStampsDiffer, nil
 		}
 	}
 	return false, fmt.Errorf("%s carries no source for %s", path, hook)
@@ -183,6 +258,8 @@ func gapPhrase(g GuardSource) string {
 		return g.Name + " differs from its file"
 	case SourceAbsentFromStore:
 		return g.Name + " has no file in the store"
+	case SourceStampsDiffer:
+		return g.Name + " carries an old " + strings.Join(g.Stamps, ", ") + " from the manifest"
 	}
 	return g.Name
 }

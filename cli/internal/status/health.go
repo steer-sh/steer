@@ -366,6 +366,9 @@ func guardIssues(s *SystemStatus) []Issue {
 		case m.Stale():
 			out = append(out, Issue{Severity: SeverityAttention, Title: label + " guard runner is out of date",
 				Fix: RebuildCommand(m.Scope)})
+		case m.SourcesDrifted() && m.Sources.StampsOnly():
+			out = append(out, Issue{Severity: SeverityAttention,
+				Title: label + " guard runner reports an old rule or identity for a guard", Fix: RebuildCommand(m.Scope)})
 		case m.SourcesDrifted():
 			out = append(out, Issue{Severity: SeverityAttention,
 				Title: label + " guard runner carries an old copy of an edited guard", Fix: RebuildCommand(m.Scope)})
