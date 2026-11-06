@@ -493,7 +493,7 @@ func runCadence() {
 			repairs = append(repairs, status.RebuildCommand(s))
 		}
 		lines = append(lines, fmt.Sprintf(
-			"steer: a guard file was edited and the runner still carries the old source (%s) — to restore agreement, run: %s",
+			"steer: a guard runner carries an old copy of a guard or of its rule (%s) — to restore agreement, run: %s",
 			strings.Join(driftLabels, "; "), strings.Join(repairs, " and ")))
 	}
 	// A harness runs skills and the launcher from its cached plugin copy, and

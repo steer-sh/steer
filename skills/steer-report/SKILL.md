@@ -185,7 +185,7 @@ A correction occurrence can carry two context fields, each `{text, cut}` with `c
 
 An `after_interrupt` occurrence carries the same two fields, read from before the interrupt. A `correction_candidates` occurrence carries them too.
 
-### The `steer status --json` contract (`status_version: 36`)
+### The `steer status --json` contract (`status_version: 37`)
 
 Step 1 reads this snapshot for posture and the full class inventory. The unit is
 the failure class and what the corpus recorded about it, not the hook count. This
@@ -300,10 +300,14 @@ counted from this machine's stored session snapshots, and a row with `fix` has n
   freshness and detachment: a runner carrying this binary's runtime can still run
   source the store file no longer holds. Its `state` is `complete`, `no-master`,
   `unavailable` or `not-applicable`, and only `complete` supports a reading —
-  `guards[]` then names each guard `matches`, `differs`, `absent-from-master` or
-  `absent-from-store`. An `unavailable` comparison is not agreement. `differs` is
+  `guards[]` then names each guard `matches`, `differs`, `absent-from-master`,
+  `absent-from-store` or `stamps-differ`. An `unavailable` comparison is not
+  agreement. `differs` is
   directionless: it says the runner runs something other than the file, never
-  which one is wanted, so read the guard file before rebuilding. A detached row
+  which one is wanted, so read the guard file before rebuilding.
+  `stamps-differ` is current source under an old manifest identity, the fields
+  named in `stamps` (`hook_name`, `rule`, `rule_hash`, `source`, `source_id`): a
+  block reports the old one, and the rebuild publishes the manifest's. A detached row
   also carries `store_sources`, the same reading for the runner the store holds,
   because the two choose different repairs: a store runner that already covers
   the store needs `sync`, not `rebuild`.

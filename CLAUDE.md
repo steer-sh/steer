@@ -180,12 +180,15 @@ Read the linked architecture section before changing the corresponding boundary:
   `firing_id` alone, a check judgment its run by `run_id`, and the identity it was
   made against is stored with it; `gate/mine` reads no receipt store.
 - Guard source agreement: `cli/internal/claude/sourcecompare.go` holds the one
-  comparison of a store's guard files against the copies a master embeds.
-  `MasterCovers` (`cli/internal/claude/sync.go`) wraps it as the refusal sync
-  depends on, and `cli/internal/status/status.go` runs it against each harness's
-  registered master, so a change to its states changes both. It compares source,
-  never the `hook_digest` in `STEER_HOOK_META`: a digest is the generator's claim
-  about the bytes it wrote.
+  comparison of a store's guard files against the copies a master embeds, and of
+  the manifest's identity for each guard against the `STEER_HOOK_META` stamps
+  (`stamps-differ`). `MasterCovers` (`cli/internal/claude/sync.go`) wraps it as
+  the refusal sync depends on, and `cli/internal/status/status.go` runs it against
+  each harness's registered master, so a change to its states changes both. The
+  stamped fields are `manifestStamps` (`consolidation.go`), which writes and
+  compares one set; a stamp a master lacks is unknown, not stale. It compares
+  source, never the `hook_digest`: a digest is the generator's claim about the
+  bytes it wrote.
 - Check tier readings: `cli/internal/checks/state.go` is the one reader of a
   repository's check state, shared by the status snapshot, the refresh queue and
   `steer check list`. Adoption, registration, validation freshness and observed

@@ -127,7 +127,11 @@ instruction synchronization and reading registration back.
 
 `internal/claude/lifecycle.go`, `rules.go` and `sync.go` compose store mutations
 with harness updates. These are sequential writes across artifacts and targets,
-not one transaction; synchronization and rebuild are retry paths. `SyncTargets` derives `## Steer Rules` from `ManifestRules`;
+not one transaction; synchronization and rebuild are retry paths. A manifest
+write can therefore land without the master rebuild after it, so the master
+comparison reads each guard's `STEER_HOOK_META` stamps against the manifest as
+well as its embedded source, and sync refuses a master that disagrees with
+either. `SyncTargets` derives `## Steer Rules` from `ManifestRules`;
 `internal/instructions/` replaces that managed section while preserving surrounding
 prose. Rebuild and removal retries also synchronize it. Handwritten lines inside
 the managed section do not survive regeneration. The section ends at its

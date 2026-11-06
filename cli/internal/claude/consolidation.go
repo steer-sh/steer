@@ -318,23 +318,13 @@ func ConsolidateHooks(scope string) error {
 		}
 		sources = append(sources, source)
 
-		owned, entry := OwnedEntry(manifest, hook)
-		ruleHash := strings.TrimSpace(entry.RuleHash)
-		meta := map[string]string{
-			"hook_name": owned.Name,
-			"rule":      strings.TrimSpace(entry.Rule),
-			"source":    strings.TrimSpace(entry.Source),
-			"source_id": strings.TrimSpace(entry.SourceID),
-			// The digest is taken over the bytes this master carries, never over
-			// the file on disk: the standalone guard can change after the master
-			// is built, so only the embedded source identifies what ran.
-			"hook_digest": sourceDigest([]byte(source.Source)),
-			// The footer names the removal command for this store's scope.
-			"scope": normalizeScope(scope),
-		}
-		if ruleHash != "" {
-			meta["rule_hash"] = ruleHash
-		}
+		meta := manifestStamps(manifest, hook)
+		// The digest is taken over the bytes this master carries, never over
+		// the file on disk: the standalone guard can change after the master
+		// is built, so only the embedded source identifies what ran.
+		meta["hook_digest"] = sourceDigest([]byte(source.Source))
+		// The footer names the removal command for this store's scope.
+		meta["scope"] = normalizeScope(scope)
 		hookMeta[hook.Name] = meta
 	}
 
@@ -345,6 +335,28 @@ func ConsolidateHooks(scope string) error {
 
 	return nil
 }
+
+// manifestStamps is the identity a master stamps on one guard from the manifest:
+// its owning id, rule, rule hash and source. A file no entry owns is stamped with
+// empty values under the name OwnedEntry gives it. CompareMasterSources reads the
+// same stamps back, so every field written here is a field it compares.
+func manifestStamps(manifest *Manifest, hook HookFile) map[string]string {
+	owned, entry := OwnedEntry(manifest, hook)
+	stamps := map[string]string{
+		"hook_name": owned.Name,
+		"rule":      strings.TrimSpace(entry.Rule),
+		"source":    strings.TrimSpace(entry.Source),
+		"source_id": strings.TrimSpace(entry.SourceID),
+	}
+	if ruleHash := strings.TrimSpace(entry.RuleHash); ruleHash != "" {
+		stamps["rule_hash"] = ruleHash
+	}
+	return stamps
+}
+
+// manifestStampFields names every field manifestStamps can write, in the order a
+// reading reports them.
+var manifestStampFields = []string{"hook_name", "rule", "rule_hash", "source", "source_id"}
 
 // refuseUnsafeGuardNames refuses a store whose guard file stem or owning manifest
 // key falls outside hookstore.GuardName. The stem is written into the master's

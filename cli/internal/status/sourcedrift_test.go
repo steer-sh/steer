@@ -124,3 +124,49 @@ func TestASyncThatWouldBeRefusedIsNotTheRepairOffered(t *testing.T) {
 		t.Fatalf("a store its runner covers is repaired with %q", got)
 	}
 }
+
+func TestStaleStampsReadAsAnOldRuleNotAnEditedGuard(t *testing.T) {
+	m := drifted()
+	m.Sources.Guards = []claude.GuardSource{
+		{Name: "alpha", State: claude.SourceMatches},
+		{Name: "beta", State: claude.SourceStampsDiffer, Stamps: []string{"rule", "rule_hash"}},
+	}
+	if !m.SourcesDrifted() {
+		t.Fatal("a runner stamped with an old rule is not reported")
+	}
+	phrase := MasterSourcePhrase(m)
+	if !strings.Contains(phrase, "old manifest identity for beta (rule, rule_hash)") ||
+		strings.Contains(phrase, "different source") {
+		t.Fatalf("the phrase misreads stale stamps: %q", phrase)
+	}
+	s := &SystemStatus{Posture: Posture{Masters: []MasterRuntime{m}}}
+	var found *Issue
+	for _, issue := range guardIssues(s) {
+		if strings.Contains(issue.Title, "old rule or identity") {
+			found = &issue
+		}
+	}
+	if found == nil || found.Fix != RebuildCommand("project") {
+		t.Fatalf("no rebuild issue for stale stamps: %+v", guardIssues(s))
+	}
+
+	// A source difference beside it keeps the edited-guard reading.
+	m.Sources.Guards[0].State = claude.SourceDiffers
+	phrase = MasterSourcePhrase(m)
+	if !strings.Contains(phrase, "different source for alpha") || !strings.Contains(phrase, "beta (rule, rule_hash)") {
+		t.Fatalf("a mixed reading dropped one half: %q", phrase)
+	}
+}
+
+func TestTheDriftNudgeKeysStaleStampsApartFromSourceDrift(t *testing.T) {
+	source := drifted()
+	stamps := drifted()
+	stamps.Sources = &claude.SourceComparison{State: claude.ComparisonComplete, Guards: []claude.GuardSource{
+		{Name: "beta", State: claude.SourceStampsDiffer, Stamps: []string{"rule"}},
+	}}
+	a, _, _ := DriftedMasters([]MasterRuntime{source})
+	b, _, _ := DriftedMasters([]MasterRuntime{stamps})
+	if a == "" || b == "" || a == b {
+		t.Fatalf("source drift and stale stamps on one guard share a nudge key: %q %q", a, b)
+	}
+}
