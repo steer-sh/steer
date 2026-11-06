@@ -117,8 +117,9 @@ func missingCoverage(obs mine.Observation) bool {
 }
 
 // RemovalPhrase says what stopping the tracking does to the fix a record binds:
-// nothing. It names the command that removes the fix and never claims the fix is
-// still there; ArtifactPhrase says where it stands. It reads BOTH ladder spellings
+// nothing. It names the command that removes the fix, except for a check whose id
+// now names another check, and never claims the fix is still there; ArtifactPhrase
+// says where it stands. It reads BOTH ladder spellings
 // through internal/tier.
 func RemovalPhrase(t string, a *cadence.Artifact) string {
 	const ends = "stopping the tracking ends the measurement"
@@ -130,6 +131,10 @@ func RemovalPhrase(t string, a *cadence.Artifact) string {
 	out := ends + " and removes no " + noun
 	if a.ID == "" {
 		return out
+	}
+	if kind == tier.Check && a.Changed() {
+		// The id now names another check, which removing it would take out.
+		return out + "; its id now names another check, so there is nothing of this record's to remove"
 	}
 	return out + "; to remove it, run: " + RemoveCommand(t, a.ID, a.Scope)
 }

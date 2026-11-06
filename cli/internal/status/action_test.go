@@ -158,3 +158,17 @@ func TestRecurrenceOutranksDrift(t *testing.T) {
 		t.Fatalf("action = %q, want %q", got, ActionInspect)
 	}
 }
+
+// A check whose id now names another check names no remove command: running it
+// would remove a check the record never tracked.
+func TestRemovalPhraseNamesNoCommandForARetargetedCheck(t *testing.T) {
+	rebound := &cadence.Artifact{ID: "no-count", State: cadence.ArtifactChanged,
+		Detail: "declared as script a.sh where this record registered script b.sh"}
+	if got := RemovalPhrase("check", rebound); strings.Contains(got, "steer check remove") || !strings.Contains(got, "another check") {
+		t.Fatalf("RemovalPhrase = %q; want no remove command", got)
+	}
+	present := &cadence.Artifact{ID: "no-count", State: cadence.ArtifactPresent, Detail: cadence.DetectorMoved}
+	if got := RemovalPhrase("check", present); !strings.Contains(got, "steer check remove no-count") {
+		t.Fatalf("RemovalPhrase = %q; want the remove command for the check the record follows", got)
+	}
+}
