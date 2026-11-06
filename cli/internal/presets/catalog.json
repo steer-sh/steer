@@ -65,7 +65,7 @@
       "os": ["all"],
       "prompt_version": "factory-prompt-v1",
       "prompt_modules": ["python-security"],
-      "hook_version": "factory-hook-v4"
+      "hook_version": "factory-hook-v5"
     },
     {
       "name": "hardcoded-secret-reference-prevention",

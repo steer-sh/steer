@@ -185,9 +185,12 @@ class CommandInjectionVisitor(ast.NodeVisitor):
         module_name = node.func.value.id
         func_name = node.func.attr
 
+        visited = []
+
         # os.system: always uses shell
         if module_name == 'os' and func_name == 'system':
-            if node.args and not self._is_static_string(node.args[0]):
+            command, visited = self._command_arg(node, 'command')
+            if command is not None and not self._is_static_string(command):
                 self.violations.append(
                     (node.lineno, "os.system() with dynamic input is a command injection risk")
                 )
@@ -204,15 +207,35 @@ class CommandInjectionVisitor(ast.NodeVisitor):
                 return
 
             # shell=True found - check the command argument
-            if node.args:
-                first_arg = node.args[0]
+            first_arg, visited = self._command_arg(node, 'args')
+            if first_arg is not None:
                 if not self._is_static_string(first_arg) and not self._uses_shlex_quote(first_arg):
                     self.violations.append(
                         (node.lineno,
                          f"subprocess.{func_name}() with shell=True and dynamic input is a command injection risk")
                     )
 
-        self.generic_visit(node)
+        self._visit_call_rest(node, visited)
+
+    def _command_arg(self, node, keyword):
+        """Return the call's command, passed first positionally or by its keyword
+        name, and the keywords this visited to reach it.
+
+        A keyword command is built after the keyword values written before it,
+        so those are visited first and a rebinding among them ends a proof."""
+        if node.args:
+            return node.args[0], []
+        for i, kw in enumerate(node.keywords):
+            if kw.arg == keyword:
+                for earlier in node.keywords[:i]:
+                    self.visit(earlier)
+                return kw.value, node.keywords[:i]
+        return None, []
+
+    def _visit_call_rest(self, node, visited):
+        for child in ast.iter_child_nodes(node):
+            if not any(child is kw for kw in visited):
+                self.visit(child)
 
     def _is_static_string(self, node):
         return isinstance(node, ast.Constant) and isinstance(node.value, str)
