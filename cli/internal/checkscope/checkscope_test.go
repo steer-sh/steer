@@ -123,7 +123,8 @@ func TestBindFreezesTheCheckItsRepositoryAndItsInstallation(t *testing.T) {
 		}
 	}
 	identity, _ := checks.RepoIdentity(root)
-	if facts[mine.CheckRepoKey] != identity || facts[mine.CheckKindKey] != checks.KindScript {
+	if facts[mine.CheckRepoKey] != identity || facts[mine.CheckKindKey] != checks.KindScript ||
+		facts[mine.CheckTargetKey] != ".steer/checks/no-count.sh" {
 		t.Errorf("facts %v; want the resolved root %s and a script binding", facts, identity)
 	}
 	history, _ := checks.History(root)
@@ -236,7 +237,8 @@ func TestBindFreezesAGoTestBinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if facts[mine.CheckKindKey] != checks.KindGoTest || facts[mine.CheckDigestKey] != det.Digest {
+	if facts[mine.CheckKindKey] != checks.KindGoTest || facts[mine.CheckDigestKey] != det.Digest ||
+		facts[mine.CheckTargetKey] != decl.Target() {
 		t.Fatalf("facts %v; want a go-test binding frozen at digest %s", facts, det.Digest)
 	}
 	history, _ := checks.History(root)

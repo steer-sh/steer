@@ -47,8 +47,9 @@ type CheckActivity struct {
 	Outcomes map[string]int `json:"outcomes,omitempty"`
 	// Blocked counts failed executions whose run blocked a turn.
 	Blocked int `json:"blocked"`
-	// ChangedDetector counts executions of a detector other than the one the
-	// record registered.
+	// ChangedDetector counts executions whose recorded detector digest differs from the one
+	// the record registered, by an edit, a new digest format or a rebinding of the
+	// id. They are runs of the check id, counted like the rest.
 	ChangedDetector int `json:"changed_detector"`
 	// Units is the number of distinct eligible sessions the executions landed in,
 	// answered only by the session join.

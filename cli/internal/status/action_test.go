@@ -94,8 +94,12 @@ func TestArtifactPhraseNamesTheState(t *testing.T) {
 			"the rule config-path is no longer installed (global)"},
 		{"review", &cadence.Artifact{ID: "fp-sort", Scope: "project", State: cadence.ArtifactAbsent},
 			"the review prompt entry fp-sort is not in the project's committed review prompt, so the commit gate does not read it"},
-		{"check", &cadence.Artifact{ID: "no-count", Repo: "/w/steer", State: cadence.ArtifactChanged},
-			"the check no-count is declared, but its detector differs from the one this record registered"},
+		{"check", &cadence.Artifact{ID: "no-count", Repo: "/w/steer", State: cadence.ArtifactChanged,
+			Detail: "declared as go-test where this record registered script"},
+			"the check no-count is declared as go-test where this record registered script"},
+		{"check", &cadence.Artifact{ID: "no-count", Repo: "/w/steer", State: cadence.ArtifactPresent, Detail: cadence.DetectorMoved},
+			"the check no-count is declared as recorded; its detector digest differs from the one this record registered, " +
+				"and the record goes on following the check"},
 		{"guard", &cadence.Artifact{ID: "g", Scope: "project", Repo: "/w/other", State: cadence.ArtifactElsewhere},
 			"the guard g belongs to /w/other, which this reading does not inspect"},
 		{"guard", &cadence.Artifact{ID: "g", Scope: "global", State: cadence.ArtifactPresent, Removed: "2026-02-01T00:00:00.000000000Z"},
@@ -110,8 +114,8 @@ func TestArtifactPhraseNamesTheState(t *testing.T) {
 	}
 }
 
-// A reworded rule asks for a repair and names the re-baseline command. A check
-// whose detector was edited does not: its digest moves with the test it runs.
+// A reworded rule, or a check id rebound to another kind, asks for a repair and names
+// the re-baseline command. A check whose detector was edited does not.
 func TestADriftedFixAsksForANewBaseline(t *testing.T) {
 	scope := &cadence.Scope{Version: 1, All: true}
 	obs := actionObs(false, 10)
@@ -120,7 +124,11 @@ func TestADriftedFixAsksForANewBaseline(t *testing.T) {
 	if got := ActionFor(obs, scope, "instruction", drifted); got != ActionRepair {
 		t.Errorf("reworded rule action = %q, want %q", got, ActionRepair)
 	}
-	if got := ActionFor(obs, scope, "check", drifted); got != ActionObserve {
+	if got := ActionFor(obs, scope, "check", drifted); got != ActionRepair {
+		t.Errorf("rebound check action = %q, want %q", got, ActionRepair)
+	}
+	edited := &cadence.Artifact{ID: "my-fix", State: cadence.ArtifactPresent, Detail: cadence.DetectorMoved}
+	if got := ActionFor(obs, scope, "check", edited); got != ActionObserve {
 		t.Errorf("edited detector action = %q, want %q", got, ActionObserve)
 	}
 	if got := ActionFor(obs, scope, "instruction", &cadence.Artifact{ID: "my-fix", State: cadence.ArtifactPresent}); got != ActionObserve {
@@ -133,7 +141,10 @@ func TestADriftedFixAsksForANewBaseline(t *testing.T) {
 	if !strings.Contains(sentence, "earlier text") {
 		t.Errorf("the sentence does not say which text the counts describe:\n%s", sentence)
 	}
-	if got := ActionSentence(obs, scope, "check", drifted); strings.Contains(got, "--supersedes") {
+	if got := ActionSentence(obs, scope, "check", drifted); !strings.Contains(got, "runs of both checks") {
+		t.Errorf("a rebound check's sentence does not say its window mixes two checks:\n%s", got)
+	}
+	if got := ActionSentence(obs, scope, "check", edited); strings.Contains(got, "--supersedes") {
 		t.Errorf("an edited detector must not be sent to re-baseline:\n%s", got)
 	}
 }

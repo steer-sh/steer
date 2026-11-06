@@ -13,6 +13,7 @@ func boundFacts() map[string]any {
 	return map[string]any{
 		CheckIDKey:      "no-count",
 		CheckKindKey:    "script",
+		CheckTargetKey:  ".steer/checks/no-count.sh",
 		CheckRepoKey:    boundRoot,
 		CheckDigestKey:  "deadbeef",
 		CheckReceiptKey: "run-1",

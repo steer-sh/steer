@@ -722,7 +722,7 @@ and trailing-separator normalization, without resolving historical paths again.
 The session's project discovery key is separate metadata. A unit whose evidence
 names no repository stays unknown coverage.
 
-A check-tier record binds one check: check id, binding kind, resolved
+A check-tier record binds one check: check id, binding kind and target, resolved
 repository, detector digest, current validation receipt, adoption and registered
 harnesses. `internal/checkscope/` freezes those facts, because
 `internal/gate/mine` may import no adapter; `mine` owns the contract they must
@@ -746,7 +746,12 @@ ways: `evidence.Gather` reads every repository's live check streams through
 `checks.ReadLiveEvidence`, and `mine` joins them on check id and exact root.
 Session scoring joins a Stop run's session and harness; chain scoring counts the
 window period. Each count is by outcome, with the failures whose run blocked a
-turn and the runs of a detector other than the registered one. The streams are
+turn and the runs of a detector digest other than the registered one. The record
+follows its check by id across detector edits and digest format changes: the frozen
+digest marks where the lineage began and excludes no run, and only a declaration
+under the same id with another binding kind or target (the script, or the test and
+its package, frozen as `check_target`) reads as a different check; a binding written
+before `check_target` compares the kind alone. The streams are
 this machine's only, while review history can hold other machines' commits. A
 bound record whose repository has no check evidence here is unknown activity and
 missing coverage; an unbound record's attribution is unavailable. The binding's
@@ -773,7 +778,8 @@ overdue local rows is the status entry for `Posture.Unresolved`, not the record.
 `cadence.ArtifactOf` reads where the fix a record binds stands now, against the
 facts registration froze: a guard's or rule's text digest in its store, a review
 entry where the commit gate reads it (the global store, the project store at
-HEAD), and a check's declaration and detector digest in its bound repository. It
+HEAD), and a check's declaration, kind and target in its bound repository, with a
+moved detector digest noted on a check that is still present. It
 sits beside the observation and never enters it. The rules presence reading
 compares a document with the current manifest, so a removed rule synced out of
 every document leaves no drift; only this reading reports it absent. A project

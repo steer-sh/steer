@@ -68,6 +68,15 @@ func Dir(root string) string { return steerpath.ChecksDir(root) }
 func ManifestPath(root string) string { return filepath.Join(Dir(root), ManifestName) }
 
 // Validate reports the first rule the declaration breaks.
+// Target names what the binding runs: the script path, or the test and its package.
+// Inputs are left out; they belong to the detector, not to which check this is.
+func (d Declaration) Target() string {
+	if d.Kind == KindGoTest {
+		return d.Test + " in " + d.Package
+	}
+	return d.Script
+}
+
 func (d Declaration) Validate() error {
 	if !idPattern.MatchString(d.ID) {
 		return fmt.Errorf("check id %q: use 1-64 letters, digits, - and _, starting with a letter or digit", d.ID)

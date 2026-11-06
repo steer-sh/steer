@@ -93,6 +93,10 @@ func ActionSentence(obs mine.Observation, scope *cadence.Scope, t string, artifa
 		return "the problem recurred since this fix was declined, and no fix is installed — inspect the newest example"
 	case GenericRecurrence(obs):
 		return "inspect the newest example and decide whether the fix needs reworking"
+	case artifact.NeedsBaseline(t) && tier.IsCheck(t):
+		return "the check's id now names another binding than the one this record measured, " +
+			"so its window can mix runs of both checks — `steer fix register --supersedes " +
+			"<record-id>` starts a clean window"
 	case artifact.NeedsBaseline(t):
 		return "the fix's text differs from the text this record measured, so these counts " +
 			"describe the earlier text — `steer fix register --supersedes <record-id>` " +
@@ -198,10 +202,14 @@ func ArtifactPhrase(t string, a *cadence.Artifact) string {
 func artifactStatePhrase(kind tier.Kind, noun, name string, a *cadence.Artifact) string {
 	switch a.State {
 	case cadence.ArtifactPresent:
+		if kind == tier.Check && a.Detail == cadence.DetectorMoved {
+			return "the " + name + " is declared as recorded; " + a.Detail +
+				", and the record goes on following the check"
+		}
 		return "the " + name + " is in place as recorded"
 	case cadence.ArtifactChanged:
 		if kind == tier.Check {
-			return "the " + name + " is declared, but its detector differs from the one this record registered"
+			return "the " + name + " is " + a.Detail
 		}
 		return "the " + name + " is in place, but its text differs from the text this record measured"
 	case cadence.ArtifactAbsent:
@@ -277,7 +285,7 @@ func CheckActivityPhrase(obs mine.Observation) string {
 		s += fmt.Sprintf("; %s; %d stopped a turn", mine.OutcomeCounts(c.Outcomes), c.Blocked)
 	}
 	if c.ChangedDetector > 0 {
-		s += fmt.Sprintf("; %d ran an edited check", c.ChangedDetector)
+		s += fmt.Sprintf("; %d ran a detector digest other than the registered one", c.ChangedDetector)
 	}
 	return s
 }

@@ -386,3 +386,41 @@ func TestFixRetireAsksToCommitAnUncommittedReviewRemoval(t *testing.T) {
 		t.Fatalf("retire after an uncommitted review removal told the reader %q", got)
 	}
 }
+
+// A retired check record whose id now names another script names no remove command:
+// removing that id would remove a check the record never tracked.
+func TestFixRetireLeavesARetargetedCheckAlone(t *testing.T) {
+	root := archiveRepo(t)
+	if _, _, err := checks.Init(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".steer", "checks", "no-count.sh"), []byte("exit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m, err := checks.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Checks = append(m.Checks, checks.Declaration{ID: "no-count", Kind: checks.KindScript, Script: ".steer/checks/no-count.sh"})
+	if err := checks.Save(root, m); err != nil {
+		t.Fatal(err)
+	}
+	identity, err := checks.RepoIdentity(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stateDir := gateConfig().StateDir
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	record := `{"id":"count-fix","tier":"check","check_id":"no-count","check_kind":"script",` +
+		`"check_target":".steer/checks/other.sh","check_digest":"deadbeef","check_repo":"` + identity + `"}` + "\n"
+	if err := os.WriteFile(mine.InterventionsPath(stateDir), []byte(record), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	printRetiredFix(&out, stateDir, "count-fix")
+	if got := out.String(); strings.Contains(got, "steer check remove") || !strings.Contains(got, "another check") {
+		t.Fatalf("retire of a retargeted check printed %q; want no remove command", got)
+	}
+}

@@ -1407,7 +1407,7 @@ func writeCheckActivity(w io.Writer, c CheckActivity) {
 		fmt.Fprintf(w, "    checks: %d executions of %s on this machine, counted over %s (class-scoped=%t)\n",
 			c.Executions, c.CheckID, c.Scope, c.ClassScoped)
 		if c.Executions > 0 {
-			fmt.Fprintf(w, "      outcomes: %s; %d blocked a turn; %d ran a changed detector\n",
+			fmt.Fprintf(w, "      outcomes: %s; %d blocked a turn; %d ran a detector digest other than the registered one\n",
 				OutcomeCounts(c.Outcomes), c.Blocked, c.ChangedDetector)
 		}
 	}

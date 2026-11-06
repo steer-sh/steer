@@ -140,6 +140,7 @@ func Bind(tierValue, root, checkID string, scopeHarness []harness.ID) (map[strin
 	return map[string]any{
 		mine.CheckIDKey:      decl.ID,
 		mine.CheckKindKey:    decl.Kind,
+		mine.CheckTargetKey:  decl.Target(),
 		mine.CheckRepoKey:    identity,
 		mine.CheckDigestKey:  det.Digest,
 		mine.CheckReceiptKey: fresh.Receipt.RunID,
