@@ -55,7 +55,11 @@ func ExtensionsDir(scope, cwd string) (string, error) {
 func InstructionFile(scope, cwd string) (string, error) {
 	entry, _ := harness.Get(harness.Pi)
 	if scope == harness.ProjectScope {
-		return filepath.Join(cwd, entry.InstructionFile), nil
+		root, err := steerpath.ProjectConfigDir(cwd)
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(root, entry.InstructionFile), nil
 	}
 	dir, err := entry.ConfigDir(scope, cwd)
 	if err != nil {

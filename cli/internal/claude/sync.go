@@ -9,6 +9,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/hookstore"
 	"github.com/steer-sh/steer-cli/internal/instructions"
+	"github.com/steer-sh/steer-cli/internal/steerpath"
 )
 
 // ManifestRules returns the rules the manifest names, ordered by the id that
@@ -278,15 +279,36 @@ type masterCommandStaleReader interface {
 }
 
 // SamePath reports whether two master paths name one file. A project path is
-// relative to the harness config that carries it, and a caller reads that config
-// at the working directory, so both resolve against the working directory.
+// relative to the harness config that carries it, which sits at the project root,
+// so a relative path resolves there and an absolute one stands as written.
 func SamePath(a, b string) bool {
 	if a == "" || b == "" {
 		return false
 	}
-	absA, errA := filepath.Abs(filepath.FromSlash(a))
-	absB, errB := filepath.Abs(filepath.FromSlash(b))
+	base, err := steerpath.ProjectConfigDir("")
+	if err != nil {
+		return false
+	}
+	absA, errA := masterFile(base, a)
+	absB, errB := masterFile(base, b)
 	return errA == nil && errB == nil && absA == absB
+}
+
+// masterFile is path absolute, relative to base when it is not already, with its
+// symlinks resolved when it exists.
+func masterFile(base, path string) (string, error) {
+	path = filepath.FromSlash(path)
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(base, path)
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		return resolved, nil
+	}
+	return abs, nil
 }
 
 // masterSourcesPrefix opens the object in which a generated master carries each

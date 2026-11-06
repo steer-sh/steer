@@ -112,13 +112,16 @@ func MasterArming(scope, cwd string) Arming {
 }
 
 // InstructionFile names the AGENTS.md this scope's rules are written to. Project
-// scope resolves against the working directory, which the guard store no longer
-// does: the store anchors at the repository root.
+// scope resolves at the project root of cwd, beside the guard store.
 func InstructionFile(scope, cwd string) (string, error) {
 	entry, _ := harness.Get(harness.Codex)
 	switch strings.ToLower(strings.TrimSpace(scope)) {
 	case "project":
-		return filepath.Join(cwd, entry.InstructionFile), nil
+		root, err := steerpath.ProjectConfigDir(cwd)
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(root, entry.InstructionFile), nil
 	case "global":
 		home, err := codexHome()
 		if err != nil {
@@ -131,9 +134,8 @@ func InstructionFile(scope, cwd string) (string, error) {
 }
 
 // Registrar adapts Codex to the guard lifecycle: hooks.json for the master hook,
-// AGENTS.md for the rules. Project paths resolve against the working directory;
-// the guard store resolves against the repository root, so the two differ when a
-// command runs from a subdirectory.
+// AGENTS.md for the rules. Project paths resolve at the working directory's
+// project root, as the guard store does.
 type Registrar struct{}
 
 func (Registrar) Harness() harness.Harness {

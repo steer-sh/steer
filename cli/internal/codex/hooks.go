@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/steer-sh/steer-cli/internal/steerpath"
 )
 
 const (
@@ -141,7 +143,11 @@ func hooksPath(scope, cwd string) (string, error) {
 	if scope != "project" {
 		return "", fmt.Errorf("invalid scope %q", scope)
 	}
-	return filepath.Join(cwd, ".codex", "hooks.json"), nil
+	root, err := steerpath.ProjectConfigDir(cwd)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, ".codex", "hooks.json"), nil
 }
 
 func codexHome() (string, error) {

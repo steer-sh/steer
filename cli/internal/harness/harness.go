@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/steer-sh/steer-cli/internal/steerpath"
 )
 
 type ID string
@@ -241,12 +243,16 @@ func Detect() ID {
 	return found
 }
 
-// ConfigDir resolves this harness's config directory for a scope. cwd is the
-// repository root and is read for project scope only.
+// ConfigDir resolves this harness's config directory for a scope. Under project
+// scope it sits at the project root of cwd (steerpath.ProjectConfigDir).
 func (h Harness) ConfigDir(scope, cwd string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(scope)) {
 	case ProjectScope:
-		return filepath.Join(cwd, h.ConfigDirName), nil
+		root, err := steerpath.ProjectConfigDir(cwd)
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(root, h.ConfigDirName), nil
 	case GlobalScope:
 		if h.HomeEnv != "" {
 			if configured := strings.TrimSpace(os.Getenv(h.HomeEnv)); configured != "" {

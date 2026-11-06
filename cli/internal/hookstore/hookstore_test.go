@@ -413,8 +413,8 @@ func TestPrepareFromASubdirectoryWritesTheRepositorysStore(t *testing.T) {
 }
 
 // A registration must resolve against the directory holding the harness config,
-// which every harness still writes at the working directory. From the repository
-// root that is the store's own path; from a subdirectory it climbs to it.
+// which sits at the repository root: from a subdirectory the registration is the
+// one the root's config carries, and it names the store's master from there.
 func TestMasterRegistrationResolvesFromTheDirectoryItIsWrittenIn(t *testing.T) {
 	root, sub := repoWithSub(t)
 	wd, err := os.Getwd()
@@ -423,6 +423,7 @@ func TestMasterRegistrationResolvesFromTheDirectoryItIsWrittenIn(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(wd) })
 
+	want := filepath.Join(".steer", "hooks", MasterName)
 	if err := os.Chdir(root); err != nil {
 		t.Fatal(err)
 	}
@@ -430,7 +431,7 @@ func TestMasterRegistrationResolvesFromTheDirectoryItIsWrittenIn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := filepath.Join(".steer", "hooks", MasterName); fromRoot != want {
+	if fromRoot != want {
 		t.Fatalf("MasterRegistration at the root = %q; want %q", fromRoot, want)
 	}
 
@@ -441,20 +442,20 @@ func TestMasterRegistrationResolvesFromTheDirectoryItIsWrittenIn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := filepath.Join("..", ".steer", "hooks", MasterName); fromSub != want {
-		t.Fatalf("MasterRegistration in a subdirectory = %q; want %q", fromSub, want)
+	if fromSub != want {
+		t.Fatalf("MasterRegistration in a subdirectory = %q; want the root's %q", fromSub, want)
 	}
-	// Both name the one master the store holds.
+	// It names the one master the store holds, resolved from the root.
 	store, err := MasterPath("project")
 	if err != nil {
 		t.Fatal(err)
 	}
-	abs, err := filepath.Abs(fromSub)
+	physicalRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if abs != store {
-		t.Errorf("the registration resolves to %q; want the store's master %q", abs, store)
+	if got := filepath.Join(physicalRoot, fromSub); got != store {
+		t.Errorf("the registration resolves to %q; want the store's master %q", got, store)
 	}
 
 	global, err := MasterRegistration("global", "")

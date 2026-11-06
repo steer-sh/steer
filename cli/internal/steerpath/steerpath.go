@@ -156,6 +156,30 @@ func ProjectRootOf(dir string) (string, error) {
 	return root, nil
 }
 
+// ProjectConfigDir returns the directory a project's harness configuration and
+// instruction documents sit in for dir, which is "" for the working directory:
+// the project root ProjectRootOf names, so a command run from a subdirectory
+// reads and writes the repository's own files rather than creating copies there.
+// A dir that is its own project root comes back as given, "." for "", so a path
+// built on it keeps the spelling the caller used.
+func ProjectConfigDir(dir string) (string, error) {
+	root, err := ProjectRootOf(dir)
+	if err != nil {
+		return "", err
+	}
+	physical, err := PhysicalDir(dir)
+	if err != nil {
+		return "", err
+	}
+	if root != physical {
+		return root, nil
+	}
+	if dir == "" {
+		return ".", nil
+	}
+	return dir, nil
+}
+
 // LinkBound returns the directory a project file Steer writes must resolve
 // inside under scope. Under project scope it is the working directory's project
 // root, since the repository carries any link on the way to the file. Under

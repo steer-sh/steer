@@ -305,7 +305,11 @@ func GetClaudeDir(scope string) (string, error) {
 		return filepath.Join(home, ClaudeDirName), nil
 	}
 
-	return ClaudeDirName, nil
+	root, err := steerpath.ProjectConfigDir("")
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, ClaudeDirName), nil
 }
 
 // GetHooksDir returns the scope-specific guard directory. The store is neutral
@@ -351,7 +355,7 @@ func GetMasterHookCommand(scope string) (string, error) {
 		return "", err
 	}
 
-	// Claude Code reads a project settings.json at the working directory.
+	// The project settings.json sits at the project root.
 	masterPath, err := hookstore.MasterRegistration(scope, "")
 	if err != nil {
 		return "", err
@@ -395,7 +399,11 @@ func GetClaudeMDFile(scope string) (string, error) {
 		return filepath.Join(claudeDir, ClaudeMDName), nil
 	}
 
-	return ClaudeMDName, nil
+	root, err := steerpath.ProjectConfigDir("")
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, ClaudeMDName), nil
 }
 
 // EnsureDirectories creates the guard directory for the scope and moves a legacy
