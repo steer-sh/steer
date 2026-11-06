@@ -82,10 +82,10 @@ func (l *Ledger) Errors() []string { return l.errs }
 //
 // A lock it cannot take does not stop the append: the row rides out noting that, since
 // a commit cannot wait on the lock and a missing row is the worse record. A rewrite that
-// replaced the shard after the write either carried the row or did not; Log waits for
-// the lock again and writes the row only if the current shard lacks its row_id, which a
-// rewrite keeps when it stamps the row. If that wait also runs out, the row may land
-// twice.
+// replaced the shard after the write either carried the row or did not; Log takes
+// LockSwap, which the rewrite holds from its rename through its carry, and writes the
+// row only if the current shard lacks its row_id, which a rewrite keeps when it stamps
+// the row. If that wait also runs out, the row may land twice.
 func (l *Ledger) Log(row Row) error {
 	release, lockErr := LockLog(l.cfg)
 	if lockErr != nil {
@@ -115,12 +115,16 @@ func (l *Ledger) Log(row Row) error {
 	if err != nil || current {
 		return err
 	}
-	// A rewrite holds the lock until it has carried what landed on the shard it
-	// replaced, so once the lock is held the current shard shows whether it has the row.
+	// A rewrite holds LockSwap until it has carried what landed on the shard it
+	// replaced, so once that lock is held the current shard shows whether it has the
+	// row. A rewrite from before LockSwap carries under LockLog alone.
 	if lockErr != nil {
 		if release, err := LockLog(l.cfg); err == nil {
 			defer release()
 		}
+	}
+	if release, err := LockSwap(l.cfg); err == nil {
+		defer release()
 	}
 	mark := line
 	if id, ok := row["row_id"].(string); ok && id != "" {
