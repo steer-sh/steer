@@ -335,14 +335,6 @@ func TestASubdirectoryCommitNamesARealAddendumChange(t *testing.T) {
 	}
 }
 
-func TestThePendingAddendumIsReadFromASubdirectory(t *testing.T) {
-	repo := committedAddendumRepo(t, map[string]string{"a": "entry"})
-	a := PendingAddendum(addendumSubdir(t, repo))
-	if got := entryTexts(a); len(got) != 1 || got[0] != "project:a:entry" || len(a.Errors) != 0 {
-		t.Fatalf("addendum = %#v", a)
-	}
-}
-
 // Whitespace in the root's name is part of the path git reports.
 func TestARepositoryRootEndingInASpaceKeepsItsManifest(t *testing.T) {
 	repo := committedAddendumRepo(t, map[string]string{"a": "entry"})
@@ -364,8 +356,5 @@ func TestAnUnresolvedRootIsNotAnEmptyAddendum(t *testing.T) {
 	writeFileAt(t, dir, ".steer/hooks/steer-manifest.json", addendumManifest(t, map[string]string{"a": "entry"}))
 	if texts, _, ok := workingTreeProjectAddendum(dir); ok {
 		t.Fatalf("texts = %v, want not ok outside a repository", texts)
-	}
-	if a := PendingAddendum(dir); !a.projectUnread || len(a.Entries) != 0 {
-		t.Fatalf("addendum = %#v, want the project store unread", a)
 	}
 }

@@ -163,7 +163,7 @@ def bounded(args, cwd, deadline, stdin=None, fds=(), cancel=None):
     except BaseException:
         try:
             os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
+        except (ProcessLookupError, PermissionError):
             pass
         process.communicate()
         raise
