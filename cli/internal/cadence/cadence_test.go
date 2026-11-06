@@ -334,3 +334,37 @@ func TestSortCandidatesGroupsByCorpus(t *testing.T) {
 		t.Errorf("review findings order first: got %q first", cs[0].Corpus)
 	}
 }
+
+// A refresh that skips the transcript scan reports no transcript candidate even
+// when a recent correction is on disk; the default refresh reports it.
+func TestRefreshSkipTranscriptScanReadsNoTranscript(t *testing.T) {
+	home := isolate(t)
+	project := filepath.Join(home, ".claude", "projects", "-t-proj")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	row := fmt.Sprintf(`{"type":"user","sessionId":"s1","timestamp":%q,"message":{"content":%q}}`+"\n",
+		time.Now().Add(-time.Hour).UTC().Format(time.RFC3339), "don't use var")
+	if err := os.WriteFile(filepath.Join(project, "s1.jsonl"), []byte(row), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	transcriptCandidates := func(skip bool) int {
+		q, err := Refresh(Options{GateStateDir: t.TempDir(), WindowDays: 7, SkipTranscriptScan: skip})
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := 0
+		for _, c := range q.Candidates {
+			if c.Corpus == CorpusTranscript {
+				n++
+			}
+		}
+		return n
+	}
+	if got := transcriptCandidates(false); got != 1 {
+		t.Fatalf("the default refresh must report the planted correction, got %d candidates", got)
+	}
+	if got := transcriptCandidates(true); got != 0 {
+		t.Fatalf("a skipped scan must report no transcript candidate, got %d", got)
+	}
+}

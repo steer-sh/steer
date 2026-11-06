@@ -61,10 +61,12 @@ a problem already decided; 'steer fix score --json' carries each fix's detail.`,
 			// the scope it lists, reads one.
 			InventoryScopes: []string{claude.ProjectScope, claude.GlobalScope},
 			ScanScope:       scope,
-			RepoRoot:        root,
-			ReviewerProbe:   reviewerProbe(cfg, resolveErr),
-			Addendum:        gateAddendum(root),
-			PreCommit:       statusPreCommit(root),
+			// The text view prints only HealthOf, which reads no candidate.
+			SkipTranscriptScan: !statusJSON,
+			RepoRoot:           root,
+			ReviewerProbe:      reviewerProbe(cfg, resolveErr),
+			Addendum:           gateAddendum(root),
+			PreCommit:          statusPreCommit(root),
 			Evidence: evidence.Gather(evidence.Options{
 				GateStateDir: cfg.StateDir,
 				ScanScope:    scope,

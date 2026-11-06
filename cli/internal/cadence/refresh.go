@@ -8,6 +8,7 @@ package cadence
 
 import (
 	"encoding/json"
+	"errors"
 	"sort"
 
 	"github.com/steer-sh/steer-cli/internal/gate"
@@ -135,6 +136,10 @@ type Options struct {
 	// ScanScope selects which sessions the transcript scan reads. The zero
 	// value reads every project.
 	ScanScope report.Scope
+	// SkipTranscriptScan leaves the transcript scan out: the queue then carries
+	// no transcript candidate, and the transcript corpus size counts only
+	// Evidence.Sessions.
+	SkipTranscriptScan bool
 	// RepoRoot is the Git root whose check tier the queue reports, "" outside a
 	// repository. The caller resolves it; Refresh runs no git command.
 	RepoRoot string
@@ -226,7 +231,11 @@ func Refresh(opts Options) (*Queue, error) {
 	}
 
 	// --- transcript-friction candidate pointer: ungrouped correction clusters --
-	digest, derr := report.Generate(opts.WindowDays, opts.ScanScope)
+	var digest *report.Digest
+	derr := errTranscriptScanSkipped
+	if !opts.SkipTranscriptScan {
+		digest, derr = report.Generate(opts.WindowDays, opts.ScanScope)
+	}
 	if derr == nil && len(digest.Signals.UserCorrections) > 0 {
 		q.Candidates = append(q.Candidates, transcriptCandidate(digest.Signals.UserCorrections))
 	}
@@ -327,6 +336,8 @@ func transcriptCandidate(clusters []*report.Cluster) Candidate {
 	}
 	return c
 }
+
+var errTranscriptScanSkipped = errors.New("transcript scan skipped")
 
 func sessionsScanned(d *report.Digest, err error) int {
 	if err != nil || d == nil {

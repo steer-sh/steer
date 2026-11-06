@@ -94,6 +94,9 @@ type Options struct {
 	// ScanScope selects which sessions the transcript scan reads. The zero
 	// value reads every project.
 	ScanScope report.Scope
+	// SkipTranscriptScan is cadence.Options.SkipTranscriptScan, for a reader that
+	// shows no attention candidate.
+	SkipTranscriptScan bool
 	// RepoRoot is the Git root whose check tier the snapshot reports, "" outside
 	// a repository. The caller resolves it; Collect runs no git command.
 	RepoRoot string
@@ -521,8 +524,10 @@ func Collect(opts Options) (*SystemStatus, error) {
 		WindowDays:   opts.WindowDays,
 		ScanScope:    opts.ScanScope,
 		RepoRoot:     opts.RepoRoot,
-		Addendum:     opts.Addendum,
-		Evidence:     ev,
+
+		SkipTranscriptScan: opts.SkipTranscriptScan,
+		Addendum:           opts.Addendum,
+		Evidence:           ev,
 	})
 	if err == nil && q != nil {
 		s.Attention = AttentionQueue{
