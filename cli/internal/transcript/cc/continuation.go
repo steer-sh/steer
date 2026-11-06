@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/steer-sh/steer-cli/internal/harness"
@@ -21,6 +22,8 @@ type walkRow struct {
 	ParentUUID string `json:"parentUuid"`
 	// PromptID names the turn a user entry belongs to.
 	PromptID string `json:"promptId"`
+	// AgentID names the subagent whose stream a sidechain entry belongs to.
+	AgentID string `json:"agentId"`
 	// DenialKind is what the harness called the denial. It reads
 	// "permission-rule" for a hook block and names no hook.
 	DenialKind string `json:"toolDenialKind"`
@@ -30,8 +33,28 @@ type walkRow struct {
 //
 // It finds the tool_result carrying toolUseID and walks parentUuid forward from
 // it, so the granularity is JoinCall. The reading stops at the person's next
-// turn, at the end of the transcript, or at the budget, and says which.
+// turn, at the end of the transcript, or at the budget, and says which. It reads
+// the root conversation only; a subagent's call is read by SubagentContinuation.
 func Continuation(path, toolUseID string, budget transcript.ContinuationBudget) (transcript.Continuation, error) {
+	return continuation(path, toolUseID, "", budget)
+}
+
+// SubagentContinuation is Continuation over one subagent's own stream: path is
+// the agent's file (SubagentTranscript), and only sidechain entries of agentID
+// are read.
+func SubagentContinuation(path, agentID, toolUseID string, budget transcript.ContinuationBudget) (transcript.Continuation, error) {
+	return continuation(path, toolUseID, agentID, budget)
+}
+
+// SubagentTranscript is the file Claude Code writes one subagent's stream to,
+// beside the session transcript at sessionPath.
+func SubagentTranscript(sessionPath, agentID string) string {
+	return filepath.Join(strings.TrimSuffix(sessionPath, ".jsonl"), "subagents", "agent-"+agentID+".jsonl")
+}
+
+// continuation reads the stream agentID names, the root conversation when it
+// is empty.
+func continuation(path, toolUseID, agentID string, budget transcript.ContinuationBudget) (transcript.Continuation, error) {
 	budget = budget.WithDefaults()
 	out := transcript.Continuation{
 		Harness:     harness.ClaudeCode,
@@ -53,7 +76,7 @@ func Continuation(path, toolUseID string, budget transcript.ContinuationBudget) 
 	defer file.Close()
 
 	reader := bufio.NewReaderSize(file, 256*1024)
-	walk := walker{toolUseID: toolUseID, budget: budget}
+	walk := walker{toolUseID: toolUseID, agentID: agentID, budget: budget}
 	for {
 		line, readErr := reader.ReadBytes('\n')
 		if len(line) > 0 {
@@ -84,8 +107,11 @@ func Continuation(path, toolUseID string, budget transcript.ContinuationBudget) 
 // walks away from it.
 type walker struct {
 	toolUseID string
-	budget    transcript.ContinuationBudget
-	found     bool
+	// agentID selects the stream: a subagent's sidechain entries, or the root
+	// conversation's when it is empty.
+	agentID string
+	budget  transcript.ContinuationBudget
+	found   bool
 	// done reports that the walk stopped emitting. The scan runs on to the end
 	// of the file, because a rewind appends its branch after the entries the
 	// walk already read.
@@ -111,7 +137,7 @@ func (w *walker) consider(r walkRow, out *transcript.Continuation) {
 		w.done = w.locate(r, out)
 		return
 	}
-	if r.IsSidechain || !w.member[r.ParentUUID] {
+	if !w.inStream(r) || !w.member[r.ParentUUID] {
 		return
 	}
 	speaks := speaks(r)
@@ -127,6 +153,16 @@ func (w *walker) consider(r walkRow, out *transcript.Continuation) {
 		w.spoken[r.ParentUUID] = true
 	}
 	w.done = w.emit(r, out)
+}
+
+// inStream reports whether an entry belongs to the stream the walk reads. A
+// sidechain entry that names no agent is taken as the agent's, since the
+// subagent file holds that agent's entries alone.
+func (w *walker) inStream(r walkRow) bool {
+	if w.agentID == "" {
+		return !r.IsSidechain
+	}
+	return r.IsSidechain && (r.AgentID == "" || r.AgentID == w.agentID)
 }
 
 // speaks reports an entry that continues the conversation: an assistant entry
@@ -146,7 +182,7 @@ func speaks(r walkRow) bool {
 // locate finds the two anchors: the entry holding the blocked call, and the
 // entry recording the block. The second is the walk's root.
 func (w *walker) locate(r walkRow, out *transcript.Continuation) bool {
-	if r.IsSidechain || r.Message == nil {
+	if !w.inStream(r) || r.Message == nil {
 		return false
 	}
 	blocks, ok := decodeBlocks(r.Message.Content)

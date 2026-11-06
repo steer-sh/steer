@@ -828,7 +828,11 @@ opened. Claude Code reaches the blocked call: `cc.Continuation` finds the
 `tool_result` carrying `tool_use_id` and walks `parentUuid` forward over every
 descendant in file order, so parallel tool results and attachments stay on it. A
 second assistant or human child of one entry is a rewind branch, which it counts
-and does not follow. Codex and Pi have no lookup, and
+and does not follow. A row carrying `agent_id` was recorded inside a subagent,
+whose entries live in the agent's own file (`cc.SubagentTranscript`) rather than
+the session transcript the row names; `Reach` selects that file and the walk reads
+only that agent's sidechain entries. When the agent file is absent it reads the
+session file, and a reading that reaches nothing there names the absent file. Codex and Pi have no lookup, and
 each says so in its own terms rather than reading as missing evidence.
 
 `internal/adjudication/` holds one append-only receipt per judged block. A

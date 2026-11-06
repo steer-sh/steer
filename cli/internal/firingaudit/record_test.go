@@ -2,6 +2,7 @@ package firingaudit
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -338,5 +339,80 @@ func TestRecordersRefuseANegativeInspectedExtent(t *testing.T) {
 	}
 	if stored, _ := adjudication.Load(dir); len(stored) != 0 {
 		t.Errorf("the stream holds %+v", stored)
+	}
+}
+
+// subagentRow is a Claude Code row recorded inside subagent agent: its
+// transcript path names the session file, which holds no result for the call.
+func subagentRow(t *testing.T, agent string) (Row, string) {
+	t.Helper()
+	row := ccRow(t, "s", "2026-09-20T01:00:00Z")
+	session := filepath.Join(t.TempDir(), "session.jsonl")
+	if err := os.WriteFile(session, []byte(`{"uuid":"spawn","parentUuid":"","type":"assistant","message":{"content":[{"type":"text","text":"starting an agent"}]}}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	row.Locators["transcript_path"] = session
+	row.Locators["agent_id"] = agent
+	return row, session
+}
+
+func TestContinuationReadsASubagentsOwnTranscript(t *testing.T) {
+	row, session := subagentRow(t, "a1")
+	agentFile := filepath.Join(strings.TrimSuffix(session, ".jsonl"), "subagents", "agent-a1.jsonl")
+	if err := os.MkdirAll(filepath.Dir(agentFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.ReadFile(transcriptFor(t, "toolu_s"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lines []string
+	for _, line := range strings.Split(strings.TrimSpace(string(root)), "\n") {
+		lines = append(lines, strings.Replace(line, "{", `{"isSidechain":true,"agentId":"a1",`, 1))
+	}
+	if err := os.WriteFile(agentFile, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if reach := row.Reach(); reach.Granularity != transcript.JoinCall || reach.TranscriptPath != agentFile {
+		t.Errorf("reach = %+v; want the call joined in the agent's file", reach)
+	}
+	got, err := row.Continuation(transcript.ContinuationBudget{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Granularity != transcript.JoinCall || len(got.Steps) != 2 {
+		t.Fatalf("continuation = %+v; want the denial and the step after it", got)
+	}
+	if got.Anchors.TranscriptPath != agentFile || got.Anchors.DenialEntry != "denial" {
+		t.Errorf("anchors = %+v; want the agent file read named", got.Anchors)
+	}
+}
+
+func TestContinuationSaysASubagentsTranscriptIsAbsent(t *testing.T) {
+	row, session := subagentRow(t, "a1")
+	got, err := row.Continuation(transcript.ContinuationBudget{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Reached() || got.Anchors.TranscriptPath != session {
+		t.Errorf("continuation = %+v; want the session file read and nothing reached", got)
+	}
+	if !strings.Contains(got.Reason, "agent-a1.jsonl is absent") {
+		t.Errorf("reason = %q; want it to name the absent agent file", got.Reason)
+	}
+}
+
+func TestReachRefusesAnUnreadableSubagentTranscript(t *testing.T) {
+	row, session := subagentRow(t, "a1")
+	// A file where the directory belongs makes the agent path unstattable
+	// without being absent.
+	if err := os.WriteFile(strings.TrimSuffix(session, ".jsonl"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := row.Reach()
+	if got.Granularity != transcript.JoinUnavailable || !strings.Contains(got.Reason, "cannot be read") ||
+		got.AgentID != "a1" {
+		t.Errorf("reach = %+v; want unavailable naming the unreadable agent file", got)
 	}
 }

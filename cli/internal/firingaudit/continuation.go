@@ -1,7 +1,9 @@
 package firingaudit
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 
 	"github.com/steer-sh/steer-cli/internal/checks"
@@ -14,6 +16,7 @@ import (
 // The locator keys the masters write. A key's absence and its empty value are
 // different facts, so a reader tests presence.
 const (
+	locatorAgentID        = "agent_id"
 	locatorToolUseID      = "tool_use_id"
 	locatorTranscriptPath = "transcript_path"
 	locatorTurnID         = "turn_id"
@@ -29,8 +32,15 @@ type Reach struct {
 	TranscriptPath string
 	CallID         string
 	TurnID         string
+	// AgentID names the Claude Code subagent whose own transcript
+	// TranscriptPath is. It is empty when the lookup reads the session file.
+	AgentID string
 	// Reason says what is missing, when the granularity is JoinUnavailable.
 	Reason string
+	// Fallback says why a subagent's call is sought in the session transcript
+	// rather than the agent's own file. A reading that reaches nothing there
+	// adds it to its reason.
+	Fallback string
 }
 
 // Reach reports whether a continuation can be looked up for this row, and at
@@ -47,14 +57,36 @@ func (r Row) Reach() Reach {
 			return Reach{Granularity: transcript.JoinUnavailable,
 				Reason: "the row carries no call identifier and transcript path"}
 		}
+		// A subagent's calls and their results live in the agent's own file,
+		// while the row names the session transcript.
+		var fallback string
+		if agent := r.Locators[locatorAgentID]; agent != "" {
+			sub := cc.SubagentTranscript(path, agent)
+			_, err := os.Stat(sub)
+			if err == nil {
+				return Reach{Granularity: transcript.JoinCall,
+					TranscriptPath: sub, CallID: id, AgentID: agent}
+			}
+			if !errors.Is(err, fs.ErrNotExist) {
+				// The agent's file may hold the call, so the session file
+				// stands in for nothing.
+				return Reach{Granularity: transcript.JoinUnavailable,
+					TranscriptPath: sub, CallID: id, AgentID: agent,
+					Reason: fmt.Sprintf("the subagent %s transcript %s cannot be read: %v", agent, sub, err)}
+			}
+			fallback = fmt.Sprintf("the subagent %s transcript %s is absent", agent, sub)
+		}
 		if _, err := os.Stat(path); err != nil {
 			// The locators stay on the reach, so a receipt records where the
 			// continuation was sought and not found.
+			reason := fmt.Sprintf("the transcript %s is gone", path)
+			if fallback != "" {
+				reason += "; " + fallback
+			}
 			return Reach{Granularity: transcript.JoinUnavailable,
-				TranscriptPath: path, CallID: id,
-				Reason: fmt.Sprintf("the transcript %s is gone", path)}
+				TranscriptPath: path, CallID: id, Reason: reason}
 		}
-		return Reach{Granularity: transcript.JoinCall, TranscriptPath: path, CallID: id}
+		return Reach{Granularity: transcript.JoinCall, TranscriptPath: path, CallID: id, Fallback: fallback}
 	case harness.Codex:
 		// A blocked Codex call emits no rollout item, so its own call
 		// identifier reaches nothing and the turn is the join. The row's
@@ -85,7 +117,11 @@ func (r Row) Reach() Reach {
 // A row whose Reach is JoinUnavailable yields that granularity and its reason
 // without opening anything, so an unreachable continuation costs no read.
 func (r Row) Continuation(budget transcript.ContinuationBudget) (transcript.Continuation, error) {
-	reach := r.Reach()
+	return r.continuationAt(r.Reach(), budget)
+}
+
+// continuationAt reads the continuation reach selected.
+func (r Row) continuationAt(reach Reach, budget transcript.ContinuationBudget) (transcript.Continuation, error) {
 	out := transcript.Continuation{
 		Harness:     harness.ID(r.Harness),
 		Granularity: transcript.JoinUnavailable,
@@ -101,7 +137,14 @@ func (r Row) Continuation(budget transcript.ContinuationBudget) (transcript.Cont
 	}
 	switch harness.ID(r.Harness) {
 	case harness.ClaudeCode:
-		return cc.Continuation(reach.TranscriptPath, reach.CallID, budget)
+		if reach.AgentID != "" {
+			return cc.SubagentContinuation(reach.TranscriptPath, reach.AgentID, reach.CallID, budget)
+		}
+		got, err := cc.Continuation(reach.TranscriptPath, reach.CallID, budget)
+		if err == nil && !got.Reached() && reach.Fallback != "" {
+			got.Reason += "; " + reach.Fallback
+		}
+		return got, err
 	case harness.Codex:
 		return codex.Continuation(reach.TranscriptPath, reach.TurnID, budget)
 	}
@@ -116,11 +159,12 @@ func (r Row) Continuation(budget transcript.ContinuationBudget) (transcript.Cont
 // a transcript that will not open bounds what can be said about the task after
 // the block and settles nothing about the block itself.
 func (r Row) continuationOrUnavailable(budget transcript.ContinuationBudget) transcript.Continuation {
-	out, err := r.Continuation(budget)
+	// One reach serves both, so a failure is anchored at the file that failed.
+	reach := r.Reach()
+	out, err := r.continuationAt(reach, budget)
 	if err == nil {
 		return out
 	}
-	reach := r.Reach()
 	return transcript.Continuation{
 		Harness:     harness.ID(r.Harness),
 		Granularity: transcript.JoinUnavailable,
