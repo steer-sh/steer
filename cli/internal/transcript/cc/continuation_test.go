@@ -289,3 +289,61 @@ func TestContinuationSurvivesAnUnparsableLine(t *testing.T) {
 		t.Errorf("steps = %+v; want the walk to survive the bad line", c.Steps)
 	}
 }
+
+// sidechain marks an entry as one subagent's, the way Claude Code writes every
+// line of an agent's own file.
+func sidechain(agent, line string) string {
+	return strings.Replace(line, "{", fmt.Sprintf(`{"isSidechain":true,"agentId":%q,`, agent), 1)
+}
+
+func TestSubagentContinuationWalksTheAgentStream(t *testing.T) {
+	path := writeWalk(t,
+		sidechain("a1", entry("prompt", "", humanTurn("do the task"))),
+		sidechain("a1", entry("call", "prompt", assistantCall("toolu_blocked", "python x.py"))),
+		sidechain("a1", entry("denial", "call", toolResult("toolu_blocked", "Blocked by hook", true))),
+		sidechain("a1", entry("say", "denial", assistantText("I will use python3."))),
+		// Another agent's entry and a root entry never join the walk, even
+		// under a member's uuid.
+		sidechain("a2", entry("other", "say", assistantText("another agent"))),
+		entry("root", "say", assistantText("the root conversation")),
+		sidechain("a1", entry("retry", "say", assistantCall("toolu_retry", "python3 x.py"))),
+		sidechain("a1", entry("rewound", "denial", assistantText("an abandoned branch"))),
+		sidechain("a1", entry("retried", "retry", toolResult("toolu_retry", "done", false))),
+	)
+
+	c, err := SubagentContinuation(path, "a1", "toolu_blocked", transcript.ContinuationBudget{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Granularity != transcript.JoinCall {
+		t.Fatalf("granularity = %q (%s); want %q", c.Granularity, c.Reason, transcript.JoinCall)
+	}
+	if c.Anchors.TranscriptPath != path || c.Anchors.BlockedCallEntry != "call" || c.Anchors.DenialEntry != "denial" {
+		t.Errorf("anchors = %+v; want the agent file, its blocked call and denial", c.Anchors)
+	}
+	want := []string{"denial", "say", "retry", "retried"}
+	var got []string
+	for _, s := range c.Steps {
+		got = append(got, s.Entry)
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("entries = %v; want %v", got, want)
+	}
+	if c.BranchPoints != 1 {
+		t.Errorf("branch points = %d; want the rewound branch counted", c.BranchPoints)
+	}
+	if c.EndReason != transcript.EndTranscript {
+		t.Errorf("end reason = %q; want %q", c.EndReason, transcript.EndTranscript)
+	}
+
+	if root, err := Continuation(path, "toolu_blocked", transcript.ContinuationBudget{}); err != nil || root.Reached() {
+		t.Errorf("the root reading of an agent file = %+v (%v); want it unreached", root, err)
+	}
+}
+
+func TestSubagentTranscriptSitsBesideTheSession(t *testing.T) {
+	got := SubagentTranscript("/p/proj/sess.jsonl", "a1")
+	if want := "/p/proj/sess/subagents/agent-a1.jsonl"; got != want {
+		t.Errorf("subagent transcript = %q; want %q", got, want)
+	}
+}
