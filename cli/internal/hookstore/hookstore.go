@@ -61,9 +61,9 @@ func MasterPathIn(scope, dir string) (string, error) {
 }
 
 // MasterRegistration names the master as a registration must name it: under
-// project scope a path relative to configDir, the directory holding the harness
-// config that carries it, and under global scope the absolute path. configDir is
-// "" for the working directory.
+// project scope a path relative to the project root of configDir, where the
+// harness config that carries it sits (steerpath.ProjectConfigDir), and under
+// global scope the absolute path. configDir is "" for the working directory.
 func MasterRegistration(scope, configDir string) (string, error) {
 	path, err := MasterPathIn(scope, configDir)
 	if err != nil {
@@ -74,7 +74,7 @@ func MasterRegistration(scope, configDir string) (string, error) {
 	}
 	// The store was resolved for configDir's own repository, so both sides are
 	// the physical path and Rel finds the common parent.
-	anchor, err := steerpath.PhysicalDir(configDir)
+	anchor, err := steerpath.ProjectRootOf(configDir)
 	if err != nil {
 		return "", err
 	}

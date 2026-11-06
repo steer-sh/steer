@@ -156,6 +156,31 @@ func TestLinkBoundIsTheProjectRootOnlyUnderProjectScope(t *testing.T) {
 	}
 }
 
+// A project's harness files sit at its root: a subdirectory resolves to the root,
+// and a directory that is its own root, in a repository or not, keeps its spelling.
+func TestProjectConfigDirIsTheProjectRoot(t *testing.T) {
+	root, sub := initRepoWithSub(t)
+	if got, err := ProjectConfigDir(sub); err != nil || got != root {
+		t.Errorf("ProjectConfigDir(subdirectory) = %q, %v; want the root %q", got, err, root)
+	}
+	t.Chdir(root)
+	if got, err := ProjectConfigDir(""); err != nil || got != "." {
+		t.Errorf("ProjectConfigDir(\"\") at the root = %q, %v; want \".\"", got, err)
+	}
+	if got, err := ProjectConfigDir("cli"); err != nil || got != root {
+		t.Errorf("ProjectConfigDir(\"cli\") = %q, %v; want the root %q", got, err, root)
+	}
+	t.Chdir(sub)
+	if got, err := ProjectConfigDir(""); err != nil || got != root {
+		t.Errorf("ProjectConfigDir(\"\") in a subdirectory = %q, %v; want the root %q", got, err, root)
+	}
+
+	outside := t.TempDir()
+	if got, err := ProjectConfigDir(outside); err != nil || got != outside {
+		t.Errorf("ProjectConfigDir outside a repository = %q, %v; want %q as given", got, err, outside)
+	}
+}
+
 // Within places a path by where its links lead, and places a path that does not
 // exist yet by its directory.
 func TestWithinPlacesAPathWhereItsLinksLead(t *testing.T) {

@@ -86,7 +86,12 @@ migration ownership:
   Three forms of that path are distinct. `HooksDir` is the filesystem path.
   `hookstore.MasterRegistration` is what a registration names: relative to the
   directory holding the harness config, because a harness resolves a project
-  registration against that directory. A comparison against a registered value uses
+  registration against that directory. That directory is the project root too:
+  `steerpath.ProjectConfigDir` places every project `.claude`, `.codex`, `.pi` and
+  instruction document there, so a command run from a subdirectory reads and
+  rewrites the root's registrations and never creates a second set beside it.
+  A path the operator types, such as `--target`, still resolves against the working
+  directory. A comparison against a registered value uses
   it on both sides. Claude Code runs a hook in the session's current directory, which
   a `cd` moves, so its command prefixes the path with `$CLAUDE_PROJECT_DIR` and
   `Registrar.RegisteredMasterPath` removes the prefix on read. Each resolver has an `…In`/`…Of` form taking that directory, so

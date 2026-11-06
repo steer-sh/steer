@@ -326,7 +326,9 @@ has no mechanical pass/fail oracle for comprehension.
 - Evidence: `~/.steer/state/<component>/`, resolved through `statestore` with
   legacy-path fallback. Ledgers, snapshots and logs are machine-local and partial.
 - Guard/rule stores: `.steer/hooks` and `~/.steer/hooks`, resolved through
-  `hookstore`. Project scope anchors at the repository root, and the filesystem
+  `hookstore`. Project scope anchors at the repository root, as do project harness
+  configs and instruction documents (`steerpath.ProjectConfigDir`); a new project
+  path resolver goes through it. The filesystem
   path, the registration string and the repository-relative path are three
   different forms; see [harnesses and storage](ARCHITECTURE.md#harnesses-and-storage)
   before changing one. A new write into a store goes through `hookstore.WriteFile`,
