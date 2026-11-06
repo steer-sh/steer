@@ -75,7 +75,9 @@ import (
 // without a record. v34 adds the trust states approved, disabled, hooks-off and modified: Codex
 // approval reads the saved hash and the enabled state.
 // v35 adds posture.health: the verdict `steer status` prints, with its issues.
-const StatusVersion = 35
+// v36 adds corpora[].refreshed_at and fix: the transcript candidate reads stored
+// snapshots, and a row with fix has none.
+const StatusVersion = 36
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20
@@ -94,9 +96,6 @@ type Options struct {
 	// ScanScope selects which sessions the transcript scan reads. The zero
 	// value reads every project.
 	ScanScope report.Scope
-	// SkipTranscriptScan is cadence.Options.SkipTranscriptScan, for a reader that
-	// shows no attention candidate.
-	SkipTranscriptScan bool
 	// RepoRoot is the Git root whose check tier the snapshot reports, "" outside
 	// a repository. The caller resolves it; Collect runs no git command.
 	RepoRoot string
@@ -200,6 +199,10 @@ type CorpusRow struct {
 	Present bool   `json:"present"`
 	Size    int    `json:"size"`
 	Path    string `json:"path,omitempty"`
+	// RefreshedAt and Fix are cadence.CorpusStatus's: on the transcript row, when
+	// the snapshot build behind its candidate ran, or the command that builds one.
+	RefreshedAt string `json:"refreshed_at,omitempty"`
+	Fix         string `json:"fix,omitempty"`
 }
 
 // ChainSummary is one commit attempt's review outcome, without the finding text.
@@ -525,9 +528,8 @@ func Collect(opts Options) (*SystemStatus, error) {
 		ScanScope:    opts.ScanScope,
 		RepoRoot:     opts.RepoRoot,
 
-		SkipTranscriptScan: opts.SkipTranscriptScan,
-		Addendum:           opts.Addendum,
-		Evidence:           ev,
+		Addendum: opts.Addendum,
+		Evidence: ev,
 	})
 	if err == nil && q != nil {
 		s.Attention = AttentionQueue{
@@ -1199,6 +1201,9 @@ func corpusRows(rows []cadence.CorpusStatus, opts Options) []CorpusRow {
 			Present: r.Present,
 			Size:    r.Size,
 			Path:    paths[r.Corpus],
+
+			RefreshedAt: r.RefreshedAt,
+			Fix:         r.Fix,
 		})
 	}
 	return out

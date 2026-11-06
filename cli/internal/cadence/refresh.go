@@ -8,12 +8,14 @@ package cadence
 
 import (
 	"encoding/json"
-	"errors"
 	"sort"
+	"strconv"
+	"time"
 
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
 	"github.com/steer-sh/steer-cli/internal/report"
+	"github.com/steer-sh/steer-cli/internal/sessions"
 )
 
 // QueueVersion is the schema version of the queue file the skill reads. v6 adds
@@ -26,8 +28,14 @@ import (
 // the per-cluster transcript candidates with one pointer row. v13 queues no record
 // for a ledger its resolver owes or closed as a miss. v14 queues no record for an
 // unknown scope or a session with no project. v15 carries scope.repo_root, the
-// exact repository root a v3 scope binds.
-const QueueVersion = 15
+// exact repository root a v3 scope binds. v16 reads the transcript candidate from
+// this host's session snapshots and adds refreshed_at and fix to the transcript
+// corpus row.
+const QueueVersion = 16
+
+// DefaultWindowDays is the transcript look-back a refresh and a status read use
+// when no --days is given.
+const DefaultWindowDays = 30
 
 // maxCandidateExamples bounds the snippets a pointer row carries. The row exists
 // to say how big the ungrouped pile is; the examples show its shape, and the
@@ -111,6 +119,16 @@ type CorpusStatus struct {
 	Corpus  string `json:"corpus"`
 	Present bool   `json:"present"`
 	Size    int    `json:"size"`
+	// RefreshedAt is when the snapshot build behind the transcript candidate ran,
+	// on the transcript row when that build covers the queried window and scope.
+	// The queue file leaves it out: it changes with every build, and the queue's
+	// bytes are the nudge's change key (QueueHash). Status carries it.
+	RefreshedAt string `json:"-"`
+	// Fix is the command that builds the snapshots the transcript candidate needs,
+	// on the transcript row when no complete build covers the queried window and
+	// scope. The queue then carries no transcript candidate, which is no reading of
+	// zero corrections.
+	Fix string `json:"fix,omitempty"`
 }
 
 // Queue is the deterministic tier's output: the work the skill finishes. Its
@@ -136,10 +154,10 @@ type Options struct {
 	// ScanScope selects which sessions the transcript scan reads. The zero
 	// value reads every project.
 	ScanScope report.Scope
-	// SkipTranscriptScan leaves the transcript scan out: the queue then carries
-	// no transcript candidate, and the transcript corpus size counts only
-	// Evidence.Sessions.
-	SkipTranscriptScan bool
+	// SessionsDir and Host locate the snapshot shard the transcript candidate
+	// reads; "" resolves to sessions.StateDir() and gate.HostID().
+	SessionsDir string
+	Host        string
 	// RepoRoot is the Git root whose check tier the queue reports, "" outside a
 	// repository. The caller resolves it; Refresh runs no git command.
 	RepoRoot string
@@ -230,26 +248,25 @@ func Refresh(opts Options) (*Queue, error) {
 		})
 	}
 
-	// --- transcript-friction candidate pointer: ungrouped correction clusters --
-	var digest *report.Digest
-	derr := errTranscriptScanSkipped
-	if !opts.SkipTranscriptScan {
-		digest, derr = report.Generate(opts.WindowDays, opts.ScanScope)
-	}
-	if derr == nil && len(digest.Signals.UserCorrections) > 0 {
-		q.Candidates = append(q.Candidates, transcriptCandidate(digest.Signals.UserCorrections))
+	// --- transcript-friction candidate pointer: this host's stored corrections --
+	transcriptRow := CorpusStatus{Corpus: CorpusTranscript}
+	clusters, refreshedAt, covered := storedCorrections(opts)
+	if covered {
+		transcriptRow.RefreshedAt = refreshedAt
+		if len(clusters) > 0 {
+			q.Candidates = append(q.Candidates, transcriptCandidate(clusters))
+		}
+	} else {
+		transcriptRow.Fix = refreshFix(opts.WindowDays, opts.ScanScope)
 	}
 	sortCandidates(q.Candidates)
 
 	// --- corpus sweep: one row per corpus, present when it holds data ---------
-	// The transcript corpus's size is the snapshot store, falling back to the scan.
-	transcriptSize := len(ev.Sessions)
-	if transcriptSize == 0 {
-		transcriptSize = sessionsScanned(digest, derr)
-	}
+	transcriptRow.Size = len(ev.Sessions)
+	transcriptRow.Present = transcriptRow.Size > 0
 	q.Corpora = []CorpusStatus{
 		{Corpus: CorpusReviewFindings, Present: len(chains) > 0, Size: len(chains)},
-		{Corpus: CorpusTranscript, Present: transcriptSize > 0, Size: transcriptSize},
+		transcriptRow,
 	}
 
 	return q, nil
@@ -337,11 +354,44 @@ func transcriptCandidate(clusters []*report.Cluster) Candidate {
 	return c
 }
 
-var errTranscriptScanSkipped = errors.New("transcript scan skipped")
-
-func sessionsScanned(d *report.Digest, err error) int {
-	if err != nil || d == nil {
-		return 0
+// storedCorrections ranks the correction clusters in this host's snapshot shard
+// over the queried window and scope, with when the covering build ran. It is false
+// when no complete build of that shard covers them or the scope does not resolve.
+func storedCorrections(opts Options) ([]*report.Cluster, string, bool) {
+	dir, host := opts.SessionsDir, opts.Host
+	if dir == "" {
+		dir = sessions.StateDir()
 	}
-	return d.Stats.SessionsScanned
+	if host == "" {
+		host = gate.HostID()
+	}
+	now := time.Now()
+	filter, err := opts.ScanScope.Filter(now.AddDate(0, 0, -opts.WindowDays))
+	if err != nil {
+		return nil, "", false
+	}
+	cov, ok := sessions.LoadCoverage(dir, host)
+	if !ok || !cov.Covers(filter, opts.WindowDays, now) {
+		return nil, "", false
+	}
+	units, err := sessions.LoadShardStrict(dir, host)
+	if err != nil {
+		return nil, "", false
+	}
+	return sessions.CorrectionClusters(units, filter), cov.ScannedAt.UTC().Format(time.RFC3339), true
+}
+
+// refreshFix is the snapshot build that covers a window and scope.
+func refreshFix(windowDays int, scope report.Scope) string {
+	fix := "steer report refresh"
+	if windowDays != DefaultWindowDays {
+		fix += " --days " + strconv.Itoa(windowDays)
+	}
+	switch scope {
+	case report.ScopeRepo:
+		fix += " --repo-only"
+	case report.ScopeProject:
+		fix += " --project-only"
+	}
+	return fix
 }

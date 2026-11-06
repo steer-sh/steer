@@ -6,6 +6,8 @@ package sessions
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -49,16 +51,23 @@ type Options struct {
 
 // Fresh is one build: a snapshot per root session it read, and every transcript file
 // it read to the end without error, including a file that yielded no session.
+// Complete is true when discovery under every existing harness root reported no
+// error and every file it selected was read; Coverage is what such a build covers.
+// An adapter skips an unreadable subdirectory without an error, so Complete does
+// not cover that.
 type Fresh struct {
-	Units []mine.SessionUnit
-	Read  map[string]bool
+	Units    []mine.SessionUnit
+	Read     map[string]bool
+	Complete bool
+	Coverage Coverage
 }
 
 // Build reads both harnesses' transcripts and returns one snapshot per root session,
 // sorted. A harness whose transcript root is unreadable contributes nothing and never
-// fails the build.
+// fails the build; it leaves the build incomplete, and an absent root does not.
 func Build(opts Options) (Fresh, error) {
-	since := time.Now().AddDate(0, 0, -opts.WindowDays)
+	now := time.Now()
+	since := now.AddDate(0, 0, -opts.WindowDays)
 	// One resolver serves both the scope predicate and each session's stored
 	// root, so a directory is resolved once however the scan selects.
 	resolve := report.RootResolver()
@@ -73,13 +82,20 @@ func Build(opts Options) (Fresh, error) {
 	// session's entries can span several files, so it outlives one collectSession.
 	seeded := map[string]bool{}
 	read := map[string]bool{}
+	complete := true
 	for _, adapter := range report.Adapters(opts.Only) {
 		root, err := adapter.Root()
 		if err != nil {
+			complete = complete && errors.Is(err, os.ErrNotExist)
+			continue
+		}
+		if _, err := os.Stat(root); err != nil {
+			complete = complete && errors.Is(err, os.ErrNotExist)
 			continue
 		}
 		discovered, err := adapter.Discover(root, filter)
 		if err != nil {
+			complete = false
 			continue
 		}
 		// The adapter decides the fields the classifier reads, so a unit's
@@ -88,13 +104,20 @@ func Build(opts Options) (Fresh, error) {
 		for _, session := range discovered {
 			if collectSession(adapter, session, instrument, resolve, seeded, byID) {
 				read[sourcePath(session.Path)] = true
+			} else {
+				complete = false
 			}
 		}
 	}
 	for _, u := range byID {
 		derive(u)
 	}
-	return Fresh{Units: sorted(byID), Read: read}, nil
+	return Fresh{
+		Units:    sorted(byID),
+		Read:     read,
+		Complete: complete,
+		Coverage: coverageOf(filter, now, opts.WindowDays, opts.Only),
+	}, nil
 }
 
 // collectSession streams one whole transcript file into the snapshots of the root
@@ -216,11 +239,24 @@ func LoadShard(dir, host string) ([]mine.SessionUnit, error) {
 	return loadFiles([]string{ShardPath(dir, host)})
 }
 
+// LoadShardStrict reads one host's shard and fails on a missing or unreadable file
+// or a malformed row, for a reader that must not take a partial shard as whole.
+func LoadShardStrict(dir, host string) ([]mine.SessionUnit, error) {
+	return loadFilesWith([]string{ShardPath(dir, host)}, true)
+}
+
 func loadFiles(paths []string) ([]mine.SessionUnit, error) {
+	return loadFilesWith(paths, false)
+}
+
+func loadFilesWith(paths []string, strict bool) ([]mine.SessionUnit, error) {
 	byID := map[string]*mine.SessionUnit{}
 	for _, path := range paths {
 		data, err := os.ReadFile(path)
 		if err != nil {
+			if strict {
+				return nil, err
+			}
 			continue
 		}
 		for _, line := range strings.Split(string(data), "\n") {
@@ -230,9 +266,15 @@ func loadFiles(paths []string) ([]mine.SessionUnit, error) {
 			}
 			var u mine.SessionUnit
 			if err := json.Unmarshal([]byte(line), &u); err != nil {
+				if strict {
+					return nil, fmt.Errorf("%s: %w", path, err)
+				}
 				continue
 			}
 			if u.SessionID == "" {
+				if strict {
+					return nil, fmt.Errorf("%s: a row names no session", path)
+				}
 				continue
 			}
 			copied := u
@@ -350,6 +392,13 @@ func Refresh(dir, host string, opts Options) ([]mine.SessionUnit, error) {
 		return nil, err
 	}
 	defer release()
+	// A shard that does not read whole loses rows in this save, so the coverage an
+	// earlier build wrote no longer describes it: only a complete build restores one.
+	if _, err := LoadShardStrict(dir, host); err != nil {
+		if err := os.Remove(CoveragePath(dir, host)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+	}
 	own, err := LoadShard(dir, host)
 	if err != nil {
 		return nil, err
@@ -361,6 +410,13 @@ func Refresh(dir, host string, opts Options) ([]mine.SessionUnit, error) {
 	}
 	if err := Save(dir, host, Merge(own, fresh)); err != nil {
 		return nil, err
+	}
+	// A build that missed a file keeps the last complete build's coverage: its
+	// retained signals are no fresher than that build.
+	if fresh.Complete {
+		if err := saveCoverage(dir, host, fresh.Coverage); err != nil {
+			return nil, err
+		}
 	}
 	return Load(dir)
 }

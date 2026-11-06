@@ -85,12 +85,12 @@ id and draw no audit conclusion for it. Fail soft — if a command errors, say s
 one line, continue, and read `audit.md` anyway: without a snapshot, nothing shows
 that there is no fix to audit.
 
-Then Read the queue **once**: `~/.steer/state/steer-report/queue.json` (`version: 15`). It holds:
+Then Read the queue **once**: `~/.steer/state/steer-report/queue.json` (`version: 16`). It holds:
 
 - `interventions[]` — full contract records the tier flagged as **asking for a reader**: the class recurred after the split, an absent guard audit log or missing check evidence left the fix's activity unread, the record carries no frozen scope, the fix it binds is `absent` or `unreadable`, or the fix is in place but carries `artifact.removed`. These carry a `match`; they are the audit's action list, pre-filtered. Each carries `problem` and `intervention` — the record's own explanation of what goes wrong and what it does about it, authored when the class was found. Lead your report with those rather than with the class name or the regex, and correct one that no longer describes the evidence with `steer fix describe ID`, which changes no window. Each also carries the conditions the counts were taken under: `corpus` and `unit` (`review-findings` counts by `chain`, `transcript-friction` by `session` — never compare the two rates), `signal_kind` on a session-unit record, `scope` (the frozen eligibility rule, `null` on a legacy record), `before_coverage` / `after_coverage` (`total`, `eligible`, `ineligible`, `unknown`, `unknown_scope`, `unknown_evidence`, `pending`, `ledger_missed`, `ledger_overdue`, `partial_exposure`), `observation` — the seven field blocks documented in `audit.md` — and `artifact`, where the fix the record binds stands now.
 - `unscored[]` — ids of records no engine reads. Report their existence; do not read a result into them.
 - `candidates[]` — **one row per corpus**, each pointing at a pile of evidence no problem covers yet. The transcript row carries `ungrouped_clusters`; the review row carries `undecided_chains` and a `dump` command. The transcript row also carries a few `examples` — the strongest cluster keys, for a reader glancing at the row, never the pile itself; the review row carries none, because its `dump` command prints the findings in full. A row has **no** `match` and no title: grouping the pile and authoring the regex are your job, below. Read the full dumps for the pile; the row only sizes it.
-- `corpora[]` — one row per corpus (`review-findings`, `transcript-friction`) with `present` and `size`. Use this sweep to establish what history is available; surface a gap when it limits the assessment or requires action. When `review-findings` is absent or empty, a second sentence says what comes next. Read that from `posture.readiness`, never from a `commit_gate[]` row's `effective`, which holds before Codex trusts the hook. If `readiness.reviewing` is true, the commit gate reviews each commit from now on, and a later `/steer-report` can mine those reviews for problems. If it is false, no review history collects yet: relay `posture.health.headline` and each `posture.health.issues[]` entry with its `fix`. When no commit gate is registered, `/steer-setup` arms one.
+- `corpora[]` — one row per corpus (`review-findings`, `transcript-friction`) with `present` and `size`. The transcript row can also carry `fix`: no complete snapshot build covers this window and scope, so the queue holds no transcript candidate, which says nothing about how many corrections exist. Report that the transcript pile was not sized, and give the `fix` command. Use this sweep to establish what history is available; surface a gap when it limits the assessment or requires action. When `review-findings` is absent or empty, a second sentence says what comes next. Read that from `posture.readiness`, never from a `commit_gate[]` row's `effective`, which holds before Codex trusts the hook. If `readiness.reviewing` is true, the commit gate reviews each commit from now on, and a later `/steer-report` can mine those reviews for problems. If it is false, no review history collects yet: relay `posture.health.headline` and each `posture.health.issues[]` entry with its `fix`. When no commit gate is registered, `/steer-setup` arms one.
 - `checks[]` — the open steps in the repository the refresh ran in, each with `kind`, `repo`, an optional `check_id`, a `detail` and the `fix` command. `not-adopted` is a repository declaring checks that this machine never authorized to run at the end of a turn (`steer check adopt`). `never-validated` is a declared check whose cases were never replayed here, so nothing shows it fails on the problem it names (`steer check test <id>`). `integration-failure` is a zero-exit `check.sh` with absent or nonpassing declared results. Missing records need executor wiring (`steer check init` prints the managed line); reported nonpassing results need inspection and repair (`steer check run` prints the results). Follow the row's `detail` and `fix`. A **stale** receipt is deliberately not here: a stale check keeps running, and `steer status --json` carries the label. These are states of a declaration, not recurrence measured over a window, so they carry no count and never enter a before/after reading.
 
 The queue tells you what is pending. The full dumps below are the raw material you cluster over. The score file holds every live record for the complete audit — the queue lists only the ones asking for a reader, not the quiet ones worth showing too. When the score file is `[]`, this machine records no fix. Guard evidence is a separate stream from review history, so an absent ledger says nothing about what the installed guards blocked: the rule under "The audit lives in `audit.md`" decides whether the audit runs.
@@ -185,7 +185,7 @@ A correction occurrence can carry two context fields, each `{text, cut}` with `c
 
 An `after_interrupt` occurrence carries the same two fields, read from before the interrupt. A `correction_candidates` occurrence carries them too.
 
-### The `steer status --json` contract (`status_version: 35`)
+### The `steer status --json` contract (`status_version: 36`)
 
 Step 1 reads this snapshot for posture and the full class inventory. The unit is
 the failure class and what the corpus recorded about it, not the hook count. This
@@ -232,6 +232,8 @@ whether this process finds the interpreter every guard runner starts under. v32
 adds `unread` to each `attention.candidates[]` row. v33 adds `fixtures` to each
 `hooks[]` row. v34 adds the `trust` states `approved`, `disabled`, `hooks-off` and `modified`.
 v35 adds `posture.health`: the verdict `steer status` prints, with its issues.
+v36 adds `refreshed_at` and `fix` to the transcript `corpora[]` row: its candidate is
+counted from this machine's stored session snapshots, and a row with `fix` has none.
 
 - `status_version` — the schema version. `--json` is a stable agent contract.
 - `posture` — the arming state: `instrument` (reviewer model / runs / prompt
@@ -389,7 +391,9 @@ v35 adds `posture.health`: the verdict `steer status` prints, with its issues.
   `session_snapshots`, plus `harnesses[]` — one row per harness with its
   `sessions`, `firings`, `check_blocks` and `chains`, so a harness that contributed
   nothing reads differently from one that was never mined.
-- `corpora[]` — one row per corpus with `present`, `size` and `path`.
+- `corpora[]` — one row per corpus with `present`, `size` and `path`; the
+  transcript row adds `refreshed_at`, when the snapshot build its candidate was
+  counted from ran, or `fix`, as in the queue.
 - `hooks[]` — the registered managed hooks in both scopes: `name`, `scope`,
   `source`, `rule`, and `fixtures`, the guard's stored cases read against the
   guard installed now, in the shape `audit.md` gives for a score row's `fixtures`.

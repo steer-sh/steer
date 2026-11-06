@@ -23,7 +23,7 @@ BASE = Path(__file__).with_name("base_status.json")
 
 def _base():
     snap = json.loads(BASE.read_text())
-    snap["status_version"] = 35
+    snap["status_version"] = 36
     snap["posture"]["readiness"].pop("unverified", None)
     return snap
 
@@ -194,7 +194,7 @@ def _score(rec):
 
 def _queue(interventions=(), candidates=(), unscored=(), review_size=211):
     return {
-        "version": 15,
+        "version": 16,
         "interventions": _queued(interventions),
         "candidates": list(candidates),
         "unscored": list(unscored),
@@ -353,7 +353,8 @@ def _first_run():
         {"corpus": "review-findings", "present": False, "size": 0,
          "path": "/home/example/.steer/state/commit-review"},
         {"corpus": "transcript-friction", "present": True, "size": 465,
-         "path": "/home/example/.steer/state/transcript-sessions"},
+         "path": "/home/example/.steer/state/transcript-sessions",
+         "refreshed_at": "2026-03-01T09:00:00Z"},
     ]
     tel = snap["telemetry"]
     tel["review_chains"] = 0

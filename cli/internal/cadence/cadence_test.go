@@ -2,6 +2,7 @@ package cadence
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
 	"github.com/steer-sh/steer-cli/internal/report"
+	"github.com/steer-sh/steer-cli/internal/sessions"
 	"github.com/steer-sh/steer-cli/internal/testhome"
 )
 
@@ -335,36 +337,130 @@ func TestSortCandidatesGroupsByCorpus(t *testing.T) {
 	}
 }
 
-// A refresh that skips the transcript scan reports no transcript candidate even
-// when a recent correction is on disk; the default refresh reports it.
-func TestRefreshSkipTranscriptScanReadsNoTranscript(t *testing.T) {
-	home := isolate(t)
+// plantCorrection writes one Claude Code session whose single turn is a correction.
+func plantCorrection(t *testing.T, home, session, text string) {
+	t.Helper()
 	project := filepath.Join(home, ".claude", "projects", "-t-proj")
 	if err := os.MkdirAll(project, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	row := fmt.Sprintf(`{"type":"user","sessionId":"s1","timestamp":%q,"message":{"content":%q}}`+"\n",
-		time.Now().Add(-time.Hour).UTC().Format(time.RFC3339), "don't use var")
-	if err := os.WriteFile(filepath.Join(project, "s1.jsonl"), []byte(row), 0o644); err != nil {
+	row := fmt.Sprintf(`{"type":"user","sessionId":%q,"timestamp":%q,"message":{"content":%q}}`+"\n",
+		session, time.Now().Add(-time.Hour).UTC().Format(time.RFC3339), text)
+	if err := os.WriteFile(filepath.Join(project, session+".jsonl"), []byte(row), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	transcriptCandidates := func(skip bool) int {
-		q, err := Refresh(Options{GateStateDir: t.TempDir(), WindowDays: 7, SkipTranscriptScan: skip})
+}
+
+func transcriptRow(t *testing.T, q *Queue) (CorpusStatus, *Candidate) {
+	t.Helper()
+	var row CorpusStatus
+	for _, r := range q.Corpora {
+		if r.Corpus == CorpusTranscript {
+			row = r
+		}
+	}
+	for i := range q.Candidates {
+		if q.Candidates[i].Corpus == CorpusTranscript {
+			return row, &q.Candidates[i]
+		}
+	}
+	return row, nil
+}
+
+// The transcript candidate comes from this host's snapshot shard once a complete
+// build covers the window; before that, and for a longer window, the row names the
+// refresh that builds one and the queue carries no candidate.
+func TestRefreshTranscriptCandidateReadsCoveredSnapshots(t *testing.T) {
+	home := isolate(t)
+	plantCorrection(t, home, "s1", "don't use var")
+	dir := t.TempDir()
+	opts := Options{GateStateDir: t.TempDir(), WindowDays: DefaultWindowDays, SessionsDir: dir, Host: "h"}
+
+	q, err := Refresh(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, c := transcriptRow(t, q)
+	if c != nil || row.Fix != "steer report refresh" || row.RefreshedAt != "" {
+		t.Fatalf("with no snapshot build the row must name the refresh and carry no candidate: %+v %+v", row, c)
+	}
+
+	if _, err := sessions.Refresh(dir, "h", sessions.Options{WindowDays: DefaultWindowDays}); err != nil {
+		t.Fatal(err)
+	}
+	q, err = Refresh(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, c = transcriptRow(t, q)
+	if c == nil || c.UngroupedClusters != 1 || row.Fix != "" || row.RefreshedAt == "" {
+		t.Fatalf("a covering build must yield the stored correction: %+v %+v", row, c)
+	}
+
+	queue, err := json.Marshal(q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(queue, []byte("refreshed_at")) {
+		t.Fatalf("the queue file must not carry refreshed_at, it is the nudge's change key: %s", queue)
+	}
+
+	shard := sessions.ShardPath(dir, "h")
+	good, err := os.ReadFile(shard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string][]byte{"malformed": append(append([]byte{}, good...), []byte("{not json\n")...), "missing": nil} {
+		if body == nil {
+			err = os.Remove(shard)
+		} else {
+			err = os.WriteFile(shard, body, 0o644)
+		}
 		if err != nil {
 			t.Fatal(err)
 		}
-		n := 0
-		for _, c := range q.Candidates {
-			if c.Corpus == CorpusTranscript {
-				n++
-			}
+		q, err = Refresh(opts)
+		if err != nil {
+			t.Fatal(err)
 		}
-		return n
+		if row, c = transcriptRow(t, q); c != nil || row.Fix == "" {
+			t.Fatalf("a %s shard is no covered reading: %+v %+v", name, row, c)
+		}
 	}
-	if got := transcriptCandidates(false); got != 1 {
-		t.Fatalf("the default refresh must report the planted correction, got %d candidates", got)
+	if err := os.WriteFile(shard, good, 0o644); err != nil {
+		t.Fatal(err)
 	}
-	if got := transcriptCandidates(true); got != 0 {
-		t.Fatalf("a skipped scan must report no transcript candidate, got %d", got)
+
+	opts.WindowDays = 90
+	q, err = Refresh(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row, c = transcriptRow(t, q); c != nil || row.Fix != "steer report refresh --days 90" {
+		t.Fatalf("a 30-day build does not cover 90 days: %+v %+v", row, c)
+	}
+}
+
+// Another host's shard can hold corrections this machine's live report cannot
+// find, so the candidate reads this host's shard alone.
+func TestRefreshTranscriptCandidateIgnoresOtherHosts(t *testing.T) {
+	home := isolate(t)
+	plantCorrection(t, home, "s1", "don't use var")
+	dir := t.TempDir()
+	if _, err := sessions.Refresh(dir, "other", sessions.Options{WindowDays: DefaultWindowDays}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(home, ".claude", "projects"), filepath.Join(home, "moved")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sessions.Refresh(dir, "h", sessions.Options{WindowDays: DefaultWindowDays}); err != nil {
+		t.Fatal(err)
+	}
+	q, err := Refresh(Options{GateStateDir: t.TempDir(), WindowDays: DefaultWindowDays, SessionsDir: dir, Host: "h"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row, c := transcriptRow(t, q); c != nil || row.RefreshedAt == "" {
+		t.Fatalf("this host's covered shard holds no correction: %+v %+v", row, c)
 	}
 }

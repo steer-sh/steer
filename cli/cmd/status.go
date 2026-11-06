@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steer-sh/steer-cli/internal/cadence"
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/evidence"
 	"github.com/steer-sh/steer-cli/internal/gate"
@@ -61,12 +62,10 @@ a problem already decided; 'steer fix score --json' carries each fix's detail.`,
 			// the scope it lists, reads one.
 			InventoryScopes: []string{claude.ProjectScope, claude.GlobalScope},
 			ScanScope:       scope,
-			// The text view prints only HealthOf, which reads no candidate.
-			SkipTranscriptScan: !statusJSON,
-			RepoRoot:           root,
-			ReviewerProbe:      reviewerProbe(cfg, resolveErr),
-			Addendum:           gateAddendum(root),
-			PreCommit:          statusPreCommit(root),
+			RepoRoot:        root,
+			ReviewerProbe:   reviewerProbe(cfg, resolveErr),
+			Addendum:        gateAddendum(root),
+			PreCommit:       statusPreCommit(root),
 			Evidence: evidence.Gather(evidence.Options{
 				GateStateDir: cfg.StateDir,
 				ScanScope:    scope,
@@ -160,7 +159,7 @@ func renderHealth(h status.Health, width int) string {
 func init() {
 	rootCmd.AddCommand(statusCmd)
 	statusCmd.Flags().BoolVar(&statusJSON, "json", false, "Emit the versioned status contract as JSON on stdout")
-	statusCmd.Flags().IntVar(&statusDays, "days", 30, "Transcript look-back window in days for the attention refresh")
+	statusCmd.Flags().IntVar(&statusDays, "days", cadence.DefaultWindowDays, "Transcript look-back window in days for the attention refresh")
 	statusCmd.Flags().BoolVar(&statusProjectOnly, "project-only", false, "Restrict the transcript scan to the current working directory")
 	statusCmd.Flags().BoolVar(&statusRepoOnly, "repo-only", false, "Restrict the transcript scan to the current checkout")
 }
