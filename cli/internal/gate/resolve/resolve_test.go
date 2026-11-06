@@ -1541,6 +1541,34 @@ func TestAppendDuringRewriteLandsOnTheNewShard(t *testing.T) {
 	}
 }
 
+// An unlocked append still landing when the carry reads the replaced shard shows only its
+// first bytes. Its writer finds the shard replaced and writes the row again, so the carry
+// must take none of them.
+func TestCarryLeavesAnAppendStillLanding(t *testing.T) {
+	cfg := lockTestShard(t)
+	setBeforeSwap(t, func() {
+		beforeSwap = func() {}
+		f, err := os.OpenFile(cfg.LogFile(), os.O_APPEND|os.O_WRONLY, 0o644)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer f.Close()
+		f.WriteString(`{"phase":"chain-end","row_`)
+	})
+	if res := lockTestApply(cfg, false, func() float64 { return 2_000_000_000 }); res.Err != nil || res.Changed == 0 {
+		t.Fatalf("the rewrite must complete: %+v", res)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(shardTextOf(t, cfg)), "\n") {
+		if !json.Valid([]byte(line)) {
+			t.Fatalf("the shard holds a torn line %q:\n%s", line, shardTextOf(t, cfg))
+		}
+	}
+	if got := shardPhases(t, cfg); got != "deny,retry" {
+		t.Fatalf("shard phases = %s", got)
+	}
+}
+
 // An append that gave up waiting goes in unlocked, after the rewrite read the shard; the
 // rewrite carries it onto the shard it swaps in.
 func TestUnlockedAppendIsCarriedThroughTheSwap(t *testing.T) {

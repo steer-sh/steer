@@ -560,14 +560,17 @@ during a harvest is carried through. Both are OS locks, which a dead holder rele
 The wait is bounded so a commit never stalls: a `Log` that outlasts it appends anyway,
 notes that in `gate_errors`. A rewrite links its backup to the shard it is about to
 replace, reads through a file it keeps open and, after the rename and still under the
-lock, appends to the new shard whatever reached the replaced one past its read; if that
+lock, appends to the new shard whatever whole lines reached the replaced one past its
+read (an append still landing can show only its first bytes, which stay behind); if that
 append fails, the rows stay in the backup when it is a hard link (a copied backup gets
 them appended if they could be read), and that run prunes no backups. A backup never
 writes over an existing file.
-A `Log` that finds its shard replaced waits for the lock again and writes the row only
-if the current shard lacks its random `row_id`, which a rewrite keeps when it stamps
-the row. If that second wait also runs out while a rewrite is between its rename and
-its carry, the row lands twice. A writer that never takes the lock (a binary from
+A `Log` that finds its shard replaced waits for the lock again, then takes
+`gate.LockSwap` (`<shard>.swap.lock`), which a rewrite holds only from its rename
+through its carry, and writes the row only if the current shard lacks its random
+`row_id`, which a rewrite keeps when it stamps the row. That wait has its own bound,
+since no holder keeps it across a whole rewrite; if it runs out mid-carry, the row
+lands twice. A writer that never takes the lock (a binary from
 before it existed) loses a row it writes after the rewrite has measured the replaced
 file for its carry.
 `--rejoin` re-judges the links the resolver made (a row with

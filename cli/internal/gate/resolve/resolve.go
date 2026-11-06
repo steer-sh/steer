@@ -940,7 +940,8 @@ func (r *resolver) writeRows(rows []resolverRow, seenLines int) error {
 	if err != nil {
 		return err
 	}
-	// An unlocked append may be mid-write; the carry takes its partial line whole.
+	// An unlocked append may be mid-write; its partial line is left for the carry, which
+	// takes it only once it is whole.
 	data = data[:snapshotEnd(data)]
 	backup, linked, err := newBackup(log, int64(r.now()), data)
 	if err != nil {
@@ -972,11 +973,18 @@ func (r *resolver) writeRows(rows []resolverRow, seenLines int) error {
 		return err
 	}
 	beforeSwap()
+	releaseSwap, err := gate.LockSwap(r.cfg)
+	if err != nil {
+		os.Remove(tmp)
+		return err
+	}
 	if err := os.Rename(tmp, log); err != nil {
+		releaseSwap()
 		os.Remove(tmp)
 		return err
 	}
 	carried, extra, err := carryGrowth(old, int64(len(data)), log)
+	releaseSwap()
 	if err != nil {
 		kept := linked
 		if !kept && len(extra) > 0 {
@@ -997,9 +1005,11 @@ func (r *resolver) writeRows(rows []resolverRow, seenLines int) error {
 	return nil
 }
 
-// carryGrowth appends to the file at log whatever old holds past read bytes. It returns
-// how many lines it carried and the bytes it read, which a failed append leaves uncarried.
-// old is the shard a rename just replaced.
+// carryGrowth appends to the file at log whatever old holds past read bytes, up to
+// snapshotEnd. It returns how many lines it carried and the bytes it read, which a failed
+// append leaves uncarried. old is the shard a rename just replaced. An unlocked append
+// can still be landing, and a reader may see part of it; that writer finds its shard
+// replaced and writes the row again, so a part carried here would stay as a torn line.
 func carryGrowth(old *os.File, read int64, log string) (int, []byte, error) {
 	info, err := old.Stat()
 	if err != nil {
@@ -1012,6 +1022,7 @@ func carryGrowth(old *os.File, read int64, log string) (int, []byte, error) {
 	if _, err := old.ReadAt(extra, read); err != nil {
 		return 0, nil, err
 	}
+	extra = extra[:snapshotEnd(extra)]
 	if len(bytes.TrimSpace(extra)) == 0 {
 		return 0, nil, nil
 	}

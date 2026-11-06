@@ -272,6 +272,55 @@ func TestUnlockedAppendWaitsForTheRewriteToCarry(t *testing.T) {
 	}
 }
 
+// A Log whose second wait for the shard lock runs out while a rewrite sits between its
+// rename and its carry must still wait for the carry before writing the row again.
+func TestUnlockedAppendOutwaitedTwiceWaitsForTheCarry(t *testing.T) {
+	cfg := lockTestConfig(t)
+	cfg.LogLockWait = time.Millisecond
+	release, err := LockLog(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	carried := make(chan struct{})
+	afterAppend = func() {
+		afterAppend = func() {}
+		releaseSwap, err := LockSwap(cfg)
+		if err != nil {
+			t.Error(err)
+			close(carried)
+			return
+		}
+		old := replaceShard(t, cfg, "{\"phase\":\"deny\"}\n")
+		go func() {
+			defer close(carried)
+			defer release()
+			defer releaseSwap()
+			defer old.Close()
+			time.Sleep(100 * time.Millisecond)
+			data, err := io.ReadAll(old)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			f, err := os.OpenFile(cfg.LogFile(), os.O_APPEND|os.O_WRONLY, 0o644)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			defer f.Close()
+			f.Write(data)
+		}()
+	}
+	t.Cleanup(func() { afterAppend = func() {} })
+	if err := NewLedger(cfg).Log(Row{"phase": "chain-end"}); err != nil {
+		t.Fatal(err)
+	}
+	<-carried
+	if n := strings.Count(shardText(t, cfg), "chain-end"); n != 1 {
+		t.Fatalf("the current shard holds the row %d times, want once:\n%s", n, shardText(t, cfg))
+	}
+}
+
 // Two rows with equal fields are two rows: a second one that a rewrite missed must not
 // be taken for the first.
 func TestUnlockedAppendKeepsAnEqualRow(t *testing.T) {
