@@ -88,18 +88,3 @@ func Scan(adapters []transcript.Adapter, since time.Time, filter transcript.Filt
 	sort.Strings(names) // map order is random; sort so the digest is deterministic
 	return scanner, names
 }
-
-// Generate runs the transcript scan end to end and returns the in-memory digest,
-// without marshaling or size-capping it. The cadence runner reads it directly;
-// the `steer report` command keeps its own scan because it also folds in
-// instruction-file directives, which Generate omits — the cadence runner draws
-// candidates from the transcript signal clusters, not from standing rules.
-func Generate(windowDays int, scope Scope) (*Digest, error) {
-	since := time.Now().AddDate(0, 0, -windowDays)
-	filter, err := scope.Filter(since)
-	if err != nil {
-		return nil, err
-	}
-	scanner, names := Scan(Adapters(harness.Unknown), since, filter, nil)
-	return scanner.Finalize(windowDays, names, nil), nil
-}

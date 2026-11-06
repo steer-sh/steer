@@ -519,12 +519,18 @@ func normalizeKey(s string) string {
 // addCluster adds the event to its cluster and returns the occurrence it
 // appended, or nil when the key normalizes to nothing.
 func (s *Scanner) addCluster(kind, keyBasis, example string, e transcript.Event) *Occurrence {
+	return addToClusters(s.clusters[kind], keyBasis, example, e.SessionID, e.Timestamp)
+}
+
+// addToClusters adds one occurrence to the cluster its key normalizes to and
+// returns it, or nil when the key normalizes to nothing. A scan and a stored
+// projection both group through it.
+func addToClusters(m map[string]*Cluster, keyBasis, example, sessionID, timestamp string) *Occurrence {
 	key := normalizeKey(keyBasis)
 	if key == "" {
 		return nil
 	}
 
-	m := s.clusters[kind]
 	c, ok := m[key]
 	if !ok {
 		c = &Cluster{Pattern: key, sessionIDs: map[string]struct{}{}}
@@ -532,23 +538,51 @@ func (s *Scanner) addCluster(kind, keyBasis, example string, e transcript.Event)
 	}
 
 	c.Count++
-	if e.SessionID != "" {
-		c.sessionIDs[e.SessionID] = struct{}{}
+	if sessionID != "" {
+		c.sessionIDs[sessionID] = struct{}{}
 	}
 	c.Sessions = len(c.sessionIDs)
-	if c.FirstSeen == "" || e.Timestamp < c.FirstSeen {
-		c.FirstSeen = e.Timestamp
+	if c.FirstSeen == "" || timestamp < c.FirstSeen {
+		c.FirstSeen = timestamp
 	}
-	if e.Timestamp > c.LastSeen {
-		c.LastSeen = e.Timestamp
+	if timestamp > c.LastSeen {
+		c.LastSeen = timestamp
 	}
 	text := whitespaceRun.ReplaceAllString(strings.TrimSpace(example), " ")
 	c.Occurrences = append(c.Occurrences, Occurrence{
-		Session:   e.SessionID,
-		Timestamp: e.Timestamp,
+		Session:   sessionID,
+		Timestamp: timestamp,
 		Text:      clip(text, maxOccurrenceLen),
 	})
 	return &c.Occurrences[len(c.Occurrences)-1]
+}
+
+// StoredSignal is one classifier signal as a snapshot keeps it: the session it
+// landed on, its kind, its key text and its time in unix seconds (0 when unknown).
+type StoredSignal struct {
+	SessionID string
+	Kind      string
+	Text      string
+	TS        float64
+}
+
+// CorrectionClusters groups stored user-correction signals and ranks them as a
+// scan ranks its user_corrections. A stored signal keeps no surrounding turns, so
+// an occurrence carries no previous or first human text, and its timestamp is
+// whole seconds.
+func CorrectionClusters(signals []StoredSignal) []*Cluster {
+	m := map[string]*Cluster{}
+	for _, sig := range signals {
+		if sig.Kind != kindCorrection {
+			continue
+		}
+		ts := ""
+		if sig.TS > 0 {
+			ts = time.Unix(int64(sig.TS), 0).UTC().Format(time.RFC3339)
+		}
+		addToClusters(m, sig.Text, sig.Text, sig.SessionID, ts)
+	}
+	return collect(m)
 }
 
 // Finalize assembles the digest from accumulated clusters, ranks each signal's

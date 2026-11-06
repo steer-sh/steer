@@ -161,6 +161,24 @@ func (f Filter) Selector() func(Session) bool {
 	}
 }
 
+// SelectsStored applies Selector's scope to a stored session: its normalized
+// project key and the repository root resolved when it was read. A stored session
+// with no root is outside every repository scope.
+func (f Filter) SelectsStored(project, repoRoot string) bool {
+	if f.RepoRoot != "" {
+		return repoRoot != "" && repoRoot == f.RepoRoot
+	}
+	if f.AllProjects {
+		return true
+	}
+	for _, p := range f.Projects {
+		if NormalizeProject(p) == NormalizeProject(project) {
+			return true
+		}
+	}
+	return false
+}
+
 // ScopesRepo reports that this filter selects one checkout. An adapter reads it
 // to decide whether a session's launch directory is worth the read it costs.
 func (f Filter) ScopesRepo() bool { return f.RepoRoot != "" }

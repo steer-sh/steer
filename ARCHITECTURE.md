@@ -650,7 +650,8 @@ repeated wording and correction candidates.
 signal's clusters filtered by `--match`, or the occurrences and directives of named
 items. Each output is one page within a byte bound and holds at least one row, so
 paging drops no evidence; `show` refuses a `--report` id that a later scan replaced.
-The refresh queue reads `report.Generate` in memory, never the stored report.
+The refresh queue reads neither the stored report nor the transcripts: its
+transcript candidate comes from session snapshots (see below).
 
 Four report-only readings live in the `Scanner`, not the `Classifier`, because
 they need more than one event: session snapshots and fix scores never carry them,
@@ -918,6 +919,23 @@ recurrences of one problem. A corpus therefore contributes one candidate pointer
 sizing its ungrouped pile, never one row per item, and carries a few
 strength-ranked examples for a reader. Naming classes is the skill's work on both
 corpora, over the full dumps.
+
+The transcript pointer is counted from this host's snapshot shard, never from a
+transcript scan, so a status read costs no transcript decode. `report.CorrectionClusters`
+groups stored correction signals through the scanner's own accumulator and ranking;
+the stored form keeps whole-second times and no surrounding turns, and a shard keeps
+rotated-away transcripts, so the pointer can differ from a live report at those
+edges. Another host's shard stays out: a live report reads only this machine's
+transcripts. A snapshot build writes `coverage.<host>.json` (`sessions.Coverage`:
+time, window, harness and scope target) only when discovery under every existing
+harness root reported no error, every file it selected was read and the shard was
+saved; a build that missed a file keeps the previous record. An adapter skips an
+unreadable subdirectory without an error, as a live scan does, so the record does not
+cover that. When no record covers the queried window and scope, or the shard does not
+read whole, the queue carries no transcript pointer and the corpus row names the
+refresh that builds one, because absent evidence is no reading of zero corrections.
+The build time (`refreshed_at`) reaches the status row only: the queue's bytes are the
+nudge's change key, and a time that moves on every build would re-nudge.
 
 A pile can stay undecided after a pass reads it: a one-off finding gets no
 class. `steer report mark-read` stores, per corpus, the size of the pile the pass

@@ -630,10 +630,10 @@ func init() {
 	reportCmd.AddCommand(reportMarkReadCmd)
 	reportMarkReadCmd.Flags().StringSliceVar(&reportMarkReadCorpora, "corpus",
 		[]string{cadence.CorpusReviewFindings, cadence.CorpusTranscript}, "A pile the pass read; repeat for both (default both)")
-	reportRefreshCmd.Flags().IntVar(&reportDays, "days", 30, "Transcript look-back window in days")
+	reportRefreshCmd.Flags().IntVar(&reportDays, "days", cadence.DefaultWindowDays, "Transcript look-back window in days")
 	reportRefreshCmd.Flags().BoolVar(&reportProjectOnly, "project-only", false, "Restrict the transcript scan to the current working directory")
 	reportRefreshCmd.Flags().BoolVar(&reportRepoOnly, "repo-only", false, "Restrict the transcript scan to the current checkout")
-	reportCmd.Flags().IntVar(&reportDays, "days", 30, "Look-back window in days")
+	reportCmd.Flags().IntVar(&reportDays, "days", cadence.DefaultWindowDays, "Look-back window in days")
 	reportCmd.Flags().BoolVar(&reportProjectOnly, "project-only", false, "Restrict the scan to transcripts of the current working directory")
 	reportCmd.Flags().BoolVar(&reportRepoOnly, "repo-only", false, "Restrict the scan to transcripts of the current checkout")
 	reportCmd.Flags().StringVar(&reportHarness, "harness", "", "Mine one harness only: all (default), claude-code, or codex")

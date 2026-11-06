@@ -108,6 +108,9 @@ Read the linked architecture section before changing the corresponding boundary:
   require adapter-specific handling.
   `cli/internal/sessions/Refresh` holds its per-host shard lock through the complete
   read-build-merge-save transaction; another snapshot writer must share that lock.
+  The queue's transcript candidate reads only this host's shard, and only while
+  `coverage.<host>.json` (`sessions.Coverage`) covers the query; `Refresh` writes
+  that record after a complete build alone, so a new build path must do the same.
 - Intervention records, eligibility, or scoring:
   [observations](ARCHITECTURE.md#interventions-and-observations).
   `cli/internal/gate/mine/` owns both corpus engines. Field counts describe
