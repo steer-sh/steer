@@ -8,6 +8,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/claude"
 	codexhooks "github.com/steer-sh/steer-cli/internal/codex"
 	"github.com/steer-sh/steer-cli/internal/gate"
+	"github.com/steer-sh/steer-cli/internal/harness"
 	pihooks "github.com/steer-sh/steer-cli/internal/pi"
 	"github.com/steer-sh/steer-cli/internal/status"
 	"github.com/steer-sh/steer-cli/internal/steerbin"
@@ -143,6 +144,29 @@ func relinkClaude(scope, path string) (int, error) {
 	return rewritten, nil
 }
 
+// relinkCodexMaster rewrites a Codex guard master registered in an old form, which
+// the operator then approves again in /hooks.
+func relinkCodexMaster(scope string) (int, error) {
+	cwd, err := gate.ProjectDir()
+	if err != nil {
+		return 0, nil
+	}
+	stale, err := codexhooks.MasterCommandStale(scope, cwd)
+	if err != nil || !stale {
+		return 0, err
+	}
+	if _, err := codexhooks.RegisterMaster(scope, cwd); err != nil {
+		return 0, err
+	}
+	command, err := codexhooks.MasterCommand(scope, cwd)
+	if err != nil {
+		return 0, err
+	}
+	reportRelink("codex", scope, "guard master", command)
+	utils.Info(status.GuardCommandChangedPhrase(status.HarnessLabel(string(harness.Codex))))
+	return 1, nil
+}
+
 // relinkCodex repoints this scope's Codex registrations. The gate and the resolver
 // are written together, because Codex's writer arms them in one save.
 func relinkCodex(scope, path string) (int, error) {
@@ -246,6 +270,11 @@ func repointRegistrations(path string) (int, error) {
 		}
 		rewritten += n
 		n, err = relinkCodex(scope, path)
+		if err != nil {
+			return rewritten, err
+		}
+		rewritten += n
+		n, err = relinkCodexMaster(scope)
 		if err != nil {
 			return rewritten, err
 		}

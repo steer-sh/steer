@@ -104,6 +104,11 @@ does not, sync refuses and names rebuild, which regenerates the master.`,
 		for _, h := range result.Current {
 			utils.Info(fmt.Sprintf("%s: already in sync, nothing written", h.DisplayName))
 		}
+		for _, h := range result.CommandChanged {
+			if h.Capabilities.TrustReview {
+				utils.Info(status.GuardCommandChangedPhrase(h.DisplayName))
+			}
+		}
 		for _, m := range status.MasterRuntimes(scope) {
 			if m.Stale() && contains(result.Synced, m.Harness) {
 				utils.Info(fmt.Sprintf("%s: %s", status.HarnessLabel(m.Harness), status.MasterPhrase(m)))
@@ -156,8 +161,7 @@ func printRebuild(scope string, result *claude.RebuildResult) {
 	}
 	for _, target := range result.Targets {
 		if target.CommandChanged && target.Harness.Capabilities.TrustReview {
-			utils.Info(fmt.Sprintf("%s: the guard command changed, so re-approve it in %s.",
-				target.Harness.DisplayName, target.Harness.DisplayName))
+			utils.Info(status.GuardCommandChangedPhrase(target.Harness.DisplayName))
 		}
 	}
 	if result.Stamp.Runtime != guard.RuntimeDigest() || result.Stamp.Version != version.Version {

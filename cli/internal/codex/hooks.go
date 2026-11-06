@@ -2,6 +2,7 @@
 package codex
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -276,10 +277,15 @@ func save(scope, path string, root map[string]any) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	raw, err := json.MarshalIndent(root, "", "  ")
-	if err != nil {
+	// A command's shell redirection stays readable in the file, not >.
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(root); err != nil {
 		return err
 	}
+	raw := bytes.TrimRight(buf.Bytes(), "\n")
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".hooks.json.*")
 	if err != nil {
 		return err

@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/steer-sh/steer-cli/internal/codex"
 	"github.com/steer-sh/steer-cli/internal/guard"
 	"github.com/steer-sh/steer-cli/internal/hookstore"
 )
@@ -273,6 +275,71 @@ func TestSyncStoreRepointsABareProjectRegistration(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(again.Synced) != 0 || len(again.Current) != 1 {
+		t.Fatalf("second sync = %#v; want the target current", again)
+	}
+}
+
+// bareCodexMaster rewrites the Codex master registration in hooks.json to the
+// relative command Steer wrote before the root anchor.
+func bareCodexMaster(t *testing.T, path string) {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var root map[string]any
+	if err := json.Unmarshal(raw, &root); err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range root["hooks"].(map[string]any)["PreToolUse"].([]any) {
+		for _, hook := range entry.(map[string]any)["hooks"].([]any) {
+			hook := hook.(map[string]any)
+			if hookstore.IsMasterCommand(hook["command"].(string)) {
+				hook["command"] = "python3 .steer/hooks/" + MasterHookName + " --harness codex"
+			}
+		}
+	}
+	if raw, err = json.Marshal(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A Codex registration written before the root anchor names the same master, so
+// only its text shows it needs the rewrite. Sync repoints it, reports the changed
+// command Codex must approve again, and a second sync changes nothing.
+func TestSyncStoreRepointsABareCodexRegistration(t *testing.T) {
+	withProjectTempDir(t)
+	t.Setenv("CODEX_HOME", t.TempDir())
+	installTestHook(t, "no-bare-python", "use python3 instead", codex.Registrar{})
+	path, err := codex.RegisterMaster(ProjectScope, ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bareCodexMaster(t, path)
+
+	result, err := SyncStore(ProjectScope, codex.Registrar{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Synced) != 1 || len(result.CommandChanged) != 1 {
+		t.Fatalf("result = %#v; want one synced target with a changed command", result)
+	}
+	want, err := codex.MasterCommand(ProjectScope, ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := (codex.Registrar{}).RegisteredMasterCommand(ProjectScope); got != want {
+		t.Fatalf("command = %q, want %q", got, want)
+	}
+
+	again, err := SyncStore(ProjectScope, codex.Registrar{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(again.Synced) != 0 || len(again.Current) != 1 || len(again.CommandChanged) != 0 {
 		t.Fatalf("second sync = %#v; want the target current", again)
 	}
 }

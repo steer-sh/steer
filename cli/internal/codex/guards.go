@@ -3,6 +3,7 @@ package codex
 import (
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/steer-sh/steer-cli/internal/guard"
@@ -27,10 +28,21 @@ const MasterStatusMessage = "checking the change against your rules ..."
 // must leave the other registered.
 func isMaster(command string) bool { return hookstore.IsMasterCommand(command) }
 
+// projectRootPrefix anchors a project registration at the project root. Codex
+// loads a repository's .codex/hooks.json from any subdirectory but runs a hook in
+// the session's working directory, and it sets no variable naming the root. The
+// expression is steerpath.ProjectRootOf in shell: the git top level, else the
+// working directory, which is where a directory in no repository anchors its store.
+const projectRootPrefix = `$(git rev-parse --show-toplevel 2>/dev/null || pwd)/`
+
 // MasterCommand is the hooks.json command value for the guard master, for the
 // hooks.json under cwd. The master serves every harness and reads its reply
 // contract off this flag.
 func MasterCommand(scope, cwd string) (string, error) {
+	return masterCommandOn(runtime.GOOS, scope, cwd)
+}
+
+func masterCommandOn(goos, scope, cwd string) (string, error) {
 	master, err := hookstore.MasterRegistration(scope, cwd)
 	if err != nil {
 		return "", err
@@ -42,7 +54,44 @@ func MasterCommand(scope, cwd string) (string, error) {
 	if err := shellword.Encodable(master); err != nil {
 		return "", fmt.Errorf("cannot register the guard master: %w", err)
 	}
+	// cmd.exe has no command substitution, so a Windows host keeps the bare form.
+	if scope == "project" && !filepath.IsAbs(master) && goos != "windows" {
+		// The relative part holds only .steer or .claude, and hooks, so the double
+		// quotes protect the root the expression prints and expand nothing else.
+		return fmt.Sprintf(`python3 "%s%s" %s %s`, projectRootPrefix, master, guard.HarnessFlag, harness.Codex), nil
+	}
 	return fmt.Sprintf("python3 %s %s %s", shellword.Quote(master), guard.HarnessFlag, harness.Codex), nil
+}
+
+// registeredMasterPath reads the master path out of a hooks.json command without
+// the root anchor, so a project path stays relative to the config carrying it.
+func registeredMasterPath(command string) string {
+	return strings.TrimPrefix(hookstore.MasterPathFromCommand(command), projectRootPrefix)
+}
+
+// MasterCommandStale reports a project registration that names the store's master
+// in a form other than the one MasterCommand writes. A path comparison cannot see
+// it: the bare relative form and the anchored form read as one path.
+func MasterCommandStale(scope, cwd string) (bool, error) {
+	if scope != "project" {
+		return false, nil
+	}
+	command := MasterArming(scope, cwd).Command
+	if command == "" {
+		return false, nil
+	}
+	current, err := hookstore.MasterRegistration(scope, cwd)
+	if err != nil {
+		return false, err
+	}
+	if filepath.ToSlash(registeredMasterPath(command)) != filepath.ToSlash(current) {
+		return false, nil
+	}
+	want, err := MasterCommand(scope, cwd)
+	if err != nil {
+		return false, err
+	}
+	return command != want, nil
 }
 
 // RegisterMaster upserts the guard master's PreToolUse handler, preserving every
@@ -175,7 +224,12 @@ func (Registrar) MasterRegistered(scope string) (bool, error) {
 
 // RegisteredMasterPath reads back the master path hooks.json names.
 func (Registrar) RegisteredMasterPath(scope string) (string, error) {
-	return hookstore.MasterPathFromCommand(MasterArming(scope, ".").Command), nil
+	return registeredMasterPath(MasterArming(scope, ".").Command), nil
+}
+
+// MasterCommandStale reports a registration naming the right master in an old form.
+func (Registrar) MasterCommandStale(scope string) (bool, error) {
+	return MasterCommandStale(scope, ".")
 }
 
 // RegisteredMasterCommand reads back the command hooks.json runs the master with.
