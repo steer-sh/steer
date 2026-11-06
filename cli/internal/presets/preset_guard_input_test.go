@@ -206,6 +206,18 @@ var reboundProofCases = []struct {
 	{"subprocess.check_output with shell", "import subprocess\nsubprocess.check_output(input(), shell=True)\n", true},
 	{"subprocess.check_call with shell", "import subprocess\nsubprocess.check_call(input(), shell=True)\n", true},
 	{"subprocess.call with shell", "import subprocess\nsubprocess.call(input(), shell=True)\n", true},
+	{"subprocess.run args keyword with shell", "import subprocess\nsubprocess.run(args=input(), shell=True)\n", true},
+	{"subprocess.Popen args keyword with shell", "import subprocess\nsubprocess.Popen(args=input(), shell=True)\n", true},
+	{"subprocess.check_output args keyword with shell", "import subprocess\nsubprocess.check_output(args=input(), shell=True)\n", true},
+	{"subprocess.check_call args keyword with shell", "import subprocess\nsubprocess.check_call(args=input(), shell=True)\n", true},
+	{"subprocess.call args keyword with shell", "import subprocess\nsubprocess.call(shell=True, args=input())\n", true},
+	{"os.system command keyword", "import os\nos.system(command=input())\n", true},
+	{"args keyword with a literal command", "import subprocess\nsubprocess.call(args=\"ls -l\", shell=True)\n", false},
+	{"args keyword with a proven name", reboundQuoted + "subprocess.run(args=f\"ls {x}\", shell=True)\n", false},
+	{"args keyword list without shell", "import subprocess\nsubprocess.run(args=[\"ls\", input()])\n", false},
+	{"keyword before an args keyword rebinds the name", reboundQuoted + "subprocess.run(cwd=(x := input()), args=f\"ls {x}\", shell=True)\n", true},
+	{"keyword after an args keyword reads the old proof", reboundQuoted + "subprocess.run(args=f\"ls {x}\", shell=True, cwd=(x := input()))\n", false},
+	{"os.system command keyword literal", "import os\nos.system(command=\"ls\")\n", false},
 }
 
 // reboundMatchCases need match syntax, which Python before 3.10 cannot parse.
@@ -315,7 +327,7 @@ func TestReworkedPresetGuardsInstallAtNewVersionIntoMaster(t *testing.T) {
 	}
 	for name, want := range map[string]string{
 		"postinstall-script-prevention": "factory-hook-v3",
-		"python-command-injection":      "factory-hook-v4",
+		"python-command-injection":      "factory-hook-v5",
 	} {
 		if got := manifest.Hooks[name].HookVersion; got != want {
 			t.Fatalf("%s manifest hook version = %q, want %s", name, got, want)

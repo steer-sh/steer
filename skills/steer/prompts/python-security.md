@@ -24,7 +24,7 @@ except SyntaxError:
 This is the most nuanced security rule. The detection logic MUST follow this exact priority:
 
 ### Step 1: Handle os.system()
-`os.system()` always uses a shell. Block if the argument is anything other than a static string literal.
+`os.system()` always uses a shell. Block if the argument is anything other than a static string literal. The argument is the first positional one or the `command=` keyword.
 
 ### Step 2: Handle subprocess calls (run, Popen, check_output, check_call, call)
 
@@ -32,7 +32,7 @@ This is the most nuanced security rule. The detection logic MUST follow this exa
 
 **Path A: `shell=True` is NOT present** → The call uses `shell=False` (default). This is the safest method. Arguments are passed directly to the program without shell interpretation. **ALLOW immediately.** Do not analyze further.
 
-**Path B: `shell=True` IS present** → Now inspect the command argument:
+**Path B: `shell=True` IS present** → Now inspect the command argument, which is the first positional argument or the `args=` keyword:
 - If the command is a static string literal → **ALLOW** (no user input possible)
 - If the command uses `shlex.quote()` on all dynamic parts → **ALLOW** (safely escaped)
 - If the command is anything else (f-string, variable, .format(), concatenation) → **BLOCK**
@@ -244,9 +244,12 @@ class CommandInjectionVisitor(ast.NodeVisitor):
             self.generic_visit(node)
             return
 
+        visited = []
+
         # os.system: always uses shell
         if module_name == 'os' and func_name == 'system':
-            if node.args and not self._is_static_string(node.args[0]):
+            command, visited = self._command_arg(node, 'command')
+            if command is not None and not self._is_static_string(command):
                 self.violations.append((node.lineno, "os.system() with dynamic input"))
 
         # subprocess calls
@@ -263,13 +266,33 @@ class CommandInjectionVisitor(ast.NodeVisitor):
                 return
 
             # shell=True found - now check the command argument
-            if node.args:
-                first_arg = node.args[0]
+            first_arg, visited = self._command_arg(node, 'args')
+            if first_arg is not None:
                 if not self._is_static_string(first_arg) and not self._uses_shlex_quote(first_arg):
                     self.violations.append((node.lineno,
                         f"subprocess.{func_name}() with shell=True and dynamic input"))
 
-        self.generic_visit(node)
+        self._visit_call_rest(node, visited)
+
+    def _command_arg(self, node, keyword):
+        """Return the call's command, passed first positionally or by its keyword
+        name, and the keywords this visited to reach it.
+
+        A keyword command is built after the keyword values written before it,
+        so those are visited first and a rebinding among them ends a proof."""
+        if node.args:
+            return node.args[0], []
+        for i, kw in enumerate(node.keywords):
+            if kw.arg == keyword:
+                for earlier in node.keywords[:i]:
+                    self.visit(earlier)
+                return kw.value, node.keywords[:i]
+        return None, []
+
+    def _visit_call_rest(self, node, visited):
+        for child in ast.iter_child_nodes(node):
+            if not any(child is kw for kw in visited):
+                self.visit(child)
 
     def _is_static_string(self, node):
         return isinstance(node, ast.Constant) and isinstance(node.value, str)
