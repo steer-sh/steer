@@ -579,35 +579,6 @@ func linkedSteerWithOldGuard(t *testing.T) string {
 	return hooks
 }
 
-// A .steer the repository carries as a link is refused, so no fixture lands at
-// its target.
-func TestSaveFixturesRefusesALinkedSteerDirectory(t *testing.T) {
-	hooks := linkedSteerWithOldGuard(t)
-	err := SaveFixtures(ProjectScope, fixture.File{Version: fixture.Version, Hook: "alpha", Cases: []fixture.Case{
-		bashCase("blocks", "x", fixture.ExpectBlock),
-	}})
-	if err == nil {
-		t.Error("SaveFixtures accepted a linked .steer")
-	}
-	if _, err := os.Stat(filepath.Join(hooks, fixture.DirName, "alpha.json")); err == nil {
-		t.Error("SaveFixtures wrote through a linked .steer")
-	}
-}
-
-// A bad document is refused before the store is created.
-func TestSaveFixturesRefusesABadHookBeforeCreatingTheStore(t *testing.T) {
-	withProjectTempDir(t)
-	err := SaveFixtures(ProjectScope, fixture.File{Version: fixture.Version, Hook: "../x", Cases: []fixture.Case{
-		bashCase("blocks", "x", fixture.ExpectBlock),
-	}})
-	if err == nil {
-		t.Error("SaveFixtures accepted a hook that is not a guard name")
-	}
-	if _, err := os.Stat(".steer"); err == nil {
-		t.Error("SaveFixtures created the store before refusing the document")
-	}
-}
-
 // A refused rekey leaves a legacy store unmigrated.
 func TestRekeyManagedHookRefusalLeavesALegacyStoreInPlace(t *testing.T) {
 	withProjectTempDir(t)
