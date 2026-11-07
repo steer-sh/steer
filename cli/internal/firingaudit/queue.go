@@ -2,6 +2,7 @@ package firingaudit
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"time"
 
@@ -22,6 +23,9 @@ const (
 
 // Where a queued case stands in the reading order.
 const (
+	// StratumFlagged is an owed or reserve case that carries at least one flag. It
+	// is listed before every other case.
+	StratumFlagged = "flagged"
 	// StratumUnit is a case its unit still owes: the unit holds fewer than
 	// SaturationReadings clean readings under its current identity, or a reading
 	// that found the block wrong.
@@ -32,6 +36,21 @@ const (
 	// StratumOther is a case no reading of which describes the fix installed now,
 	// listed only when the caller asks for --other.
 	StratumOther = "other"
+)
+
+// Outcome facts that move a case ahead of the round-robin. A flag reorders the
+// queue and never removes a case from it.
+const (
+	// FlagContest is a case a contest names.
+	FlagContest = "contest"
+	// FlagSilentContest is a check block after which the session stopped again
+	// on the same working tree, and no contest names it.
+	FlagSilentContest = "silent-contest"
+	// FlagRepeat is the earliest case of a unit that blocked more than once in
+	// one session.
+	FlagRepeat = "repeat"
+	// FlagMoved is a check block with a moved failure.
+	FlagMoved = "moved"
 )
 
 // SaturationReadings is how many clean readings under its current identity move
@@ -52,11 +71,13 @@ type Item struct {
 	Rule      string `json:"rule,omitempty"`
 	// Reason is Unjudged or ContinuationUnread.
 	Reason string `json:"reason"`
-	// Stratum is StratumUnit, StratumReserve or StratumOther, and Unit the fix
-	// whose turn in the order this case takes: a guard in its store, or one
-	// failure kind of one repository's check.sh.
-	Stratum string `json:"stratum"`
-	Unit    string `json:"unit"`
+	// Stratum is StratumFlagged, StratumUnit, StratumReserve or StratumOther,
+	// and Unit the fix whose turn in the order this case takes: a guard in its
+	// store, or one failure kind of one repository's check.sh. Flags names the
+	// flags that put a case in StratumFlagged.
+	Stratum string   `json:"stratum"`
+	Unit    string   `json:"unit"`
+	Flags   []string `json:"flags,omitempty"`
 	// Applies is a guard row's own implementation against the installed guard:
 	// adjudication.Current, Historic or Unknown. A check block has no one
 	// implementation; each of its Failures carries its own.
@@ -108,7 +129,9 @@ type Counts struct {
 	Other int `json:"other"`
 	// Queued is Unjudged + ContinuationUnread: everything the options selected.
 	Queued int `json:"queued"`
-	// Reserve is how many of Queued belong to saturated units.
+	// Flagged is how many of Queued carry a flag and are listed first.
+	Flagged int `json:"flagged"`
+	// Reserve is how many of Queued belong to saturated units and carry no flag.
 	Reserve int `json:"reserve"`
 	// Listed is how many of Queued survived Limit.
 	Listed int `json:"listed"`
@@ -129,6 +152,10 @@ func (c Counts) Remaining() string {
 	default:
 		out = fmt.Sprintf("%d of %d queued case(s) listed; %d stay unexamined by this listing (%d unread, %d judged with an unread continuation in total).",
 			c.Listed, c.Queued, left, c.Unjudged, c.ContinuationUnread)
+	}
+	if c.Flagged > 0 {
+		out += fmt.Sprintf(" %d queued case(s) are flagged and listed first: a contest, a block after which the session stopped again on the same tree with no contest, a unit's first block of several in one session, or a moved detector.",
+			c.Flagged)
 	}
 	if c.Reserve > 0 {
 		out += fmt.Sprintf(" %d queued case(s) are in the reserve: their fix already has %d clean readings under its current identity.",
@@ -162,6 +189,8 @@ type QueueOptions struct {
 	// ExcludedRuns the check blocks one retires, keyed by run.
 	Excluded     map[string]adjudication.Exclusion
 	ExcludedRuns map[string]adjudication.Exclusion
+	// Contests are the recorded contests, which flag the cases they name.
+	Contests []adjudication.Contest
 }
 
 // Queue lists the cases a reading pass should take next, guard firings and check
@@ -172,8 +201,8 @@ type QueueOptions struct {
 // is not one of them, so an unresolved receipt waits for new evidence or for
 // the operator to ask for it by name.
 //
-// Owed units go round-robin (see roundRobin), then the reserve the same way,
-// then the --other cases oldest first.
+// Flagged cases go round-robin first (see roundRobin and flag), then the owed
+// units, then the reserve the same way, then the --other cases oldest first.
 func Queue(rows []Row, cases []CheckCase, receipts []adjudication.Receipt, opts QueueOptions) ([]Item, Counts) {
 	tallies := tallyReadings(rows, cases, receipts, opts)
 	var items []Item
@@ -193,6 +222,7 @@ func Queue(rows []Row, cases []CheckCase, receipts []adjudication.Receipt, opts 
 	sort.SliceStable(items, func(i, j int) bool {
 		return Earlier(items[i].Timestamp, items[j].Timestamp)
 	})
+	flag(items, cases, opts.Contests, repeats(rows, cases, opts))
 	for _, item := range items {
 		switch item.Reason {
 		case Unjudged:
@@ -200,7 +230,10 @@ func Queue(rows []Row, cases []CheckCase, receipts []adjudication.Receipt, opts 
 		case ContinuationUnread:
 			counts.ContinuationUnread++
 		}
-		if item.Stratum == StratumReserve {
+		switch item.Stratum {
+		case StratumFlagged:
+			counts.Flagged++
+		case StratumReserve:
 			counts.Reserve++
 		}
 	}
@@ -397,12 +430,15 @@ func place(item *Item, covers []string, tallies map[string]readings) {
 	}
 }
 
-// arrange orders time-sorted items: owed units round-robin, then the reserve
-// round-robin, then the --other cases as they came.
+// arrange orders time-sorted items: flagged cases round-robin, then owed units
+// round-robin, then the reserve round-robin, then the --other cases as they
+// came. The owed round-robin counts what the flagged one listed.
 func arrange(items []Item, tallies map[string]readings) []Item {
-	var owed, reserve, other []Item
+	var flagged, owed, reserve, other []Item
 	for _, item := range items {
 		switch item.Stratum {
+		case StratumFlagged:
+			flagged = append(flagged, item)
 		case StratumUnit:
 			owed = append(owed, item)
 		case StratumReserve:
@@ -411,19 +447,124 @@ func arrange(items []Item, tallies map[string]readings) []Item {
 			other = append(other, item)
 		}
 	}
-	out := append(roundRobin(owed, tallies, true), roundRobin(reserve, tallies, false)...)
+	count := map[string]int{}
+	out := roundRobin(flagged, tallies, true, count)
+	out = append(out, roundRobin(owed, tallies, true, count)...)
+	out = append(out, roundRobin(reserve, tallies, false, map[string]int{})...)
 	return append(out, other...)
+}
+
+// flag puts each owed or reserve case that carries a flag in StratumFlagged.
+// items are in time order, and repeated holds each case's repeated session
+// units (see repeats), by subject and identifier; the earliest listed case of
+// a repeated session unit takes its repeat flag.
+func flag(items []Item, cases []CheckCase, contests []adjudication.Contest, repeated map[string][]string) {
+	contested := map[string]bool{}
+	for _, c := range contests {
+		contested[c.Subject+":"+c.ID()] = true
+	}
+	trees := map[string]string{}
+	for _, c := range cases {
+		if c.Run.Session != "" {
+			trees[c.Run.RunID] = c.Followup.SessionTree
+		}
+	}
+	taken := map[string]bool{}
+	for i := range items {
+		item := &items[i]
+		if item.Stratum != StratumUnit && item.Stratum != StratumReserve {
+			continue
+		}
+		key := item.Subject + ":" + item.ID()
+		var flags []string
+		switch {
+		case contested[key]:
+			flags = append(flags, FlagContest)
+		case item.Subject == adjudication.SubjectCheck && trees[item.RunID] == checks.FollowUnchanged:
+			flags = append(flags, FlagSilentContest)
+		}
+		repeat := false
+		for _, unit := range repeated[key] {
+			if !taken[unit] {
+				taken[unit], repeat = true, true
+			}
+		}
+		if repeat {
+			flags = append(flags, FlagRepeat)
+		}
+		if len(item.moved) > 0 {
+			flags = append(flags, FlagMoved)
+		}
+		if len(flags) > 0 {
+			item.Flags = flags
+			item.Stratum = StratumFlagged
+		}
+	}
+}
+
+// repeats maps each case, by subject and identifier, to the session units it
+// shares with another case: a unit that blocked more than once in one session.
+// It counts only cases of the installed fix (guard rows of the installed guard,
+// and the owed failures of check blocks) and each unit once per case. Excluded
+// cases count for nothing.
+func repeats(rows []Row, cases []CheckCase, opts QueueOptions) map[string][]string {
+	byCase := map[string][]string{}
+	n := map[string]int{}
+	note := func(key, session, unit string) {
+		su := session + "\x00" + unit
+		for _, seen := range byCase[key] {
+			if seen == su {
+				return
+			}
+		}
+		byCase[key] = append(byCase[key], su)
+		n[su]++
+	}
+	for _, row := range rows {
+		if row.FiringID == "" || row.SessionID == "" || opts.Installed == nil {
+			continue
+		}
+		if _, excluded := opts.Excluded[row.RowDigest]; excluded && row.RowDigest != "" {
+			continue
+		}
+		if adjudication.AppliesStamps(row.HookDigest, row.RuleHash, opts.Installed(row)) != adjudication.Current {
+			continue
+		}
+		note(adjudication.SubjectGuard+":"+row.FiringID, row.Harness+"\x00"+row.SessionID, guardUnit(row))
+	}
+	for _, c := range cases {
+		if _, excluded := opts.ExcludedRuns[c.Run.RunID]; excluded || c.Run.Session == "" {
+			continue
+		}
+		failures, owed := c.units()
+		for i, f := range failures {
+			if owed[i] {
+				note(adjudication.SubjectCheck+":"+c.Run.RunID, c.Run.Harness+"\x00"+c.Run.Session,
+					checkUnit(c.Run.Repo, f.Kind, f.Check))
+			}
+		}
+	}
+	out := map[string][]string{}
+	for key, units := range byCase {
+		for _, su := range units {
+			if n[su] > 1 {
+				out[key] = append(out[key], su)
+			}
+		}
+	}
+	return out
 }
 
 // roundRobin gives each turn to the unit with the fewest readings and lists its
 // oldest unlisted case, counting that case as one more reading of every unit it
-// covers. A tie goes to the unit whose oldest case is oldest. In the owed
-// stratum a case with a moved failure takes only its moved units' turns, and a
-// saturated unit takes a turn only for a case no other unit covers.
-func roundRobin(items []Item, tallies map[string]readings, owed bool) []Item {
+// covers. count carries those readings from an earlier stratum; a unit it does
+// not hold starts at its clean readings. A tie goes to the unit whose oldest
+// case is oldest. In the owed stratum a case with a moved failure takes only
+// its moved units' turns, and a saturated unit takes a turn only for a case no
+// other unit covers.
+func roundRobin(items []Item, tallies map[string]readings, owed bool, count map[string]int) []Item {
 	var order []string
 	queues := map[string][]int{}
-	count := map[string]int{}
 	for i, item := range items {
 		var turns []string
 		for _, unit := range item.covers {
@@ -440,6 +581,8 @@ func roundRobin(items []Item, tallies map[string]readings, owed bool) []Item {
 		for _, unit := range turns {
 			if _, ok := queues[unit]; !ok {
 				order = append(order, unit)
+			}
+			if _, ok := count[unit]; !ok {
 				count[unit] = tallies[unit].clean
 			}
 			queues[unit] = append(queues[unit], i)
@@ -471,6 +614,9 @@ func roundRobin(items []Item, tallies map[string]readings, owed bool) []Item {
 		item := items[i]
 		item.Unit = next
 		for _, unit := range item.covers {
+			if _, ok := count[unit]; !ok {
+				count[unit] = tallies[unit].clean
+			}
 			count[unit]++
 		}
 		out = append(out, item)
@@ -499,8 +645,8 @@ func checkItems(cases []CheckCase, receipts []adjudication.Receipt, opts QueueOp
 		failures, owed := c.units()
 		var covers []string
 		for i, f := range failures {
-			if owed[i] {
-				covers = append(covers, checkUnit(c.Run.Repo, f.Kind, f.Check))
+			if unit := checkUnit(c.Run.Repo, f.Kind, f.Check); owed[i] && !slices.Contains(covers, unit) {
+				covers = append(covers, unit)
 			}
 		}
 		if len(covers) == 0 && !opts.Other {

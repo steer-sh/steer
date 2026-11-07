@@ -171,6 +171,12 @@ under its current identity first, and oldest first within a unit. A guard's or
 a declared check's unit with 3 clean readings and no wrong block is saturated:
 its cases are the reserve, listed after every owed case.
 
+A flag moves an owed or reserve case ahead of every other, and flagged cases
+take turns the same way: a contest names it (contest); a check block after
+which the session stopped again on the same working tree and no contest names
+it (silent-contest); it is a unit's first block of several in one session
+(repeat); or a check failure's detector moved (moved).
+
 Guard rows an earlier implementation recorded are a separate backlog: no
 reading of them establishes what the guard running now does. So is a check
 block that fails declared checks none of which is current, and has no wiring
@@ -188,6 +194,10 @@ the list; --hook names one guard and so lists no check block.`,
 			return err
 		}
 		source.classify()
+		contests, err := adjudication.LoadContests(adjudication.Dir())
+		if err != nil {
+			return err
+		}
 		items, counts := firingaudit.Queue(source.Rows, source.Cases, source.Receipts, firingaudit.QueueOptions{
 			Subject:      auditSubject,
 			HookName:     auditHook,
@@ -196,6 +206,7 @@ the list; --hook names one guard and so lists no check block.`,
 			Limit:        auditLimit,
 			Excluded:     source.Excluded,
 			ExcludedRuns: source.ExcludedRuns,
+			Contests:     contests,
 		})
 		var coverage []guardCoverage
 		if auditSubject != adjudication.SubjectCheck {
@@ -247,6 +258,9 @@ func writeQueue(w io.Writer, present bool, items []firingaudit.Item,
 	}
 	fmt.Fprintf(w, "\n%s\n", counts.Remaining())
 	for _, item := range items {
+		if len(item.Flags) > 0 {
+			item.Stratum += "[" + strings.Join(item.Flags, ",") + "]"
+		}
 		if item.Subject == adjudication.SubjectCheck {
 			var failures []string
 			for _, f := range item.Failures {

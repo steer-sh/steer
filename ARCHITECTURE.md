@@ -889,7 +889,11 @@ Stop); a block with no declared-check failure is always owed, and the rest go to
 store, or one failure kind of one repository's check.sh). `Queue` takes the units
 in turn, the fewest clean readings under their current identity first, and a
 unit with `SaturationReadings` clean readings and no wrong block becomes the
-reserve, listed after every owed case. `--subject` narrows the queue and
+reserve, listed after every owed case. An owed or reserve case with a flag (a
+contest names it, the session's next Stop saw the same tree with no contest, it is
+a unit's first block of several in one session, or a failure moved) goes ahead of
+both in its own round-robin, whose turns count in the owed one; a flag never
+lifts a case out of `--other`. `--subject` narrows the queue and
 `--hook` lists guards only. `show` and `record` take a firing or a run
 identifier (`--subject` settles one both carry); `ShowCheck` adds the records'
 follow-up and `FitCheck` withholds prior readings, then continuation from the
