@@ -159,16 +159,26 @@ var auditQueueCmd = &cobra.Command{
 	Use:   "queue",
 	Short: "List the blocks a reading pass should take next",
 	Long: `Queue lists unread guard firings of the installed guard and unread check.sh
-Stop blocks, in one list, oldest first.
+Stop blocks, in one list.
 
 A block is here because no judgment names it, or because a judgment read the
 block and nobody read what the task did next while that transcript is still on
-this machine. Guard rows an earlier implementation recorded are a separate
-backlog: no reading of them establishes what the guard running now does, so
---other is what asks for them. A check block is listed whatever its detectors
-are now, and each failure says whether a reading of it describes the detector
-installed now (applies=current). --subject guard|check narrows the list; --hook
-names one guard and so lists no check block.`,
+this machine.
+
+Each case belongs to a unit: a guard in its store, or one failure kind of one
+repository's check.sh. Units take turns, the one with the fewest clean readings
+under its current identity first, and oldest first within a unit. A guard's or
+a declared check's unit with 3 clean readings and no wrong block is saturated:
+its cases are the reserve, listed after every owed case.
+
+Guard rows an earlier implementation recorded are a separate backlog: no
+reading of them establishes what the guard running now does. So is a check
+block that fails declared checks none of which is current, and has no wiring
+failure, unless the records show one's detector changed before its next pass
+or the session's next Stop no longer declared it. A block failing only check.sh
+itself or its wiring is always listed. --other lists both backlogs after the
+rest. --subject guard|check narrows
+the list; --hook names one guard and so lists no check block.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := validSubject(auditSubject); err != nil {
 			return err
@@ -240,15 +250,20 @@ func writeQueue(w io.Writer, present bool, items []firingaudit.Item,
 		if item.Subject == adjudication.SubjectCheck {
 			var failures []string
 			for _, f := range item.Failures {
-				failures = append(failures, fmt.Sprintf("%s(applies=%s)",
-					firingaudit.FailureName(f.Kind, f.Check), f.Applies))
+				moved := ""
+				if f.Moved {
+					moved = ",moved"
+				}
+				failures = append(failures, fmt.Sprintf("%s(applies=%s%s)",
+					firingaudit.FailureName(f.Kind, f.Check), f.Applies, moved))
 			}
-			fmt.Fprintf(w, "  %s  %s  check.sh block in %s  %s  reach=%s  %s\n",
-				item.RunID, item.Timestamp, item.Repo, item.Reason, item.Reach, strings.Join(failures, " "))
+			fmt.Fprintf(w, "  %s  %s  check.sh block in %s  %s  reach=%s  %s  %s %s\n",
+				item.RunID, item.Timestamp, item.Repo, item.Reason, item.Reach, strings.Join(failures, " "),
+				item.Stratum, item.Unit)
 			continue
 		}
-		fmt.Fprintf(w, "  %s  %s  %s  %s  reach=%s\n",
-			item.FiringID, item.Timestamp, item.HookName, item.Reason, item.Reach)
+		fmt.Fprintf(w, "  %s  %s  %s  %s  reach=%s  %s %s\n",
+			item.FiringID, item.Timestamp, item.HookName, item.Reason, item.Reach, item.Stratum, item.Unit)
 	}
 	return nil
 }
@@ -484,6 +499,9 @@ func renderCheckCase(c firingaudit.CheckShow, e firingaudit.Emission) ([]byte, e
 	for _, ch := range f.Checks {
 		fmt.Fprintf(w, "  %s: %s at the block; next %s; detector at the next pass %s\n",
 			ch.Check, ch.Blocked, or(ch.Next), ch.DetectorAtPass)
+		if ch.UndeclaredAtNextStop {
+			fmt.Fprintf(w, "  %s: not declared at the next Stop in this session\n", ch.Check)
+		}
 	}
 
 	reading := c.Reading

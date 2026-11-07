@@ -129,8 +129,8 @@ long case cannot consume the report. The budget is spent across every guard and 
 repository's check.sh together: guard firings and check blocks share one queue and
 one budget, never one each.
 
-Start with the queue. It lists unread cases oldest first and counts the whole queue
-before `--limit` cuts the listing:
+Start with the queue. It lists unread cases in reading order and counts the whole
+queue before `--limit` cuts the listing:
 
 ```bash
 steer audit queue --json --limit 3
@@ -144,9 +144,13 @@ still on this machine. Each item's `subject` says which kind it is: `guard`, nam
 `coverage[]` holds each guard's account of its own rows, and `check_coverage[]` each
 repository's account of its blocks. Guard rows an earlier implementation recorded
 are **not** in this listing: no reading of them says what the guard running now does.
-`--other` asks for them as separate work. A check block is listed whatever its
-detectors are now; each failure's `applies` says whether a reading of it describes
-the detector installed now.
+Neither is a check block that fails declared checks none of which is current, and
+has no wiring (`integration`) failure, unless one of those checks reads `moved`: the
+records show its detector changed before its next pass, or the session's next Stop
+no longer declared it. A block failing only check.sh itself, or the wiring, has no
+detector to go stale and is always listed. `counts.other` is how many such
+cases only `--other` lists; it asks for them as separate work. Each failure's
+`applies` says whether a reading of it describes the detector installed now.
 
 Then read each case, handing it the bytes you can still afford. Read cases in the
 **text** form. `--json` re-encodes and indents the same evidence and costs close to
@@ -174,7 +178,7 @@ Then record one judgment per case you read. A guard firing:
 
 ```bash
 steer audit record FIRING_ID --judgment prevented \
-  --rationale "..." --selection "oldest unread, pass budget 3 cases" \
+  --rationale "..." --selection "stratum unit, unit guard:NAME@STORE, pass budget 3 cases" \
   --continuation-inspected --inspected-steps 9 \
   --continuation-outcome "..."
 ```
@@ -206,15 +210,22 @@ failure it reads:
 steer audit record RUN_ID \
   --failure check:go-test=valid,introduced,fixed \
   --failure oracle=valid,introduced,fixed \
-  --rationale "..." --selection "oldest unread, pass budget 3 cases" \
+  --rationale "..." --selection "stratum unit, unit check:go-test@REPO, pass budget 3 cases" \
   --continuation-inspected --inspected-steps 6
 ```
 
 `--judgment` is for guards only. `record` refuses a failure the run did not report
 and a block whose `required` failures are not all read.
 
-Selection for this pass is the queue's own order: oldest first, up to the case cap.
-Do not invent a sampling scheme. If a case you read shows an over-fire or a derailed
+Selection for this pass is the queue's own order, up to the case cap. Each item's
+`unit` is the fix it stands for: a guard in its store, or one failure kind of one
+repository's check.sh. Units take turns, the least-read first, so one busy fix
+cannot hold the others back. `stratum` is `unit` for a case its fix still owes and
+`reserve` for a case of a fix that already has three clean readings under its
+current identity. Read at most one `reserve` case per pass, and only when no `unit`
+case is left in the listing. `counts.reserve` says how many wait there. Copy the
+item's `stratum` and `unit` into `--selection`, so a later pass knows how each
+reading was picked. Do not invent a sampling scheme. If a case you read shows an over-fire or a derailed
 task, say so as an explicit finding and offer the user a focused drill-down or a
 reading of every recorded case for that guard. Full inspection is always the user's
 option; it is not the default, because reading cost grows with the installed
