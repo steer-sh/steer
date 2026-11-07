@@ -8,8 +8,12 @@ import (
 	"github.com/steer-sh/steer-cli/internal/checks"
 )
 
+// blockCase is a block in a session of its own, so no two fixtures repeat a
+// unit in one session unless a test puts them there.
 func blockCase(id string, m int, failures ...CheckFailure) CheckCase {
-	return CheckCase{Run: blockRun("/r", id, m), Failures: failures}
+	run := blockRun("/r", id, m)
+	run.Session = "s-" + id
+	return CheckCase{Run: run, Failures: failures}
 }
 
 func checkFailure(check, applies string) CheckFailure {
@@ -144,8 +148,9 @@ func TestQueueReservesASaturatedCheck(t *testing.T) {
 	moved := blockCase("v", 11, checkFailure("go", adjudication.Historic), oracleFailure)
 	moved.Followup.Checks = []checks.CheckFollowup{{Blocked: checks.Execution{CheckID: "go"}, Detector: checks.FollowChanged}}
 	items, _ = Queue(nil, append(cases, moved), receipts, QueueOptions{})
-	if len(items) != 2 || items[0].RunID != "v" || items[0].Stratum != StratumUnit {
-		t.Errorf("queue = %+v; want a block whose detector moved owed ahead of the reserve", items)
+	if len(items) != 2 || items[0].RunID != "v" || items[0].Stratum != StratumFlagged ||
+		strings.Join(items[0].Flags, ",") != FlagMoved {
+		t.Errorf("queue = %+v; want a block whose detector moved flagged ahead of the reserve", items)
 	}
 
 	movedBeside := blockCase("vl", 12, checkFailure("go", adjudication.Historic),
@@ -212,13 +217,13 @@ func TestQueueLeavesForOtherABlockNoReadingDescribes(t *testing.T) {
 	cases := []CheckCase{historic, changed, removed, oracleOnly, wiring}
 
 	items, counts := Queue(nil, cases, nil, QueueOptions{})
-	if got := strings.Join(ids(items), ","); got != "c,o,w,d" {
-		t.Fatalf("queue = %s; want c, o, w, d and not the historic block", got)
+	if got := strings.Join(ids(items), ","); got != "c,d,o,w" {
+		t.Fatalf("queue = %s; want the moved c and d flagged, then o, w, and not the historic block", got)
 	}
 	if counts.Other != 1 || !strings.Contains(counts.Remaining(), "--other") {
 		t.Errorf("counts %+v, remaining %q; want the historic block disclosed for --other", counts, counts.Remaining())
 	}
-	if !items[0].Failures[0].Moved || items[1].Unit != "oracle@/r" {
+	if !items[0].Failures[0].Moved || items[2].Unit != "oracle@/r" {
 		t.Errorf("items %+v; want the changed failure marked moved and check.sh's own unit", items)
 	}
 
@@ -275,5 +280,174 @@ func TestQueueReadsTheFollowupOfTheFailingExecution(t *testing.T) {
 	items, _ := Queue(nil, []CheckCase{c}, nil, QueueOptions{})
 	if len(items) != 1 || !items[0].Failures[0].Moved {
 		t.Errorf("queue = %+v; want the failed execution's moved detector to keep the block owed", items)
+	}
+}
+
+// A contested case goes ahead of every unflagged one, out of the reserve too,
+// and a contest lifts no case out of --other.
+func TestQueueListsAContestedCaseFirst(t *testing.T) {
+	rows := []Row{ccRow(t, "a1", "2026-09-20T01:00:00Z"), second(ccRow(t, "b1", "2026-09-20T02:00:00Z"))}
+	contests := []adjudication.Contest{{Subject: adjudication.SubjectGuard, FiringID: "b1"}}
+
+	items, counts := Queue(rows, nil, nil, QueueOptions{Installed: installed, Contests: contests})
+	if got := strings.Join(ids(items), ","); got != "b1,a1" {
+		t.Fatalf("queue = %s; want the contested b1 first", got)
+	}
+	if items[0].Stratum != StratumFlagged || strings.Join(items[0].Flags, ",") != FlagContest ||
+		items[1].Stratum != StratumUnit || items[1].Flags != nil {
+		t.Errorf("items %+v; want b1 flagged by its contest and a1 owed with no flag", items)
+	}
+	if counts.Flagged != 1 || !strings.Contains(counts.Remaining(), "flagged") {
+		t.Errorf("counts %+v, remaining %q; want one flagged case disclosed", counts, counts.Remaining())
+	}
+
+	var receipts []adjudication.Receipt
+	saturated := []Row{}
+	for _, id := range []string{"r1", "r2", "r3"} {
+		saturated = append(saturated, second(ccRow(t, id, "2026-09-20T00:00:00Z")))
+		receipts = append(receipts, cleanGuardReading(id))
+	}
+	items, counts = Queue(append(saturated, rows...), nil, receipts, QueueOptions{Installed: installed, Contests: contests})
+	if got := strings.Join(ids(items), ","); got != "b1,a1" || counts.Reserve != 0 {
+		t.Errorf("queue = %s, counts %+v; want the contest to lift b1 out of the reserve", got, counts)
+	}
+
+	stale := ccRow(t, "h1", "2026-09-20T00:30:00Z")
+	stale.HookDigest = "old"
+	contests = append(contests, adjudication.Contest{Subject: adjudication.SubjectGuard, FiringID: "h1"})
+	items, _ = Queue(append(rows, stale), nil, nil, QueueOptions{Installed: installed, Contests: contests, Other: true})
+	if last := items[len(items)-1]; last.FiringID != "h1" || last.Stratum != StratumOther || last.Flags != nil {
+		t.Errorf("last item %+v; want the contested historic row left in --other", last)
+	}
+}
+
+// A check block the session stopped past on the same tree, with no contest,
+// is flagged as a silent contest; a contest replaces that flag.
+func TestQueueFlagsASilentContest(t *testing.T) {
+	earlier := blockCase("e", 0, checkFailure("lint", adjudication.Current), oracleFailure)
+	silent := blockCase("t", 1, checkFailure("go", adjudication.Current), oracleFailure)
+	silent.Followup.SessionTree = checks.FollowUnchanged
+
+	items, _ := Queue(nil, []CheckCase{earlier, silent}, nil, QueueOptions{})
+	if got := strings.Join(ids(items), ","); got != "t,e" || strings.Join(items[0].Flags, ",") != FlagSilentContest {
+		t.Fatalf("queue = %s, items %+v; want t first, flagged as a silent contest", got, items)
+	}
+
+	contests := []adjudication.Contest{{Subject: adjudication.SubjectCheck, RunID: "t"}}
+	items, _ = Queue(nil, []CheckCase{earlier, silent}, nil, QueueOptions{Contests: contests})
+	if strings.Join(items[0].Flags, ",") != FlagContest {
+		t.Errorf("flags %v; want a contested block flagged by its contest alone", items[0].Flags)
+	}
+
+	silent.Followup.SessionTree = checks.FollowChanged
+	items, _ = Queue(nil, []CheckCase{earlier, silent}, nil, QueueOptions{})
+	if got := strings.Join(ids(items), ","); got != "e,t" {
+		t.Errorf("queue = %s; want no flag when the tree changed", got)
+	}
+
+	// A block with no session ID has no next Stop of its own session to read.
+	silent.Followup.SessionTree = checks.FollowUnchanged
+	silent.Run.Session = ""
+	items, _ = Queue(nil, []CheckCase{earlier, silent}, nil, QueueOptions{})
+	if got := strings.Join(ids(items), ","); got != "e,t" {
+		t.Errorf("queue = %s; want no silent contest without a session ID", got)
+	}
+}
+
+// A unit that blocked more than once in one session flags its earliest queued
+// case alone; a case already read passes the flag to the next one, because a
+// reading may stop before the repeat, and an excluded case counts for nothing.
+func TestQueueFlagsTheFirstRepeatOfAUnitInASession(t *testing.T) {
+	inSession := func(r Row, session string) Row {
+		r.SessionID = session
+		return r
+	}
+	b1 := inSession(second(ccRow(t, "b1", "2026-09-20T00:30:00Z")), "s2")
+	a1 := inSession(ccRow(t, "a1", "2026-09-20T01:00:00Z"), "s1")
+	a2 := inSession(ccRow(t, "a2", "2026-09-20T02:00:00Z"), "s1")
+	a3 := inSession(ccRow(t, "a3", "2026-09-20T03:00:00Z"), "s3")
+	rows := []Row{b1, a1, a2, a3}
+
+	items, _ := Queue(rows, nil, nil, QueueOptions{Installed: installed})
+	if got := strings.Join(ids(items), ","); got != "a1,b1,a2,a3" {
+		t.Fatalf("queue = %s; want a1 flagged first, then the units in turn", got)
+	}
+	if strings.Join(items[0].Flags, ",") != FlagRepeat {
+		t.Errorf("a1 flags %v; want repeat", items[0].Flags)
+	}
+	for _, item := range items[1:] {
+		if item.Flags != nil {
+			t.Errorf("%s flags %v; want only the session's first case flagged", item.ID(), item.Flags)
+		}
+	}
+
+	items, _ = Queue(rows, nil, []adjudication.Receipt{cleanGuardReading("a1")}, QueueOptions{Installed: installed})
+	if got := strings.Join(ids(items), ","); got != "a2,b1,a3" || strings.Join(items[0].Flags, ",") != FlagRepeat {
+		t.Errorf("queue = %s, items %+v; want a2 to take the repeat flag once a1 is read", got, items)
+	}
+
+	rows[1].RowDigest = "row-a1"
+	excluded := map[string]adjudication.Exclusion{"row-a1": {}}
+	items, _ = Queue(rows, nil, nil, QueueOptions{Installed: installed, Excluded: excluded})
+	for _, item := range items {
+		if item.Flags != nil {
+			t.Errorf("%s flags %v; want an excluded case to count for nothing", item.ID(), item.Flags)
+		}
+	}
+}
+
+// A block that fails one check in two executions is one block of that unit.
+func TestQueueCountsARepeatOncePerBlock(t *testing.T) {
+	twice := blockCase("x", 1)
+	twice.Failures = []CheckFailure{checkFailure("go", adjudication.Current), checkFailure("go", adjudication.Current), oracleFailure}
+	items, _ := Queue(nil, []CheckCase{twice}, nil, QueueOptions{})
+	if len(items) != 1 || items[0].Flags != nil {
+		t.Errorf("queue = %+v; want no repeat flag for one block", items)
+	}
+}
+
+// A unit that took a flagged turn has had that turn when the owed cases take
+// theirs.
+func TestQueueCountsFlaggedTurnsInTheOwedOrder(t *testing.T) {
+	rows := []Row{
+		ccRow(t, "a1", "2026-09-20T01:00:00Z"),
+		ccRow(t, "a2", "2026-09-20T02:00:00Z"),
+		second(ccRow(t, "b1", "2026-09-20T03:00:00Z")),
+	}
+	contests := []adjudication.Contest{{Subject: adjudication.SubjectGuard, FiringID: "a1"}}
+	items, _ := Queue(rows, nil, nil, QueueOptions{Installed: installed, Contests: contests})
+	if got := strings.Join(ids(items), ","); got != "a1,b1,a2" {
+		t.Errorf("queue = %s; want b1 before a2, because a1 took the guard's turn", got)
+	}
+
+	// A flagged block that takes its moved unit's turn still counts as one more
+	// reading of its other unit, on top of that unit's clean readings.
+	var cases []CheckCase
+	var receipts []adjudication.Receipt
+	for i, read := range []struct{ id, check string }{{"p1", "lint"}, {"p2", "lint"}, {"q1", "vet"}, {"q2", "vet"}} {
+		cases = append(cases, blockCase(read.id, i, checkFailure(read.check, adjudication.Current), oracleFailure))
+		receipts = append(receipts, cleanCheckReading(read.id, read.check))
+	}
+	moved := blockCase("m", 4, checkFailure("go", adjudication.Historic), checkFailure("lint", adjudication.Current), oracleFailure)
+	moved.Followup.Checks = []checks.CheckFollowup{{Blocked: checks.Execution{CheckID: "go"}, Detector: checks.FollowChanged}}
+	cases = append(cases, moved,
+		blockCase("l", 5, checkFailure("lint", adjudication.Current), oracleFailure),
+		blockCase("v", 6, checkFailure("vet", adjudication.Current), oracleFailure))
+	items, _ = Queue(nil, cases, receipts, QueueOptions{})
+	if got := strings.Join(ids(items), ","); got != "m,v,l" {
+		t.Errorf("queue = %s; want v before l, because m counted as a third lint reading", got)
+	}
+
+	// A flagged block failing one check in two executions is one reading of it.
+	twice := blockCase("f", 1, checkFailure("go", adjudication.Current), checkFailure("go", adjudication.Current), oracleFailure)
+	cases = []CheckCase{
+		blockCase("q", 0, checkFailure("vet", adjudication.Current), oracleFailure), twice,
+		blockCase("g", 2, checkFailure("go", adjudication.Current), oracleFailure),
+		blockCase("w", 3, checkFailure("vet", adjudication.Current), oracleFailure),
+	}
+	contested := []adjudication.Contest{{Subject: adjudication.SubjectCheck, RunID: "f"}}
+	items, _ = Queue(nil, cases, []adjudication.Receipt{cleanCheckReading("q", "vet")}, QueueOptions{Contests: contested})
+	if got := strings.Join(ids(items), ","); got != "f,g,w" {
+		t.Errorf("queue = %s; want g before w, because f counts once toward go", got)
 	}
 }

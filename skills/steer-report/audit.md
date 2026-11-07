@@ -220,12 +220,16 @@ and a block whose `required` failures are not all read.
 Selection for this pass is the queue's own order, up to the case cap. Each item's
 `unit` is the fix it stands for: a guard in its store, or one failure kind of one
 repository's check.sh. Units take turns, the least-read first, so one busy fix
-cannot hold the others back. `stratum` is `unit` for a case its fix still owes and
-`reserve` for a case of a fix that already has three clean readings under its
-current identity. Read at most one `reserve` case per pass, and only when no `unit`
-case is left in the listing. `counts.reserve` says how many wait there. Copy the
-item's `stratum` and `unit` into `--selection`, so a later pass knows how each
-reading was picked. Do not invent a sampling scheme. If a case you read shows an over-fire or a derailed
+cannot hold the others back. `stratum` is `flagged` for a case an outcome fact moved
+to the front, `unit` for a case its fix still owes, and `reserve` for a case of a fix
+that already has three clean readings under its current identity. A flagged case
+names its facts in `flags`: `contest`, `silent-contest` (the session stopped again on
+the same tree with no contest), `repeat` (the first of several blocks of one unit in
+one session) or `moved`. `counts.flagged` says how many are flagged. Read at most one
+`reserve` case per pass, and only when no `flagged` or `unit` case is left in the
+listing. `counts.reserve` says how many wait there. Copy the item's `stratum`, its
+`flags` and its `unit` into `--selection`, so a later pass knows how each reading was
+picked. Do not invent a sampling scheme. If a case you read shows an over-fire or a derailed
 task, say so as an explicit finding and offer the user a focused drill-down or a
 reading of every recorded case for that guard. Full inspection is always the user's
 option; it is not the default, because reading cost grows with the installed
