@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/claude"
+	codexhooks "github.com/steer-sh/steer-cli/internal/codex"
 	"github.com/steer-sh/steer-cli/internal/guard"
 	"github.com/steer-sh/steer-cli/internal/hookstore"
 	"github.com/steer-sh/steer-cli/internal/status"
@@ -203,5 +204,82 @@ func TestExecutableFileReadsTheBit(t *testing.T) {
 	}
 	if !executableFile(path) {
 		t.Error("an executable file read as not runnable")
+	}
+}
+
+// TestBinInstallLeavesARemovedHarnessUnregistered pins that bin install's rebuild of
+// a stale global master re-registers only the harnesses that still hold it: Codex,
+// removed through uninstall, gets back neither the master nor the rules section,
+// and Claude Code's master is rebuilt whatever --harness names.
+func TestBinInstallLeavesARemovedHarnessUnregistered(t *testing.T) {
+	home := t.TempDir()
+	testhome.Set(t, home)
+	t.Setenv("CODEX_HOME", "")
+	t.Chdir(home)
+	g := claude.GlobalScope
+	addOrphanFactoryHook(t, g, "orphan-global", "orphan-global", "never use var globally")
+	if _, err := claude.RebuildMaster(g, claude.Registrar{}, codexhooks.Registrar{}); err != nil {
+		t.Fatal(err)
+	}
+	agents, err := codexhooks.Registrar{}.InstructionPath(g)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	harnessFlag = "codex"
+	t.Cleanup(func() { harnessFlag = "" })
+	if _, err := runUninstallWith(t, true, false); err != nil {
+		t.Fatal(err)
+	}
+	ageStamp(t, g)
+
+	// --harness still names Codex: the rebuild follows the registrations, not the flag.
+	if err := rebuildStaleMasters(); err != nil {
+		t.Fatal(err)
+	}
+	if path, err := (codexhooks.Registrar{}).RegisteredMasterPath(g); err != nil || path != "" {
+		t.Errorf("Codex master registration after bin install = %q (%v), want none", path, err)
+	}
+	if doc, err := os.ReadFile(agents); err == nil && strings.Contains(string(doc), "Steer Rules") {
+		t.Errorf("bin install wrote the rules section back into %s:\n%s", agents, doc)
+	}
+	for _, m := range status.MasterRuntimes(g) {
+		if m.Harness == "claude-code" && m.State != status.MasterCurrent {
+			t.Errorf("Claude Code global master is %s after bin install, want current", m.State)
+		}
+	}
+}
+
+// TestBinInstallRefusesAnUnreadableCodexHooksFile pins that a stale global master
+// is not rebuilt while Codex's hooks file cannot be read, since Codex would read
+// as unregistered and be left on the old master.
+func TestBinInstallRefusesAnUnreadableCodexHooksFile(t *testing.T) {
+	home := t.TempDir()
+	testhome.Set(t, home)
+	t.Setenv("CODEX_HOME", "")
+	t.Chdir(home)
+	g := claude.GlobalScope
+	addOrphanFactoryHook(t, g, "orphan-global", "orphan-global", "never use var globally")
+	if _, err := claude.RebuildMaster(g, claude.Registrar{}, codexhooks.Registrar{}); err != nil {
+		t.Fatal(err)
+	}
+	master := ageStamp(t, g)
+	before, err := os.ReadFile(master)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".codex", "hooks.json"), []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := rebuildStaleMasters(); err == nil || !strings.Contains(err.Error(), "Codex") {
+		t.Fatalf("err = %v, want a failure naming the Codex registration", err)
+	}
+	after, err := os.ReadFile(master)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Error("bin install rewrote the master while Codex's registration was unreadable")
 	}
 }
