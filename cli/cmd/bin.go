@@ -8,6 +8,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/claude"
 	codexhooks "github.com/steer-sh/steer-cli/internal/codex"
 	"github.com/steer-sh/steer-cli/internal/gate"
+	"github.com/steer-sh/steer-cli/internal/guardscope"
 	"github.com/steer-sh/steer-cli/internal/harness"
 	pihooks "github.com/steer-sh/steer-cli/internal/pi"
 	"github.com/steer-sh/steer-cli/internal/status"
@@ -102,7 +103,8 @@ func recordPluginCopies() {
 
 // rebuildStaleMasters rebuilds the global guard master when its runtime is not
 // this binary's, and names the rebuild of a stale project master without running
-// it, because that master is committed for the whole repository.
+// it, because that master is committed for the whole repository. The rebuild
+// re-registers only the harnesses already holding a registration in the scope.
 func rebuildStaleMasters() error {
 	for _, s := range status.StaleScopes(status.MasterRuntimes(claude.GlobalScope, claude.ProjectScope)) {
 		if s != claude.GlobalScope {
@@ -110,9 +112,12 @@ func rebuildStaleMasters() error {
 				"to rebuild it for the repository, run: %s", s, status.RebuildCommand(s)))
 			continue
 		}
-		targets, err := currentRegistrars()
+		targets, err := registeredTargets(s)
 		if err != nil {
 			return err
+		}
+		if len(targets) == 0 {
+			continue // RebuildMaster would fall back to registering Claude Code
 		}
 		result, err := claude.RebuildMaster(s, targets...)
 		if err != nil {
@@ -122,6 +127,31 @@ func rebuildStaleMasters() error {
 		printRebuild(s, result)
 	}
 	return nil
+}
+
+// registeredTargets resolves the harnesses holding a master registration in scope,
+// whatever --harness names. A registration that cannot be read fails the rebuild
+// before it writes, rather than leaving that harness on the old master.
+func registeredTargets(scope string) ([]harness.Registrar, error) {
+	// Codex reads an unreadable hooks file as holding no registration.
+	if path, err := codexhooks.HooksReadable(scope, "."); err != nil {
+		return nil, fmt.Errorf("read the Codex guard master registration in %s: %w", path, err)
+	}
+	all, err := guardscope.HookRegistrars(false)
+	if err != nil {
+		return nil, err
+	}
+	out := []harness.Registrar{}
+	for _, registrar := range all {
+		registered, err := registrar.MasterRegistered(scope)
+		if err != nil {
+			return nil, fmt.Errorf("read the %s guard master registration: %w", registrar.Harness().DisplayName, err)
+		}
+		if registered {
+			out = append(out, registrar)
+		}
+	}
+	return out, nil
 }
 
 // relinkClaude repoints this scope's Claude Code registrations, reporting how many
