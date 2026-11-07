@@ -124,7 +124,7 @@ Remove Steer before you remove the plugin. The hooks that setup registered call 
 ~/.steer/bin/steer uninstall --apply
 ```
 
-This removes Steer's commit gate, check runner, guard runner, rules section and status line from each agent's global settings. A status line that Steer wrapped comes back as it was. To remove Steer from one agent only, add `--harness claude-code` or `--harness codex`. Then remove the plugin:
+This removes Steer's commit gate, check runner, guard runner, rules section and status line from each agent's global settings. A status line that Steer wrapped comes back as it was. To remove Steer from one agent only, add `--harness claude-code` or `--harness codex`. If you remove the plugin first, the status line and each commit review name this command. Then remove the plugin:
 
 ```bash
 claude plugin uninstall steer@steer-marketplace

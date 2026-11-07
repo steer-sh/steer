@@ -77,8 +77,27 @@ plugin update alone changes neither the stable executable nor any master.`,
 		} else {
 			utils.Info(fmt.Sprintf("Repointed %d registration(s) at the stable executable.", rewritten))
 		}
-		return rebuildStaleMasters()
+		if err := rebuildStaleMasters(); err != nil {
+			return err
+		}
+		if steerbin.RunningIsStable() {
+			// Installing the stable executable over itself is the operator keeping
+			// Steer without a plugin, so no removed plugin is named any more.
+			return steerbin.ClearSource()
+		}
+		recordPluginCopies()
+		return nil
 	},
+}
+
+// recordPluginCopies adds each harness's active Steer plugin copy to the source
+// record, so a later removal of a plugin this install did not come from is named too.
+func recordPluginCopies() {
+	for _, c := range status.PluginCopies() {
+		if status.PluginInstalled(harness.ID(c.Harness)) {
+			steerbin.RecordSource(c.Path)
+		}
+	}
 }
 
 // rebuildStaleMasters rebuilds the global guard master when its runtime is not

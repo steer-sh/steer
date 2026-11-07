@@ -214,9 +214,18 @@ func TestUninstallLeavesProjectScopeAndRemovesTheLocalPreCommit(t *testing.T) {
 }
 
 // TestUninstallHarnessLeavesTheOtherAgent: --harness removes that agent's global
-// registrations; the other agent's registrations stay.
+// registrations and clears a source record in its plugin cache; the other agent's
+// registrations stay.
 func TestUninstallHarnessLeavesTheOtherAgent(t *testing.T) {
-	uninstallHome(t)
+	home := uninstallHome(t)
+	source := filepath.Join(home, ".steer", "bin", "source")
+	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	codexCopy := filepath.Join(home, ".codex", "plugins", "cache", "m", "steer", "0.1.7", "bin", "x", "steer")
+	if err := os.WriteFile(source, []byte(codexCopy+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	harnessFlag = "codex"
 	t.Cleanup(func() { harnessFlag = "" })
 	if _, err := runUninstallWith(t, true, false); err != nil {
@@ -236,6 +245,9 @@ func TestUninstallHarnessLeavesTheOtherAgent(t *testing.T) {
 	}
 	if claudeLeft == 0 {
 		t.Error("uninstall --harness codex removed Claude Code's registrations")
+	}
+	if _, err := os.Stat(source); !os.IsNotExist(err) {
+		t.Errorf("the source record in Codex's plugin cache is still there: %v", err)
 	}
 }
 

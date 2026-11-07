@@ -67,6 +67,17 @@ links to another harness's survives a one-harness removal. `~/.steer` stays unle
 given, which is refused while another Steer registration or a kept hook still
 needs it.
 
+Each install from another path adds that path, as `os.Executable` reports it, to
+`~/.steer/bin/source`, and `bin install` adds every active plugin copy it finds. When a recorded path lies in a harness's plugin cache and
+the harness's own install record (`installed_plugins.json`, or the `plugins` table
+of Codex's `config.toml`) no longer names Steer while its global configuration
+still calls Steer, `status.RemovedPlugins` names that harness: the status line row
+and every commit the PreToolUse gate reviews name
+`steer uninstall --harness <id>`. This is a notice and never a removal, because an
+update or a disabled plugin can read the same way for a moment. An uninstall for
+that harness drops its paths; `bin install` run from the stable executable clears
+the record, which is how an operator keeps the hooks.
+
 ## Harnesses and storage
 
 `cli/internal/harness/` is the registry and registrar contract. It owns harness

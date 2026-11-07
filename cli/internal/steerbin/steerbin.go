@@ -92,7 +92,81 @@ func install() (string, error) {
 	if err := copyExecutable(running, target); err != nil {
 		return "", err
 	}
+	exe, err := os.Executable()
+	if err != nil {
+		exe = running
+	}
+	RecordSource(exe)
 	return target, nil
+}
+
+// sourceFile holds the paths the stable executable was installed from, newest last.
+func sourceFile() (string, error) {
+	dir, err := steerpath.BinDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "source"), nil
+}
+
+// RecordSource adds path to the source record. The record only feeds a notice, so a
+// failed write leaves the install standing.
+func RecordSource(path string) {
+	kept := []string{}
+	for _, p := range Sources() {
+		if p != path {
+			kept = append(kept, p)
+		}
+	}
+	kept = append(kept, path)
+	_ = SetSources(kept)
+}
+
+// Sources returns the paths the stable executable was installed from, newest last.
+func Sources() []string {
+	file, err := sourceFile()
+	if err != nil {
+		return nil
+	}
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, line := range strings.Split(string(data), "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+// SetSources replaces the source record; an empty list removes it.
+func SetSources(paths []string) error {
+	file, err := sourceFile()
+	if err != nil {
+		return err
+	}
+	if len(paths) == 0 {
+		if err := os.Remove(file); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return nil
+	}
+	return os.WriteFile(file, []byte(strings.Join(paths, "\n")+"\n"), 0o644)
+}
+
+// ClearSource removes the source record.
+func ClearSource() error { return SetSources(nil) }
+
+// RunningIsStable reports whether this process is the stable executable itself.
+func RunningIsStable() bool {
+	target, err := steerpath.BinPath()
+	if err != nil {
+		return false
+	}
+	running, err := runningBinary()
+	return err == nil && running == target
 }
 
 // runningBinary names this process's executable with every symlink resolved, so a

@@ -152,6 +152,7 @@ reply on stdout. It always exits 0: a gate that cannot answer must fail open.`,
 			fmt.Fprintln(os.Stderr, "steer commit-gate:", err)
 			return nil
 		}
+		cfg.OperatorNotice = status.PluginRemovedNotice()
 		cc.Run(context.Background(), cfg, reviewer, os.Stdin, os.Stdout)
 		return nil
 	},
@@ -203,6 +204,7 @@ native hook reply on stdout. It always exits 0 so adapter failures fail open.`,
 			fmt.Fprintln(os.Stderr, "steer commit-gate:", err)
 			return nil
 		}
+		cfg.OperatorNotice = status.PluginRemovedNotice()
 		gatecodex.Run(context.Background(), cfg, reviewer, os.Stdin, os.Stdout)
 		return nil
 	},
@@ -224,6 +226,7 @@ native tool_call reply on stdout. It always exits 0 so adapter failures fail ope
 			fmt.Fprintln(os.Stderr, "steer commit-gate:", err)
 			return nil
 		}
+		cfg.OperatorNotice = status.PluginRemovedNotice()
 		gatepi.Run(context.Background(), cfg, reviewer, os.Stdin, os.Stdout)
 		return nil
 	},

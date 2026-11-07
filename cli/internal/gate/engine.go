@@ -183,6 +183,14 @@ func (e *Engine) review(ctx context.Context, req Request, p prepared) PanelResul
 
 // Handle rules on one commit.
 func (e *Engine) Handle(ctx context.Context, req Request) Decision {
+	d := e.handle(ctx, req)
+	if e.cfg.OperatorNotice != "" {
+		d.SystemMessage = joinNote(d.SystemMessage, e.cfg.OperatorNotice)
+	}
+	return d
+}
+
+func (e *Engine) handle(ctx context.Context, req Request) Decision {
 	req.addendum = LoadAddendum(req.Repo)
 	for _, msg := range req.addendum.Errors {
 		e.ledger.noteErr("%s", msg)

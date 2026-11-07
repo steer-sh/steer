@@ -176,6 +176,13 @@ func runUninstall(cmd *cobra.Command, _ []string) error {
 	if len(failed) > 0 {
 		return fmt.Errorf("uninstall did not finish; ~/.steer was kept:\n  %s", strings.Join(failed, "\n  "))
 	}
+	forget := steerbin.ClearSource
+	if target != harness.Unknown {
+		forget = func() error { return status.ForgetPluginSource(target) }
+	}
+	if err := forget(); err != nil {
+		return err
+	}
 	if uninstallPurge {
 		if err := os.RemoveAll(home); err != nil {
 			return fmt.Errorf("delete %s: %w", home, err)
@@ -185,7 +192,8 @@ func runUninstall(cmd *cobra.Command, _ []string) error {
 	if target == harness.Unknown {
 		fmt.Fprintln(out, "\nNo global Steer registration is left. Remove the Steer plugin from each agent next.")
 	} else {
-		fmt.Fprintf(out, "\nNo global %s registration of Steer is left.\n", status.HarnessLabel(string(target)))
+		fmt.Fprintf(out, "\nNo global %s registration of Steer is left, apart from what the plan keeps.\n",
+			status.HarnessLabel(string(target)))
 	}
 	return nil
 }

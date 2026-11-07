@@ -314,3 +314,34 @@ func TestStripFlagsReadsNoFlagInAComment(t *testing.T) {
 		t.Fatal("a flag named only in a comment must not read as present")
 	}
 }
+
+// TestEnsureRecordsWhereItInstalledFrom: an install adds the running executable to
+// the source record, keeping earlier sources, and ClearSource removes the record.
+func TestEnsureRecordsWhereItInstalledFrom(t *testing.T) {
+	home := t.TempDir()
+	testhome.Set(t, home)
+	if err := os.MkdirAll(filepath.Join(home, ".steer", "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	RecordSource("/earlier/plugin/steer")
+	if _, err := Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := Sources()
+	if len(got) != 2 || got[0] != "/earlier/plugin/steer" || got[1] != exe {
+		t.Fatalf("Sources() = %q, want the earlier source then %q", got, exe)
+	}
+	if RunningIsStable() {
+		t.Error("the test binary reads as the stable executable")
+	}
+	if err := ClearSource(); err != nil {
+		t.Fatal(err)
+	}
+	if got := Sources(); len(got) != 0 {
+		t.Fatalf("Sources() after ClearSource = %q", got)
+	}
+}
