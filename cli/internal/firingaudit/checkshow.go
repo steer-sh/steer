@@ -49,12 +49,15 @@ type CheckFact struct {
 	Next           string `json:"next,omitempty"`
 	NextPassRun    string `json:"next_pass_run,omitempty"`
 	DetectorAtPass string `json:"detector_at_pass"`
+	// UndeclaredAtNextStop says the session's next Stop no longer declared the check.
+	UndeclaredAtNextStop bool `json:"undeclared_at_next_stop,omitempty"`
 }
 
 func followupOf(f checks.BlockFollowup) Followup {
 	out := Followup{NextStop: runFact(f.NextStop), SessionTree: f.SessionTree, NextRun: runFact(f.NextRun)}
 	for _, c := range f.Checks {
-		fact := CheckFact{Check: c.Blocked.CheckID, Blocked: c.Blocked.Outcome, DetectorAtPass: c.Detector}
+		fact := CheckFact{Check: c.Blocked.CheckID, Blocked: c.Blocked.Outcome, DetectorAtPass: c.Detector,
+			UndeclaredAtNextStop: c.Undeclared}
 		if c.Next != nil {
 			fact.Next = c.Next.Outcome
 		}

@@ -112,3 +112,34 @@ func TestLiveFollowupsKeepEachRepositoryApart(t *testing.T) {
 		t.Errorf("check followups %+v; want go with no later result in /a", c)
 	}
 }
+
+// A check the session's next Stop no longer declares was removed before the
+// session stopped again, also when no check is left declared.
+func TestFollowupNamesACheckRemovedBeforeTheNextStop(t *testing.T) {
+	block := stopRun("b", "s1", DispositionBlock, "t1", 10)
+	block.Declared = []string{"go", "fmt"}
+	next := stopRun("n", "s1", DispositionAllow, "t2", 12)
+	next.Outcome = OutcomePassed
+	next.Declared = []string{"fmt"}
+	executions := []Execution{
+		execution("b", "go", OutcomeFailed, "d1", 10),
+		execution("b", "fmt", OutcomeFailed, "f1", 10),
+	}
+
+	got := blockFollowups([]OracleRun{block, next}, executions)
+	if len(got) != 1 || len(got[0].Checks) != 2 {
+		t.Fatalf("followups %+v; want one block following two checks", got)
+	}
+	if c := got[0].Checks[0]; !c.Undeclared {
+		t.Errorf("go followup %+v; want it undeclared at the next Stop", c)
+	}
+	if c := got[0].Checks[1]; c.Undeclared {
+		t.Errorf("fmt followup %+v; want it still declared", c)
+	}
+
+	next.Declared = nil
+	got = blockFollowups([]OracleRun{block, next}, executions)
+	if c := got[0].Checks[1]; !c.Undeclared {
+		t.Errorf("fmt followup %+v; want it undeclared once no check is declared", c)
+	}
+}

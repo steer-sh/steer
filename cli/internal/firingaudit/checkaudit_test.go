@@ -28,6 +28,7 @@ func TestQueueOrdersFiringsAndBlocksTogether(t *testing.T) {
 	early := ccRow(t, "f1", "2026-09-23T02:00:00Z")
 	late := ccRow(t, "f2", "2026-09-23T04:00:00+00:00")
 	block := mixedCase(t) // started 2026-09-23T03:01:00Z
+	block.Failures[0].Applies = adjudication.Current
 	cases := []CheckCase{block}
 
 	items, counts := Queue([]Row{late, early}, cases, nil, QueueOptions{Installed: installed})

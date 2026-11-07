@@ -882,8 +882,14 @@ historic.
 `Queue` offers unread rows of the installed guard, plus a judged row whose
 continuation nobody read while that transcript is still on this machine. The
 judgment's value queues nothing. Check blocks share the queue under the same
-revisit rule, in one time order (`firingaudit.Earlier`), whatever their
-failures' applicability, which each item carries; `--subject` narrows it and
+revisit rule. A block is owed while one of its declared-check failures is current
+or moved (`CheckFollowup.Detector` changed, or `Undeclared` at the session's next
+Stop); a block with no declared-check failure is always owed, and the rest go to
+`--other` beside historic guard rows. Each case belongs to a unit (a guard in its
+store, or one failure kind of one repository's check.sh). `Queue` takes the units
+in turn, the fewest clean readings under their current identity first, and a
+unit with `SaturationReadings` clean readings and no wrong block becomes the
+reserve, listed after every owed case. `--subject` narrows the queue and
 `--hook` lists guards only. `show` and `record` take a firing or a run
 identifier (`--subject` settles one both carry); `ShowCheck` adds the records'
 follow-up and `FitCheck` withholds prior readings, then continuation from the

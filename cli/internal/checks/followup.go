@@ -1,5 +1,7 @@
 package checks
 
+import "slices"
+
 // Comparison states for a follow-up. Unknown means a record needed for the
 // comparison is missing or predates the field.
 const (
@@ -32,6 +34,9 @@ type CheckFollowup struct {
 	// Detector compares the detector at the block with the one at NextPass:
 	// changed means the detector changed before the recorded pass.
 	Detector string
+	// Undeclared reports that the session's next Stop run did not declare this
+	// check: it was removed before the session stopped again.
+	Undeclared bool
 }
 
 // BlockFollowups returns a follow-up for each recorded Stop block in the
@@ -98,7 +103,9 @@ func blockFollowups(runs []OracleRun, executions []Execution) []BlockFollowup {
 		}
 		for _, e := range executions {
 			if e.RunID == block.RunID && !e.Passed() {
-				f.Checks = append(f.Checks, followCheck(e, block, executions))
+				c := followCheck(e, block, executions)
+				c.Undeclared = f.NextStop != nil && !slices.Contains(f.NextStop.Declared, e.CheckID)
+				f.Checks = append(f.Checks, c)
 			}
 		}
 		out = append(out, f)

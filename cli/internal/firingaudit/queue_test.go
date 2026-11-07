@@ -115,8 +115,11 @@ func TestQueueOffersUnreadRowsOfTheInstalledGuardOldestFirst(t *testing.T) {
 	}
 
 	widened, _ := Queue(rows, nil, nil, QueueOptions{Installed: installed, Other: true})
-	if got := ids(widened); fmt.Sprint(got) != fmt.Sprint([]string{"old", "a", "b", "c"}) {
-		t.Errorf("widened queue = %v; want the historic row too, never the legacy one", got)
+	if got := ids(widened); fmt.Sprint(got) != fmt.Sprint([]string{"a", "b", "c", "old"}) {
+		t.Errorf("widened queue = %v; want the historic row after the owed ones, never the legacy one", got)
+	}
+	if s := widened[3].Stratum; s != StratumOther {
+		t.Errorf("historic row stratum = %q; want %q", s, StratumOther)
 	}
 
 	limited, _ := Queue(rows, nil, nil, QueueOptions{Installed: installed, Limit: 2})
