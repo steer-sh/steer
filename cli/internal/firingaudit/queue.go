@@ -65,8 +65,10 @@ type Item struct {
 	// Reach is the join a lookup could achieve for this case.
 	Reach string `json:"reach"`
 
-	// covers is every owed unit a reading of this case advances.
+	// covers is every owed unit a reading of this case advances, and moved the
+	// units of its moved failures.
 	covers []string
+	moved  []string
 }
 
 // ItemFailure is one failure of a queued check block and what a reading of it
@@ -262,13 +264,22 @@ func checkUnit(repo, kind, check string) string {
 	return FailureName(kind, check) + "@" + repo
 }
 
-// moved reports that the records show check's detector changed before its next
-// pass, or that the session's next Stop no longer declared it.
-func (c CheckCase) moved(check string) bool {
-	for _, f := range c.Followup.Checks {
-		if f.Blocked.CheckID == check {
-			return f.Detector == checks.FollowChanged || f.Undeclared
+// moved reports that the records show a declared-check failure's detector
+// changed before its next pass, or that the session's next Stop no longer
+// declared it. It reads the follow-up of the execution that reported f.
+func (c CheckCase) moved(f CheckFailure) bool {
+	if f.Kind != adjudication.FailureCheck {
+		return false
+	}
+	for _, follow := range c.Followup.Checks {
+		if follow.Blocked.CheckID != f.Check {
+			continue
 		}
+		if e := f.Execution; e != nil &&
+			(follow.Blocked.Invocation != e.Invocation || !follow.Blocked.Started.Equal(e.Started)) {
+			continue
+		}
+		return follow.Detector == checks.FollowChanged || follow.Undeclared
 	}
 	return false
 }
@@ -288,7 +299,7 @@ func (c CheckCase) units() (failures []CheckFailure, owed []bool) {
 		}
 		failures = append(failures, f)
 		owed = append(owed, f.Kind != adjudication.FailureCheck ||
-			f.Applies == adjudication.Current || c.moved(f.Check))
+			f.Applies == adjudication.Current || c.moved(f))
 	}
 	return failures, owed
 }
@@ -407,7 +418,8 @@ func arrange(items []Item, tallies map[string]readings) []Item {
 // roundRobin gives each turn to the unit with the fewest readings and lists its
 // oldest unlisted case, counting that case as one more reading of every unit it
 // covers. A tie goes to the unit whose oldest case is oldest. In the owed
-// stratum a saturated unit takes a turn only for a case no other unit covers.
+// stratum a case with a moved failure takes only its moved units' turns, and a
+// saturated unit takes a turn only for a case no other unit covers.
 func roundRobin(items []Item, tallies map[string]readings, owed bool) []Item {
 	var order []string
 	queues := map[string][]int{}
@@ -421,6 +433,9 @@ func roundRobin(items []Item, tallies map[string]readings, owed bool) []Item {
 		}
 		if len(turns) == 0 {
 			turns = item.covers
+		}
+		if owed && len(item.moved) > 0 {
+			turns = item.moved
 		}
 		for _, unit := range turns {
 			if _, ok := queues[unit]; !ok {
@@ -502,9 +517,12 @@ func checkItems(cases []CheckCase, receipts []adjudication.Receipt, opts QueueOp
 			Reach:     reach.Granularity,
 		}
 		for _, f := range c.Failures {
+			moved := c.moved(f)
 			item.Failures = append(item.Failures, ItemFailure{Kind: f.Kind, Check: f.Check,
-				Required: f.Required, Applies: f.Applies,
-				Moved: f.Kind == adjudication.FailureCheck && c.moved(f.Check)})
+				Required: f.Required, Applies: f.Applies, Moved: moved})
+			if moved {
+				item.moved = append(item.moved, checkUnit(c.Run.Repo, f.Kind, f.Check))
+			}
 		}
 		if len(covers) == 0 {
 			item.Stratum = StratumOther
@@ -513,10 +531,8 @@ func checkItems(cases []CheckCase, receipts []adjudication.Receipt, opts QueueOp
 			}
 		} else {
 			place(&item, covers, tallies)
-			for _, f := range item.Failures {
-				if f.Moved {
-					item.Stratum = StratumUnit
-				}
+			if len(item.moved) > 0 {
+				item.Stratum = StratumUnit
 			}
 		}
 		items = append(items, item)

@@ -148,6 +148,14 @@ func TestQueueReservesASaturatedCheck(t *testing.T) {
 		t.Errorf("queue = %+v; want a block whose detector moved owed ahead of the reserve", items)
 	}
 
+	movedBeside := blockCase("vl", 12, checkFailure("go", adjudication.Historic),
+		checkFailure("lint", adjudication.Current), oracleFailure)
+	movedBeside.Followup.Checks = moved.Followup.Checks
+	items, _ = Queue(nil, append(cases, movedBeside), receipts, QueueOptions{})
+	if len(items) != 2 || items[0].RunID != "vl" || items[0].Unit != "check:go@/r" {
+		t.Errorf("queue = %+v; want the moved check's turn named, not lint's", items)
+	}
+
 	items, _ = Queue(nil, cases, receipts, QueueOptions{ExcludedRuns: map[string]adjudication.Exclusion{"p1": {}}})
 	if len(items) != 1 || items[0].Stratum != StratumUnit {
 		t.Errorf("queue = %+v; want an excluded block's reading to count for nothing", items)
@@ -245,5 +253,27 @@ func TestQueueCountsOneBlockTowardEveryUnitItCovers(t *testing.T) {
 	items, _ = Queue(nil, []CheckCase{first, goNext, later}, nil, QueueOptions{})
 	if got := strings.Join(ids(items), ","); got != "m1,a1,m2" || items[2].Unit != "check:lint@/r" {
 		t.Errorf("queue = %s, last unit %q; want m2 to take lint's turn", got, items[len(items)-1].Unit)
+	}
+}
+
+// A check executed twice in one run is judged by the execution that failed, so
+// its move is read from that execution's follow-up and not from the other's.
+func TestQueueReadsTheFollowupOfTheFailingExecution(t *testing.T) {
+	skipped := checks.Execution{RunID: "x", CheckID: "go", Invocation: "i1", Outcome: checks.OutcomeNotExecuted,
+		DetectorDigest: "dA", Started: minute(1)}
+	failed := checks.Execution{RunID: "x", CheckID: "go", Invocation: "i2", Outcome: checks.OutcomeFailed,
+		DetectorDigest: "dB", Started: minute(2)}
+	c := blockCase("x", 1)
+	c.Executions = []checks.Execution{skipped, failed}
+	c.Failures = CheckFailures(c.Run, c.Executions)
+	c.Failures[0].Applies = adjudication.Historic
+	c.Followup.Checks = []checks.CheckFollowup{
+		{Blocked: skipped, Detector: checks.FollowUnchanged},
+		{Blocked: failed, Detector: checks.FollowChanged},
+	}
+
+	items, _ := Queue(nil, []CheckCase{c}, nil, QueueOptions{})
+	if len(items) != 1 || !items[0].Failures[0].Moved {
+		t.Errorf("queue = %+v; want the failed execution's moved detector to keep the block owed", items)
 	}
 }
