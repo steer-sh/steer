@@ -22,6 +22,7 @@ MARKETS = (".claude-plugin/marketplace.json", ".agents/plugins/marketplace.json"
 PLUGINS = (".claude-plugin/plugin.json", ".codex-plugin/plugin.json")
 SKILL_FILES = ("skills/steer/SKILL.md", "skills/steer/prompts/routing.md",
                "skills/steer-report/SKILL.md", "skills/steer-report/audit.md",
+               "skills/steer-report/reading.md",
                "skills/steer-setup/SKILL.md", *("skills/steer/prompts/" + name for name in (
                    "simple-regex.md", "python-security.md", "python-style.md", "terraform-hcl.md",
                    "generic-html.md", "shell-lint.md", "react-jsx.md", "security-layer2.md")))
