@@ -31,7 +31,13 @@ checksums; each archive carries `LICENSE` and `THIRD_PARTY_LICENSES` beside the 
 on the default branch and the bundle on that ref. The Windows
 build-tag files stay, and `check.sh` vets the module under `GOOS=windows`.
 Bundled commands resolve the plugin root through
-`${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}`.
+`${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}`. Skills cannot: neither harness exports a
+plugin root to the agent's shell. A skill writes each Steer command as
+`<STEER_BIN> …`, and the agent fills in the launcher's absolute path: Claude Code
+substitutes `${CLAUDE_PLUGIN_ROOT}` into SKILL.md text, and on Codex the launcher
+is two directories above the skill. A skill command carries no shell variable,
+because a permission rule matches command text and Claude Code will not check a
+braced expansion, so a user's approval of the launcher could never be saved.
 
 `cli/internal/steerbin/` owns the stable installed executable at
 `~/.steer/bin/steer`. `HookCommand` supplies commands to CLI and dashboard

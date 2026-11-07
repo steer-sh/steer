@@ -3,8 +3,8 @@
 
 Each run gets a fresh git repository holding the scenario's files and a
 sandbox home (tests/sandbox.py) shared by Claude Code and the steer CLI the
-skill calls, which runs through a wrapper named by PLUGIN_ROOT and first on
-PATH. A run fails when it changed a real Steer or harness file or wrote a
+skill calls: the working tree's scripts/steer, which --plugin-dir makes the
+skill's launcher. A run fails when it changed a real Steer or harness file or wrote a
 firing to the real audit log.
 
 Usage:
@@ -26,7 +26,6 @@ from sandbox import Sandbox
 
 ROOT = Path(__file__).resolve().parent.parent
 SCENARIOS = ROOT / "tests" / "test_data" / "routing.yaml"
-STEER = ROOT / "scripts" / "steer"
 FIELDS = ("tier", "action", "supported")
 
 
@@ -49,26 +48,11 @@ def build_repo(workdir, files):
     git(workdir, "commit", "-q", "-m", "fixture")
 
 
-def build_wrapper(scratch, home):
-    """Return (plugin root, bin dir) for a wrapper that runs the CLI in home."""
-    script = "#!/bin/sh\nHOME=%s exec %s \"$@\"\n" % (home, STEER)
-    plugin = scratch / "plugin" / "scripts"
-    bindir = scratch / "bin"
-    for directory in (plugin, bindir):
-        directory.mkdir(parents=True)
-        wrapper = directory / "steer"
-        wrapper.write_text(script)
-        wrapper.chmod(0o755)
-    return scratch / "plugin", bindir
-
-
-def run_skill(scenario, workdir, box, plugin, bindir, model):
+def run_skill(scenario, workdir, box, model):
     flags = "--headless --" + scenario["mode"]
     if scenario.get("harness"):
         flags += " --harness " + scenario["harness"]
     env = box.env()
-    env["PLUGIN_ROOT"] = str(plugin)
-    env["PATH"] = "%s:%s" % (bindir, env.get("PATH", ""))
     result = subprocess.run(
         ["claude", "-p", "/steer %s %s" % (flags, scenario["rule"]),
          "--output-format", "json", "--model", model, *box.claude_args(),
@@ -98,9 +82,8 @@ def run_once(scenario, model):
         workdir.mkdir()
         build_repo(workdir, scenario.get("files"))
         (home / ".claude").mkdir(parents=True, exist_ok=True)
-        plugin, bindir = build_wrapper(scratch, home)
 
-        result, error = run_skill(scenario, workdir, box, plugin, bindir, model)
+        result, error = run_skill(scenario, workdir, box, model)
 
         problems = box.leaks()
         if result is None:

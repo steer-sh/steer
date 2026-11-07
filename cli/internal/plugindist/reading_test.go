@@ -22,14 +22,14 @@ func readSkillFile(t *testing.T, rel string) string {
 	return string(raw)
 }
 
-var showCommand = regexp.MustCompile("steer audit show [A-Z_]+[^`\n]*")
+var showCommand = regexp.MustCompile("(?:steer|<STEER_BIN>) audit show [A-Z_]+[^`\n]*")
 
 // A reading pass is bounded by command flags: the queue's --limit is each reader's
 // case cap, and every show of a case carries the one per-case allowance.
 func TestReadingPassBoundsAreCommandFlags(t *testing.T) {
 	audit, reading := readSkillFile(t, auditGuide), readSkillFile(t, readingGuide)
 	for _, r := range []struct{ reader, limit string }{{"subagent", "12"}, {"inline", "3"}} {
-		queue := "steer audit queue --json --limit " + r.limit + "\n"
+		queue := "<STEER_BIN> audit queue --json --limit " + r.limit + "\n"
 		if !strings.Contains(reading, queue) {
 			t.Errorf("%s does not list the %s reader's cases with %q", readingGuide, r.reader, strings.TrimSpace(queue))
 		}

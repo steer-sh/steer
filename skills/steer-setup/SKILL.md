@@ -18,30 +18,31 @@ harness registered and the reviewer left exactly as it is.
 
 ## Step 0: Resolve the CLI
 
-Prefer the launcher bundled with the plugin, and fall back to `steer` on PATH when
-there is none. Replace `<SKILL_DIR>` with the absolute directory that holds this
-SKILL.md; the harness names it when it loads the skill. Claude Code fills in its
-plugin root itself, but Codex gives a skill no plugin root, so there the launcher
-is found only through `<SKILL_DIR>`. Run a **single command**:
+`<STEER_BIN>` in a command stands for the launcher's absolute path. Write that
+path in its place, quoted for the shell when it holds a space, a quote or another
+metacharacter, and run the command as it stands, never through a shell
+variable or a `${…}` expansion: the harness cannot check those before they run,
+so a user's "don't ask again" would never match. The launcher is
+`${CLAUDE_PLUGIN_ROOT}/scripts/steer`. If that path begins with `$`, the harness
+filled in no plugin root: the launcher is `scripts/steer` two directories above
+`<SKILL_DIR>`, the absolute directory that holds this SKILL.md, which the harness
+names when it loads the skill; write it without `..`. A `steer …` command named in
+prose runs the same way.
 
 ```bash
-STEER_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}"
-STEER_ROOT="${STEER_ROOT:-<SKILL_DIR>/../..}"
-STEER_BIN="${STEER_ROOT}/scripts/steer"
-[ -x "${STEER_BIN}" ] || STEER_BIN=steer
-"${STEER_BIN}" --help >/dev/null && echo "steer resolved: ${STEER_BIN}"
+<STEER_BIN> --version
 ```
 
-Keep `${STEER_BIN}` for every later step. If that command fails and `${STEER_BIN}` was
-the bundled launcher, try bare `steer` once — a machine may carry an installed CLI
-beside a plugin root this session cannot read. If neither runs, stop and say steer
-could not be resolved. Do not try to install it by another route.
+If that command fails, run `steer --version` once, and when it succeeds use
+`steer` as `<STEER_BIN>` from then on — a machine may carry an
+installed CLI beside a plugin root this session cannot read. If neither runs, stop
+and say steer could not be resolved. Do not try to install it by another route.
 
 ## Step 1: Read what is already there
 
 ```bash
-"${STEER_BIN}" config show
-"${STEER_BIN}" status --json --to-file
+<STEER_BIN> config show
+<STEER_BIN> status --json --to-file
 ```
 
 `--to-file` writes the output to a new file and prints only that file's path;
@@ -73,7 +74,7 @@ Steer ships no reviewer default beyond a fallback. Ask the user, and suggest fro
 what they actually have installed.
 
 ```bash
-"${STEER_BIN}" config providers
+<STEER_BIN> config providers
 ```
 
 Each row is a provider id, its name, the executable it calls and whether that
@@ -102,8 +103,8 @@ Then ask for the model. Write the provider first, then read the model Steer woul
 for it when none is set:
 
 ```bash
-"${STEER_BIN}" config set reviewer.provider <provider>
-"${STEER_BIN}" config show
+<STEER_BIN> config set reviewer.provider <provider>
+<STEER_BIN> config show
 ```
 
 Offer the `reviewer.model` value `config show` prints as the default, and accept any
@@ -113,7 +114,7 @@ ending in `-default`, such as `agy-default`, names the CLI's own default and is 
 a model to write. Write a model only when the user names a different one:
 
 ```bash
-"${STEER_BIN}" config set reviewer.model <model>
+<STEER_BIN> config set reviewer.model <model>
 ```
 
 Show the user any warning `config set` prints.
@@ -130,29 +131,30 @@ model provider the router picks.
    `https://openrouter.ai/api/v1`. Write the provider and the URL:
 
    ```bash
-   "${STEER_BIN}" config set reviewer.provider openai-compatible
-   "${STEER_BIN}" config set reviewer.api.base_url <url>
+   <STEER_BIN> config set reviewer.provider openai-compatible
+   <STEER_BIN> config set reviewer.api.base_url <url>
    ```
 
 2. Ask for the model, as the endpoint names it, and write it. This provider has no
    default model, so the model is required:
 
    ```bash
-   "${STEER_BIN}" config set reviewer.model <model>
+   <STEER_BIN> config set reviewer.model <model>
    ```
 
 3. Ask whether the user keeps the key in an environment variable. If yes, write the
    variable's name, never its value:
 
    ```bash
-   "${STEER_BIN}" config set reviewer.api.key_env <VARIABLE_NAME>
+   <STEER_BIN> config set reviewer.api.key_env <VARIABLE_NAME>
    ```
 
 4. Otherwise tell the user to run this in a separate terminal of their own, not
-   through this agent and not with the `!` prefix:
+   through this agent and not with the `!` prefix. Give it with `<STEER_BIN>`
+   written as Step 0 resolved it: their shell may have no `steer` on PATH.
 
    ```bash
-   steer reviewer key set
+   <STEER_BIN> reviewer key set
    ```
 
    It reads the key with no echo into a file only they can read, and refuses input
@@ -162,7 +164,7 @@ model provider the router picks.
    `missing`, and never the key:
 
    ```bash
-   "${STEER_BIN}" reviewer key status
+   <STEER_BIN> reviewer key status
    ```
 
 Offer file tools, and let the user decide. With `reviewer.api.tools` set to `auto`, the
@@ -173,7 +175,7 @@ so a review can use many times the input tokens of a diff-only review. Leave the
 unset (off) if the user declines:
 
 ```bash
-"${STEER_BIN}" config set reviewer.api.tools auto
+<STEER_BIN> config set reviewer.api.tools auto
 ```
 
 A model can answer empty after a tool call. An `empty` count in `reviewer_outcomes` on
@@ -193,8 +195,8 @@ already show which harnesses are registered, so name those and do not re-arm the
 
 ```bash
 # one of:
-"${STEER_BIN}" commit-gate install --harness claude-code --scope global
-"${STEER_BIN}" commit-gate install --harness codex --scope global
+<STEER_BIN> commit-gate install --harness claude-code --scope global
+<STEER_BIN> commit-gate install --harness codex --scope global
 ```
 
 `--scope global` covers every repository. Use `--scope project` in the current
@@ -209,7 +211,7 @@ channel. Choose one channel per repository, or a commit gets reviewed twice.
 ## Step 4: Place the stable executable
 
 ```bash
-"${STEER_BIN}" bin install
+<STEER_BIN> bin install
 ```
 
 This copies the binary to `~/.steer/bin/steer` and repoints every registration at
@@ -233,7 +235,7 @@ is in the same state when the teammate used a different harness or did not commi
 their harness configuration. Read the two readings that name this:
 
 ```bash
-"${STEER_BIN}" status --json --to-file
+<STEER_BIN> status --json --to-file
 ```
 
 Read the file whose path it prints with the Read tool, to its end; a harness can show only the start
@@ -245,7 +247,7 @@ that runs none of that scope's guards. In `posture.rules`, a row whose `state` i
 each scope with either row, name the harnesses to the user and ask before you run:
 
 ```bash
-"${STEER_BIN}" hooks sync --scope <global|project>
+<STEER_BIN> hooks sync --scope <global|project>
 ```
 
 Sync registers the runner the store already holds and rewrites each harness's
@@ -273,7 +275,7 @@ Then check that the reviewer answers. This sends one small sample diff to the
 configured reviewer and writes no review record:
 
 ```bash
-"${STEER_BIN}" commit-gate test-reviewer
+<STEER_BIN> commit-gate test-reviewer
 ```
 
 In Codex, when its output says the shell runs in Codex's sandbox with the network
@@ -291,7 +293,7 @@ whether a commit here is reviewed, by which reviewer, and the one command that
 changes the answer. Nothing else installs it. Ask the user; on yes:
 
 ```bash
-"${STEER_BIN}" statusline install --scope global
+<STEER_BIN> statusline install --scope global
 ```
 
 When the user already has a status line, it writes nothing, exits 1 and names two
@@ -303,7 +305,7 @@ when Claude Code is not armed.
 Finish by reading the answer back:
 
 ```bash
-"${STEER_BIN}" status
+<STEER_BIN> status
 ```
 
 Report its first line and each issue under it verbatim. Do not claim the gate is armed on the strength
@@ -332,18 +334,18 @@ this step describes, instead of steps 1 and 2.
 Three separate facts arm a repository, and none implies another:
 
 1. **The Stop runner is registered** in the harness:
-   `"${STEER_BIN}" check install --harness <claude-code|codex> --scope <project|global>`.
+   `<STEER_BIN> check install --harness <claude-code|codex> --scope <project|global>`.
    In Codex, the user must approve the new Stop hook in
    `/hooks`; Steer cannot read that trust record, so `check install` reports the
    step as unknown.
-2. **The repository is adopted** on this machine: `"${STEER_BIN}" check adopt`
+2. **The repository is adopted** on this machine: `<STEER_BIN> check adopt`
    inside it. Adoption replays each declared check and runs `check.sh` in
    isolation first, and it refuses on any failure. A registration alone runs
    nothing, and a clone at another path is not adopted. Tell the user that
    adoption trusts the repository, not this version of `check.sh`: a later pull
    that changes `check.sh` or a detector runs at the next Stop with no new
    approval.
-3. **A run is observed**: `"${STEER_BIN}" check list` shows the latest `check.sh`
+3. **A run is observed**: `<STEER_BIN> check list` shows the latest `check.sh`
    run and each check's latest execution.
 
 Relay what `check install` and `check adopt` print, as in Step 3.
@@ -351,12 +353,12 @@ Relay what `check install` and `check adopt` print, as in Step 3.
 **Moving a personal gate.** Preview the move first:
 
 ```bash
-"${STEER_BIN}" check migrate
+<STEER_BIN> check migrate
 ```
 
 The preview writes nothing. Show it to the user: it classifies each approval as
 already adopted, importable, without a `check.sh`, or without a repository. Run
-`"${STEER_BIN}" check migrate --apply` only after the user says yes. Apply adopts
+`<STEER_BIN> check migrate --apply` only after the user says yes. Apply adopts
 each importable repository the way `check adopt` does. It replaces the personal
 hook with the runner only when no approved repository with a `check.sh` stays
 unadopted, so a refused import keeps the personal hook in place. It never deletes

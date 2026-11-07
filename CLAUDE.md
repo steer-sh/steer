@@ -43,6 +43,9 @@ Read the linked architecture section before changing the corresponding boundary:
   manifest version, because a harness refreshes its copy only on a version change.
   `cli/internal/plugindist/` checks the four plugin/marketplace manifests together
   and the README's install commands against their repository and marketplace.
+  A skill runs every steer command as `<STEER_BIN> …`, which the agent writes as
+  the launcher's absolute path, never as bare `steer` or a shell variable;
+  `TestSkillCommandsStartWithTheLauncherPlaceholder` pins it.
   Before publishing, `python3 scripts/preflight-release.py [--ref <branch-or-tag>]`
   checks anonymous access and the published bundle against this candidate,
   including executable and skill bytes and contained support files; it stays outside `check.sh`.

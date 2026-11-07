@@ -23,6 +23,24 @@ pattern become a Python guard: generate it, test it, and install it.
 /steer never use var in JavaScript | use const or let instead
 ```
 
+## Running steer
+
+Every mode, headless included, runs steer this way.
+
+`<STEER_BIN>` in a command stands for the launcher's absolute path. Write that
+path in its place, quoted for the shell when it holds a space, a quote or another
+metacharacter, and run the command as it stands, never through a shell variable or
+a `${…}` expansion: the harness cannot check those before they run, so a user's
+"don't ask again" would never match. The launcher is
+`${CLAUDE_PLUGIN_ROOT}/scripts/steer`. If that path begins with `$`, the harness
+filled in no plugin root: the launcher is `scripts/steer` two directories above
+`<SKILL_DIR>`, the absolute directory that holds this SKILL.md, which the harness
+names when it loads the skill; write it without `..`. If the first command fails
+because the launcher could not run (no such file, permission denied, or `binary
+not found`), run that command again with `steer` and use `steer` as `<STEER_BIN>`
+from then on. A `steer …` command named in prose, here or in a file this skill
+reads, runs the same way.
+
 ## Operating Modes
 
 ### Interactive Mode (default)
@@ -217,18 +235,8 @@ Before you install anything, read the fixes Steer already holds and the recurrin
 problems it already decided. This step stops a duplicate fix and a re-proposed
 problem.
 
-Every `steer` command in this skill runs the launcher bundled with the plugin, or
-`steer` on PATH when there is none. Replace `<SKILL_DIR>` with the absolute
-directory that holds this SKILL.md; the harness names it when it loads the skill.
-Codex gives a skill no plugin root, so there the launcher is found only through
-`<SKILL_DIR>`.
-
 ```bash
-STEER_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}"
-STEER_ROOT="${STEER_ROOT:-<SKILL_DIR>/../..}"
-STEER_BIN="${STEER_ROOT}/scripts/steer"
-[ -x "${STEER_BIN}" ] || STEER_BIN=steer
-"${STEER_BIN}" status --json --to-file
+<STEER_BIN> status --json --to-file
 ```
 
 `--to-file` writes the output to a new file and prints only that file's path.
@@ -257,7 +265,7 @@ user's rule against each row's `problem`. When a row matches, read that record's
 detail before you decide:
 
 ```bash
-"${STEER_BIN}" fix score --json --id <id> --to-file
+<STEER_BIN> fix score --json --id <id> --to-file
 ```
 
 Read the file whose path it prints the same way. Its one row carries the record's `observation`, and
@@ -438,14 +446,10 @@ stored case is rerunnable evidence. A count is not.
 
 ### Step 4: Register the Hook
 
-Use the steer CLI to register the hook, resolved as in Pre-flight: the bundled launcher, else `steer` on PATH. Run a **single command** — do not try one and then the other:
+Use the steer CLI to register the hook, with `<STEER_BIN>` written as in [Running steer](#running-steer). Run a **single command**:
 
 ```bash
-STEER_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}"
-STEER_ROOT="${STEER_ROOT:-<SKILL_DIR>/../..}"
-STEER_BIN="${STEER_ROOT}/scripts/steer"
-[ -x "${STEER_BIN}" ] || STEER_BIN=steer
-"${STEER_BIN}" register <store>/hooks/<rule-name>-hook.py --rule "<original rule text>" --scope <project|global> \
+<STEER_BIN> register <store>/hooks/<rule-name>-hook.py --rule "<original rule text>" --scope <project|global> \
   --source generated \
   --prompt-version "<prompt_version from SKILL.md frontmatter>" \
   --prompt-modules "<comma,separated,modules>" \
@@ -538,7 +542,7 @@ into `<store>/hooks/steer-hooks.py` and reruns the stored cases. Run them again 
 demand with:
 
 ```bash
-steer test <rule-name>-hook
+<STEER_BIN> test <rule-name>-hook
 ```
 
 This replays every case twice, against byte-identical copies in a temporary store,
@@ -586,7 +590,7 @@ them, then drops the rule line and rebuilds the master. A hand deletion keeps
 no copy and leaves the manifest entry behind.
 
 ```bash
-"${STEER_BIN}" remove <hook-id> --scope <project|global> --reason "<why it goes>" --force
+<STEER_BIN> remove <hook-id> --scope <project|global> --reason "<why it goes>" --force
 ```
 
 The command asks for confirmation on a terminal, and an agent's shell has none.
@@ -596,7 +600,7 @@ Pass `--force` only after the user confirmed this removal. Always pass
 To put a guard back, run `steer archive list` to find its entry, then:
 
 ```bash
-"${STEER_BIN}" archive restore <hook-id> --scope <project|global>
+<STEER_BIN> archive restore <hook-id> --scope <project|global>
 ```
 
 Restore reinstalls the guard through `steer register`'s installer, so its
