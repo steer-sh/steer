@@ -19,6 +19,9 @@ import (
 // Python hook shipped with; Load() applies environment overrides on top.
 type Config struct {
 	StateDir string
+	// OperatorNotice is a line the engine adds to the operator receipt of every commit
+	// it rules on; "" adds nothing.
+	OperatorNotice string
 	// LogLockWait bounds a shard writer's wait for the shard's lock; zero is the default.
 	LogLockWait time.Duration
 

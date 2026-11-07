@@ -12,6 +12,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/settings"
+	"github.com/steer-sh/steer-cli/internal/status"
 )
 
 // Prefix names the row, so it stays identifiable under another script's output.
@@ -20,6 +21,7 @@ const Prefix = "steer"
 const (
 	armedGlyph   = "⏻"
 	unarmedGlyph = "✕"
+	warnGlyph    = "⚠"
 	separator    = " · "
 )
 
@@ -37,11 +39,21 @@ type Inputs struct {
 	Decisions int
 	// Observed is true when the ledger holds at least one row.
 	Observed bool
+	// RemovedPlugin names the harness whose Steer plugin the stable executable came
+	// from, once that harness no longer has it installed; "" otherwise.
+	RemovedPlugin string
+	// UninstallCommand removes that harness's registrations.
+	UninstallCommand string
 }
 
-// Render builds the row. The tail carries the most urgent single item: a gate that
-// is not armed, then decisions waiting, then whether the gate has ever fired.
+// Render builds the row. The tail carries the most urgent single item: a removed
+// plugin whose hooks still run, a gate that is not armed, then decisions waiting,
+// then whether the gate has ever fired.
 func Render(in Inputs) string {
+	if in.RemovedPlugin != "" {
+		return fmt.Sprintf("%s %s %s plugin removed, hooks still run → %s",
+			Prefix, warnGlyph, in.RemovedPlugin, in.UninstallCommand)
+	}
 	if !in.Armed {
 		return fmt.Sprintf("%s %s gate off → steer commit-gate install", Prefix, unarmedGlyph)
 	}
@@ -85,6 +97,11 @@ func reviewerLabel(model string, runs int) string {
 // ledger or queue leaves its field zero rather than failing the row.
 func Collect() Inputs {
 	in := Inputs{Armed: gateArmed()}
+	if removed := status.RemovedPlugins(); len(removed) > 0 {
+		id := removed[0]
+		in.RemovedPlugin = status.HarnessLabel(string(id))
+		in.UninstallCommand = status.UninstallCommand(id)
+	}
 
 	if cfg, err := gate.Load(); err == nil {
 		// A provider that does not resolve runs no reviewer, so the row names none.

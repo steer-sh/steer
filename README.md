@@ -117,23 +117,21 @@ A plugin update refreshes the skills and the plugin's own copy of `steer`. It do
 
 ## Uninstall
 
-Setup writes hook registrations into each agent's own settings, and those registrations call `~/.steer/bin/steer`. Removing the plugin removes neither. Run these commands with `~/.steer/bin/steer` before you delete it, once for each agent you set up (`--harness claude-code` or `--harness codex`).
+Remove Steer before you remove the plugin. The hooks that setup registered call `~/.steer/bin/steer`, not the plugin, so removing the plugin leaves them in place.
 
-1. Stop reviews: `steer commit-gate remove --harness <claude-code|codex> --scope global`. Add `--scope project` in each repository where you armed a project gate. For the Git pre-commit channel, delete the hook file that `git rev-parse --git-path hooks/pre-commit` names.
-2. Stop turn-end checks: `steer check uninstall --harness <claude-code|codex> --scope <global|project>`, then `steer check unadopt` in each adopted repository.
-3. Remove guards and instructions: `steer list --scope global` and `steer rules list --scope global` name them; `steer remove <hook-name> --scope global` and `steer rules remove <rule-id> --scope global` remove them. Run `steer preset disable <preset>` yourself for factory presets. Removing the last guard removes the guard registration. Repeat with `--scope project` in each repository that has a `.steer/` directory.
-4. Remove the status line: `steer statusline remove`. A status line that Steer wrapped comes back as it was.
-5. Check the removal: `steer commit-gate status` must show every channel as not armed, and `steer statusline status` must show no Steer row. The first reads the project scope of the repository you run it in.
-6. Remove the plugin: `claude plugin uninstall steer@steer-marketplace` or `codex plugin remove steer@steer-marketplace`.
+```bash
+~/.steer/bin/steer uninstall          # prints what it will remove
+~/.steer/bin/steer uninstall --apply
+```
 
-Local data stays in `~/.steer` until you delete it:
+This removes Steer's commit gate, check runner, guard runner, rules section and status line from each agent's global settings. A status line that Steer wrapped comes back as it was. To remove Steer from one agent only, add `--harness claude-code` or `--harness codex`. If you remove the plugin first, the status line and each commit review name this command. Then remove the plugin:
 
-- `~/.steer/state`: review ledgers, audit logs and session snapshots. Keep it if you might reinstall, because reports and fix scores read it.
-- `~/.steer/hooks`: global guards with their fixtures and audit log, instruction rules, and the archive of removed fixes.
-- `~/.steer/config.json`: reviewer settings.
-- `~/.steer/bin`: the stable executable.
+```bash
+claude plugin uninstall steer@steer-marketplace
+codex plugin remove steer@steer-marketplace
+```
 
-To delete everything, run `rm -rf ~/.steer` after step 5. A repository's `.steer/` directory is part of that repository; remove it with a commit.
+`~/.steer` keeps your review ledgers, guards and reviewer settings in case you reinstall; add `--purge` to delete it. Project-scope registrations and a repository's `.steer/` directory are committed files: `steer uninstall` names the ones in the repository you run it from, and you remove them with a commit.
 
 ## Development and reference
 

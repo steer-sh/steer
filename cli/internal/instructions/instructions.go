@@ -106,6 +106,20 @@ func SectionRules(path string) ([]string, error) {
 	return out, nil
 }
 
+// HasSection reports whether the document at path holds a Steer Rules section,
+// with or without rules in it. A missing file holds none.
+func HasSection(path string) (bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to read %s: %w", path, err)
+	}
+	start, _, _, _ := findSteerSection(strings.Split(strings.TrimRight(string(data), "\n"), "\n"))
+	return start != -1, nil
+}
+
 func normalizeRules(rules []string) []string {
 	out := make([]string, 0, len(rules))
 	seen := make(map[string]struct{}, len(rules))

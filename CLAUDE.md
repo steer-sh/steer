@@ -54,7 +54,9 @@ Read the linked architecture section before changing the corresponding boundary:
   A harness runs skills and the launcher from its cached plugin copy, which an
   unchanged version does not refresh and `steer bin install` never touches;
   `posture.plugins` (`cli/internal/status/plugins.go`) compares each copy's binary
-  with `~/.steer/bin/steer`.
+  with `~/.steer/bin/steer`. A removed plugin is read from `~/.steer/bin/source`
+  (`steerbin.Sources`) against each harness's install record (`status.RemovedPlugins`),
+  and its notice rides the gate through `gate.Config.OperatorNotice`.
 - Harness support, paths, or migrations: [harnesses and storage](ARCHITECTURE.md#harnesses-and-storage).
   Start with `cli/internal/harness/` and `cli/internal/steerpath/`; registration
   adapters and shared stores have different ownership.
@@ -141,6 +143,10 @@ Read the linked architecture section before changing the corresponding boundary:
 
 ## Changes that must travel together
 
+- Steer-owned registrations: a new kind of registration Steer writes into a harness
+  needs its relink in `repointRegistrations` (`cli/cmd/bin.go`) and its reader and
+  removal in `uninstallItems` (`cli/cmd/uninstall.go`), or `bin install` strands it
+  and `steer uninstall` leaves it behind.
 - Report index and details: `cli/internal/report/digest.go` and `index.go`, and
   Step 2a of `skills/steer-report/SKILL.md`; a shape change bumps `DigestVersion`.
 - Status JSON: the projection `cli/internal/status/json.go` and the one documented

@@ -1044,3 +1044,17 @@ func TestNewEngineStampsTheReviewersEndpoint(t *testing.T) {
 		t.Errorf("an API reviewer's endpoint = %q", got)
 	}
 }
+
+// TestOperatorNoticeRidesTheReceipt: a configured notice reaches the operator on a
+// commit's receipt and stays out of the agent's reason.
+func TestOperatorNoticeRidesTheReceipt(t *testing.T) {
+	h := newHarness(t, findingReply("NO FINDINGS"))
+	h.cfg.OperatorNotice = "[steer] notice"
+	d := h.handle()
+	if !strings.Contains(d.SystemMessage, "[steer] notice") {
+		t.Errorf("SystemMessage = %q, want the notice", d.SystemMessage)
+	}
+	if strings.Contains(d.Reason, "[steer] notice") {
+		t.Errorf("Reason = %q carries the operator notice", d.Reason)
+	}
+}

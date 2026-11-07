@@ -131,3 +131,13 @@ func TestCollectNamesTheModelTheConfiguredProviderRuns(t *testing.T) {
 		})
 	}
 }
+
+// TestRenderLeadsWithARemovedPlugin: hooks that outlive their plugin outrank every
+// other item, because nothing else on screen says Steer is still active.
+func TestRenderLeadsWithARemovedPlugin(t *testing.T) {
+	got := Render(Inputs{Armed: true, Decisions: 3, RemovedPlugin: "Codex",
+		UninstallCommand: "~/.steer/bin/steer uninstall --harness codex --apply"})
+	if !strings.Contains(got, "Codex plugin removed") || !strings.Contains(got, "uninstall --harness codex --apply") {
+		t.Errorf("row = %q", got)
+	}
+}

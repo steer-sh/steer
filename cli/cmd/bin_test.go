@@ -216,3 +216,31 @@ func TestRelinkRepointsABareCodexGuardMaster(t *testing.T) {
 		t.Fatalf("second pass rewrote %d, %v; want 0", rewritten, err)
 	}
 }
+
+// TestRecordPluginCopiesNamesEveryInstalledPlugin: a plugin the stable executable was
+// not copied from is recorded while its harness names it, so its removal is named later.
+func TestRecordPluginCopiesNamesEveryInstalledPlugin(t *testing.T) {
+	home := t.TempDir()
+	testhome.Set(t, home)
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	root := filepath.Join(home, ".codex", "plugins", "cache", "m", "steer", "0.1.7")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".steer", "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	recordPluginCopies()
+	if got := steerbin.Sources(); len(got) != 0 {
+		t.Fatalf("a cache directory Codex no longer names was recorded: %q", got)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("[plugins.\"steer@m\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	recordPluginCopies()
+	got := steerbin.Sources()
+	if len(got) != 1 || got[0] != root {
+		t.Fatalf("Sources() = %q, want the Codex plugin copy %q", got, root)
+	}
+}

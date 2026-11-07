@@ -3,6 +3,7 @@ package status
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -10,6 +11,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/BurntSushi/toml"
+	"github.com/steer-sh/steer-cli/internal/claude"
+	"github.com/steer-sh/steer-cli/internal/codex"
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/mods"
 	"github.com/steer-sh/steer-cli/internal/statestore"
@@ -171,6 +175,155 @@ func claudeInstallPaths(configDir string) (paths map[string]bool, ok bool) {
 		}
 	}
 	return paths, true
+}
+
+// PluginSources names each harness whose plugin cache holds a path the stable
+// executable was installed from.
+func PluginSources() []harness.ID {
+	var out []harness.ID
+	for _, id := range []harness.ID{harness.ClaudeCode, harness.Codex} {
+		if len(sourcesIn(id)) > 0 {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// sourcesIn returns the recorded install sources that lie in the harness's plugin cache.
+func sourcesIn(id harness.ID) []string {
+	h, ok := harness.Get(id)
+	if !ok {
+		return nil
+	}
+	dir, err := h.ConfigDir(harness.GlobalScope, "")
+	if err != nil {
+		return nil
+	}
+	cache := filepath.Join(dir, "plugins", "cache")
+	var out []string
+	for _, source := range steerbin.Sources() {
+		if lexicallyWithin(cache, source) || steerpath.Within(cache, source) {
+			out = append(out, source)
+		}
+	}
+	return out
+}
+
+// ForgetPluginSource drops the recorded sources that lie in the harness's plugin cache.
+func ForgetPluginSource(id harness.ID) error {
+	drop := map[string]bool{}
+	for _, source := range sourcesIn(id) {
+		drop[source] = true
+	}
+	var kept []string
+	for _, source := range steerbin.Sources() {
+		if !drop[source] {
+			kept = append(kept, source)
+		}
+	}
+	return steerbin.SetSources(kept)
+}
+
+// RemovedPlugins names each harness the stable executable was installed from whose
+// own install record no longer names the Steer plugin while its global configuration
+// still calls Steer. Its hooks still run
+// ~/.steer/bin/steer, so nothing else tells the operator that Steer is still active.
+func RemovedPlugins() []harness.ID {
+	var out []harness.ID
+	for _, id := range PluginSources() {
+		h, _ := harness.Get(id)
+		dir, err := h.ConfigDir(harness.GlobalScope, "")
+		if err == nil && !pluginInstalled(id, dir) && globallyRegistered(id) {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// PluginRemovedNotice is the operator's line for each of RemovedPlugins, or "".
+func PluginRemovedNotice() string {
+	var notes []string
+	for _, id := range RemovedPlugins() {
+		notes = append(notes, fmt.Sprintf("[steer] The Steer plugin is no longer installed in %s, but Steer's hooks "+
+			"still run. To remove them: %s. To keep them: ~/.steer/bin/steer bin install.",
+			HarnessLabel(string(id)), UninstallCommand(id)))
+	}
+	return strings.Join(notes, " ")
+}
+
+// globallyRegistered reports whether the harness's global configuration still calls
+// Steer: a commit gate, resolver, check runner, guard runner, or Steer's status line.
+func globallyRegistered(id harness.ID) bool {
+	g := harness.GlobalScope
+	switch id {
+	case harness.ClaudeCode:
+		if claude.CommitGateHookArmed(g).Registered || claude.BackfillHookArming(g).Registered {
+			return true
+		}
+		if a, err := claude.CheckHookArming(g); err == nil && a.Registered {
+			return true
+		}
+		if registered, err := (claude.Registrar{}).MasterRegistered(g); err == nil && registered {
+			return true
+		}
+		_, present, mine := claude.StatusLineArmed(g)
+		return present && mine
+	case harness.Codex:
+		return codex.CommitGateArming(g, "").Registered || codex.ResolverArmingRow(g, "").Registered ||
+			codex.CheckHookArming(g, "").Registered || codex.MasterArming(g, "").Registered
+	}
+	return false
+}
+
+// PluginInstalled reports whether the harness's own install record names the Steer
+// plugin; a cache directory alone can outlive the plugin.
+func PluginInstalled(id harness.ID) bool {
+	h, ok := harness.Get(id)
+	if !ok {
+		return false
+	}
+	dir, err := h.ConfigDir(harness.GlobalScope, "")
+	return err == nil && pluginInstalled(id, dir)
+}
+
+// UninstallCommand removes one harness's global Steer registrations.
+func UninstallCommand(id harness.ID) string {
+	return "~/.steer/bin/steer uninstall --harness " + string(id) + " --apply"
+}
+
+// pluginInstalled reads the harness's own record of installed plugins: Claude Code's
+// installed_plugins.json, and the plugins table of Codex's config.toml. A record that
+// exists but cannot be read counts as installed, so a read failure raises no notice.
+func pluginInstalled(id harness.ID, dir string) bool {
+	if id == harness.ClaudeCode {
+		paths, ok := claudeInstallPaths(dir)
+		if !ok {
+			_, err := os.Stat(filepath.Join(dir, "plugins", "installed_plugins.json"))
+			return !os.IsNotExist(err)
+		}
+		return len(paths) > 0
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "config.toml"))
+	if err != nil {
+		return !os.IsNotExist(err)
+	}
+	var config struct {
+		Plugins map[string]any `toml:"plugins"`
+	}
+	if _, err := toml.Decode(string(data), &config); err != nil {
+		return true
+	}
+	for key := range config.Plugins {
+		if strings.HasPrefix(key, pluginName+"@") {
+			return true
+		}
+	}
+	return false
+}
+
+func lexicallyWithin(dir, path string) bool {
+	rel, err := filepath.Rel(filepath.Clean(dir), filepath.Clean(path))
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
 
 // ModExposures reads each enabled Claude Code mod against the inspection cache that
