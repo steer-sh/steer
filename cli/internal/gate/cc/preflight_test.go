@@ -439,6 +439,14 @@ func TestRefusalReasonsNameFormsTheGateReviews(t *testing.T) {
 	if denied, _ := DetectionDeny(selfSafeSearchExample); denied != "" {
 		t.Errorf("the offered search %q is itself refused: %s", selfSafeSearchExample, denied)
 	}
+	interpreter, _ := DetectionDeny("python3 - <<'EOF'\nprint('git " + c + " -m x')\nEOF")
+	if !strings.Contains(interpreter, documentHeredocExample) {
+		t.Errorf("the interpreter-heredoc refusal names no document-heredoc exit: %q", interpreter)
+	}
+	document := documentHeredocExample + "\ngit " + c + " -m x\nEOF"
+	if denied, _ := DetectionDeny(document); denied != "" {
+		t.Errorf("the offered document heredoc %q is itself refused: %s", document, denied)
+	}
 
 	reason := fmt.Sprintf(stepBeforeCommitReason, "python3 edit.py")
 	for step, cmd := range map[string]string{

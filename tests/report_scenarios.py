@@ -65,6 +65,7 @@ report itself.
 def skill_reads(events: list[dict], skill_dirs: set[Path]) -> list[str]:
     """Skill files under skill_dirs with successful Read results in the recorded
     tool stream."""
+    dirs = {d.resolve() for d in skill_dirs}
     requested = {}
     seen = []
     for ev in events:
@@ -75,8 +76,8 @@ def skill_reads(events: list[dict], skill_dirs: set[Path]) -> list[str]:
             if not isinstance(part, dict):
                 continue
             if part.get("type") == "tool_use" and part.get("name") == "Read":
-                path = Path(part.get("input", {}).get("file_path", ""))
-                if path.parent in skill_dirs:
+                path = Path(part.get("input", {}).get("file_path", "")).resolve()
+                if path.parent in dirs:
                     requested[part["id"]] = path.name
             if part.get("type") == "tool_result" and not part.get("is_error"):
                 name = requested.get(part.get("tool_use_id"))
@@ -123,9 +124,6 @@ def run_scenario(name: str, model: str) -> tuple[str, float, list[str]]:
         if needs_audit:
             extra_reads.append(f"Read {skill_dir / 'audit.md'} with the Read tool too; "
                                "this snapshot requires the audit instructions.")
-        if needs_routing:
-            extra_reads.append(f"Read {routing} with the Read tool as the routing guide "
-                               "Step 3 names; the queue holds candidates to route.")
         cmd = [
             "claude", "-p", PROMPT.format(
                 skill=skill_dir / "SKILL.md",

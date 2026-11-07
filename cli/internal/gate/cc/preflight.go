@@ -69,12 +69,19 @@ const possibleCommitReason = "[commit-gate] BLOCKED: this command holds a possib
 	"subcommand or command word that the shell expands from a variable or an escape. " +
 	"NOTHING IN " +
 	"THE COMMAND RAN. To search for the text, write a pattern that does not match " +
-	"itself, for example `" + selfSafeSearchExample + "`. To commit, run git commit as " +
+	"itself, for example `" + selfSafeSearchExample + "`. An interpreter that reads a " +
+	"heredoc, such as `python3 - <<'EOF'`, runs code that could commit, so the gate " +
+	"refuses commit text in its body; to keep that text as data, write it through a " +
+	"file tool or a quoted document heredoc such as `" + documentHeredocExample + "`. " +
+	"To commit, run git commit as " +
 	"a plain command with the full intended message. This form keeps a multi-line " +
 	"message whole:\n\n" + heredocCommitExample
 
 // selfSafeSearchExample searches for commit text without holding it.
 const selfSafeSearchExample = "rg 'git[ ]commit' cli/"
+
+// documentHeredocExample writes text to a file, which the gate reads as data.
+const documentHeredocExample = "cat > notes.txt <<'EOF'"
 
 const possibleBesideCommitReason = "[commit-gate] BLOCKED: this command runs a commit " +
 	"and also holds a possible commit outside it: `git ... commit` text that the gate " +
