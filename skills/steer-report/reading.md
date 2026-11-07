@@ -6,8 +6,10 @@
   when the report reads its own cases.
 - **case cap** is 12 for a `subagent` reader and 3 for an `inline` one.
 
-Every `steer` command here runs the launcher the report resolved. A subagent's brief
-names it; use that path for every command.
+`<STEER_BIN>` is the launcher's absolute path: the one your brief names, or the one
+the report wrote. Write that path in its place in every command, including a
+`steer …` command named in prose, quoted for the shell when it holds a space or a
+quote, and run the command as it stands.
 
 A reader records receipts and nothing else. It excludes nothing, repairs nothing and
 edits no file: those steps need the user's decision, which the report asks for.
@@ -28,13 +30,13 @@ The queue lists unread cases in reading order and counts the whole queue before
 `--limit` cuts the listing. A `subagent` reader runs:
 
 ```bash
-steer audit queue --json --limit 12
+<STEER_BIN> audit queue --json --limit 12
 ```
 
 An `inline` reader runs the same command with its own cap:
 
 ```bash
-steer audit queue --json --limit 3
+<STEER_BIN> audit queue --json --limit 3
 ```
 
 `counts` holds `unjudged`, `continuation_unread`, `queued` and `listed`, over both
@@ -72,7 +74,7 @@ Read cases in the **text** form. `--json` re-encodes and indents the same eviden
 and costs close to twice as much, which buys nothing a reader needs:
 
 ```bash
-steer audit show ID --max-bytes 8000
+<STEER_BIN> audit show ID --max-bytes 8000
 ```
 
 ID is the item's `firing_id` or `run_id`. `show` enforces the allowance itself. Do
@@ -94,7 +96,7 @@ as a case you did not read. Never treat retrieving a case as having inspected it
 Record one judgment per case you read. A guard firing:
 
 ```bash
-steer audit record FIRING_ID --judgment prevented \
+<STEER_BIN> audit record FIRING_ID --judgment prevented \
   --rationale "..." \
   --selection "reader subagent, case cap 12, stratum unit, unit guard:NAME@STORE" \
   --continuation-inspected --inspected-steps 9 \
@@ -126,7 +128,7 @@ A check block is read with the section below, and recorded with one `--failure` 
 failure it reads:
 
 ```bash
-steer audit record RUN_ID \
+<STEER_BIN> audit record RUN_ID \
   --failure check:go-test=valid,introduced,fixed \
   --failure oracle=valid,introduced,fixed \
   --rationale "..." \

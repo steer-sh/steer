@@ -49,22 +49,18 @@ Respect the user's choice. If the conversation is fresh, skip the warning and pr
 
 A deterministic tier runs this loop's mechanical half — scoring, corpus sweeps, threshold checks — with no model. It may have run on a schedule already; run it again now, synchronously, so you never read a stale queue. It takes seconds and spends no tokens. Run it first, so the snapshot and the scores below read the session history it refreshed.
 
-Every `steer` command in this skill runs the launcher bundled with the plugin, or `steer` on PATH when there is none. Replace `<SKILL_DIR>` with the absolute directory that holds this SKILL.md; the harness names it when it loads the skill. Codex gives a skill no plugin root, so there the launcher is found only through `<SKILL_DIR>`.
+`<STEER_BIN>` in a command stands for the launcher's absolute path. Write that path in its place, quoted for the shell when it holds a space, a quote or another metacharacter, and run the command as it stands, never through a shell variable or a `${…}` expansion: the harness cannot check those before they run, so a user's "don't ask again" would never match. The launcher is `${CLAUDE_PLUGIN_ROOT}/scripts/steer`. If that path begins with `$`, the harness filled in no plugin root: the launcher is `scripts/steer` two directories above `<SKILL_DIR>`, the absolute directory that holds this SKILL.md, which the harness names when it loads the skill; write it without `..`. If the first command fails because the launcher could not run (no such file, permission denied, or `binary not found`), run that command again with `steer` and use `steer` as `<STEER_BIN>` from then on. A `steer …` command named in prose, here or in a file this skill reads, runs the same way.
 
 ```bash
-STEER_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}"
-STEER_ROOT="${STEER_ROOT:-<SKILL_DIR>/../..}"
-STEER_BIN="${STEER_ROOT}/scripts/steer"
-[ -x "${STEER_BIN}" ] || STEER_BIN=steer
-"${STEER_BIN}" report refresh --days 30
+<STEER_BIN> report refresh --days 30
 ```
 
 Then read the whole loop's posture and full class inventory in one snapshot, and
 each live record's detail beside it:
 
 ```bash
-"${STEER_BIN}" status --json --to-file
-"${STEER_BIN}" fix score --json --to-file
+<STEER_BIN> status --json --to-file
+<STEER_BIN> fix score --json --to-file
 ```
 
 `--to-file` writes a command's output to a new file and prints only that file's
@@ -130,22 +126,18 @@ case: the fail-soft rule above reads `audit.md` anyway.
 
 ### 2a. Transcript friction
 
-Resolve the CLI as in Step 1. Redirect every report output to a temp file and Read the file once — via Read, not via command output, which a harness can cut. Run a **single command** for the scan:
+Write `<STEER_BIN>` as in Step 1. Redirect every report output to a temp file and Read the file once — via Read, not via command output, which a harness can cut. Run a **single command** for the scan:
 
 ```bash
-STEER_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}"
-STEER_ROOT="${STEER_ROOT:-<SKILL_DIR>/../..}"
-STEER_BIN="${STEER_ROOT}/scripts/steer"
-[ -x "${STEER_BIN}" ] || STEER_BIN=steer
-"${STEER_BIN}" report --days 30 --to-file
+<STEER_BIN> report --days 30 --to-file
 ```
 
 Then Read the file whose path it prints. It is the first page of the report's index. The scan stored the whole report — every occurrence of every cluster — and `steer report show` reads the rest of that stored report without scanning again. Pass `--report` with the index's `report_id` on every `show`: a later scan replaces the stored report, and `show` refuses to mix the two.
 
 ```bash
-"${STEER_BIN}" report show --report ID --cursor N --to-file          # the next index page
-"${STEER_BIN}" report show SIGNAL --match 'RE' --report ID --to-file # one signal's clusters
-"${STEER_BIN}" report show c3 r1 i1 --report ID --to-file            # every occurrence or directive
+<STEER_BIN> report show --report ID --cursor N --to-file          # the next index page
+<STEER_BIN> report show SIGNAL --match 'RE' --report ID --to-file # one signal's clusters
+<STEER_BIN> report show c3 r1 i1 --report ID --to-file            # every occurrence or directive
 ```
 
 All projects and every harness are scanned by default (cross-project, cross-harness habits are the strongest candidates). Pass through any flags the user supplied (`--days N`, `--project-only`, `--repo-only`, `--harness claude-code|codex`, `--max-digest-bytes N`). `--project-only` reads the working directory alone; `--repo-only` reads every session launched anywhere inside the current checkout, and the two are mutually exclusive.
@@ -430,8 +422,8 @@ counted from this machine's stored session snapshots, and a row with `fix` has n
 If this machine has a commit-review ledger, dump the findings. If not, skip to Step 3 and add nothing: Step 1's sweep sentence already told the reader that review history is absent, and what comes next.
 
 ```bash
-steer commit-gate mine findings --kind accepted --undecided --to-file
-steer commit-gate mine findings --kind rejected --to-file
+<STEER_BIN> commit-gate mine findings --kind accepted --undecided --to-file
+<STEER_BIN> commit-gate mine findings --kind rejected --to-file
 ```
 
 Read each file whose path they print **once**. Do not cat them and do not re-read.
@@ -709,10 +701,10 @@ A candidate routed to a repository check registers with `--tier check --check-id
 Then register the class over the transcript corpus, so the fix you just installed is measured rather than assumed:
 
 ```bash
-steer fix match 'YOUR REGEX' --corpus transcript-friction --signal-kind user_corrections \
+<STEER_BIN> fix match 'YOUR REGEX' --corpus transcript-friction --signal-kind user_corrections \
   --scope-harness claude-code,codex
 
-steer fix register \
+<STEER_BIN> fix register \
   --class "bare python call" \
   --match 'YOUR REGEX' \
   --corpus transcript-friction --signal-kind user_corrections \
@@ -736,7 +728,7 @@ For each accepted review candidate:
 1. **Author the regex and test it before writing any fix:**
 
    ```bash
-   steer fix match 'YOUR REGEX' --kind accepted
+   <STEER_BIN> fix match 'YOUR REGEX' --kind accepted
    ```
 
    `match` also reports every recorded class that covers chains your candidate matches. A high share against a rejected class means you are re-proposing it: read the reason before going further.
@@ -752,7 +744,7 @@ For each accepted review candidate:
 3. **Register it**, after the fix is in:
 
    ```bash
-   steer fix register \
+   <STEER_BIN> fix register \
      --class "stale test-count claim" \
      --match 'YOUR REGEX' \
      --kind defect \
@@ -786,7 +778,7 @@ For each accepted review candidate:
 For each review candidate you examine and refuse, record the refusal:
 
 ```bash
-steer fix reject \
+<STEER_BIN> fix reject \
   --class "within-chain repeat finding" \
   --match 'YOUR REGEX' \
   --scope-all \
@@ -813,7 +805,7 @@ Register only after the fix exists. The install timestamp is the split point for
 After you register, reject, rework, or remove anything, run the refresh once more:
 
 ```bash
-steer report refresh --days 30
+<STEER_BIN> report refresh --days 30
 ```
 
 This rewrites the queue and its timestamp from the new state, so the SessionStart nudge stops pointing at work you just finished. Skip it only when you changed nothing this pass.
@@ -821,7 +813,7 @@ This rewrites the queue and its timestamp from the new state, so the SessionStar
 Then record that this pass read the candidate piles, whether or not it made a class from them:
 
 ```bash
-steer report mark-read
+<STEER_BIN> report mark-read
 ```
 
 A one-off finding stays in its pile after you read it, so without the mark the status line counts that pile as a decision after every pass. Run it last, after any pass that read the dumps in Step 2, including one that changed nothing. When you read only one pile, or read the transcript pile with a filter, name the pile you read in full: `--corpus review-findings` or `--corpus transcript-friction`. A pile whose `unread` is false is unchanged since the last pass: say so in one line, and do not present its old items again as new evidence.

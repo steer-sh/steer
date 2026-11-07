@@ -78,7 +78,7 @@ cheapest signal that a block was wrong for the task. It is still a complaint, no
 judgment: it reads no rule and no evidence beyond its own task.
 
 ```bash
-steer audit contests --json
+<STEER_BIN> audit contests --json
 ```
 
 This reads no case evidence and spends nothing from the reading pass below. For
@@ -141,8 +141,9 @@ Replace `<SKILL_DIR>` in the brief with this skill's absolute directory, and
 `<STEER_BIN>` with the launcher Step 1 of `SKILL.md` resolved:
 
 > Read `<SKILL_DIR>/reading.md` and run one reading pass of recorded Steer blocks as
-> its reader `subagent`, with a case cap of 12. Run every `steer` command it names as
-> `<STEER_BIN>`. Record a receipt for each case you read; exclude nothing, repair
+> its reader `subagent`, with a case cap of 12. The launcher is `<STEER_BIN>`: write
+> that path wherever a command shows the launcher placeholder, and run each command
+> as it stands. Record a receipt for each case you read; exclude nothing, repair
 > nothing and edit no file. Your final message is the account that file's last
 > section describes, and nothing else.
 

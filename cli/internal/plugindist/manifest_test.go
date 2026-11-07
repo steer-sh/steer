@@ -297,17 +297,8 @@ var claudeRootExpansion = regexp.MustCompile(`\$\{?CLAUDE_PLUGIN_ROOT\b[^}"\s]*\
 // exact text ${CLAUDE_PLUGIN_ROOT}, and only into SKILL.md. A skill's shell
 // expansion of that name is the bare placeholder, in its SKILL.md.
 func TestSkillsExpandTheClaudePluginRootPlaceholder(t *testing.T) {
-	root := repoRoot(t)
-	dirs := map[string]bool{}
-	for _, rel := range pluginManifests {
-		skills, _ := readJSON(t, filepath.Join(root, rel))["skills"].([]any)
-		for _, s := range skills {
-			dir, _ := s.(string)
-			dirs[filepath.Join(root, strings.TrimPrefix(dir, "./"))] = true
-		}
-	}
 	found := 0
-	for dir := range dirs {
+	for _, dir := range skillDirs(t) {
 		err := filepath.WalkDir(dir, func(file string, d os.DirEntry, err error) error {
 			if err != nil || d.IsDir() || filepath.Ext(file) != ".md" {
 				return err
@@ -333,43 +324,52 @@ func TestSkillsExpandTheClaudePluginRootPlaceholder(t *testing.T) {
 	}
 }
 
-const (
-	pluginRootLine = `STEER_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}"`
-	skillDirLine   = `STEER_ROOT="${STEER_ROOT:-<SKILL_DIR>/../..}"`
-)
-
-// Codex gives a skill no plugin root, so each resolution falls back to the
-// launcher two directories above the skill, which must hold scripts/steer.
-func TestSkillsResolveTheLauncherBesideTheSkill(t *testing.T) {
+// skillDirs returns the absolute directory of every skill a plugin manifest lists.
+func skillDirs(t *testing.T) []string {
+	t.Helper()
 	root := repoRoot(t)
-	dirs := map[string]bool{}
+	seen := map[string]bool{}
+	var dirs []string
 	for _, rel := range pluginManifests {
 		skills, _ := readJSON(t, filepath.Join(root, rel))["skills"].([]any)
 		for _, s := range skills {
-			dir, _ := s.(string)
-			dirs[filepath.Join(root, strings.TrimPrefix(dir, "./"))] = true
+			name, _ := s.(string)
+			dir := filepath.Join(root, strings.TrimPrefix(name, "./"))
+			if !seen[dir] {
+				seen[dir] = true
+				dirs = append(dirs, dir)
+			}
 		}
 	}
-	total := 0
-	for dir := range dirs {
+	sort.Strings(dirs)
+	if len(dirs) == 0 {
+		t.Fatal("no plugin manifest lists a skill")
+	}
+	return dirs
+}
+
+// launcherStatements are the sentences each SKILL.md names its launcher with:
+// Claude Code substitutes the plugin root into the first, and Codex, which
+// substitutes nothing, leaves the agent the directory of the skill.
+var launcherStatements = []string{
+	"The launcher is `${CLAUDE_PLUGIN_ROOT}/scripts/steer`.",
+	"the launcher is `scripts/steer` two directories above `<SKILL_DIR>`",
+	"write it without `..`.",
+}
+
+// Every skill names its launcher as a path the agent writes out, and the
+// launcher two directories above each skill exists and is executable.
+func TestSkillsNameTheLauncherBesideTheSkill(t *testing.T) {
+	for _, dir := range skillDirs(t) {
 		raw, err := os.ReadFile(filepath.Join(dir, "SKILL.md"))
 		if err != nil {
 			t.Fatalf("read %s: %v", dir, err)
 		}
-		lines := strings.Split(string(raw), "\n")
-		sites := 0
-		for i, line := range lines {
-			if !strings.HasPrefix(line, `STEER_ROOT="${PLUGIN_ROOT`) {
-				continue
+		text := strings.Join(strings.Fields(string(raw)), " ")
+		for _, statement := range launcherStatements {
+			if !strings.Contains(text, statement) {
+				t.Errorf("%s/SKILL.md does not say %q", dir, statement)
 			}
-			sites++
-			if line != pluginRootLine || i+1 >= len(lines) || lines[i+1] != skillDirLine {
-				t.Errorf("%s/SKILL.md:%d resolves the launcher without %s then %s", dir, i+1, pluginRootLine, skillDirLine)
-			}
-		}
-		total += sites
-		if sites == 0 {
-			continue
 		}
 		info, err := os.Stat(filepath.Join(dir, "..", "..", "scripts", "steer"))
 		if err != nil {
@@ -378,8 +378,55 @@ func TestSkillsResolveTheLauncherBesideTheSkill(t *testing.T) {
 			t.Errorf("%s: the launcher two directories above the skill is not executable", dir)
 		}
 	}
-	if total == 0 {
-		t.Error("no skill resolves the bundled launcher")
+}
+
+// launcherVariable is a shell variable or assignment carrying the launcher.
+var launcherVariable = regexp.MustCompile(`STEER_(?:BIN|ROOT)=|\$\{?STEER_`)
+
+// A permission rule matches a command by its text, and Claude Code refuses to
+// check a command that expands a braced variable, so every steer command a
+// skill runs starts with the <STEER_BIN> placeholder the agent fills with the
+// launcher's absolute path, never with bare steer or a shell variable.
+func TestSkillCommandsStartWithTheLauncherPlaceholder(t *testing.T) {
+	placeholders := 0
+	for _, dir := range skillDirs(t) {
+		err := filepath.WalkDir(dir, func(file string, d os.DirEntry, err error) error {
+			if err != nil || d.IsDir() || filepath.Ext(file) != ".md" {
+				return err
+			}
+			raw, err := os.ReadFile(file)
+			if err != nil {
+				return err
+			}
+			if m := launcherVariable.FindString(string(raw)); m != "" {
+				t.Errorf("%s carries the launcher in a shell variable (%s)", file, m)
+			}
+			fenced := false
+			for i, line := range strings.Split(string(raw), "\n") {
+				trimmed := strings.TrimSpace(line)
+				if strings.HasPrefix(trimmed, "```") {
+					fenced = !fenced
+					continue
+				}
+				if !fenced {
+					continue
+				}
+				switch {
+				case strings.HasPrefix(trimmed, "<STEER_BIN> "):
+					placeholders++
+				case strings.HasPrefix(trimmed, "steer "), strings.HasPrefix(trimmed, "$"),
+					strings.HasPrefix(trimmed, `"$`):
+					t.Errorf("%s:%d runs a command the launcher placeholder does not start: %s", file, i+1, trimmed)
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("walk %s: %v", dir, err)
+		}
+	}
+	if placeholders == 0 {
+		t.Error("no skill runs a command through <STEER_BIN>")
 	}
 }
 

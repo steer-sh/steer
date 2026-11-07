@@ -101,7 +101,7 @@ specialist prompt, hook, fixtures, `steer register`, and the mandatory tests.
 ### Instruction rule
 
 ```bash
-"${STEER_BIN}" rules add <id> --rule "<text>" --scope <project|global>
+<STEER_BIN> rules add <id> --rule "<text>" --scope <project|global>
 ```
 
 It writes the rule under `## Steer Rules` in each installed harness's
@@ -112,7 +112,7 @@ thing in other words is a duplicate the refusal does not catch.
 ### Review prompt
 
 ```bash
-"${STEER_BIN}" commit-gate addendum add <id> --text "<text>" --scope <project|global>
+<STEER_BIN> commit-gate addendum add <id> --text "<text>" --scope <project|global>
 ```
 
 The stock review prompt is compiled into the binary; never edit it. A project
