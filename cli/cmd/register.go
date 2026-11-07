@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -124,7 +125,7 @@ Optional provenance flags can be used to persist generation metadata.`,
 		if line := codexApprovalLine(scope, targets); line != "" {
 			utils.Info(line)
 		}
-		printFixtureVerification(result.Verification)
+		printFixtureVerification(os.Stdout, result.Verification)
 		return nil
 	},
 }
@@ -318,19 +319,19 @@ func readFixtureFile(path, hook string) (*fixture.File, error) {
 
 // printFixtureVerification reports the rerun that followed consolidation. It is
 // a report and never a gate: the install already happened.
-func printFixtureVerification(v *claude.FixtureVerification) {
+func printFixtureVerification(out io.Writer, v *claude.FixtureVerification) {
 	if v == nil || len(v.Reports) == 0 {
 		return
 	}
 	for _, report := range v.Reports {
 		if report.Tested() {
-			fmt.Printf("fixtures: %s — %d case(s) intercepted", report.Hook, len(report.Cases))
+			fmt.Fprintf(out, "fixtures: %s — %d case(s) intercepted", report.Hook, len(report.Cases))
 			if n := report.Shadowed(); n > 0 {
-				fmt.Printf(", %d shadowed by another guard and not verified through the master", n)
+				fmt.Fprintf(out, ", %d shadowed by another guard and not verified through the master", n)
 			}
-			fmt.Println()
+			fmt.Fprintln(out)
 			continue
 		}
-		fmt.Printf("fixtures: %s — %s\n", report.Hook, report.NotVerified("master"))
+		fmt.Fprintf(out, "fixtures: %s — %s\n", report.Hook, report.NotVerified("master"))
 	}
 }

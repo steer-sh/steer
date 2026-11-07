@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,7 +29,7 @@ func TestRelinkRepointsAPATHRegistration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rewritten, err := relinkClaude(claude.GlobalScope, path)
+	rewritten, err := relinkClaude(quietReport(), claude.GlobalScope, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +50,7 @@ func TestRelinkRepointsAPATHRegistration(t *testing.T) {
 	}
 
 	// A second install rewrites nothing: the registrations already name the path.
-	rewritten, err = relinkClaude(claude.GlobalScope, path)
+	rewritten, err = relinkClaude(quietReport(), claude.GlobalScope, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +73,7 @@ func TestAForeignCommandIsNeverRewritten(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rewritten, err := relinkClaude(claude.GlobalScope, path)
+	rewritten, err := relinkClaude(quietReport(), claude.GlobalScope, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +125,7 @@ func TestCodexRelinkWritesNoEmptyResolver(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rewritten, err := relinkCodex(claude.GlobalScope, path)
+	rewritten, err := relinkCodex(quietReport(), claude.GlobalScope, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +167,7 @@ func TestRelinkRepointsABareGuardMaster(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rewritten, err := relinkClaude(claude.ProjectScope, path)
+	rewritten, err := relinkClaude(quietReport(), claude.ProjectScope, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +181,7 @@ func TestRelinkRepointsABareGuardMaster(t *testing.T) {
 	if got, _ := (claude.Registrar{}).RegisteredMasterCommand(claude.ProjectScope); got != want {
 		t.Fatalf("command = %q, want %q", got, want)
 	}
-	if rewritten, err = relinkClaude(claude.ProjectScope, path); err != nil || rewritten != 0 {
+	if rewritten, err = relinkClaude(quietReport(), claude.ProjectScope, path); err != nil || rewritten != 0 {
 		t.Fatalf("second pass rewrote %d, %v; want 0", rewritten, err)
 	}
 }
@@ -201,7 +202,7 @@ func TestRelinkRepointsABareCodexGuardMaster(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rewritten, err := relinkCodexMaster(claude.ProjectScope)
+	rewritten, err := relinkCodexMaster(quietReport(), claude.ProjectScope)
 	if err != nil || rewritten != 1 {
 		t.Fatalf("rewrote %d, %v; want 1", rewritten, err)
 	}
@@ -212,7 +213,7 @@ func TestRelinkRepointsABareCodexGuardMaster(t *testing.T) {
 	if got, _ := (codexhooks.Registrar{}).RegisteredMasterCommand(claude.ProjectScope); got != want {
 		t.Fatalf("command = %q, want %q", got, want)
 	}
-	if rewritten, err = relinkCodexMaster(claude.ProjectScope); err != nil || rewritten != 0 {
+	if rewritten, err = relinkCodexMaster(quietReport(), claude.ProjectScope); err != nil || rewritten != 0 {
 		t.Fatalf("second pass rewrote %d, %v; want 0", rewritten, err)
 	}
 }
@@ -244,3 +245,6 @@ func TestRecordPluginCopiesNamesEveryInstalledPlugin(t *testing.T) {
 		t.Fatalf("Sources() = %q, want the Codex plugin copy %q", got, root)
 	}
 }
+
+// quietReport is an install report that prints nothing.
+func quietReport() *installReport { return &installReport{out: io.Discard} }

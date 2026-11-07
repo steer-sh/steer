@@ -210,14 +210,14 @@ func printRunnerWiring(out io.Writer) {
 
 // relinkCheckRunners repoints this scope's Stop runner registrations at the
 // stable executable, keeping each timeout, and reports how many changed.
-func relinkCheckRunners(scope, path string) (int, error) {
+func relinkCheckRunners(r *installReport, scope, path string) (int, error) {
 	rewritten := 0
 	if a, err := claude.CheckHookArming(scope); err == nil {
 		if next, ok := relinked(a.Registered, a.Command, path); ok {
 			if err := claude.RegisterCheckHook(scope, next, a.Timeout); err != nil {
 				return rewritten, err
 			}
-			reportRelink("claude-code", scope, "check runner", next)
+			reportRelink(r, "claude-code", scope, "check runner", next)
 			rewritten++
 		}
 	}
@@ -230,7 +230,7 @@ func relinkCheckRunners(scope, path string) (int, error) {
 		if _, err := codexhooks.RegisterCheckHook(scope, cwd, next, a.Timeout); err != nil {
 			return rewritten, err
 		}
-		reportRelink("codex", scope, "check runner", next)
+		reportRelink(r, "codex", scope, "check runner", next)
 		rewritten++
 	}
 	return rewritten, nil

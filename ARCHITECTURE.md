@@ -46,8 +46,18 @@ registrations, with a reported PATH fallback if installation fails.
 custom wrapper commands retain their ownership. It then rebuilds a global guard
 master whose runtime differs from the installed binary's, and only names the
 rebuild of a stale project master, which the repository commits. A plugin
-update refreshes the harness's cached copy alone, so this install is the
-upgrade step. Guard master registration is
+update refreshes the harness's cached copy alone, so the SessionStart cadence
+runs the same install from the updated copy (`updateHooks`). It acts only from
+the newest copy whose release is ahead of the stable executable's, so an older
+copy never moves the hooks back and a development build, which has no order, is
+never overwritten; only where a global registration already calls the stable
+executable or runs a global master, so a machine never set up, or fully
+uninstalled, is left alone; and only while it holds `~/.steer/bin-install.lock`,
+which a manual install takes too. It places the binary last, through a rename,
+so an install that stops early leaves the hooks on the old build and the next
+session repeats it, and it leaves the rebuilt master's fixture rerun to a detached
+`steer fixture verify` to stay inside the hook's timeout. A failure falls back to
+the notice naming the copy's `bin install`. Guard master registration is
 separate: project store paths can remain relative, while global and bridge paths
 can be absolute. Reviewer flags in older registrations are stripped
 when repointing because those flags would override operator settings.

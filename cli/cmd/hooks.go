@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"fmt"
+	"io"
+	"os"
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/claude"
@@ -55,7 +57,7 @@ than patched.`,
 		fmt.Println(styles.MainHeader.Render("Rebuild Master Hook"))
 		fmt.Println()
 
-		printRebuild(scope, result)
+		printRebuild(os.Stdout, scope, result)
 		return nil
 	},
 }
@@ -136,36 +138,46 @@ func init() {
 
 // printRebuild reports one scope's rebuild: the master written, each harness's
 // registration, and the harness approvals the changed command voids.
-func printRebuild(scope string, result *claude.RebuildResult) {
+func printRebuild(out io.Writer, scope string, result *claude.RebuildResult) {
+	info := func(msg string) { fmt.Fprintln(out, styles.StatusIndicator("info", msg)) }
 	if result.Hooks == 0 {
-		utils.Info(fmt.Sprintf("Scope %s holds no guards; the master was removed.", scope))
+		info(fmt.Sprintf("Scope %s holds no guards; the master was removed.", scope))
 		for _, target := range result.Targets {
-			utils.Info(fmt.Sprintf("%s: deregistered", target.Harness.DisplayName))
+			info(fmt.Sprintf("%s: deregistered", target.Harness.DisplayName))
 		}
 		return
 	}
 
-	utils.Success(fmt.Sprintf("Rebuilt %s from %d guard(s).", result.MasterPath, result.Hooks))
-	utils.Info(fmt.Sprintf("Runtime %s | steer %s", result.Stamp.Runtime, result.Stamp.Version))
+	fmt.Fprintln(out, styles.StatusIndicator("success", fmt.Sprintf("Rebuilt %s from %d guard(s).", result.MasterPath, result.Hooks)))
+	info(fmt.Sprintf("Runtime %s | steer %s", result.Stamp.Runtime, result.Stamp.Version))
 	if result.Migrated {
-		utils.Info(fmt.Sprintf("Store migrated: %s -> %s (the legacy copy is left in place).",
+		info(fmt.Sprintf("Store migrated: %s -> %s (the legacy copy is left in place).",
 			result.LegacyDir, result.StoreDir))
 	}
 	for _, target := range result.Targets {
 		if target.Previous != "" && target.Previous != target.Path {
-			utils.Info(fmt.Sprintf("%s: re-registered %s (was %s)",
+			info(fmt.Sprintf("%s: re-registered %s (was %s)",
 				target.Harness.DisplayName, target.Path, target.Previous))
 			continue
 		}
-		utils.Info(fmt.Sprintf("%s: registered %s", target.Harness.DisplayName, target.Path))
+		info(fmt.Sprintf("%s: registered %s", target.Harness.DisplayName, target.Path))
 	}
-	for _, target := range result.Targets {
-		if target.CommandChanged && target.Harness.Capabilities.TrustReview {
-			utils.Info(status.GuardCommandChangedPhrase(target.Harness.DisplayName))
-		}
+	for _, phrase := range reapprovals(result) {
+		info(phrase)
 	}
 	if result.Stamp.Runtime != guard.RuntimeDigest() || result.Stamp.Version != version.Version {
-		utils.Info("The stamp does not match this binary; report it as a bug.")
+		info("The stamp does not match this binary; report it as a bug.")
 	}
-	printFixtureVerification(result.Verification)
+	printFixtureVerification(out, result.Verification)
+}
+
+// reapprovals names each harness whose changed guard command needs approving again.
+func reapprovals(result *claude.RebuildResult) []string {
+	var out []string
+	for _, target := range result.Targets {
+		if target.CommandChanged && target.Harness.Capabilities.TrustReview {
+			out = append(out, status.GuardCommandChangedPhrase(target.Harness.DisplayName))
+		}
+	}
+	return out
 }

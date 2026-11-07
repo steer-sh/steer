@@ -111,7 +111,9 @@ For Codex:
 codex plugin marketplace upgrade steer-marketplace
 ```
 
-A plugin update refreshes the skills and the plugin's own copy of `steer`. It does not change `~/.steer/bin/steer`, which your hooks run, or the guard runners that Steer generated. After the update, the next session's start-up message names the command for your machine: the updated plugin's `scripts/steer bin install`. That command copies the new build to `~/.steer/bin/steer`, repoints Steer's hook registrations at it, and rebuilds your global guard runner. A repository's guard runner is committed, so `bin install` prints `steer hooks rebuild --scope project` for you to run in that repository when you choose.
+A plugin update refreshes the skills and the plugin's own copy of `steer`. Your hooks run `~/.steer/bin/steer` and the guard runners Steer generated, so the update reaches them at the next session start: the updated plugin copies its build to `~/.steer/bin/steer`, repoints Steer's hook registrations at it, rebuilds your global guard runner, and says so in one start-up line, such as `steer: hooks updated 0.1.7 → 0.1.8`. It does this only when one of your global Steer registrations already calls `~/.steer/bin/steer`, so it never sets Steer up on a machine where you have not, or where you ran `steer uninstall --apply`. A repository's guard runner is committed, so the start-up message names `steer hooks rebuild --scope project` for you to run in that repository when you choose; if Codex must approve a changed guard command again, it says that too.
+
+Run the updated plugin's `scripts/steer bin install` yourself when the start-up message names it: that happens when the automatic update failed, or when only an older plugin copy runs on this machine.
 
 `steer --version` names the build you run, with its commit and build date.
 

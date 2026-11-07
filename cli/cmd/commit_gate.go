@@ -420,7 +420,7 @@ func installReviewChannel(cfg gate.Config) error {
 	// The registration this install writes carries no reviewer flag; one written by an
 	// older steer still does, and it outranks the settings file wherever it survives.
 	if binPath, binErr := steerbin.Ensure(); binErr == nil {
-		if _, repairErr := repointRegistrations(binPath); repairErr != nil {
+		if _, repairErr := repointRegistrations(&installReport{out: os.Stdout}, binPath); repairErr != nil {
 			utils.Warning("could not repair the other registrations: " + repairErr.Error())
 		}
 	}

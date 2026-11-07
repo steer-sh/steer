@@ -60,6 +60,16 @@ func (r *RebuildResult) Moved() bool {
 // A store holding no guards has no master, so each target is deregistered
 // instead — the same answer RemoveManagedHook gives when the last guard goes.
 func RebuildMaster(scope string, targets ...harness.Registrar) (*RebuildResult, error) {
+	return rebuildMaster(scope, true, targets)
+}
+
+// RebuildMasterUnverified is RebuildMaster without the fixture rerun: every guard's
+// tested state stays cleared until a VerifyFixtures over the scope earns it again.
+func RebuildMasterUnverified(scope string, targets ...harness.Registrar) (*RebuildResult, error) {
+	return rebuildMaster(scope, false, targets)
+}
+
+func rebuildMaster(scope string, verify bool, targets []harness.Registrar) (*RebuildResult, error) {
 	scope = strings.ToLower(strings.TrimSpace(scope))
 	if err := ValidateScope(scope); err != nil {
 		return nil, err
@@ -148,6 +158,9 @@ func RebuildMaster(scope string, targets ...harness.Registrar) (*RebuildResult, 
 		result.Targets = append(result.Targets, row)
 	}
 
+	if !verify {
+		return result, nil
+	}
 	verification, err := VerifyFixtures(scope)
 	if err != nil {
 		return result, err

@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/hookstore"
 	"github.com/steer-sh/steer-cli/internal/status"
 	"github.com/steer-sh/steer-cli/internal/steerbin"
+	"github.com/steer-sh/steer-cli/internal/steerpath"
 	"github.com/steer-sh/steer-cli/internal/testhome"
 	"github.com/steer-sh/steer-cli/internal/version"
 )
@@ -85,7 +87,7 @@ func TestBinInstallRebuildsOnlyTheGlobalMaster(t *testing.T) {
 	}
 
 	var rebuildErr error
-	out := captureStdout(t, func() { rebuildErr = rebuildStaleMasters() })
+	out := captureStdout(t, func() { rebuildErr = rebuildStaleMasters(&installReport{out: os.Stdout}, nil) })
 	if rebuildErr != nil {
 		t.Fatal(rebuildErr)
 	}
@@ -234,7 +236,7 @@ func TestBinInstallLeavesARemovedHarnessUnregistered(t *testing.T) {
 	ageStamp(t, g)
 
 	// --harness still names Codex: the rebuild follows the registrations, not the flag.
-	if err := rebuildStaleMasters(); err != nil {
+	if err := rebuildStaleMasters(&installReport{out: os.Stdout}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if path, err := (codexhooks.Registrar{}).RegisteredMasterPath(g); err != nil || path != "" {
@@ -272,7 +274,7 @@ func TestBinInstallRefusesAnUnreadableCodexHooksFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := rebuildStaleMasters(); err == nil || !strings.Contains(err.Error(), "Codex") {
+	if err := rebuildStaleMasters(&installReport{out: os.Stdout}, nil); err == nil || !strings.Contains(err.Error(), "Codex") {
 		t.Fatalf("err = %v, want a failure naming the Codex registration", err)
 	}
 	after, err := os.ReadFile(master)
@@ -281,5 +283,212 @@ func TestBinInstallRefusesAnUnreadableCodexHooksFile(t *testing.T) {
 	}
 	if !bytes.Equal(before, after) {
 		t.Error("bin install rewrote the master while Codex's registration was unreadable")
+	}
+}
+
+// updateHome is a home whose stable executable a global commit gate already calls,
+// with a Claude Code plugin copy at version whose bundled binary is this process. It
+// returns the copy and the stable executable's path.
+func updateHome(t *testing.T, version string) (status.PluginCopy, string) {
+	t.Helper()
+	home := t.TempDir()
+	testhome.Set(t, home)
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	t.Chdir(home)
+	stable, err := steerbin.Path()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(stable), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stable, []byte("old build"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	readHooksBuild = func() status.BuildIdentity { return oldHooks }
+	t.Cleanup(func() { readHooksBuild = status.HooksBuild })
+	quoted := steerbin.Quote(stable)
+	if err := claude.RegisterCommitGateAndResolver(claude.GlobalScope, quoted+" commit-gate review", 460,
+		quoted+" commit-gate backfill --if-due --apply --quiet", 30); err != nil {
+		t.Fatal(err)
+	}
+	return pluginCopyRunningThis(t, home, version), stable
+}
+
+// pluginCopyRunningThis makes a Claude Code plugin copy whose bundled binary links to
+// this test process, stamped with version.
+func pluginCopyRunningThis(t *testing.T, home, version string) status.PluginCopy {
+	t.Helper()
+	copy := status.PluginCopy{Harness: "claude-code", State: status.PluginDifferentBinary, Version: version, Commit: "bbb",
+		Path: filepath.Join(home, ".claude", "plugins", "cache", "m", "steer", version)}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(copy.Binary()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(exe, copy.Binary()); err != nil {
+		t.Fatal(err)
+	}
+	return copy
+}
+
+var oldHooks = status.BuildIdentity{Version: "0.1.7", Commit: "aaa"}
+
+// runsThisBinary reports whether the file at path holds this test process's bytes.
+func runsThisBinary(t *testing.T, path string) bool {
+	t.Helper()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.ReadFile(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	return err == nil && bytes.Equal(got, want)
+}
+
+// TestStartupUpdateInstallsTheNewerPluginCopy: the newest plugin copy ahead of the
+// hooks, run at session start where a global registration calls the stable
+// executable, places itself there and reports one line plus the step it leaves.
+func TestStartupUpdateInstallsTheNewerPluginCopy(t *testing.T) {
+	copy, stable := updateHome(t, "0.1.8")
+	project := t.TempDir()
+	if out, err := exec.Command("git", "-C", project, "init", "-q").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	t.Chdir(project)
+	addOrphanFactoryHook(t, claude.ProjectScope, "orphan-project", "orphan-project", "never use var here")
+	if _, err := claude.RebuildMaster(claude.ProjectScope); err != nil {
+		t.Fatal(err)
+	}
+	ageStamp(t, claude.ProjectScope)
+
+	got := updateHooks([]status.PluginCopy{copy}, oldHooks)
+	if !got.installed || got.failed {
+		t.Fatalf("update = %+v, want installed", got)
+	}
+	if len(got.lines) == 0 || got.lines[0] != "steer: hooks updated 0.1.7 → 0.1.8" {
+		t.Errorf("lines = %q, want the update line first", got.lines)
+	}
+	if !strings.Contains(strings.Join(got.lines, "\n"), status.RebuildCommand(claude.ProjectScope)) {
+		t.Errorf("lines = %q, want the stale project master's rebuild", got.lines)
+	}
+	if !runsThisBinary(t, stable) {
+		t.Error("the stable executable does not carry the plugin copy's build")
+	}
+}
+
+// TestStartupUpdateLeavesTheHooksAlone covers every reading that must change
+// nothing: a development build, an older copy, a copy that is not the newest ahead,
+// a machine with no registration left after a full uninstall, and an install
+// already running.
+func TestStartupUpdateLeavesTheHooksAlone(t *testing.T) {
+	cases := []struct {
+		name  string
+		setup func(t *testing.T) ([]status.PluginCopy, string)
+	}{
+		{"development build", func(t *testing.T) ([]status.PluginCopy, string) {
+			copy, stable := updateHome(t, "0.1.8")
+			copy.Version = "dev"
+			return []status.PluginCopy{copy}, stable
+		}},
+		{"older copy", func(t *testing.T) ([]status.PluginCopy, string) {
+			copy, stable := updateHome(t, "0.1.6")
+			return []status.PluginCopy{copy}, stable
+		}},
+		{"another copy is newer", func(t *testing.T) ([]status.PluginCopy, string) {
+			copy, stable := updateHome(t, "0.1.8")
+			newer := copy
+			newer.Harness, newer.Version = "codex", "0.1.9"
+			newer.Path = filepath.Join(t.TempDir(), "steer", "0.1.9")
+			return []status.PluginCopy{copy, newer}, stable
+		}},
+		{"full uninstall", func(t *testing.T) ([]status.PluginCopy, string) {
+			copy, stable := updateHome(t, "0.1.8")
+			if _, err := runUninstallWith(t, true, false); err != nil {
+				t.Fatal(err)
+			}
+			return []status.PluginCopy{copy}, stable
+		}},
+		{"install running", func(t *testing.T) ([]status.PluginCopy, string) {
+			copy, stable := updateHome(t, "0.1.8")
+			release, held, err := lockInstall()
+			if err != nil || !held {
+				t.Fatalf("lock: held=%v err=%v", held, err)
+			}
+			t.Cleanup(release)
+			return []status.PluginCopy{copy}, stable
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			copies, stable := c.setup(t)
+			got := updateHooks(copies, oldHooks)
+			if got.installed || got.failed || len(got.lines) > 0 {
+				t.Errorf("update = %+v, want nothing", got)
+			}
+			if data, err := os.ReadFile(stable); err != nil || string(data) != "old build" {
+				t.Errorf("the stable executable changed (%v)", err)
+			}
+			if sources := steerbin.Sources(); len(sources) > 0 {
+				t.Errorf("the source record = %q, want it empty", sources)
+			}
+		})
+	}
+}
+
+// TestStartupUpdateActsFromEitherHarnessOfOneRelease: with the same release cached by
+// both harnesses, the copy whose session starts installs it.
+func TestStartupUpdateActsFromEitherHarnessOfOneRelease(t *testing.T) {
+	copy, stable := updateHome(t, "0.1.8")
+	copy.Harness = "codex"
+	other := copy
+	other.Harness = "claude-code"
+	other.Path = filepath.Join(t.TempDir(), "steer", "0.1.8")
+	got := updateHooks([]status.PluginCopy{other, copy}, oldHooks)
+	if !got.installed {
+		t.Fatalf("update = %+v, want installed from the Codex copy", got)
+	}
+	if !runsThisBinary(t, stable) {
+		t.Error("the stable executable does not carry the plugin copy's build")
+	}
+}
+
+// TestStartupUpdateFailsWhenTheLockCannotBeOpened: a lock file Steer cannot open is a
+// failed update, so the notice naming the manual install keeps printing.
+func TestStartupUpdateFailsWhenTheLockCannotBeOpened(t *testing.T) {
+	copy, stable := updateHome(t, "0.1.8")
+	home, err := steerpath.Home()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, installLockName), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got := updateHooks([]status.PluginCopy{copy}, oldHooks)
+	if !got.failed || got.installed {
+		t.Fatalf("update = %+v, want failed", got)
+	}
+	if data, err := os.ReadFile(stable); err != nil || string(data) != "old build" {
+		t.Errorf("the stable executable changed (%v)", err)
+	}
+}
+
+// TestStartupUpdateYieldsToAnInstallThatFinishedFirst: when the stable executable no
+// longer carries the build the decision read, another install got there first.
+func TestStartupUpdateYieldsToAnInstallThatFinishedFirst(t *testing.T) {
+	copy, stable := updateHome(t, "0.1.8")
+	readHooksBuild = func() status.BuildIdentity { return status.BuildIdentity{Version: "0.1.9", Commit: "ccc"} }
+	got := updateHooks([]status.PluginCopy{copy}, oldHooks)
+	if got.installed || got.failed || len(got.lines) > 0 {
+		t.Errorf("update = %+v, want nothing", got)
+	}
+	if data, err := os.ReadFile(stable); err != nil || string(data) != "old build" {
+		t.Errorf("the stable executable changed (%v)", err)
 	}
 }

@@ -31,7 +31,7 @@ func TestAPinnedRegistrationIsReportedThenStripped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repointRegistrations(path); err != nil {
+	if _, err := repointRegistrations(quietReport(), path); err != nil {
 		t.Fatal(err)
 	}
 

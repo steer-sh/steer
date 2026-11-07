@@ -208,7 +208,7 @@ const (
 func BuildIssues(plugins []PluginCopy, hooks, running BuildIdentity) []Issue {
 	var out []Issue
 	var differ []string
-	newest := newestAhead(plugins, hooks)
+	newest := NewestAhead(plugins, hooks)
 	for _, p := range plugins {
 		label := HarnessLabel(p.Harness)
 		own := BuildIdentity{Version: p.Version, Commit: p.Commit}
@@ -249,8 +249,9 @@ func BuildIssues(plugins []PluginCopy, hooks, running BuildIdentity) []Issue {
 	return out
 }
 
-// newestAhead is the plugin copy with the highest version among those ahead of the hooks.
-func newestAhead(plugins []PluginCopy, hooks BuildIdentity) PluginCopy {
+// NewestAhead is the plugin copy with the highest version among those ahead of the hooks,
+// the zero copy when none is.
+func NewestAhead(plugins []PluginCopy, hooks BuildIdentity) PluginCopy {
 	var best PluginCopy
 	for _, p := range plugins {
 		if p.CompareToHooks(hooks) != BuildNewer {

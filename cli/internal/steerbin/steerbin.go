@@ -169,6 +169,9 @@ func RunningIsStable() bool {
 	return err == nil && running == target
 }
 
+// Running names this process's executable with every symlink resolved.
+func Running() (string, error) { return runningBinary() }
+
 // runningBinary names this process's executable with every symlink resolved, so a
 // copy through a wrapper link copies the real file.
 func runningBinary() (string, error) {
@@ -297,6 +300,12 @@ func split(command string) (string, string) {
 func IsSteerCommand(command string) bool {
 	head, _ := split(command)
 	return head != "" && isSteer(head)
+}
+
+// NamesExecutable reports whether a command's first word is the executable at path.
+func NamesExecutable(command, path string) bool {
+	head, _ := split(command)
+	return head != "" && path != "" && filepath.Clean(head) == filepath.Clean(path)
 }
 
 // isSteer reports whether a command's first word is a steer executable. It

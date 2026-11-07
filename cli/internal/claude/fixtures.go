@@ -86,16 +86,29 @@ func VerifyHookFixtures(scope, hook string) (*fixture.Report, error) {
 		masterPath = ""
 	}
 
+	guardDigest := fixture.FileDigest(guardPath)
 	report, err := fixture.Runner{}.Run(guardPath, masterPath, file)
 	if err != nil {
 		return nil, err
 	}
 
+	// The run takes a while, so the entry is read again: a guard removed or changed
+	// meanwhile keeps what that change wrote.
+	manifest, err = LoadManifest(scope)
+	if err != nil {
+		return nil, err
+	}
+	current, still := manifest.Hooks[hook]
+	if !still || current.File != entry.File || current.RuleHash != entry.RuleHash ||
+		fixture.FileDigest(guardPath) != guardDigest {
+		return &report, nil
+	}
+	entry = current
 	entry.Fixtures = &FixtureBinding{
 		Digest:       fixture.Digest(file),
 		Cases:        len(file.Cases),
 		Tested:       report.Tested(),
-		HookDigest:   fixture.FileDigest(guardPath),
+		HookDigest:   guardDigest,
 		MasterDigest: report.MasterDigest,
 		RuleHash:     entry.RuleHash,
 		VerifiedAt:   time.Now().UTC().Format(time.RFC3339),
