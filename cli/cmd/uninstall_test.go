@@ -494,3 +494,18 @@ func TestUninstallHarnessNamesTheSharedDocumentItKeeps(t *testing.T) {
 		t.Errorf("the plan does not name the kept shared document:\n%s", out)
 	}
 }
+
+// TestUninstallHarnessClaimsKeptItemsOnlyWhenThereAreSome: the one-agent success
+// line mentions kept items only when the plan kept any.
+func TestUninstallHarnessClaimsKeptItemsOnlyWhenThereAreSome(t *testing.T) {
+	uninstallHome(t)
+	harnessFlag = "codex"
+	t.Cleanup(func() { harnessFlag = "" })
+	out, err := runUninstallWith(t, true, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "No global Codex registration of Steer is left.") {
+		t.Errorf("the success line claims kept items the plan does not have:\n%s", out)
+	}
+}

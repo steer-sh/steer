@@ -354,6 +354,31 @@ class FreshInstallRunner(unittest.TestCase):
         with self.assertRaises(ValueError):
             fresh_install.install_commands(readme, "codex")
 
+    def test_reads_each_harness_uninstall_lines_from_the_readme(self):
+        readme = (ROOT / "README.md").read_text()
+        for harness, other in (("claude-code", "codex "), ("codex", "claude ")):
+            commands = fresh_install.uninstall_commands(readme, harness)
+            self.assertIn("~/.steer/bin/steer uninstall --apply", commands)
+            self.assertTrue(any(c.startswith(fresh_install.CLIS[harness] + " plugin ") for c in commands))
+            self.assertFalse(any(c.startswith(other) for c in commands), commands)
+
+    def test_plugin_first_removes_the_plugin_before_the_uninstall(self):
+        commands = ["~/.steer/bin/steer uninstall --apply", "codex plugin remove steer@m"]
+        program = "\n".join(fresh_install.uninstall_lines("codex", commands, "plugin-first"))
+        self.assertLess(program.index("codex plugin remove"), program.index("plugin removed"))
+        self.assertLess(program.index("plugin removed"), program.index("uninstall --harness codex --apply"))
+        self.assertNotIn("steer uninstall --apply", program)
+        readme = "\n".join(fresh_install.uninstall_lines("codex", commands, "readme"))
+        self.assertLess(readme.index("steer uninstall --apply"), readme.index("codex plugin remove"))
+
+    def test_a_local_install_adds_the_staged_checkout(self):
+        self.assertEqual(fresh_install.local_commands(
+            ["claude plugin marketplace add steer-sh/steer", "claude plugin install steer@steer-marketplace"]),
+            [f"claude plugin marketplace add {fresh_install.LOCAL_SOURCE}", "claude plugin install steer@steer-marketplace"])
+        program = fresh_install.script(["true"], "codex", "9.9.9", local=True, removal=["echo removal"])
+        self.assertLess(program.index("/src-ro"), program.index("true"))
+        self.assertGreater(program.index("echo removal"), program.index("bin install"))
+
     def test_the_script_requires_the_expected_version(self):
         program = fresh_install.script(["true"], "codex", "9.9.9")
         self.assertIn("~/.codex/plugins/cache/steer-marketplace/steer/9.9.9", program)
