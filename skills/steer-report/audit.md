@@ -114,7 +114,8 @@ order, among the flagged cases the queue lists ahead of the rest, so its case ca
 can leave some unread. When contested blocks remain unread after the pass,
 offer the user a deeper audit of them: read each one with
 `steer audit show ID --max-bytes 8000` and record a judgment by the rules of
-`./reading.md`. Read none beyond the pass unasked.
+`./reading.md`. A case `show` refused at that allowance needs the size its refusal
+named. Read none beyond the pass unasked.
 
 ## Read a sample of the recorded blocks
 
@@ -156,7 +157,8 @@ every other case in full.
 - A guard judged `incorrect` goes to "Repairing a guard you judged incorrect" below,
   and a check block's readings to "Where a check reading's repair goes".
 - A case `show` refused, or a listed case left unread, is unread work. Never treat
-  retrieving a case as having inspected it.
+  retrieving a case as having inspected it. When the user asks to read a refused
+  case, pass `show` the size its refusal named.
 - A case that records no real work: tell the user what shows it is a test, and offer
   `steer audit exclude ID --reason "..." --evidence PATH`. The record stays where it
   is; the queue and every count leave it out. Exclude nothing unasked.

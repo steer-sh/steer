@@ -193,8 +193,9 @@ reader keeps the same account as the evidence behind the report's assessment.
 
 - **The queue's `counts`, `coverage` and `check_coverage`**, as the queue printed
   them before you read anything.
-- **One line per clean case**: its ID, its `unit`, its reading, whether you read
-  the continuation, what `show` withheld, and its `emitted_bytes`. A clean case is a guard judged
+- **One line per clean case**: its ID, its `unit`, its reading (with each
+  failure's `applies` for a check block), whether you read the continuation, what
+  `show` withheld, and its `emitted_bytes`. A clean case is a guard judged
   `prevented` whose continuation shows no derailed task, or a check block whose
   every failure you read as `valid,introduced,fixed`.
 - **Every other case you recorded, in full**: its ID, `subject`, `unit`, `stratum`
