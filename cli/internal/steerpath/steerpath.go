@@ -324,6 +324,15 @@ func BinDir() (string, error) {
 	return filepath.Join(home, steerHome, binDirName), nil
 }
 
+// Home returns ~/.steer, the root that holds everything Steer owns on this machine.
+func Home() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve home directory: %w", err)
+	}
+	return filepath.Join(home, steerHome), nil
+}
+
 // BinPath returns the stable executable's absolute path.
 func BinPath() (string, error) {
 	dir, err := BinDir()

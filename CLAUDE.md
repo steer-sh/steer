@@ -141,6 +141,10 @@ Read the linked architecture section before changing the corresponding boundary:
 
 ## Changes that must travel together
 
+- Steer-owned registrations: a new kind of registration Steer writes into a harness
+  needs its relink in `repointRegistrations` (`cli/cmd/bin.go`) and its reader and
+  removal in `uninstallItems` (`cli/cmd/uninstall.go`), or `bin install` strands it
+  and `steer uninstall` leaves it behind.
 - Report index and details: `cli/internal/report/digest.go` and `index.go`, and
   Step 2a of `skills/steer-report/SKILL.md`; a shape change bumps `DigestVersion`.
 - Status JSON: the projection `cli/internal/status/json.go` and the one documented

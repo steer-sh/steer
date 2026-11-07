@@ -162,6 +162,17 @@ func codexHome() (string, error) {
 	return filepath.Join(home, ".codex"), nil
 }
 
+// HooksReadable names the scope's hooks file and the error that stops it being read;
+// a missing file reads as empty.
+func HooksReadable(scope, cwd string) (string, error) {
+	path, err := hooksPath(scope, cwd)
+	if err != nil {
+		return "", err
+	}
+	_, err = load(path)
+	return path, err
+}
+
 func load(path string) (map[string]any, error) {
 	raw, err := os.ReadFile(path)
 	if os.IsNotExist(err) {

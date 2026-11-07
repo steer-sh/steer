@@ -52,6 +52,21 @@ separate: project store paths can remain relative, while global and bridge paths
 can be absolute. Reviewer flags in older registrations are stripped
 when repointing because those flags would override operator settings.
 
+Removing the plugin runs no Steer code, and a machine can run Steer with no
+plugin, so the stable executable never reads a missing plugin copy as a removal.
+`steer uninstall` is the removal: it reads each harness's global gate, check
+runner, guard master, rules section and status line through the readers status
+uses, removes the Steer-owned ones, and reads them again before it reports
+success; a file a reader cannot load is an item whose removal fails, never an
+empty reading. Project-scope registrations are committed, so it names the current
+repository's and changes none. It removes a pre-commit hook only when the hook
+lies in the repository's git common dir and equals a script Steer writes; any
+other Steer-marked hook is named and kept. The repository's check adoption is
+machine-local too, so a full uninstall removes it; an instruction document that
+links to another harness's survives a one-harness removal. `~/.steer` stays unless `--purge` is
+given, which is refused while another Steer registration or a kept hook still
+needs it.
+
 ## Harnesses and storage
 
 `cli/internal/harness/` is the registry and registrar contract. It owns harness
