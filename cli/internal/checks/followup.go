@@ -14,7 +14,8 @@ const (
 // what happened next; it does not say whether the block was correct.
 type BlockFollowup struct {
 	Block OracleRun
-	// NextStop is the next Stop run from the block's harness and session.
+	// NextStop is the next Stop run from the block's harness and session; a
+	// block with no session ID has none.
 	NextStop *OracleRun
 	// SessionTree compares the tree the block judged with NextStop's.
 	SessionTree string
@@ -91,7 +92,7 @@ func blockFollowups(runs []OracleRun, executions []Execution) []BlockFollowup {
 		f := BlockFollowup{Block: block, SessionTree: FollowUnknown}
 		for j := i + 1; j < len(runs); j++ {
 			r := runs[j]
-			if f.NextStop == nil && r.Source == SourceStop && r.Harness == block.Harness && r.Session == block.Session {
+			if f.NextStop == nil && block.Session != "" && r.Source == SourceStop && r.Harness == block.Harness && r.Session == block.Session {
 				f.NextStop = &runs[j]
 			}
 			if f.NextRun == nil && executed(r) {
