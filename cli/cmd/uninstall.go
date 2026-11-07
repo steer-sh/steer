@@ -192,8 +192,11 @@ func runUninstall(cmd *cobra.Command, _ []string) error {
 	if target == harness.Unknown {
 		fmt.Fprintln(out, "\nNo global Steer registration is left. Remove the Steer plugin from each agent next.")
 	} else {
-		fmt.Fprintf(out, "\nNo global %s registration of Steer is left, apart from what the plan keeps.\n",
-			status.HarnessLabel(string(target)))
+		kept := ""
+		if len(project) > 0 {
+			kept = ", apart from what the plan keeps"
+		}
+		fmt.Fprintf(out, "\nNo global %s registration of Steer is left%s.\n", status.HarnessLabel(string(target)), kept)
 	}
 	return nil
 }
