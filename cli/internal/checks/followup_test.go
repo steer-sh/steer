@@ -143,3 +143,27 @@ func TestFollowupNamesACheckRemovedBeforeTheNextStop(t *testing.T) {
 		t.Errorf("fmt followup %+v; want it undeclared once no check is declared", c)
 	}
 }
+
+// A block with no session ID has no next Stop of its own session: a later
+// Stop run that also lacks one belongs to no known session, so it neither
+// compares trees nor makes a check undeclared.
+func TestFollowupOfABlockWithNoSessionHasNoNextStop(t *testing.T) {
+	block := stopRun("b", "", DispositionBlock, "t1", 10)
+	block.Declared = []string{"go"}
+	later := stopRun("l", "", DispositionAllow, "t1", 12)
+	later.Outcome = OutcomePassed
+	got := blockFollowups([]OracleRun{block, later}, []Execution{execution("b", "go", OutcomeFailed, "d1", 10)})
+	if len(got) != 1 || len(got[0].Checks) != 1 {
+		t.Fatalf("followups %+v; want one block following one check", got)
+	}
+	f := got[0]
+	if f.NextStop != nil || f.SessionTree != FollowUnknown {
+		t.Errorf("next stop %+v, tree %s; want none and unknown", f.NextStop, f.SessionTree)
+	}
+	if f.Checks[0].Undeclared {
+		t.Errorf("go followup %+v; want it not undeclared without a next Stop", f.Checks[0])
+	}
+	if f.NextRun == nil || f.NextRun.RunID != "l" {
+		t.Errorf("next run %+v; want run l from any source", f.NextRun)
+	}
+}
