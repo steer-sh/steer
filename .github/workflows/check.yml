@@ -1,9 +1,10 @@
 name: check
 
 on:
+  # A branch is checked by its pull request's run; the push run on main is the
+  # one a release requires (scripts/ci-revert-base.py).
   push:
-    # release holds generated bundles, not source changes.
-    branches: ["**", "!release"]
+    branches: [main]
   pull_request:
   workflow_call:
     inputs:
