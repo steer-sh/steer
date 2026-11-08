@@ -92,7 +92,7 @@ const (
 // change as drift, and a per-release suffix would fire that flag on every patch
 // release. Bump it only when gate behaviour changes reviewer inputs or the
 // parser semantics that decide which reviewer findings enter the corpus.
-const InstrumentSuffix = "go-findings-v4-shell"
+const InstrumentSuffix = "go-findings-v5-shell"
 
 // PhaseChainEnd is the row the engine writes when it releases a review sequence that
 // blocked: from then on the agent owes that sequence's ledger.
