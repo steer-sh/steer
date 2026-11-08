@@ -46,8 +46,18 @@ registrations, with a reported PATH fallback if installation fails.
 custom wrapper commands retain their ownership. It then rebuilds a global guard
 master whose runtime differs from the installed binary's, and only names the
 rebuild of a stale project master, which the repository commits. A plugin
-update refreshes the harness's cached copy alone, so this install is the
-upgrade step. Guard master registration is
+update refreshes the harness's cached copy alone, so the SessionStart cadence
+runs the same install from the updated copy (`updateHooks`). It acts only from
+the newest copy whose release is ahead of the stable executable's, so an older
+copy never moves the hooks back and a development build, which has no order, is
+never overwritten; only where a global registration already calls the stable
+executable or runs a global master, so a machine never set up, or fully
+uninstalled, is left alone; and only while it holds `~/.steer/bin-install.lock`,
+which a manual install takes too. It places the binary last, through a rename,
+so an install that stops early leaves the hooks on the old build and the next
+session repeats it, and it leaves the rebuilt master's fixture rerun to a detached
+`steer fixture verify` to stay inside the hook's timeout. A failure falls back to
+the notice naming the copy's `bin install`. Guard master registration is
 separate: project store paths can remain relative, while global and bridge paths
 can be absolute. Reviewer flags in older registrations are stripped
 when repointing because those flags would override operator settings.
@@ -1026,6 +1036,14 @@ required reading Steer cannot make blocks healthy. `status.BuildIssues` orders r
 by version from stamps read with `debug/buildinfo`, without running a binary; a
 difference involving a development build has no order and no repair. The startup
 notice reads the same comparison.
+Uninstall leaves no record of a removed harness, so a global-scope harness with no
+Steer registration of any kind reads not registered rather than detached, whether it
+was never set up or removed: `status.globallyRegistered` decides it, and a harness
+with any other Steer registration still reads detached, and an empty global rules
+section in such a harness is not read as drift. A plain `hooks rebuild` or `hooks sync`
+registers every installed harness, so `status.RebuildRepair`, `DetachedRepair` and `RulesRepair` name
+`--harness` per registered or detached harness while an installed one holds no part
+of the scope; the verdict, the startup notices and `bin install` all take that repair.
 `--json` is a projection of it (`status/json.go`): one summary row per record, whose
 observation `steer fix score --json` carries under the same id, guards and
 presets from both scopes, the readiness answer as `posture.readiness`, and the verdict

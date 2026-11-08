@@ -349,6 +349,14 @@ class FreshInstallRunner(unittest.TestCase):
         self.assertLess(program.index(f"mv {marketplace}.layer {marketplace}"), program.index("true"))
         self.assertNotIn(".layer", fresh_install.script(["true"], "codex", "9.9.9"))
 
+    def test_an_update_reaches_the_hooks_through_the_session_start(self):
+        program = fresh_install.script(["codex plugin marketplace upgrade m"], "codex", "9.9.9", update=True)
+        armed = program.index(f"{fresh_install.STEER} check install --harness codex --scope global")
+        self.assertLess(armed, program.index("codex plugin marketplace upgrade m"))
+        self.assertIn('"$copy/scripts/steer" report cadence', program)
+        self.assertNotIn("bin install", program)
+        self.assertIn('"$copy/scripts/steer" bin install', fresh_install.script(["true"], "codex", "9.9.9"))
+
     def test_a_block_outside_install_is_not_read(self):
         readme = "## Install\n\nNothing.\n\n## Update\n\nFor Codex:\n\n```bash\ncodex x\n```\n"
         with self.assertRaises(ValueError):

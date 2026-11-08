@@ -6,7 +6,9 @@ README `## Install` in a new container, places the stable executable with the
 installed copy's `scripts/steer bin install`, and requires every version it reads
 to equal the manifest version. --snapshot saves the container as a local image, so
 a later release can run its update commands against this install: --update-from
-runs README `## Update` in each saved image instead. --local installs this
+arms a global check runner with the saved stable executable, runs README
+`## Update` in each saved image, then the new copy's SessionStart command
+`scripts/steer report cadence`, which must report the hooks update. --local installs this
 checkout's HEAD with a Linux build in place of the published bundle, and
 --uninstall then arms Steer's global gate, check runner and status line and removes
 them: `readme` runs
@@ -158,6 +160,8 @@ def script(commands, harness, version, update=False, local=False, removal=None):
 
     With update, the program first copies the marketplace clone into the container's
     own layer: overlayfs refuses to rename a directory an image layer holds (EXDEV).
+    It arms a global registration that calls the stable executable, which the
+    SessionStart update requires, and runs that update in place of bin install.
     With local, it copies the mounted checkout to LOCAL_SOURCE first. removal is the
     output of uninstall_lines, run after the install checks.
     """
@@ -167,14 +171,20 @@ def script(commands, harness, version, update=False, local=False, removal=None):
     if update:
         m = MARKETPLACES[harness]
         lines.append(f"cp -a {m} {m}.layer && rm -rf {m} && mv {m}.layer {m}")
+        lines.append(f"{STEER} check install --harness {harness} --scope global")
     for command in commands:
         lines += [f"echo '$ '{shlex.quote(command)}", command]
     lines += [
         f"copy={CACHES[harness]}/{version}",
         *([f'[ -d "$copy" ] || copy={CACHES[harness]}/local'] if local else []),
         'test -x "$copy/scripts/steer" || { echo "no installed copy at $copy" >&2; ls ' + CACHES[harness] + ' >&2 || true; exit 1; }',
-        'echo "$ $copy/scripts/steer bin install"',
-        '"$copy/scripts/steer" bin install',
+        *(['echo "$ $copy/scripts/steer report cadence"',
+           'started=$(cd /tmp && "$copy/scripts/steer" report cadence)',
+           'echo "$started"',
+           'case "$started" in *"hooks updated"*) ;; *) echo "the session start did not update the hooks" >&2; exit 1;; esac']
+          if update else
+          ['echo "$ $copy/scripts/steer bin install"',
+           '"$copy/scripts/steer" bin install']),
         'for bin in "$copy/scripts/steer" ~/.steer/bin/steer; do',
         '  got=$("$bin" --version)',
         '  echo "$bin: $got"',

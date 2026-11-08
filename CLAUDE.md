@@ -52,7 +52,11 @@ Read the linked architecture section before changing the corresponding boundary:
   The working skills live under `skills/`, including `steer`, `steer-report` and
   `steer-setup`; there is no root generation `SKILL.md`.
   A harness runs skills and the launcher from its cached plugin copy, which an
-  unchanged version does not refresh and `steer bin install` never touches;
+  unchanged version does not refresh and `steer bin install` never touches. At
+  SessionStart the newest copy ahead of the hooks runs `bin install`'s body
+  (`installStable`, `cli/cmd/bin.go`) through `updateHooks` (`cli/cmd/report.go`),
+  only where a global registration already calls `~/.steer/bin/steer`, so a new
+  step in that body must stay inside the hook's timeout and print nothing to stdout;
   `posture.plugins` (`cli/internal/status/plugins.go`) compares each copy's binary
   with `~/.steer/bin/steer`. A removed plugin is read from `~/.steer/bin/source`
   (`steerbin.Sources`) against each harness's install record (`status.RemovedPlugins`),

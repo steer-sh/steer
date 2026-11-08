@@ -49,6 +49,31 @@ audit log records no synthetic firing.`,
 	},
 }
 
+var fixtureVerifyCmd = &cobra.Command{
+	Use:   "verify",
+	Short: "Replay every stored fixture in a scope and record each guard's tested state",
+	Long: `verify replays the stored cases of every guard in --scope that carries
+fixtures, against the guard alone and against the master, and records the state
+each guard earns. A rebuild clears that state, because a guard's cases passed
+under the master it replaced.
+
+The automatic hooks update at session start rebuilds the global master and runs
+this in the background.`,
+	Example: `  steer fixture verify --scope global`,
+	Args:    cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		result, err := claude.VerifyFixtures(currentScope())
+		if err != nil {
+			return err
+		}
+		printFixtureVerification(os.Stdout, result)
+		if result.Failed() {
+			return fmt.Errorf("fixture verification failed in the %s scope", currentScope())
+		}
+		return nil
+	},
+}
+
 var fixtureMineCmd = &cobra.Command{
 	Use:   "mine",
 	Short: "Reconstruct candidate cases from a stored diff or a transcript",
@@ -350,6 +375,7 @@ func emitJSON(value any) error {
 func init() {
 	rootCmd.AddCommand(fixtureCmd)
 	fixtureCmd.AddCommand(fixtureRunCmd)
+	fixtureCmd.AddCommand(fixtureVerifyCmd)
 	fixtureCmd.AddCommand(fixtureMineCmd)
 	fixtureMineCmd.Flags().StringVar(&fixtureMineDiff, "diff", "", "A ledger row's diff_file, or a path to a stored diff")
 	fixtureMineCmd.Flags().StringVar(&fixtureMineSession, "session", "", "A session id to re-read from the harnesses' transcripts")

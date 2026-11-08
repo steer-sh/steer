@@ -57,6 +57,11 @@ type PluginCopy struct {
 // Differs reports a copy that bundles a build other than the stable executable.
 func (p PluginCopy) Differs() bool { return p.State == PluginDifferentBinary }
 
+// Binary is the executable this copy bundles for this platform.
+func (p PluginCopy) Binary() string {
+	return filepath.Join(p.Path, "bin", runtime.GOOS+"-"+runtime.GOARCH, steerpath.BinName)
+}
+
 // BinInstallCommand places this copy's build at the stable executable.
 func (p PluginCopy) BinInstallCommand() string {
 	return steerbin.Quote(filepath.Join(p.Path, "scripts", "steer")) + " bin install"
@@ -101,7 +106,7 @@ func PluginCopies() []PluginCopy {
 					row.Target = target
 				}
 			}
-			bundled := filepath.Join(root, "bin", runtime.GOOS+"-"+runtime.GOARCH, steerpath.BinName)
+			bundled := row.Binary()
 			identity := ReadBuild(bundled)
 			row.Version, row.Commit = identity.Version, identity.Commit
 			if same, ok := sameFile(bundled, stable); ok {

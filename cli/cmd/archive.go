@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -120,7 +121,7 @@ no manifest entry names.`,
 		}
 		result, err := claude.RestoreArchived(scope, s, targets...)
 		if result != nil {
-			printFixtureVerification(result.Verification)
+			printFixtureVerification(os.Stdout, result.Verification)
 		}
 		if err != nil {
 			return err

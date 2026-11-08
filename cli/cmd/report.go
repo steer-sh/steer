@@ -16,11 +16,16 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/cadence"
 	"github.com/steer-sh/steer-cli/internal/claude"
+	codexhooks "github.com/steer-sh/steer-cli/internal/codex"
 	"github.com/steer-sh/steer-cli/internal/evidence"
+	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/resolve"
+	"github.com/steer-sh/steer-cli/internal/guardscope"
 	"github.com/steer-sh/steer-cli/internal/harness"
+	pihooks "github.com/steer-sh/steer-cli/internal/pi"
 	"github.com/steer-sh/steer-cli/internal/report"
 	"github.com/steer-sh/steer-cli/internal/status"
+	"github.com/steer-sh/steer-cli/internal/steerbin"
 	"github.com/steer-sh/steer-cli/internal/transcript"
 )
 
@@ -399,11 +404,25 @@ It does two things:
      only when the queue changes or a new refresh cycle has run — never every
      session.
 
+When it runs from a plugin copy whose release is newer than the stable
+executable's, and no newer copy is installed, it runs 'steer bin install' from
+that copy before anything else: the copy goes to ~/.steer/bin/steer,
+registrations are repointed and a stale global guard master is rebuilt, with the
+master's fixture rerun left to a background 'steer fixture verify'. It reports
+one line, and a line for each step the install leaves to you. It does this only
+where a global Steer registration already calls ~/.steer/bin/steer or runs a
+global guard master, so a machine Steer was never set up on, or was uninstalled
+from, stays as it is. A development build has no order and is never installed
+this way. If the install fails, the notice naming the command prints instead.
+
 It also names three standing conditions, each once until it changes: a registered
 guard runner older than this binary, which repairs with 'steer hooks rebuild'; an
 installed harness whose Steer Rules section does not match the manifest; and an
 installed harness that runs none of a store's guards. The last two repair with
-'steer hooks sync'.`,
+'steer hooks sync'. In the global scope a harness that holds no Steer
+registration at all is not named, because one never set up and one that
+'steer uninstall --harness' removed read the same, and a rebuild that would
+register the master in such a harness names --harness for each one that holds it.`,
 	Example: `  steer report cadence`,
 	// SilenceErrors/Usage: this runs as a hook. Any failure must be silent and
 	// exit 0, never a stderr dump into the session's startup.
@@ -444,14 +463,23 @@ func runCadence() {
 		}
 	}
 
+	// A plugin copy ahead of the hooks installs itself before any standing condition
+	// is read, so every line below describes the state after it.
+	hooksBuild := readHooksBuild()
+	copies := status.PluginCopies()
+	update := updateHooks(copies, hooksBuild)
+	lines = append(lines, update.lines...)
+	if update.installed {
+		hooksBuild, copies = status.HooksBuild(), status.PluginCopies()
+	}
+
 	// A stale guard master is a standing condition, not a queue change: the store
 	// keeps whatever runtime it was last built with, and upgrading the CLI
 	// repairs nothing until something rebuilds it.
-	key, labels, scopes := staleMasters()
+	key, labels, scopes, masterRows := staleMasters()
 	// The plugin line's install rebuilds the global master, so the master line
 	// reads the plugin copies before it chooses its repair.
-	hooksBuild := status.HooksBuild()
-	pluginCopies := status.ActionablePlugins(status.PluginCopies(), hooksBuild)
+	pluginCopies := status.ActionablePlugins(copies, hooksBuild)
 	pluginKey, _ := status.DifferingPlugins(pluginCopies)
 	if pluginKey != "" {
 		// The hooks' build sets the direction, so a change on either side is a new notice.
@@ -459,23 +487,25 @@ func runCadence() {
 	}
 	install := hooksBehindInstall(pluginCopies, hooksBuild)
 	masterDue := cadence.ShouldNudgeMaster(dir, key)
-	if masterDue {
-		lines = append(lines, staleMasterLine(labels, scopes, install != ""))
+	// After an update the global master is rebuilt and the update's own lines name
+	// what remains, so the condition is recorded without a line of its own.
+	if masterDue && !update.installed {
+		lines = append(lines, staleMasterLine(masterRows, labels, scopes, install != ""))
 	}
 	// A drifted rules section is the same kind of standing condition: nothing
 	// rewrites it until a sync, and meanwhile an agent does not read the rule.
-	rulesKey, ruleLabels, ruleScopes := status.RulesDrift(
-		status.InstalledRules(claude.GlobalScope, claude.ProjectScope))
+	masters := status.MasterRuntimes(claude.GlobalScope, claude.ProjectScope)
+	rules := status.InstalledRules(claude.GlobalScope, claude.ProjectScope)
+	rulesKey, ruleLabels, ruleScopes := status.RulesDrift(rules)
 	if cadence.ShouldNudgeRules(dir, rulesKey) {
 		repairs := make([]string, 0, len(ruleScopes))
 		for _, s := range ruleScopes {
-			repairs = append(repairs, status.RulesRepairCommand(s))
+			repairs = append(repairs, status.RulesRepair(rules, masters, s))
 		}
 		lines = append(lines, fmt.Sprintf(
 			"steer: an agent's instruction file does not match Steer's rules (%s) — run: %s",
 			strings.Join(ruleLabels, "; "), strings.Join(repairs, " and ")))
 	}
-	masters := status.MasterRuntimes(claude.GlobalScope, claude.ProjectScope)
 	detachedKey, detachedLabels, detachedScopes := status.DetachedMasters(masters)
 	if cadence.ShouldNudgeDetached(dir, detachedKey) {
 		repairs := make([]string, 0, len(detachedScopes))
@@ -490,7 +520,7 @@ func runCadence() {
 	if cadence.ShouldNudgeSourceDrift(dir, driftKey) {
 		repairs := make([]string, 0, len(driftScopes))
 		for _, s := range driftScopes {
-			repairs = append(repairs, status.RebuildCommand(s))
+			repairs = append(repairs, status.RebuildRepair(masters, s))
 		}
 		lines = append(lines, fmt.Sprintf(
 			"steer: a guard runner carries an old copy of a guard or of its rule (%s) — to restore agreement, run: %s",
@@ -498,7 +528,8 @@ func runCadence() {
 	}
 	// A harness runs skills and the launcher from its cached plugin copy, and
 	// nothing refreshes that copy when the stable executable changes.
-	if pluginLineDue(cadence.ShouldNudgePlugins(dir, pluginKey), masterDue, install) {
+	// A failed update leaves the hooks behind, so its notice prints every session.
+	if pluginLineDue(cadence.ShouldNudgePlugins(dir, pluginKey), masterDue, install) || update.failed {
 		lines = append(lines, pluginCopyLines(pluginCopies, hooksBuild)...)
 	}
 	if len(lines) == 0 {
@@ -535,8 +566,8 @@ func runCadence() {
 // binary's, the scopes that hold them, and a key that changes with them. An empty key means
 // nothing is stale. Every read fails soft: an unreadable configuration reports no
 // master rather than a false alarm.
-func staleMasters() (key string, labels []string, scopes []string) {
-	rows := status.MasterRuntimes(claude.GlobalScope, claude.ProjectScope)
+func staleMasters() (key string, labels []string, scopes []string, rows []status.MasterRuntime) {
+	rows = status.MasterRuntimes(claude.GlobalScope, claude.ProjectScope)
 	parts := []string{}
 	for _, m := range rows {
 		if !m.Stale() {
@@ -546,23 +577,23 @@ func staleMasters() (key string, labels []string, scopes []string) {
 		labels = append(labels, fmt.Sprintf("%s %s scope", m.Harness, m.Scope))
 	}
 	if len(parts) == 0 {
-		return "", nil, nil
+		return "", nil, nil, rows
 	}
 	sort.Strings(parts)
-	return strings.Join(parts, "|"), labels, status.StaleScopes(rows)
+	return strings.Join(parts, "|"), labels, status.StaleScopes(rows), rows
 }
 
 // staleMasterLine names the stale masters and a rebuild for each scope. When a
 // plugin copy bundles another build, a rebuild from the terminal's steer would
 // embed the old runtime again, so the line defers to the plugin line's install,
 // which rebuilds the global master itself.
-func staleMasterLine(labels, scopes []string, pluginsDiffer bool) string {
+func staleMasterLine(rows []status.MasterRuntime, labels, scopes []string, pluginsDiffer bool) string {
 	repairs := make([]string, 0, len(scopes))
 	for _, s := range scopes {
 		if pluginsDiffer && s == claude.GlobalScope {
 			continue
 		}
-		repairs = append(repairs, status.RebuildCommand(s))
+		repairs = append(repairs, status.RebuildRepair(rows, s))
 	}
 	line := fmt.Sprintf("steer: the guard master runs an older runtime (%s)", strings.Join(labels, ", "))
 	switch {
@@ -612,15 +643,149 @@ func pluginCopyLines(copies []status.PluginCopy, hooks status.BuildIdentity) []s
 // spawnRefresh starts 'steer report refresh' detached, so a stale queue refreshes
 // without blocking startup. Failure is silent — the worst case is a queue one
 // cycle older than 7 days, which the next session retries.
-func spawnRefresh() {
+func spawnRefresh() { spawnDetached("report", "refresh") }
+
+// spawnFixtureVerify reruns a rebuilt scope's fixtures detached, so the update stays
+// inside the SessionStart timeout.
+func spawnFixtureVerify(scope string) { spawnDetached("fixture", "verify", "--scope", scope) }
+
+// spawnDetached starts this binary with args and does not wait for it.
+func spawnDetached(args ...string) {
 	exe, err := os.Executable()
 	if err != nil {
 		return
 	}
-	c := exec.Command(exe, "report", "refresh")
+	c := exec.Command(exe, args...)
 	c.Stdin, c.Stdout, c.Stderr = nil, nil, nil
 	c.SysProcAttr = detachAttr()
-	_ = c.Start() // do not Wait — the refresh outlives this process
+	_ = c.Start() // do not Wait — the child outlives this process
+}
+
+// readHooksBuild reads the stable executable's build; a test replaces it.
+var readHooksBuild = status.HooksBuild
+
+// hooksUpdate is what the startup update did: the lines it reports, whether the
+// stable executable now carries the running build, and whether an attempt failed.
+type hooksUpdate struct {
+	lines     []string
+	installed bool
+	failed    bool
+}
+
+// updateHooks runs the bin install body when this process is the newest plugin copy
+// ahead of the hooks and the operator's hooks already call the stable executable. An
+// older copy, a development build and a machine Steer was never set up on, or was
+// removed from, change nothing. Another install in progress skips this one.
+func updateHooks(copies []status.PluginCopy, hooks status.BuildIdentity) (out hooksUpdate) {
+	own, ok := runningCopy(copies)
+	if !ok || steerbin.RunningIsStable() || !newestAhead(copies, own, hooks) {
+		return out
+	}
+	path, err := steerbin.Path()
+	if err != nil || !stableRegistered(path) {
+		return out
+	}
+	release, held, err := lockInstall()
+	if err != nil {
+		return hooksUpdate{failed: true}
+	}
+	if !held {
+		return out
+	}
+	defer release()
+	// An install that finished after hooks was read decides instead.
+	if readHooksBuild() != hooks {
+		return out
+	}
+	defer func() {
+		// The hook fails open: a panic reads as a failed update, never a trace.
+		if recover() != nil {
+			out = hooksUpdate{failed: true}
+		}
+	}()
+	r := &installReport{out: io.Discard}
+	if err := installStable(r, spawnFixtureVerify); err != nil {
+		// A step already taken, such as a rewritten Codex command, is not seen again.
+		out.failed = true
+		for _, action := range r.actions {
+			out.lines = append(out.lines, "steer: "+action)
+		}
+		return out
+	}
+	out.installed = true
+	out.lines = append(out.lines, fmt.Sprintf("steer: hooks updated %s → %s", hooks.Label(),
+		status.BuildIdentity{Version: own.Version, Commit: own.Commit}.Label()))
+	for _, action := range r.actions {
+		out.lines = append(out.lines, "steer: "+action)
+	}
+	return out
+}
+
+// newestAhead reports whether own is ahead of hooks and no copy is ahead of own. Another
+// harness's copy of the same release counts as own.
+func newestAhead(copies []status.PluginCopy, own status.PluginCopy, hooks status.BuildIdentity) bool {
+	return own.CompareToHooks(hooks) == status.BuildNewer &&
+		status.NewestAhead(copies, hooks).CompareToHooks(status.BuildIdentity{Version: own.Version, Commit: own.Commit}) == status.BuildSame
+}
+
+// runningCopy is the plugin copy whose bundled binary this process runs.
+func runningCopy(copies []status.PluginCopy) (status.PluginCopy, bool) {
+	running, err := steerbin.Running()
+	if err != nil {
+		return status.PluginCopy{}, false
+	}
+	for _, c := range copies {
+		if resolved, err := filepath.EvalSymlinks(c.Binary()); err == nil && resolved == running {
+			return c, true
+		}
+	}
+	return status.PluginCopy{}, false
+}
+
+// stableRegistered reports whether a global Steer registration in any harness calls
+// the stable executable at path, or runs a global guard master. Project registrations
+// are committed and arrive with a clone, so they do not show Steer was set up here.
+func stableRegistered(path string) bool {
+	g := claude.GlobalScope
+	cwd, _ := gate.ProjectDir()
+	type channel struct {
+		registered bool
+		command    string
+	}
+	channels := []channel{}
+	add := func(registered bool, command string) { channels = append(channels, channel{registered, command}) }
+	gateArm, resolver := claude.CommitGateHookArmed(g), claude.BackfillHookArming(g)
+	add(gateArm.Registered, gateArm.Command)
+	add(resolver.Registered, resolver.Command)
+	if line, present, mine := claude.StatusLineArmed(g); present && mine {
+		add(true, line.Command)
+	}
+	codexGate, codexResolver := codexhooks.CommitGateArming(g, cwd), codexhooks.ResolverArmingRow(g, cwd)
+	add(codexGate.Registered, codexGate.Command)
+	add(codexResolver.Registered, codexResolver.Command)
+	piGate, piResolver := pihooks.CommitGateArming(g, cwd), pihooks.ResolverArming(g, cwd)
+	add(piGate.Registered, piGate.Command)
+	add(piResolver.Registered, piResolver.Command)
+	for _, target := range runnerHarnesses {
+		if a, err := checkRunnerArming(target, g); err == nil {
+			add(a.Registered, a.Command)
+		}
+	}
+	for _, c := range channels {
+		if c.registered && steerbin.NamesExecutable(c.command, path) {
+			return true
+		}
+	}
+	registrars, err := guardscope.HookRegistrars(false)
+	if err != nil {
+		return false
+	}
+	for _, registrar := range registrars {
+		if registered, err := registrar.MasterRegistered(g); err == nil && registered {
+			return true
+		}
+	}
+	return false
 }
 
 func init() {

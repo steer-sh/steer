@@ -87,7 +87,7 @@ artifacts:
 		fmt.Println()
 		fmt.Println(styles.SuccessBox.Render(fmt.Sprintf(
 			"Removed hook: %s\nHarness: %s\nArchived: %s%s", hook.Name, harnessNames(targets), result.ArchivePath, stray)))
-		printFixtureVerification(result.Verification)
+		printFixtureVerification(os.Stdout, result.Verification)
 		return nil
 	},
 }

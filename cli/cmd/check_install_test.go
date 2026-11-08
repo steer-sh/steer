@@ -158,7 +158,7 @@ func TestBinInstallRelinksTheCheckRunner(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rewritten, err := repointRegistrations(path)
+	rewritten, err := repointRegistrations(quietReport(), path)
 	if err != nil {
 		t.Fatal(err)
 	}

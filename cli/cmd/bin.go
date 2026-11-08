@@ -2,7 +2,10 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
+	"slices"
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/claude"
@@ -13,8 +16,8 @@ import (
 	pihooks "github.com/steer-sh/steer-cli/internal/pi"
 	"github.com/steer-sh/steer-cli/internal/status"
 	"github.com/steer-sh/steer-cli/internal/steerbin"
+	"github.com/steer-sh/steer-cli/internal/steerpath"
 	"github.com/steer-sh/steer-cli/internal/styles"
-	"github.com/steer-sh/steer-cli/internal/utils"
 )
 
 // steerHookCommand renders a hook command naming the stable executable, placing
@@ -53,42 +56,117 @@ global master whose runtime differs from this binary's. A project master is
 committed and shared: install names its rebuild command and leaves the file as
 it is.
 
-After a plugin update, run install from the updated plugin's launcher; the
-plugin update alone changes neither the stable executable nor any master.`,
+After a plugin update, the next session start runs this install from the updated
+plugin copy when a global registration already names ~/.steer/bin/steer (see
+'steer report cadence'). Run it yourself to place the executable the first time,
+to keep the hooks after removing the plugin, or when the startup notice names it.`,
 	Example: `  steer bin install
   ~/.claude/plugins/cache/<marketplace>/steer/<version>/scripts/steer bin install`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		path, err := steerbin.Ensure()
+		release, held, err := lockInstall()
 		if err != nil {
 			return err
 		}
+		if !held {
+			return fmt.Errorf("another steer bin install is running; run this again when it finishes")
+		}
+		defer release()
 		fmt.Println()
 		fmt.Println(styles.MainHeader.Render("Stable Executable"))
 		fmt.Println()
-		utils.Success("Installed " + path)
-
-		utils.Info(versionLine())
-
-		rewritten, err := repointRegistrations(path)
-		if err != nil {
-			return err
-		}
-		if rewritten == 0 {
-			utils.Info("No registration needed rewriting.")
-		} else {
-			utils.Info(fmt.Sprintf("Repointed %d registration(s) at the stable executable.", rewritten))
-		}
-		if err := rebuildStaleMasters(); err != nil {
-			return err
-		}
-		if steerbin.RunningIsStable() {
-			// Installing the stable executable over itself is the operator keeping
-			// Steer without a plugin, so no removed plugin is named any more.
-			return steerbin.ClearSource()
-		}
-		recordPluginCopies()
-		return nil
+		return installStable(&installReport{out: os.Stdout}, nil)
 	},
+}
+
+// installReport carries what an install did: its narrative goes to out, and
+// actions keeps each step it leaves to the operator.
+type installReport struct {
+	out     io.Writer
+	actions []string
+}
+
+func (r *installReport) info(msg string) {
+	fmt.Fprintln(r.out, styles.StatusIndicator("info", msg))
+}
+
+func (r *installReport) success(msg string) {
+	fmt.Fprintln(r.out, styles.StatusIndicator("success", msg))
+}
+
+// action reports a step left to the operator.
+func (r *installReport) action(msg string) {
+	r.info(msg)
+	r.keep(msg)
+}
+
+// keep records a step left to the operator that was already printed.
+func (r *installReport) keep(msg string) {
+	if !slices.Contains(r.actions, msg) {
+		r.actions = append(r.actions, msg)
+	}
+}
+
+// installLockName is the file every install of the stable executable locks.
+const installLockName = "bin-install.lock"
+
+// lockInstall takes the install lock without waiting; held is false while another
+// process installs.
+func lockInstall() (release func(), held bool, err error) {
+	home, err := steerpath.Home()
+	if err != nil {
+		return nil, false, err
+	}
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		return nil, false, err
+	}
+	return gate.TryLockFile(filepath.Join(home, installLockName))
+}
+
+// installStable places the running binary at the stable executable, repoints every
+// Steer-owned registration at it and rebuilds a stale global master. When the
+// executable already exists the binary is placed last, so an install that stops
+// early leaves the hooks on their old build and the next one repeats all of it.
+// verifyLater, when set, takes each rebuilt scope's fixture rerun off this process.
+func installStable(r *installReport, verifyLater func(scope string)) error {
+	path, err := steerbin.Path()
+	if err != nil {
+		return err
+	}
+	placed := false
+	if _, err := os.Stat(path); err != nil {
+		// Nothing runs the stable path yet, so the registrations below must not name it
+		// before it exists.
+		if _, err := steerbin.Ensure(); err != nil {
+			return err
+		}
+		placed = true
+	}
+	rewritten, err := repointRegistrations(r, path)
+	if err != nil {
+		return err
+	}
+	if rewritten == 0 {
+		r.info("No registration needed rewriting.")
+	} else {
+		r.info(fmt.Sprintf("Repointed %d registration(s) at the stable executable.", rewritten))
+	}
+	if err := rebuildStaleMasters(r, verifyLater); err != nil {
+		return err
+	}
+	if !placed {
+		if _, err := steerbin.Ensure(); err != nil {
+			return err
+		}
+	}
+	r.success("Installed " + path)
+	r.info(versionLine())
+	if steerbin.RunningIsStable() {
+		// Installing the stable executable over itself is the operator keeping
+		// Steer without a plugin, so no removed plugin is named any more.
+		return steerbin.ClearSource()
+	}
+	recordPluginCopies()
+	return nil
 }
 
 // recordPluginCopies adds each harness's active Steer plugin copy to the source
@@ -105,11 +183,12 @@ func recordPluginCopies() {
 // this binary's, and names the rebuild of a stale project master without running
 // it, because that master is committed for the whole repository. The rebuild
 // re-registers only the harnesses already holding a registration in the scope.
-func rebuildStaleMasters() error {
-	for _, s := range status.StaleScopes(status.MasterRuntimes(claude.GlobalScope, claude.ProjectScope)) {
+func rebuildStaleMasters(r *installReport, verifyLater func(scope string)) error {
+	rows := status.MasterRuntimes(claude.GlobalScope, claude.ProjectScope)
+	for _, s := range status.StaleScopes(rows) {
 		if s != claude.GlobalScope {
-			utils.Info(fmt.Sprintf("The %s guard master runs an older runtime and is committed; "+
-				"to rebuild it for the repository, run: %s", s, status.RebuildCommand(s)))
+			r.action(fmt.Sprintf("The %s guard master runs an older runtime and is committed; "+
+				"to rebuild it for the repository, run: %s", s, status.RebuildRepair(rows, s)))
 			continue
 		}
 		targets, err := registeredTargets(s)
@@ -119,12 +198,22 @@ func rebuildStaleMasters() error {
 		if len(targets) == 0 {
 			continue // RebuildMaster would fall back to registering Claude Code
 		}
-		result, err := claude.RebuildMaster(s, targets...)
+		rebuild := claude.RebuildMaster
+		if verifyLater != nil {
+			rebuild = claude.RebuildMasterUnverified
+		}
+		result, err := rebuild(s, targets...)
 		if err != nil {
 			return fmt.Errorf("rebuild the %s guard master: %w", s, err)
 		}
-		utils.Info(fmt.Sprintf("The %s guard master ran an older runtime; rebuilt it:", s))
-		printRebuild(s, result)
+		if verifyLater != nil {
+			verifyLater(s)
+		}
+		r.info(fmt.Sprintf("The %s guard master ran an older runtime; rebuilt it:", s))
+		printRebuild(r.out, s, result)
+		for _, phrase := range reapprovals(result) {
+			r.keep(phrase)
+		}
 	}
 	return nil
 }
@@ -157,14 +246,14 @@ func registeredTargets(scope string) ([]harness.Registrar, error) {
 // relinkClaude repoints this scope's Claude Code registrations, reporting how many
 // changed. A registration already naming the stable path is left untouched, and one
 // naming a command that is not steer's own is never rewritten.
-func relinkClaude(scope, path string) (int, error) {
+func relinkClaude(r *installReport, scope, path string) (int, error) {
 	rewritten := 0
 	gate := claude.CommitGateHookArmed(scope)
 	if next, ok := relinked(gate.Registered, gate.Command, path); ok {
 		if err := claude.RegisterCommitGateHook(scope, next, gate.Timeout); err != nil {
 			return rewritten, err
 		}
-		reportRelink("claude-code", scope, "commit gate", next)
+		reportRelink(r, "claude-code", scope, "commit gate", next)
 		rewritten++
 	}
 	resolver := claude.BackfillHookArming(scope)
@@ -172,7 +261,7 @@ func relinkClaude(scope, path string) (int, error) {
 		if err := claude.RegisterBackfillHook(scope, next, resolver.Timeout); err != nil {
 			return rewritten, err
 		}
-		reportRelink("claude-code", scope, "resolver", next)
+		reportRelink(r, "claude-code", scope, "resolver", next)
 		rewritten++
 	}
 	stale, err := claude.MasterCommandStale(scope)
@@ -187,7 +276,7 @@ func relinkClaude(scope, path string) (int, error) {
 		if err != nil {
 			return rewritten, err
 		}
-		reportRelink("claude-code", scope, "guard master", command)
+		reportRelink(r, "claude-code", scope, "guard master", command)
 		rewritten++
 	}
 	return rewritten, nil
@@ -195,7 +284,7 @@ func relinkClaude(scope, path string) (int, error) {
 
 // relinkCodexMaster rewrites a Codex guard master registered in an old form, which
 // the operator then approves again in /hooks.
-func relinkCodexMaster(scope string) (int, error) {
+func relinkCodexMaster(r *installReport, scope string) (int, error) {
 	cwd, err := gate.ProjectDir()
 	if err != nil {
 		return 0, nil
@@ -211,14 +300,14 @@ func relinkCodexMaster(scope string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	reportRelink("codex", scope, "guard master", command)
-	utils.Info(status.GuardCommandChangedPhrase(status.HarnessLabel(string(harness.Codex))))
+	reportRelink(r, "codex", scope, "guard master", command)
+	r.action(status.GuardCommandChangedPhrase(status.HarnessLabel(string(harness.Codex))))
 	return 1, nil
 }
 
 // relinkCodex repoints this scope's Codex registrations. The gate and the resolver
 // are written together, because Codex's writer arms them in one save.
-func relinkCodex(scope, path string) (int, error) {
+func relinkCodex(r *installReport, scope, path string) (int, error) {
 	// Only the project scope needs a working directory: the global registration
 	// lives under CODEX_HOME. So an unreadable cwd skips project scope alone.
 	cwd, err := gate.ProjectDir()
@@ -232,7 +321,7 @@ func relinkCodex(scope, path string) (int, error) {
 		// with no gate command, so a resolver left behind by a removed gate cannot be
 		// repaired here. Naming it beats rewriting it into a state steer never writes.
 		if _, changed := relinked(resolver.Registered, resolver.Command, path); changed {
-			utils.Info(fmt.Sprintf("codex, %s scope: the resolver is registered without a gate; "+
+			r.action(fmt.Sprintf("codex, %s scope: the resolver is registered without a gate; "+
 				"run: steer commit-gate install --harness codex --scope %s", scope, scope))
 		}
 		return 0, nil
@@ -254,11 +343,11 @@ func relinkCodex(scope, path string) (int, error) {
 	}
 	rewritten := 0
 	if gateChanged {
-		reportRelink("codex", scope, "commit gate", nextGate)
+		reportRelink(r, "codex", scope, "commit gate", nextGate)
 		rewritten++
 	}
 	if resolverChanged {
-		reportRelink("codex", scope, "resolver", nextResolver)
+		reportRelink(r, "codex", scope, "resolver", nextResolver)
 		rewritten++
 	}
 	return rewritten, nil
@@ -267,7 +356,7 @@ func relinkCodex(scope, path string) (int, error) {
 // relinkPi repoints both commands baked into Pi's one commit-gate extension. The
 // gate and the resolver live in that one file, so a resolver registered without a
 // gate is a state steer never writes and needs no repair of its own.
-func relinkPi(scope, path string) (int, error) {
+func relinkPi(r *installReport, scope, path string) (int, error) {
 	// Only the project scope needs a working directory: the global extension lives
 	// under the Pi config directory. So an unreadable cwd skips project scope alone.
 	cwd, err := gate.ProjectDir()
@@ -296,11 +385,11 @@ func relinkPi(scope, path string) (int, error) {
 	}
 	rewritten := 0
 	if gateChanged {
-		reportRelink("pi", scope, "commit gate", nextGate)
+		reportRelink(r, "pi", scope, "commit gate", nextGate)
 		rewritten++
 	}
 	if resolverChanged {
-		reportRelink("pi", scope, "resolver", nextResolver)
+		reportRelink(r, "pi", scope, "resolver", nextResolver)
 		rewritten++
 	}
 	return rewritten, nil
@@ -310,30 +399,30 @@ func relinkPi(scope, path string) (int, error) {
 // reports how many changed. `steer bin install` and `steer commit-gate install` both
 // call it: an install repairs the registration it writes, and this repairs the ones
 // it does not.
-func repointRegistrations(path string) (int, error) {
+func repointRegistrations(r *installReport, path string) (int, error) {
 	rewritten := 0
 	for _, scope := range []string{claude.ProjectScope, claude.GlobalScope} {
-		n, err := relinkClaude(scope, path)
+		n, err := relinkClaude(r, scope, path)
 		if err != nil {
 			return rewritten, err
 		}
 		rewritten += n
-		n, err = relinkCodex(scope, path)
+		n, err = relinkCodex(r, scope, path)
 		if err != nil {
 			return rewritten, err
 		}
 		rewritten += n
-		n, err = relinkCodexMaster(scope)
+		n, err = relinkCodexMaster(r, scope)
 		if err != nil {
 			return rewritten, err
 		}
 		rewritten += n
-		n, err = relinkPi(scope, path)
+		n, err = relinkPi(r, scope, path)
 		if err != nil {
 			return rewritten, err
 		}
 		rewritten += n
-		n, err = relinkCheckRunners(scope, path)
+		n, err = relinkCheckRunners(r, scope, path)
 		if err != nil {
 			return rewritten, err
 		}
@@ -354,8 +443,8 @@ func relinked(registered bool, command, path string) (string, bool) {
 	return next, next != command
 }
 
-func reportRelink(harnessID, scope, channel, command string) {
-	utils.Info(fmt.Sprintf("%s, %s scope: %s -> %s", harnessID, scope, channel, command))
+func reportRelink(r *installReport, harnessID, scope, channel, command string) {
+	r.info(fmt.Sprintf("%s, %s scope: %s -> %s", harnessID, scope, channel, command))
 }
 
 func init() {
