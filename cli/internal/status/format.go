@@ -126,6 +126,56 @@ func RebuildCommand(scope string) string {
 	return "steer hooks rebuild --scope " + scope
 }
 
+// RebuildRepair names the rebuild of a scope's stale master; see targetedRepair.
+func RebuildRepair(rows []MasterRuntime, scope string) string {
+	return targetedRepair(rows, scope, RebuildCommand(scope))
+}
+
+// targetedRepair names command for a scope without registering its master in a
+// harness that holds no part of it. A plain sync or rebuild targets every installed
+// harness, so while one holds no registration and does not read detached, the
+// command is named once per harness that is registered or detached.
+func targetedRepair(rows []MasterRuntime, scope, command string) string {
+	var targets []string
+	for _, m := range rows {
+		if m.Scope == scope && (m.Path != "" || m.Detached()) {
+			targets = append(targets, m.Harness)
+		}
+	}
+	return repairFor(rows, scope, command, targets)
+}
+
+// repairFor names command once per target harness while an installed harness holds
+// no part of the scope, and once for the whole scope otherwise.
+func repairFor(rows []MasterRuntime, scope, command string, targets []string) string {
+	unregistered := false
+	for _, m := range rows {
+		if m.Scope == scope && m.Path == "" && !m.Detached() && m.Installed {
+			unregistered = true
+		}
+	}
+	if !unregistered || len(targets) == 0 {
+		return command
+	}
+	repairs := make([]string, 0, len(targets))
+	for _, id := range targets {
+		repairs = append(repairs, command+" --harness "+id)
+	}
+	return strings.Join(repairs, " and ")
+}
+
+// RulesRepair names the sync of a scope's drifted rules sections, targeted at the
+// drifted harnesses while an installed harness holds no part of the scope.
+func RulesRepair(rules []RulesPresence, masters []MasterRuntime, scope string) string {
+	var targets []string
+	for _, r := range rules {
+		if r.Scope == scope && r.State == RulesDrifted {
+			targets = append(targets, r.Harness)
+		}
+	}
+	return repairFor(masters, scope, RulesRepairCommand(scope), targets)
+}
+
 // StaleScopes names each scope with a registered master that needs a rebuild,
 // once, in the order the rows list them.
 func StaleScopes(rows []MasterRuntime) []string {
@@ -236,10 +286,10 @@ func DriftedMasters(rows []MasterRuntime) (key string, labels, scopes []string) 
 func DetachedRepair(rows []MasterRuntime, scope string) string {
 	for _, m := range rows {
 		if m.Scope == scope && m.Detached() && m.StoreSourcesDrifted() {
-			return RebuildCommand(scope)
+			return targetedRepair(rows, scope, RebuildCommand(scope))
 		}
 	}
-	return SyncCommand(scope)
+	return targetedRepair(rows, scope, SyncCommand(scope))
 }
 
 // DetachedMasters summarizes the detached rows for a one-line notice, in the shape

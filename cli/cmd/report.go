@@ -419,7 +419,10 @@ It also names three standing conditions, each once until it changes: a registere
 guard runner older than this binary, which repairs with 'steer hooks rebuild'; an
 installed harness whose Steer Rules section does not match the manifest; and an
 installed harness that runs none of a store's guards. The last two repair with
-'steer hooks sync'.`,
+'steer hooks sync'. In the global scope a harness that holds no Steer
+registration at all is not named, because one never set up and one that
+'steer uninstall --harness' removed read the same, and a rebuild that would
+register the master in such a harness names --harness for each one that holds it.`,
 	Example: `  steer report cadence`,
 	// SilenceErrors/Usage: this runs as a hook. Any failure must be silent and
 	// exit 0, never a stderr dump into the session's startup.
@@ -473,7 +476,7 @@ func runCadence() {
 	// A stale guard master is a standing condition, not a queue change: the store
 	// keeps whatever runtime it was last built with, and upgrading the CLI
 	// repairs nothing until something rebuilds it.
-	key, labels, scopes := staleMasters()
+	key, labels, scopes, masterRows := staleMasters()
 	// The plugin line's install rebuilds the global master, so the master line
 	// reads the plugin copies before it chooses its repair.
 	pluginCopies := status.ActionablePlugins(copies, hooksBuild)
@@ -487,22 +490,22 @@ func runCadence() {
 	// After an update the global master is rebuilt and the update's own lines name
 	// what remains, so the condition is recorded without a line of its own.
 	if masterDue && !update.installed {
-		lines = append(lines, staleMasterLine(labels, scopes, install != ""))
+		lines = append(lines, staleMasterLine(masterRows, labels, scopes, install != ""))
 	}
 	// A drifted rules section is the same kind of standing condition: nothing
 	// rewrites it until a sync, and meanwhile an agent does not read the rule.
-	rulesKey, ruleLabels, ruleScopes := status.RulesDrift(
-		status.InstalledRules(claude.GlobalScope, claude.ProjectScope))
+	masters := status.MasterRuntimes(claude.GlobalScope, claude.ProjectScope)
+	rules := status.InstalledRules(claude.GlobalScope, claude.ProjectScope)
+	rulesKey, ruleLabels, ruleScopes := status.RulesDrift(rules)
 	if cadence.ShouldNudgeRules(dir, rulesKey) {
 		repairs := make([]string, 0, len(ruleScopes))
 		for _, s := range ruleScopes {
-			repairs = append(repairs, status.RulesRepairCommand(s))
+			repairs = append(repairs, status.RulesRepair(rules, masters, s))
 		}
 		lines = append(lines, fmt.Sprintf(
 			"steer: an agent's instruction file does not match Steer's rules (%s) — run: %s",
 			strings.Join(ruleLabels, "; "), strings.Join(repairs, " and ")))
 	}
-	masters := status.MasterRuntimes(claude.GlobalScope, claude.ProjectScope)
 	detachedKey, detachedLabels, detachedScopes := status.DetachedMasters(masters)
 	if cadence.ShouldNudgeDetached(dir, detachedKey) {
 		repairs := make([]string, 0, len(detachedScopes))
@@ -517,7 +520,7 @@ func runCadence() {
 	if cadence.ShouldNudgeSourceDrift(dir, driftKey) {
 		repairs := make([]string, 0, len(driftScopes))
 		for _, s := range driftScopes {
-			repairs = append(repairs, status.RebuildCommand(s))
+			repairs = append(repairs, status.RebuildRepair(masters, s))
 		}
 		lines = append(lines, fmt.Sprintf(
 			"steer: a guard runner carries an old copy of a guard or of its rule (%s) — to restore agreement, run: %s",
@@ -563,8 +566,8 @@ func runCadence() {
 // binary's, the scopes that hold them, and a key that changes with them. An empty key means
 // nothing is stale. Every read fails soft: an unreadable configuration reports no
 // master rather than a false alarm.
-func staleMasters() (key string, labels []string, scopes []string) {
-	rows := status.MasterRuntimes(claude.GlobalScope, claude.ProjectScope)
+func staleMasters() (key string, labels []string, scopes []string, rows []status.MasterRuntime) {
+	rows = status.MasterRuntimes(claude.GlobalScope, claude.ProjectScope)
 	parts := []string{}
 	for _, m := range rows {
 		if !m.Stale() {
@@ -574,23 +577,23 @@ func staleMasters() (key string, labels []string, scopes []string) {
 		labels = append(labels, fmt.Sprintf("%s %s scope", m.Harness, m.Scope))
 	}
 	if len(parts) == 0 {
-		return "", nil, nil
+		return "", nil, nil, rows
 	}
 	sort.Strings(parts)
-	return strings.Join(parts, "|"), labels, status.StaleScopes(rows)
+	return strings.Join(parts, "|"), labels, status.StaleScopes(rows), rows
 }
 
 // staleMasterLine names the stale masters and a rebuild for each scope. When a
 // plugin copy bundles another build, a rebuild from the terminal's steer would
 // embed the old runtime again, so the line defers to the plugin line's install,
 // which rebuilds the global master itself.
-func staleMasterLine(labels, scopes []string, pluginsDiffer bool) string {
+func staleMasterLine(rows []status.MasterRuntime, labels, scopes []string, pluginsDiffer bool) string {
 	repairs := make([]string, 0, len(scopes))
 	for _, s := range scopes {
 		if pluginsDiffer && s == claude.GlobalScope {
 			continue
 		}
-		repairs = append(repairs, status.RebuildCommand(s))
+		repairs = append(repairs, status.RebuildRepair(rows, s))
 	}
 	line := fmt.Sprintf("steer: the guard master runs an older runtime (%s)", strings.Join(labels, ", "))
 	switch {

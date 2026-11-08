@@ -184,10 +184,11 @@ func recordPluginCopies() {
 // it, because that master is committed for the whole repository. The rebuild
 // re-registers only the harnesses already holding a registration in the scope.
 func rebuildStaleMasters(r *installReport, verifyLater func(scope string)) error {
-	for _, s := range status.StaleScopes(status.MasterRuntimes(claude.GlobalScope, claude.ProjectScope)) {
+	rows := status.MasterRuntimes(claude.GlobalScope, claude.ProjectScope)
+	for _, s := range status.StaleScopes(rows) {
 		if s != claude.GlobalScope {
 			r.action(fmt.Sprintf("The %s guard master runs an older runtime and is committed; "+
-				"to rebuild it for the repository, run: %s", s, status.RebuildCommand(s)))
+				"to rebuild it for the repository, run: %s", s, status.RebuildRepair(rows, s)))
 			continue
 		}
 		targets, err := registeredTargets(s)

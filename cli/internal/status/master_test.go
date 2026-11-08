@@ -347,3 +347,53 @@ func rowFor(t *testing.T, rows []MasterRuntime, harness string) MasterRuntime {
 	t.Fatalf("no row for harness %q", harness)
 	return MasterRuntime{}
 }
+
+// A global store registered in Claude Code alone leaves an installed Codex with no
+// Steer registration unpushed, since a removed harness reads the same on disk; once
+// Codex carries another Steer registration it reads detached, and the stale rebuild
+// names the registered harness while Codex holds none.
+func TestAGlobalHarnessWithNoSteerRegistrationIsNotDetached(t *testing.T) {
+	home := projectDir(t)
+	testhome.Set(t, home)
+	codexHome := filepath.Join(home, ".codex")
+	if err := os.MkdirAll(codexHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CODEX_HOME", codexHome)
+	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(home, "no-pi"))
+	content := []byte("#!/usr/bin/env python3\nimport sys\n\ndef main():\n    sys.exit(0)\n\nif __name__ == '__main__':\n    main()\n")
+	if _, err := claude.InstallManagedHook(claude.GlobalScope, claude.InstallManagedHookInput{
+		HookName: "no-bare-python", Rule: "use python3 instead", Content: content,
+		Metadata: claude.HookInstallMetadata{Source: claude.SourceGenerated},
+	}, claude.Registrar{}); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(t.TempDir())
+
+	rows := MasterRuntimes(claude.GlobalScope)
+	if row := rowFor(t, rows, "codex"); row.Detached() || !row.Installed {
+		t.Fatalf("codex row with no Steer registration = %#v", row)
+	}
+	want := RebuildCommand(claude.GlobalScope) + " --harness claude-code"
+	if got := RebuildRepair(rows, claude.GlobalScope); got != want {
+		t.Errorf("RebuildRepair = %q, want %q", got, want)
+	}
+
+	detached := []MasterRuntime{{Harness: "claude-code", Scope: claude.GlobalScope, State: MasterDetached, Store: "/s"},
+		{Harness: "codex", Scope: claude.GlobalScope, State: MasterNotRegistered, Installed: true}}
+	if got, want := DetachedRepair(detached, claude.GlobalScope), SyncCommand(claude.GlobalScope)+" --harness claude-code"; got != want {
+		t.Errorf("DetachedRepair = %q, want %q", got, want)
+	}
+
+	drifted := []RulesPresence{{Harness: "claude-code", Scope: claude.GlobalScope, State: RulesDrifted}}
+	if got, want := RulesRepair(drifted, detached, claude.GlobalScope), SyncCommand(claude.GlobalScope)+" --harness claude-code"; got != want {
+		t.Errorf("RulesRepair = %q, want %q", got, want)
+	}
+
+	if _, err := codex.RegisterCheckHook(claude.GlobalScope, "", "steer check hook --harness codex", 600); err != nil {
+		t.Fatal(err)
+	}
+	if row := rowFor(t, MasterRuntimes(claude.GlobalScope), "codex"); !row.Detached() {
+		t.Errorf("codex row with a check runner = %#v, want detached", row)
+	}
+}

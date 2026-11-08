@@ -10,6 +10,7 @@ import (
 
 	"github.com/steer-sh/steer-cli/internal/claude"
 	codexhooks "github.com/steer-sh/steer-cli/internal/codex"
+	"github.com/steer-sh/steer-cli/internal/gate/reviewers"
 	"github.com/steer-sh/steer-cli/internal/guard"
 	"github.com/steer-sh/steer-cli/internal/hookstore"
 	"github.com/steer-sh/steer-cli/internal/status"
@@ -128,7 +129,7 @@ func TestStaleMasterLineNamesEveryScope(t *testing.T) {
 		{[]string{claude.ProjectScope}, true, []string{"after the bin install below, run: " + status.RebuildCommand("project")}, nil},
 	}
 	for _, c := range cases {
-		line := staleMasterLine(labels, c.scopes, c.pluginsDiffer)
+		line := staleMasterLine(nil, labels, c.scopes, c.pluginsDiffer)
 		for _, w := range c.want {
 			if !strings.Contains(line, w) {
 				t.Errorf("staleMasterLine(%v, %v) = %q, want %q", c.scopes, c.pluginsDiffer, line, w)
@@ -490,5 +491,50 @@ func TestStartupUpdateYieldsToAnInstallThatFinishedFirst(t *testing.T) {
 	}
 	if data, err := os.ReadFile(stable); err != nil || string(data) != "old build" {
 		t.Errorf("the stable executable changed (%v)", err)
+	}
+}
+
+// TestNoNoticeRegistersARemovedHarnessAgain: after uninstall --harness codex, with
+// Claude Code kept and its global master stale, neither the startup notices nor the
+// status verdict name a command that registers Codex again.
+func TestNoNoticeRegistersARemovedHarnessAgain(t *testing.T) {
+	home := t.TempDir()
+	testhome.Set(t, home)
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	t.Chdir(home)
+	g := claude.GlobalScope
+	addOrphanFactoryHook(t, g, "orphan-global", "orphan-global", "never use var globally")
+	if _, err := claude.RebuildMaster(g, claude.Registrar{}, codexhooks.Registrar{}); err != nil {
+		t.Fatal(err)
+	}
+	harnessFlag = "codex"
+	t.Cleanup(func() { harnessFlag = "" })
+	if _, err := runUninstallWith(t, true, false); err != nil {
+		t.Fatal(err)
+	}
+	ageStamp(t, g)
+	t.Chdir(t.TempDir())
+
+	key, labels, scopes, rows := staleMasters()
+	if key == "" {
+		t.Fatal("the Claude Code global master does not read stale")
+	}
+	line := staleMasterLine(rows, labels, scopes, false)
+	if !strings.Contains(line, status.RebuildCommand(g)+" --harness claude-code") || strings.Contains(line, "codex") {
+		t.Errorf("stale master line = %q, want a rebuild for Claude Code alone", line)
+	}
+	if key, labels, _ := status.DetachedMasters(rows); key != "" {
+		t.Errorf("the removed harness reads detached: %q", labels)
+	}
+	if key, labels, _ := status.RulesDrift(status.InstalledRules(g)); key != "" {
+		t.Errorf("the removed harness's emptied rules section reads drifted: %q", labels)
+	}
+	h := status.HealthOf(&status.SystemStatus{Posture: status.Posture{Masters: rows}}, reviewers.Probe{})
+	for _, issue := range h.Issues {
+		if strings.Contains(issue.Fix, "hooks sync") || strings.Contains(issue.Fix, "--harness codex") ||
+			issue.Fix == status.RebuildCommand(g) {
+			t.Errorf("issue %q names %q, which registers Codex again", issue.Title, issue.Fix)
+		}
 	}
 }

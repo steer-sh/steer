@@ -68,7 +68,7 @@ func HealthOf(s *SystemStatus, probe reviewers.Probe) Health {
 	}
 	h.Issues = append(h.Issues, trustIssues(s)...)
 	h.Issues = append(h.Issues, guardIssues(s)...)
-	h.Issues = append(h.Issues, ruleIssues(s.Posture.Rules)...)
+	h.Issues = append(h.Issues, ruleIssues(s.Posture.Rules, s.Posture.Masters)...)
 	h.Issues = append(h.Issues, checkIssues(s.Checks)...)
 	for _, p := range s.StoreProblems {
 		h.Issues = append(h.Issues, Issue{Severity: SeverityAttention,
@@ -366,13 +366,13 @@ func guardIssues(s *SystemStatus) []Issue {
 			}
 		case m.Stale():
 			out = append(out, Issue{Severity: SeverityAttention, Title: label + " guard runner is out of date",
-				Fix: RebuildCommand(m.Scope)})
+				Fix: RebuildRepair(s.Posture.Masters, m.Scope)})
 		case m.SourcesDrifted() && m.Sources.StampsOnly():
 			out = append(out, Issue{Severity: SeverityAttention,
-				Title: label + " guard runner reports an old rule or identity for a guard", Fix: RebuildCommand(m.Scope)})
+				Title: label + " guard runner reports an old rule or identity for a guard", Fix: RebuildRepair(s.Posture.Masters, m.Scope)})
 		case m.SourcesDrifted():
 			out = append(out, Issue{Severity: SeverityAttention,
-				Title: label + " guard runner carries an old copy of an edited guard", Fix: RebuildCommand(m.Scope)})
+				Title: label + " guard runner carries an old copy of an edited guard", Fix: RebuildRepair(s.Posture.Masters, m.Scope)})
 		case m.Sources != nil && m.Sources.State == claude.ComparisonUnavailable:
 			out = append(out, Issue{Severity: SeverityUnchecked,
 				Title: "Steer could not compare the " + label + " guard runner with its guard files", Detail: []string{m.Sources.Reason}})
@@ -381,14 +381,14 @@ func guardIssues(s *SystemStatus) []Issue {
 	return out
 }
 
-func ruleIssues(rows []RulesPresence) []Issue {
+func ruleIssues(rows []RulesPresence, masters []MasterRuntime) []Issue {
 	var out []Issue
 	for _, r := range rows {
 		label := HarnessLabel(r.Harness) + " " + r.Scope
 		switch r.State {
 		case RulesDrifted:
 			out = append(out, Issue{Severity: SeverityAttention, Title: label + " instructions do not match Steer's rules",
-				Fix: RulesRepairCommand(r.Scope)})
+				Fix: RulesRepair(rows, masters, r.Scope)})
 		case RulesUnknown:
 			out = append(out, Issue{Severity: SeverityUnchecked, Title: "Steer could not read the " + label + " instructions",
 				Detail: []string{r.Path}})

@@ -329,6 +329,9 @@ type MasterRuntime struct {
 	// master that already covers the store is repaired by sync rather than by a
 	// rebuild, so the two readings choose different repairs.
 	StoreSources *claude.SourceComparison `json:"store_sources,omitempty"`
+	// Installed reports the harness's configuration directory on this machine, which a
+	// plain rebuild registers the scope's master in.
+	Installed bool `json:"-"`
 }
 
 // SourcesDrifted reports that the registered master runs something other than
@@ -804,8 +807,13 @@ func RulesPresences(scope string, targets []harness.Registrar) []RulesPresence {
 			State:   RulesUnknown,
 		}
 		presence, err := claude.TargetRulesPresence(scope, target)
-		if !harness.Listed(target.Harness().ID) &&
-			(err != nil || (len(presence.Missing) == presence.Expected && len(presence.Extra) == 0)) {
+		empty := err == nil && len(presence.Missing) == presence.Expected && len(presence.Extra) == 0
+		if !harness.Listed(target.Harness().ID) && (err != nil || empty) {
+			continue
+		}
+		// An empty global section in a harness holding no Steer registration is one
+		// never set up or one uninstall removed; either way a sync is not its repair.
+		if empty && scope == harness.GlobalScope && !globallyRegistered(target.Harness().ID) {
 			continue
 		}
 		row.Path = presence.Path
@@ -887,10 +895,11 @@ func masterRuntimes(scope string) []MasterRuntime {
 	out := make([]MasterRuntime, 0, len(guardRegistrars()))
 	for _, registrar := range guardRegistrars() {
 		row := MasterRuntime{
-			Harness:  string(registrar.Harness().ID),
-			Scope:    scope,
-			Expected: expected,
-			State:    MasterNotRegistered,
+			Harness:   string(registrar.Harness().ID),
+			Scope:     scope,
+			Expected:  expected,
+			State:     MasterNotRegistered,
+			Installed: registrar.Harness().Installed(),
 		}
 		path, err := registrar.RegisteredMasterPath(scope)
 		if !harness.Listed(registrar.Harness().ID) && (err != nil || path == "") {
@@ -903,7 +912,11 @@ func masterRuntimes(scope string) []MasterRuntime {
 		row.Path = path
 		resolved := resolveRegistered(path, scope)
 		row.Sources = compareStore(scope, resolved, "no registered guard runner")
-		detached := store != "" && registrar.Harness().Installed() && !sameFilePath(resolved, store)
+		// With no registration in the global scope, a harness reads detached only while
+		// another Steer registration of its own shows it was set up: a harness never set
+		// up and one an uninstall removed read the same on disk, and neither is pushed.
+		set := path != "" || scope != harness.GlobalScope || globallyRegistered(registrar.Harness().ID)
+		detached := store != "" && set && row.Installed && !sameFilePath(resolved, store)
 		if detached {
 			// Both readings, because they choose different repairs: a registered
 			// master can carry matching source while pointing elsewhere, and a
