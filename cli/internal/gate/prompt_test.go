@@ -34,7 +34,7 @@ func TestPromptDigestsArePinned(t *testing.T) {
 
 func TestInstrumentID(t *testing.T) {
 	c := Defaults()
-	if got, want := c.InstrumentID(), "claude-haiku-5-5/3/d0fe0811/go-findings-v5-shell"; got != want {
+	if got, want := c.InstrumentID(), "claude-haiku-5-5/3/d0fe0811/go-findings-v6-shell"; got != want {
 		t.Errorf("InstrumentID() = %q, want %q", got, want)
 	}
 }

@@ -176,6 +176,13 @@ func (e *Engine) review(ctx context.Context, req Request, p prepared) PanelResul
 	// would leave &lt; in a search term, and a dropped file's hunks seed no search.
 	// Changed-path stems stay search terms. BuildContext neutralises its own files.
 	contextBlock := BuildContext(e.cfg, req.Repo, ChangedTerms(p.diff, p.paths), p.paths)
+	// A CLI reviewer reads files from the working tree; an API reviewer reads the
+	// commit view or nothing. Only the first can open an unstaged copy.
+	if req.Spec.StagedOnly && e.cfg.ReviewerEndpoint == "" {
+		if unstaged, ok := UnstagedPaths(req.Repo); ok {
+			contextBlock += UnstagedNote(unstaged, p.paths)
+		}
+	}
 	prompt := BuildReviewPrompt(
 		NeutralizeTags(req.Message), NeutralizeTags(p.diff), contextBlock, req.addendum)
 	return e.panel.Run(ctx, prompt, req.Repo, req.Spec)
