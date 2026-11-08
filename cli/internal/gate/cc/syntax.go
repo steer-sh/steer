@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/shellsyntax"
 	"github.com/steer-sh/steer-cli/internal/steerpath"
 	"mvdan.cc/sh/v3/syntax"
@@ -1341,49 +1342,87 @@ func parsedStagedPathspecs(program *shellsyntax.Program, commit *parsedGit) [][]
 }
 
 // parsedAddPathspecs preserves the selection of forced adds independently of ordinary adds.
+// An add it cannot read yields nil for ordinary adds and the whole repository for
+// forced ones; PreflightDeny refuses the forced case before any review.
 func parsedAddPathspecs(program *shellsyntax.Program, commit *parsedGit, forcedOnly bool) [][]string {
-	wide := func() [][]string {
+	out, unresolved := resolveAddPathspecs(program, commit, forcedOnly)
+	if unresolved != nil {
 		if forcedOnly {
 			return [][]string{{":/"}}
 		}
 		return nil
 	}
-	commitCWD, commitTree, ok := commit.resolvedDirs()
-	if !ok {
-		return wide()
-	}
+	return out
+}
+
+// unresolvedAdd is an add before the commit whose staged paths the gate cannot read.
+type unresolvedAdd struct {
+	text string
+	why  string
+}
+
+// unresolvedForcedAdd returns the first forced add before the commit whose paths the
+// gate cannot read, or nil when every forced add resolves.
+func unresolvedForcedAdd(commit *parsedGit) *unresolvedAdd {
+	_, unresolved := resolveAddPathspecs(commit.program, commit, true)
+	return unresolved
+}
+
+// resolveAddPathspecs returns the pathspecs each add before the commit names, one list
+// per add, or the first add it cannot read. With forcedOnly it reads forced adds alone:
+// a forced whole-tree add with no paths selects the repository, and a forced add that
+// stages no untracked file (-u, or no paths without -A) selects nothing.
+func resolveAddPathspecs(program *shellsyntax.Program, commit *parsedGit, forcedOnly bool) ([][]string, *unresolvedAdd) {
+	commitCWD, commitTree, commitOK := commit.resolvedDirs()
 	var out [][]string
 	for _, add := range parsedGitCalls(program, commit.baseCWD, "add", "stage") {
 		if add.call.Start >= commit.call.Start || forcedOnly && !add.forcesAdd() {
 			continue
 		}
+		if forcedOnly && add.updatesOnly() {
+			continue
+		}
+		text := program.Source[add.call.Start:add.call.End]
+		if !commitOK {
+			return nil, &unresolvedAdd{text, "the commit's directory cannot be read from the command"}
+		}
 		if add.gitDirOnly {
-			return wide()
+			return nil, &unresolvedAdd{text, "it selects git's directory without a working tree"}
 		}
 		addCWD, addTree, ok := add.resolvedDirs()
-		if !ok || addCWD != commitCWD || addTree != commitTree {
-			return wide()
+		if !ok {
+			return nil, &unresolvedAdd{text, "its directory cannot be read from the command"}
+		}
+		if !sameDir(addCWD, commitCWD) || !sameDir(addTree, commitTree) {
+			return nil, &unresolvedAdd{text, "it runs in a different directory from the commit"}
 		}
 		literal := false
 		var specs []string
 		for _, arg := range add.call.Args[add.subcommand+1:] {
 			if !arg.Static {
-				return wide()
+				return nil, &unresolvedAdd{text, "an operand is expanded by the shell"}
 			}
 			if !literal && arg.Value == "--" {
 				literal = true
 				continue
 			}
 			if !literal && strings.HasPrefix(arg.Value, "-") {
-				if strings.HasPrefix(arg.Value, "--pathspec-from-file") {
-					return wide()
+				if readsPathspecFile(arg.Value) {
+					return nil, &unresolvedAdd{text, "it reads its paths from a file"}
 				}
 				continue
 			}
 			specs = append(specs, arg.Value)
 		}
 		if len(specs) == 0 {
-			return wide()
+			if !forcedOnly {
+				return nil, &unresolvedAdd{text, "it names no path"}
+			}
+			// git stages nothing for an add with no pathspec unless -A selects the tree.
+			if add.addsAll() {
+				out = append(out, []string{":/"})
+			}
+			continue
 		}
 		// git add reads a list of exclusions alone as the whole repository less them,
 		// while ls-files reads it as the cwd's subtree less them.
@@ -1393,9 +1432,25 @@ func parsedAddPathspecs(program *shellsyntax.Program, commit *parsedGit, forcedO
 		out = append(out, specs)
 	}
 	if len(out) == 0 {
-		return nil
+		return nil, nil
 	}
-	return out
+	return out, nil
+}
+
+// readsPathspecFile reports --pathspec-from-file or an abbreviation git accepts for it;
+// `--pathspec-f` is the longest prefix it shares with --pathspec-file-nul.
+func readsPathspecFile(option string) bool {
+	name, _, _ := strings.Cut(option, "=")
+	return len(name) > len("--pathspec-f") && strings.HasPrefix("--pathspec-from-file", name)
+}
+
+// sameDir compares two resolved directories by their canonical spelling, so a trailing
+// slash or a symlinked path names the directory it resolves to. Empty matches only empty.
+func sameDir(a, b string) bool {
+	if a == "" || b == "" {
+		return a == b
+	}
+	return a == b || gate.Canonical(a) == gate.Canonical(b)
 }
 
 // allExclusions reports whether every pathspec carries exclude magic: `:!`, `:^`, or
@@ -1456,6 +1511,56 @@ func (p *parsedGit) forcesAdd() bool {
 		}
 	}
 	return force
+}
+
+// updatesOnly reports an add that stages tracked files alone (-u without -A), so it
+// stages no untracked file whatever its paths.
+func (p *parsedGit) updatesOnly() bool {
+	update, all := p.addModes()
+	return update && !all
+}
+
+// addsAll reports an add whose -A selects the whole tree when it names no path.
+func (p *parsedGit) addsAll() bool {
+	_, all := p.addModes()
+	return all
+}
+
+// addModes reads the last -u and -A options before a literal path delimiter, accepting
+// the abbreviations git accepts for their long forms. The separate value of
+// --pathspec-from-file or --chmod is a value, not an option.
+func (p *parsedGit) addModes() (update, all bool) {
+	abbrev := func(arg, name string, min int) bool {
+		return len(arg) >= min && strings.HasPrefix(name, arg)
+	}
+	args := p.call.Args[p.subcommand+1:]
+	for i := 0; i < len(args); i++ {
+		if !args[i].Static {
+			continue
+		}
+		v := args[i].Value
+		if v == "--" {
+			break
+		}
+		switch {
+		case readsPathspecFile(v) || abbrev(v, "--chmod", 4):
+			if !strings.Contains(v, "=") {
+				i++
+			}
+		case abbrev(v, "--update", 3):
+			update = true
+		case abbrev(v, "--no-update", 6):
+			update = false
+		case abbrev(v, "--all", 3), abbrev(v, "--no-ignore-removal", 7):
+			all = true
+		case abbrev(v, "--no-all", 6), abbrev(v, "--ignore-removal", 10):
+			all = false
+		case strings.HasPrefix(v, "-") && !strings.HasPrefix(v, "--"):
+			update = update || strings.Contains(v[1:], "u")
+			all = all || strings.Contains(v[1:], "A")
+		}
+	}
+	return update, all
 }
 
 // shellAmbiguity names why the gate cannot establish a parsed commit's repository or

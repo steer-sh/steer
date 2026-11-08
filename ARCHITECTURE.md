@@ -562,7 +562,10 @@ selects its own paths (pathspecs, `--only`, `--include`), whose landed tree is
 neither the index nor the working tree the gate reads; an add before the commit with
 an operand the shell expands (an unquoted glob, brace or leading `~`,
 `expandedAddOperand`), because git reads the unexpanded word as its own pathspec and
-the gate cannot tell which files the add stages; and a bundled
+the gate cannot tell which files the add stages; a forced add before the commit whose
+paths the gate cannot read, such as one run in another directory or reading
+`--pathspec-from-file` (`unresolvedForcedAdd`), because a forced add stages ignored
+files and an unread one would put every ignored file in the review; and a bundled
 `git add ... && git commit` while a file holds both staged and unstaged edits: that
 form is reviewed from the working tree (`cc.DiffSpecFor`), which would show the
 reviewers edits the commit does not carry.

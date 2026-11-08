@@ -41,6 +41,9 @@ func PreflightDeny(cmd, cwd string) (reason, receipt string) {
 		if word := expandedAddOperand(parsed); word != "" {
 			return fmt.Sprintf(expandedAddReason, shortStep(word)), ExpandedAddReceipt
 		}
+		if add := unresolvedForcedAdd(parsed); add != nil {
+			return fmt.Sprintf(unresolvedForcedAddReason, shortStep(add.text), add.why), UnresolvedForcedAddReceipt
+		}
 	}
 	if reason := PartlyStagedReason(cmd, cwd); reason != "" {
 		return reason, PartlyStagedReceipt
@@ -191,6 +194,18 @@ const expandedAddReason = "[commit-gate] BLOCKED: this command stages files and 
 // ExpandedAddReceipt states that the expanded add operand refusal blocked before review.
 const ExpandedAddReceipt = "[commit-gate] refused a bundled add whose operand the shell " +
 	"expands. No review ran and no adjudication row was written."
+
+const unresolvedForcedAddReason = "[commit-gate] BLOCKED: this command force-adds files " +
+	"and commits in one call, and the gate cannot tell which files that add stages: `%s` " +
+	"(%s). A forced add stages ignored files, so reviewing it unread would send every " +
+	"ignored file in the repository, such as a .env, to the reviewers. NOTHING IN THE " +
+	"COMMAND RAN, and the index is as it was. Run the add from the commit's directory " +
+	"and name its paths literally, relative to that directory, or run the add as its own " +
+	"command and then the commit alone: a plain commit is reviewed from the index."
+
+// UnresolvedForcedAddReceipt states that the unresolved forced add refusal blocked before review.
+const UnresolvedForcedAddReceipt = "[commit-gate] refused a bundled forced add whose paths " +
+	"the gate cannot read. No review ran and no adjudication row was written."
 
 // PartlyStagedReason refuses a bundled `git add ... && git commit` while a file holds
 // both staged and unstaged edits. That form is reviewed from the working tree, so the
