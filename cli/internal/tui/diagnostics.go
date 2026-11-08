@@ -82,7 +82,8 @@ type diagnosticIssue struct {
 // work out where to go.
 func (m *Model) diagnosticIssues() []diagnosticIssue {
 	out := m.checkIssues()
-	for _, master := range m.snap.Posture.Masters {
+	masters := m.snap.Posture.Masters
+	for _, master := range masters {
 		if !master.Stale() {
 			continue
 		}
@@ -93,7 +94,7 @@ func (m *Model) diagnosticIssues() []diagnosticIssue {
 			detail += " Open Fixes and run the maintenance action under Maintenance needed."
 		} else {
 			detail += " The Fixes action rebuilds this dashboard's scope only; for this one, run: " +
-				status.RebuildCommand(master.Scope)
+				status.RebuildRepair(masters, master.Scope)
 		}
 		out = append(out, diagnosticIssue{
 			headline: "The guard runner for " + agent + " in " + scopeReach(master.Scope) +
@@ -115,13 +116,13 @@ func (m *Model) diagnosticIssues() []diagnosticIssue {
 			detail += " The runner built from these guard files does not carry " +
 				strings.Join(master.StoreSources.Drifted(), ", ") +
 				" as its guard file and rule now hold it, and registering it would be refused. Read the guard " +
-				"file, then run: " + status.RebuildCommand(master.Scope) +
+				"file, then run: " + status.DetachedRepair(masters, master.Scope) +
 				", which rebuilds and registers in one operation."
 		} else if master.Scope == m.scope {
 			detail += " Open Fixes and run the maintenance action under Maintenance needed."
 		} else {
 			detail += " The Fixes action syncs this dashboard's scope only; for this one, run: " +
-				status.SyncCommand(master.Scope)
+				status.DetachedRepair(masters, master.Scope)
 		}
 		out = append(out, diagnosticIssue{
 			headline: agent + " runs none of the guards in " + scopeReach(master.Scope),
@@ -139,7 +140,7 @@ func (m *Model) diagnosticIssues() []diagnosticIssue {
 					" reports an old rule or identity for a guard",
 				detail: "The runner carries each guard's current source, but the manifest " +
 					"changed a guard's rule or identity after the runner was built, so a " +
-					"block records the old one in the audit log. For this one, run: " + status.RebuildCommand(master.Scope),
+					"block records the old one in the audit log. For this one, run: " + status.RebuildRepair(masters, master.Scope),
 			})
 			continue
 		}
@@ -147,7 +148,7 @@ func (m *Model) diagnosticIssues() []diagnosticIssue {
 			"source it was built with, so the edit changes nothing the agent runs. " +
 			"Rebuilding publishes the guard files; it does not establish that they " +
 			"hold the version you want. Check the guard file first."
-		detail += " For this one, run: " + status.RebuildCommand(master.Scope)
+		detail += " For this one, run: " + status.RebuildRepair(masters, master.Scope)
 		out = append(out, diagnosticIssue{
 			headline: "The guard runner for " + agent + " in " + scopeReach(master.Scope) +
 				" runs different source than the guard file holds",
@@ -179,7 +180,7 @@ func (m *Model) diagnosticIssues() []diagnosticIssue {
 			detail += " Open Fixes and run the maintenance action under Maintenance needed."
 		default:
 			detail += " The Fixes action syncs this dashboard's scope only; for this one, run: " +
-				status.RulesRepairCommand(r.Scope)
+				status.RulesRepair(m.snap.Posture.Rules, masters, r.Scope)
 		}
 		out = append(out, diagnosticIssue{
 			headline: "The rules " + agent + " reads in " + scopeReach(r.Scope) +
@@ -308,7 +309,7 @@ func (m *Model) technicalLines(width int) string {
 		}
 	}
 	for _, master := range m.snap.Posture.Masters {
-		phrase := status.MasterPhrase(master)
+		phrase := status.MasterPhrase(m.snap.Posture.Masters, master)
 		if phrase == "" {
 			continue
 		}

@@ -111,9 +111,10 @@ does not, sync refuses and names rebuild, which regenerates the master.`,
 				utils.Info(status.GuardCommandChangedPhrase(h.DisplayName))
 			}
 		}
-		for _, m := range status.MasterRuntimes(scope) {
+		masters := status.MasterRuntimes(scope)
+		for _, m := range masters {
 			if m.Stale() && contains(result.Synced, m.Harness) {
-				utils.Info(fmt.Sprintf("%s: %s", status.HarnessLabel(m.Harness), status.MasterPhrase(m)))
+				utils.Info(fmt.Sprintf("%s: %s", status.HarnessLabel(m.Harness), status.MasterPhrase(masters, m)))
 			}
 		}
 		return nil

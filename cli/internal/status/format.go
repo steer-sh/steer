@@ -6,6 +6,7 @@ package status
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -100,22 +101,23 @@ func TrustPhrase(trust string) string {
 
 // MasterPhrase names one registered master's runtime state in one clause. The
 // empty string means the harness registers no master, which the caller renders
-// as its own row or omits.
-func MasterPhrase(m MasterRuntime) string {
+// as its own row or omits. rows are every master reading, which confine the
+// repair it names; see targetedRepair.
+func MasterPhrase(rows []MasterRuntime, m MasterRuntime) string {
 	switch m.State {
 	case MasterCurrent:
 		return fmt.Sprintf("runtime %s, steer %s", m.Runtime, m.Version)
 	case MasterStale:
 		return fmt.Sprintf("runtime %s is older than this binary's %s — run: %s",
-			m.Runtime, m.Expected, RebuildCommand(m.Scope))
+			m.Runtime, m.Expected, RebuildRepair(rows, m.Scope))
 	case MasterUnknown:
-		return "runtime has no version (unstamped) — run: " + RebuildCommand(m.Scope)
+		return "runtime has no version (unstamped) — run: " + RebuildRepair(rows, m.Scope)
 	case MasterDetached:
 		if m.Path == "" {
-			return "runs none of this scope's guards: no runner is registered — run: " + SyncCommand(m.Scope)
+			return "runs none of this scope's guards: no runner is registered — run: " + targetedRepair(rows, m.Scope, SyncCommand(m.Scope))
 		}
 		return fmt.Sprintf("runs none of this scope's guards: the registration names %s, not %s — run: %s",
-			m.Path, m.Store, SyncCommand(m.Scope))
+			m.Path, m.Store, targetedRepair(rows, m.Scope, SyncCommand(m.Scope)))
 	}
 	return ""
 }
@@ -136,25 +138,35 @@ func RebuildRepair(rows []MasterRuntime, scope string) string {
 // harness, so while one holds no registration and does not read detached, the
 // command is named once per harness that is registered or detached.
 func targetedRepair(rows []MasterRuntime, scope, command string) string {
+	return repairFor(command, narrowTargets(rows, scope, masterTargets(rows, scope)))
+}
+
+// masterTargets are the harnesses that register a scope's master or read detached.
+func masterTargets(rows []MasterRuntime, scope string) []string {
 	var targets []string
 	for _, m := range rows {
 		if m.Scope == scope && (m.Path != "" || m.Detached()) {
 			targets = append(targets, m.Harness)
 		}
 	}
-	return repairFor(rows, scope, command, targets)
+	return targets
 }
 
-// repairFor names command once per target harness while an installed harness holds
-// no part of the scope, and once for the whole scope otherwise.
-func repairFor(rows []MasterRuntime, scope, command string, targets []string) string {
-	unregistered := false
+// narrowTargets is targets while an installed harness holds no part of the scope,
+// and nil otherwise or when targets is empty.
+func narrowTargets(rows []MasterRuntime, scope string, targets []string) []string {
 	for _, m := range rows {
 		if m.Scope == scope && m.Path == "" && !m.Detached() && m.Installed {
-			unregistered = true
+			return targets
 		}
 	}
-	if !unregistered || len(targets) == 0 {
+	return nil
+}
+
+// repairFor names command once per target harness, and once for the whole scope
+// when targets is empty.
+func repairFor(command string, targets []string) string {
+	if len(targets) == 0 {
 		return command
 	}
 	repairs := make([]string, 0, len(targets))
@@ -167,13 +179,32 @@ func repairFor(rows []MasterRuntime, scope, command string, targets []string) st
 // RulesRepair names the sync of a scope's drifted rules sections, targeted at the
 // drifted harnesses while an installed harness holds no part of the scope.
 func RulesRepair(rules []RulesPresence, masters []MasterRuntime, scope string) string {
+	return repairFor(RulesRepairCommand(scope), narrowTargets(masters, scope, driftedRules(rules, scope)))
+}
+
+// RepairTargets names the harnesses one rebuild or sync of a scope, which writes
+// both the runner registration and the rules sections, must be confined to: those
+// its master repair targets and those whose rules section drifted. nil means it may
+// run in every installed harness.
+func RepairTargets(rules []RulesPresence, masters []MasterRuntime, scope string) []string {
+	targets := masterTargets(masters, scope)
+	for _, id := range driftedRules(rules, scope) {
+		if !slices.Contains(targets, id) {
+			targets = append(targets, id)
+		}
+	}
+	return narrowTargets(masters, scope, targets)
+}
+
+// driftedRules are the harnesses whose rules section in a scope drifted.
+func driftedRules(rules []RulesPresence, scope string) []string {
 	var targets []string
 	for _, r := range rules {
 		if r.Scope == scope && r.State == RulesDrifted {
 			targets = append(targets, r.Harness)
 		}
 	}
-	return repairFor(masters, scope, RulesRepairCommand(scope), targets)
+	return targets
 }
 
 // StaleScopes names each scope with a registered master that needs a rebuild,

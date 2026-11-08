@@ -3,6 +3,7 @@ package status
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -73,7 +74,7 @@ func TestMasterRuntimeReadsTheRegisteredFile(t *testing.T) {
 	if row.Runtime != "deadbeef" || row.Expected != guard.RuntimeDigest() {
 		t.Errorf("runtime %q, expected %q", row.Runtime, row.Expected)
 	}
-	if MasterPhrase(row) == "" {
+	if MasterPhrase(nil, row) == "" {
 		t.Error("a stale master renders no phrase")
 	}
 
@@ -121,7 +122,7 @@ func TestAnUnregisteredHarnessReportsNoMaster(t *testing.T) {
 	if row.Stale() {
 		t.Error("an unregistered harness reports as stale")
 	}
-	if MasterPhrase(row) != "" {
+	if MasterPhrase(nil, row) != "" {
 		t.Error("an unregistered harness renders a phrase")
 	}
 }
@@ -258,8 +259,8 @@ func TestAnInstalledHarnessWithoutTheStoresRegistrationIsDetached(t *testing.T) 
 		if !row.Detached() || row.Store == "" || row.Stale() || row.RunnerUnapproved() {
 			t.Fatalf("%s row = %#v", id, row)
 		}
-		if !strings.Contains(MasterPhrase(row), "steer hooks sync --scope project") {
-			t.Errorf("%s phrase = %q", id, MasterPhrase(row))
+		if !strings.Contains(MasterPhrase(nil, row), "steer hooks sync --scope project") {
+			t.Errorf("%s phrase = %q", id, MasterPhrase(nil, row))
 		}
 	}
 	for _, row := range rows {
@@ -296,7 +297,7 @@ func TestAnInstalledHarnessWithoutTheStoresRegistrationIsDetached(t *testing.T) 
 		t.Errorf("a store with no master reads detached: %q", key)
 	}
 	if row := rowFor(t, rows, "claude-code"); !row.Stale() ||
-		!strings.Contains(MasterPhrase(row), "steer hooks rebuild") {
+		!strings.Contains(MasterPhrase(nil, row), "steer hooks rebuild") {
 		t.Errorf("claude-code row without a master = %#v", row)
 	}
 }
@@ -395,5 +396,27 @@ func TestAGlobalHarnessWithNoSteerRegistrationIsNotDetached(t *testing.T) {
 	}
 	if row := rowFor(t, MasterRuntimes(claude.GlobalScope), "codex"); !row.Detached() {
 		t.Errorf("codex row with a check runner = %#v, want detached", row)
+	}
+}
+
+// A dashboard rebuild or sync writes the runner registration and the rules
+// sections in one operation, so it reaches a harness whose rules section drifted
+// as well as each registered one, and none other while one holds nothing.
+func TestARepairReachesEveryDriftedRulesSection(t *testing.T) {
+	g := claude.GlobalScope
+	masters := []MasterRuntime{{Harness: "claude-code", Scope: g, State: MasterStale, Path: "/m", Installed: true},
+		{Harness: "codex", Scope: g, State: MasterNotRegistered, Installed: true},
+		{Harness: "pi", Scope: g, State: MasterNotRegistered, Installed: true}}
+	if got := RepairTargets(nil, masters, g); !slices.Equal(got, []string{"claude-code"}) {
+		t.Errorf("RepairTargets with no drift = %q, want Claude Code alone", got)
+	}
+	drifted := []RulesPresence{{Harness: "codex", Scope: g, State: RulesDrifted},
+		{Harness: "claude-code", Scope: g, State: RulesDrifted}}
+	if got := RepairTargets(drifted, masters, g); !slices.Equal(got, []string{"claude-code", "codex"}) {
+		t.Errorf("RepairTargets = %q, want Claude Code and the drifted Codex section", got)
+	}
+	masters[1].Path, masters[2].Installed = "/m", false
+	if got := RepairTargets(drifted, masters, g); got != nil {
+		t.Errorf("RepairTargets with every installed harness registered = %q, want nil", got)
 	}
 }

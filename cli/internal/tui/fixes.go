@@ -12,6 +12,7 @@ import (
 
 	"github.com/steer-sh/steer-cli/internal/checks"
 	"github.com/steer-sh/steer-cli/internal/claude"
+	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/hookstore"
 	"github.com/steer-sh/steer-cli/internal/presets"
 	"github.com/steer-sh/steer-cli/internal/status"
@@ -195,7 +196,7 @@ func (m *Model) ruleState(r status.RuleInfo) (string, bool) {
 	}
 	if len(missing) > 0 {
 		parts = append(parts, "missing from the instructions of "+strings.Join(missing, " and ")+
-			" — run: "+status.RulesRepairCommand(r.Scope))
+			" — run: "+status.RulesRepair(m.snap.Posture.Rules, m.snap.Posture.Masters, r.Scope))
 	}
 	if len(parts) == 0 {
 		return "no installed agent's instructions were read at this scope", false
@@ -734,9 +735,14 @@ func (m *Model) syncPresets() {
 }
 
 // rebuildMaster writes the shared runner again and repoints every registration at
-// it, through the same package function `steer hooks rebuild` calls.
+// it, through the same package function `steer hooks rebuild` calls. It registers
+// only in the harnesses the scope's repair names.
 func (m *Model) rebuildMaster() {
-	res, err := claude.RebuildMaster(m.scope, m.targets...)
+	targets, ok := m.repairTargets(status.RepairTargets(m.snap.Posture.Rules, m.snap.Posture.Masters, m.scope))
+	if !ok {
+		return
+	}
+	res, err := claude.RebuildMaster(m.scope, targets...)
 	if err != nil {
 		m.note("the runner was not rebuilt: %v", err)
 		return
@@ -749,16 +755,41 @@ func (m *Model) rebuildMaster() {
 	m.note("the runner now carries %d guard(s), version %s", res.Hooks, res.Stamp.Runtime)
 }
 
-// syncStore registers the store's existing runner and rules in every target,
-// through the same package function `steer hooks sync` calls.
+// syncStore registers the store's existing runner and rules in every target the
+// scope's sync repair names, through the same package function `steer hooks sync`
+// calls.
 func (m *Model) syncStore() {
-	res, err := claude.SyncStore(m.scope, m.targets...)
+	targets, ok := m.repairTargets(status.RepairTargets(m.snap.Posture.Rules, m.snap.Posture.Masters, m.scope))
+	if !ok {
+		return
+	}
+	res, err := claude.SyncStore(m.scope, targets...)
 	if err != nil {
 		m.note("nothing was synced: %v", err)
 		return
 	}
 	m.refresh()
 	m.note("synced %d agent(s); %d already matched the guard files", len(res.Synced), len(res.Current))
+}
+
+// repairTargets confines the dashboard's targets to the harnesses a repair names;
+// nil ids keeps every target. With none left it notes the refusal and reports false,
+// since an empty list would fall back to a default harness.
+func (m *Model) repairTargets(ids []string) ([]harness.Registrar, bool) {
+	if ids == nil {
+		return m.targets, true
+	}
+	var out []harness.Registrar
+	for _, t := range m.targets {
+		if slices.Contains(ids, string(t.Harness().ID)) {
+			out = append(out, t)
+		}
+	}
+	if len(out) == 0 {
+		m.note("nothing was repaired: no agent this dashboard writes to is one the repair names (%s)", strings.Join(ids, ", "))
+		return nil, false
+	}
+	return out, true
 }
 
 // viewFixes renders any repair a detected issue asks for, each tier's fixes, and
