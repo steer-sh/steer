@@ -42,10 +42,11 @@ var panelNames = [panelCount]string{"Arming", "Problems", "Fixes", "Reviewer", "
 // a per-panel cursor, and the one text editor the panels share.
 type Model struct {
 	cfg gate.Config
-	// targets are the harnesses a built-in guard toggle registers into. The
-	// dashboard takes them from the same flags the CLI reads, so a toggle here and
-	// a `steer preset enable` write the same registrations.
+	// targets are the harnesses a guard action may register into, taken from the
+	// same flags the CLI reads; named says the user chose them with a flag, so
+	// targetsFor does not narrow them.
 	targets []harness.Registrar
+	named   bool
 	scope   string
 	snap    *status.SystemStatus
 	chains  []mine.Chain
@@ -110,9 +111,11 @@ func New(cfg gate.Config, scope string, targets ...harness.Registrar) *Model {
 	return m
 }
 
-// Run starts the dashboard event loop.
-func Run(cfg gate.Config, scope string, targets ...harness.Registrar) error {
-	p := tea.NewProgram(New(cfg, scope, targets...), tea.WithAltScreen())
+// Run starts the dashboard event loop. named says the user chose targets by flag.
+func Run(cfg gate.Config, scope string, named bool, targets ...harness.Registrar) error {
+	m := New(cfg, scope, targets...)
+	m.named = named
+	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err := p.Run()
 	return err
 }

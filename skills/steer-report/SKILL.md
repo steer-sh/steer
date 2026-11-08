@@ -313,7 +313,8 @@ counted from this machine's stored session snapshots, and a row with `fix` has n
   rule is missing from a harness's file stays live while that agent never reads
   the rule: a harness installed after the rule was written, or a hand edit to the
   file, causes it. **Act on `drifted`:** run `steer hooks sync --scope <scope>`,
-  which rewrites every installed harness's section from the manifest.
+  which rewrites each target harness's section from the manifest; in the global
+  scope that is each one holding a Steer registration.
   `plugins[]` is each cached copy of the Steer plugin in the Claude Code and Codex
   plugin caches: `harness`, `path`, `target` (where `path` resolves when it is a
   link) and `state` — `same-binary`, `different-binary` or `unknown` (a binary

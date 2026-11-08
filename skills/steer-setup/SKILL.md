@@ -229,8 +229,8 @@ export PATH="$HOME/.steer/bin:$PATH"    # add to ~/.zshrc or ~/.bashrc
 ```
 
 **Carry existing guards and rules into this harness, on every setup.** Guards and
-instruction rules are registered only in the harnesses installed when they were
-written. So a harness installed later has no guard runner and no `## Steer Rules`
+instruction rules are registered only in the harnesses installed, and in the global
+scope set up for Steer, when they were written. So a harness installed later has no guard runner and no `## Steer Rules`
 section. A clone of a repository whose `.steer/hooks` store a teammate committed
 is in the same state when the teammate used a different harness or did not commit
 their harness configuration. Read the two readings that name this:
@@ -248,8 +248,15 @@ that runs none of that scope's guards. In `posture.rules`, a row whose `state` i
 each scope with either row, name the harnesses to the user and ask before you run:
 
 ```bash
-<STEER_BIN> hooks sync --scope <global|project>
+<STEER_BIN> hooks sync --scope <global|project> --harness <claude-code|codex>
 ```
+
+Run it once per harness you named. When Step 3 did not arm the global gate in the
+harness you are setting up (the gate went to another harness, to one project, or
+to a pre-commit hook), also name it to the user, ask as above, and run
+`hooks sync --scope global --harness <id>` for it:
+a harness with no global Steer registration of its own reads neither detached nor
+drifted, and a sync that names no harness leaves it out.
 
 Sync registers the runner the store already holds and rewrites each harness's
 rules section. Lines written by hand inside that section are removed; the rest of

@@ -813,7 +813,9 @@ func RulesPresences(scope string, targets []harness.Registrar) []RulesPresence {
 		}
 		// An empty global section in a harness holding no Steer registration is one
 		// never set up or one uninstall removed; either way a sync is not its repair.
-		if empty && scope == harness.GlobalScope && !globallyRegistered(target.Harness().ID) {
+		// A section it shares with a registered harness is read on that harness's row.
+		if scope == harness.GlobalScope && !globallyRegistered(target.Harness().ID) &&
+			(empty || sharedDocument(target, presence.Path, targets, globallyRegistered)) {
 			continue
 		}
 		row.Path = presence.Path

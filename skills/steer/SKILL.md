@@ -3,7 +3,7 @@ name: steer
 description: Turns a natural-language rule into the fix that can enforce it — a repository check, a PreToolUse Python guard, or an instruction rule — and installs it. Use when enforcing coding standards, blocking insecure patterns, making sure checks pass before a turn ends, managing hook lifecycle, or running steer CLI commands (register, remove, list, test, preset, verify, git-hooks).
 user-invocable: true
 prompt_version: 26
-compatibility: Requires Claude Code or Codex with tool-call hook support. Hooks are installed into .steer/hooks/ and registered in every installed harness (settings.json for Claude Code, hooks.json for Codex). steer CLI must be available on PATH or bundled under scripts/.
+compatibility: Requires Claude Code or Codex with tool-call hook support. Hooks are installed into .steer/hooks/ and registered in every installed harness Steer is set up in (settings.json for Claude Code, hooks.json for Codex). steer CLI must be available on PATH or bundled under scripts/.
 allowed-tools: Bash(steer *), Bash(python3 *), Bash(echo *), Read, Write, Edit
 ---
 
@@ -466,7 +466,11 @@ This atomically:
 The store is shared between harnesses; the registration is not. `register` writes
 to every hook-registering harness installed on the machine — the one whose config
 directory exists — and reports which ones on the last line of its output. A guard
-is a rule about the operator's work, not about one agent, so all get it. Add
+is a rule about the operator's work, not about one agent, so all get it. In the
+global scope, once any installed harness holds a Steer registration (commit gate,
+check runner, guard runner, status line or rules section), `register` writes only
+to those that hold one: a harness with none was never set up or was removed with
+`steer uninstall --harness`. Add
 `--harness claude-code` or `--harness codex` to write to one only, or
 `--all-harnesses` to write to every hook-supporting harness whether or not it is
 installed here. On a machine with no harness directory, `register` writes to

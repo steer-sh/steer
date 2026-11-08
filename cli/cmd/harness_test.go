@@ -147,7 +147,7 @@ func TestNoNamedHarnessRegistersClaudeCode(t *testing.T) {
 	t.Setenv("CODEX_SESSION_ID", "")
 	harnessFlag, allHarnesses = "", false
 
-	targets, err := currentRegistrars()
+	targets, err := currentRegistrars(currentScope())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestAllHarnessesTargetsEveryHarnessThatRegistersHooks(t *testing.T) {
 	harnessFlag, allHarnesses = "", true
 	t.Cleanup(func() { allHarnesses = false })
 
-	targets, err := currentRegistrars()
+	targets, err := currentRegistrars(currentScope())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +177,7 @@ func TestAnUnknownHarnessIsRefused(t *testing.T) {
 	harnessFlag, allHarnesses = "emacs", false
 	t.Cleanup(func() { harnessFlag = "" })
 
-	if _, err := currentRegistrars(); err == nil {
+	if _, err := currentRegistrars(currentScope()); err == nil {
 		t.Error("currentRegistrars accepted an unregistered harness")
 	}
 }

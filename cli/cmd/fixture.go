@@ -13,6 +13,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/guard/fixture"
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/report"
+	"github.com/steer-sh/steer-cli/internal/status"
 	"github.com/steer-sh/steer-cli/internal/styles"
 )
 
@@ -204,7 +205,7 @@ func blockedAllowRepair(r fixture.Report, scope string) string {
 	}
 	if !agrees {
 		return "\nThe master embeds a different source for this guard than the store file holds." +
-			"\nRun steer hooks rebuild --scope " + scope + " to restore source agreement." +
+			"\nRun " + status.RebuildRepair(status.MasterRuntimes(scope), scope) + " to restore source agreement." +
 			"\nThat restores agreement; it does not establish that the difference caused this."
 	}
 	return "\nThis guard's source matches the tested master, so the cause is not source drift." +

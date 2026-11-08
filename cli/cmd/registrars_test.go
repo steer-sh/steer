@@ -30,7 +30,7 @@ func TestCurrentRegistrarsDefaultsToTheInstalledHarnesses(t *testing.T) {
 
 	// No harness directory at all: the fallback still answers Claude Code, because
 	// that is what every settings.json written before this default assumes.
-	targets, err := currentRegistrars()
+	targets, err := currentRegistrars(currentScope())
 	if err != nil {
 		t.Fatalf("currentRegistrars: %v", err)
 	}
@@ -41,7 +41,7 @@ func TestCurrentRegistrarsDefaultsToTheInstalledHarnesses(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if targets, err = currentRegistrars(); err != nil {
+	if targets, err = currentRegistrars(currentScope()); err != nil {
 		t.Fatal(err)
 	}
 	if len(targets) != 1 || targets[0].Harness().ID != harness.ClaudeCode {
@@ -53,7 +53,7 @@ func TestCurrentRegistrarsDefaultsToTheInstalledHarnesses(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(home, ".codex"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if targets, err = currentRegistrars(); err != nil {
+	if targets, err = currentRegistrars(currentScope()); err != nil {
 		t.Fatal(err)
 	}
 	if len(targets) != 2 {
@@ -63,7 +63,7 @@ func TestCurrentRegistrarsDefaultsToTheInstalledHarnesses(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(home, ".pi", "agent"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if targets, err = currentRegistrars(); err != nil {
+	if targets, err = currentRegistrars(currentScope()); err != nil {
 		t.Fatal(err)
 	}
 	if len(targets) != 3 {
@@ -79,7 +79,7 @@ func TestCurrentRegistrarsHonoursAnExplicitHarness(t *testing.T) {
 		}
 	}
 	harnessFlag = "codex"
-	targets, err := currentRegistrars()
+	targets, err := currentRegistrars(currentScope())
 	if err != nil {
 		t.Fatalf("currentRegistrars: %v", err)
 	}

@@ -87,7 +87,7 @@ steer preset enable sql-injection-prevention
 steer verify --staged
 ```
 
-Guard commands default to project scope and register with every installed supported harness. Use `--scope global` or `--harness codex` to choose explicitly.
+Guard commands default to project scope and register with every installed supported harness. In the global scope, once any harness holds a Steer registration, they register only with the harnesses that hold one, so a harness removed with `steer uninstall --harness` stays removed while another keeps Steer. Use `--scope global` or `--harness codex` to choose explicitly; `--harness` adds a harness back.
 
 To remove a custom guard, run `steer remove <hook-name>`. For a factory preset, run `steer preset disable <preset>` yourself in a terminal; factory self-protection prevents an agent from disabling its own safeguards.
 
