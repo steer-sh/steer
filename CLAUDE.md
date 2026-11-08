@@ -228,6 +228,10 @@ Read the linked architecture section before changing the corresponding boundary:
 - Transcript normalization: each adapter's `Instrument` is pinned by replay of
   its `testdata/instrument/` corpus. Classification changes also affect
   `report.ParserInstrument`; see the architecture section before changing either.
+- Harness targets: `status.GuardTargets` (`cli/internal/status/targets.go`) decides
+  which harnesses a command naming none writes to; `currentRegistrars`
+  (`cli/cmd/harness.go`) and the dashboard's actions both call it, so a new
+  writing command or action takes it rather than every installed harness.
 - Display wording: use shared `status`/`styles` helpers and check
   `cli/internal/status/vocabulary_test.go`. Stored tokens and human labels have
   different compatibility obligations.

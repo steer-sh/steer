@@ -38,11 +38,13 @@ be pointed at the file that was just written.
 
 It is also the repair for an install or a removal that stopped part way through
 the harnesses: the manifest names every rule, so the section is rewritten rather
-than patched.`,
+than patched. In the global scope, while any installed harness holds a Steer
+registration, a harness holding none is a target only when named with --harness
+or --all-harnesses.`,
 	Example: `  steer hooks rebuild --scope global
   steer hooks rebuild --scope global --all-harnesses`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		targets, err := currentRegistrars()
+		targets, err := currentRegistrars(currentScope())
 		if err != nil {
 			return err
 		}
@@ -73,14 +75,17 @@ the store: the master, the manifest and fixture state stay as they are.
 Use it when a store arrived without this machine's registrations — a clone of a
 repository whose guards a teammate committed, or a harness installed after the
 guards were written. A project store is shared, and rebuild would rewrite its
-master with this binary's runtime.
+master with this binary's runtime. In the global scope, while any installed
+harness holds a Steer registration, a harness holding none (never set up, or
+removed by uninstall) is a target only when named with --harness or
+--all-harnesses.
 
 A store with guards must hold a master that embeds exactly those guards. When it
 does not, sync refuses and names rebuild, which regenerates the master.`,
 	Example: `  steer hooks sync --scope project
   steer hooks sync --scope project --harness codex`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		targets, err := currentRegistrars()
+		targets, err := currentRegistrars(currentScope())
 		if err != nil {
 			return err
 		}

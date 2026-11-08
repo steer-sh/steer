@@ -30,7 +30,7 @@ var rulesAddCmd = &cobra.Command{
 	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		text, _ := cmd.Flags().GetString("rule")
-		targets, err := currentRegistrars()
+		targets, err := currentRegistrars(currentScope())
 		if err != nil {
 			return err
 		}
@@ -94,7 +94,7 @@ var rulesRemoveCmd = &cobra.Command{
 	Short: "Delete an instruction rule from the store and every agent's document",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		targets, err := currentRegistrars()
+		targets, err := currentRegistrars(currentScope())
 		if err != nil {
 			return err
 		}

@@ -11,6 +11,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/archive"
 	"github.com/steer-sh/steer-cli/internal/checks"
 	"github.com/steer-sh/steer-cli/internal/claude"
+	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/hookstore"
 	"github.com/steer-sh/steer-cli/internal/status"
 	"github.com/steer-sh/steer-cli/internal/tier"
@@ -182,14 +183,22 @@ func (m *Model) archiveFix(f archiveForm, reason string) (string, error) {
 	restore := "; enter on it under Archived restores it"
 	switch tier.Kind(f.tier) {
 	case tier.Guard:
-		res, err := claude.RemoveManagedHook(f.scope, f.id, claude.RemoveOptions{Reason: reason}, m.targetsFor(f.scope)...)
+		targets, err := m.targetsFor(f.scope)
+		if err != nil {
+			return "", err
+		}
+		res, err := claude.RemoveManagedHook(f.scope, f.id, claude.RemoveOptions{Reason: reason}, targets...)
 		if err != nil {
 			return "", err
 		}
 		return "archived " + noun + " " + f.id + "; it no longer runs in " + scopeReach(f.scope) +
 			fixtureNote(res.Verification, "") + restore, nil
 	case tier.Instruction:
-		if _, err := claude.RemoveManagedRule(f.scope, f.id, reason, m.targetsFor(f.scope)...); err != nil {
+		targets, err := m.targetsFor(f.scope)
+		if err != nil {
+			return "", err
+		}
+		if _, err := claude.RemoveManagedRule(f.scope, f.id, reason, targets...); err != nil {
 			return "", err
 		}
 		return "archived " + noun + " " + f.id + "; the instructions in " + scopeReach(f.scope) +
@@ -279,7 +288,16 @@ func (m *Model) restoreArchived(e *archivedEntry) tea.Cmd {
 			return checkActionMsg{action: checkRestore, id: s.ID, note: restoreCheckNote(s.ID, run, err)}
 		}
 	}
-	result, err := claude.RestoreArchived(e.scope, s, m.targetsFor(e.scope)...)
+	// Only a guard or a rule registers in a harness; a review entry writes the store.
+	var targets []harness.Registrar
+	if k := tier.Kind(s.Tier); k == tier.Guard || k == tier.Instruction {
+		var err error
+		if targets, err = m.targetsFor(e.scope); err != nil {
+			m.note("%s %s was not restored, and its archive entry stays: %v", noun, s.ID, err)
+			return nil
+		}
+	}
+	result, err := claude.RestoreArchived(e.scope, s, targets...)
 	fixtures := ""
 	if result != nil {
 		fixtures = fixtureNote(result.Verification, s.ID)

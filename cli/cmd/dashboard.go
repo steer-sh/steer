@@ -28,7 +28,7 @@ an interactive terminal; a script or an agent reads 'steer status --json'.`,
 		if err := prepareState(); err != nil {
 			return err
 		}
-		targets, err := currentRegistrars()
+		targets, err := candidateRegistrars()
 		if err != nil {
 			return err
 		}

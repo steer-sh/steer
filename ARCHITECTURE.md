@@ -1040,18 +1040,21 @@ Uninstall leaves no record of a removed harness, so a global-scope harness with 
 Steer registration of any kind reads not registered rather than detached, whether it
 was never set up or removed: `status.globallyRegistered` decides it, and a harness
 with any other Steer registration still reads detached, and an empty global rules
-section in such a harness is not read as drift. A plain `hooks rebuild` or `hooks sync`
-registers every installed harness, so `status.RebuildRepair`, `DetachedRepair` and `RulesRepair` name
-`--harness` per registered or detached harness while an installed one holds no part
-of the scope; the verdict, the startup notices, `bin install` and the dashboard all
-take that repair. The dashboard's rebuild and sync actions register only in the
-harnesses `status.RepairTargets` names, and its guard actions (a built-in guard on
-or off, archive, restore) only in `status.GuardTargets`: in the global scope the
-harnesses holding a Steer registration or a rules section of their own, or every
-installed one while none does.
-Both read the registrations when the action runs, not from the dashboard's
-snapshot, so an uninstall run elsewhere while it is open is seen; a harness named
-with `--harness` or `--all-harnesses` is written to as named.
+section in such a harness is not read as drift. A rules document that such a
+harness shares with a registered one is read on the registered harness's row.
+`status.GuardTargets` is the one rule for which harnesses a command naming no
+harness writes to: in the global scope the installed harnesses holding a Steer
+registration or a rules section of their own, or every installed one while none
+does; in the project scope every installed one. The CLI's guard, rule and hooks
+commands take it through `currentRegistrars`, and the dashboard's guard actions (a
+built-in guard on or off, archive, restore) take it when the action runs, not from
+its snapshot, so an uninstall run elsewhere while it is open is seen.
+`status.RebuildRepair`, `DetachedRepair` and `RulesRepair` name `--harness` per
+registered or detached harness while an installed one holds no part of the scope;
+the verdict, the startup notices, `bin install` and the dashboard all take that
+repair, and the dashboard's rebuild and sync actions register only in the
+harnesses `status.RepairTargets` names, read when they run. A harness named with
+`--harness` or `--all-harnesses` is written to as named.
 `--json` is a projection of it (`status/json.go`): one summary row per record, whose
 observation `steer fix score --json` carries under the same id, guards and
 presets from both scopes, the readiness answer as `posture.readiness`, and the verdict

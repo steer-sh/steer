@@ -86,7 +86,7 @@ Optional provenance flags can be used to persist generation metadata.`,
 			return err
 		}
 
-		targets, err := currentRegistrars()
+		targets, err := currentRegistrars(currentScope())
 		if err != nil {
 			return err
 		}

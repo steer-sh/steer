@@ -74,3 +74,55 @@ func TestPrintedRebuildsSpareARemovedHarness(t *testing.T) {
 	}
 	assertRebuildSparesCodex(t, "verify's missing-master error", missingMasterError(g, master).Error())
 }
+
+// A guard command naming no harness registers only where Steer is still
+// registered, so `steer register` after a one-harness uninstall leaves Codex out;
+// --harness codex is how it is added back.
+func TestAGuardCommandRegistersNoRemovedHarness(t *testing.T) {
+	codexRemovedHome(t)
+	g := claude.GlobalScope
+	targets, err := currentRegistrars(g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if names := harnessNames(targets); names != "Claude Code" {
+		t.Fatalf("targets after uninstalling Codex = %s, want Claude Code", names)
+	}
+	if _, err := claude.InstallManagedHook(g, claude.InstallManagedHookInput{
+		HookName: "no-let-hook", FileName: "no-let-hook.py", Rule: "never use let",
+		Content: []byte(guardSource), Metadata: claude.HookInstallMetadata{Source: claude.SourceManual},
+	}, targets...); err != nil {
+		t.Fatal(err)
+	}
+	if path, err := (codexhooks.Registrar{}).RegisteredMasterPath(g); err != nil || path != "" {
+		t.Errorf("a new guard registered the runner in Codex again: %q (%v)", path, err)
+	}
+
+	harnessFlag = "codex"
+	if targets, err = currentRegistrars(g); err != nil {
+		t.Fatal(err)
+	}
+	if names := harnessNames(targets); names != "Codex" {
+		t.Errorf("--harness codex targets %s, want Codex", names)
+	}
+}
+
+// Two harnesses that each carry only a guard runner both receive a new guard.
+func TestAGuardCommandReachesEveryRegisteredHarness(t *testing.T) {
+	home := isolatedHome(t)
+	t.Chdir(home)
+	g := claude.GlobalScope
+	if _, err := claude.InstallManagedHook(g, claude.InstallManagedHookInput{
+		HookName: "no-var-hook", FileName: "no-var-hook.py", Rule: "never use var",
+		Content: []byte(guardSource), Metadata: claude.HookInstallMetadata{Source: claude.SourceManual},
+	}, claude.Registrar{}, codexhooks.Registrar{}); err != nil {
+		t.Fatal(err)
+	}
+	targets, err := currentRegistrars(g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if names := harnessNames(targets); names != "Claude Code, Codex" {
+		t.Errorf("guards-only machine targets %s, want Claude Code, Codex", names)
+	}
+}

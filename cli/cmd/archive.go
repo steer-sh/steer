@@ -12,6 +12,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/checks"
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
+	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/styles"
 	"github.com/steer-sh/steer-cli/internal/tier"
 )
@@ -115,9 +116,12 @@ no manifest entry names.`,
 			return nil
 		}
 
-		targets, err := currentRegistrars()
-		if err != nil {
-			return err
+		// Only a guard or a rule registers in a harness; a review entry writes the store.
+		var targets []harness.Registrar
+		if k := tier.Kind(s.Tier); k == tier.Guard || k == tier.Instruction {
+			if targets, err = currentRegistrars(currentScope()); err != nil {
+				return err
+			}
 		}
 		result, err := claude.RestoreArchived(scope, s, targets...)
 		if result != nil {

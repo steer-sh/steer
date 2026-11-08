@@ -73,7 +73,7 @@ artifacts:
 			}
 		}
 
-		targets, err := currentRegistrars()
+		targets, err := currentRegistrars(currentScope())
 		if err != nil {
 			return err
 		}

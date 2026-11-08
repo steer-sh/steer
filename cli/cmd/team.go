@@ -129,7 +129,7 @@ lockfile are untouched: team policy is a floor, not a ceiling.
 			return err
 		}
 
-		targets, err := currentRegistrars()
+		targets, err := currentRegistrars(currentScope())
 		if err != nil {
 			return err
 		}
@@ -208,7 +208,7 @@ var teamVerifyCmd = &cobra.Command{
 			return err
 		}
 
-		targets, err := currentRegistrars()
+		targets, err := currentRegistrars(currentScope())
 		if err != nil {
 			return err
 		}

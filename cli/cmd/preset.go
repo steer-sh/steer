@@ -141,7 +141,7 @@ var presetEnableCmd = &cobra.Command{
 	Short: "Enable one factory preset",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		targets, err := currentRegistrars()
+		targets, err := currentRegistrars(currentScope())
 		if err != nil {
 			return err
 		}
@@ -186,7 +186,7 @@ var presetDisableCmd = &cobra.Command{
 	Short: "Disable one factory preset",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		targets, err := currentRegistrars()
+		targets, err := currentRegistrars(currentScope())
 		if err != nil {
 			return err
 		}
@@ -228,7 +228,7 @@ var presetEnableBundleCmd = &cobra.Command{
 	Short: "Enable all presets in a bundle",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		targets, err := currentRegistrars()
+		targets, err := currentRegistrars(currentScope())
 		if err != nil {
 			return err
 		}
@@ -302,7 +302,7 @@ var presetDisableBundleCmd = &cobra.Command{
 	Short: "Disable all presets in a bundle",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		targets, err := currentRegistrars()
+		targets, err := currentRegistrars(currentScope())
 		if err != nil {
 			return err
 		}
@@ -377,7 +377,7 @@ var presetSyncCmd = &cobra.Command{
   steer preset sync --strict
   steer preset sync --prune-orphans`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		targets, err := currentRegistrars()
+		targets, err := currentRegistrars(currentScope())
 		if err != nil {
 			return err
 		}

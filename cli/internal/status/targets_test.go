@@ -11,7 +11,10 @@ import (
 	"github.com/steer-sh/steer-cli/internal/testhome"
 )
 
-func targetIDs(targets []harness.Registrar) []string {
+func targetIDs(targets []harness.Registrar, err error) []string {
+	if err != nil {
+		return []string{"error: " + err.Error()}
+	}
 	ids := make([]string, 0, len(targets))
 	for _, t := range targets {
 		ids = append(ids, string(t.Harness().ID))
@@ -138,5 +141,67 @@ func TestASharedRulesDocumentNamesNoRemovedHarness(t *testing.T) {
 	}
 	if drifted != 2 {
 		t.Errorf("an unregistered shared document drifted on %d rows, want both", drifted)
+	}
+}
+
+// A harness whose hooks file cannot be read is not taken for one Steer was removed
+// from: the selection fails rather than leave it out.
+func TestGuardTargetsRefuseAnUnreadableHarness(t *testing.T) {
+	home := projectDir(t)
+	testhome.Set(t, home)
+	codexHome := filepath.Join(home, ".codex")
+	if err := os.MkdirAll(codexHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CODEX_HOME", codexHome)
+	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(home, "no-pi"))
+	t.Chdir(t.TempDir())
+	g := harness.GlobalScope
+	if err := claude.RegisterCommitGateAndResolver(g, "steer commit-gate review", 460,
+		"steer commit-gate backfill --if-due --apply --quiet", 30); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(codexHome, "hooks.json"), []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	both := []harness.Registrar{claude.Registrar{}, codex.Registrar{}}
+	if got, err := GuardTargets(g, both); err == nil {
+		t.Errorf("GuardTargets with an unreadable Codex hooks file = %q, want an error", targetIDs(got, nil))
+	}
+	// A first guard fails before it writes anything, not part way through.
+	if _, err := claude.RemoveCommitGateAndResolver(g); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := GuardTargets(g, both); err == nil {
+		t.Errorf("GuardTargets on a fresh machine with an unreadable Codex hooks file = %q, want an error", targetIDs(got, nil))
+	}
+}
+
+// An instruction document that cannot be read is not taken for one without rules.
+func TestGuardTargetsRefuseAnUnreadableInstructionDocument(t *testing.T) {
+	home := projectDir(t)
+	testhome.Set(t, home)
+	codexHome := filepath.Join(home, ".codex")
+	if err := os.MkdirAll(codexHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CODEX_HOME", codexHome)
+	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(home, "no-pi"))
+	t.Chdir(t.TempDir())
+	g := harness.GlobalScope
+	if err := claude.RegisterCommitGateAndResolver(g, "steer commit-gate review", 460,
+		"steer commit-gate backfill --if-due --apply --quiet", 30); err != nil {
+		t.Fatal(err)
+	}
+	agents, err := codex.Registrar{}.InstructionPath(g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(agents, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	both := []harness.Registrar{claude.Registrar{}, codex.Registrar{}}
+	if got, err := GuardTargets(g, both); err == nil {
+		t.Errorf("GuardTargets with an unreadable AGENTS.md = %q, want an error", targetIDs(got, nil))
 	}
 }
