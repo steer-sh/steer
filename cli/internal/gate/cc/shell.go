@@ -43,10 +43,9 @@ func commitSpans(cmd string) []Span {
 	return spans
 }
 
-// boundaryStart backs the span up over the command boundary that precedes `git`, so
-// the span covers what the Python pattern's own boundary alternation consumed. The
-// leftmost such start wins, exactly as the regex engine chose it: an operator plus any
-// following whitespace beats the single-whitespace alternative.
+// boundaryStart backs the span up over the command boundary that precedes `git`: an
+// operator (`;`, `&`, `|`) plus any whitespace after it, else a single whitespace byte.
+// The leftmost start wins, so an operator beats the whitespace alternative.
 func boundaryStart(cmd string, i int) int {
 	if i == 0 {
 		return 0

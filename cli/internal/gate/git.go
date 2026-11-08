@@ -9,9 +9,8 @@ import (
 	"time"
 )
 
-// Git runs a git command in cwd. It returns stdout, or ok=false on any failure —
-// the same fail-open contract the Python helper had: a git that cannot answer must
-// never deny a commit.
+// Git runs a git command in cwd. It returns stdout, or ok=false on any failure. It
+// fails open: a git that cannot answer must never deny a commit.
 func Git(cwd string, timeout time.Duration, args ...string) (string, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()

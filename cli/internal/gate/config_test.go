@@ -20,7 +20,7 @@ func tempConfigHome(t *testing.T) {
 		t.Setenv("HOME", home)
 	}
 	for _, key := range []string{
-		"COMMIT_GATE_STATE_DIR", "COMMIT_REVIEW_STATE", "COMMIT_GATE_RUNS",
+		"COMMIT_GATE_STATE_DIR", "COMMIT_GATE_RUNS",
 		"COMMIT_GATE_TIMEOUT", "COMMIT_GATE_MAX_FIRINGS", "COMMIT_GATE_MODEL",
 		"COMMIT_GATE_EFFORT",
 	} {

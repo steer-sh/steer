@@ -17,8 +17,8 @@ import (
 // pairs the tags by hand rather than accepting any closer.
 var harnessTagRe = regexp.MustCompile(`<(system-reminder|local-command-[a-z]+|command-[a-z]+)>`)
 
-// stripHarnessText removes each `<tag>...</tag>` block, shortest body first, exactly
-// as the non-greedy Python pattern did.
+// stripHarnessText removes each `<tag>...</tag>` block, shortest body first, as a
+// non-greedy match would.
 func stripHarnessText(text string) string {
 	var out strings.Builder
 	for pos := 0; pos < len(text); {

@@ -1,7 +1,6 @@
 // Package mine is the reader half of the commit-review gate: it segments the
 // adjudication ledger into chains, counts a class's chain-level incidence, and
-// scores the interventions that incidence motivates. A port of
-// ~/.claude/hooks/commit-review/mine.py with byte-identical output.
+// scores the interventions that incidence motivates.
 package mine
 
 import (
@@ -369,7 +368,7 @@ func ledgerPrint(raw any) string {
 	return b.String()
 }
 
-// normWhitespaceRe matches Python's Unicode `\s`: ASCII whitespace plus the Unicode
+// normWhitespaceRe matches Unicode whitespace: ASCII whitespace plus the Unicode
 // space separators. RE2's own `\s` is ASCII-only, which would widen the dedup class.
 var normWhitespaceRe = regexp.MustCompile(
 	`[\t\n\x0b\f\r \x1c\x1d\x1e\x1f\x{0085}\x{00a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]+`)

@@ -4,12 +4,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
 
-// Diff-pipeline cases ported from hooks/commit-review/test_inputs.py. Every mechanism
-// here fails SILENTLY, which is why they are asserted rather than read.
+// Diff-pipeline cases. Every mechanism here fails SILENTLY, which is why they are
+// asserted rather than read.
 //
 // Real repositories, because the pathspec magic under test is git's own and a stub
 // would assert a belief about it rather than its behaviour. The subcommand is spelled
@@ -357,12 +358,12 @@ func TestUntrackedFiles(t *testing.T) {
 		t.Fatal("ChangedFiles failed")
 	}
 	want := []string{".gitignore", "new.py", "old.py", "web/deep.py", "yarn.lock"}
-	if got := sortedUnique(paths); !equalStrings(got, want) {
+	if got := sortedUnique(paths); !slices.Equal(got, want) {
 		t.Errorf("ChangedFiles = %v, want %v — the path list drives the prose skip and "+
 			"the cross-file check, so it must carry the same files the diff does", got, want)
 	}
 	fromSub, _ := ChangedFiles(cfg, filepath.Join(root, "web"), spec)
-	if !equalStrings(sortedUnique(fromSub), want) {
+	if !slices.Equal(sortedUnique(fromSub), want) {
 		t.Errorf("from a subdirectory ChangedFiles = %v, want %v — `--full-name -- :/`: "+
 			"bare ls-files --others lists that subtree ALONE", sortedUnique(fromSub), want)
 	}

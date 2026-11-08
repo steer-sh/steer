@@ -311,12 +311,10 @@ class LiveReviewerRunner(unittest.TestCase):
         self.assertIn("interrupted", call["termination"])
         self.assertGreaterEqual(call["seconds_upper_bound"], 1)
 
-    def test_legacy_environment_cannot_redirect_state_or_expand_panel(self):
-        for key in ("COMMIT_GATE_STATE_DIR", "COMMIT_REVIEW_STATE"):
-            with self.subTest(key=key):
-                code, result = self.cell("codex", state_override=key)
-                self.assertEqual(code, 0, result["failures"])
-                self.assertEqual(len(result["calls"]), 2)
+    def test_environment_cannot_redirect_state_or_expand_panel(self):
+        code, result = self.cell("codex", state_override="COMMIT_GATE_STATE_DIR")
+        self.assertEqual(code, 0, result["failures"])
+        self.assertEqual(len(result["calls"]), 2)
 
     def test_git_environment_cannot_change_operator_repository_or_run_hooks(self):
         for kind in ("repository", "hooks"):

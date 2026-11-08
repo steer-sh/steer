@@ -15,8 +15,8 @@ import (
 	"github.com/steer-sh/steer-cli/internal/statestore"
 )
 
-// Config holds every tunable the engine reads. Defaults() carries the values the
-// Python hook shipped with; Load() applies environment overrides on top.
+// Config holds every tunable the engine reads. Defaults() carries the shipped values;
+// Load() applies environment overrides on top.
 type Config struct {
 	StateDir string
 	// OperatorNotice is a line the engine adds to the operator receipt of every commit
@@ -87,10 +87,10 @@ const (
 )
 
 // InstrumentSuffix marks rows produced by this implementation. Diff assembly and
-// context selection are part of the instrument, so a Python-to-Go swap is a genuine
-// instrument change even at an identical prompt. It carries no CLI version: mine.py
-// flags any change as drift, and a per-release suffix would fire that flag on every
-// patch release. Bump it only when gate behaviour changes reviewer inputs or the
+// context selection are part of the instrument, so a change to either is an instrument
+// change even at an identical prompt. It carries no CLI version: the miner flags any
+// change as drift, and a per-release suffix would fire that flag on every patch
+// release. Bump it only when gate behaviour changes reviewer inputs or the
 // parser semantics that decide which reviewer findings enter the corpus.
 const InstrumentSuffix = "go-findings-v4-shell"
 
@@ -182,11 +182,7 @@ func WithFile(c Config, file steerconfig.Config) Config {
 
 // WithEnv applies the environment overrides, which outrank the settings file.
 func WithEnv(c Config) Config {
-	// COMMIT_GATE_STATE_DIR wins over COMMIT_REVIEW_STATE. The second is mine.py's
-	// own variable, so the miner and an existing mine.py invocation read one directory.
 	if v := os.Getenv("COMMIT_GATE_STATE_DIR"); v != "" {
-		c.StateDir = v
-	} else if v := os.Getenv("COMMIT_REVIEW_STATE"); v != "" {
 		c.StateDir = v
 	}
 	if v := strings.TrimSpace(os.Getenv("COMMIT_GATE_EFFORT")); v != "" {
