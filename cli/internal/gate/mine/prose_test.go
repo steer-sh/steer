@@ -173,14 +173,18 @@ func TestDescribeLeavesAChainVerdictUnchanged(t *testing.T) {
 		t.Fatal(loadErr)
 	}
 	chains := BuildChains(rowsAll, false)
-	before := scoreOne(t, stateDir, chains)
-	if err := Describe(io.Discard, stateDir, "widget-parser-flag-loss", DescribeOpts{
-		Problem:      "the reviewer finds a dropped flag in the widget parser",
-		Intervention: "check.sh refuses a parser branch that drops a flag",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	after := scoreOne(t, stateDir, chains)
+	var before, after map[string]any
+	// Scoring reads the clock in whole seconds, so both scores share one instant.
+	withClock(1_800_000_000, func() {
+		before = scoreOne(t, stateDir, chains)
+		if err := Describe(io.Discard, stateDir, "widget-parser-flag-loss", DescribeOpts{
+			Problem:      "the reviewer finds a dropped flag in the widget parser",
+			Intervention: "check.sh refuses a parser branch that drops a flag",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		after = scoreOne(t, stateDir, chains)
+	})
 	if !reflect.DeepEqual(before, after) {
 		t.Errorf("a rewording moved the chain verdict:\n before: %v\n  after: %v", before, after)
 	}
@@ -200,14 +204,18 @@ func TestDescribeLeavesASessionVerdictUnchanged(t *testing.T) {
 		window(2000, 12, "claude-code", "proj", "something else")...)
 	ev := EvidenceSet{Sessions: units}
 
-	before := scoreSession(t, loadOne(t, stateDir), ev)
-	if err := Describe(io.Discard, stateDir, "friction", DescribeOpts{
-		Problem:      "a session runs bare python and the interpreter is missing",
-		Intervention: "a guard refuses a bare python invocation",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	after := scoreSession(t, loadOne(t, stateDir), ev)
+	var before, after map[string]any
+	// Scoring reads the clock in whole seconds, so both scores share one instant.
+	withClock(1_800_000_000, func() {
+		before = scoreSession(t, loadOne(t, stateDir), ev)
+		if err := Describe(io.Discard, stateDir, "friction", DescribeOpts{
+			Problem:      "a session runs bare python and the interpreter is missing",
+			Intervention: "a guard refuses a bare python invocation",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		after = scoreSession(t, loadOne(t, stateDir), ev)
+	})
 	if !reflect.DeepEqual(before, after) {
 		t.Errorf("a rewording moved the session verdict:\n before: %v\n  after: %v", before, after)
 	}
