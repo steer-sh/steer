@@ -212,8 +212,8 @@ func (e *Engine) handleFirst(ctx context.Context, req Request, chain *Chain) Dec
 	// diff's own content. That is also one `git diff` cheaper than probing first.
 	if record := chain.LoadCleared(p.raw); record != nil {
 		// Logged, never silent, for the reason skip-empty is: a pass the log does not
-		// carry is an invisible skip. The phase is deliberately NOT one mine.py opens
-		// a chain on — a chain here is the phantom this removes.
+		// carry is an invisible skip. The phase is deliberately NOT one the miner
+		// opens a chain on — a chain here is the phantom this removes.
 		logErr := e.log(req, Row{"ts": time.Now().Unix(), "phase": "skip-cleared",
 			"firing": 1, "diff_sha": record.DiffSHA, "chars": len(p.raw),
 			"session_id": req.SessionID, "cleared_ts": record.TS,

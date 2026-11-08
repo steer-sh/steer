@@ -3,8 +3,8 @@ package mine
 import "regexp"
 
 // compilePattern compiles a class regex case-insensitively, searching anywhere. RE2
-// rejects the lookaround and backreferences Python's `re` accepts; its compile error
-// names the unsupported construct, which the calling command wraps for the user.
+// rejects lookaround and backreferences; its compile error names the unsupported
+// construct, which the calling command wraps for the user.
 func compilePattern(expr string) (*regexp.Regexp, error) {
 	return regexp.Compile("(?i)" + expr)
 }

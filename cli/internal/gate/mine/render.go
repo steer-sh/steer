@@ -19,7 +19,7 @@ import (
 // test can pin it.
 var now = func() int64 { return time.Now().Unix() }
 
-// stamp renders a unix timestamp as mine.py's stamp does: a local YYYY-MM-DD, or "?".
+// stamp renders a unix timestamp as a local YYYY-MM-DD, or "?" for zero.
 func stamp(ts float64) string {
 	if ts == 0 {
 		return "?"
@@ -1193,8 +1193,8 @@ func baselineMap(hits, total int, rate float64) map[string]any {
 	return map[string]any{"hits": hits, "units": total, "rate": pyFloat(round4(rate))}
 }
 
-// instrumentValue is the current reviewer, or nil so the record stores null the way
-// mine.py stores None on an unstamped log.
+// instrumentValue is the current reviewer, or nil so the record stores null on an
+// unstamped log.
 func instrumentValue(chains []Chain) any {
 	if inst := CurrentInstrument(chains); inst != "" {
 		return inst
@@ -1559,9 +1559,8 @@ func Retire(w io.Writer, stateDir, id, reason, status string) error {
 
 // --- shared JSON output -----------------------------------------------------
 
-// writeJSON emits a value as indented JSON, keeping json.Number floats verbatim. Key
-// order and HTML escaping are the only differences from mine.py's dump, and the reader
-// of a --json stream decodes it, so neither carries meaning.
+// writeJSON emits a value as indented JSON, keeping json.Number floats verbatim. The
+// reader of a --json stream decodes it, so key order and HTML escaping carry no meaning.
 func writeJSON(w io.Writer, v any) error {
 	raw, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {

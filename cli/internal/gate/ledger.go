@@ -19,9 +19,9 @@ import (
 )
 
 // Row is one adjudication-ledger entry. It is a map rather than a struct because the
-// schema is append-only across two implementations and mine.py reads it by key: a
-// typed row would have to model every field any writer has ever emitted, and an
-// unmodeled key would be dropped on the floor.
+// schema is append-only and readers take it by key: a typed row would have to model
+// every field any writer has ever emitted, and an unmodeled key would be dropped on
+// the floor.
 type Row map[string]any
 
 // Channel names the adapter that wrote a row, so a reader can tell a field that is

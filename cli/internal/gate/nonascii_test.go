@@ -1,6 +1,7 @@
 package gate
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -42,7 +43,7 @@ func TestNonASCIIUntrackedFileIsReviewed(t *testing.T) {
 	if !ok {
 		t.Fatal("ChangedFiles failed")
 	}
-	if !equalStrings(sortedUnique(paths), []string{"café.go"}) {
+	if !slices.Equal(sortedUnique(paths), []string{"café.go"}) {
 		t.Errorf("ChangedFiles = %q, want the path as it is on disk", paths)
 	}
 }
@@ -67,7 +68,7 @@ func TestNonASCIITrackedPathsReadUnquoted(t *testing.T) {
 		t.Fatal("ChangedFiles failed")
 	}
 	want := []string{"naïve.go", "small.go", "über/package-lock.json"}
-	if got := sortedUnique(paths); !equalStrings(got, want) {
+	if got := sortedUnique(paths); !slices.Equal(got, want) {
 		t.Errorf("ChangedFiles = %q, want %q", got, want)
 	}
 
@@ -105,7 +106,7 @@ func TestNonASCIIReferencingFiles(t *testing.T) {
 	gitCmd(t, root, verb, "-qm", "init")
 
 	hits := ReferencingFiles(cfg, root, map[string]bool{"Fetch": true}, []string{"café.go"})
-	if !equalStrings(hits, []string{"über.go"}) {
+	if !slices.Equal(hits, []string{"über.go"}) {
 		t.Errorf("ReferencingFiles = %q, want only the unchanged caller, unquoted", hits)
 	}
 }

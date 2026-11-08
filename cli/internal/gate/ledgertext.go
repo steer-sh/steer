@@ -175,8 +175,8 @@ separatorDone:
 // text rather than silently changing its measurement key.
 var arrowSplitRe = regexp.MustCompile(`[ \t]+(?:→|->)[ \t]+`)
 
-// capRunes caps s at maxConcernChars by rune, as Python slices a str by code point; a
-// byte cap splits a multibyte char and drops a different last word on the same text.
+// capRunes caps s at maxConcernChars by rune; a byte cap splits a multibyte char and
+// drops a different last word on the same text.
 func capRunes(s string) string {
 	if r := []rune(s); len(r) > maxConcernChars {
 		return string(r[:maxConcernChars])
@@ -187,7 +187,7 @@ func capRunes(s string) string {
 // ParseLedgerText turns the verdict bullets of one ledger message into the row fields
 // they become.
 func ParseLedgerText(text string) Row {
-	// Non-nil so an empty result marshals to [] like Python's list, not null.
+	// Non-nil so an empty result marshals to [], not null.
 	concerns := []Concern{}
 	accepted, rejected := 0, 0
 	for _, line := range strings.Split(text, "\n") {

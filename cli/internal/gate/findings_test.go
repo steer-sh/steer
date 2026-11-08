@@ -2,13 +2,13 @@ package gate
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
 
-// Finding-shape cases ported from hooks/commit-review/test_inputs.py section 3. A
-// mis-parse writes a plausible row, and these fields are what the gate is scored on, so
-// a wrong number here is worse than a missing one.
+// Finding-shape cases. A mis-parse writes a plausible row, and these fields are what the
+// gate is scored on, so a wrong number here is worse than a missing one.
 
 const reviewOne = `
 [1] SEVERITY: BLOCKING
@@ -105,7 +105,7 @@ func TestMarkdownLinkCitations(t *testing.T) {
 			"\n    CLAIM: one.\n    FAILS WHEN: something.\n"}
 		shape := FindingShape(review, []string{"pkg/store.py"})
 		files := shape["finding_files"].([]string)
-		if !equalStrings(files, []string{"pkg/store.py"}) {
+		if !slices.Equal(files, []string{"pkg/store.py"}) {
 			t.Errorf("%q: finding_files = %v, want [pkg/store.py] — the link TEXT is the "+
 				"repo path; the target is a URL matching nothing", c, files)
 		}

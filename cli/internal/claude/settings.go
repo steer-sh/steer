@@ -776,17 +776,12 @@ func (a CommitGateArming) Effective() bool {
 	return a.Registered && a.Matcher == CommitGateMatcher
 }
 
-// backfillIdentity recognises steer's Go resolver Stop hook.
+// backfillIdentity recognises steer's resolver Stop hook.
 const backfillIdentity = "commit-gate backfill"
 
-// legacyBackfillIdentity recognises the deprecated Python resolver Stop hook that
-// install replaces.
-const legacyBackfillIdentity = "backfill_ledger.py"
-
-// IsBackfillCommand reports whether a Stop hook command is steer's resolver — the Go
-// hook or the Python one it supersedes. Both are steer-owned and removed together.
+// IsBackfillCommand reports whether a Stop hook command is steer's resolver.
 func IsBackfillCommand(command string) bool {
-	return strings.Contains(command, backfillIdentity) || strings.Contains(command, legacyBackfillIdentity)
+	return strings.Contains(command, backfillIdentity)
 }
 
 func backfillIdentityErr(command string) error {
@@ -795,8 +790,8 @@ func backfillIdentityErr(command string) error {
 }
 
 // RegisterBackfillHook upserts the resolver's Stop hook, replacing any recognised
-// resolver command (the Go hook or the Python one it supersedes) and preserving every
-// other Stop hook. A settings.json with no Stop groups gains one.
+// resolver command and preserving every other Stop hook. A settings.json with no Stop
+// groups gains one.
 func RegisterBackfillHook(scope, command string, timeout int) error {
 	if !strings.Contains(command, backfillIdentity) {
 		return backfillIdentityErr(command)

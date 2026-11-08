@@ -8,7 +8,7 @@ import (
 )
 
 // Every case below is a bypass found on a real commit, or a reviewer finding on the fix
-// for one, ported from hooks/commit-review/test_repo_dir.py with its provenance.
+// for one, with its provenance.
 //
 // The subcommand is spelled from a constant so running this file never trips the gate on
 // itself.

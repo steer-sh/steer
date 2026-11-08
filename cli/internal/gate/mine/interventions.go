@@ -191,7 +191,8 @@ var (
 	slugDashes   = regexp.MustCompile(`-+`)
 )
 
-// Slugify mirrors mine.py's slugify: lowercase, non-alphanumerics to dashes, collapse.
+// Slugify lowercases name, turns each run of non-alphanumerics into one dash and trims
+// dashes from both ends.
 func Slugify(name string) string {
 	s := slugNonAlnum.ReplaceAllString(strings.ToLower(name), "-")
 	s = slugDashes.ReplaceAllString(s, "-")

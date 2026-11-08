@@ -14,9 +14,9 @@ import (
 	"github.com/steer-sh/steer-cli/internal/gate"
 )
 
-// Join cases ported from hooks/commit-review/test_resolver.py: which ledger answers
-// which retry row. A wrong join is worse than a missing one — it files a number that was
-// never about that round, and nothing downstream can tell.
+// Join cases: which ledger answers which retry row. A wrong join is worse than a missing
+// one — it files a number that was never about that round, and nothing downstream can
+// tell.
 
 const (
 	fixSession = "s1"

@@ -49,49 +49,6 @@ func TestRegisterBackfillHookRejectsUnrecognisable(t *testing.T) {
 	}
 }
 
-func TestRegisterBackfillReplacesPythonResolver(t *testing.T) {
-	withProjectDir(t)
-	writeSettings(t, `{
-  "hooks": {
-    "Stop": [
-      {"hooks": [
-        {"type": "command", "command": "python3 /home/x/.claude/hooks/read-provenance.py", "timeout": 20},
-        {"type": "command", "command": "python3 /home/x/.claude/hooks/commit-review/backfill_ledger.py --if-due --apply --quiet", "timeout": 30}
-      ]}
-    ]
-  }
-}`)
-	if err := RegisterBackfillHook(ProjectScope, "steer commit-gate backfill --if-due --apply --quiet", 30); err != nil {
-		t.Fatal(err)
-	}
-	hooks := stopHooks(t)
-	var commands []string
-	for _, h := range hooks {
-		m := h.(map[string]any)
-		commands = append(commands, m["command"].(string))
-	}
-	sawPython, sawGo, sawSibling := false, false, false
-	for _, c := range commands {
-		switch {
-		case contains(c, "backfill_ledger.py"):
-			sawPython = true
-		case contains(c, "commit-gate backfill"):
-			sawGo = true
-		case contains(c, "read-provenance.py"):
-			sawSibling = true
-		}
-	}
-	if sawPython {
-		t.Error("the Python resolver entry must be replaced")
-	}
-	if !sawGo {
-		t.Error("the Go resolver entry must be present")
-	}
-	if !sawSibling {
-		t.Error("the unrelated read-provenance Stop hook must survive")
-	}
-}
-
 func TestRemoveBackfillPreservesUnrelatedStopHooks(t *testing.T) {
 	withProjectDir(t)
 	writeSettings(t, `{

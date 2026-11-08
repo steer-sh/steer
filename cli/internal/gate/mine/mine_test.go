@@ -13,8 +13,7 @@ import (
 )
 
 // The unit that matters here is the CHAIN, not the ledger row: counting rows inflates
-// the denominator, and not deduplicating within a chain inflates the numerator. These
-// cases are the port of test_mine.py, which is where the denominator failures live.
+// the denominator, and not deduplicating within a chain inflates the numerator.
 
 func check(t *testing.T, label string, got, want any) {
 	t.Helper()

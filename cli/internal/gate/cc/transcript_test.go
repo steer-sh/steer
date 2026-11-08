@@ -11,11 +11,10 @@ import (
 	"github.com/steer-sh/steer-cli/internal/gate"
 )
 
-// Ledger-recovery cases ported from hooks/commit-review/test_ledger.py. The two
-// failure directions are NOT symmetric: a MISSED ledger loses one row and the
-// transcript is still on disk, while a FORGED ledger — verdict bullets scraped out of
-// ordinary prose about the gate — writes a row indistinguishable from a real one,
-// permanently. Every case asserting nil is that guard.
+// Ledger-recovery cases. The two failure directions are NOT symmetric: a MISSED ledger
+// loses one row and the transcript is still on disk, while a FORGED ledger — verdict
+// bullets scraped out of ordinary prose about the gate — writes a row indistinguishable
+// from a real one, permanently. Every case asserting nil is that guard.
 
 // t0 stands in for the deny row's ts and MUST sit between before and after.
 const (
