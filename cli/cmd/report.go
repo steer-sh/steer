@@ -19,6 +19,7 @@ import (
 	codexhooks "github.com/steer-sh/steer-cli/internal/codex"
 	"github.com/steer-sh/steer-cli/internal/evidence"
 	"github.com/steer-sh/steer-cli/internal/gate"
+	"github.com/steer-sh/steer-cli/internal/gate/mine"
 	"github.com/steer-sh/steer-cli/internal/gate/resolve"
 	"github.com/steer-sh/steer-cli/internal/guardscope"
 	"github.com/steer-sh/steer-cli/internal/harness"
@@ -330,7 +331,9 @@ var reportMarkReadCmd = &cobra.Command{
 pass reads and leaves as a one-off stays in its pile, so after the mark the status
 line and the session nudge count a row only when it changes: a new item, or one
 that returns to the pile. steer status --json and the dumps still list the whole
-pile.
+pile. For the review pile it also takes the findings the last whole-pile
+mine findings --undecided dump showed as read, so the next dump prints only later
+or returned findings under its new section.
 
 Run it at the end of a pass, after any refresh the pass ran. --corpus names a pile
 the pass read (review-findings or transcript-friction); the default is both.`,
@@ -363,6 +366,21 @@ the pass read (review-findings or transcript-friction); the default is both.`,
 				fmt.Printf("%s: marked read. The status line counts this pile again when it changes.\n", corpus)
 			} else {
 				fmt.Printf("%s: no pile in the queue; nothing to mark.\n", corpus)
+			}
+			if corpus != cadence.CorpusReviewFindings {
+				continue
+			}
+			taken, err := mine.MarkFindingsRead(gateConfig().StateDir)
+			if err != nil {
+				return err
+			}
+			if len(taken) == 0 {
+				fmt.Printf("%s: no whole-pile --undecided dump since the last mark; the next dump's new section is unchanged.\n", corpus)
+			}
+			for _, kind := range []string{"accepted", "rejected", "both"} {
+				if n, ok := taken[kind]; ok {
+					fmt.Printf("%s: %d %s finding(s) the last --undecided dump showed are now read; the next dump lists later ones as new.\n", corpus, n, kind)
+				}
 			}
 		}
 		return nil

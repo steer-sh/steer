@@ -1032,6 +1032,19 @@ class returns, changes the size; a pile where one item was decided as another
 arrived keeps its size and reads unchanged. The dumps and `steer status --json` still list the whole pile,
 so a later repeat of a one-off can still join it into a class.
 
+The review dump also orders that pile by what a pass read. A whole-pile
+`mine findings --undecided` (no `--since`, `--strict-joins` or `--ledger`) whose
+output was written in full narrows `findings_shown.json` to the residual findings
+it printed (`mine.FindingKey`: host, chain start, verdict, text), so the pending set
+holds only what every dump since the last mark showed. `mark-read` makes it the
+kind's read set (`findings_read.json`). The next dump
+prints the chains with an unread finding first, then the rest under `=== read
+before`. A covered finding is not recorded as shown, so it leaves the read set, and
+retiring or superseding a class drops the findings its regex matches from the read
+and pending sets (`forgetRead`); a finding a class stops covering reads as new. The key files
+change under the inventory lock. A chain reviewed after the dump is in no shown
+set, so a mark at the end of a pass does not hide it.
+
 The queue also carries the open steps in the repository the refresh ran in. The
 deterministic tier reads the check stores only, so no harness adapter enters it;
 the runner's registration reaches a reader through the status snapshot. A stale

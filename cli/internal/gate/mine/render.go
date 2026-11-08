@@ -82,7 +82,9 @@ type RenderedFinding struct {
 }
 
 // Findings emits adjudicated findings grouped by chain, for a reader to cluster.
-func Findings(w io.Writer, stateDir string, o FindingsOpts) error {
+func Findings(out io.Writer, stateDir string, o FindingsOpts) error {
+	ew := &errWriter{w: out}
+	var w io.Writer = ew
 	rows, err := LoadRows(stateDir, o.Ledger)
 	if err != nil {
 		return err
@@ -108,9 +110,14 @@ func Findings(w io.Writer, stateDir string, o FindingsOpts) error {
 	// incidence the dump prints keeps its denominator when --undecided narrows
 	// what the reader is shown.
 	var deciding []Deciding
+	var read map[string]bool
+	readRecorded := false
 	if o.Undecided {
 		deciding = DecidingClasses(records)
+		read, readRecorded = loadKeySets(FindingsReadPath(stateDir))[o.Kind]
 	}
+	shownKeys := map[string]bool{}
+	var isNew []bool
 
 	var payload []map[string]any
 	var shown []Chain
@@ -122,11 +129,17 @@ func Findings(w io.Writer, stateDir string, o FindingsOpts) error {
 			carrying++
 		}
 		chainResidue := 0
+		chainNew := false
 		for _, f := range findings {
 			if len(f.CoveredBy) > 0 {
 				covered++
-			} else {
-				chainResidue++
+				continue
+			}
+			chainResidue++
+			if o.Undecided {
+				key := FindingKey(ch, f.Finding)
+				shownKeys[key] = true
+				chainNew = chainNew || !read[key]
 			}
 		}
 		residue += chainResidue
@@ -155,30 +168,57 @@ func Findings(w io.Writer, stateDir string, o FindingsOpts) error {
 		if ch.RepoRootKnown {
 			entry["repo_root"] = ch.RepoRoot
 		}
+		if o.Undecided {
+			entry["new"] = chainNew
+		}
 		shown = append(shown, ch)
 		payload = append(payload, entry)
+		isNew = append(isNew, chainNew)
 	}
 	reviewed := len(chains)
+	newChains := 0
+	if o.Undecided {
+		shown, payload, newChains = newFirst(shown, payload, isNew)
+	}
+	// Only a whole-pile dump that reached its reader in full is a reading of
+	// every residual finding; any other leaves the pending set as it was.
+	record := func() error {
+		if !o.Undecided || o.Since != 0 || o.StrictJoins || o.Ledger != "" || ew.err != nil {
+			return ew.err
+		}
+		return recordShown(stateDir, o.Kind, shownKeys)
+	}
 
 	if o.JSON {
-		out := map[string]any{
+		doc := map[string]any{
 			"chains_reviewed": reviewed,
 			"decisions":       nonNilRecords(records),
 			"chains":          nonNilMaps(payload),
 		}
 		if o.Undecided {
-			out["selected_findings"] = selected
-			out["covered_findings"] = covered
-			out["residual_findings"] = residue
-			out["residual_chains"] = residueChains
+			doc["selected_findings"] = selected
+			doc["covered_findings"] = covered
+			doc["residual_findings"] = residue
+			doc["residual_chains"] = residueChains
+			doc["new_chains"] = newChains
 		}
-		return writeJSON(w, out)
+		if err := writeJSON(w, doc); err != nil {
+			return err
+		}
+		return record()
 	}
 
 	if len(records) > 0 {
 		fmt.Fprintf(w, "# %d class(es) already decided on this corpus:\n", len(records))
+		decides := map[string]bool{}
+		for _, d := range deciding {
+			decides[d.ID] = o.Kind == "both" || d.Kind == o.Kind
+		}
 		for _, r := range records {
 			printDecisionIncidence(w, r, chains)
+			if o.Undecided && !decides[str(r["id"])] {
+				fmt.Fprintln(w, "#     decides none of the findings below: retired, another corpus, or another verdict")
+			}
 		}
 		fmt.Fprintln(w, "#")
 	}
@@ -191,6 +231,12 @@ func Findings(w io.Writer, stateDir string, o FindingsOpts) error {
 		fmt.Fprintf(w, "# --undecided: %d covered, %d remaining over %d chain(s) — those %d chains are what is printed below\n",
 			covered, residue, residueChains, len(payload))
 		fmt.Fprintln(w, "# a covered finding is shown in place, marked [covered-by=...]; quote the text without the marker")
+		if readRecorded {
+			fmt.Fprintf(w, "# %d chain(s) carry a finding no earlier pass read and come first under %q; the other %d follow under %q\n",
+				newChains, newHeading, len(payload)-newChains, readHeading)
+		} else {
+			fmt.Fprintf(w, "# no earlier pass recorded a read: all %d chain(s) are under %q\n", len(payload), newHeading)
+		}
 	} else {
 		fmt.Fprintf(w, "# %d chains reviewed, %d carrying %s findings\n", reviewed, len(payload), o.Kind)
 		distinct := 0
@@ -201,7 +247,13 @@ func Findings(w io.Writer, stateDir string, o FindingsOpts) error {
 	}
 	fmt.Fprintln(w)
 	labels := repoLabels(shown)
+	if o.Undecided {
+		fmt.Fprintf(w, "%s: %d chain(s)\n\n", newHeading, newChains)
+	}
 	for i, c := range payload {
+		if o.Undecided && i == newChains {
+			fmt.Fprintf(w, "%s: %d chain(s)\n\n", readHeading, len(payload)-newChains)
+		}
 		fmt.Fprintf(w, "--- %s  ts=%s  repo=%s  rounds=%d  files=%d  end=%s\n",
 			c["date"], pyStr(c["start_ts"]), labels[i], c["rounds"], c["files"], pyStr(c["terminal"]))
 		for _, f := range c["findings"].([]RenderedFinding) {
@@ -213,7 +265,50 @@ func Findings(w io.Writer, stateDir string, o FindingsOpts) error {
 		}
 		fmt.Fprintln(w)
 	}
-	return nil
+	if o.Undecided && newChains == len(payload) {
+		fmt.Fprintf(w, "%s: 0 chain(s)\n", readHeading)
+	}
+	return record()
+}
+
+// errWriter keeps the first write error, so a dump can tell whether its reader
+// received all of it.
+type errWriter struct {
+	w   io.Writer
+	err error
+}
+
+func (e *errWriter) Write(p []byte) (int, error) {
+	if e.err != nil {
+		return 0, e.err
+	}
+	n, err := e.w.Write(p)
+	if err != nil {
+		e.err = err
+	}
+	return n, err
+}
+
+// The section headings of the undecided dump. A reader finds the read-before
+// section by its heading, so the wording is part of the dump's contract.
+const (
+	newHeading  = "=== new since the last read"
+	readHeading = "=== read before"
+)
+
+// newFirst moves the chains flagged new ahead of the rest, keeping each group's
+// order, and returns how many are new.
+func newFirst(chains []Chain, payload []map[string]any, isNew []bool) ([]Chain, []map[string]any, int) {
+	var nc, rc []Chain
+	var np, rp []map[string]any
+	for i := range payload {
+		if isNew[i] {
+			nc, np = append(nc, chains[i]), append(np, payload[i])
+		} else {
+			rc, rp = append(rc, chains[i]), append(rp, payload[i])
+		}
+	}
+	return append(nc, rc...), append(np, rp...), len(np)
 }
 
 // repoLabels names each chain's repository for the text dump, one label per chain
@@ -876,6 +971,11 @@ func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 	records = append(records, record)
 	if err := save(stateDir, records); err != nil {
 		return err
+	}
+	if o.Supersedes != "" {
+		if err := forgetRead(stateDir, findRecord(records, o.Supersedes)); err != nil {
+			return err
+		}
 	}
 	fmt.Fprintln(w, pyDumps(record, 2))
 	return nil
@@ -1551,6 +1651,9 @@ func Retire(w io.Writer, stateDir, id, reason, status string) error {
 	hit["retired_ts"] = int(now())
 	hit["retired_reason"] = reason
 	if err := save(stateDir, records); err != nil {
+		return err
+	}
+	if err := forgetRead(stateDir, hit); err != nil {
 		return err
 	}
 	fmt.Fprintln(w, pyDumps(hit, 2))

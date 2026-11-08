@@ -427,7 +427,14 @@ If this machine has a commit-review ledger, dump the findings. If not, skip to S
 <STEER_BIN> commit-gate mine findings --kind rejected --to-file
 ```
 
-Read each file whose path they print **once**. Do not cat them and do not re-read.
+Read the rejected dump **once**, to its end. Read the accepted dump **once**, from its start to the `=== read before` line: the decided classes, the header and the new section. Do not cat either file and do not re-read.
+
+The new section holds every chain with a finding no earlier pass read: a later chain, or a finding a retired class returned to the pile. The read-before section holds the chains an earlier pass read and left as one-offs. For each finding in the new section, in this order:
+
+1. Compare it with the decided classes above the header. A class marked `decides none of the findings below` cannot cover it, so a resemblance to one is no miss. A finding that describes the problem of any other class but carries no `[covered-by=...]` marker is a miss of that class's regex. It is a recurrence only when its chain started after the date in the class's headline and the chain is inside every predicate of the class's `scope` in `interventions[]`: repository, harness and paths. `steer fix match` with the record's `--scope-*` flags marks a chain inside or outside that scope. An earlier miss is a miss in the baseline, and one outside the scope is no evidence about the class. Name the class and the finding, and propose a wider regex through `register --supersedes`. A superseding record opens a fresh window, so the missed recurrence counts in its baseline and never as a recurrence; say so in the proposal.
+2. Search the read-before section for a partner. Draft the regex this finding's class would need, in the words that name the kind of mistake and not in this commit's identifiers, and Grep the dump file with it. Members of one class rarely share identifiers or paths, so a search by those words misses most partners. Read each matched chain in full before you pair it.
+
+Read the whole accepted dump instead when the new section is empty, when the header says no earlier pass recorded a read, or when the user asks for a full sweep. A search finds no partner that shares no words with the new finding; a full read is the only way to find one.
 
 The queue's review candidate names how many chains carry an accepted finding that no class regex — active or rejected — yet covers (`undecided_chains`). A class counts as covering one only when it is live (active or rejected, never removed or reworked), mined from this corpus, and authored against that finding's verdict — a false-positive class decides rejected findings and leaves an accepted defect undecided. A transcript-friction class names a pattern in a session transcript, so its regex meeting a finding's text here is a coincidence. A record stored before the corpus tags existed reads as review-findings. That is the pool the classes below come from; the review side has no per-class threshold the tier can compute, because a new class has no regex until you author one.
 
@@ -817,7 +824,7 @@ Then record that this pass read the candidate piles, whether or not it made a cl
 <STEER_BIN> report mark-read
 ```
 
-A one-off finding stays in its pile after you read it, so without the mark the status line counts that pile as a decision after every pass. Run it last, after any pass that read the dumps in Step 2, including one that changed nothing. When you read only one pile, or read the transcript pile with a filter, name the pile you read in full: `--corpus review-findings` or `--corpus transcript-friction`. A pile whose `unread` is false is unchanged since the last pass: say so in one line, and do not present its old items again as new evidence.
+A one-off finding stays in its pile after you read it, so without the mark the status line counts that pile as a decision after every pass. For the review pile, the mark also takes the findings the last whole-pile `--undecided` dump showed as read, and the next dump lists only later or returned ones under its new section. A dump with `--since` or `--strict-joins` records nothing, so a pass that marks the review pile reads the whole-pile dump. Run it last, after any pass that read the dumps in Step 2, including one that changed nothing. When you read only one pile, or read the transcript pile with a filter, name the pile you read in full: `--corpus review-findings` or `--corpus transcript-friction`. A pile whose `unread` is false is unchanged since the last pass: say so in one line, and do not present its old items again as new evidence.
 
 ## Reading the numbers honestly
 
