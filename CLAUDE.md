@@ -336,9 +336,9 @@ commands from the README, so a change to that section changes the test.
 `--snapshot <tag>` keeps each installed container as a local image, and the next
 release's `--update-from <tag>` runs the README's `## Update` commands in it. It needs Docker and the network and stays outside `check.sh`.
 `--local` installs this checkout's HEAD with a Linux build instead, so it runs before a
-release; `--uninstall readme|plugin-first` then arms the global gate, check runner and
-status line and removes them through the README's `## Uninstall` lines or after removing
-the plugin first, which is the only test of what `claude plugin uninstall` and
+release; `--uninstall readme|plugin-first|steer-first` then arms the global gate, check runner and
+status line and removes them through the README's `## Uninstall` lines, after removing
+the plugin, or before removing it, which is the only test of what `claude plugin uninstall` and
 `codex plugin remove` write. Guard and rules removal is covered in `cli/e2e/` alone.
 
 For routing changes, `tests/routing_scenarios.py --model <model>` runs the

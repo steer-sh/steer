@@ -376,6 +376,8 @@ class FreshInstallRunner(unittest.TestCase):
         self.assertNotIn("steer uninstall --apply", program)
         readme = "\n".join(fresh_install.uninstall_lines("codex", commands, "readme"))
         self.assertLess(readme.index("steer uninstall --apply"), readme.index("codex plugin remove"))
+        steer = "\n".join(fresh_install.uninstall_lines("codex", commands, "steer-first"))
+        self.assertLess(steer.index("uninstall --harness codex --apply"), steer.index("codex plugin remove"))
 
     def test_a_local_install_adds_the_staged_checkout(self):
         self.assertEqual(fresh_install.local_commands(

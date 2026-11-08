@@ -12,8 +12,9 @@ arms a global check runner with the saved stable executable, runs README
 checkout's HEAD with a Linux build in place of the published bundle, and
 --uninstall then arms Steer's global gate, check runner and status line and removes
 them: `readme` runs
-README `## Uninstall`, and `plugin-first` removes the plugin, requires the
-removed-plugin notice, and runs `uninstall --harness`. Network checks stay outside
+README `## Uninstall`, `plugin-first` removes the plugin, requires the
+removed-plugin notice, and runs `uninstall --harness`, and `steer-first` runs
+`uninstall --harness` before it removes the plugin. Network checks stay outside
 the turn-end oracle.
 """
 
@@ -115,7 +116,8 @@ def uninstall_lines(harness, commands, mode):
     """Return the bash lines that arm Steer's global channels and remove them.
 
     commands are the harness's README ## Uninstall lines. readme runs them in order;
-    plugin-first removes the plugin, requires the notice, then uninstalls the harness.
+    plugin-first removes the plugin, requires the notice, then uninstalls the harness;
+    steer-first uninstalls the harness, then removes the plugin.
     """
     lines = [f"{STEER} commit-gate install --harness {harness} --scope global",
              f"{STEER} check install --harness {harness} --scope global"]
@@ -131,6 +133,8 @@ def uninstall_lines(harness, commands, mode):
             f'case "$({STEER} statusline)" in *"plugin removed"*) '
             'echo "the notice outlived the uninstall" >&2; exit 1;; esac',
         ]
+    elif mode == "steer-first":
+        steps = [f"{STEER} uninstall --harness {harness} --apply"] + plugin
     else:
         steps = commands
     for step in steps:
@@ -205,7 +209,7 @@ def main():
     parser.add_argument("--update-from", metavar="TAG",
                         help="run README ## Update in each saved TAG-<harness> image instead of installing")
     parser.add_argument("--local", action="store_true", help="install this checkout's HEAD instead of the published bundle")
-    parser.add_argument("--uninstall", choices=["readme", "plugin-first"],
+    parser.add_argument("--uninstall", choices=["readme", "plugin-first", "steer-first"],
                         help="after the install, arm Steer's global channels and remove them")
     args = parser.parse_args()
     if args.local and args.update_from:
