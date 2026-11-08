@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -251,5 +252,42 @@ func TestRepositoryChecksAndTheirLastRunLiveOnFixes(t *testing.T) {
 	fixes := strings.Join(strings.Fields(m.viewFixes()), " ")
 	if !strings.Contains(fixes, "last run passed at the end of a turn") {
 		t.Errorf("fixes does not name the last check.sh run:\n%s", fixes)
+	}
+}
+
+// While an installed harness holds no Steer registration in a scope, every repair
+// the dashboard prints for that scope's runner or rules names the registered
+// harness. A plain rebuild or sync registers every installed harness, so it set
+// up again the agent the operator had removed Steer from.
+func TestNoPrintedRepairRegistersARemovedHarnessAgain(t *testing.T) {
+	m := New(gate.Defaults(), "project")
+	m.width = 400
+	m.snap = &status.SystemStatus{
+		Rules: []status.RuleInfo{{ID: "use-python3", Scope: "global", Text: "use python3"}},
+		Posture: status.Posture{
+			Masters: []status.MasterRuntime{
+				{Harness: "claude-code", Scope: "global", State: status.MasterStale, Path: "/m",
+					Runtime: "deadbeef", Expected: guard.RuntimeDigest(), Installed: true},
+				{Harness: "codex", Scope: "global", State: status.MasterNotRegistered, Installed: true},
+			},
+			Rules: []status.RulesPresence{{Harness: "claude-code", Scope: "global",
+				State: status.RulesDrifted, Missing: []string{"use-python3"}}},
+		},
+	}
+	m.active = panelDiagnostics
+	m.technical = true
+	view := strings.Join(strings.Fields(m.viewDiagnostics()), " ")
+	for _, r := range m.ruleRows() {
+		view += " " + r.state
+	}
+	untargeted := regexp.MustCompile(`steer hooks (rebuild|sync) --scope global( --harness (\S+))?`)
+	found := untargeted.FindAllStringSubmatch(view, -1)
+	if len(found) < 3 {
+		t.Fatalf("want the runner, technical and rules repairs, found %q in:\n%s", found, view)
+	}
+	for _, f := range found {
+		if f[3] != "claude-code" {
+			t.Errorf("%q registers a harness other than Claude Code:\n%s", f[0], view)
+		}
 	}
 }

@@ -13,10 +13,12 @@ import (
 	"github.com/steer-sh/steer-cli/internal/archive"
 	"github.com/steer-sh/steer-cli/internal/checks"
 	"github.com/steer-sh/steer-cli/internal/claude"
+	"github.com/steer-sh/steer-cli/internal/codex"
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/guard"
 	"github.com/steer-sh/steer-cli/internal/guard/fixture"
 	"github.com/steer-sh/steer-cli/internal/status"
+	"github.com/steer-sh/steer-cli/internal/testhome"
 )
 
 // An enabled built-in guard is in your inventory, so it appears there and not a
@@ -655,6 +657,47 @@ func TestEachSectionHasItsOwnNameColumn(t *testing.T) {
 		name := strings.TrimLeft(line, " ›")
 		if strings.HasPrefix(name, "config-path") && !strings.HasPrefix(name, "config-path resolve") {
 			t.Errorf("the rule's text sits in another section's column: %q", line)
+		}
+	}
+}
+
+// The Fixes repair actions register only in the harnesses their repair names.
+// The dashboard writes to every installed harness, so a rebuild or sync run from
+// it registered Steer again in the agent the operator had removed it from.
+func TestARepairActionRegistersNoRemovedHarness(t *testing.T) {
+	home := t.TempDir()
+	testhome.Set(t, home)
+	codexHome := filepath.Join(home, ".codex")
+	if err := os.MkdirAll(codexHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CODEX_HOME", codexHome)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(home, "no-pi"))
+	t.Chdir(t.TempDir())
+	content := []byte("#!/usr/bin/env python3\nimport sys\n\ndef main():\n    sys.exit(0)\n\nif __name__ == '__main__':\n    main()\n")
+	if _, err := claude.InstallManagedHook(claude.GlobalScope, claude.InstallManagedHookInput{
+		HookName: "no-bare-python", Rule: "use python3 instead", Content: content,
+		Metadata: claude.HookInstallMetadata{Source: claude.SourceGenerated},
+	}, claude.Registrar{}); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := gate.Defaults()
+	cfg.StateDir = t.TempDir()
+	m := New(cfg, claude.GlobalScope, claude.Registrar{}, codex.Registrar{})
+	for _, action := range []func(){m.rebuildMaster, m.syncStore} {
+		m.snap = &status.SystemStatus{Posture: status.Posture{Masters: status.MasterRuntimes(claude.GlobalScope)}}
+		action()
+		if strings.HasPrefix(m.message, "nothing was") || strings.Contains(m.message, "not rebuilt") {
+			t.Fatalf("the repair did not run: %q", m.message)
+		}
+		path, err := codex.Registrar{}.RegisteredMasterPath(claude.GlobalScope)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if path != "" {
+			t.Fatalf("the repair registered Codex again: %s (note %q)", path, m.message)
 		}
 	}
 }

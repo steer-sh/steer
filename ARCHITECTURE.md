@@ -1043,7 +1043,9 @@ with any other Steer registration still reads detached, and an empty global rule
 section in such a harness is not read as drift. A plain `hooks rebuild` or `hooks sync`
 registers every installed harness, so `status.RebuildRepair`, `DetachedRepair` and `RulesRepair` name
 `--harness` per registered or detached harness while an installed one holds no part
-of the scope; the verdict, the startup notices and `bin install` all take that repair.
+of the scope; the verdict, the startup notices, `bin install` and the dashboard all
+take that repair, and the dashboard's rebuild and sync actions register only in the
+harnesses `status.RepairTargets` names.
 `--json` is a projection of it (`status/json.go`): one summary row per record, whose
 observation `steer fix score --json` carries under the same id, guards and
 presets from both scopes, the readiness answer as `posture.readiness`, and the verdict
