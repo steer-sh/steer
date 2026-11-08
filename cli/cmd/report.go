@@ -609,14 +609,14 @@ func staleMasterLine(rows []status.MasterRuntime, labels, scopes []string, plugi
 		}
 		repairs = append(repairs, status.RebuildRepair(rows, s))
 	}
-	line := fmt.Sprintf("steer: the guard master runs an older runtime (%s)", strings.Join(labels, ", "))
+	line := fmt.Sprintf("steer: guards (%s) need a rebuild", strings.Join(labels, ", "))
 	switch {
 	case !pluginsDiffer:
 		return line + " — run: " + strings.Join(repairs, " and ")
 	case len(repairs) == 0:
-		return line + " — the bin install below rebuilds it"
+		return line + " — the bin install below updates them"
 	case len(repairs) < len(scopes):
-		return line + " — the bin install below rebuilds the global master; after it, run: " + strings.Join(repairs, " and ")
+		return line + " — the bin install below updates the global guards; after it, run: " + strings.Join(repairs, " and ")
 	}
 	return line + " — after the bin install below, run: " + strings.Join(repairs, " and ")
 }
