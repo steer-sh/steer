@@ -1,7 +1,7 @@
 package gate
 
 import (
-	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -11,7 +11,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // Tags structuring the review prompt. Untrusted text lands between them — the message,
@@ -40,6 +42,13 @@ const (
 	commonTermDivisor = 2
 	// maxListedTerms caps the matched terms a file's header names.
 	maxListedTerms = 12
+)
+
+// contextScanBytes caps the bytes one context search reads from candidate files, and
+// contextScanTime the time it spends reading them.
+var (
+	contextScanBytes = 32 << 20
+	contextScanTime  = gitMedium
 )
 
 // wordRunRe matches a word as `git grep -w` delimits one: ASCII letters, digits and
@@ -153,27 +162,74 @@ func sortedKeys(set map[string]bool) []string {
 	return out
 }
 
-// indexedReader returns a reader for a file's index content, the version a file
-// outside the diff lands with. A file whose working copy matches the index is read
-// from disk; one with unstaged edits is read from its index blob. cwd is the work-tree
-// root, so paths are root-relative, as `git grep` prints them there.
-func indexedReader(cwd string) func(path string) ([]byte, error) {
+// indexedFiles reads a file's index content, the version a file outside the diff
+// lands with. A file whose working copy matches the index is read from disk; one with
+// unstaged edits from its index blob. cwd is the work-tree root, so paths are
+// root-relative, as `git grep` prints them there.
+type indexedFiles struct {
+	cwd   string
+	dirty map[string]bool
+}
+
+func newIndexedFiles(cwd string) indexedFiles {
 	dirty := map[string]bool{}
 	if out, ok := Git(cwd, gitMedium, "diff", "--name-only", "--relative", "-z"); ok {
 		for _, path := range strings.Split(out, "\x00") {
 			dirty[path] = path != ""
 		}
 	}
-	return func(path string) ([]byte, error) {
-		if !dirty[path] {
-			return os.ReadFile(filepath.Join(cwd, path))
-		}
-		blob, ok := Git(cwd, gitMedium, "cat-file", "blob", ":./"+path)
-		if !ok {
-			return nil, fmt.Errorf("no index blob for %s", path)
-		}
-		return []byte(blob), nil
+	return indexedFiles{cwd: cwd, dirty: dirty}
+}
+
+func (f indexedFiles) read(path string) ([]byte, error) {
+	if !f.dirty[path] {
+		return os.ReadFile(filepath.Join(f.cwd, path))
 	}
+	blob, ok := Git(f.cwd, gitMedium, "cat-file", "blob", ":./"+path)
+	if !ok {
+		return nil, fmt.Errorf("no index blob for %s", path)
+	}
+	return []byte(blob), nil
+}
+
+// sizes returns the byte length read would return for each of paths it can size,
+// without reading them: one stat per clean file, one `git cat-file --batch-check`
+// for every dirty one.
+func (f indexedFiles) sizes(paths []string) map[string]int {
+	out := make(map[string]int, len(paths))
+	var dirty []string
+	for _, path := range paths {
+		switch {
+		case !f.dirty[path]:
+			if n, ok := fileSize(filepath.Join(f.cwd, path)); ok {
+				out[path] = int(n)
+			}
+		case !strings.Contains(path, "\n"):
+			dirty = append(dirty, path)
+		}
+	}
+	if len(dirty) == 0 {
+		return out
+	}
+	var stdin strings.Builder
+	for _, path := range dirty {
+		stdin.WriteString(":./" + path + "\n")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), gitMedium)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "cat-file", "--batch-check=%(objectsize)")
+	cmd.Dir = f.cwd
+	cmd.Stdin = strings.NewReader(stdin.String())
+	reply, err := cmd.Output()
+	if err != nil {
+		return out
+	}
+	for i, line := range strings.Split(strings.TrimSuffix(string(reply), "\n"), "\n") {
+		if n, err := strconv.Atoi(line); err == nil && i < len(dirty) {
+			out[dirty[i]] = n
+		}
+	}
+	return out
 }
 
 // searchTerms orders terms longest first, then lexically, and keeps the first
@@ -193,61 +249,166 @@ type termSet [maxSearchTerms / 64]uint64
 func (s *termSet) add(i int)      { s[i/64] |= 1 << (i % 64) }
 func (s *termSet) has(i int) bool { return s[i/64]&(1<<(i%64)) != 0 }
 
-// grepTerms runs one `git grep --cached -o` over the index for terms and returns, per
-// file outside skip, which terms it contains as whole words. The output streams, so
-// memory holds one set per matching file however often a term recurs. ok is false when
-// git fails or times out; a partial result never ranks.
-func grepTerms(cwd string, terms []string, skip map[string]bool) (map[string]*termSet, bool) {
-	args := []string{"grep", "--cached", "-o", "-z", "-w", "-F", "-I",
-		"--no-color", "--no-line-number", "--no-column"}
-	index := make(map[string]int, len(terms))
-	for i, term := range terms {
+// errSearchTimedOut reports that the candidate search ran past its time limit.
+var errSearchTimedOut = errors.New("timed out")
+
+// grepCandidates lists the indexed files outside skip that contain any of terms as a
+// whole word, in git's path order. It costs one `git grep -l`, which stops reading a
+// file at its first match.
+func grepCandidates(cwd string, terms []string, skip map[string]bool) ([]string, error) {
+	args := []string{"grep", "--cached", "-l", "-z", "-w", "-F", "-I"}
+	for _, term := range terms {
 		args = append(args, "-e", term)
-		index[term] = i
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), gitMedium)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = cwd
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, false
-	}
-	if err := cmd.Start(); err != nil {
-		return nil, false
-	}
-	hits := map[string]*termSet{}
-	// Each match prints as `path NUL word LF`; the path is verbatim under -z.
-	r := bufio.NewReaderSize(stdout, 64<<10)
-	for {
-		path, err := r.ReadString(0)
-		if err != nil {
-			break
+	var out strings.Builder
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		var exit *exec.ExitError
+		switch {
+		case ctx.Err() != nil:
+			return nil, errSearchTimedOut
+		case errors.As(err, &exit) && exit.ExitCode() == 1:
+			return nil, nil // no match
+		default:
+			return nil, err
 		}
-		word, err := r.ReadString('\n')
-		if err != nil {
-			break
+	}
+	var paths []string
+	for _, path := range nulFields(out.String()) {
+		if !skip[path] {
+			paths = append(paths, path)
 		}
-		path = path[:len(path)-1]
-		i, known := index[strings.TrimSuffix(word, "\n")]
-		if !known || skip[path] {
+	}
+	return paths, nil
+}
+
+// isWordByte is the byte class `git grep -w` treats as part of a word.
+func isWordByte(c byte) bool {
+	return c == '_' || (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
+// containsWord reports whether text holds term with no word byte on either side.
+func containsWord(text []byte, term string) bool {
+	for from := 0; from <= len(text)-len(term); {
+		at := bytes.Index(text[from:], []byte(term))
+		if at < 0 {
+			return false
+		}
+		at += from
+		end := at + len(term)
+		if (at == 0 || !isWordByte(text[at-1])) && (end == len(text) || !isWordByte(text[end])) {
+			return true
+		}
+		from = at + 1
+	}
+	return false
+}
+
+// termMatcher marks which search terms a file contains as whole words. A term that is
+// one word is found by splitting the file into words; any other (a stem such as
+// `check-gate`) by a bounded substring search.
+type termMatcher struct {
+	words map[string]int
+	other []int
+	terms []string
+}
+
+func newTermMatcher(terms []string) termMatcher {
+	m := termMatcher{words: map[string]int{}, terms: terms}
+	for i, term := range terms {
+		if wordRunRe.FindString(term) == term {
+			m.words[term] = i
+		} else {
+			m.other = append(m.other, i)
+		}
+	}
+	return m
+}
+
+func (m termMatcher) match(text []byte) termSet {
+	var set termSet
+	for i := 0; i < len(text); {
+		if !isWordByte(text[i]) {
+			i++
 			continue
 		}
-		set := hits[path]
-		if set == nil {
-			set = &termSet{}
-			hits[path] = set
+		j := i
+		for j < len(text) && isWordByte(text[j]) {
+			j++
 		}
-		set.add(i)
-	}
-	if err := cmd.Wait(); err != nil {
-		var exit *exec.ExitError
-		if errors.As(err, &exit) && exit.ExitCode() == 1 && ctx.Err() == nil {
-			return hits, true // no match
+		if k, ok := m.words[string(text[i:j])]; ok {
+			set.add(k)
 		}
-		return nil, false
+		i = j
 	}
-	return hits, true
+	for _, k := range m.other {
+		if containsWord(text, m.terms[k]) {
+			set.add(k)
+		}
+	}
+	return set
+}
+
+// termScan is what the search learned: per scanned file, its terms and size, and how
+// much of the candidate list it covered.
+type termScan struct {
+	hits       map[string]*termSet
+	sizes      map[string]int
+	candidates int
+	scanned    int
+	unread     int
+	err        error
+}
+
+// scanTerms finds the candidate files, then reads them smallest first and marks the
+// terms each contains, until the next file would take the bytes read past budget. The
+// cost is bounded by budget and the one grep, not by how often a term occurs.
+func scanTerms(cwd string, terms []string, skip map[string]bool,
+	files indexedFiles, budget int) termScan {
+	scan := termScan{hits: map[string]*termSet{}, sizes: map[string]int{}}
+	candidates, err := grepCandidates(cwd, terms, skip)
+	if err != nil {
+		scan.err = err
+		return scan
+	}
+	scan.candidates = len(candidates)
+	sizes := files.sizes(candidates)
+	var sized []string
+	for _, path := range candidates {
+		if _, ok := sizes[path]; ok {
+			sized = append(sized, path)
+		} else {
+			scan.unread++
+		}
+	}
+	sort.SliceStable(sized, func(a, b int) bool { return sizes[sized[a]] < sizes[sized[b]] })
+	matcher := newTermMatcher(terms)
+	spent := 0
+	deadline := time.Now().Add(contextScanTime)
+	for _, path := range sized {
+		if spent+sizes[path] > budget || time.Now().After(deadline) {
+			break
+		}
+		text, err := files.read(path)
+		if err != nil || spent+len(text) > budget {
+			scan.unread++
+			continue
+		}
+		spent += len(text)
+		set := matcher.match(text)
+		if set == (termSet{}) { // on disk in a form git grep does not search
+			scan.unread++
+			continue
+		}
+		scan.scanned++
+		scan.hits[path] = &set
+		scan.sizes[path] = len(text)
+	}
+	return scan
 }
 
 // indexedFileCount is the number of index entries outside skip.
@@ -278,7 +439,8 @@ type contextFile struct {
 func ReferencingFiles(cfg Config, cwd string, terms map[string]bool, changed []string) []string {
 	top := Toplevel(cwd)
 	var paths []string
-	for _, f := range referencingFiles(cfg, top, terms, changed, indexedReader(top)) {
+	files, _ := referencingFiles(cfg, top, terms, changed, newIndexedFiles(top))
+	for _, f := range files {
 		paths = append(paths, f.path)
 	}
 	return paths
@@ -290,18 +452,19 @@ func ReferencingFiles(cfg Config, cwd string, terms map[string]bool, changed []s
 // of the total. A file scores the sum of its terms' weights; ties go to the smaller
 // file, then the path. cwd is the work-tree root.
 func referencingFiles(cfg Config, cwd string, terms map[string]bool, changed []string,
-	read func(string) ([]byte, error)) []contextFile {
+	files indexedFiles) ([]contextFile, termScan) {
 	search := searchTerms(terms)
 	if len(search) == 0 || cfg.MaxContextFiles <= 0 {
-		return nil
+		return nil, termScan{}
 	}
 	changedSet := map[string]bool{}
 	for _, p := range changed {
 		changedSet[p] = true
 	}
-	hits, ok := grepTerms(cwd, search, changedSet)
-	if !ok || len(hits) == 0 {
-		return nil
+	scan := scanTerms(cwd, search, changedSet, files, contextScanBytes)
+	hits := scan.hits
+	if len(hits) == 0 {
+		return nil, scan
 	}
 
 	total := indexedFileCount(cwd, changedSet)
@@ -352,20 +515,11 @@ func referencingFiles(cfg Config, cwd string, terms map[string]bool, changed []s
 			ranked = append(ranked, f)
 		}
 	}
-	sizes := map[string]int{}
-	size := func(path string) int {
-		if n, seen := sizes[path]; seen {
-			return n
-		}
-		text, _ := read(path)
-		sizes[path] = len(text)
-		return len(text)
-	}
 	sort.Slice(ranked, func(a, b int) bool {
 		if ranked[a].score != ranked[b].score {
 			return ranked[a].score > ranked[b].score
 		}
-		if sa, sb := size(ranked[a].path), size(ranked[b].path); sa != sb {
+		if sa, sb := scan.sizes[ranked[a].path], scan.sizes[ranked[b].path]; sa != sb {
 			return sa < sb
 		}
 		return ranked[a].path < ranked[b].path
@@ -373,7 +527,29 @@ func referencingFiles(cfg Config, cwd string, terms map[string]bool, changed []s
 	if len(ranked) > cfg.MaxContextFiles {
 		ranked = ranked[:cfg.MaxContextFiles]
 	}
-	return ranked
+	return ranked, scan
+}
+
+// searchNote says how much of the candidate search a context block reflects, or ""
+// when the search covered every candidate.
+func searchNote(scan termScan) string {
+	switch {
+	case scan.err != nil:
+		return fmt.Sprintf("The search for files sharing these names did not finish (%v), "+
+			"so no unchanged file was ranked; their absence here says nothing about callers.",
+			scan.err)
+	}
+	var notes []string
+	if scan.unread > 0 {
+		notes = append(notes, fmt.Sprintf(
+			"%d candidate files could not be read or matched and were not ranked.", scan.unread))
+	}
+	if scan.scanned+scan.unread < scan.candidates {
+		notes = append(notes, fmt.Sprintf("The search read %d of %d candidate files, smallest "+
+			"first, before its %d-byte or %s budget ran out; the rest were not ranked.",
+			scan.scanned, scan.candidates, contextScanBytes, contextScanTime))
+	}
+	return strings.Join(notes, " ")
 }
 
 // BuildContext renders the unchanged files that share a changed term as one block,
@@ -381,15 +557,13 @@ func referencingFiles(cfg Config, cwd string, terms map[string]bool, changed []s
 // the text, so the reviewer never mistakes an elision for the end of a file.
 func BuildContext(cfg Config, cwd string, terms map[string]bool, changed []string) string {
 	cwd = Toplevel(cwd)
-	read := indexedReader(cwd)
-	files := referencingFiles(cfg, cwd, terms, changed, read)
-	if len(files) == 0 {
-		return ""
-	}
+	indexed := newIndexedFiles(cwd)
+	files, scan := referencingFiles(cfg, cwd, terms, changed, indexed)
+	note := searchNote(scan)
 	var chunks []string
 	spent := 0
 	for _, f := range files {
-		raw, err := read(f.path)
+		raw, err := indexed.read(f.path)
 		if err != nil {
 			continue
 		}
@@ -414,11 +588,17 @@ func BuildContext(cfg Config, cwd string, terms map[string]bool, changed []strin
 		chunks = append(chunks, fmt.Sprintf("--- %s (unchanged; shares: %s%s) ---\n%s",
 			f.path, strings.Join(listed, ", "), more, text))
 	}
+	if note != "" {
+		note += "\n"
+	}
 	if len(chunks) == 0 {
-		return ""
+		if note == "" {
+			return ""
+		}
+		return "\n<unchanged-callers>\n" + note + "</unchanged-callers>\n"
 	}
 	return "\n<unchanged-callers>\nThese files are NOT part of the commit. Each shares " +
 		"names with the diff's changed lines, rarest names first; a shared name shows " +
-		"possible relevance, not a confirmed caller.\n\n" +
+		"possible relevance, not a confirmed caller.\n" + note + "\n" +
 		strings.Join(chunks, "\n\n") + "\n</unchanged-callers>\n"
 }

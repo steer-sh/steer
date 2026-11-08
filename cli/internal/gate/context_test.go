@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestCallerContextReadsTheIndex: a file outside the diff lands with its index
@@ -241,5 +242,101 @@ func TestSearchTermsAreCapped(t *testing.T) {
 	}
 	if got[0] != "a_much_longer_identifier_name" {
 		t.Errorf("searchTerms()[0] = %q, want the longest term first", got[0])
+	}
+}
+
+// TestCallerContextSaysWhenTheScanBudgetCutsIt: the search reads candidates smallest
+// first within its byte budget, and the block names the candidates it did not rank.
+func TestCallerContextSaysWhenTheScanBudgetCutsIt(t *testing.T) {
+	saved := contextScanBytes
+	defer func() { contextScanBytes = saved }()
+	contextScanBytes = 200
+	cfg := Defaults()
+	root := buildRepo(t, map[string]string{
+		"api.go":   "func Fetch() {}\n",
+		"small.go": "func one() { Fetch() }\n",
+		"large.go": "func two() { Fetch() }\n" + strings.Repeat("// pad\n", 60),
+	})
+	gitCmd(t, root, verb, "-qm", "init")
+	writeFileAt(t, root, "api.go", "func Fetch(id int) {}\n")
+	gitCmd(t, root, "add", "api.go")
+
+	block := BuildContext(cfg, root, map[string]bool{"Fetch": true}, []string{"api.go"})
+	if !strings.Contains(block, "--- small.go ") {
+		t.Errorf("a candidate within the budget must still be ranked:\n%s", block)
+	}
+	if strings.Contains(block, "large.go") {
+		t.Errorf("a candidate past the budget must not be read:\n%s", block)
+	}
+	if !strings.Contains(block, "read 1 of 2 candidate files") {
+		t.Errorf("the block must say the budget cut the search:\n%s", block)
+	}
+}
+
+// TestCallerContextSaysWhenTheSearchFails: a search that cannot run leaves a note in
+// place of the files, never an empty block.
+func TestCallerContextSaysWhenTheSearchFails(t *testing.T) {
+	block := BuildContext(Defaults(), t.TempDir(), map[string]bool{"Fetch": true}, nil)
+	if !strings.Contains(block, "did not finish") {
+		t.Errorf("a failed search must say so, got %q", block)
+	}
+}
+
+// TestTermMatcherMatchesWholeWords: a term matches only with no word byte beside it,
+// whether it is one word or a stem holding other characters.
+func TestTermMatcherMatchesWholeWords(t *testing.T) {
+	m := newTermMatcher([]string{"check-gate", "Fetch"})
+	set := m.match([]byte("xcheck-gate; run ./check-gate now; Fetcher"))
+	if !set.has(0) {
+		t.Error("a stem with a hyphen must match where it stands alone")
+	}
+	if set.has(1) {
+		t.Error("Fetch must not match inside Fetcher")
+	}
+	if set = m.match([]byte("xcheck-gate Fetch")); set.has(0) || !set.has(1) {
+		t.Errorf("match = %v: a stem inside a longer word is no match; a whole word is", set)
+	}
+}
+
+// TestCallerContextBudgetsIndexedContent: the scan budget counts the index content it
+// reads, so an unstaged edit that shrinks a large file does not admit it.
+func TestCallerContextBudgetsIndexedContent(t *testing.T) {
+	saved := contextScanBytes
+	defer func() { contextScanBytes = saved }()
+	contextScanBytes = 200
+	cfg := Defaults()
+	root := buildRepo(t, map[string]string{
+		"api.go":   "func Fetch() {}\n",
+		"small.go": "func one() { Fetch() }\n",
+		"large.go": "func two() { Fetch() }\n" + strings.Repeat("// pad\n", 60),
+	})
+	gitCmd(t, root, verb, "-qm", "init")
+	writeFileAt(t, root, "api.go", "func Fetch(id int) {}\n")
+	gitCmd(t, root, "add", "api.go")
+	writeFileAt(t, root, "large.go", "x\n")
+
+	block := BuildContext(cfg, root, map[string]bool{"Fetch": true}, []string{"api.go"})
+	if strings.Contains(block, "large.go") || !strings.Contains(block, "read 1 of 2 candidate files") {
+		t.Errorf("a file whose indexed content overruns the budget must not be read:\n%s", block)
+	}
+}
+
+// TestCallerContextSaysWhenTheScanTimeRunsOut: the scan stops reading at its time
+// budget and says how much it read.
+func TestCallerContextSaysWhenTheScanTimeRunsOut(t *testing.T) {
+	saved := contextScanTime
+	defer func() { contextScanTime = saved }()
+	contextScanTime = -time.Second
+	root := buildRepo(t, map[string]string{
+		"api.go":    "func Fetch() {}\n",
+		"caller.go": "func one() { Fetch() }\n",
+	})
+	gitCmd(t, root, verb, "-qm", "init")
+	writeFileAt(t, root, "api.go", "func Fetch(id int) {}\n")
+	gitCmd(t, root, "add", "api.go")
+
+	block := BuildContext(Defaults(), root, map[string]bool{"Fetch": true}, []string{"api.go"})
+	if !strings.Contains(block, "read 0 of 1 candidate files") {
+		t.Errorf("a scan past its time budget must say so:\n%s", block)
 	}
 }
