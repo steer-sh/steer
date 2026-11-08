@@ -489,7 +489,10 @@ one `CommitView` per round from the round's `DiffSpec`, and the reviewer runs a 
 loop whose `read_file`, `grep` and `list_files` (`reviewers/viewtools.go`) read that
 view, so a file reads as the commit lands it: the working copy where the command
 stages it, the index blob everywhere else, so an unstaged edit the commit leaves out
-is never what a tool returns. The CLI reviewers read the disk. The loop's call, turn and byte caps hold inside the review
+is never what a tool returns. The CLI reviewers read the disk, so on a review of the
+index the engine adds an `<unstaged-paths>` section to their prompt alone
+(`gate.UnstagedNote`): the tracked paths whose working copy differs from the index the
+diff read, capped at `maxUnstagedPaths` with the rest counted. The loop's call, turn and byte caps hold inside the review
 timeout; an assistant turn goes back with the `reasoning` and `reasoning_details` the
 endpoint sent, because a reasoning model can answer empty without them. Past the caps one request without tools asks for the review, and a reply that
 still calls tools is `tool_budget`. Under `auto` a first-request 4xx that names tools

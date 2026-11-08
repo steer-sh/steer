@@ -20,15 +20,18 @@ import (
 type stubReviewer struct {
 	replies []RawRun
 	calls   int
+	// prompts holds every prompt the stub was handed, in call order.
+	prompts []string
 	mu      sync.Mutex
 }
 
 func (s *stubReviewer) Name() string       { return "stub" }
 func (s *stubReviewer) ModelLabel() string { return "stub-model" }
 
-func (s *stubReviewer) Review(context.Context, string, string) RawRun {
+func (s *stubReviewer) Review(_ context.Context, prompt, _ string) RawRun {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.prompts = append(s.prompts, prompt)
 	reply := s.replies[min(s.calls, len(s.replies)-1)]
 	s.calls++
 	return reply
@@ -154,7 +157,7 @@ func TestCleanPassAllows(t *testing.T) {
 		t.Errorf("channel = %v, want %s — a reader must be able to tell an absent "+
 			"field from a lost one", row["channel"], ChannelPreToolUse)
 	}
-	if row["instrument"] != "stub-model/2/"+PromptDigest()+"/go-findings-v5-shell" {
+	if row["instrument"] != "stub-model/2/"+PromptDigest()+"/go-findings-v6-shell" {
 		t.Errorf("instrument = %v — it must name the reviewer that actually ran", row["instrument"])
 	}
 	if row["diff_file"] == nil {
@@ -167,7 +170,7 @@ func TestRowCarriesTheInstrumentByDimension(t *testing.T) {
 	h.cfg.ReviewerEffort = "high"
 	h.handle()
 	row := h.lastRow()
-	if row["instrument"] != "stub-model/2/"+PromptDigest()+"/go-findings-v5-shell/high" {
+	if row["instrument"] != "stub-model/2/"+PromptDigest()+"/go-findings-v6-shell/high" {
 		t.Errorf("instrument = %v — a set effort is the fifth segment", row["instrument"])
 	}
 	fields, ok := row["instrument_fields"].(map[string]any)
@@ -176,7 +179,7 @@ func TestRowCarriesTheInstrumentByDimension(t *testing.T) {
 	}
 	want := map[string]any{
 		"provider": "stub", "model": "stub-model", "effort": "high",
-		"runs": float64(2), "prompt_digest": PromptDigest(), "engine": "go-findings-v5-shell",
+		"runs": float64(2), "prompt_digest": PromptDigest(), "engine": "go-findings-v6-shell",
 	}
 	for key, value := range want {
 		if fields[key] != value {
