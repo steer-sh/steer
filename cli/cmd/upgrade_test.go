@@ -123,9 +123,9 @@ func TestStaleMasterLineNamesEveryScope(t *testing.T) {
 		want, not     []string
 	}{
 		{both, false, []string{status.RebuildCommand("global"), status.RebuildCommand("project")}, []string{"bin install"}},
-		{both, true, []string{"bin install below rebuilds the global master", status.RebuildCommand("project")},
+		{both, true, []string{"bin install below updates the global guards", status.RebuildCommand("project")},
 			[]string{status.RebuildCommand("global")}},
-		{[]string{claude.GlobalScope}, true, []string{"bin install below rebuilds it"}, []string{"steer hooks rebuild"}},
+		{[]string{claude.GlobalScope}, true, []string{"bin install below updates them"}, []string{"steer hooks rebuild"}},
 		{[]string{claude.ProjectScope}, true, []string{"after the bin install below, run: " + status.RebuildCommand("project")}, nil},
 	}
 	for _, c := range cases {

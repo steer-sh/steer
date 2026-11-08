@@ -181,14 +181,15 @@ func recordPluginCopies() {
 
 // rebuildStaleMasters rebuilds the global guard master when its runtime is not
 // this binary's, and names the rebuild of a stale project master without running
-// it, because that master is committed for the whole repository. The rebuild
+// it, because bin install leaves a repository's guard runner to the operator. The rebuild
 // re-registers only the harnesses already holding a registration in the scope.
 func rebuildStaleMasters(r *installReport, verifyLater func(scope string)) error {
 	rows := status.MasterRuntimes(claude.GlobalScope, claude.ProjectScope)
 	for _, s := range status.StaleScopes(rows) {
 		if s != claude.GlobalScope {
-			r.action(fmt.Sprintf("The %s guard master runs an older runtime and is committed; "+
-				"to rebuild it for the repository, run: %s", s, status.RebuildRepair(rows, s)))
+			r.action(fmt.Sprintf("This repository's guards need a rebuild to run this Steer's runtime. "+
+				"bin install leaves a repository's guard runner to you; run: %s",
+				status.RebuildRepair(rows, s)))
 			continue
 		}
 		targets, err := registeredTargets(s)
