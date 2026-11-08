@@ -69,3 +69,36 @@ func TestCommitShapeGuidanceReachesArmedClaudeSessions(t *testing.T) {
 		t.Errorf("the guidance reached the operator line: %q", system)
 	}
 }
+
+// TestCodexCommitGuidance checks both context entry points with Codex registration.
+// pins existing behaviour
+func TestCodexCommitGuidance(t *testing.T) {
+	t.Parallel()
+	s := NewSandbox(t)
+	env := []string{"CODEX_SESSION_ID=test"}
+	run := func(args ...string) Result { return s.Run(s.Repo, "", env, "steer", args...) }
+	if r := run("commit-gate", "subagent-start"); r.Code != 0 || r.Stdout != "" {
+		t.Fatalf("unarmed: %s", r.Output())
+	}
+	s.Reviewer("claude-code", "sonnet", "", 3, 3)
+	s.MustSteer("commit-gate", "install", "--harness", "codex")
+	for _, args := range [][]string{{"commit-gate", "subagent-start"}, {"report", "cadence"}} {
+		r := run(args...)
+		var doc struct {
+			System string `json:"systemMessage"`
+			Hook   struct {
+				Context string `json:"additionalContext"`
+			} `json:"hookSpecificOutput"`
+		}
+		if r.Code != 0 {
+			t.Fatalf("hook: %s", r.Output())
+		}
+		if err := json.Unmarshal([]byte(r.Stdout), &doc); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(doc.Hook.Context, "git -C /absolute/path/to/repository commit -F -") || strings.Contains(doc.System, guidanceMarker) {
+			t.Fatalf("delivery: %s", r.Stdout)
+		}
+	}
+	s.WaitForRefresh()
+}

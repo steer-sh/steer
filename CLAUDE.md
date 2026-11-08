@@ -103,6 +103,8 @@ Read the linked architecture section before changing the corresponding boundary:
   A change to what `cc.PreflightDeny` refuses can change what
   `cli/internal/gate/cc/guidance.go` may teach; its test runs each quoted form
   through the preflight.
+  `cli/cmd/commit_gate_guidance.go` selects the registered harness's guidance for
+  SessionStart and SubagentStart; Codex adds an absolute `git -C` repository path.
   The API reviewer's key never goes in `~/.steer/config.json`; it lives in the
   variable `reviewer.api.key_env` names or in the file `internal/apikey/` owns, and
   only `steer reviewer key set` writes that file.
