@@ -67,7 +67,7 @@ func TestFixture(t *testing.T) {
 	if !ok {
 		t.Fatal("GetDiff failed")
 	}
-	symbols := gate.ChangedSymbols(diff, paths)
+	symbols := gate.ChangedTerms(diff, paths)
 	contextBlock := gate.BuildContext(cfg, repo, symbols, paths)
 	t.Logf("changed files: %v", paths)
 	t.Logf("diff chars: %d, symbols: %d", len(diff), len(symbols))

@@ -172,10 +172,10 @@ func (e *Engine) prepare(req Request, firing int, d *DiffResult) (prepared, stri
 
 // review runs the panel over a prepared round.
 func (e *Engine) review(ctx context.Context, req Request, p prepared) PanelResult {
-	// Symbols come from the budgeted diff before neutralisation: neutralising first
+	// Terms come from the budgeted diff before neutralisation: neutralising first
 	// would leave &lt; in a search term, and a dropped file's hunks seed no search.
 	// Changed-path stems stay search terms. BuildContext neutralises its own files.
-	contextBlock := BuildContext(e.cfg, req.Repo, ChangedSymbols(p.diff, p.paths), p.paths)
+	contextBlock := BuildContext(e.cfg, req.Repo, ChangedTerms(p.diff, p.paths), p.paths)
 	prompt := BuildReviewPrompt(
 		NeutralizeTags(req.Message), NeutralizeTags(p.diff), contextBlock, req.addendum)
 	return e.panel.Run(ctx, prompt, req.Repo, req.Spec)

@@ -109,7 +109,7 @@ func replay(provider, model, effort, base string, runs int, wt, diffFile, subjec
 	if err != nil {
 		return err
 	}
-	ctxBlock := gate.BuildContext(cfg, wt, gate.ChangedSymbols(diff, paths), paths)
+	ctxBlock := gate.BuildContext(cfg, wt, gate.ChangedTerms(diff, paths), paths)
 	prompt := gate.BuildReviewPrompt(gate.NeutralizeTags(subject), gate.NeutralizeTags(diff),
 		ctxBlock, gate.LoadAddendum(wt))
 	start := time.Now()
