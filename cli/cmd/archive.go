@@ -130,8 +130,7 @@ no manifest entry names.`,
 		if err != nil {
 			return err
 		}
-		fmt.Fprintln(out, styles.SuccessBox.Render(fmt.Sprintf(
-			"Restored %s %s\nScope: %s\nHarness: %s\nFrom: %s", s.Tier, s.ID, scope, harnessNames(targets), s.Dir)))
+		fmt.Fprintln(out, styles.SuccessBox.Render(restoredMessage(s, scope, targets)))
 		if s.Tier == string(tier.Review) && scope == claude.ProjectScope {
 			fmt.Fprintf(out, "The commit gate reads project entries from HEAD. Commit %s on its own, before the change "+
 				"the restored entry is for: a commit that carries both is reviewed without the entry.\n", projectManifestPath())
@@ -139,6 +138,16 @@ no manifest entry names.`,
 		printRestorePointer(out, s, s.ID, scope)
 		return nil
 	},
+}
+
+// restoredMessage confirms a restore, naming the harnesses it registered in when
+// there are any.
+func restoredMessage(s archive.Stored, scope string, targets []harness.Registrar) string {
+	msg := fmt.Sprintf("Restored %s %s\nScope: %s", s.Tier, s.ID, scope)
+	if len(targets) > 0 {
+		msg += "\nHarness: " + harnessNames(targets)
+	}
+	return msg + "\nFrom: " + s.Dir
 }
 
 type archiveStore struct {

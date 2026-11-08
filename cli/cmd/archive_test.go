@@ -424,3 +424,21 @@ func TestFixRetireLeavesARetargetedCheckAlone(t *testing.T) {
 		t.Fatalf("retire of a retargeted check printed %q; want no remove command", got)
 	}
 }
+
+// A review entry registers in no harness, so its restore names none.
+func TestArchiveRestoreOfAReviewEntryNamesNoHarness(t *testing.T) {
+	archiveRepo(t)
+	if _, err := claude.InstallAddendum(claude.ProjectScope, "nits", "naming preferences are not findings"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := claude.RemoveAddendum(claude.ProjectScope, "nits", ""); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runArchiveCmd(t, archiveRestoreCmd, claude.ProjectScope, []string{"nits"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "Restored review nits") || strings.Contains(out, "Harness:") {
+		t.Errorf("review restore output names a harness or no restore:\n%s", out)
+	}
+}
