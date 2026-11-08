@@ -571,12 +571,13 @@ files and an unread one would put every ignored file in the review; and a bundle
 form is reviewed from the working tree (`cc.DiffSpecFor`), which would show the
 reviewers edits the commit does not carry.
 
-A Claude Code session whose commit gate is armed learns the accepted form before its
+A Claude Code or Codex session whose commit gate is registered learns the accepted form before its
 first commit: `cc.CommitShapeGuidance` rides `additionalContext` at SessionStart
 (`report cadence`) and at SubagentStart (`commit-gate subagent-start`), because a
 subagent does not inherit the session's SessionStart context. It never reaches
 `systemMessage`, and elsewhere both entry points print nothing. Each command the
-guidance quotes passes `PreflightDeny`.
+guidance quotes passes `PreflightDeny`. Codex adds an absolute repository selector
+with `git -C` because nested tool payloads can omit the shell working directory.
 
 Every decision that does not block carries a receipt to both the agent's context
 and the operator (`internal/gate/receipt.go`); no path lets a commit through

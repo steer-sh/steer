@@ -549,7 +549,7 @@ func runCadence() {
 	if pluginLineDue(cadence.ShouldNudgePlugins(dir, pluginKey), masterDue, install) || update.failed {
 		lines = append(lines, pluginCopyLines(pluginCopies, hooksBuild)...)
 	}
-	guidance := claudeCommitGuidance()
+	guidance := commitGuidance()
 	if len(lines) == 0 {
 		// No operator line, but a repaired condition still has to clear its key: a
 		// record left behind would suppress the nudge if that same condition
