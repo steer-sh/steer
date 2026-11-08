@@ -33,7 +33,7 @@ an interactive terminal; a script or an agent reads 'steer status --json'.`,
 			return err
 		}
 		cfg, _, _ := resolvedGateConfig()
-		return tui.Run(cfg, currentScope(), targets...)
+		return tui.Run(cfg, currentScope(), harnessNamed(), targets...)
 	},
 }
 

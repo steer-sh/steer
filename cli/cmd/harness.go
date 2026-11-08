@@ -48,6 +48,12 @@ func currentRegistrars() ([]harness.Registrar, error) {
 	return []harness.Registrar{registrar}, nil
 }
 
+// harnessNamed reports whether the user chose the targets with --harness or
+// --all-harnesses.
+func harnessNamed() bool {
+	return allHarnesses || strings.TrimSpace(harnessFlag) != ""
+}
+
 // harnessNames renders the targets for the line a command prints after writing,
 // so a Codex user reading "Claude Code" sees the mismatch and re-runs.
 func harnessNames(targets []harness.Registrar) string {

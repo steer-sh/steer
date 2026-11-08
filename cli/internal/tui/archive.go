@@ -182,14 +182,14 @@ func (m *Model) archiveFix(f archiveForm, reason string) (string, error) {
 	restore := "; enter on it under Archived restores it"
 	switch tier.Kind(f.tier) {
 	case tier.Guard:
-		res, err := claude.RemoveManagedHook(f.scope, f.id, claude.RemoveOptions{Reason: reason}, m.targets...)
+		res, err := claude.RemoveManagedHook(f.scope, f.id, claude.RemoveOptions{Reason: reason}, m.targetsFor(f.scope)...)
 		if err != nil {
 			return "", err
 		}
 		return "archived " + noun + " " + f.id + "; it no longer runs in " + scopeReach(f.scope) +
 			fixtureNote(res.Verification, "") + restore, nil
 	case tier.Instruction:
-		if _, err := claude.RemoveManagedRule(f.scope, f.id, reason, m.targets...); err != nil {
+		if _, err := claude.RemoveManagedRule(f.scope, f.id, reason, m.targetsFor(f.scope)...); err != nil {
 			return "", err
 		}
 		return "archived " + noun + " " + f.id + "; the instructions in " + scopeReach(f.scope) +
@@ -279,7 +279,7 @@ func (m *Model) restoreArchived(e *archivedEntry) tea.Cmd {
 			return checkActionMsg{action: checkRestore, id: s.ID, note: restoreCheckNote(s.ID, run, err)}
 		}
 	}
-	result, err := claude.RestoreArchived(e.scope, s, m.targets...)
+	result, err := claude.RestoreArchived(e.scope, s, m.targetsFor(e.scope)...)
 	fixtures := ""
 	if result != nil {
 		fixtures = fixtureNote(result.Verification, s.ID)

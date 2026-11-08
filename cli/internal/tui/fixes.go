@@ -691,11 +691,12 @@ func (m *Model) togglePreset(name string, on bool) {
 	}
 	var removed []presets.CatalogItem
 	if on {
-		_, removed, err = presets.DisablePreset(m.scope, catalog, item, false, m.targets...)
+		_, removed, err = presets.DisablePreset(m.scope, catalog, item, false, m.targetsFor(m.scope)...)
 	} else {
-		_, err = presets.EnablePreset(m.scope, catalog, item, false, m.targets...)
+		targets := m.targetsFor(m.scope)
+		_, err = presets.EnablePreset(m.scope, catalog, item, false, targets...)
 		if err == nil {
-			_, err = presets.EnsureAutoManagedFactoryPresets(m.scope, catalog, false, m.targets...)
+			_, err = presets.EnsureAutoManagedFactoryPresets(m.scope, catalog, false, targets...)
 		}
 	}
 	// A disable can fail after it removed the guard, so the panel reads the store
@@ -724,7 +725,7 @@ func (m *Model) syncPresets() {
 		m.note("could not read the built-in guards: %v", err)
 		return
 	}
-	res, err := presets.SyncFactoryPresets(m.scope, catalog, presets.SyncOptions{}, m.targets...)
+	res, err := presets.SyncFactoryPresets(m.scope, catalog, presets.SyncOptions{}, m.targetsFor(m.scope)...)
 	if err != nil {
 		m.note("nothing was updated: %v", err)
 		return
@@ -738,7 +739,7 @@ func (m *Model) syncPresets() {
 // it, through the same package function `steer hooks rebuild` calls. It registers
 // only in the harnesses the scope's repair names.
 func (m *Model) rebuildMaster() {
-	targets, ok := m.repairTargets(status.RepairTargets(m.snap.Posture.Rules, m.snap.Posture.Masters, m.scope))
+	targets, ok := m.repairTargets()
 	if !ok {
 		return
 	}
@@ -759,7 +760,7 @@ func (m *Model) rebuildMaster() {
 // scope's sync repair names, through the same package function `steer hooks sync`
 // calls.
 func (m *Model) syncStore() {
-	targets, ok := m.repairTargets(status.RepairTargets(m.snap.Posture.Rules, m.snap.Posture.Masters, m.scope))
+	targets, ok := m.repairTargets()
 	if !ok {
 		return
 	}
@@ -772,15 +773,30 @@ func (m *Model) syncStore() {
 	m.note("synced %d agent(s); %d already matched the guard files", len(res.Synced), len(res.Current))
 }
 
-// repairTargets confines the dashboard's targets to the harnesses a repair names;
-// nil ids keeps every target. With none left it notes the refusal and reports false,
-// since an empty list would fall back to a default harness.
-func (m *Model) repairTargets(ids []string) ([]harness.Registrar, bool) {
-	if ids == nil {
+// targetsFor are the harnesses a guard action in scope registers in, read from the
+// registrations on disk when it runs rather than from the snapshot.
+func (m *Model) targetsFor(scope string) []harness.Registrar {
+	if m.named {
+		return m.targets
+	}
+	return status.GuardTargets(scope, m.targets)
+}
+
+// repairTargets confines targetsFor to the harnesses the scope's repair names,
+// read from disk when it runs; nil ids keeps targetsFor. With none left it notes
+// the refusal and reports false, since an empty list would fall back to a default
+// harness.
+func (m *Model) repairTargets() ([]harness.Registrar, bool) {
+	if m.named {
 		return m.targets, true
 	}
+	targets := m.targetsFor(m.scope)
+	ids := status.RepairTargets(status.InstalledRules(m.scope), status.MasterRuntimes(m.scope), m.scope)
+	if ids == nil {
+		return targets, true
+	}
 	var out []harness.Registrar
-	for _, t := range m.targets {
+	for _, t := range targets {
 		if slices.Contains(ids, string(t.Harness().ID)) {
 			out = append(out, t)
 		}

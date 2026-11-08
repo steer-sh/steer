@@ -14,6 +14,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/adjudication"
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/guard"
+	"github.com/steer-sh/steer-cli/internal/status"
 	"github.com/steer-sh/steer-cli/internal/styles"
 	"github.com/steer-sh/steer-cli/internal/utils"
 )
@@ -114,8 +115,7 @@ global hooks after project hooks.`,
 				return err
 			}
 			if _, err := os.Stat(masterHookPath); err != nil {
-				return fmt.Errorf("scope %s has managed hooks but missing master hook at %s (run `steer hooks rebuild --scope %s`)",
-					verifyScope, masterHookPath, verifyScope)
+				return missingMasterError(verifyScope, masterHookPath)
 			}
 
 			verifiedScopes++
@@ -431,4 +431,11 @@ func init() {
 	verifyCmd.Flags().StringVar(&verifyBase, "base", "", "Base git ref/sha for --changed mode")
 	verifyCmd.Flags().StringVar(&verifyHead, "head", "", "Head git ref/sha for --changed mode")
 	verifyCmd.Flags().BoolVar(&verifyIncludeGlobal, "include-global", false, "Also verify global hooks in addition to selected scope")
+}
+
+// missingMasterError names the rebuild for a scope whose store holds guards but no
+// master, confined to the harnesses that scope's repair targets.
+func missingMasterError(scope, path string) error {
+	return fmt.Errorf("scope %s has managed hooks but missing master hook at %s (run `%s`)",
+		scope, path, status.RebuildRepair(status.MasterRuntimes(scope), scope))
 }
