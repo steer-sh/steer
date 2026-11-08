@@ -12,6 +12,18 @@
           }
         ]
       }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/steer\" commit-gate subagent-start",
+            "timeout": 10,
+            "statusMessage": "giving the subagent Steer's commit form ..."
+          }
+        ]
+      }
     ]
   }
 }

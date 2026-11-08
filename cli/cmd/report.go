@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -550,8 +549,9 @@ func runCadence() {
 	if pluginLineDue(cadence.ShouldNudgePlugins(dir, pluginKey), masterDue, install) || update.failed {
 		lines = append(lines, pluginCopyLines(pluginCopies, hooksBuild)...)
 	}
+	guidance := claudeCommitGuidance()
 	if len(lines) == 0 {
-		// Nothing to say, but a repaired condition still has to clear its key: a
+		// No operator line, but a repaired condition still has to clear its key: a
 		// record left behind would suppress the nudge if that same condition
 		// came back.
 		if prev := cadence.LoadNudge(dir); prev.Master != key || prev.Rules != rulesKey ||
@@ -559,20 +559,16 @@ func runCadence() {
 			_ = cadence.WriteNudge(dir, rec.WithMaster(key).WithRules(rulesKey).
 				WithDetached(detachedKey).WithSourceDrift(driftKey).WithPlugins(pluginKey))
 		}
+		if out, ok := hookContextReply("SessionStart", nil, guidance); ok {
+			fmt.Println(string(out))
+		}
 		return
 	}
 	rec = rec.WithMaster(key).WithRules(rulesKey).WithDetached(detachedKey).WithSourceDrift(driftKey).
 		WithPlugins(pluginKey)
 
-	msg := strings.Join(lines, "\n")
-	out, err := json.Marshal(sessionStartOutput{
-		SystemMessage: msg,
-		HookSpecificOutput: sessionStartHookOutput{
-			HookEventName:     "SessionStart",
-			AdditionalContext: msg,
-		},
-	})
-	if err != nil {
+	out, ok := hookContextReply("SessionStart", lines, guidance)
+	if !ok {
 		return
 	}
 	fmt.Println(string(out))

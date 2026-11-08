@@ -6,8 +6,9 @@ schemas live in that code; the reasons behind a design live in its commits.
 
 ## Distribution and installation
 
-The plugin bundles skills, a launcher, platform binaries and a cadence SessionStart
-hook. Guard and commit-gate activation are explicit setup operations.
+The plugin bundles skills, a launcher, platform binaries, a cadence SessionStart
+hook and a SubagentStart hook that carries the commit gate's command form. Guard and
+commit-gate activation are explicit setup operations.
 `skills/steer-setup/SKILL.md` handles reviewer selection and installation;
 `skills/steer/SKILL.md` routes a rule to a tier and handles guard generation and removal,
 and `skills/steer-report/SKILL.md` reads the queue and evidence to propose interventions.
@@ -569,6 +570,13 @@ files and an unread one would put every ignored file in the review; and a bundle
 `git add ... && git commit` while a file holds both staged and unstaged edits: that
 form is reviewed from the working tree (`cc.DiffSpecFor`), which would show the
 reviewers edits the commit does not carry.
+
+A Claude Code session whose commit gate is armed learns the accepted form before its
+first commit: `cc.CommitShapeGuidance` rides `additionalContext` at SessionStart
+(`report cadence`) and at SubagentStart (`commit-gate subagent-start`), because a
+subagent does not inherit the session's SessionStart context. It never reaches
+`systemMessage`, and elsewhere both entry points print nothing. Each command the
+guidance quotes passes `PreflightDeny`.
 
 Every decision that does not block carries a receipt to both the agent's context
 and the operator (`internal/gate/receipt.go`); no path lets a commit through

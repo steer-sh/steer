@@ -100,6 +100,9 @@ Read the linked architecture section before changing the corresponding boundary:
   `cli/internal/gate/`; its adapters own harness payloads and replies.
   Codex hook payloads can omit a nested shell workdir: select the repository
   explicitly with `git -C /absolute/path commit` when committing through code mode.
+  A change to what `cc.PreflightDeny` refuses can change what
+  `cli/internal/gate/cc/guidance.go` may teach; its test runs each quoted form
+  through the preflight.
   The API reviewer's key never goes in `~/.steer/config.json`; it lives in the
   variable `reviewer.api.key_env` names or in the file `internal/apikey/` owns, and
   only `steer reviewer key set` writes that file.
