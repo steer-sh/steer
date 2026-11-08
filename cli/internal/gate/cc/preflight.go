@@ -38,6 +38,9 @@ func PreflightDeny(cmd, cwd string) (reason, receipt string) {
 		if parsed.selectsPaths() {
 			return selectedPathsReason, SelectedPathsReceipt
 		}
+		if word := expandedAddOperand(parsed); word != "" {
+			return fmt.Sprintf(expandedAddReason, shortStep(word)), ExpandedAddReceipt
+		}
 	}
 	if reason := PartlyStagedReason(cmd, cwd); reason != "" {
 		return reason, PartlyStagedReceipt
@@ -160,6 +163,34 @@ const selectedPathsReason = "[commit-gate] BLOCKED: this commit selects its own 
 // SelectedPathsReceipt states that the path-selecting commit refusal blocked before review.
 const SelectedPathsReceipt = "[commit-gate] refused a commit that selects its own paths. " +
 	"No review ran and no adjudication row was written."
+
+// expandedAddOperand returns the first operand of an add before the commit that the
+// shell rewrites with a glob, brace or tilde. git reads the unexpanded word as its own
+// pathspec, so the gate cannot tell which files the add stages. Empty means none.
+func expandedAddOperand(commit *parsedGit) string {
+	for _, add := range parsedGitCalls(commit.program, commit.baseCWD, "add", "stage") {
+		if add.call.Start >= commit.call.Start {
+			continue
+		}
+		for _, arg := range add.call.Args[add.subcommand+1:] {
+			if arg.Static && arg.Pattern {
+				return arg.Raw
+			}
+		}
+	}
+	return ""
+}
+
+const expandedAddReason = "[commit-gate] BLOCKED: this command stages files and commits " +
+	"in one call, and an add operand is one the shell expands (a glob, a brace or a " +
+	"leading ~): %s. The gate cannot tell which files that add stages, so it cannot " +
+	"review the commit. NOTHING IN THE COMMAND RAN, and the index is as it was. Name " +
+	"each path literally in the add, or run the add as its own command and then the " +
+	"commit alone: a plain commit is reviewed from the index."
+
+// ExpandedAddReceipt states that the expanded add operand refusal blocked before review.
+const ExpandedAddReceipt = "[commit-gate] refused a bundled add whose operand the shell " +
+	"expands. No review ran and no adjudication row was written."
 
 // PartlyStagedReason refuses a bundled `git add ... && git commit` while a file holds
 // both staged and unstaged edits. That form is reviewed from the working tree, so the

@@ -559,7 +559,10 @@ beside its commit, either a background job that starts before the commit ends or
 a member of the commit's pipeline that is not a read-only filter
 (`concurrentStep`); a commit that
 selects its own paths (pathspecs, `--only`, `--include`), whose landed tree is
-neither the index nor the working tree the gate reads; and a bundled
+neither the index nor the working tree the gate reads; an add before the commit with
+an operand the shell expands (an unquoted glob, brace or leading `~`,
+`expandedAddOperand`), because git reads the unexpanded word as its own pathspec and
+the gate cannot tell which files the add stages; and a bundled
 `git add ... && git commit` while a file holds both staged and unstaged edits: that
 form is reviewed from the working tree (`cc.DiffSpecFor`), which would show the
 reviewers edits the commit does not carry.
