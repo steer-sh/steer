@@ -5,6 +5,76 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-11-07
+
+### Added
+
+- `steer uninstall` prints every global Steer registration for each agent (commit
+  gate, check runner, guard runner, rules section, status line) and removes them
+  with `--apply`. A wrapped status line is given back. `--purge` also deletes
+  `~/.steer`. Project registrations are committed files, so it names them and
+  changes none. Run it before you remove the plugin.
+- After a plugin update, the next session start installs the new build to
+  `~/.steer/bin/steer`, repoints the hooks and rebuilds the global guard runner, and
+  prints one line such as `steer: hooks updated 0.1.7 → 0.2.0`. It acts only where a
+  global Steer registration already calls `~/.steer/bin/steer` or runs the global
+  guard runner.
+- The status line and the commit gate's operator notice name a plugin that you
+  removed while its hooks still run, with the uninstall command.
+- The audit queue gives each fix a turn, so one busy fix no longer holds the others
+  behind its backlog. A fix with three clean readings moves to the reserve. A case
+  that an agent contested, stopped on again, hit more than once in a session, or
+  whose check detector moved is flagged and read first.
+- `/steer-report` reads audit cases in a reader subagent on the same model, up to 12
+  cases at 8,000 bytes each, and returns only what needs a decision. A harness with
+  no subagent reads 3 cases inline.
+- The commit gate tells the CLI reviewers which paths have unstaged edits on a
+  staged-only commit, because the copy on disk is not what lands.
+
+### Changed
+
+- A guard command that names no harness (`register`, `remove`, `preset enable`,
+  `rules add`, `archive restore`, `hooks sync`, `hooks rebuild`) and the dashboard's
+  guard actions write only to harnesses where Steer is set up. Use `--harness` or
+  `--all-harnesses` to add a harness. A fresh machine's first guard still reaches
+  every installed harness.
+- Codex: the project guard runner command finds the repository root, so a session
+  started from a subdirectory runs the guards instead of blocking every call. Run
+  `steer hooks sync --scope project`, then approve the changed command in `/hooks`.
+- Project harness files (`.claude/settings.json`, `.codex/hooks.json`, `.pi/`, the
+  project `CLAUDE.md` and `AGENTS.md`) resolve at the repository root from any
+  subdirectory, so a sync from a subdirectory no longer writes a second set.
+- The commit gate's caller context searches every changed word, weighted by rarity,
+  in every language, and says when its search is incomplete.
+- `steer status` without `--json` skips the transcript scan. The queue's transcript
+  candidate comes from this machine's stored snapshots, and only while a complete
+  `steer report refresh` covers the window. The status JSON shape changed.
+- A check whose detector you edited stays tracked by its record. Only an id that now
+  names another check reads as changed.
+- Every skill command runs the launcher's absolute path, so a "don't ask again"
+  permission answer applies to later commands.
+- The retired Python gate's replay drivers, its Stop-hook recognition and the
+  `COMMIT_REVIEW_STATE` fallback are removed. Use `COMMIT_GATE_STATE_DIR`.
+
+### Fixed
+
+- The `python-command-injection` preset and generated Python guards judge a command
+  passed as `args=` or `command=`. Run `steer preset sync --scope <scope>` to update
+  an installed preset.
+- The commit gate refuses an add before a commit that uses a shell glob or brace
+  expansion, which it read as a pathspec and so reviewed only part of the commit.
+- `steer hooks sync` refuses, and `steer status` warns, when the guard runner stamps
+  an old rule on a guard whose source is current. Run
+  `steer hooks rebuild --scope <scope>`.
+- A guard firing inside a Claude Code subagent is read from the subagent's own
+  transcript.
+- The review ledger keeps every row once while a rewrite stalls.
+- A check.sh block with no session ID no longer takes another session's next Stop.
+- `steer bin install` rebuilds a stale global guard runner only in the harnesses
+  that register it.
+- The possible-commit refusal of an interpreter heredoc names the exit: a file tool
+  or a quoted document heredoc.
+
 ## [0.1.7] - 2026-11-05
 
 ### Changed
@@ -244,6 +314,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 First public release.
 
+[0.2.0]: https://github.com/steer-sh/steer/releases/tag/v0.2.0
 [0.1.7]: https://github.com/steer-sh/steer/releases/tag/v0.1.7
 [0.1.6]: https://github.com/steer-sh/steer/releases/tag/v0.1.6
 [0.1.5]: https://github.com/steer-sh/steer/releases/tag/v0.1.5
