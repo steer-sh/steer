@@ -4,6 +4,7 @@ package shellsyntax
 import (
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -17,15 +18,18 @@ const Instrument = "mvdan-sh-v3.13.1-calls-v2"
 // Word is one shell word. Static is false when evaluating it requires expansion;
 // a static Value is the word after quote removal, as the command receives it.
 // Splits is true when an expansion can make the word several words.
+// Pattern is true when an unquoted glob character, brace expansion or leading tilde
+// lets the shell rewrite the word, so its Value may not be what the command receives.
 // Start and End are the word's byte range in the source; a word built by a caller
 // rather than the parser leaves both zero.
 type Word struct {
-	Value  string
-	Raw    string
-	Static bool
-	Splits bool
-	Start  int
-	End    int
+	Value   string
+	Raw     string
+	Static  bool
+	Splits  bool
+	Pattern bool
+	Start   int
+	End     int
 }
 
 // Redirect is one redirection attached to a simple command. HeredocStart and
@@ -167,7 +171,38 @@ func normalizeWord(source string, word *syntax.Word) Word {
 	if start >= 0 && end >= start && end <= len(source) {
 		raw = source[start:end]
 	}
-	return Word{Value: value, Raw: raw, Static: static, Splits: splits(word.Parts), Start: start, End: end}
+	return Word{Value: value, Raw: raw, Static: static, Splits: splits(word.Parts),
+		Pattern: pattern(word), Start: start, End: end}
+}
+
+// pattern reports an unquoted, unescaped `*`, `?` or `[` in the word's literal parts,
+// a `~` that starts it, or a brace expansion such as `{a,b}` or `{1..3}`.
+func pattern(word *syntax.Word) bool {
+	braces := *word
+	if syntax.SplitBraces(&braces) && slices.ContainsFunc(braces.Parts, func(part syntax.WordPart) bool {
+		_, ok := part.(*syntax.BraceExp)
+		return ok
+	}) {
+		return true
+	}
+	for i, part := range word.Parts {
+		lit, ok := part.(*syntax.Lit)
+		if !ok {
+			continue
+		}
+		if i == 0 && strings.HasPrefix(lit.Value, "~") {
+			return true
+		}
+		for j := 0; j < len(lit.Value); j++ {
+			switch lit.Value[j] {
+			case '\\':
+				j++
+			case '*', '?', '[':
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // splits reports an unquoted parameter, command or arithmetic expansion, whose

@@ -619,3 +619,71 @@ func TestPreflightDenyRefusesACDIntoADirectoryItCannotEnter(t *testing.T) {
 		t.Errorf("%q: cd cannot enter the directory, so it must be refused, got receipt %q", cmd, receipt)
 	}
 }
+
+// TestPreflightDenyRefusesAnAddOperandTheShellExpands: git reads an unexpanded
+// `{a,b}` or `*.go` as its own pathspec, so the gate cannot know which files a
+// bundled add stages. Quoted or escaped, the same characters are git's to read.
+func TestPreflightDenyRefusesAnAddOperandTheShellExpands(t *testing.T) {
+	c := "co" + "mmit"
+	for _, cmd := range []string{
+		"git add README.md pkg/{a.go,b.go} && git " + c + " -m x",
+		"git add pkg/{a..c}.go && git " + c + " -m x",
+		"git add a.go *.go && git " + c + " -m x",
+		"git add pkg/?.go && git " + c + " -m x",
+		"git add pkg/[ab].go && git " + c + " -m x",
+		"git add ~/repo/a.go && git " + c + " -m x",
+		"git add ~other/a.go && git " + c + " -m x",
+		"git stage pkg/*.go && git " + c + " -m x",
+		"git add -f pkg/{a,b}.go && git " + c + " -m x",
+		"git add a.go && git add *.go; git " + c + " -m x",
+	} {
+		if reason, receipt := PreflightDeny(cmd, "/cwd"); receipt != ExpandedAddReceipt {
+			t.Errorf("%q stages paths the shell expands and must be refused, got %q", cmd, reason)
+		}
+	}
+	for _, cmd := range []string{
+		"git add '*.go' \"pkg/{a,b}.go\" pkg/\\*.go && git " + c + " -m x",
+		"git add a~b.go x/~y.go && git " + c + " -m x",
+		"git add notes{draft}.txt a{b && git " + c + " -m x",
+		"git add --pathspec-from-file='paths{a,b}.txt' && git " + c + " -m x",
+		"git " + c + " -m x && git add *.go",
+		"git add a.go && git " + c + " -m x",
+	} {
+		if reason, receipt := PreflightDeny(cmd, "/cwd"); receipt == ExpandedAddReceipt {
+			t.Errorf("%q names its paths literally and must not be refused: %q", cmd, reason)
+		}
+	}
+}
+
+// TestPreflightDenyRefusesTheBraceAddThatSkippedReview replays the shape of a commit
+// the gate logged as prose-only: a brace operand matched nothing as a pathspec, so
+// only the Markdown file beside it counted as staged.
+func TestPreflightDenyRefusesTheBraceAddThatSkippedReview(t *testing.T) {
+	root, _ := newRepo(t, "README.md", "pkg/a.go", "pkg/b.go")
+	writeLines(t, root, "README.md", "changed\n")
+	writeLines(t, root, "pkg/a.go", "changed\n")
+	writeLines(t, root, "pkg/b.go", "changed\n")
+
+	cmd := "cd " + root + " && git add README.md pkg/{a.go,b.go} && git co" + "mmit -q -F msg.txt"
+	reason, receipt := PreflightDeny(cmd, root)
+	if receipt != ExpandedAddReceipt {
+		t.Fatalf("receipt = %q, reason = %q; want the expanded add refusal", receipt, reason)
+	}
+	if !strings.Contains(reason, "pkg/{a.go,b.go}") {
+		t.Errorf("the reason must name the operand: %q", reason)
+	}
+}
+
+// TestPreflightDenyRefusesADynamicPatternAdd: an add operand that also holds a variable
+// is refused before the expanded-add check reads it, so it never reaches the review.
+// pins existing behaviour
+func TestPreflightDenyRefusesADynamicPatternAdd(t *testing.T) {
+	for _, cmd := range []string{
+		"git add -f \"$DIR\"/*.go && git co" + "mmit -m x",
+		"git add \"$dir\"/{a.go,b.go} && git co" + "mmit -m x",
+	} {
+		if _, receipt := PreflightDeny(cmd, "/cwd"); receipt == "" {
+			t.Errorf("%q must be refused before review", cmd)
+		}
+	}
+}
