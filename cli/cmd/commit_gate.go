@@ -973,7 +973,7 @@ func init() {
 	rootCmd.AddCommand(commitGateCmd)
 	commitGateCmd.AddCommand(commitGateReviewCmd, commitGateCodexReviewCmd, commitGatePiReviewCmd, commitGatePreCommitCmd,
 		commitGateInstallCmd, commitGateRemoveCmd, commitGateStatusCmd, commitGateBackfillCmd,
-		commitGateTestReviewerCmd)
+		commitGateTestReviewerCmd, commitGateSubagentStartCmd)
 
 	commitGateBackfillCmd.Flags().BoolVar(&backfillApply, "apply", false, "Write the resolved rows")
 	commitGateBackfillCmd.Flags().BoolVar(&backfillIfDue, "if-due", false, "Exit early unless a row is due")

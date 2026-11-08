@@ -249,15 +249,20 @@ func TestBundledHookResolvesEitherHarnessPluginRoot(t *testing.T) {
 	if !ok || len(entries) == 0 || len(entries[0].Hooks) == 0 {
 		t.Fatal("hooks/hooks.json declares no SessionStart command")
 	}
-	command := entries[0].Hooks[0].Command
 
 	// Codex sets PLUGIN_ROOT and Claude Code sets CLAUDE_PLUGIN_ROOT, so one
 	// bundled command reads the first and falls back to the second. The inner
 	// name stays braced: Claude Code may substitute the placeholder into the
 	// string instead of exporting it, and the braced form is the one every
 	// version of that substitution has accepted.
-	if !strings.Contains(command, "${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}") {
-		t.Fatalf("SessionStart command does not resolve both plugin roots: %q", command)
+	for event, entries := range bundle.Hooks {
+		for _, entry := range entries {
+			for _, hook := range entry.Hooks {
+				if !strings.Contains(hook.Command, "${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}") {
+					t.Errorf("%s command does not resolve both plugin roots: %q", event, hook.Command)
+				}
+			}
+		}
 	}
 }
 
