@@ -10,7 +10,6 @@ import (
 	"github.com/steer-sh/steer-cli/internal/codex"
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/harness"
-	"github.com/steer-sh/steer-cli/internal/presets"
 	"github.com/steer-sh/steer-cli/internal/status"
 	"github.com/steer-sh/steer-cli/internal/testhome"
 )
@@ -79,35 +78,12 @@ func dashboardOver(t *testing.T, targets ...harness.Registrar) *Model {
 	return New(cfg, claude.GlobalScope, targets...)
 }
 
-func firstSecurityPreset(t *testing.T) string {
-	t.Helper()
-	catalog, err := presets.LoadCatalog()
-	if err != nil {
-		t.Fatal(err)
-	}
-	names, err := catalog.BundleMembers(presets.BundleSecurity)
-	if err != nil || len(names) == 0 {
-		t.Fatalf("no security preset (%v)", err)
-	}
-	return names[0]
-}
-
-// Turning a built-in guard on or off, archiving a guard and restoring it register
-// only where Steer is still registered, so a harness Steer was removed from stays
-// removed.
+// Archiving a guard and restoring it register only where Steer is still
+// registered, so a harness Steer was removed from stays removed.
 func TestAGuardActionRegistersNoRemovedHarness(t *testing.T) {
 	twoHarnessGuardHome(t)
 	removeCodex(t)
 	m := dashboardOver(t, claude.Registrar{}, codex.Registrar{})
-
-	name := firstSecurityPreset(t)
-	m.togglePreset(name, false)
-	if !strings.Contains(m.message, "is on") {
-		t.Fatalf("the built-in guard was not turned on: %q", m.message)
-	}
-	assertCodexUnregistered(t, "turning a built-in guard on")
-	m.togglePreset(name, true)
-	assertCodexUnregistered(t, "turning a built-in guard off")
 
 	if _, err := m.archiveFix(archiveForm{tier: "guard", id: "no-bare-python", scope: claude.GlobalScope}, "test"); err != nil {
 		t.Fatal(err)

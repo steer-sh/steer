@@ -24,8 +24,9 @@ var (
 var presetCmd = &cobra.Command{
 	Use:   "preset",
 	Short: "Manage bundled factory presets",
-	Long: `Preset manages bundled factory hooks shipped with steer.
-Presets are disabled by default and can be enabled individually or by bundle.`,
+	Long: `Preset manages the factory hooks steer installs: the internal
+steer-self-protection guard, and any guard an earlier steer installed from a
+preset it no longer ships. disable <name> or sync --prune-orphans removes those.`,
 }
 
 var presetListCmd = &cobra.Command{
@@ -49,6 +50,18 @@ var presetListCmd = &cobra.Command{
 		items, err := catalog.ListVisible(presetListBundle)
 		if err != nil {
 			return err
+		}
+
+		if all, err := catalog.ListVisible(""); err == nil && len(all) == 0 {
+			flag := ""
+			if scope == claude.GlobalScope {
+				flag = " --scope global"
+			}
+			fmt.Println(styles.InfoBox.Render("This Steer ships no optional presets.\n" +
+				"A preset an earlier Steer installed keeps running until\n" +
+				"`steer preset disable <name>" + flag + "` or\n" +
+				"`steer preset sync --prune-orphans" + flag + "` removes it."))
+			return nil
 		}
 
 		manifest, err := claude.LoadManifest(scope)
@@ -206,7 +219,21 @@ var presetDisableCmd = &cobra.Command{
 		// the user's way to remove it, so disable accepts one.
 		item, ok := catalog.Find(name)
 		if !ok {
-			return fmt.Errorf("preset not found: %s", name)
+			// A guard from a preset this catalog no longer holds is removed by the
+			// command its block names, which is this one.
+			found, removed, err := presets.DisableOrphan(scope, catalog, name, targets...)
+			if err != nil {
+				return err
+			}
+			if !found {
+				return fmt.Errorf("preset not found: %s", name)
+			}
+			message := fmt.Sprintf("Preset: %s\nStatus: disabled (no longer shipped; archived)\nScope: %s", name, scope)
+			if line := removedInternalLine(removed); line != "" {
+				message += "\n" + line
+			}
+			fmt.Println(styles.SuccessBox.Render(message))
+			return nil
 		}
 
 		status, removed, err := presets.DisablePreset(scope, catalog, item, force, targets...)

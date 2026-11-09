@@ -250,7 +250,12 @@ Store readers skip subdirectories, so an archived guard never reaches the master
 Only a caller that proves a catalog copy removes without an archive
 (`RemoveOptions.CatalogCopy`, which `presets.DisablePreset` sets for its own
 factory entry); a pruned orphan and a team-lockfile extra are archived. A project
-archive is committed with the store.
+archive is committed with the store. The preset catalog ships only the internal
+`steer-self-protection`; a guard an earlier catalog installed is an orphan that
+keeps running, with self-protection beside it. `steer preset disable <name>`,
+the removal its block names, archives one (`presets.DisableOrphan`), and
+`steer preset sync --prune-orphans` archives all; self-protection goes with
+the last.
 
 `steer archive list` reads the project hook store, the global hook store and the
 project check store. `steer archive restore` selects one entry with
@@ -1135,12 +1140,13 @@ Problems lists tracked records first, then the candidate pointers: a tracked row
 offers a key that acts on it and a pointer row offers only the handoff. Authoring
 goes through the skills. Fixes lists guards, rules, review prompt entries and the repository's
 checks, each with its own state, after any maintenance a detected issue asks for;
-the built-in guard catalog and the Archived section open from a row that counts
-them. `fixRows` returns rows in render order, because the cursor walks that list. A project addendum entry is read on disk and at
+the built-in guard catalog, when the catalog holds a visible preset, and the
+Archived section open from a row that counts them. `fixRows` returns rows in render order, because the cursor walks that list. A project addendum entry is read on disk and at
 HEAD through `status.AddendumInventory`, which `steer commit-gate addendum list`
 shares, so an entry removed on disk but still committed stays listed. Every fix
 except a built-in guard archives through its tier's remove function; a built-in
-guard turns off, which writes no archive. The Archived section shows the newest
+guard turns off, which writes no archive. A factory guard the catalog no longer
+holds has no switch; enter and x name `steer preset disable <name>` for its scope. The Archived section shows the newest
 entry of each tier and id per store and restores it through the same code as
 `steer archive restore`. Check adoption, replay and restore run as background
 commands; the check runner's registration belongs to Arming. Git pre-commit installation remains CLI-only. Shared styles and geometry

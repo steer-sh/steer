@@ -8,7 +8,6 @@ them against canonical positive/negative test files from prompts.yaml.
 Usage:
     python3 tests/skill_test.py --test python-command-injection
     python3 tests/skill_test.py --test console-log-block --model claude-sonnet-4-6
-    python3 tests/skill_test.py --test sql-injection-prevention --save
     python3 tests/skill_test.py --test sql-injection-prevention --save /tmp/hooks
     python3 tests/skill_test.py --list
 
@@ -35,7 +34,6 @@ NEGATIVE_DIR = TESTS_DIR / "test_data" / "negative_files"
 IMAGES_DIR = TESTS_DIR / "test_data" / "images"
 FAILURES_DIR = TESTS_DIR / "failures"
 DEFAULT_MODEL = "claude-opus-4-6"
-DEFAULT_SAVE_DIR = TESTS_DIR.parent / "cli" / "internal" / "presets" / "hooks"
 
 
 def load_test_cases():
@@ -128,8 +126,6 @@ def resolve_save_dir(save_arg: str | None) -> Path | None:
     """Resolve --save argument to an absolute directory path."""
     if save_arg is None:
         return None
-    if save_arg == "__factory_default__":
-        return DEFAULT_SAVE_DIR.resolve()
     return Path(save_arg).expanduser().resolve()
 
 
@@ -322,7 +318,7 @@ def run_test_case(test_case: dict, model: str, save_dir: Path | None = None) -> 
             print(f"\n  Hook saved for inspection: {fail_dir}/")
         elif save_dir is not None:
             saved_path = save_hook_artifact(hook_path, name, save_dir)
-            print(f"\n  Hook saved to factory library path: {saved_path}")
+            print(f"\n  Hook saved to: {saved_path}")
 
         print(f"\nResult: {'ALL PASS' if all_pass else 'FAILURES DETECTED'}")
         return all_pass, cost
@@ -348,10 +344,8 @@ def main():
     )
     parser.add_argument(
         "--save",
-        nargs="?",
-        const="__factory_default__",
         metavar="DIR",
-        help="If test passes, save generated hook to DIR. Use --save with no DIR to save into cli/internal/presets/hooks/"
+        help="If test passes, save generated hook to DIR"
     )
     args = parser.parse_args()
 

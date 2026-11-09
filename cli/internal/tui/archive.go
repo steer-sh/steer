@@ -132,7 +132,7 @@ func (m *Model) archiveKey(row fixRow) {
 	case row.builtin:
 		m.note("%s is a built-in guard: enter turns it off, and turning it off writes no archive", row.name)
 	case row.kind == guardInstalled && row.source == claude.SourceFactory:
-		m.note("%s is a guard Steer keeps for itself, so it has no switch here", row.name)
+		m.note("%s", factoryGuardNote(row.name, m.scope))
 	case !row.removable:
 		if row.unremovable != "" {
 			m.note("%s", row.unremovable)

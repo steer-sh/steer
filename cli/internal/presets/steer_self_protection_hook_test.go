@@ -340,13 +340,9 @@ func TestSelfProtectionInstallsItsCommandReadingAtNewVersionIntoMaster(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	item, ok := catalog.Find("sql-injection-prevention")
-	if !ok {
-		t.Fatal("sql-injection-prevention missing from catalog")
-	}
-	if _, err := EnablePreset(claude.ProjectScope, catalog, item, false); err != nil {
-		t.Fatal(err)
-	}
+	// A preset that left the catalog stays installed as an orphan, which
+	// self-protection guards like any factory hook.
+	addOrphanFactoryHook(t, claude.ProjectScope, "sql-injection-prevention", "sql-injection-prevention", "sql safety")
 	if _, err := EnsureAutoManagedFactoryPresets(claude.ProjectScope, catalog, false); err != nil {
 		t.Fatal(err)
 	}

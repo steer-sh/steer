@@ -10,7 +10,7 @@ Usage:
     python3 tests/run_tests.py --filter python           # run tests matching "python"
     python3 tests/run_tests.py --stop-on-fail            # bail on first failure
     python3 tests/run_tests.py --model claude-sonnet-4-6 # override model
-    python3 tests/run_tests.py --filter security --save  # save passing hooks to factory library
+    python3 tests/run_tests.py --filter security --save /tmp/hooks  # save passing hooks to a directory
     python3 tests/run_tests.py --list                    # list available tests
 """
 
@@ -52,10 +52,8 @@ def main():
     )
     parser.add_argument(
         "--save",
-        nargs="?",
-        const="__factory_default__",
         metavar="DIR",
-        help="If a test passes, save generated hook to DIR. Use --save with no DIR to save into cli/internal/presets/hooks/"
+        help="If a test passes, save generated hook to DIR"
     )
     args = parser.parse_args()
     save_dir: Path | None = resolve_save_dir(args.save)
