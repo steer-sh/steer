@@ -226,9 +226,8 @@ Read the linked architecture section before changing the corresponding boundary:
 - Generation behavior: bump `prompt_version` in `skills/steer/SKILL.md`.
   That includes `skills/steer/prompts/routing.md`, which `/steer-report` also
   reads; its rung names are pinned to `cli/internal/tier` by a plugindist test.
-  The reference visitor in `skills/steer/prompts/python-security.md` runs the same
-  `reboundProofCases` table as the `python-command-injection` preset, so a tracking
-  change lands in both.
+  The reference visitor in `skills/steer/prompts/python-security.md` is pinned by
+  the `reboundProofCases` table in `cli/internal/presets/preset_guard_input_test.go`.
   Review templates have separate pinned digests in `cli/internal/gate/`.
 - Transcript normalization: each adapter's `Instrument` is pinned by replay of
   its `testdata/instrument/` corpus. Classification changes also affect

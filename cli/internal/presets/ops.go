@@ -176,6 +176,46 @@ func DisablePreset(scope string, catalog *Catalog, item CatalogItem, force bool,
 	return status, removed, nil
 }
 
+// DisableOrphan removes a factory guard whose preset left the catalog, named by its
+// hook id or its preset name, and archives it, since the catalog holds no copy. When
+// no other factory guard remains, it also removes the internal presets beside it and
+// returns them. found is false when the scope holds no such guard.
+func DisableOrphan(scope string, catalog *Catalog, name string, targets ...harness.Registrar) (found bool, removed []CatalogItem, err error) {
+	manifest, err := claude.LoadManifest(scope)
+	if err != nil {
+		return false, nil, err
+	}
+	name = strings.TrimSpace(name)
+	orphan := func(key string) bool {
+		entry := manifest.Hooks[key]
+		if !strings.EqualFold(strings.TrimSpace(entry.Source), claude.SourceFactory) {
+			return false
+		}
+		_, inCatalog := catalog.Find(strings.TrimSpace(entry.SourceID))
+		return !inCatalog
+	}
+	var matches []string
+	for key, entry := range manifest.Hooks {
+		if orphan(key) && (key == name || strings.TrimSpace(entry.SourceID) == name) {
+			matches = append(matches, key)
+		}
+	}
+	if len(matches) == 0 {
+		return false, nil, nil
+	}
+	if len(matches) > 1 {
+		sort.Strings(matches)
+		return true, nil, fmt.Errorf("%s names more than one guard (%s); remove one with steer remove <id>", name, strings.Join(matches, ", "))
+	}
+	hookName := matches[0]
+	opts := claude.RemoveOptions{Reason: "its preset is no longer in the catalog"}
+	if _, err := claude.RemoveManagedHook(scope, hookName, opts, targets...); err != nil {
+		return true, nil, err
+	}
+	removed, err = RemoveAutoManagedFactoryPresets(scope, catalog, false, targets...)
+	return true, removed, err
+}
+
 func disablePreset(scope string, item CatalogItem, force bool, targets ...harness.Registrar) (string, error) {
 	hookName := strings.TrimSuffix(item.HookFile, ".py")
 	if hookName == "" {

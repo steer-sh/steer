@@ -479,7 +479,7 @@ func (m *Model) fixesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if row.builtin {
 			m.togglePreset(row.name, true)
 		} else if row.source == claude.SourceFactory {
-			m.note("%s is a guard Steer keeps for itself, so it has no switch here", row.name)
+			m.note("%s", factoryGuardNote(row.name, m.scope))
 		}
 	case fixRepo:
 		if m.checking != "" || m.snap.Checks.Adopted {
@@ -853,7 +853,7 @@ func (m *Model) viewFixes() string {
 			out += guardTitleInColumn(r.display(), r.origin, i == cursor, width, column)
 		}
 	}
-	if anyOfKind(rows, guardInstalled) {
+	if anyBuiltin(rows) {
 		out += wrapTo(secondary("Turning a built-in guard off writes no archive: it comes back from the built-in "+
 			"guards below. Archiving any other guard keeps its file and fixtures for a restore."), "  ", width)
 	}
@@ -879,17 +879,20 @@ func (m *Model) viewFixes() string {
 		out += wrapTo(secondary("A check action is running; its result appears at the bottom of the screen when it finishes."), "  ", width)
 	}
 
-	out += section("Available built-in guards")
-	if !anyOfKind(rows, catalogToggle) {
-		out += dim("  every built-in guard is already on here.\n")
-	}
-	column = nameColumn(rows, width, guardAvailable)
-	for i, r := range rows {
-		switch r.kind {
-		case catalogToggle:
-			out += selectedRow(r.display(), " "+secondary("— "+r.description), i == cursor, width)
-		case guardAvailable:
-			out += guardTitleInColumn(r.display(), r.description, i == cursor, width, column)
+	// A Steer whose catalog ships no built-in guard has no section to offer.
+	if m.snap != nil && len(m.snap.Presets) > 0 {
+		out += section("Available built-in guards")
+		if !anyOfKind(rows, catalogToggle) {
+			out += dim("  every built-in guard is already on here.\n")
+		}
+		column = nameColumn(rows, width, guardAvailable)
+		for i, r := range rows {
+			switch r.kind {
+			case catalogToggle:
+				out += selectedRow(r.display(), " "+secondary("— "+r.description), i == cursor, width)
+			case guardAvailable:
+				out += guardTitleInColumn(r.display(), r.description, i == cursor, width, column)
+			}
 		}
 	}
 
@@ -948,6 +951,33 @@ func (m *Model) guardStorePath() string {
 		return "an unreadable location: " + err.Error()
 	}
 	return path
+}
+
+// anyBuiltin says whether the list holds a built-in guard you can turn off.
+func anyBuiltin(rows []fixRow) bool {
+	for _, r := range rows {
+		if r.builtin {
+			return true
+		}
+	}
+	return false
+}
+
+// factoryGuardNote answers enter or x on a guard Steer installed in scope that has
+// no switch: the one Steer keeps for itself, or one this Steer's catalog no longer
+// holds, which the command it names removes from that scope.
+func factoryGuardNote(name, scope string) string {
+	if catalog, err := presets.LoadCatalog(); err == nil {
+		if item, ok := catalog.Find(name); ok && item.Internal {
+			return name + " is a guard Steer keeps for itself, so it has no switch here"
+		}
+	}
+	command := "steer preset disable " + name
+	if scope == claude.GlobalScope {
+		command += " --scope global"
+	}
+	return name + " is not a built-in guard of this Steer; run " + command +
+		" to remove it and keep an archived copy"
 }
 
 // anyOfKind says whether the list holds a row of one kind, so a section can print

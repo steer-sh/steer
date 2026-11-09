@@ -56,6 +56,8 @@ var machineWords = regexp.MustCompile(`(?i)\b(class|classes|intervention|interve
 var allowedPhrases = map[string]bool{
 	// The command a reader types to remove a review prompt entry.
 	"steer commit-gate addendum remove ": true,
+	// The command a reader types to remove a guard whose catalog entry left Steer.
+	"steer preset disable ": true,
 	// Matched against the gate's own read error, never shown.
 	" store": true,
 }

@@ -174,6 +174,44 @@ func TestArchiveIsOfferedOnEveryFixButABuiltInGuard(t *testing.T) {
 	}
 }
 
+// A guard an earlier Steer installed from a built-in guard this one no longer
+// ships has no switch, so enter and x name the command that removes it from the
+// dashboard's scope. With no
+// built-in guard in the catalog, nothing offers one or promises to bring one back.
+func TestAGuardWhoseBuiltInLeftSteerNamesItsRemoval(t *testing.T) {
+	m := New(gate.Defaults(), "global")
+	m.width = 200
+	m.snap = &status.SystemStatus{Hooks: []status.HookInfo{
+		{Name: "eval-usage-security", Source: claude.SourceFactory},
+		{Name: "steer-self-protection", Source: claude.SourceFactory},
+	}}
+	m.active = panelFixes
+	view := strings.Join(strings.Fields(m.viewFixes()), " ")
+	for _, gone := range []string{"Available built-in guards", "Turning a built-in guard off"} {
+		if strings.Contains(view, gone) {
+			t.Errorf("the panel shows %q with no built-in guard to offer", gone)
+		}
+	}
+	found := false
+	for i, row := range m.fixRows() {
+		if row.name != "eval-usage-security" {
+			continue
+		}
+		found = true
+		m.cursor[panelFixes] = i
+		for _, key := range []tea.KeyMsg{{Type: tea.KeyEnter}, {Type: tea.KeyRunes, Runes: []rune("x")}} {
+			m.message = ""
+			m.fixesKey(key)
+			if !strings.Contains(m.message, "steer preset disable eval-usage-security --scope global") {
+				t.Errorf("%s on the guard reads %q", key, m.message)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("the guard has no row")
+	}
+}
+
 // The form says what the archive keeps before enter removes anything, and a
 // project entry's form says the removal waits for a commit.
 func TestTheArchiveFormSaysWhatItRemovesAndWhen(t *testing.T) {

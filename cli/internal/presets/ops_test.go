@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/steer-sh/steer-cli/internal/archive"
 	"github.com/steer-sh/steer-cli/internal/claude"
@@ -30,23 +31,39 @@ func withPresetProjectTempDir(t *testing.T) string {
 	return tempDir
 }
 
+// loadCatalogAndOneVisiblePreset returns the embedded catalog with two visible
+// presets added, and the first of them. The embedded catalog holds none.
 func loadCatalogAndOneVisiblePreset(t *testing.T) (*Catalog, CatalogItem) {
 	t.Helper()
 
-	catalog, err := LoadCatalog()
+	embedded, err := LoadCatalog()
 	if err != nil {
 		t.Fatalf("LoadCatalog returned error: %v", err)
 	}
+	assets := fstest.MapFS{}
+	for _, item := range embedded.Presets {
+		content, err := embedded.ReadHookContent(item)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assets["hooks/"+item.HookFile] = &fstest.MapFile{Data: content}
+	}
+	items := append([]CatalogItem(nil), embedded.Presets...)
+	for _, name := range []string{"test-guard-a", "test-guard-b"} {
+		items = append(items, CatalogItem{
+			Name: name, Description: name + " description", Rule: name + " rule",
+			HookFile: name + ".py", Bundles: []string{BundleSecurity}, OS: []string{"all"},
+			PromptVersion: "test-prompt-v1", HookVersion: "test-hook-v1",
+		})
+		assets["hooks/"+name+".py"] = &fstest.MapFile{Data: []byte("#!/usr/bin/env python3\n# " + name + "\n\ndef main():\n    return\n")}
+	}
+	catalog := NewCatalog(embedded.CatalogVersion, items, assets)
 
 	names, err := catalog.BundleMembers(BundleSecurity)
 	if err != nil {
 		t.Fatalf("BundleMembers returned error: %v", err)
 	}
-	if len(names) == 0 {
-		t.Fatalf("expected at least one security preset")
-	}
 	sort.Strings(names)
-
 	item, ok := catalog.Find(names[0])
 	if !ok {
 		t.Fatalf("expected visible preset %s in catalog", names[0])
@@ -802,5 +819,117 @@ func TestPresetSyncFinishesARenameWhoseReinstallFailedOnAnUnchangedFile(t *testi
 	}
 	if result.Reinstalled == 0 {
 		t.Fatalf("the moved entry read as up to date, so the master keeps the old id: %+v", result)
+	}
+}
+
+// DisableOrphan finds a guard by its preset name as well as its id, archives it,
+// keeps self-protection while another factory guard stays, and never takes a
+// guard whose preset the catalog still holds.
+func TestDisableOrphanArchivesTheNamedGuardAlone(t *testing.T) {
+	withPresetProjectTempDir(t)
+	catalog, visible := loadCatalogAndOneVisiblePreset(t)
+	installVisibleAndInternal(t, claude.ProjectScope, catalog, visible)
+	addOrphanFactoryHook(t, claude.ProjectScope, "old-guard", "old-preset", "old rule")
+
+	if found, _, err := DisableOrphan(claude.ProjectScope, catalog, visible.Name); err != nil || found {
+		t.Fatalf("a catalog preset read as an orphan (found=%v err=%v)", found, err)
+	}
+	found, removed, err := DisableOrphan(claude.ProjectScope, catalog, "old-preset")
+	if err != nil || !found {
+		t.Fatalf("the orphan named by its preset was not found (err=%v)", err)
+	}
+	if len(removed) != 0 || manifestHas(t, "old-guard") || !manifestHas(t, selfProtectionHook(t, catalog)) {
+		t.Fatalf("want the orphan gone and self-protection kept beside %s (removed %+v)", visible.Name, removed)
+	}
+	hooksDir, err := claude.GetHooksDir(claude.ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := archive.List(hooksDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].ID != "old-guard" {
+		t.Fatalf("the removed orphan has no archive entry: %+v", entries)
+	}
+
+	// A name that is one orphan's id and another's preset is refused, not guessed.
+	addOrphanFactoryHook(t, claude.ProjectScope, "shared", "first-preset", "first rule")
+	addOrphanFactoryHook(t, claude.ProjectScope, "second-guard", "shared", "second rule")
+	if _, _, err := DisableOrphan(claude.ProjectScope, catalog, "shared"); err == nil {
+		t.Fatal("an ambiguous name removed a guard")
+	}
+	if !manifestHas(t, "shared") || !manifestHas(t, "second-guard") {
+		t.Fatal("an ambiguous name removed a guard")
+	}
+}
+
+// removedPresets are the optional presets the catalog no longer ships. An install
+// from an earlier Steer still holds their guards.
+var removedPresets = []string{
+	"api-key-detection", "dangerous-python-imports", "data-exfiltration-prevention",
+	"env-dump-prevention", "environment-variable-enumeration-prevention",
+	"eval-usage-security", "hardcoded-secret-reference-prevention",
+	"package-json-git-deps", "postinstall-script-prevention",
+	"python-command-injection", "recursive-search-prevention", "sql-injection-prevention",
+}
+
+// A guard installed from a preset that left the catalog keeps running, with
+// self-protection beside it, until a prune removes both and archives the guard.
+func TestARemovedPresetKeepsRunningAsAnOrphanUntilPruned(t *testing.T) {
+	withPresetProjectTempDir(t)
+	catalog, err := LoadCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range removedPresets {
+		if _, ok := catalog.Find(name); ok {
+			t.Fatalf("%s is still in the catalog", name)
+		}
+		addOrphanFactoryHook(t, claude.ProjectScope, name, name, name+" rule")
+	}
+
+	result, err := SyncFactoryPresets(claude.ProjectScope, catalog, SyncOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.OrphansKept != len(removedPresets) || result.InternalEnsured != 1 {
+		t.Fatalf("sync must keep every orphan and install self-protection: %+v", result)
+	}
+	for _, name := range append([]string{selfProtectionHook(t, catalog)}, removedPresets...) {
+		if !manifestHas(t, name) {
+			t.Fatalf("%s is not installed after sync", name)
+		}
+	}
+
+	result, err = SyncFactoryPresets(claude.ProjectScope, catalog, SyncOptions{PruneOrphans: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.OrphansPruned != len(removedPresets) || result.InternalRemoved != 1 {
+		t.Fatalf("prune must remove every orphan and self-protection: %+v", result)
+	}
+	manifest, err := claude.LoadManifest(claude.ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.Hooks) != 0 {
+		t.Fatalf("guards left after prune: %v", manifest.Hooks)
+	}
+	hooksDir, err := claude.GetHooksDir(claude.ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := archive.List(hooksDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var archived []string
+	for _, entry := range entries {
+		archived = append(archived, entry.ID)
+	}
+	sort.Strings(archived)
+	if want := strings.Join(removedPresets, ","); strings.Join(archived, ",") != want {
+		t.Fatalf("archived %v, want each pruned guard and no self-protection", archived)
 	}
 }

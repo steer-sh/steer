@@ -15,7 +15,7 @@ const (
 	BundleSecurity = "security"
 	BundleQuality  = "quality"
 
-	ExpectedSecurityCount = 12
+	ExpectedSecurityCount = 0
 	ExpectedQualityCount  = 0
 	ExpectedInternalCount = 1
 )
@@ -32,6 +32,15 @@ var embeddedAssets embed.FS
 type Catalog struct {
 	CatalogVersion string        `json:"catalog_version"`
 	Presets        []CatalogItem `json:"presets"`
+
+	// assets holds hook files at hooks/<hook_file>; nil reads the embedded ones.
+	assets fs.FS
+}
+
+// NewCatalog builds an unvalidated catalog whose hook files are read from
+// assets at hooks/<hook_file>, in place of the embedded ones.
+func NewCatalog(version string, items []CatalogItem, assets fs.FS) *Catalog {
+	return &Catalog{CatalogVersion: version, Presets: items, assets: assets}
 }
 
 // CatalogItem defines one preset entry in the embedded catalog.
@@ -264,7 +273,11 @@ func (catalog *Catalog) BundleMembers(bundle string) ([]string, error) {
 // ReadHookContent reads one embedded hook asset for a preset.
 func (catalog *Catalog) ReadHookContent(item CatalogItem) ([]byte, error) {
 	path := filepath.ToSlash(filepath.Join("hooks", strings.TrimSpace(item.HookFile)))
-	data, err := fs.ReadFile(embeddedAssets, path)
+	var assets fs.FS = embeddedAssets
+	if catalog.assets != nil {
+		assets = catalog.assets
+	}
+	data, err := fs.ReadFile(assets, path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read preset hook asset %s: %w", path, err)
 	}

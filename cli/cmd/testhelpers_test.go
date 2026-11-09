@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"sort"
 	"testing"
+	"testing/fstest"
 
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/presets"
@@ -28,23 +29,39 @@ func withCmdProjectTempDir(t *testing.T) string {
 	return tempDir
 }
 
+// loadCatalogAndOneVisiblePreset returns the embedded catalog with two visible
+// presets added, and the first of them. The embedded catalog holds none.
 func loadCatalogAndOneVisiblePreset(t *testing.T) (*presets.Catalog, presets.CatalogItem) {
 	t.Helper()
 
-	catalog, err := presets.LoadCatalog()
+	embedded, err := presets.LoadCatalog()
 	if err != nil {
 		t.Fatalf("LoadCatalog returned error: %v", err)
 	}
+	assets := fstest.MapFS{}
+	for _, item := range embedded.Presets {
+		content, err := embedded.ReadHookContent(item)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assets["hooks/"+item.HookFile] = &fstest.MapFile{Data: content}
+	}
+	items := append([]presets.CatalogItem(nil), embedded.Presets...)
+	for _, name := range []string{"test-guard-a", "test-guard-b"} {
+		items = append(items, presets.CatalogItem{
+			Name: name, Description: name + " description", Rule: name + " rule",
+			HookFile: name + ".py", Bundles: []string{presets.BundleSecurity}, OS: []string{"all"},
+			PromptVersion: "test-prompt-v1", HookVersion: "test-hook-v1",
+		})
+		assets["hooks/"+name+".py"] = &fstest.MapFile{Data: []byte("#!/usr/bin/env python3\n# " + name + "\n\ndef main():\n    return\n")}
+	}
+	catalog := presets.NewCatalog(embedded.CatalogVersion, items, assets)
 
 	names, err := catalog.BundleMembers(presets.BundleSecurity)
 	if err != nil {
 		t.Fatalf("BundleMembers returned error: %v", err)
 	}
-	if len(names) == 0 {
-		t.Fatalf("expected at least one security preset")
-	}
 	sort.Strings(names)
-
 	item, ok := catalog.Find(names[0])
 	if !ok {
 		t.Fatalf("expected visible preset %s in catalog", names[0])

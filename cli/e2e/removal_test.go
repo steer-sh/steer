@@ -169,19 +169,25 @@ func TestRemovalLeavesOnlyTheOperatorsHooks(t *testing.T) {
 	}
 }
 
-// TestSelfProtectionRefusesTheAgentAndNamesAWorkingCommand enables a factory preset,
-// then requires the master to deny an agent's attempt to disable it, and the removal
-// command the block names to work when the user runs it.
+// TestSelfProtectionRefusesTheAgentAndNamesAWorkingCommand installs a factory guard
+// whose preset left the catalog, as an earlier Steer leaves one, and lets sync add
+// self-protection beside it. It then requires the master to deny an agent's attempt
+// to remove the guard, and the commands the user runs to remove both to work.
 //
 // pins existing behaviour
 func TestSelfProtectionRefusesTheAgentAndNamesAWorkingCommand(t *testing.T) {
 	t.Parallel()
 	s := NewSandbox(t)
-	s.MustSteer("preset", "enable", "eval-usage-security")
+	src := s.path("eval-usage-security.py")
+	if err := os.WriteFile(src, []byte(noVarSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s.MustSteer("register", src, "--rule", "never use eval | call it directly", "--source", "factory")
+	s.MustSteer("preset", "sync")
 
-	decision, reason := s.FireMaster("steer preset disable eval-usage-security")
+	decision, reason := s.FireMaster("steer remove eval-usage-security")
 	if decision != "deny" {
-		t.Fatalf("the master allowed an agent to disable a factory preset (%q)", decision)
+		t.Fatalf("the master allowed an agent to remove a factory guard (%q)", decision)
 	}
 	const named = "preset disable steer-self-protection"
 	if !strings.Contains(reason, named) {
