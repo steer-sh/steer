@@ -248,6 +248,46 @@ func TestDetectionDenyNamesTheCase(t *testing.T) {
 	}
 }
 
+// A possible commit whose only cause is an unquoted git option value gets a refusal
+// that names that value and the quoted form; every other cause keeps the generic one.
+func TestUnquotedOptionValueRefusalTeachesQuoting(t *testing.T) {
+	quoting := map[string]string{
+		`git -C $D init -q`:            "$D",
+		`git -C $D/smoke status`:       "$D/smoke",
+		`git -C $(pwd)/r status`:       "$(pwd)/r",
+		`git --work-tree=$W status`:    "--work-tree=$W",
+		`cd /r && git -C $D status -s`: "$D",
+	}
+	for cmd, word := range quoting {
+		reason, receipt := DetectionDeny(cmd)
+		if !strings.Contains(reason, "`"+word+"`") || !strings.Contains(reason, quotedOptionValueExample) ||
+			!strings.Contains(reason, "NOTHING IN THE COMMAND RAN") ||
+			!strings.HasSuffix(reason, "\n\n"+heredocCommitExample) || receipt != PossibleCommitReceipt {
+			t.Errorf("DetectionDeny(%q) = %q, %q; want the quoting refusal naming %q", cmd, reason, receipt, word)
+		}
+	}
+	generic := []string{
+		"bash -c 'git " + c + " -m x'",
+		`git -C "$@"`,
+		`git -C "${D[@]}" status`,
+		`git "$X" -m x`,
+		"$G " + c + " -m x",
+		"git -C $D status && bash -c 'git " + c + " -m x'",
+		`git -C $D status; git "$X"`,
+		`git -C $D "$X"`,
+		`git -C $D -C "$@" status`,
+		`git -C $D -- "$X"`,
+	}
+	for _, cmd := range generic {
+		if reason, _ := DetectionDeny(cmd); reason != possibleCommitReason {
+			t.Errorf("DetectionDeny(%q) = %q; want the generic possible-commit refusal", cmd, reason)
+		}
+	}
+	if reason, _ := PreflightDeny(quotedOptionValueExample, "/r"); reason != "" {
+		t.Errorf("the taught form %q is itself refused: %s", quotedOptionValueExample, reason)
+	}
+}
+
 // The deny stops the WHOLE command, so a file the command wrote is not on disk and a
 // retry of the `git commit` half alone exits 128. The note says so, and only for the
 // commands that can hit it.

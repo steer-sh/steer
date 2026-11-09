@@ -262,40 +262,66 @@ func commitCalls(program *shellsyntax.Program) []commitCall {
 // static git with a dynamic word where an option or the subcommand goes (`git "$X"`),
 // or a dynamic command word before a static `commit` (`$G commit`). A dynamic option
 // value that stays one word (`-C "$D"`, `--work-tree="$W"`) is skipped; one that can
-// split (`$D`, "$@") is not.
-func hiddenCommit(call shellsyntax.Call) bool {
+// split (`$D`, "$@") is not. When unquoted option values are all that hide the commit,
+// splitValue is the first of them as written, since double quotes would keep it whole.
+func hiddenCommit(call shellsyntax.Call) (hidden bool, splitValue string) {
 	args := call.Args
 	if len(args) > 0 && !args[0].Static {
 		return slices.ContainsFunc(args[1:], func(w shellsyntax.Word) bool {
 			return w.Static && w.Value == "commit"
-		})
+		}), ""
 	}
 	gitArg, ok := gitExecutable(args)
 	if !ok {
-		return false
+		return false, ""
+	}
+	split := ""
+	// splitting records a splitting option value and reports whether the scan goes on:
+	// one that quotes cannot keep whole hides the commit by another cause.
+	splitting := func(word shellsyntax.Word) bool {
+		value := unquotedSplit(word)
+		if split == "" {
+			split = value
+		}
+		return value != ""
 	}
 	for i := gitArg + 1; i < len(args); i++ {
 		if !args[i].Static {
-			if !args[i].Splits && attachedLongOption.MatchString(args[i].Raw) {
-				continue
+			if attachedLongOption.MatchString(args[i].Raw) {
+				if !args[i].Splits || splitting(args[i]) {
+					continue
+				}
 			}
-			return true
+			return true, ""
 		}
 		token := args[i].Value
 		if token == "--" {
-			return i+1 < len(args) && !args[i+1].Static
+			if i+1 < len(args) && !args[i+1].Static {
+				return true, ""
+			}
+			break
 		}
 		if !strings.HasPrefix(token, "-") {
-			return false
+			break
 		}
 		if name, _, attached := strings.Cut(token, "="); takesGitValue(name) && !attached {
 			i++
-			if i < len(args) && args[i].Splits {
-				return true
+			if i < len(args) && args[i].Splits && !splitting(args[i]) {
+				return true, ""
 			}
 		}
 	}
-	return false
+	return split != "", split
+}
+
+// unquotedSplit returns a splitting word's text when quoting it would keep it one
+// word. A double-quoted word splits only through an `@` element expansion, so a
+// splitting word with no `@` splits through an unquoted expansion.
+func unquotedSplit(word shellsyntax.Word) string {
+	if strings.Contains(word.Raw, "@") {
+		return ""
+	}
+	return word.Raw
 }
 
 // attachedLongOption matches a word whose literal start is `--name=`, so the word is

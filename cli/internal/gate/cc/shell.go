@@ -161,33 +161,53 @@ const (
 // possible commit (hiddenCommit). A command that hides both words, such as
 // `$GIT "$SUB"`, an alias or a function, is not covered.
 func Detect(cmd string) Detection {
+	detection, _ := detect(cmd)
+	return detection
+}
+
+// detect is Detect, plus the unquoted git option value that alone makes the command a
+// PossibleCommit (`git -C $D status`); it is empty when any other cause contributes.
+func detect(cmd string) (Detection, string) {
 	spans := commitSpans(cmd)
 	program, err := shellsyntax.Parse(cmd)
 	if err != nil {
 		if len(spans) > 0 {
-			return UnparsedCommit
+			return UnparsedCommit, ""
 		}
-		return NoCommit
+		return NoCommit, ""
 	}
 	calls := commitCalls(program)
 	parsed := false
 	for _, call := range calls {
 		parsed = parsed || !call.dryRun
 	}
-	possible := false
+	other := false
 	for _, span := range spans {
-		possible = possible || !slices.ContainsFunc(calls, func(call commitCall) bool { return call.owns(span) })
+		other = other || !slices.ContainsFunc(calls, func(call commitCall) bool { return call.owns(span) })
 	}
-	possible = possible || slices.ContainsFunc(program.Calls, hiddenCommit)
+	splitValue := ""
+	for _, call := range program.Calls {
+		hidden, value := hiddenCommit(call)
+		switch {
+		case !hidden:
+		case value == "":
+			other = true
+		case splitValue == "":
+			splitValue = value
+		}
+	}
+	possible := other || splitValue != ""
 	switch {
 	case parsed && possible:
-		return ParsedAndPossible
+		return ParsedAndPossible, ""
 	case parsed:
-		return ParsedCommit
+		return ParsedCommit, ""
+	case possible && other:
+		return PossibleCommit, ""
 	case possible:
-		return PossibleCommit
+		return PossibleCommit, splitValue
 	}
-	return NoCommit
+	return NoCommit, ""
 }
 
 // IsCommitCommand reports whether this Bash command may run `git commit` for real.
