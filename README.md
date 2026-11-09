@@ -85,16 +85,11 @@ The `/steer` skill creates a new rule using the most appropriate fix type: a rep
 /steer never use bare python in shell commands | use python3 instead
 ```
 
-You can also use bundled presets (we have included 12 completely optional security presets with Steer):
+Guard commands default to project scope and register with both Claude Code/Codex. Use `--scope global` or `--harness codex` to change scope or target CLI as needed.
 
-```bash
-steer preset list
-steer preset enable sql-injection-prevention
-```
+To remove a custom guard - you can ask your agent to do so, or run `steer remove <hook-name>`.
 
-Guard commands default to project scope and register with both Claude Code/Codex. Use `--scope global` or `--harness codex` to choose to change scope as needed.
-
-To remove a custom guard - you can ask your agent to do so, or run `steer remove <hook-name>`. For a factory preset, manually run `steer preset disable <preset>` yourself. Your agent cannot run that command, as factory self-protection prevents an agent from disabling its own safeguards in the factory hooks.
+Steer ships with self-protection on by default. It blocks your agent from changing Steer files, turning Steer hooks off, or removing Steer configuration entries. Other edits to your config that do not modify the Steer's entries are allowed to pass. It is intended to stop careless agent changes, not necessarily adversarial agents. `~/.steer/bin/steer config set protection.self off` turns off self-protection. You need to run this - agents cannot.
 
 ## Other setups
 
@@ -137,7 +132,7 @@ However, to uninstall the hooks that Steer requires to function - please additio
 ~/.steer/bin/steer uninstall --apply
 ```
 
-If you want to uninstall on only one CLI you can also do that with `~/.steer/bin/steer uninstall --harness`
+If you want to uninstall on only one CLI you can also do that with `~/.steer/bin/steer uninstall --harness <claude-code|codex>`.
 
 Your local data in `~/.steer` including ledgers, guards and settings is not removed in case you reinstall. You can add `--purge` to the above command if you want it fully removed.
 
