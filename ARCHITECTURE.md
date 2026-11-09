@@ -247,15 +247,44 @@ manifest entry, which holds the text. One archive id can hold entries of
 different tiers over time, and the entry's tier tells them apart. The entry is written to a
 temporary directory and renamed into place, and a failed write stops the removal.
 Store readers skip subdirectories, so an archived guard never reaches the master.
-Only a caller that proves a catalog copy removes without an archive
-(`RemoveOptions.CatalogCopy`, which `presets.DisablePreset` sets for its own
-factory entry); a pruned orphan and a team-lockfile extra are archived. A project
-archive is committed with the store. The preset catalog ships only the internal
-`steer-self-protection`; a guard an earlier catalog installed is an orphan that
-keeps running, with self-protection beside it. `steer preset disable <name>`,
-the removal its block names, archives one (`presets.DisableOrphan`), and
-`steer preset sync --prune-orphans` archives all; self-protection goes with
-the last.
+Only a guard this binary ships removes without an archive
+(`RemoveOptions.ShippedCopy`, which turning self-protection off sets); a pruned
+orphan and a team-lockfile extra are archived. A project archive is committed with
+the store. Steer ships no presets: a guard an earlier Steer installed from its
+catalog keeps `source: factory` and is an orphan that keeps running.
+`steer preset disable <name>`, the removal its block names, archives one
+(`presets.DisableOrphan`), and `steer preset sync --prune-orphans` archives all.
+
+Self-protection (`internal/protection/`) is a guard Steer owns: `source: steer`,
+id `steer-self-protection`, in the global store only. It is on unless
+`protection.self` in `~/.steer/config.json` is `off`, and `protection.Reconcile`
+installs, updates or removes it to match, registering the master only in
+`status.SetUpTargets`, the harnesses that already hold a global Steer
+registration; with none it writes nothing. `steer bin install` (and so the
+SessionStart update), `steer config set protection.self` and
+`steer hooks rebuild --scope global` run it, so a machine whose only Steer fixes
+are checks and reviews still holds one guard and a registered master. The guard
+is lexical and best-effort: it matches protected files by full path, resolving a
+relative one against the payload's `cwd`, and protects the global store's master,
+manifest, audit log and its own file, `~/.steer/config.json`, the Claude Code and
+Codex global registration files and Codex's `config.toml`, and the current
+repository's stores, registrations and team lockfile. It also blocks
+`config set protection.self`, and `remove`, `register` or `preset disable` of
+itself. A shell command is split into simple commands, and a path counts only
+where its command writes it (an output redirection, an operand of `rm` or `mv`
+or a directory holding a protected file, the last operand of `cp`), and a quoted
+`>` stays an argument, so reading a protected file is never blocked. A
+command behind `bash -c`, an interpreter, `eval` or a variable gets past it. The
+runtime footer of a `steer` guard names the setting, not a removal. Status reads
+`on` only while every set-up harness runs it: it registers the global master,
+the master carries the guard (`claude.MasterCovers`), and Codex's approval of it
+reads as present; an unreadable approval is not counted as one.
+An earlier Steer installed it from its catalog as `source: factory` in either
+scope: the global copy is replaced in place by the next reconcile, and
+`steer hooks rebuild --scope project` archives a repository's copy only while
+status reads the global guard `on` and every harness the rebuild registers is
+one it runs in, which `bin install` and status name; team
+lock, apply and verify neither install nor remove it.
 
 `steer archive list` reads the project hook store, the global hook store and the
 project check store. `steer archive restore` selects one entry with
@@ -1083,7 +1112,7 @@ harness writes to: in the global scope the installed harnesses holding a Steer
 registration or a rules section of their own, or every installed one while none
 does; in the project scope every installed one. The CLI's guard, rule and hooks
 commands take it through `currentRegistrars`, and the dashboard's guard actions (a
-built-in guard on or off, archive, restore) take it when the action runs, not from
+archive, restore) take it when the action runs, not from
 its snapshot, so an uninstall run elsewhere while it is open is seen.
 `status.RebuildRepair`, `DetachedRepair` and `RulesRepair` name `--harness` per
 registered or detached harness while an installed one holds no part of the scope;
@@ -1093,7 +1122,7 @@ harnesses `status.RepairTargets` names, read when they run. A harness named with
 `--harness` or `--all-harnesses` is written to as named.
 `--json` is a projection of it (`status/json.go`): one summary row per record, whose
 observation `steer fix score --json` carries under the same id, guards and
-presets from both scopes, the readiness answer as `posture.readiness`, and the verdict
+the self-protection reading as `posture.protection`, guards from both scopes, the readiness answer as `posture.readiness`, and the verdict
 as `posture.health`. The TUI lists one scope because it mutates that scope.
 Shared problem, evidence and formatting helpers keep human summaries aligned;
 wire version constants and schema tests own machine compatibility.
@@ -1140,13 +1169,12 @@ Problems lists tracked records first, then the candidate pointers: a tracked row
 offers a key that acts on it and a pointer row offers only the handoff. Authoring
 goes through the skills. Fixes lists guards, rules, review prompt entries and the repository's
 checks, each with its own state, after any maintenance a detected issue asks for;
-the built-in guard catalog, when the catalog holds a visible preset, and the
-Archived section open from a row that counts them. `fixRows` returns rows in render order, because the cursor walks that list. A project addendum entry is read on disk and at
+the Archived section opens from a row that counts it. `fixRows` returns rows in render order, because the cursor walks that list. A project addendum entry is read on disk and at
 HEAD through `status.AddendumInventory`, which `steer commit-gate addendum list`
 shares, so an entry removed on disk but still committed stays listed. Every fix
-except a built-in guard archives through its tier's remove function; a built-in
-guard turns off, which writes no archive. A factory guard the catalog no longer
-holds has no switch; enter and x name `steer preset disable <name>` for its scope. The Archived section shows the newest
+archives through its tier's remove function except a guard Steer installed: enter
+and x on a factory orphan name `steer preset disable <name>` for its scope, and on
+self-protection the setting that turns it off, which the dashboard does not edit. The Archived section shows the newest
 entry of each tier and id per store and restores it through the same code as
 `steer archive restore`. Check adoption, replay and restore run as background
 commands; the check runner's registration belongs to Arming. Git pre-commit installation remains CLI-only. Shared styles and geometry

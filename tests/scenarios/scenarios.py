@@ -23,8 +23,10 @@ BASE = Path(__file__).with_name("base_status.json")
 
 def _base():
     snap = json.loads(BASE.read_text())
-    snap["status_version"] = 37
+    snap["status_version"] = 38
     snap["posture"]["readiness"].pop("unverified", None)
+    snap.pop("presets", None)
+    snap["posture"]["protection"] = {"state": "on", "setting": "on", "store": "current", "legacy": []}
     return snap
 
 

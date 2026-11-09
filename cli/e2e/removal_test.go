@@ -69,11 +69,17 @@ func (s *Sandbox) AddOperatorHook(rel string) {
 // decision and reason; an allowed call returns two empty strings.
 func (s *Sandbox) FireMaster(command string) (decision, reason string) {
 	s.t.Helper()
+	return s.FireMasterAt(filepath.Join(s.Repo, ".steer", "hooks", "steer-hooks.py"), command)
+}
+
+// FireMasterAt is FireMaster for the master at path.
+func (s *Sandbox) FireMasterAt(master, command string) (decision, reason string) {
+	s.t.Helper()
 	payload, _ := json.Marshal(map[string]any{
 		"hook_event_name": "PreToolUse", "tool_name": "Bash",
 		"tool_input": map[string]any{"command": command}, "session_id": "sess", "cwd": s.Repo,
 	})
-	r := s.Run(s.Repo, string(payload), nil, "python3", filepath.Join(s.Repo, ".steer", "hooks", "steer-hooks.py"))
+	r := s.Run(s.Repo, string(payload), nil, "python3", master)
 	if r.Code != 0 {
 		s.t.Fatalf("master exited %d:\n%s", r.Code, r.Output())
 	}
@@ -169,36 +175,73 @@ func TestRemovalLeavesOnlyTheOperatorsHooks(t *testing.T) {
 	}
 }
 
-// TestSelfProtectionRefusesTheAgentAndNamesAWorkingCommand installs a factory guard
-// whose preset left the catalog, as an earlier Steer leaves one, and lets sync add
-// self-protection beside it. It then requires the master to deny an agent's attempt
-// to remove the guard, and the commands the user runs to remove both to work.
+// protectionState reads posture.protection.state from steer status --json.
+func (s *Sandbox) protectionState() string {
+	s.t.Helper()
+	var doc struct {
+		Posture struct {
+			Protection struct {
+				State string `json:"state"`
+			} `json:"protection"`
+		} `json:"posture"`
+	}
+	r := s.MustSteer("status", "--json")
+	if err := json.Unmarshal([]byte(r.Stdout), &doc); err != nil {
+		s.t.Fatalf("status --json: %v\n%s", err, r.Stdout)
+	}
+	return doc.Posture.Protection.State
+}
+
+// TestSelfProtectionRefusesTheAgentAndNamesAWorkingCommand sets Steer up in Claude
+// Code with a global gate and no guard of the user's, and places the executable.
+// That installs self-protection in the global store, and the global master must deny
+// an agent turning it off or writing Steer's settings, while leaving a file that only
+// shares a protected name alone. The user's own command then turns it off.
 //
 // pins existing behaviour
 func TestSelfProtectionRefusesTheAgentAndNamesAWorkingCommand(t *testing.T) {
 	t.Parallel()
 	s := NewSandbox(t)
-	src := s.path("eval-usage-security.py")
-	if err := os.WriteFile(src, []byte(noVarSrc), 0o644); err != nil {
-		t.Fatal(err)
+	s.MustSteer("commit-gate", "install", "--harness", "claude-code", "--scope", "global")
+	if state := s.protectionState(); state != "missing" {
+		t.Fatalf("protection before bin install reads %q, want missing", state)
 	}
-	s.MustSteer("register", src, "--rule", "never use eval | call it directly", "--source", "factory")
-	s.MustSteer("preset", "sync")
+	if out := s.MustSteer("bin", "install").Output(); !strings.Contains(out, "Installed Steer's self-protection") {
+		t.Fatalf("bin install did not install self-protection:\n%s", out)
+	}
+	if state := s.protectionState(); state != "on" {
+		t.Fatalf("protection after bin install reads %q, want on", state)
+	}
 
-	decision, reason := s.FireMaster("steer remove eval-usage-security")
+	master := filepath.Join(s.Home, ".steer", "hooks", "steer-hooks.py")
+	decision, reason := s.FireMasterAt(master, "steer config set protection.self off")
 	if decision != "deny" {
-		t.Fatalf("the master allowed an agent to remove a factory guard (%q)", decision)
+		t.Fatalf("the master allowed an agent to turn self-protection off (%q)", decision)
 	}
-	const named = "preset disable steer-self-protection"
+	const named = "config set protection.self off"
 	if !strings.Contains(reason, named) {
 		t.Fatalf("the block does not name %q:\n%s", named, reason)
 	}
+	if decision, _ := s.FireMasterAt(master, "echo '{}' > ~/.steer/config.json"); decision != "deny" {
+		t.Fatalf("the master allowed an agent to write Steer's settings (%q)", decision)
+	}
+	if decision, _ := s.FireMasterAt(master, "echo '{}' > .vscode/settings.json"); decision != "" {
+		t.Fatalf("the master refused a file that only shares a protected name (%q)", decision)
+	}
 
-	s.MustSteer("preset", "disable", "steer-self-protection")
-	s.MustSteer("preset", "disable", "eval-usage-security")
-	for _, f := range []string{"steer-self-protection.py", "eval-usage-security.py"} {
-		if fileExists(filepath.Join(s.Repo, ".steer", "hooks", f)) {
-			t.Errorf("%s is still installed after the user disabled it", f)
-		}
+	if r := s.Steer("remove", "steer-self-protection", "--scope", "global", "--force"); r.Code == 0 ||
+		!strings.Contains(r.Output(), named) {
+		t.Fatalf("remove of self-protection did not name the setting (exit %d):\n%s", r.Code, r.Output())
+	}
+	s.MustSteer("config", "set", "protection.self", "off")
+	if fileExists(filepath.Join(s.Home, ".steer", "hooks", "steer-self-protection.py")) {
+		t.Error("the guard is still installed after the user turned it off")
+	}
+	if state := s.protectionState(); state != "off" {
+		t.Errorf("protection after the user turned it off reads %q", state)
+	}
+	s.MustSteer("bin", "install")
+	if fileExists(filepath.Join(s.Home, ".steer", "hooks", "steer-self-protection.py")) {
+		t.Error("bin install put back a guard the setting turns off")
 	}
 }

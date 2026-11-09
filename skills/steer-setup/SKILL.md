@@ -215,8 +215,14 @@ channel. Choose one channel per repository, or a commit gets reviewed twice.
 ```
 
 This copies the binary to `~/.steer/bin/steer` and repoints every registration at
-that absolute path. It also rebuilds a global guard runner built by an older
-Steer, and prints the rebuild command for a stale project runner; relay that line. A registration naming the bare word `steer` is resolved on PATH
+that absolute path. It installs Steer's self-protection, a global guard that blocks
+an agent from changing Steer's own hooks, settings and registrations, in each agent
+holding a global Steer registration. When its output says it installed
+self-protection, tell the user so, and that `steer config set protection.self off`,
+run in their own terminal, turns it off; relay a Codex approval line it prints. A
+project-only setup gets none. It
+also rebuilds a global guard runner built by an older Steer, and prints the rebuild
+command for a stale project runner; relay that line. A registration naming the bare word `steer` is resolved on PATH
 at hook time, and neither harness reports a command it cannot resolve: the tool call
 runs, the hook is skipped, and nothing says so. After a plugin update, the next
 session start runs this install from the updated plugin itself.

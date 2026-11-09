@@ -74,10 +74,9 @@ type Model struct {
 	archived      []archivedEntry
 	archiveUnread []string
 	// fixOpen is the key of the rule or review prompt entry whose full text the
-	// Fixes panel shows, "" when every entry shows one line. showCatalog and
-	// showArchived open the built-in guard catalog and the Archived list.
+	// Fixes panel shows, "" when every entry shows one line. showArchived opens
+	// the Archived list.
 	fixOpen      string
-	showCatalog  bool
 	showArchived bool
 
 	// expanded says the selected problem's detail area is open; technical says its
@@ -190,7 +189,7 @@ func (m *Model) rowCount(p panel) int {
 	case panelFixes:
 		return len(m.fixRows())
 	case panelReviewer:
-		return len(settings.Fields)
+		return len(settings.ReviewerFields)
 	}
 	return 0
 }

@@ -39,6 +39,20 @@ func GuardTargets(scope string, candidates []harness.Registrar) ([]harness.Regis
 	return held, nil
 }
 
+// SetUpTargets narrows candidates to the harnesses holding a global Steer
+// registration: the ones Steer is set up in. Unlike GuardTargets it never widens to
+// every candidate, so a write Steer makes on its own reaches no harness the user did
+// not set up.
+func SetUpTargets(candidates []harness.Registrar) []harness.Registrar {
+	var held []harness.Registrar
+	for _, c := range candidates {
+		if holdsGlobalRegistration(c, candidates) {
+			held = append(held, c)
+		}
+	}
+	return held
+}
+
 // globalConfigReadable fails when the harness's global instruction document or
 // the file holding its global hook registrations exists but cannot be read.
 func globalConfigReadable(r harness.Registrar) error {

@@ -10,7 +10,6 @@ import (
 	"github.com/steer-sh/steer-cli/internal/codex"
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/hookstore"
-	"github.com/steer-sh/steer-cli/internal/presets"
 	"github.com/steer-sh/steer-cli/internal/testhome"
 )
 
@@ -232,44 +231,6 @@ func TestDriftCountsAHarnessThatCarriesNoRegistration(t *testing.T) {
 	}
 	if reason != claude.DriftHarness {
 		t.Errorf("reason = %q; want %q", reason, claude.DriftHarness)
-	}
-}
-
-func TestEnablingAPresetForASecondHarnessIsNotAlreadyEnabled(t *testing.T) {
-	withCmdProjectTempDir(t)
-	catalog, item := loadCatalogAndOneVisiblePreset(t)
-
-	if _, err := presets.EnablePreset(claude.ProjectScope, catalog, item, false, claude.Registrar{}); err != nil {
-		t.Fatalf("EnablePreset returned error: %v", err)
-	}
-	status, err := presets.EnablePreset(claude.ProjectScope, catalog, item, false, codex.Registrar{})
-	if err != nil {
-		t.Fatalf("EnablePreset for the second harness returned error: %v", err)
-	}
-	if status == "already enabled" {
-		t.Fatal("the second harness was reported enabled without being registered")
-	}
-	if hooks := readFile(t, filepath.Join(".codex", "hooks.json")); !strings.Contains(hooks, "--harness codex") {
-		t.Error("the second harness never got the registration")
-	}
-}
-
-func TestSyncReinstallsForAHarnessThatWasNeverRegistered(t *testing.T) {
-	withCmdProjectTempDir(t)
-	catalog, item := loadCatalogAndOneVisiblePreset(t)
-	if _, err := presets.EnablePreset(claude.ProjectScope, catalog, item, false, claude.Registrar{}); err != nil {
-		t.Fatalf("EnablePreset returned error: %v", err)
-	}
-
-	result, err := presets.SyncFactoryPresets(claude.ProjectScope, catalog, presets.SyncOptions{}, codex.Registrar{})
-	if err != nil {
-		t.Fatalf("SyncFactoryPresets returned error: %v", err)
-	}
-	if result.Reinstalled == 0 {
-		t.Fatal("sync found nothing to do for a harness with no registration")
-	}
-	if hooks := readFile(t, filepath.Join(".codex", "hooks.json")); !strings.Contains(hooks, "--harness codex") {
-		t.Error("sync did not register the master for the second harness")
 	}
 }
 

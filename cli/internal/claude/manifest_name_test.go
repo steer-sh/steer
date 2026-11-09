@@ -32,8 +32,8 @@ func TestARemovalRefusesAManifestNameOutsideTheStore(t *testing.T) {
 		opts RemoveOptions
 	}{
 		{"archived removal", RemoveOptions{Reason: "poisoned"}},
-		// CatalogCopy skips the archive, so the delete is the only step left.
-		{"catalog removal", RemoveOptions{CatalogCopy: true}},
+		// ShippedCopy skips the archive, so the delete is the only step left.
+		{"catalog removal", RemoveOptions{ShippedCopy: true}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir, manifestRaw := poisonedProject(t, "x", "../../victim")

@@ -14,7 +14,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/hookstore"
-	"github.com/steer-sh/steer-cli/internal/presets"
+	"github.com/steer-sh/steer-cli/internal/protection"
 	"github.com/steer-sh/steer-cli/internal/status"
 	"github.com/steer-sh/steer-cli/internal/tier"
 )
@@ -29,7 +29,6 @@ import (
 // The kinds of row.
 const (
 	guardInstalled = "installed"
-	guardAvailable = "available"
 	guardRepair    = "repair"
 	fixRule        = "rule"
 	fixAddendum    = "addendum"
@@ -37,13 +36,12 @@ const (
 	fixCheck       = "check"
 	fixArchived    = "archived"
 	// A disclosure row opens or closes the section under it.
-	catalogToggle = "catalog-toggle"
 	archiveToggle = "archive-toggle"
 )
 
 // fixRow is one line of the panel: a guard in your inventory, a rule, a review
-// addendum entry, this repository or one of its checks, a built-in guard you can
-// turn on, an archived fix, or a maintenance action a detected issue asks for.
+// addendum entry, this repository or one of its checks, an archived fix, or a
+// maintenance action a detected issue asks for.
 type fixRow struct {
 	kind string
 	// name is the fix's id, the one archive and restore act on; label is what the
@@ -52,14 +50,12 @@ type fixRow struct {
 	label string
 	// compact shows the first line of description only.
 	compact bool
-	// origin is where an installed guard came from; description is a built-in
-	// guard's own summary, a rule's or entry's text, or a check's binding.
+	// origin is where an installed guard came from; description is a rule's or
+	// entry's text, or a check's binding.
 	origin      string
 	description string
-	// source is an installed guard's stored source, and builtin marks one the
-	// catalog can turn off and on again.
-	source  string
-	builtin bool
+	// source is an installed guard's stored source.
+	source string
 	// state is where a rule, entry, repository or check stands, and attention
 	// marks a state that asks the reader to act.
 	state     string
@@ -91,45 +87,27 @@ func fixKey(r fixRow) string {
 
 // The repair actions. Each names one operation and one detected issue.
 const (
-	repairPresets = "update-built-ins"
-	repairRunner  = "rebuild-runner"
-	repairSync    = "sync-registrations"
+	repairRunner = "rebuild-runner"
+	repairSync   = "sync-registrations"
 )
 
 // fixRows lists the rows in the order the panel prints them, which is the order
 // the cursor walks: one row per detected issue, your guards, rules, review prompt
-// entries, this repository and its checks, then the built-in guards not in your
-// inventory and the archived fixes, each behind a row that opens it.
+// entries, this repository and its checks, then the archived fixes behind a row
+// that opens them.
 func (m *Model) fixRows() []fixRow {
 	if m.snap == nil {
 		return nil
 	}
 	rows := m.guardRepairs()
-	visible := map[string]bool{}
-	for _, p := range m.snap.Presets {
-		visible[p.Name] = true
-	}
 	for _, h := range m.snap.Hooks {
 		rows = append(rows, fixRow{kind: guardInstalled, name: h.Name,
-			origin: guardOrigin(h.Source), source: h.Source,
-			builtin: h.Source == claude.SourceFactory && visible[h.Name],
-			scope:   m.scope, removable: h.Source != claude.SourceFactory})
+			origin: guardOrigin(h.Source), source: h.Source, scope: m.scope,
+			removable: h.Source != claude.SourceFactory && h.Source != claude.SourceSteer})
 	}
 	rows = append(rows, m.ruleRows()...)
 	rows = append(rows, m.addendumRows()...)
 	rows = append(rows, m.checkRows()...)
-	var catalog []fixRow
-	for _, p := range m.snap.Presets {
-		if p.Enabled {
-			// It is already in your inventory above. A second line here reads as two
-			// protections where one is installed.
-			continue
-		}
-		catalog = append(catalog, fixRow{kind: guardAvailable, name: p.Name,
-			description: p.Description})
-	}
-	rows = append(rows, disclose(catalogToggle, catalog, m.showCatalog,
-		fmt.Sprintf("%d you can turn on", len(catalog)))...)
 	archived := m.archivedRows()
 	return append(rows, disclose(archiveToggle, archived, m.showArchived,
 		fmt.Sprintf("%d archived %s", len(archived), fixNoun(len(archived))))...)
@@ -273,28 +251,11 @@ func lastRunPhrase(r *status.CheckRun) string {
 	return "last run " + status.CheckRunPhrase(r)
 }
 
-// guardRepairs is one row per detected issue: a built-in guard whose installed
-// copy no longer matches the catalog, and a guard runner older than this binary.
+// guardRepairs is one row per detected issue: a guard runner older than this
+// binary, or one a harness does not run.
 // A healthy screen carries neither, so nothing asks for routine maintenance.
 func (m *Model) guardRepairs() []fixRow {
 	var rows []fixRow
-	var drifted []string
-	for _, p := range m.snap.Presets {
-		if p.Enabled && p.Drifted {
-			drifted = append(drifted, p.Name)
-		}
-	}
-	if len(drifted) > 0 {
-		rows = append(rows, fixRow{
-			kind: guardRepair, repair: repairPresets,
-			label: "Update built-in guards",
-			issue: fmt.Sprintf("%s no longer %s the built-in guard this version of Steer ships. "+
-				"Updating reinstalls %s from the catalog in the running Steer, and puts back any "+
-				"supporting guard Steer keeps for itself. Local edits to %s are replaced.",
-				strings.Join(drifted, ", "), matchVerb(len(drifted)),
-				pronoun(len(drifted)), pronoun(len(drifted))),
-		})
-	}
 	// A rebuild writes the runner in the dashboard's scope, so a stale runner in
 	// the other scope gets no row here; Diagnostics carries its command instead.
 	for _, master := range m.snap.Posture.Masters {
@@ -361,21 +322,6 @@ func hasRepair(rows []fixRow, repair string) bool {
 	return false
 }
 
-// matchVerb and pronoun keep the issue sentence grammatical for one or many.
-func matchVerb(n int) string {
-	if n == 1 {
-		return "matches"
-	}
-	return "match"
-}
-
-func pronoun(n int) string {
-	if n == 1 {
-		return "it"
-	}
-	return "them"
-}
-
 // guardOrigin says where a guard in your inventory came from, in the reader's
 // words. The stored source arrives as data, so it is translated here.
 func guardOrigin(source string) string {
@@ -383,7 +329,9 @@ func guardOrigin(source string) string {
 	case claude.SourceGenerated:
 		return "written for you by Steer"
 	case claude.SourceFactory:
-		return "built in to Steer"
+		return "a built-in guard Steer no longer ships"
+	case claude.SourceSteer:
+		return "part of Steer: its self-protection"
 	case claude.SourceManual:
 		return "written by you, registered with Steer"
 	}
@@ -402,7 +350,7 @@ func (m *Model) fixesLegend() string {
 		archive = "x archive · "
 	}
 	switch row.kind {
-	case catalogToggle, archiveToggle:
+	case archiveToggle:
 		return "enter " + strings.TrimPrefix(row.description, "enter ") + " · "
 	case fixRule, fixAddendum:
 		if row.compact {
@@ -411,12 +359,6 @@ func (m *Model) fixesLegend() string {
 		return "enter hide full text · " + archive
 	case guardRepair:
 		return "enter run this repair · "
-	case guardInstalled:
-		if row.builtin {
-			return "enter turn off · "
-		}
-	case guardAvailable:
-		return "enter turn on · "
 	case fixRepo:
 		if m.checking == "" && !m.snap.Checks.Adopted {
 			return "enter authorize the whole repository (runs check.sh) · "
@@ -433,8 +375,7 @@ func (m *Model) fixesLegend() string {
 	return archive
 }
 
-// fixesKey acts on the selected row. Enter turns a built-in guard on or off, runs
-// a repair row's operation, authorizes the repository, tests a check, restores an
+// fixesKey acts on the selected row. Enter runs a repair row's operation, authorizes the repository, tests a check, restores an
 // archived fix, shows or hides an entry's full text, or opens a section; x opens
 // the archive form over any other fix.
 func (m *Model) fixesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -452,9 +393,6 @@ func (m *Model) fixesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch row.kind {
-	case catalogToggle:
-		m.showCatalog = !m.showCatalog
-		m.clampCursor(panelFixes)
 	case archiveToggle:
 		m.showArchived = !m.showArchived
 		m.clampCursor(panelFixes)
@@ -466,20 +404,14 @@ func (m *Model) fixesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case guardRepair:
 		switch row.repair {
-		case repairPresets:
-			m.syncPresets()
 		case repairSync:
 			m.syncStore()
 		default:
 			m.rebuildMaster()
 		}
-	case guardAvailable:
-		m.togglePreset(row.name, false)
 	case guardInstalled:
-		if row.builtin {
-			m.togglePreset(row.name, true)
-		} else if row.source == claude.SourceFactory {
-			m.note("%s", factoryGuardNote(row.name, m.scope))
+		if note := steerGuardNote(row, m.scope); note != "" {
+			m.note("%s", note)
 		}
 	case fixRepo:
 		if m.checking != "" || m.snap.Checks.Adopted {
@@ -675,75 +607,6 @@ func testNote(id string, run checks.ValidationRun, err error) string {
 	return id + " tested"
 }
 
-// togglePreset turns a built-in guard on or off through the same presets
-// functions the CLI commands call. A guard the catalog does not hold is not a
-// built-in guard, so the panel names the archive action instead.
-func (m *Model) togglePreset(name string, on bool) {
-	catalog, err := presets.LoadCatalog()
-	if err != nil {
-		m.note("could not read the built-in guards: %v", err)
-		return
-	}
-	item, found := presets.FindVisiblePreset(catalog, name)
-	if !found {
-		m.note("%s is not a built-in guard in this Steer; x archives it instead", name)
-		return
-	}
-	targets, err := m.targetsFor(m.scope)
-	if err != nil {
-		m.note("nothing was changed: %v", err)
-		return
-	}
-	var removed []presets.CatalogItem
-	if on {
-		_, removed, err = presets.DisablePreset(m.scope, catalog, item, false, targets...)
-	} else {
-		_, err = presets.EnablePreset(m.scope, catalog, item, false, targets...)
-		if err == nil {
-			_, err = presets.EnsureAutoManagedFactoryPresets(m.scope, catalog, false, targets...)
-		}
-	}
-	// A disable can fail after it removed the guard, so the panel reads the store
-	// before it reports the error.
-	m.refresh()
-	if err != nil {
-		m.note("error: %v", err)
-		return
-	}
-	if on {
-		if len(removed) > 0 {
-			m.note("%s is off in %s; %s went with it, as no built-in guard remains", name, scopeReach(m.scope), removed[0].Name)
-			return
-		}
-		m.note("%s is off in %s", name, scopeReach(m.scope))
-		return
-	}
-	m.note("%s is on in %s", name, scopeReach(m.scope))
-}
-
-// syncPresets reconciles the built-in guards you have on with the catalog in the
-// running Steer.
-func (m *Model) syncPresets() {
-	catalog, err := presets.LoadCatalog()
-	if err != nil {
-		m.note("could not read the built-in guards: %v", err)
-		return
-	}
-	targets, err := m.targetsFor(m.scope)
-	if err != nil {
-		m.note("nothing was updated: %v", err)
-		return
-	}
-	res, err := presets.SyncFactoryPresets(m.scope, catalog, presets.SyncOptions{}, targets...)
-	if err != nil {
-		m.note("nothing was updated: %v", err)
-		return
-	}
-	m.refresh()
-	m.note("%d built-in guard(s) read, %d replaced, %d already current",
-		res.CheckedFactory, res.Reinstalled, res.UpToDate)
-}
-
 // rebuildMaster writes the shared runner again and repoints every registration at
 // it, through the same package function `steer hooks rebuild` calls. It registers
 // only in the harnesses the scope's repair names.
@@ -822,7 +685,7 @@ func (m *Model) repairTargets() ([]harness.Registrar, bool) {
 }
 
 // viewFixes renders any repair a detected issue asks for, each tier's fixes, and
-// the built-in guards you can turn on and the archived fixes behind a row each.
+// the archived fixes behind a row.
 func (m *Model) viewFixes() string {
 	if m.editing && m.archiveForm != nil {
 		return m.viewArchiveForm()
@@ -853,10 +716,6 @@ func (m *Model) viewFixes() string {
 			out += guardTitleInColumn(r.display(), r.origin, i == cursor, width, column)
 		}
 	}
-	if anyBuiltin(rows) {
-		out += wrapTo(secondary("Turning a built-in guard off writes no archive: it comes back from the built-in "+
-			"guards below. Archiving any other guard keeps its file and fixtures for a restore."), "  ", width)
-	}
 
 	out += section("Rules — instructions your coding agent reads")
 	if !anyOfKind(rows, fixRule) {
@@ -877,23 +736,6 @@ func (m *Model) viewFixes() string {
 	out += stateRows(rows, cursor, width, fixRepo, fixCheck)
 	if m.checking != "" {
 		out += wrapTo(secondary("A check action is running; its result appears at the bottom of the screen when it finishes."), "  ", width)
-	}
-
-	// A Steer whose catalog ships no built-in guard has no section to offer.
-	if m.snap != nil && len(m.snap.Presets) > 0 {
-		out += section("Available built-in guards")
-		if !anyOfKind(rows, catalogToggle) {
-			out += dim("  every built-in guard is already on here.\n")
-		}
-		column = nameColumn(rows, width, guardAvailable)
-		for i, r := range rows {
-			switch r.kind {
-			case catalogToggle:
-				out += selectedRow(r.display(), " "+secondary("— "+r.description), i == cursor, width)
-			case guardAvailable:
-				out += guardTitleInColumn(r.display(), r.description, i == cursor, width, column)
-			}
-		}
 	}
 
 	out += section("Archived — fixes a removal took out, which enter puts back")
@@ -953,31 +795,27 @@ func (m *Model) guardStorePath() string {
 	return path
 }
 
-// anyBuiltin says whether the list holds a built-in guard you can turn off.
-func anyBuiltin(rows []fixRow) bool {
-	for _, r := range rows {
-		if r.builtin {
-			return true
+// steerGuardNote answers enter or x on a guard Steer installed that x does not
+// archive, and is "" for any other row: an orphan from a preset this Steer no longer
+// ships, which the command it names removes, or Steer's self-protection, which a
+// setting turns off.
+func steerGuardNote(row fixRow, scope string) string {
+	if row.kind != guardInstalled {
+		return ""
+	}
+	switch row.source {
+	case claude.SourceSteer:
+		return row.name + " is Steer's self-protection; run " + protection.OffCommand +
+			" in your own terminal to turn it off"
+	case claude.SourceFactory:
+		command := "steer preset disable " + row.name
+		if scope == claude.GlobalScope {
+			command += " --scope global"
 		}
+		return row.name + " is a built-in guard this Steer no longer ships; run " + command +
+			" to remove it and keep an archived copy"
 	}
-	return false
-}
-
-// factoryGuardNote answers enter or x on a guard Steer installed in scope that has
-// no switch: the one Steer keeps for itself, or one this Steer's catalog no longer
-// holds, which the command it names removes from that scope.
-func factoryGuardNote(name, scope string) string {
-	if catalog, err := presets.LoadCatalog(); err == nil {
-		if item, ok := catalog.Find(name); ok && item.Internal {
-			return name + " is a guard Steer keeps for itself, so it has no switch here"
-		}
-	}
-	command := "steer preset disable " + name
-	if scope == claude.GlobalScope {
-		command += " --scope global"
-	}
-	return name + " is not a built-in guard of this Steer; run " + command +
-		" to remove it and keep an archived copy"
+	return ""
 }
 
 // anyOfKind says whether the list holds a row of one kind, so a section can print

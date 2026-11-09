@@ -68,6 +68,7 @@ func HealthOf(s *SystemStatus, probe reviewers.Probe) Health {
 	}
 	h.Issues = append(h.Issues, trustIssues(s)...)
 	h.Issues = append(h.Issues, guardIssues(s)...)
+	h.Issues = append(h.Issues, protectionIssues(s.Posture.Protection)...)
 	h.Issues = append(h.Issues, ruleIssues(s.Posture.Rules, s.Posture.Masters)...)
 	h.Issues = append(h.Issues, checkIssues(s.Checks)...)
 	for _, p := range s.StoreProblems {
@@ -190,6 +191,9 @@ func readyLines(s *SystemStatus, r Readiness, agree bool) []string {
 		out = append(out, parts[0]+" and "+parts[1]+" are ready.")
 	default:
 		out = append(out, strings.Join(parts[:len(parts)-1], ", ")+" and "+parts[len(parts)-1]+" are ready.")
+	}
+	if s.Posture.Protection.State == ProtectionOn {
+		out = append(out, "Self-protection is on.")
 	}
 	if agree {
 		out = append(out, "Hooks and plugins run the same build.")

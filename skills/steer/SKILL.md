@@ -2,7 +2,7 @@
 name: steer
 description: Turns a natural-language rule into the fix that can enforce it — a repository check, a PreToolUse Python guard, or an instruction rule — and installs it. Use when enforcing coding standards, blocking insecure patterns, making sure checks pass before a turn ends, managing hook lifecycle, or running steer CLI commands (register, remove, list, test, preset, verify, git-hooks).
 user-invocable: true
-prompt_version: 26
+prompt_version: 27
 compatibility: Requires Claude Code or Codex with tool-call hook support. Hooks are installed into .steer/hooks/ and registered in every installed harness Steer is set up in (settings.json for Claude Code, hooks.json for Codex). steer CLI must be available on PATH or bundled under scripts/.
 allowed-tools: Bash(steer *), Bash(python3 *), Bash(echo *), Read, Write, Edit
 ---
@@ -242,13 +242,12 @@ problem.
 `--to-file` writes the output to a new file and prints only that file's path.
 Read that file with the Read tool, to its end; never redirect it to a path of
 your own. Never read it from command output: a harness can show only the start of a
-long output. The snapshot lists guards and presets in both scopes; each row
-names its scope.
+long output. The snapshot lists guards in both scopes; each row names its scope.
 
 **Installed fixes.** Compare the rule with each fix, whatever its tier:
 
-- Guards: `hooks[]`, and each preset in `presets[]` whose `enabled_scopes` is
-  not empty.
+- Guards: `hooks[]`. A row whose `source` is `steer` is Steer's self-protection,
+  which guards Steer itself and covers no rule of the user's.
 - Instruction rules: `rules[]`.
 - Review prompt entries: `addenda[]`.
 - Repository checks: `checks.checks[]`, for this repository only. For a request

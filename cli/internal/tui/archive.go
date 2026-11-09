@@ -126,13 +126,11 @@ func rowTier(row fixRow) string {
 }
 
 // archiveKey answers x on the selected row: a fix Steer can archive opens the
-// archive form, and a built-in guard says it turns off instead.
+// archive form, and a guard Steer installed names its own way out instead.
 func (m *Model) archiveKey(row fixRow) {
 	switch {
-	case row.builtin:
-		m.note("%s is a built-in guard: enter turns it off, and turning it off writes no archive", row.name)
-	case row.kind == guardInstalled && row.source == claude.SourceFactory:
-		m.note("%s", factoryGuardNote(row.name, m.scope))
+	case steerGuardNote(row, m.scope) != "":
+		m.note("%s", steerGuardNote(row, m.scope))
 	case !row.removable:
 		if row.unremovable != "" {
 			m.note("%s", row.unremovable)

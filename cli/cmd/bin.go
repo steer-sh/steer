@@ -51,6 +51,10 @@ unreviewed.
 The copy and the re-registration are one operation, because a path written into a
 config is stranded the moment the file it names moves.
 
+It installs or updates Steer's self-protection guard in the global store, for
+the agents a global Steer registration already covers, unless
+"steer config set protection.self off" turned it off; then it removes it.
+
 A guard master embeds the runtime it was built with, so install then rebuilds a
 global master whose runtime differs from this binary's. A project master is
 committed and shared: install names its rebuild command and leaves the file as
@@ -123,7 +127,8 @@ func lockInstall() (release func(), held bool, err error) {
 }
 
 // installStable places the running binary at the stable executable, repoints every
-// Steer-owned registration at it and rebuilds a stale global master. When the
+// Steer-owned registration at it, brings self-protection in line with its setting
+// and rebuilds a stale global master. When the
 // executable already exists the binary is placed last, so an install that stops
 // early leaves the hooks on their old build and the next one repeats all of it.
 // verifyLater, when set, takes each rebuilt scope's fixture rerun off this process.
@@ -150,6 +155,9 @@ func installStable(r *installReport, verifyLater func(scope string)) error {
 	} else {
 		r.info(fmt.Sprintf("Repointed %d registration(s) at the stable executable.", rewritten))
 	}
+	// A guard it installs rebuilds the global master with this binary's runtime, so
+	// it runs before the stale-master pass, which then finds that master current.
+	reconcileProtection(r, verifyLater)
 	if err := rebuildStaleMasters(r, verifyLater); err != nil {
 		return err
 	}

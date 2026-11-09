@@ -46,7 +46,7 @@ func (m *Model) reviewerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.String() != "enter" && msg.String() != "e" {
 		return m, nil
 	}
-	f := settings.Fields[m.cursor[panelReviewer]]
+	f := settings.ReviewerFields[m.cursor[panelReviewer]]
 	file, err := config.Load()
 	if err != nil {
 		m.note("error: %v", err)
@@ -279,7 +279,7 @@ func (m *Model) viewReviewer() string {
 		file = config.Config{}
 	}
 	out += "\n"
-	for i, f := range settings.Fields {
+	for i, f := range settings.ReviewerFields {
 		selected := i == m.cursor[panelReviewer]
 		out += selectedRow(reviewerLabel(settings.LabelOf(f), selected), " "+settings.DisplayValue(f, m.cfg), selected && !m.editing, width)
 		if override := overrideNote(f, file); override != "" {
@@ -324,8 +324,8 @@ func (m *Model) viewReviewerKey(width int) string {
 func (m *Model) viewReviewerDetails(width int) string {
 	out := section("Details")
 	out += wrapTo(dim("Saved in "+configPath()), "  ", width)
-	names := make([]string, 0, len(settings.Fields))
-	for _, f := range settings.Fields {
+	names := make([]string, 0, len(settings.ReviewerFields))
+	for _, f := range settings.ReviewerFields {
 		names = append(names, f.Name)
 	}
 	return out + wrapTo(dim("Keys: "+strings.Join(names, ", ")), "  ", width)

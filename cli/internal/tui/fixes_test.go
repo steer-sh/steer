@@ -21,28 +21,6 @@ import (
 	"github.com/steer-sh/steer-cli/internal/testhome"
 )
 
-// An enabled built-in guard is in your inventory, so it appears there and not a
-// second time under the ones you can turn on. Two lines read as two protections.
-func TestAnEnabledBuiltInGuardIsListedOnce(t *testing.T) {
-	m := New(gate.Defaults(), "global")
-	m.snap = &status.SystemStatus{
-		Hooks: []status.HookInfo{{Name: "bare-python", Source: claude.SourceFactory}},
-		Presets: []status.PresetInfo{
-			{Name: "bare-python", Enabled: true, Description: "blocks bare python"},
-			{Name: "no-force-push", Description: "blocks git push --force"},
-		},
-	}
-	m.active = panelFixes
-	m.showCatalog = true
-
-	if got := strings.Count(m.viewFixes(), "bare-python"); got != 1 {
-		t.Errorf("the enabled built-in guard appears %d times, want once", got)
-	}
-	if !strings.Contains(m.viewFixes(), "no-force-push") {
-		t.Error("a built-in guard that is off is not offered")
-	}
-}
-
 // Every guard in your inventory says where it came from, in the reader's words.
 func TestEveryGuardNamesItsOrigin(t *testing.T) {
 	m := New(gate.Defaults(), "global")
@@ -51,11 +29,13 @@ func TestEveryGuardNamesItsOrigin(t *testing.T) {
 		{Name: "written-by-steer", Source: claude.SourceGenerated},
 		{Name: "built-in", Source: claude.SourceFactory},
 		{Name: "hand-written", Source: claude.SourceManual},
+		{Name: "steer-self-protection", Source: claude.SourceSteer},
 	}}
 	m.active = panelFixes
 	view := m.viewFixes()
 	for _, want := range []string{
-		"written for you by Steer", "built in to Steer", "written by you, registered with Steer",
+		"written for you by Steer", "a built-in guard Steer no longer ships",
+		"written by you, registered with Steer", "part of Steer: its self-protection",
 	} {
 		if !strings.Contains(strings.Join(strings.Fields(view), " "), want) {
 			t.Errorf("the inventory is missing the origin %q:\n%s", want, view)
@@ -85,8 +65,7 @@ func TestAnEmptyInventoryIsLocal(t *testing.T) {
 func TestNoMaintenanceIsAskedForOnAHealthyScreen(t *testing.T) {
 	m := New(gate.Defaults(), "global")
 	m.snap = &status.SystemStatus{
-		Hooks:   []status.HookInfo{{Name: "bare-python", Source: claude.SourceFactory}},
-		Presets: []status.PresetInfo{{Name: "bare-python", Enabled: true}},
+		Hooks: []status.HookInfo{{Name: "bare-python", Source: claude.SourceFactory}},
 		Posture: status.Posture{Masters: []status.MasterRuntime{{
 			Harness: "claude-code", Scope: "global", State: status.MasterCurrent,
 			Runtime: guard.RuntimeDigest(),
@@ -96,62 +75,18 @@ func TestNoMaintenanceIsAskedForOnAHealthyScreen(t *testing.T) {
 	if strings.Contains(m.viewFixes(), "Maintenance needed") {
 		t.Errorf("a healthy screen asks for maintenance:\n%s", m.viewFixes())
 	}
-	if got := m.fixesLegend(); !strings.Contains(got, "turn off") {
-		t.Errorf("the legend on an installed guard reads %q", got)
-	}
 }
 
-// Only a guard the catalog can turn back on offers "turn off". A generated or
-// hand-written guard has no copy to restore, and a guard Steer keeps for itself
-// is not a built-in the reader can switch, so the legend promised an action enter
-// then refused.
-func TestOnlyABuiltInGuardOffersTurnOff(t *testing.T) {
-	m := New(gate.Defaults(), "global")
-	m.snap = &status.SystemStatus{
-		Hooks: []status.HookInfo{
-			{Name: "bare-python", Source: claude.SourceFactory},
-			{Name: "steer-self-protection", Source: claude.SourceFactory},
-			{Name: "written-by-steer", Source: claude.SourceGenerated},
-			{Name: "hand-written", Source: claude.SourceManual},
-		},
-		Presets: []status.PresetInfo{{Name: "bare-python", Enabled: true}},
-	}
-	m.active = panelFixes
-	want := map[string]bool{"bare-python": true}
-	for i, row := range m.fixRows() {
-		if row.kind != guardInstalled {
-			continue
-		}
-		m.cursor[panelFixes] = i
-		if got := strings.Contains(m.fixesLegend(), "turn off"); got != want[row.name] {
-			t.Errorf("%s: legend offers turn off = %v, want %v", row.name, got, want[row.name])
-		}
-		if want[row.name] {
-			continue
-		}
-		m.message = ""
-		m.fixesKey(tea.KeyMsg{Type: tea.KeyEnter})
-		if strings.Contains(m.message, "is off") {
-			t.Errorf("%s: enter turned a guard off: %q", row.name, m.message)
-		}
-		if row.name == "steer-self-protection" && !strings.Contains(m.message, "keeps for itself") {
-			t.Errorf("enter on a guard Steer keeps for itself reads %q", m.message)
-		}
-	}
-}
-
-// x archives every fix except a built-in guard, which turns off and writes no
-// archive. A guard Steer keeps for itself, and a project entry already removed on
-// disk, offer neither.
+// x archives every fix except a guard Steer installed, which names its own way
+// out, and a project entry already removed on disk.
 func TestArchiveIsOfferedOnEveryFixButABuiltInGuard(t *testing.T) {
 	m := fixesModel(false)
 	m.snap.Hooks = []status.HookInfo{
 		{Name: "bare-python", Source: claude.SourceFactory},
-		{Name: "steer-self-protection", Source: claude.SourceFactory},
+		{Name: "steer-self-protection", Source: claude.SourceSteer},
 		{Name: "written-by-steer", Source: claude.SourceGenerated},
 		{Name: "hand-written", Source: claude.SourceManual},
 	}
-	m.snap.Presets = []status.PresetInfo{{Name: "bare-python", Enabled: true}}
 	m.snap.Addenda = append(m.snap.Addenda, status.AddendumInfo{ID: "fp-live", Scope: "global",
 		Text: "a live entry", State: status.AddendumLive})
 	want := map[string]bool{"written-by-steer": true, "hand-written": true, "config-path": true,
@@ -165,9 +100,6 @@ func TestArchiveIsOfferedOnEveryFixButABuiltInGuard(t *testing.T) {
 		if m.editing != want[row.name] {
 			t.Errorf("%s (%s): x opened the archive form = %v", row.name, row.kind, m.editing)
 		}
-		if row.builtin && !strings.Contains(m.message, "writes no archive") {
-			t.Errorf("x on a built-in guard reads %q", m.message)
-		}
 		if m.editing {
 			m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 		}
@@ -176,14 +108,14 @@ func TestArchiveIsOfferedOnEveryFixButABuiltInGuard(t *testing.T) {
 
 // A guard an earlier Steer installed from a built-in guard this one no longer
 // ships has no switch, so enter and x name the command that removes it from the
-// dashboard's scope. With no
-// built-in guard in the catalog, nothing offers one or promises to bring one back.
+// dashboard's scope, and Steer's self-protection names the setting that turns it
+// off. Nothing offers a built-in guard or promises to bring one back.
 func TestAGuardWhoseBuiltInLeftSteerNamesItsRemoval(t *testing.T) {
 	m := New(gate.Defaults(), "global")
 	m.width = 200
 	m.snap = &status.SystemStatus{Hooks: []status.HookInfo{
 		{Name: "eval-usage-security", Source: claude.SourceFactory},
-		{Name: "steer-self-protection", Source: claude.SourceFactory},
+		{Name: "steer-self-protection", Source: claude.SourceSteer},
 	}}
 	m.active = panelFixes
 	view := strings.Join(strings.Fields(m.viewFixes()), " ")
@@ -192,23 +124,31 @@ func TestAGuardWhoseBuiltInLeftSteerNamesItsRemoval(t *testing.T) {
 			t.Errorf("the panel shows %q with no built-in guard to offer", gone)
 		}
 	}
-	found := false
+	want := map[string]string{
+		"eval-usage-security":   "steer preset disable eval-usage-security --scope global",
+		"steer-self-protection": "steer config set protection.self off",
+	}
+	found := 0
 	for i, row := range m.fixRows() {
-		if row.name != "eval-usage-security" {
+		command, ok := want[row.name]
+		if !ok {
 			continue
 		}
-		found = true
+		found++
 		m.cursor[panelFixes] = i
+		if strings.Contains(m.fixesLegend(), "x archive") {
+			t.Errorf("%s offers archive", row.name)
+		}
 		for _, key := range []tea.KeyMsg{{Type: tea.KeyEnter}, {Type: tea.KeyRunes, Runes: []rune("x")}} {
 			m.message = ""
 			m.fixesKey(key)
-			if !strings.Contains(m.message, "steer preset disable eval-usage-security --scope global") {
-				t.Errorf("%s on the guard reads %q", key, m.message)
+			if !strings.Contains(m.message, command) || m.editing {
+				t.Errorf("%s on %s reads %q, editing %v", key, row.name, m.message, m.editing)
 			}
 		}
 	}
-	if !found {
-		t.Fatal("the guard has no row")
+	if found != len(want) {
+		t.Fatalf("%d of the guards have a row", found)
 	}
 }
 
@@ -359,7 +299,7 @@ func TestAFixtureNoteNamesTheRestoredGuardAndEveryFailure(t *testing.T) {
 // selectRow puts the cursor on the row of a kind with a name.
 func selectRow(t *testing.T, m *Model, kind, name string) {
 	t.Helper()
-	m.showCatalog, m.showArchived = true, true
+	m.showArchived = true
 	for i, r := range m.fixRows() {
 		if r.kind == kind && r.display() == name {
 			m.cursor[panelFixes] = i
@@ -375,8 +315,7 @@ func TestEachIssueNamesItsOperationAndItsReach(t *testing.T) {
 	m := New(gate.Defaults(), "global")
 	m.width = 200
 	m.snap = &status.SystemStatus{
-		Hooks:   []status.HookInfo{{Name: "bare-python", Source: claude.SourceFactory}},
-		Presets: []status.PresetInfo{{Name: "bare-python", Enabled: true, Drifted: true}},
+		Hooks: []status.HookInfo{{Name: "bare-python", Source: claude.SourceFactory}},
 		Posture: status.Posture{Masters: []status.MasterRuntime{{
 			Harness: "codex", Scope: "global", State: status.MasterStale,
 			Runtime: "deadbeef", Expected: guard.RuntimeDigest(),
@@ -385,9 +324,6 @@ func TestEachIssueNamesItsOperationAndItsReach(t *testing.T) {
 	m.active = panelFixes
 	view := m.viewFixes()
 	for _, want := range []string{
-		"Update built-in guards",
-		"bare-python no longer matches the built-in guard",
-		"Local edits to it are replaced",
 		"Update the guard runner for Codex",
 		"every project on this machine",
 		"Your guard files are left alone",
@@ -396,7 +332,7 @@ func TestEachIssueNamesItsOperationAndItsReach(t *testing.T) {
 			t.Errorf("an issue is missing %q:\n%s", want, view)
 		}
 	}
-	// Both repairs are selectable, so enter reaches each one.
+	// The repair is selectable, so enter reaches it.
 	rows := m.fixRows()
 	repairs := 0
 	for _, r := range rows {
@@ -404,7 +340,7 @@ func TestEachIssueNamesItsOperationAndItsReach(t *testing.T) {
 			repairs++
 		}
 	}
-	if repairs != 2 {
+	if repairs != 1 {
 		t.Errorf("%d repair rows, want one per detected issue", repairs)
 	}
 	m.cursor[panelFixes] = 0
@@ -438,7 +374,7 @@ func fixesModel(adopted bool) *Model {
 // selectKind puts the cursor on the first row of a kind.
 func selectKind(t *testing.T, m *Model, kind string) {
 	t.Helper()
-	m.showCatalog, m.showArchived = true, true
+	m.showArchived = true
 	for i, r := range m.fixRows() {
 		if r.kind == kind {
 			m.cursor[panelFixes] = i
@@ -633,35 +569,6 @@ func TestXSaysWhyAnEntryOffDiskCannotBeArchived(t *testing.T) {
 	}
 }
 
-// The catalog and the archive open from a row that counts them, and the cursor
-// walks only the rows on screen: closed, their entries are not selectable.
-func TestTheCatalogAndTheArchiveOpenFromACountedRow(t *testing.T) {
-	m := New(gate.Defaults(), "global")
-	m.width = 200
-	m.snap = &status.SystemStatus{Presets: []status.PresetInfo{
-		{Name: "no-force-push", Description: "blocks git push --force"},
-		{Name: "no-rm-rf", Description: "blocks rm -rf"},
-	}}
-	m.active = panelFixes
-	rows := m.fixRows()
-	if anyOfKind(rows, guardAvailable) {
-		t.Fatal("a closed catalog put its guards in the cursor's list")
-	}
-	view := strings.Join(strings.Fields(m.viewFixes()), " ")
-	if !strings.Contains(view, "2 you can turn on — enter shows them") || strings.Contains(view, "no-force-push") {
-		t.Errorf("the closed catalog does not read as a counted row:\n%s", view)
-	}
-	for i, r := range rows {
-		if r.kind == catalogToggle {
-			m.cursor[panelFixes] = i
-		}
-	}
-	m.fixesKey(tea.KeyMsg{Type: tea.KeyEnter})
-	if !strings.Contains(m.viewFixes(), "no-force-push") || !anyOfKind(m.fixRows(), guardAvailable) {
-		t.Error("enter on the counted row did not open the catalog")
-	}
-}
-
 // A rule or review prompt entry shows the first line of its text, and enter shows
 // the whole of it. The row's id stays the id archive acts on.
 func TestAnEntryShowsOneLineUntilEnterOpensIt(t *testing.T) {
@@ -685,12 +592,11 @@ func TestAnEntryShowsOneLineUntilEnterOpensIt(t *testing.T) {
 	}
 }
 
-// Each section lays its names out in its own column, so a long built-in guard
-// name never pushes a rule's text to the right.
+// Each section lays its names out in its own column, so a long guard name never
+// pushes a rule's text to the right.
 func TestEachSectionHasItsOwnNameColumn(t *testing.T) {
 	m := fixesModel(true)
-	m.showCatalog = true
-	m.snap.Presets = []status.PresetInfo{{Name: strings.Repeat("long-name-", 6), Description: "d"}}
+	m.snap.Hooks = []status.HookInfo{{Name: strings.Repeat("long-name-", 6), Source: claude.SourceManual}}
 	for _, line := range strings.Split(ansi.Strip(m.viewFixes()), "\n") {
 		name := strings.TrimLeft(line, " ›")
 		if strings.HasPrefix(name, "config-path") && !strings.HasPrefix(name, "config-path resolve") {

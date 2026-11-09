@@ -1,7 +1,8 @@
 // Package settings owns the editable surface of ~/.steer/config.json: the one key
 // table and the reviewer it resolves.
-// The CLI's `steer config` and the dashboard's Reviewer panel both read this table,
-// so a key can never exist in one editor only.
+// The CLI's `steer config` reads the whole table and the dashboard's Reviewer panel
+// reads its reviewer part, so a reviewer key can never exist in one editor only.
+// The protection key is the CLI's alone: writing it also installs or removes a guard.
 package settings
 
 import (
@@ -56,8 +57,11 @@ type Field struct {
 	Usage    string
 	Get      func(config.Config) string
 	Set      func(*config.Config, string) error
-	// Effective renders the value the commit gate would run with.
+	// Effective renders the value the commit gate would run with. A key the gate
+	// does not read leaves it nil and sets FileEffective instead.
 	Effective func(gate.Config) string
+	// FileEffective renders the value in force from the settings file alone.
+	FileEffective func(config.Config) string
 	// Display renders that same value for a person: a name rather than an id, and
 	// a duration rather than a count of seconds.
 	Display func(gate.Config) string
@@ -77,7 +81,46 @@ type Choice struct {
 }
 
 // Fields is the whole editable surface, in the order an editor lists it.
-var Fields = []Field{
+var Fields = append(append([]Field{}, ReviewerFields...), ProtectionField)
+
+// ProtectionField turns Steer's self-protection guard off or back on.
+var ProtectionField = Field{
+	Name:  "protection.self",
+	Label: "Self-protection",
+	Help: "Whether Steer blocks an agent from changing Steer's own hooks, settings and " +
+		"registrations. Turning it off removes the guard.",
+	Kind:         KindChoice,
+	DefaultLabel: "on",
+	Choices: func() []Choice {
+		return []Choice{{Value: "on", Label: "On"}, {Value: "off", Label: "Off"}}
+	},
+	Usage:         "Self-protection (on|off); unset means on",
+	Get:           func(c config.Config) string { return c.Protection.Self },
+	Set:           setProtection,
+	FileEffective: protectionInForce,
+}
+
+// setProtection stores on, off, or nothing for the default; any other value is a
+// typo, which is refused rather than read as on.
+func setProtection(c *config.Config, v string) error {
+	if v != "" && v != "on" && v != "off" {
+		return fmt.Errorf("protection.self takes on or off")
+	}
+	c.Protection.Self = v
+	return nil
+}
+
+// protectionInForce is the self-protection value in force: off only when the file says so.
+func protectionInForce(c config.Config) string {
+	if c.Protection.Self == "off" {
+		return "off"
+	}
+	return "on"
+}
+
+// ReviewerFields are the keys of the reviewer the commit gate runs, the ones the
+// dashboard's Reviewer panel edits.
+var ReviewerFields = []Field{
 	{
 		Name: "reviewer.provider", Identity: true,
 		Label:        "Reviewer",
@@ -300,6 +343,15 @@ func LabelOf(f Field) string {
 		return f.Label
 	}
 	return f.Name
+}
+
+// EffectiveValue renders the value in force, from the resolved gate configuration
+// or, for a key the gate does not read, from the settings file.
+func EffectiveValue(f Field, cfg gate.Config, file config.Config) string {
+	if f.Effective == nil {
+		return f.FileEffective(file)
+	}
+	return f.Effective(cfg)
 }
 
 // DisplayValue is the value in force, in the reader's words.

@@ -480,6 +480,9 @@ def steer_block_footer(hook_name, firing_id):
                    + " the blocked action.")
     if not source:
         return footer
+    if source == "steer":
+        return (footer + "\nTurning this protection off needs the user's approval: "
+                + cli + " config set protection.self off")
     if source == "factory":
         cmd = cli + " preset disable " + (source_id or hook_name)
     else:
