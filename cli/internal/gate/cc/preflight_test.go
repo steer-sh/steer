@@ -417,9 +417,11 @@ func TestPreflightDenyPassesTheFormsAgentsUse(t *testing.T) {
 func TestRefusalReasonsNameFormsTheGateReviews(t *testing.T) {
 	c := "co" + "mmit"
 	possible, _ := DetectionDeny(`echo "git ` + c + `"`)
+	unquoted, _ := DetectionDeny(`git -C $D status`)
 	for name, reason := range map[string]string{
-		"dynamic-message": AmbiguousShellReason(`git `+c+` -F "$MSG"`, "/cwd"),
-		"possible-commit": possible,
+		"dynamic-message":       AmbiguousShellReason(`git `+c+` -F "$MSG"`, "/cwd"),
+		"possible-commit":       possible,
+		"unquoted-option-value": unquoted,
 	} {
 		_, example, ok := strings.Cut(reason, "\n\n")
 		if !ok {

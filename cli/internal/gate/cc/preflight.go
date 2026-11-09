@@ -56,12 +56,16 @@ func PreflightDeny(cmd, cwd string) (reason, receipt string) {
 // so an adapter may call it before any check of the payload. Empty means Detect found
 // no commit, or only parsed ones.
 func DetectionDeny(cmd string) (reason, receipt string) {
-	switch Detect(cmd) {
+	detection, splitValue := detect(cmd)
+	switch detection {
 	case UnparsedCommit:
 		_, err := shellsyntax.Parse(cmd)
 		return fmt.Sprintf(ambiguousShellReason, fmt.Sprintf("the shell syntax could not be parsed (%v)", err)),
 			AmbiguousShellReceipt
 	case PossibleCommit:
+		if splitValue != "" {
+			return fmt.Sprintf(unquotedOptionValueReason, shortStep(splitValue)), PossibleCommitReceipt
+		}
 		return possibleCommitReason, PossibleCommitReceipt
 	case ParsedAndPossible:
 		return possibleBesideCommitReason, PossibleCommitReceipt
@@ -82,6 +86,17 @@ const possibleCommitReason = "[commit-gate] BLOCKED: this command holds a possib
 	"To commit, run git commit as " +
 	"a plain command with the full intended message. This form keeps a multi-line " +
 	"message whole:\n\n" + heredocCommitExample
+
+const unquotedOptionValueReason = "[commit-gate] BLOCKED: this command holds a possible " +
+	"commit: the git option value in `%s` is an unquoted expansion, and the shell splits " +
+	"its result into words, so a value such as `x commit` would run git commit. NOTHING " +
+	"IN THE COMMAND RAN. Quote that value, and any other unquoted git option value, so " +
+	"each stays one word, for example `" + quotedOptionValueExample + "`. To commit, run " +
+	"git commit as a plain command with the full intended message. This form keeps a " +
+	"multi-line message whole:\n\n" + heredocCommitExample
+
+// quotedOptionValueExample passes a variable as one git option value.
+const quotedOptionValueExample = `git -C "$D" status`
 
 // selfSafeSearchExample searches for commit text without holding it.
 const selfSafeSearchExample = "rg 'git[ ]commit' cli/"
