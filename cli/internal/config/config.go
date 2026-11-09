@@ -13,7 +13,14 @@ import (
 
 // Config is the JSON document stored at ~/.steer/config.json.
 type Config struct {
-	Reviewer Reviewer `json:"reviewer"`
+	Reviewer   Reviewer   `json:"reviewer"`
+	Protection Protection `json:"protection,omitzero"`
+}
+
+// Protection configures the guard that keeps an agent from changing Steer's own
+// state. Self is "on", "off", or empty for the default, which is on.
+type Protection struct {
+	Self string `json:"self,omitempty"`
 }
 
 // Reviewer configures the independent CLI that red-teams commit diffs. Timeout

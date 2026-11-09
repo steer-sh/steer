@@ -122,3 +122,30 @@ func TestToolsTakesOnlyAKnownMode(t *testing.T) {
 		t.Errorf("Set(on) stored %q, err %v; want refused", c.Reviewer.API.Tools, err)
 	}
 }
+
+// Self-protection takes on or off; a typo is refused rather than read as on, an
+// unset key is in force as on, and the reviewer panel does not list the key.
+func TestProtectionTakesOnlyOnOrOff(t *testing.T) {
+	f, err := settings.Find("protection.self")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range []string{"on", "off", ""} {
+		var c config.Config
+		if err := f.Set(&c, v); err != nil || c.Protection.Self != v {
+			t.Errorf("Set(%q) = %v, stored %q", v, err, c.Protection.Self)
+		}
+	}
+	var c config.Config
+	if err := f.Set(&c, "of"); err == nil || c.Protection.Self != "" {
+		t.Errorf("Set(of) stored %q, err %v; want refused", c.Protection.Self, err)
+	}
+	if got := f.FileEffective(config.Config{}); got != "on" {
+		t.Errorf("an unset key is in force as %q, want on", got)
+	}
+	for _, r := range settings.ReviewerFields {
+		if r.Name == f.Name {
+			t.Error("the reviewer panel lists the protection key")
+		}
+	}
+}

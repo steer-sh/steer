@@ -241,7 +241,9 @@ func TestJSONContractIsStable(t *testing.T) {
 				{ID: "pane@m", Path: "/h/.claude/plugins/cache/m/pane/0.1.0", Enabled: "project", State: mods.StateUninspected},
 			},
 			GuardInterpreter: InterpreterReading{Command: "python3", Found: true},
-			Unresolved:       4,
+			Protection: ProtectionReading{State: ProtectionOutdated, Setting: "on", Store: "outdated",
+				Legacy: []string{"global", "project"}},
+			Unresolved: 4,
 		},
 		Checks: CheckTier{
 			Repo: "/w/steer", Manifest: true, Adopted: true, AdoptedAt: 1600,
@@ -328,11 +330,6 @@ func TestJSONContractIsStable(t *testing.T) {
 			{Name: "no-console", Scope: "global", Source: "generated", Rule: "no console.log",
 				Fixtures: &mine.FixtureReceipt{Applicable: true, State: mine.FixtureStale,
 					Cases: intPtr(6), Shadowed: intPtr(1), VerifiedAt: "2025-12-01T00:00:00Z", Changed: []string{"master"}}},
-		},
-		Presets: []PresetInfo{
-			{Name: "shell-safety", Scope: "project", Bundle: "security", Description: "block risky shell", Enabled: false},
-			{Name: "shell-safety", Scope: "global", Bundle: "security", Description: "block risky shell", Enabled: true, Drifted: true},
-			{Name: "env-files", Scope: "global", Bundle: "security", Description: "block .env reads", Enabled: true},
 		},
 		Rules: []RuleInfo{{ID: "config-path", Scope: "global", Text: "resolve config from the repo root"}},
 		Addenda: []AddendumInfo{{ID: "fp-sort", Scope: "project", Text: "sorted output is fine",
@@ -505,6 +502,15 @@ const goldenStatusJSON = `{
       "command": "python3",
       "found": true
     },
+    "protection": {
+      "state": "outdated",
+      "setting": "on",
+      "store": "outdated",
+      "legacy": [
+        "global",
+        "project"
+      ]
+    },
     "readiness": {
       "reviewing": true,
       "headline": "Commits here are reviewed before they land — Claude Code global.",
@@ -533,6 +539,11 @@ const goldenStatusJSON = `{
           "severity": "attention",
           "title": "Codex project runs none of this scope's guards",
           "fix": "steer hooks sync --scope project"
+        },
+        {
+          "severity": "attention",
+          "title": "Self-protection is out of date",
+          "fix": "steer bin install"
         },
         {
           "severity": "attention",
@@ -783,28 +794,6 @@ const goldenStatusJSON = `{
         "verified_at": "2025-12-01T00:00:00Z",
         "shadowed": 1
       }
-    }
-  ],
-  "presets": [
-    {
-      "name": "env-files",
-      "bundle": "security",
-      "description": "block .env reads",
-      "enabled_scopes": [
-        "global"
-      ],
-      "drifted_scopes": []
-    },
-    {
-      "name": "shell-safety",
-      "bundle": "security",
-      "description": "block risky shell",
-      "enabled_scopes": [
-        "global"
-      ],
-      "drifted_scopes": [
-        "global"
-      ]
     }
   ],
   "rules": [

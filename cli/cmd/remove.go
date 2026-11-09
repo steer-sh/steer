@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/claude"
+	"github.com/steer-sh/steer-cli/internal/protection"
 	"github.com/steer-sh/steer-cli/internal/status"
 	"github.com/steer-sh/steer-cli/internal/styles"
 	"github.com/steer-sh/steer-cli/internal/tier"
@@ -48,6 +49,13 @@ artifacts:
 				return err
 			}
 			return fmt.Errorf("%w\n%s", err, otherTierRemoveHint(tier.Guard, identifier, scope))
+		}
+		// bin install puts back a self-protection guard its setting leaves on, so a
+		// removal would last until the next update; the setting is the switch.
+		if manifest, err := claude.LoadManifest(scope); err == nil &&
+			strings.EqualFold(manifest.Hooks[hook.Name].Source, claude.SourceSteer) {
+			return fmt.Errorf("%s is Steer's self-protection, which its setting keeps installed; "+
+				"turn it off with: %s", hook.Name, protection.OffCommand)
 		}
 
 		stray := ""

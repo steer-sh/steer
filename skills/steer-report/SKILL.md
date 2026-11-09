@@ -226,6 +226,8 @@ adds `unread` to each `attention.candidates[]` row. v33 adds `fixtures` to each
 v35 adds `posture.health`: the verdict `steer status` prints, with its issues.
 v36 adds `refreshed_at` and `fix` to the transcript `corpora[]` row: its candidate is
 counted from this machine's stored session snapshots, and a row with `fix` has none.
+v38 adds `posture.protection` and removes `presets[]`: Steer ships no presets, and a
+guard an earlier Steer installed from one is a `hooks[]` row whose `source` is `factory`.
 
 - `status_version` — the schema version. `--json` is a stable agent contract.
 - `posture` — the arming state: `instrument` (reviewer model / runs / prompt
@@ -341,6 +343,24 @@ counted from this machine's stored session snapshots, and a row with `fix` has n
   Like `resolvable`, it can prove the interpreter absent and never prove a hook
   runs. **Act on `found: false` when a `masters[]` row has a `path`:** tell the
   user that their guards enforce nothing until Python 3 is installed.
+  `protection` is Steer's self-protection, a guard in the global store that blocks
+  an agent from changing Steer's own files and settings, and from removing Steer's
+  entries from a harness's configuration or turning its hooks off (other edits to
+  those files through the Edit or Write tool pass):
+  `setting` (`on` or `off`), `store` (`absent`, `current`, `outdated` or `foreign`,
+  a guard Steer did not install holding its id), `legacy` (the scopes still holding
+  the copy an earlier Steer installed from its preset catalog) and `state` — `on`,
+  `off` (the user turned it off), `missing` or `outdated` (expected and not
+  installed as this Steer ships it), `not-running` with `reason` (installed, and an
+  agent Steer is set up in does not run it: no global guard runner registration,
+  a runner that does not carry the guard, or a Codex runner awaiting approval or
+  whose approval Steer could not read), `not-set-up` (no agent holds a global Steer
+  registration, so none is expected and a stored guard runs nowhere) or `unknown` with `error`. It is lexical and
+  best-effort: it stops a careless agent, not a determined one. **Act on `missing`,
+  `outdated` or `not-running`:** run `steer bin install`, except that a runner
+  awaiting Codex approval needs the user to approve it in `/hooks`. **Act on a `legacy`
+  holding `project` while `state` is `on`:** run `steer hooks rebuild --scope project`. Never run the command that turns it
+  off; that is the user's decision.
 - `checks` — this repository's check tier on this machine, with an empty reading
   when `steer status` ran outside a repository. `repo` is the resolved Git root,
   `manifest` says whether it declares checks, and `adopted` / `adopted_at` say
@@ -392,13 +412,11 @@ counted from this machine's stored session snapshots, and a row with `fix` has n
   transcript row adds `refreshed_at`, when the snapshot build its candidate was
   counted from ran, or `fix`, as in the queue.
 - `hooks[]` — the registered managed hooks in both scopes: `name`, `scope`,
-  `source`, `rule`, and `fixtures`, the guard's stored cases read against the
+  `source` (`generated`, `manual`, `steer` for Steer's own self-protection, or
+  `factory` for a guard from a preset Steer no longer ships), `rule`, and `fixtures`, the guard's stored cases read against the
   guard installed now, in the shape `audit.md` gives for a score row's `fixtures`.
   Every guard carries it, whether or not a record names the guard. One name can
   appear once per scope; `scope` and `name` together identify a guard.
-- `presets[]` — the catalog roster, one row per preset: `name`, `bundle`,
-  `description`, and `enabled_scopes` / `drifted_scopes`, the scopes it is enabled
-  in and the scopes whose installed copy drifted from the catalog.
 - `rules[]` — the instruction-tier rules in both stores: `id`, `scope`, `text`.
   Whether an agent's instructions carry one is `posture.rules[].missing`.
 - `addenda[]` — the review addendum entries in both stores: `id`, `scope`,
@@ -408,7 +426,7 @@ counted from this machine's stored session snapshots, and a row with `fix` has n
   (removed on disk, still read at HEAD) or `unreadable` with `detail`. A global
   entry is read from disk, so it is `live` whenever the store holds it.
 - `store_problems[]` — the guard stores a reader refused, each `scope` with the
-  `error`. A row says `hooks`, `presets` and `rules` are INCOMPLETE for that
+  `error`. A row says `hooks` and `rules` are INCOMPLETE for that
   scope, not empty: the guards the store registered still run. A manifest naming
   a file outside its store is refused this way, and an operator repairs it by
   editing the named entry.

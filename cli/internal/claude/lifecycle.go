@@ -35,6 +35,9 @@ type InstallManagedHookInput struct {
 	Metadata HookInstallMetadata
 	// Fixtures are the guard's replayable test cases, stored beside it.
 	Fixtures *fixture.File
+	// Unverified skips the fixture rerun after consolidation, as
+	// RemoveOptions.Unverified does.
+	Unverified bool
 }
 
 // InstallManagedHookResult reports install outcome details.
@@ -53,9 +56,12 @@ type InstallManagedHookResult struct {
 type RemoveOptions struct {
 	// Reason is why the guard is removed. The archive entry keeps it.
 	Reason string
-	// CatalogCopy marks a guard the preset catalog can install again, so the
+	// ShippedCopy marks a guard this binary ships and can install again, so the
 	// removal writes no archive entry.
-	CatalogCopy bool
+	ShippedCopy bool
+	// Unverified skips the fixture rerun after consolidation; every guard's tested
+	// state stays cleared until a VerifyFixtures over the scope earns it again.
+	Unverified bool
 }
 
 // RemoveManagedHookResult reports remove outcome details.
@@ -336,6 +342,9 @@ func InstallManagedHook(scope string, input InstallManagedHookInput, targets ...
 		Overwritten:  manifestExists,
 		PreviousRule: existingEntry.Rule,
 	}
+	if input.Unverified {
+		return result, nil
+	}
 	verification, err := VerifyFixtures(scope)
 	if err != nil {
 		return result, err
@@ -509,7 +518,7 @@ func RemoveManagedHook(scope, identifier string, opts RemoveOptions, targets ...
 	}
 
 	archivePath := ""
-	if !opts.CatalogCopy {
+	if !opts.ShippedCopy {
 		archivePath, err = archiveHook(scope, hookName, hookFile, manifestEntry, hasEntry, opts.Reason)
 		if err != nil {
 			return nil, fmt.Errorf("failed to archive hook %s, so it was not removed: %w", hookName, err)
@@ -547,6 +556,9 @@ func RemoveManagedHook(scope, identifier string, opts RemoveOptions, targets ...
 		HookPath:    hookPath,
 		Rule:        rule,
 		ArchivePath: archivePath,
+	}
+	if opts.Unverified {
+		return result, nil
 	}
 	verification, err := VerifyFixtures(scope)
 	if err != nil {

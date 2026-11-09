@@ -12,7 +12,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/steer-sh/steer-cli/internal/adjudication"
@@ -29,7 +28,6 @@ import (
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/mods"
 	"github.com/steer-sh/steer-cli/internal/pi"
-	"github.com/steer-sh/steer-cli/internal/presets"
 	"github.com/steer-sh/steer-cli/internal/report"
 	"github.com/steer-sh/steer-cli/internal/sessions"
 	"github.com/steer-sh/steer-cli/internal/steerbin"
@@ -79,7 +77,7 @@ import (
 // snapshots, and a row with fix has none.
 // v37 adds the guard source state stamps-differ and guards[].stamps: a runner
 // carrying a guard's current source under an old rule or identity.
-const StatusVersion = 37
+const StatusVersion = 38
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20
@@ -169,16 +167,6 @@ type HookInfo struct {
 	// in the shape a guard-tier record's score row carries, whether or not a record
 	// names the guard. It is absent only when the guard left the store mid-read.
 	Fixtures *mine.FixtureReceipt `json:"fixtures,omitempty"`
-}
-
-// PresetInfo is one catalog preset with its enable and drift state in a scope.
-type PresetInfo struct {
-	Name        string `json:"name"`
-	Scope       string `json:"scope"`
-	Bundle      string `json:"bundle"`
-	Description string `json:"description"`
-	Enabled     bool   `json:"enabled"`
-	Drifted     bool   `json:"drifted"`
 }
 
 // TeamState summarizes the repo-committed team lockfile, when one is present.
@@ -415,6 +403,9 @@ type Posture struct {
 	// GuardInterpreter is whether this process finds the interpreter every guard
 	// runner starts under.
 	GuardInterpreter InterpreterReading `json:"guard_interpreter"`
+	// Protection is whether Steer's self-protection guard stands where its setting
+	// says it should.
+	Protection ProtectionReading `json:"protection"`
 	// HookTimeout is the harness timeout, in seconds, a commit-gate registration
 	// needs under the current reviewer timeout.
 	HookTimeout int `json:"-"`
@@ -471,7 +462,6 @@ type SystemStatus struct {
 	Corpora       []CorpusRow          `json:"corpora"`
 	// Config state — what the dashboard panels mutate. Each reads fail-soft.
 	Hooks   []HookInfo     `json:"hooks"`
-	Presets []PresetInfo   `json:"presets"`
 	Rules   []RuleInfo     `json:"rules"`
 	Addenda []AddendumInfo `json:"addenda"`
 	Team    TeamState      `json:"team"`
@@ -507,7 +497,6 @@ func Collect(opts Options) (*SystemStatus, error) {
 		Corpora:       []CorpusRow{},
 		Summary:       VerdictSummary{Counts: map[string]int{}},
 		Hooks:         []HookInfo{},
-		Presets:       []PresetInfo{},
 		ReviewerProbe: opts.ReviewerProbe,
 	}
 
@@ -564,9 +553,6 @@ func Collect(opts Options) (*SystemStatus, error) {
 	for _, scope := range inventory {
 		hooks, problems := collectHooks(scope)
 		s.Hooks = append(s.Hooks, hooks...)
-		s.StoreProblems = append(s.StoreProblems, problems...)
-		roster, problems := collectPresets(scope)
-		s.Presets = append(s.Presets, roster...)
 		s.StoreProblems = append(s.StoreProblems, problems...)
 	}
 	rules, problems := collectRules()
@@ -692,6 +678,7 @@ func collectPosture(cfg gate.Config, ev mine.EvidenceSet) Posture {
 		Builds:           Builds{Running: RunningBuild(), Hooks: HooksBuild()},
 		Mods:             ModExposures(),
 		GuardInterpreter: ReadInterpreter(exec.LookPath),
+		Protection:       ReadProtection(),
 		Unresolved:       resolve.CountUnresolved(cfg),
 		HookTimeout:      cfg.HookTimeout(),
 	}
@@ -1272,51 +1259,6 @@ func collectHooks(scope string) ([]HookInfo, []StoreProblem) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
-}
-
-// collectPresets reads the catalog roster with each preset's enable and drift
-// state in a scope. A missing catalog or manifest yields an empty list; a
-// manifest the reader refuses yields a store problem beside the roster, whose
-// enable state is then unknown rather than false.
-func collectPresets(scope string) ([]PresetInfo, []StoreProblem) {
-	catalog, err := presets.LoadCatalog()
-	if err != nil {
-		return []PresetInfo{}, nil
-	}
-	items, err := catalog.ListVisible("")
-	if err != nil {
-		return []PresetInfo{}, nil
-	}
-	var problems []StoreProblem
-	manifest, err := claude.LoadManifest(scope)
-	if err != nil || manifest == nil {
-		if err != nil {
-			problems = append(problems, StoreProblem{Scope: scope, Error: err.Error()})
-		}
-		manifest = &claude.Manifest{Hooks: map[string]claude.ManifestEntry{}}
-	}
-	out := make([]PresetInfo, 0, len(items))
-	for _, item := range items {
-		hookName := strings.TrimSuffix(item.HookFile, ".py")
-		entry, ok := manifest.Hooks[hookName]
-		enabled := ok && strings.EqualFold(strings.TrimSpace(entry.Source), claude.SourceFactory) && strings.TrimSpace(entry.SourceID) == item.Name
-		drifted := false
-		if enabled {
-			if needs, _, derr := presets.FactoryPresetNeedsReinstall(scope, catalog, item, hookName, entry); derr == nil {
-				drifted = needs
-			}
-		}
-		out = append(out, PresetInfo{
-			Name:        item.Name,
-			Scope:       scope,
-			Bundle:      presets.BundleFor(item),
-			Description: item.Description,
-			Enabled:     enabled,
-			Drifted:     drifted,
-		})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out, problems
 }
 
 // teamLockfileName is the repo-committed team policy lockfile at project root.

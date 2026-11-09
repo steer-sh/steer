@@ -78,7 +78,14 @@ Read the linked architecture section before changing the corresponding boundary:
   Start with `cli/internal/claude/lifecycle.go`, `rules.go` and `sync.go`.
   `## Steer Rules` is derived from the manifest; change it through the lifecycle.
   A removal archives the fix first (`cli/internal/archive/`); a new removal path
-  must pass `RemoveOptions` and archive unless the catalog holds a copy.
+  must pass `RemoveOptions` and archive unless this binary ships the copy
+  (`ShippedCopy`).
+  Self-protection is core, not a preset: `cli/internal/protection/` owns the guard
+  and `Reconcile`, which `installStable`, `steer config set protection.self` and a
+  global `hooks rebuild` call with `status.SetUpTargets`, never `GuardTargets`, so
+  it registers no harness the user did not set up. A new protected path or a new
+  steer command it reads changes `guard.py` and its tests together; the guard's
+  `STEER_VALUE_FLAGS` table is pinned to the CLI's flags.
   `steer archive restore` (`cli/cmd/archive.go`) goes back through each tier's
   installer, so a change to an installer's refusals changes restore too.
 - Guard execution or fixture mining: [runtime and fixtures](ARCHITECTURE.md#guard-runtime-and-fixtures).

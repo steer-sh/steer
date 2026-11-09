@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/claude"
-	"github.com/steer-sh/steer-cli/internal/presets"
+	"github.com/steer-sh/steer-cli/internal/protection"
 )
 
 func installGeneratedHook(t *testing.T, scope, hookName, rule string) {
@@ -28,11 +28,7 @@ func installGeneratedHook(t *testing.T, scope, hookName, rule string) {
 
 func lockCurrentState(t *testing.T) *teamLockfile {
 	t.Helper()
-	catalog, err := presets.LoadCatalog()
-	if err != nil {
-		t.Fatalf("LoadCatalog returned error: %v", err)
-	}
-	lockfile, err := buildTeamLockfile(claude.ProjectScope, catalog)
+	lockfile, err := buildTeamLockfile(claude.ProjectScope)
 	if err != nil {
 		t.Fatalf("buildTeamLockfile returned error: %v", err)
 	}
@@ -52,8 +48,7 @@ func requireNoFindings(t *testing.T, lockfile *teamLockfile) {
 
 func TestTeamLockDeterministicAndSorted(t *testing.T) {
 	withCmdProjectTempDir(t)
-	catalog, visible := loadCatalogAndOneVisiblePreset(t)
-	installVisibleAndInternal(t, claude.ProjectScope, catalog, visible)
+	installFactoryGuards(t, claude.ProjectScope)
 	installGeneratedHook(t, claude.ProjectScope, "zz-team-rule", "no team rule violations")
 
 	first := lockCurrentState(t)
@@ -79,14 +74,13 @@ func TestTeamLockDeterministicAndSorted(t *testing.T) {
 		t.Fatalf("expected sorted hook names, got %v", names)
 	}
 	if len(first.Hooks) != 3 {
-		t.Fatalf("expected 3 locked hooks (visible + internal + generated), got %d", len(first.Hooks))
+		t.Fatalf("expected 3 locked hooks (two factory + generated), got %d", len(first.Hooks))
 	}
 }
 
 func TestTeamApplyFreshClone(t *testing.T) {
 	withCmdProjectTempDir(t)
-	catalog, visible := loadCatalogAndOneVisiblePreset(t)
-	installVisibleAndInternal(t, claude.ProjectScope, catalog, visible)
+	installFactoryGuards(t, claude.ProjectScope)
 	installGeneratedHook(t, claude.ProjectScope, "team-rule", "no team rule violations in fresh clone")
 	lockfile := lockCurrentState(t)
 
@@ -135,8 +129,7 @@ func TestTeamApplyFreshClone(t *testing.T) {
 
 func TestTeamApplyFloorKeepsPersonalRemovesFactoryExtras(t *testing.T) {
 	withCmdProjectTempDir(t)
-	catalog, visible := loadCatalogAndOneVisiblePreset(t)
-	installVisibleAndInternal(t, claude.ProjectScope, catalog, visible)
+	installFactoryGuards(t, claude.ProjectScope)
 	lockfile := lockCurrentState(t)
 
 	// Personal hook outside the lockfile plus a factory extra outside it.
@@ -161,8 +154,7 @@ func TestTeamApplyFloorKeepsPersonalRemovesFactoryExtras(t *testing.T) {
 
 func TestTeamApplyForceRemovesAllExtras(t *testing.T) {
 	withCmdProjectTempDir(t)
-	catalog, visible := loadCatalogAndOneVisiblePreset(t)
-	installVisibleAndInternal(t, claude.ProjectScope, catalog, visible)
+	installFactoryGuards(t, claude.ProjectScope)
 	lockfile := lockCurrentState(t)
 
 	installGeneratedHook(t, claude.ProjectScope, "personal-hook", "my personal rule")
@@ -183,8 +175,7 @@ func TestTeamApplyForceRemovesAllExtras(t *testing.T) {
 
 func TestTeamApplyDryRunDoesNotMutate(t *testing.T) {
 	withCmdProjectTempDir(t)
-	catalog, visible := loadCatalogAndOneVisiblePreset(t)
-	installVisibleAndInternal(t, claude.ProjectScope, catalog, visible)
+	installFactoryGuards(t, claude.ProjectScope)
 	lockfile := lockCurrentState(t)
 
 	withCmdProjectTempDir(t)
@@ -202,8 +193,7 @@ func TestTeamApplyDryRunDoesNotMutate(t *testing.T) {
 
 func TestTeamVerifyFindsDrift(t *testing.T) {
 	withCmdProjectTempDir(t)
-	catalog, visible := loadCatalogAndOneVisiblePreset(t)
-	installVisibleAndInternal(t, claude.ProjectScope, catalog, visible)
+	installFactoryGuards(t, claude.ProjectScope)
 	lockfile := lockCurrentState(t)
 	requireNoFindings(t, lockfile)
 
@@ -211,7 +201,7 @@ func TestTeamVerifyFindsDrift(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetHooksDir returned error: %v", err)
 	}
-	path := filepath.Join(hooksDir, visible.HookFile)
+	path := filepath.Join(hooksDir, "test-guard-a.py")
 	if err := os.WriteFile(path, []byte("#!/usr/bin/env python3\n# tampered\n"), 0o755); err != nil {
 		t.Fatalf("failed to tamper hook file: %v", err)
 	}
@@ -233,8 +223,7 @@ func TestTeamVerifyFindsDrift(t *testing.T) {
 
 func TestReadTeamLockfileRejectsTamper(t *testing.T) {
 	withCmdProjectTempDir(t)
-	catalog, visible := loadCatalogAndOneVisiblePreset(t)
-	installVisibleAndInternal(t, claude.ProjectScope, catalog, visible)
+	installFactoryGuards(t, claude.ProjectScope)
 	lockfile := lockCurrentState(t)
 
 	lockfile.Hooks[0].Rule = "tampered rule without updated hash"
@@ -281,4 +270,43 @@ func TestTeamLockfileLivesAtTheProjectRoot(t *testing.T) {
 	if _, err := readTeamLockfile(filepath.Join(root, TeamLockfileName)); err != nil {
 		t.Fatalf("no lockfile at the project root: %v", err)
 	}
+}
+
+// An earlier Steer locked its catalog's self-protection beside the team's guards.
+// Apply neither installs nor removes it, even under --force, and verify reads the
+// lock as satisfied whether the project holds that copy or not.
+func TestTeamApplyAndVerifyLeaveOutTheOldSelfProtection(t *testing.T) {
+	withCmdProjectTempDir(t)
+	installGeneratedHook(t, claude.ProjectScope, "team-rule", "no team rule violations")
+	lockfile := lockCurrentState(t)
+	const rule = "Block mutations to factory-managed hooks | Use steer preset sync"
+	content := "def main():\n    return\n"
+	lockfile.Hooks = append(lockfile.Hooks, teamLockedHook{
+		Name: protection.HookName, File: protection.HookName + ".py",
+		Source: claude.SourceFactory, SourceID: protection.HookName,
+		Rule: rule, RuleHash: claude.HashRule(rule),
+		Content: content, ContentSHA256: claude.ContentSHA256([]byte(content)),
+	})
+
+	if _, err := applyTeamLockfile(claude.ProjectScope, lockfile, false, false); err != nil {
+		t.Fatal(err)
+	}
+	if legacy, err := protection.LegacyIn(claude.ProjectScope); err != nil || legacy {
+		t.Fatalf("apply installed the old self-protection (err %v)", err)
+	}
+	requireNoFindings(t, lockfile)
+
+	if _, err := claude.InstallManagedHook(claude.ProjectScope, claude.InstallManagedHookInput{
+		HookName: protection.HookName, Rule: rule, Content: []byte(content),
+		Metadata: claude.HookInstallMetadata{Source: claude.SourceFactory, SourceID: protection.HookName},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := applyTeamLockfile(claude.ProjectScope, lockfile, false, true); err != nil {
+		t.Fatal(err)
+	}
+	if legacy, err := protection.LegacyIn(claude.ProjectScope); err != nil || !legacy {
+		t.Fatalf("a forced apply removed the project's old self-protection (err %v)", err)
+	}
+	requireNoFindings(t, lockfile)
 }

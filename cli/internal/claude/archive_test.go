@@ -155,7 +155,7 @@ func TestAFailedArchiveWriteKeepsTheRule(t *testing.T) {
 func TestACatalogCopyIsRemovedWithoutAnArchive(t *testing.T) {
 	dir := fixtureProject(t, map[string]string{"alpha": blockingHook("ALPHA")})
 
-	result, err := RemoveManagedHook(ProjectScope, "alpha", RemoveOptions{CatalogCopy: true})
+	result, err := RemoveManagedHook(ProjectScope, "alpha", RemoveOptions{ShippedCopy: true})
 	if err != nil {
 		t.Fatal(err)
 	}

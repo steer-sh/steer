@@ -49,7 +49,7 @@ func TestReviewerPanelNamesEverySetting(t *testing.T) {
 	m.width = 200
 	m.active = panelReviewer
 	view := m.View()
-	for _, f := range settings.Fields {
+	for _, f := range settings.ReviewerFields {
 		if !strings.Contains(view, settings.LabelOf(f)) {
 			t.Errorf("the reviewer panel omits %s", settings.LabelOf(f))
 		}
@@ -390,7 +390,7 @@ func TestReviewerPanelNamesAPinnedRegistration(t *testing.T) {
 
 func indexOfField(t *testing.T, name string) int {
 	t.Helper()
-	for i, f := range settings.Fields {
+	for i, f := range settings.ReviewerFields {
 		if f.Name == name {
 			return i
 		}

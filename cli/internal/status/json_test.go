@@ -13,8 +13,8 @@ import (
 	"github.com/steer-sh/steer-cli/internal/testhome"
 )
 
-// TestCollectListsTheInventoryScopesItIsGiven: the command lists both scopes' guards
-// and presets, and a caller naming none (the TUI, which mutates the scope it lists)
+// TestCollectListsTheInventoryScopesItIsGiven: the command lists both scopes' guards,
+// and a caller naming none (the TUI, which mutates the scope it lists)
 // reads its own scope alone.
 func TestCollectListsTheInventoryScopesItIsGiven(t *testing.T) {
 	home := t.TempDir()
@@ -37,11 +37,6 @@ func TestCollectListsTheInventoryScopesItIsGiven(t *testing.T) {
 	if want := "project/no-console=project rule,global/no-console=global rule"; strings.Join(got, ",") != want {
 		t.Errorf("both scopes listed %v; want %s", got, want)
 	}
-	for _, p := range both.Presets {
-		if p.Scope == "" {
-			t.Errorf("preset %s names no scope", p.Name)
-		}
-	}
 
 	one, err := Collect(Options{GateStateDir: t.TempDir(), Scope: claude.GlobalScope})
 	if err != nil {
@@ -49,11 +44,6 @@ func TestCollectListsTheInventoryScopesItIsGiven(t *testing.T) {
 	}
 	if len(one.Hooks) != 1 || one.Hooks[0].Scope != claude.GlobalScope {
 		t.Errorf("a caller naming no inventory scope listed %+v; want its own scope alone", one.Hooks)
-	}
-	for _, p := range one.Presets {
-		if p.Scope != claude.GlobalScope {
-			t.Errorf("preset %s listed from scope %q; want global alone", p.Name, p.Scope)
-		}
 	}
 }
 
@@ -132,10 +122,6 @@ func eightRecordSnapshot() *SystemStatus {
 					Shadowed: &shadowed, VerifiedAt: "2026-01-01T00:00:00Z",
 					Changed: []string{"fixtures", "hook", "rule", "master"},
 					Reason:  "the master hook could not be read: permission denied"}})
-		}
-		for i := 0; i < 12; i++ {
-			s.Presets = append(s.Presets, PresetInfo{Name: fmt.Sprintf("preset-%d", i), Scope: scope,
-				Bundle: "security", Description: "block a risky command the catalog describes in one line"})
 		}
 	}
 	for i := 0; i < 8; i++ {

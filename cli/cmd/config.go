@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/config"
 	"github.com/steer-sh/steer-cli/internal/gate/reviewers"
+	"github.com/steer-sh/steer-cli/internal/protection"
 	"github.com/steer-sh/steer-cli/internal/settings"
 	"github.com/steer-sh/steer-cli/internal/steerpath"
 	"github.com/steer-sh/steer-cli/internal/styles"
@@ -45,7 +46,7 @@ var configShowCmd = &cobra.Command{
 		fmt.Printf("  File  %s%s\n", steerpath.ConfigFile(), configFileNote())
 		fmt.Println()
 		for _, f := range settings.Fields {
-			fmt.Printf("  %-22s %-24s %s\n", f.Name, f.Effective(cfg), styles.MutedText.Render(settings.Source(f, file)))
+			fmt.Printf("  %-22s %-24s %s\n", f.Name, settings.EffectiveValue(f, cfg, file), styles.MutedText.Render(settings.Source(f, file)))
 		}
 		fmt.Println()
 		if resolveErr != nil {
@@ -108,6 +109,10 @@ changes the instrument the ledger stamps on every later review row.`,
 		}
 		if next == file {
 			utils.Info(fmt.Sprintf("%s is already %s.", f.Name, settings.StoredLabel(value)))
+			if f.Name == protection.SettingKey {
+				// A write whose guard change failed is retried by setting it again.
+				applyProtectionSetting(next)
+			}
 			return nil
 		}
 
@@ -128,6 +133,9 @@ changes the instrument the ledger stamps on every later review row.`,
 			// written is not the one that runs until that registration is stripped.
 			reportPinnedRegistrations()
 		}
+		if f.Name == protection.SettingKey {
+			applyProtectionSetting(next)
+		}
 		if f.Name == "reviewer.timeout" {
 			// The engine reads the new value on the next firing; the harness's own
 			// hook timeout is a registered number, and a review killed by the smaller
@@ -142,6 +150,30 @@ changes the instrument the ledger stamps on every later review row.`,
 		}
 		return nil
 	},
+}
+
+// applyProtectionSetting installs or removes the global self-protection guard to
+// match the value just written, in the harnesses Steer is set up in.
+func applyProtectionSetting(next config.Config) {
+	targets, err := protectionTargets()
+	if err != nil {
+		utils.Warning("The guard was not changed: " + err.Error() + "; steer bin install applies the setting.")
+		return
+	}
+	enabled := protection.Enabled(next)
+	if len(targets) == 0 {
+		if enabled {
+			utils.Info("No agent has Steer set up yet; self-protection is installed once one does (steer bin install).")
+		}
+		return
+	}
+	change, err := protection.Reconcile(enabled, targets, protection.Options{})
+	if err != nil {
+		utils.Warning("The guard was not changed: " + err.Error())
+		return
+	}
+	r := &installReport{out: os.Stdout}
+	reportProtectionChange(r, change, targets)
 }
 
 // previewReviewer resolves the reviewer the pending change would run, so its warnings

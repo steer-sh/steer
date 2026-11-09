@@ -2,7 +2,6 @@ package status
 
 import (
 	"encoding/json"
-	"sort"
 
 	"github.com/steer-sh/steer-cli/internal/cadence"
 	"github.com/steer-sh/steer-cli/internal/mods"
@@ -23,7 +22,6 @@ type statusJSON struct {
 	Telemetry     Telemetry        `json:"telemetry"`
 	Corpora       []CorpusRow      `json:"corpora"`
 	Hooks         []HookInfo       `json:"hooks"`
-	Presets       []presetJSON     `json:"presets"`
 	Rules         []RuleInfo       `json:"rules"`
 	Addenda       []AddendumInfo   `json:"addenda"`
 	Team          TeamState        `json:"team"`
@@ -43,6 +41,7 @@ type postureJSON struct {
 	Plugins          []PluginCopy       `json:"plugins"`
 	Mods             []mods.Exposure    `json:"mods"`
 	GuardInterpreter InterpreterReading `json:"guard_interpreter"`
+	Protection       ProtectionReading  `json:"protection"`
 	Readiness        readinessJSON      `json:"readiness"`
 	Health           healthJSON         `json:"health"`
 }
@@ -132,15 +131,6 @@ type attentionJSON struct {
 	Checks        []cadence.CheckWork `json:"checks"`
 }
 
-// presetJSON is one catalog preset and the scopes it is enabled or drifted in.
-type presetJSON struct {
-	Name          string   `json:"name"`
-	Bundle        string   `json:"bundle"`
-	Description   string   `json:"description"`
-	EnabledScopes []string `json:"enabled_scopes"`
-	DriftedScopes []string `json:"drifted_scopes"`
-}
-
 // MarshalIndent renders the --json contract as indented JSON.
 func (s *SystemStatus) MarshalIndent() ([]byte, error) {
 	return json.MarshalIndent(s.contract(), "", "  ")
@@ -162,6 +152,7 @@ func (s *SystemStatus) contract() statusJSON {
 			Plugins:          nonNil(s.Posture.Plugins),
 			Mods:             nonNil(s.Posture.Mods),
 			GuardInterpreter: s.Posture.GuardInterpreter,
+			Protection:       s.Posture.Protection,
 			Readiness:        readinessRow(ReadinessOf(s, s.ReviewerProbe)),
 			Health:           healthRow(HealthOf(s, s.ReviewerProbe)),
 		},
@@ -177,7 +168,6 @@ func (s *SystemStatus) contract() statusJSON {
 		Telemetry:     s.Telemetry,
 		Corpora:       nonNil(s.Corpora),
 		Hooks:         nonNil(s.Hooks),
-		Presets:       presetRows(s.Presets),
 		Rules:         nonNil(s.Rules),
 		Addenda:       nonNil(s.Addenda),
 		Team:          s.Team,
@@ -200,33 +190,6 @@ func (s *SystemStatus) contract() statusJSON {
 	}
 	for _, iv := range s.Attention.Interventions {
 		out.Attention.Interventions = append(out.Attention.Interventions, iv.ID)
-	}
-	return out
-}
-
-// presetRows folds the per-scope preset rows into one row per catalog preset.
-func presetRows(in []PresetInfo) []presetJSON {
-	byName := map[string]*presetJSON{}
-	out := []presetJSON{}
-	var names []string
-	for _, p := range in {
-		row, ok := byName[p.Name]
-		if !ok {
-			row = &presetJSON{Name: p.Name, Bundle: p.Bundle, Description: p.Description,
-				EnabledScopes: []string{}, DriftedScopes: []string{}}
-			byName[p.Name] = row
-			names = append(names, p.Name)
-		}
-		if p.Enabled {
-			row.EnabledScopes = append(row.EnabledScopes, p.Scope)
-		}
-		if p.Drifted {
-			row.DriftedScopes = append(row.DriftedScopes, p.Scope)
-		}
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		out = append(out, *byName[name])
 	}
 	return out
 }

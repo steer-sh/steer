@@ -17,6 +17,9 @@ const (
 	SourceManual    = "manual"
 	SourceGenerated = "generated"
 	SourceFactory   = "factory"
+	// SourceSteer marks a guard Steer itself owns and installs, such as
+	// self-protection. A setting, never a removal, turns one off.
+	SourceSteer = "steer"
 
 	DefaultPromptVersion = "unknown"
 	DefaultHookVersion   = "manual"
@@ -26,6 +29,7 @@ var validSources = map[string]struct{}{
 	SourceManual:    {},
 	SourceGenerated: {},
 	SourceFactory:   {},
+	SourceSteer:     {},
 }
 
 // SelfTestSummary stores high-level generated hook test outcomes.
@@ -170,7 +174,7 @@ func NormalizeSource(source string) (string, error) {
 		normalized = SourceManual
 	}
 	if _, ok := validSources[normalized]; !ok {
-		return "", fmt.Errorf("invalid source %q: expected manual, generated, or factory", source)
+		return "", fmt.Errorf("invalid source %q: expected manual, generated, factory or steer", source)
 	}
 	return normalized, nil
 }

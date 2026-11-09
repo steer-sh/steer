@@ -9,6 +9,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/guard"
 	"github.com/steer-sh/steer-cli/internal/harness"
+	"github.com/steer-sh/steer-cli/internal/protection"
 	"github.com/steer-sh/steer-cli/internal/status"
 	"github.com/steer-sh/steer-cli/internal/styles"
 	"github.com/steer-sh/steer-cli/internal/utils"
@@ -50,14 +51,16 @@ or --all-harnesses.`,
 		}
 
 		scope := currentScope()
+		fmt.Println()
+		fmt.Println(styles.MainHeader.Render("Rebuild Master Hook"))
+		fmt.Println()
+		if err := migrateProtection(scope, targets); err != nil {
+			return err
+		}
 		result, err := claude.RebuildMaster(scope, targets...)
 		if err != nil {
 			return err
 		}
-
-		fmt.Println()
-		fmt.Println(styles.MainHeader.Render("Rebuild Master Hook"))
-		fmt.Println()
 
 		printRebuild(os.Stdout, scope, result)
 		return nil
@@ -124,6 +127,35 @@ does not, sync refuses and names rebuild, which regenerates the master.`,
 		}
 		return nil
 	},
+}
+
+// migrateProtection moves a scope off the self-protection guard an earlier Steer
+// installed from its catalog before a rebuild: a project's copy is archived and
+// removed, since the global guard protects every repository, and the global store's
+// is brought in line with the setting in the harnesses Steer is set up in.
+func migrateProtection(scope string, targets []harness.Registrar) error {
+	if scope == claude.ProjectScope {
+		if legacy, err := protection.LegacyIn(scope); err != nil || !legacy {
+			return err
+		}
+		if !globalProtectionRuns() || !globallyCovered(targets) {
+			utils.Info("This repository keeps the self-protection guard an earlier Steer installed, " +
+				"because the global guard does not run in every agent this rebuild registers; steer status names why.")
+			return nil
+		}
+		removed, err := protection.RetireLegacy(scope, targets...)
+		if err != nil {
+			return fmt.Errorf("retire this repository's old self-protection guard: %w", err)
+		}
+		if removed {
+			utils.Info("Removed this repository's copy of the self-protection guard an earlier Steer " +
+				"installed, and archived it; the global guard now protects this repository.")
+		}
+		return nil
+	}
+	r := &installReport{out: os.Stdout}
+	reconcileProtection(r, func(string) {})
+	return nil
 }
 
 // contains reports whether hs holds the harness with this id.

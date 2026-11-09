@@ -12,7 +12,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/hookstore"
-	"github.com/steer-sh/steer-cli/internal/presets"
+	"github.com/steer-sh/steer-cli/internal/protection"
 	"github.com/steer-sh/steer-cli/internal/steerpath"
 	"github.com/steer-sh/steer-cli/internal/styles"
 )
@@ -44,9 +44,11 @@ type teamLockedHook struct {
 }
 
 type teamLockfile struct {
-	LockfileVersion int              `json:"lockfile_version"`
-	CatalogVersion  string           `json:"catalog_version"`
-	Hooks           []teamLockedHook `json:"hooks"`
+	LockfileVersion int `json:"lockfile_version"`
+	// CatalogVersion is the preset catalog an earlier Steer locked against; this
+	// Steer ships no catalog and writes none.
+	CatalogVersion string           `json:"catalog_version,omitempty"`
+	Hooks          []teamLockedHook `json:"hooks"`
 }
 
 var teamCmd = &cobra.Command{
@@ -72,12 +74,7 @@ var teamLockCmd = &cobra.Command{
 			return err
 		}
 
-		catalog, err := presets.LoadCatalog()
-		if err != nil {
-			return err
-		}
-
-		lockfile, err := buildTeamLockfile(scope, catalog)
+		lockfile, err := buildTeamLockfile(scope)
 		if err != nil {
 			return err
 		}
@@ -91,10 +88,9 @@ var teamLockCmd = &cobra.Command{
 		}
 
 		fmt.Println(styles.SuccessBox.Render(fmt.Sprintf(
-			"Lockfile: %s\nHooks locked: %d\nCatalog version: %s",
+			"Lockfile: %s\nHooks locked: %d",
 			path,
 			len(lockfile.Hooks),
-			lockfile.CatalogVersion,
 		)))
 		return nil
 	},
@@ -253,13 +249,15 @@ func driftLabel(reason string) string {
 	return reason
 }
 
-func buildTeamLockfile(scope string, catalog *presets.Catalog) (*teamLockfile, error) {
+// buildTeamLockfile snapshots the scope's guards. The self-protection guard an
+// earlier Steer installed in a project is left out: the global guard replaced it.
+func buildTeamLockfile(scope string) (*teamLockfile, error) {
 	manifest, err := claude.LoadManifest(scope)
 	if err != nil {
 		return nil, err
 	}
 	if len(manifest.Hooks) == 0 {
-		return nil, fmt.Errorf("no steer hooks to lock (manifest is empty); enable presets or register hooks first")
+		return nil, fmt.Errorf("no steer hooks to lock (manifest is empty); register hooks first")
 	}
 
 	hooksDir, err := claude.GetHooksDir(scope)
@@ -272,8 +270,13 @@ func buildTeamLockfile(scope string, catalog *presets.Catalog) (*teamLockfile, e
 	}
 
 	names := make([]string, 0, len(manifest.Hooks))
-	for name := range manifest.Hooks {
-		names = append(names, name)
+	for name, entry := range manifest.Hooks {
+		if !protection.Legacy(entry) {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return nil, fmt.Errorf("no steer hooks to lock: the store holds only the self-protection guard an earlier Steer installed; register hooks first")
 	}
 	sort.Strings(names)
 
@@ -287,7 +290,7 @@ func buildTeamLockfile(scope string, catalog *presets.Catalog) (*teamLockfile, e
 		}
 		content, err := os.ReadFile(filepath.Join(hooksDir, fileName))
 		if err != nil {
-			return nil, fmt.Errorf("hook %s: cannot read %s (run `steer preset sync` to repair drifted state before locking): %w", name, fileName, err)
+			return nil, fmt.Errorf("hook %s: cannot read %s: %w", name, fileName, err)
 		}
 
 		ruleHash := strings.TrimSpace(entry.RuleHash)
@@ -313,7 +316,6 @@ func buildTeamLockfile(scope string, catalog *presets.Catalog) (*teamLockfile, e
 
 	return &teamLockfile{
 		LockfileVersion: teamLockfileVersion,
-		CatalogVersion:  catalog.CatalogVersion,
 		Hooks:           locked,
 	}, nil
 }
@@ -383,9 +385,15 @@ func readTeamLockfile(path string) (*teamLockfile, error) {
 	return lockfile, nil
 }
 
+// desiredHooksFromLockfile is the lockfile's guards, less the self-protection
+// guard an earlier Steer locked from its catalog, which team policy neither
+// installs nor removes.
 func desiredHooksFromLockfile(lockfile *teamLockfile) []claude.DesiredHook {
 	desired := make([]claude.DesiredHook, 0, len(lockfile.Hooks))
 	for _, hook := range lockfile.Hooks {
+		if protection.Legacy(claude.ManifestEntry{Source: hook.Source, SourceID: hook.SourceID}) {
+			continue
+		}
 		desired = append(desired, claude.DesiredHook{
 			HookName: strings.TrimSpace(hook.Name),
 			FileName: strings.TrimSpace(hook.File),
@@ -408,6 +416,11 @@ func applyTeamLockfile(scope string, lockfile *teamLockfile, dryRun, force bool,
 	return claude.Reconcile(scope, desiredHooksFromLockfile(lockfile), claude.ReconcileOptions{
 		DryRun: dryRun,
 		RemoveExtra: func(hookName string, entry claude.ManifestEntry) bool {
+			// An earlier Steer's self-protection is retired by the project rebuild
+			// once the global guard runs, never by team policy.
+			if protection.Legacy(entry) {
+				return false
+			}
 			if force {
 				return true
 			}
@@ -443,7 +456,7 @@ func verifyAgainstLockfile(scope string, lockfile *teamLockfile, targets ...harn
 
 	extraNames := make([]string, 0)
 	for name, entry := range manifest.Hooks {
-		if _, locked := lockedNames[name]; locked {
+		if _, locked := lockedNames[name]; locked || protection.Legacy(entry) {
 			continue
 		}
 		if strings.EqualFold(strings.TrimSpace(entry.Source), claude.SourceFactory) {
@@ -468,11 +481,14 @@ func verifyAgainstLockfile(scope string, lockfile *teamLockfile, targets ...harn
 		if err != nil && !os.IsNotExist(err) {
 			return nil, fmt.Errorf("failed to read %s: %w", entry.InstructionFile, err)
 		}
-		for _, hook := range lockfile.Hooks {
+		for _, hook := range desired {
 			if !strings.Contains(string(doc), strings.TrimSpace(hook.Rule)) {
 				findings = append(findings, fmt.Sprintf("%s missing rule hook=%s harness=%s",
-					entry.InstructionFile, strings.TrimSpace(hook.Name), entry.ID))
+					entry.InstructionFile, hook.HookName, entry.ID))
 			}
+		}
+		if len(desired) == 0 {
+			continue
 		}
 
 		registered, err := target.MasterRegistered(scope)
