@@ -169,17 +169,35 @@ func TestReconcileReplacesTheCatalogCopyInPlace(t *testing.T) {
 	}
 }
 
-// A guard the user installed under the id is never replaced.
+// A guard the user installed under the id is never replaced, nor a file of its
+// name that no manifest entry owns.
 func TestReconcileRefusesAGuardSteerDidNotInstall(t *testing.T) {
-	withHomeAndRepo(t)
+	home, _ := withHomeAndRepo(t)
+	stray := filepath.Join(home, ".steer", "hooks", HookName+".py")
+	if err := os.MkdirAll(filepath.Dir(stray), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stray, []byte("# the user's own\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Reconcile(true, claudeOnly, Options{Unverified: true}); err == nil || !strings.Contains(err.Error(), stray) {
+		t.Fatalf("an unowned file under the guard's name was not refused by its path: %v", err)
+	}
+	if data, _ := os.ReadFile(stray); string(data) != "# the user's own\n" {
+		t.Fatalf("the unowned file now reads %q", data)
+	}
+	if err := os.Remove(stray); err != nil {
+		t.Fatal(err)
+	}
+
 	if _, err := claude.InstallManagedHook(claude.GlobalScope, claude.InstallManagedHookInput{
 		HookName: HookName, Rule: "mine | mine", Content: []byte("def main():\n    return\n"),
 		Metadata: claude.HookInstallMetadata{Source: claude.SourceManual},
 	}, claudeOnly...); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Reconcile(true, claudeOnly, Options{Unverified: true}); err == nil {
-		t.Fatal("a manual guard under the id was replaced")
+	if _, err := Reconcile(true, claudeOnly, Options{Unverified: true}); err == nil || !strings.Contains(err.Error(), "steer remove "+HookName) {
+		t.Fatalf("a manual guard under the id was not refused with its removal: %v", err)
 	}
 	if got := storeState(t); got != StoreForeign {
 		t.Fatalf("store = %s, want foreign", got)

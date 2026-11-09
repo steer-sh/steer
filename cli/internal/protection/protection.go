@@ -16,6 +16,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/config"
 	"github.com/steer-sh/steer-cli/internal/harness"
+	"github.com/steer-sh/steer-cli/internal/hookstore"
 )
 
 //go:embed guard.py
@@ -71,7 +72,9 @@ const (
 	// StoreOutdated: the store holds Steer's guard under that id with other bytes
 	// or metadata, or the one an earlier Steer installed from its catalog.
 	StoreOutdated = "outdated"
-	// StoreForeign: the id belongs to a guard Steer did not install.
+	// StoreForeign: the id belongs to a guard Steer did not install, or the store
+	// holds a file of the guard's name that no manifest entry owns and whose bytes
+	// are not this binary's guard.
 	StoreForeign = "foreign"
 )
 
@@ -83,7 +86,7 @@ func StoreState(scope string) (string, error) {
 	}
 	entry, ok := manifest.Hooks[HookName]
 	if !ok {
-		return StoreAbsent, nil
+		return unownedFileState(scope, manifest)
 	}
 	source := strings.ToLower(strings.TrimSpace(entry.Source))
 	if Legacy(entry) {
@@ -118,6 +121,87 @@ func StoreState(scope string) (string, error) {
 		return StoreOutdated, nil
 	}
 	return StoreCurrent, nil
+}
+
+// unownedFileState reads a store with no entry for the guard: absent, unless
+// another entry owns a file of the guard's name, or such a file holds other bytes
+// in the store read now or the neutral store an install writes after migrating,
+// which an install would overwrite unarchived.
+func unownedFileState(scope string, manifest *claude.Manifest) (string, error) {
+	if fileOwner(manifest) != "" {
+		return StoreForeign, nil
+	}
+	paths, err := guardPaths(scope)
+	if err != nil {
+		return "", err
+	}
+	want, err := claude.DesiredFileContent(Desired())
+	if err != nil {
+		return "", err
+	}
+	for _, path := range paths {
+		actual, err := os.ReadFile(path)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		if claude.ContentSHA256(actual) != claude.ContentSHA256(want) {
+			return StoreForeign, nil
+		}
+	}
+	return StoreAbsent, nil
+}
+
+// guardPaths are the places a file of the guard's name can sit in scope.
+func guardPaths(scope string) ([]string, error) {
+	read, err := claude.GetHooksDir(scope)
+	if err != nil {
+		return nil, err
+	}
+	neutral, err := hookstore.Dir(scope)
+	if err != nil {
+		return nil, err
+	}
+	paths := []string{filepath.Join(read, Desired().FileName)}
+	if neutral != read {
+		paths = append(paths, filepath.Join(neutral, Desired().FileName))
+	}
+	return paths, nil
+}
+
+// fileOwner names the entry other than the guard's own that owns a file of the
+// guard's name, or "".
+func fileOwner(manifest *claude.Manifest) string {
+	for name, entry := range manifest.Hooks {
+		if name != HookName && strings.TrimSpace(entry.File) == Desired().FileName {
+			return name
+		}
+	}
+	return ""
+}
+
+// foreignError says what holds the guard's id or file, and how the user frees it.
+func foreignError(scope string) error {
+	manifest, err := claude.LoadManifest(scope)
+	if err != nil {
+		return err
+	}
+	if entry, ok := manifest.Hooks[HookName]; ok {
+		return fmt.Errorf("the global guard %s (source %s) was not installed by Steer, so self-protection cannot be installed under its id; remove it with: steer remove %s --scope global",
+			HookName, entry.Source, HookName)
+	}
+	if owner := fileOwner(manifest); owner != "" {
+		return fmt.Errorf("the global guard %s uses the file %s, so self-protection cannot be installed; remove it with: steer remove %s --scope global",
+			owner, Desired().FileName, owner)
+	}
+	paths, err := guardPaths(scope)
+	if err != nil {
+		return err
+	}
+	return fmt.Errorf("a file no guard owns sits at %s, so self-protection cannot be installed; move it aside",
+		strings.Join(paths, " or "))
 }
 
 // Legacy reports whether entry is the self-protection guard an earlier Steer
@@ -184,7 +268,7 @@ func Reconcile(enabled bool, targets []harness.Registrar, opts Options) (Change,
 	}
 	switch state {
 	case StoreForeign:
-		return Unchanged, fmt.Errorf("the global guard %s was not installed by Steer, so self-protection cannot be installed under its id; remove it with: steer remove %s --scope global", HookName, HookName)
+		return Unchanged, foreignError(scope)
 	case StoreCurrent:
 		drifted, _, err := claude.TargetDrift(scope, Rule, targets)
 		if err != nil {
