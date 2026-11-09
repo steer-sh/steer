@@ -344,7 +344,9 @@ guard an earlier Steer installed from one is a `hooks[]` row whose `source` is `
   runs. **Act on `found: false` when a `masters[]` row has a `path`:** tell the
   user that their guards enforce nothing until Python 3 is installed.
   `protection` is Steer's self-protection, a guard in the global store that blocks
-  an agent from changing Steer's own hooks, settings and harness registrations:
+  an agent from changing Steer's own files and settings, and from removing Steer's
+  entries from a harness's configuration or turning its hooks off (other edits to
+  those files through the Edit or Write tool pass):
   `setting` (`on` or `off`), `store` (`absent`, `current`, `outdated` or `foreign`,
   a guard Steer did not install holding its id), `legacy` (the scopes still holding
   the copy an earlier Steer installed from its preset catalog) and `state` — `on`,

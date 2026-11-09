@@ -216,8 +216,10 @@ channel. Choose one channel per repository, or a commit gets reviewed twice.
 
 This copies the binary to `~/.steer/bin/steer` and repoints every registration at
 that absolute path. It installs Steer's self-protection, a global guard that blocks
-an agent from changing Steer's own hooks, settings and registrations, in each agent
-holding a global Steer registration. When its output says it installed
+an agent from changing Steer's own files and settings, and from removing Steer's
+entries from an agent's configuration or turning its hooks off, in each agent
+holding a global Steer registration. Other edits to those configuration files
+pass when made with the Edit or Write tool; a shell write to one is blocked. When its output says it installed
 self-protection, tell the user so, and that `steer config set protection.self off`,
 run in their own terminal, turns it off; relay a Codex approval line it prints. A
 project-only setup gets none. It

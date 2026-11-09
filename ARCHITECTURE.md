@@ -265,10 +265,24 @@ SessionStart update), `steer config set protection.self` and
 `steer hooks rebuild --scope global` run it, so a machine whose only Steer fixes
 are checks and reviews still holds one guard and a registered master. The guard
 is lexical and best-effort: it matches protected files by full path, resolving a
-relative one against the payload's `cwd`, and protects the global store's master,
-manifest, audit log and its own file, `~/.steer/config.json`, the Claude Code and
-Codex global registration files and Codex's `config.toml`, and the current
-repository's stores, registrations and team lockfile. It also blocks
+relative one against the payload's `cwd`, in two classes. Steer's own files (the
+global store's master, manifest, audit log and its own file,
+`~/.steer/config.json`, and the current repository's stores and team lockfile)
+are closed to every change, and the block names the steer command the user runs
+instead. Harness configuration files (`~/.claude/settings.json`, the repository's
+`.claude/settings.json` and `.claude/settings.local.json`, `$CODEX_HOME/hooks.json`
+and `config.toml`, the repository's `.codex/hooks.json`) stay open to the Edit and
+Write tools: the guard reads the file on disk, applies the edit, and blocks only a
+result that drops a hook command Steer registered (one naming `steer-hooks.py` or
+`~/.steer/bin/steer`, or whose first word is a steer executable) or moves it to
+another event, matcher or field, counted per occurrence, sets
+`disableAllHooks`, or, in `config.toml`, turns off `[features] hooks` or
+`codex_hooks`, or removes, changes or sets `enabled = false` on a
+`[hooks.state."<hooks.json>:<event>:<entry>:<handler>"]` record whose handler is
+Steer's. A patch hunk out of its context is judged on its lines, and a
+`config.toml` one that adds a `hooks`/`enabled = false` switch or removes approval
+lines is blocked, since its table is unknown. A deletion of one is blocked, and so
+is a shell write, whose block sends the agent to Edit or Write. It also blocks
 `config set protection.self`, and `remove`, `register` or `preset disable` of
 itself. A shell command is split into simple commands, and a path counts only
 where its command writes it (an output redirection, an operand of `rm` or `mv`
