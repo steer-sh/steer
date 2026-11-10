@@ -278,3 +278,74 @@ func TestRepoLabelsIgnoreARootlessChain(t *testing.T) {
 		t.Errorf("the rootless chain reads by name; got %q", got[1])
 	}
 }
+
+func deferredConcern(text string) map[string]any {
+	return map[string]any{"concern": text, "verdict": "ACCEPTED", "qualifier": "not fixed"}
+}
+
+func TestFindingsDumpMarksADeferredFinding(t *testing.T) {
+	dir := findingsDir(t, nil,
+		[]map[string]any{c("a repaired defect"), deferredConcern("a concern left unrepaired")})
+
+	text := findingsOut(t, dir, FindingsOpts{Kind: "accepted"})
+	if !strings.Contains(text, "  [ACCEPTED, not fixed] a concern left unrepaired") {
+		t.Errorf("a deferred finding carries the ruling; got:\n%s", text)
+	}
+	if !strings.Contains(text, "  [ACCEPTED] a repaired defect") {
+		t.Errorf("a repaired finding keeps the bare verdict; got:\n%s", text)
+	}
+	if !strings.Contains(text, "# 2 distinct findings, 1 of them ACCEPTED, not fixed\n") {
+		t.Errorf("the header names the deferred share; got:\n%s", text)
+	}
+
+	repaired := findingsOut(t, dir, FindingsOpts{Kind: "repaired"})
+	if strings.Contains(repaired, "unrepaired") || !strings.Contains(repaired, "a repaired defect") {
+		t.Errorf("--kind repaired drops the deferred finding; got:\n%s", repaired)
+	}
+
+	var payload struct {
+		Chains []struct {
+			Findings []RenderedFinding `json:"findings"`
+		} `json:"chains"`
+	}
+	out := findingsOut(t, dir, FindingsOpts{Kind: "deferred", JSON: true})
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Chains) != 1 || len(payload.Chains[0].Findings) != 1 ||
+		payload.Chains[0].Findings[0].Qualifier != "not fixed" {
+		t.Errorf("--kind deferred emits the one deferred finding with its qualifier; got %s", out)
+	}
+}
+
+func TestUndecidedDeferredDumpCountsAnAcceptedClassAsDeciding(t *testing.T) {
+	dir := findingsDir(t,
+		[]Record{reviewRecord("known", "parser", "defect", "active")},
+		[]map[string]any{deferredConcern("the parser drops a flag"), deferredConcern("a concern no class names")})
+
+	out := findingsOut(t, dir, FindingsOpts{Kind: "deferred", Undecided: true})
+	if strings.Contains(out, "decides none of the findings below") {
+		t.Errorf("a defect class decides deferred findings; got:\n%s", out)
+	}
+	if !strings.Contains(out, "[covered-by=known] the parser drops a flag") {
+		t.Errorf("the defect class covers the deferred finding; got:\n%s", out)
+	}
+}
+
+func TestMatchOnDeferredFindingsLabelsThemAndFindsTheDefectClass(t *testing.T) {
+	dir := findingsDir(t,
+		[]Record{reviewRecord("known", "parser", "defect", "active")},
+		[]map[string]any{deferredConcern("the parser drops a flag")})
+
+	var buf strings.Builder
+	if err := Match(&buf, dir, MatchOpts{Regex: "parser", Kind: "deferred"}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "  [ACCEPTED, not fixed] the parser drops a flag") {
+		t.Errorf("a matched deferred finding carries the ruling; got:\n%s", out)
+	}
+	if !strings.Contains(out, "1 prior decision(s)") {
+		t.Errorf("a defect class overlaps a deferred candidate; got:\n%s", out)
+	}
+}

@@ -54,7 +54,7 @@ If you use both Codex and Claude Code, run `/steer-setup` in both CLI agents. It
 
 ### Commit as usual
 
-Nothing changes when committing repo changes. Once your agent makes a commit, it will be automatically reviewed and concerns raised on findings. Your CLI agent will check each finding against the code, fix what holds up, and send back a report on what it accepted and what it rejected. Steer will continue reviewing the commits until no accepted findings remain, or until 4 reviews in a row have blocked the commit. 4 reviews were chosen as diminishing returns were found after this number.
+Nothing changes when committing repo changes. Once your agent makes a commit, it will be automatically reviewed and concerns raised on findings. Your CLI agent will check each finding against the code, fix what holds up, and send back a report on what it accepted and what it rejected. Steer will continue reviewing the commits until no accepted - non-nitpick - findings remain, or until 4 reviews in a row have blocked the commit. 4 reviews were chosen as diminishing returns were found after this number.
 
 Commits where every changed file is prose (`.md`, `.txt` and similar), or binary are skipped. `CLAUDE.md` and `AGENTS.md` are exceptions to the prose rule.
 

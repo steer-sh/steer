@@ -16,7 +16,7 @@ func FindingKey(ch Chain, f Finding) string {
 	return hex.EncodeToString(sum[:8])
 }
 
-// keySets maps a findings kind (accepted, rejected, both) to a set of FindingKeys.
+// keySets maps a findings kind (accepted, repaired, deferred, rejected, both) to a set of FindingKeys.
 type keySets map[string]map[string]bool
 
 // FindingsShownPath holds the residual keys the latest whole-pile undecided dump
@@ -167,7 +167,7 @@ func forgetRead(stateDir string, record Record) error {
 	changed := make([]bool, len(paths))
 	for _, ch := range BuildChains(rows, false) {
 		for _, f := range ch.Findings {
-			if !KindFilter(f.Verdict, kind) || !pattern.MatchString(f.Text) {
+			if !KindFilter(f, kind) || !pattern.MatchString(f.Text) {
 				continue
 			}
 			key := FindingKey(ch, f)

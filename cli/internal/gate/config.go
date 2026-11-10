@@ -98,6 +98,10 @@ const InstrumentSuffix = "go-findings-v6-shell"
 // blocked: from then on the agent owes that sequence's ledger.
 const PhaseChainEnd = "chain-end"
 
+// PhaseNitpick is the row of a reviewed round whose findings were all rated NITPICK:
+// the findings reach the agent, the commit proceeds and the sequence ends there.
+const PhaseNitpick = "nitpick"
+
 // Phases where no reviewer ran. They open no chain and close none, so a reader of
 // the log must not treat one as a boundary.
 var NonReviewPhases = map[string]bool{

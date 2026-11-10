@@ -24,7 +24,7 @@ const (
 // an adjudication. It mirrors the resolver's own predicate in gate/resolve.
 func expectsLedger(row gate.Row) bool {
 	switch str(row["phase"]) {
-	case "retry":
+	case "retry", gate.PhaseNitpick:
 		return true
 	case "cap":
 		// A cap row reaches the agent with review text whenever the panel returned any
@@ -38,10 +38,10 @@ func expectsLedger(row gate.Row) bool {
 	return false
 }
 
-// rowAnchorTS is when the findings this row answers were handed over: a cap row is that
-// moment, a retry row answers the deny before it.
+// rowAnchorTS is when the findings this row answers were handed over: a cap or nitpick
+// row is that moment, a retry row answers the deny before it.
 func rowAnchorTS(rows []gate.Row, i int) (float64, bool) {
-	if str(rows[i]["phase"]) == "cap" {
+	if phase := str(rows[i]["phase"]); phase == "cap" || phase == gate.PhaseNitpick {
 		return numFloat(rows[i]["ts"]), true
 	}
 	if v := numFloat(rows[i]["deny_ts"]); v != 0 {

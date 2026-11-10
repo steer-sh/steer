@@ -17,7 +17,7 @@ import (
 
 // chainOpeningPhases open a new chain when firing is back at 1. NonReviewPhases,
 // which open none and join none, come from the engine (gate.NonReviewPhases).
-var chainOpeningPhases = map[string]bool{"deny": true, "clean": true}
+var chainOpeningPhases = map[string]bool{"deny": true, "clean": true, gate.PhaseNitpick: true}
 
 var shardNameRe = regexp.MustCompile(`^adjudication\.(.+)\.jsonl$`)
 
@@ -159,10 +159,12 @@ type Chain struct {
 // Finding is one adjudicated concern kept after per-chain and cross-chain dedup.
 type Finding struct {
 	Verdict string `json:"verdict"`
-	Text    string `json:"text"`
-	TS      any    `json:"ts"`
-	Join    any    `json:"join"`
-	Round   any    `json:"round"`
+	// Qualifier is the ledger text after the verdict word, such as "not fixed".
+	Qualifier string `json:"qualifier,omitempty"`
+	Text      string `json:"text"`
+	TS        any    `json:"ts"`
+	Join      any    `json:"join"`
+	Round     any    `json:"round"`
 }
 
 // BuildChains groups ledger rows into chains, segmenting per host. A chain is only
@@ -268,7 +270,7 @@ func chainsForHost(rows []gate.Row, strictJoins bool) []Chain {
 				}
 			}
 		}
-		if phase == "clean" || phase == "cap" {
+		if phase == "clean" || phase == "cap" || phase == gate.PhaseNitpick {
 			p := phase
 			ch.Terminal = &p
 		}
@@ -333,11 +335,12 @@ func chainsForHost(rows []gate.Row, strictJoins bool) []Chain {
 			}
 			ch.seen[key] = true
 			ch.Findings = append(ch.Findings, Finding{
-				Verdict: strings.ToUpper(str(concern["verdict"])),
-				Text:    text,
-				TS:      row["ts"],
-				Join:    row["ledger_join"],
-				Round:   row["ledger_round"],
+				Verdict:   strings.ToUpper(str(concern["verdict"])),
+				Qualifier: strings.TrimSpace(str(concern["qualifier"])),
+				Text:      text,
+				TS:        row["ts"],
+				Join:      row["ledger_join"],
+				Round:     row["ledger_round"],
 			})
 		}
 	}

@@ -55,7 +55,7 @@ var matchEveryFinding = regexp.MustCompile("")
 func CoveringIDs(f Finding, deciding []Deciding) []string {
 	var ids []string
 	for _, d := range deciding {
-		if KindFilter(f.Verdict, d.Kind) && d.Pattern.MatchString(f.Text) {
+		if KindFilter(f, d.Kind) && d.Pattern.MatchString(f.Text) {
 			ids = append(ids, d.ID)
 		}
 	}

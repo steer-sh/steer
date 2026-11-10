@@ -75,6 +75,34 @@ func TestPrecommitFindingBlocksTheCommit(t *testing.T) {
 	}
 }
 
+// TestPrecommitNitpickOnlyRoundProceeds checks that a panel whose every finding is
+// NITPICK lets the commit land, prints the findings and the not-blocked line on git's
+// stderr, and records the round and the sequence's release.
+//
+// pins existing behaviour
+func TestPrecommitNitpickOnlyRoundProceeds(t *testing.T) {
+	t.Parallel()
+	s := precommitSandbox(t)
+	s.Script("nitpick")
+	before := s.Head()
+	s.StageCode("mod.py")
+	r := s.Run(s.Repo, "", nil, "git", "commit", "-m", "add mod")
+	if r.Code != 0 || s.Head() == before {
+		t.Fatalf("commit exited %d and HEAD moved %v:\n%s", r.Code, s.Head() != before, r.Output())
+	}
+	for _, want := range []string{"[1] SEVERITY: NITPICK", "**Round 1, terminal**",
+		"[commit-gate] Commit not blocked — 3 of 3 reviewers returned 3 finding(s), duplicates included, all rated NITPICK"} {
+		if !strings.Contains(r.Stderr, want) {
+			t.Errorf("stderr lacks %q:\n%s", want, r.Stderr)
+		}
+	}
+	rows := s.LedgerRows()
+	if len(rows) != 2 || rows[0]["phase"] != gate.PhaseNitpick || rows[1]["phase"] != gate.PhaseChainEnd ||
+		rows[1]["blocks"] != float64(0) || rows[1]["terminal_round"] != float64(1) {
+		t.Errorf("ledger rows = %v, want a nitpick row and its release with terminal round 1", rows)
+	}
+}
+
 // TestPrecommitFailsOpenWhenNoReviewerAnswers checks that every panel failure lets
 // the commit land with a receipt that says no review happened.
 //

@@ -7,18 +7,19 @@ import (
 	"testing"
 )
 
-// The digests of the five templates. review.md's digest is the instrument's prompt
+// The digests of the six templates. review.md's digest is the instrument's prompt
 // half, so a change there makes every row written afterwards a different instrument;
-// deny.md and cap.md are read by the agent alone and move no instrument.
+// deny.md, cap.md and nitpick.md are read by the agent alone and move no instrument.
 // These are golden values, not a checksum of convenience. Regenerate one only
 // when the prompt change is the intended change.
 var promptDigests = map[string]struct {
 	text string
 	want string
 }{
-	"review":     {reviewPrompt, "d0fe0811565066c3c1bbb2e57754841642990c842e9b973ebbe1f34c9d16aa27"},
-	"deny":       {denyTemplate, "5b69447df292f0cdcec16358d8014b8c1573d711b60ef2da14cf004864ed6f7b"},
+	"review":     {reviewPrompt, "22c02ff71dd349d0622fe4d359182944057912d5ec051b72fa114aff24f2a1ff"},
+	"deny":       {denyTemplate, "9ba32aa2552d2b3205aa1491bc444e2688a8e440f5e81b418fc7b1db890fd4b1"},
 	"cap":        {capTemplate, "89df834419fdae8cb8585bdc6b977d2f7d5eb2377d6eb8b1aaddc6d3a0130c32"},
+	"nitpick":    {nitpickTemplate, "23ced2dc4dc2f61de49a4d3b5beec78bff9ad89dbac61884ea18c48c7e2424c8"},
 	"round-note": {roundNote, "f40acabd50e95481f309c08ccacf4cac025835d79e8e265601170f7c4a4d34c3"},
 	"rerun-note": {rerunNoteText, "27d14c6916336301abd551b90d82d5fc799e027ae7d95b0520ef501c0efa9f1b"},
 }
@@ -34,7 +35,7 @@ func TestPromptDigestsArePinned(t *testing.T) {
 
 func TestInstrumentID(t *testing.T) {
 	c := Defaults()
-	if got, want := c.InstrumentID(), "claude-haiku-5-5/3/d0fe0811/go-findings-v6-shell"; got != want {
+	if got, want := c.InstrumentID(), "claude-haiku-5-5/3/22c02ff7/go-findings-v6-shell"; got != want {
 		t.Errorf("InstrumentID() = %q, want %q", got, want)
 	}
 }
@@ -45,11 +46,12 @@ func TestNoPlaceholderSurvivesFill(t *testing.T) {
 	prompt := BuildReviewPrompt("msg", "diff", "ctx", Addendum{})
 	deny := BuildDeny(3, "reviews", 2, 4, rerunNoteText, "feat: a subject", "", "a reviewer")
 	capped := BuildCap(3, "reviews", 5, 4, "feat: a subject", "", "a reviewer")
-	for name, out := range map[string]string{"review": prompt, "deny": deny, "cap": capped} {
+	nitpick := BuildNitpick(3, "reviews", 2, "feat: a subject", "", "a reviewer")
+	for name, out := range map[string]string{"review": prompt, "deny": deny, "cap": capped, "nitpick": nitpick} {
 		for _, placeholder := range []string{
 			"{message}", "{diff}", "{context}", "{count}", "{review}",
 			"{firing}", "{cap}", "{round_note}", "{rerun_note}", "{subject}",
-			"{chain}", "{reviewer}",
+			"{chain}", "{reviewer}", "{sections}",
 		} {
 			if strings.Contains(out, placeholder) {
 				t.Errorf("%s output still carries %s", name, placeholder)
@@ -90,6 +92,9 @@ func TestSubjectReachesTheHeader(t *testing.T) {
 	if !strings.Contains(BuildCap(3, "r", 5, 4, subject, "", "a reviewer"), "review sequence, "+subject+"**") {
 		t.Error("the terminal header must carry it too")
 	}
+	if !strings.Contains(BuildNitpick(3, "r", 1, subject, "", "a reviewer"), "review sequence, "+subject+"**") {
+		t.Error("the nitpick header must carry it too")
+	}
 	if !strings.Contains(BuildDeny(3, "r", 2, 4, "", "", "", "a reviewer"), "review sequence, "+NoSubject+"**") {
 		t.Error("an unread commit message still renders a header, matching no row")
 	}
@@ -98,8 +103,9 @@ func TestSubjectReachesTheHeader(t *testing.T) {
 func TestChainIDReachesTheHeader(t *testing.T) {
 	const subject = "fix(resolver): chain join"
 	for name, out := range map[string]string{
-		"deny": BuildDeny(3, "r", 2, 4, "", subject, "7f3a2b9c", "a reviewer"),
-		"cap":  BuildCap(3, "r", 5, 4, subject, "7f3a2b9c", "a reviewer"),
+		"deny":    BuildDeny(3, "r", 2, 4, "", subject, "7f3a2b9c", "a reviewer"),
+		"cap":     BuildCap(3, "r", 5, 4, subject, "7f3a2b9c", "a reviewer"),
+		"nitpick": BuildNitpick(3, "r", 1, subject, "7f3a2b9c", "a reviewer"),
 	} {
 		start := strings.Index(out, "**"+LedgerHeader+" — review sequence")
 		if start < 0 {
@@ -140,11 +146,11 @@ func TestReviewPromptExampleParsesAsFindings(t *testing.T) {
 	}
 }
 
-// The deny and cap templates tell the agent who wrote the reviews, and that name
+// The deny, cap and nitpick templates tell the agent who wrote the reviews, and that name
 // comes from the reviewer that ran. A provider or model spelled into the template
 // would name the wrong panel on every machine configured differently.
 func TestTemplatesNameNoReviewer(t *testing.T) {
-	for name, tmpl := range map[string]string{"deny": denyTemplate, "cap": capTemplate, "review": reviewPrompt} {
+	for name, tmpl := range map[string]string{"deny": denyTemplate, "cap": capTemplate, "nitpick": nitpickTemplate, "review": reviewPrompt} {
 		for _, word := range []string{"gemini", "agy", "codex", "claude", "anthropic"} {
 			if strings.Contains(strings.ToLower(tmpl), word) {
 				t.Errorf("%s.md names %q; the reviewer is a placeholder", name, word)

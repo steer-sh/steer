@@ -231,7 +231,8 @@ func (e *Engine) handleFirst(ctx context.Context, req Request, chain *Chain) Dec
 			logErr)
 	}
 	req.chainID = NewChainID()
-	return e.reviewCommit(ctx, req, chain, p, 1)
+	d, terminal := e.reviewCommit(ctx, req, chain, p, 1)
+	return e.release(d, req, 0, terminal)
 }
 
 // clearedEnding words how the earlier review sequence let this exact diff through.
@@ -244,6 +245,9 @@ func clearedEnding(ending string) string {
 			"blocked it and it came back unchanged"
 	case ClearedCap:
 		return "the review sequence already ended on this exact diff at its block limit"
+	case ClearedNitpick:
+		return "the review sequence already ended on this exact diff, whose every " +
+			"finding the reviewers rated NITPICK"
 	default:
 		return "a review sequence already ended on this exact diff"
 	}
@@ -337,16 +341,18 @@ func (e *Engine) handleRetry(ctx context.Context, req Request, chain *Chain, sta
 		return e.release(e.skipped(req, status, logErr), req, firing, 0)
 	}
 	// The diff changed, so this round reviews code no reviewer has read.
-	return e.release(withLedgerError(e.reviewCommit(ctx, req, chain, p, next), logErr), req, firing, 0)
+	d, terminal := e.reviewCommit(ctx, req, chain, p, next)
+	return e.release(withLedgerError(d, logErr), req, firing, terminal)
 }
 
 // release finishes a decision that ends a sequence which blocked `blocks` times. A
-// receipt gets the ledger instruction; the cap's terminal review carries it in its own
-// template and passes the round it names as terminal. Either way the release row records
-// the ledger the agent now owes. A deny continues the sequence and a silent decision
-// rules nothing, so neither is a release.
+// receipt gets the ledger instruction; the cap's terminal review and a NITPICK-only
+// round carry it in their own templates and pass the round they name as terminal.
+// Either way the release row records the ledger the agent now owes. A deny continues
+// the sequence, a silent decision rules nothing, and a sequence with no blocking round
+// and no terminal round owes no ledger, so none of those is a release.
 func (e *Engine) release(d Decision, req Request, blocks, terminal int) Decision {
-	if d.Kind == Deny || d.Kind == Silent || (!d.Receipt && terminal == 0) {
+	if d.Kind == Deny || d.Kind == Silent || (!d.Receipt && terminal == 0) || (blocks == 0 && terminal == 0) {
 		return d
 	}
 	header := ledgerHeaderLine(req)
@@ -424,8 +430,10 @@ func withLedgerError(d Decision, err error) Decision {
 
 // reviewCommit reviews this commit and rules on it. Called for firing 1 and for every
 // re-fire, so a round 3 review is identical in depth and inputs to a round 1 review —
-// the only difference is the diff it reads.
-func (e *Engine) reviewCommit(ctx context.Context, req Request, chain *Chain, p prepared, firing int) Decision {
+// the only difference is the diff it reads. terminal is the round the agent's ledger
+// must answer as terminal: firing when a NITPICK-only round handed the agent findings
+// without blocking, else 0.
+func (e *Engine) reviewCommit(ctx context.Context, req Request, chain *Chain, p prepared, firing int) (Decision, int) {
 	result := e.review(ctx, req, p)
 
 	if result.Answered == 0 {
@@ -444,7 +452,7 @@ func (e *Engine) reviewCommit(ctx context.Context, req Request, chain *Chain, p 
 		return proceed(kind, req, p.raw, firing, fmt.Sprintf(
 			"all %d reviewers unavailable — %s. This commit was NOT reviewed; it "+
 				"proceeds with no review.%s", e.cfg.ReviewerRuns, ReviewerTrouble(result.Runs),
-			separated(p.notice)), err)
+			separated(p.notice)), err), 0
 	}
 
 	if len(result.Reviews) == 0 {
@@ -480,10 +488,13 @@ func (e *Engine) reviewCommit(ctx context.Context, req Request, chain *Chain, p 
 		d := proceed(kind, req, p.raw, firing, found+tail, err)
 		d.Reason = agentReceipt(req, p.raw, firing,
 			found+" The review ran; that is not a claim the change is correct."+tail)
-		return d
+		return d, 0
 	}
 
 	review, findings := ComposeReview(result.Reviews)
+	if NitpickOnlyRound(result.Reviews) {
+		return e.nitpickRound(req, chain, p, firing, result, review, findings), firing
+	}
 	// `firing` rides in the state, so the retry row it produces knows which round it
 	// closes.
 	saveErr := chain.Save(ChainState{
@@ -520,6 +531,42 @@ func (e *Engine) reviewCommit(ctx context.Context, req Request, chain *Chain, p 
 		Kind: Deny,
 		Reason: p.notice + BuildDeny(result.Answered, review, firing, e.cfg.MaxFirings, req.RerunNote, CommitSubject(req.Message), req.chainID, e.cfg.ReviewerLabel()) +
 			separated(pendingProjectAddendumNotice(req.Repo, req.addendum, p.paths)),
+		SystemMessage: note,
+		LedgerError:   err,
+	}, 0
+}
+
+// nitpickRound lets through a round whose every finding the reviewers rated NITPICK.
+// The reviews reach the agent as context under the nitpick template, which asks for the
+// sequence's ledger with this round as its terminal section, and the sequence ends: no
+// chain state is saved, so the next commit starts a new one.
+func (e *Engine) nitpickRound(req Request, chain *Chain, p prepared, firing int, result PanelResult, review string, findings int) Decision {
+	err := e.log(req, mergeRows(
+		Row{"ts": time.Now().Unix(), "phase": PhaseNitpick, "reviewers": result.Answered,
+			"finding_slots": findings, "files": len(p.paths),
+			"changed_paths": SlashPaths(p.paths), "firing": firing,
+			"session_id": req.SessionID, "severity_lines_loose": LooseFindingCount(result.Reviews),
+			"reviews_off_format": OffFormatReviews(result.Reviews)},
+		ReviewerReport(e.cfg, result.Runs),
+		e.ledger.SaveDiff(req.SessionID, firing, p.diff),
+		FindingShape(result.Reviews, p.paths)))
+	// No cleared record under the stale-index notice, as on the clean path.
+	if p.notice == "" {
+		if cerr := chain.RememberCleared(p.raw, req.Channel, ClearedNitpick); cerr != nil && err == nil {
+			err = cerr
+		}
+	}
+	note := fmt.Sprintf("[commit-gate] Commit not blocked — %d of %d reviewers returned %d "+
+		"finding(s), duplicates included, all rated NITPICK, on a diff of %d changed file(s). Only "+
+		"the agent sees the findings; expect its ruling on each one in its reply.",
+		result.Answered, e.cfg.ReviewerRuns, findings, len(p.paths))
+	if result.Answered < e.cfg.ReviewerRuns {
+		note += fmt.Sprintf(" The other %d did not answer (%s).",
+			e.cfg.ReviewerRuns-result.Answered, ReviewerTrouble(result.Runs))
+	}
+	return Decision{
+		Kind:          ContextOnly,
+		Reason:        p.notice + BuildNitpick(result.Answered, review, firing, CommitSubject(req.Message), req.chainID, e.cfg.ReviewerLabel()),
 		SystemMessage: note,
 		LedgerError:   err,
 	}

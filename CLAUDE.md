@@ -117,7 +117,8 @@ Read the linked architecture section before changing the corresponding boundary:
   only `steer reviewer key set` writes that file.
   The root-Stop ledger backstop (`cli/internal/gate/stophook/`, run by
   `commit-gate backfill`) reads only the `chain-end` rows `Engine.release` writes,
-  so a new path that ends a blocked sequence must go through `release`.
+  so a new path that ends a blocked sequence, or hands findings without blocking, must
+  go through `release`.
   A new writer of the ledger shard takes `gate.LockLog`: `Ledger.Log` appends and
   `resolve.writeRows` renames over the file. A rewrite carries what reached the
   replaced file under `gate.LockSwap` (rename through carry, whole lines only), and
@@ -163,6 +164,11 @@ Read the linked architecture section before changing the corresponding boundary:
   needs its relink in `repointRegistrations` (`cli/cmd/bin.go`) and its reader and
   removal in `uninstallItems` (`cli/cmd/uninstall.go`), or `bin install` strands it
   and `steer uninstall` leaves it behind.
+- Ledger row phases: a new phase where a reviewer ran is read by `resolve`
+  (`ExpectsLedger`, `anchorTS`, `chainIDs`, `handedChains`), `gate/mine`
+  (`expectsLedger`, `rowAnchorTS`, `chainOpeningPhases`, chain `Terminal`) and
+  `REVIEW_PHASES` in `tests/replay_reviewers.py`; one where none ran goes in
+  `gate.NonReviewPhases`.
 - Report index and details: `cli/internal/report/digest.go` and `index.go`, and
   Step 2a of `skills/steer-report/SKILL.md`; a shape change bumps `DigestVersion`.
 - Status JSON: the projection `cli/internal/status/json.go` and the one documented

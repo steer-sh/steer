@@ -376,7 +376,7 @@ the pass read (review-findings or transcript-friction); the default is both.`,
 			if len(taken) == 0 {
 				fmt.Printf("%s: no whole-pile --undecided dump since the last mark; the next dump's new section is unchanged.\n", corpus)
 			}
-			for _, kind := range []string{"accepted", "rejected", "both"} {
+			for _, kind := range []string{"accepted", "repaired", "deferred", "rejected", "both"} {
 				if n, ok := taken[kind]; ok {
 					fmt.Printf("%s: %d %s finding(s) the last --undecided dump showed are now read; the next dump lists later ones as new.\n", corpus, n, kind)
 				}

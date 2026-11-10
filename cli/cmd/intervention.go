@@ -210,7 +210,8 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 		},
 	}
 	m := match.Flags()
-	m.StringVar(&v.matchKind, "kind", "accepted", "accepted|rejected|both")
+	m.StringVar(&v.matchKind, "kind", "accepted",
+		"accepted|repaired|deferred|rejected|both; repaired and deferred split accepted by the ACCEPTED, not fixed ruling")
 	m.BoolVar(&v.matchStrictJoins, "strict-joins", false, "round-joined rows only")
 	m.StringVar(&v.matchCorpus, "corpus", mine.CorpusReviewFindings, corpusUsage)
 	m.StringVar(&v.matchSignalKind, "signal-kind", "", signalKindUsage)
@@ -517,7 +518,8 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 			},
 		}
 		f := findings.Flags()
-		f.StringVar(&v.findingsKind, "kind", "accepted", "accepted|rejected|both")
+		f.StringVar(&v.findingsKind, "kind", "accepted",
+			"accepted|repaired|deferred|rejected|both; repaired and deferred split accepted by the ACCEPTED, not fixed ruling")
 		f.Float64Var(&v.findingsSince, "since", 0, "only the last N days")
 		f.BoolVar(&v.findingsStrictJoins, "strict-joins", false, "round-joined rows only")
 		f.BoolVar(&v.findingsIncludeEmpty, "include-empty", false, "keep chains with no findings")

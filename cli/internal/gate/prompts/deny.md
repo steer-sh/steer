@@ -61,6 +61,6 @@ A round with no section reads as a round you never adjudicated, so the number of
 
 Do NOT put this ledger in the commit message.
 
-This gate re-fires on your next `git commit` if the diff CHANGED, because the reviewers then read code none of them has seen — your fixes. It stops the moment a retry's diff is identical to the one already reviewed, and after {cap} firings in any case. So an unchanged retry ends the chain immediately, whether you rejected every finding or accepted some and left them unfixed: it costs you nothing and buys you nothing, and the only reader of that decision is the user.
+This gate re-fires on your next `git commit` if the diff CHANGED, because the reviewers then read code none of them has seen — your fixes. It stops the moment a retry's diff is identical to the one already reviewed, and after {cap} firings in any case. So an unchanged retry ends the chain immediately, whether you rejected every finding or accepted some and left them unfixed: it costs you nothing and buys you nothing, and the only reader of that decision is the user. A re-fired round whose every finding the reviewers rate NITPICK ends the chain too: the commit proceeds, and that round's findings come to you for the same adjudication and a terminal section in the ledger.
 
 Ending the chain at the {cap}-firing cap does not skip the review of your last fixes. That round gets one final review which cannot block the commit, and which you must adjudicate and report in the same way.

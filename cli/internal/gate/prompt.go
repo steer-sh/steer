@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// The five prompts. Their digests are pinned: the instrument digest is a hash of
+// The six prompts. Their digests are pinned: the instrument digest is a hash of
 // reviewPrompt, so a drift there silently reclassifies every row that follows.
 var (
 	//go:embed prompts/review.md
@@ -17,6 +17,8 @@ var (
 	denyTemplate string
 	//go:embed prompts/cap.md
 	capTemplate string
+	//go:embed prompts/nitpick.md
+	nitpickTemplate string
 	//go:embed prompts/round-note.md
 	roundNote string
 	//go:embed prompts/rerun-note.md
@@ -100,6 +102,25 @@ func BuildCap(count int, review string, firing, cap int, subject, chainID, revie
 		"count": fmt.Sprint(count), "review": review,
 		"firing": fmt.Sprint(firing), "cap": fmt.Sprint(cap),
 		"subject": subject, "chain": chainSlot(chainID), "reviewer": reviewer,
+	})
+}
+
+// BuildNitpick renders the non-blocking message for a round whose findings were all
+// rated NITPICK. firing is that round, which the ledger answers as terminal after one
+// section for each earlier round, all of which blocked.
+func BuildNitpick(count int, review string, firing int, subject, chainID, reviewer string) string {
+	if subject == "" {
+		subject = NoSubject
+	}
+	sections := make([]string, 0, firing)
+	for r := 1; r < firing; r++ {
+		sections = append(sections, fmt.Sprintf("**Round %d, blocking**", r))
+	}
+	sections = append(sections, fmt.Sprintf("**Round %d, terminal**", firing))
+	return fill(nitpickTemplate, map[string]string{
+		"count": fmt.Sprint(count), "review": review, "firing": fmt.Sprint(firing),
+		"sections": strings.Join(sections, ", "), "subject": subject,
+		"chain": chainSlot(chainID), "reviewer": reviewer,
 	})
 }
 

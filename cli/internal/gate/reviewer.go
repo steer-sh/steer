@@ -2,6 +2,7 @@ package gate
 
 import (
 	"context"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -355,6 +356,29 @@ func OffFormatReviews(reviews []string) int {
 		}
 	}
 	return total
+}
+
+// higherSeverityRe finds either higher level named as a word anywhere in a review.
+var higherSeverityRe = regexp.MustCompile(`(?i)\b(BLOCKING|SUBSTANTIVE)\b`)
+
+// NitpickOnlyRound reports whether a round's non-clean reviews hold at least one complete
+// finding and nothing that could be a higher one: every complete finding is rated
+// NITPICK, no review lacks a complete finding, and no review names BLOCKING or
+// SUBSTANTIVE anywhere.
+func NitpickOnlyRound(reviews []string) bool {
+	complete := 0
+	for _, review := range reviews {
+		for _, m := range reviewFindingRe.FindAllStringSubmatch(review, -1) {
+			if !strings.EqualFold(m[1], "NITPICK") {
+				return false
+			}
+			complete++
+		}
+		if higherSeverityRe.MatchString(review) {
+			return false
+		}
+	}
+	return complete > 0 && OffFormatReviews(reviews) == 0
 }
 
 func truncate(text string, n int) string {
