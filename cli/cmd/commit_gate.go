@@ -448,7 +448,7 @@ func installReviewChannel(cfg gate.Config) error {
 func installSteps(cfg gate.Config, target harness.ID, command string) []status.Step {
 	var steps []status.Step
 	_, _, resolveErr := resolveReviewer(cfg)
-	if step, ok := status.ReviewerStep(reviewerProbe(cfg, resolveErr)); ok {
+	if step, ok := status.ReviewerStep(settings.ReviewerProbe(cfg, resolveErr)); ok {
 		steps = append(steps, step)
 	}
 	if step, ok := status.CommandStep(steerbin.Resolve(command)); ok {
@@ -1000,18 +1000,4 @@ func init() {
 		"PreToolUse harness (claude-code|codex)")
 	commitGateRemoveCmd.Flags().StringVar(&commitGateRemoveHarness, "harness", "",
 		"PreToolUse harness (claude-code|codex), required")
-}
-
-// reviewerProbe reads whether the configured reviewer can actually run. An
-// unresolvable provider is reported as missing with no executable: it names no CLI,
-// so no review can run, and the repair is the setting rather than an install. An API
-// provider's probe reads its own configuration, which names the setting to repair.
-func reviewerProbe(cfg gate.Config, err error) reviewers.Probe {
-	if p, ok := reviewers.FindProvider(cfg.ReviewerProvider); ok && p.API {
-		return reviewers.ProbeConfig(cfg.ReviewerProvider, settings.ReviewerOptions(cfg))
-	}
-	if err != nil {
-		return reviewers.Probe{Provider: cfg.ReviewerProvider, State: reviewers.ProbeMissing}
-	}
-	return reviewers.ProbeProvider(cfg.ReviewerProvider)
 }
