@@ -31,7 +31,9 @@ type Reviewer struct {
 	Effort   string `json:"effort,omitempty"`
 	Runs     int    `json:"runs,omitempty"`
 	Timeout  int    `json:"timeout,omitempty"`
-	API      API    `json:"api,omitzero"`
+	// Rounds is how many reviews in one sequence may block a commit.
+	Rounds int `json:"rounds,omitempty"`
+	API    API `json:"api,omitzero"`
 }
 
 // API configures the openai-compatible provider. It holds no key: Save writes this

@@ -703,6 +703,10 @@ carrying what a deny row carries, saves no chain state, and hands the reviews to
 agent as `ContextOnly` text under `prompts/nitpick.md`, which applies the deny and cap
 templates' repair policy and asks for the sequence's ledger now. The round ends the
 sequence: it does not count toward `MaxFirings`, and the next commit starts a new one.
+`MaxFirings` is the `reviewer.rounds` setting, 1 to `gate.MaxFiringsLimit`; no setting
+turns off the final review after it. The engine reads the limit on each commit, so every
+review row records the value in force for its own round as `max_firings`; a row without
+the field predates it.
 Without the stale-index notice it writes a cleared record ending `nitpick`. The review
 prompt does not say which levels block. Readers treat a `nitpick` row like a `cap` row
 with findings: it owes its own terminal ledger section, anchored at its own timestamp;

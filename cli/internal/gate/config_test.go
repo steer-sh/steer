@@ -104,3 +104,43 @@ func TestLoadReportsAMalformedSettingsFile(t *testing.T) {
 		t.Fatalf("cfg = %s/%d; want claude-code/9", cfg.ReviewerProvider, cfg.ReviewerRuns)
 	}
 }
+
+// TestLoadReadsTheBlockLimit: the file's reviewer.rounds sets MaxFirings, the
+// environment outranks it, and a value above MaxFiringsLimit runs as the limit.
+func TestLoadReadsTheBlockLimit(t *testing.T) {
+	tempConfigHome(t)
+	save := func(rounds int) {
+		t.Helper()
+		if err := steerconfig.Save(steerconfig.Config{Reviewer: steerconfig.Reviewer{Rounds: rounds}}); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+	}
+	load := func() int {
+		t.Helper()
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		return cfg.MaxFirings
+	}
+	if got := load(); got != defaultMaxFirings {
+		t.Errorf("unset MaxFirings = %d, want %d", got, defaultMaxFirings)
+	}
+	save(2)
+	if got := load(); got != 2 {
+		t.Errorf("file MaxFirings = %d, want 2", got)
+	}
+	save(MaxFiringsLimit + 5)
+	if got := load(); got != MaxFiringsLimit {
+		t.Errorf("file MaxFirings above the limit = %d, want %d", got, MaxFiringsLimit)
+	}
+	save(2)
+	t.Setenv("COMMIT_GATE_MAX_FIRINGS", "6")
+	if got := load(); got != 6 {
+		t.Errorf("environment MaxFirings = %d, want 6", got)
+	}
+	t.Setenv("COMMIT_GATE_MAX_FIRINGS", "99")
+	if got := load(); got != MaxFiringsLimit {
+		t.Errorf("environment MaxFirings above the limit = %d, want %d", got, MaxFiringsLimit)
+	}
+}

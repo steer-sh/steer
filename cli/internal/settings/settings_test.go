@@ -1,10 +1,12 @@
 package settings_test
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/config"
+	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/settings"
 )
 
@@ -147,5 +149,34 @@ func TestProtectionTakesOnlyOnOrOff(t *testing.T) {
 		if r.Name == f.Name {
 			t.Error("the reviewer panel lists the protection key")
 		}
+	}
+}
+
+// TestRoundsSettingTakesOneToTheLimit: reviewer.rounds stores a number from 1 to
+// gate.MaxFiringsLimit, clears on an empty value and refuses every other value.
+func TestRoundsSettingTakesOneToTheLimit(t *testing.T) {
+	field, err := settings.Find("reviewer.rounds")
+	if err != nil {
+		t.Fatalf("settings.Find: %v", err)
+	}
+	limit := strconv.Itoa(gate.MaxFiringsLimit)
+	for _, v := range []string{"1", limit} {
+		var c config.Config
+		if err := field.Set(&c, v); err != nil || field.Get(c) != v {
+			t.Errorf("set %s: err %v, stored %q", v, err, field.Get(c))
+		}
+	}
+	for _, v := range []string{"0", "-1", strconv.Itoa(gate.MaxFiringsLimit + 1), "many"} {
+		c := config.Config{Reviewer: config.Reviewer{Rounds: 3}}
+		if err := field.Set(&c, v); err == nil || c.Reviewer.Rounds != 3 {
+			t.Errorf("set %s: err %v, stored %d; want a refusal and 3", v, err, c.Reviewer.Rounds)
+		}
+	}
+	c := config.Config{Reviewer: config.Reviewer{Rounds: 3}}
+	if err := field.Set(&c, ""); err != nil || c.Reviewer.Rounds != 0 {
+		t.Errorf("clear: err %v, stored %d", err, c.Reviewer.Rounds)
+	}
+	if got := field.Effective(gate.WithFile(gate.Defaults(), config.Config{Reviewer: config.Reviewer{Rounds: 7}})); got != "7" {
+		t.Errorf("effective = %q, want 7", got)
 	}
 }
