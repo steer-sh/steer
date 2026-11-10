@@ -54,7 +54,7 @@ If you use both Codex and Claude Code, run `/steer-setup` in both CLI agents. It
 
 ### Commit as usual
 
-Nothing changes when committing repo changes. Once your agent makes a commit, it will be automatically reviewed and concerns raised on findings. Your CLI agent will check each finding against the code, fix what holds up, and send back a report on what it accepted and what it rejected. Steer will continue reviewing the commits until no accepted - non-nitpick - findings remain, or until 4 reviews in a row have blocked the commit. 4 reviews were chosen as diminishing returns were found after this number.
+Nothing changes when committing repo changes. Once your agent makes a commit, it will be automatically reviewed and concerns raised on findings. Your CLI agent will check each finding against the code, fix what holds up, and send back a report on what it accepted and what it rejected. Steer will continue reviewing the commits until no accepted - non-nitpick - findings remain, or until 4 reviews in a row have blocked the commit. Change that number with `steer config set reviewer.rounds <1-10>`. 4 is the default because initial testing shows diminishing returns after this amount.
 
 Commits where every changed file is prose (`.md`, `.txt` and similar), or binary are skipped. `CLAUDE.md` and `AGENTS.md` are exceptions to the prose rule.
 
@@ -70,10 +70,10 @@ For each recurring problem, `/steer-report` proposes a repository check, a guard
 
 Steer measures the frequency of the problems you fix using before/after stats. Later reports will also audit each fix by examining each instance of blocks - were they legitimate blocks or in error? If they were in error, Steer will suggest modifications so the fix is as effective as possible.
 
-To see what is active and what needs attention:
+You can inspect and change your setup from the terminal using `steer dashboard`. This is an interactive TUI for arming repos, browsing problems, toggling review settings, viewing diagnostics and more.
 
 ```bash
-steer dashboard
+steer dashboard     # interactive TUI to inspect Steer operations and set options
 steer status        # whether your Steer installation is healthy, and steps to take if it is not
 ```
 
