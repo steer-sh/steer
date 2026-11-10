@@ -17,7 +17,7 @@ import (
 
 // chainOpeningPhases open a new chain when firing is back at 1. NonReviewPhases,
 // which open none and join none, come from the engine (gate.NonReviewPhases).
-var chainOpeningPhases = map[string]bool{"deny": true, "clean": true}
+var chainOpeningPhases = map[string]bool{"deny": true, "clean": true, gate.PhaseNitpick: true}
 
 var shardNameRe = regexp.MustCompile(`^adjudication\.(.+)\.jsonl$`)
 
@@ -270,7 +270,7 @@ func chainsForHost(rows []gate.Row, strictJoins bool) []Chain {
 				}
 			}
 		}
-		if phase == "clean" || phase == "cap" {
+		if phase == "clean" || phase == "cap" || phase == gate.PhaseNitpick {
 			p := phase
 			ch.Terminal = &p
 		}

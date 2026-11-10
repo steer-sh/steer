@@ -36,7 +36,7 @@ from pathlib import Path
 from sandbox import REPO, Sandbox
 
 STATE = Path.home() / ".steer" / "state" / "commit-review"
-REVIEW_PHASES = ("deny", "clean", "cap")
+REVIEW_PHASES = ("deny", "clean", "cap", "nitpick")
 
 
 def api_setup(home, base_url, key_env, environ=os.environ, key_file=None, tools=None):

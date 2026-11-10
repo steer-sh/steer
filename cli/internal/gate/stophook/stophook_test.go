@@ -173,6 +173,30 @@ func TestACompleteLedgerInReplyTextSatisfiesTheRelease(t *testing.T) {
 	}
 }
 
+// A sequence that ended on its first round without blocking owes the terminal section
+// alone; a release naming neither a blocking round nor a terminal one owes nothing.
+func TestAReleaseWithNoBlockingRoundOwesItsTerminalSection(t *testing.T) {
+	for _, h := range harnesses {
+		t.Run(h, func(t *testing.T) {
+			f := newFixture(t, h)
+			f.release("ab12", 0, map[string]any{"terminal_round": 1})
+			f.release("cd34", 0, nil)
+			f.replies("Done; the commit landed.")
+			res := f.stop(nil)
+			if !res.Block || !strings.Contains(res.Reason, header("ab12", "add mod")+"\nSections: **Round 1, terminal**\n") {
+				t.Fatalf("result = %+v, want a block naming the terminal section alone", res)
+			}
+			if strings.Contains(res.Reason, "cd34") {
+				t.Errorf("a release with no round to answer was owed:\n%s", res.Reason)
+			}
+			f.replies("Here is the ledger.\n\n" + ledger("ab12", 0, 1))
+			if res := f.stop(nil); res.Block {
+				t.Errorf("result = %+v, want the terminal section to satisfy the release", res)
+			}
+		})
+	}
+}
+
 func TestOnlyReplyTextCountsAsALedger(t *testing.T) {
 	text := ledger("ab12", 1, 0)
 	for _, tc := range []struct {

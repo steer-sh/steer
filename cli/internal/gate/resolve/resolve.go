@@ -279,12 +279,13 @@ func snapshotEnd(data []byte) int {
 	return end
 }
 
-// ExpectsLedger reports whether a row demanded a ledger: every retry, and a cap whose
-// terminal review reached the agent. Findings written as prose score zero slots and are
-// counted by reviews_off_format, which a cap with no review at all never carries.
+// ExpectsLedger reports whether a row demanded a ledger: every retry, every NITPICK-only
+// round, and a cap whose terminal review reached the agent. Findings written as prose
+// score zero slots and are counted by reviews_off_format, which a cap with no review at
+// all never carries.
 func ExpectsLedger(row map[string]any) bool {
 	switch pyStr(row["phase"]) {
-	case "retry":
+	case "retry", gate.PhaseNitpick:
 		return true
 	case "cap":
 		n, _ := pyInt(row["finding_slots"])
@@ -295,9 +296,9 @@ func ExpectsLedger(row map[string]any) bool {
 }
 
 // anchorTS is when the findings this row's ledger answers were handed to the agent. A
-// cap row IS that moment; a retry row answers the deny before it.
+// cap or nitpick row IS that moment; a retry row answers the deny before it.
 func anchorTS(rows []resolverRow, i int) (float64, bool) {
-	if pyStr(rows[i]["phase"]) == "cap" {
+	if phase := pyStr(rows[i]["phase"]); phase == "cap" || phase == gate.PhaseNitpick {
 		return pyNum(rows[i]["ts"])
 	}
 	return denyTSFor(rows, i)
@@ -357,7 +358,7 @@ func joinKey(row resolverRow) string {
 }
 
 // chainIDs numbers the chain each row belongs to, or -1 for a non-review row. A chain
-// is a run within one thread and repository, opened by a deny or clean at firing 1;
+// is a run within one thread and repository, opened by a deny, clean or nitpick row at firing 1;
 // the gate keys its pending state on the actor and the repository, so one thread can
 // interleave the rounds of two repositories' chains.
 func chainIDs(rows []resolverRow) []int {
@@ -372,7 +373,7 @@ func chainIDs(rows []resolverRow) []int {
 		stream := joinKey(row) + "\x00" + pyStr(row["repo"])
 		f, _ := pyInt(row["firing"])
 		id, ok := current[stream]
-		if !ok || ((phase == "deny" || phase == "clean") && f <= 1) {
+		if !ok || ((phase == "deny" || phase == "clean" || phase == gate.PhaseNitpick) && f <= 1) {
 			id = i
 			current[stream] = id
 		}
@@ -438,15 +439,15 @@ func (r *resolver) nameOwner(rows []resolverRow, ids []int, key, name string, wh
 	return owner, n == 1
 }
 
-// handedChains is the set of chains of thread key with a deny or cap row: the chains
-// that were handed findings and so owe a ledger.
+// handedChains is the set of chains of thread key with a deny, cap or nitpick row: the
+// chains that were handed findings and so owe a ledger.
 func handedChains(rows []resolverRow, ids []int, key string) map[int]bool {
 	out := map[int]bool{}
 	for j, row := range rows {
 		if ids[j] < 0 || joinKey(row) != key {
 			continue
 		}
-		if phase := pyStr(row["phase"]); phase == "deny" || phase == "cap" {
+		if phase := pyStr(row["phase"]); phase == "deny" || phase == "cap" || phase == gate.PhaseNitpick {
 			out[ids[j]] = true
 		}
 	}

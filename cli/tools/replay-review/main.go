@@ -122,6 +122,8 @@ func replay(provider, model, effort, base string, runs int, wt, diffFile, subjec
 		verdict = "ungated"
 	} else if len(result.Reviews) == 0 {
 		verdict = "clean"
+	} else if gate.NitpickOnlyRound(result.Reviews) {
+		verdict = gate.PhaseNitpick
 	}
 	row := gate.Row{
 		"model": cfg.ReviewerModel, "effort": cfg.ReviewerEffort, "provider": reviewer.Name(),

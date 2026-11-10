@@ -686,6 +686,44 @@ func TestResolverCap(t *testing.T) {
 	}
 }
 
+// A NITPICK-only round owes its own terminal section, anchored at the round itself; at
+// firing 1 it opens a chain of its own, and that chain was handed findings.
+func TestResolverNitpickRound(t *testing.T) {
+	r := testResolver()
+	first := resolverRow{"phase": gate.PhaseNitpick, "ts": fixCT + 900, "firing": 1, "finding_slots": 2, "session_id": fixSession}
+	rows := append(chainRows(fixCT, 1, ""), first)
+	idx := len(rows) - 1
+	if !ExpectsLedger(first) {
+		t.Fatal("a NITPICK-only round handed the agent findings and demands a ledger")
+	}
+	if ts, _ := anchorTS(rows, idx); ts != fixCT+900 {
+		t.Fatalf("the nitpick row IS the handover moment; anchor = %v, want %v", ts, fixCT+900)
+	}
+	ids := chainIDs(rows)
+	if ids[idx] != idx || ids[0] != 0 || ids[1] != 0 {
+		t.Fatalf("chain ids = %v; a nitpick row at firing 1 opens a chain of its own", ids)
+	}
+	if !handedChains(rows, ids, fixSession)[idx] {
+		t.Error("a chain that ended on a NITPICK-only round was handed findings")
+	}
+	led := chainLedgerFix(fixCT+950, nil, "", 1)
+	cand, join, _ := r.pickLedger(rows, idx, fixCT+900, []LedgerMsg{led})
+	if join != "chain" || cand == nil || cand.Text != led.Text {
+		t.Fatalf("round 1's terminal section answers the nitpick row; got join=%s match=%v", join, cand != nil)
+	}
+
+	later := append(chainRows(fixCT, 1, ""),
+		resolverRow{"phase": gate.PhaseNitpick, "ts": fixCT + 100, "firing": 2, "finding_slots": 1, "session_id": fixSession})
+	if ids := chainIDs(later); ids[2] != 0 {
+		t.Fatalf("chain ids = %v; a later nitpick round continues its chain", ids)
+	}
+	led = chainLedgerFix(fixCT+150, []int{1}, "", 2)
+	cand, join, _ = r.pickLedger(later, 2, fixCT+100, []LedgerMsg{led})
+	if join != "chain" || cand == nil || gate.LedgerSection(cand.Text, 2) == "" {
+		t.Fatalf("the terminal section answers the later nitpick round; got join=%s match=%v", join, cand != nil)
+	}
+}
+
 func TestResolverPending(t *testing.T) {
 	now := 2_000_000_000.0
 	r := testResolver()

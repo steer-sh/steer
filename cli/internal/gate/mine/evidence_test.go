@@ -51,6 +51,29 @@ func TestChainEvidence(t *testing.T) {
 	check(t, "a stamp the resolver has not closed is overdue however young", ChainEvidence(reopened, 5001), EvidenceOverdue)
 }
 
+// A NITPICK-only round at firing 1 opens a chain and ends it; its row owes a ledger from
+// its own timestamp, and the concerns the resolver read into it are the chain's findings.
+func TestANitpickRoundOpensEndsAndOwesItsChain(t *testing.T) {
+	chains := BuildChains([]gate.Row{
+		row(1000, "deny"), concerns(row(1010, "retry"), "round", c("earlier")),
+		row(2000, gate.PhaseNitpick),
+		firing(row(3000, "deny"), 1), firing(row(3010, "retry"), 1),
+		firing(row(3100, gate.PhaseNitpick), 2),
+	}, false)
+	check(t, "a nitpick round at firing 1 opens a chain; a later one continues its chain", len(chains), 3)
+	for i := 1; i < 3; i++ {
+		if chains[i].Terminal == nil || *chains[i].Terminal != gate.PhaseNitpick {
+			t.Errorf("chain %d terminal = %v, want %s", i, chains[i].Terminal, gate.PhaseNitpick)
+		}
+	}
+	check(t, "inside the grace window it is pending", ChainEvidence(chains[1], 2000+gate.LedgerGrace-1), EvidencePending)
+	check(t, "past it, an unanswered nitpick round is overdue", ChainEvidence(chains[1], 2000+gate.LedgerGrace), EvidenceOverdue)
+
+	answered := BuildChains([]gate.Row{concerns(row(4000, gate.PhaseNitpick), "chain", cv("a stale comment", "ACCEPTED"))}, false)[0]
+	check(t, "an answered nitpick round is complete", ChainEvidence(answered, 9_000_000), EvidenceComplete)
+	check(t, "its concerns are the chain's findings", len(answered.Findings), 1)
+}
+
 func TestAnOverdueRowOutranksAClosedMissInOneChain(t *testing.T) {
 	both := BuildChains([]gate.Row{
 		row(1000, "deny"), closedMiss(1010),

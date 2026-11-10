@@ -214,7 +214,7 @@ func ownedRelease(line []byte, p Payload, unlocated *string) (o obligation, harn
 	}
 	if !row.TurnPresent || row.Turn != turn || row.Thread != "" || row.ThreadID != "" ||
 		row.Transcript == "" || row.Transcript != p.TranscriptPath ||
-		row.ChainID == "" || row.Header == "" || row.Blocks < 1 {
+		row.ChainID == "" || row.Header == "" || row.Blocks < 0 || (row.Blocks == 0 && row.Terminal < 1) {
 		return obligation{}, "", "", false
 	}
 	o = obligation{header: row.Header, chainID: strings.ToLower(row.ChainID), blocks: row.Blocks, terminal: row.Terminal}

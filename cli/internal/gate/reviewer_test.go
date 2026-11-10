@@ -230,3 +230,34 @@ func TestInstrumentRecordsAnAPIToolMode(t *testing.T) {
 		t.Error("a CLI reviewer stamped a tools field")
 	}
 }
+
+const (
+	nitpickFinding     = "[1] SEVERITY: NITPICK\n    FILE: a.py\n    CLAIM: the comment names the wrong field.\n    FAILS WHEN: a reader trusts the comment.\n"
+	substantiveFinding = "[2] SEVERITY: SUBSTANTIVE\n    FILE: a.py\n    CLAIM: x.\n    FAILS WHEN: y.\n"
+)
+
+// A round lets its commit through only when every reading of its reviews agrees that
+// nothing above NITPICK was found.
+func TestNitpickOnlyRound(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		reviews []string
+		want    bool
+	}{
+		{"every finding NITPICK", []string{nitpickFinding, nitpickFinding + "\n" + nitpickFinding}, true},
+		{"a clean reply beside a NITPICK review", []string{"NO FINDINGS", nitpickFinding}, true},
+		{"a SUBSTANTIVE finding beside them", []string{nitpickFinding, nitpickFinding + substantiveFinding}, false},
+		{"a review written as prose", []string{nitpickFinding, "The parser drops the last line of every file."}, false},
+		{"a malformed BLOCKING finding", []string{nitpickFinding + "\nSEVERITY: BLOCKING\nFILE: a.py\nthe loop never ends\n"}, false},
+		{"an emphasized level", []string{nitpickFinding + "\n[2] SEVERITY: **BLOCKING**\nthe loop never ends\n"}, false},
+		{"an emphasized label", []string{nitpickFinding + "\n**SEVERITY: SUBSTANTIVE**\nthe loop never ends\n"}, false},
+		{"a linked label", []string{nitpickFinding + "\n[SEVERITY](#severity): BLOCKING\nthe loop never ends\n"}, false},
+		{"words between label and level", []string{nitpickFinding + "\nSEVERITY: **Level: blocking**\nthe loop never ends\n"}, false},
+		{"no complete finding at all", []string{"NO FINDINGS"}, false},
+		{"no reviews", nil, false},
+	} {
+		if got := NitpickOnlyRound(tc.reviews); got != tc.want {
+			t.Errorf("%s: NitpickOnlyRound = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

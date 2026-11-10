@@ -1061,3 +1061,137 @@ func TestOperatorNoticeRidesTheReceipt(t *testing.T) {
 		t.Errorf("Reason = %q carries the operator notice", d.Reason)
 	}
 }
+
+// A first round whose every finding is NITPICK lets the commit through with the reviews
+// in the agent's context, writes a nitpick row, leaves no pending chain, and releases
+// the sequence with round 1 as its terminal section and no blocking round.
+func TestANitpickOnlyFirstRoundProceedsAndEndsTheSequence(t *testing.T) {
+	h := newHarness(t, findingReply(nitpickFinding))
+	h.turnKey, h.turnID = "prompt_id", "turn-7"
+	d := h.handle()
+	if d.Kind != ContextOnly || d.Receipt {
+		t.Fatalf("Kind = %v, Receipt = %v; want ContextOnly carrying the nitpick template", d.Kind, d.Receipt)
+	}
+	for _, want := range []string{nitpickFinding, "nothing is blocked", "Its sections, in order: **Round 1, terminal**.",
+		"**Round 1, terminal**", "ACCEPTED, not fixed"} {
+		if !strings.Contains(d.Reason, want) {
+			t.Errorf("the agent's text lacks %q", want)
+		}
+	}
+	wantNote := "[commit-gate] Commit not blocked — 2 of 2 reviewers returned 2 finding(s), duplicates " +
+		"included, all rated NITPICK, on a diff of 1 changed file(s). Only the agent sees the findings; " +
+		"expect its ruling on each one in its reply."
+	if d.SystemMessage != wantNote {
+		t.Errorf("operator line:\n got %q\nwant %q", d.SystemMessage, wantNote)
+	}
+	row := h.lastRow()
+	if row["phase"] != PhaseNitpick || row["finding_slots"] != float64(2) || row["firing"] != float64(1) {
+		t.Errorf("row = %v, want a nitpick row with 2 slots at firing 1", row)
+	}
+	if sev, _ := row["severities"].(map[string]any); sev["NITPICK"] != float64(2) {
+		t.Errorf("severities = %v, want 2 NITPICK", row["severities"])
+	}
+	for _, key := range []string{"diff_file", "severity_lines_loose", "reviews_off_format", "changed_paths", "reviewers"} {
+		if _, ok := row[key]; !ok {
+			t.Errorf("the nitpick row lacks %s", key)
+		}
+	}
+	chain := NewChain(h.cfg, ChainKey{Actor: "session-1", Repo: h.repo})
+	if chain.Pending(chain.Load()) {
+		t.Error("a NITPICK-only round left the chain awaiting a retry")
+	}
+	raw := stagedDiff(t, h.cfg, h.repo)
+	if record := chain.LoadCleared(raw); record == nil || record.Ending != ClearedNitpick {
+		t.Errorf("cleared record = %+v, want one ending %s", record, ClearedNitpick)
+	}
+	releases := h.releases()
+	if len(releases) != 1 {
+		t.Fatalf("%d release rows, want 1", len(releases))
+	}
+	if r := releases[0]; r["blocks"] != float64(0) || r["terminal_round"] != float64(1) ||
+		r["ledger_header"] != headerLine(t, d.Reason) || r["chain_id"] != row["chain_id"] {
+		t.Errorf("release row = %v, want blocks 0, terminal round 1 and the template's header", r)
+	}
+
+	again := h.handle()
+	if !strings.Contains(again.SystemMessage, "every finding the reviewers rated NITPICK") {
+		t.Errorf("the same diff again = %q, want the cleared-diff skip naming its ending", again.SystemMessage)
+	}
+}
+
+// A later round whose findings are all NITPICK ends a sequence that blocked: the
+// release counts the blocking rounds and names this one terminal, and the round does not
+// count toward the block limit, so the next commit starts a new sequence at round 1.
+func TestANitpickOnlyLaterRoundReleasesTheBlockedSequence(t *testing.T) {
+	h := newHarness(t, findingReply(oneFinding))
+	h.cfg.MaxFirings = 2
+	deny := h.handle()
+	if deny.Kind != Deny {
+		t.Fatalf("first round Kind = %v, want Deny", deny.Kind)
+	}
+	h.reviewer.replies = []RawRun{findingReply(nitpickFinding)}
+	h.reviewer.calls = 0
+	writeFileAt(t, h.repo, "a.py", lines(160))
+	gitCmd(t, h.repo, "add", "-A")
+	d := h.handle()
+	if d.Kind != ContextOnly || !strings.Contains(d.Reason, "Its sections, in order: **Round 1, blocking**, **Round 2, terminal**.") {
+		t.Fatalf("round 2 = %v / %q, want the nitpick template naming both sections", d.Kind, d.Reason)
+	}
+	if got := headerLine(t, d.Reason); got != headerLine(t, deny.Reason) {
+		t.Errorf("header line = %q, want the deny's %q", got, headerLine(t, deny.Reason))
+	}
+	if row := h.lastRow(); row["phase"] != PhaseNitpick || row["firing"] != float64(2) {
+		t.Errorf("row = %v, want a nitpick row at firing 2", row)
+	}
+	releases := h.releases()
+	if len(releases) != 1 || releases[0]["blocks"] != float64(1) || releases[0]["terminal_round"] != float64(2) {
+		t.Fatalf("release rows = %v, want one with blocks 1 and terminal round 2", releases)
+	}
+
+	h.reviewer.replies = []RawRun{findingReply(oneFinding)}
+	h.reviewer.calls = 0
+	writeFileAt(t, h.repo, "a.py", lines(200))
+	gitCmd(t, h.repo, "add", "-A")
+	next := h.handle()
+	if next.Kind != Deny || !strings.Contains(next.SystemMessage, "Blocking round 1 of at most 2") {
+		t.Errorf("next commit = %v / %q, want a new sequence at round 1", next.Kind, next.SystemMessage)
+	}
+}
+
+// Under the stale-index notice a NITPICK-only round still reaches the agent with the
+// notice, and writes no cleared record for the tree the notice questions.
+func TestANitpickOnlyRoundOnAStaleIndexWarnsAndClearsNothing(t *testing.T) {
+	h := newHarness(t, findingReply(oneFinding))
+	h.withHistory()
+	h.spec = DiffSpec{}
+	if d := h.handle(); d.Kind != Deny {
+		t.Fatalf("first firing Kind = %v, want Deny", d.Kind)
+	}
+	h.reviewer.replies = []RawRun{findingReply(nitpickFinding)}
+	h.reviewer.calls = 0
+	writeFileAt(t, h.repo, "a.py", lines(240))
+	gitCmd(t, h.repo, "add", "-A")
+	writeFileAt(t, h.repo, "a.py", lines(260))
+	h.spec = DiffSpec{StagedOnly: true}
+	d := h.handle()
+	if row := h.lastRow(); row["phase"] != PhaseNitpick {
+		t.Fatalf("phase = %v, want %s", row["phase"], PhaseNitpick)
+	}
+	if !strings.HasPrefix(d.Reason, StaleIndexNotice()) {
+		t.Errorf("the nitpick round lost the notice: %q", d.Reason)
+	}
+	chain := NewChain(h.cfg, ChainKey{Actor: "session-1", Repo: h.repo})
+	if record := chain.LoadCleared(stagedDiff(t, h.cfg, h.repo)); record != nil {
+		t.Error("a cleared record was written for a diff the agent was warned about")
+	}
+}
+
+// A NITPICK-only round from a thin panel names the reviewers that did not answer.
+func TestANitpickOnlyRoundNamesAThinPanel(t *testing.T) {
+	h := newHarness(t, findingReply(nitpickFinding), RawRun{Outcome: OutcomeTimeout, Detail: "no response"})
+	d := h.handle()
+	if d.Kind != ContextOnly || !strings.Contains(d.SystemMessage, "1 of 2 reviewers returned 1 finding(s)") ||
+		!strings.Contains(d.SystemMessage, " The other 1 did not answer (") {
+		t.Errorf("operator line = %q, want the thin-panel clause", d.SystemMessage)
+	}
+}

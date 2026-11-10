@@ -210,7 +210,11 @@ func record(call Call) {
 }
 
 func finding(n int, file string) string {
-	return fmt.Sprintf("[%d] SEVERITY: BLOCKING\n    FILE: %s\n    CLAIM: stub finding %d.\n    FAILS WHEN: the stub says so.\n", n, file, n)
+	return findingAt("BLOCKING", n, file)
+}
+
+func findingAt(severity string, n int, file string) string {
+	return fmt.Sprintf("[%d] SEVERITY: %s\n    FILE: %s\n    CLAIM: stub finding %d.\n    FAILS WHEN: the stub says so.\n", n, severity, file, n)
 }
 
 // reply writes the answer for call.Mode and returns the exit code.
@@ -227,6 +231,8 @@ func reply(call Call) int {
 		text = finding(1, file)
 	case "findings":
 		text = finding(1, file) + finding(2, file) + finding(3, file)
+	case "nitpick":
+		text = findingAt("NITPICK", 1, file)
 	case "malformed":
 		if call.Provider == "codex" {
 			fmt.Print("I read the change and have some thoughts but no structured answer.")

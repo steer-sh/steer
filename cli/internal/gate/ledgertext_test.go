@@ -37,10 +37,10 @@ func TestLedgerLineReadsAQualifiedVerdict(t *testing.T) {
 	}
 }
 
-// Every verdict bullet the deny and cap templates show must parse, or an agent that
+// Every verdict bullet the deny, cap and nitpick templates show must parse, or an agent that
 // copies the template writes a line the ledger drops.
 func TestTemplateVerdictLinesParse(t *testing.T) {
-	for name, text := range map[string]string{"deny": denyTemplate, "cap": capTemplate} {
+	for name, text := range map[string]string{"deny": denyTemplate, "cap": capTemplate, "nitpick": nitpickTemplate} {
 		seen := map[string]bool{}
 		for _, line := range strings.Split(text, "\n") {
 			if !strings.HasPrefix(line, "- **ACCEPTED") && !strings.HasPrefix(line, "- **REJECTED") {
@@ -82,7 +82,7 @@ func TestLedgerTextKeepsTheResolution(t *testing.T) {
 // A fixed finding's ledger line names the requirement that needed the repair, so the
 // ledger records the necessity ruling and not only the change.
 func TestTemplateFixedLinesNameTheRequirement(t *testing.T) {
-	for name, text := range map[string]string{"deny": denyTemplate, "cap": capTemplate} {
+	for name, text := range map[string]string{"deny": denyTemplate, "cap": capTemplate, "nitpick": nitpickTemplate} {
 		found := false
 		for _, line := range strings.Split(text, "\n") {
 			got, ok := parseLedgerLine(line)

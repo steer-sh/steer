@@ -210,7 +210,8 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 		},
 	}
 	m := match.Flags()
-	m.StringVar(&v.matchKind, "kind", "accepted", "accepted|rejected|both")
+	m.StringVar(&v.matchKind, "kind", "accepted",
+		"accepted|repaired|deferred|rejected|both; repaired and deferred split accepted by the ACCEPTED, not fixed ruling")
 	m.BoolVar(&v.matchStrictJoins, "strict-joins", false, "round-joined rows only")
 	m.StringVar(&v.matchCorpus, "corpus", mine.CorpusReviewFindings, corpusUsage)
 	m.StringVar(&v.matchSignalKind, "signal-kind", "", signalKindUsage)

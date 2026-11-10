@@ -691,10 +691,27 @@ again only when a row was written or a miss deadline passed since the last appli
 scan (recorded in `backfill.scanned`), or after `rescanAfter`; a run without it,
 including the dashboard's, always harvests.
 
-When the gate lets through the commit of a sequence that blocked, `Engine.release`
-writes a `chain-end` row (`gate.PhaseChainEnd`). It names the header line the agent
-was told to copy, the blocking rounds, the terminal round when the cap's final review
-handed the agent findings, and the PreToolUse turn (`prompt_id` on Claude Code,
+A reviewed round with findings blocks the commit (a `deny` row) unless
+`gate.NitpickOnlyRound` holds: at least one complete finding, every complete finding
+rated NITPICK, no review that reached the composed review without a complete finding
+(`OffFormatReviews`), and no review naming BLOCKING or SUBSTANTIVE as a word anywhere.
+Such a round, at any firing below the cap, writes a `nitpick` row (`gate.PhaseNitpick`)
+carrying what a deny row carries, saves no chain state, and hands the reviews to the
+agent as `ContextOnly` text under `prompts/nitpick.md`, which applies the deny and cap
+templates' repair policy and asks for the sequence's ledger now. The round ends the
+sequence: it does not count toward `MaxFirings`, and the next commit starts a new one.
+Without the stale-index notice it writes a cleared record ending `nitpick`. The review
+prompt does not say which levels block. Readers treat a `nitpick` row like a `cap` row
+with findings: it owes its own terminal ledger section, anchored at its own timestamp;
+at firing 1 it opens a chain (`chainIDs`, `mine.chainOpeningPhases`); and it is that
+chain's `Terminal`.
+
+When the gate lets through the commit of a sequence that blocked, or a NITPICK-only
+round hands the agent findings, `Engine.release` writes a `chain-end` row
+(`gate.PhaseChainEnd`). It names the header line the agent was told to copy, the
+blocking rounds (zero when a first round was NITPICK-only), the terminal round when
+the cap's final review or a NITPICK-only round handed the agent findings, and the
+PreToolUse turn (`prompt_id` on Claude Code,
 `turn_id` on Codex) with a presence flag. It records gate release, not git success.
 The phase is in `NonReviewPhases`, so chains, mining and the resolver skip it. At a
 root Stop, the same `commit-gate backfill` hook first runs `internal/gate/stophook/`.

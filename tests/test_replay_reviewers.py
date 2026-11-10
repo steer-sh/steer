@@ -30,13 +30,13 @@ class ChainRoundsTest(unittest.TestCase):
             state = Path(tmp)
             rows = [row("bbb", 2, "deny", "b2"), row("aaa", 1, "deny", "a1"), row("bbb", 1, "deny", "b1"),
                     row("aaa", 2, "retry", "a2"), row("ccc", 1, "deny", "c1"), row("aaa", 2, "clean", "a2"),
-                    {**row("aaa", 3, "deny", "a3"), "base_sha": None}]
+                    {**row("aaa", 3, "deny", "a3"), "base_sha": None}, row("bbb", 3, "nitpick", "b3")]
             (state / "adjudication.host.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
             (state / "adjudication.host.jsonl.bak.1").write_text(json.dumps(row("aaa", 3, "deny")) + "\n")
             with contextlib.redirect_stderr(io.StringIO()):
                 got = replay_reviewers.chain_rounds(state, ["bbb", "aaa"])
         self.assertEqual([(c, n, f) for c, n, _, f, _ in got],
-                         [("bbb", 1, "b1"), ("bbb", 2, "b2"), ("aaa", 1, "a1"), ("aaa", 2, "a2")])
+                         [("bbb", 1, "b1"), ("bbb", 2, "b2"), ("bbb", 3, "b3"), ("aaa", 1, "a1"), ("aaa", 2, "a2")])
         self.assertEqual(got[0][4], "Fix the parser")
 
 

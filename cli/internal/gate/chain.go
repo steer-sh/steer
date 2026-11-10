@@ -73,6 +73,7 @@ const (
 	ClearedClean     = "clean"
 	ClearedUnchanged = "unchanged"
 	ClearedCap       = "cap"
+	ClearedNitpick   = "nitpick"
 )
 
 // Chain owns the on-disk state for one (actor, repo) pair.
