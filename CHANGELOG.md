@@ -5,6 +5,60 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-11-10
+
+### Added
+
+- `reviewer.rounds` sets how many review rounds the commit gate can block, from 1 to
+  10. The default stays 4, and the final review after the limit still runs. Each
+  review row records the limit in force as `max_firings`.
+- At session start and subagent start, an agent whose commit gate is armed receives
+  the commit form the gate accepts, so it no longer learns the form from a refusal.
+  Codex also receives the absolute `git -C` repository path.
+- Review rows record each reviewer run's outcome and elapsed time as `reviewer_runs`,
+  and the round's as `review_elapsed_ms`.
+- `commit-gate mine findings` and `steer fix match` take `--kind repaired` and
+  `--kind deferred`, which split accepted findings by the `ACCEPTED, not fixed`
+  ruling. Text listings label a deferred finding `[ACCEPTED, not fixed]`.
+
+### Changed
+
+- Steer ships no presets. A guard that an earlier Steer installed from a preset keeps
+  running: `steer preset list` names them, `steer preset disable <name>` removes one
+  and `steer preset sync --prune-orphans` removes all of them, archiving each. Each
+  command reads one store, the project's by default; add `--scope global` for the
+  global store. `steer preset enable`, the bundles and the dashboard's built-in guard toggle are
+  removed, and the status JSON drops `presets[]`.
+- Self-protection is part of Steer and on by default, where it was installed only
+  beside a preset. One global guard runs in each harness where Steer is set up, and
+  `steer status` reads it as `posture.protection`. Only you turn it off:
+  `steer config set protection.self off`.
+- Self-protection leaves harness configuration files (`settings.json`, `hooks.json`,
+  `config.toml`) open to Edit and Write. It blocks only a result that drops, moves or
+  disables a hook Steer registered. Steer's own files stay closed, and the block
+  names the steer command to run instead.
+- A review round whose findings are all rated NITPICK no longer blocks the commit.
+  The agent sees the findings, the commit proceeds and the review sequence ends.
+- The reviewer prompt rates severity by who meets the failure and what it costs, and
+  a finding that fits two levels takes the higher. Review rows after this release
+  carry a new instrument ID.
+- The undecided findings dump lists the findings no `/steer-report` pass read first,
+  under `=== new since the last read`, and `/steer-report` reads that section in
+  place of the whole pile.
+- `steer bin install` and the session-start line say that stale guards need a
+  rebuild, and leave a project guard runner's rebuild and commit to you.
+
+### Fixed
+
+- The commit gate refuses a forced add before a commit when it cannot read the add's
+  paths. A bundled `git -C sub add -f x && git commit` sent every ignored file in
+  the repository, a `.env` among them, to the reviewers.
+- The refusal of an unquoted git option value, such as `git -C $D init`, names the
+  word and teaches the quoted form.
+- `steer bin install` no longer overwrites a file named `steer-self-protection.py`
+  that no manifest entry owns. It names what holds the file and the command that
+  frees it.
+
 ## [0.2.0] - 2026-11-07
 
 ### Added
@@ -314,6 +368,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 First public release.
 
+[0.3.0]: https://github.com/steer-sh/steer/releases/tag/v0.3.0
 [0.2.0]: https://github.com/steer-sh/steer/releases/tag/v0.2.0
 [0.1.7]: https://github.com/steer-sh/steer/releases/tag/v0.1.7
 [0.1.6]: https://github.com/steer-sh/steer/releases/tag/v0.1.6
