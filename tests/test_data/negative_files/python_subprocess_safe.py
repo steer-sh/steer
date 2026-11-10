@@ -24,14 +24,6 @@ def run_python_script_safe(script_path: str, args: List[str]) -> str:
     return result.stdout
 
 # Good: Using shlex.quote() when shell=True is necessary
-def execute_with_shell_safe(command: str, *args) -> str:
-    """Good: Safe shell execution with proper quoting"""
-    # Safe: all arguments properly quoted with shlex.quote()
-    quoted_args = [shlex.quote(str(arg)) for arg in args]
-    full_command = f"{command} {' '.join(quoted_args)}"
-    result = subprocess.run(full_command, shell=True, capture_output=True, text=True, check=True)
-    return result.stdout
-
 def git_operations_safe(repo_path: str, branch: str) -> None:
     """Good: Safe git operations"""
     # Safe: using shlex.quote for shell commands

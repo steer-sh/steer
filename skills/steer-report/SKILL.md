@@ -722,7 +722,7 @@ clearer sentence never restarts the measurement. Omit a flag to keep that half.
 
 ### Transcript candidates — install through the tier's own workflow
 
-Install each accepted transcript candidate through its tier's section in the routing guide. A pre-tool guard goes through the steer skill's generation protocol with the phrased rule — specialist prompt selection, hook generation, registration via `steer register`, and mandatory self-testing all apply unchanged. Do not duplicate or shortcut that protocol here.
+Install each accepted transcript candidate through its tier's section in the routing guide. A pre-tool guard goes through the steer skill's generation protocol with the phrased rule — hook generation, registration via `steer register`, and mandatory self-testing all apply unchanged. Do not duplicate or shortcut that protocol here.
 
 A candidate routed to a repository check registers with `--tier check --check-id` under the same binding and `--scope-repo-root` rules as a review candidate.
 

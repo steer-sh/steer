@@ -96,7 +96,7 @@ Limits to state to the user, not work around:
 ### Pre-tool guard
 
 Follow the generation protocol in the `steer` skill's `SKILL.md`, from Step 1:
-specialist prompt, hook, fixtures, `steer register`, and the mandatory tests.
+hook, fixtures, `steer register`, and the mandatory tests.
 
 ### Instruction rule
 

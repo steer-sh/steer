@@ -211,6 +211,8 @@ def run_hook_against_file(
             }
         })
     else:
+        # A Write creates the file, so it is not on disk when the hook runs.
+        staged_file_path.unlink(missing_ok=True)
         payload = json.dumps({
             "tool_name": "Write",
             "tool_input": {
