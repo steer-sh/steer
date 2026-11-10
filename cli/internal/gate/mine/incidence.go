@@ -1,6 +1,9 @@
 package mine
 
-import "regexp"
+import (
+	"regexp"
+	"strings"
+)
 
 // compilePattern compiles a class regex case-insensitively, searching anywhere. RE2
 // rejects lookaround and backreferences; its compile error names the unsupported
@@ -9,23 +12,43 @@ func compilePattern(expr string) (*regexp.Regexp, error) {
 	return regexp.Compile("(?i)" + expr)
 }
 
-// KindFilter is the verdict a finding must carry for the requested kind.
-func KindFilter(verdict, kind string) bool {
+// Deferred reports whether the author accepted a finding but left it unrepaired:
+// verdict ACCEPTED with a qualifier containing "not fixed".
+func Deferred(f Finding) bool {
+	return f.Verdict == "ACCEPTED" && strings.Contains(strings.ToLower(f.Qualifier), "not fixed")
+}
+
+// KindFilter reports whether a finding belongs to the requested kind. accepted is
+// every ACCEPTED finding; repaired and deferred split it by Deferred.
+func KindFilter(f Finding, kind string) bool {
 	switch kind {
 	case "accepted":
-		return verdict == "ACCEPTED"
+		return f.Verdict == "ACCEPTED"
+	case "repaired":
+		return f.Verdict == "ACCEPTED" && !Deferred(f)
+	case "deferred":
+		return Deferred(f)
 	case "rejected":
-		return verdict == "REJECTED"
+		return f.Verdict == "REJECTED"
 	default: // "both"
 		return true
 	}
+}
+
+// kindVerdict is the verdict filter a findings kind narrows; repaired and deferred
+// are subsets of accepted.
+func kindVerdict(kind string) string {
+	if kind == "repaired" || kind == "deferred" {
+		return "accepted"
+	}
+	return kind
 }
 
 // ChainHits are the findings in one chain matching the pattern and the verdict.
 func ChainHits(ch Chain, pattern *regexp.Regexp, kind string) []Finding {
 	var out []Finding
 	for _, f := range ch.Findings {
-		if KindFilter(f.Verdict, kind) && pattern.MatchString(f.Text) {
+		if KindFilter(f, kind) && pattern.MatchString(f.Text) {
 			out = append(out, f)
 		}
 	}

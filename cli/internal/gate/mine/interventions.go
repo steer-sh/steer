@@ -167,7 +167,7 @@ type Decision struct {
 func OverlappingDecisions(records []Record, chains []Chain, pattern *regexp.Regexp, kind string) ([]Decision, error) {
 	var out []Decision
 	for _, record := range records {
-		if kind != "both" && RecordKindFilter(record) != kind {
+		if kind != "both" && RecordKindFilter(record) != kindVerdict(kind) {
 			continue
 		}
 		shared, total, err := Overlap(record, chains, pattern, kind)

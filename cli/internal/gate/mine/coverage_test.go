@@ -3,6 +3,8 @@ package mine
 import (
 	"reflect"
 	"testing"
+
+	"github.com/steer-sh/steer-cli/internal/gate"
 )
 
 func reviewRecord(id, match, kind, status string) Record {
@@ -103,5 +105,42 @@ func TestFindingsOfKindSelectsByVerdict(t *testing.T) {
 	}
 	if got := FindingsOfKind(ch, "both"); len(got) != 2 {
 		t.Errorf("both selects two findings; got %#v", got)
+	}
+}
+
+func TestKindFilterSplitsAcceptedByTheNotFixedRuling(t *testing.T) {
+	repaired := Finding{Verdict: "ACCEPTED", Text: "a"}
+	deferred := Finding{Verdict: "ACCEPTED", Qualifier: "Not Fixed, out of scope", Text: "b"}
+	other := Finding{Verdict: "ACCEPTED", Qualifier: "partly", Text: "c"}
+	rejected := Finding{Verdict: "REJECTED", Qualifier: "not fixed", Text: "d"}
+	ch := Chain{Findings: []Finding{repaired, deferred, other, rejected}}
+	texts := func(fs []Finding) string {
+		var s string
+		for _, f := range fs {
+			s += f.Text
+		}
+		return s
+	}
+	for kind, want := range map[string]string{
+		"accepted": "abc",
+		"repaired": "ac",
+		"deferred": "b",
+		"rejected": "d",
+	} {
+		if got := texts(FindingsOfKind(ch, kind)); got != want {
+			t.Errorf("--kind %s: want %q, got %q", kind, want, got)
+		}
+	}
+}
+
+func TestChainsCarryTheLedgerQualifier(t *testing.T) {
+	q := map[string]any{"concern": "a deferred concern", "verdict": "ACCEPTED", "qualifier": " not fixed "}
+	chains := BuildChains([]gate.Row{row(1000, "deny"), concerns(row(1001, "retry"), "round", q)}, false)
+	if len(chains) != 1 || len(chains[0].Findings) != 1 {
+		t.Fatalf("want one chain with one finding, got %#v", chains)
+	}
+	f := chains[0].Findings[0]
+	if f.Qualifier != "not fixed" || !Deferred(f) {
+		t.Errorf("the finding keeps the trimmed qualifier and reads as deferred; got %#v", f)
 	}
 }

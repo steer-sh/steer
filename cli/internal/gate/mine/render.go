@@ -122,9 +122,17 @@ func Findings(out io.Writer, stateDir string, o FindingsOpts) error {
 	var payload []map[string]any
 	var shown []Chain
 	selected, covered, residue, carrying, residueChains := 0, 0, 0, 0, 0
+	deferred, shownDeferred := 0, 0
 	for _, ch := range chains {
 		findings := renderFindings(filterFindings(ch.Findings, o.Kind), deciding, o.Undecided)
 		selected += len(findings)
+		chainDeferred := 0
+		for _, f := range findings {
+			if Deferred(f.Finding) {
+				chainDeferred++
+			}
+		}
+		deferred += chainDeferred
 		if len(findings) > 0 {
 			carrying++
 		}
@@ -171,6 +179,7 @@ func Findings(out io.Writer, stateDir string, o FindingsOpts) error {
 		if o.Undecided {
 			entry["new"] = chainNew
 		}
+		shownDeferred += chainDeferred
 		shown = append(shown, ch)
 		payload = append(payload, entry)
 		isNew = append(isNew, chainNew)
@@ -212,7 +221,7 @@ func Findings(out io.Writer, stateDir string, o FindingsOpts) error {
 		fmt.Fprintf(w, "# %d class(es) already decided on this corpus:\n", len(records))
 		decides := map[string]bool{}
 		for _, d := range deciding {
-			decides[d.ID] = o.Kind == "both" || d.Kind == o.Kind
+			decides[d.ID] = o.Kind == "both" || d.Kind == kindVerdict(o.Kind)
 		}
 		for _, r := range records {
 			printDecisionIncidence(w, r, chains)
@@ -227,7 +236,7 @@ func Findings(out io.Writer, stateDir string, o FindingsOpts) error {
 	// reports the filtered subset under a name that means the corpus.
 	if o.Undecided {
 		fmt.Fprintf(w, "# %d chains reviewed, %d carrying %s findings\n", reviewed, carrying, o.Kind)
-		fmt.Fprintf(w, "# %d distinct findings\n", selected)
+		fmt.Fprintf(w, "# %d distinct findings%s\n", selected, deferredShare(deferred))
 		fmt.Fprintf(w, "# --undecided: %d covered, %d remaining over %d chain(s) — those %d chains are what is printed below\n",
 			covered, residue, residueChains, len(payload))
 		fmt.Fprintln(w, "# a covered finding is shown in place, marked [covered-by=...]; quote the text without the marker")
@@ -243,7 +252,7 @@ func Findings(out io.Writer, stateDir string, o FindingsOpts) error {
 		for _, c := range payload {
 			distinct += len(c["findings"].([]RenderedFinding))
 		}
-		fmt.Fprintf(w, "# %d distinct findings\n", distinct)
+		fmt.Fprintf(w, "# %d distinct findings%s\n", distinct, deferredShare(shownDeferred))
 	}
 	fmt.Fprintln(w)
 	labels := repoLabels(shown)
@@ -257,11 +266,12 @@ func Findings(out io.Writer, stateDir string, o FindingsOpts) error {
 		fmt.Fprintf(w, "--- %s  ts=%s  repo=%s  rounds=%d  files=%d  end=%s\n",
 			c["date"], pyStr(c["start_ts"]), labels[i], c["rounds"], c["files"], pyStr(c["terminal"]))
 		for _, f := range c["findings"].([]RenderedFinding) {
+			verdict := verdictLabel(f.Finding)
 			if len(f.CoveredBy) > 0 {
-				fmt.Fprintf(w, "  [%s] [covered-by=%s] %s\n", f.Verdict, strings.Join(f.CoveredBy, ","), f.Text)
+				fmt.Fprintf(w, "  [%s] [covered-by=%s] %s\n", verdict, strings.Join(f.CoveredBy, ","), f.Text)
 				continue
 			}
-			fmt.Fprintf(w, "  [%s] %s\n", f.Verdict, f.Text)
+			fmt.Fprintf(w, "  [%s] %s\n", verdict, f.Text)
 		}
 		fmt.Fprintln(w)
 	}
@@ -269,6 +279,27 @@ func Findings(out io.Writer, stateDir string, o FindingsOpts) error {
 		fmt.Fprintf(w, "%s: 0 chain(s)\n", readHeading)
 	}
 	return record()
+}
+
+// deferredMarker is the verdict label of every deferred finding in text output, in
+// the ledger template's form whatever qualifier the author wrote.
+const deferredMarker = "ACCEPTED, not fixed"
+
+// verdictLabel is the bracketed verdict a text listing prints for a finding.
+func verdictLabel(f Finding) string {
+	if Deferred(f) {
+		return deferredMarker
+	}
+	return f.Verdict
+}
+
+// deferredShare is the header suffix naming how many findings are deferred, or ""
+// when none are.
+func deferredShare(n int) string {
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf(", %d of them %s", n, deferredMarker)
 }
 
 // errWriter keeps the first write error, so a dump can tell whether its reader
@@ -361,7 +392,7 @@ func renderFindings(findings []Finding, deciding []Deciding, undecided bool) []R
 func filterFindings(findings []Finding, kind string) []Finding {
 	out := []Finding{}
 	for _, f := range findings {
-		if KindFilter(f.Verdict, kind) {
+		if KindFilter(f, kind) {
 			out = append(out, f)
 		}
 	}
@@ -523,7 +554,7 @@ func Match(w io.Writer, stateDir string, o MatchOpts) error {
 		}
 		fmt.Fprintf(w, "--- %s  ts=%s%s\n", stamp(numFloat(m.ch.StartTS)), pyStr(m.ch.StartTS), label)
 		for _, f := range m.found {
-			fmt.Fprintf(w, "  [%s] %s\n", f.Verdict, f.Text)
+			fmt.Fprintf(w, "  [%s] %s\n", verdictLabel(f), f.Text)
 		}
 	}
 	if len(matched) == 0 {
