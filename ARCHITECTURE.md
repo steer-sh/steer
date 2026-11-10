@@ -548,7 +548,10 @@ still calls tools is `tool_budget`. Under `auto` a first-request 4xx that names 
 repeats the request once without them; under `required` it fails the run. Each run's
 token usage and tool use (the mode that ran, calls, refusals, bytes, files read) go
 to the row as `reviewer_api_runs`, and the instrument records a mode other than off
-as `tools`. It has no default model. `Resolve` refuses it
+as `tools`. Every review row, for any reviewer, lists each run's outcome and wall-clock
+milliseconds as `reviewer_runs` and the round's as `review_elapsed_ms`, which runs
+from building the context block and prompt to the last run's return; reading the diff
+and the addendum comes before it. It has no default model. `Resolve` refuses it
 without a base URL or a model; the key is read at review time, so a missing key is a
 `no_key` run outcome in the ledger rather than a gate that fails open with no row.
 The key comes from the variable `reviewer.api.key_env` names, when it is non-empty

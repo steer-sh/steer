@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // Decision-flow cases: the chain, the cap, the cleared record, and the ledger rows each
@@ -1193,5 +1194,42 @@ func TestANitpickOnlyRoundNamesAThinPanel(t *testing.T) {
 	if d.Kind != ContextOnly || !strings.Contains(d.SystemMessage, "1 of 2 reviewers returned 1 finding(s)") ||
 		!strings.Contains(d.SystemMessage, " The other 1 did not answer (") {
 		t.Errorf("operator line = %q, want the thin-panel clause", d.SystemMessage)
+	}
+}
+
+// slowStub is a reviewer whose every run takes at least delay.
+type slowStub struct {
+	stubReviewer
+	delay time.Duration
+}
+
+func (s *slowStub) Review(ctx context.Context, prompt, cwd string) RawRun {
+	time.Sleep(s.delay)
+	return s.stubReviewer.Review(ctx, prompt, cwd)
+}
+
+// TestReviewRowCarriesElapsedTime: a review row records each run's outcome and
+// wall-clock time, and the time of the whole round.
+func TestReviewRowCarriesElapsedTime(t *testing.T) {
+	h := newHarness(t)
+	slow := &slowStub{delay: 40 * time.Millisecond,
+		stubReviewer: stubReviewer{replies: []RawRun{findingReply("NO FINDINGS")}}}
+	NewEngine(h.cfg, slow).Handle(context.Background(), Request{
+		Repo: h.repo, Actor: "session-1", Channel: ChannelPreToolUse,
+		SessionID: "session-1", Spec: h.spec, Message: "subject",
+	})
+	row := h.lastRow()
+	runs, _ := row["reviewer_runs"].([]any)
+	if len(runs) != h.cfg.ReviewerRuns {
+		t.Fatalf("reviewer_runs = %v, want %d entries", row["reviewer_runs"], h.cfg.ReviewerRuns)
+	}
+	for _, entry := range runs {
+		run, _ := entry.(map[string]any)
+		if ms, _ := run["elapsed_ms"].(float64); run["outcome"] != "ok" || ms < 40 {
+			t.Errorf("run = %v, want outcome ok and at least 40 ms", run)
+		}
+	}
+	if ms, _ := row["review_elapsed_ms"].(float64); ms < 40 {
+		t.Errorf("review_elapsed_ms = %v, want at least 40", row["review_elapsed_ms"])
 	}
 }

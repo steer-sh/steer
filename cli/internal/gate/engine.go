@@ -172,6 +172,7 @@ func (e *Engine) prepare(req Request, firing int, d *DiffResult) (prepared, stri
 
 // review runs the panel over a prepared round.
 func (e *Engine) review(ctx context.Context, req Request, p prepared) PanelResult {
+	start := time.Now()
 	// Terms come from the budgeted diff before neutralisation: neutralising first
 	// would leave &lt; in a search term, and a dropped file's hunks seed no search.
 	// Changed-path stems stay search terms. BuildContext neutralises its own files.
@@ -185,7 +186,15 @@ func (e *Engine) review(ctx context.Context, req Request, p prepared) PanelResul
 	}
 	prompt := BuildReviewPrompt(
 		NeutralizeTags(req.Message), NeutralizeTags(p.diff), contextBlock, req.addendum)
-	return e.panel.Run(ctx, prompt, req.Repo, req.Spec)
+	result := e.panel.Run(ctx, prompt, req.Repo, req.Spec)
+	result.Elapsed = time.Since(start)
+	return result
+}
+
+// report is the row fields that describe a round's reviewers and its duration.
+func (e *Engine) report(result PanelResult) Row {
+	return mergeRows(ReviewerReport(e.cfg, result.Runs),
+		Row{"review_elapsed_ms": result.Elapsed.Milliseconds()})
 }
 
 // Handle rules on one commit.
@@ -444,7 +453,7 @@ func (e *Engine) reviewCommit(ctx context.Context, req Request, chain *Chain, p 
 			Row{"ts": time.Now().Unix(), "phase": "ungated", "reviewers": 0,
 				"files": len(p.paths), "changed_paths": SlashPaths(p.paths),
 				"firing": firing, "chars": len(p.raw), "session_id": req.SessionID},
-			ReviewerReport(e.cfg, result.Runs)))
+			e.report(result)))
 		kind := Allow
 		if p.notice != "" {
 			kind = ContextOnly
@@ -460,7 +469,7 @@ func (e *Engine) reviewCommit(ctx context.Context, req Request, chain *Chain, p 
 			Row{"ts": time.Now().Unix(), "phase": "clean", "reviewers": result.Answered,
 				"files": len(p.paths), "changed_paths": SlashPaths(p.paths),
 				"firing": firing, "session_id": req.SessionID},
-			ReviewerReport(e.cfg, result.Runs),
+			e.report(result),
 			e.ledger.SaveDiff(req.SessionID, firing, p.diff)))
 		if p.notice == "" {
 			// No cleared record while edits sit unstaged. The record's meaning is
@@ -508,7 +517,7 @@ func (e *Engine) reviewCommit(ctx context.Context, req Request, chain *Chain, p 
 			"changed_paths": SlashPaths(p.paths), "firing": firing,
 			"session_id": req.SessionID, "severity_lines_loose": LooseFindingCount(result.Reviews),
 			"reviews_off_format": OffFormatReviews(result.Reviews)},
-		ReviewerReport(e.cfg, result.Runs),
+		e.report(result),
 		e.ledger.SaveDiff(req.SessionID, firing, p.diff),
 		FindingShape(result.Reviews, p.paths)))
 	if err == nil {
@@ -547,7 +556,7 @@ func (e *Engine) nitpickRound(req Request, chain *Chain, p prepared, firing int,
 			"changed_paths": SlashPaths(p.paths), "firing": firing,
 			"session_id": req.SessionID, "severity_lines_loose": LooseFindingCount(result.Reviews),
 			"reviews_off_format": OffFormatReviews(result.Reviews)},
-		ReviewerReport(e.cfg, result.Runs),
+		e.report(result),
 		e.ledger.SaveDiff(req.SessionID, firing, p.diff),
 		FindingShape(result.Reviews, p.paths)))
 	// No cleared record under the stale-index notice, as on the clean path.
@@ -588,7 +597,7 @@ func (e *Engine) terminalReview(ctx context.Context, req Request, chain *Chain, 
 		Row{"ts": time.Now().Unix(), "phase": "cap", "firing": firing,
 			"reviewers": result.Answered, "files": len(p.paths),
 			"changed_paths": SlashPaths(p.paths), "session_id": req.SessionID},
-		ReviewerReport(e.cfg, result.Runs),
+		e.report(result),
 		e.ledger.SaveDiff(req.SessionID, firing, p.diff))
 
 	if result.Answered == 0 {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 )
 
 // Outcome classification. A denied tool call does not stop a run: the model reads the
@@ -259,5 +260,19 @@ func TestNitpickOnlyRound(t *testing.T) {
 		if got := NitpickOnlyRound(tc.reviews); got != tc.want {
 			t.Errorf("%s: NitpickOnlyRound = %v, want %v", tc.name, got, tc.want)
 		}
+	}
+}
+
+// TestReviewerReportListsRunTimes: every run's time reaches the row beside its
+// outcome, a CLI run and a run that did not answer included.
+func TestReviewerReportListsRunTimes(t *testing.T) {
+	ok := Classify(RawRun{Response: "NO FINDINGS", Status: "SUCCESS"})
+	ok.Elapsed = 1500 * time.Millisecond
+	lost := Classify(RawRun{Outcome: OutcomeTimeout})
+	lost.Elapsed = 2 * time.Second
+	got, _ := ReviewerReport(Defaults(), []ReviewRun{ok, lost})["reviewer_runs"].([]Row)
+	if len(got) != 2 || got[0]["outcome"] != "ok" || got[0]["elapsed_ms"] != int64(1500) ||
+		got[1]["outcome"] != "timeout" || got[1]["elapsed_ms"] != int64(2000) {
+		t.Errorf("reviewer_runs = %v", got)
 	}
 }
