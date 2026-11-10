@@ -71,6 +71,8 @@ const (
 	// MaxFirings is a backstop against a chain that keeps changing the diff without
 	// converging, not the expected stop.
 	defaultMaxFirings = 4
+	// MaxFiringsLimit is the largest MaxFirings a setting may ask for.
+	MaxFiringsLimit = 10
 
 	// Above this, whole file-diffs are dropped smallest-first until the rest fits;
 	// only a commit whose every single file overruns the budget alone falls back to
@@ -172,6 +174,9 @@ func WithFile(c Config, file steerconfig.Config) Config {
 	if file.Reviewer.Timeout > 0 {
 		c.ReviewTimeout = time.Duration(file.Reviewer.Timeout) * time.Second
 	}
+	if file.Reviewer.Rounds > 0 {
+		c.MaxFirings = min(file.Reviewer.Rounds, MaxFiringsLimit)
+	}
 	if v := strings.TrimSpace(file.Reviewer.API.BaseURL); v != "" {
 		c.ReviewerAPIBaseURL = v
 	}
@@ -199,7 +204,7 @@ func WithEnv(c Config) Config {
 		c.ReviewTimeout = time.Duration(v) * time.Second
 	}
 	if v := envInt("COMMIT_GATE_MAX_FIRINGS"); v > 0 {
-		c.MaxFirings = v
+		c.MaxFirings = min(v, MaxFiringsLimit)
 	}
 	if v := os.Getenv("COMMIT_GATE_MODEL"); v != "" {
 		c.ReviewerModel = v

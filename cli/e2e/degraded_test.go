@@ -281,7 +281,7 @@ func TestFiringCapStopsBlocking(t *testing.T) {
 	if reply.Denied() {
 		t.Fatalf("the gate refused past its cap:\n%s", reply.Raw)
 	}
-	if !strings.Contains(reply.Text(), "reached its limit of 4 blocks") {
+	if !strings.Contains(reply.Text(), "reached its limit of 4 blocking rounds") {
 		t.Errorf("the capped reply does not name the cap:\n%s", reply.Raw)
 	}
 	if !strings.Contains(reply.Context, "CLAIM: stub finding 1.") {

@@ -297,6 +297,27 @@ var ReviewerFields = []Field{
 		Effective: func(c gate.Config) string { return strconv.Itoa(c.ReviewerRuns) },
 	},
 	{
+		Name: "reviewer.rounds", Env: "COMMIT_GATE_MAX_FIRINGS", Numeric: true,
+		Label: "Blocking rounds",
+		Help: "How many reviews in a row may block one commit. After the last " +
+			"one, a final review of the fixes reports without blocking. A lower " +
+			"number commits sooner and leaves more findings to that report.",
+		Kind:  KindNumber,
+		Unit:  "round",
+		Usage: fmt.Sprintf("Reviews that may block one commit, 1 to %d", gate.MaxFiringsLimit),
+		Get:   func(c config.Config) string { return IntValue(c.Reviewer.Rounds) },
+		Set: func(c *config.Config, v string) error {
+			n, err := positiveInt(v)
+			if err != nil || n > gate.MaxFiringsLimit || (v != "" && n < 1) {
+				return fmt.Errorf("reviewer.rounds takes a whole number from 1 to %d, got %q",
+					gate.MaxFiringsLimit, v)
+			}
+			c.Reviewer.Rounds = n
+			return nil
+		},
+		Effective: func(c gate.Config) string { return strconv.Itoa(c.MaxFirings) },
+	},
+	{
 		Name: "reviewer.timeout", Env: "COMMIT_GATE_TIMEOUT", Numeric: true,
 		Label: "Timeout per run",
 		Help: "How long one reviewer may take. Your coding agent keeps its own, " +

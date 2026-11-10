@@ -340,7 +340,7 @@ func TestCapEndsWithTerminalReview(t *testing.T) {
 		t.Error("the terminal message must say the chain ended and is not blocking")
 	}
 	if !strings.HasPrefix(d.SystemMessage, "[commit-gate] Commit not blocked — the review "+
-		"sequence reached its limit of 2 blocks.") {
+		"sequence reached its limit of 2 blocking rounds.") {
 		t.Errorf("the operator line must lead with the commit's fate: %q", d.SystemMessage)
 	}
 	if got := h.lastRow()["phase"]; got != "cap" {
@@ -1231,5 +1231,31 @@ func TestReviewRowCarriesElapsedTime(t *testing.T) {
 	}
 	if ms, _ := row["review_elapsed_ms"].(float64); ms < 40 {
 		t.Errorf("review_elapsed_ms = %v, want at least 40", row["review_elapsed_ms"])
+	}
+}
+
+// TestReviewRowCarriesTheBlockLimit: a review row records the limit in force for
+// its round, on a blocking round and on the final review after the limit.
+func TestReviewRowCarriesTheBlockLimit(t *testing.T) {
+	h := newHarness(t, findingReply(oneFinding))
+	h.cfg.MaxFirings = 1
+	if d := h.handle(); d.Kind != Deny {
+		t.Fatalf("round 1 Kind = %v, want Deny", d.Kind)
+	}
+	if got, _ := h.lastRow()["max_firings"].(float64); got != 1 {
+		t.Errorf("blocking row max_firings = %v, want 1", h.lastRow()["max_firings"])
+	}
+	writeFileAt(t, h.repo, "a.py", lines(121)+"fix\n")
+	gitCmd(t, h.repo, "add", "-A")
+	d := h.handle()
+	if d.Kind != ContextOnly {
+		t.Fatalf("final review Kind = %v, want ContextOnly", d.Kind)
+	}
+	if !strings.Contains(d.SystemMessage, "its limit of 1 blocking round.") {
+		t.Errorf("operator line = %q, want the limit as 1 blocking round", d.SystemMessage)
+	}
+	row := h.lastRow()
+	if got, _ := row["max_firings"].(float64); row["phase"] != "cap" || got != 1 {
+		t.Errorf("final row phase %v max_firings %v, want cap and 1", row["phase"], row["max_firings"])
 	}
 }

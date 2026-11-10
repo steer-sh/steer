@@ -191,10 +191,11 @@ func (e *Engine) review(ctx context.Context, req Request, p prepared) PanelResul
 	return result
 }
 
-// report is the row fields that describe a round's reviewers and its duration.
+// report is the row fields that describe a round's reviewers, its duration and the
+// block limit in force for the round.
 func (e *Engine) report(result PanelResult) Row {
 	return mergeRows(ReviewerReport(e.cfg, result.Runs),
-		Row{"review_elapsed_ms": result.Elapsed.Milliseconds()})
+		Row{"review_elapsed_ms": result.Elapsed.Milliseconds(), "max_firings": e.cfg.MaxFirings})
 }
 
 // Handle rules on one commit.
@@ -581,12 +582,20 @@ func (e *Engine) nitpickRound(req Request, chain *Chain, p prepared, firing int,
 	}
 }
 
+// BlockingRounds words a block limit as the reviewer.rounds setting names it.
+func BlockingRounds(n int) string {
+	if n == 1 {
+		return "1 blocking round"
+	}
+	return fmt.Sprintf("%d blocking rounds", n)
+}
+
 // terminalReview reviews the capped chain's last fixes without ruling on this commit.
 // The commit keeps its normal permission path while the findings reach the agent as
 // context and the operator gets the count. terminal is the round the agent's ledger
 // must answer as terminal: firing when the findings reached the agent, else 0.
 func (e *Engine) terminalReview(ctx context.Context, req Request, chain *Chain, p prepared, status string, firing int) (d Decision, terminal int) {
-	capped := fmt.Sprintf("the review sequence reached its limit of %d blocks", e.cfg.MaxFirings)
+	capped := fmt.Sprintf("the review sequence reached its limit of %s", BlockingRounds(e.cfg.MaxFirings))
 	if status != "" {
 		return proceed(ContextOnly, req, p.raw, firing, fmt.Sprintf(
 			"%s. The final review did not run (%s), so round %d's fixes are UNREVIEWED.%s",

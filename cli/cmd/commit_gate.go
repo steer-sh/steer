@@ -872,7 +872,7 @@ var commitGateStatusCmd = &cobra.Command{
 		fmt.Printf("  Reviewers    %d x %s%s via %s, %s each\n",
 			cfg.ReviewerRuns, cfg.ReviewerModel, effortNote(cfg.ReviewerEffort),
 			reviewer.Name(), cfg.ReviewTimeout)
-		fmt.Printf("  Cap          %d firings\n", cfg.MaxFirings)
+		fmt.Printf("  Limit        %s\n", gate.BlockingRounds(cfg.MaxFirings))
 		cwd, _ := gate.ProjectDir()
 		for _, scope := range []string{claude.ProjectScope, claude.GlobalScope} {
 			arming := claude.CommitGateHookArmed(scope)
