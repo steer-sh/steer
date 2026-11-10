@@ -2,7 +2,7 @@
 name: steer
 description: Turns a natural-language rule into the fix that can enforce it — a repository check, a PreToolUse Python guard, or an instruction rule — and installs it. Use when enforcing coding standards, blocking insecure patterns, making sure checks pass before a turn ends, managing hook lifecycle, or running steer CLI commands (register, remove, list, test, preset, verify, git-hooks).
 user-invocable: true
-prompt_version: 27
+prompt_version: 28
 compatibility: Requires Claude Code or Codex with tool-call hook support. Hooks are installed into .steer/hooks/ and registered in every installed harness Steer is set up in (settings.json for Claude Code, hooks.json for Codex). steer CLI must be available on PATH or bundled under scripts/.
 allowed-tools: Bash(steer *), Bash(python3 *), Bash(echo *), Read, Write, Edit
 ---
@@ -79,14 +79,12 @@ In headless mode you MUST:
     "negative_fail": 0
   },
   "prompt_version": 1,
-  "prompt_modules": ["simple-regex"],
   "model_used": "claude-sonnet-4-20250514"
 }
 ```
 
 **Metadata fields:**
 - `prompt_version`: Read from the `prompt_version` field in this file's YAML frontmatter (top of SKILL.md). Do not guess.
-- `prompt_modules`: List the specialist prompt filenames you read (e.g., `["simple-regex", "python-security"]`). Empty list `[]` if none.
 - `model_used`: Your model name as shown in your system prompt. Report it exactly.
 
 The test harness invokes: `claude -p "/steer --headless <rule>" --output-format json --no-session-persistence` and parses this result from the response.
@@ -141,45 +139,6 @@ result above:
   approval. A repository check that is not armed yet always leaves a step here:
   name the command that arms it, or `steer check migrate --apply` when a
   personal check gate must move first.
-
-## Specialist Prompts
-
-Before generating a hook, read the appropriate specialist prompt for domain-specific patterns, examples, and critical edge cases. These contain hard-won knowledge about false positive avoidance and detection strategies.
-
-| Rule targets... | Read | Type |
-|---|---|---|
-| Simple keyword/pattern blocking (console.log, TODO, var, debugger, JS/TS eval()) | [prompts/simple-regex.md](prompts/simple-regex.md) | detection |
-| Python security (subprocess, os.system, SQL injection, Python eval/exec/compile, dangerous imports) | [prompts/python-security.md](prompts/python-security.md) | detection |
-| Python style (naming conventions, docstrings, mutable defaults, imports) | [prompts/python-style.md](prompts/python-style.md) | detection |
-| Terraform/HCL (resource config, tagging, security groups) | [prompts/terraform-hcl.md](prompts/terraform-hcl.md) | detection |
-| HTML (accessibility, XSS, semantic markup) | [prompts/generic-html.md](prompts/generic-html.md) | detection |
-| Shell safety & Bash commands (command blocking, chaining, exfiltration, env exposure, dangerous flags) | [prompts/shell-lint.md](prompts/shell-lint.md) | **template-override** |
-| React/JSX (hooks, component patterns, data fetching) | [prompts/react-jsx.md](prompts/react-jsx.md) | detection |
-| Security Layer 2 (hardcoded secrets, postinstall scripts, env enumeration) | [prompts/security-layer2.md](prompts/security-layer2.md) | detection |
-
-### Specialist Types
-
-- **detection** specialists provide detection logic that plugs into the standard template from Step 2. The template skeleton stays the same.
-- **template-override** specialists provide their own complete hook template. When using a template-override specialist, **use their template instead of the one in Step 2**.
-
-### Routing Precedence (Secrets and Env Rules)
-
-Use these boundaries to avoid specialist selection ambiguity:
-
-- **API key/token patterns in code** (`sk_live`, `AKIA`, hardcoded `api_key=...`) → `simple-regex.md`
-- **Sensitive file/path references in code/config** (`id_rsa`, `.env`, `secrets.json`, `keystore`, `wallet.dat`) → `security-layer2.md`
-- **Code-level env enumeration** (`Object.keys(process.env)`, `for ... in process.env`, `...process.env`) → `security-layer2.md`
-- **Command-level env exposure and shell data exfiltration** (`env`, piping to network tools, dangerous shell command patterns) → `shell-lint.md`
-
-Tie-break guidance:
-- If a rule says "prevent secret exposure" or "prevent env exposure" without details, read **both** `simple-regex.md` and `security-layer2.md`.
-- If the same rule also targets Bash command behavior, also read `shell-lint.md` and use its template as the base.
-
-**If the rule doesn't clearly fit one category**, use the general protocol below without reading a specialist prompt.
-
-**If the rule spans two categories**, read both specialist prompts. If one is a template-override, use that specialist's template as the base and incorporate detection logic from the other.
-
-**If the rule targets both file content AND Bash commands** (e.g., "never use rm -rf" should block it in shell scripts AND in the Bash tool), generate a single combined hook that handles both tool types. Read the shell-lint specialist for the combined template and the relevant detection specialist for file-content-specific logic.
 
 ## How Claude Code Hooks Work
 
@@ -306,7 +265,7 @@ Before anything else, split the rule on `|` if present:
  ^--- detection_rule          ^--- suggestion (optional)
 ```
 
-- **`detection_rule`** (before `|`): used for everything — classification, specialist prompt selection, detection logic, hook naming, self-tests
+- **`detection_rule`** (before `|`): used for everything — classification, detection logic, hook naming, self-tests
 - **`suggestion`** (after `|`, if present): used **only** in the `stopReason` message to tell the developer what to do instead
 
 Everything below operates on `detection_rule` only. The suggestion is carried forward solely for use in Step 2's stopReason.
@@ -331,11 +290,9 @@ Then install on the routed tier:
   tier, what was installed and where, and what still needs the user. For an
   instruction rule, the rule text is the whole rule, suggestion included.
 
-### Step 1: Analyze the Rule and Read Specialist Prompt
+### Step 1: Analyze the Rule
 
 Before writing code:
-- Identify the rule category from the specialist table above (using `detection_rule`)
-- **Read the appropriate specialist prompt** for domain-specific guidance
 - Consider: what exact pattern should be blocked? Which tools are relevant? Which file types? What are the false positive risks?
 - Look at the user's actual project files to understand what languages and patterns are in use
 
@@ -380,7 +337,7 @@ def main():
         sys.exit(0)
 
     # [FILE TYPE FILTER] - Only check relevant files
-    # [DETECTION LOGIC] - From specialist prompt guidance
+    # [DETECTION LOGIC]
     # [BLOCK IF VIOLATION]
 
     sys.exit(0)
@@ -388,6 +345,62 @@ def main():
 if __name__ == "__main__":
     main()
 ```
+
+**A rule about a shell command** reads the Bash tool. A Bash call carries
+`command` and no `new_string` or `content`, so replace everything in the template
+from the tool filter through the empty-content exit with:
+
+```python
+    if tool_name != 'Bash':
+        sys.exit(0)
+
+    command = tool_input.get('command', '')
+    if not command.strip():
+        sys.exit(0)
+```
+
+The detection logic then reads `command`.
+
+**A rule about both commands and file content** (for example, "never use rm -rf"
+in the Bash tool and in shell scripts) is one guard that reads both:
+
+```python
+    if tool_name == 'Bash':
+        content_to_check = tool_input.get('command', '')
+        file_path = ''
+    elif tool_name in ('Edit', 'Write'):
+        file_path = tool_input.get('file_path', '')
+        content_to_check = tool_input.get('new_string', '') or tool_input.get('content', '') or ''
+    else:
+        sys.exit(0)
+```
+
+A Bash call has `file_path == ''`, so apply a file type filter to Edit and Write
+only (`if tool_name != 'Bash' and not file_path.endswith(...)`); a bare
+`endswith()` test skips every command.
+
+**A rule that blocks running a command** matches the command's name at command
+position only: the first word of a command segment, never anywhere in the line.
+A mention in an argument is prose: `git commit -m "switch from python to rust"`
+and `echo python is fun` must pass a rule against bare `python`.
+
+- Split each line into segments at `;`, `&`, `|`, `(`, `)`, a backtick and `$(`,
+  where these stand outside quotes: `echo "one; python two"` is one segment.
+  A backtick and `$(` also start a command inside double quotes.
+  Test each segment's first word after skipping `VAR=value` assignments, command
+  wrappers (`sudo`, `env`, `time`, `nohup`, `xargs`, `exec`) and their flags. A
+  wrapper with no command after it is the command itself, so a rule against
+  `env` still sees a bare `env`.
+- Skip heredoc bodies. The lines between `<<DELIM` (or `<<-DELIM`, `<<'DELIM'`)
+  and the closing delimiter are data, such as a commit message or file content.
+  Track each opened delimiter and skip lines until it closes.
+- Strip shell comments before matching, full-line (`# note`) and inline
+  (`cmd  # note`). A `#` starts a comment only at the start of a word and
+  outside quotes: keep it in `echo "color #ff0000"`, in `foo#bar`, after an
+  escaped quote inside a string, and in a `#!` first line.
+- The allow cases for such a rule include the name quoted in a string, the name
+  unquoted in an argument (`echo <name> is fun`), and the name at the start of a
+  line inside a heredoc body.
 
 ### Step 3: Determine Scope and Save the Hook
 
@@ -451,7 +464,6 @@ Use the steer CLI to register the hook, with `<STEER_BIN>` written as in [Runnin
 <STEER_BIN> register <store>/hooks/<rule-name>-hook.py --rule "<original rule text>" --scope <project|global> \
   --source generated \
   --prompt-version "<prompt_version from SKILL.md frontmatter>" \
-  --prompt-modules "<comma,separated,modules>" \
   --model "<your model name from system prompt>" \
   --fixtures <store>/hooks/<rule-name>-cases.json \
   --self-test '{"passed":true,"positive_pass":2,"positive_fail":0,"negative_pass":2,"negative_fail":0}'
@@ -519,24 +531,7 @@ Expected: no stdout, exit code 0
   `python3 <store>/hooks/<rule-name>-hook.py < <payload-file>`, or keep it only in
   the cases file, which `steer test` replays from the file
 
-**Critical: Negative tests must stress the boundary.** Simple "obviously clean" code is not enough. At least one negative test MUST use the same construct as the positive tests but in a safe way. Examples:
-- If blocking `shell=True` with dynamic args, a negative test MUST include `shell=True` with `shlex.quote()` via an **intermediate variable** (not just inline):
-  ```python
-  quoted = shlex.quote(user_input)
-  cmd = f"git clone {quoted}"
-  subprocess.run(cmd, shell=True)
-  ```
-- If blocking `eval()`, a negative test MUST include `ast.literal_eval()` (the safe alternative)
-- If blocking f-string SQL, a negative test MUST include parameterized queries that still use f-strings for table names (a common safe pattern)
-
-The hardest bugs to find are false positives on safe code that *looks* like the dangerous pattern. Your negative tests must exercise this boundary.
-
-**If the guard remembers that a variable is safe, a positive test MUST rebind that variable to unproven data before the dangerous use.** For a `shell=True` rule:
-```python
-quoted = shlex.quote(user_input)
-quoted = input()
-subprocess.run(f"git clone {quoted}", shell=True)
-```
+**Critical: Negative tests must stress the boundary.** Simple "obviously clean" code is not enough. At least one negative test MUST use the same construct as the positive tests but in a safe way. The hardest bugs to find are false positives on safe code that *looks* like the blocked pattern.
 
 **If the rule uses `|` suggestion syntax**, add one test that verifies the `stopReason` output contains the user's suggestion text. Pipe a positive test case and check that the JSON output includes the suggestion. The user chose those words deliberately — the stopReason must include them.
 
@@ -628,10 +623,10 @@ restores all of them; pass `--tier` when one id holds entries of more than one t
 1. **Never crash** - Wrap stdin parsing in try/except. Exit 0 on any error.
 2. **Exit early** - Filter irrelevant tools and file types before expensive analysis.
 3. **Minimize false positives** - A false positive that blocks legitimate code is worse than missing a violation. Be precise.
-4. **Comments and strings** - A pattern inside a comment or string literal is almost never a violation. For Python, prefer AST parsing (`ast` module) over regex — it inherently ignores comments and strings. For JS/TS and other languages without convenient AST access, strip comments and string literals before running regex detection. A rule blocking `console.log` must not block `// I removed console.log`. This is the #1 cause of developer frustration with custom hooks.
+4. **Comments and strings** - A pattern inside a comment or string literal is almost never a violation. A rule blocking `console.log` must not block `// I removed console.log`. This is the #1 cause of developer frustration with custom hooks.
 5. **Clear stopReason** - Explain WHAT was wrong and HOW to fix it.
 6. **Safe regex** - Never use nested quantifiers like `(a*)*` or `(a|b)*` inside repetition. These cause catastrophic backtracking (ReDoS).
-7. **Handle Edit and Write** - Every edit reaches a guard as one of these (see Hook Input). Edit provides `new_string` (added) and `old_string` (removed), Write provides `content`. A rule about code being added reads `new_string` or `content`; a rule about code being removed reads `old_string`; a rule about deleting files checks `steer_operation == "delete"` for Edit and parses `command` for Bash. Write test cases and stored fixture cases in these shapes, never as a raw MultiEdit or apply_patch payload. See the template in Step 2.
+7. **Handle Edit and Write** - Every edit reaches a guard as one of these (see Hook Input). An Edit's `new_string` is a fragment, not the file: it may not parse on its own, so a parse failure is never a violation by itself and never a crash. Edit provides `new_string` (added) and `old_string` (removed), Write provides `content`. A rule about code being added reads `new_string` or `content`; a rule about code being removed reads `old_string`; a rule about deleting files checks `steer_operation == "delete"` for Edit and parses `command` for Bash. Write test cases and stored fixture cases in these shapes, never as a raw MultiEdit or apply_patch payload. See the template in Step 2.
 8. **Multi-language rules** - When the rule mentions multiple languages, handle ALL of them with file extension routing. Don't focus on only one.
 
 ## User Suggestion Syntax
