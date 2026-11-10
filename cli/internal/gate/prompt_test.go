@@ -16,7 +16,7 @@ var promptDigests = map[string]struct {
 	text string
 	want string
 }{
-	"review":     {reviewPrompt, "d0fe0811565066c3c1bbb2e57754841642990c842e9b973ebbe1f34c9d16aa27"},
+	"review":     {reviewPrompt, "ba0330e88b8eccaff9b3a1f5ca09788cfbf2c847e283f83f9416543e8eb8f30e"},
 	"deny":       {denyTemplate, "5b69447df292f0cdcec16358d8014b8c1573d711b60ef2da14cf004864ed6f7b"},
 	"cap":        {capTemplate, "89df834419fdae8cb8585bdc6b977d2f7d5eb2377d6eb8b1aaddc6d3a0130c32"},
 	"round-note": {roundNote, "f40acabd50e95481f309c08ccacf4cac025835d79e8e265601170f7c4a4d34c3"},
@@ -34,7 +34,7 @@ func TestPromptDigestsArePinned(t *testing.T) {
 
 func TestInstrumentID(t *testing.T) {
 	c := Defaults()
-	if got, want := c.InstrumentID(), "claude-haiku-5-5/3/d0fe0811/go-findings-v6-shell"; got != want {
+	if got, want := c.InstrumentID(), "claude-haiku-5-5/3/ba0330e8/go-findings-v6-shell"; got != want {
 		t.Errorf("InstrumentID() = %q, want %q", got, want)
 	}
 }
