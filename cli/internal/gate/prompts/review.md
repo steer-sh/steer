@@ -38,7 +38,7 @@ SEVERITY rates the failure you named by who meets it and what it costs:
 - SUBSTANTIVE: an input or state that ordinary use of this code produces gives wrong or degraded behaviour; or a claim that later changes will rely on is false.
 - NITPICK: the failure needs an input or state you constructed, on a path whose input its author controls, and nothing in the diff or its context shows ordinary use produces it; or the code stops safely with no harm done; or a comment, message or docstring is imprecise while the behaviour it describes is right.
 
-NITPICK is a legitimate level. When a finding fits it, rate it NITPICK; do not raise its level to make it count.
+A finding that fits more than one level takes the highest. NITPICK is a legitimate level: when a finding fits no higher one, rate it NITPICK; do not raise its level to make it count.
 
 The complete four-line block is how a finding is counted. Use one of the three severity levels and include every field in the shown order. Never replace the opening line with a heading, title or label of your own — `### Defect: ...`, `**Finding 1**`, `1. The parser ...`. An incomplete or differently shaped finding is counted as no finding at all, so the defect you found ships and the record says the diff was clean.
 
