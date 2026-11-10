@@ -3,7 +3,7 @@
 Master steer hook - consolidated from individual hooks.
 Generated automatically - do not edit manually.
 """
-# steer-runtime: {"runtime":"c36e0e25","version":"dev"}
+# steer-runtime: {"runtime":"4ae40534","version":"dev"}
 
 import ast
 import datetime
@@ -15,7 +15,7 @@ import shlex
 import stat
 import sys
 
-STEER_MASTER_BUILD_DIGEST = "be521e79870a083c"
+STEER_MASTER_BUILD_DIGEST = "4f9217577a0eaae0"
 
 STEER_HOOK_META = {
     "no-direct-main-hook": {
@@ -525,6 +525,9 @@ def steer_block_footer(hook_name, firing_id):
                    + " the blocked action.")
     if not source:
         return footer
+    if source == "steer":
+        return (footer + "\nTurning this protection off needs the user's approval: "
+                + cli + " config set protection.self off")
     if source == "factory":
         cmd = cli + " preset disable " + (source_id or hook_name)
     else:
