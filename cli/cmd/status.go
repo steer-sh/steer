@@ -12,6 +12,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/evidence"
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/reviewers"
+	"github.com/steer-sh/steer-cli/internal/settings"
 	"github.com/steer-sh/steer-cli/internal/status"
 	"github.com/steer-sh/steer-cli/internal/styles"
 )
@@ -63,7 +64,7 @@ a problem already decided; 'steer fix score --json' carries each fix's detail.`,
 			InventoryScopes: []string{claude.ProjectScope, claude.GlobalScope},
 			ScanScope:       scope,
 			RepoRoot:        root,
-			ReviewerProbe:   reviewerProbe(cfg, resolveErr),
+			ReviewerProbe:   settings.ReviewerProbe(cfg, resolveErr),
 			Addendum:        gateAddendum(root),
 			PreCommit:       statusPreCommit(root),
 			Evidence: evidence.Gather(evidence.Options{

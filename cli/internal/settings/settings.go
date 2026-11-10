@@ -507,6 +507,21 @@ func ReviewerOptions(cfg gate.Config) reviewers.Options {
 	}
 }
 
+// ReviewerProbe reads whether the configured reviewer can run, given the error its
+// resolution returned. An unresolvable provider is reported as missing with no
+// executable: it names no CLI, so no review can run, and the repair is the setting
+// rather than an install. An API provider's probe reads its own configuration, which
+// names the setting to repair.
+func ReviewerProbe(cfg gate.Config, err error) reviewers.Probe {
+	if p, ok := reviewers.FindProvider(cfg.ReviewerProvider); ok && p.API {
+		return reviewers.ProbeConfig(cfg.ReviewerProvider, ReviewerOptions(cfg))
+	}
+	if err != nil {
+		return reviewers.Probe{Provider: cfg.ReviewerProvider, State: reviewers.ProbeMissing}
+	}
+	return reviewers.ProbeProvider(cfg.ReviewerProvider)
+}
+
 // Resolve returns the configuration with ReviewerModel naming the model that would
 // ACTUALLY run, beside the reviewer it resolved. An unresolvable provider yields the
 // error, no reviewer, and the operator's own configured model where that label would
