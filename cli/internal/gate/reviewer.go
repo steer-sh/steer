@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // RunOutcome names which of the ways a reviewer run ended. Every failure used to
@@ -51,6 +52,8 @@ type ReviewRun struct {
 	// Usage and Tools are what an API run reported and did; nil for a CLI run.
 	Usage *TokenUsage
 	Tools *ToolUse
+	// Elapsed is the wall-clock time of the run, a run the timeout ended included.
+	Elapsed time.Duration
 }
 
 // TokenUsage sums the tokens an endpoint reported over one run's requests.
@@ -207,6 +210,9 @@ type PanelResult struct {
 	// Answered counts every run that returned usable text, NO FINDINGS included.
 	Answered int
 	Runs     []ReviewRun
+	// Elapsed is the wall-clock time of the round, from building the context block
+	// and prompt to the last run's return. The diff was read before it.
+	Elapsed time.Duration
 }
 
 // Run fires the panel. spec selects the commit view for a reviewer that reads
@@ -227,7 +233,9 @@ func (p *Panel) Run(ctx context.Context, prompt, cwd string, spec DiffSpec) Pane
 			defer wg.Done()
 			runCtx, cancel := context.WithTimeout(ctx, p.cfg.ReviewTimeout)
 			defer cancel()
+			start := time.Now()
 			runs[i] = Classify(review(runCtx, prompt, cwd))
+			runs[i].Elapsed = time.Since(start)
 		}(i)
 	}
 	wg.Wait()
@@ -262,7 +270,7 @@ func ReviewerReport(cfg Config, runs []ReviewRun) Row {
 			errors = append(errors, string(run.Outcome)+": "+truncate(run.Detail, cfg.MaxDetailChars))
 		}
 	}
-	row := Row{"reviewer_outcomes": outcomes}
+	row := Row{"reviewer_outcomes": outcomes, "reviewer_runs": runTimes(runs)}
 	if len(errors) > 0 {
 		row["reviewer_errors"] = errors
 	}
@@ -273,6 +281,17 @@ func ReviewerReport(cfg Config, runs []ReviewRun) Row {
 		row["reviewer_api_runs"] = api
 	}
 	return row
+}
+
+// runTimes lists each run's outcome and wall-clock milliseconds, in run order. The
+// outcome rides with the time because the time of a run that did not answer is when
+// it was stopped or gave up, not what a review costs.
+func runTimes(runs []ReviewRun) []Row {
+	out := make([]Row, 0, len(runs))
+	for _, run := range runs {
+		out = append(out, Row{"outcome": string(run.Outcome), "elapsed_ms": run.Elapsed.Milliseconds()})
+	}
+	return out
 }
 
 // apiRuns lists each run's token usage and tool use, in run order, or nil when no run
