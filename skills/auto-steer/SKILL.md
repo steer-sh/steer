@@ -76,7 +76,10 @@ drop whatever the user answered.
   repository. `steer check test <id>` passes. `steer check run` exits 0 on the
   current tree with the check wired in; when existing content fails it, undo the
   install and hold the finding: take out any line you added to `check.sh`, then
-  run `steer check remove <id>`. Never run
+  run `steer check remove <id> --reason "..."`. That drops the declaration alone,
+  so delete what it keeps and writes: the detector script and the `inputs` files
+  you wrote, `.steer/checks/cases/<id>.json`, any patch file its cases name, and
+  the archive entry its `Archived:` line names. Never run
   `steer check adopt`, `steer check install` or `steer check migrate --apply`: a
   repository's first adoption is the user's decision.
 - **Instruction rule.** The problem recurs across sessions, no instruction already
@@ -87,9 +90,9 @@ drop whatever the user answered.
   entry says it.
 
 Hold a finding in any tier when it depends on a workflow question only the user can
-answer, or when the harm reading (`steer-report` Step 5, "Harm") finds acceptable
-work the fix would obstruct. An unknown harm does not hold a finding; say that it
-is unknown.
+answer, when a refused class covers it ("Tracked fixes" below), or when the harm
+reading (`steer-report` Step 5, "Harm") finds acceptable work the fix would
+obstruct. An unknown harm does not hold a finding; say that it is unknown.
 
 Install through the tier's own workflow, then register the record with `--problem`
 and `--intervention` as `steer-report` requires. When `register` refuses the record
@@ -108,8 +111,9 @@ These rules cover guards in both scopes. They never touch a `hooks[]` row whose
   with `steer remove`, which archives it, when no repair passes, or when its cases
   held an `audited block` allow case before this pass and the guard as installed
   now made this block: the repaired guard blocked valid work again. Several such
-  readings in one pass are one repair, with one case each. Leave a removed guard's record as it is; retiring it is the
-  user's step once they keep the removal.
+  readings in one pass are one repair, with one case each. After a removal,
+  retire every record that binds the guard, as the audit does:
+  `steer fix retire <record-id> --reason "..."`.
 - **`prevented`, and the block derailed the task.** Rewrite the block message alone.
   Run `steer test` before and after: every stored case must give the same decision.
   Then run `steer hooks rebuild --scope <scope>` and read its `fixtures:` lines; the
@@ -131,9 +135,15 @@ repair, a `check.sh` wiring repair, a failure outside the task).
 
 - **A false match.** Tighten the record as the audit file says and register the
   replacement with `--supersedes`. This changes tracking and no behavior.
-- **A confirmed recurrence.** Rework the fix when the reworked fix meets its tier's
-  bar above, and supersede the record. Otherwise hold it. Never remove a fix
-  because the problem came back.
+- **A confirmed recurrence under an installed fix.** Rework the fix when the
+  reworked fix meets its tier's bar above, and supersede the record. Otherwise
+  hold it. Never remove a fix because the problem came back.
+- **A refused class that came back** (a `rejected` record, listed with its reason
+  and reopen condition among the decided classes). While the stored reopen
+  condition is not met, do nothing. When it is met, hold the finding under "Needs
+  your decision" with the refusal's reason. Never install a fix for a class a
+  live rejection covers, and never pass `register` a rejection's id as
+  `--supersedes`, or `--force` past one.
 - **A fix the record binds is `absent`.** Hold it: restoring or retiring is the
   user's decision.
 - **Repairs with a named command** (`steer hooks rebuild`, `steer hooks sync`,
@@ -167,15 +177,21 @@ nothing changed and nothing was held, say so in one sentence.
      - an installed fix: its tier's remove command, always with `--reason "..."`
        (`steer remove <name> --scope <scope> --force`, `steer check remove <id>`,
        `steer rules remove <id> --scope <scope>`, `steer commit-gate addendum
-       remove <id> --scope <scope>`), then, when Steer tracks the fix, `steer fix retire
-       <record-id> --reason "..."`, then `steer fix reject` with the `--class`,
-       `--match`, `--kind`, corpus and scope flags you registered or would have,
-       `--problem`, `--intervention`, `--reason` and `--reopen`, joined with `&&`
-       on one line. The rejection is what stops a later pass from installing the
+       remove <id> --scope <scope>`), then `steer fix retire <record-id> --reason
+       "..."` once for each record that tracks the fix (a guard scored per
+       harness has one per harness), then `steer fix reject` with the `--class`,
+       `--match`, `--kind`, `--corpus` (and `--signal-kind` for a
+       `transcript-friction` class) and scope flags you registered or would
+       have, `--problem`, `--intervention`, `--reason` and `--reopen`, joined
+       with `&&` on one line. The rejection is what stops a later pass from installing the
        same fix again. For a check, also name the line to delete from `check.sh`
        when one names the check.
      - a removal: `steer archive restore <id> --scope <scope>`, with `--tier` and
-       `--entry` when `steer archive list` shows more than one entry for the id.
+       `--entry` when `steer archive list` shows more than one entry for the id,
+       then, for each record you retired, `&& steer fix register` with that
+       record's flags and its install time as `--installed-ts`. A restore
+       registers no record and a retired one stays retired, so the new record
+       is what tracks the guard again.
      - a repair: the earlier lines to put back and the stored case to delete, then
        `steer hooks rebuild --scope <scope>`. Say that Steer's tracking still
        names the repaired version until a later pass registers the fix again.
@@ -187,7 +203,7 @@ nothing changed and nothing was held, say so in one sentence.
    `.steer/` and the instruction documents, named by path; approve a Codex guard
    runner in `/hooks` when `register` printed that line; commit the guard manifest
    before a project review prompt entry reaches the reviewer; adopt this repository
-   for checks; run `steer fix retire <record-id>` to keep a removal.
+   for checks.
 
 A report, to copy for shape; its fixes are invented:
 
@@ -198,6 +214,7 @@ A report, to copy for shape; its fixes are invented:
 > - **New guard, this repository: never run bare `python` | use `python3`.** You
 >   corrected this in 4 sessions. Files: `.steer/hooks/no-bare-python-hook.py` and
 >   its test cases. Undo, which also stops me from installing it again: `…`
+>
 > **Needs your decision**
 >
 > - **Migrations that drop a column in the release that stops reading it.** A check
