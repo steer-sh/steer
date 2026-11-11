@@ -274,8 +274,9 @@ var checkHookCmd = &cobra.Command{
 way ` + "`steer check run`" + ` does, with source stop, and blocks the turn on a failure.
 The same failure on an unchanged tree for the same session then lets the turn
 end. A missing approval, check.sh or bash, a malformed payload, a timeout, a
-run already in progress, or an execution error lets the turn end with a notice
-to the operator. Subagent Stop events are ignored. Always exits 0.`,
+run already in progress, an execution error, or a Claude Code subagent of the
+session that still runs lets the turn end with a notice to the operator.
+Subagent Stop events are ignored. Always exits 0.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name, _ := cmd.Flags().GetString("harness")

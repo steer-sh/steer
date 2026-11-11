@@ -483,7 +483,11 @@ fields and reply shape. It acts on a root Stop in an adopted repository only,
 blocks a failure once, and yields when the tree, outcome and per-check results
 repeat in the same session. A block names each other session, of any harness,
 whose Stop run in the same working tree finished within the last hour, because
-a whole-tree check cannot attribute a failure to one session's edits. Each run records its disposition and the
+a whole-tree check cannot attribute a failure to one session's edits. A subagent
+shares its parent's session, so that notice cannot name it: `StopHook` reads Claude
+Code's `background_tasks` and runs no check for a root Stop while a subagent task
+still runs, with a notice to the operator and no run record. Codex sends no such
+list, so its root Stop is always checked. Each run records its disposition and the
 working-tree signature it judged. A Stop run also records the payload's
 transcript locators by key presence (`transcript_path`, and the turn as Claude
 Code's `prompt_id` or Codex's `turn_id`) and `stop_hook_active`; a block records
