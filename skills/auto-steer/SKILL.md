@@ -102,7 +102,9 @@ the `steer fix register` command written out.
 
 ### Recorded blocks: act on each reading
 
-These rules cover guards in both scopes. They never touch a `hooks[]` row whose
+These rules cover global guards and the project guards of the repository the pass
+runs in; a project guard of another repository is acted on only by a pass run
+there. They never touch a `hooks[]` row whose
 `source` is `steer`: Steer's self-protection is not repaired, rewritten or removed.
 
 - **`incorrect`.** Follow "Repairing a guard you judged incorrect" in the audit
@@ -163,8 +165,16 @@ the read mark, with `--corpus` when you read one pile.
 
 This report replaces `steer-report`'s Step 5 questions. Its rules on plain words
 ("Words the reader sees") and on what a sentence may claim still bind every line.
-Write three parts in this order, and leave out a part with nothing in it. When
+Write these parts in this order, and leave out a part with nothing in it. When
 nothing changed and nothing was held, say so in one sentence.
+
+Open the report by saying what the pass covered, before any count of changes,
+whenever that is less than a reader would assume. Outside a repository it covered
+global guards and this machine's records, and no project guard or repository
+check. When the evidence names guards or fixes of another repository that this
+pass could not read or change (an `unmatched[]` contest or `unmatched_checks[]`
+run, or a record whose `artifact.state` is `elsewhere`), name that repository and
+say that a pass run there covers it. Otherwise write no coverage line.
 
 1. **What I changed.** One item per action. Each carries:
    - what changed, exactly: an instruction rule or review prompt entry quoted in
@@ -199,7 +209,13 @@ nothing changed and nothing was held, say so in one sentence.
    decision it needs, in one or two sentences. Say once that the user can answer
    here and you will carry it out, and that a later pass raises a held finding
    again only when the problem recurs.
-3. **Still to do.** What only the user can do: commit the changed files under
+3. **Not acted on.** One line for each thing the pass examined and left unchanged
+   where the user has nothing to decide now: a refused problem that matched again
+   while its reopen condition is not met, a block whose reading did not settle,
+   the blocks the pass's caps left unread, and, when it is so, that no new problem
+   cleared the bar. An item that needs the user's answer goes under "Needs your
+   decision".
+4. **Still to do.** What only the user can do: commit the changed files under
    `.steer/` and the instruction documents, named by path; approve a Codex guard
    runner in `/hooks` when `register` printed that line; commit the guard manifest
    before a project review prompt entry reaches the reviewer; adopt this repository
@@ -220,6 +236,10 @@ A report, to copy for shape; its fixes are invented:
 > - **Migrations that drop a column in the release that stops reading it.** A check
 >   could block these, but 14 existing migrations fail it. Do old and new code still
 >   run side by side during a deploy?
+>
+> **Not acted on**
+>
+> - 3 blocks are still unread; a later pass reads them.
 >
 > **Still to do**
 >
