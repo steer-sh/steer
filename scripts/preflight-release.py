@@ -20,7 +20,7 @@ from urllib.request import Request, urlopen
 ROOT = Path(__file__).resolve().parent.parent
 MARKETS = (".claude-plugin/marketplace.json", ".agents/plugins/marketplace.json")
 PLUGINS = (".claude-plugin/plugin.json", ".codex-plugin/plugin.json")
-SKILL_FILES = ("skills/steer/SKILL.md", "skills/steer/prompts/routing.md",
+SKILL_FILES = ("skills/auto-steer/SKILL.md", "skills/steer/SKILL.md", "skills/steer/prompts/routing.md",
                "skills/steer-report/SKILL.md", "skills/steer-report/audit.md",
                "skills/steer-report/reading.md",
                "skills/steer-setup/SKILL.md")
@@ -83,7 +83,8 @@ def identity(root):
         if {k: v for k, v in plugin.items() if k not in ("skills", "hooks")} != expected:
             raise ValueError(f"{name}: differs from the marketplace plugin")
         if plugin.get("hooks") != "./hooks/hooks.json" or plugin.get("skills") != [
-                "./skills/steer", "./skills/steer-report", "./skills/steer-setup"]:
+                "./skills/auto-steer", "./skills/steer", "./skills/steer-report",
+                "./skills/steer-setup"]:
             raise ValueError(f"{name}: missing bundled skill or hook declarations")
     return entries[0]
 

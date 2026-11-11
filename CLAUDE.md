@@ -49,8 +49,8 @@ Read the linked architecture section before changing the corresponding boundary:
   Before publishing, `python3 scripts/preflight-release.py [--ref <branch-or-tag>]`
   checks anonymous access and the published bundle against this candidate,
   including executable and skill bytes and contained support files; it stays outside `check.sh`.
-  The working skills live under `skills/`, including `steer`, `steer-report` and
-  `steer-setup`; there is no root generation `SKILL.md`.
+  The working skills live under `skills/`, including `steer`, `steer-report`,
+  `auto-steer` and `steer-setup`; there is no root generation `SKILL.md`.
   A harness runs skills and the launcher from its cached plugin copy, which an
   unchanged version does not refresh and `steer bin install` never touches. At
   SessionStart the newest copy ahead of the hooks runs `bin install`'s body
@@ -236,6 +236,10 @@ Read the linked architecture section before changing the corresponding boundary:
   gate's HEAD reader `cli/internal/gate/addendum.go` and `mine.SteerAddendumFacts`
   decode one `review_addendum` shape. The stock `prompts/review.md` is never the
   review tier's target.
+- Report pass decision points: `skills/auto-steer/SKILL.md` runs the pass in
+  `skills/steer-report/` and replaces each point where it asks, offers or waits.
+  A new or moved step, question or offer there, or in the `steer` skill's install
+  workflow, needs its answer in the auto skill's policy.
 - Generation behavior: bump `prompt_version` in `skills/steer/SKILL.md`.
   That includes `skills/steer/prompts/routing.md`, which `/steer-report` also
   reads; its rung names are pinned to `cli/internal/tier` by a plugindist test.

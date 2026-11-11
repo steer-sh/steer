@@ -14,6 +14,11 @@ commit-gate activation are explicit setup operations.
 and `skills/steer-report/SKILL.md` reads the queue and evidence to propose interventions.
 Both route through `skills/steer/prompts/routing.md`; `/steer-report` reads it as a
 sibling, so the two skills ship in one bundle.
+`skills/auto-steer/SKILL.md` holds no pass of its own: it reads the `steer-report`
+files as siblings and supplies a decision policy for each point where that pass
+asks the reader. Its bar to install is stricter than the report's bar to show, a
+finding that misses it is listed for the user, and the skill never commits: its
+closing report names each change with the command that undoes it.
 
 The two marketplace manifests and two root plugin manifests describe one identity:
 `.claude-plugin/marketplace.json`, `.agents/plugins/marketplace.json`,
