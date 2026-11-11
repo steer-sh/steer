@@ -21,13 +21,13 @@
         "negative_fail": 0
       },
       "fixtures": {
-        "digest": "6a8a4872d9608250",
-        "cases": 35,
+        "digest": "76955c248a83b34d",
+        "cases": 47,
         "tested": true,
-        "hook_digest": "5937d381dc3f99b1",
-        "master_digest": "07a1fccf6913a4a9",
+        "hook_digest": "67b4f8486b4174f8",
+        "master_digest": "ce356093be651ef6",
         "rule_hash": "219d4203914a9d920a1e0d83ba4b21c7373d55f4c1c181a31fdfa5af077d6d62",
-        "verified_at": "2026-11-10T18:43:12Z"
+        "verified_at": "2026-11-11T20:33:05Z"
       }
     },
     "no-readme-edit-hook": {
@@ -55,9 +55,9 @@
         "cases": 33,
         "tested": true,
         "hook_digest": "213d866c4bbf2953",
-        "master_digest": "07a1fccf6913a4a9",
+        "master_digest": "ce356093be651ef6",
         "rule_hash": "95d19019e65d4c17ad9335184e9f1f35a56bcde3c0c44c33a88814a694b643c7",
-        "verified_at": "2026-11-10T18:43:14Z"
+        "verified_at": "2026-11-11T20:33:07Z"
       }
     }
   },
