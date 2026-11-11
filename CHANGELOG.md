@@ -5,6 +5,23 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-11-10
+
+### Changed
+
+- The status line names the reviewer's effort and the blocking round limit, for
+  example `@ high · 4 rounds`, and reads `5 pending decisions` for the queue.
+- `/steer` writes every guard from one general protocol and reads no per-category
+  prompt. Facts about Bash calls (tool filters, command position, heredoc bodies,
+  comments) are part of that protocol. The headless result drops `prompt_modules`.
+- The Go toolchain moves to 1.27.4 for GO-2026-6859 in `net/http`.
+
+### Fixed
+
+- The status line no longer reads `healthy` over an armed commit gate that does not
+  review. It warns `reviewer cannot run → steer status` when the reviewer cannot
+  start, and names the repair when the harness hook timeout is shorter than a review.
+
 ## [0.3.0] - 2026-11-10
 
 ### Added
@@ -368,6 +385,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 First public release.
 
+[0.3.1]: https://github.com/steer-sh/steer/releases/tag/v0.3.1
 [0.3.0]: https://github.com/steer-sh/steer/releases/tag/v0.3.0
 [0.2.0]: https://github.com/steer-sh/steer/releases/tag/v0.2.0
 [0.1.7]: https://github.com/steer-sh/steer/releases/tag/v0.1.7
