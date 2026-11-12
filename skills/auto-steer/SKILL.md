@@ -94,7 +94,8 @@ In a repository that passes, run the audit and the install steps as you run them
 here, with `-C <root>` right after `<STEER_BIN>` in every steer command: its own
 `status --json` and `fix score --json`, its contests, `fixture mine`, `test`,
 `register`, `hooks rebuild --scope project` and `fix register`. Start a reader of
-its recorded blocks with the launcher given as `<STEER_BIN> -C <root>`. The bars
+its recorded blocks with the usual brief and one more sentence: "Write `-C <root>`
+after the launcher's path in every steer command." with the root filled in. The bars
 below apply unchanged; a repository check there needs that repository's own
 snapshot to read `checks.adopted` true. Write `--scope-repo-root` as that root
 itself, never as a command substitution, which runs where the pass started. Where
