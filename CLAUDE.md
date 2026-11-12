@@ -247,6 +247,12 @@ Read the linked architecture section before changing the corresponding boundary:
 - Transcript normalization: each adapter's `Instrument` is pinned by replay of
   its `testdata/instrument/` corpus. Classification changes also affect
   `report.ParserInstrument`; see the architecture section before changing either.
+- Working directory flag: `-C` (`enterWorkDir`, `cli/cmd/root.go`) changes directory
+  in the root's `PersistentPreRunE`, which cobra skips for a subcommand declaring its
+  own, so such a command must call it. The self-protection guard reads a `steer`
+  operand against that directory (`steer_positionals`). The skills act in another
+  repository through `-C` only where `steer uncommitted` (`cli/cmd/uncommitted.go`)
+  lists nothing; a new project file Steer writes joins `steerOwnedPathspecs`.
 - Harness targets: `status.GuardTargets` (`cli/internal/status/targets.go`) decides
   which harnesses a command naming none writes to; `currentRegistrars`
   (`cli/cmd/harness.go`) and the dashboard's actions both call it, so a new

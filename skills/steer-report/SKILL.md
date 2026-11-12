@@ -596,9 +596,18 @@ State a limit on its own only where a reader would otherwise draw the wrong
 conclusion. "The problem has not come back" is the supported claim, and it needs
 no disclaimer after it.
 
-- **Scope.** A proposal names **project** (this repository alone) or **global**
+- **Scope.** A proposal names **project** (one repository alone) or **global**
   (every repository on this machine), chosen from the evidence: one repository
-  scopes to project, several to global. The reason fits in a clause.
+  scopes to project, several to global. The reason fits in a clause. A project
+  proposal for a repository other than this one names that repository. On a yes,
+  first run `<STEER_BIN> -C <root> uncommitted --json` with its absolute root:
+  when it fails, prints a `repo` other than that root, or lists a path, the
+  repository is gone or the files Steer writes there hold uncommitted work, so say
+  so and change nothing there. Otherwise apply the fix with `-C <root>`
+  right after `<STEER_BIN>` in every steer command, write `--scope-repo-root` as
+  that root rather than a command substitution, and give a file you edit there by
+  its absolute path. A fix there that edits an existing file outside the paths
+  `uncommitted` reads, such as a check's detector script, waits for the user.
   Name an agent the fix does not reach when coverage differs materially.
 - **Harm.** A proposal says what it blocks or changes and the legitimate work it
   could obstruct, in the form that kind of fix's harm takes: a repository check
