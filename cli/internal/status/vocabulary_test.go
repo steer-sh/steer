@@ -121,7 +121,7 @@ func TestNoMachineWordReachesADisplayString(t *testing.T) {
 }
 
 // reportSkillQuotes returns the blockquote lines of the bundled skills that speak to
-// a reader — steer-report's files, steer and steer-setup — the phrases a skill hands
+// a reader — steer-report's files, steer, steer-setup and auto-steer — the phrases a skill hands
 // a reader, with inline code removed: a command or an
 // identifier stays verbatim. A line without `>` that directly follows a quote line
 // is a lazy continuation and belongs to the quote. Fenced code blocks are skipped.
@@ -131,7 +131,8 @@ func reportSkillQuotes(t *testing.T) map[string][]string {
 	if err != nil || len(paths) == 0 {
 		t.Fatalf("no steer-report skill files found: %v", err)
 	}
-	paths = append(paths, "../../../skills/steer/SKILL.md", "../../../skills/steer-setup/SKILL.md")
+	paths = append(paths, "../../../skills/steer/SKILL.md", "../../../skills/steer-setup/SKILL.md",
+		"../../../skills/auto-steer/SKILL.md")
 	quote := regexp.MustCompile(`^\s*>\s?(.*)$`)
 	code := regexp.MustCompile("`[^`]*`")
 	blockStart := regexp.MustCompile(`^(#|[-*+] |\d+\. |\|)`)

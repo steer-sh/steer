@@ -77,6 +77,11 @@ steer dashboard     # interactive TUI to inspect Steer operations and set option
 steer status        # whether your Steer installation is healthy, and steps to take if it is not
 ```
 
+### Run `/auto-steer`
+*Experimental New Feature*: `/auto-steer` runs the same report as `/steer-report`. But instead of proposing new fixes, or changes to your existing fixes - `/auto-steer` implements all the changes autonomously. You will be given a summary report of all actions taken at the end of the run. If there are any further actions required, you will be notified at that point. `/auto-steer` doesn't ever commit files without your consent.
+
+The intention of `/auto-steer` is similar to auto-permissions mode in agent CLIs -- it removes the friction of decision-making from the user unless completely necessary. `/auto-steer` is completely optional, so if you want to be involved in every decision continue to use `/steer-report` instead.
+
 ## Add a rule yourself
 
 The `/steer` skill creates a new rule using the most appropriate fix type: a repo check, a guard, or an instruction. For example:
@@ -151,4 +156,5 @@ This checks Go formatting, builds the CLI, runs vet, and runs the tests. `./chec
 - [Project map](CLAUDE.md): intended as a roadmap for your agent to navigate the repo.
 - [Guard skill](skills/steer/SKILL.md): core rule generation and installation workflow.
 - [Report skill](skills/steer-report/SKILL.md): evidence review, audit and the fix workflow.
+- [Auto skill](skills/auto-steer/SKILL.md): the auto-report pass with a decision policy instead of user questions.
 - `steer <command> --help`: CLI command options
