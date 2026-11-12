@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -12,6 +13,9 @@ import (
 )
 
 var scope string
+
+// workDir is the -C flag: the directory the command runs as if it started in.
+var workDir string
 
 var rootCmd = &cobra.Command{
 	Use:   "steer",
@@ -34,6 +38,9 @@ Steer supports Claude Code and Codex on macOS and Linux, plus a Git pre-commit c
   steer status
   steer dashboard`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		if err := enterWorkDir(workDir); err != nil {
+			return err
+		}
 		scope = strings.ToLower(strings.TrimSpace(scope))
 		return claude.ValidateScope(scope)
 	},
@@ -81,6 +88,33 @@ func helpHint(args []string) string {
 	return fmt.Sprintf("Run `%s --help` for usage.", path)
 }
 
+// enterWorkDir makes dir the process's working directory, as a shell's cd would,
+// before any command resolves a path. "" leaves the working directory alone. PWD
+// follows, so a child process and os.Getwd report the directory as given.
+func enterWorkDir(dir string) error {
+	if dir == "" {
+		return nil
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return fmt.Errorf("-C %s: %w", dir, err)
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("-C %s: no such directory", dir)
+		}
+		return fmt.Errorf("-C %s: %w", dir, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("-C %s: not a directory", dir)
+	}
+	if err := os.Chdir(abs); err != nil {
+		return fmt.Errorf("-C %s: %w", dir, err)
+	}
+	return os.Setenv("PWD", abs)
+}
+
 // prepareState migrates the evidence corpora into the neutral root. A writing
 // entry point calls it before it resolves any state path, so nothing in the same
 // process holds a path from the root the migration just left.
@@ -114,6 +148,8 @@ func init() {
 		claude.ProjectScope,
 		fmt.Sprintf("Scope for hook operations (%s|%s)", claude.ProjectScope, claude.GlobalScope),
 	)
+	rootCmd.PersistentFlags().StringVarP(&workDir, "directory", "C", "",
+		"Run as if steer started in this directory, like git -C")
 }
 
 func renderHelp(cmd *cobra.Command) {

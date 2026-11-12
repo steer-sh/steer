@@ -18,7 +18,10 @@ sibling, so the two skills ship in one bundle.
 files as siblings and supplies a decision policy for each point where that pass
 asks the reader. Its bar to install is stricter than the report's bar to show, a
 finding that misses it is listed for the user, and the skill never commits: its
-closing report names each change with the command that undoes it.
+closing report names each change with the command that undoes it. It acts in every
+repository its evidence names by running each command with `steer -C <root>`, and
+holds a repository where `steer uncommitted` lists a file Steer writes that already
+carries uncommitted changes.
 
 The two marketplace manifests and two root plugin manifests describe one identity:
 `.claude-plugin/marketplace.json`, `.agents/plugins/marketplace.json`,
@@ -131,6 +134,8 @@ migration ownership:
   `~/.steer/hooks`. A project store belongs to a repository: `steerpath.ProjectRoot`
   anchors it at the repository containing the working directory, so a command run
   from a subdirectory reads and writes the same store as one run from the root.
+  The root flag `-C <dir>` makes `dir` the working directory before any command
+  resolves a path, so it addresses another repository's store the same way.
   Three forms of that path are distinct. `HooksDir` is the filesystem path.
   `hookstore.MasterRegistration` is what a registration names: relative to the
   directory holding the harness config. A harness runs a hook in the session's

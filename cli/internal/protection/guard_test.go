@@ -193,6 +193,10 @@ func TestSelfProtectionReadsEverySteerInvocationPastFlagsAndPunctuation(t *testi
 		{"registering over the guard", "steer register --rule x ./steer-self-protection.py", true},
 		{"disabling the guard as a preset", "steer --scope global preset disable steer-self-protection", true},
 		{"an unbalanced quote later on", "steer remove steer-self-protection; echo \"", true},
+		{"removing the guard in another directory", "steer -C /tmp/other remove steer-self-protection", true},
+		{"removing the guard with an attached directory", "steer -C/tmp/other remove steer-self-protection", true},
+		{"disabling the guard in another directory", "steer --directory /tmp/other --scope global preset disable steer-self-protection", true},
+		{"another guard in another directory", "steer -C /tmp/other remove user-custom", false},
 		{"another setting", "steer config set reviewer.effort high", false},
 		{"reading the setting", "steer config get protection.self", false},
 		{"the key as another setting's value", "steer config set reviewer.model protection.self", false},
@@ -320,5 +324,31 @@ func TestSelfProtectionGuardsSteersEntriesInHarnessFiles(t *testing.T) {
 				t.Fatalf("blocked = %v, want %v (reason %q)", blocked, tc.blocked, reason)
 			}
 		})
+	}
+}
+
+// steer resolves a path operand against its -C directory, so a link to the guard
+// named from there is the guard, and the same name read from the working
+// directory is not.
+func TestSelfProtectionResolvesAnOperandAgainstTheDirectoryFlag(t *testing.T) {
+	rt := setupGuardRuntime(t)
+	if err := os.Symlink(rt.hookPath, filepath.Join(rt.repo, "src", "alias.py")); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		command string
+		blocked bool
+	}{
+		{"steer -C src remove alias.py", true},
+		{"steer -Csrc remove ./alias.py", true},
+		{"steer --directory=src register --rule x alias.py", true},
+		{"steer -C " + filepath.Join(rt.repo, "src") + " remove alias.py", true},
+		{"steer remove alias.py", false},
+		{"steer -C src remove other.py", false},
+	}
+	for _, tc := range tests {
+		if blocked, reason := rt.run(t, rt.repo, bash(tc.command)); blocked != tc.blocked {
+			t.Errorf("%q: blocked = %v, want %v (reason %q)", tc.command, blocked, tc.blocked, reason)
+		}
 	}
 }

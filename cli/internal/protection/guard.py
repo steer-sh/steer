@@ -24,9 +24,11 @@ SELF_NAME = "steer-self-protection"
 SETTING_KEY = "protection.self"
 
 # Value-taking flags of steer's root, remove, register, preset and config
-# commands. A flag its command does not define makes the CLI exit, so one table
+# commands, each long form beside its shorthand. A flag its command does not define makes the CLI exit, so one table
 # serves every position in an invocation.
 STEER_VALUE_FLAGS = {
+    "-C",
+    "--directory",
     "--fixtures",
     "--harness",
     "--hook-version",
@@ -413,14 +415,29 @@ def skip_redirections(words, idx):
     return idx
 
 
+# The root flag that runs steer as if it started in another directory.
+WORKDIR_FLAGS = ("-C", "--directory")
+
+
+def attached_workdir(word):
+    """The directory a -C or --directory word carries in itself, or None."""
+    if word.startswith("--directory="):
+        return word[len("--directory="):]
+    if word.startswith("-C") and not word.startswith("--") and len(word) > 2:
+        return word[3:] if word[2] == "=" else word[2:]
+    return None
+
+
 def steer_positionals(words, start, value_after_redirection):
-    """Return the positional arguments of the steer invocation whose arguments begin at words[start].
+    """Return the positional arguments of the steer invocation whose arguments begin
+    at words[start], and the directory its last -C flag names, "" for none.
 
     value_after_redirection selects how a value flag followed by a redirection
     reads: the flag's value is the word after the redirection, or the next word.
     Lexing cannot tell these apart, since it loses quotes and adjacency.
     """
     positionals = []
+    workdir = ""
     idx = skip_redirections(words, start)
     while idx < len(words):
         word = words[idx]
@@ -428,16 +445,21 @@ def steer_positionals(words, start, value_after_redirection):
             idx += 1
             if value_after_redirection:
                 idx = skip_redirections(words, idx)
+            if word in WORKDIR_FLAGS and idx < len(words):
+                workdir = words[idx]
             idx += 1
         elif is_shell_punctuation(word):
             break
         elif word.startswith("-"):
+            attached = attached_workdir(word)
+            if attached is not None:
+                workdir = attached
             idx += 1
         else:
             positionals.append(word)
             idx += 1
         idx = skip_redirections(words, idx)
-    return positionals
+    return positionals, workdir
 
 
 # Commands that write every file they name, and ones that write only the last.
@@ -580,8 +602,10 @@ def evaluate_bash_command(command_text, protected, self_path, cwd):
         if not is_steer_binary(word):
             continue
         for value_after_redirection in (True, False):
-            positionals = steer_positionals(words, idx + 1, value_after_redirection)
-            reason = evaluate_steer_invocation(positionals, self_path, cwd)
+            positionals, workdir = steer_positionals(words, idx + 1, value_after_redirection)
+            # steer resolves an operand against its -C directory.
+            base = canonicalize_path(workdir, cwd) if workdir else cwd
+            reason = evaluate_steer_invocation(positionals, self_path, base)
             if reason:
                 return reason
     return None

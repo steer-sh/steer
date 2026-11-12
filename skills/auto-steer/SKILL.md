@@ -2,7 +2,7 @@
 name: auto-steer
 description: Runs the steer-report pass without questions — audits the fixes steer installed, mines session and review history for recurring problems, then installs, repairs or removes every fix that clears a stated bar, and ends with one report of what changed, what was held back and what is left to do. Use when the user wants steer to act on its evidence without deciding each step ("auto steer", "just fix what steer finds") and will undo what they do not want.
 user-invocable: true
-compatibility: Requires the steer CLI on PATH or bundled under scripts/, and the steer-report and steer skills of the same plugin, whose files it reads. Reads what steer-report reads. Changes guards, instruction rules and review prompt entries in the project and global scopes, and repository checks in a repository already adopted. Never commits.
+compatibility: Requires the steer CLI on PATH or bundled under scripts/, and the steer-report and steer skills of the same plugin, whose files it reads. Reads what steer-report reads. Changes guards, instruction rules and review prompt entries in the global scope and in the project scope of each repository its evidence names, and repository checks in a repository already adopted. Never commits.
 allowed-tools: Bash(steer *), Read, Edit, Write
 ---
 
@@ -55,10 +55,58 @@ decides whether an action happens; they decide how it is done.
 - **The reader of recorded blocks is unchanged.** It records its readings and
   changes nothing. You take the actions below after its account comes back.
 - **A question the `steer` skill would ask during an install has these answers.**
-  Scope follows the evidence: this repository alone is project, several are
-  global. Hold a finding seen only in another repository, and name the repository
-  to run in. A removal this policy decides counts as confirmed, so pass `--force`
-  with `--reason`.
+  Scope follows the evidence: one repository alone is project, several are
+  global. A project fix for another repository is installed there, as "Other
+  repositories" below says. A removal this policy decides counts as confirmed, so
+  pass `--force` with `--reason`.
+
+### Other repositories
+
+The pass acts in every repository this machine's evidence names, not only the one
+it runs in. Take each repository's absolute root from:
+
+- a review sequence's `repo_root`, in the output of
+  `<STEER_BIN> commit-gate mine findings --kind <kind> --json --to-file`. Leave
+  `--undecided` out of that command: with it, the command records what it showed as
+  read. The text dump's `repo=` names the same repository by its directory name.
+- an `interventions[]` row whose `artifact.repo` or `scope.repo_root` names a
+  repository other than this one, as every `artifact.state` `elsewhere` does.
+- a `checks[].repo` or `unmatched_checks[].repo` of `steer audit contests`.
+
+A finding whose evidence names its repository by no root above, such as one seen
+only in session history, is held with the repository named as the evidence names
+it. Under `--repo-only` or `--project-only` the pass acts in this repository alone.
+
+Before you act in another repository, run:
+
+```bash
+<STEER_BIN> -C <root> uncommitted --json
+```
+
+When the command fails (the path is gone or is no git checkout), prints a `repo`
+other than the root you gave it (the root is no checkout of its own, and git found
+the one around it), or lists any path, hold that repository and change nothing in
+it: it is not where the evidence placed it, or the files Steer writes there already
+hold uncommitted work. Put the repository and that reason under "Needs your
+decision".
+
+In a repository that passes, run the audit and the install steps as you run them
+here, with `-C <root>` right after `<STEER_BIN>` in every steer command: its own
+`status --json` and `fix score --json`, its contests, `fixture mine`, `test`,
+`register`, `hooks rebuild --scope project` and `fix register`. Start a reader of
+its recorded blocks with the launcher given as `<STEER_BIN> -C <root>`. The bars
+below apply unchanged; a repository check there needs that repository's own
+snapshot to read `checks.adopted` true. Write `--scope-repo-root` as that root
+itself, never as a command substitution, which runs where the pass started. Where
+the pass edits a file there, such as a guard source or a stored case, give the Edit
+or Write tool its absolute path in that repository. Hold a change there that would
+edit an existing file outside the paths `uncommitted` reads, such as a check's
+detector script: the command does not show whether that file holds uncommitted
+work. Install a global fix once, from here.
+
+When the pass is done in that repository, run `<STEER_BIN> -C <root> uncommitted`
+again. The paths it lists, with any file the pass wrote there outside them, such
+as a check's detector script, are what the pass changed there.
 
 ### New findings: the bar to install
 
@@ -102,9 +150,8 @@ the `steer fix register` command written out.
 
 ### Recorded blocks: act on each reading
 
-These rules cover global guards and the project guards of the repository the pass
-runs in; a project guard of another repository is acted on only by a pass run
-there. They never touch a `hooks[]` row whose
+These rules cover global guards and the project guards of every repository the pass
+acts in. They never touch a `hooks[]` row whose
 `source` is `steer`: Steer's self-protection is not repaired, rewritten or removed.
 
 - **`incorrect`.** Follow "Repairing a guard you judged incorrect" in the audit
@@ -166,15 +213,15 @@ the read mark, with `--corpus` when you read one pile.
 This report replaces `steer-report`'s Step 5 questions. Its rules on plain words
 ("Words the reader sees") and on what a sentence may claim still bind every line.
 Write these parts in this order, and leave out a part with nothing in it. When
-nothing changed and nothing was held, say so in one sentence.
+nothing changed and nothing was held, say so in one sentence. When the pass acted
+in more than one repository, group the items of each part by repository, global
+fixes first, and name each repository by its root.
 
-Open the report by saying what the pass covered, before any count of changes,
-whenever that is less than a reader would assume. Outside a repository it covered
-global guards and this machine's records, and no project guard or repository
-check. When the evidence names guards or fixes of another repository that this
-pass could not read or change (an `unmatched[]` contest or `unmatched_checks[]`
-run, or a record whose `artifact.state` is `elsewhere`), name that repository and
-say that a pass run there covers it. Otherwise write no coverage line.
+When the evidence named a repository other than this one, or the pass ran outside
+a repository, open the report by saying what the pass covered, before any count of
+changes: the repositories it acted in, and each one it held with its reason. An
+`unmatched[]` contest names no repository: say that the pass could not place it.
+Otherwise write no coverage line.
 
 1. **What I changed.** One item per action. Each carries:
    - what changed, exactly: an instruction rule or review prompt entry quoted in
@@ -183,7 +230,8 @@ say that a pass run there covers it. Otherwise write no coverage line.
    - the evidence behind it as a count with its unit: sessions, review sequences
      or inspected blocks.
    - the undo, written out with the launcher's path and every argument filled in,
-     so the user can run it as it stands:
+     so the user can run it as it stands; a change in another repository carries
+     `-C <root>` right after the launcher's path in each steer command:
      - an installed fix: its tier's remove command, always with `--reason "..."`
        (`steer remove <name> --scope <scope> --force`, `steer check remove <id>`,
        `steer rules remove <id> --scope <scope>`, `steer commit-gate addendum
@@ -216,14 +264,18 @@ say that a pass run there covers it. Otherwise write no coverage line.
    cleared the bar. An item that needs the user's answer goes under "Needs your
    decision".
 4. **Still to do.** What only the user can do: commit the changed files under
-   `.steer/` and the instruction documents, named by path; approve a Codex guard
-   runner in `/hooks` when `register` printed that line; commit the guard manifest
-   before a project review prompt entry reaches the reviewer; adopt this repository
-   for checks.
+   `.steer/` and the instruction documents, named by path, in each repository (in
+   another repository, the paths its last `uncommitted` listed and any other file
+   the pass wrote there); approve a Codex
+   guard runner in `/hooks` when `register` printed that line; commit the guard
+   manifest before a project review prompt entry reaches the reviewer; adopt a
+   repository for checks.
 
 A report, to copy for shape; its fixes are invented:
 
-> I installed one guard and held one finding.
+> I acted in `~/code/app` and `~/code/api`, and held `~/code/web`: files Steer
+> writes there already hold uncommitted changes. I installed one guard and held one
+> finding.
 >
 > **What I changed**
 >
