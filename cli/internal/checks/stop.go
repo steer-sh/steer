@@ -35,6 +35,9 @@ const (
 	DispositionBadContext = "bad-context"
 	DispositionIgnored    = "ignored"
 	DispositionOutside    = "outside-repository"
+	// DispositionSubagentActive is a root Stop while a subagent of the session
+	// still runs.
+	DispositionSubagentActive = "subagent-active"
 )
 
 const (
@@ -65,6 +68,9 @@ type StopRequest struct {
 	// Locators and StopHookActive are recorded on the run; see OracleRun.
 	Locators       map[string]string
 	StopHookActive *bool
+	// RunningSubagents names the session's subagents that still run; an
+	// adopted repository's turn is then not checked.
+	RunningSubagents []string
 }
 
 // StopDecision is the Stop runner's answer. Reason is for the model and is set
@@ -104,6 +110,12 @@ func Stop(req StopRequest) StopDecision {
 				stopMessagePrefix, identity)
 		}
 		return d
+	}
+	if len(req.RunningSubagents) > 0 {
+		return StopDecision{Disposition: DispositionSubagentActive,
+			Message: fmt.Sprintf("%sa subagent of this session still runs (%s), so %s did not run for this turn. "+
+				"A turn that ends with no subagent running is checked.",
+				stopMessagePrefix, strings.Join(req.RunningSubagents, ", "), OracleName)}
 	}
 
 	tail := newTailRecorder(diagnosticBytes)

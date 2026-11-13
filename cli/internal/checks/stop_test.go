@@ -428,6 +428,45 @@ func TestStopHookAnswersOnlyTheRootStopEvent(t *testing.T) {
 	}
 }
 
+// A root Stop with a subagent still running does not run check.sh and tells the
+// operator. A finished subagent, one with no status, another kind of background
+// task and a list in an unknown shape leave the turn checked.
+func TestStopHookDoesNotCheckATurnWhileASubagentRuns(t *testing.T) {
+	root, req := stopRepo(t, map[string]string{"a": "exit 1\n"}, "")
+	opts := StopHookOptions{Timeout: req.Timeout, SteerBin: req.SteerBin}
+	payload := func(session, tasks string) []byte {
+		return []byte(fmt.Sprintf(`{"hook_event_name":"Stop","session_id":%q,"cwd":%q,"background_tasks":%s}`, session, root, tasks))
+	}
+
+	running := `[{"id":"t1","type":"shell","status":"running"},{"id":"t2","type":"subagent","status":"running","agent_type":"general-purpose"}]`
+	d, reply := StopHook("claude-code", payload("s", running), opts)
+	if d.Disposition != DispositionSubagentActive || reply == nil || reply.Decision != "" ||
+		!strings.Contains(reply.SystemMessage, "general-purpose") {
+		t.Fatalf("running subagent: %+v %+v; want an unchecked turn that names the subagent", d, reply)
+	}
+	if runs, _ := OracleRuns(root); len(runs) != 0 {
+		t.Fatalf("a Stop with a running subagent ran check.sh %d times", len(runs))
+	}
+
+	plain := t.TempDir()
+	gitIn(t, plain, "init", "-q")
+	if d, reply := StopHook("claude-code", []byte(fmt.Sprintf(`{"hook_event_name":"Stop","session_id":"p","cwd":%q,"background_tasks":%s}`, plain, running)), opts); d.Disposition != DispositionNotAdopted || reply != nil {
+		t.Fatalf("unadopted repository with a running subagent: %+v %+v; want a silent not-adopted turn", d, reply)
+	}
+
+	for name, tasks := range map[string]string{
+		"finished subagent": `[{"id":"t2","type":"subagent","status":"completed","agent_type":"general-purpose"}]`,
+		"shell task":        `[{"id":"t1","type":"shell","status":"running"}]`,
+		"no status":         `[{"id":"t2","type":"subagent"}]`,
+		"unknown shape":     `{"subagent":true}`,
+		"empty":             `[]`,
+	} {
+		if d, reply := StopHook("claude-code", payload(name, tasks), opts); d.Disposition != DispositionBlock || reply == nil || reply.Decision != "block" {
+			t.Errorf("%s: %+v %+v; want the failing turn blocked", name, d, reply)
+		}
+	}
+}
+
 // A Stop run records the payload's transcript locators by key presence and
 // whether a Stop hook already blocked the turn. A block keeps the reason it
 // sent, and that reason names the run, so the transcript entry joins to it.

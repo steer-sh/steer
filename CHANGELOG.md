@@ -5,6 +5,15 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Claude Code: `check.sh` no longer stops a parent session's turn while one of its
+  subagents still runs. The tree then holds the subagent's unfinished work, which the
+  parent cannot repair. The operator gets a notice, and a turn that ends with no
+  subagent running is checked as before.
+
 ## [0.3.1] - 2026-11-10
 
 ### Changed
