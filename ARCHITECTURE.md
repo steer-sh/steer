@@ -86,6 +86,17 @@ links to another harness's survives a one-harness removal. `~/.steer` stays unle
 given, which is refused while another Steer registration or a kept hook still
 needs it.
 
+`hooks/hooks.json`, the hooks file the Claude Code manifest names, also names one
+Claude Code mod under `modules` (`hooks/mod/register.tsx`). Codex refuses a hooks
+file with that key and then loads none of the plugin's hooks, so the Codex manifest
+names `hooks/codex.json`, the same file without `modules`. The mod is a view
+of state Steer writes: it draws a band above the prompt from the commit gate's live
+review file and handles no tool event and no `classic.*` event, because a tool
+handler runs ahead of every settings hook and Steer reports a mod that has one as an
+exposure. Enforcement stays in the settings hooks and the CLI, which every harness
+shares. `hooks/mod/marks.ts` holds the colours and pixel marks, drawn as terminal
+half-block cells; other hosts get the same band as text and colour.
+
 Each install from another path adds that path, as `os.Executable` reports it, to
 `~/.steer/bin/source`, and `bin install` adds every active plugin copy it finds. When a recorded path lies in a harness's plugin cache and
 the harness's own install record (`installed_plugins.json`, or the `plugins` table
@@ -747,6 +758,18 @@ sections. Every read doubt fails open, and a release or Stop with no turn ID get
 operator notice. The check does not depend on `--if-due`, the resolver lock or
 `backfill.scanned`; after it the ordinary resolver runs, narrating on stderr. A
 ledger found only in the payload satisfies the check and creates no resolver link.
+
+While a round's reviewers run, the engine keeps a live review file at
+`<state>/commit-review/live/<session>/<actor>-<repo hash>.json` (`internal/gate/live.go`):
+written when the round starts, rewritten at each run's return and on a beat every two
+seconds, and ended with the phase of the row the round wrote and each well-formed
+finding's severity, file and bounded claim. It is a view for a reader that draws the
+review: no decision reads it, a write that fails is dropped without a note, and a
+request with no session keeps none. A reader tells a dead gate from a running one by
+the beat, never by the process id. The retry that answers a held round removes the
+file; one that puts the round back unanswered keeps it. Each new round prunes files
+older than `StaleAfter`. The bundled Claude Code mod is its reader
+(`hooks/mod/review.ts`), which resolves the directory as `statestore.Resolve` does.
 
 Each row's transcript prefix is stored once per session under `prefixes/`: the
 session file grows by appended gzip members, and a row names its slice with

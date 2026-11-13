@@ -20,10 +20,17 @@ from urllib.request import Request, urlopen
 ROOT = Path(__file__).resolve().parent.parent
 MARKETS = (".claude-plugin/marketplace.json", ".agents/plugins/marketplace.json")
 PLUGINS = (".claude-plugin/plugin.json", ".codex-plugin/plugin.json")
+# The hooks file each plugin manifest names. Codex refuses the modules key, so its
+# file is the Claude Code file without it.
+HOOK_FILES = {".claude-plugin/plugin.json": "hooks/hooks.json", ".codex-plugin/plugin.json": "hooks/codex.json"}
 SKILL_FILES = ("skills/auto-steer/SKILL.md", "skills/steer/SKILL.md", "skills/steer/prompts/routing.md",
                "skills/steer-report/SKILL.md", "skills/steer-report/audit.md",
                "skills/steer-report/reading.md",
                "skills/steer-setup/SKILL.md")
+# The Claude Code mod that hooks/hooks.json names under modules, and the files it imports.
+MOD_FILES = ("hooks/mod/register.tsx", "hooks/mod/marks.ts", "hooks/mod/review.ts")
+# The text files a harness runs from the bundle, compared byte for byte.
+BUNDLE_FILES = (*SKILL_FILES, *MOD_FILES)
 LAUNCHER = "scripts/steer"
 BINARIES = tuple(f"bin/{osname}-{arch}/steer" for osname in ("darwin", "linux") for arch in ("amd64", "arm64"))
 EXECUTABLES = (LAUNCHER, *BINARIES)
@@ -82,7 +89,7 @@ def identity(root):
         expected = {k: v for k, v in entry.items() if k not in ("source", "strict")}
         if {k: v for k, v in plugin.items() if k not in ("skills", "hooks")} != expected:
             raise ValueError(f"{name}: differs from the marketplace plugin")
-        if plugin.get("hooks") != "./hooks/hooks.json" or plugin.get("skills") != [
+        if plugin.get("hooks") != "./" + HOOK_FILES[name] or plugin.get("skills") != [
                 "./skills/auto-steer", "./skills/steer", "./skills/steer-report",
                 "./skills/steer-setup"]:
             raise ValueError(f"{name}: missing bundled skill or hook declarations")
@@ -113,7 +120,7 @@ def inspect_listing(root, expected):
 
 def inspect_checkout(root, expected, expected_hooks=None, expected_digests=None, expected_skill_digests=None,
                      expected_stamp=None):
-    for name in ("hooks/hooks.json", *SKILL_FILES):
+    for name in (*HOOK_FILES.values(), *BUNDLE_FILES):
         if not contained_file(root, name):
             raise ValueError(f"published bundle file is missing or outside the bundle: {name}")
     inspect_listing(root, expected)
@@ -134,20 +141,25 @@ def inspect_checkout(root, expected, expected_hooks=None, expected_digests=None,
         if expected_stamp.encode() not in data:
             raise ValueError(f"published executable lacks the candidate build stamp {expected_stamp}: {name}")
     if expected_skill_digests is None:
-        expected_skill_digests = artifact_digests(ROOT, SKILL_FILES)
-    if artifact_digests(root, SKILL_FILES) != expected_skill_digests:
-        raise ValueError("published skill bytes differ from the candidate bundle")
+        expected_skill_digests = artifact_digests(ROOT, BUNDLE_FILES)
+    if artifact_digests(root, BUNDLE_FILES) != expected_skill_digests:
+        raise ValueError("published skill or mod bytes differ from the candidate bundle")
     if expected_hooks is None:
-        expected_hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text())
-    if json.loads((root / "hooks" / "hooks.json").read_text()) != expected_hooks:
+        expected_hooks = hook_wiring(ROOT)
+    if hook_wiring(root) != expected_hooks:
         raise ValueError("published hook wiring differs from this checkout")
+
+
+def hook_wiring(root):
+    """Return each hooks file the plugin manifests name, parsed, keyed by its path."""
+    return {name: json.loads((root / name).read_text()) for name in HOOK_FILES.values()}
 
 
 def preflight(root, ref=None):
     expected = identity(root)
-    expected_hooks = json.loads((root / "hooks" / "hooks.json").read_text())
+    expected_hooks = hook_wiring(root)
     expected_digests = artifact_digests(root)
-    expected_skill_digests = artifact_digests(root, SKILL_FILES)
+    expected_skill_digests = artifact_digests(root, BUNDLE_FILES)
     repository = expected[1]["repository"]
     slug = repository.removeprefix("https://github.com/")
     request = Request(f"https://api.github.com/repos/{slug}",

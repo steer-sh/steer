@@ -170,9 +170,11 @@ func (e *Engine) prepare(req Request, firing int, d *DiffResult) (prepared, stri
 	return prepared{paths: paths, diff: d.Text, raw: d.Raw}, "", nil
 }
 
-// review runs the panel over a prepared round.
-func (e *Engine) review(ctx context.Context, req Request, p prepared) PanelResult {
+// review runs the panel over a prepared round and keeps the round's live review file
+// while it runs. The caller ends that file with the phase of the row it writes.
+func (e *Engine) review(ctx context.Context, req Request, p prepared, firing int, final bool) PanelResult {
 	start := time.Now()
+	live := e.beginLive(req, firing, final)
 	// Terms come from the budgeted diff before neutralisation: neutralising first
 	// would leave &lt; in a search term, and a dropped file's hunks seed no search.
 	// Changed-path stems stay search terms. BuildContext neutralises its own files.
@@ -186,8 +188,9 @@ func (e *Engine) review(ctx context.Context, req Request, p prepared) PanelResul
 	}
 	prompt := BuildReviewPrompt(
 		NeutralizeTags(req.Message), NeutralizeTags(p.diff), contextBlock, req.addendum)
-	result := e.panel.Run(ctx, prompt, req.Repo, req.Spec)
+	result := e.panel.run(ctx, prompt, req.Repo, req.Spec, live.runEnded)
 	result.Elapsed = time.Since(start)
+	result.live = live
 	return result
 }
 
@@ -308,6 +311,7 @@ func (e *Engine) handleRetry(ctx context.Context, req Request, chain *Chain, sta
 	}
 
 	if !changed {
+		e.clearLive(req)
 		// The chain's real stop. An all-rejected round produces this, which is why the
 		// cap almost never binds.
 		//
@@ -332,6 +336,7 @@ func (e *Engine) handleRetry(ctx context.Context, req Request, chain *Chain, sta
 		logErr = err
 	}
 	if firing >= e.cfg.MaxFirings {
+		e.clearLive(req)
 		// The cap stops the BLOCKING chain, not the reading of the last round's fixes.
 		d, terminal := e.terminalReview(ctx, req, chain, p, status, next)
 		return e.release(withLedgerError(d, logErr), req, firing, terminal)
@@ -348,9 +353,11 @@ func (e *Engine) handleRetry(ctx context.Context, req Request, chain *Chain, sta
 			// about the round the chain still awaits an answer for.
 			return proceed(ContextOnly, req, state.Diff, firing, notice, logErr)
 		}
+		e.clearLive(req)
 		return e.release(e.skipped(req, status, logErr), req, firing, 0)
 	}
 	// The diff changed, so this round reviews code no reviewer has read.
+	e.clearLive(req)
 	d, terminal := e.reviewCommit(ctx, req, chain, p, next)
 	return e.release(withLedgerError(d, logErr), req, firing, terminal)
 }
@@ -444,9 +451,10 @@ func withLedgerError(d Decision, err error) Decision {
 // must answer as terminal: firing when a NITPICK-only round handed the agent findings
 // without blocking, else 0.
 func (e *Engine) reviewCommit(ctx context.Context, req Request, chain *Chain, p prepared, firing int) (Decision, int) {
-	result := e.review(ctx, req, p)
+	result := e.review(ctx, req, p, firing, false)
 
 	if result.Answered == 0 {
+		result.live.end("ungated", result)
 		// Logged for the reason skip-empty is: this is a commit that went through
 		// ungated, and a pass the log does not carry reads as a commit that never
 		// happened. No cleared record: nothing was reviewed, so nothing is cleared.
@@ -466,6 +474,7 @@ func (e *Engine) reviewCommit(ctx context.Context, req Request, chain *Chain, p 
 	}
 
 	if len(result.Reviews) == 0 {
+		result.live.end("clean", result)
 		err := e.log(req, mergeRows(
 			Row{"ts": time.Now().Unix(), "phase": "clean", "reviewers": result.Answered,
 				"files": len(p.paths), "changed_paths": SlashPaths(p.paths),
@@ -503,8 +512,10 @@ func (e *Engine) reviewCommit(ctx context.Context, req Request, chain *Chain, p 
 
 	review, findings := ComposeReview(result.Reviews)
 	if NitpickOnlyRound(result.Reviews) {
+		result.live.end(PhaseNitpick, result)
 		return e.nitpickRound(req, chain, p, firing, result, review, findings), firing
 	}
+	result.live.end("deny", result)
 	// `firing` rides in the state, so the retry row it produces knows which round it
 	// closes.
 	saveErr := chain.Save(ChainState{
@@ -601,7 +612,8 @@ func (e *Engine) terminalReview(ctx context.Context, req Request, chain *Chain, 
 			"%s. The final review did not run (%s), so round %d's fixes are UNREVIEWED.%s",
 			capped, status, e.cfg.MaxFirings, separated(p.notice)), nil), 0
 	}
-	result := e.review(ctx, req, p)
+	result := e.review(ctx, req, p, firing, true)
+	result.live.end("cap", result)
 	row := mergeRows(
 		Row{"ts": time.Now().Unix(), "phase": "cap", "firing": firing,
 			"reviewers": result.Answered, "files": len(p.paths),

@@ -52,7 +52,7 @@ class ReleasePreflight(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        for name in (*preflight.MARKETS, *preflight.PLUGINS, "README.md", "hooks/hooks.json"):
+        for name in (*preflight.MARKETS, *preflight.PLUGINS, "README.md", *preflight.HOOK_FILES.values()):
             target = self.root / name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / name, target)
@@ -64,13 +64,13 @@ class ReleasePreflight(unittest.TestCase):
             data = b"#!/bin/sh\n" if header is None else header[0].ljust(header[1]) + (header[2] or b"")
             target.write_bytes(data + b" fixture executable stamp abc1234")
             target.chmod(0o755)
-        for name in preflight.SKILL_FILES:
+        for name in preflight.BUNDLE_FILES:
             target = self.root / name
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text("fixture skill")
         self.expected = preflight.identity(self.root)
         self.digests = preflight.artifact_digests(self.root)
-        self.skill_digests = preflight.artifact_digests(self.root, preflight.SKILL_FILES)
+        self.skill_digests = preflight.artifact_digests(self.root, preflight.BUNDLE_FILES)
 
     def inspect(self):
         return preflight.inspect_checkout(self.root, self.expected, expected_digests=self.digests,
@@ -103,9 +103,14 @@ class ReleasePreflight(unittest.TestCase):
                 path.write_text("fixture skill")
 
     def test_empty_published_hook_wiring_is_refused(self):
-        (self.root / "hooks/hooks.json").write_text("{}")
-        with self.assertRaisesRegex(ValueError, "hook wiring"):
-            self.inspect()
+        for name in preflight.HOOK_FILES.values():
+            with self.subTest(name=name):
+                path = self.root / name
+                original = path.read_text()
+                path.write_text("{}")
+                with self.assertRaisesRegex(ValueError, "hook wiring"):
+                    self.inspect()
+                path.write_text(original)
 
     def test_external_skill_symlinks_are_refused(self):
         with tempfile.TemporaryDirectory() as outside:
@@ -148,11 +153,12 @@ class ReleasePreflight(unittest.TestCase):
                     preflight.identity(self.root)
 
     def test_stale_skill_contents_are_refused(self):
-        for name in ("skills/steer/prompts/routing.md", "skills/steer-report/audit.md"):
+        for name in ("skills/steer/prompts/routing.md", "skills/steer-report/audit.md",
+                     "hooks/mod/review.ts"):
             with self.subTest(name=name):
                 path = self.root / name
                 path.write_text("stale published skill")
-                with self.assertRaisesRegex(ValueError, "skill bytes differ"):
+                with self.assertRaisesRegex(ValueError, "skill or mod bytes differ"):
                     self.inspect()
                 path.write_text("fixture skill")
 
