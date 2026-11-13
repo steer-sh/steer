@@ -10,5 +10,5 @@
   "license": "MIT",
   "keywords": ["code-review", "commit-review", "checks", "guards", "hooks"],
   "skills": ["./skills/auto-steer", "./skills/steer", "./skills/steer-report", "./skills/steer-setup"],
-  "hooks": "./hooks/hooks.json"
+  "hooks": "./hooks/codex.json"
 }

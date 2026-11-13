@@ -61,6 +61,13 @@ Read the linked architecture section before changing the corresponding boundary:
   with `~/.steer/bin/steer`. A removed plugin is read from `~/.steer/bin/source`
   (`steerbin.Sources`) against each harness's install record (`status.RemovedPlugins`),
   and its notice rides the gate through `gate.Config.OperatorNotice`.
+  The Claude Code mod is the module `hooks/hooks.json` names under `modules`
+  (`hooks/mod/`); it handles no tool or `classic.*` event, which
+  `TestTheBundledModHandlesNoToolOrClassicEvent` and `scripts/check-mod.py` pin. A
+  file it imports joins `MOD_FILES` in `scripts/preflight-release.py`. Codex refuses
+  the `modules` key, so its manifest names `hooks/codex.json`: a change to the
+  plugin's hooks goes into both files, which
+  `TestCodexHooksAreTheClaudeHooksWithoutModules` pins.
 - Harness support, paths, or migrations: [harnesses and storage](ARCHITECTURE.md#harnesses-and-storage).
   Start with `cli/internal/harness/` and `cli/internal/steerpath/`; registration
   adapters and shared stores have different ownership.
@@ -185,6 +192,13 @@ Read the linked architecture section before changing the corresponding boundary:
   The check tier's share of it lives in `cli/internal/status/checks.go`.
 - Refresh queue: `cli/internal/cadence/refresh.go` and
   `skills/steer-report/SKILL.md`. Read version constants at their source.
+- Live review file: the writer `cli/internal/gate/live.go` (`LiveReview`,
+  `LiveVersion`), the mod's reader `hooks/mod/review.ts` (`parseLive`, `viewOf`) and
+  its directory lookup `resolveRoot` in `hooks/mod/register.tsx`, which mirrors
+  `statestore.Resolve`. An `outcome` is the ledger phase of the round's row, so a new
+  phase where a reviewer ran needs its `end` call in the engine and its case in
+  `endedKind`. A changed shape bumps `LiveVersion`; the mod draws nothing for a
+  version it does not know.
 - Fixture receipts: `cli/internal/claude/fixturestate.go` reads a guard store,
   `cli/internal/evidence/` resolves it into `mine.EvidenceSet`, and
   `cli/internal/gate/mine/guardfix.go` tests each record's frozen ownership
@@ -296,6 +310,10 @@ built binary as a subprocess in a throwaway home, with `cli/e2e/stubreviewer` li
 on PATH as `agy`, `claude` and `codex`. Its environment is built from nothing, so a
 case reads no operator setting. `revert-test.py` runs no tagged test, so each e2e
 test carries `// pins existing behaviour`.
+`./check.sh` runs `scripts/check-mod.py`: `claude plugin validate` must list no tool,
+`classic.*` or wildcard event for the mod, and `claude plugin test` runs
+`hooks/mod/*.test.tsx`; neither starts a session. Without a `claude` that has both
+commands it prints a skip line and passes.
 `./check-full.sh` adds `scripts/revert-test-verify.py`, which checks that script's
 copy, lock and variant generation over fixture repositories, then the slow headless skill-generation
 harness that invokes `claude -p`; it is separate from the turn-end gate.
