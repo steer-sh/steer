@@ -743,6 +743,17 @@ operator notice. The check does not depend on `--if-due`, the resolver lock or
 `backfill.scanned`; after it the ordinary resolver runs, narrating on stderr. A
 ledger found only in the payload satisfies the check and creates no resolver link.
 
+While a round's reviewers run, the engine keeps a live review file at
+`<state>/commit-review/live/<session>/<actor>-<repo hash>.json` (`internal/gate/live.go`):
+written when the round starts, rewritten at each run's return and on a beat every two
+seconds, and ended with the phase of the row the round wrote and each well-formed
+finding's severity, file and bounded claim. It is a view for a reader that draws the
+review: no decision reads it, a write that fails is dropped without a note, and a
+request with no session keeps none. A reader tells a dead gate from a running one by
+the beat, never by the process id. The retry that answers a held round removes the
+file; one that puts the round back unanswered keeps it. Each new round prunes files
+older than `StaleAfter`.
+
 Each row's transcript prefix is stored once per session under `prefixes/`: the
 session file grows by appended gzip members, and a row names its slice with
 `prefix_lines` and `prefix_sha`. Read it through `gate.ReadPrefix`, which also

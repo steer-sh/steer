@@ -213,11 +213,19 @@ type PanelResult struct {
 	// Elapsed is the wall-clock time of the round, from building the context block
 	// and prompt to the last run's return. The diff was read before it.
 	Elapsed time.Duration
+	// live is the round's live review file, nil when the round keeps none.
+	live *liveReview
 }
 
 // Run fires the panel. spec selects the commit view for a reviewer that reads
 // files; the view is built once and shared, since a run only reads it.
 func (p *Panel) Run(ctx context.Context, prompt, cwd string, spec DiffSpec) PanelResult {
+	return p.run(ctx, prompt, cwd, spec, nil)
+}
+
+// run is Run with onRun called as each run returns, from that run's goroutine, with
+// the run's position in the panel. A nil onRun is not called.
+func (p *Panel) run(ctx context.Context, prompt, cwd string, spec DiffSpec, onRun func(int, ReviewRun)) PanelResult {
 	review := p.reviewer.Review
 	if vr, ok := wantsView(p.reviewer); ok {
 		view, _ := NewCommitView(p.cfg, cwd, spec)
@@ -236,6 +244,9 @@ func (p *Panel) Run(ctx context.Context, prompt, cwd string, spec DiffSpec) Pane
 			start := time.Now()
 			runs[i] = Classify(review(runCtx, prompt, cwd))
 			runs[i].Elapsed = time.Since(start)
+			if onRun != nil {
+				onRun(i, runs[i])
+			}
 		}(i)
 	}
 	wg.Wait()
