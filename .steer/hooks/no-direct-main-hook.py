@@ -22,6 +22,8 @@ SEPARATORS = set(";&|()")
 WRAPPERS = {"sudo", "env", "time", "nohup", "exec", "command"}
 GIT_VALUE_FLAGS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace"}
 PUSH_VALUE_FLAGS = {"--repo", "-o", "--push-option", "--receive-pack", "--exec"}
+INIT_VALUE_FLAGS = {"-b", "--initial-branch", "--template", "--separate-git-dir",
+                    "--object-format", "--ref-format"}
 HEREDOC = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
 
 
@@ -163,6 +165,24 @@ def switched_branch(subcommand, arguments):
     return names[0]
 
 
+def initialized_directory(arguments, directory):
+    """Return the directory a git init creates a repository in, or "" if it exists already."""
+    index = 0
+    while index < len(arguments):
+        argument = arguments[index]
+        if not argument.startswith("-"):
+            directory = os.path.join(directory, os.path.expanduser(argument))
+            break
+        index += 2 if argument in INIT_VALUE_FLAGS else 1
+    directory = os.path.normpath(directory)
+    return "" if os.path.exists(directory) else directory
+
+
+def inside(directory, roots):
+    """Return whether directory is one of roots or below one."""
+    return any(directory == root or directory.startswith(root + os.sep) for root in roots)
+
+
 def push_targets_main(arguments, branch):
     """Return whether a push with these arguments updates main."""
     positional = []
@@ -201,9 +221,16 @@ def violation(command, cwd):
     """Return the message for the first commit or push that reaches main, or ""."""
     directory = cwd
     moved = {}
+    fresh = set()
+    removed = set()
     for raw, separator in segments(command):
         tokens = strip_prefix(raw)
         if not tokens:
+            continue
+        if tokens[0] == "rm" and any(t == "--recursive" or (t[:1] == "-" and t[1:2] != "-" and "r" in t.lower())
+                                       for t in tokens[1:]):
+            removed.update(os.path.normpath(os.path.join(directory, os.path.expanduser(t)))
+                           for t in tokens[1:] if not t.startswith("-"))
             continue
         if tokens[0] == "cd" and len(tokens) > 1:
             directory = os.path.join(directory, os.path.expanduser(tokens[1]))
@@ -212,6 +239,17 @@ def violation(command, cwd):
             continue
         target, subcommand, arguments = parse_git(tokens, directory)
         target = os.path.normpath(target)
+        if subcommand == "init":
+            # A directory that does not exist yet becomes a repository of its own.
+            created = initialized_directory(arguments, target)
+            # An unexpanded path may name the checkout; it counts as new only below an rm -r.
+            if created and ("$" not in created or inside(created, removed)):
+                fresh.add(created)
+            continue
+        redirected = any(t.split("=")[0] in GIT_VALUE_FLAGS - {"-c"} for t in tokens[1:tokens.index(subcommand)]) \
+            if subcommand in tokens else True
+        if not redirected and inside(target, fresh):
+            continue
         if subcommand in ("switch", "checkout"):
             destination = switched_branch(subcommand, arguments)
             # Only && proves that a move away from main succeeded.
