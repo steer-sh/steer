@@ -56,6 +56,12 @@ If you use both Codex and Claude Code, run `/steer-setup` in both CLI agents. It
 
 Nothing changes when committing repo changes. Once your agent makes a commit, it will be automatically reviewed and concerns raised on findings. Your CLI agent will check each finding against the code, fix what holds up, and send back a report on what it accepted and what it rejected. Steer will continue reviewing the commits until no accepted - non-nitpick - findings remain, or until 4 reviews in a row have blocked the commit. Change that number with `steer config set reviewer.rounds <1-10>`. 4 is the default because initial testing shows diminishing returns after this amount.
 
+*New in 0.4.0*: Graphical Review Band. Using Claude Code Mods, Steer now displays a uniquely-styled review band on both terminal and Desktop. This band shows the status of the commit review, as well as a preview of its findings.
+
+<p align="center">
+  <img src="docs/review-band-desktop.png" width="900" alt="Steer's review band in the Claude Code Desktop app: round 2 of 4, Steer holds the commit while 3 runs read the diff">
+</p>
+
 Commits where every changed file is prose (`.md`, `.txt` and similar), or binary are skipped. `CLAUDE.md` and `AGENTS.md` are exceptions to the prose rule.
 
 ### Run `/steer-report`
