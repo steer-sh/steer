@@ -5,6 +5,29 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-11-13
+
+- **auto-steer skill added**: `/auto-steer` is an optional skill that runs the
+  full Steer report pass for you. It audits your installed fixes, finds recurring
+  problems in your session and review history, and then installs, repairs or
+  removes each fix that meets a stated bar. You answer no questions. At the end,
+  one report tells you what changed, what it held back and what is left for you.
+  Each change the report lists comes with the steps that undo it, except a
+  repair the report says has no undo. When you undo a fix it installed, a later
+  pass does not install that fix again.
+- **Claude Code - Graphical Review Band**: built with
+  [Claude Code Mods](https://code.claude.com/docs/en/plugins/mods/overview). In
+  Claude Code, a band above the prompt shows the review round and its reviewers
+  while they read. It then shows the result: held with its findings, passed, or not
+  reviewed. In the Desktop app, the band is an animated card that follows your
+  light or dark appearance.
+- **Report passes reach every repository**: `/steer-report` and `/auto-steer` can
+  now install and repair project fixes in repositories other than the one where
+  you start them. Before, they held those fixes back.
+- **Codex: approve Steer's hooks once more**: after you update, open `/hooks` in
+  Codex and approve Steer's two hooks again. Steer now gives Codex its own hooks
+  file, and Codex links each approval to a file path.
+
 ## [0.3.1] - 2026-11-10
 
 ### Changed
@@ -385,6 +408,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 First public release.
 
+[0.4.0]: https://github.com/steer-sh/steer/releases/tag/v0.4.0
 [0.3.1]: https://github.com/steer-sh/steer/releases/tag/v0.3.1
 [0.3.0]: https://github.com/steer-sh/steer/releases/tag/v0.3.0
 [0.2.0]: https://github.com/steer-sh/steer/releases/tag/v0.2.0
