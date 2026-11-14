@@ -1,0 +1,472 @@
+# steer Hook Testing Framework - Test Case Configuration
+# This file defines test cases for validating hook generation and execution
+
+test_cases:
+  - name: "package-json-git-deps"
+    rule: "In package.json, block git dependencies in the main 'dependencies' section | Git dependencies should only be used in 'devDependencies' for local tooling"
+    description: "Prevent git dependencies in production dependencies section"
+    file_type: "json"
+    timeout: 30
+    repeat_count: 1
+    positive_files:
+      - path: "package_with_git_main/package.json"
+        description: "package.json with git dependency in main dependencies"
+      - path: "package_multiple_git_main/package.json"
+        description: "package.json with multiple git dependencies in main"
+    negative_files:
+      - path: "package_clean/package.json"
+        description: "Clean package.json without git dependencies"
+      - path: "package_git_dev/package.json"
+        description: "package.json with git dependency in devDependencies"
+      - path: "package_npm_deps/package.json"
+        description: "package.json with only npm registry dependencies"
+  
+  - name: "console-log-block"
+    rule: "never use console.log"
+    description: "Block all console.log statements in JavaScript/TypeScript"
+    file_type: "javascript"
+    timeout: 30
+    repeat_count: 1
+    positive_files:
+      - path: "code_with_console.js"
+        description: "JavaScript file with console.log statements"
+      - path: "code_multiple_console.ts"
+        description: "TypeScript file with multiple console.log calls"
+    negative_files:
+      - path: "code_clean.js"
+        description: "Clean JavaScript without console.log"
+      - path: "code_with_logger.js"
+        description: "JavaScript using proper logging library"
+  
+  - name: "no-var-declarations"
+    rule: "never use var declarations | use const or let instead"
+    description: "Prevent var declarations in favor of const/let"
+    file_type: "javascript"
+    timeout: 30
+    repeat_count: 1
+    positive_files:
+      - path: "code_with_var.js"
+        description: "JavaScript with var declarations"
+    negative_files:
+      - path: "code_with_const_let.js"
+        description: "JavaScript using const and let"
+      - path: "code_modern_syntax.js"
+        description: "Modern JavaScript without var"
+
+  - name: "todo-comments-production"
+    rule: "Block common code annotations like TODO, FIXME, XXX, and HACK in production files."
+    description: "Prevent TODO comments in production code"
+    file_type: "generic"
+    timeout: 30
+    repeat_count: 1
+    positive_files:
+      - path: "prod/code_with_todo.js"
+        description: "Code file with TODO comments in production path (should be blocked)"
+      - path: "prod/code_with_fixme.py"
+        description: "Python file with FIXME comments in production path (should be blocked)"
+    negative_files:
+      - path: "code_clean_comments.js"
+        description: "Code with proper comments only (non-production path)"
+      - path: "code_no_comments.py"
+        description: "Code without any comments (non-production path)"
+      - path: "tests/code_with_todo.js"
+        description: "Code with TODO comments in test path (should be allowed)"
+      - path: "tests/code_with_fixme.py"
+        description: "Code with FIXME comments in test path (should be allowed)"
+
+  - name: "eval-usage-security"
+    rule: "prevent eval() usage | use safer alternatives like JSON.parse()"
+    description: "Block dangerous eval() usage for security"
+    file_type: "javascript"
+    timeout: 30
+    repeat_count: 1
+    positive_files:
+      - path: "code_with_eval.js"
+        description: "JavaScript using eval() function"
+    negative_files:
+      - path: "code_with_json_parse.js"
+        description: "JavaScript using JSON.parse() instead"
+      - path: "code_safe_parsing.js"
+        description: "Code with safe parsing methods"
+
+  - name: "python-mutable-defaults"
+    rule: "block mutable default arguments in python functions | Use 'None' as the default and initialize inside the function"
+    description: "Prevent dangerous mutable default arguments in Python functions"
+    file_type: "python"
+    timeout: 30
+    repeat_count: 1
+    positive_files:
+      - path: "function_with_list_default.py"
+        description: "Python function with mutable list default argument"
+      - path: "function_with_dict_default.py"
+        description: "Python function with mutable dict default argument"
+    negative_files:
+      - path: "function_with_none_default.py"
+        description: "Python function using None default and proper initialization"
+      - path: "function_with_immutable_defaults.py"
+        description: "Python function with safe immutable default arguments"
+
+  - name: "go-panic-usage"
+    rule: "In Go functions outside of the main package, block the use of panic() | Use error returns for handling recoverable errors"
+    description: "Prevent panic() usage outside main package in Go"
+    file_type: "go"
+    timeout: 30
+    repeat_count: 1
+    positive_files:
+      - path: "go_function_with_panic.go"
+        description: "Go function outside main package using panic()"
+      - path: "go_library_with_panic.go"
+        description: "Go library code using panic() inappropriately"
+    negative_files:
+      - path: "go_function_with_error.go"
+        description: "Go function using proper error returns"
+      - path: "go_main_with_panic.go"
+        description: "Go main package function using panic() (allowed)"
+
+  - name: "sql-injection-prevention"
+    rule: "Block SQL queries that use Python f-string or %-formatting for values | Use parameterized queries to prevent SQL injection vulnerabilities"
+    description: "Prevent SQL injection by blocking unsafe string formatting in SQL queries"
+    file_type: "python"
+    timeout: 30
+    repeat_count: 1
+    positive_files:
+      - path: "sql_with_fstring.py"
+        description: "Python code using f-strings in SQL queries"
+      - path: "sql_with_percent_format.py"
+        description: "Python code using %-formatting in SQL queries"
+    negative_files:
+      - path: "sql_with_parameters.py"
+        description: "Python code using parameterized queries"
+      - path: "sql_with_orm.py"
+        description: "Python code using ORM or safe query methods"
+
+  - name: "terraform-s3-versioning"
+    rule: "In Terraform, require all 'aws_s3_bucket' resources to have a 'versioning' block with 'enabled = true'"
+    description: "Enforce S3 bucket versioning in Terraform configurations"
+    file_type: "terraform"
+    timeout: 30
+    repeat_count: 1
+    positive_files:
+      - path: "s3_bucket_no_versioning.tf"
+        description: "Terraform S3 bucket without versioning block"
+      - path: "s3_bucket_versioning_disabled.tf"
+        description: "Terraform S3 bucket with versioning disabled"
+    negative_files:
+      - path: "s3_bucket_versioning_enabled.tf"
+        description: "Terraform S3 bucket with proper versioning enabled"
+      - path: "s3_multiple_buckets_versioned.tf"
+        description: "Multiple S3 buckets all with versioning enabled"
+
+  - name: "html-img-alt-attribute"
+    rule: "Ensure all <img> tags have a non-empty 'alt' attribute with meaningful text"
+    description: "Enforce accessibility by requiring descriptive alt attributes on images"
+    file_type: "html"
+    timeout: 30
+    repeat_count: 1
+    positive_files:
+      - path: "html_img_no_alt.html"
+        description: "HTML with img tags missing alt attributes"
+      - path: "html_img_empty_alt.html"
+        description: "HTML with img tags having empty alt attributes"
+    negative_files:
+      - path: "html_img_with_alt.html"
+        description: "HTML with img tags properly having alt attributes"
+      - path: "html_complex_with_alt.html"
+        description: "Complex HTML with all img tags having alt attributes"
+
+  - name: "python-naming-conventions"
+    rule: "Enforce that all Python class names are PascalCase, functions/variables are snake_case, and module-level constants are ALL_CAPS"
+    description: "Enforce Python naming conventions for better code consistency"
+    file_type: "python"
+    timeout: 30
+    repeat_count: 1
+    positive_files:
+      - path: "python_bad_class_names.py"
+        description: "Python classes with non-PascalCase names"
+      - path: "python_bad_function_names.py"
+        description: "Python functions with non-snake_case names"
+    negative_files:
+      - path: "python_good_naming.py"
+        description: "Python code with proper PascalCase classes and snake_case functions"
+      - path: "python_mixed_good_naming.py"
+        description: "Complex Python code with consistent naming conventions"
+
+  - name: "react-data-fetching"
+    rule: "In React components, block direct use of 'fetch' in the component body | Data fetching should be performed inside a 'useEffect' hook"
+    description: "React smoke test: direct fetch in component body should block; fetch in useEffect should allow"
+    file_type: "javascript"
+    timeout: 30
+    repeat_count: 1
+    positive_files:
+      - path: "react_direct_fetch.jsx"
+        description: "React component with fetch calls in component body"
+    negative_files:
+      - path: "react_proper_useeffect.jsx"
+        description: "React component using fetch inside useEffect"
+
+  - name: "markdown-file-validation"
+    rule: "Block any Markdown image paths that point to a non-existent file"
+    description: "Validate that Markdown image references point to existing files"
+    file_type: "markdown"
+    timeout: 30
+    repeat_count: 1
+    positive_files:
+      - path: "markdown_broken_images.md"
+        description: "Markdown file with image paths pointing to non-existent files"
+      - path: "markdown_mixed_images.md"
+        description: "Markdown file with mix of valid and invalid image paths"
+    negative_files:
+      - path: "markdown_valid_images.md"
+        description: "Markdown file with all valid image paths"
+      - path: "markdown_no_images.md"
+        description: "Markdown file without any image references"
+
+  - name: "api-key-detection"
+    rule: "Block strings that look like common API key patterns (e.g., sk_live_, AKIA...) | Store secrets in environment variables or a secure vault service"
+    description: "Detect and block hardcoded API keys and secrets in code"
+    file_type: "generic"
+    timeout: 30
+    repeat_count: 1
+    positive_files:
+      - path: "code_with_api_keys.py"
+        description: "Code with hardcoded API keys and secrets"
+      - path: "config_with_secrets.js"
+        description: "Configuration file with exposed secrets"
+    negative_files:
+      - path: "code_with_env_vars.py"
+        description: "Code properly using environment variables for secrets"
+      - path: "config_secure_secrets.js"
+        description: "Configuration using secure secret management"
+
+  - name: "dangerous-python-imports"
+    rule: "In Python, block the import of 'pickle' or 'shelve' | Use safer serialization formats like JSON for data interchange"
+    description: "Prevent use of dangerous Python serialization libraries"
+    file_type: "python"
+    timeout: 30
+    repeat_count: 1
+    positive_files:
+      - path: "python_with_pickle.py"
+        description: "Python code importing and using pickle module"
+      - path: "python_with_shelve.py"
+        description: "Python code importing and using shelve module"
+    negative_files:
+      - path: "python_safe_serialization.py"
+        description: "Python code using safe serialization methods like JSON"
+      - path: "python_alternative_serialization.py"
+        description: "Python code using safer alternatives to pickle"
+
+  - name: "python-command-injection"
+    rule: "In Python files, block command injection vulnerabilities from os.system and subprocess calls with shell=True"
+    description: "Prevent command injection vulnerabilities in Python subprocess calls"
+    file_type: "python"
+    timeout: 30
+    repeat_count: 1
+    positive_files:
+      - path: "python_command_injection.py"
+        description: "Python code with command injection vulnerabilities"
+      - path: "shell_script_injection.py"
+        description: "Python code with unsafe shell command execution"
+      - path: "python_stale_quoting_proof.py"
+        description: "Python code that quotes a variable, rebinds it, then runs it with shell=True"
+    negative_files:
+      - path: "python_safe_commands.py"
+        description: "Python code with safe command execution practices"
+      - path: "python_subprocess_safe.py"
+        description: "Python code using subprocess safely with proper quoting"
+
+  - name: "javascript-switch-defaults"
+    rule: "All JavaScript/TypeScript switch statements must have a 'default' case | Add a default case to handle unexpected values"
+    description: "Ensure JavaScript switch statements have default cases for better error handling"
+    file_type: "javascript"
+    timeout: 30
+    repeat_count: 1
+    positive_files:
+      - path: "js_switch_no_default.js"
+        description: "JavaScript switch statement without default case"
+      - path: "ts_switch_no_default.ts"
+        description: "TypeScript switch statement without default case"
+    negative_files:
+      - path: "js_switch_with_default.js"
+        description: "JavaScript switch statement with proper default case"
+      - path: "ts_switch_with_default.ts"
+        description: "TypeScript switch statement with proper default case"
+
+  - name: "python-fstring-enforcement"
+    rule: "In Python, prefer f-strings over .format() or % formatting for string formatting | Use f-strings for better readability and performance"
+    description: "Enforce modern Python f-string usage for consistent code style"
+    file_type: "python"
+    timeout: 30
+    repeat_count: 1
+    positive_files:
+      - path: "python_old_format_methods.py"
+        description: "Python code using .format() method for string formatting"
+      - path: "python_percent_formatting.py"
+        description: "Python code using % formatting for strings"
+    negative_files:
+      - path: "python_fstring_usage.py"
+        description: "Python code using modern f-string formatting"
+      - path: "python_mixed_fstring.py"
+        description: "Python code consistently using f-strings throughout"
+
+  - name: "javascript-strict-equality"
+    rule: "In JavaScript/TypeScript, always use strict equality (=== and !==) instead of loose equality (== and !=) | Use === and !== for type-safe comparisons"
+    description: "Enforce strict equality operators for better type safety in JavaScript"
+    file_type: "javascript"
+    timeout: 30
+    repeat_count: 1
+    positive_files:
+      - path: "js_loose_equality.js"
+        description: "JavaScript code using loose equality operators (== and !=)"
+      - path: "ts_loose_equality.ts"
+        description: "TypeScript code using loose equality operators"
+    negative_files:
+      - path: "js_strict_equality.js"
+        description: "JavaScript code using strict equality operators (=== and !==)"
+      - path: "ts_strict_equality.ts"
+        description: "TypeScript code using strict equality operators"
+
+  - name: "python-docstring-requirements"
+    rule: "All Python functions and classes must have docstrings | Add docstrings to document the purpose, parameters, and return values"
+    description: "Enforce comprehensive documentation through required docstrings"
+    file_type: "python"
+    timeout: 30
+    repeat_count: 1
+    positive_files:
+      - path: "python_missing_docstrings.py"
+        description: "Python code with functions and classes missing docstrings"
+      - path: "python_partial_docstrings.py"
+        description: "Python code with some functions missing docstrings"
+    negative_files:
+      - path: "python_complete_docstrings.py"
+        description: "Python code with comprehensive docstrings for all functions and classes"
+      - path: "python_detailed_docstrings.py"
+        description: "Python code with detailed docstrings following best practices"
+
+  # Layer 2 Security Rules - The Security Linter (Static Code Analysis Layer)
+
+  - name: "hardcoded-secret-reference-prevention"
+    rule: "Block code that contains hardcoded string literals referencing sensitive files like id_rsa, .env, secrets.json, keystore, wallet.dat, metamask, electrum, ledger, trezor, exodus, trust, phantom, solflare, keystore.json, or UTC-- wallet patterns"
+    description: "Prevent hardcoded references to sensitive files and crypto wallets"
+    file_type: "generic"
+    timeout: 30
+    repeat_count: 1
+    positive_files:
+      - path: "layer2/code_with_secret_refs.py"
+        description: "Code with hardcoded references to sensitive files like id_rsa, .env"
+      - path: "layer2/code_with_crypto_refs.js"
+        description: "Code with hardcoded crypto wallet references"
+      - path: "layer2/config_with_keystore.json"
+        description: "Configuration file with keystore references"
+    negative_files:
+      - path: "layer2/code_with_safe_paths.py"
+        description: "Code with safe file path references"
+      - path: "layer2/code_without_secrets.js"
+        description: "Code without any sensitive file references"
+      - path: "layer2/config_clean.json"
+        description: "Clean configuration without secret references"
+
+  - name: "postinstall-script-prevention"
+    rule: "In package.json files, never allow a 'postinstall' script. Post-install scripts are a major security risk for supply-chain attacks"
+    description: "Block postinstall scripts in package.json to prevent supply chain attacks"
+    file_type: "json"
+    timeout: 30
+    repeat_count: 1
+    positive_files:
+      - path: "layer2/package_with_postinstall.json"
+        description: "package.json with dangerous postinstall script"
+      - path: "layer2/package_complex_postinstall.json"
+        description: "package.json with complex postinstall script configuration"
+    negative_files:
+      - path: "layer2/package_safe_scripts.json"
+        description: "package.json with safe scripts (build, test, start)"
+      - path: "layer2/package_no_scripts.json"
+        description: "package.json without any scripts section"
+      - path: "layer2/package_preinstall_only.json"
+        description: "package.json with only preinstall scripts (safer)"
+
+  - name: "environment-variable-enumeration-prevention"
+    rule: "Block code that iterates over all process.env variables. Only allow access to specific, named variables"
+    description: "Prevent enumeration of all environment variables for security"
+    file_type: "javascript"
+    timeout: 30
+    repeat_count: 1
+    positive_files:
+      - path: "layer2/code_env_enumeration.js"
+        description: "JavaScript code iterating over all process.env variables"
+      - path: "layer2/code_env_loop.ts"
+        description: "TypeScript code with for-in loop over process.env"
+      - path: "layer2/code_env_keys.js"
+        description: "Code using Object.keys(process.env) to enumerate all variables"
+    negative_files:
+      - path: "layer2/code_specific_env.js"
+        description: "JavaScript accessing specific environment variables"
+      - path: "layer2/code_safe_env_access.ts"
+        description: "TypeScript with safe environment variable patterns"
+      - path: "layer2/code_config_object.js"
+        description: "Code using configuration object instead of raw env enumeration"
+
+
+
+  # Layer 3: Command Firewall (Action Layer) - Shell Command Security Rules
+  - name: "recursive-search-prevention"
+    rule: "Block shell commands that use recursive file system tools like 'find' or 'grep -r' starting from the home directory ($HOME)"
+    description: "Prevent dangerous recursive filesystem operations from home directory"
+    file_type: "shell"
+    timeout: 30
+    repeat_count: 1
+    positive_files:
+      - path: "layer3/cmd_find_home_recursive.sh"
+        description: "Shell command using find to recursively search from $HOME directory"
+      - path: "layer3/cmd_grep_recursive_home.sh"
+        description: "Shell command using grep -r to search recursively from home directory"
+      - path: "layer3/cmd_find_home_keys.sh"
+        description: "Shell command finding sensitive files recursively from home directory"
+    negative_files:
+      - path: "layer3/cmd_find_project_local.sh"
+        description: "Shell command using find within current project directory"
+      - path: "layer3/cmd_grep_specific_dir.sh"
+        description: "Shell command using grep -r within specific subdirectory"
+      - path: "layer3/cmd_find_safe_search.sh"
+        description: "Shell command using find with safe, limited scope"
+
+  - name: "data-exfiltration-prevention"
+    rule: "Block shell commands that pipe the output of a file-reading command (like cat, grep, ls) to a network tool (like curl, wget, nc)"
+    description: "Prevent data exfiltration via piping to network tools"
+    file_type: "shell"
+    timeout: 30
+    repeat_count: 1
+    positive_files:
+      - path: "layer3/cmd_cat_pipe_curl.sh"
+        description: "Shell command piping file contents to curl for data exfiltration"
+      - path: "layer3/cmd_ls_pipe_wget.sh"
+        description: "Shell command piping directory listing to wget for reconnaissance"
+      - path: "layer3/cmd_grep_pipe_netcat.sh"
+        description: "Shell command piping sensitive grep results to netcat"
+    negative_files:
+      - path: "layer3/cmd_cat_pipe_grep.sh"
+        description: "Shell command piping file contents to grep for local processing"
+      - path: "layer3/cmd_ls_pipe_sort.sh"
+        description: "Shell command piping directory listing to sort for organization"
+      - path: "layer3/cmd_safe_curl_usage.sh"
+        description: "Shell command using curl for legitimate API calls without piping"
+
+  - name: "env-dump-prevention"
+    rule: "Block the direct execution of the 'env' command, which can expose all environment variables"
+    description: "Prevent environment variable enumeration and exposure"
+    file_type: "shell"
+    timeout: 30
+    repeat_count: 1
+    positive_files:
+      - path: "layer3/cmd_env_dump.sh"
+        description: "Shell command executing env to dump all environment variables"
+      - path: "layer3/cmd_env_grep_secrets.sh"
+        description: "Shell command using env with grep to extract sensitive variables"
+      - path: "layer3/cmd_env_redirect_file.sh"
+        description: "Shell command redirecting env output to file for persistence"
+    negative_files:
+      - path: "layer3/cmd_env_var_set.sh"
+        description: "Shell command using env to set specific environment variable"
+      - path: "layer3/cmd_echo_specific_var.sh"
+        description: "Shell command echoing specific environment variable like $PATH"
+      - path: "layer3/cmd_export_variable.sh"
+        description: "Shell command using export to set environment variable"

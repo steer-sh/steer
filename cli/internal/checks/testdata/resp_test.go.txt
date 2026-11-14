@@ -1,0 +1,29 @@
+package resp
+
+import (
+	"strings"
+	"testing"
+)
+
+var requiredFields = []string{"id"}
+
+func assertFields(t *testing.T, body string, fields []string) {
+	t.Helper()
+	for _, f := range fields {
+		if !strings.Contains(body, "\""+f+"\"") {
+			t.Errorf("missing field %s in %s", f, body)
+		}
+	}
+}
+
+func TestResponse(t *testing.T) {
+	assertFields(t, Response(), requiredFields)
+}
+
+func otherHelper() int { return Unrelated() }
+
+func TestOther(t *testing.T) {
+	if otherHelper() != 2 {
+		t.Fatal("unrelated")
+	}
+}

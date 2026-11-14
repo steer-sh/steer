@@ -1,0 +1,2 @@
+NOTHING IN THE DENIED COMMAND RAN. The deny stopped the whole command, so a `git add` inside it staged nothing, and any file it wrote does not exist — a heredoc message file, a `>` redirect. The gate never unstages files: the index is exactly as it was before the command. Re-issue the command WHOLE on your retry. Running only its `git commit` part commits the index as it stood before, or exits 128 on a missing message file.
+

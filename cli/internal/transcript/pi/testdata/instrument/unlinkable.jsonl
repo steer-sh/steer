@@ -1,0 +1,4 @@
+{"type": "session", "version": 3, "id": "session-unlinkable", "timestamp": "2026-04-19T03:17:25.911Z", "cwd": "/repo/demo"}
+{"type": "message", "id": "e0000001", "parentId": null, "timestamp": "2026-04-19T03:17:26.000Z", "message": {"role": "user", "content": [{"type": "text", "text": "first turn"}], "timestamp": 1}}
+{"type": "message", "id": "e0000002", "parentId": null, "timestamp": "2026-04-19T03:17:26.000Z", "message": {"role": "user", "content": [{"type": "text", "text": "second turn"}], "timestamp": 1}}
+{"type": "message", "id": "e0000003", "parentId": null, "timestamp": "2026-04-19T03:17:26.000Z", "message": {"role": "user", "content": [{"type": "text", "text": "third turn"}], "timestamp": 1}}

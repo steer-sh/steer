@@ -1,0 +1,8 @@
+type fixture struct{ path string }
+
+func (f fixture) body() string { return f.path }
+
+func TestLoads(t *testing.T) {
+	f := fixture{path: "testdata/golden.json"}
+	testutil.Check(t, f.body())
+}

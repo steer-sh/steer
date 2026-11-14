@@ -1,0 +1,5 @@
+{"type": "session", "version": 3, "id": "session-custom", "timestamp": "2026-04-19T03:17:25.911Z", "cwd": "/repo/demo"}
+{"type": "custom", "id": "e0000001", "parentId": null, "timestamp": "2026-04-19T03:17:25.960Z", "customType": "my-extension", "data": {"count": 42}}
+{"type": "message", "id": "e0000002", "parentId": "e0000001", "timestamp": "2026-04-19T03:17:26.000Z", "message": {"role": "custom", "customType": "my-extension", "content": "extension state", "display": true, "timestamp": 1}}
+{"type": "custom_message", "id": "e0000003", "parentId": "e0000002", "timestamp": "2026-04-19T03:17:25.980Z", "customType": "my-extension", "content": "injected", "display": true}
+{"type": "message", "id": "e0000004", "parentId": "e0000003", "timestamp": "2026-04-19T03:17:26.000Z", "message": {"role": "user", "content": [{"type": "text", "text": "the only turn"}], "timestamp": 1776568645970}}

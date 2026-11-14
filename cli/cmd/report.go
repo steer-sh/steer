@@ -1,0 +1,848 @@
+package cmd
+
+import (
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/spf13/cobra"
+	"github.com/steer-sh/steer-cli/internal/cadence"
+	"github.com/steer-sh/steer-cli/internal/claude"
+	codexhooks "github.com/steer-sh/steer-cli/internal/codex"
+	"github.com/steer-sh/steer-cli/internal/evidence"
+	"github.com/steer-sh/steer-cli/internal/gate"
+	"github.com/steer-sh/steer-cli/internal/gate/mine"
+	"github.com/steer-sh/steer-cli/internal/gate/resolve"
+	"github.com/steer-sh/steer-cli/internal/guardscope"
+	"github.com/steer-sh/steer-cli/internal/harness"
+	pihooks "github.com/steer-sh/steer-cli/internal/pi"
+	"github.com/steer-sh/steer-cli/internal/report"
+	"github.com/steer-sh/steer-cli/internal/status"
+	"github.com/steer-sh/steer-cli/internal/steerbin"
+	"github.com/steer-sh/steer-cli/internal/transcript"
+)
+
+var (
+	reportDays        int
+	reportProjectOnly bool
+	reportRepoOnly    bool
+	reportMaxBytes    int
+	reportHarness     string
+)
+
+// scanScope maps the two scope flags to the shared transcript scope. It refuses
+// both at once, and it resolves the repository here rather than inside the scan:
+// evidence gathering fails soft, so an unresolved root would print an empty
+// machine instead of naming the missing repository.
+func scanScope(repoOnly, projectOnly bool) (report.Scope, error) {
+	if repoOnly && projectOnly {
+		return report.ScopeAll, fmt.Errorf("--repo-only and --project-only select different scopes; pass one")
+	}
+	scope := report.ScopeOf(repoOnly, projectOnly)
+	if scope == report.ScopeRepo {
+		if _, err := scope.Filter(time.Now()); err != nil {
+			return scope, fmt.Errorf("--repo-only needs a repository: %w", err)
+		}
+	}
+	return scope, nil
+}
+
+var reportCmd = &cobra.Command{
+	Use:   "report",
+	Short: "Scan agent transcripts for hook-suggestion signals",
+	Long: `Report streams session transcripts from the last N days and emits a compact
+JSON digest of recurring friction: user corrections, rejected tool calls,
+lint/test failures, and hook blocks. It also lists the message typed right after
+each interrupted turn and typed human text that repeats verbatim across
+sessions, and diffs instruction-file directives
+(CLAUDE.md, AGENTS.md) against already-registered steer rules.
+
+Every harness with transcripts on this machine is mined — Claude Code
+(~/.claude/projects) and Codex ($CODEX_HOME/sessions). Use --harness to read
+one of them alone. A subagent thread is provenance on its
+root session, never a unit of its own, so every harness's sessions count the
+same way.
+
+All projects are scanned by default — the strongest hook candidates are habits
+that repeat across projects. Use --project-only to restrict the scan to
+transcripts of the current working directory, or --repo-only to read every
+session launched anywhere inside the current checkout. A sibling worktree, a
+nested repository and a submodule each have a root of their own and stay out.
+
+The report is mechanical evidence only — deciding which signals deserve hooks
+is the job of the /steer-report skill, which reads this output. The scan stores
+the whole report, every occurrence of every cluster, in the steer-report state
+directory, and prints the first page of its index: coverage, a summary of each
+signal and instruction document, and one row per correction, rejection,
+after-interrupt and repeated wording cluster. 'steer report show' reads the rest of the stored report. Stdout
+carries pure JSON; progress goes to stderr. A page stays within
+--max-digest-bytes, and page.next_cursor names the next one.`,
+	Example: `  steer report
+  steer report --days 7
+  steer report --harness codex
+  steer report --project-only
+  steer report --repo-only
+  steer report --max-digest-bytes 20000`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if reportDays <= 0 {
+			return fmt.Errorf("--days must be positive, got %d", reportDays)
+		}
+		only, err := parseReportHarness()
+		if err != nil {
+			return err
+		}
+
+		scope, err := scanScope(reportRepoOnly, reportProjectOnly)
+		if err != nil {
+			return err
+		}
+
+		since := time.Now().AddDate(0, 0, -reportDays)
+		filter, err := scope.Filter(since)
+		if err != nil {
+			return fmt.Errorf("failed to resolve the scan scope: %w", err)
+		}
+		adapters := report.Adapters(only)
+
+		scanner, projectNames := report.Scan(adapters, since, filter, func(s transcript.Session, err error) {
+			fmt.Fprintf(os.Stderr, "warning: skipping %s: %v\n", filepath.Base(s.Path), err)
+		})
+
+		digest := scanner.Finalize(reportDays, projectNames, collectInstructionFiles(only))
+		dir, err := cadence.PrepareStateDir()
+		if err != nil {
+			return err
+		}
+		if err := report.Save(dir, digest); err != nil {
+			return fmt.Errorf("failed to store the report: %w", err)
+		}
+		data, err := report.IndexPage(digest, 0, reportMaxBytes)
+		if err != nil {
+			return err
+		}
+
+		for _, line := range coverageLines(digest.Stats.Harnesses) {
+			fmt.Fprintln(os.Stderr, line)
+		}
+		fmt.Fprintf(os.Stderr, "Scanned %d sessions (%d bytes); found %d clusters; stored report %s in %s.\n",
+			digest.Stats.SessionsScanned,
+			digest.Stats.BytesScanned,
+			digest.Stats.ClustersFound,
+			digest.ReportID,
+			report.ReportPath(dir),
+		)
+
+		fmt.Println(string(data))
+		return nil
+	},
+}
+
+var (
+	reportShowReport string
+	reportShowCursor int
+	reportShowMatch  string
+	reportShowBytes  int
+)
+
+var reportShowCmd = &cobra.Command{
+	Use:   "show [signal | id...]",
+	Short: "Read the stored report: index pages, one signal's clusters, or item details",
+	Long: `show reads the report the last 'steer report' stored, without scanning again.
+
+With no argument it prints the index page at --cursor. With a signal name
+(user_corrections, user_rejections, after_interrupt, repeated_wording,
+correction_candidates, tool_failures, hook_blocks) it lists that signal's clusters, filtered by --match
+when given. With ids from the index (c3, r1, a4, w2, k5, f12, h2, i1) it prints every occurrence of each cluster and every
+directive of each instruction document.
+
+Every output is one page within --max-bytes; page.next_cursor names the next
+page. Pass --report with the report_id the index printed: a later scan replaces
+the stored report, and show refuses to mix the two.`,
+	Example: `  steer report show --report 3f2a9c1b7d4e --cursor 57
+  steer report show hook_blocks --match 'python' --report 3f2a9c1b7d4e
+  steer report show c3 c7 i1 --report 3f2a9c1b7d4e`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		d, err := report.Load(cadence.StateDir(), reportShowReport)
+		if err != nil {
+			return err
+		}
+		var match *regexp.Regexp
+		if reportShowMatch != "" {
+			if match, err = regexp.Compile(reportShowMatch); err != nil {
+				return fmt.Errorf("--match: %w", err)
+			}
+		}
+		var data []byte
+		switch {
+		case len(args) == 0:
+			if match != nil {
+				return fmt.Errorf("--match filters a signal listing; name the signal")
+			}
+			data, err = report.IndexPage(d, reportShowCursor, reportShowBytes)
+		case len(args) == 1 && slices.Contains(report.SignalNames(), args[0]):
+			data, err = report.SignalPage(d, args[0], match, reportShowCursor, reportShowBytes)
+		default:
+			if match != nil {
+				return fmt.Errorf("--match filters a signal listing, not item details")
+			}
+			data, err = report.DetailPage(d, args, reportShowCursor, reportShowBytes)
+		}
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(data))
+		return nil
+	},
+}
+
+// parseReportHarness resolves --harness for a read. An empty flag means every
+// harness: a read aggregates, and only a mutation needs one named target.
+func parseReportHarness() (harness.ID, error) {
+	if strings.TrimSpace(reportHarness) == "" || strings.EqualFold(reportHarness, "all") {
+		return harness.Unknown, nil
+	}
+	return harness.Parse(reportHarness)
+}
+
+// collectInstructionFiles reads each harness's project and global instruction
+// document. Both scopes are always included: standing user rules — the
+// highest-precision hook candidates — live in either. Read failures degrade to
+// an empty section, never abort the scan.
+func collectInstructionFiles(only harness.ID) []report.InstructionFile {
+	out := []report.InstructionFile{}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return out
+	}
+	for _, h := range harness.All() {
+		if only != harness.Unknown && h.ID != only {
+			continue
+		}
+		for _, scope := range []string{harness.ProjectScope, harness.GlobalScope} {
+			path := h.InstructionFile
+			if scope == harness.GlobalScope {
+				dir, err := h.ConfigDir(scope, cwd)
+				if err != nil {
+					continue
+				}
+				path = filepath.Join(dir, h.InstructionFile)
+			}
+			md, err := report.ExtractInstructionFile(h.ID, path, guardRuleTexts(scope))
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not read %s: %v\n", path, err)
+				continue
+			}
+			if len(md.SteerRules) == 0 && len(md.Directives) == 0 {
+				continue
+			}
+			out = append(out, md)
+		}
+	}
+	return out
+}
+
+// guardRuleTexts are the rules the scope's guards carry, the lines of its rules
+// section a guard enforces. An unreadable manifest yields none, so every line
+// reads as unenforced rather than as enforced.
+func guardRuleTexts(scope string) []string {
+	rules, err := claude.GuardRules(scope)
+	if err != nil {
+		return nil
+	}
+	return rules
+}
+
+var reportRefreshCmd = &cobra.Command{
+	Use:   "refresh",
+	Short: "Run the deterministic tier of the feedback loop and write the work queue",
+	Long: `refresh is the deterministic tier of the steer feedback loop. It spends no
+model tokens and runs in seconds. It scores the review-corpus interventions the
+local engine can score, sweeps every corpus present on this machine, and writes a
+queue of pending work to ~/.steer/state/steer-report/ for the /steer-report skill
+to finish. It groups nothing: each corpus contributes one row sizing the evidence
+no problem covers yet, and naming the problems in it needs a model.
+
+The queue content is deterministic: a second run over the same evidence produces
+a byte-identical queue. The refresh timestamp lives in a sibling file, not the
+queue, so the skill's nudge can hash the queue for change detection.`,
+	Example: `  steer report refresh
+  steer report refresh --days 7 --repo-only`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := prepareState(); err != nil {
+			return err
+		}
+		// A ledger the agent wrote since the last turn-end resolver run joins its row
+		// before the review corpus is read. The resolver fails open.
+		if res := resolve.Backfill(gateConfig(), ledgerHarvests(),
+			resolve.BackfillOptions{Apply: true, Quiet: true}, io.Discard, nil); res.Err != nil {
+			fmt.Fprintln(os.Stderr, "steer report refresh: review outcomes not read:", res.Err)
+		}
+		// refresh is the one writer of the snapshot store: it rebuilds the session
+		// corpus from the harnesses' transcripts before scoring over it.
+		scope, err := scanScope(reportRepoOnly, reportProjectOnly)
+		if err != nil {
+			return err
+		}
+		ev := evidence.Gather(evidence.Options{
+			GateStateDir: gateConfig().StateDir,
+			WindowDays:   reportDays,
+			ScanScope:    scope,
+			Rebuild:      true,
+		})
+		root := repoRootOrNone()
+		q, err := cadence.Refresh(cadence.Options{
+			GateStateDir: gateConfig().StateDir,
+			WindowDays:   reportDays,
+			ScanScope:    scope,
+			RepoRoot:     root,
+			Addendum:     gateAddendum(root),
+			Evidence:     ev,
+		})
+		if err != nil {
+			return err
+		}
+		dir := cadence.StateDir()
+		if err := cadence.WriteQueue(dir, q, time.Now()); err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr,
+			"Wrote queue: %d fix(es) needing attention, %d candidate(s), %d unscored, "+
+				"%d session snapshot(s).\n",
+			len(q.Interventions), len(q.Candidates), len(q.Unscored), len(ev.Sessions))
+		fmt.Println(cadence.QueuePath(dir))
+		return nil
+	},
+}
+
+var reportMarkReadCorpora []string
+
+var reportMarkReadCmd = &cobra.Command{
+	Use:   "mark-read",
+	Short: "Record that a /steer-report pass read the candidate evidence",
+	Long: `mark-read records each candidate row in the queue as read. A finding the
+pass reads and leaves as a one-off stays in its pile, so after the mark the status
+line and the session nudge count a row only when it changes: a new item, or one
+that returns to the pile. steer status --json and the dumps still list the whole
+pile. For the review pile it also takes the findings the last whole-pile
+mine findings --undecided dump showed as read, so the next dump prints only later
+or returned findings under its new section.
+
+Run it at the end of a pass, after any refresh the pass ran. --corpus names a pile
+the pass read (review-findings or transcript-friction); the default is both.`,
+	Example: `  steer report mark-read
+  steer report mark-read --corpus review-findings`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		for _, corpus := range reportMarkReadCorpora {
+			if corpus != cadence.CorpusReviewFindings && corpus != cadence.CorpusTranscript {
+				return fmt.Errorf("--corpus %q: name %s or %s", corpus, cadence.CorpusReviewFindings, cadence.CorpusTranscript)
+			}
+		}
+		if err := prepareState(); err != nil {
+			return err
+		}
+		dir, err := cadence.PrepareStateDir()
+		if err != nil {
+			return err
+		}
+		q, err := cadence.ReadQueue(dir)
+		if err != nil {
+			return err
+		}
+		marks, err := cadence.MarkRead(dir, q.Candidates, reportMarkReadCorpora)
+		if err != nil {
+			return err
+		}
+		for _, corpus := range reportMarkReadCorpora {
+			if _, ok := marks[corpus]; ok {
+				fmt.Printf("%s: marked read. The status line counts this pile again when it changes.\n", corpus)
+			} else {
+				fmt.Printf("%s: no pile in the queue; nothing to mark.\n", corpus)
+			}
+			if corpus != cadence.CorpusReviewFindings {
+				continue
+			}
+			taken, err := mine.MarkFindingsRead(gateConfig().StateDir)
+			if err != nil {
+				return err
+			}
+			if len(taken) == 0 {
+				fmt.Printf("%s: no whole-pile --undecided dump since the last mark; the next dump's new section is unchanged.\n", corpus)
+			}
+			for _, kind := range []string{"accepted", "repaired", "deferred", "rejected", "both"} {
+				if n, ok := taken[kind]; ok {
+					fmt.Printf("%s: %d %s finding(s) the last --undecided dump showed are now read; the next dump lists later ones as new.\n", corpus, n, kind)
+				}
+			}
+		}
+		return nil
+	},
+}
+
+// sessionStartOutput is the SessionStart hook's stdout contract. The docs do not
+// confirm SessionStart shows systemMessage ("some events discard it"), so the nudge
+// rides hookSpecificOutput.additionalContext — the documented SessionStart channel,
+// guaranteed to deliver. That puts one actionable line in the model's context, the
+// plan's accepted fallback. systemMessage is kept as a bonus operator line where the
+// harness honors it; it costs nothing where it does not.
+type sessionStartOutput struct {
+	SystemMessage      string                 `json:"systemMessage,omitempty"`
+	HookSpecificOutput sessionStartHookOutput `json:"hookSpecificOutput"`
+}
+
+type sessionStartHookOutput struct {
+	HookEventName     string `json:"hookEventName"`
+	AdditionalContext string `json:"additionalContext"`
+}
+
+var reportCadenceCmd = &cobra.Command{
+	Use:   "cadence",
+	Short: "SessionStart entrypoint: refresh the queue in the background, nudge if work is pending",
+	Long: `cadence is the plugin-native SessionStart entrypoint of the feedback loop. It
+must never block startup and fails open on every error — a cadence check that
+cannot read state emits nothing and exits 0.
+
+It does two things:
+
+  1. If the last refresh is older than 7 days, it spawns 'steer report refresh'
+     detached in the background. This session proceeds; the next session sees the
+     result.
+  2. If the queue holds pending work, it emits one line naming the counts and the
+     command to run. The line rides hookSpecificOutput.additionalContext, the
+     documented SessionStart channel, so delivery is guaranteed; it also sets
+     systemMessage for an operator line where the harness honors it. It re-emits
+     only when the queue changes or a new refresh cycle has run — never every
+     session.
+
+When it runs from a plugin copy whose release is newer than the stable
+executable's, and no newer copy is installed, it runs 'steer bin install' from
+that copy before anything else: the copy goes to ~/.steer/bin/steer,
+registrations are repointed and a stale global guard master is rebuilt, with the
+master's fixture rerun left to a background 'steer fixture verify'. It reports
+one line, and a line for each step the install leaves to you. It does this only
+where a global Steer registration already calls ~/.steer/bin/steer or runs a
+global guard master, so a machine Steer was never set up on, or was uninstalled
+from, stays as it is. A development build has no order and is never installed
+this way. If the install fails, the notice naming the command prints instead.
+
+It also names three standing conditions, each once until it changes: a registered
+guard runner older than this binary, which repairs with 'steer hooks rebuild'; an
+installed harness whose Steer Rules section does not match the manifest; and an
+installed harness that runs none of a store's guards. The last two repair with
+'steer hooks sync'. In the global scope a harness that holds no Steer
+registration at all is not named, because one never set up and one that
+'steer uninstall --harness' removed read the same, and a rebuild that would
+register the master in such a harness names --harness for each one that holds it.`,
+	Example: `  steer report cadence`,
+	// SilenceErrors/Usage: this runs as a hook. Any failure must be silent and
+	// exit 0, never a stderr dump into the session's startup.
+	SilenceErrors: true,
+	SilenceUsage:  true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		runCadence()
+		return nil
+	},
+}
+
+// runCadence is the fail-open body of the cadence hook. Every step degrades to
+// "emit nothing" on error; it never returns a non-nil error to the caller.
+func runCadence() {
+	dir := cadence.StateDir()
+
+	if time.Since(cadence.LastRefresh(dir)) > cadence.StaleAfter {
+		spawnRefresh()
+	}
+
+	rec := cadence.LoadNudge(dir)
+	lines := []string{}
+
+	if queueBytes, err := os.ReadFile(cadence.QueuePath(dir)); err == nil {
+		if q, err := cadence.ReadQueue(dir); err == nil {
+			hash := cadence.QueueHash(queueBytes)
+			emit, next := cadence.ShouldNudge(dir, q, hash, cadence.LastRefresh(dir))
+			if emit {
+				candidates, ineffective := cadence.PendingCounts(q, cadence.LoadReadMarks(dir))
+				// A queued row is one source of evidence nobody has grouped yet, so
+				// the count names sources. Calling them problems reported the size of
+				// the raw pile as the number of problems found.
+				lines = append(lines, fmt.Sprintf(
+					"steer: %d %s of ungrouped evidence and %d tracked fix(es) need a decision — run /steer-report",
+					candidates, sourceWord(candidates), ineffective))
+				rec = next
+			}
+		}
+	}
+
+	// A plugin copy ahead of the hooks installs itself before any standing condition
+	// is read, so every line below describes the state after it.
+	hooksBuild := readHooksBuild()
+	copies := status.PluginCopies()
+	update := updateHooks(copies, hooksBuild)
+	lines = append(lines, update.lines...)
+	if update.installed {
+		hooksBuild, copies = status.HooksBuild(), status.PluginCopies()
+	}
+
+	// A stale guard master is a standing condition, not a queue change: the store
+	// keeps whatever runtime it was last built with, and upgrading the CLI
+	// repairs nothing until something rebuilds it.
+	key, labels, scopes, masterRows := staleMasters()
+	// The plugin line's install rebuilds the global master, so the master line
+	// reads the plugin copies before it chooses its repair.
+	pluginCopies := status.ActionablePlugins(copies, hooksBuild)
+	pluginKey, _ := status.DifferingPlugins(pluginCopies)
+	if pluginKey != "" {
+		// The hooks' build sets the direction, so a change on either side is a new notice.
+		pluginKey += "|hooks=" + hooksBuild.DetailLabel()
+	}
+	install := hooksBehindInstall(pluginCopies, hooksBuild)
+	masterDue := cadence.ShouldNudgeMaster(dir, key)
+	// After an update the global master is rebuilt and the update's own lines name
+	// what remains, so the condition is recorded without a line of its own.
+	if masterDue && !update.installed {
+		lines = append(lines, staleMasterLine(masterRows, labels, scopes, install != ""))
+	}
+	// A drifted rules section is the same kind of standing condition: nothing
+	// rewrites it until a sync, and meanwhile an agent does not read the rule.
+	masters := status.MasterRuntimes(claude.GlobalScope, claude.ProjectScope)
+	rules := status.InstalledRules(claude.GlobalScope, claude.ProjectScope)
+	rulesKey, ruleLabels, ruleScopes := status.RulesDrift(rules)
+	if cadence.ShouldNudgeRules(dir, rulesKey) {
+		repairs := make([]string, 0, len(ruleScopes))
+		for _, s := range ruleScopes {
+			repairs = append(repairs, status.RulesRepair(rules, masters, s))
+		}
+		lines = append(lines, fmt.Sprintf(
+			"steer: an agent's instruction file does not match Steer's rules (%s) — run: %s",
+			strings.Join(ruleLabels, "; "), strings.Join(repairs, " and ")))
+	}
+	detachedKey, detachedLabels, detachedScopes := status.DetachedMasters(masters)
+	if cadence.ShouldNudgeDetached(dir, detachedKey) {
+		repairs := make([]string, 0, len(detachedScopes))
+		for _, s := range detachedScopes {
+			repairs = append(repairs, status.DetachedRepair(masters, s))
+		}
+		lines = append(lines, fmt.Sprintf(
+			"steer: an installed agent runs none of Steer's guards (%s) — run: %s",
+			strings.Join(detachedLabels, "; "), strings.Join(repairs, " and ")))
+	}
+	driftKey, driftLabels, driftScopes := status.DriftedMasters(masters)
+	if cadence.ShouldNudgeSourceDrift(dir, driftKey) {
+		repairs := make([]string, 0, len(driftScopes))
+		for _, s := range driftScopes {
+			repairs = append(repairs, status.RebuildRepair(masters, s))
+		}
+		lines = append(lines, fmt.Sprintf(
+			"steer: a guard runner carries an old copy of a guard or of its rule (%s) — to restore agreement, run: %s",
+			strings.Join(driftLabels, "; "), strings.Join(repairs, " and ")))
+	}
+	// A harness runs skills and the launcher from its cached plugin copy, and
+	// nothing refreshes that copy when the stable executable changes.
+	// A failed update leaves the hooks behind, so its notice prints every session.
+	if pluginLineDue(cadence.ShouldNudgePlugins(dir, pluginKey), masterDue, install) || update.failed {
+		lines = append(lines, pluginCopyLines(pluginCopies, hooksBuild)...)
+	}
+	guidance := commitGuidance()
+	if len(lines) == 0 {
+		// No operator line, but a repaired condition still has to clear its key: a
+		// record left behind would suppress the nudge if that same condition
+		// came back.
+		if prev := cadence.LoadNudge(dir); prev.Master != key || prev.Rules != rulesKey ||
+			prev.Detached != detachedKey || prev.SourceDrift != driftKey || prev.Plugins != pluginKey {
+			_ = cadence.WriteNudge(dir, rec.WithMaster(key).WithRules(rulesKey).
+				WithDetached(detachedKey).WithSourceDrift(driftKey).WithPlugins(pluginKey))
+		}
+		if out, ok := hookContextReply("SessionStart", nil, guidance); ok {
+			fmt.Println(string(out))
+		}
+		return
+	}
+	rec = rec.WithMaster(key).WithRules(rulesKey).WithDetached(detachedKey).WithSourceDrift(driftKey).
+		WithPlugins(pluginKey)
+
+	out, ok := hookContextReply("SessionStart", lines, guidance)
+	if !ok {
+		return
+	}
+	fmt.Println(string(out))
+	// Persist only after a successful emit, so a failed print re-nudges next time.
+	_ = cadence.WriteNudge(dir, rec)
+}
+
+// staleMasters names the masters whose registered runtime differs from this
+// binary's, the scopes that hold them, and a key that changes with them. An empty key means
+// nothing is stale. Every read fails soft: an unreadable configuration reports no
+// master rather than a false alarm.
+func staleMasters() (key string, labels []string, scopes []string, rows []status.MasterRuntime) {
+	rows = status.MasterRuntimes(claude.GlobalScope, claude.ProjectScope)
+	parts := []string{}
+	for _, m := range rows {
+		if !m.Stale() {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s/%s:%s:%s", m.Harness, m.Scope, m.State, m.Runtime))
+		labels = append(labels, fmt.Sprintf("%s %s scope", m.Harness, m.Scope))
+	}
+	if len(parts) == 0 {
+		return "", nil, nil, rows
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, "|"), labels, status.StaleScopes(rows), rows
+}
+
+// staleMasterLine names the stale masters and a rebuild for each scope. When a
+// plugin copy bundles another build, a rebuild from the terminal's steer would
+// embed the old runtime again, so the line defers to the plugin line's install,
+// which rebuilds the global master itself.
+func staleMasterLine(rows []status.MasterRuntime, labels, scopes []string, pluginsDiffer bool) string {
+	repairs := make([]string, 0, len(scopes))
+	for _, s := range scopes {
+		if pluginsDiffer && s == claude.GlobalScope {
+			continue
+		}
+		repairs = append(repairs, status.RebuildRepair(rows, s))
+	}
+	line := fmt.Sprintf("steer: guards (%s) need a rebuild", strings.Join(labels, ", "))
+	switch {
+	case !pluginsDiffer:
+		return line + " — run: " + strings.Join(repairs, " and ")
+	case len(repairs) == 0:
+		return line + " — the bin install below updates them"
+	case len(repairs) < len(scopes):
+		return line + " — the bin install below updates the global guards; after it, run: " + strings.Join(repairs, " and ")
+	}
+	return line + " — after the bin install below, run: " + strings.Join(repairs, " and ")
+}
+
+// hooksBehindInstall names the install from the newest plugin copy the hooks are behind,
+// "" when they are behind none.
+func hooksBehindInstall(copies []status.PluginCopy, hooks status.BuildIdentity) string {
+	for _, issue := range status.BuildIssues(copies, hooks, hooks) {
+		if strings.HasPrefix(issue.Title, "Hooks are behind") {
+			return issue.Fix
+		}
+	}
+	return ""
+}
+
+// pluginLineDue reports whether the plugin line prints: when its own key
+// changed, or when a printed master line defers its repair to the line's install.
+func pluginLineDue(pluginDue, masterDue bool, install string) bool {
+	return pluginDue || (masterDue && install != "")
+}
+
+// pluginCopyLines words the build issues with a known action as startup notices.
+func pluginCopyLines(copies []status.PluginCopy, hooks status.BuildIdentity) []string {
+	var lines []string
+	for _, issue := range status.BuildIssues(copies, hooks, hooks) {
+		fix := issue.Fix
+		switch {
+		case fix == "":
+			fix = "run: steer status"
+		case strings.HasPrefix(issue.Title, "Hooks are behind"):
+			fix = "run: " + fix
+		}
+		lines = append(lines, "steer: "+issue.Title+" ("+strings.Join(issue.Detail, ", ")+") — "+fix)
+	}
+	return lines
+}
+
+// spawnRefresh starts 'steer report refresh' detached, so a stale queue refreshes
+// without blocking startup. Failure is silent — the worst case is a queue one
+// cycle older than 7 days, which the next session retries.
+func spawnRefresh() { spawnDetached("report", "refresh") }
+
+// spawnFixtureVerify reruns a rebuilt scope's fixtures detached, so the update stays
+// inside the SessionStart timeout.
+func spawnFixtureVerify(scope string) { spawnDetached("fixture", "verify", "--scope", scope) }
+
+// spawnDetached starts this binary with args and does not wait for it.
+func spawnDetached(args ...string) {
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	c := exec.Command(exe, args...)
+	c.Stdin, c.Stdout, c.Stderr = nil, nil, nil
+	c.SysProcAttr = detachAttr()
+	_ = c.Start() // do not Wait — the child outlives this process
+}
+
+// readHooksBuild reads the stable executable's build; a test replaces it.
+var readHooksBuild = status.HooksBuild
+
+// hooksUpdate is what the startup update did: the lines it reports, whether the
+// stable executable now carries the running build, and whether an attempt failed.
+type hooksUpdate struct {
+	lines     []string
+	installed bool
+	failed    bool
+}
+
+// updateHooks runs the bin install body when this process is the newest plugin copy
+// ahead of the hooks and the operator's hooks already call the stable executable. An
+// older copy, a development build and a machine Steer was never set up on, or was
+// removed from, change nothing. Another install in progress skips this one.
+func updateHooks(copies []status.PluginCopy, hooks status.BuildIdentity) (out hooksUpdate) {
+	own, ok := runningCopy(copies)
+	if !ok || steerbin.RunningIsStable() || !newestAhead(copies, own, hooks) {
+		return out
+	}
+	path, err := steerbin.Path()
+	if err != nil || !stableRegistered(path) {
+		return out
+	}
+	release, held, err := lockInstall()
+	if err != nil {
+		return hooksUpdate{failed: true}
+	}
+	if !held {
+		return out
+	}
+	defer release()
+	// An install that finished after hooks was read decides instead.
+	if readHooksBuild() != hooks {
+		return out
+	}
+	defer func() {
+		// The hook fails open: a panic reads as a failed update, never a trace.
+		if recover() != nil {
+			out = hooksUpdate{failed: true}
+		}
+	}()
+	r := &installReport{out: io.Discard}
+	if err := installStable(r, spawnFixtureVerify); err != nil {
+		// A step already taken, such as a rewritten Codex command, is not seen again.
+		out.failed = true
+		for _, action := range r.actions {
+			out.lines = append(out.lines, "steer: "+action)
+		}
+		return out
+	}
+	out.installed = true
+	out.lines = append(out.lines, fmt.Sprintf("steer: hooks updated %s → %s", hooks.Label(),
+		status.BuildIdentity{Version: own.Version, Commit: own.Commit}.Label()))
+	for _, action := range r.actions {
+		out.lines = append(out.lines, "steer: "+action)
+	}
+	return out
+}
+
+// newestAhead reports whether own is ahead of hooks and no copy is ahead of own. Another
+// harness's copy of the same release counts as own.
+func newestAhead(copies []status.PluginCopy, own status.PluginCopy, hooks status.BuildIdentity) bool {
+	return own.CompareToHooks(hooks) == status.BuildNewer &&
+		status.NewestAhead(copies, hooks).CompareToHooks(status.BuildIdentity{Version: own.Version, Commit: own.Commit}) == status.BuildSame
+}
+
+// runningCopy is the plugin copy whose bundled binary this process runs.
+func runningCopy(copies []status.PluginCopy) (status.PluginCopy, bool) {
+	running, err := steerbin.Running()
+	if err != nil {
+		return status.PluginCopy{}, false
+	}
+	for _, c := range copies {
+		if resolved, err := filepath.EvalSymlinks(c.Binary()); err == nil && resolved == running {
+			return c, true
+		}
+	}
+	return status.PluginCopy{}, false
+}
+
+// stableRegistered reports whether a global Steer registration in any harness calls
+// the stable executable at path, or runs a global guard master. Project registrations
+// are committed and arrive with a clone, so they do not show Steer was set up here.
+func stableRegistered(path string) bool {
+	g := claude.GlobalScope
+	cwd, _ := gate.ProjectDir()
+	type channel struct {
+		registered bool
+		command    string
+	}
+	channels := []channel{}
+	add := func(registered bool, command string) { channels = append(channels, channel{registered, command}) }
+	gateArm, resolver := claude.CommitGateHookArmed(g), claude.BackfillHookArming(g)
+	add(gateArm.Registered, gateArm.Command)
+	add(resolver.Registered, resolver.Command)
+	if line, present, mine := claude.StatusLineArmed(g); present && mine {
+		add(true, line.Command)
+	}
+	codexGate, codexResolver := codexhooks.CommitGateArming(g, cwd), codexhooks.ResolverArmingRow(g, cwd)
+	add(codexGate.Registered, codexGate.Command)
+	add(codexResolver.Registered, codexResolver.Command)
+	piGate, piResolver := pihooks.CommitGateArming(g, cwd), pihooks.ResolverArming(g, cwd)
+	add(piGate.Registered, piGate.Command)
+	add(piResolver.Registered, piResolver.Command)
+	for _, target := range runnerHarnesses {
+		if a, err := checkRunnerArming(target, g); err == nil {
+			add(a.Registered, a.Command)
+		}
+	}
+	for _, c := range channels {
+		if c.registered && steerbin.NamesExecutable(c.command, path) {
+			return true
+		}
+	}
+	registrars, err := guardscope.HookRegistrars(false)
+	if err != nil {
+		return false
+	}
+	for _, registrar := range registrars {
+		if registered, err := registrar.MasterRegistered(g); err == nil && registered {
+			return true
+		}
+	}
+	return false
+}
+
+func init() {
+	rootCmd.AddCommand(reportCmd)
+	reportCmd.AddCommand(reportRefreshCmd)
+	reportCmd.AddCommand(reportCadenceCmd)
+	reportCmd.AddCommand(reportMarkReadCmd)
+	reportMarkReadCmd.Flags().StringSliceVar(&reportMarkReadCorpora, "corpus",
+		[]string{cadence.CorpusReviewFindings, cadence.CorpusTranscript}, "A pile the pass read; repeat for both (default both)")
+	reportRefreshCmd.Flags().IntVar(&reportDays, "days", cadence.DefaultWindowDays, "Transcript look-back window in days")
+	reportRefreshCmd.Flags().BoolVar(&reportProjectOnly, "project-only", false, "Restrict the transcript scan to the current working directory")
+	reportRefreshCmd.Flags().BoolVar(&reportRepoOnly, "repo-only", false, "Restrict the transcript scan to the current checkout")
+	reportCmd.Flags().IntVar(&reportDays, "days", cadence.DefaultWindowDays, "Look-back window in days")
+	reportCmd.Flags().BoolVar(&reportProjectOnly, "project-only", false, "Restrict the scan to transcripts of the current working directory")
+	reportCmd.Flags().BoolVar(&reportRepoOnly, "repo-only", false, "Restrict the scan to transcripts of the current checkout")
+	reportCmd.Flags().StringVar(&reportHarness, "harness", "", "Mine one harness only: all (default), claude-code, or codex")
+	reportCmd.Flags().IntVar(&reportMaxBytes, "max-digest-bytes", report.DefaultMaxDigestBytes, "Size bound of the printed index page")
+	reportCmd.AddCommand(reportShowCmd)
+	reportShowCmd.Flags().StringVar(&reportShowReport, "report", "", "The report_id the index printed; refuse any other stored report")
+	reportShowCmd.Flags().IntVar(&reportShowCursor, "cursor", 0, "Row to start the page at (page.next_cursor of the previous page)")
+	reportShowCmd.Flags().StringVar(&reportShowMatch, "match", "", "Regex keeping the clusters of a signal listing whose pattern or an occurrence matches")
+	reportShowCmd.Flags().IntVar(&reportShowBytes, "max-bytes", report.DefaultMaxDigestBytes, "Size bound of the printed page")
+}
+
+// sourceWord counts the queued rows with their own noun, so no bare number
+// reaches the nudge without saying what it counts.
+func sourceWord(n int) string {
+	if n == 1 {
+		return "source"
+	}
+	return "sources"
+}
+
+// coverageLines is one line per scanned harness. An unlisted harness gets a line only
+// when the scan found a file of its, readable or not.
+func coverageLines(harnesses []report.HarnessCoverage) []string {
+	var lines []string
+	for _, cov := range harnesses {
+		if !harness.Listed(cov.Harness) && cov.FilesScanned == 0 {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("%s: %d file(s), %d session(s), %d thread(s).",
+			cov.Harness, cov.FilesScanned, cov.SessionsScanned, cov.ThreadsScanned))
+	}
+	return lines
+}

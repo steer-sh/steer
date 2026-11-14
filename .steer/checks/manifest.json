@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "checks": [
+    {
+      "id": "revert-test",
+      "kind": "script",
+      "script": "scripts/revert-test.py",
+      "inputs": [
+        "scripts/revert-test-funcs.go"
+      ]
+    }
+  ]
+}

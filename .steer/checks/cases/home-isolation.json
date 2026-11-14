@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "helper",
+      "exit_code": 0,
+      "provenance": "the testhome.Set form every HOME-only call was rewritten to",
+      "files": {
+        "cli/internal/p/p_test.go": "package p\n\nimport (\n\t\"testing\"\n\n\t\"github.com/steer-sh/steer-cli/internal/testhome\"\n)\n\nfunc TestReadsHome(t *testing.T) {\n\ttesthome.Set(t, t.TempDir())\n}\n"
+      }
+    },
+    {
+      "name": "paired",
+      "exit_code": 0,
+      "provenance": "cmd/registrars_test.go's isolatedHome, which set both before this check",
+      "files": {
+        "cli/cmd/registrars_test.go": "package cmd\n\nimport \"testing\"\n\nfunc isolatedHome(t *testing.T) string {\n\thome := t.TempDir()\n\tt.Setenv(\"HOME\", home)\n\tt.Setenv(\"USERPROFILE\", home)\n\treturn home\n}\n"
+      }
+    },
+    {
+      "name": "marked-home-only",
+      "exit_code": 0,
+      "provenance": "a deliberate HOME-only line carries the marker",
+      "files": {
+        "cli/internal/p/p_test.go": "package p\n\nimport \"testing\"\n\nfunc TestUnixHome(t *testing.T) {\n\tt.Setenv(\"HOME\", t.TempDir()) // home-only: the test skips Windows\n}\n"
+      }
+    },
+    {
+      "name": "home-without-userprofile",
+      "exit_code": 1,
+      "diagnostic": "sets HOME 1 time(s) but USERPROFILE 0 time(s)",
+      "provenance": "the defect the review of 14a7306 found: t.Setenv(\"HOME\", …) does not steer os.UserHomeDir() on Windows",
+      "files": {
+        "cli/internal/harness/harness_test.go": "package harness\n\nimport \"testing\"\n\nfunc TestStateDirUnderHome(t *testing.T) {\n\thome := t.TempDir()\n\tt.Setenv(\"HOME\", home)\n}\n"
+      }
+    },
+    {
+      "name": "second-function-unpaired",
+      "exit_code": 1,
+      "diagnostic": "sets HOME 2 time(s) but USERPROFILE 1 time(s)",
+      "provenance": "the review of 8ddedab found a test package setting HOME alone; here a file that already pairs one call gains a second, HOME-only one",
+      "files": {
+        "cli/internal/p/p_test.go": "package p\n\nimport \"testing\"\n\nfunc TestPaired(t *testing.T) {\n\thome := t.TempDir()\n\tt.Setenv(\"HOME\", home)\n\tt.Setenv(\"USERPROFILE\", home)\n}\n\nfunc TestUnpaired(t *testing.T) {\n\tt.Setenv(\"HOME\", t.TempDir())\n}\n"
+      }
+    }
+  ]
+}
