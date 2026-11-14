@@ -108,6 +108,143 @@ test('a running review shows its round, reviewer, elapsed time and runs', async 
   }
 })
 
+type Drawing = { alt: string; width: number; height: number; source: string }
+const MISSING: Drawing = { alt: '(missing)', width: 0, height: 0, source: '' }
+
+/** The Svg elements a band drew, in order: its wash, its sky, its rail, its book, then a pulse per run. */
+const svgs = async (ui: { findAll(q: { type: string }): Promise<{ props: Record<string, unknown> }[]> }) => {
+  const all = (await ui.findAll({ type: 'Svg' })).map(s => s.props as Drawing)
+  return { wash: all[0] ?? MISSING, sky: all[1] ?? MISSING, rail: all[2] ?? MISSING, book: all[3] ?? MISSING, pulses: all.slice(4), all }
+}
+
+test('the desktop band draws a card, a book and a pulse per run, with no rail glyph', async ($, on) => {
+  await world($, on, { [`${LIVE}/${SESSION}/a-1.json`]: running({ runs_ended: [{ run: 2, outcome: 'ok' }, { run: 3, outcome: 'timeout' }] }) })
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  const drawn = await texts(ui)
+  expect(drawn).not.toContain('▌')
+  expect(drawn).toContain('Steer holds the commit while 3 runs read the diff.')
+  expect(drawn).toContain('run 3 no answer')
+
+  const cards = (await ui.findAll({ type: 'Box' })).filter(b => b.props.borderStyle === 'round')
+  expect(cards.map(c => /^#[0-9a-f]{8}$/.test(String(c.props.backgroundColor)))).toEqual([true])
+  expect(cards.map(c => /^#[0-9a-f]{8}$/.test(String(c.props.borderColor)))).toEqual([true])
+
+  const { wash, sky, rail, book, pulses, all } = await svgs(ui)
+  expect(all).toHaveLength(7)
+  for (const svg of all) expect(svg.alt).not.toBe('')
+  for (const layer of [wash, sky, rail]) expect(layer.source).not.toContain('preserveAspectRatio')
+  expect(wash.source).toContain('@keyframes ab')
+  expect(sky.source).toContain('@keyframes ah')
+  // Each drawing carries its own shades for a dark app.
+  for (const svg of all) expect(svg.source).toContain('@media (prefers-color-scheme:dark)')
+  expect(book.alt).toBe('review running')
+  expect([book.width, book.height]).toEqual([96, 60])
+  expect(book.source).toContain('@keyframes al')
+  // A reading run's pulse moves; a returned run's bar is still, whether or not the run answered.
+  expect(pulses.map(p => p.source.includes('@keyframes'))).toEqual([true, false, false])
+  expect(pulses[1]?.source).toBe(pulses[2]?.source)
+  for (const svg of all) expect(svg.source.length).toBeLessThan(131072)
+  await ui.unmount()
+
+  const vscode = await $.ui.mount({ ...BAND, surface: 'vscode' })
+  expect(await vscode.findAll({ type: 'Svg' })).toHaveLength(0)
+  await vscode.unmount()
+})
+
+test('the desktop running band shows no clock, and a redraw continues its art', async ($, on) => {
+  const clock = await world($, on, { [`${LIVE}/${SESSION}/a-1.json`]: running({ beat_ms: NOW + 60_000 }) })
+  const first = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  expect(await texts(first)).not.toMatch(/\d:\d\d/)
+  expect((await svgs(first)).book.source).toContain('.ag{animation:ag 5s ease-in-out 0s infinite}')
+  await first.unmount()
+
+  await clock.advance(2000)
+  const later = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  expect((await svgs(later)).book.source).toContain('.ag{animation:ag 5s ease-in-out -2s infinite}')
+  await later.unmount()
+
+  const terminal = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await texts(terminal)).toMatch(/\d:\d\d/)
+  await terminal.unmount()
+})
+
+test('a narrow desktop band lengthens its rail for wrapped runs, and each header part truncates', async ($, on) => {
+  await world($, on, { [`${LIVE}/${SESSION}/a-1.json`]: running({ runs_ended: [{ run: 2, outcome: 'ok' }, { run: 3, outcome: 'timeout' }] }) })
+  const wide = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  const wideRail = (await svgs(wide)).rail.height
+  await wide.unmount()
+  // Runs of 17, 14 and 19 columns in 30 columns of room: no two fit in a row, so each takes its own.
+  const narrow = await $.ui.mount({ ...BAND, props: { ...BAND.props, bodyColumns: 34 }, surface: 'desktop' })
+  const { all, rail } = await svgs(narrow)
+  expect(rail.height).toBe(wideRail + 2 * 20)
+  // Below the terminal's mark width the card keeps its ground and rail but leaves the book out.
+  expect(all.map(s => s.alt)).not.toContain('review running')
+  await narrow.unmount()
+})
+
+test('each desktop header part of a passed commit is plain text that truncates', async ($, on) => {
+  await world($, on, { [`${LIVE}/${SESSION}/a-1.json`]: ended('clean') })
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  const parts = (await ui.findAll({ type: 'Text' })).filter(t => t.text.startsWith(' · ') || t.text.startsWith('round ')) as {
+    text: string
+    props: Record<string, unknown>
+  }[]
+  expect(parts.length).toBe(3)
+  for (const part of parts) expect(part.props.wrap).toBe('truncate')
+  await ui.unmount()
+})
+
+test('a desktop finding row keeps its claim in plain text that truncates', async ($, on) => {
+  await world($, on, { [`${LIVE}/${SESSION}/a-1.json`]: ended('deny', { findings: FINDINGS }) })
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  const claims = (await ui.findAll({ type: 'Text' })).filter(t => t.text.startsWith('routes.ts:41')) as {
+    props: Record<string, unknown>
+  }[]
+  expect(claims.length).toBeGreaterThan(0)
+  for (const claim of claims) expect(claim.props.wrap).toBe('truncate')
+  await ui.unmount()
+})
+
+const ENDED_BOOKS = [
+  ['deny', { findings: FINDINGS }, 'commit held', 96],
+  ['nitpick', { findings: FINDINGS.slice(0, 1) }, 'commit not held', 96],
+  ['clean', {}, 'commit passed', 29],
+  ['ungated', { answered: 0 }, 'commit not reviewed', 29],
+] as const
+// Each ended book's drawing without its colours, to tell the drawings apart.
+const endedShapes = new Set<string>()
+
+for (const [outcome, over, alt, width] of ENDED_BOOKS)
+  test(`the desktop band draws its own book for ${alt}`, async ($, on) => {
+    await world($, on, { [`${LIVE}/${SESSION}/a-1.json`]: ended(outcome, over) })
+    const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+    const { book, pulses, all } = await svgs(ui)
+    for (const svg of all) expect(svg.alt).not.toBe('')
+    expect(book.alt).toBe(alt)
+    expect(book.width).toBe(width)
+    expect(pulses).toHaveLength(0)
+    const drawn = await texts(ui)
+    expect(drawn).toContain(alt)
+    expect(drawn).not.toContain('▌')
+    const shape = book.source.replace(/#[0-9a-f]{6}/g, '')
+    expect(endedShapes.has(shape)).toBe(false)
+    endedShapes.add(shape)
+    await ui.unmount()
+  })
+
+test('the desktop label takes a blue that reads on both grounds; the terminal label keeps its own', async ($, on) => {
+  await world($, on, { [`${LIVE}/${SESSION}/a-1.json`]: running() })
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  const label = (await ui.findAll({ type: 'Text' })).find(t => t.text === 'REVIEW') as { props: Record<string, unknown> } | undefined
+  expect(label?.props.color).toBe('#5f7cf2')
+  await ui.unmount()
+
+  const terminal = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  const plain = (await terminal.findAll({ type: 'Text' })).find(t => t.text === 'REVIEW') as { props: Record<string, unknown> } | undefined
+  expect(plain?.props.color).toBe('#9badff')
+  await terminal.unmount()
+})
+
 test('a narrow terminal leaves the marks out', async ($, on) => {
   await world($, on, { [`${LIVE}/${SESSION}/a-1.json`]: running() })
   const ui = await $.ui.mount({ ...BAND, props: { ...BAND.props, bodyColumns: 60 }, surface: 'terminal' })

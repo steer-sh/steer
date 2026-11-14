@@ -95,7 +95,13 @@ review file and handles no tool event and no `classic.*` event, because a tool
 handler runs ahead of every settings hook and Steer reports a mod that has one as an
 exposure. Enforcement stays in the settings hooks and the CLI, which every harness
 shares. `hooks/mod/marks.ts` holds the colours and pixel marks, drawn as terminal
-half-block cells; other hosts get the same band as text and colour.
+half-block cells. `hooks/mod/vector.ts` holds the Desktop app's drawings: `Svg`
+documents for the band's ground, its rail, the book and each run's pulse. Each drawing
+carries its light and dark shades and picks one through `prefers-color-scheme`.
+Desktop restarts an image's animations at each redraw, so the Desktop band shows no
+running clock and redraws only on a change of state; the animations are placed by the
+time since the state first drew, so such a redraw continues them. Other hosts get the
+same band as text and colour.
 
 Each install from another path adds that path, as `os.Executable` reports it, to
 `~/.steer/bin/source`, and `bin install` adds every active plugin copy it finds. When a recorded path lies in a harness's plugin cache and
