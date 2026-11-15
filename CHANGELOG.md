@@ -5,18 +5,24 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.1] - 2026-11-15
 
-### Fixed
-
-- Claude Code: subagent adjudication ledgers now join their own review rows,
-  including reports delivered through `SubagentHandback`.
-  `steer commit-gate backfill --reresolve` previews recovery from retained child
-  transcripts; add `--apply` to recover previously recorded misses.
-- Claude Code: `check.sh` no longer stops a parent session's turn while one of its
-  subagents still runs. The tree then holds the subagent's unfinished work, which the
-  parent cannot repair. The operator gets a notice, and a turn that ends with no
-  subagent running is checked as before.
+- **Claude Code: checks wait for subagents**: Steer no longer runs
+  `check.sh` at turn end while one of that session's subagents is still
+  working. This avoids blocking the parent on a subagent's unfinished
+  changes. You get a notice when checks are skipped. The next turn that
+  ends with no subagent running is checked as usual.
+- **Claude Code: subagent review decisions are recorded**: Steer now
+  connects a subagent's accepted and rejected findings to its own commit
+  reviews, including decisions returned in its handback report. These
+  could previously stay marked as missing. To preview recovery from
+  retained transcripts, run `steer commit-gate backfill --reresolve`;
+  add `--apply` to save the recovered decisions.
+- **Claude Code: the terminal review band fits smaller windows**: The
+  band hides the model, reviewer and timer as space gets tighter, keeping
+  the review result and finding counts visible for longer. Passed and
+  unreviewed results also use the full available width, so reviewer
+  details no longer disappear while space remains.
 
 ## [0.4.0] - 2026-11-13
 
@@ -421,6 +427,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 First public release.
 
+[0.4.1]: https://github.com/steer-sh/steer/releases/tag/v0.4.1
 [0.4.0]: https://github.com/steer-sh/steer/releases/tag/v0.4.0
 [0.3.1]: https://github.com/steer-sh/steer/releases/tag/v0.3.1
 [0.3.0]: https://github.com/steer-sh/steer/releases/tag/v0.3.0
