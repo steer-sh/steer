@@ -39,11 +39,16 @@ if SLOW and 'average.py' in prompt:
 if CLEAN:
     text = 'NO FINDINGS'
 if provider == 'claude':
-    print(json.dumps({'result': text, 'is_error': False}))
+    print(json.dumps({'result': text, 'is_error': False, 'total_cost_usd': 0.01,
+                      'usage': {'input_tokens': 2, 'cache_creation_input_tokens': 0,
+                                'cache_read_input_tokens': 900, 'output_tokens': 40}}))
 elif provider == 'agy':
-    print(json.dumps({'response': text, 'status': 'SUCCESS'}))
+    print(json.dumps({'response': text, 'status': 'SUCCESS',
+                      'usage': {'input_tokens': 900, 'output_tokens': 40, 'thinking_tokens': 0,
+                                'cache_read_tokens': 0, 'total_tokens': 940}}))
 else:
-    print(text)
+    print(json.dumps({'type': 'item.completed', 'item': {'type': 'agent_message', 'text': text}}))
+    print(json.dumps({'type': 'turn.completed', 'usage': {'input_tokens': 900, 'output_tokens': 40}}))
 '''
 
 

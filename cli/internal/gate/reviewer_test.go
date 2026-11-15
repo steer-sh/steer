@@ -195,22 +195,32 @@ func TestPanelBuildsOneViewOnlyForAReviewerThatWantsIt(t *testing.T) {
 	}
 }
 
-// TestReviewerReportListsAPIRuns: token usage and tool use reach the row per run, and
-// a panel of CLI runs writes no such field.
-func TestReviewerReportListsAPIRuns(t *testing.T) {
+// TestReviewerRunsCarryUsageAndTools: each run's token usage and tool use reach its
+// own reviewer_runs entry, a terminal outcome's included, and a run that reported
+// neither carries neither key.
+func TestReviewerRunsCarryUsageAndTools(t *testing.T) {
+	input, cost := 10, 0.25
+	usage := TokenUsage{Input: &input, CostUSD: &cost}
 	runs := []ReviewRun{
 		Classify(RawRun{Response: "NO FINDINGS", Status: "SUCCESS",
-			Usage: &TokenUsage{Prompt: 10, Completion: 2}, Tools: &ToolUse{Mode: "tools", Calls: 1}}),
-		Classify(RawRun{Outcome: OutcomeToolBudget, Tools: &ToolUse{Mode: "tools", Calls: 24}}),
+			Usage: &usage, Tools: &ToolUse{Mode: "tools", Calls: 1}}),
+		Classify(RawRun{Outcome: OutcomeToolBudget, Usage: &usage, Tools: &ToolUse{Mode: "tools", Calls: 24}}),
+		Classify(RawRun{Response: "NO FINDINGS", Status: "SUCCESS", Usage: &TokenUsage{}}),
 	}
-	api, ok := ReviewerReport(Defaults(), runs)["reviewer_api_runs"].([]Row)
-	if !ok || len(api) != 2 || api[0]["usage"] != (TokenUsage{Prompt: 10, Completion: 2}) ||
-		api[1]["outcome"] != "tool_budget" || api[1]["tools"].(ToolUse).Calls != 24 {
-		t.Errorf("reviewer_api_runs = %v", api)
+	row := ReviewerReport(Defaults(), runs)
+	got, _ := row["reviewer_runs"].([]Row)
+	if len(got) != 3 || got[0]["usage"] != usage || got[0]["tools"].(ToolUse).Calls != 1 ||
+		got[1]["outcome"] != "tool_budget" || got[1]["usage"] != usage || got[1]["tools"].(ToolUse).Calls != 24 {
+		t.Fatalf("reviewer_runs = %v", got)
 	}
-	cli := []ReviewRun{Classify(RawRun{Response: "NO FINDINGS", Status: "SUCCESS"})}
-	if _, ok := ReviewerReport(Defaults(), cli)["reviewer_api_runs"]; ok {
-		t.Error("a CLI panel wrote reviewer_api_runs")
+	if _, ok := got[2]["usage"]; ok {
+		t.Errorf("a run that reported no usage carries one: %v", got[2])
+	}
+	if _, ok := got[2]["tools"]; ok {
+		t.Errorf("a CLI run carries tools: %v", got[2])
+	}
+	if _, ok := row["reviewer_api_runs"]; ok {
+		t.Error("the row still writes reviewer_api_runs")
 	}
 }
 

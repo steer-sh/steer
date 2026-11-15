@@ -45,9 +45,10 @@ func (a *Agy) binary() string {
 }
 
 type agyReply struct {
-	Response string `json:"response"`
-	Status   string `json:"status"`
-	Error    any    `json:"error"`
+	Response string    `json:"response"`
+	Status   string    `json:"status"`
+	Error    any       `json:"error"`
+	Usage    *agyUsage `json:"usage"`
 }
 
 func (a *Agy) Review(ctx context.Context, prompt, cwd string) gate.RawRun {
@@ -69,6 +70,9 @@ func (a *Agy) Review(ctx context.Context, prompt, cwd string) gate.RawRun {
 	argv = append(argv, "--output-format", "json", "-p", prompt)
 	stdout, stderr, raw, failed := runProcess(ctx, cwd, argv, "")
 	if failed {
+		if raw.Outcome == gate.OutcomeExit {
+			raw.Usage = decodeAgyUsage([]byte(stdout))
+		}
 		return raw
 	}
 	var reply agyReply
@@ -83,6 +87,7 @@ func (a *Agy) Review(ctx context.Context, prompt, cwd string) gate.RawRun {
 		Response: reply.Response,
 		Status:   reply.Status,
 		Error:    stringify(reply.Error),
+		Usage:    reply.Usage.tokenUsage(),
 	}
 }
 

@@ -125,14 +125,14 @@ func TestAgyOmitsPrintTimeoutWithoutADeadline(t *testing.T) {
 }
 
 func TestCodexRendersEffortAsAConfigOverride(t *testing.T) {
-	binary, argvFile := stubBinary(t, "findings")
+	binary, argvFile := stubBinary(t, `{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"findings"}}`)
 	reviewer := NewCodex("gpt-reviewer", "high")
 	reviewer.Binary = binary
 	if run := reviewer.Review(context.Background(), "PROMPT", t.TempDir()); run.Response != "findings" {
-		t.Fatalf("Review = %#v; want the stdout text", run)
+		t.Fatalf("Review = %#v; want the agent message", run)
 	}
 	assertArgv(t, recordedArgv(t, argvFile), []string{
-		"exec", "--skip-git-repo-check", "--ephemeral", "--ignore-user-config", "--sandbox", "read-only", "--disable", "hooks", "--disable", "apps",
+		"exec", "--json", "--skip-git-repo-check", "--ephemeral", "--ignore-user-config", "--sandbox", "read-only", "--disable", "hooks", "--disable", "apps",
 		"--model", "gpt-reviewer",
 		"-c", "model_reasoning_effort=high", "-",
 	})
@@ -146,7 +146,7 @@ func TestCodexOmitsAnUnsetModel(t *testing.T) {
 	reviewer.Binary = binary
 	reviewer.Review(context.Background(), "PROMPT", t.TempDir())
 	assertArgv(t, recordedArgv(t, argvFile), []string{
-		"exec", "--skip-git-repo-check", "--ephemeral", "--ignore-user-config", "--sandbox", "read-only", "--disable", "hooks", "--disable", "apps",
+		"exec", "--json", "--skip-git-repo-check", "--ephemeral", "--ignore-user-config", "--sandbox", "read-only", "--disable", "hooks", "--disable", "apps",
 		"-c", "model_reasoning_effort=low", "-",
 	})
 }

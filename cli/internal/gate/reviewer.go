@@ -49,19 +49,37 @@ type ReviewRun struct {
 	Detail  string
 	// ResponseModel is the model the provider says answered, "" when it says none.
 	ResponseModel string
-	// Usage and Tools are what an API run reported and did; nil for a CLI run.
+	// Usage is what the provider reported the run spent, nil when it reported nothing.
 	Usage *TokenUsage
+	// Tools is what an API run's tool loop did; nil for a CLI run.
 	Tools *ToolUse
 	// Elapsed is the wall-clock time of the run, a run the timeout ended included.
 	Elapsed time.Duration
 }
 
-// TokenUsage sums the tokens an endpoint reported over one run's requests.
+// TokenUsage is one run's token counts and cost, in one shape for every provider. A
+// nil field is one the provider did not report; a reported zero is kept.
 type TokenUsage struct {
-	Prompt     int `json:"prompt_tokens"`
-	Completion int `json:"completion_tokens"`
-	// Reasoning is the part of Completion the endpoint reports as reasoning.
-	Reasoning int `json:"reasoning_tokens,omitempty"`
+	// Input counts every input token, the cached part included.
+	Input *int `json:"input_tokens,omitempty"`
+	// CachedInput is the part of Input read from the provider's cache, not an
+	// addition to Input.
+	CachedInput *int `json:"cached_input_tokens,omitempty"`
+	// Output counts every output token, the reasoning part included.
+	Output *int `json:"output_tokens,omitempty"`
+	// Reasoning is the part of Output the provider reports as reasoning, not an
+	// addition to Output.
+	Reasoning *int `json:"reasoning_tokens,omitempty"`
+	// CostUSD is the run's cost as the provider reports it; Steer computes none.
+	CostUSD *float64 `json:"cost_usd,omitempty"`
+}
+
+// Reported returns u, or nil when u is nil or holds no field.
+func (u *TokenUsage) Reported() *TokenUsage {
+	if u == nil || *u == (TokenUsage{}) {
+		return nil
+	}
+	return u
 }
 
 // ToolUse is what one run's tool loop did.
@@ -281,49 +299,31 @@ func ReviewerReport(cfg Config, runs []ReviewRun) Row {
 			errors = append(errors, string(run.Outcome)+": "+truncate(run.Detail, cfg.MaxDetailChars))
 		}
 	}
-	row := Row{"reviewer_outcomes": outcomes, "reviewer_runs": runTimes(runs)}
+	row := Row{"reviewer_outcomes": outcomes, "reviewer_runs": runEntries(runs)}
 	if len(errors) > 0 {
 		row["reviewer_errors"] = errors
 	}
 	if len(models) > 0 {
 		row["reviewer_response_models"] = models
 	}
-	if api := apiRuns(runs); api != nil {
-		row["reviewer_api_runs"] = api
-	}
 	return row
 }
 
-// runTimes lists each run's outcome and wall-clock milliseconds, in run order. The
-// outcome rides with the time because the time of a run that did not answer is when
-// it was stopped or gave up, not what a review costs.
-func runTimes(runs []ReviewRun) []Row {
+// runEntries lists each run's outcome and wall-clock milliseconds, in run order, with
+// the token usage and tool use the run reported. The outcome rides with the time
+// because the time of a run that did not answer is when it was stopped or gave up,
+// not what a review costs.
+func runEntries(runs []ReviewRun) []Row {
 	out := make([]Row, 0, len(runs))
 	for _, run := range runs {
-		out = append(out, Row{"outcome": string(run.Outcome), "elapsed_ms": run.Elapsed.Milliseconds()})
-	}
-	return out
-}
-
-// apiRuns lists each run's token usage and tool use, in run order, or nil when no run
-// reported either.
-func apiRuns(runs []ReviewRun) []Row {
-	var out []Row
-	reported := false
-	for _, run := range runs {
-		entry := Row{"outcome": string(run.Outcome)}
-		if run.Usage != nil {
-			entry["usage"] = *run.Usage
-			reported = true
+		entry := Row{"outcome": string(run.Outcome), "elapsed_ms": run.Elapsed.Milliseconds()}
+		if usage := run.Usage.Reported(); usage != nil {
+			entry["usage"] = *usage
 		}
 		if run.Tools != nil {
 			entry["tools"] = *run.Tools
-			reported = true
 		}
 		out = append(out, entry)
-	}
-	if !reported {
-		return nil
 	}
 	return out
 }

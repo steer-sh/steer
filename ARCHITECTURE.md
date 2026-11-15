@@ -577,12 +577,16 @@ timeout; an assistant turn goes back with the `reasoning` and `reasoning_details
 endpoint sent, because a reasoning model can answer empty without them. Past the caps one request without tools asks for the review, and a reply that
 still calls tools is `tool_budget`. Under `auto` a first-request 4xx that names tools
 repeats the request once without them; under `required` it fails the run. Each run's
-token usage and tool use (the mode that ran, calls, refusals, bytes, files read) go
-to the row as `reviewer_api_runs`, and the instrument records a mode other than off
+tool use (the mode that ran, calls, refusals, bytes, files read) goes on its
+`reviewer_runs` entry as `tools`, and the instrument records a mode other than off
 as `tools`. Every review row, for any reviewer, lists each run's outcome and wall-clock
 milliseconds as `reviewer_runs` and the round's as `review_elapsed_ms`, which runs
 from building the context block and prompt to the last run's return; reading the diff
-and the addendum comes before it. It has no default model. `Resolve` refuses it
+and the addendum comes before it. A run's entry also carries the `usage` its provider
+reported, normalized by `gate.TokenUsage` (input including the cached part, output
+including reasoning, and `cost_usd` only where the provider states one, which today
+is Claude Code); each reviewer adapter decodes its own reply's counts, and the Codex
+reviewer runs `codex exec --json` to receive them. The API reviewer has no default model. `Resolve` refuses it
 without a base URL or a model; the key is read at review time, so a missing key is a
 `no_key` run outcome in the ledger rather than a gate that fails open with no row.
 The key comes from the variable `reviewer.api.key_env` names, when it is non-empty

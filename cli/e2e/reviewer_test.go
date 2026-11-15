@@ -43,7 +43,7 @@ func TestReviewerArgvPerProvider(t *testing.T) {
 				want = []string{"-p", "--output-format", "json", "--no-session-persistence",
 					"--safe-mode", "--tools", "Read,Grep,Glob", "--restricted", "--model", "model-claude-code", "--effort", "high"}
 			case "codex":
-				want = []string{"exec", "--skip-git-repo-check", "--ephemeral", "--ignore-user-config", "--sandbox", "read-only",
+				want = []string{"exec", "--json", "--skip-git-repo-check", "--ephemeral", "--ignore-user-config", "--sandbox", "read-only",
 					"--disable", "hooks", "--disable", "apps", "--model", "model-codex",
 					"-c", "model_reasoning_effort=high", "-"}
 			}
@@ -116,6 +116,52 @@ func TestTestReviewerWithNoReviewerOnPath(t *testing.T) {
 			if out := r.Output(); !strings.Contains(out, "The reviewer did not answer.") ||
 				!strings.Contains(out, fmt.Sprintf("%q", providerBinary[provider])) {
 				t.Errorf("output does not name the missing %s executable:\n%s", providerBinary[provider], out)
+			}
+		})
+	}
+}
+
+// TestReviewRowsRecordEachCLIRunsUsage checks that a review row's reviewer_runs
+// entries carry the usage each CLI's reply reported, normalized so input counts the
+// cached part.
+//
+// pins existing behaviour
+func TestReviewRowsRecordEachCLIRunsUsage(t *testing.T) {
+	t.Parallel()
+	want := map[string]map[string]any{
+		"agy":         {"input_tokens": float64(1200), "cached_input_tokens": float64(0), "output_tokens": float64(30)},
+		"claude-code": {"input_tokens": float64(1202), "cached_input_tokens": float64(600), "output_tokens": float64(30), "cost_usd": 0.01},
+		"codex":       {"input_tokens": float64(1200), "cached_input_tokens": float64(600), "output_tokens": float64(30)},
+	}
+	for provider, fields := range want {
+		t.Run(provider, func(t *testing.T) {
+			t.Parallel()
+			s := NewSandbox(t)
+			s.Reviewer(provider, "model-"+provider, "", 2, 20)
+			s.MustSteer("commit-gate", "install", "--precommit")
+			s.Script("clean")
+			s.StageCode("mod.py")
+			if r := s.Run(s.Repo, "", nil, "git", "commit", "-m", "add mod"); r.Code != 0 {
+				t.Fatalf("commit exited %d:\n%s", r.Code, r.Output())
+			}
+			rows := s.LedgerRows()
+			if len(rows) != 1 {
+				t.Fatalf("ledger rows = %v, want one", rows)
+			}
+			runs, _ := rows[0]["reviewer_runs"].([]any)
+			if len(runs) != 2 {
+				t.Fatalf("reviewer_runs = %v, want two entries", rows[0]["reviewer_runs"])
+			}
+			for _, run := range runs {
+				usage, _ := run.(map[string]any)["usage"].(map[string]any)
+				for k, v := range fields {
+					if usage[k] != v {
+						t.Errorf("usage[%s] = %v, want %v (usage %v)", k, usage[k], v, usage)
+					}
+				}
+				if _, ok := fields["cost_usd"]; !ok && usage["cost_usd"] != nil {
+					t.Errorf("a provider that reports no cost recorded one: %v", usage)
+				}
 			}
 		})
 	}

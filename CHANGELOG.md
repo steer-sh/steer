@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+- **Commit reviews record their token usage**: Each reviewer run in a review's
+  ledger row now records the tokens that agy, Claude Code, Codex or the API
+  reviewer reported, and Claude Code's dollar cost. A field a reviewer does not
+  report is left out. An API run's tool use moves onto the same `reviewer_runs`
+  entry, and `reviewer_api_runs` is no longer written.
+
 ## [0.4.1] - 2026-11-15
 
 - **Claude Code: checks wait for subagents**: Steer no longer runs
