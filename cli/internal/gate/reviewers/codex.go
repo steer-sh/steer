@@ -77,8 +77,9 @@ func (c *Codex) Review(ctx context.Context, prompt, cwd string) gate.RawRun {
 	if detail == "" {
 		detail = stderrTail(stderr)
 	}
-	// Only a completed turn that did not fail is a SUCCESS, whatever the exit code; a
-	// message written before a failure or a cut stream goes through salvage.
+	// On a zero exit only a completed turn that did not fail is a SUCCESS; a message
+	// written before a failure or a cut stream goes through salvage. A process that
+	// failed returned above with runProcess's outcome, as for every CLI reviewer.
 	status := "SUCCESS"
 	if stream.turnFailed || !stream.turnCompleted {
 		status = "ERROR"
