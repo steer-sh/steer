@@ -681,7 +681,14 @@ path list and the diff is not seen.
 
 `internal/gate/resolve/` joins adjudication rows to harness-neutral `LedgerMsg`
 values supplied by each adapter's harvest. The join uses thread id when present,
-otherwise session id. The gate gives each chain an ID (`ChainState.ChainID`),
+otherwise session id. Claude Code's harvest reads root assistant replies under
+the session key and `subagents/agent-<id>.jsonl` sidechain replies under the child
+key, requiring the entry's `agentId` to match the filename. Parent history,
+sibling entries and return notifications do not supply child adjudications.
+`cc.ReadLedgers` remains the root-only reader used by the Stop backstop.
+After upgrading, `steer commit-gate backfill --reresolve` previews recovery of
+previously missed child ledgers; adding `--apply` writes those links.
+The gate gives each chain an ID (`ChainState.ChainID`),
 stamps it as `chain_id` on the chain's rows and renders it into the ledger header;
 a header ID joins only the chain carrying it, across sessions and past the chain
 bound. A chain started before IDs keeps none until it ends. Without an ID, a chain

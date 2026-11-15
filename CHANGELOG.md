@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Claude Code: subagent adjudication ledgers now join their own review rows.
+  `steer commit-gate backfill --reresolve` previews recovery from retained child
+  transcripts; add `--apply` to recover previously recorded misses.
 - Claude Code: `check.sh` no longer stops a parent session's turn while one of its
   subagents still runs. The tree then holds the subagent's unfinished work, which the
   parent cannot repair. The operator gets a notice, and a turn that ends with no
