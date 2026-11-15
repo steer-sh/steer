@@ -210,7 +210,9 @@ held the repository, and never counts as a pass.
 registers it. A registration authorizes nothing by itself: the hook runs
 `check.sh` only in an adopted repository. In an adopted
 repository it runs `check.sh` for the root thread's Stop event; subagent Stop
-events are ignored. A failure blocks the turn and hands you the failing checks
+events are ignored. While a Claude Code subagent of the session still runs, the
+root Stop is not checked, because the tree holds that subagent's unfinished work;
+the operator gets a notice. A failure blocks the turn and hands you the failing checks
 and the tail of the output. An integration failure also blocks, and says that
 no assertion failed. When the tree and the failure are unchanged since the
 last block in the same session, the turn ends without another block: if the

@@ -10,12 +10,49 @@ import (
 // StopPayload is the part of a Claude Code or Codex Stop payload the runner
 // reads. AgentID is set only on a subagent's thread. StopHookActive is nil when
 // the payload does not say whether a Stop hook already blocked this turn.
+// BackgroundTasks is Claude Code's list of the session's in-flight tasks, kept
+// raw so a shape this runner does not know never fails the whole payload.
 type StopPayload struct {
-	HookEventName  string `json:"hook_event_name"`
-	SessionID      string `json:"session_id"`
-	CWD            string `json:"cwd"`
-	AgentID        string `json:"agent_id"`
-	StopHookActive *bool  `json:"stop_hook_active,omitempty"`
+	HookEventName   string          `json:"hook_event_name"`
+	SessionID       string          `json:"session_id"`
+	CWD             string          `json:"cwd"`
+	AgentID         string          `json:"agent_id"`
+	StopHookActive  *bool           `json:"stop_hook_active,omitempty"`
+	BackgroundTasks json.RawMessage `json:"background_tasks,omitempty"`
+}
+
+// finishedTaskStatuses are the statuses of a background task that no longer runs.
+var finishedTaskStatuses = map[string]bool{
+	"completed": true, "failed": true, "killed": true, "stopped": true, "cancelled": true, "canceled": true,
+}
+
+// runningSubagents names each subagent task in a Stop payload's background_tasks
+// that still runs, by its agent type or, without one, its id.
+func runningSubagents(raw json.RawMessage) []string {
+	var tasks []struct {
+		ID        string `json:"id"`
+		Type      string `json:"type"`
+		Status    string `json:"status"`
+		AgentType string `json:"agent_type"`
+	}
+	if len(raw) == 0 || json.Unmarshal(raw, &tasks) != nil {
+		return nil
+	}
+	var out []string
+	for _, task := range tasks {
+		if task.Type != "subagent" || task.Status == "" || finishedTaskStatuses[task.Status] {
+			continue
+		}
+		name := task.AgentType
+		if name == "" {
+			name = task.ID
+		}
+		if name == "" {
+			name = "subagent"
+		}
+		out = append(out, name)
+	}
+	return out
 }
 
 // stopLocatorKeys are the payload fields that find a block in the harness
@@ -84,8 +121,9 @@ type StopHookOptions struct {
 }
 
 // StopHook answers one Stop payload from harness. It acts only on the root
-// thread's Stop event; any other event is ignored. The reply is nil when the
-// hook has nothing to say.
+// thread's Stop event; any other event is ignored. A root Stop with a subagent
+// still running is not checked: the tree holds that subagent's unfinished work.
+// The reply is nil when the hook has nothing to say.
 func StopHook(harness string, raw []byte, opts StopHookOptions) (StopDecision, *StopReply) {
 	var p StopPayload
 	var d StopDecision
@@ -97,7 +135,7 @@ func StopHook(harness string, raw []byte, opts StopHookOptions) (StopDecision, *
 		d = StopDecision{Disposition: DispositionIgnored}
 	default:
 		d = Stop(StopRequest{Harness: harness, Session: p.SessionID, CWD: p.CWD, Timeout: opts.Timeout, SteerBin: opts.SteerBin,
-			Locators: stopLocators(raw), StopHookActive: p.StopHookActive})
+			Locators: stopLocators(raw), StopHookActive: p.StopHookActive, RunningSubagents: runningSubagents(p.BackgroundTasks)})
 	}
 	return d, d.Reply()
 }
