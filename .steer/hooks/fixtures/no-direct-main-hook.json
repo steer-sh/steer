@@ -534,6 +534,187 @@
         ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
       },
       "origin": "synthetic"
+    },
+    {
+      "name": "audited block 7606bb657432b049dae7703b3b8f7b71",
+      "payload": {
+        "tool_input": {
+          "command": "S=/private/tmp/claude-501/-Volumes-MiniEx-projects-steer-skill/b5bf06d8-f969-48db-8c2d-c768a49bd4f2/scratchpad/sbe; rm -rf $S; mkdir -p $S; cd $S; git init -q .; printf 'a\\n\\nb\\n\\nc\\n' \u003e f; git add f; git -c user.name=x -c user.email=x@x commit -qm i; printf 'a\\n\\nB\\n\\nc\\n' \u003e f; git config diff.suppressBlankEmpty true; git diff --function-context --no-relative --submodule=short HEAD | cat -A 2\u003e/dev/null || git diff | od -c | head"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "allow",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/main\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "reconstructed"
+    },
+    {
+      "name": "audited block 1c2cfd7255dcd7d97524cc78f2c40b2e",
+      "payload": {
+        "tool_input": {
+          "command": "S=/private/tmp/claude-501/-Volumes-MiniEx-projects-steer-skill/b5bf06d8-f969-48db-8c2d-c768a49bd4f2/scratchpad/verify-repro; rm -rf \"$S\"; mkdir -p \"$S/home\" \"$S/repo\"; cd \"$S/repo\" \u0026\u0026 export HOME=\"$S/home\" \u0026\u0026 git init -q . \u0026\u0026 git config user.email t@t \u0026\u0026 git config user.name t \u0026\u0026 echo a \u003e ok.txt \u0026\u0026 git add ok.txt \u0026\u0026 git commit -qm init; printf 'x = 1\\n' \u003e plain.py; git add plain.py; \"$S/steer\" verify --staged; echo \"ascii exit=$?\""
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "allow",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/main\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "reconstructed"
+    },
+    {
+      "name": "audited block 540c569f0269f44b3b98eb07f9c9be60",
+      "payload": {
+        "tool_input": {
+          "command": "S=/private/tmp/claude-501/-Volumes-MiniEx-projects-steer-skill/fd62b79c-b9f8-468b-a8f4-67e64b37c6b2/scratchpad; R=$S/meta-repro; rm -rf $R; mkdir -p $R/home $R/repo; export HOME=$R/home; cd $R/repo \u0026\u0026 git init -q \u0026\u0026 git commit -q --allow-empty -m init\nmkdir -p .steer/hooks \u0026\u0026 cat \u003e .steer/hooks/no-todo.py \u003c\u003c'EOF'\nimport json, sys\nEOF\n$S/steer register .steer/hooks/no-todo.py --rule \"rule one: no TODO\" --scope project 2\u003e\u00261 | tail -5"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "allow",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/main\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "reconstructed"
+    },
+    {
+      "name": "audited block ef50535bbe12d7b9b84040f2ef901684",
+      "payload": {
+        "tool_input": {
+          "command": "S=/private/tmp/claude-501/-Volumes-MiniEx-projects-steer-skill/fd62b79c-b9f8-468b-a8f4-67e64b37c6b2/scratchpad; R=$S/meta-repro; rm -rf $R; mkdir -p $R/home $R/repo; export HOME=$R/home; cd $R/repo \u0026\u0026 git init -q -b scratch \u0026\u0026 git -c user.name=x -c user.email=x@x commit -q --allow-empty -m init\nmkdir -p .steer/hooks \u0026\u0026 cat \u003e .steer/hooks/no-todo.py \u003c\u003c'EOF'\nimport json, sys\nEOF\n$S/steer register .steer/hooks/no-todo.py --rule \"rule one: no TODO\" --scope project 2\u003e\u00261 | tail -3"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "allow",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/main\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "reconstructed"
+    },
+    {
+      "name": "commit after init of a new directory named by argument is allowed",
+      "payload": {
+        "tool_input": {
+          "command": "git init -q scratch \u0026\u0026 cd scratch \u0026\u0026 git commit -q --allow-empty -m init"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "allow",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/main\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "commit on main after init in the existing checkout is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "git init -q . \u0026\u0026 git commit -m x"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/main\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "commit on main after init of an existing subdirectory is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "cd cli \u0026\u0026 git init -q \u0026\u0026 git commit -m x"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/main\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "cli/go.mod": "module x\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "commit on main after a cd to a variable path with no init is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "cd $REPO \u0026\u0026 git commit -m x"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/main\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "commit on main after init at a variable path with no rm is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "cd $REPO \u0026\u0026 git init -q \u0026\u0026 git commit -m x"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/main\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "commit after init --shared of a new directory is allowed",
+      "payload": {
+        "tool_input": {
+          "command": "git init --shared scratch \u0026\u0026 cd scratch \u0026\u0026 git commit -q --allow-empty -m init"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "allow",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/main\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "commit on main through --git-dir from inside a new repository is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "git init scratch \u0026\u0026 cd scratch \u0026\u0026 git --git-dir=../.git --work-tree=.. commit -m x"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/main\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "commit on main after init at a variable path removed without -r is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "rm --force $REPO; cd $REPO \u0026\u0026 git init \u0026\u0026 git commit -m x"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/main\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "synthetic"
     }
   ]
 }
