@@ -357,3 +357,10 @@ for (const [columns, right] of [
     if (!right) expect(drawn).not.toContain('round 2 of 4')
     await ui.unmount()
   })
+
+test('a passed terminal header, which has no book, gives the reviewer the columns of the book', async ($, on) => {
+  await world($, on, { [`${LIVE}/${SESSION}/a-1.json`]: ended('clean') })
+  const ui = await $.ui.mount({ ...BAND, props: { ...BAND.props, bodyColumns: 97 }, surface: 'terminal' })
+  expect(await texts(ui)).toContain('round 2 of 4 · stub-provider · stub-model · 1:41')
+  await ui.unmount()
+})

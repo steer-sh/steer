@@ -195,7 +195,9 @@ function band($: EngineInterface, e: RenderInput<'AbovePrompt'>, view: ReviewVie
   // The columns left for a line of text beside the rail and the mark.
   // A narrow Desktop band leaves the book out, as a narrow terminal leaves its marks out.
   const book = Svg !== undefined && columns >= MARK_MIN_COLUMNS
-  const room = Math.max(20, columns - 2 - (Raster ? BOOK_COLUMNS + 2 : book ? VECTOR_MARK_COLUMNS : Svg ? 2 : 0))
+  // A passed or unreviewed terminal band is one line and draws no book.
+  const rasterBook = Raster !== undefined && (view.kind === 'running' || view.kind === 'held' || view.kind === 'handed')
+  const room = Math.max(20, columns - 2 - (rasterBook ? BOOK_COLUMNS + 2 : book ? VECTOR_MARK_COLUMNS : Svg ? 2 : 0))
   const clockText = view.kind === 'running' && !ticking ? undefined : clock(view.elapsedMs)
   const right = clockText === undefined ? who(doc, columns) : `${who(doc, columns)} · ${clockText}`
 
@@ -276,7 +278,7 @@ function band($: EngineInterface, e: RenderInput<'AbovePrompt'>, view: ReviewVie
 
   if (view.kind === 'running') {
     const done = new Map(doc.runs_ended.map(r => [r.run, r.outcome]))
-    if (Raster) {
+    if (Raster && rasterBook) {
       moving = { requestId: e.requestId, runs: doc.runs, done: new Set(done.keys()) }
       startFrames($)
       mark = <Raster key="book" columns={BOOK_COLUMNS} rows={BOOK_ROWS} cells={bookCells(frame)} />
@@ -328,7 +330,7 @@ function band($: EngineInterface, e: RenderInput<'AbovePrompt'>, view: ReviewVie
     }
   } else if (view.kind === 'held' || view.kind === 'handed') {
     rail = view.kind === 'held' ? COLORS.held : COLORS.pass
-    if (Raster) mark = <Raster key="book" columns={BOOK_COLUMNS} rows={BOOK_ROWS} cells={bookCells()} />
+    if (Raster && rasterBook) mark = <Raster key="book" columns={BOOK_COLUMNS} rows={BOOK_ROWS} cells={bookCells()} />
     const sorted = bySeverity(doc.findings)
     const shown = sorted.slice(0, FINDINGS_SHOWN)
     const more = sorted.length - shown.length
