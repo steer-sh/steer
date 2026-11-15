@@ -337,3 +337,23 @@ test('a session with no review draws nothing', async ($, on) => {
   expect(await texts(ui)).toBe('engine')
   await ui.unmount()
 })
+
+for (const [columns, right] of [
+  [114, 'round 2 of 4 · stub-provider · stub-model · 1:41'],
+  [99, 'round 2 of 4 · stub-provider · 1:41'],
+  [84, 'round 2 of 4 · 1:41'],
+  [80, 'round 2 of 4'],
+  [50, ''],
+] as const)
+  test(`a held terminal header at ${columns} columns keeps its title whole on one line`, async ($, on) => {
+    const doc = ended('deny', { findings: FINDINGS.slice(2), model: 'stub-model', reviewer: 'stub-provider' })
+    await world($, on, { [`${LIVE}/${SESSION}/a-1.json`]: doc })
+    const ui = await $.ui.mount({ ...BAND, props: { ...BAND.props, bodyColumns: columns }, surface: 'terminal' })
+    const drawn = await texts(ui)
+    expect(drawn).toContain('REVIEW · commit held · 1 finding: 1 blocking')
+    if (right) expect(drawn).toContain(right)
+    if (columns < 114) expect(drawn).not.toContain('stub-model')
+    if (columns < 84) expect(drawn).not.toContain('1:41')
+    if (!right) expect(drawn).not.toContain('round 2 of 4')
+    await ui.unmount()
+  })

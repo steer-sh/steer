@@ -154,6 +154,26 @@ function who(doc: LiveReview, columns: number): string {
   return `${round} · ${reviewer}`
 }
 
+/**
+ * The terminal header's right-hand text that fits beside `left` in `room` columns:
+ * it sheds the model, then the reviewer, then the clock, then itself, so the title never wraps or truncates first.
+ */
+function fitRight(doc: LiveReview, clockText: string | undefined, left: string, room: number): string {
+  const round = doc.final ? 'final review' : `round ${doc.round} of ${doc.max_rounds}`
+  const tail = clockText ? [clockText] : []
+  const tries = [
+    [round, doc.reviewer, ...(doc.model ? [doc.model] : []), ...tail],
+    [round, doc.reviewer, ...tail],
+    [round, ...tail],
+    [round],
+  ]
+  for (const parts of tries) {
+    const text = parts.join(' · ')
+    if (left.length + 2 + text.length <= room) return text
+  }
+  return ''
+}
+
 const cut = (text: string, width: number) => (text.length <= width ? text : `${text.slice(0, Math.max(1, width - 1))}…`)
 
 function band($: EngineInterface, e: RenderInput<'AbovePrompt'>, view: ReviewView, now: number) {
@@ -176,10 +196,14 @@ function band($: EngineInterface, e: RenderInput<'AbovePrompt'>, view: ReviewVie
   // A narrow Desktop band leaves the book out, as a narrow terminal leaves its marks out.
   const book = Svg !== undefined && columns >= MARK_MIN_COLUMNS
   const room = Math.max(20, columns - 2 - (Raster ? BOOK_COLUMNS + 2 : book ? VECTOR_MARK_COLUMNS : Svg ? 2 : 0))
-  const right = view.kind === 'running' && !ticking ? who(doc, columns) : `${who(doc, columns)} · ${clock(view.elapsedMs)}`
+  const clockText = view.kind === 'running' && !ticking ? undefined : clock(view.elapsedMs)
+  const right = clockText === undefined ? who(doc, columns) : `${who(doc, columns)} · ${clockText}`
 
-  const head = (label: RenderChildren) => {
-    if (!Svg)
+  const head = (bold: string, dim = '') => {
+    const label = labelOf(bold, dim)
+    if (!Svg) {
+      const left = `REVIEW${bold ? ` · ${bold}` : ''}${dim ? ` · ${dim}` : ''}`
+      const fitted = fitRight(doc, clockText, left, room)
       return (
         <Box justifyContent="space-between" columnGap={2}>
           <Text wrap="truncate-end">
@@ -188,9 +212,10 @@ function band($: EngineInterface, e: RenderInput<'AbovePrompt'>, view: ReviewVie
             </Text>
             {label}
           </Text>
-          <Text dimColor>{right}</Text>
+          {fitted ? <Text dimColor>{fitted}</Text> : ''}
         </Box>
       )
+    }
     // Desktop truncates only a Text that holds plain text, so each part is its own
     // Box that gives way; the right-hand text gives way first.
     return (
@@ -215,7 +240,7 @@ function band($: EngineInterface, e: RenderInput<'AbovePrompt'>, view: ReviewVie
   }
 
   /** The header's words after `REVIEW`: a bold part, then a dim part; either may be empty. */
-  const label = (bold: string, dim = '') => {
+  function labelOf(bold: string, dim: string): RenderChildren {
     if (!Svg)
       return (
         <Text>
@@ -283,7 +308,7 @@ function band($: EngineInterface, e: RenderInput<'AbovePrompt'>, view: ReviewVie
       }
     }
     lines = [
-      head(label('', 'at commit')),
+      head('', 'at commit'),
       <Text wrap="truncate-end">
         {doc.final
           ? `Steer reads the last fixes with ${plural(doc.runs, 'run')}. This review does not hold the commit.`
@@ -310,7 +335,7 @@ function band($: EngineInterface, e: RenderInput<'AbovePrompt'>, view: ReviewVie
     const title = view.kind === 'held' ? 'commit held' : 'commit not held'
     const count = sorted.length > 0 ? ` · ${plural(sorted.length, 'finding')}: ${severityCounts(sorted)}` : ''
     lines = [
-      head(label(`${title}${count}`)),
+      head(`${title}${count}`),
       ...shown.map(f =>
         Svg ? (
           <Box flexDirection="row" minWidth={0}>
@@ -339,12 +364,12 @@ function band($: EngineInterface, e: RenderInput<'AbovePrompt'>, view: ReviewVie
   } else if (view.kind === 'passed') {
     rail = COLORS.pass
     lines = [
-      head(label('commit passed', `${plural(doc.answered, 'run')}, no findings`)),
+      head('commit passed', `${plural(doc.answered, 'run')}, no findings`),
     ]
   } else {
     rail = COLORS.held
     lines = [
-      head(label('commit not reviewed', 'no reviewer answered')),
+      head('commit not reviewed', 'no reviewer answered'),
     ]
   }
   if (view.kind !== 'running' && moving?.requestId === e.requestId) stopFrames()
