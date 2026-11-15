@@ -92,9 +92,11 @@ func (c *ClaudeCode) authSettings() string {
 }
 
 type claudeReply struct {
-	Result  string `json:"result"`
-	IsError bool   `json:"is_error"`
-	Subtype string `json:"subtype"`
+	Result       string       `json:"result"`
+	IsError      bool         `json:"is_error"`
+	Subtype      string       `json:"subtype"`
+	Usage        *claudeUsage `json:"usage"`
+	TotalCostUSD *float64     `json:"total_cost_usd"`
 }
 
 // exitDetail puts the result text of a failed run's JSON reply, such as a missing
@@ -105,12 +107,18 @@ func exitDetail(detail, stdout string) string {
 	if json.Unmarshal([]byte(stdout), &reply) != nil {
 		return detail
 	}
-	result := stderrTail(reply.Result)
-	if result == "" {
+	return withReplyText(detail, reply.Result)
+}
+
+// withReplyText puts text, bounded like a stderr tail, between a failed run's exit
+// code and the rest of its detail. It returns detail unchanged for empty text.
+func withReplyText(detail, text string) string {
+	text = stderrTail(text)
+	if text == "" {
 		return detail
 	}
 	code, rest, _ := strings.Cut(detail, " ")
-	return strings.TrimSpace(code + " " + result + " " + rest)
+	return strings.TrimSpace(code + " " + text + " " + rest)
 }
 
 func (c *ClaudeCode) Review(ctx context.Context, prompt, cwd string) gate.RawRun {
@@ -137,6 +145,7 @@ func (c *ClaudeCode) Review(ctx context.Context, prompt, cwd string) gate.RawRun
 	if failed {
 		if raw.Outcome == gate.OutcomeExit {
 			raw.Detail = exitDetail(raw.Detail, stdout)
+			raw.Usage = decodeClaudeUsage([]byte(stdout))
 		}
 		return raw
 	}
@@ -152,5 +161,6 @@ func (c *ClaudeCode) Review(ctx context.Context, prompt, cwd string) gate.RawRun
 	if reply.IsError {
 		status = "ERROR"
 	}
-	return gate.RawRun{Response: reply.Result, Status: status, Error: reply.Subtype}
+	return gate.RawRun{Response: reply.Result, Status: status, Error: reply.Subtype,
+		Usage: claudeTokenUsage(reply.Usage, reply.TotalCostUSD)}
 }

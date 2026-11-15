@@ -123,7 +123,7 @@ func parseArgv(call *Call) error {
 		seen := map[string]bool{}
 		for i := 1; i < len(args)-1; i++ {
 			switch args[i] {
-			case "--skip-git-repo-check", "--ephemeral", "--ignore-user-config":
+			case "--json", "--skip-git-repo-check", "--ephemeral", "--ignore-user-config":
 				seen[args[i]] = true
 			case "--sandbox", "--disable", "--model", "-c":
 				v, err := value(i)
@@ -149,9 +149,9 @@ func parseArgv(call *Call) error {
 				return fmt.Errorf("unknown flag %q", args[i])
 			}
 		}
-		if !seen["--skip-git-repo-check"] || !seen["--ephemeral"] || !seen["--ignore-user-config"] ||
+		if !seen["--json"] || !seen["--skip-git-repo-check"] || !seen["--ephemeral"] || !seen["--ignore-user-config"] ||
 			!seen["read-only"] || !seen["hooks off"] || !seen["apps off"] {
-			return fmt.Errorf("want --skip-git-repo-check --ephemeral --ignore-user-config --sandbox read-only --disable hooks --disable apps, got %q", args)
+			return fmt.Errorf("want --json --skip-git-repo-check --ephemeral --ignore-user-config --sandbox read-only --disable hooks --disable apps, got %q", args)
 		}
 		call.Prompt = call.Stdin
 	default:
@@ -235,7 +235,7 @@ func reply(call Call) int {
 		text = findingAt("NITPICK", 1, file)
 	case "malformed":
 		if call.Provider == "codex" {
-			fmt.Print("I read the change and have some thoughts but no structured answer.")
+			codexReply("I read the change and have some thoughts but no structured answer.")
 		} else {
 			fmt.Print("{not json")
 		}
@@ -264,13 +264,32 @@ func reply(call Call) int {
 	}
 	switch call.Provider {
 	case "agy":
-		out, _ := json.Marshal(map[string]any{"response": text, "status": "SUCCESS", "error": nil})
+		out, _ := json.Marshal(map[string]any{"response": text, "status": "SUCCESS", "error": nil,
+			"usage": map[string]int{"input_tokens": 1200, "output_tokens": 30, "thinking_tokens": 0,
+				"cache_read_tokens": 0, "total_tokens": 1230}})
 		fmt.Println(string(out))
 	case "claude":
-		out, _ := json.Marshal(map[string]any{"result": text, "is_error": false, "subtype": "success"})
+		out, _ := json.Marshal(map[string]any{"result": text, "is_error": false, "subtype": "success",
+			"total_cost_usd": 0.01, "usage": map[string]any{"input_tokens": 2, "cache_creation_input_tokens": 600,
+				"cache_read_input_tokens": 600, "output_tokens": 30, "output_tokens_details": map[string]int{"thinking_tokens": 0}}})
 		fmt.Println(string(out))
 	default:
-		fmt.Println(text)
+		codexReply(text)
 	}
 	return 0
+}
+
+// codexReply prints text as `codex exec --json` does: the agent message between the
+// turn's events, with the usage on turn.completed.
+func codexReply(text string) {
+	for _, event := range []any{
+		map[string]any{"type": "thread.started", "thread_id": "stub-thread"},
+		map[string]any{"type": "turn.started"},
+		map[string]any{"type": "item.completed", "item": map[string]any{"id": "item_0", "type": "agent_message", "text": text}},
+		map[string]any{"type": "turn.completed", "usage": map[string]int{"input_tokens": 1200,
+			"cached_input_tokens": 600, "cache_write_input_tokens": 0, "output_tokens": 30, "reasoning_output_tokens": 0}},
+	} {
+		line, _ := json.Marshal(event)
+		fmt.Println(string(line))
+	}
 }

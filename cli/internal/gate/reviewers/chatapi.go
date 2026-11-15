@@ -204,13 +204,7 @@ type chatResponse struct {
 			ReasoningDetails json.RawMessage `json:"reasoning_details"`
 		} `json:"message"`
 	} `json:"choices"`
-	Usage *struct {
-		PromptTokens            int `json:"prompt_tokens"`
-		CompletionTokens        int `json:"completion_tokens"`
-		CompletionTokensDetails struct {
-			ReasoningTokens int `json:"reasoning_tokens"`
-		} `json:"completion_tokens_details"`
-	} `json:"usage"`
+	Usage *chatUsage `json:"usage"`
 }
 
 // The loop's caps. The tool output caps are in viewtools.go; all of them hold inside
@@ -254,16 +248,14 @@ func (c *ChatAPI) ReviewView(ctx context.Context, prompt, cwd string, view *gate
 	if key == "" {
 		return gate.RawRun{Outcome: gate.OutcomeNoKey, Detail: status.Missing()}
 	}
-	usage := &gate.TokenUsage{}
+	usage := &apiUsage{}
 	var run gate.RawRun
 	if c.WantsView() {
 		run = c.converse(ctx, prompt, key, view, usage)
 	} else {
 		run = c.once(ctx, prompt, key, usage)
 	}
-	if *usage != (gate.TokenUsage{}) {
-		run.Usage = usage
-	}
+	run.Usage = usage.tokenUsage()
 	// Every field the endpoint wrote: Classify copies an unusable reply into the
 	// run's detail, and the ledger records the model it names.
 	run.Response = redact(run.Response, key)
@@ -274,7 +266,7 @@ func (c *ChatAPI) ReviewView(ctx context.Context, prompt, cwd string, view *gate
 }
 
 // once sends the prompt alone and maps the reply.
-func (c *ChatAPI) once(ctx context.Context, prompt, key string, usage *gate.TokenUsage) gate.RawRun {
+func (c *ChatAPI) once(ctx context.Context, prompt, key string, usage *apiUsage) gate.RawRun {
 	parsed, fail := c.post(ctx, key, chatRequest{
 		Model: c.Model, ReasoningEffort: c.Effort,
 		Messages: []chatMessage{textMessage("user", prompt)},
@@ -293,7 +285,7 @@ const NoViewFallback = "git could not build the commit view"
 // turn without calls ends the run through finalRun. After the caps, one request
 // without tools asks for the review, and a reply that still calls tools is
 // tool_budget. Tool calls and text between turns never reach Classify.
-func (c *ChatAPI) converse(ctx context.Context, prompt, key string, view *gate.CommitView, usage *gate.TokenUsage) gate.RawRun {
+func (c *ChatAPI) converse(ctx context.Context, prompt, key string, view *gate.CommitView, usage *apiUsage) gate.RawRun {
 	if view == nil {
 		if c.Tools == "required" {
 			return gate.RawRun{Outcome: gate.OutcomeExit,
@@ -426,10 +418,16 @@ func refusesTools(run gate.RawRun) bool {
 }
 
 // post sends one request. It returns the parsed reply, which holds at least one
-// choice, or the run that ends the review. The reply's token usage adds to usage.
-func (c *ChatAPI) post(ctx context.Context, key string, request chatRequest, usage *gate.TokenUsage) (*chatResponse, *gate.RawRun) {
+// choice, or the run that ends the review. The reply's token usage adds to usage; a
+// request the endpoint may have run without a readable reply adds a reply with no
+// usage, and a request it refused or never received adds nothing.
+func (c *ChatAPI) post(ctx context.Context, key string, request chatRequest, usage *apiUsage) (*chatResponse, *gate.RawRun) {
 	fail := func(outcome gate.RunOutcome, detail string) (*chatResponse, *gate.RawRun) {
 		return nil, &gate.RawRun{Outcome: outcome, Detail: detail}
+	}
+	unknown := func(outcome gate.RunOutcome, detail string) (*chatResponse, *gate.RawRun) {
+		usage.add(nil)
+		return fail(outcome, detail)
 	}
 	body, err := json.Marshal(request)
 	if err != nil {
@@ -437,10 +435,11 @@ func (c *ChatAPI) post(ctx context.Context, key string, request chatRequest, usa
 	}
 	endpoint := strings.TrimRight(c.BaseURL, "/") + chatCompletionsPath
 	// replied tells an endpoint that sent any HTTP reply, a redirect included,
-	// from one that sent none.
-	var replied atomic.Bool
+	// from one that sent none; wrote tells a request the endpoint received.
+	var replied, wrote atomic.Bool
 	traced := httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
 		GotFirstResponseByte: func() { replied.Store(true) },
+		WroteRequest:         func(httptrace.WroteRequestInfo) { wrote.Store(true) },
 	})
 	req, err := http.NewRequestWithContext(traced, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
@@ -452,10 +451,13 @@ func (c *ChatAPI) post(ctx context.Context, key string, request chatRequest, usa
 	resp, err := c.client().Do(req)
 	if err != nil {
 		if ctx.Err() != nil {
-			return fail(gate.OutcomeTimeout, "no response before the deadline")
+			return unknown(gate.OutcomeTimeout, "no response before the deadline")
 		}
 		if replied.Load() {
-			return fail(gate.OutcomeExit, "request failed: "+err.Error())
+			return unknown(gate.OutcomeExit, "request failed: "+err.Error())
+		}
+		if wrote.Load() {
+			return unknown(gate.OutcomeUnreachable, "request failed: "+err.Error())
 		}
 		return fail(gate.OutcomeUnreachable, "request failed: "+err.Error())
 	}
@@ -463,12 +465,12 @@ func (c *ChatAPI) post(ctx context.Context, key string, request chatRequest, usa
 	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if err != nil {
 		if ctx.Err() != nil {
-			return fail(gate.OutcomeTimeout, "no response before the deadline")
+			return unknown(gate.OutcomeTimeout, "no response before the deadline")
 		}
-		return fail(gate.OutcomeExit, "read the response: "+err.Error())
+		return unknown(gate.OutcomeExit, "read the response: "+err.Error())
 	}
 	if len(data) > maxResponseBytes {
-		return fail(gate.OutcomeUnparseable, "the response exceeds "+strconv.Itoa(maxResponseBytes)+" bytes")
+		return unknown(gate.OutcomeUnparseable, "the response exceeds "+strconv.Itoa(maxResponseBytes)+" bytes")
 	}
 
 	code := "HTTP " + strconv.Itoa(resp.StatusCode)
@@ -479,19 +481,17 @@ func (c *ChatAPI) post(ctx context.Context, key string, request chatRequest, usa
 	case resp.StatusCode == http.StatusTooManyRequests:
 		// The message tells a quota on the key from a limit upstream of a router.
 		return fail(gate.OutcomeRateLimited, withMessage(code, data, key))
+	case resp.StatusCode >= 500:
+		return unknown(gate.OutcomeExit, withMessage(code, data, key))
 	case resp.StatusCode != http.StatusOK:
 		return fail(gate.OutcomeExit, withMessage(code, data, key))
 	}
 
 	var parsed chatResponse
 	if err := json.Unmarshal(data, &parsed); err != nil {
-		return fail(gate.OutcomeUnparseable, "the response is not JSON: "+err.Error())
+		return unknown(gate.OutcomeUnparseable, "the response is not JSON: "+err.Error())
 	}
-	if u := parsed.Usage; u != nil {
-		usage.Prompt += u.PromptTokens
-		usage.Completion += u.CompletionTokens
-		usage.Reasoning += u.CompletionTokensDetails.ReasoningTokens
-	}
+	usage.add(parsed.Usage)
 	if len(parsed.Choices) == 0 {
 		detail := "the response holds no choices"
 		if msg := errorMessage(data, key); msg != "" {

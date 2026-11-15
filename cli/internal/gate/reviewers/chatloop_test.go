@@ -39,6 +39,13 @@ func scriptedServer(t *testing.T, replies ...scriptedReply) (*httptest.Server, *
 		s.requests = append(s.requests, body)
 		rep := s.replies[min(n, len(s.replies)-1)]
 		s.mu.Unlock()
+		if rep.status == 0 {
+			// Status 0 closes the connection after reading the request, sending nothing.
+			if conn, _, err := w.(http.Hijacker).Hijack(); err == nil {
+				conn.Close()
+			}
+			return
+		}
 		w.WriteHeader(rep.status)
 		io.WriteString(w, rep.body)
 	}))
@@ -118,8 +125,9 @@ func TestToolLoopReadsTheViewAndAnswers(t *testing.T) {
 	if use == nil || use.Mode != "tools" || use.Calls != 1 || use.Turns != 1 || len(use.Files) != 1 || use.Bytes == 0 {
 		t.Errorf("Tools = %+v", use)
 	}
-	if raw.Usage == nil || raw.Usage.Prompt != 100 || raw.Usage.Completion != 10 {
-		t.Errorf("Usage = %+v", raw.Usage)
+	// The final reply carries no usage, so no run total is known.
+	if raw.Usage != nil {
+		t.Errorf("Usage = %+v, want nil", raw.Usage)
 	}
 }
 
@@ -214,6 +222,28 @@ func TestToolLoopAutoFallsBackOnceWhenToolsAreRefused(t *testing.T) {
 	raw = loopReviewer(srv.URL, "required").ReviewView(context.Background(), "p", "", loopView(t))
 	if raw.Outcome != gate.OutcomeExit || len(s.requests) != 1 {
 		t.Errorf("required: run = %+v after %d requests", raw, len(s.requests))
+	}
+}
+
+// TestToolLoopUsageOmitsARunWithAnUnknownRequest: a request the endpoint may have run
+// without a readable reply leaves the run's total unknown, and a refused request
+// leaves the total of the requests that ran.
+func TestToolLoopUsageOmitsARunWithAnUnknownRequest(t *testing.T) {
+	srv, _ := scriptedServer(t, ok(callsReply("a.go")), scriptedReply{502, `{"error":{"message":"upstream"}}`})
+	raw := loopReviewer(srv.URL, "auto").ReviewView(context.Background(), "p", "", loopView(t))
+	if raw.Outcome != gate.OutcomeExit || raw.Usage != nil {
+		t.Errorf("after a 502: run = %+v, usage %+v", raw, raw.Usage)
+	}
+	srv, _ = scriptedServer(t, ok(callsReply("a.go")), scriptedReply{})
+	raw = loopReviewer(srv.URL, "auto").ReviewView(context.Background(), "p", "", loopView(t))
+	if raw.Outcome != gate.OutcomeUnreachable || raw.Usage != nil {
+		t.Errorf("after a request closed unanswered: run = %+v, usage %+v", raw, raw.Usage)
+	}
+	refusal := scriptedReply{404, `{"error":{"message":"No endpoints found that support tool use"}}`}
+	srv, _ = scriptedServer(t, refusal, ok(callsReply("a.go")))
+	raw = loopReviewer(srv.URL, "auto").ReviewView(context.Background(), "p", "", loopView(t))
+	if raw.Usage == nil || raw.Usage.Input == nil || *raw.Usage.Input != 100 {
+		t.Errorf("after a refusal: usage %+v", raw.Usage)
 	}
 }
 

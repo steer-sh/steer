@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Each `reviewer_runs` entry of a review row records the token usage its reviewer
+  reported, for agy, Claude Code, Codex and the API reviewer, and Claude Code's
+  dollar cost. An API run's tool use moves onto the same entry, and
+  `reviewer_api_runs` is no longer written.
+
 ### Fixed
 
 - Claude Code: `check.sh` no longer stops a parent session's turn while one of its

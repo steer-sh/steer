@@ -95,7 +95,7 @@ def check_call(call, provider, model, effort):
         flags = ("-p", "--safe-mode", "--restricted", "--no-session-persistence")
         pairs = (("--output-format", "json"), ("--tools", "Read,Grep,Glob"))
     elif provider == "codex":
-        flags = ("exec", "--ignore-user-config", "--ephemeral", "--skip-git-repo-check")
+        flags = ("exec", "--json", "--ignore-user-config", "--ephemeral", "--skip-git-repo-check")
         pairs = (("--sandbox", "read-only"), ("--disable", "hooks"), ("--disable", "apps"))
         if not argv or argv[-1] != "-":
             failures.append("Codex prompt is not on stdin")
@@ -202,6 +202,8 @@ def run_cell(args):
         elif any(rows[0].get("instrument_fields", {}).get(k) != v for k, v in
                  (("provider", args.provider), ("model", args.model), ("effort", args.effort), ("runs", 1))):
             report["failures"].append("ledger reviewer identity differs from the selected cell")
+        elif not all(run.get("usage", {}).get("input_tokens") for run in rows[0].get("reviewer_runs") or [{}]):
+            report["failures"].append("ledger does not record the reviewer's token usage")
         traces = sorted(output.glob("call-*/call.json"))
         if len(traces) != 2:
             report["failures"].append(f"expected trial and live CLI calls, found {len(traces)}")
