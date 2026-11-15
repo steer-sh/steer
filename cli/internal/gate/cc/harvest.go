@@ -113,7 +113,11 @@ func ledgersInLine(path, agent string, line []byte) ([]resolve.LedgerMsg, error)
 		return nil, nil
 	}
 	var texts []string
-	for _, text := range textBlocks(row.Message.Content) {
+	replies := textBlocks(row.Message.Content)
+	if agent != "" {
+		replies = append(replies, handbackTexts(row.Message.Content)...)
+	}
+	for _, text := range replies {
 		if strings.Contains(text, gate.LedgerHeader) && gate.HasLedgerLine(text) {
 			texts = append(texts, text)
 		}
@@ -134,4 +138,29 @@ func ledgersInLine(path, agent string, line []byte) ([]resolve.LedgerMsg, error)
 		out = append(out, resolve.LedgerMsg{When: *when, Key: key, Path: path, Text: text})
 	}
 	return out, nil
+}
+
+// handbackTexts reads reports delivered by a child through Claude's handback tool.
+func handbackTexts(content json.RawMessage) []string {
+	var blocks []struct {
+		Type  string          `json:"type"`
+		Name  string          `json:"name"`
+		Input json.RawMessage `json:"input"`
+	}
+	if json.Unmarshal(content, &blocks) != nil {
+		return nil
+	}
+	var texts []string
+	for _, block := range blocks {
+		if block.Type != "tool_use" || block.Name != "SubagentHandback" {
+			continue
+		}
+		var input struct {
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(block.Input, &input) == nil && input.Message != "" {
+			texts = append(texts, input.Message)
+		}
+	}
+	return texts
 }

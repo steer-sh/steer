@@ -99,6 +99,56 @@ func childLedgerRow(agent string) map[string]any {
 	return row
 }
 
+func childHandbackRow(agent string) map[string]any {
+	row := childLedgerRow(agent)
+	row["message"] = map[string]any{"content": []any{map[string]any{
+		"type": "tool_use", "name": "SubagentHandback", "input": map[string]any{"message": ledgerText},
+	}}}
+	return row
+}
+
+func TestChildHarvestReadsOnlyHandbackReports(t *testing.T) {
+	for _, tc := range []struct {
+		name, kind, tool string
+		input            any
+		want             int
+	}{
+		{"handback", "tool_use", "SubagentHandback", map[string]any{"message": ledgerText}, 1},
+		{"shell argument", "tool_use", "Bash", map[string]any{"message": ledgerText}, 0},
+		{"tool result", "tool_result", "SubagentHandback", map[string]any{"message": ledgerText}, 0},
+		{"different field", "tool_use", "SubagentHandback", map[string]any{"description": ledgerText}, 0},
+		{"non-string message", "tool_use", "SubagentHandback", map[string]any{"message": []string{ledgerText}}, 0},
+		{"missing input", "tool_use", "SubagentHandback", nil, 0},
+		{"informal summary", "tool_use", "SubagentHandback", map[string]any{"message": "Gate: fixed the findings."}, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			path := filepath.Join(root, "project", "s1", "subagents", "agent-child1.jsonl")
+			row := childLedgerRow("child1")
+			row["message"] = map[string]any{"content": []any{map[string]any{
+				"type": tc.kind, "name": tc.tool, "input": tc.input,
+			}}}
+			writeLedgerTranscript(t, path, row)
+			msgs := Harvest(root)()
+			if len(msgs) != tc.want {
+				t.Fatalf("harvest = %+v, want %d", msgs, tc.want)
+			}
+			if tc.want == 1 && (msgs[0].Key != "child1" || msgs[0].Text != ledgerText || msgs[0].Path != path) {
+				t.Fatalf("handback lost its original text or child attribution: %+v", msgs)
+			}
+			// Root reports and sibling handbacks cannot claim this child's rows.
+			row["isSidechain"] = false
+			writeLedgerTranscript(t, filepath.Join(root, "project", "s1.jsonl"), row)
+			row["isSidechain"] = true
+			row["agentId"] = "child2"
+			writeLedgerTranscript(t, path, row)
+			if msgs := Harvest(root)(); len(msgs) != 0 {
+				t.Fatalf("a root or sibling handback supplied a ledger: %+v", msgs)
+			}
+		})
+	}
+}
+
 func TestHarvestKeepsRootAndChildLedgersInTheirOwnThreads(t *testing.T) {
 	root := t.TempDir()
 	parent := filepath.Join(root, "project", "s1.jsonl")
@@ -153,51 +203,58 @@ func TestChildHarvestKeepsWholeLedgersAroundATornLine(t *testing.T) {
 }
 
 func TestHarvestRecoversChildMissWithoutClaimingParentOrSiblingRows(t *testing.T) {
-	root := t.TempDir()
-	child := filepath.Join(root, "project", "s1", "subagents", "agent-child1.jsonl")
-	writeLedgerTranscript(t, child, childLedgerRow("child1"))
-	cfg := gate.Config{StateDir: t.TempDir(), HostID: "test", StaleAfter: 30 * time.Minute}
-	stamp, _ := time.Parse(time.RFC3339, "2026-10-09T10:00:00Z")
-	var rows []map[string]any
-	for _, thread := range []string{"", "child1", "child2"} {
-		rows = append(rows, map[string]any{
-			"phase": "retry", "ts": stamp.Unix() - 10, "deny_ts": stamp.Unix() - 20,
-			"firing": 1, "chain_id": "ab12", "subject": "add mod", "session_id": "s1",
-			"thread_id": thread, "ledger_expected": true, "ledger_found": false,
-			"backfilled": true, "ledger_join": "chain", "ledger_miss": "no-ledger",
-		})
-	}
-	writeLedgerTranscript(t, cfg.LogFile(), rows...)
-	harvests := []resolve.Harvest{Harvest(root)}
-	now := func() float64 { return float64(stamp.Unix() + 86400) }
-	preview := resolve.Backfill(cfg, harvests, resolve.BackfillOptions{Reresolve: true}, io.Discard, now)
-	if preview.Err != nil || preview.Changed != 1 {
-		t.Fatalf("preview = %+v, want one recoverable child row", preview)
-	}
-	opts := resolve.BackfillOptions{Apply: true, Reresolve: true}
-	result := resolve.Backfill(cfg, harvests, opts, io.Discard, now)
-	if result.Err != nil || result.Changed != 1 {
-		t.Fatalf("backfill = %+v", result)
-	}
-	raw, err := os.ReadFile(cfg.LogFile())
-	if err != nil {
-		t.Fatal(err)
-	}
-	for i, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
-		var row map[string]any
-		if err := json.Unmarshal([]byte(line), &row); err != nil {
-			t.Fatal(err)
-		}
-		if i == 1 {
-			if row["ledger_found"] != true || row["self_reported_rejected"] != float64(1) ||
-				row["ledger_ts"] != float64(stamp.Unix()) || row["session_id"] != "s1" || row["thread_id"] != "child1" {
-				t.Fatalf("child adjudication not recovered with original provenance: %v", row)
+	for _, source := range []struct {
+		name string
+		row  func(string) map[string]any
+	}{{"reply text", childLedgerRow}, {"handback", childHandbackRow}} {
+		t.Run(source.name, func(t *testing.T) {
+			root := t.TempDir()
+			child := filepath.Join(root, "project", "s1", "subagents", "agent-child1.jsonl")
+			writeLedgerTranscript(t, child, source.row("child1"))
+			cfg := gate.Config{StateDir: t.TempDir(), HostID: "test", StaleAfter: 30 * time.Minute}
+			stamp, _ := time.Parse(time.RFC3339, "2026-10-09T10:00:00Z")
+			var rows []map[string]any
+			for _, thread := range []string{"", "child1", "child2"} {
+				rows = append(rows, map[string]any{
+					"phase": "retry", "ts": stamp.Unix() - 10, "deny_ts": stamp.Unix() - 20,
+					"firing": 1, "chain_id": "ab12", "subject": "add mod", "session_id": "s1",
+					"thread_id": thread, "ledger_expected": true, "ledger_found": false,
+					"backfilled": true, "ledger_join": "chain", "ledger_miss": "no-ledger",
+				})
 			}
-		} else if row["ledger_found"] != false {
-			t.Fatalf("child adjudication claimed another thread: %v", row)
-		}
-	}
-	if again := resolve.Backfill(cfg, harvests, opts, io.Discard, now); again.Err != nil || again.Changed != 0 {
-		t.Fatalf("repeated backfill = %+v, want no changes", again)
+			writeLedgerTranscript(t, cfg.LogFile(), rows...)
+			harvests := []resolve.Harvest{Harvest(root)}
+			now := func() float64 { return float64(stamp.Unix() + 86400) }
+			preview := resolve.Backfill(cfg, harvests, resolve.BackfillOptions{Reresolve: true}, io.Discard, now)
+			if preview.Err != nil || preview.Changed != 1 {
+				t.Fatalf("preview = %+v, want one recoverable child row", preview)
+			}
+			opts := resolve.BackfillOptions{Apply: true, Reresolve: true}
+			result := resolve.Backfill(cfg, harvests, opts, io.Discard, now)
+			if result.Err != nil || result.Changed != 1 {
+				t.Fatalf("backfill = %+v", result)
+			}
+			raw, err := os.ReadFile(cfg.LogFile())
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+				var row map[string]any
+				if err := json.Unmarshal([]byte(line), &row); err != nil {
+					t.Fatal(err)
+				}
+				if i == 1 {
+					if row["ledger_found"] != true || row["self_reported_rejected"] != float64(1) ||
+						row["ledger_ts"] != float64(stamp.Unix()) || row["session_id"] != "s1" || row["thread_id"] != "child1" {
+						t.Fatalf("child adjudication not recovered with original provenance: %v", row)
+					}
+				} else if row["ledger_found"] != false {
+					t.Fatalf("child adjudication claimed another thread: %v", row)
+				}
+			}
+			if again := resolve.Backfill(cfg, harvests, opts, io.Discard, now); again.Err != nil || again.Changed != 0 {
+				t.Fatalf("repeated backfill = %+v, want no changes", again)
+			}
+		})
 	}
 }

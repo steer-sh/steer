@@ -683,7 +683,9 @@ path list and the diff is not seen.
 values supplied by each adapter's harvest. The join uses thread id when present,
 otherwise session id. Claude Code's harvest reads root assistant replies under
 the session key and `subagents/agent-<id>.jsonl` sidechain replies under the child
-key, requiring the entry's `agentId` to match the filename. Parent history,
+key, requiring the entry's `agentId` to match the filename. Child replies include
+text blocks and `SubagentHandback` tool calls' `input.message` reports; each is
+harvested separately under the original transcript timestamp. Parent history,
 sibling entries and return notifications do not supply child adjudications.
 `cc.ReadLedgers` remains the root-only reader used by the Stop backstop.
 After upgrading, `steer commit-gate backfill --reresolve` previews recovery of
