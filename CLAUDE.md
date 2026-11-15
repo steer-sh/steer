@@ -131,6 +131,11 @@ Read the linked architecture section before changing the corresponding boundary:
   replaced file under `gate.LockSwap` (rename through carry, whole lines only), and
   `Log` checks for its row under that lock, so a new rewriter must do both or a row is
   lost or written twice.
+  Claude subagent ledger recovery belongs in `cc.Harvest`, which reads child
+  files by agent ID, including `SubagentHandback` reports in tool inputs;
+  keep `cc.ReadLedgers` root-only for the Stop backstop.
+  Preview historical misses with `commit-gate backfill --reresolve` before
+  adding `--apply`.
 - Transcript ingestion, classification, or snapshots:
   [transcripts](ARCHITECTURE.md#transcripts-and-session-evidence).
   `cli/internal/transcript/` owns normalization; `cli/internal/report/` classifies
