@@ -62,29 +62,6 @@ func TestNativeAmendIsReviewedAgainstTheCommitItReplaces(t *testing.T) {
 	}
 }
 
-// TestPrecommitAmendIsReviewedAndLands records the pre-commit channel under --amend:
-// git tells a pre-commit hook nothing about the amend, so the review reads the index
-// against HEAD, and the amend lands after a clean review.
-//
-// pins existing behaviour
-func TestPrecommitAmendIsReviewedAndLands(t *testing.T) {
-	t.Parallel()
-	s := precommitSandbox(t)
-	s.StageCode("first.py")
-	s.Git("commit", "-q", "--no-verify", "-m", "add first")
-	before := s.Head()
-	s.StageCode("second.py")
-
-	s.Script("clean")
-	r := s.Run(s.Repo, "", nil, "git", "commit", "--amend", "-m", "add first and second")
-	if r.Code != 0 || s.Head() == before {
-		t.Fatalf("the amend exited %d and HEAD moved %v:\n%s", r.Code, s.Head() != before, r.Output())
-	}
-	if got := s.reviewedPaths(); len(got) != 3 || !strings.Contains(got[0], "second.py") {
-		t.Errorf("the amend's reviewers read %v, want three reviews of second.py", got)
-	}
-}
-
 // TestAReviewerChangeSplitsTheProvenanceLists checks that a record's provenance lists
 // the reviewer that counted each window, with its provider, so a reviewer edit after
 // registration reads as two identities at read time.

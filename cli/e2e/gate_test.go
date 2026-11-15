@@ -12,35 +12,28 @@ import (
 	"github.com/steer-sh/steer-cli/internal/gate"
 )
 
-// precommitSandbox arms the pre-commit channel with a three-run stub panel.
-func precommitSandbox(t *testing.T, opts ...SandboxOption) *Sandbox {
-	s := NewSandbox(t, opts...)
-	s.Reviewer("claude-code", "sonnet", "", 3, 3)
-	s.MustSteer("commit-gate", "install", "--precommit")
-	return s
+// reviewSandbox arms the Claude Code commit gate with a three-run stub panel.
+func reviewSandbox(t *testing.T, opts ...SandboxOption) (*Sandbox, *NativeGate) {
+	t.Helper()
+	return newNativeGate(t, "claude-code", ".claude/settings.json", "commit-gate review", opts...)
 }
 
-// TestPrecommitCleanReviewProceeds checks that a clean panel lets the commit land
-// with one receipt and a clean ledger row for the repository.
+// TestCleanReviewProceeds checks that a clean panel lets the commit run with one
+// receipt and a clean ledger row for the repository.
 //
 // pins existing behaviour
-func TestPrecommitCleanReviewProceeds(t *testing.T) {
+func TestCleanReviewProceeds(t *testing.T) {
 	t.Parallel()
-	s := precommitSandbox(t)
+	s, g := reviewSandbox(t)
 	s.Script("clean")
-	before := s.Head()
 	s.StageCode("mod.py")
-	r := s.Run(s.Repo, "", nil, "git", "commit", "-m", "add mod")
-	if r.Code != 0 || s.Head() == before {
-		t.Fatalf("commit exited %d and HEAD moved %v:\n%s", r.Code, s.Head() != before, r.Output())
+	r := g.Hook("git commit -m 'add mod'", s.Repo)
+	if r.Denied() {
+		t.Fatalf("a clean review denied the commit:\n%s", r.Text())
 	}
-	receipt := "[commit-gate] " + filepath.Base(s.Repo) + " (firing 1, diff "
-	if n := strings.Count(r.Stderr, "found nothing — commit proceeds."); n != 1 ||
-		!strings.Contains(r.Stderr, receipt) {
-		t.Errorf("want one clean receipt starting %q, got %d:\n%s", receipt, n, r.Stderr)
-	}
-	if strings.Contains(r.Stderr, gate.SubjectUnavailable) {
-		t.Errorf("the receipt quotes the reviewer placeholder as the subject:\n%s", r.Stderr)
+	receipt := "[commit-gate] " + filepath.Base(s.Repo) + ` "add mod" (firing 1, diff `
+	if !strings.Contains(r.System, "found nothing — commit proceeds.") || !strings.Contains(r.Context, receipt) {
+		t.Errorf("want a clean receipt starting %q:\n%s", receipt, r.Text())
 	}
 	if n := len(s.Calls()); n != 3 {
 		t.Errorf("the panel made %d reviewer calls, want 3", n)
@@ -51,49 +44,45 @@ func TestPrecommitCleanReviewProceeds(t *testing.T) {
 	}
 }
 
-// TestPrecommitFindingBlocksTheCommit checks that a standing finding stops the commit
-// and shows the reviewer's text.
+// TestFindingBlocksTheCommit checks that a standing finding refuses the commit and
+// shows the reviewer's text.
 //
 // pins existing behaviour
-func TestPrecommitFindingBlocksTheCommit(t *testing.T) {
+func TestFindingBlocksTheCommit(t *testing.T) {
 	t.Parallel()
-	s := precommitSandbox(t)
+	s, g := reviewSandbox(t)
 	s.Script("finding")
-	before := s.Head()
 	s.StageCode("mod.py")
-	r := s.Run(s.Repo, "", nil, "git", "commit", "-m", "add mod")
-	if r.Code == 0 || s.Head() != before {
-		t.Fatalf("commit exited 0 or HEAD moved over a finding:\n%s", r.Output())
+	r := g.Hook("git commit -m 'add mod'", s.Repo)
+	if !r.Denied() {
+		t.Fatalf("a finding did not refuse the commit:\n%s", r.Raw)
 	}
-	for _, want := range []string{"CLAIM: stub finding 1.", "[commit-gate] Commit blocked"} {
-		if !strings.Contains(r.Stderr, want) {
-			t.Errorf("stderr lacks %q:\n%s", want, r.Stderr)
-		}
+	if !strings.Contains(r.Text(), "CLAIM: stub finding 1.") {
+		t.Errorf("the reply lacks the finding:\n%s", r.Text())
 	}
 	if rows := s.LedgerRows(); len(rows) != 1 || rows[0]["phase"] != "deny" {
 		t.Errorf("ledger rows = %v, want one deny row", rows)
 	}
 }
 
-// TestPrecommitNitpickOnlyRoundProceeds checks that a panel whose every finding is
-// NITPICK lets the commit land, prints the findings and the not-blocked line on git's
-// stderr, and records the round and the sequence's release.
+// TestNitpickOnlyRoundProceeds checks that a panel whose every finding is NITPICK
+// lets the commit run, shows the findings and the not-blocked line, and records the
+// round and the sequence's release.
 //
 // pins existing behaviour
-func TestPrecommitNitpickOnlyRoundProceeds(t *testing.T) {
+func TestNitpickOnlyRoundProceeds(t *testing.T) {
 	t.Parallel()
-	s := precommitSandbox(t)
+	s, g := reviewSandbox(t)
 	s.Script("nitpick")
-	before := s.Head()
 	s.StageCode("mod.py")
-	r := s.Run(s.Repo, "", nil, "git", "commit", "-m", "add mod")
-	if r.Code != 0 || s.Head() == before {
-		t.Fatalf("commit exited %d and HEAD moved %v:\n%s", r.Code, s.Head() != before, r.Output())
+	r := g.Hook("git commit -m 'add mod'", s.Repo)
+	if r.Denied() {
+		t.Fatalf("a nitpick-only round denied the commit:\n%s", r.Text())
 	}
 	for _, want := range []string{"[1] SEVERITY: NITPICK", "**Round 1, terminal**",
 		"[commit-gate] Commit not blocked — 3 of 3 reviewers returned 3 finding(s), duplicates included, all rated NITPICK"} {
-		if !strings.Contains(r.Stderr, want) {
-			t.Errorf("stderr lacks %q:\n%s", want, r.Stderr)
+		if !strings.Contains(r.Text(), want) {
+			t.Errorf("the reply lacks %q:\n%s", want, r.Text())
 		}
 	}
 	rows := s.LedgerRows()
@@ -103,11 +92,11 @@ func TestPrecommitNitpickOnlyRoundProceeds(t *testing.T) {
 	}
 }
 
-// TestPrecommitFailsOpenWhenNoReviewerAnswers checks that every panel failure lets
-// the commit land with a receipt that says no review happened.
+// TestFailsOpenWhenNoReviewerAnswers checks that every panel failure lets the commit
+// run with a receipt that says no review happened.
 //
 // pins existing behaviour
-func TestPrecommitFailsOpenWhenNoReviewerAnswers(t *testing.T) {
+func TestFailsOpenWhenNoReviewerAnswers(t *testing.T) {
 	t.Parallel()
 	for _, mode := range []string{"exit", "auth", "unknown-model", "malformed", "empty", "sleep", "missing"} {
 		t.Run(mode, func(t *testing.T) {
@@ -116,18 +105,16 @@ func TestPrecommitFailsOpenWhenNoReviewerAnswers(t *testing.T) {
 			if mode == "missing" {
 				opts = append(opts, WithoutStubs())
 			}
-			s := precommitSandbox(t, opts...)
+			s, g := reviewSandbox(t, opts...)
 			s.Setenv("STEER_STUB_SLEEP", "10")
 			s.Script(mode)
-			before := s.Head()
 			s.StageCode("mod.py")
-			r := s.Run(s.Repo, "", nil, "git", "commit", "-m", "add mod")
-			if r.Code != 0 || s.Head() == before {
-				t.Fatalf("commit exited %d and HEAD moved %v; the gate must fail open:\n%s",
-					r.Code, s.Head() != before, r.Output())
+			r := g.Hook("git commit -m 'add mod'", s.Repo)
+			if r.Denied() {
+				t.Fatalf("the gate must fail open:\n%s", r.Text())
 			}
-			if !strings.Contains(r.Stderr, "This commit was NOT reviewed") {
-				t.Errorf("no not-reviewed receipt:\n%s", r.Stderr)
+			if !strings.Contains(r.Text(), "This commit was NOT reviewed") {
+				t.Errorf("no not-reviewed receipt:\n%s", r.Text())
 			}
 			if rows := s.LedgerRows(); len(rows) != 1 || rows[0]["phase"] != "ungated" {
 				t.Errorf("ledger rows = %v, want one ungated row", rows)
@@ -136,11 +123,11 @@ func TestPrecommitFailsOpenWhenNoReviewerAnswers(t *testing.T) {
 	}
 }
 
-// TestPrecommitSkipReceipts checks that a skipped commit gets one reason and calls no
+// TestSkipReceipts checks that a skipped commit gets one reason and calls no
 // reviewer.
 //
 // pins existing behaviour
-func TestPrecommitSkipReceipts(t *testing.T) {
+func TestSkipReceipts(t *testing.T) {
 	t.Parallel()
 	cases := []struct{ file, content, want string }{
 		{"NOTES.md", strings.Repeat("prose line\n", 80), "not reviewed — every changed file is prose"},
@@ -149,16 +136,16 @@ func TestPrecommitSkipReceipts(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.file, func(t *testing.T) {
 			t.Parallel()
-			s := precommitSandbox(t)
+			s, g := reviewSandbox(t)
 			s.Script("finding")
 			s.Write(tc.file, tc.content)
 			s.Git("add", tc.file)
-			r := s.Run(s.Repo, "", nil, "git", "commit", "-m", "skip me")
-			if r.Code != 0 {
-				t.Fatalf("commit exited %d:\n%s", r.Code, r.Output())
+			r := g.Hook("git commit -m 'skip me'", s.Repo)
+			if r.Denied() {
+				t.Fatalf("a skipped commit was denied:\n%s", r.Text())
 			}
-			if !strings.Contains(r.Stderr, tc.want) {
-				t.Errorf("stderr lacks %q:\n%s", tc.want, r.Stderr)
+			if !strings.Contains(r.Text(), tc.want) {
+				t.Errorf("the reply lacks %q:\n%s", tc.want, r.Text())
 			}
 			if n := len(s.Calls()); n != 0 {
 				t.Errorf("a skipped commit made %d reviewer calls", n)
@@ -167,20 +154,17 @@ func TestPrecommitSkipReceipts(t *testing.T) {
 	}
 }
 
-// TestPrecommitReviewsARootCommit checks a first commit, where HEAD does not resolve.
+// TestReviewsARootCommit checks a first commit, where HEAD does not resolve.
 //
 // pins existing behaviour
-func TestPrecommitReviewsARootCommit(t *testing.T) {
+func TestReviewsARootCommit(t *testing.T) {
 	t.Parallel()
-	s := precommitSandbox(t, WithoutBaseCommit())
+	s, g := reviewSandbox(t, WithoutBaseCommit())
 	s.Script("finding")
 	s.StageCode("mod.py")
-	r := s.Run(s.Repo, "", nil, "git", "commit", "-m", "first")
-	if r.Code == 0 || s.Head() != "" {
-		t.Fatalf("a root commit with a finding landed:\n%s", r.Output())
-	}
-	if !strings.Contains(r.Stderr, "CLAIM: stub finding 1.") {
-		t.Errorf("the panel did not review the root commit:\n%s", r.Stderr)
+	r := g.Hook("git commit -m 'first'", s.Repo)
+	if !r.Denied() || !strings.Contains(r.Text(), "CLAIM: stub finding 1.") {
+		t.Errorf("the panel did not refuse the root commit over its finding:\n%s", r.Text())
 	}
 }
 

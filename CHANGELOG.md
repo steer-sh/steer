@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **The git pre-commit review is removed**: `steer commit-gate install
+  --precommit` is gone. Steer records review decisions only from Claude
+  Code, Codex and Pi sessions, so a pre-commit review run under any other
+  tool never reached `/steer-report`. A pre-commit hook an earlier Steer installed
+  no longer reviews: it lets each commit through and prints one line
+  saying so. To remove it from a repository, run
+  `steer commit-gate remove --precommit` there; `steer uninstall --apply`
+  also removes it from the repository it runs in. Both leave a hook you
+  edited or one in a hooks directory outside the repository's `.git`. Ledger rows the
+  pre-commit review wrote still read as before.
 - **Commit reviews record their token usage**: Each reviewer run in a review's
   ledger row now records the tokens that agy, Claude Code, Codex or the API
   reviewer reported, and Claude Code's dollar cost. A field a reviewer does not

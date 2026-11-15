@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/claude"
@@ -70,16 +69,5 @@ func TestAFreshRegistrationNamesNoReviewer(t *testing.T) {
 		if steerbin.HasFlags(command, reviewerFlags...) {
 			t.Fatalf("registration command %q names the reviewer", command)
 		}
-	}
-	// The script is many lines, so its steer line is read on its own: a whole-script
-	// test would find no steer command at the front and pass on anything.
-	var invocation string
-	for _, line := range strings.Split(buildCommitGatePreCommitScript(), "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "steer commit-gate precommit") {
-			invocation = strings.TrimSpace(line)
-		}
-	}
-	if invocation != "steer commit-gate precommit" {
-		t.Fatalf("pre-commit invocation = %q, want the bare command", invocation)
 	}
 }

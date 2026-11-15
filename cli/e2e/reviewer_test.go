@@ -138,11 +138,11 @@ func TestReviewRowsRecordEachCLIRunsUsage(t *testing.T) {
 			t.Parallel()
 			s := NewSandbox(t)
 			s.Reviewer(provider, "model-"+provider, "", 2, 20)
-			s.MustSteer("commit-gate", "install", "--precommit")
+			g := armNativeGate(s, "claude-code", ".claude/settings.json", "commit-gate review")
 			s.Script("clean")
 			s.StageCode("mod.py")
-			if r := s.Run(s.Repo, "", nil, "git", "commit", "-m", "add mod"); r.Code != 0 {
-				t.Fatalf("commit exited %d:\n%s", r.Code, r.Output())
+			if r := g.Hook("git commit -m 'add mod'", s.Repo); r.Denied() {
+				t.Fatalf("a clean review denied the commit:\n%s", r.Text())
 			}
 			rows := s.LedgerRows()
 			if len(rows) != 1 {

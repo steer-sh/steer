@@ -108,9 +108,6 @@ type Options struct {
 	// ReviewerProbe is whether the configured reviewer CLI resolves, which the
 	// readiness answer reads. The zero value checked nothing and raises no step.
 	ReviewerProbe reviewers.Probe
-	// PreCommit reports the git pre-commit channel armed in RepoRoot; the caller reads
-	// it, because Collect runs no git command.
-	PreCommit bool
 }
 
 // ScoredIntervention is one live intervention with its recomputed observation. It
@@ -411,8 +408,6 @@ type Posture struct {
 	HookTimeout int `json:"-"`
 	// Builds is the running CLI's identity and the hooks' identity.
 	Builds Builds `json:"-"`
-	// PreCommit reports the git pre-commit channel armed in this repository.
-	PreCommit bool `json:"-"`
 }
 
 // AttentionQueue is the subset of the loop needing action: the cadence queue
@@ -543,7 +538,6 @@ func Collect(opts Options) (*SystemStatus, error) {
 	}
 
 	s.Posture = collectPosture(opts.Config, ev)
-	s.Posture.PreCommit = opts.PreCommit
 	s.Checks = collectChecks(opts.RepoRoot)
 	s.Telemetry = telemetry(ev, checkBlocks())
 	inventory := opts.InventoryScopes

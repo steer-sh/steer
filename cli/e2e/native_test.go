@@ -41,9 +41,15 @@ func newNativeGate(t *testing.T, harness, config, sub string, opts ...SandboxOpt
 	t.Helper()
 	s := NewSandbox(t, opts...)
 	s.Reviewer("claude-code", "sonnet", "", 3, 3)
+	return s, armNativeGate(s, harness, config, sub)
+}
+
+// armNativeGate registers harness's commit gate in s under the reviewer s configures.
+func armNativeGate(s *Sandbox, harness, config, sub string) *NativeGate {
+	s.t.Helper()
 	s.MustSteer("bin", "install")
 	s.MustSteer("commit-gate", "install", "--harness", harness)
-	return s, &NativeGate{s: s, harness: harness, command: s.RegisteredCommand(filepath.Join(s.Repo, config), sub)}
+	return &NativeGate{s: s, harness: harness, command: s.RegisteredCommand(filepath.Join(s.Repo, config), sub)}
 }
 
 // Hook sends a Bash tool call through the registered command, as the harness does.

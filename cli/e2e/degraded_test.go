@@ -128,26 +128,6 @@ func TestGateOutsideARepositoryClaimsNoReview(t *testing.T) {
 	}
 }
 
-// TestPrecommitInstallOutsideARepositoryRefusesInOneLine checks the pre-commit
-// install from a directory that is not a repository.
-//
-// pins existing behaviour
-func TestPrecommitInstallOutsideARepositoryRefusesInOneLine(t *testing.T) {
-	t.Parallel()
-	s := NewSandbox(t)
-	plain := s.path("plain")
-	if err := os.MkdirAll(plain, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	r := s.Run(plain, "", nil, "steer", "commit-gate", "install", "--precommit")
-	if r.Code == 0 {
-		t.Errorf("install outside a repository exited 0:\n%s", r.Output())
-	}
-	if !strings.Contains(strings.ToLower(r.Output()), "repositor") {
-		t.Errorf("the refusal does not say a repository is needed:\n%s", r.Output())
-	}
-}
-
 // TestGateWithAnUnwritableStateDirProceeds makes the Steer state directory read-only.
 // The review still runs and the commit proceeds; the reply says the row was lost.
 //

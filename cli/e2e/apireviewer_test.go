@@ -49,17 +49,16 @@ func (c *chatStub) Auths() []string {
 	return append([]string(nil), c.auths...)
 }
 
-// apiSandbox arms the pre-commit channel with a three-run panel of the
+// apiSandbox arms the Claude Code commit gate with a three-run panel of the
 // openai-compatible reviewer pointed at stub.
-func apiSandbox(t *testing.T, stub *chatStub) *Sandbox {
+func apiSandbox(t *testing.T, stub *chatStub) (*Sandbox, *NativeGate) {
 	s := NewSandbox(t)
 	s.MustSteer("config", "set", "reviewer.provider", "openai-compatible")
 	s.MustSteer("config", "set", "reviewer.api.base_url", stub.URL+"/v1")
 	s.MustSteer("config", "set", "reviewer.model", "stub/model")
 	s.MustSteer("config", "set", "reviewer.runs", "3")
 	s.MustSteer("config", "set", "reviewer.timeout", "10")
-	s.MustSteer("commit-gate", "install", "--precommit")
-	return s
+	return s, armNativeGate(s, "claude-code", ".claude/settings.json", "commit-gate review")
 }
 
 // TestAPIReviewerReviewsACommitWithTheKeyFile runs a commit through the API reviewer
@@ -70,7 +69,7 @@ func apiSandbox(t *testing.T, stub *chatStub) *Sandbox {
 func TestAPIReviewerReviewsACommitWithTheKeyFile(t *testing.T) {
 	t.Parallel()
 	stub := newChatStub(t)
-	s := apiSandbox(t, stub)
+	s, g := apiSandbox(t, stub)
 	dir := filepath.Join(s.Home, ".steer", "credentials")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
@@ -82,11 +81,9 @@ func TestAPIReviewerReviewsACommitWithTheKeyFile(t *testing.T) {
 		t.Fatalf("key status = %q, want file", out)
 	}
 
-	before := s.Head()
 	s.StageCode("mod.py")
-	r := s.Run(s.Repo, "", nil, "git", "commit", "-m", "add mod")
-	if r.Code != 0 || s.Head() == before {
-		t.Fatalf("commit exited %d:\n%s", r.Code, r.Output())
+	if r := g.Hook("git commit -m 'add mod'", s.Repo); r.Denied() {
+		t.Fatalf("a clean review denied the commit:\n%s", r.Text())
 	}
 	auths := stub.Auths()
 	if len(auths) != 3 {
@@ -125,16 +122,16 @@ func TestAPIReviewerReviewsACommitWithTheKeyFile(t *testing.T) {
 func TestAPIReviewerWithNoKeyRecordsNoKey(t *testing.T) {
 	t.Parallel()
 	stub := newChatStub(t)
-	s := apiSandbox(t, stub)
+	s, g := apiSandbox(t, stub)
 	s.MustSteer("config", "set", "reviewer.api.key_env", "STEER_E2E_API_KEY")
 	s.StageCode("mod.py")
-	r := s.Run(s.Repo, "", nil, "git", "commit", "-m", "add mod")
+	r := g.Hook("git commit -m 'add mod'", s.Repo)
 	if n := len(stub.Auths()); n != 0 {
 		t.Fatalf("the endpoint saw %d requests with no key", n)
 	}
 	rows := s.LedgerRows()
 	if len(rows) == 0 {
-		t.Fatalf("no ledger row; commit output:\n%s", r.Output())
+		t.Fatalf("no ledger row; hook reply:\n%s", r.Raw)
 	}
 	if got := dig(rows[len(rows)-1], "reviewer_outcomes", "no_key"); got != float64(3) {
 		t.Errorf("reviewer_outcomes = %v, want three no_key", rows[len(rows)-1]["reviewer_outcomes"])

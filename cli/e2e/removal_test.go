@@ -245,3 +245,52 @@ func TestSelfProtectionRefusesTheAgentAndNamesAWorkingCommand(t *testing.T) {
 		t.Error("bin install put back a guard the setting turns off")
 	}
 }
+
+// legacyPreCommitHook is the git pre-commit hook the removed pre-commit review wrote.
+const legacyPreCommitHook = `#!/usr/bin/env bash
+set -uo pipefail
+
+# steer-managed: commit-gate
+if ! command -v steer >/dev/null 2>&1; then
+  echo "steer commit-gate: 'steer' is not in PATH." >&2
+  exit 0
+fi
+
+steer commit-gate precommit
+`
+
+// TestALegacyPreCommitHookLetsTheCommitLandAndComesOut checks the hook an earlier
+// Steer installed: git runs it on a real commit, the commit lands with the one line
+// naming the removal command, and that command deletes the hook.
+//
+// pins existing behaviour
+func TestALegacyPreCommitHookLetsTheCommitLandAndComesOut(t *testing.T) {
+	t.Parallel()
+	s := NewSandbox(t)
+	s.Reviewer("claude-code", "sonnet", "", 3, 3)
+	s.Script("finding")
+	hook := filepath.Join(s.Repo, ".git", "hooks", "pre-commit")
+	if err := os.MkdirAll(filepath.Dir(hook), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hook, []byte(legacyPreCommitHook), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	before := s.Head()
+	s.StageCode("mod.py")
+	r := s.Run(s.Repo, "", nil, "git", "commit", "-m", "add mod")
+	if r.Code != 0 || s.Head() == before {
+		t.Fatalf("the commit exited %d and HEAD moved %v:\n%s", r.Code, s.Head() != before, r.Output())
+	}
+	if !strings.Contains(r.Stderr, "steer commit-gate remove --precommit") {
+		t.Errorf("the hook's output does not name the removal command:\n%s", r.Stderr)
+	}
+	if n := len(s.Calls()); n != 0 {
+		t.Errorf("the removed review made %d reviewer calls", n)
+	}
+
+	s.MustSteer("commit-gate", "remove", "--precommit")
+	if _, err := os.Stat(hook); !os.IsNotExist(err) {
+		t.Errorf("the hook is still there: %v", err)
+	}
+}

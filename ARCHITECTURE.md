@@ -79,8 +79,12 @@ uses, removes the Steer-owned ones, and reads them again before it reports
 success; a file a reader cannot load is an item whose removal fails, never an
 empty reading. Project-scope registrations are committed, so it names the current
 repository's and changes none. It removes a pre-commit hook only when the hook
-lies in the repository's git common dir and equals a script Steer writes; any
-other Steer-marked hook is named and kept. The repository's check adoption is
+lies in the repository's git common dir and equals a script Steer writes (the
+`git-hooks` verify hook, or the hook of the removed pre-commit review); any
+other Steer-marked hook is named and kept. That removed review's hook still runs
+`steer commit-gate precommit`, a hidden command that exits 0, because git refuses
+the commit on any other exit, and names `steer commit-gate remove --precommit`,
+which deletes the hook from one repository under the same equality test. The repository's check adoption is
 machine-local too, so a full uninstall removes it; an instruction document that
 links to another harness's survives a one-harness removal. `~/.steer` stays unless `--purge` is
 given, which is refused while another Steer registration or a kept hook still
@@ -531,8 +535,10 @@ the other's registration. Pi has no Stop runner.
 
 ## Commit gate and resolver
 
-`internal/gate/` is the review engine; `cc`, `codex`, `pi` and `gitgate` adapt it
-to native hooks and git pre-commit. Reviewer processes live under
+`internal/gate/` is the review engine; `cc`, `codex` and `pi` adapt it to each
+harness's native hook. Steer reads review outcomes only from those harnesses'
+transcripts (`gate/harvests`), so the gate has no channel outside them; ledger rows
+an earlier git pre-commit review wrote still read, with `channel: precommit`. Reviewer processes live under
 `internal/gate/reviewers/`; prompts and their pinned digests live under `prompts/`.
 The review prompt digest is part of reviewer identity. Ledger rows record both a
 legacy instrument string and structured identity dimensions.
@@ -673,8 +679,7 @@ auto-approval; the other adapters carry it without a decision. Both copies carry
 one sentence. The agent's copy identifies the commit by repository, subject,
 firing and diff digest — the hook runs before a commit hash exists; the
 operator's names the repository and subject. Neither quotes a placeholder subject
-(`gate.PlaceholderSubject`). git shows a pre-commit hook's two copies on one stderr,
-so `gitgate` prints only the agent's copy of a receipt (`Decision.Receipt`). A skipped commit (prose only, binary
+(`gate.PlaceholderSubject`). A skipped commit (prose only, binary
 content only, or an empty raw diff) gets a receipt that names the reason
 and rules nothing; only a repository git cannot read stays silent. The binary skip
 (`IsBinaryOnly`) reads the raw diff the reviewers would get: every stanza must be a
@@ -732,7 +737,7 @@ file for its carry.
 `ledger_ts`; a hook-time capture has none) under the current rules, and keeps a
 link with no ledger left to read. Stop hooks run
 the resolver; Codex also registers SubagentStop, and Pi uses turn_end.
-The git pre-commit channel has no session resolver. Pending rows have a grace
+Pending rows have a grace
 period before they count as missing evidence. The hooks' `--if-due` form harvests
 again only when a row was written or a miss deadline passed since the last applied
 scan (recorded in `backfill.scanned`), or after `rescanAfter`; a run without it,
@@ -1271,7 +1276,7 @@ and x on a factory orphan name `steer preset disable <name>` for its scope, and 
 self-protection the setting that turns it off, which the dashboard does not edit. The Archived section shows the newest
 entry of each tier and id per store and restores it through the same code as
 `steer archive restore`. Check adoption, replay and restore run as background
-commands; the check runner's registration belongs to Arming. Git pre-commit installation remains CLI-only. Shared styles and geometry
+commands; the check runner's registration belongs to Arming. The `git-hooks` verify hook's installation remains CLI-only. Shared styles and geometry
 tests own wrapping and terminal layout details.
 
 `internal/statusline/` renders the Claude Code status-line row;
