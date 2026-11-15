@@ -51,7 +51,7 @@ const FINDINGS = [
 ]
 
 /** Answers the file system, environment, clock and session the mod reads, and starts the session. */
-async function world($: Engine, on: On, files: Record<string, unknown>, session = SESSION) {
+async function world($: Engine, on: On, files: Record<string, unknown>, session = () => SESSION) {
   const clock = mock.clock(on, { now: NOW })
   mock.env(on, { HOME })
   const text: Record<string, string> = { [`${HOME}/.steer/state/commit-review/.steer-state`]: '' }
@@ -67,7 +67,7 @@ async function world($: Engine, on: On, files: Record<string, unknown>, session 
     if (found === undefined) throw new Error('missing')
     return { value: found }
   })
-  on('session.id', () => ({ value: session }))
+  on('session.id', () => ({ value: session() }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('ui.blit', () => ({ value: {} }))
   on('ui.render', ($, e) => {
@@ -329,6 +329,20 @@ test('nothing draws for another session, a stale file or an unreadable one', asy
     expect(await texts(ui)).toBe('engine')
     await ui.unmount()
   }
+})
+
+test('after /clear the band follows the new session and drops the old one', async ($, on) => {
+  let current = SESSION
+  const clock = await world($, on, { [`${LIVE}/${SESSION}/a-1.json`]: ended('deny', { findings: FINDINGS }) }, () => current)
+  const before = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await texts(before)).toContain('commit held')
+  await before.unmount()
+
+  current = 'sess-2'
+  await clock.advance(1000)
+  const after = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await texts(after)).toBe('engine')
+  await after.unmount()
 })
 
 test('a session with no review draws nothing', async ($, on) => {

@@ -88,7 +88,8 @@ async function resolveRoot($: EngineInterface): Promise<string> {
 
 async function poll($: EngineInterface): Promise<void> {
   if (polls++ % ROOT_EVERY === 0 || !liveRoot) liveRoot = await resolveRoot($)
-  if (!sessionId) sessionId = await $.session.id()
+  // Read each poll: /clear gives the same process a new session.
+  sessionId = await $.session.id()
   const slug = sessionSlug(sessionId)
   const read: LiveReview[] = []
   if (liveRoot && slug) {
