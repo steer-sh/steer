@@ -109,7 +109,7 @@ func ledgersInLine(path, agent string, line []byte) ([]resolve.LedgerMsg, error)
 	if err := json.Unmarshal(line, &row); err != nil {
 		return nil, ErrUnreadableLine
 	}
-	if row.Type != "assistant" || row.IsSidechain != (agent != "") || row.AgentID != agent {
+	if row.Type != "assistant" || row.IsSidechain != (agent != "") || (agent != "" && row.AgentID != agent) {
 		return nil, nil
 	}
 	var texts []string

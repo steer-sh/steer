@@ -38,12 +38,15 @@ func assistantBlocks(blocks ...map[string]any) map[string]any {
 func TestReadLedgersTakesMainThreadReplyTextOnly(t *testing.T) {
 	sidechain := assistantBlocks(map[string]any{"type": "text", "text": ledgerText})
 	sidechain["isSidechain"] = true
+	rootWithAgent := assistantBlocks(map[string]any{"type": "text", "text": ledgerText})
+	rootWithAgent["agentId"] = "root-agent"
 	user := map[string]any{"type": "user", "sessionId": "s1", "timestamp": "2026-10-09T10:00:00.000Z",
 		"message": map[string]any{"role": "user", "content": ledgerText}}
 	lines := []string{
 		transcriptLine(t, assistantBlocks(map[string]any{"type": "thinking", "thinking": ledgerText})),
 		transcriptLine(t, sidechain),
 		transcriptLine(t, user),
+		transcriptLine(t, rootWithAgent),
 		transcriptLine(t, assistantBlocks(map[string]any{"type": "text", "text": ledgerText})),
 	}
 	path := filepath.Join(t.TempDir(), "s1.jsonl")
@@ -55,8 +58,8 @@ func TestReadLedgersTakesMainThreadReplyTextOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	msgs, err := ReadLedgers(path)
-	if err != nil || len(msgs) != 1 || msgs[0].Key != "s1" {
-		t.Fatalf("ledgers = %+v, err %v; want the one text block", msgs, err)
+	if err != nil || len(msgs) != 2 || msgs[0].Key != "s1" || msgs[1].Key != "s1" {
+		t.Fatalf("ledgers = %+v, err %v; want both root text blocks", msgs, err)
 	}
 }
 
