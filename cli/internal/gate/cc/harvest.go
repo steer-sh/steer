@@ -22,8 +22,8 @@ var ErrUnreadableLine = errors.New("a transcript line does not parse")
 // resolver cannot place in time.
 var ErrUndatedLedger = errors.New("a ledger row carries no readable timestamp")
 
-// Harvest returns every real ledger under a ~/.claude/projects tree. A sidechain's
-// text never reached the operator, so it is not a report to them whatever it contains.
+// Harvest returns root and subagent ledgers under a ~/.claude/projects tree,
+// keyed by the session or child thread that authored them.
 func Harvest(projectsDir string) resolve.Harvest {
 	return func() []resolve.LedgerMsg {
 		var out []resolve.LedgerMsg
@@ -31,6 +31,15 @@ func Harvest(projectsDir string) resolve.Harvest {
 		for _, p := range matches {
 			// An unreadable file or line narrows the harvest; what was read still counts.
 			msgs, _ := ReadLedgers(p)
+			out = append(out, msgs...)
+		}
+		children, _ := filepath.Glob(filepath.Join(projectsDir, "*", "*", "subagents", "agent-*.jsonl"))
+		for _, p := range children {
+			agent := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(p), "agent-"), ".jsonl")
+			if agent == "" {
+				continue
+			}
+			msgs, _ := readLedgers(p, agent)
 			out = append(out, msgs...)
 		}
 		resolve.SortLedgers(out)
@@ -43,6 +52,12 @@ func Harvest(projectsDir string) resolve.Harvest {
 // not parse or date, or a last line that does not parse; the ledgers read before or
 // around it are still returned.
 func ReadLedgers(path string) ([]resolve.LedgerMsg, error) {
+	return readLedgers(path, "")
+}
+
+// readLedgers selects the root stream when agent is empty, otherwise only the
+// named child's sidechain entries. Replayed parent and sibling text is excluded.
+func readLedgers(path, agent string) ([]resolve.LedgerMsg, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -55,7 +70,7 @@ func ReadLedgers(path string) ([]resolve.LedgerMsg, error) {
 	for {
 		line, readErr := reader.ReadBytes('\n')
 		if len(line) > 0 {
-			msgs, err := ledgersInLine(path, line)
+			msgs, err := ledgersInLine(path, agent, line)
 			out = append(out, msgs...)
 			if err != nil && lineErr == nil {
 				lineErr = err
@@ -76,7 +91,7 @@ func ReadLedgers(path string) ([]resolve.LedgerMsg, error) {
 	}
 }
 
-func ledgersInLine(path string, line []byte) ([]resolve.LedgerMsg, error) {
+func ledgersInLine(path, agent string, line []byte) ([]resolve.LedgerMsg, error) {
 	// Cheap prefilter: skip the JSON parse for the rows that cannot match.
 	if !strings.Contains(string(line), gate.LedgerHeader) {
 		return nil, nil
@@ -84,6 +99,7 @@ func ledgersInLine(path string, line []byte) ([]resolve.LedgerMsg, error) {
 	var row struct {
 		Type        string `json:"type"`
 		IsSidechain bool   `json:"isSidechain"`
+		AgentID     string `json:"agentId"`
 		SessionID   string `json:"sessionId"`
 		Timestamp   string `json:"timestamp"`
 		Message     struct {
@@ -93,11 +109,15 @@ func ledgersInLine(path string, line []byte) ([]resolve.LedgerMsg, error) {
 	if err := json.Unmarshal(line, &row); err != nil {
 		return nil, ErrUnreadableLine
 	}
-	if row.Type != "assistant" || row.IsSidechain {
+	if row.Type != "assistant" || row.IsSidechain != (agent != "") || (agent != "" && row.AgentID != agent) {
 		return nil, nil
 	}
 	var texts []string
-	for _, text := range textBlocks(row.Message.Content) {
+	replies := textBlocks(row.Message.Content)
+	if agent != "" {
+		replies = append(replies, handbackTexts(row.Message.Content)...)
+	}
+	for _, text := range replies {
 		if strings.Contains(text, gate.LedgerHeader) && gate.HasLedgerLine(text) {
 			texts = append(texts, text)
 		}
@@ -110,8 +130,37 @@ func ledgersInLine(path string, line []byte) ([]resolve.LedgerMsg, error) {
 		return nil, nil
 	}
 	out := make([]resolve.LedgerMsg, 0, len(texts))
+	key := row.SessionID
+	if agent != "" {
+		key = agent
+	}
 	for _, text := range texts {
-		out = append(out, resolve.LedgerMsg{When: *when, Key: row.SessionID, Path: path, Text: text})
+		out = append(out, resolve.LedgerMsg{When: *when, Key: key, Path: path, Text: text})
 	}
 	return out, nil
+}
+
+// handbackTexts reads reports delivered by a child through Claude's handback tool.
+func handbackTexts(content json.RawMessage) []string {
+	var blocks []struct {
+		Type  string          `json:"type"`
+		Name  string          `json:"name"`
+		Input json.RawMessage `json:"input"`
+	}
+	if json.Unmarshal(content, &blocks) != nil {
+		return nil
+	}
+	var texts []string
+	for _, block := range blocks {
+		if block.Type != "tool_use" || block.Name != "SubagentHandback" {
+			continue
+		}
+		var input struct {
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(block.Input, &input) == nil && input.Message != "" {
+			texts = append(texts, input.Message)
+		}
+	}
+	return texts
 }
