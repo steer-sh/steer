@@ -454,8 +454,10 @@ func checkAdoptionItem(root string) (uninstallItem, bool) {
 // generatedPreCommit reports whether text is exactly a hook Steer writes, so a
 // removal deletes no line an operator added.
 func generatedPreCommit(text string) bool {
-	for _, script := range []string{buildCommitGatePreCommitScript(),
-		buildSteerPreCommitScript(false), buildSteerPreCommitScript(true)} {
+	if commitGatePreCommitScript(text) {
+		return true
+	}
+	for _, script := range []string{buildSteerPreCommitScript(false), buildSteerPreCommitScript(true)} {
 		if text == script {
 			return true
 		}

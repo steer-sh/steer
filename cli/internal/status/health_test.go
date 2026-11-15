@@ -145,15 +145,6 @@ func TestHealthIgnoresUnlistedTrustUnknown(t *testing.T) {
 	}
 }
 
-// The git channel counts as review with no harness hook.
-func TestReadinessCountsPreCommit(t *testing.T) {
-	s := &SystemStatus{Posture: Posture{PreCommit: true}}
-	r := ReadinessOf(s, availableProbe())
-	if !r.Reviewing || len(r.Steps) != 0 {
-		t.Errorf("readiness = %+v", r)
-	}
-}
-
 // A copy read as dev never names an install, even when its bytes differ.
 func TestBuildIssuesOfferNoRepairForADevDifference(t *testing.T) {
 	copyRow := PluginCopy{Harness: "codex", Path: "/p", State: PluginDifferentBinary, Version: "dev", Commit: "b"}
@@ -207,18 +198,6 @@ func TestHealthReadsModsBesideAnyClaudeHook(t *testing.T) {
 	s.Posture.Mods = []mods.Exposure{{ID: "m", State: mods.StateUninspected}}
 	if h := HealthOf(s, availableProbe()); h.Verdict != VerdictUnchecked {
 		t.Errorf("health = %+v", h)
-	}
-}
-
-// Collect carries the caller's pre-commit reading into the posture readiness reads.
-func TestCollectCarriesPreCommit(t *testing.T) {
-	isolate(t)
-	s, err := Collect(Options{GateStateDir: t.TempDir(), WindowDays: 7, PreCommit: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !s.Posture.PreCommit {
-		t.Error("the pre-commit reading was dropped")
 	}
 }
 

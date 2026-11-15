@@ -205,9 +205,6 @@ repository instead when the user asks for one repository only.
 The command prints the conditions that are not yet true and the command that clears
 each one. Relay them; do not summarize them away.
 
-For a Git pre-commit workflow, `commit-gate install --precommit` is the alternative
-channel. Choose one channel per repository, or a commit gets reviewed twice.
-
 ## Step 4: Place the stable executable
 
 ```bash
@@ -260,8 +257,8 @@ each scope with either row, name the harnesses to the user and ask before you ru
 ```
 
 Run it once per harness you named. When Step 3 did not arm the global gate in the
-harness you are setting up (the gate went to another harness, to one project, or
-to a pre-commit hook), also name it to the user, ask as above, and run
+harness you are setting up (the gate went to another harness or to one project),
+also name it to the user, ask as above, and run
 `hooks sync --scope global --harness <id>` for it:
 a harness with no global Steer registration of its own reads neither detached nor
 drifted, and a sync that names no harness leaves it out.

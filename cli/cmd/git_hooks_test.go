@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/testhome"
 )
 
@@ -233,7 +232,11 @@ func TestGitHooksDir_RefusesOutsideTheWorkTreeItNames(t *testing.T) {
 	}
 }
 
-func TestPreCommitChannel_RefusesInsideTheGitDirectory(t *testing.T) {
+// TestPreCommitArmedHere_IgnoresAHookGitNeverRuns: a hook under the git directory
+// that a relative hooksPath never reaches is not reported.
+//
+// pins existing behaviour
+func TestPreCommitArmedHere_IgnoresAHookGitNeverRuns(t *testing.T) {
 	repo := hooksScratchRepo(t)
 	gitIn(t, repo, "config", "core.hooksPath", ".githooks")
 	// A hook where a relative hooksPath lands when resolved from .git, which git never runs.
@@ -248,15 +251,6 @@ func TestPreCommitChannel_RefusesInsideTheGitDirectory(t *testing.T) {
 
 	if armed, path := preCommitArmedHere(); armed {
 		t.Fatalf("reported a hook git never runs as armed: %s", path)
-	}
-	prevBoth, prevForce := commitGateBothChannels, commitGateForce
-	t.Cleanup(func() { commitGateBothChannels, commitGateForce = prevBoth, prevForce })
-	commitGateBothChannels, commitGateForce = true, true
-	if err := installPreCommitChannel(gate.Config{}); err == nil {
-		t.Fatal("install must refuse outside a work tree")
-	}
-	if _, err := os.Stat(filepath.Join(repo, ".githooks")); !os.IsNotExist(err) {
-		t.Fatalf("install wrote a hooks directory: %v", err)
 	}
 }
 

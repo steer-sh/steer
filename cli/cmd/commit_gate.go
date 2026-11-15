@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -18,7 +19,6 @@ import (
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/cc"
 	gatecodex "github.com/steer-sh/steer-cli/internal/gate/codex"
-	"github.com/steer-sh/steer-cli/internal/gate/gitgate"
 	"github.com/steer-sh/steer-cli/internal/gate/harvests"
 	gatepi "github.com/steer-sh/steer-cli/internal/gate/pi"
 	"github.com/steer-sh/steer-cli/internal/gate/resolve"
@@ -47,13 +47,11 @@ func backfillCommand() string {
 }
 
 var (
-	commitGateProvider     string
-	commitGateModel        string
-	commitGateEffort       string
-	commitGateRuns         int
-	commitGateBothChannels bool
-	commitGateForce        bool
-	commitGateHarness      string
+	commitGateProvider string
+	commitGateModel    string
+	commitGateEffort   string
+	commitGateRuns     int
+	commitGateHarness  string
 )
 
 var commitGateCmd = &cobra.Command{
@@ -63,16 +61,11 @@ var commitGateCmd = &cobra.Command{
 blocks the commit while a finding stands, writing an adjudication row for every
 decision.
 
-Three channels share one review engine:
+Each harness's hook shares one review engine:
   review        PreToolUse hook for Claude Code — reads a JSON payload on stdin
-  review-codex  PreToolUse hook for Codex — reads a JSON payload on stdin
-  precommit  git pre-commit hook — reads the index
-
-Arming both channels in one repository reviews every commit twice. Use
-"install --both-channels" to say that is intended.`,
+  review-codex  PreToolUse hook for Codex — reads a JSON payload on stdin`,
 	Example: `  steer commit-gate install --scope global
-  steer commit-gate status
-  steer commit-gate precommit`,
+  steer commit-gate status`,
 }
 
 // buildReviewer resolves the provider through the one resolver every editor shares,
@@ -158,36 +151,22 @@ reply on stdout. It always exits 0: a gate that cannot answer must fail open.`,
 	},
 }
 
+// commitGatePreCommitCmd answers the git pre-commit hook an earlier Steer installed,
+// whose last line runs this command. git refuses the commit on a non-zero exit, so it
+// exits 0 whatever it is given and names the command that removes the hook.
 var commitGatePreCommitCmd = &cobra.Command{
-	Use:   "precommit",
-	Short: "git pre-commit hook: rule on the staged tree",
-	Long: `precommit reviews the staged tree and exits 2 with the reviews on stderr when
-a finding stands. Any other failure exits 0, because a gate that cannot answer must
-fail open.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := prepareState(); err != nil {
-			fmt.Fprintln(os.Stderr, "steer commit-gate:", err)
-		}
-		cfg := gateConfig()
-		reviewer, err := buildReviewer(cfg)
-		if err != nil {
-			// Any non-zero exit from this hook aborts the change being made, so
-			// returning the error blocks work the reviewers never saw.
-			fmt.Fprintln(os.Stderr, "steer commit-gate:", err)
-			return nil
-		}
-		cwd, err := os.Getwd()
-		if err != nil {
-			return nil
-		}
-		result := gitgate.Run(context.Background(), cfg, reviewer, cwd)
-		result.Write(os.Stderr)
-		if result.Block {
-			os.Exit(2)
-		}
-		return nil
+	Use:                "precommit",
+	Short:              "Removed: the git pre-commit review",
+	Hidden:             true,
+	DisableFlagParsing: true,
+	Run: func(cmd *cobra.Command, args []string) {
+		fmt.Fprintln(cmd.ErrOrStderr(), preCommitRemovedNotice)
 	},
 }
+
+// preCommitRemovedNotice is the stub's one stderr line.
+const preCommitRemovedNotice = "steer: the git pre-commit review is removed from Steer, and this hook reviews nothing; " +
+	"to remove it, run: steer commit-gate remove --precommit"
 
 var commitGateCodexReviewCmd = &cobra.Command{
 	Use:   "review-codex",
@@ -357,32 +336,19 @@ func truncateDetail(text string, n int) string {
 
 var commitGateInstallCmd = &cobra.Command{
 	Use:   "install",
-	Short: "Arm the commit gate on one channel",
-	Long: `install writes the PreToolUse entry into settings.json, with a timeout derived
-from the reviewer timeout so the pair cannot drift. Use --precommit to install the git
-pre-commit hook in this repository instead.`,
+	Short: "Arm the commit gate for one harness",
+	Long: `install writes the harness's PreToolUse entry, with a timeout derived from the
+reviewer timeout so the pair cannot drift.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := prepareState(); err != nil {
 			fmt.Fprintln(os.Stderr, "steer commit-gate:", err)
 		}
-		cfg := gateConfig()
-		if commitGatePreCommitChannel {
-			return installPreCommitChannel(cfg)
-		}
-		return installReviewChannel(cfg)
+		return installReviewChannel(gateConfig())
 	},
 }
 
-var commitGatePreCommitChannel bool
-
 func installReviewChannel(cfg gate.Config) error {
 	scope := currentScope()
-	if !commitGateBothChannels {
-		if armed, path := preCommitArmedHere(); armed {
-			return fmt.Errorf("the pre-commit channel is already armed in this repository (%s); "+
-				"arming both reviews every commit twice — pass --both-channels to do it anyway", path)
-		}
-	}
 	timeout := cfg.HookTimeout()
 	target, err := harness.Parse(commitGateHarness)
 	if err != nil {
@@ -494,45 +460,8 @@ func renderReadinessBox(steps []status.Step, ready, pending, registered string) 
 	return styles.WarningBox.Render(strings.Join(lines, "\n"))
 }
 
-func installPreCommitChannel(cfg gate.Config) error {
-	if !commitGateBothChannels {
-		if armed, scope := reviewChannelArmed(); armed {
-			return fmt.Errorf("the PreToolUse channel is already armed (%s scope); "+
-				"arming both reviews every commit twice — pass --both-channels to do it anyway", scope)
-		}
-	}
-	hooksDir, err := gitHooksDir()
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
-		return fmt.Errorf("failed to create hooks directory: %w", err)
-	}
-	path := filepath.Join(hooksDir, "pre-commit")
-	existing, readErr := os.ReadFile(path)
-	if readErr == nil {
-		// Only THIS hook is safe to replace. `steer git-hooks install` writes its own
-		// pre-commit doing a different job, and overwriting it silently disarms the
-		// verification a repository already had.
-		if !strings.Contains(string(existing), commitGatePreCommitMarker) && !commitGateForce {
-			return fmt.Errorf("pre-commit hook already exists and is not the commit gate's: %s (use --force to overwrite)", path)
-		}
-	} else if !os.IsNotExist(readErr) {
-		return fmt.Errorf("failed to read existing pre-commit hook: %w", readErr)
-	}
-	if err := os.WriteFile(path, []byte(buildCommitGatePreCommitScript()), 0o755); err != nil {
-		return fmt.Errorf("failed to write pre-commit hook: %w", err)
-	}
-	fmt.Println()
-	fmt.Println(styles.SuccessBox.Render("Armed the commit gate on the pre-commit channel\nPath: " + path))
-	return nil
-}
-
-// buildCommitGatePreCommitScript writes the wrapper git runs.
-//
-// It forwards no arguments. git invokes a pre-commit hook with none, and the reviewer
-// is read from ~/.steer/config.json at firing time: a flag written here would outrank
-// that file and pin the reviewer this install happened to name.
+// buildCommitGatePreCommitScript is the git pre-commit hook the removed pre-commit
+// review installed. Steer no longer writes it; a removal compares a hook against it.
 func buildCommitGatePreCommitScript() string {
 	return strings.Join([]string{
 		"#!/usr/bin/env bash",
@@ -611,16 +540,6 @@ func pinnedRegistrations() []pinnedRegistration {
 			add("codex "+scope+" scope", arming.Command, "steer bin install")
 		}
 	}
-	if armed, path := preCommitArmedHere(); armed {
-		if raw, err := os.ReadFile(path); err == nil {
-			for _, line := range strings.Split(string(raw), "\n") {
-				line = strings.TrimSpace(line)
-				if strings.HasPrefix(line, "steer commit-gate precommit") {
-					add("pre-commit "+path, line, "steer commit-gate install --precommit --force")
-				}
-			}
-		}
-	}
 	return pinned
 }
 
@@ -654,33 +573,35 @@ func preCommitArmedHere() (bool, string) {
 	return strings.Contains(string(raw), commitGatePreCommitMarker), path
 }
 
-func reviewChannelArmed() (bool, string) {
-	for _, scope := range []string{claude.ProjectScope, claude.GlobalScope} {
-		if claude.CommitGateHookArmed(scope).Registered {
-			return true, scope
-		}
-	}
-	cwd, _ := gate.ProjectDir()
-	for _, scope := range []string{claude.ProjectScope, claude.GlobalScope} {
-		if codexhooks.CommitGateArming(scope, cwd).Registered {
-			return true, "codex " + scope
-		}
-	}
-	for _, scope := range []string{claude.ProjectScope, claude.GlobalScope} {
-		if pihooks.CommitGateArming(scope, cwd).Registered {
-			return true, "pi " + scope
-		}
-	}
-	return false, ""
-}
-
 // commitGateRemoveHarness has no default, so a removal always names its harness.
 var commitGateRemoveHarness string
+
+// commitGateRemovePreCommit selects this repository's git pre-commit hook instead.
+var commitGateRemovePreCommit bool
 
 var commitGateRemoveCmd = &cobra.Command{
 	Use:   "remove",
 	Short: "Remove one harness's commit gate from one scope; --harness and --scope are required",
+	Long: `remove takes one harness's commit review hooks out of one scope, leaving every
+other hook in that file.
+
+--precommit instead removes the git pre-commit hook an earlier Steer installed for
+its removed pre-commit review, in the repository this runs in. It removes only a hook
+that is exactly the one Steer wrote.`,
+	Example: `  steer commit-gate remove --harness codex --scope global
+  steer commit-gate remove --precommit`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if commitGateRemovePreCommit {
+			if commitGateRemoveHarness != "" || cmd.Flags().Changed("scope") {
+				return errors.New("--precommit removes this repository's git hook and takes no --harness or --scope")
+			}
+			message, err := removeCommitGatePreCommit()
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), message)
+			return nil
+		}
 		if commitGateRemoveHarness == "" || !cmd.Flags().Changed("scope") || strings.TrimSpace(scope) == "" {
 			return errors.New(commitGateRemoveUsage())
 		}
@@ -714,6 +635,69 @@ var commitGateRemoveCmd = &cobra.Command{
 		fmt.Println(commitGateRemoveResult(status.HarnessLabel(string(target)), scope, path, removed))
 		return nil
 	},
+}
+
+// removeCommitGatePreCommit deletes this repository's git pre-commit hook when it is
+// the commit review hook an earlier Steer wrote, and reports what it did. A hook
+// without the marker is not Steer's and stays; a marked hook with other lines stays
+// too, because deleting it would drop lines an operator added. A hook outside the
+// repository's git directory is refused, as uninstall refuses it: other repositories
+// may share that hooks directory, or the work tree tracks it.
+func removeCommitGatePreCommit() (string, error) {
+	dir, err := gitHooksDir()
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, "pre-commit")
+	raw, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return "No git pre-commit hook in this repository; nothing changed.", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("could not read the pre-commit hook: %w", err)
+	}
+	text := string(raw)
+	if !strings.Contains(text, commitGatePreCommitMarker) {
+		return fmt.Sprintf("The pre-commit hook at %s is not Steer's commit review hook; nothing changed.", path), nil
+	}
+	if !commitGatePreCommitScript(text) {
+		return "", fmt.Errorf("the pre-commit hook at %s carries Steer's marker but differs from the hook Steer "+
+			"wrote, so Steer leaves it; delete its steer commit-gate lines by hand", path)
+	}
+	if !insideGitDir(path) {
+		return "", fmt.Errorf("the pre-commit hook at %s lies outside this repository's git directory, where "+
+			"other repositories may share it or the work tree tracks it, so Steer leaves it; remove it by hand", path)
+	}
+	if err := os.Remove(path); err != nil {
+		return "", fmt.Errorf("could not remove the pre-commit hook: %w", err)
+	}
+	return "Removed Steer's git pre-commit review hook: " + path, nil
+}
+
+// legacyPreCommitInvocation is the hook's last command as any Steer wrote it: an
+// older Steer added --provider and --model, in that order, each with one word.
+var legacyPreCommitInvocation = regexp.MustCompile(
+	`^steer commit-gate precommit( --provider [A-Za-z0-9._:/@+=-]+)?( --model [A-Za-z0-9._:/@+=-]+)?$`)
+
+// commitGatePreCommitScript reports whether text is a hook the pre-commit review
+// wrote, with or without an older Steer's reviewer flags.
+func commitGatePreCommitScript(text string) bool {
+	const invocation = "steer commit-gate precommit"
+	want := strings.Split(buildCommitGatePreCommitScript(), "\n")
+	got := strings.Split(text, "\n")
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range want {
+		if want[i] == invocation {
+			if !legacyPreCommitInvocation.MatchString(got[i]) {
+				return false
+			}
+		} else if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // commitGateRemoveResult says what a removal changed.
@@ -948,11 +932,9 @@ var commitGateStatusCmd = &cobra.Command{
 			fmt.Printf("  Resolver     codex %s scope: %s%s\n", scope, resolverState,
 				commandNote(resolver.Registered, resolver.Command))
 		}
-		armed, path := preCommitArmedHere()
-		if armed {
-			fmt.Printf("  pre-commit   armed: %s\n", path)
-		} else {
-			fmt.Printf("  pre-commit   not armed in this repository\n")
+		if armed, path := preCommitArmedHere(); armed {
+			fmt.Printf("  pre-commit   %s carries the removed pre-commit review's marker — "+
+				"to remove it: steer commit-gate remove --precommit\n", path)
 		}
 		fmt.Println()
 		reportPinnedRegistrations()
@@ -990,14 +972,10 @@ func init() {
 	commitGateCmd.PersistentFlags().IntVar(&commitGateRuns, "runs", 0,
 		"Reviewers in the panel; default 3")
 
-	commitGateInstallCmd.Flags().BoolVar(&commitGatePreCommitChannel, "precommit", false,
-		"Install the git pre-commit hook instead of the PreToolUse entry")
-	commitGateInstallCmd.Flags().BoolVar(&commitGateBothChannels, "both-channels", false,
-		"Arm this channel even though the other one is already armed for this repository")
-	commitGateInstallCmd.Flags().BoolVar(&commitGateForce, "force", false,
-		"Overwrite an existing non-steer pre-commit hook")
 	commitGateInstallCmd.Flags().StringVar(&commitGateHarness, "harness", "claude-code",
 		"PreToolUse harness (claude-code|codex)")
 	commitGateRemoveCmd.Flags().StringVar(&commitGateRemoveHarness, "harness", "",
 		"PreToolUse harness (claude-code|codex), required")
+	commitGateRemoveCmd.Flags().BoolVar(&commitGateRemovePreCommit, "precommit", false,
+		"Remove this repository's git pre-commit hook from Steer's removed pre-commit review")
 }

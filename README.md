@@ -105,7 +105,6 @@ Steer ships with self-protection on by default. It blocks your agent from changi
 ## Other setups
 
 - **One repository only:** run `steer commit-gate install --harness <claude-code|codex> --scope project` in that repository instead of the global gate that setup installs.
-- **Git pre-commit:** for other workflows (such as CLI agents other than the supported Claude Code and Codex), run `steer commit-gate install --precommit` in the repository. There is no need to use this option *in addition* to the standard hook-based commit-gate. That would result in commits being reviewed twice.
 
 ## Update
 

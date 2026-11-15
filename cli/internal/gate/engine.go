@@ -45,12 +45,12 @@ type Decision struct {
 type Request struct {
 	// Repo is the git toplevel the commit lands in.
 	Repo string
-	// Actor keys the chain: the session id under PreToolUse, HEAD under pre-commit.
+	// Actor keys the chain: the harness session id.
 	Actor string
-	// Channel is ChannelPreToolUse or ChannelPreCommit, stamped on every row so a
-	// reader can tell an absent field from a lost one.
+	// Channel is ChannelPreToolUse, stamped on every row so a reader can tell an
+	// absent field from a lost one.
 	Channel string
-	// SessionID names the sidecars. Empty under pre-commit by construction.
+	// SessionID names the sidecars.
 	SessionID string
 	// Spec says which tree the diff is a delta against.
 	Spec DiffSpec

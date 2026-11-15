@@ -25,7 +25,8 @@ import (
 type Row map[string]any
 
 // Channel names the adapter that wrote a row, so a reader can tell a field that is
-// absent by construction from one that was lost.
+// absent by construction from one that was lost. No adapter writes ChannelPreCommit
+// now; rows the removed git pre-commit review wrote still carry it.
 const (
 	ChannelPreToolUse = "pretooluse"
 	ChannelPreCommit  = "precommit"

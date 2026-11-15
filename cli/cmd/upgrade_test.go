@@ -193,23 +193,6 @@ func TestPluginLinePrintsWhenTheMasterLineDefersToIt(t *testing.T) {
 	}
 }
 
-// A hook file git cannot run is not an armed channel.
-func TestExecutableFileReadsTheBit(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "pre-commit")
-	if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if executableFile(path) {
-		t.Error("a file with no executable bit read as runnable")
-	}
-	if err := os.Chmod(path, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if !executableFile(path) {
-		t.Error("an executable file read as not runnable")
-	}
-}
-
 // TestBinInstallLeavesARemovedHarnessUnregistered pins that bin install's rebuild of
 // a stale global master re-registers only the harnesses that still hold it: Codex,
 // removed through uninstall, gets back neither the master nor the rules section,

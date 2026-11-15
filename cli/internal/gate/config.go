@@ -1,6 +1,6 @@
 // Package gate is the harness-neutral commit-review engine: diff acquisition and
 // budgeting, context selection, the reviewer panel, chain state and the ledger row.
-// Adapters (cc, gitgate) render the Decision it returns; nothing here knows what a
+// Adapters (cc, codex, pi) render the Decision it returns; nothing here knows what a
 // PreToolUse permissionDecision is.
 package gate
 

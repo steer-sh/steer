@@ -13,8 +13,8 @@ import (
 
 // ChainKey identifies one gate chain: who is committing, and into which tree.
 //
-// Actor is the Claude Code session id under the PreToolUse adapter and HEAD under the
-// pre-commit adapter, which git hands no session at all. Repo is the git toplevel, so a
+// Actor is the harness session id; a row the removed git pre-commit review wrote
+// carries HEAD instead, because git hands a hook no session. Repo is the git toplevel, so a
 // round denied from a subdirectory and retried from the root stays one chain.
 type ChainKey struct {
 	Actor string

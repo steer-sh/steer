@@ -289,7 +289,7 @@ func (m *Model) toggleCheckRunner(row channelRow, on bool) error {
 }
 
 // viewChannels renders the armable channels, then the action row, then a
-// read-only note for the git pre-commit channels, whose install still lives
+// read-only note for the git pre-commit verify hook, whose install still lives
 // behind the CLI. The action row is not a channel and does not take the channel
 // columns: it names the work and the panel does it, so it never asks the reader
 // to leave for a terminal.
@@ -316,7 +316,6 @@ func (m *Model) viewChannels() string {
 		out += selectedRow(name, " "+armingBadge(r.armed)+m.pairedDrift(r), selected, m.bodyWidth())
 	}
 	out += "\n" + secondary("Install through the CLI:") + "\n"
-	out += wrapTo("steer commit-gate install --precommit", "  ", m.bodyWidth())
 	out += wrapTo("steer git-hooks install", "  ", m.bodyWidth())
 	return out
 }

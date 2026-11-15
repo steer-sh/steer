@@ -2,8 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -66,7 +64,6 @@ a problem already decided; 'steer fix score --json' carries each fix's detail.`,
 			RepoRoot:        root,
 			ReviewerProbe:   settings.ReviewerProbe(cfg, resolveErr),
 			Addendum:        gateAddendum(root),
-			PreCommit:       statusPreCommit(root),
 			Evidence: evidence.Gather(evidence.Options{
 				GateStateDir: cfg.StateDir,
 				ScanScope:    scope,
@@ -103,26 +100,6 @@ func repoRootOrNone() string {
 		return ""
 	}
 	return root
-}
-
-// statusPreCommit reports the git pre-commit channel armed in this repository.
-func statusPreCommit(root string) bool {
-	if root == "" {
-		return false
-	}
-	armed, path := preCommitArmedHere()
-	if !armed || !executableFile(path) {
-		return false
-	}
-	// The hook exits cleanly with no review when steer does not resolve.
-	_, err := exec.LookPath("steer")
-	return err == nil
-}
-
-// executableFile reports a file git can run; git skips a hook without the bit.
-func executableFile(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && info.Mode()&0o111 != 0
 }
 
 // renderStatus prints the verdict, then each issue with what clears it. A fix prints

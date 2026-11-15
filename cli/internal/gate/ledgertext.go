@@ -15,7 +15,8 @@ import (
 const LedgerHeader = "Commit gate fired"
 
 // The subjects an adapter records when it cannot read the commit message. A chain that
-// carries only these has no known subject.
+// carries only these has no known subject. SubjectUnavailable appears in rows the
+// removed git pre-commit review wrote.
 const (
 	SubjectNotRecoverable = "(not recoverable from the command line — judge the diff alone)"
 	SubjectUnavailable    = "(not available to a pre-commit hook — judge the diff alone)"
