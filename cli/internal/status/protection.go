@@ -153,8 +153,11 @@ func protectionState(enabled, setUp, running bool, store string) string {
 
 // protectionIssues reports a guard the setting expects and the store lacks, the
 // setting turning it off, and an earlier Steer's copy a scope still holds.
-func protectionIssues(p ProtectionReading) []Issue {
+func protectionIssues(p ProtectionReading, folded bool) []Issue {
 	var out []Issue
+	if folded && p.State == ProtectionOutdated {
+		return nil // staleIssues names its repair
+	}
 	switch p.State {
 	case ProtectionMissing:
 		detail := []string{}

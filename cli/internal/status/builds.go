@@ -130,8 +130,24 @@ func (p PluginCopy) CompareToHooks(hooks BuildIdentity) string {
 	if p.State == PluginSameBinary {
 		return BuildSame
 	}
-	own := BuildIdentity{Version: p.Version, Commit: p.Commit}
-	if p.State == PluginUnknown || !own.Known() || !hooks.Known() {
+	if p.State == PluginUnknown {
+		return BuildUnknown
+	}
+	return compareBuilds(BuildIdentity{Version: p.Version, Commit: p.Commit}, hooks)
+}
+
+// CLIToHooks reads the running CLI against the hooks' build, BuildSame when both are
+// one identity.
+func (b Builds) CLIToHooks() string {
+	if b.Running.Known() && b.Running == b.Hooks {
+		return BuildSame
+	}
+	return compareBuilds(b.Running, b.Hooks)
+}
+
+// compareBuilds reads own against the hooks' build.
+func compareBuilds(own, hooks BuildIdentity) string {
+	if !own.Known() || !hooks.Known() {
 		return BuildUnknown
 	}
 	if !own.Release() || !hooks.Release() {

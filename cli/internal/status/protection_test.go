@@ -31,7 +31,7 @@ func TestProtectionReadsTheSettingAgainstTheStore(t *testing.T) {
 		if state != tc.state {
 			t.Errorf("enabled=%v setUp=%v store=%s: state %s, want %s", tc.enabled, tc.setUp, tc.store, state, tc.state)
 		}
-		issues := protectionIssues(ProtectionReading{State: state, Store: tc.store})
+		issues := protectionIssues(ProtectionReading{State: state, Store: tc.store}, false)
 		severity := ""
 		if len(issues) > 0 {
 			severity = issues[0].Severity
@@ -43,15 +43,15 @@ func TestProtectionReadsTheSettingAgainstTheStore(t *testing.T) {
 			t.Errorf("state %s: fix %q", state, issues[0].Fix)
 		}
 	}
-	legacy := protectionIssues(ProtectionReading{State: ProtectionOn, Legacy: []string{"global", "project"}})
+	legacy := protectionIssues(ProtectionReading{State: ProtectionOn, Legacy: []string{"global", "project"}}, false)
 	if len(legacy) != 1 || legacy[0].Fix != "steer hooks rebuild --scope project" {
 		t.Errorf("a repository's old copy reads %+v", legacy)
 	}
-	unapproved := protectionIssues(ProtectionReading{State: ProtectionNotRunning, Reason: reasonUnapproved})
+	unapproved := protectionIssues(ProtectionReading{State: ProtectionNotRunning, Reason: reasonUnapproved}, false)
 	if len(unapproved) != 1 || unapproved[0].Fix == ProtectionRepair {
 		t.Errorf("a runner awaiting Codex approval names %+v", unapproved)
 	}
-	if kept := protectionIssues(ProtectionReading{State: ProtectionNotSetUp, Legacy: []string{"project"}}); len(kept) != 0 {
+	if kept := protectionIssues(ProtectionReading{State: ProtectionNotSetUp, Legacy: []string{"project"}}, false); len(kept) != 0 {
 		t.Errorf("a repository's old copy is named for retirement with no global guard running: %+v", kept)
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/gate/reviewers"
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/mods"
+	"github.com/steer-sh/steer-cli/internal/steerbin"
 )
 
 // Verdicts. Healthy covers installation and configuration; it does not promise that a
@@ -67,8 +68,10 @@ func HealthOf(s *SystemStatus, probe reviewers.Probe) Health {
 			Title: fmt.Sprintf("Steer could not check the reviewer %q", probe.Provider)})
 	}
 	h.Issues = append(h.Issues, trustIssues(s)...)
+	stale, folded, deferred := staleIssues(s)
+	h.Issues = append(h.Issues, stale...)
 	h.Issues = append(h.Issues, guardIssues(s)...)
-	h.Issues = append(h.Issues, protectionIssues(s.Posture.Protection)...)
+	h.Issues = append(h.Issues, protectionIssues(s.Posture.Protection, folded)...)
 	h.Issues = append(h.Issues, ruleIssues(s.Posture.Rules, s.Posture.Masters)...)
 	h.Issues = append(h.Issues, checkIssues(s.Checks)...)
 	for _, p := range s.StoreProblems {
@@ -82,6 +85,11 @@ func HealthOf(s *SystemStatus, probe reviewers.Probe) Health {
 	}
 	h.Issues = append(h.Issues, modIssues(s)...)
 	builds := BuildIssues(s.Posture.Plugins, hooks, running)
+	for i := range builds {
+		if deferred != "" && strings.HasPrefix(builds[i].Title, hooksBehindPrefix) {
+			builds[i].Detail = append(builds[i].Detail, "Also updates: "+deferred)
+		}
+	}
 	h.Issues = append(h.Issues, builds...)
 	if !hooks.Known() && len(hookRows(s)) > 0 {
 		h.Issues = append(h.Issues, Issue{Severity: SeverityUnchecked, Title: "Steer could not read the build the hooks run"})
@@ -203,7 +211,7 @@ func readyLines(s *SystemStatus, r Readiness, agree bool) []string {
 
 const (
 	buildsDifferTitle = "Builds differ"
-	hooksBehindPrefix = "Hooks are behind the "
+	hooksBehindPrefix = "Hooks are behind "
 )
 
 // BuildIssues compares the active plugin copies with the hooks' build, and names the
@@ -223,7 +231,7 @@ func BuildIssues(plugins []PluginCopy, hooks, running BuildIdentity) []Issue {
 			if p.Path != newest.Path {
 				continue
 			}
-			out = append(out, Issue{Severity: SeverityAttention, Title: hooksBehindPrefix + label + " plugin",
+			out = append(out, Issue{Severity: SeverityAttention, Title: hooksBehindPrefix + "the " + label + " plugin",
 				Detail: pair, Fix: p.BinInstallCommand()})
 		case BuildOlder:
 			out = append(out, Issue{Severity: SeverityAttention, Title: "The " + label + " plugin is behind the hooks",
@@ -349,6 +357,110 @@ func trustIssues(s *SystemStatus) []Issue {
 	return out
 }
 
+// staleIssues reports the stale guard runners, one issue per scope, and whether it
+// folded an outdated self-protection guard into its own issue. The repair follows the
+// running CLI against the hooks' build: ahead, bin install; unordered, bin install with
+// its condition; behind, the stable executable's own status. A project runner keeps its
+// rebuild except behind, since bin install leaves it alone. While a plugin copy is ahead
+// of the hooks, its install covers the global readings, which come back as deferred.
+func staleIssues(s *SystemStatus) (out []Issue, folded bool, deferred string) {
+	byScope := map[string][]string{}
+	var scopes []string
+	for _, m := range s.Posture.Masters {
+		if !m.Stale() {
+			continue
+		}
+		if _, seen := byScope[m.Scope]; !seen {
+			scopes = append(scopes, m.Scope)
+		}
+		byScope[m.Scope] = append(byScope[m.Scope], HarnessLabel(m.Harness))
+	}
+	runners := func(scope string) string {
+		noun := " guard runner"
+		if len(byScope[scope]) > 1 {
+			noun += "s"
+		}
+		return joinAnd(byScope[scope]) + " " + scope + noun
+	}
+	outdated := s.Posture.Protection.State == ProtectionOutdated
+	covered := func(scopes ...string) string {
+		var parts []string
+		for _, scope := range scopes {
+			if len(byScope[scope]) > 0 {
+				parts = append(parts, runners(scope))
+			}
+		}
+		if outdated {
+			parts = append(parts, "self-protection")
+		}
+		return strings.Join(parts, "; ")
+	}
+	switch rel := s.Posture.Builds.CLIToHooks(); rel {
+	case BuildOlder:
+		if what := covered(scopes...); what != "" {
+			return []Issue{{Severity: SeverityUnchecked,
+				Title:  "This CLI is behind the hooks' build, so it cannot judge what they run",
+				Detail: []string{"Differs from this CLI's build: " + what}, Fix: stableCommand("status")}}, outdated, ""
+		}
+		return nil, false, ""
+	case BuildNewer, BuildUnordered, BuildConflict:
+		what := covered(harness.GlobalScope)
+		if NewestAhead(s.Posture.Plugins, s.Posture.Builds.Hooks).Path != "" {
+			deferred = what
+		} else if what != "" {
+			issue := Issue{Severity: SeverityAttention, Title: hooksBehindPrefix + "this CLI",
+				Detail: []string{"Out of date: " + what}, Fix: runningCommand("bin install")}
+			if rel != BuildNewer {
+				issue.Title = "Hooks run another build than this CLI"
+				issue.Detail = []string{"Differs from this CLI's build: " + what,
+					"Install only if this CLI's build should replace the hooks' build."}
+			}
+			out = append(out, issue)
+		}
+		folded = outdated
+		delete(byScope, harness.GlobalScope)
+	}
+	for _, scope := range scopes {
+		if len(byScope[scope]) == 0 {
+			continue
+		}
+		verb := " is out of date"
+		if len(byScope[scope]) > 1 {
+			verb = " are out of date"
+		}
+		out = append(out, Issue{Severity: SeverityAttention, Title: runners(scope) + verb,
+			Fix: RebuildRepair(s.Posture.Masters, scope)})
+	}
+	return out, folded, deferred
+}
+
+// stableCommand names a steer command run by the stable executable the hooks run.
+func stableCommand(args string) string {
+	path, err := steerbin.Path()
+	if err != nil {
+		return ""
+	}
+	return steerbin.Quote(path) + " " + args
+}
+
+// runningCommand names a steer command run by this process's own executable, which a
+// bare steer on PATH may not resolve to.
+func runningCommand(args string) string {
+	path, err := steerbin.Running()
+	if err != nil {
+		return "steer " + args
+	}
+	return steerbin.Quote(path) + " " + args
+}
+
+// joinAnd lists items as prose: "a", "a and b", "a, b and c".
+func joinAnd(items []string) string {
+	if len(items) < 2 {
+		return strings.Join(items, "")
+	}
+	return strings.Join(items[:len(items)-1], ", ") + " and " + items[len(items)-1]
+}
+
 // guardIssues reports guard runners that do not run what the store holds. A row for an
 // unlisted harness counts only where it registers a runner.
 func guardIssues(s *SystemStatus) []Issue {
@@ -369,8 +481,7 @@ func guardIssues(s *SystemStatus) []Issue {
 					Fix: DetachedRepair(s.Posture.Masters, m.Scope)})
 			}
 		case m.Stale():
-			out = append(out, Issue{Severity: SeverityAttention, Title: label + " guard runner is out of date",
-				Fix: RebuildRepair(s.Posture.Masters, m.Scope)})
+			// staleIssues reports it.
 		case m.SourcesDrifted() && m.Sources.StampsOnly():
 			out = append(out, Issue{Severity: SeverityAttention,
 				Title: label + " guard runner reports an old rule or identity for a guard", Fix: RebuildRepair(s.Posture.Masters, m.Scope)})
