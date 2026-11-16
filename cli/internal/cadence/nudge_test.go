@@ -141,119 +141,6 @@ func TestReadMarkStopsCountingAPileAPassRead(t *testing.T) {
 	}
 }
 
-// TestMasterNudgeFiresOncePerKey pins that a stale guard master is a standing
-// condition: it nudges when the key changes and stays quiet after.
-func TestMasterNudgeFiresOncePerKey(t *testing.T) {
-	dir := t.TempDir()
-
-	if ShouldNudgeMaster(dir, "") {
-		t.Error("an empty key nudged")
-	}
-	if !ShouldNudgeMaster(dir, "claude-code/global:stale:aaaaaaaa") {
-		t.Fatal("a first stale master did not nudge")
-	}
-	if err := WriteNudge(dir, LoadNudge(dir).WithMaster("claude-code/global:stale:aaaaaaaa")); err != nil {
-		t.Fatalf("WriteNudge returned error: %v", err)
-	}
-	if ShouldNudgeMaster(dir, "claude-code/global:stale:aaaaaaaa") {
-		t.Error("the same stale master nudged twice")
-	}
-	if !ShouldNudgeMaster(dir, "claude-code/global:stale:bbbbbbbb") {
-		t.Error("a different stale runtime did not nudge")
-	}
-
-	// A repaired master clears the key, so the same staleness nudges again if it
-	// comes back. The cadence hook writes this even when it emits nothing.
-	if err := WriteNudge(dir, LoadNudge(dir).WithMaster("")); err != nil {
-		t.Fatalf("WriteNudge returned error: %v", err)
-	}
-	if !ShouldNudgeMaster(dir, "claude-code/global:stale:aaaaaaaa") {
-		t.Error("a returning staleness did not nudge after the key was cleared")
-	}
-}
-
-// A drifted rules section nudges once per key, and a cleared key lets the same
-// drift nudge again when it comes back.
-func TestRulesNudgeFiresOncePerKey(t *testing.T) {
-	dir := t.TempDir()
-	key := "codex/global:/h/.codex/AGENTS.md:config-path:0"
-
-	if ShouldNudgeRules(dir, "") {
-		t.Error("an empty key nudged")
-	}
-	if !ShouldNudgeRules(dir, key) {
-		t.Fatal("a first drift did not nudge")
-	}
-	if err := WriteNudge(dir, LoadNudge(dir).WithRules(key)); err != nil {
-		t.Fatal(err)
-	}
-	if ShouldNudgeRules(dir, key) {
-		t.Error("the same drift nudged twice")
-	}
-	if err := WriteNudge(dir, LoadNudge(dir).WithRules("")); err != nil {
-		t.Fatal(err)
-	}
-	if !ShouldNudgeRules(dir, key) {
-		t.Error("a returning drift did not nudge after the key was cleared")
-	}
-}
-
-// The queue nudge rewrites the record, so it must carry the rules key through, or
-// the drift line repeats in the next session.
-func TestQueueNudgeCarriesTheRulesKey(t *testing.T) {
-	dir := t.TempDir()
-	key := "claude-code/project:CLAUDE.md::1"
-	if err := WriteNudge(dir, LoadNudge(dir).WithRules(key)); err != nil {
-		t.Fatal(err)
-	}
-	q := &Queue{Candidates: []Candidate{{Corpus: "transcript-friction", UngroupedClusters: 1}}}
-	_, rec := ShouldNudge(dir, q, "hash", time.Now())
-	if rec.Rules != key {
-		t.Fatalf("rules key: got %q, want %q", rec.Rules, key)
-	}
-}
-
-// TestQueueNudgeCarriesTheMasterKey pins that the two nudges share one record:
-// emitting a queue line must not silently clear the master key.
-func TestQueueNudgeCarriesTheMasterKey(t *testing.T) {
-	dir := t.TempDir()
-	key := "claude-code/global:unknown:"
-	if err := WriteNudge(dir, LoadNudge(dir).WithMaster(key)); err != nil {
-		t.Fatalf("WriteNudge returned error: %v", err)
-	}
-	q := &Queue{Candidates: []Candidate{{Corpus: "transcript-friction", UngroupedClusters: 1}}}
-	_, rec := ShouldNudge(dir, q, "hash", time.Now())
-	if rec.Master != key {
-		t.Fatalf("master key: got %q, want %q", rec.Master, key)
-	}
-}
-
-// A differing plugin copy nudges once per key, and a cleared key lets the same
-// copy nudge again when it differs again.
-func TestPluginsNudgeFiresOncePerKey(t *testing.T) {
-	dir := t.TempDir()
-	key := "codex:/h/.codex/plugins/cache/m/steer/0.1.0"
-
-	if ShouldNudgePlugins(dir, "") {
-		t.Error("an empty key nudged")
-	}
-	if !ShouldNudgePlugins(dir, key) {
-		t.Fatal("a first differing copy did not nudge")
-	}
-	if err := WriteNudge(dir, LoadNudge(dir).WithPlugins(key)); err != nil {
-		t.Fatal(err)
-	}
-	if ShouldNudgePlugins(dir, key) {
-		t.Error("the same differing copy nudged twice")
-	}
-	if err := WriteNudge(dir, LoadNudge(dir).WithPlugins("")); err != nil {
-		t.Fatal(err)
-	}
-	if !ShouldNudgePlugins(dir, key) {
-		t.Error("a copy that differs again did not nudge after the key was cleared")
-	}
-}
-
 // The first session on a fresh machine writes its record before any refresh has
 // made the state directory.
 func TestWriteNudgeCreatesTheStateDirectory(t *testing.T) {
@@ -263,5 +150,75 @@ func TestWriteNudgeCreatesTheStateDirectory(t *testing.T) {
 	}
 	if ShouldNudgePlugins(dir, "claude-code:/cache/steer") {
 		t.Error("the same plugin copy nudged twice")
+	}
+}
+
+// standingNudge is one condition that nudges once per distinct key: its decision,
+// its record setter and its record field.
+type standingNudge struct {
+	name   string
+	should func(dir, key string) bool
+	with   func(nudgeRecord, string) nudgeRecord
+	field  func(nudgeRecord) string
+	key    string
+}
+
+var standingNudges = []standingNudge{
+	{"master", ShouldNudgeMaster, nudgeRecord.WithMaster, func(r nudgeRecord) string { return r.Master }, "claude-code/global:stale:aaaaaaaa"},
+	{"rules", ShouldNudgeRules, nudgeRecord.WithRules, func(r nudgeRecord) string { return r.Rules }, "codex/global:/h/.codex/AGENTS.md:config-path:0"},
+	{"detached", ShouldNudgeDetached, nudgeRecord.WithDetached, func(r nudgeRecord) string { return r.Detached }, "codex/global"},
+	{"source drift", ShouldNudgeSourceDrift, nudgeRecord.WithSourceDrift, func(r nudgeRecord) string { return r.SourceDrift }, "claude-code/global:no-bare-python"},
+	{"plugins", ShouldNudgePlugins, nudgeRecord.WithPlugins, func(r nudgeRecord) string { return r.Plugins }, "codex:/h/.codex/plugins/cache/m/steer/0.1.0"},
+}
+
+// A standing condition nudges when its key changes and stays quiet after. A
+// repaired condition clears the key, which the cadence hook writes even when it
+// emits nothing, so the same condition nudges again if it comes back.
+// pins existing behaviour
+func TestStandingNudgesFireOncePerKey(t *testing.T) {
+	for _, n := range standingNudges {
+		t.Run(n.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if n.should(dir, "") {
+				t.Error("an empty key nudged")
+			}
+			if !n.should(dir, n.key) {
+				t.Fatal("a first key did not nudge")
+			}
+			if err := WriteNudge(dir, n.with(LoadNudge(dir), n.key)); err != nil {
+				t.Fatal(err)
+			}
+			if n.should(dir, n.key) {
+				t.Error("the same key nudged twice")
+			}
+			if !n.should(dir, n.key+"-other") {
+				t.Error("a different key did not nudge")
+			}
+			if err := WriteNudge(dir, n.with(LoadNudge(dir), "")); err != nil {
+				t.Fatal(err)
+			}
+			if !n.should(dir, n.key) {
+				t.Error("a returning key did not nudge after it was cleared")
+			}
+		})
+	}
+}
+
+// The standing nudges share one record with the queue nudge, which rewrites it:
+// a queue line must carry every standing key through, or that line repeats in
+// the next session.
+// pins existing behaviour
+func TestQueueNudgeCarriesEveryStandingKey(t *testing.T) {
+	for _, n := range standingNudges {
+		t.Run(n.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := WriteNudge(dir, n.with(LoadNudge(dir), n.key)); err != nil {
+				t.Fatal(err)
+			}
+			q := &Queue{Candidates: []Candidate{{Corpus: "transcript-friction", UngroupedClusters: 1}}}
+			if _, rec := ShouldNudge(dir, q, "hash", time.Now()); n.field(rec) != n.key {
+				t.Fatalf("key: got %q, want %q", n.field(rec), n.key)
+			}
+		})
 	}
 }
