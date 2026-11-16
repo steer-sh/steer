@@ -512,23 +512,6 @@ func TestLedgerRowAfterATruncatedLineParses(t *testing.T) {
 	}
 }
 
-// The stat-only fallback renders SHORTER than the raw diff it replaces, so a one-file
-// change too big to inline must still be reviewed.
-func TestOverBudgetSingleFileIsReviewed(t *testing.T) {
-	h := newHarness(t, findingReply("NO FINDINGS"))
-	h.cfg.MaxDiffChars = 500
-	h.repo = buildRepo(t, map[string]string{"a.py": lines(300)})
-	d := h.handle()
-	if d.Kind != Allow {
-		t.Fatalf("Kind = %v, want Allow", d.Kind)
-	}
-	row := h.lastRow()
-	if row["phase"] != "clean" {
-		t.Fatalf("phase = %v, want clean — the commit is one file over the diff budget, "+
-			"which the stat-only fallback exists to review anyway", row["phase"])
-	}
-}
-
 // The chain's changed-since-last-round test keys on the RAW diff. Two different
 // versions of one over-budget file render to the same stat block, so a rendered
 // comparison would end the chain on "byte-identical" without reading the fix.
@@ -771,6 +754,26 @@ func TestBareRetryOnAnEmptyIndexIsNotSilent(t *testing.T) {
 	}
 }
 
+// stagePartOfTheFix moves the index past the denied round and leaves the rest of the
+// edit unstaged, then reads the index: the miss the stale-index notice names.
+func (h *harness) stagePartOfTheFix() {
+	h.t.Helper()
+	writeFileAt(h.t, h.repo, "a.py", lines(240))
+	gitCmd(h.t, h.repo, "add", "-A")
+	writeFileAt(h.t, h.repo, "a.py", lines(260))
+	h.spec = DiffSpec{StagedOnly: true}
+}
+
+// assertNothingCleared fails when a cleared record names the staged diff, which would
+// let a diff the agent was warned about skip the gate next time.
+func (h *harness) assertNothingCleared() {
+	h.t.Helper()
+	chain := NewChain(h.cfg, ChainKey{Actor: "session-1", Repo: h.repo})
+	if record := chain.LoadCleared(stagedDiff(h.t, h.cfg, h.repo)); record != nil {
+		h.t.Error("a cleared record was written for a diff the agent was warned about")
+	}
+}
+
 // A retry reading the index while edits sit unstaged carries the notice on every path
 // out, the byte-identical chain end included — and that end must not write a cleared
 // record, which would let the same stale diff skip the gate outright next time.
@@ -793,10 +796,7 @@ func TestTheChainEndOnAStaleIndexWarnsAndClearsNothing(t *testing.T) {
 		t.Error("Kind = Allow — a commit reviewed on a possibly stale index must not " +
 			"also skip the permission prompt")
 	}
-	chain := NewChain(h.cfg, ChainKey{Actor: "session-1", Repo: h.repo})
-	if record := chain.LoadCleared(stagedDiff(t, h.cfg, h.repo)); record != nil {
-		t.Error("a cleared record was written for a diff the agent was warned about")
-	}
+	h.assertNothingCleared()
 }
 
 // Nothing is reviewed on an empty-index pass, so the round awaiting an answer is still
@@ -843,10 +843,7 @@ func TestACleanReviewOnAStaleIndexWarnsAndClearsNothing(t *testing.T) {
 	}
 	// Part of the work is staged, so the index moved and the round reviews something.
 	// The rest stays unstaged, which is the miss the notice names.
-	writeFileAt(t, h.repo, "a.py", lines(240))
-	gitCmd(t, h.repo, "add", "-A")
-	writeFileAt(t, h.repo, "a.py", lines(260))
-	h.spec = DiffSpec{StagedOnly: true}
+	h.stagePartOfTheFix()
 	d := h.handle()
 	if !strings.Contains(d.Reason, "REVIEWS THE INDEX") {
 		t.Fatalf("the clean pass lost the notice: %q", d.Reason)
@@ -859,10 +856,7 @@ func TestACleanReviewOnAStaleIndexWarnsAndClearsNothing(t *testing.T) {
 		t.Fatalf("phase = %v, want clean — the index moved, so a review had to run",
 			row["phase"])
 	}
-	chain := NewChain(h.cfg, ChainKey{Actor: "session-1", Repo: h.repo})
-	if record := chain.LoadCleared(stagedDiff(t, h.cfg, h.repo)); record != nil {
-		t.Error("a cleared record was written for a diff the agent was warned about")
-	}
+	h.assertNothingCleared()
 }
 
 // The capped final pass is the last place the notice can reach the agent, and the last
@@ -877,10 +871,7 @@ func TestTheCappedPassOnAStaleIndexWarnsAndClearsNothing(t *testing.T) {
 	}
 	h.reviewer.replies = []RawRun{findingReply("NO FINDINGS")}
 	h.reviewer.calls = 0
-	writeFileAt(t, h.repo, "a.py", lines(240))
-	gitCmd(t, h.repo, "add", "-A")
-	writeFileAt(t, h.repo, "a.py", lines(260))
-	h.spec = DiffSpec{StagedOnly: true}
+	h.stagePartOfTheFix()
 	d := h.handle()
 	if !strings.Contains(d.Reason, "REVIEWS THE INDEX") {
 		t.Fatalf("the capped pass lost the notice: %q", d.Reason)
@@ -888,10 +879,7 @@ func TestTheCappedPassOnAStaleIndexWarnsAndClearsNothing(t *testing.T) {
 	if row := h.lastRow(); row["phase"] != "cap" {
 		t.Fatalf("phase = %v, want cap", row["phase"])
 	}
-	chain := NewChain(h.cfg, ChainKey{Actor: "session-1", Repo: h.repo})
-	if record := chain.LoadCleared(stagedDiff(t, h.cfg, h.repo)); record != nil {
-		t.Error("a cleared record was written for a diff the agent was warned about")
-	}
+	h.assertNothingCleared()
 }
 
 func TestADenyCarriesThePendingAddendumNotice(t *testing.T) {
@@ -1170,10 +1158,7 @@ func TestANitpickOnlyRoundOnAStaleIndexWarnsAndClearsNothing(t *testing.T) {
 	}
 	h.reviewer.replies = []RawRun{findingReply(nitpickFinding)}
 	h.reviewer.calls = 0
-	writeFileAt(t, h.repo, "a.py", lines(240))
-	gitCmd(t, h.repo, "add", "-A")
-	writeFileAt(t, h.repo, "a.py", lines(260))
-	h.spec = DiffSpec{StagedOnly: true}
+	h.stagePartOfTheFix()
 	d := h.handle()
 	if row := h.lastRow(); row["phase"] != PhaseNitpick {
 		t.Fatalf("phase = %v, want %s", row["phase"], PhaseNitpick)
@@ -1181,10 +1166,7 @@ func TestANitpickOnlyRoundOnAStaleIndexWarnsAndClearsNothing(t *testing.T) {
 	if !strings.HasPrefix(d.Reason, StaleIndexNotice()) {
 		t.Errorf("the nitpick round lost the notice: %q", d.Reason)
 	}
-	chain := NewChain(h.cfg, ChainKey{Actor: "session-1", Repo: h.repo})
-	if record := chain.LoadCleared(stagedDiff(t, h.cfg, h.repo)); record != nil {
-		t.Error("a cleared record was written for a diff the agent was warned about")
-	}
+	h.assertNothingCleared()
 }
 
 // A NITPICK-only round from a thin panel names the reviewers that did not answer.

@@ -15,30 +15,9 @@ import (
 // an untracked plan file to three reviewers: add and commit both select the
 // repository with `git -C <absolute path>`.
 func TestAbsoluteRepoCommitKeepsAStrayOutOfTheReview(t *testing.T) {
-	root := t.TempDir()
-	run := func(args ...string) {
-		t.Helper()
-		cmd := exec.Command("git", args...)
-		cmd.Dir = root
-		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
-			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v: %s", args, err, out)
-		}
-	}
-	write := func(path string) {
-		t.Helper()
-		body := strings.Repeat("line x\n", 80)
-		if err := os.WriteFile(filepath.Join(root, path), []byte(body), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	write("old.go")
-	run("init", "-q", ".")
-	run("add", "old.go")
-	run("co"+"mmit", "-qm", "init")
-	write("new_test.go")
-	write("check_plan.md")
+	root, _ := newRepo(t, "old.go")
+	writeLines(t, root, "new_test.go", "line x\n")
+	writeLines(t, root, "check_plan.md", "line x\n")
 
 	cmd := "git -C " + root + " add new_test.go && git -C " + root + " co" + "mmit -F msg"
 	diff, ok := gate.GetDiff(gate.Defaults(), RepoDir(cmd, "/elsewhere"), DiffSpecFor(cmd, "/elsewhere"))
@@ -57,25 +36,9 @@ func TestAbsoluteRepoCommitKeepsAStrayOutOfTheReview(t *testing.T) {
 // hands the hook when it drops a leading `cd` to its own working directory: a bare
 // add, then a commit that selects the same repository with `git -C`.
 func TestABareAddInTheShellDirectoryKeepsAStrayOutOfTheReview(t *testing.T) {
-	root := t.TempDir()
-	run := func(args ...string) {
-		t.Helper()
-		cmd := exec.Command("git", args...)
-		cmd.Dir = root
-		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
-			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v: %s", args, err, out)
-		}
-	}
-	for _, path := range []string{"old.go", "new_test.go", "check_plan.md"} {
-		if err := os.WriteFile(filepath.Join(root, path), []byte(strings.Repeat("line x\n", 80)), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	run("init", "-q", ".")
-	run("add", "old.go")
-	run("co"+"mmit", "-qm", "init")
+	root, _ := newRepo(t, "old.go")
+	writeLines(t, root, "new_test.go", "line x\n")
+	writeLines(t, root, "check_plan.md", "line x\n")
 
 	cmd := "git add new_test.go && git -C " + root + " co" + "mmit -F msg"
 	diff, ok := gate.GetDiff(gate.Defaults(), RepoDir(cmd, root), DiffSpecFor(cmd, root))

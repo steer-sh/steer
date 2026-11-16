@@ -45,6 +45,10 @@ func assertArgv(t *testing.T, got, want []string) {
 	}
 }
 
+// The argv is compared whole, so it carries no flag of its own: no
+// --print-timeout without a deadline, and no --dangerously-skip-permissions.
+// Auto-approval turned the reviewer into an explorer that answered on none of
+// three runs.
 func TestAgyRendersModelAndEffort(t *testing.T) {
 	binary, argvFile := stubBinary(t, `{"response":"ok","status":"SUCCESS"}`)
 	reviewer := NewAgy("gemini-3.7-flash-high", "high")
@@ -68,19 +72,15 @@ func TestAgyOmitsAnUnsetEffort(t *testing.T) {
 	})
 }
 
-// The gate grants the reviewer no permissions of its own. Auto-approval turned the
-// reviewer into an explorer that answered on none of three runs, so the argv must
-// never carry it again.
-func TestAgyGrantsTheReviewerNoPermissions(t *testing.T) {
+// A reviewer configured with neither model nor effort gets the bare argv: no flag
+// of its own appears for the unset fields.
+// pins existing behaviour
+func TestAgyWithNothingSetRendersTheBareArgv(t *testing.T) {
 	binary, argvFile := stubBinary(t, `{"response":"ok","status":"SUCCESS"}`)
 	reviewer := NewAgy("", "")
 	reviewer.Binary = binary
 	reviewer.Review(context.Background(), "PROMPT", t.TempDir())
-	for _, arg := range recordedArgv(t, argvFile) {
-		if arg == "--dangerously-skip-permissions" {
-			t.Fatalf("argv auto-approves the reviewer's tool calls")
-		}
-	}
+	assertArgv(t, recordedArgv(t, argvFile), []string{"--output-format", "json", "-p", "PROMPT"})
 }
 
 // agy's own print-timeout must sit above the panel's deadline, or agy stops first and
@@ -108,19 +108,6 @@ func TestAgyGivesItsOwnClockRoomAboveTheDeadline(t *testing.T) {
 	}
 	if budget <= 100*time.Second {
 		t.Fatalf("--print-timeout = %s; want more than the 100s deadline", budget)
-	}
-}
-
-// A context with no deadline names no wall clock, so agy keeps its own default.
-func TestAgyOmitsPrintTimeoutWithoutADeadline(t *testing.T) {
-	binary, argvFile := stubBinary(t, `{"response":"ok","status":"SUCCESS"}`)
-	reviewer := NewAgy("", "")
-	reviewer.Binary = binary
-	reviewer.Review(context.Background(), "PROMPT", t.TempDir())
-	for _, arg := range recordedArgv(t, argvFile) {
-		if arg == "--print-timeout" {
-			t.Fatalf("argv carries --print-timeout with no deadline")
-		}
 	}
 }
 

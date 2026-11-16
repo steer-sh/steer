@@ -165,8 +165,7 @@ func TestUnlockedAppendFollowsAReplacedShard(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer release()
-	afterAppend = func() {
-		afterAppend = func() {}
+	onceAfterAppend(t, func() {
 		tmp := cfg.LogFile() + ".tmp"
 		if err := os.WriteFile(tmp, []byte("{\"phase\":\"deny\"}\n"), 0o644); err != nil {
 			t.Error(err)
@@ -175,12 +174,27 @@ func TestUnlockedAppendFollowsAReplacedShard(t *testing.T) {
 		if err := os.Rename(tmp, cfg.LogFile()); err != nil {
 			t.Error(err)
 		}
-	}
-	t.Cleanup(func() { afterAppend = func() {} })
+	})
 	if err := NewLedger(cfg).Log(Row{"phase": "chain-end"}); err != nil {
 		t.Fatal(err)
 	}
-	if n := strings.Count(shardText(t, cfg), "chain-end"); n != 1 {
+	assertRowOnce(t, cfg, "chain-end")
+}
+
+// onceAfterAppend runs fn at the first point between an unlocked append and Log's
+// check for its row, and never again.
+func onceAfterAppend(t *testing.T, fn func()) {
+	afterAppend = func() {
+		afterAppend = func() {}
+		fn()
+	}
+	t.Cleanup(func() { afterAppend = func() {} })
+}
+
+// assertRowOnce fails unless the current shard holds needle exactly once.
+func assertRowOnce(t *testing.T, cfg Config, needle string) {
+	t.Helper()
+	if n := strings.Count(shardText(t, cfg), needle); n != 1 {
 		t.Fatalf("the current shard holds the row %d times, want once:\n%s", n, shardText(t, cfg))
 	}
 }
@@ -212,22 +226,18 @@ func TestUnlockedAppendCarriedByARewriteIsNotRepeated(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer release()
-	afterAppend = func() {
-		afterAppend = func() {}
+	onceAfterAppend(t, func() {
 		data, err := os.ReadFile(cfg.LogFile())
 		if err != nil {
 			t.Error(err)
 			return
 		}
 		replaceShard(t, cfg, "{\"phase\":\"deny\"}\n"+string(data)).Close()
-	}
-	t.Cleanup(func() { afterAppend = func() {} })
+	})
 	if err := NewLedger(cfg).Log(Row{"phase": "chain-end"}); err != nil {
 		t.Fatal(err)
 	}
-	if n := strings.Count(shardText(t, cfg), "chain-end"); n != 1 {
-		t.Fatalf("the current shard holds the row %d times, want once:\n%s", n, shardText(t, cfg))
-	}
+	assertRowOnce(t, cfg, "chain-end")
 }
 
 // A rewrite that has renamed but not yet carried the replaced file's growth still holds
@@ -240,8 +250,7 @@ func TestUnlockedAppendWaitsForTheRewriteToCarry(t *testing.T) {
 		t.Fatal(err)
 	}
 	carried := make(chan struct{})
-	afterAppend = func() {
-		afterAppend = func() {}
+	onceAfterAppend(t, func() {
 		old := replaceShard(t, cfg, "{\"phase\":\"deny\"}\n")
 		go func() {
 			defer close(carried)
@@ -261,15 +270,12 @@ func TestUnlockedAppendWaitsForTheRewriteToCarry(t *testing.T) {
 			defer f.Close()
 			f.Write(data)
 		}()
-	}
-	t.Cleanup(func() { afterAppend = func() {} })
+	})
 	if err := NewLedger(cfg).Log(Row{"phase": "chain-end"}); err != nil {
 		t.Fatal(err)
 	}
 	<-carried
-	if n := strings.Count(shardText(t, cfg), "chain-end"); n != 1 {
-		t.Fatalf("the current shard holds the row %d times, want once:\n%s", n, shardText(t, cfg))
-	}
+	assertRowOnce(t, cfg, "chain-end")
 }
 
 // A Log whose second wait for the shard lock runs out while a rewrite sits between its
@@ -282,8 +288,7 @@ func TestUnlockedAppendOutwaitedTwiceWaitsForTheCarry(t *testing.T) {
 		t.Fatal(err)
 	}
 	carried := make(chan struct{})
-	afterAppend = func() {
-		afterAppend = func() {}
+	onceAfterAppend(t, func() {
 		releaseSwap, err := LockSwap(cfg)
 		if err != nil {
 			t.Error(err)
@@ -310,15 +315,12 @@ func TestUnlockedAppendOutwaitedTwiceWaitsForTheCarry(t *testing.T) {
 			defer f.Close()
 			f.Write(data)
 		}()
-	}
-	t.Cleanup(func() { afterAppend = func() {} })
+	})
 	if err := NewLedger(cfg).Log(Row{"phase": "chain-end"}); err != nil {
 		t.Fatal(err)
 	}
 	<-carried
-	if n := strings.Count(shardText(t, cfg), "chain-end"); n != 1 {
-		t.Fatalf("the current shard holds the row %d times, want once:\n%s", n, shardText(t, cfg))
-	}
+	assertRowOnce(t, cfg, "chain-end")
 }
 
 // Two rows with equal fields are two rows: a second one that a rewrite missed must not
@@ -336,11 +338,9 @@ func TestUnlockedAppendKeepsAnEqualRow(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := shardText(t, cfg)
-	afterAppend = func() {
-		afterAppend = func() {}
+	onceAfterAppend(t, func() {
 		replaceShard(t, cfg, before).Close()
-	}
-	t.Cleanup(func() { afterAppend = func() {} })
+	})
 	if err := NewLedger(cfg).Log(row()); err != nil {
 		t.Fatal(err)
 	}
@@ -359,8 +359,7 @@ func TestUnlockedAppendKnowsItsRestampedRow(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer release()
-	afterAppend = func() {
-		afterAppend = func() {}
+	onceAfterAppend(t, func() {
 		data, err := os.ReadFile(cfg.LogFile())
 		if err != nil {
 			t.Error(err)
@@ -368,14 +367,11 @@ func TestUnlockedAppendKnowsItsRestampedRow(t *testing.T) {
 		}
 		stamped := strings.Replace(string(data), "{", `{"backfilled":true,`, 1)
 		replaceShard(t, cfg, stamped).Close()
-	}
-	t.Cleanup(func() { afterAppend = func() {} })
+	})
 	if err := NewLedger(cfg).Log(Row{"phase": "retry"}); err != nil {
 		t.Fatal(err)
 	}
-	if n := strings.Count(shardText(t, cfg), `"phase":"retry"`); n != 1 {
-		t.Fatalf("the current shard holds the row %d times, want once:\n%s", n, shardText(t, cfg))
-	}
+	assertRowOnce(t, cfg, `"phase":"retry"`)
 }
 
 // A carry cut short leaves a torn line holding the row_id; that is no copy of the row.
@@ -387,8 +383,7 @@ func TestUnlockedAppendIgnoresATornCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer release()
-	afterAppend = func() {
-		afterAppend = func() {}
+	onceAfterAppend(t, func() {
 		data, err := os.ReadFile(cfg.LogFile())
 		if err != nil {
 			t.Error(err)
@@ -396,8 +391,7 @@ func TestUnlockedAppendIgnoresATornCopy(t *testing.T) {
 		}
 		torn := strings.TrimSpace(string(data))
 		replaceShard(t, cfg, torn[:len(torn)-1]+"\n").Close()
-	}
-	t.Cleanup(func() { afterAppend = func() {} })
+	})
 	if err := NewLedger(cfg).Log(Row{"phase": "chain-end"}); err != nil {
 		t.Fatal(err)
 	}

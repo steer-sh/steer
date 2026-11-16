@@ -28,23 +28,9 @@ func registerRuleFixture(t *testing.T) (stateDir, ledger string) {
 	return writeLedger(t, rows)
 }
 
-// An instruction record names the rule its digest was taken over. A record naming
-// only a document names no text inside it, which is the state this commit ends.
-func TestAnInstructionTierNeedsARuleID(t *testing.T) {
-	stateDir, ledger := registerRuleFixture(t)
-
-	err := Register(io.Discard, stateDir, RegisterOpts{
-		Prose: testProse, ScopeAll: true, Ledger: ledger,
-		Class: "widget parser flag loss", Match: "widget parser",
-		Tier: "instruction", Target: "CLAUDE.md",
-	})
-	if err == nil || !strings.Contains(err.Error(), "--rule-id") {
-		t.Fatalf("err = %v", err)
-	}
-}
-
-// Both spellings of the rung reach the same refusal, because both reach a stored
-// record.
+// An instruction record names the rule its digest was taken over; a record naming
+// only a document names no text inside it. Both spellings of the rung reach the
+// same refusal, because both reach a stored record.
 func TestBothInstructionSpellingsNeedARuleID(t *testing.T) {
 	stateDir, ledger := registerRuleFixture(t)
 
