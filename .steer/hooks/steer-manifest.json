@@ -1,5 +1,33 @@
 {
   "hooks": {
+    "near-copy-test-hook": {
+      "file": "near-copy-test-hook.py",
+      "rule": "never add a Go test that nearly copies another test in the same file | add the case as a row in the twin test or a shared helper, or state in the new test's doc comment what distinct property it checks",
+      "created": "2026-11-15",
+      "updated": "2026-11-15",
+      "source": "generated",
+      "prompt_version": "28",
+      "hook_version": "28",
+      "model": "claude-opus-5-5",
+      "rule_hash": "9673a9fc1251e48d847666b155384b5a85c7eb48352160a813da83cecf8d5e4d",
+      "self_test": {
+        "passed": true,
+        "positive_pass": 8,
+        "positive_fail": 0,
+        "negative_pass": 13,
+        "negative_fail": 0
+      },
+      "fixtures": {
+        "digest": "defcb316c971253d",
+        "cases": 21,
+        "tested": true,
+        "hook_digest": "ca86696af67afad0",
+        "master_digest": "b6ef1542f52ce72b",
+        "rule_hash": "9673a9fc1251e48d847666b155384b5a85c7eb48352160a813da83cecf8d5e4d",
+        "verified_at": "2026-11-16T01:10:57Z"
+      },
+      "once": true
+    },
     "no-direct-main-hook": {
       "file": "no-direct-main-hook.py",
       "rule": "never commit on main or push to main in this repository | work on a branch and merge through a pull request",
@@ -25,9 +53,9 @@
         "cases": 47,
         "tested": true,
         "hook_digest": "67b4f8486b4174f8",
-        "master_digest": "ce356093be651ef6",
+        "master_digest": "b6ef1542f52ce72b",
         "rule_hash": "219d4203914a9d920a1e0d83ba4b21c7373d55f4c1c181a31fdfa5af077d6d62",
-        "verified_at": "2026-11-11T20:33:05Z"
+        "verified_at": "2026-11-16T01:10:59Z"
       }
     },
     "no-readme-edit-hook": {
@@ -55,9 +83,9 @@
         "cases": 33,
         "tested": true,
         "hook_digest": "213d866c4bbf2953",
-        "master_digest": "ce356093be651ef6",
+        "master_digest": "b6ef1542f52ce72b",
         "rule_hash": "95d19019e65d4c17ad9335184e9f1f35a56bcde3c0c44c33a88814a694b643c7",
-        "verified_at": "2026-11-11T20:33:07Z"
+        "verified_at": "2026-11-16T01:11:01Z"
       }
     }
   },
