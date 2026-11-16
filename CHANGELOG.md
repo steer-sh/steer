@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.2] - 2026-11-16
 
 - **The git pre-commit review is removed**: `steer commit-gate install
   --precommit` is gone. Steer records review decisions only from Claude
@@ -22,6 +22,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reviewer reported, and Claude Code's dollar cost. A field a reviewer does not
   report is left out. An API run's tool use moves onto the same `reviewer_runs`
   entry, and `reviewer_api_runs` is no longer written.
+- **Guards can block once per file**: `steer register --once` registers a
+  guard that blocks at most once per session, file and repository. After
+  the first block, the agent's next edit to that file in the session goes
+  through. Use it for a guard whose block is advice that the agent can
+  answer by stating its reason and retrying. A tool call that carries no
+  session ID is still blocked each time.
+- **Claude Code: the review band follows `/clear`**: After `/clear`, the
+  band shows only the new conversation's reviews. Before this fix, it kept
+  showing the earlier session's reviews, including a held round and the
+  reviews from a background subagent of that session.
+- **`steer status` names one repair for stale global hooks**: When the
+  global guard runners and self-protection differ from the running CLI,
+  status now shows one issue for all of them instead of one issue per
+  harness. If the CLI is newer, that issue names one `steer bin install`
+  and gives the CLI's own path. A stale project guard runner still gets
+  its own issue that names a project-scope `steer hooks rebuild`. If the
+  CLI is older than the hooks, status names no repair that moves the
+  hooks back to an older build.
 
 ## [0.4.1] - 2026-11-15
 
@@ -445,6 +463,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 First public release.
 
+[0.4.2]: https://github.com/steer-sh/steer/releases/tag/v0.4.2
 [0.4.1]: https://github.com/steer-sh/steer/releases/tag/v0.4.1
 [0.4.0]: https://github.com/steer-sh/steer/releases/tag/v0.4.0
 [0.3.1]: https://github.com/steer-sh/steer/releases/tag/v0.3.1
