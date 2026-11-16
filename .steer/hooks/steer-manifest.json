@@ -1,0 +1,100 @@
+{
+  "hooks": {
+    "near-copy-test-hook": {
+      "file": "near-copy-test-hook.py",
+      "rule": "never add a Go test that nearly copies another test in the same file | add the case as a row in the twin test or a shared helper; if the test is distinct, say what it checks in its doc comment and retry",
+      "created": "2026-11-15",
+      "updated": "2026-11-15",
+      "source": "generated",
+      "prompt_version": "28",
+      "hook_version": "28",
+      "model": "claude-opus-5-5",
+      "rule_hash": "5a5f6b4d71f06b4d8353fb015f9d43e9d841ecf73c96127d4aef15b338ab56c0",
+      "self_test": {
+        "passed": true,
+        "positive_pass": 8,
+        "positive_fail": 0,
+        "negative_pass": 13,
+        "negative_fail": 0
+      },
+      "fixtures": {
+        "digest": "defcb316c971253d",
+        "cases": 21,
+        "tested": true,
+        "hook_digest": "44f19dea27b33814",
+        "master_digest": "53bce9745491187a",
+        "rule_hash": "5a5f6b4d71f06b4d8353fb015f9d43e9d841ecf73c96127d4aef15b338ab56c0",
+        "verified_at": "2026-11-16T02:08:47Z"
+      },
+      "once": true
+    },
+    "no-direct-main-hook": {
+      "file": "no-direct-main-hook.py",
+      "rule": "never commit on main or push to main in this repository | work on a branch and merge through a pull request",
+      "created": "2026-10-31",
+      "updated": "2026-10-31",
+      "source": "generated",
+      "prompt_version": "22",
+      "prompt_modules": [
+        "shell-lint"
+      ],
+      "hook_version": "22",
+      "model": "claude-opus-5-5",
+      "rule_hash": "219d4203914a9d920a1e0d83ba4b21c7373d55f4c1c181a31fdfa5af077d6d62",
+      "self_test": {
+        "passed": true,
+        "positive_pass": 18,
+        "positive_fail": 0,
+        "negative_pass": 17,
+        "negative_fail": 0
+      },
+      "fixtures": {
+        "digest": "76955c248a83b34d",
+        "cases": 47,
+        "tested": true,
+        "hook_digest": "67b4f8486b4174f8",
+        "master_digest": "53bce9745491187a",
+        "rule_hash": "219d4203914a9d920a1e0d83ba4b21c7373d55f4c1c181a31fdfa5af077d6d62",
+        "verified_at": "2026-11-16T02:08:49Z"
+      }
+    },
+    "no-readme-edit-hook": {
+      "file": "no-readme-edit-hook.py",
+      "rule": "never change the repository-root README.md | the maintainer edits README.md by hand; tell the user what change it needs and quote the text",
+      "created": "2026-11-08",
+      "updated": "2026-11-08",
+      "source": "generated",
+      "prompt_version": "26",
+      "prompt_modules": [
+        "shell-lint"
+      ],
+      "hook_version": "26",
+      "model": "claude-opus-5-5",
+      "rule_hash": "95d19019e65d4c17ad9335184e9f1f35a56bcde3c0c44c33a88814a694b643c7",
+      "self_test": {
+        "passed": true,
+        "positive_pass": 18,
+        "positive_fail": 0,
+        "negative_pass": 15,
+        "negative_fail": 0
+      },
+      "fixtures": {
+        "digest": "b7eca784972d01f2",
+        "cases": 33,
+        "tested": true,
+        "hook_digest": "213d866c4bbf2953",
+        "master_digest": "53bce9745491187a",
+        "rule_hash": "95d19019e65d4c17ad9335184e9f1f35a56bcde3c0c44c33a88814a694b643c7",
+        "verified_at": "2026-11-16T02:08:51Z"
+      }
+    }
+  },
+  "review_addendum": {
+    "no-windows-pi-findings": {
+      "text": "Windows and the Pi harness are out of scope in this repository: Steer ships for Claude Code and Codex on macOS and Linux. Do not report a defect that occurs only on Windows or only under Pi. A defect that also occurs on macOS or Linux under Claude Code or Codex stays reportable, and you describe it there.",
+      "text_hash": "505487528b7e265d7853359a14963719f7eb783234e619df13b7eb10c2a6db34",
+      "created": "2026-10-31",
+      "updated": "2026-10-31"
+    }
+  }
+}

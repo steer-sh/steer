@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "tier": "check",
+  "id": "binary-freshness",
+  "scope": "project",
+  "removed": "2026-10-13T18:43:00.744195000Z",
+  "manifest": {
+    "id": "binary-freshness",
+    "kind": "script",
+    "script": "scripts/binary-freshness.sh"
+  }
+}

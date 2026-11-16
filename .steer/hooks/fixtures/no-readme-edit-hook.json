@@ -1,0 +1,550 @@
+{
+  "version": 1,
+  "hook": "no-readme-edit-hook",
+  "cases": [
+    {
+      "name": "Edit of a nested README is allowed",
+      "payload": {
+        "tool_input": {
+          "file_path": "tests/live/README.md",
+          "new_string": "# Live",
+          "old_string": "# live"
+        },
+        "tool_name": "Edit"
+      },
+      "expect": "allow",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n",
+        "tests/live/README.md": "# live\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "Edit of another file is allowed",
+      "payload": {
+        "tool_input": {
+          "file_path": "CLAUDE.md",
+          "new_string": "b",
+          "old_string": "a"
+        },
+        "tool_name": "Edit"
+      },
+      "expect": "allow",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "Edit of another repository's README is allowed",
+      "payload": {
+        "tool_input": {
+          "file_path": "README.md",
+          "new_string": "# Other",
+          "old_string": "# other"
+        },
+        "tool_name": "Edit"
+      },
+      "expect": "allow",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/main\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:example/other.git\n",
+        "README.md": "# other\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "Edit of the root README is blocked",
+      "payload": {
+        "tool_input": {
+          "file_path": "README.md",
+          "new_string": "# Steer",
+          "old_string": "# steer"
+        },
+        "tool_name": "Edit"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "README.md named in a heredoc body is allowed",
+      "payload": {
+        "tool_input": {
+          "command": "git commit -F - \u003c\u003c'MSG'\ndocs: echo x \u003e README.md\nMSG"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "allow",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "Write of the root README is blocked",
+      "payload": {
+        "tool_input": {
+          "content": "# new\n",
+          "file_path": "README.md"
+        },
+        "tool_name": "Write"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "an irrelevant tool is allowed",
+      "payload": {
+        "tool_input": {
+          "file_path": "README.md"
+        },
+        "tool_name": "Read"
+      },
+      "expect": "allow",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "an outer redirect after bash -c onto the root README is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "bash -c 'printf new' \u003e README.md"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "append onto the root README is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "echo extra \u003e\u003e README.md"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "bash -c reading the root README is allowed",
+      "payload": {
+        "tool_input": {
+          "command": "bash -c 'cat README.md \u003e /tmp/x'"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "allow",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "bash -c writing the root README is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "bash -c 'echo x \u003e README.md'"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "cd into a subdirectory then write the root README is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "cd tests/live \u0026\u0026 echo x \u003e ../../README.md"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n",
+        "tests/live/README.md": "# live\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "cp from the root README is allowed",
+      "payload": {
+        "tool_input": {
+          "command": "cp README.md /tmp/README.bak"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "allow",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "cp of a README into the repository directory is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "cp /tmp/x/README.md ."
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "cp of another file into the repository directory is allowed",
+      "payload": {
+        "tool_input": {
+          "command": "cp /tmp/x/README_2.md ."
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "allow",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "cp onto the root README is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "cp /tmp/x/README_2.md README.md"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "deletion of the root README is blocked",
+      "payload": {
+        "tool_input": {
+          "file_path": "README.md",
+          "new_string": "",
+          "steer_operation": "delete"
+        },
+        "tool_name": "Edit"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "diff against the root README is allowed",
+      "payload": {
+        "tool_input": {
+          "command": "diff README.md /tmp/README_2.md"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "allow",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "git -C restore of the root README is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "git -C . restore README.md"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "git restore --staged --worktree of the root README is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "git restore --staged --worktree README.md"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "git restore --staged of the root README is allowed",
+      "payload": {
+        "tool_input": {
+          "command": "git restore --staged README.md"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "allow",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "git restore of the root README is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "git restore README.md"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "grep on the root README is allowed",
+      "payload": {
+        "tool_input": {
+          "command": "grep -n Install README.md"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "allow",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "inline python opening the root README for writing is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "python3 -c \"open('README.md', 'w').close()\""
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "inline python reading the root README is allowed",
+      "payload": {
+        "tool_input": {
+          "command": "python3 -c \"print(open('README.md').read().count('steer'))\""
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "allow",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "inline python writing a nested README is allowed",
+      "payload": {
+        "tool_input": {
+          "command": "python3 -c \"from pathlib import Path; Path('tests/live/README.md').write_text('x')\""
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "allow",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n",
+        "tests/live/README.md": "# live\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "inline python writing the root README from a subdirectory is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "cd tests/live \u0026\u0026 python3 -c \"from pathlib import Path; Path('../../README.md').write_text('x')\""
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n",
+        "tests/live/README.md": "# live\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "inline python writing the root README is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "python3 - \u003c\u003c'EOF'\nfrom pathlib import Path\np = Path('README.md')\np.write_text(p.read_text().replace('a', 'b'))\nEOF"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "reading the root README is allowed",
+      "payload": {
+        "tool_input": {
+          "command": "cat README.md \u003e /tmp/out.md"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "allow",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "redirect onto a nested README is allowed",
+      "payload": {
+        "tool_input": {
+          "command": "cd tests/live \u0026\u0026 echo x \u003e README.md"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "allow",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n",
+        "tests/live/README.md": "# live\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "redirect onto the root README is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "cat \u003e README.md \u003c\u003c'EOF'\n# new\nEOF"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "sed -i on the root README is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "sed -i '' 's/a/b/' README.md"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "tee onto the root README is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "printf x | tee -a README.md"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    }
+  ]
+}

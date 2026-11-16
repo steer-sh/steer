@@ -1,0 +1,26 @@
+{
+  "name": "npm-deps-only",
+  "version": "1.0.0",
+  "description": "Project with only npm registry dependencies",
+  "main": "index.js",
+  "dependencies": {
+    "express": "^4.18.0",
+    "lodash": "^4.17.21",
+    "axios": "^1.0.0",
+    "react": "^18.2.0",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "jest": "^29.0.0",
+    "eslint": "^8.0.0",
+    "typescript": "^4.9.0"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "test": "jest",
+    "build": "tsc"
+  },
+  "keywords": ["test", "npm"],
+  "author": "Test Author",
+  "license": "MIT"
+}

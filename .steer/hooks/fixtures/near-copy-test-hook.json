@@ -1,0 +1,333 @@
+{
+  "version": 1,
+  "hook": "near-copy-test-hook",
+  "cases": [
+    {
+      "name": "Bash call is ignored",
+      "payload": {
+        "tool_input": {
+          "command": "go test ./..."
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "allow",
+      "origin": "synthetic"
+    },
+    {
+      "name": "Edit adding a near-copy beside an existing near-copy names the closest twin",
+      "payload": {
+        "tool_input": {
+          "file_path": "store/store_test.go",
+          "new_string": "func TestOpenRejectsFile(t *testing.T) {\n\tif _, err := Open(\"/dev/null\"); err == nil {\n\t\tt.Fatal(\"Open succeeded on a file\")\n\t}\n}\n\nfunc TestLoadReadsUnicodeName(t *testing.T) {\n\tdir := t.TempDir()\n\ts, err := Open(dir)\n\tif err != nil {\n\t\tt.Fatalf(\"Open: %v\", err)\n\t}\n\tif err := s.Put(\"beta\", Record{Name: \"été\", Size: 7}); err != nil {\n\t\tt.Fatalf(\"Put: %v\", err)\n\t}\n\tgot, err := s.Load(\"beta\")\n\tif err != nil {\n\t\tt.Fatalf(\"Load: %v\", err)\n\t}\n\tif got.Name != \"été\" {\n\t\tt.Fatalf(\"Name = %q, want %q\", got.Name, \"été\")\n\t}\n\tif got.Size != 7 {\n\t\tt.Fatalf(\"Size = %d, want 7\", got.Size)\n\t}\n}\n",
+          "old_string": "func TestOpenRejectsFile(t *testing.T) {\n\tif _, err := Open(\"/dev/null\"); err == nil {\n\t\tt.Fatal(\"Open succeeded on a file\")\n\t}\n}\n"
+        },
+        "tool_name": "Edit"
+      },
+      "expect": "block",
+      "files": {
+        "store/store_test.go": "package store\n\nimport \"testing\"\n\n// TestLoadReadsName checks that Load returns the stored name.\nfunc TestLoadReadsName(t *testing.T) {\n\tdir := t.TempDir()\n\ts, err := Open(dir)\n\tif err != nil {\n\t\tt.Fatalf(\"Open: %v\", err)\n\t}\n\tif err := s.Put(\"alpha\", Record{Name: \"one\", Size: 3}); err != nil {\n\t\tt.Fatalf(\"Put: %v\", err)\n\t}\n\tgot, err := s.Load(\"alpha\")\n\tif err != nil {\n\t\tt.Fatalf(\"Load: %v\", err)\n\t}\n\tif got.Name != \"one\" {\n\t\tt.Fatalf(\"Name = %q, want %q\", got.Name, \"one\")\n\t}\n}\n\nfunc TestLoadReadsOtherName(t *testing.T) {\n\tdir := t.TempDir()\n\ts, err := Open(dir)\n\tif err != nil {\n\t\tt.Fatalf(\"Open: %v\", err)\n\t}\n\tif err := s.Put(\"beta\", Record{Name: \"été\", Size: 7}); err != nil {\n\t\tt.Fatalf(\"Put: %v\", err)\n\t}\n\tgot, err := s.Load(\"beta\")\n\tif err != nil {\n\t\tt.Fatalf(\"Load: %v\", err)\n\t}\n\tif got.Name != \"été\" {\n\t\tt.Fatalf(\"Name = %q, want %q\", got.Name, \"été\")\n\t}\n\tif got.Size != 7 {\n\t\tt.Fatalf(\"Size = %d, want 7\", got.Size)\n\t}\n}\n\nfunc TestOpenRejectsFile(t *testing.T) {\n\tif _, err := Open(\"/dev/null\"); err == nil {\n\t\tt.Fatal(\"Open succeeded on a file\")\n\t}\n}\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "Edit appending a near-copy of a kept test is blocked",
+      "payload": {
+        "tool_input": {
+          "file_path": "store/store_test.go",
+          "new_string": "func TestOpenRejectsFile(t *testing.T) {\n\tif _, err := Open(\"/dev/null\"); err == nil {\n\t\tt.Fatal(\"Open succeeded on a file\")\n\t}\n}\n\nfunc TestLoadReadsUnicodeName(t *testing.T) {\n\tdir := t.TempDir()\n\ts, err := Open(dir)\n\tif err != nil {\n\t\tt.Fatalf(\"Open: %v\", err)\n\t}\n\tif err := s.Put(\"beta\", Record{Name: \"été\", Size: 7}); err != nil {\n\t\tt.Fatalf(\"Put: %v\", err)\n\t}\n\tgot, err := s.Load(\"beta\")\n\tif err != nil {\n\t\tt.Fatalf(\"Load: %v\", err)\n\t}\n\tif got.Name != \"été\" {\n\t\tt.Fatalf(\"Name = %q, want %q\", got.Name, \"été\")\n\t}\n\tif got.Size != 7 {\n\t\tt.Fatalf(\"Size = %d, want 7\", got.Size)\n\t}\n}\n",
+          "old_string": "func TestOpenRejectsFile(t *testing.T) {\n\tif _, err := Open(\"/dev/null\"); err == nil {\n\t\tt.Fatal(\"Open succeeded on a file\")\n\t}\n}\n"
+        },
+        "tool_name": "Edit"
+      },
+      "expect": "block",
+      "files": {
+        "store/store_test.go": "package store\n\nimport \"testing\"\n\n// TestLoadReadsName checks that Load returns the stored name.\nfunc TestLoadReadsName(t *testing.T) {\n\tdir := t.TempDir()\n\ts, err := Open(dir)\n\tif err != nil {\n\t\tt.Fatalf(\"Open: %v\", err)\n\t}\n\tif err := s.Put(\"alpha\", Record{Name: \"one\", Size: 3}); err != nil {\n\t\tt.Fatalf(\"Put: %v\", err)\n\t}\n\tgot, err := s.Load(\"alpha\")\n\tif err != nil {\n\t\tt.Fatalf(\"Load: %v\", err)\n\t}\n\tif got.Name != \"one\" {\n\t\tt.Fatalf(\"Name = %q, want %q\", got.Name, \"one\")\n\t}\n}\n\nfunc TestOpenRejectsFile(t *testing.T) {\n\tif _, err := Open(\"/dev/null\"); err == nil {\n\t\tt.Fatal(\"Open succeeded on a file\")\n\t}\n}\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "Edit inside an existing test body is allowed",
+      "payload": {
+        "tool_input": {
+          "file_path": "store/store_test.go",
+          "new_string": "\t\tt.Fatalf(\"Open(%q) succeeded\", \"/dev/null\")\n",
+          "old_string": "\t\tt.Fatal(\"Open succeeded on a file\")\n"
+        },
+        "tool_name": "Edit"
+      },
+      "expect": "allow",
+      "files": {
+        "store/store_test.go": "package store\n\nimport \"testing\"\n\n// TestLoadReadsName checks that Load returns the stored name.\nfunc TestLoadReadsName(t *testing.T) {\n\tdir := t.TempDir()\n\ts, err := Open(dir)\n\tif err != nil {\n\t\tt.Fatalf(\"Open: %v\", err)\n\t}\n\tif err := s.Put(\"alpha\", Record{Name: \"one\", Size: 3}); err != nil {\n\t\tt.Fatalf(\"Put: %v\", err)\n\t}\n\tgot, err := s.Load(\"alpha\")\n\tif err != nil {\n\t\tt.Fatalf(\"Load: %v\", err)\n\t}\n\tif got.Name != \"one\" {\n\t\tt.Fatalf(\"Name = %q, want %q\", got.Name, \"one\")\n\t}\n}\n\nfunc TestOpenRejectsFile(t *testing.T) {\n\tif _, err := Open(\"/dev/null\"); err == nil {\n\t\tt.Fatal(\"Open succeeded on a file\")\n\t}\n}\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "File deletion of a test file is allowed",
+      "payload": {
+        "tool_input": {
+          "file_path": "store/store_test.go",
+          "new_string": "",
+          "steer_operation": "delete"
+        },
+        "tool_name": "Edit"
+      },
+      "expect": "allow",
+      "files": {
+        "store/store_test.go": "package store\n\nimport \"testing\"\n\n// TestLoadReadsName checks that Load returns the stored name.\nfunc TestLoadReadsName(t *testing.T) {\n\tdir := t.TempDir()\n\ts, err := Open(dir)\n\tif err != nil {\n\t\tt.Fatalf(\"Open: %v\", err)\n\t}\n\tif err := s.Put(\"alpha\", Record{Name: \"one\", Size: 3}); err != nil {\n\t\tt.Fatalf(\"Put: %v\", err)\n\t}\n\tgot, err := s.Load(\"alpha\")\n\tif err != nil {\n\t\tt.Fatalf(\"Load: %v\", err)\n\t}\n\tif got.Name != \"one\" {\n\t\tt.Fatalf(\"Name = %q, want %q\", got.Name, \"one\")\n\t}\n}\n\nfunc TestOpenRejectsFile(t *testing.T) {\n\tif _, err := Open(\"/dev/null\"); err == nil {\n\t\tt.Fatal(\"Open succeeded on a file\")\n\t}\n}\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "MultiEdit-style hunk with replace_all adding a near-copy is blocked",
+      "payload": {
+        "tool_input": {
+          "file_path": "store/store_test.go",
+          "new_string": "func TestOpenRejectsFile(t *testing.T) {\n\tif _, err := Open(\"/dev/null\"); err == nil {\n\t\tt.Fatal(\"Open succeeded on a file\")\n\t}\n}\n\nfunc TestLoadReadsUnicodeName(t *testing.T) {\n\tdir := t.TempDir()\n\ts, err := Open(dir)\n\tif err != nil {\n\t\tt.Fatalf(\"Open: %v\", err)\n\t}\n\tif err := s.Put(\"beta\", Record{Name: \"été\", Size: 7}); err != nil {\n\t\tt.Fatalf(\"Put: %v\", err)\n\t}\n\tgot, err := s.Load(\"beta\")\n\tif err != nil {\n\t\tt.Fatalf(\"Load: %v\", err)\n\t}\n\tif got.Name != \"été\" {\n\t\tt.Fatalf(\"Name = %q, want %q\", got.Name, \"été\")\n\t}\n\tif got.Size != 7 {\n\t\tt.Fatalf(\"Size = %d, want 7\", got.Size)\n\t}\n}\n",
+          "old_string": "func TestOpenRejectsFile(t *testing.T) {\n\tif _, err := Open(\"/dev/null\"); err == nil {\n\t\tt.Fatal(\"Open succeeded on a file\")\n\t}\n}\n",
+          "replace_all": true
+        },
+        "tool_name": "Edit"
+      },
+      "expect": "block",
+      "files": {
+        "store/store_test.go": "package store\n\nimport \"testing\"\n\n// TestLoadReadsName checks that Load returns the stored name.\nfunc TestLoadReadsName(t *testing.T) {\n\tdir := t.TempDir()\n\ts, err := Open(dir)\n\tif err != nil {\n\t\tt.Fatalf(\"Open: %v\", err)\n\t}\n\tif err := s.Put(\"alpha\", Record{Name: \"one\", Size: 3}); err != nil {\n\t\tt.Fatalf(\"Put: %v\", err)\n\t}\n\tgot, err := s.Load(\"alpha\")\n\tif err != nil {\n\t\tt.Fatalf(\"Load: %v\", err)\n\t}\n\tif got.Name != \"one\" {\n\t\tt.Fatalf(\"Name = %q, want %q\", got.Name, \"one\")\n\t}\n}\n\nfunc TestOpenRejectsFile(t *testing.T) {\n\tif _, err := Open(\"/dev/null\"); err == nil {\n\t\tt.Fatal(\"Open succeeded on a file\")\n\t}\n}\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "Near-copy in a non-test Go file is allowed",
+      "payload": {
+        "tool_input": {
+          "file_path": "store/store.go",
+          "new_string": "// end\nfunc TestLoadReadsUnicodeName(t *testing.T) {\n\tdir := t.TempDir()\n\ts, err := Open(dir)\n\tif err != nil {\n\t\tt.Fatalf(\"Open: %v\", err)\n\t}\n\tif err := s.Put(\"beta\", Record{Name: \"été\", Size: 7}); err != nil {\n\t\tt.Fatalf(\"Put: %v\", err)\n\t}\n\tgot, err := s.Load(\"beta\")\n\tif err != nil {\n\t\tt.Fatalf(\"Load: %v\", err)\n\t}\n\tif got.Name != \"été\" {\n\t\tt.Fatalf(\"Name = %q, want %q\", got.Name, \"été\")\n\t}\n\tif got.Size != 7 {\n\t\tt.Fatalf(\"Size = %d, want 7\", got.Size)\n\t}\n}\n",
+          "old_string": "// end\n"
+        },
+        "tool_name": "Edit"
+      },
+      "expect": "allow",
+      "files": {
+        "store/store.go": "package store\n\n// end\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "Patch section adding a near-copy (old_string empty) is blocked",
+      "payload": {
+        "tool_input": {
+          "file_path": "store/store_test.go",
+          "new_string": "func TestLoadReadsUnicodeName(t *testing.T) {\n\tdir := t.TempDir()\n\ts, err := Open(dir)\n\tif err != nil {\n\t\tt.Fatalf(\"Open: %v\", err)\n\t}\n\tif err := s.Put(\"beta\", Record{Name: \"été\", Size: 7}); err != nil {\n\t\tt.Fatalf(\"Put: %v\", err)\n\t}\n\tgot, err := s.Load(\"beta\")\n\tif err != nil {\n\t\tt.Fatalf(\"Load: %v\", err)\n\t}\n\tif got.Name != \"été\" {\n\t\tt.Fatalf(\"Name = %q, want %q\", got.Name, \"été\")\n\t}\n\tif got.Size != 7 {\n\t\tt.Fatalf(\"Size = %d, want 7\", got.Size)\n\t}\n}\n",
+          "old_string": ""
+        },
+        "tool_name": "Edit"
+      },
+      "expect": "block",
+      "files": {
+        "store/store_test.go": "package store\n\nimport \"testing\"\n\n// TestLoadReadsName checks that Load returns the stored name.\nfunc TestLoadReadsName(t *testing.T) {\n\tdir := t.TempDir()\n\ts, err := Open(dir)\n\tif err != nil {\n\t\tt.Fatalf(\"Open: %v\", err)\n\t}\n\tif err := s.Put(\"alpha\", Record{Name: \"one\", Size: 3}); err != nil {\n\t\tt.Fatalf(\"Put: %v\", err)\n\t}\n\tgot, err := s.Load(\"alpha\")\n\tif err != nil {\n\t\tt.Fatalf(\"Load: %v\", err)\n\t}\n\tif got.Name != \"one\" {\n\t\tt.Fatalf(\"Name = %q, want %q\", got.Name, \"one\")\n\t}\n}\n\nfunc TestOpenRejectsFile(t *testing.T) {\n\tif _, err := Open(\"/dev/null\"); err == nil {\n\t\tt.Fatal(\"Open succeeded on a file\")\n\t}\n}\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "Patch section renaming a test header only is allowed",
+      "payload": {
+        "tool_input": {
+          "file_path": "store/store_test.go",
+          "new_string": "func TestLoadReturnsStoredName(t *testing.T) {\n",
+          "old_string": "func TestLoadReadsName(t *testing.T) {\n"
+        },
+        "tool_name": "Edit"
+      },
+      "expect": "allow",
+      "files": {
+        "store/store_test.go": "package store\n\nimport \"testing\"\n\n// TestLoadReadsName checks that Load returns the stored name.\nfunc TestLoadReadsName(t *testing.T) {\n\tdir := t.TempDir()\n\ts, err := Open(dir)\n\tif err != nil {\n\t\tt.Fatalf(\"Open: %v\", err)\n\t}\n\tif err := s.Put(\"alpha\", Record{Name: \"one\", Size: 3}); err != nil {\n\t\tt.Fatalf(\"Put: %v\", err)\n\t}\n\tgot, err := s.Load(\"alpha\")\n\tif err != nil {\n\t\tt.Fatalf(\"Load: %v\", err)\n\t}\n\tif got.Name != \"one\" {\n\t\tt.Fatalf(\"Name = %q, want %q\", got.Name, \"one\")\n\t}\n}\n\nfunc TestOpenRejectsFile(t *testing.T) {\n\tif _, err := Open(\"/dev/null\"); err == nil {\n\t\tt.Fatal(\"Open succeeded on a file\")\n\t}\n}\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "Patch section whose closing brace is context, adding a near-copy, is blocked",
+      "payload": {
+        "tool_input": {
+          "file_path": "store/store_test.go",
+          "new_string": "}\n\nfunc TestLoadReadsUnicodeName(t *testing.T) {\n\tdir := t.TempDir()\n\ts, err := Open(dir)\n\tif err != nil {\n\t\tt.Fatalf(\"Open: %v\", err)\n\t}\n\tif err := s.Put(\"beta\", Record{Name: \"été\", Size: 7}); err != nil {\n\t\tt.Fatalf(\"Put: %v\", err)\n\t}\n\tgot, err := s.Load(\"beta\")\n\tif err != nil {\n\t\tt.Fatalf(\"Load: %v\", err)\n\t}\n\tif got.Name != \"été\" {\n\t\tt.Fatalf(\"Name = %q, want %q\", got.Name, \"été\")\n\t}\n\tif got.Size != 7 {\n\t\tt.Fatalf(\"Size = %d, want 7\", got.Size)\n\t}\n",
+          "old_string": ""
+        },
+        "tool_name": "Edit"
+      },
+      "expect": "block",
+      "files": {
+        "store/store_test.go": "package store\n\nimport \"testing\"\n\n// TestLoadReadsName checks that Load returns the stored name.\nfunc TestLoadReadsName(t *testing.T) {\n\tdir := t.TempDir()\n\ts, err := Open(dir)\n\tif err != nil {\n\t\tt.Fatalf(\"Open: %v\", err)\n\t}\n\tif err := s.Put(\"alpha\", Record{Name: \"one\", Size: 3}); err != nil {\n\t\tt.Fatalf(\"Put: %v\", err)\n\t}\n\tgot, err := s.Load(\"alpha\")\n\tif err != nil {\n\t\tt.Fatalf(\"Load: %v\", err)\n\t}\n\tif got.Name != \"one\" {\n\t\tt.Fatalf(\"Name = %q, want %q\", got.Name, \"one\")\n\t}\n}\n\nfunc TestOpenRejectsFile(t *testing.T) {\n\tif _, err := Open(\"/dev/null\"); err == nil {\n\t\tt.Fatal(\"Open succeeded on a file\")\n\t}\n}\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "Patch section whose one removed line matches on disk and adds a near-copy is blocked",
+      "payload": {
+        "tool_input": {
+          "file_path": "store/store_test.go",
+          "new_string": "\t\tt.Fatalf(\"Open(%q) succeeded on a file\", \"/dev/null\")\nfunc TestLoadReadsUnicodeName(t *testing.T) {\n\tdir := t.TempDir()\n\ts, err := Open(dir)\n\tif err != nil {\n\t\tt.Fatalf(\"Open: %v\", err)\n\t}\n\tif err := s.Put(\"beta\", Record{Name: \"été\", Size: 7}); err != nil {\n\t\tt.Fatalf(\"Put: %v\", err)\n\t}\n\tgot, err := s.Load(\"beta\")\n\tif err != nil {\n\t\tt.Fatalf(\"Load: %v\", err)\n\t}\n\tif got.Name != \"été\" {\n\t\tt.Fatalf(\"Name = %q, want %q\", got.Name, \"été\")\n\t}\n\tif got.Size != 7 {\n\t\tt.Fatalf(\"Size = %d, want 7\", got.Size)\n\t}\n}\n",
+          "old_string": "\t\tt.Fatal(\"Open succeeded on a file\")\n"
+        },
+        "tool_name": "Edit"
+      },
+      "expect": "block",
+      "files": {
+        "store/store_test.go": "package store\n\nimport \"testing\"\n\n// TestLoadReadsName checks that Load returns the stored name.\nfunc TestLoadReadsName(t *testing.T) {\n\tdir := t.TempDir()\n\ts, err := Open(dir)\n\tif err != nil {\n\t\tt.Fatalf(\"Open: %v\", err)\n\t}\n\tif err := s.Put(\"alpha\", Record{Name: \"one\", Size: 3}); err != nil {\n\t\tt.Fatalf(\"Put: %v\", err)\n\t}\n\tgot, err := s.Load(\"alpha\")\n\tif err != nil {\n\t\tt.Fatalf(\"Load: %v\", err)\n\t}\n\tif got.Name != \"one\" {\n\t\tt.Fatalf(\"Name = %q, want %q\", got.Name, \"one\")\n\t}\n}\n\nfunc TestOpenRejectsFile(t *testing.T) {\n\tif _, err := Open(\"/dev/null\"); err == nil {\n\t\tt.Fatal(\"Open succeeded on a file\")\n\t}\n}\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "Patch section with non-contiguous fragments adding a near-copy is blocked",
+      "payload": {
+        "tool_input": {
+          "file_path": "store/store_test.go",
+          "new_string": "\t\tt.Errorf(\"Name = %q, want %q\", got.Name, \"one\")\n\t\tt.Fatalf(\"Open(%q) succeeded on a file\", \"/dev/null\")\nfunc TestLoadReadsUnicodeName(t *testing.T) {\n\tdir := t.TempDir()\n\ts, err := Open(dir)\n\tif err != nil {\n\t\tt.Fatalf(\"Open: %v\", err)\n\t}\n\tif err := s.Put(\"beta\", Record{Name: \"été\", Size: 7}); err != nil {\n\t\tt.Fatalf(\"Put: %v\", err)\n\t}\n\tgot, err := s.Load(\"beta\")\n\tif err != nil {\n\t\tt.Fatalf(\"Load: %v\", err)\n\t}\n\tif got.Name != \"été\" {\n\t\tt.Fatalf(\"Name = %q, want %q\", got.Name, \"été\")\n\t}\n\tif got.Size != 7 {\n\t\tt.Fatalf(\"Size = %d, want 7\", got.Size)\n\t}\n}\n",
+          "old_string": "\t\tt.Fatalf(\"Name = %q, want %q\", got.Name, \"one\")\n\t\tt.Fatal(\"Open succeeded on a file\")\n"
+        },
+        "tool_name": "Edit"
+      },
+      "expect": "block",
+      "files": {
+        "store/store_test.go": "package store\n\nimport \"testing\"\n\n// TestLoadReadsName checks that Load returns the stored name.\nfunc TestLoadReadsName(t *testing.T) {\n\tdir := t.TempDir()\n\ts, err := Open(dir)\n\tif err != nil {\n\t\tt.Fatalf(\"Open: %v\", err)\n\t}\n\tif err := s.Put(\"alpha\", Record{Name: \"one\", Size: 3}); err != nil {\n\t\tt.Fatalf(\"Put: %v\", err)\n\t}\n\tgot, err := s.Load(\"alpha\")\n\tif err != nil {\n\t\tt.Fatalf(\"Load: %v\", err)\n\t}\n\tif got.Name != \"one\" {\n\t\tt.Fatalf(\"Name = %q, want %q\", got.Name, \"one\")\n\t}\n}\n\nfunc TestOpenRejectsFile(t *testing.T) {\n\tif _, err := Open(\"/dev/null\"); err == nil {\n\t\tt.Fatal(\"Open succeeded on a file\")\n\t}\n}\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "Re-sending a test the file already holds is allowed",
+      "payload": {
+        "tool_input": {
+          "file_path": "store/store_test.go",
+          "new_string": "func TestOpenRejectsFile(t *testing.T) {\n\tif _, err := Open(\"/dev/null\"); err == nil {\n\t\tt.Fatal(\"Open succeeded on a file\")\n\t}\n}\n\n// TestLoadReadsName checks that Load returns the stored name.\nfunc TestLoadReadsName(t *testing.T) {\n\tdir := t.TempDir()\n\ts, err := Open(dir)\n\tif err != nil {\n\t\tt.Fatalf(\"Open: %v\", err)\n\t}\n\tif err := s.Put(\"alpha\", Record{Name: \"one\", Size: 3}); err != nil {\n\t\tt.Fatalf(\"Put: %v\", err)\n\t}\n\tgot, err := s.Load(\"alpha\")\n\tif err != nil {\n\t\tt.Fatalf(\"Load: %v\", err)\n\t}\n\tif got.Name != \"one\" {\n\t\tt.Fatalf(\"Name = %q, want %q\", got.Name, \"one\")\n\t}\n}\n",
+          "old_string": "func TestOpenRejectsFile(t *testing.T) {\n\tif _, err := Open(\"/dev/null\"); err == nil {\n\t\tt.Fatal(\"Open succeeded on a file\")\n\t}\n}\n"
+        },
+        "tool_name": "Edit"
+      },
+      "expect": "allow",
+      "files": {
+        "store/store_test.go": "package store\n\nimport \"testing\"\n\n// TestLoadReadsName checks that Load returns the stored name.\nfunc TestLoadReadsName(t *testing.T) {\n\tdir := t.TempDir()\n\ts, err := Open(dir)\n\tif err != nil {\n\t\tt.Fatalf(\"Open: %v\", err)\n\t}\n\tif err := s.Put(\"alpha\", Record{Name: \"one\", Size: 3}); err != nil {\n\t\tt.Fatalf(\"Put: %v\", err)\n\t}\n\tgot, err := s.Load(\"alpha\")\n\tif err != nil {\n\t\tt.Fatalf(\"Load: %v\", err)\n\t}\n\tif got.Name != \"one\" {\n\t\tt.Fatalf(\"Name = %q, want %q\", got.Name, \"one\")\n\t}\n}\n\nfunc TestOpenRejectsFile(t *testing.T) {\n\tif _, err := Open(\"/dev/null\"); err == nil {\n\t\tt.Fatal(\"Open succeeded on a file\")\n\t}\n}\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "Rename of an existing test is allowed",
+      "payload": {
+        "tool_input": {
+          "file_path": "store/store_test.go",
+          "new_string": "// TestLoadReturnsStoredName checks that Load returns the stored name.\nfunc TestLoadReturnsStoredName(t *testing.T) {\n\tdir := t.TempDir()\n\ts, err := Open(dir)\n\tif err != nil {\n\t\tt.Fatalf(\"Open: %v\", err)\n\t}\n\tif err := s.Put(\"alpha\", Record{Name: \"one\", Size: 3}); err != nil {\n\t\tt.Fatalf(\"Put: %v\", err)\n\t}\n\tgot, err := s.Load(\"alpha\")\n\tif err != nil {\n\t\tt.Fatalf(\"Load: %v\", err)\n\t}\n\tif got.Name != \"one\" {\n\t\tt.Fatalf(\"Name = %q, want %q\", got.Name, \"one\")\n\t}\n}\n",
+          "old_string": "// TestLoadReadsName checks that Load returns the stored name.\nfunc TestLoadReadsName(t *testing.T) {\n\tdir := t.TempDir()\n\ts, err := Open(dir)\n\tif err != nil {\n\t\tt.Fatalf(\"Open: %v\", err)\n\t}\n\tif err := s.Put(\"alpha\", Record{Name: \"one\", Size: 3}); err != nil {\n\t\tt.Fatalf(\"Put: %v\", err)\n\t}\n\tgot, err := s.Load(\"alpha\")\n\tif err != nil {\n\t\tt.Fatalf(\"Load: %v\", err)\n\t}\n\tif got.Name != \"one\" {\n\t\tt.Fatalf(\"Name = %q, want %q\", got.Name, \"one\")\n\t}\n}\n"
+        },
+        "tool_name": "Edit"
+      },
+      "expect": "allow",
+      "files": {
+        "store/store_test.go": "package store\n\nimport \"testing\"\n\n// TestLoadReadsName checks that Load returns the stored name.\nfunc TestLoadReadsName(t *testing.T) {\n\tdir := t.TempDir()\n\ts, err := Open(dir)\n\tif err != nil {\n\t\tt.Fatalf(\"Open: %v\", err)\n\t}\n\tif err := s.Put(\"alpha\", Record{Name: \"one\", Size: 3}); err != nil {\n\t\tt.Fatalf(\"Put: %v\", err)\n\t}\n\tgot, err := s.Load(\"alpha\")\n\tif err != nil {\n\t\tt.Fatalf(\"Load: %v\", err)\n\t}\n\tif got.Name != \"one\" {\n\t\tt.Fatalf(\"Name = %q, want %q\", got.Name, \"one\")\n\t}\n}\n\nfunc TestOpenRejectsFile(t *testing.T) {\n\tif _, err := Open(\"/dev/null\"); err == nil {\n\t\tt.Fatal(\"Open succeeded on a file\")\n\t}\n}\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "Rename with a body edit, still a near-copy of the old body, is allowed",
+      "payload": {
+        "tool_input": {
+          "file_path": "store/store_test.go",
+          "new_string": "// TestLoadReturnsStoredName checks that Load returns the stored name.\nfunc TestLoadReturnsStoredName(t *testing.T) {\n\tdir := t.TempDir()\n\ts, err := Open(dir)\n\tif err != nil {\n\t\tt.Fatalf(\"Open: %v\", err)\n\t}\n\tif err := s.Put(\"alpha\", Record{Name: \"uno\", Size: 3}); err != nil {\n\t\tt.Fatalf(\"Put: %v\", err)\n\t}\n\tgot, err := s.Load(\"alpha\")\n\tif err != nil {\n\t\tt.Fatalf(\"Load: %v\", err)\n\t}\n\tif got.Name != \"uno\" {\n\t\tt.Fatalf(\"Name = %q, want %q\", got.Name, \"uno\")\n\t}\n}\n",
+          "old_string": "// TestLoadReadsName checks that Load returns the stored name.\nfunc TestLoadReadsName(t *testing.T) {\n\tdir := t.TempDir()\n\ts, err := Open(dir)\n\tif err != nil {\n\t\tt.Fatalf(\"Open: %v\", err)\n\t}\n\tif err := s.Put(\"alpha\", Record{Name: \"one\", Size: 3}); err != nil {\n\t\tt.Fatalf(\"Put: %v\", err)\n\t}\n\tgot, err := s.Load(\"alpha\")\n\tif err != nil {\n\t\tt.Fatalf(\"Load: %v\", err)\n\t}\n\tif got.Name != \"one\" {\n\t\tt.Fatalf(\"Name = %q, want %q\", got.Name, \"one\")\n\t}\n}\n"
+        },
+        "tool_name": "Edit"
+      },
+      "expect": "allow",
+      "files": {
+        "store/store_test.go": "package store\n\nimport \"testing\"\n\n// TestLoadReadsName checks that Load returns the stored name.\nfunc TestLoadReadsName(t *testing.T) {\n\tdir := t.TempDir()\n\ts, err := Open(dir)\n\tif err != nil {\n\t\tt.Fatalf(\"Open: %v\", err)\n\t}\n\tif err := s.Put(\"alpha\", Record{Name: \"one\", Size: 3}); err != nil {\n\t\tt.Fatalf(\"Put: %v\", err)\n\t}\n\tgot, err := s.Load(\"alpha\")\n\tif err != nil {\n\t\tt.Fatalf(\"Load: %v\", err)\n\t}\n\tif got.Name != \"one\" {\n\t\tt.Fatalf(\"Name = %q, want %q\", got.Name, \"one\")\n\t}\n}\n\nfunc TestOpenRejectsFile(t *testing.T) {\n\tif _, err := Open(\"/dev/null\"); err == nil {\n\t\tt.Fatal(\"Open succeeded on a file\")\n\t}\n}\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "Test sharing a twin's lines only up to a raw string's closing brace is allowed",
+      "payload": {
+        "tool_input": {
+          "file_path": "store/store_test.go",
+          "new_string": "func TestOpenRejectsFile(t *testing.T) {\n\tif _, err := Open(\"/dev/null\"); err == nil {\n\t\tt.Fatal(\"Open succeeded on a file\")\n\t}\n}\n\nfunc TestDecodeRoundTrips(t *testing.T) {\n\tinput := `{\n\t\"name\": \"one\"\n}`\n\trec, err := Decode([]byte(input))\n\tif err != nil {\n\t\tt.Fatalf(\"Decode: %v\", err)\n\t}\n\tout, err := Encode(rec)\n\tif err != nil {\n\t\tt.Fatalf(\"Encode: %v\", err)\n\t}\n\tback, err := Decode(out)\n\tif err != nil {\n\t\tt.Fatalf(\"Decode(Encode): %v\", err)\n\t}\n\tif !reflect.DeepEqual(back, rec) {\n\t\tt.Fatalf(\"round trip = %+v, want %+v\", back, rec)\n\t}\n}\n",
+          "old_string": "func TestOpenRejectsFile(t *testing.T) {\n\tif _, err := Open(\"/dev/null\"); err == nil {\n\t\tt.Fatal(\"Open succeeded on a file\")\n\t}\n}\n"
+        },
+        "tool_name": "Edit"
+      },
+      "expect": "allow",
+      "files": {
+        "store/store_test.go": "package store\n\nimport \"testing\"\n\nfunc TestDecodeName(t *testing.T) {\n\tinput := `{\n\t\"name\": \"one\"\n}`\n\trec, err := Decode([]byte(input))\n\tif err != nil {\n\t\tt.Fatalf(\"Decode: %v\", err)\n\t}\n\tif rec.Name != \"one\" {\n\t\tt.Fatalf(\"Name = %q, want %q\", rec.Name, \"one\")\n\t}\n}\n\nfunc TestOpenRejectsFile(t *testing.T) {\n\tif _, err := Open(\"/dev/null\"); err == nil {\n\t\tt.Fatal(\"Open succeeded on a file\")\n\t}\n}\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "Test sharing only the Open/Put scaffold is allowed",
+      "payload": {
+        "tool_input": {
+          "file_path": "store/store_test.go",
+          "new_string": "func TestOpenRejectsFile(t *testing.T) {\n\tif _, err := Open(\"/dev/null\"); err == nil {\n\t\tt.Fatal(\"Open succeeded on a file\")\n\t}\n}\n\nfunc TestDeleteRacesLoad(t *testing.T) {\n\tdir := t.TempDir()\n\ts, err := Open(dir)\n\tif err != nil {\n\t\tt.Fatalf(\"Open: %v\", err)\n\t}\n\tif err := s.Put(\"alpha\", Record{Name: \"one\", Size: 3}); err != nil {\n\t\tt.Fatalf(\"Put: %v\", err)\n\t}\n\tvar wg sync.WaitGroup\n\twg.Add(2)\n\tgo func() { defer wg.Done(); _ = s.Delete(\"alpha\") }()\n\tgo func() { defer wg.Done(); _, _ = s.Load(\"alpha\") }()\n\twg.Wait()\n\tif _, err := s.Load(\"alpha\"); !errors.Is(err, ErrNotFound) {\n\t\tt.Fatalf(\"Load after Delete = %v, want ErrNotFound\", err)\n\t}\n}\n",
+          "old_string": "func TestOpenRejectsFile(t *testing.T) {\n\tif _, err := Open(\"/dev/null\"); err == nil {\n\t\tt.Fatal(\"Open succeeded on a file\")\n\t}\n}\n"
+        },
+        "tool_name": "Edit"
+      },
+      "expect": "allow",
+      "files": {
+        "store/store_test.go": "package store\n\nimport \"testing\"\n\n// TestLoadReadsName checks that Load returns the stored name.\nfunc TestLoadReadsName(t *testing.T) {\n\tdir := t.TempDir()\n\ts, err := Open(dir)\n\tif err != nil {\n\t\tt.Fatalf(\"Open: %v\", err)\n\t}\n\tif err := s.Put(\"alpha\", Record{Name: \"one\", Size: 3}); err != nil {\n\t\tt.Fatalf(\"Put: %v\", err)\n\t}\n\tgot, err := s.Load(\"alpha\")\n\tif err != nil {\n\t\tt.Fatalf(\"Load: %v\", err)\n\t}\n\tif got.Name != \"one\" {\n\t\tt.Fatalf(\"Name = %q, want %q\", got.Name, \"one\")\n\t}\n}\n\nfunc TestOpenRejectsFile(t *testing.T) {\n\tif _, err := Open(\"/dev/null\"); err == nil {\n\t\tt.Fatal(\"Open succeeded on a file\")\n\t}\n}\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "Test whose only twin is commented out in a block comment is allowed",
+      "payload": {
+        "tool_input": {
+          "file_path": "store/store_test.go",
+          "new_string": "func TestOpenRejectsFile(t *testing.T) {\n\tif _, err := Open(\"/dev/null\"); err == nil {\n\t\tt.Fatal(\"Open succeeded on a file\")\n\t}\n}\n\nfunc TestLoadReadsAccentedName(t *testing.T) {\n\tdir := t.TempDir()\n\ts, err := Open(dir)\n\tif err != nil {\n\t\tt.Fatalf(\"Open: %v\", err)\n\t}\n\tif err := s.Put(\"beta\", Record{Name: \"été\", Size: 7}); err != nil {\n\t\tt.Fatalf(\"Put: %v\", err)\n\t}\n\tgot, err := s.Load(\"beta\")\n\tif err != nil {\n\t\tt.Fatalf(\"Load: %v\", err)\n\t}\n\tif got.Name != \"été\" {\n\t\tt.Fatalf(\"Name = %q, want %q\", got.Name, \"été\")\n\t}\n\tif got.Size != 7 {\n\t\tt.Fatalf(\"Size = %d, want 7\", got.Size)\n\t}\n}\n",
+          "old_string": "func TestOpenRejectsFile(t *testing.T) {\n\tif _, err := Open(\"/dev/null\"); err == nil {\n\t\tt.Fatal(\"Open succeeded on a file\")\n\t}\n}\n"
+        },
+        "tool_name": "Edit"
+      },
+      "expect": "allow",
+      "files": {
+        "store/store_test.go": "package store\n\nimport \"testing\"\n\n/*\nfunc TestLoadReadsUnicodeName(t *testing.T) {\n\tdir := t.TempDir()\n\ts, err := Open(dir)\n\tif err != nil {\n\t\tt.Fatalf(\"Open: %v\", err)\n\t}\n\tif err := s.Put(\"beta\", Record{Name: \"été\", Size: 7}); err != nil {\n\t\tt.Fatalf(\"Put: %v\", err)\n\t}\n\tgot, err := s.Load(\"beta\")\n\tif err != nil {\n\t\tt.Fatalf(\"Load: %v\", err)\n\t}\n\tif got.Name != \"été\" {\n\t\tt.Fatalf(\"Name = %q, want %q\", got.Name, \"été\")\n\t}\n\tif got.Size != 7 {\n\t\tt.Fatalf(\"Size = %d, want 7\", got.Size)\n\t}\n}\n*/\n\nfunc TestOpenRejectsFile(t *testing.T) {\n\tif _, err := Open(\"/dev/null\"); err == nil {\n\t\tt.Fatal(\"Open succeeded on a file\")\n\t}\n}\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "Unreadable payload path (a directory) fails open",
+      "payload": {
+        "tool_input": {
+          "file_path": "store/dir_test.go",
+          "new_string": "func TestLoadReadsUnicodeName(t *testing.T) {\n\tdir := t.TempDir()\n\ts, err := Open(dir)\n\tif err != nil {\n\t\tt.Fatalf(\"Open: %v\", err)\n\t}\n\tif err := s.Put(\"beta\", Record{Name: \"été\", Size: 7}); err != nil {\n\t\tt.Fatalf(\"Put: %v\", err)\n\t}\n\tgot, err := s.Load(\"beta\")\n\tif err != nil {\n\t\tt.Fatalf(\"Load: %v\", err)\n\t}\n\tif got.Name != \"été\" {\n\t\tt.Fatalf(\"Name = %q, want %q\", got.Name, \"été\")\n\t}\n\tif got.Size != 7 {\n\t\tt.Fatalf(\"Size = %d, want 7\", got.Size)\n\t}\n}\n",
+          "old_string": ""
+        },
+        "tool_name": "Edit"
+      },
+      "expect": "allow",
+      "files": {
+        "store/dir_test.go/keep": ""
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "Write of a new test file with no same-file twin is allowed",
+      "payload": {
+        "tool_input": {
+          "content": "package store\n\nimport \"testing\"\n\n// TestLoadReadsName checks that Load returns the stored name.\nfunc TestLoadReadsName(t *testing.T) {\n\tdir := t.TempDir()\n\ts, err := Open(dir)\n\tif err != nil {\n\t\tt.Fatalf(\"Open: %v\", err)\n\t}\n\tif err := s.Put(\"alpha\", Record{Name: \"one\", Size: 3}); err != nil {\n\t\tt.Fatalf(\"Put: %v\", err)\n\t}\n\tgot, err := s.Load(\"alpha\")\n\tif err != nil {\n\t\tt.Fatalf(\"Load: %v\", err)\n\t}\n\tif got.Name != \"one\" {\n\t\tt.Fatalf(\"Name = %q, want %q\", got.Name, \"one\")\n\t}\n}\n\nfunc TestLoadReadsUnicodeName(t *testing.T) {\n\tdir := t.TempDir()\n\ts, err := Open(dir)\n\tif err != nil {\n\t\tt.Fatalf(\"Open: %v\", err)\n\t}\n\tif err := s.Put(\"beta\", Record{Name: \"été\", Size: 7}); err != nil {\n\t\tt.Fatalf(\"Put: %v\", err)\n\t}\n\tgot, err := s.Load(\"beta\")\n\tif err != nil {\n\t\tt.Fatalf(\"Load: %v\", err)\n\t}\n\tif got.Name != \"été\" {\n\t\tt.Fatalf(\"Name = %q, want %q\", got.Name, \"été\")\n\t}\n\tif got.Size != 7 {\n\t\tt.Fatalf(\"Size = %d, want 7\", got.Size)\n\t}\n}\n",
+          "file_path": "store/store_test.go"
+        },
+        "tool_name": "Write"
+      },
+      "expect": "allow",
+      "origin": "synthetic"
+    },
+    {
+      "name": "Write overwriting a test file with an added near-copy is blocked",
+      "payload": {
+        "tool_input": {
+          "content": "package store\n\nimport \"testing\"\n\n// TestLoadReadsName checks that Load returns the stored name.\nfunc TestLoadReadsName(t *testing.T) {\n\tdir := t.TempDir()\n\ts, err := Open(dir)\n\tif err != nil {\n\t\tt.Fatalf(\"Open: %v\", err)\n\t}\n\tif err := s.Put(\"alpha\", Record{Name: \"one\", Size: 3}); err != nil {\n\t\tt.Fatalf(\"Put: %v\", err)\n\t}\n\tgot, err := s.Load(\"alpha\")\n\tif err != nil {\n\t\tt.Fatalf(\"Load: %v\", err)\n\t}\n\tif got.Name != \"one\" {\n\t\tt.Fatalf(\"Name = %q, want %q\", got.Name, \"one\")\n\t}\n}\n\nfunc TestOpenRejectsFile(t *testing.T) {\n\tif _, err := Open(\"/dev/null\"); err == nil {\n\t\tt.Fatal(\"Open succeeded on a file\")\n\t}\n}\n\nfunc TestLoadReadsUnicodeName(t *testing.T) {\n\tdir := t.TempDir()\n\ts, err := Open(dir)\n\tif err != nil {\n\t\tt.Fatalf(\"Open: %v\", err)\n\t}\n\tif err := s.Put(\"beta\", Record{Name: \"été\", Size: 7}); err != nil {\n\t\tt.Fatalf(\"Put: %v\", err)\n\t}\n\tgot, err := s.Load(\"beta\")\n\tif err != nil {\n\t\tt.Fatalf(\"Load: %v\", err)\n\t}\n\tif got.Name != \"été\" {\n\t\tt.Fatalf(\"Name = %q, want %q\", got.Name, \"été\")\n\t}\n\tif got.Size != 7 {\n\t\tt.Fatalf(\"Size = %d, want 7\", got.Size)\n\t}\n}\n",
+          "file_path": "store/store_test.go"
+        },
+        "tool_name": "Write"
+      },
+      "expect": "block",
+      "files": {
+        "store/store_test.go": "package store\n\nimport \"testing\"\n\n// TestLoadReadsName checks that Load returns the stored name.\nfunc TestLoadReadsName(t *testing.T) {\n\tdir := t.TempDir()\n\ts, err := Open(dir)\n\tif err != nil {\n\t\tt.Fatalf(\"Open: %v\", err)\n\t}\n\tif err := s.Put(\"alpha\", Record{Name: \"one\", Size: 3}); err != nil {\n\t\tt.Fatalf(\"Put: %v\", err)\n\t}\n\tgot, err := s.Load(\"alpha\")\n\tif err != nil {\n\t\tt.Fatalf(\"Load: %v\", err)\n\t}\n\tif got.Name != \"one\" {\n\t\tt.Fatalf(\"Name = %q, want %q\", got.Name, \"one\")\n\t}\n}\n\nfunc TestOpenRejectsFile(t *testing.T) {\n\tif _, err := Open(\"/dev/null\"); err == nil {\n\t\tt.Fatal(\"Open succeeded on a file\")\n\t}\n}\n"
+      },
+      "origin": "synthetic"
+    }
+  ]
+}
