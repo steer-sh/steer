@@ -24,6 +24,7 @@ type HookInstallMetadata struct {
 	Model         string
 	SkillVersion  string
 	SelfTest      *SelfTestSummary
+	Once          bool
 }
 
 // InstallManagedHookInput describes a managed install request.
@@ -300,6 +301,7 @@ func InstallManagedHook(scope string, input InstallManagedHookInput, targets ...
 		SkillVersion:  metadata.SkillVersion,
 		RuleHash:      HashRule(rule),
 		SelfTest:      metadata.SelfTest,
+		Once:          metadata.Once,
 	}
 
 	updatedContent := applyMetadataHeader(input.Content, entry.Source, entry.PromptVersion, entry.HookVersion)

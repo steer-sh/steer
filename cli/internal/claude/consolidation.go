@@ -337,9 +337,10 @@ func ConsolidateHooks(scope string) error {
 }
 
 // manifestStamps is the identity a master stamps on one guard from the manifest:
-// its owning id, rule, rule hash and source. A file no entry owns is stamped with
-// empty values under the name OwnedEntry gives it. CompareMasterSources reads the
-// same stamps back, so every field written here is a field it compares.
+// its owning id, rule, rule hash, source and block-once setting. A file no entry
+// owns is stamped with empty values under the name OwnedEntry gives it.
+// CompareMasterSources reads the same stamps back, so every field written here
+// is a field it compares.
 func manifestStamps(manifest *Manifest, hook HookFile) map[string]string {
 	owned, entry := OwnedEntry(manifest, hook)
 	stamps := map[string]string{
@@ -351,12 +352,16 @@ func manifestStamps(manifest *Manifest, hook HookFile) map[string]string {
 	if ruleHash := strings.TrimSpace(entry.RuleHash); ruleHash != "" {
 		stamps["rule_hash"] = ruleHash
 	}
+	stamps["once"] = ""
+	if entry.Once {
+		stamps["once"] = "true"
+	}
 	return stamps
 }
 
 // manifestStampFields names every field manifestStamps can write, in the order a
 // reading reports them.
-var manifestStampFields = []string{"hook_name", "rule", "rule_hash", "source", "source_id"}
+var manifestStampFields = []string{"hook_name", "once", "rule", "rule_hash", "source", "source_id"}
 
 // refuseUnsafeGuardNames refuses a store whose guard file stem or owning manifest
 // key falls outside hookstore.GuardName. The stem is written into the master's

@@ -142,6 +142,7 @@ func restoreGuard(scope string, s archive.Stored, targets ...harness.Registrar) 
 			Model:         entry.Model,
 			SkillVersion:  entry.SkillVersion,
 			SelfTest:      entry.SelfTest,
+			Once:          entry.Once,
 		},
 		Fixtures: fixtures,
 	}, targets...)

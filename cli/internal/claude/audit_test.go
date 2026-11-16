@@ -599,3 +599,72 @@ func TestMasterEvidenceRefusesSymlinkedPaths(t *testing.T) {
 		})
 	}
 }
+
+const blockOnceHookContent = `#!/usr/bin/env python3
+import sys
+import json
+
+def main():
+    data = json.load(sys.stdin)
+    if "var " in data.get("tool_input", {}).get("new_string", ""):
+        print(json.dumps({"decision": "block", "reason": "never use var"}))
+    sys.exit(0)
+
+if __name__ == "__main__":
+    main()
+`
+
+// A block-once guard blocks the first edit in a session on a file and lets a
+// later one through; another file, another repository, another session or no
+// session id still blocks.
+func TestABlockOnceGuardPassesAfterItsFirstBlockInASessionOnAFile(t *testing.T) {
+	withProjectTempDir(t)
+	requirePython3(t)
+	if _, err := InstallManagedHook(ProjectScope, InstallManagedHookInput{
+		HookName: "no-var-hook",
+		FileName: "no-var-hook.py",
+		Rule:     "never use var",
+		Content:  []byte(blockOnceHookContent),
+		Metadata: HookInstallMetadata{Source: SourceGenerated, Once: true},
+	}); err != nil {
+		t.Fatalf("InstallManagedHook returned error: %v", err)
+	}
+
+	repoA, repoB := t.TempDir(), t.TempDir()
+	for _, repo := range []string{repoA, repoB} {
+		if err := os.Mkdir(filepath.Join(repo, ".git"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	edit := func(session, file, cwd string) string {
+		payload := map[string]any{
+			"cwd":        cwd,
+			"tool_name":  "Edit",
+			"tool_input": map[string]any{"file_path": file, "old_string": "x", "new_string": "var x"},
+		}
+		if session != "" {
+			payload["session_id"] = session
+		}
+		data, _ := json.Marshal(payload)
+		return string(data)
+	}
+	steps := []struct {
+		session, file, cwd string
+		blocked            bool
+	}{
+		{"s1", "a.go", repoA, true},
+		{"s1", "a.go", repoA, false},
+		{"s1", "b.go", repoA, true},
+		{"s1", "a.go", repoB, true},
+		{"s2", "a.go", repoA, true},
+		{"", "c.go", repoA, true},
+		{"", "c.go", repoA, true},
+	}
+	for i, step := range steps {
+		out := runMasterHook(t, edit(step.session, step.file, step.cwd))
+		if masterBlocked(out) != step.blocked {
+			t.Fatalf("step %d (%s, %s): blocked = %v, want %v; output: %s",
+				i, step.session, step.file, masterBlocked(out), step.blocked, out)
+		}
+	}
+}
