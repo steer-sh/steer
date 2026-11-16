@@ -1208,7 +1208,13 @@ attention, could-not-check, or information that leaves the verdict alone, and a
 required reading Steer cannot make blocks healthy. `status.BuildIssues` orders releases
 by version from stamps read with `debug/buildinfo`, without running a binary; a
 difference involving a development build has no order and no repair. The startup
-notice reads the same comparison.
+notice reads the same comparison. A stale guard runner and outdated self-protection
+are readings against the running CLI's own runtime and guard, so their repair in
+`HealthOf` follows `Builds.CLIToHooks`: one `steer bin install` covers the global
+runners and the guard from a CLI ahead of the hooks, and is named with its condition
+across a development difference; while a plugin copy is ahead, its install covers them
+instead, so no two installs are offered; a CLI behind the hooks names the stable
+executable's own `status`, because its install or rebuild would move them backward.
 Uninstall leaves no record of a removed harness, so a global-scope harness with no
 Steer registration of any kind reads not registered rather than detached, whether it
 was never set up or removed: `status.globallyRegistered` decides it, and a harness

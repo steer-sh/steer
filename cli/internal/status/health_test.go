@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -223,5 +224,70 @@ func TestHealthPutsTheInstallFirst(t *testing.T) {
 	h := HealthOf(s, availableProbe())
 	if len(h.Issues) < 2 || !strings.HasPrefix(h.Issues[0].Title, hooksBehindPrefix) {
 		t.Errorf("issues = %+v", h.Issues)
+	}
+}
+
+// Stale runners make one issue per scope, and the repair follows the running CLI
+// against the hooks' build, so no reading sends the hooks backward.
+func TestStaleRunnerRepairFollowsTheCLIOrder(t *testing.T) {
+	t.Setenv("HOME", "/h")
+	hooks := BuildIdentity{Version: "0.1.5", Commit: "b"}
+	install := runningCommand("bin install")
+	ahead := PluginCopy{Harness: "codex", Path: "/x", State: PluginDifferentBinary, Version: "0.1.6", Commit: "d"}
+	type want struct{ title, fix, last string }
+	project := want{"Codex project guard runner is out of date", "steer hooks rebuild --scope project", ""}
+	for name, tc := range map[string]struct {
+		running BuildIdentity
+		plugins []PluginCopy
+		want    []want
+	}{
+		"same build": {hooks, nil, []want{
+			{"Claude Code, Codex and Pi global guard runners are out of date", "steer hooks rebuild --scope global", ""},
+			project,
+			{"Self-protection is out of date", "steer bin install", ""},
+		}},
+		"CLI ahead": {BuildIdentity{Version: "0.1.6", Commit: "c"}, nil, []want{
+			{"Hooks are behind this CLI", install, "Out of date: Claude Code, Codex and Pi global guard runners; self-protection"},
+			project,
+		}},
+		"plugin ahead too": {BuildIdentity{Version: "0.1.7", Commit: "c"}, []PluginCopy{ahead}, []want{
+			{"Hooks are behind the Codex plugin", ahead.BinInstallCommand(),
+				"Also updates: Claude Code, Codex and Pi global guard runners; self-protection"},
+			project,
+		}},
+		"dev builds": {BuildIdentity{Version: "dev", Commit: "c"}, nil, []want{
+			{"Hooks run another build than this CLI", install, "Install only if this CLI's build should replace the hooks' build."},
+			project,
+		}},
+		"CLI behind": {BuildIdentity{Version: "0.1.4", Commit: "a"}, nil, []want{
+			{"This CLI is behind the hooks' build, so it cannot judge what they run", "/h/.steer/bin/steer status",
+				"Differs from this CLI's build: Claude Code, Codex and Pi global guard runners; Codex project guard runner; self-protection"},
+		}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := healthyFixture()
+			s.Posture.Builds = Builds{Running: tc.running, Hooks: hooks}
+			s.Posture.Plugins = tc.plugins
+			s.Posture.Masters = nil
+			for _, id := range []string{"claude-code", "codex", "pi"} {
+				s.Posture.Masters = append(s.Posture.Masters, MasterRuntime{Harness: id, Scope: "global", Path: "/m", State: MasterStale})
+			}
+			s.Posture.Masters = append(s.Posture.Masters, MasterRuntime{Harness: "codex", Scope: "project", Path: "/p", State: MasterStale})
+			s.Posture.Protection = ProtectionReading{State: ProtectionOutdated, Legacy: []string{"project"}}
+			var got []want
+			for _, issue := range HealthOf(s, availableProbe()).Issues {
+				if issue.Title == buildsDifferTitle {
+					continue
+				}
+				last := ""
+				if n := len(issue.Detail); n > 0 {
+					last = issue.Detail[n-1]
+				}
+				got = append(got, want{issue.Title, issue.Fix, last})
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("issues = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

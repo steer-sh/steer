@@ -108,7 +108,7 @@ func MasterPhrase(rows []MasterRuntime, m MasterRuntime) string {
 	case MasterCurrent:
 		return fmt.Sprintf("runtime %s, steer %s", m.Runtime, m.Version)
 	case MasterStale:
-		return fmt.Sprintf("runtime %s is older than this binary's %s — run: %s",
+		return fmt.Sprintf("runtime %s differs from this binary's %s — run: %s",
 			m.Runtime, m.Expected, RebuildRepair(rows, m.Scope))
 	case MasterUnknown:
 		return "runtime has no version (unstamped) — run: " + RebuildRepair(rows, m.Scope)

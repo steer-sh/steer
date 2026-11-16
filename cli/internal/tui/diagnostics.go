@@ -88,8 +88,8 @@ func (m *Model) diagnosticIssues() []diagnosticIssue {
 			continue
 		}
 		agent := status.HarnessLabel(master.Harness)
-		detail := "It was written by an older Steer, or carries no version at all, so a fix " +
-			"shipped since then is not running."
+		detail := "It was written by another Steer build than this dashboard's, or carries " +
+			"no version at all, so it does not run this build's guard runtime."
 		if master.Scope == m.scope {
 			detail += " Open Fixes and run the maintenance action under Maintenance needed."
 		} else {
