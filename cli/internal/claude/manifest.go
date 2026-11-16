@@ -152,6 +152,9 @@ type ManifestEntry struct {
 	RuleHash      string           `json:"rule_hash,omitempty"`
 	SelfTest      *SelfTestSummary `json:"self_test,omitempty"`
 	Fixtures      *FixtureBinding  `json:"fixtures,omitempty"`
+	// Once makes the guard block at most once per session and file: a later
+	// edit that the guard would block passes.
+	Once bool `json:"once,omitempty"`
 }
 
 // ManifestListEntry is a flattened view for list output.

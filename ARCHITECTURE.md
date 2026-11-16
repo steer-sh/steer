@@ -418,6 +418,15 @@ and otherwise in `steer-audit-payloads/<firing_id>.json`, named by
 describe either form. Evidence that cannot be retained marks the row incomplete
 rather than dropping the firing. Rows an older master wrote carry none of these
 fields, so a reader tests presence; coverage starts at the scope's rebuild.
+
+A guard registered with `--once` (manifest `once`, stamped into `STEER_HOOK_META`)
+blocks at most once per session and file. Before such a block, the runtime reads
+its store's audit log for a row with the same `hook_name`, `session_id`,
+`file_path` and `repository`; when one exists, the edit passes and no row is
+written. The audit log is therefore also the guard's state: a change to those
+fields, or a row removed from the log, changes what a block-once guard lets
+through. A call that names no file, such as Bash, shares one key per session and
+repository. A payload without a session id never matches, so it always blocks.
 Runtime writes refuse linked audit files, payload directories and sidecar files,
 and linked store directories. A project store also refuses a linked parent
 `.steer` (or legacy `.claude`); a global store permits the operator's parent link.

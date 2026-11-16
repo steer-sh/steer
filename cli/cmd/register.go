@@ -27,6 +27,7 @@ var registerModel string
 var registerSkillVersion string
 var registerSelfTest string
 var registerFixtures string
+var registerOnce bool
 
 var registerCmd = &cobra.Command{
 	Use:   "register <hook-path>",
@@ -107,6 +108,7 @@ Optional provenance flags can be used to persist generation metadata.`,
 				Model:         registerModel,
 				SkillVersion:  registerSkillVersion,
 				SelfTest:      selfTest,
+				Once:          registerOnce,
 			},
 			Fixtures: fixtures,
 		}, targets...)
@@ -281,6 +283,7 @@ func init() {
 	registerCmd.Flags().StringVar(&registerModel, "model", "", "Model used for generation (if applicable)")
 	registerCmd.Flags().StringVar(&registerSkillVersion, "skill-version", "", "Skill/package version used for generation")
 	registerCmd.Flags().StringVar(&registerFixtures, "fixtures", "", "Path to a fixture file storing this guard's replayable cases")
+	registerCmd.Flags().BoolVar(&registerOnce, "once", false, "Block at most once per session and file; a later edit the guard would block passes")
 	registerCmd.Flags().StringVar(&registerSelfTest, "self-test", "", "Self-test summary JSON or compact form: passed,positive_pass,positive_fail,negative_pass,negative_fail")
 }
 

@@ -251,6 +251,8 @@ Read the linked architecture section before changing the corresponding boundary:
   payload `cli/internal/pi/bridge_guards.ts` and the reader
   `cli/internal/gate/mine/session.go`. A new field reaches rows only after
   `steer hooks rebuild --scope <scope>`, so every reader tests presence.
+  The runtime's `steer_blocked_before` also reads `hook_name`, `session_id`,
+  `file_path` and `repository` back as a block-once guard's state.
 - Review addendum: the manifest key in `cli/internal/claude/manifest.go`, the
   gate's HEAD reader `cli/internal/gate/addendum.go` and `mine.SteerAddendumFacts`
   decode one `review_addendum` shape. The stock `prompts/review.md` is never the

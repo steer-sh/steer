@@ -451,6 +451,54 @@ def steer_audit_log(hook_name, payload, edit, harness, edit_index=None, firing_i
         pass
 
 
+def steer_blocked_before(hook_name, payload, edit):
+    """True when the audit log holds a block by this guard in this session on
+    this edit's file in the same repository. A payload without a session id
+    never matches, and any failure to read the log answers False, so the guard
+    blocks."""
+    try:
+        meta = STEER_HOOK_META.get(hook_name, {})
+        session_id = payload.get("session_id")
+        if not isinstance(session_id, str) or not session_id:
+            return False
+        tool_input = edit.get("tool_input") if isinstance(edit, dict) else None
+        file_path = tool_input.get("file_path") if isinstance(tool_input, dict) else None
+        if not isinstance(file_path, str):
+            file_path = ""
+        name = meta.get("hook_name", hook_name)
+        cwd = payload.get("cwd")
+        repository = steer_repo_root(cwd if isinstance(cwd, str) else "")
+        store_dir = os.path.dirname(os.path.abspath(__file__))
+        store = steer_open_store(store_dir, meta.get("scope"))
+        try:
+            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+            if isinstance(store, str):
+                fd = os.open(steer_unlinked_path(store, "steer-audit.jsonl"), flags)
+            else:
+                fd = os.open("steer-audit.jsonl", flags, dir_fd=store)
+        finally:
+            if not isinstance(store, str):
+                os.close(store)
+        with os.fdopen(fd, "r", encoding="utf-8", errors="replace") as handle:
+            if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                return False
+            for line in handle:
+                if session_id not in line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except Exception:
+                    continue
+                if (isinstance(row, dict) and row.get("hook_name") == name
+                        and row.get("session_id") == session_id
+                        and row.get("file_path", "") == file_path
+                        and row.get("repository", "") == repository):
+                    return True
+    except Exception:
+        pass
+    return False
+
+
 def steer_cli():
     """The steer command a blocked agent can run, as one shell word: the stable
     executable when it is installed, otherwise the one on PATH."""
@@ -696,6 +744,11 @@ def steer_run(hook_names):
                 continue
             blocked, result = steer_parse_block(output)
             if not blocked:
+                continue
+            # A block-once guard lets the edit pass after its first block in
+            # this session on this file.
+            if (STEER_HOOK_META.get(hook_name, {}).get("once") == "true"
+                    and steer_blocked_before(hook_name, payload, edit)):
                 continue
             firing_id = steer_new_firing_id()
             steer_audit_log(hook_name, payload, edit, harness, edit_index, firing_id)
