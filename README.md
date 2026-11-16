@@ -26,9 +26,11 @@ codex plugin add steer@steer-marketplace
 
 The plugin consists of several components:
 * `steer` CLI executable
-* `/steer`, `/steer-report` and `/steer-setup` skills
-* Custom status line for Claude Code (not currently possible in Codex)
+* `/steer`, `/steer-report`, `/auto-steer` and `/steer-setup` skills
 * A session-start reminder hook when you should run `/steer-report`
+* Claude Code-exclusive features (not currently possible in Codex):
+  * Graphical Review Band (see below), drawn by Claude Code Mod
+  * Custom Statusline for Claude Code
 
 The Codex hook trust model is different from Claude Code. It requires you to approve new hooks. Approve the hooks during initial install, and the first new guard in each scope. Later guards shouldn't require new approval. Note you may need to restart Codex if you don't get the hook approval prompt.
 
@@ -42,7 +44,7 @@ After the installation step above, please run the `/steer-setup` skill. It helps
 
 Reviews can run through 3 different CLIs: `claude`, `codex`, or `agy` (Google Antigravity). They can also be run through any OpenAI-compatible chat-completions endpoint, such as OpenRouter, with an API key that you store with `steer reviewer key set` in your own terminal. The reviewer can be different from the agent that writes your code. Actually, in early testing this is a preferable setup (OpenAI reviewing Anthropic models, for example). By default, three reviewers run in parallel. Keep in mind that reviews do take time and they will use your CLI usage quota or API credits. If latency is too high, it's recommended to use a smaller model or use less reasoning effort. Good results are definitely possible using smaller models with low reasoning.
 
-What reviewer model should you choose? As of November 2026, two good options with a mix of low-cost, speed and intelligence are *Sonnet 5.5 Low*, or *GPT-6.1-Terra Low*.
+What reviewer model should you choose? As of November 2026, two good options with a mix of low-cost, speed and intelligence are **Sonnet 5.5 Low**, or **GPT-6.1-Terra Low**.
 
 Due to the current state of `agy`, it's not possible to block tool usage with command-line flags, nor is it possible to have ephemeral runs that do not create conversation history. With `agy`, your own `agy` permission rules stored in CLI configuration are the reviewer's only boundary, and each review stays in your `agy` conversation history.
 
@@ -56,10 +58,13 @@ If you use both Codex and Claude Code, run `/steer-setup` in both CLI agents. It
 
 Nothing changes when committing repo changes. Once your agent makes a commit, it will be automatically reviewed and concerns raised on findings. Your CLI agent will check each finding against the code, fix what holds up, and send back a report on what it accepted and what it rejected. Steer will continue reviewing the commits until no accepted - non-nitpick - findings remain, or until 4 reviews in a row have blocked the commit. Change that number with `steer config set reviewer.rounds <1-10>`. 4 is the default because initial testing shows diminishing returns after this amount.
 
-*New in 0.4.0*: Graphical Review Band. Using Claude Code Mods, Steer now displays a uniquely-styled review band on both terminal and Desktop. This band shows the status of the commit review, as well as a preview of its findings.
+**New in 0.4.0**: *Graphical Review Band*. Using Claude Code Mods, Steer now displays a uniquely-styled review band on both terminal and Desktop. This band shows the status of the commit review, as well as a preview of its findings.
 
 <p align="center">
   <img src="docs/review-band-desktop.png" width="900" alt="Steer's review band in the Claude Code Desktop app: round 2 of 4, Steer holds the commit while 3 runs read the diff">
+</p>
+<p align="center">
+  <img src="docs/review-band-terminal.png" width="900" alt="Steer's review band in the Claude Code Terminal app: round 2 of 4, Steer holds the commit while 3 runs read the diff">
 </p>
 
 Commits where every changed file is prose (`.md`, `.txt` and similar), or binary are skipped. `CLAUDE.md` and `AGENTS.md` are exceptions to the prose rule.
@@ -84,7 +89,7 @@ steer status        # whether your Steer installation is healthy, and steps to t
 ```
 
 ### Run `/auto-steer`
-*Experimental New Feature*: `/auto-steer` runs the same report as `/steer-report`. But instead of proposing new fixes, or changes to your existing fixes - `/auto-steer` implements all the changes autonomously. You will be given a summary report of all actions taken at the end of the run. If there are any further actions required, you will be notified at that point. `/auto-steer` doesn't ever commit files without your consent.
+**Experimental New Feature**: `/auto-steer` runs the same report as `/steer-report`. But instead of proposing new fixes, or changes to your existing fixes - `/auto-steer` implements all the changes autonomously. You will be given a summary report of all actions taken at the end of the run. If there are any further actions required, you will be notified at that point. `/auto-steer` doesn't ever commit files without your consent.
 
 The intention of `/auto-steer` is similar to auto-permissions mode in agent CLIs -- it removes the friction of decision-making from the user unless completely necessary. `/auto-steer` is completely optional, so if you want to be involved in every decision continue to use `/steer-report` instead.
 
