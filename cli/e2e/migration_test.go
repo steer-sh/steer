@@ -103,7 +103,7 @@ func TestLegacyStateIsReadInPlaceAndMovedByAWrite(t *testing.T) {
 	}
 	neutral := filepath.Join(s.Home, ".steer", "state")
 	for _, args := range [][]string{{"status"}, {"status", "--json"}, {"fix", "list", "--json"}, {"fix", "score", "--json"},
-		{"commit-gate", "status"}, {"audit", "queue"}, {"check", "blocks"}, {"archive", "list"}} {
+		{"audit", "queue"}, {"check", "blocks"}, {"archive", "list"}} {
 		s.Steer(args...)
 		if fileExists(neutral) {
 			t.Fatalf("steer %q created %s", args, neutral)

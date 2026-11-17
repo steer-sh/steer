@@ -66,7 +66,7 @@ The pass acts in every repository this machine's evidence names, not only the on
 it runs in. Take each repository's absolute root from:
 
 - a review sequence's `repo_root`, in the output of
-  `<STEER_BIN> commit-gate mine findings --kind <kind> --json --to-file`. Leave
+  `<STEER_BIN> fix findings --kind <kind> --json --to-file`. Leave
   `--undecided` out of that command: with it, the command records what it showed as
   read. The text dump's `repo=` names the same repository by its directory name.
 - an `interventions[]` row whose `artifact.repo` or `scope.repo_root` names a

@@ -64,8 +64,8 @@ decision.
 Each harness's hook shares one review engine:
   review        PreToolUse hook for Claude Code — reads a JSON payload on stdin
   review-codex  PreToolUse hook for Codex — reads a JSON payload on stdin`,
-	Example: `  steer commit-gate install --scope global
-  steer commit-gate status`,
+	Example: `  steer commit-gate install --harness claude-code --scope global
+  steer status`,
 }
 
 // buildReviewer resolves the provider through the one resolver every editor shares,
@@ -478,17 +478,6 @@ func buildCommitGatePreCommitScript() string {
 	}, "\n")
 }
 
-// commandNote warns when a registered hook command does not resolve from here. A
-// harness that cannot resolve a hook command runs the tool anyway and reports
-// nothing, so this line is the only place the failure is visible.
-func commandNote(registered bool, command string) string {
-	if !registered || steerbin.Resolve(command) != steerbin.Missing {
-		return ""
-	}
-	return "\n               the command does not resolve here — the hook is skipped " +
-		"silently; run: steer bin install"
-}
-
 func commitGateCommand() string {
 	return steerHookCommand("commit-gate review")
 }
@@ -560,19 +549,6 @@ func reportPinnedRegistrations() {
 	fmt.Println()
 }
 
-func preCommitArmedHere() (bool, string) {
-	hooksDir, err := gitHooksDir()
-	if err != nil {
-		return false, ""
-	}
-	path := filepath.Join(hooksDir, "pre-commit")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return false, ""
-	}
-	return strings.Contains(string(raw), commitGatePreCommitMarker), path
-}
-
 // commitGateRemoveHarness has no default, so a removal always names its harness.
 var commitGateRemoveHarness string
 
@@ -585,9 +561,9 @@ var commitGateRemoveCmd = &cobra.Command{
 	Long: `remove takes one harness's commit review hooks out of one scope, leaving every
 other hook in that file.
 
---precommit instead removes the git pre-commit hook an earlier Steer installed for
-its removed pre-commit review, in the repository this runs in. It removes only a hook
-that is exactly the one Steer wrote.`,
+--precommit instead removes the git pre-commit hook an earlier Steer installed, for
+its removed pre-commit review or its removed verify command, in the repository this
+runs in. It removes only a hook that is exactly the one Steer wrote.`,
 	Example: `  steer commit-gate remove --harness codex --scope global
   steer commit-gate remove --precommit`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -638,7 +614,7 @@ that is exactly the one Steer wrote.`,
 }
 
 // removeCommitGatePreCommit deletes this repository's git pre-commit hook when it is
-// the commit review hook an earlier Steer wrote, and reports what it did. A hook
+// a hook an earlier Steer wrote, and reports what it did. A hook
 // without the marker is not Steer's and stays; a marked hook with other lines stays
 // too, because deleting it would drop lines an operator added. A hook outside the
 // repository's git directory is refused, as uninstall refuses it: other repositories
@@ -657,12 +633,12 @@ func removeCommitGatePreCommit() (string, error) {
 		return "", fmt.Errorf("could not read the pre-commit hook: %w", err)
 	}
 	text := string(raw)
-	if !strings.Contains(text, commitGatePreCommitMarker) {
-		return fmt.Sprintf("The pre-commit hook at %s is not Steer's commit review hook; nothing changed.", path), nil
+	if !strings.Contains(text, commitGatePreCommitMarker) && !strings.Contains(text, steerPreCommitMarker) {
+		return fmt.Sprintf("The pre-commit hook at %s is not Steer's; nothing changed.", path), nil
 	}
-	if !commitGatePreCommitScript(text) {
+	if !generatedPreCommit(text) {
 		return "", fmt.Errorf("the pre-commit hook at %s carries Steer's marker but differs from the hook Steer "+
-			"wrote, so Steer leaves it; delete its steer commit-gate lines by hand", path)
+			"wrote, so Steer leaves it; delete its steer lines by hand", path)
 	}
 	if !insideGitDir(path) {
 		return "", fmt.Errorf("the pre-commit hook at %s lies outside this repository's git directory, where "+
@@ -671,7 +647,7 @@ func removeCommitGatePreCommit() (string, error) {
 	if err := os.Remove(path); err != nil {
 		return "", fmt.Errorf("could not remove the pre-commit hook: %w", err)
 	}
-	return "Removed Steer's git pre-commit review hook: " + path, nil
+	return "Removed Steer's git pre-commit hook: " + path, nil
 }
 
 // legacyPreCommitInvocation is the hook's last command as any Steer wrote it: an
@@ -838,110 +814,6 @@ func stopReply(res stophook.Result) *checks.StopReply {
 // so the dashboard's Channels panel starts the same resolve this command does.
 func ledgerHarvests() []resolve.Harvest { return harvests.All() }
 
-var commitGateStatusCmd = &cobra.Command{
-	Use:   "status",
-	Short: "Report which channels are armed and where the ledger lives",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		// This view prints the provider's own name, so an unresolvable one is a
-		// refusal here rather than a dropped field.
-		cfg, reviewer, err := resolvedGateConfig()
-		if err != nil {
-			return err
-		}
-		fmt.Println()
-		fmt.Println(styles.MainHeader.Render("Commit Gate"))
-		fmt.Println()
-		fmt.Printf("  Instrument   %s\n", cfg.InstrumentID())
-		fmt.Printf("  Ledger       %s\n", cfg.LogFile())
-		fmt.Printf("  Reviewers    %d x %s%s via %s, %s each\n",
-			cfg.ReviewerRuns, cfg.ReviewerModel, effortNote(cfg.ReviewerEffort),
-			reviewer.Name(), cfg.ReviewTimeout)
-		fmt.Printf("  Limit        %s\n", gate.BlockingRounds(cfg.MaxFirings))
-		cwd, _ := gate.ProjectDir()
-		for _, scope := range []string{claude.ProjectScope, claude.GlobalScope} {
-			arming := claude.CommitGateHookArmed(scope)
-			state := "not armed"
-			switch {
-			case arming.Effective():
-				state = fmt.Sprintf("armed, timeout %ds", arming.Timeout)
-			case arming.Registered:
-				// Present but never invoked on a commit. Naming it plainly is the whole
-				// point: the config looks armed and nothing is being reviewed.
-				state = fmt.Sprintf("REGISTERED BUT INERT — matcher %q does not match %q, "+
-					"so commits are NOT reviewed; re-run install", arming.Matcher, claude.CommitGateMatcher)
-			}
-			fmt.Printf("  Claude       %s scope: %s%s\n", scope, state,
-				commandNote(arming.Registered, arming.Command))
-		}
-		for _, scope := range []string{claude.ProjectScope, claude.GlobalScope} {
-			arming := pihooks.CommitGateArming(scope, cwd)
-			resolver := pihooks.ResolverArming(scope, cwd)
-			// Pi is unlisted: its rows appear only where a registration exists.
-			if !arming.Registered && !resolver.Registered {
-				continue
-			}
-			state := "not armed"
-			if arming.Registered {
-				state = fmt.Sprintf("registered, timeout %ds, trust state unavailable", arming.Timeout)
-			}
-			fmt.Printf("  Pi           %s scope: %s%s\n", scope, state,
-				commandNote(arming.Registered, arming.Command))
-			resolverState := "not armed"
-			if resolver.Registered {
-				resolverState = fmt.Sprintf("turn_end armed, timeout %ds", resolver.Timeout)
-			}
-			fmt.Printf("  Resolver     pi %s scope: %s%s\n", scope, resolverState,
-				commandNote(resolver.Registered, resolver.Command))
-		}
-		for _, scope := range []string{claude.ProjectScope, claude.GlobalScope} {
-			resolver := claude.BackfillHookArming(scope)
-			state := "not armed"
-			if resolver.Registered {
-				state = fmt.Sprintf("armed, timeout %ds", resolver.Timeout)
-			}
-			fmt.Printf("  Resolver     %s scope: %s%s\n", scope, state,
-				commandNote(resolver.Registered, resolver.Command))
-		}
-		if unresolved := resolve.CountUnresolved(cfg); unresolved > 0 {
-			fmt.Printf("  Unresolved   %d row(s) owe a ledger — run: steer commit-gate backfill --apply\n", unresolved)
-		}
-		for _, scope := range []string{claude.ProjectScope, claude.GlobalScope} {
-			arming := codexhooks.CommitGateArming(scope, cwd)
-			state := "not armed"
-			switch {
-			case arming.Effective():
-				trust := status.TrustPhrase(status.CodexTrust(arming))
-				if trust == "" {
-					trust = "approved"
-				}
-				state = fmt.Sprintf("registered, timeout %ds, %s", arming.Timeout, trust)
-			case arming.Registered:
-				state = fmt.Sprintf("REGISTERED BUT INERT — matcher %q does not match %q, "+
-					"so commits are NOT reviewed; re-run install", arming.Matcher, codexhooks.CommitGateMatcher)
-			}
-			fmt.Printf("  Codex        %s scope: %s%s\n", scope, state,
-				commandNote(arming.Registered, arming.Command))
-			resolver := codexhooks.ResolverArmingRow(scope, cwd)
-			resolverState := "not armed"
-			if resolver.Registered {
-				resolverState = fmt.Sprintf("Stop and SubagentStop registered, timeout %ds", resolver.Timeout)
-				if trust := status.TrustPhrase(status.CodexTrust(resolver)); trust != "" {
-					resolverState += ", " + trust
-				}
-			}
-			fmt.Printf("  Resolver     codex %s scope: %s%s\n", scope, resolverState,
-				commandNote(resolver.Registered, resolver.Command))
-		}
-		if armed, path := preCommitArmedHere(); armed {
-			fmt.Printf("  pre-commit   %s carries the removed pre-commit review's marker — "+
-				"to remove it: steer commit-gate remove --precommit\n", path)
-		}
-		fmt.Println()
-		reportPinnedRegistrations()
-		return nil
-	},
-}
-
 // effortNote renders the effort beside the model, and nothing when it is unset —
 // an unset effort is the provider's own, which Steer cannot name.
 func effortNote(effort string) string {
@@ -954,7 +826,7 @@ func effortNote(effort string) string {
 func init() {
 	rootCmd.AddCommand(commitGateCmd)
 	commitGateCmd.AddCommand(commitGateReviewCmd, commitGateCodexReviewCmd, commitGatePiReviewCmd, commitGatePreCommitCmd,
-		commitGateInstallCmd, commitGateRemoveCmd, commitGateStatusCmd, commitGateBackfillCmd,
+		commitGateInstallCmd, commitGateRemoveCmd, commitGateBackfillCmd,
 		commitGateTestReviewerCmd, commitGateSubagentStartCmd)
 
 	commitGateBackfillCmd.Flags().BoolVar(&backfillApply, "apply", false, "Write the resolved rows")

@@ -33,11 +33,7 @@ func snapshotFreshnessNote(last, now time.Time) string {
 		last.Format(time.RFC3339), int(now.Sub(last).Hours()/24), how)
 }
 
-// The intervention commands exist under two parents: `steer fix`, the
-// corpus-neutral name, and `steer commit-gate mine`, the review-findings alias every
-// existing workflow types. One factory builds both trees, so the two can never drift;
-// each tree owns its own flag storage, because cobra binds a flag to one variable and
-// two trees registered against one variable would share a value across invocations.
+// interventionFlags holds the flag values of the `steer fix` subcommands.
 type interventionFlags struct {
 	ledger string
 
@@ -178,10 +174,9 @@ func liveFirings() []mine.Firing {
 	return evidence.WithoutExcluded(firings, evidence.Exclusions())
 }
 
-// interventionCommands builds one tree's subcommands. withFindings adds `findings`,
-// which reads the review corpus rather than managing an intervention, so it belongs to
-// the commit-gate tree alone.
-func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Command) {
+// newInterventionCommands builds the fix tree's subcommands and the flag storage they
+// share.
+func newInterventionCommands() (*interventionFlags, []*cobra.Command) {
 	v := &interventionFlags{}
 	out := func() io.Writer { return os.Stdout }
 
@@ -501,33 +496,31 @@ func newInterventionCommands(withFindings bool) (*interventionFlags, []*cobra.Co
 
 	cmds := []*cobra.Command{match, register, reject, scope, score, list, describe, retire}
 
-	if withFindings {
-		findings := &cobra.Command{
-			Use:   "findings",
-			Short: "Emit adjudicated findings grouped by chain",
-			RunE: func(cmd *cobra.Command, args []string) error {
-				return mine.Findings(out(), gateConfig().StateDir, mine.FindingsOpts{
-					Ledger:       v.ledger,
-					Kind:         v.findingsKind,
-					Since:        v.findingsSince,
-					StrictJoins:  v.findingsStrictJoins,
-					IncludeEmpty: v.findingsIncludeEmpty,
-					Undecided:    v.findingsUndecided,
-					JSON:         v.findingsJSON,
-				})
-			},
-		}
-		f := findings.Flags()
-		f.StringVar(&v.findingsKind, "kind", "accepted",
-			"accepted|repaired|deferred|rejected|both; repaired and deferred split accepted by the ACCEPTED, not fixed ruling")
-		f.Float64Var(&v.findingsSince, "since", 0, "only the last N days")
-		f.BoolVar(&v.findingsStrictJoins, "strict-joins", false, "round-joined rows only")
-		f.BoolVar(&v.findingsIncludeEmpty, "include-empty", false, "keep chains with no findings")
-		f.BoolVar(&v.findingsUndecided, "undecided", false,
-			"drop the chains a live class already covers, and mark the covered findings in the rest")
-		f.BoolVar(&v.findingsJSON, "json", false, "emit JSON")
-		cmds = append([]*cobra.Command{findings}, cmds...)
+	findings := &cobra.Command{
+		Use:   "findings",
+		Short: "Emit adjudicated findings grouped by chain",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return mine.Findings(out(), gateConfig().StateDir, mine.FindingsOpts{
+				Ledger:       v.ledger,
+				Kind:         v.findingsKind,
+				Since:        v.findingsSince,
+				StrictJoins:  v.findingsStrictJoins,
+				IncludeEmpty: v.findingsIncludeEmpty,
+				Undecided:    v.findingsUndecided,
+				JSON:         v.findingsJSON,
+			})
+		},
 	}
+	f := findings.Flags()
+	f.StringVar(&v.findingsKind, "kind", "accepted",
+		"accepted|repaired|deferred|rejected|both; repaired and deferred split accepted by the ACCEPTED, not fixed ruling")
+	f.Float64Var(&v.findingsSince, "since", 0, "only the last N days")
+	f.BoolVar(&v.findingsStrictJoins, "strict-joins", false, "round-joined rows only")
+	f.BoolVar(&v.findingsIncludeEmpty, "include-empty", false, "keep chains with no findings")
+	f.BoolVar(&v.findingsUndecided, "undecided", false,
+		"drop the chains a live class already covers, and mark the covered findings in the rest")
+	f.BoolVar(&v.findingsJSON, "json", false, "emit JSON")
+	cmds = append([]*cobra.Command{findings}, cmds...)
 	return v, cmds
 }
 
@@ -543,12 +536,12 @@ A record names the evidence it is counted over and the item that evidence counts
 This engine reads the review history by review sequence; a record from other evidence is
 carried unscored rather than scored against evidence it was never authored over.
 
-steer intervention is the same command set under its former name, and steer commit-gate
-mine is the same set under its original one.`,
+findings dumps the adjudicated review findings that a candidate class is read from.
+steer intervention is the same command set under its former name.`,
 }
 
 func init() {
-	v, cmds := newInterventionCommands(false)
+	v, cmds := newInterventionCommands()
 	interventionCmd.AddCommand(cmds...)
 	interventionCmd.PersistentFlags().StringVar(&v.ledger, "ledger", "",
 		"Override the adjudication ledger path (a single file, not the shard glob)")

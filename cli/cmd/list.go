@@ -20,9 +20,9 @@ for .py files (excluding steer-hooks.py). It reads rule text from
 steer-manifest.json and does not rely on settings.json entries.
 
 Use --verbose to include provenance metadata (source, prompt_version, hook_version, updated, model).`,
-	Example: `  steer list
-  steer list --verbose
-  steer list --scope global`,
+	Example: `  steer guard list
+  steer guard list --verbose
+  steer guard list --scope global`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		fmt.Println()
 		fmt.Println(styles.MainHeader.Render("📋 Registered Hooks"))
@@ -110,6 +110,7 @@ Use --verbose to include provenance metadata (source, prompt_version, hook_versi
 }
 
 func init() {
-	rootCmd.AddCommand(listCmd)
+	guardCmd.AddCommand(listCmd)
 	listCmd.Flags().BoolVar(&listVerbose, "verbose", false, "Include metadata columns")
+	rootCmd.AddCommand(topLevelAlias(listCmd))
 }

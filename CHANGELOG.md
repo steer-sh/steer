@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Guard commands move under `steer guard`**: `steer guard register`, `list`,
+  `remove` and `test`, beside `steer rules` and `steer check`. The former
+  top-level names still work and no longer appear in help.
+- **`steer commit-gate mine` is removed**: `steer fix findings` dumps the review
+  findings, and every other subcommand was already under `steer fix`.
+- **`steer commit-gate status` is removed**: `steer status` reports each
+  harness's commit review, and `steer status --json` its ledger and arming.
+- **`steer preset` is removed**: a guard an earlier Steer installed from a preset
+  is removed with `steer remove <name>`, which its block now names after
+  `steer hooks rebuild`.
+- **`steer verify` and `steer git-hooks install` are removed**: a pre-commit hook
+  that `git-hooks install` wrote still runs, checks nothing and exits 0; remove it
+  with `steer commit-gate remove --precommit` or `steer uninstall`. `steer verify`
+  in CI now fails.
 - **`steer team` is removed**: `steer team lock`, `apply` and `verify` are
   gone, and Steer no longer reads `steer-team.lock.json`. A repository shares
   its fixes as the files committed under `.steer/`, and a change to a team fix

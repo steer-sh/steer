@@ -40,9 +40,9 @@ steer-managed artifacts in sync:
 - appends the provided rule to CLAUDE.md
 
 Optional provenance flags can be used to persist generation metadata.`,
-	Example: `  steer register .steer/hooks/no-var-hook.py --rule "never use var | use const or let"
-  steer register /tmp/my-hook.py --rule "block TODO in prod files" --scope global
-  steer register .steer/hooks/sql-hook.py --rule "block SQL f-strings" --source generated --prompt-version v1 --hook-version h1`,
+	Example: `  steer guard register .steer/hooks/no-var-hook.py --rule "never use var | use const or let"
+  steer guard register /tmp/my-hook.py --rule "block TODO in prod files" --scope global
+  steer guard register .steer/hooks/sql-hook.py --rule "block SQL f-strings" --source generated --prompt-version v1 --hook-version h1`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		fmt.Println()
@@ -273,7 +273,7 @@ func parseCompactBool(raw string) (bool, error) {
 }
 
 func init() {
-	rootCmd.AddCommand(registerCmd)
+	guardCmd.AddCommand(registerCmd)
 	registerCmd.Flags().StringVar(&registerRule, "rule", "", "Original rule text for manifest and CLAUDE.md")
 	registerCmd.MarkFlagRequired("rule")
 	registerCmd.Flags().StringVar(&registerSource, "source", claude.SourceManual, "Hook source metadata (manual|generated|factory)")
@@ -285,6 +285,7 @@ func init() {
 	registerCmd.Flags().StringVar(&registerFixtures, "fixtures", "", "Path to a fixture file storing this guard's replayable cases")
 	registerCmd.Flags().BoolVar(&registerOnce, "once", false, "Block at most once per session and file; a later edit the guard would block passes")
 	registerCmd.Flags().StringVar(&registerSelfTest, "self-test", "", "Self-test summary JSON or compact form: passed,positive_pass,positive_fail,negative_pass,negative_fail")
+	rootCmd.AddCommand(topLevelAlias(registerCmd))
 }
 
 // hookNameFor derives the manifest name a hook file registers under.

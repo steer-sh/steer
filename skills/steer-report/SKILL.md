@@ -24,7 +24,7 @@ The audit comes first on purpose. Proposing new hooks is the interesting half, a
 Two corpora feed this skill, and either may be empty on a given machine:
 
 - **Transcript friction** — repeated corrections, rejected tool calls, recurring lint/test failures, and instruction-file rules (CLAUDE.md, AGENTS.md) not yet enforced. Mined by `steer report` across every harness with transcripts on this machine.
-- **Commit-review findings** — defects the commit-review gate found and adjudicated. Mined by `steer commit-gate mine`. Absent when there is no commit-review ledger on this machine.
+- **Commit-review findings** — defects the commit-review gate found and adjudicated. Mined by `steer fix findings`. Absent when there is no commit-review ledger on this machine.
 
 An empty corpus produces one line, never an error. An adopter with no commit-review ledger still gets the transcript half — the cold-start front door.
 
@@ -92,9 +92,8 @@ Then Read the queue **once**: `~/.steer/state/steer-report/queue.json` (`version
 The queue tells you what is pending. The full dumps below are the raw material you cluster over. The score file holds every live record for the complete audit — the queue lists only the ones asking for a reader, not the quiet ones worth showing too. When the score file is `[]`, this machine records no fix. Guard evidence is a separate stream from review history, so an absent ledger says nothing about what the installed guards blocked: the rule under "The audit lives in `audit.md`" decides whether the audit runs.
 
 `steer fix` is the fix command set — `match`, `register`, `reject`, `scope`, `score`,
-`list`, `describe`, `retire`. `steer intervention` is the same set under its former
-name and still works, as does `steer commit-gate mine`; `findings`, which dumps the
-review corpus rather than managing a fix, lives only under the latter.
+`list`, `describe`, `retire`, and `findings`, which dumps the review corpus rather than
+managing a fix. `steer intervention` is the same set under its former name.
 
 Three kinds of evidence answer three different questions, and none of them establishes that a fix works:
 
@@ -438,8 +437,8 @@ as the files committed under `.steer/`.
 If this machine has a commit-review ledger, dump the findings. If not, skip to Step 3 and add nothing: Step 1's sweep sentence already told the reader that review history is absent, and what comes next.
 
 ```bash
-<STEER_BIN> commit-gate mine findings --kind accepted --undecided --to-file
-<STEER_BIN> commit-gate mine findings --kind rejected --to-file
+<STEER_BIN> fix findings --kind accepted --undecided --to-file
+<STEER_BIN> fix findings --kind rejected --to-file
 ```
 
 Read the rejected dump **once**, to its end. Read the accepted dump **once**, from its start to the `=== read before` line: the decided classes, the header and the new section. Do not cat either file and do not re-read.

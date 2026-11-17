@@ -517,7 +517,6 @@ def steer_block_footer(hook_name, firing_id):
     meta = STEER_HOOK_META.get(hook_name, {})
     hook_name = meta.get("hook_name", hook_name)
     source = meta.get("source", "")
-    source_id = meta.get("source_id", "")
     cli = steer_cli()
     footer = "\n\n— steer hook: " + hook_name
     if firing_id:
@@ -531,10 +530,7 @@ def steer_block_footer(hook_name, firing_id):
     if source == "steer":
         return (footer + "\nTurning this protection off needs the user's approval: "
                 + cli + " config set protection.self off")
-    if source == "factory":
-        cmd = cli + " preset disable " + (source_id or hook_name)
-    else:
-        cmd = cli + " remove " + hook_name
+    cmd = cli + " remove " + hook_name
     if meta.get("scope") == "global":
         cmd += " --scope global"
     return footer + "\nRemoving this hook needs the user's approval: " + cmd

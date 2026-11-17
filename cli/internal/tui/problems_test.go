@@ -83,7 +83,7 @@ func TestProblemsHoldTheQueueAndTheInventory(t *testing.T) {
 	m.snap = &status.SystemStatus{Interventions: inventory()}
 	m.snap.Attention.Candidates = []cadence.Candidate{{
 		Corpus: "review-findings", UndecidedChains: 96,
-		Dump: "steer commit-gate mine findings",
+		Dump: "steer fix findings",
 	}}
 	m.active = panelProblems
 
@@ -185,7 +185,7 @@ func TestExpandingWritesNothing(t *testing.T) {
 	m.cfg.StateDir = t.TempDir()
 	m.snap = &status.SystemStatus{}
 	m.snap.Attention.Candidates = []cadence.Candidate{{
-		Corpus: "review-findings", UndecidedChains: 96, Dump: "steer commit-gate mine findings",
+		Corpus: "review-findings", UndecidedChains: 96, Dump: "steer fix findings",
 	}}
 	m.active = panelProblems
 
@@ -425,12 +425,12 @@ func stripANSI(s string) string {
 func TestCandidateDetailClaimsItemsOnlyWhereTheyAre(t *testing.T) {
 	review := candidateDetail(cadence.Candidate{
 		Corpus: "review-findings", UndecidedChains: 122,
-		Dump: "steer commit-gate mine findings",
+		Dump: "steer fix findings",
 	}, 100)
 	if strings.Contains(review, "one item of the pile") {
 		t.Errorf("a row with no examples claims items below it:\n%s", review)
 	}
-	if !strings.Contains(review, "steer commit-gate mine findings") {
+	if !strings.Contains(review, "steer fix findings") {
 		t.Errorf("the dump command is missing:\n%s", review)
 	}
 

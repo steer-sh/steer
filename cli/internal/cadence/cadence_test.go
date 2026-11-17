@@ -61,7 +61,7 @@ func TestWriteQueueIsByteIdentical(t *testing.T) {
 		Version:       QueueVersion,
 		Interventions: []Intervention{},
 		Candidates: []Candidate{
-			{Corpus: CorpusReviewFindings, UndecidedChains: 5, Dump: "steer commit-gate mine findings"},
+			{Corpus: CorpusReviewFindings, UndecidedChains: 5, Dump: "steer fix findings"},
 		},
 		Corpora: []CorpusStatus{{Corpus: CorpusReviewFindings, Present: true, Size: 10}},
 	}

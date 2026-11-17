@@ -181,9 +181,9 @@ func TestBlockFooterNamesRemoval(t *testing.T) {
 		want  string
 	}{
 		{
-			name:  "factory preset disables by source_id",
+			name:  "factory preset removes by hook name",
 			entry: ManifestEntry{Source: SourceFactory, SourceID: "python3-not-python", Rule: "use python3"},
-			want:  "steer preset disable python3-not-python",
+			want:  "steer remove python3-not-python-hook",
 		},
 		{
 			name:  "generated rule removes by hook name",
@@ -209,7 +209,7 @@ func TestBlockFooterNamesRemoval(t *testing.T) {
 		if !strings.Contains(reason, "python3-not-python-hook") {
 			t.Errorf("footer missing hook name: %q", reason)
 		}
-		if strings.Contains(reason, "steer remove") || strings.Contains(reason, "steer preset disable") {
+		if strings.Contains(reason, "steer remove") {
 			t.Errorf("footer printed a removal command with no manifest entry: %q", reason)
 		}
 	})

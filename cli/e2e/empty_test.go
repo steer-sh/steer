@@ -23,7 +23,6 @@ func TestEmptyMachineReadings(t *testing.T) {
 		want []string
 	}{
 		{[]string{"status"}, []string{"No commit gate is registered", "/steer-setup"}},
-		{[]string{"commit-gate", "status"}, []string{"not armed"}},
 		{[]string{"fix", "score", "--json"}, []string{"[]"}},
 		{[]string{"fix", "list", "--json"}, []string{"[]"}},
 		{[]string{"audit", "queue"}, []string{"No guard store on this machine holds an audit stream"}},

@@ -808,7 +808,7 @@ func steerGuardNote(row fixRow, scope string) string {
 		return row.name + " is Steer's self-protection; run " + protection.OffCommand +
 			" in your own terminal to turn it off"
 	case claude.SourceFactory:
-		command := "steer preset disable " + row.name
+		command := "steer remove " + row.name
 		if scope == claude.GlobalScope {
 			command += " --scope global"
 		}

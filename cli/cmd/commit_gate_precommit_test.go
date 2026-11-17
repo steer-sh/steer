@@ -8,15 +8,22 @@ import (
 	"testing"
 )
 
-// TestThePreCommitStubLetsTheCommitThrough: the hook an earlier Steer installed runs
-// `steer commit-gate precommit`, with reviewer flags when an older Steer wrote it, and
-// git refuses the commit on any non-zero exit. The stub succeeds on both forms and
-// prints the one line naming the removal command.
+// TestThePreCommitStubLetsTheCommitThrough: a hook an earlier Steer installed runs
+// `steer commit-gate precommit`, with reviewer flags when an older Steer wrote it, or
+// `steer verify --staged`, and git refuses the commit on any non-zero exit. Each stub
+// succeeds on every form and prints the one line naming the removal command; verify
+// in any other form, as a CI job runs it, fails.
 func TestThePreCommitStubLetsTheCommitThrough(t *testing.T) {
-	for _, args := range [][]string{
-		{"commit-gate", "precommit"},
-		{"commit-gate", "precommit", "--provider", "codex", "--model", "m"},
+	for _, tc := range []struct {
+		args   []string
+		notice string
+	}{
+		{[]string{"commit-gate", "precommit"}, preCommitRemovedNotice},
+		{[]string{"commit-gate", "precommit", "--provider", "codex", "--model", "m"}, preCommitRemovedNotice},
+		{[]string{"verify", "--staged", "--scope", "project"}, verifyRemovedNotice},
+		{[]string{"verify", "--staged", "--scope", "project", "--include-global"}, verifyRemovedNotice},
 	} {
+		args := tc.args
 		var stdout, stderr bytes.Buffer
 		rootCmd.SetOut(&stdout)
 		rootCmd.SetErr(&stderr)
@@ -28,21 +35,27 @@ func TestThePreCommitStubLetsTheCommitThrough(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%v: %v", args, err)
 		}
-		if stderr.String() != preCommitRemovedNotice+"\n" || stdout.Len() != 0 {
+		if stderr.String() != tc.notice+"\n" || stdout.Len() != 0 {
 			t.Errorf("%v: stdout %q, stderr %q; want only the notice on stderr", args, stdout.String(), stderr.String())
 		}
 	}
-	if !strings.Contains(preCommitRemovedNotice, "steer commit-gate remove --precommit") {
-		t.Errorf("the notice names no removal command: %q", preCommitRemovedNotice)
+	for _, notice := range []string{preCommitRemovedNotice, verifyRemovedNotice} {
+		if !strings.Contains(notice, "steer commit-gate remove --precommit") {
+			t.Errorf("the notice names no removal command: %q", notice)
+		}
 	}
-	if !commitGatePreCommitCmd.Hidden {
-		t.Error("the stub is listed in help")
+	if !commitGatePreCommitCmd.Hidden || !verifyCmd.Hidden {
+		t.Error("a stub is listed in help")
+	}
+	if err := verifyCmd.RunE(verifyCmd, []string{"--changed", "--base", "a", "--head", "b"}); err == nil {
+		t.Error("steer verify --changed succeeded; a CI job would pass unchecked")
 	}
 }
 
 // TestRemovePreCommitTakesOnlySteersHook: the removal deletes the hook the pre-commit
-// review wrote, including an older one carrying reviewer flags, and leaves a hook that
-// is not Steer's or that has lines Steer did not write.
+// review wrote, including an older one carrying reviewer flags, and the hook
+// `git-hooks install` wrote, and leaves a hook that is not Steer's or that has lines
+// Steer did not write.
 func TestRemovePreCommitTakesOnlySteersHook(t *testing.T) {
 	flagged := strings.Replace(buildCommitGatePreCommitScript(),
 		"steer commit-gate precommit", "steer commit-gate precommit --provider codex --model m", 1)
@@ -55,7 +68,9 @@ func TestRemovePreCommitTakesOnlySteersHook(t *testing.T) {
 		{"an older hook with reviewer flags", flagged, true, false},
 		{"a hook with an added line", buildCommitGatePreCommitScript() + "make lint\n", false, true},
 		{"a command appended to the flagged line", strings.Replace(flagged, " --model m", " --model m; make lint", 1), false, true},
-		{"the verify hook", buildSteerPreCommitScript(false), false, false},
+		{"the verify hook", buildSteerPreCommitScript(false), true, false},
+		{"the verify hook with global guards", buildSteerPreCommitScript(true), true, false},
+		{"a verify hook with an added line", buildSteerPreCommitScript(false) + "make lint\n", false, true},
 		{"another tool's hook", "#!/bin/sh\nmake lint\n", false, false},
 	}
 	for _, tc := range cases {
