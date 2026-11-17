@@ -944,7 +944,7 @@ func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 			if err := refuseRunningGuard(o, records, unbound, scope, installed); err != nil {
 				return err
 			}
-			fmt.Fprintf(os.Stderr, "steer commit-gate mine: %s is not in steer-manifest.json — "+
+			fmt.Fprintf(os.Stderr, "steer fix: %s is not in steer-manifest.json — "+
 				"recording the id anyway, but confirm it matches the audit log's hook_name\n", pyRepr(o.HookID))
 		}
 	}

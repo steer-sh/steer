@@ -123,7 +123,7 @@ func TestAGuardWhoseBuiltInLeftSteerNamesItsRemoval(t *testing.T) {
 		}
 	}
 	want := map[string]string{
-		"eval-usage-security":   "steer preset disable eval-usage-security --scope global",
+		"eval-usage-security":   "steer remove eval-usage-security --scope global",
 		"steer-self-protection": "steer config set protection.self off",
 	}
 	found := 0

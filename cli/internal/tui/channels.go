@@ -315,8 +315,6 @@ func (m *Model) viewChannels() string {
 		name := fmt.Sprintf("%-17s %-12s %-8s", r.label, status.HarnessLabel(r.harness), r.scope)
 		out += selectedRow(name, " "+armingBadge(r.armed)+m.pairedDrift(r), selected, m.bodyWidth())
 	}
-	out += "\n" + secondary("Install through the CLI:") + "\n"
-	out += wrapTo("steer git-hooks install", "  ", m.bodyWidth())
 	return out
 }
 

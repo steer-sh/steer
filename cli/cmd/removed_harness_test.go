@@ -52,8 +52,8 @@ func assertRebuildSparesCodex(t *testing.T, what, line string) {
 	}
 }
 
-// The fixture run's source-drift advice and verify's missing-master error name
-// the rebuild targeted like every other repair.
+// The fixture run's source-drift advice names the rebuild targeted like every other
+// repair.
 func TestPrintedRebuildsSpareARemovedHarness(t *testing.T) {
 	codexRemovedHome(t)
 	g := claude.GlobalScope
@@ -67,12 +67,6 @@ func TestPrintedRebuildsSpareARemovedHarness(t *testing.T) {
 	}
 	report := fixture.Report{Hook: "no-var-hook", Cases: []fixture.CaseResult{{MasterState: fixture.MasterBlockedAllow}}}
 	assertRebuildSparesCodex(t, "the fixture source-drift advice", blockedAllowRepair(report, g))
-
-	master := filepath.Join(dir, hookstore.MasterName)
-	if err := os.Remove(master); err != nil {
-		t.Fatal(err)
-	}
-	assertRebuildSparesCodex(t, "verify's missing-master error", missingMasterError(g, master).Error())
 }
 
 // A guard command naming no harness registers only where Steer is still

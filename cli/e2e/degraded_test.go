@@ -202,7 +202,7 @@ func TestGateAfterATruncatedLedgerLine(t *testing.T) {
 		data, _ := os.ReadFile(s.ledgerPath())
 		t.Errorf("want the new clean row to parse, found %d:\n%s", clean, data)
 	}
-	for _, args := range [][]string{{"status", "--json"}, {"fix", "score", "--json"}, {"commit-gate", "status"}} {
+	for _, args := range [][]string{{"status", "--json"}, {"fix", "score", "--json"}, {"status"}} {
 		if r := s.Steer(args...); r.Code != 0 {
 			t.Errorf("steer %v exited %d over a corrupt ledger:\n%s", args, r.Code, r.Output())
 		}

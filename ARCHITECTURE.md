@@ -79,12 +79,14 @@ uses, removes the Steer-owned ones, and reads them again before it reports
 success; a file a reader cannot load is an item whose removal fails, never an
 empty reading. Project-scope registrations are committed, so it names the current
 repository's and changes none. It removes a pre-commit hook only when the hook
-lies in the repository's git common dir and equals a script Steer writes (the
-`git-hooks` verify hook, or the hook of the removed pre-commit review); any
-other Steer-marked hook is named and kept. That removed review's hook still runs
-`steer commit-gate precommit`, a hidden command that exits 0, because git refuses
-the commit on any other exit, and names `steer commit-gate remove --precommit`,
-which deletes the hook from one repository under the same equality test. The repository's check adoption is
+lies in the repository's git common dir and equals a script Steer writes (the hook
+of the removed `git-hooks install`, or of the removed pre-commit review); any
+other Steer-marked hook is named and kept. Those hooks still run `steer verify
+--staged` and `steer commit-gate precommit`, hidden commands that exit 0, because
+git refuses the commit on any other exit, and name `steer commit-gate remove
+--precommit`, which deletes either hook from one repository under the same
+equality test. `steer verify` without `--staged` exits 1, so a CI job that still
+runs it fails rather than passing unchecked. The repository's check adoption is
 machine-local too, so a full uninstall removes it; an instruction document that
 links to another harness's survives a one-harness removal. `~/.steer` stays unless `--purge` is
 given, which is refused while another Steer registration or a kept hook still
@@ -282,9 +284,8 @@ Only a guard this binary ships removes without an archive
 (`RemoveOptions.ShippedCopy`, which turning self-protection off sets); a pruned
 orphan is archived. A project archive is committed with
 the store. Steer ships no presets: a guard an earlier Steer installed from its
-catalog keeps `source: factory` and is an orphan that keeps running.
-`steer preset disable <name>`, the removal its block names, archives one
-(`presets.DisableOrphan`), and `steer preset sync --prune-orphans` archives all.
+catalog keeps `source: factory` and is an orphan that keeps running until
+`steer remove <name>`, the removal its block names, archives it.
 
 Self-protection (`internal/protection/`) is a guard Steer owns: `source: steer`,
 id `steer-self-protection`, in the global store only. It is on unless
@@ -314,8 +315,8 @@ Steer's. A patch hunk out of its context is judged on its lines, and a
 `config.toml` one that adds a `hooks`/`enabled = false` switch or removes approval
 lines is blocked, since its table is unknown. A deletion of one is blocked, and so
 is a shell write, whose block sends the agent to Edit or Write. It also blocks
-`config set protection.self`, and `remove`, `register` or `preset disable` of
-itself. A shell command is split into simple commands, and a path counts only
+`config set protection.self`, and `remove` or `register` of itself, with or
+without the `guard` group word. A shell command is split into simple commands, and a path counts only
 where its command writes it (an output redirection, an operand of `rm` or `mv`
 or a directory holding a protected file, the last operand of `cp`), and a quoted
 `>` stays an argument, so reading a protected file is never blocked. A
@@ -446,10 +447,7 @@ temporary file and a rename for the same reason.
 `internal/guard/fixture/` stores replayable cases at `fixtures/<hook-id>.json`.
 Each case has payload, expected result, optional filesystem context and provenance.
 The runner copies the guard and master into a temporary store (`guard.Sandbox`) so
-synthetic firings cannot enter the live audit log. `steer verify` runs the same way:
-a copy of each scope's master beside a copy of the rest of the store, less the
-audit log and its payload directory, with each symlink made again to its target,
-with the reason lines that name the discarded firing removed. Individual guards must pass both allow and block
+synthetic firings cannot enter the live audit log. Individual guards must pass both allow and block
 cases. Master positives distinguish interception by the intended guard, shadowing
 by an earlier guard, and failure to block. Shadowing leaves integration unverified.
 
@@ -918,8 +916,8 @@ one `mine.EvidenceSet` shared by cadence, status and intervention commands.
 `internal/gate/mine/registry.go` routes review-findings to chain units and
 transcript-friction to root-session units. `ScoreWith` dispatches to the registered
 engine. Unsupported corpus/unit records remain unscored.
-`cmd/intervention.go` constructs the shared command tree exposed by `steer fix`,
-its `intervention` alias and the original `commit-gate mine` path.
+`cmd/intervention.go` constructs the command tree exposed by `steer fix` and its
+`intervention` alias; `fix findings` dumps the review corpus.
 
 Inventory mutations serialize across processes with a persistent lock file beside
 `interventions.jsonl`. Registration, rejection, scope migration, retirement and
@@ -1287,11 +1285,11 @@ the Archived section opens from a row that counts it. `fixRows` returns rows in 
 HEAD through `status.AddendumInventory`, which `steer commit-gate addendum list`
 shares, so an entry removed on disk but still committed stays listed. Every fix
 archives through its tier's remove function except a guard Steer installed: enter
-and x on a factory orphan name `steer preset disable <name>` for its scope, and on
+and x on a factory orphan name `steer remove <name>` for its scope, and on
 self-protection the setting that turns it off, which the dashboard does not edit. The Archived section shows the newest
 entry of each tier and id per store and restores it through the same code as
 `steer archive restore`. Check adoption, replay and restore run as background
-commands; the check runner's registration belongs to Arming. The `git-hooks` verify hook's installation remains CLI-only. Shared styles and geometry
+commands; the check runner's registration belongs to Arming. Shared styles and geometry
 tests own wrapping and terminal layout details.
 
 `internal/statusline/` renders the Claude Code status-line row;

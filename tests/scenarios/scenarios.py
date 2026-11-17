@@ -258,7 +258,7 @@ def _new_suggestion():
         {"corpus": "transcript-friction", "pattern": "python: command not found",
          "count": 6, "sessions": 3, "signal_kind": "tool_failures"},
         {"corpus": "review-findings", "undecided_chains": 5,
-         "dump": "steer commit-gate mine findings --kind accepted"},
+         "dump": "steer fix findings --kind accepted"},
     ]
     return _snapshot(candidates=cands), _scores(), _queue(candidates=cands)
 
@@ -407,7 +407,7 @@ def _busy_report():
     # The Windows finding reaches the report as a review pile; supporting_evidence
     # holds the dump's content.
     cands = [{"corpus": "review-findings", "undecided_chains": 2,
-              "dump": "steer commit-gate mine findings --kind accepted"}]
+              "dump": "steer fix findings --kind accepted"}]
     snap = _snapshot(records, candidates=cands)
     snap["addenda"] = addenda
     return snap, _scores(records), _queue(records, candidates=cands)

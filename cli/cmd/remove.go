@@ -27,9 +27,9 @@ artifacts:
 - removes associated rule line from CLAUDE.md
 - re-consolidates steer-hooks.py
 - removes master hook registration when no hooks remain`,
-	Example: `  steer remove no-var-hook --force
-  steer remove no-var-hook --reason "blocks legitimate var in shell scripts"
-  steer remove .steer/hooks/no-var-hook.py`,
+	Example: `  steer guard remove no-var-hook --force
+  steer guard remove no-var-hook --reason "blocks legitimate var in shell scripts"
+  steer guard remove .steer/hooks/no-var-hook.py`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		fmt.Println()
@@ -126,7 +126,8 @@ func otherTierRemoveHint(own tier.Kind, identifier, scope string) string {
 }
 
 func init() {
-	rootCmd.AddCommand(removeCmd)
+	guardCmd.AddCommand(removeCmd)
 	removeCmd.Flags().Bool("force", false, "Skip confirmation prompt")
 	removeCmd.Flags().String("reason", "", "Why the hook is removed; the archive entry keeps it")
+	rootCmd.AddCommand(topLevelAlias(removeCmd))
 }

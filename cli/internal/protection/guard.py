@@ -23,7 +23,7 @@ import sys
 SELF_NAME = "steer-self-protection"
 SETTING_KEY = "protection.self"
 
-# Value-taking flags of steer's root, remove, register, preset and config
+# Value-taking flags of steer's root, guard, remove, register and config
 # commands, each long form beside its shorthand. A flag its command does not define makes the CLI exit, so one table
 # serves every position in an invocation.
 STEER_VALUE_FLAGS = {
@@ -612,6 +612,11 @@ def evaluate_bash_command(command_text, protected, self_path, cwd):
 def evaluate_steer_invocation(positionals, self_path, cwd):
     if not positionals:
         return None
+    # steer guard <verb> is the same command as steer <verb>.
+    if positionals[0] == "guard":
+        positionals = positionals[1:]
+        if not positionals:
+            return None
     operation = positionals[0]
     operand = positionals[1] if len(positionals) > 1 else ""
 
@@ -621,8 +626,6 @@ def evaluate_steer_invocation(positionals, self_path, cwd):
         return None
     if operation in ("remove", "register") and names_self(operand, self_path, cwd):
         return "Steer's self-protection blocks " + operation + " of its own guard. Only the user turns it off."
-    if operation == "preset" and operand == "disable" and len(positionals) > 2 and names_self(positionals[2], self_path, cwd):
-        return "Steer's self-protection blocks removing its own guard. Only the user turns it off."
     return None
 
 

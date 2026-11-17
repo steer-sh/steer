@@ -23,10 +23,10 @@ With no --code or --file, it reruns the cases stored beside the guard, against
 the guard alone and through the generated master. With either flag it runs the
 individual hook once against a payload that mimics Claude Code PreToolUse JSON
 input.`,
-	Example: `  steer test no-var-hook
-  steer test no-var-hook --code "var x = 1"
-  steer test no-var-hook --file ./sample.js
-  steer test no-var-hook --code "print('x')" --extension py`,
+	Example: `  steer guard test no-var-hook
+  steer guard test no-var-hook --code "var x = 1"
+  steer guard test no-var-hook --file ./sample.js
+  steer guard test no-var-hook --code "print('x')" --extension py`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		fmt.Println()
@@ -157,8 +157,9 @@ func parseHookDecision(output string) (bool, string) {
 }
 
 func init() {
-	rootCmd.AddCommand(testCmd)
+	guardCmd.AddCommand(testCmd)
 	testCmd.Flags().String("code", "", "Code snippet to test")
 	testCmd.Flags().String("file", "", "Path to a file to test")
 	testCmd.Flags().String("extension", "", "File extension override when using --code")
+	rootCmd.AddCommand(topLevelAlias(testCmd))
 }
