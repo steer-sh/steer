@@ -228,6 +228,9 @@ Otherwise write no coverage line.
    - what changed, exactly: an instruction rule or review prompt entry quoted in
      full; for a guard or check, its rule, its scope and its files; for a repair,
      the lines before and after; for a removal, the name and the reason stored.
+     For the removal of a project-scope fix committed in the repository, add that
+     the committed removal changes enforcement for everyone who works there, while
+     the evidence behind it covers this machine only.
    - the evidence behind it as a count with its unit: sessions, review sequences
      or inspected blocks.
    - the undo, written out with the launcher's path and every argument filled in,

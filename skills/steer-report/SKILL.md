@@ -680,7 +680,9 @@ keep examples of forbidden wording inline.
 
 Applying a fix changes behavior. Stopping tracking leaves the fix installed.
 Removing a fix changes enforcement. Explain these differences when the proposed
-action makes them relevant.
+action makes them relevant. When you propose removing a project-scope fix that is
+committed in the repository, say that the committed removal changes enforcement for
+everyone who works there, while the evidence behind it covers this machine only.
 
 When the user has already decided an action, explain what it changes and ask only
 what carrying it out needs. Give contrary evidence once, as information, never as
