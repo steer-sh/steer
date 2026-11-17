@@ -166,7 +166,8 @@ func AuthorFields(ledger *gate.Ledger, cfg gate.Config, transcript, session stri
 			continue
 		}
 		var message transcriptMessage
-		if err := json.Unmarshal(row.Message, &message); err != nil || message.Model == "" {
+		if err := json.Unmarshal(row.Message, &message); err != nil ||
+			message.Model == "" || message.Model == syntheticModel {
 			continue
 		}
 		fields["author_model"] = message.Model
@@ -194,6 +195,11 @@ func AuthorFields(ledger *gate.Ledger, cfg gate.Config, transcript, session stri
 	}
 	return fields
 }
+
+// syntheticModel is the model Claude Code writes on an assistant row that no model
+// produced, such as Code Mode's record of each tool call its code made. Its usage is
+// all zeros.
+const syntheticModel = "<synthetic>"
 
 func deref(v *int) int {
 	if v == nil {

@@ -301,3 +301,32 @@ func TestStripHarnessText(t *testing.T) {
 		}
 	}
 }
+
+// TestAuthorFieldsSkipsSyntheticRows reads a Code Mode transcript at the moment a
+// commit's hook runs: the code's earlier tool call is already recorded as a
+// `<synthetic>` row with zero usage after the model's own row, and the author is the
+// model that wrote the code.
+func TestAuthorFieldsSkipsSyntheticRows(t *testing.T) {
+	row := func(model string, virtual bool, input, cacheRead int) string {
+		raw, err := json.Marshal(map[string]any{
+			"type": "assistant", "timestamp": tsAfter, "isVirtual": virtual,
+			"message": map[string]any{
+				"role": "assistant", "model": model,
+				"content": []map[string]any{{"type": "tool_use", "id": "t-" + model, "name": "Bash", "input": map[string]any{}}},
+				"usage":   map[string]int{"input_tokens": input, "cache_read_input_tokens": cacheRead, "cache_creation_input_tokens": 0},
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(raw)
+	}
+	cfg := gate.Defaults()
+	cfg.StateDir = t.TempDir()
+	path := writeTranscript(t, row("claude-haiku-5-5", false, 100, 50), row("<synthetic>", true, 0, 0))
+	fields := AuthorFields(gate.NewLedger(cfg), cfg, path, "session-1")
+	if fields["author_model"] != "claude-haiku-5-5" || fields["context_tokens"] != 150 {
+		t.Fatalf("author_model = %v, context_tokens = %v, want claude-haiku-5-5 and 150",
+			fields["author_model"], fields["context_tokens"])
+	}
+}
