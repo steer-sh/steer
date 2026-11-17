@@ -7,7 +7,6 @@
 package status
 
 import (
-	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -77,7 +76,8 @@ import (
 // snapshots, and a row with fix has none.
 // v37 adds the guard source state stamps-differ and guards[].stamps: a runner
 // carrying a guard's current source under an old rule or identity.
-const StatusVersion = 38
+// v39 removes team: Steer no longer reads a team lockfile.
+const StatusVersion = 39
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20
@@ -164,19 +164,6 @@ type HookInfo struct {
 	// in the shape a guard-tier record's score row carries, whether or not a record
 	// names the guard. It is absent only when the guard left the store mid-read.
 	Fixtures *mine.FixtureReceipt `json:"fixtures,omitempty"`
-}
-
-// TeamState summarizes the repo-committed team lockfile, when one is present.
-type TeamState struct {
-	Present        bool   `json:"present"`
-	Path           string `json:"path,omitempty"`
-	HooksLocked    int    `json:"hooks_locked"`
-	CatalogVersion string `json:"catalog_version,omitempty"`
-	// Error is why a file that IS there could not be read. A project with no
-	// lockfile is not configured for one and that is not a fault; a file that
-	// exists and will not parse is a fault, and reading the two as one absence
-	// told the reader nothing was there while a broken file sat at the path.
-	Error string `json:"error,omitempty"`
 }
 
 // CorpusRow is one corpus's presence, size and path on this machine. It carries
@@ -459,12 +446,14 @@ type SystemStatus struct {
 	Hooks   []HookInfo     `json:"hooks"`
 	Rules   []RuleInfo     `json:"rules"`
 	Addenda []AddendumInfo `json:"addenda"`
-	Team    TeamState      `json:"team"`
 	// Stores a reader refused. Every config section above fails soft, so an
 	// unreadable store would otherwise read as an empty inventory — the same
 	// snapshot a machine with no guards produces, while the installed guards
 	// still run.
 	StoreProblems []StoreProblem `json:"store_problems"`
+	// LegacyTeamLockfile is the path of a steer-team.lock.json left in the
+	// repository, "" when there is none.
+	LegacyTeamLockfile string `json:"-"`
 	// ReviewerProbe is the caller's reading of the reviewer CLI, kept for the
 	// readiness answer.
 	ReviewerProbe reviewers.Probe `json:"-"`
@@ -554,7 +543,7 @@ func Collect(opts Options) (*SystemStatus, error) {
 	s.StoreProblems = append(s.StoreProblems, problems...)
 	s.StoreProblems = dedupeStoreProblems(s.StoreProblems)
 	s.Addenda = AddendumInventory(opts.Addendum)
-	s.Team = collectTeam()
+	s.LegacyTeamLockfile = legacyTeamLockfile(opts.RepoRoot)
 	return s, nil
 }
 
@@ -1255,38 +1244,20 @@ func collectHooks(scope string) ([]HookInfo, []StoreProblem) {
 	return out, nil
 }
 
-// teamLockfileName is the repo-committed team policy lockfile at project root.
-// The read here is a minimal, decoupled decode of the file cmd/team.go writes.
-const teamLockfileName = "steer-team.lock.json"
+// legacyTeamLockfileName is the lockfile `steer team` wrote at the repository
+// root; Steer no longer reads it.
+const legacyTeamLockfileName = "steer-team.lock.json"
 
-// collectTeam reads the repo-committed team lockfile summary at the project root.
-// A file that is not there reads as absent. A file that IS there and cannot be
-// read or parsed reads as present with its error, because the two are different
-// facts: one says the project configured none, the other says the one it
-// configured is broken.
-func collectTeam() TeamState {
-	data, err := os.ReadFile(teamLockfileName)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return TeamState{Present: false}
-		}
-		return TeamState{Present: true, Path: teamLockfileName, Error: err.Error()}
+// legacyTeamLockfile returns the path of a team lockfile left in repoRoot, or "".
+func legacyTeamLockfile(repoRoot string) string {
+	if repoRoot == "" {
+		return ""
 	}
-	var lf struct {
-		CatalogVersion string `json:"catalog_version"`
-		Hooks          []struct {
-			Name string `json:"name"`
-		} `json:"hooks"`
+	path := filepath.Join(repoRoot, legacyTeamLockfileName)
+	if _, err := os.Lstat(path); err != nil {
+		return ""
 	}
-	if err := json.Unmarshal(data, &lf); err != nil {
-		return TeamState{Present: true, Path: teamLockfileName, Error: err.Error()}
-	}
-	return TeamState{
-		Present:        true,
-		Path:           teamLockfileName,
-		HooksLocked:    len(lf.Hooks),
-		CatalogVersion: lf.CatalogVersion,
-	}
+	return path
 }
 
 // markUnread sets each candidate row's unread reading against the mark the last

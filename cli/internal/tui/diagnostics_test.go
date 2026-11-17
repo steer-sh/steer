@@ -124,31 +124,6 @@ func TestAnAbsentCountIsLocal(t *testing.T) {
 	}
 }
 
-// A lockfile that is not there is not a fault. One that IS there and will not
-// parse is a fault, and reporting it as absent hid a broken file at the path.
-func TestAMalformedTeamFileIsNotAnAbsentOne(t *testing.T) {
-	m := New(gate.Defaults(), "global")
-	m.width = 200
-	m.active = panelDiagnostics
-
-	m.snap = &status.SystemStatus{}
-	if !strings.Contains(m.viewDiagnostics(), "Not configured for this project") {
-		t.Error("an absent lockfile does not read as absent")
-	}
-
-	m.snap = &status.SystemStatus{Team: status.TeamState{
-		Present: true, Path: "steer-team.lock.json",
-		Error: "unexpected end of JSON input",
-	}}
-	view := m.viewDiagnostics()
-	if strings.Contains(view, "Not configured") {
-		t.Errorf("a broken lockfile reads as absent:\n%s", view)
-	}
-	if !strings.Contains(view, "unexpected end of JSON input") {
-		t.Errorf("the actual error is not reported:\n%s", view)
-	}
-}
-
 // Feedback belongs to the panel whose action wrote it. A Reviewer cancellation
 // showing on Diagnostics reads as that page's own state.
 func TestFeedbackStaysOnItsOwnPanel(t *testing.T) {
@@ -289,5 +264,17 @@ func TestNoPrintedRepairRegistersARemovedHarnessAgain(t *testing.T) {
 		if f[3] != "claude-code" {
 			t.Errorf("%q registers a harness other than Claude Code:\n%s", f[0], view)
 		}
+	}
+}
+
+// A steer-team.lock.json left in the repository is a dashboard issue, as it is
+// in steer status, because clones no longer install the guards it holds.
+func TestALeftoverTeamLockfileIsADashboardIssue(t *testing.T) {
+	m := New(gate.Defaults(), "global")
+	m.width = 200
+	m.active = panelDiagnostics
+	m.snap = &status.SystemStatus{LegacyTeamLockfile: "/r/steer-team.lock.json"}
+	if view := m.viewDiagnostics(); !strings.Contains(view, "no longer installs guards from /r/steer-team.lock.json") {
+		t.Errorf("the leftover lockfile is not reported:\n%s", view)
 	}
 }

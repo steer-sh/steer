@@ -280,7 +280,7 @@ temporary directory and renamed into place, and a failed write stops the removal
 Store readers skip subdirectories, so an archived guard never reaches the master.
 Only a guard this binary ships removes without an archive
 (`RemoveOptions.ShippedCopy`, which turning self-protection off sets); a pruned
-orphan and a team-lockfile extra are archived. A project archive is committed with
+orphan is archived. A project archive is committed with
 the store. Steer ships no presets: a guard an earlier Steer installed from its
 catalog keeps `source: factory` and is an orphan that keeps running.
 `steer preset disable <name>`, the removal its block names, archives one
@@ -298,7 +298,7 @@ are checks and reviews still holds one guard and a registered master. The guard
 is lexical and best-effort: it matches protected files by full path, resolving a
 relative one against the payload's `cwd`, in two classes. Steer's own files (the
 global store's master, manifest, audit log and its own file,
-`~/.steer/config.json`, and the current repository's stores and team lockfile)
+`~/.steer/config.json`, and the current repository's stores)
 are closed to every change, and the block names the steer command the user runs
 instead. Harness configuration files (`~/.claude/settings.json`, the repository's
 `.claude/settings.json` and `.claude/settings.local.json`, `$CODEX_HOME/hooks.json`
