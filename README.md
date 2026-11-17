@@ -103,7 +103,7 @@ The `/steer` skill creates a new rule using the most appropriate fix type: a rep
 
 Guard commands default to project scope and register with both Claude Code/Codex. Use `--scope global` or `--harness codex` to change scope or target CLI as needed.
 
-To remove a custom guard - you can ask your agent to do so, or run `steer remove <hook-name>`.
+To remove a custom guard - you can ask your agent to do so, or run `steer guard remove <hook-name>`.
 
 Steer ships with self-protection on by default. It blocks your agent from changing Steer files, turning Steer hooks off, or removing Steer configuration entries. Other edits to your config that do not modify the Steer's entries are allowed to pass. It is intended to stop careless agent changes, not necessarily adversarial agents. `~/.steer/bin/steer config set protection.self off` turns off self-protection. You need to run this - agents cannot.
 
