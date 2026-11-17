@@ -5,6 +5,16 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+- **`steer team` is removed**: `steer team lock`, `apply` and `verify` are
+  gone, and Steer no longer reads `steer-team.lock.json`. A repository shares
+  its fixes as the files committed under `.steer/`, and a change to a team fix
+  is a pull request. `steer status` and the dashboard name a lockfile left at the
+  repository root until you delete it. A clone no longer installs guards from
+  the lockfile, so first register each guard you want in the project and commit
+  the guards with the rebuilt runner. The status JSON drops `team` (`status_version` 39).
+
 ## [0.4.2] - 2026-11-16
 
 - **The git pre-commit review is removed**: `steer commit-gate install

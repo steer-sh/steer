@@ -74,7 +74,6 @@ func TestHealthVerdictPerReading(t *testing.T) {
 			s.Posture.CommitGate[0] = ScopeArming{Harness: "pi", Scope: "global", Registered: true, Effective: true, Resolvable: ResolveResolvable, Trust: TrustUnknown}
 		}, availableProbe(), VerdictUnchecked, "cannot be verified"},
 		"store unread":   {func(s *SystemStatus) { s.StoreProblems = []StoreProblem{{Scope: "project", Error: "bad"}} }, availableProbe(), VerdictAttention, "guard list"},
-		"team unread":    {func(s *SystemStatus) { s.Team.Error = "bad" }, availableProbe(), VerdictAttention, "lockfile"},
 		"checks unread":  {func(s *SystemStatus) { s.Checks.Error = "bad" }, availableProbe(), VerdictUnchecked, "checks"},
 		"checks unrun":   {func(s *SystemStatus) { s.Checks.Adopted = true }, availableProbe(), VerdictAttention, "no harness runs them"},
 		"no interpreter": {func(s *SystemStatus) { s.Posture.GuardInterpreter = InterpreterReading{Command: GuardInterpreter} }, availableProbe(), VerdictAttention, "not on this PATH"},
@@ -101,6 +100,28 @@ func TestHealthVerdictPerReading(t *testing.T) {
 				t.Errorf("a %s verdict still claims ready: %q", h.Verdict, h.Ready)
 			}
 		})
+	}
+}
+
+// A steer-team.lock.json left at the repository root needs attention until the
+// file is gone, because clones no longer install the guards it holds.
+func TestALeftoverTeamLockfileIsInformation(t *testing.T) {
+	root := t.TempDir()
+	if got := legacyTeamLockfile(root); got != "" {
+		t.Fatalf("a repository with no lockfile reads %q", got)
+	}
+	path := filepath.Join(root, "steer-team.lock.json")
+	if err := os.WriteFile(path, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := healthyFixture()
+	s.LegacyTeamLockfile = legacyTeamLockfile(root)
+	h := HealthOf(s, availableProbe())
+	if h.Verdict != VerdictAttention || len(h.Issues) != 1 {
+		t.Fatalf("verdict %s, issues %+v; want attention with one issue", h.Verdict, h.Issues)
+	}
+	if issue := h.Issues[0]; !strings.Contains(issue.Title, path) || !strings.Contains(issue.Fix, "rebuilt runner, then delete the file") {
+		t.Errorf("issue = %+v; want it to name %s and how to keep its guards", issue, path)
 	}
 }
 

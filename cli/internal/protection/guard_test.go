@@ -95,7 +95,6 @@ func TestSelfProtectionBlocksSteerStateByFullPath(t *testing.T) {
 		filepath.Join(rt.home, ".steer", "config.json"),
 		filepath.Join(rt.repo, ".steer", "hooks", "steer-manifest.json"),
 		filepath.Join(rt.repo, ".claude", "hooks", "steer-hooks.py"),
-		filepath.Join(rt.repo, "steer-team.lock.json"),
 	}
 	for _, path := range steerFiles {
 		t.Run(path, func(t *testing.T) {
@@ -125,12 +124,12 @@ func TestSelfProtectionBlocksSteerStateByFullPath(t *testing.T) {
 	}
 	relative := []struct{ cwd, command string }{
 		{rt.repo, "rm .claude/settings.json"},
-		{filepath.Join(rt.repo, "src"), "sed -i 's/a/b/' ../steer-team.lock.json"},
+		{filepath.Join(rt.repo, "src"), "sed -i 's/a/b/' ../.steer/hooks/steer-manifest.json"},
 		{rt.repo, "echo done; rm .steer/hooks/steer-hooks.py && steer list"},
 		{rt.repo, "cp /dev/null ~/.steer/config.json"},
 		{rt.repo, "cat ~/.steer/config.json && sudo rm -f .claude/settings.json"},
 		{rt.repo, "mv .codex/hooks.json /tmp/hooks.json"},
-		{rt.repo, "FOO=1 sed -i '' 's/a/b/' steer-team.lock.json"},
+		{rt.repo, "FOO=1 sed -i '' 's/a/b/' .steer/hooks/steer-audit.jsonl"},
 		{rt.repo, "dd if=/dev/null of=.steer/hooks/steer-manifest.json"},
 		{rt.repo, "echo x | tee -a .claude/settings.json"},
 		{rt.repo, "true;rm .claude/settings.json"},
@@ -138,15 +137,15 @@ func TestSelfProtectionBlocksSteerStateByFullPath(t *testing.T) {
 		{rt.repo, "rm -rf .steer"},
 		{rt.repo, "mv .claude /tmp/old-claude"},
 		{rt.repo, "cp /tmp/settings.json .claude/"},
-		{rt.repo, "echo '{}' > \"steer-team.lock.json\""},
+		{rt.repo, "echo '{}' > \".steer/hooks/steer-manifest.json\""},
 	}
 	for _, tc := range relative {
 		if blocked, _ := rt.run(t, tc.cwd, bash(tc.command)); !blocked {
 			t.Errorf("%q from %s was allowed", tc.command, tc.cwd)
 		}
 	}
-	if blocked, _ := rt.run(t, filepath.Join(rt.repo, "src"), edit("../steer-team.lock.json")); !blocked {
-		t.Error("an Edit of the team lockfile by a relative path was allowed")
+	if blocked, _ := rt.run(t, filepath.Join(rt.repo, "src"), edit("../.steer/hooks/steer-manifest.json")); !blocked {
+		t.Error("an Edit of the project manifest by a relative path was allowed")
 	}
 
 	namesakes := []map[string]any{
@@ -205,7 +204,6 @@ func TestSelfProtectionReadsEverySteerInvocationPastFlagsAndPunctuation(t *testi
 		{"pruning orphans", "steer preset sync --prune-orphans", false},
 		{"a rule naming the removal", "steer register --rule \"steer remove steer-self-protection\" ./user-custom.py", false},
 		{"the name in the next command", "steer remove --force; echo steer-self-protection", false},
-		{"team commands", "steer team apply --force && steer team verify --ci", false},
 		{"a directory named steer", "cd steer && steer list", false},
 	}
 	for _, tc := range tests {

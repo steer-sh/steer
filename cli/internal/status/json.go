@@ -24,7 +24,6 @@ type statusJSON struct {
 	Hooks         []HookInfo       `json:"hooks"`
 	Rules         []RuleInfo       `json:"rules"`
 	Addenda       []AddendumInfo   `json:"addenda"`
-	Team          TeamState        `json:"team"`
 	StoreProblems []StoreProblem   `json:"store_problems"`
 }
 
@@ -170,7 +169,6 @@ func (s *SystemStatus) contract() statusJSON {
 		Hooks:         nonNil(s.Hooks),
 		Rules:         nonNil(s.Rules),
 		Addenda:       nonNil(s.Addenda),
-		Team:          s.Team,
 		StoreProblems: nonNil(s.StoreProblems),
 	}
 	for _, r := range s.Posture.Resolver {

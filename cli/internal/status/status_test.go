@@ -334,7 +334,6 @@ func TestJSONContractIsStable(t *testing.T) {
 		Rules: []RuleInfo{{ID: "config-path", Scope: "global", Text: "resolve config from the repo root"}},
 		Addenda: []AddendumInfo{{ID: "fp-sort", Scope: "project", Text: "sorted output is fine",
 			HeadText: "sorted output is not a finding", State: AddendumUncommittedChange}},
-		Team:          TeamState{Present: true, Path: "steer-team.lock.json", HooksLocked: 3, CatalogVersion: "v7"},
 		StoreProblems: []StoreProblem{{Scope: "project", Error: "guard manifest /w/.steer/hooks/steer-manifest.json gives entry \"x\" the file \"../y\", which is not a plain file name; edit the manifest entry"}},
 	}
 	got, err := s.MarshalIndent()
@@ -812,12 +811,6 @@ const goldenStatusJSON = `{
       "state": "uncommitted-change"
     }
   ],
-  "team": {
-    "present": true,
-    "path": "steer-team.lock.json",
-    "hooks_locked": 3,
-    "catalog_version": "v7"
-  },
   "store_problems": [
     {
       "scope": "project",
@@ -947,30 +940,6 @@ func TestPiPostureReadsTheRegisteredExtension(t *testing.T) {
 	if gateRow.Trust != TrustUnknown || resolverRow.Trust != TrustUnknown {
 		t.Fatalf("trust = %q/%q, want unknown: steer reads no Pi trust record",
 			gateRow.Trust, resolverRow.Trust)
-	}
-}
-
-// A team lockfile that is not there is not a fault. One that IS there and cannot
-// be parsed is, and reading the two as one absence told a reader nothing was
-// configured while a broken file sat at the path.
-func TestABrokenTeamLockfileIsNotAnAbsentOne(t *testing.T) {
-	t.Chdir(t.TempDir())
-	if got := collectTeam(); got.Present || got.Error != "" {
-		t.Errorf("no lockfile read as %#v, want absent with no error", got)
-	}
-
-	if err := os.WriteFile(teamLockfileName, []byte("{not json"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	got := collectTeam()
-	if !got.Present {
-		t.Fatal("a broken lockfile read as absent")
-	}
-	if got.Error == "" {
-		t.Error("a broken lockfile reports no error")
-	}
-	if got.Path != teamLockfileName {
-		t.Errorf("the broken lockfile names no path: %q", got.Path)
 	}
 }
 

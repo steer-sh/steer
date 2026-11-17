@@ -177,7 +177,7 @@ A correction occurrence can carry two context fields, each `{text, cut}` with `c
 
 An `after_interrupt` occurrence carries the same two fields, read from before the interrupt. A `correction_candidates` occurrence carries them too.
 
-### The `steer status --json` contract (`status_version: 37`)
+### The `steer status --json` contract (`status_version: 39`)
 
 Step 1 reads this snapshot for posture and the full class inventory. The unit is
 the failure class and what the corpus recorded about it, not the hook count. This
@@ -228,6 +228,8 @@ v36 adds `refreshed_at` and `fix` to the transcript `corpora[]` row: its candida
 counted from this machine's stored session snapshots, and a row with `fix` has none.
 v38 adds `posture.protection` and removes `presets[]`: Steer ships no presets, and a
 guard an earlier Steer installed from one is a `hooks[]` row whose `source` is `factory`.
+v39 removes `team`: Steer reads no team lockfile, and a repository shares its fixes
+as the files committed under `.steer/`.
 
 - `status_version` — the schema version. `--json` is a stable agent contract.
 - `posture` — the arming state: `instrument` (reviewer model / runs / prompt
@@ -430,11 +432,6 @@ guard an earlier Steer installed from one is a `hooks[]` row whose `source` is `
   scope, not empty: the guards the store registered still run. A manifest naming
   a file outside its store is refused this way, and an operator repairs it by
   editing the named entry.
-- `team` — the repo-committed team lockfile summary: `present`, `path`,
-  `hooks_locked`, `catalog_version`, and `error`. v10 adds `error`: a project with
-  no lockfile is `present: false` and is not a fault, while a lockfile that exists
-  and cannot be read is `present: true` with `error` naming why. Before v10 both
-  read as absent.
 
 ### 2b. Commit-review findings
 

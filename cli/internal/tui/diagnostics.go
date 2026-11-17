@@ -37,9 +37,6 @@ func (m *Model) viewDiagnostics() string {
 	}
 	out += wrapTo(dim("Counts recorded on this machine; the history may be incomplete."), "  ", width)
 
-	out += section("Team guard configuration")
-	out += m.teamLines(width)
-
 	if !m.technical {
 		return out + section("Technical details") +
 			wrapTo(dim("press t to show storage paths, runner versions and how the "+
@@ -82,6 +79,15 @@ type diagnosticIssue struct {
 // work out where to go.
 func (m *Model) diagnosticIssues() []diagnosticIssue {
 	out := m.checkIssues()
+	if path := m.snap.LegacyTeamLockfile; path != "" {
+		out = append(out, diagnosticIssue{
+			headline: "Steer no longer installs guards from " + path,
+			detail: "A clone runs only the guards committed in the repository, through the runner " +
+				"Steer builds from them, and the file can hold guards, or versions of them, that those " +
+				"lack. Register each guard you want in the project, commit the guards with the rebuilt " +
+				"runner, then delete the file.",
+		})
+	}
 	masters := m.snap.Posture.Masters
 	for _, master := range masters {
 		if !master.Stale() {
@@ -275,21 +281,6 @@ func (m *Model) historyLines() []historyLine {
 		}
 	}
 	return lines
-}
-
-// teamLines report the repo-committed lockfile. Absent is not a fault, and a file
-// that is there and will not parse is not absent.
-func (m *Model) teamLines(width int) string {
-	team := m.snap.Team
-	switch {
-	case !team.Present:
-		return wrapTo(dim("Not configured for this project."), "  ", width)
-	case team.Error != "":
-		return wrapTo(warn("Unreadable: ")+"The file at "+team.Path+" could not be read: "+team.Error,
-			"  ", width)
-	}
-	return wrapTo(fmt.Sprintf("%d guard(s) pinned, catalog %s, from %s",
-		team.HooksLocked, team.CatalogVersion, team.Path), "  ", width)
 }
 
 // technicalLines hold what supports inspection and repair: where each corpus is

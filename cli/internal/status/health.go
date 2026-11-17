@@ -79,9 +79,11 @@ func HealthOf(s *SystemStatus, probe reviewers.Probe) Health {
 			Title: "Steer cannot read the " + p.Scope + " guard list: " + p.Error,
 			Fix:   "edit the entry named above; the guards already installed keep running"})
 	}
-	if s.Team.Error != "" {
+	if s.LegacyTeamLockfile != "" {
 		h.Issues = append(h.Issues, Issue{Severity: SeverityAttention,
-			Title: "Steer cannot read the team lockfile", Detail: []string{s.Team.Error}})
+			Title:  "Steer no longer installs guards from " + s.LegacyTeamLockfile,
+			Detail: []string{"A clone runs only the guards committed in the repository, through the runner Steer builds from them, and the file can hold guards, or versions of them, that those lack."},
+			Fix:    "register each guard you want in the project, commit the guards with the rebuilt runner, then delete the file"})
 	}
 	h.Issues = append(h.Issues, modIssues(s)...)
 	builds := BuildIssues(s.Posture.Plugins, hooks, running)

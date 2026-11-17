@@ -88,7 +88,6 @@ STEER_FILE_COMMANDS = {
     "steer-manifest.json": "steer register or steer remove",
     "steer-audit.jsonl": "steer audit",
     "config.json": "steer config set",
-    "steer-team.lock.json": "steer team lock",
     SELF_NAME + ".py": "steer config set " + SETTING_KEY + " off",
 }
 
@@ -103,7 +102,6 @@ def protected_paths(store_dir, cwd):
     root = repo_root(cwd)
     for store in (os.path.join(root, ".steer", "hooks"), os.path.join(root, ".claude", "hooks")):
         steer_files.extend(os.path.join(store, name) for name in STORE_FILES)
-    steer_files.append(os.path.join(root, "steer-team.lock.json"))
 
     codex = codex_home()
     harness_files = [
