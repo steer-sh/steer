@@ -249,12 +249,14 @@ def record_assignments(words, variables, certain, together):
             variables[name] = value
 
 
-def single_quoted_dollar(text):
-    """Return whether a $ sits inside single quotes, where the shell does not expand it."""
+def literal_dollar(text):
+    """Return whether a $ is single-quoted or backslash-escaped, where the shell does not expand it."""
     quote = ""
     escaped = False
     for char in text:
         if escaped:
+            if char == "$":
+                return True
             escaped = False
         elif quote == "'":
             if char == "'":
@@ -292,14 +294,14 @@ def violation(command, cwd):
     fresh = set()
     removed = set()
     variables = {}
+    # The token stream drops quotes and escapes, so a literal $ turns expansion off for the command.
+    expanding = not literal_dollar(strip_heredocs(command))
     # Each mktemp gets its own new path, unless the command may move the temporary directory.
-    if "TMPDIR" not in command:
+    if expanding and "TMPDIR" not in command:
         made = []
         temporary = os.environ.get("TMPDIR") or "/tmp"
         command = MKTEMP_DIR.sub(lambda _: made.append(0) or shlex.quote(
             os.path.join(temporary, "tmp.steer%d" % len(made))), command)
-    # The token stream drops quotes, so a single-quoted $ turns expansion off for the command.
-    expanding = not single_quoted_dollar(strip_heredocs(command))
     depth = 0
     for raw, separator, before in segments(command):
         depth = max(0, depth + before.count("(") - before.count(")"))

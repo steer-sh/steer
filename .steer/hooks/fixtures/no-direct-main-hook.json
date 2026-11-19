@@ -309,6 +309,21 @@
       "origin": "synthetic"
     },
     {
+      "name": "commit on main after a cd to a single-quoted mktemp substitution is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "R='$(mktemp -d)'; cd \"$R\"; git init -q; git commit -m x"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/main\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "synthetic"
+    },
+    {
       "name": "commit on main after a cd to a single-quoted variable name is blocked",
       "payload": {
         "tool_input": {
@@ -344,6 +359,21 @@
       "payload": {
         "tool_input": {
           "command": "cd $REPO \u0026\u0026 git commit -m x"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/main\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "commit on main after a cd to an escaped variable name is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "R=/private/tmp/steer-fixture-absent; cd \\$R; git init -q; git commit -m x"
         },
         "tool_name": "Bash"
       },
