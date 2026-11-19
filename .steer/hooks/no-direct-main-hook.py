@@ -25,6 +25,10 @@ PUSH_VALUE_FLAGS = {"--repo", "-o", "--push-option", "--receive-pack", "--exec"}
 INIT_VALUE_FLAGS = {"-b", "--initial-branch", "--template", "--separate-git-dir",
                     "--object-format", "--ref-format"}
 HEREDOC = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+ASSIGNMENT = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)=(.*)", re.DOTALL)
+VARIABLE = re.compile(r"\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))")
+# A command substitution that creates a new directory under the temporary directory.
+MKTEMP_DIR = re.compile(r"\$\(\s*mktemp\s+(?:-d|-d\s+-t\s+[\w.-]+|-dt\s+[\w.-]+)\s*\)")
 
 
 def strip_heredocs(command):
@@ -42,7 +46,10 @@ def strip_heredocs(command):
 
 
 def segments(command):
-    """Return (tokens, following separator) per command in a shell string, or [] if it does not parse."""
+    """Return (tokens, following separator, preceding separators) per command in a shell string.
+
+    Returns [] if the string does not parse.
+    """
     text = strip_heredocs(command).replace("\n", " ; ")
     lexer = shlex.shlex(text, posix=True, punctuation_chars=";&|()")
     lexer.whitespace_split = True
@@ -52,15 +59,19 @@ def segments(command):
         return []
     result = []
     current = []
+    before = ""
     for token in tokens:
         if set(token) <= SEPARATORS:
             if current:
-                result.append((current, token))
+                result.append((current, token, before))
+                before = token
+            else:
+                before += token
             current = []
         else:
             current.append(token)
     if current:
-        result.append((current, ""))
+        result.append((current, "", before))
     return result
 
 
@@ -217,14 +228,89 @@ def push_targets_main(arguments, branch):
     return False
 
 
+def expand(word, variables):
+    """Return word with each variable in variables replaced by its value; others stay literal."""
+    return VARIABLE.sub(lambda match: variables.get(match.group(1) or match.group(2), match.group(0)), word)
+
+
+def record_assignments(words, variables, certain, together):
+    """Bind each NAME=value in words whose value expands to one literal word, and unbind the rest.
+
+    An assignment that may not run, or runs in a subshell, is not certain and unbinds its name.
+    When together, as for export, every value expands against the bindings before any is made.
+    """
+    before = dict(variables)
+    for word in words:
+        name, value = ASSIGNMENT.match(word).groups()
+        value = expand(value, before if together else variables)
+        if not certain or re.search(r"[$`\s*?\[]", value):
+            variables.pop(name, None)
+        else:
+            variables[name] = value
+
+
+def single_quoted_dollar(text):
+    """Return whether a $ sits inside single quotes, where the shell does not expand it."""
+    quote = ""
+    escaped = False
+    for char in text:
+        if escaped:
+            escaped = False
+        elif quote == "'":
+            if char == "'":
+                quote = ""
+            elif char == "$":
+                return True
+        elif char == "\\":
+            escaped = True
+        elif quote == '"':
+            if char == '"':
+                quote = ""
+        elif char in "'\"":
+            quote = char
+    return False
+
+
+def forget_assigned(tokens, variables):
+    """Unbind each name a command may assign: one it names as a word or as NAME=value.
+
+    export changes only the names it gives a value. source, . and eval may assign any name,
+    so they unbind every one.
+    """
+    if tokens[:1] and tokens[0] in ("source", ".", "eval"):
+        variables.clear()
+        return
+    for token in tokens:
+        if tokens[0] != "export" or "=" in token:
+            variables.pop(token.split("=", 1)[0], None)
+
+
 def violation(command, cwd):
     """Return the message for the first commit or push that reaches main, or ""."""
     directory = cwd
     moved = {}
     fresh = set()
     removed = set()
-    for raw, separator in segments(command):
-        tokens = strip_prefix(raw)
+    variables = {}
+    # Each mktemp gets its own new path, unless the command may move the temporary directory.
+    if "TMPDIR" not in command:
+        made = []
+        temporary = os.environ.get("TMPDIR") or "/tmp"
+        command = MKTEMP_DIR.sub(lambda _: made.append(0) or shlex.quote(
+            os.path.join(temporary, "tmp.steer%d" % len(made))), command)
+    # The token stream drops quotes, so a single-quoted $ turns expansion off for the command.
+    expanding = not single_quoted_dollar(strip_heredocs(command))
+    depth = 0
+    for raw, separator, before in segments(command):
+        depth = max(0, depth + before.count("(") - before.count(")"))
+        # Only a top-level assignment after ; or at the start runs unconditionally in this shell.
+        certain = expanding and before in ("", ";") and depth == 0 and separator not in ("|", "|&", "&")
+        words = raw[1:] if raw[:1] == ["export"] else raw
+        if words and all(ASSIGNMENT.match(word) for word in words):
+            record_assignments(words, variables, certain, raw[:1] == ["export"])
+            continue
+        forget_assigned(raw, variables)
+        tokens = [expand(token, variables) for token in strip_prefix(raw)]
         if not tokens:
             continue
         if tokens[0] == "rm" and any(t == "--recursive" or (t[:1] == "-" and t[1:2] != "-" and "r" in t.lower())
