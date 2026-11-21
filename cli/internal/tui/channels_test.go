@@ -211,12 +211,14 @@ func TestTheCheckRunnerIsAnArmingRow(t *testing.T) {
 		Checks: status.CheckTier{Runner: []status.ScopeArming{
 			{Harness: "claude-code", Scope: "global"},
 			{Harness: "codex", Scope: "global"},
+			{Harness: "pi", Scope: "global"},
 		}},
 	}
 	want := []string{
 		"commit gate · Claude Code global",
 		"check runner · Claude Code global",
 		"check runner · Codex global",
+		"check runner · Pi global",
 	}
 	rows := m.channelRows()
 	if len(rows) != len(want) {
@@ -231,7 +233,7 @@ func TestTheCheckRunnerIsAnArmingRow(t *testing.T) {
 	// Enter writes the runner through the same registration `steer check install`
 	// writes, and a second enter on the registered row removes it. TestMain points
 	// both harness homes at an empty directory.
-	for _, row := range rows[1:3] {
+	for _, row := range rows[1:] {
 		if err := m.toggleChannel(row); err != nil {
 			t.Fatalf("arming %s: %v", row.name(), err)
 		}
