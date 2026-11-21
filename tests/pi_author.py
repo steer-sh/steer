@@ -20,6 +20,9 @@ Cases:
   load      With the gate and check runner armed and the package loaded with
             -e, one session makes status read both bridges as approved, and the
             package's session extension runs report cadence.
+  review    The stub reviewer denies round 1; the model handles the finding and
+            the commit lands on retry. After the ledger grace, the next
+            session's turn_end resolves the retry row with the model's ledger.
 
 A case whose model did not make the calls the case needs reports INCONCLUSIVE
 and exits 2: the integration was not exercised, so nothing passed or failed.
@@ -62,6 +65,9 @@ class Run:
         self.env["PATH"] = os.pathsep.join([str(self.stubs), str(self.bin), self.env.get("PATH", "")])
         self.env["STEER_STUB_LOG"] = str(self.root / "stub.jsonl")
         self.env["STEER_STUB_STATE"] = str(self.root / "stubstate")
+        self.env["STEER_STUB_SCRIPT"] = str(self.root / "stub-script")
+        # Steer's ledger harvester finds Pi's sessions through this variable.
+        self.env["PI_CODING_AGENT_SESSION_DIR"] = str(self.sessions)
         (self.root / "stubstate").mkdir(exist_ok=True)
 
     def build(self):
@@ -197,6 +203,45 @@ def case_batch(run):
     return PASS, "the batched commit was refused before review; the commit run alone was reviewed"
 
 
+LEDGER_GRACE = 120  # gate.LedgerGrace: the resolver leaves a row alone this long after its deny
+
+
+def case_review(run):
+    stage_commit(run)
+    (run.root / "stub-script").write_text("finding\nclean\n")
+    proc = run.pi("Stage b.go and commit it with the subject 'add b'. If the commit review reports "
+                  "findings, handle them as the review instructs, then commit again.")
+    rows = run.ledger_rows()
+    phases = [r.get("phase") for r in rows]
+    if "add b" not in run.commits():
+        if not rows:
+            return INCONCLUSIVE, "the model made no commit\n" + proc.stdout[-2000:]
+        return INCONCLUSIVE, "the model did not land the commit after the deny (phases %s)\n%s" % (
+            phases, proc.stdout[-2000:])
+    owed = [r for r in rows if r.get("phase") in ("retry", "nitpick")]
+    if not owed:
+        return FAIL, "the commit landed with no retry row after the deny (phases %s)" % phases
+    # A session's own turn_end runs before the grace ends, so the next session's
+    # turn_end is the one that resolves the row.
+    wait = max(r.get("ts", 0) for r in rows) + LEDGER_GRACE + 5 - time.time()
+    if wait > 0:
+        time.sleep(wait)
+    run.pi("Reply with the single word ok. Use no tools.")
+    for _ in range(120):
+        owed = [r for r in run.ledger_rows() if r.get("phase") in ("retry", "nitpick")]
+        if all(r.get("backfilled") or r.get("ledger_found") for r in owed):
+            break
+        time.sleep(0.5)
+    else:
+        return FAIL, "the next session's turn_end did not resolve the retry row: %s" % json.dumps(owed)[:2000]
+    found = [bool(r.get("ledger_found")) for r in owed]
+    if not all(found):
+        return FAIL, "turn_end resolved the retry row as a miss; the harvester found no ledger " \
+            "(phases %s)\n%s" % (phases, proc.stdout[-2000:])
+    return PASS, "round 1 denied, the commit landed on retry, and the next turn_end found its ledger " \
+        "(phases %s)" % phases
+
+
 CHECK_SH = """#!/usr/bin/env bash
 if [ -e bad.txt ]; then
   echo "check.sh: bad.txt must not exist in this repository; remove it" >&2
@@ -284,7 +329,8 @@ def case_load(run):
     return PASS, "Pi loaded both bridges and status read them approved; the session extension ran report cadence"
 
 
-CASES = {"batch": case_batch, "check": case_check, "guidance": case_guidance, "load": case_load}
+CASES = {"batch": case_batch, "check": case_check, "guidance": case_guidance, "load": case_load,
+         "review": case_review}
 
 
 def main():
