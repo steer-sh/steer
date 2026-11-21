@@ -13,6 +13,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/claude"
 	codexhooks "github.com/steer-sh/steer-cli/internal/codex"
 	"github.com/steer-sh/steer-cli/internal/harness"
+	pihooks "github.com/steer-sh/steer-cli/internal/pi"
 	"github.com/steer-sh/steer-cli/internal/statestore"
 	"github.com/steer-sh/steer-cli/internal/testhome"
 )
@@ -507,5 +508,94 @@ func TestUninstallHarnessClaimsKeptItemsOnlyWhenThereAreSome(t *testing.T) {
 	}
 	if !strings.Contains(out, "No global Codex registration of Steer is left.") {
 		t.Errorf("the success line claims kept items the plan does not have:\n%s", out)
+	}
+}
+
+// TestUninstallNamesTheProjectGuardRunnersFileAndRemoveCommands: a project guard
+// runner stays while its store holds a guard, so the plan names the runner's file
+// and the commands that empty the store: each guard by the id remove resolves, after
+// deleting a file remove refuses, and each owner of a shared file. A one-harness plan names none of them, because
+// they change the store every harness shares.
+func TestUninstallNamesTheProjectGuardRunnersFileAndRemoveCommands(t *testing.T) {
+	testhome.Set(t, t.TempDir())
+	t.Setenv("CODEX_HOME", "")
+	repo := t.TempDir()
+	if out, err := exec.Command("git", "init", "-q", repo).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	t.Chdir(repo)
+	store := filepath.Join(repo, ".steer", "hooks")
+	if err := os.MkdirAll(store, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Entry alpha owns beta.py and entry beta owns gamma.py, so a stem names
+	// another guard; alpha.py is a file no entry owns whose stem is an id; delta and
+	// epsilon both own shared.py.
+	for _, file := range []string{"alpha.py", "beta.py", "gamma.py", "no-var.py", "shared.py"} {
+		if err := os.WriteFile(filepath.Join(store, file), []byte("def main():\n    pass\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	manifest := &claude.Manifest{Hooks: map[string]claude.ManifestEntry{
+		"alpha": {File: "beta.py", Rule: "a"}, "beta": {File: "gamma.py", Rule: "b"},
+		"delta": {File: "shared.py", Rule: "d"}, "epsilon": {File: "shared.py", Rule: "e"},
+	}}
+	if err := claude.SaveManifest(claude.ProjectScope, manifest); err != nil {
+		t.Fatal(err)
+	}
+	bridge, err := pihooks.RegisterMaster(claude.ProjectScope, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runUninstallWith(t, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := filepath.EvalSymlinks(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commands := "      rm " + filepath.Join(resolved, "alpha.py") + "\n" +
+		"      steer remove alpha --scope project\n" +
+		"      steer remove beta --scope project\n" +
+		"      steer remove no-var --scope project\n" +
+		"      steer remove delta --scope project\n" +
+		"      steer remove epsilon --scope project\n"
+	for _, want := range []string{
+		"Pi, project scope: guard runner  ",
+		filepath.Join(filepath.Base(repo), ".pi", "extensions", filepath.Base(bridge)),
+		commands,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the plan does not name %q:\n%s", want, out)
+		}
+	}
+
+	// With only the file remove refuses left, the deletion needs a sync after it.
+	for _, file := range []string{"beta.py", "gamma.py", "no-var.py", "shared.py"} {
+		if err := os.Remove(filepath.Join(store, file)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := "rm " + filepath.Join(resolved, "alpha.py") + "\nsteer hooks sync --scope project"
+	if got := guardRemoveCommands(claude.ProjectScope); got != want {
+		t.Errorf("commands for a store of one refused file = %q, want %q", got, want)
+	}
+	if err := os.Remove(filepath.Join(store, "alpha.py")); err != nil {
+		t.Fatal(err)
+	}
+	if got := guardRemoveCommands(claude.ProjectScope); got != "steer hooks sync --scope project" {
+		t.Errorf("commands for an empty store = %q, want only the sync", got)
+	}
+
+	harnessFlag = "pi"
+	t.Cleanup(func() { harnessFlag = "" })
+	out, err = runUninstallWith(t, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "Pi, project scope: guard runner") || strings.Contains(out, "steer remove") {
+		t.Errorf("a Pi-only plan should name the runner and no store-wide command:\n%s", out)
 	}
 }
