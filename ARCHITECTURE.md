@@ -25,7 +25,14 @@ carries uncommitted changes.
 
 The two marketplace manifests and two root plugin manifests describe one identity:
 `.claude-plugin/marketplace.json`, `.agents/plugins/marketplace.json`,
-`.claude-plugin/plugin.json`, and `.codex-plugin/plugin.json`.
+`.claude-plugin/plugin.json`, and `.codex-plugin/plugin.json`. Pi installs the
+same root as a git package (`git:github.com/steer-sh/steer@release`) and reads the
+root `package.json`, whose `pi` key lists the same skills and one extension,
+`pi/steer-session.ts`. That extension runs the copy's `report cadence` at
+`session_start`, Pi's counterpart of the plugins' SessionStart hook. The guard,
+commit-gate and check extensions are never in the package: Steer generates each one
+with its commands and timeouts baked in, and Pi would load a package copy beside a
+generated file, running the channel twice.
 `cli/internal/plugindist/` pins identity, declared paths and bundled hook wiring.
 `scripts/steer` selects `bin/<os>-<arch>/steer` on macOS and Linux and refuses
 any other OS in one line; `scripts/steer.cmd` is the same refusal.

@@ -62,7 +62,8 @@ class ReleasePreflight(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        for name in (*preflight.MARKETS, *preflight.PLUGINS, "README.md", *preflight.HOOK_FILES.values()):
+        for name in (*preflight.MARKETS, *preflight.PLUGINS, preflight.PI_PACKAGE, "README.md",
+                     *preflight.HOOK_FILES.values()):
             target = self.root / name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / name, target)

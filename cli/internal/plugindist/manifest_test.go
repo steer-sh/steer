@@ -193,6 +193,59 @@ func TestTheMarketplaceEntryIsStrict(t *testing.T) {
 	}
 }
 
+// piPackageOnlyKeys are the keys of Pi's package.json that the plugin manifests do
+// not carry: Pi's resource list, and the flag that keeps npm from publishing it.
+var piPackageOnlyKeys = []string{"pi", "private"}
+
+// Pi installs the plugin root from git and reads package.json there, so it names
+// the plugin the other manifests name and loads the same skills. Every resource
+// type is listed, because Pi discovers an unlisted type from its conventional
+// directory; its one extension is the package's own and sits one directory below
+// the root, beside the launcher it runs.
+func TestPiPackageDescribesThePluginManifestsPlugin(t *testing.T) {
+	root := repoRoot(t)
+	pkg := readJSON(t, filepath.Join(root, "package.json"))
+	manifest := readJSON(t, filepath.Join(root, ".claude-plugin", "plugin.json"))
+
+	resources, ok := pkg["pi"].(map[string]any)
+	if !ok {
+		t.Fatalf("package.json has no pi object: %v", pkg["pi"])
+	}
+	if !reflect.DeepEqual(resources["skills"], manifest["skills"]) {
+		t.Errorf("package.json pi.skills = %v; the plugin manifests list %v", resources["skills"], manifest["skills"])
+	}
+	for _, key := range []string{"prompts", "themes"} {
+		if list, ok := resources[key].([]any); !ok || len(list) != 0 {
+			t.Errorf("package.json pi.%s = %v, want []", key, resources[key])
+		}
+	}
+	extensions, ok := resources["extensions"].([]any)
+	if !ok || len(extensions) == 0 {
+		t.Fatalf("package.json pi.extensions = %v, want the package's session extension", resources["extensions"])
+	}
+	for _, e := range extensions {
+		rel, _ := e.(string)
+		rel = strings.TrimPrefix(rel, "./")
+		if _, err := os.Stat(filepath.Join(root, rel)); err != nil {
+			t.Errorf("package.json extension %s: %v", rel, err)
+		}
+		if depth := strings.Count(filepath.ToSlash(rel), "/"); depth != 1 {
+			t.Errorf("package.json extension %s is not one directory below the root", rel)
+		}
+	}
+
+	for _, key := range piPackageOnlyKeys {
+		delete(pkg, key)
+	}
+	for _, key := range manifestOnlyKeys {
+		delete(manifest, key)
+	}
+	if !reflect.DeepEqual(pkg, manifest) {
+		t.Errorf("package.json differs from .claude-plugin/plugin.json:\n package: %s\n manifest: %s",
+			mustJSON(t, pkg), mustJSON(t, manifest))
+	}
+}
+
 func TestEveryDeclaredPluginPathExists(t *testing.T) {
 	root := repoRoot(t)
 	for _, rel := range pluginManifests {

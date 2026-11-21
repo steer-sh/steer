@@ -47,7 +47,7 @@ jobs:
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
-          for f in .claude-plugin/plugin.json .codex-plugin/plugin.json; do
+          for f in .claude-plugin/plugin.json .codex-plugin/plugin.json package.json; do
             test "$(jq -r .version "$f")" = "$version" || { echo "$f is not $version" >&2; exit 1; }
           done
           for f in .claude-plugin/marketplace.json .agents/plugins/marketplace.json; do

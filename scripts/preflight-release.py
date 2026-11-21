@@ -23,6 +23,10 @@ PLUGINS = (".claude-plugin/plugin.json", ".codex-plugin/plugin.json")
 # The hooks file each plugin manifest names. Codex refuses the modules key, so its
 # file is the Claude Code file without it.
 HOOK_FILES = {".claude-plugin/plugin.json": "hooks/hooks.json", ".codex-plugin/plugin.json": "hooks/codex.json"}
+# Pi installs the bundle from git and reads its resources from the pi key of this file.
+PI_PACKAGE = "package.json"
+# The extension the Pi package loads.
+PI_FILES = ("pi/steer-session.ts",)
 SKILL_FILES = ("skills/auto-steer/SKILL.md", "skills/steer/SKILL.md", "skills/steer/prompts/routing.md",
                "skills/steer-report/SKILL.md", "skills/steer-report/audit.md",
                "skills/steer-report/reading.md",
@@ -30,7 +34,7 @@ SKILL_FILES = ("skills/auto-steer/SKILL.md", "skills/steer/SKILL.md", "skills/st
 # The Claude Code mod that hooks/hooks.json names under modules, and the files it imports.
 MOD_FILES = ("hooks/mod/register.tsx", "hooks/mod/marks.ts", "hooks/mod/review.ts", "hooks/mod/vector.ts")
 # The text files a harness runs from the bundle, compared byte for byte.
-BUNDLE_FILES = (*SKILL_FILES, *MOD_FILES)
+BUNDLE_FILES = (*SKILL_FILES, *MOD_FILES, *PI_FILES)
 LAUNCHER = "scripts/steer"
 BINARIES = tuple(f"bin/{osname}-{arch}/steer" for osname in ("darwin", "linux") for arch in ("amd64", "arm64"))
 EXECUTABLES = (LAUNCHER, *BINARIES)
@@ -93,6 +97,13 @@ def identity(root):
                 "./skills/auto-steer", "./skills/steer", "./skills/steer-report",
                 "./skills/steer-setup"]:
             raise ValueError(f"{name}: missing bundled skill or hook declarations")
+    package = json.loads((root / PI_PACKAGE).read_text())
+    resources = package.get("pi")
+    if {k: v for k, v in package.items() if k not in ("pi", "private")} != expected:
+        raise ValueError(f"{PI_PACKAGE}: differs from the marketplace plugin")
+    if not isinstance(resources, dict) or resources.get("skills") != plugin.get("skills") \
+            or resources.get("extensions") != ["./" + name for name in PI_FILES]:
+        raise ValueError(f"{PI_PACKAGE}: missing bundled skill or extension declarations")
     return entries[0]
 
 
@@ -102,7 +113,7 @@ def candidate_stamp(root):
 
 
 def inspect_listing(root, expected):
-    for name in (*MARKETS, *PLUGINS, "README.md"):
+    for name in (*MARKETS, *PLUGINS, PI_PACKAGE, "README.md"):
         if not contained_file(root, name):
             raise ValueError(f"published listing file is missing or outside the checkout: {name}")
     if identity(root) != expected:

@@ -41,8 +41,10 @@ Read the linked architecture section before changing the corresponding boundary:
   track. Both marketplace entries install the `release` branch, which a `v*` tag
   replaces through `.github/workflows/release.yml`; the tag must equal every
   manifest version, because a harness refreshes its copy only on a version change.
-  `cli/internal/plugindist/` checks the four plugin/marketplace manifests together
-  and the README's install commands against their repository and marketplace.
+  `cli/internal/plugindist/` checks the four plugin/marketplace manifests and Pi's
+  root `package.json` together, and the README's install commands against their
+  repository and marketplace. Pi's package loads only `pi/steer-session.ts`; a
+  generated `.pi/extensions/steer-*.ts` file stays the one owner of its channel.
   A skill runs every steer command as `<STEER_BIN> …`, which the agent writes as
   the launcher's absolute path, never as bare `steer` or a shell variable;
   `TestSkillCommandsStartWithTheLauncherPlaceholder` pins it.
