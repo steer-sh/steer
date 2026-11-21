@@ -58,6 +58,7 @@ function runSteer(payload: any): Promise<any> {
 }
 
 export default function (pi: any) {
+  steerRecordLoad(pi);
   pi.on("tool_call", async (event: any, ctx: any) => {
     try {
       const call = steerToolCall(event);

@@ -281,6 +281,10 @@ Read the linked architecture section before changing the corresponding boundary:
   which harnesses a command naming none writes to; `currentRegistrars`
   (`cli/cmd/harness.go`) and the dashboard's actions both call it, so a new
   writing command or action takes it rather than every installed harness.
+- Pi bridges: each bridge body calls `steerRecordLoad(pi)` from its default export
+  and has its digest in `currentDigest` (`cli/internal/pi/load.go`); a bridge
+  without both reads unknown in status forever, and `pi.RefreshBridges` never
+  rewrites it.
 - Display wording: use shared `status`/`styles` helpers and check
   `cli/internal/status/vocabulary_test.go`. Stored tokens and human labels have
   different compatibility obligations.

@@ -2,7 +2,10 @@ package status
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -937,9 +940,31 @@ func TestPiPostureReadsTheRegisteredExtension(t *testing.T) {
 		resolverRow.Command != "steer commit-gate backfill --if-due --apply --quiet" {
 		t.Fatalf("pi resolver row = %+v", resolverRow)
 	}
-	if gateRow.Trust != TrustUnknown || resolverRow.Trust != TrustUnknown {
-		t.Fatalf("trust = %q/%q, want unknown: steer reads no Pi trust record",
+	if gateRow.Trust != TrustMissing || resolverRow.Trust != TrustMissing {
+		t.Fatalf("trust = %q/%q, want missing: no Pi session loaded the extension",
 			gateRow.Trust, resolverRow.Trust)
+	}
+
+	// A load record of the file's current bytes is a session that runs the gate.
+	bridge := pi.CommitGateArming(claude.GlobalScope, ".").Path
+	content, err := os.ReadFile(bridge)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := filepath.EvalSymlinks(bridge)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(content)
+	record := fmt.Sprintf(`{"path":%q,"digest":%q}`, resolved, hex.EncodeToString(sum[:]))
+	if err := os.MkdirAll(pi.LoadDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pi.LoadDir(), "gate.json"), []byte(record), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := PiTrust(claude.GlobalScope, ".", bridge); got != TrustApproved {
+		t.Errorf("trust after a load of the current file = %q, want approved", got)
 	}
 }
 

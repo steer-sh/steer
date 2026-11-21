@@ -102,7 +102,7 @@ func TrustStep(harnessID, trust, path string) (Step, bool) {
 		return Step{}, false
 	}
 	step := Step{Title: fmt.Sprintf("%s has not confirmed it trusts this hook (%s)",
-		HarnessLabel(harnessID), TrustPhrase(trust))}
+		HarnessLabel(harnessID), TrustPhrase(harnessID, trust))}
 	switch harness.ID(harnessID) {
 	case harness.Codex:
 		step.Fix = "restart Codex and approve the definitions in /hooks"
@@ -116,7 +116,17 @@ func TrustStep(harnessID, trust, path string) (Step, bool) {
 			step.Title += ": " + path
 		}
 	case harness.Pi:
-		step.Fix = "trust this project in Pi (/trust), then /reload any Pi session already running here"
+		step.Title = fmt.Sprintf("Pi is not running this extension (%s)", TrustPhrase(harnessID, trust))
+		step.Fix = "run /reload in each running Pi session, or start Pi again; in a project, trust it when Pi asks"
+		switch trust {
+		case TrustModified:
+			step.Fix = "run /reload in each running Pi session, or start Pi again"
+		case TrustDisabled:
+			step.Fix = "trust this project in Pi (/trust), then /reload any Pi session already running here"
+		}
+		if path != "" {
+			step.Title += ": " + path
+		}
 	}
 	return step, true
 }
@@ -130,7 +140,7 @@ func knownOffStep(a ScopeArming, what string) (Step, bool) {
 	step, _ := TrustStep(a.Harness, a.Trust, "")
 	step.Title = what + " is turned off"
 	if a.Trust == TrustHooksOff {
-		step.Title = TrustPhrase(TrustHooksOff) + ", including " + what
+		step.Title = TrustPhrase(a.Harness, TrustHooksOff) + ", including " + what
 	}
 	return prefixHarness(step, a), true
 }
@@ -206,7 +216,7 @@ func ReadinessOf(s *SystemStatus, probe reviewers.Probe) Readiness {
 			r.Steps = append(r.Steps, step)
 			open = true
 		} else if _, ok := TrustStep(a.Harness, a.Trust, ""); ok {
-			note := fmt.Sprintf("%s %s scope: %s; current hook trust cannot be verified", HarnessLabel(a.Harness), a.Scope, TrustPhrase(a.Trust))
+			note := fmt.Sprintf("%s %s scope: %s; current hook trust cannot be verified", HarnessLabel(a.Harness), a.Scope, TrustPhrase(a.Harness, a.Trust))
 			if phrase := ObservedPhrase(a); phrase != "" {
 				note += " · " + phrase
 			}
@@ -284,7 +294,7 @@ func resolverSteps(p Posture) (steps []Step, unverified []string) {
 			steps = append(steps, step)
 		} else if _, ok := TrustStep(a.Harness, a.Trust, ""); ok {
 			unverified = append(unverified, fmt.Sprintf("%s %s scope: review-outcome reader: %s; current hook trust cannot be verified",
-				HarnessLabel(a.Harness), a.Scope, TrustPhrase(a.Trust)))
+				HarnessLabel(a.Harness), a.Scope, TrustPhrase(a.Harness, a.Trust)))
 		}
 	}
 	if candidate || len(steps) > 0 {

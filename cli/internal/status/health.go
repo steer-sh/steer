@@ -309,14 +309,15 @@ func hookRows(s *SystemStatus) []hookRow {
 }
 
 // trustIssues groups hook approval problems per harness and scope, because one visit to
-// /hooks clears them together. Steer reads no approval on an optional harness, so its
-// unknown state cannot be cleared and raises nothing.
+// /hooks, or one Pi /reload, clears them together.
 func trustIssues(s *SystemStatus) []Issue {
 	type group struct{ harness, scope, trust string }
 	whats := map[group][]string{}
 	var order []group
 	for _, row := range hookRows(s) {
-		if harness.Optional(harness.ID(row.harness)) {
+		// Pi's state is unknown only when the load records cannot be read, which no
+		// Pi step clears.
+		if harness.ID(row.harness) == harness.Pi && row.trust == TrustUnknown {
 			continue
 		}
 		switch row.trust {
@@ -341,6 +342,11 @@ func trustIssues(s *SystemStatus) []Issue {
 		where := label + " " + key.scope
 		covers := strings.Join(whats[key], ", ")
 		step, _ := TrustStep(key.harness, key.trust, "")
+		if harness.ID(key.harness) == harness.Pi {
+			out = append(out, Issue{Severity: SeverityAttention, Title: where + " extensions are not running: " + covers,
+				Detail: []string{TrustPhrase(key.harness, key.trust)}, Fix: step.Fix})
+			continue
+		}
 		switch key.trust {
 		case TrustMissing:
 			out = append(out, Issue{Severity: SeverityAttention, Title: where + " hooks need approval",

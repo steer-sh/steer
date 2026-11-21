@@ -41,6 +41,7 @@ function tellOperator(ctx: any, message: string): void {
 }
 
 export default function (pi: any) {
+  steerRecordLoad(pi);
   // agent_before_settle is Pi's last boundary before it goes idle: retries,
   // compaction and queued messages have run, and a returned entry with
   // continue: true starts one more run with that entry in context.

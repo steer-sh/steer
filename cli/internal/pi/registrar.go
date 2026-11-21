@@ -3,9 +3,7 @@ package pi
 
 import (
 	"bufio"
-	"crypto/sha256"
 	_ "embed"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -36,10 +34,7 @@ type stamp struct {
 }
 
 // GuardBridgeDigest identifies the TypeScript body baked into a Pi guard bridge.
-func GuardBridgeDigest() string {
-	sum := sha256.Sum256([]byte(strings.TrimRight(guardBridgeSource, "\n") + "\n"))
-	return hex.EncodeToString(sum[:])[:8]
-}
+func GuardBridgeDigest() string { return bridgeDigest(guardBridgeSource) }
 
 // ExtensionsDir names the auto-discovered extension directory for a scope.
 func ExtensionsDir(scope, cwd string) (string, error) {
@@ -79,7 +74,10 @@ func bridgeContent(master string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	source := strings.TrimRight(guardBridgeSource, "\n") + "\n"
+	source, err := withLoadRecorder(guardBridgeSource)
+	if err != nil {
+		return nil, err
+	}
 	if strings.Count(source, masterToken) != 1 {
 		return nil, fmt.Errorf("Pi guard bridge carries no unique master placeholder")
 	}
@@ -120,6 +118,15 @@ func masterFromBridge(content []byte) string {
 		}
 	}
 	return ""
+}
+
+// GuardBridgePath names Pi's guard extension for a scope.
+func GuardBridgePath(scope, cwd string) (string, error) {
+	dir, err := ExtensionsDir(scope, cwd)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, guardBridgeName), nil
 }
 
 // RegisterMaster writes Pi's guard extension with the master path baked into it.

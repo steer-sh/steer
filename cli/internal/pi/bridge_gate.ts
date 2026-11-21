@@ -71,6 +71,7 @@ function batchOf(ctx: any, toolCallId: any): any {
 }
 
 export default function (pi: any) {
+  steerRecordLoad(pi);
   pi.on("tool_call", async (event: any, ctx: any) => {
     try {
       if (event?.toolName !== "bash" && event?.toolName !== "powershell") {

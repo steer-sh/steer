@@ -1,9 +1,7 @@
 package pi
 
 import (
-	"crypto/sha256"
 	_ "embed"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -38,10 +36,7 @@ const CommitGuidance = cc.CommitShapeGuidance + "\n" +
 var gateBridgeSource string
 
 // GateBridgeDigest identifies the TypeScript body baked into a Pi commit-gate bridge.
-func GateBridgeDigest() string {
-	sum := sha256.Sum256([]byte(strings.TrimRight(gateBridgeSource, "\n") + "\n"))
-	return hex.EncodeToString(sum[:])[:8]
-}
+func GateBridgeDigest() string { return bridgeDigest(gateBridgeSource) }
 
 // GateArming is what one Pi extension says about the review and resolver pair.
 type GateArming struct {
@@ -61,7 +56,10 @@ func gateBridgeContent(review string, reviewSeconds int, backfill string, backfi
 	reviewJSON, _ := json.Marshal(review)
 	backfillJSON, _ := json.Marshal(backfill)
 	guidanceJSON, _ := json.Marshal(CommitGuidance)
-	source := strings.TrimRight(gateBridgeSource, "\n") + "\n"
+	source, err := withLoadRecorder(gateBridgeSource)
+	if err != nil {
+		return nil, err
+	}
 	for token, replacement := range map[string]string{
 		reviewToken:     reviewLine + string(reviewJSON) + ";",
 		backfillToken:   backfillLine + string(backfillJSON) + ";",

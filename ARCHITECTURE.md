@@ -1315,7 +1315,16 @@ Arming distinguishes registered configuration, command resolution from this
 process, and observed corpus activity. Resolution is a proxy for the harness's
 environment; activity does not identify scope or prove current trust. Readiness
 reports detectable setup problems with repairs and keeps trust uncertainty
-separate. A resolver problem is a step beside the reviewing answer, never a reason
+separate. Pi keeps no hook approval record, so each Pi bridge carries the load
+recorder (`internal/pi/bridge_load.ts`): at `session_start` it writes the resolved
+path and digest of the bytes Pi loaded to `~/.steer/state/pi-loads/`.
+`status.PiTrust` reads that record (`pi.LoadOf`) as the row's trust: approved when
+Pi loaded the file's current bytes, modified when it loaded earlier bytes, missing
+when no session loaded it. In project scope the nearest saved decision in Pi's
+`trust.json` (`pi.ProjectTrust`) comes first, and a declined project is disabled. A
+bridge an older Steer wrote has no recorder and reads unknown; `bin install`
+rewrites a global one (`pi.RefreshBridges`) and leaves a project one, which the
+repository may commit, to the install that wrote it. A resolver problem is a step beside the reviewing answer, never a reason
 to withhold it; one working resolver reads every harness's ledger. Machine-local absence describes only the evidence available here.
 
 `internal/tui/` provides Arming, Problems, Fixes, Reviewer and Diagnostics panels.

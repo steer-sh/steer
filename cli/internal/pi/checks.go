@@ -1,9 +1,7 @@
 package pi
 
 import (
-	"crypto/sha256"
 	_ "embed"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -27,10 +25,7 @@ const (
 var checkBridgeSource string
 
 // CheckBridgeDigest identifies the TypeScript body baked into a Pi check bridge.
-func CheckBridgeDigest() string {
-	sum := sha256.Sum256([]byte(strings.TrimRight(checkBridgeSource, "\n") + "\n"))
-	return hex.EncodeToString(sum[:])[:8]
-}
+func CheckBridgeDigest() string { return bridgeDigest(checkBridgeSource) }
 
 func checkBridgeContent(command string, seconds int) ([]byte, error) {
 	header, err := json.Marshal(stamp{
@@ -40,7 +35,10 @@ func checkBridgeContent(command string, seconds int) ([]byte, error) {
 		return nil, err
 	}
 	commandJSON, _ := json.Marshal(command)
-	source := strings.TrimRight(checkBridgeSource, "\n") + "\n"
+	source, err := withLoadRecorder(checkBridgeSource)
+	if err != nil {
+		return nil, err
+	}
 	for token, replacement := range map[string]string{
 		checkToken:   checkLine + string(commandJSON) + ";",
 		checkTimeout: strconv.Itoa(seconds * 1000),

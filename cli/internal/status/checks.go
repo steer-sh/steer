@@ -199,7 +199,7 @@ func runnerArming(root string, observed map[string]time.Time) []ScopeArming {
 				Registered: a.Registered,
 				Effective:  a.Registered && (a.Timeout == 0 || a.Timeout >= checks.RegisteredHookTimeout()),
 				Timeout:    a.Timeout,
-				Trust:      runnerApprovalTrust(target, a),
+				Trust:      runnerApprovalTrust(target, scope, root, a),
 				Command:    a.Command,
 			}
 			out = append(out, withEvidence(row, checkCorpus, checkTimeUnix(observed[string(target)])))
@@ -209,7 +209,10 @@ func runnerArming(root string, observed map[string]time.Time) []ScopeArming {
 }
 
 // runnerApprovalTrust reads the check runner's approval where the harness reviews one.
-func runnerApprovalTrust(target harness.ID, a checkscope.Arming) string {
+func runnerApprovalTrust(target harness.ID, scope, root string, a checkscope.Arming) string {
+	if target == harness.Pi && a.Registered {
+		return PiTrust(scope, root, a.Path)
+	}
 	if a.Registered && a.Approval != "" {
 		return approvalTrust(a.Approval)
 	}

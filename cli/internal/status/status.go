@@ -30,6 +30,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/report"
 	"github.com/steer-sh/steer-cli/internal/sessions"
 	"github.com/steer-sh/steer-cli/internal/steerbin"
+	"github.com/steer-sh/steer-cli/internal/steerpath"
 )
 
 // StatusVersion is the schema version of the emitted snapshot. It mirrors
@@ -702,10 +703,8 @@ func collectPosture(cfg gate.Config, ev mine.EvidenceSet) Posture {
 				Registered: pg.Registered,
 				Effective:  pg.Registered,
 				Timeout:    pg.Timeout,
-				// Steer reads no Pi trust record, so nothing is known: the false pair
-				// says so. trustState, not this line, turns that into a state.
-				Trust:   trustState(harness.Pi, false, false),
-				Command: pg.Command,
+				Trust:      PiTrust(scope, cwd, pg.Path),
+				Command:    pg.Command,
 			}, ledgerCorpus, observed.gate[piID]))
 		}
 		// The resolver rides a turn-end event, which takes no matcher: registered is
@@ -738,7 +737,7 @@ func collectPosture(cfg gate.Config, ev mine.EvidenceSet) Posture {
 				Registered: pr.Registered,
 				Effective:  pr.Registered,
 				Timeout:    pr.Timeout,
-				Trust:      trustState(harness.Pi, false, false),
+				Trust:      PiTrust(scope, cwd, pr.Path),
 				Command:    pr.Command,
 			}, "", 0))
 		}
@@ -1023,14 +1022,57 @@ func approvalTrust(approval string) string {
 	return TrustUnknown
 }
 
-// runnerTrust reads a harness's approval of its registered guard runner. Codex
-// is the one harness whose approval record Steer reads; any other harness that
+// runnerTrust reads a harness's approval of its registered guard runner: Codex's
+// approval record, or whether Pi runs its guard extension. Any other harness that
 // reviews hook trust reads as unknown.
 func runnerTrust(id harness.ID, scope string) string {
-	if id == harness.Codex {
+	switch id {
+	case harness.Codex:
 		return CodexTrust(codex.MasterArming(scope, "."))
+	case harness.Pi:
+		path, err := pi.GuardBridgePath(scope, ".")
+		if err != nil {
+			return TrustUnknown
+		}
+		return PiTrust(scope, ".", path)
 	}
 	return trustState(id, false, false)
+}
+
+// PiTrust reads whether Pi runs the extension at path. In project scope a project
+// Pi's trust file declines is disabled. An extension an older Steer wrote records no
+// load, so it is unknown. Otherwise the load the extension recorded decides: approved
+// when Pi loaded the file's current bytes, modified when it loaded earlier bytes,
+// and missing when no session loaded it.
+func PiTrust(scope, cwd, path string) string {
+	if path == "" {
+		return TrustUnknown
+	}
+	if scope == harness.ProjectScope {
+		root, err := steerpath.ProjectConfigDir(cwd)
+		if err != nil {
+			return TrustUnknown
+		}
+		switch pi.ProjectTrust(root) {
+		case pi.TrustDeclined:
+			return TrustDisabled
+		case pi.TrustUnread:
+			return TrustUnknown
+		}
+	}
+	if !pi.BridgeCurrent(path) {
+		return TrustUnknown
+	}
+	load := pi.LoadOf(path)
+	switch {
+	case !load.Known:
+		return TrustUnknown
+	case !load.Loaded:
+		return TrustMissing
+	case !load.Current:
+		return TrustModified
+	}
+	return TrustApproved
 }
 
 // newestFiring is the epoch second of the last block the audit log beside a

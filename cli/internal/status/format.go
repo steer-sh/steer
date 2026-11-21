@@ -14,6 +14,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/cadence"
 	"github.com/steer-sh/steer-cli/internal/checks"
 	"github.com/steer-sh/steer-cli/internal/claude"
+	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/tier"
 )
 
@@ -81,7 +82,19 @@ func GuardCommandChangedPhrase(label string) string {
 // TrustPhrase names a harness's posture on a registration, "" when nothing needs
 // saying. Registration alone does not prove enforcement on a harness that reviews hook
 // trust itself.
-func TrustPhrase(trust string) string {
+func TrustPhrase(harnessID, trust string) string {
+	if harness.ID(harnessID) == harness.Pi {
+		switch trust {
+		case TrustModified:
+			return "Pi loaded an older version of it"
+		case TrustDisabled:
+			return "Pi does not trust this project"
+		case TrustMissing:
+			return "no Pi session has loaded it"
+		case TrustUnknown:
+			return "whether Pi loaded it is unknown"
+		}
+	}
 	switch trust {
 	case TrustRecordPresent:
 		return "approval could not be compared"
@@ -462,13 +475,17 @@ func (m MasterRuntime) RunnerUnapproved() bool {
 // RunnerTrustPhrase names a registered runner's approval, "" where the harness
 // reviews no hook trust.
 func RunnerTrustPhrase(m MasterRuntime) string {
+	if m.RunnerUnapproved() && harness.ID(m.Harness) == harness.Pi {
+		step, _ := TrustStep(m.Harness, m.Trust, "")
+		return TrustPhrase(m.Harness, m.Trust) + ", so Pi runs no guard — " + step.Fix
+	}
 	if m.RunnerUnapproved() && m.Trust != TrustMissing {
-		return TrustPhrase(m.Trust) + ", so the harness runs no guard — turn it on in /hooks"
+		return TrustPhrase(m.Harness, m.Trust) + ", so the harness runs no guard — turn it on in /hooks"
 	}
 	if m.RunnerUnapproved() {
 		return "no approval record, so the harness runs no guard — approve the definitions in /hooks"
 	}
-	return TrustPhrase(m.Trust)
+	return TrustPhrase(m.Harness, m.Trust)
 }
 
 // MasterObservedPhrase names the last block a registered master recorded. The
