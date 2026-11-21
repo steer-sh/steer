@@ -12,6 +12,10 @@ Cases:
   batch     With the guidance removed, a commit that shares its tool batch with
             `git add` is refused before review, with its receipt on stderr; the
             same commit run alone is reviewed.
+  cleanup   With a guard, the gate and the check runner armed for Pi at both
+            scopes, steer uninstall --apply and the project commands its plan
+            names leave no steer-*.ts at either scope, and Pi starts with none.
+            RPC only; no model request.
   codemode  With codemode in "only" mode, a commit a script runs is refused
             before review, and pi -p prints the refusal receipt on stderr.
   check     A check.sh failure at Pi's settle boundary puts the block reason in
@@ -85,14 +89,14 @@ class Run:
             subprocess.run(["go", "build", "-o", str(out), pkg], cwd=cli, env=go_env, check=True)
         os.symlink(self.root / "stubreviewer", self.stubs / "claude")
 
-    def sh(self, *args, cwd=None, check=True, timeout=None):
+    def sh(self, *args, cwd=None, check=True, timeout=None, answer=None):
         # pi -p reads an open stdin as more prompt and waits for it to close.
+        stdin = {"input": answer} if answer is not None else {"stdin": subprocess.DEVNULL}
         return subprocess.run(list(args), cwd=cwd or self.repo, env=self.env, check=check,
-                              capture_output=True, text=True, timeout=timeout,
-                              stdin=subprocess.DEVNULL)
+                              capture_output=True, text=True, timeout=timeout, **stdin)
 
-    def steer(self, *args):
-        return self.sh(str(self.bin / "steer"), *args)
+    def steer(self, *args, answer=None):
+        return self.sh(str(self.bin / "steer"), *args, answer=answer)
 
     def seed_repo(self):
         self.sh("git", "init", "-q")
@@ -402,6 +406,75 @@ def case_trust(run):
         "an RPC new_session or a new process loaded it; declined: disabled"
 
 
+GUARD_SRC = """#!/usr/bin/env python3
+import json
+import sys
+
+
+def main():
+    data = json.load(sys.stdin)
+    if "forbidden-word" in data.get("tool_input", {}).get("command", ""):
+        print(json.dumps({"decision": "block", "reason": "never write forbidden-word"}))
+    sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()
+"""
+
+
+def bridges(run):
+    """The Steer extension files at each scope."""
+    dirs = {"project": run.repo / ".pi" / "extensions",
+            "global": run.box.home / ".pi" / "agent" / "extensions"}
+    return {scope: sorted(f.name for f in d.glob("steer-*.ts")) for scope, d in dirs.items()}
+
+
+def load_records(run):
+    d = run.box.home / ".steer" / "state" / "pi-loads"
+    return {f.name: f.stat().st_mtime_ns for f in d.glob("*")} if d.exists() else {}
+
+
+def case_cleanup(run):
+    run.seed_repo()
+    src = run.root / "no-forbidden-word.py"
+    src.write_text(GUARD_SRC)
+    run.arm_gate()
+    run.steer("check", "install", "--harness", "pi", "--scope", "project")
+    run.steer("register", str(src), "--rule", "never write forbidden-word", "--harness", "pi", "--scope", "project")
+    run.steer("register", str(src), "--rule", "never write forbidden-word", "--harness", "pi", "--scope", "global")
+    run.steer("commit-gate", "install", "--harness", "pi", "--scope", "global")
+    run.steer("check", "install", "--harness", "pi", "--scope", "global")
+    every = ["steer-checks.ts", "steer-commit-gate.ts", "steer-guards.ts"]
+    if bridges(run) != {"project": every, "global": every}:
+        return FAIL, "the install left %s, want all three bridges at both scopes" % bridges(run)
+    run.rpc(({"type": "get_state"}, None), approve=True)
+    # The final check reads these records, so it proves nothing unless Pi wrote one per bridge.
+    if len(load_records(run)) < 6:
+        return FAIL, "Pi recorded %d bridge loads with six bridges armed: %s" % (
+            len(load_records(run)), sorted(load_records(run)))
+
+    # uninstall removes the global bridges and names a command for each project one,
+    # which the repository commits; the operator runs those commands.
+    plan = run.steer("uninstall", "--apply").stdout
+    commands = [line.split() for line in plan.splitlines() if line.strip().startswith("steer ")]
+    for argv in commands:
+        run.steer(*argv[1:], answer="y\n")  # steer remove asks before it removes a guard
+    left = bridges(run)
+    if left != {"project": [], "global": []}:
+        return FAIL, "after uninstall and the commands it names (%s), Steer bridges remain: %s\n%s" % (
+            [" ".join(a) for a in commands], left, plan[-2000:])
+
+    before = load_records(run)
+    run.rpc(({"type": "get_state"}, None), approve=True)
+    after = load_records(run)
+    if after != before:
+        return FAIL, "Pi recorded a bridge load after every bridge was removed: %s" % sorted(
+            k for k in after if after[k] != before.get(k))
+    return PASS, "uninstall removed the global bridges, the commands it named removed the project ones " \
+        "(%s), and Pi started with none" % "; ".join(" ".join(a) for a in commands)
+
+
 def stage_package(run):
     """Copy the Pi package's files into the sandbox, with this checkout's build beside them."""
     pkg = run.root / "pkg"
@@ -444,7 +517,7 @@ def case_load(run):
     return PASS, "Pi loaded both bridges and status read them approved; the session extension ran report cadence"
 
 
-CASES = {"batch": case_batch, "check": case_check, "guidance": case_guidance, "load": case_load,
+CASES = {"batch": case_batch, "check": case_check, "cleanup": case_cleanup, "guidance": case_guidance, "load": case_load,
          "codemode": case_codemode, "review": case_review, "trust": case_trust}
 
 
