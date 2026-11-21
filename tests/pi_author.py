@@ -25,6 +25,11 @@ Cases:
   review    The stub reviewer denies round 1; the model handles the finding and
             the commit lands on retry. After the ledger grace, the next
             session's turn_end resolves the retry row with the model's ledger.
+  trust     With no saved trust and no --approve, Pi loads no project bridge and
+            status reports it; a saved trust loads it; a rewritten bridge reads
+            modified until an RPC new_session or a new process loads it; a
+            declined trust reads disabled. It runs RPC only, so no model
+            request is made.
 
 A case whose model did not make the calls the case needs reports INCONCLUSIVE
 and exits 2: the integration was not exercised, so nothing passed or failed.
@@ -104,6 +109,44 @@ class Run:
     def pi(self, prompt, *extra):
         return self.sh("pi", "-p", "--approve", "--model", self.model, "--session-dir", str(self.sessions),
                        "--no-skills", "--no-prompt-templates", *extra, prompt, check=False, timeout=PI_TIMEOUT)
+
+    def rpc(self, *steps, approve=False):
+        """Run pi --mode rpc through steps of (command, then), waiting for each command's
+        response before it calls then. RPC needs no prompt, so no model request runs."""
+        args = ["pi", "--mode", "rpc", "--model", self.model, "--session-dir", str(self.sessions)]
+        if approve:
+            args.append("--approve")
+        proc = subprocess.Popen(args, cwd=self.repo, env=self.env, stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            for i, (command, then) in enumerate(steps):
+                command = dict(command, id="steer-%d" % i)
+                proc.stdin.write(json.dumps(command) + "\n")
+                proc.stdin.flush()
+                while True:
+                    line = proc.stdout.readline()
+                    if not line:
+                        raise RuntimeError("pi rpc exited before it answered %s: %s" % (
+                            command["type"], proc.stderr.read()[-1500:]))
+                    msg = json.loads(line)
+                    if msg.get("type") == "response" and msg.get("id") == command["id"]:
+                        break
+                if then:
+                    then()
+            proc.stdin.close()
+            proc.wait(timeout=60)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+
+    def gate_trust(self):
+        status = json.loads(self.steer("status", "--json").stdout)
+        return [a["trust"] for a in status["posture"]["commit_gate"]
+                if a["harness"] == "pi" and a["scope"] == "project"]
+
+    def save_trust(self, trusted):
+        (self.box.home / ".pi" / "agent" / "trust.json").write_text(
+            json.dumps({str(self.repo.resolve()): trusted}))
 
     def session_entries(self):
         files = sorted(self.sessions.rglob("*.jsonl"))
@@ -314,6 +357,51 @@ def case_check(run):
         "(dispositions %s)" % dispositions
 
 
+def case_trust(run):
+    run.seed_repo()
+    run.arm_gate()
+    run.rpc(({"type": "get_state"}, None))
+    state = run.gate_trust()
+    if state != ["missing"]:
+        return FAIL, "with no saved trust and no --approve, status read %s, want missing" % state
+    text = run.sh(str(run.bin / "steer"), "status", check=False).stdout
+    if "Pi project extensions are not running" not in text:
+        return FAIL, "status names no Pi extension that is not running:\n" + text[-1500:]
+
+    run.save_trust(True)
+    run.rpc(({"type": "get_state"}, None))
+    state = run.gate_trust()
+    if state != ["approved"]:
+        return FAIL, "with a saved trust, status read %s, want approved" % state
+
+    seen = {}
+
+    def rewrite(label, seconds):
+        def then():
+            run.steer("config", "set", "reviewer.timeout", seconds)
+            run.steer("commit-gate", "install", "--harness", "pi", "--scope", "project")
+            seen[label] = run.gate_trust()
+        return then
+
+    run.rpc(({"type": "get_state"}, rewrite("rewritten", "25")),
+            ({"type": "new_session"}, lambda: seen.update(reloaded=run.gate_trust())))
+    if seen != {"rewritten": ["modified"], "reloaded": ["approved"]}:
+        return FAIL, "a rewrite and an RPC new_session read %s, want modified then approved" % seen
+    rewrite("rewritten", "30")()
+    run.rpc(({"type": "get_state"}, None))
+    state = run.gate_trust()
+    if seen["rewritten"] != ["modified"] or state != ["approved"]:
+        return FAIL, "a rewrite and a new process read %s then %s, want modified then approved" % (
+            seen["rewritten"], state)
+
+    run.save_trust(False)
+    state = run.gate_trust()
+    if state != ["disabled"]:
+        return FAIL, "with a declined trust, status read %s, want disabled" % state
+    return PASS, "untrusted: missing and reported; trusted: approved; a rewrite read modified until " \
+        "an RPC new_session or a new process loaded it; declined: disabled"
+
+
 def stage_package(run):
     """Copy the Pi package's files into the sandbox, with this checkout's build beside them."""
     pkg = run.root / "pkg"
@@ -357,7 +445,7 @@ def case_load(run):
 
 
 CASES = {"batch": case_batch, "check": case_check, "guidance": case_guidance, "load": case_load,
-         "codemode": case_codemode, "review": case_review}
+         "codemode": case_codemode, "review": case_review, "trust": case_trust}
 
 
 def main():
@@ -379,6 +467,8 @@ def main():
             verdict, detail = FAIL, "%s\n%s%s" % (e, e.stdout or "", e.stderr or "")
         except subprocess.TimeoutExpired as e:
             verdict, detail = FAIL, "%s did not finish in %ss" % (e.cmd[0], e.timeout)
+        except RuntimeError as e:
+            verdict, detail = FAIL, str(e)
         leaks = run.box.leaks()
         if leaks:
             verdict, detail = FAIL, "\n".join(leaks)
