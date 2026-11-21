@@ -17,6 +17,9 @@ Cases:
             the next check run passes.
   guidance  The gate's commit guidance reaches the system prompt, and the
             commit the model makes is reviewed.
+  load      With the gate and check runner armed and the package loaded with
+            -e, one session makes status read both bridges as approved, and the
+            package's session extension runs report cadence.
 
 A case whose model did not make the calls the case needs reports INCONCLUSIVE
 and exits 2: the integration was not exercised, so nothing passed or failed.
@@ -31,6 +34,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -88,9 +92,9 @@ class Run:
             self.steer("config", "set", key, value)
         self.steer("commit-gate", "install", "--harness", "pi", "--scope", "project")
 
-    def pi(self, prompt):
+    def pi(self, prompt, *extra):
         return self.sh("pi", "-p", "--approve", "--model", self.model, "--session-dir", str(self.sessions),
-                       "--no-skills", "--no-prompt-templates", prompt, check=False, timeout=PI_TIMEOUT)
+                       "--no-skills", "--no-prompt-templates", *extra, prompt, check=False, timeout=PI_TIMEOUT)
 
     def session_entries(self):
         files = sorted(self.sessions.rglob("*.jsonl"))
@@ -238,7 +242,49 @@ def case_check(run):
         "(dispositions %s)" % dispositions
 
 
-CASES = {"batch": case_batch, "check": case_check, "guidance": case_guidance}
+def stage_package(run):
+    """Copy the Pi package's files into the sandbox, with this checkout's build beside them."""
+    pkg = run.root / "pkg"
+    pkg.mkdir()
+    for rel in ("package.json", "pi", "scripts", "skills"):
+        src = REPO / rel
+        (shutil.copytree if src.is_dir() else shutil.copy2)(src, pkg / rel)
+    platform = "%s-%s" % (os.uname().sysname.lower(), {"x86_64": "amd64", "aarch64": "arm64"}.get(
+        os.uname().machine, os.uname().machine))
+    (pkg / "bin" / platform).mkdir(parents=True)
+    shutil.copy2(run.bin / "steer", pkg / "bin" / platform / "steer")
+    return pkg
+
+
+def case_load(run):
+    run.seed_repo()
+    run.arm_gate()
+    run.steer("check", "install", "--harness", "pi", "--scope", "project")
+    pkg = stage_package(run)
+    proc = run.pi("Reply with the single word ok. Use no tools.", "-e", str(pkg))
+    if not run.session_entries():
+        return FAIL, "pi wrote no session\n" + proc.stdout[-1500:] + proc.stderr[-1500:]
+    status = json.loads(run.steer("status", "--json").stdout)
+    gate = [a for a in status["posture"]["commit_gate"] if a["harness"] == "pi" and a["scope"] == "project"]
+    runner = [a for a in status["checks"]["runner"] if a["harness"] == "pi" and a["scope"] == "project"]
+    trusts = {"gate": [a["trust"] for a in gate], "runner": [a["trust"] for a in runner]}
+    if trusts != {"gate": ["approved"], "runner": ["approved"]}:
+        loads = sorted(p.name for p in (run.box.home / ".steer" / "state" / "pi-loads").glob("*"))
+        return FAIL, "status read %s after a Pi session; load records %s\n%s" % (trusts, loads, proc.stderr[-1500:])
+    # The package's session extension runs report cadence, which starts a refresh in
+    # the background on a machine that never refreshed; the refresh stamps its time.
+    stamp = run.box.home / ".steer" / "state" / "steer-report" / "last_refresh"
+    for _ in range(120):
+        if stamp.exists():
+            break
+        time.sleep(0.5)
+    else:
+        return FAIL, "the package's session extension started no refresh (%s is absent)\n%s" % (
+            stamp, proc.stderr[-1500:])
+    return PASS, "Pi loaded both bridges and status read them approved; the session extension ran report cadence"
+
+
+CASES = {"batch": case_batch, "check": case_check, "guidance": case_guidance, "load": case_load}
 
 
 def main():
