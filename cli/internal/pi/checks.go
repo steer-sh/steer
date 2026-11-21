@@ -35,10 +35,7 @@ func checkBridgeContent(command string, seconds int) ([]byte, error) {
 		return nil, err
 	}
 	commandJSON, _ := json.Marshal(command)
-	source, err := withLoadRecorder(checkBridgeSource)
-	if err != nil {
-		return nil, err
-	}
+	source := withLoadRecorder(checkBridgeSource)
 	for token, replacement := range map[string]string{
 		checkToken:   checkLine + string(commandJSON) + ";",
 		checkTimeout: strconv.Itoa(seconds * 1000),

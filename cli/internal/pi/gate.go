@@ -56,10 +56,7 @@ func gateBridgeContent(review string, reviewSeconds int, backfill string, backfi
 	reviewJSON, _ := json.Marshal(review)
 	backfillJSON, _ := json.Marshal(backfill)
 	guidanceJSON, _ := json.Marshal(CommitGuidance)
-	source, err := withLoadRecorder(gateBridgeSource)
-	if err != nil {
-		return nil, err
-	}
+	source := withLoadRecorder(gateBridgeSource)
 	for token, replacement := range map[string]string{
 		reviewToken:     reviewLine + string(reviewJSON) + ";",
 		backfillToken:   backfillLine + string(backfillJSON) + ";",

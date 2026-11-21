@@ -74,10 +74,7 @@ func bridgeContent(master string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	source, err := withLoadRecorder(guardBridgeSource)
-	if err != nil {
-		return nil, err
-	}
+	source := withLoadRecorder(guardBridgeSource)
 	if strings.Count(source, masterToken) != 1 {
 		return nil, fmt.Errorf("Pi guard bridge carries no unique master placeholder")
 	}

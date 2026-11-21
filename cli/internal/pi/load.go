@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -19,8 +18,6 @@ import (
 const (
 	// LoadsComponent is the state directory each bridge records its loads in.
 	LoadsComponent = "pi-loads"
-	loadsToken     = `const STEER_LOADS = "__STEER_LOADS__";`
-	loadsLine      = "const STEER_LOADS = "
 )
 
 //go:embed bridge_load.ts
@@ -33,22 +30,13 @@ func bridgeDigest(body string) string {
 	return hex.EncodeToString(sum[:])[:8]
 }
 
-// withLoadRecorder appends the load recorder to a bridge body, with this machine's
-// load directory baked in.
-func withLoadRecorder(body string) (string, error) {
-	if strings.Count(loadRecorderSource, loadsToken) != 1 {
-		return "", fmt.Errorf("Pi load recorder carries no unique load directory placeholder")
-	}
-	dir, err := filepath.Abs(LoadDir())
-	if err != nil {
-		return "", err
-	}
-	dirJSON, _ := json.Marshal(dir)
-	recorder := strings.Replace(loadRecorderSource, loadsToken, loadsLine+string(dirJSON)+";", 1)
-	return strings.TrimRight(body, "\n") + "\n" + recorder, nil
+// withLoadRecorder appends the load recorder to a bridge body.
+func withLoadRecorder(body string) string {
+	return strings.TrimRight(body, "\n") + "\n" + loadRecorderSource
 }
 
-// LoadDir is the directory the bridges write their load records to.
+// LoadDir is the directory the bridges write their load records to. bridge_load.ts
+// names the same directory under the home of the user who runs Pi.
 func LoadDir() string { return steerpath.StateDir(LoadsComponent) }
 
 // Load is what the load records say about one bridge file.

@@ -64,6 +64,26 @@ func TestBridgeRecordsTheBytesPiLoaded(t *testing.T) {
 	if got := LoadOf(checks); !got.Loaded || got.Current {
 		t.Errorf("after a rewrite: %+v, want loaded and not current", got)
 	}
+
+	// A committed project bridge records its load in the home of whoever runs Pi,
+	// not in the home of the user who wrote it.
+	repo := t.TempDir()
+	project, err := RegisterMaster(harness.ProjectScope, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(content), home) {
+		t.Errorf("the project bridge names the home that wrote it:\n%s", content)
+	}
+	isolateHome(t)
+	startSession(t, node, project)
+	if got := LoadOf(project); !got.Loaded || !got.Current {
+		t.Errorf("a project bridge loaded under another home: %+v, want loaded and current", got)
+	}
 }
 
 // ProjectTrust takes the nearest saved decision from the project up through its
