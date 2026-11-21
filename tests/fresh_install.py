@@ -9,8 +9,10 @@ a later release can run its update commands against this install: --update-from
 arms a global check runner with the saved stable executable, runs README
 `## Update` in each saved image, then the new copy's SessionStart command
 `scripts/steer report cadence`, which must report the hooks update. --local installs this
-checkout's HEAD with a Linux build in place of the published bundle, and
---uninstall then arms Steer's global gate, check runner and status line and removes
+checkout's HEAD with a Linux build in place of the published bundle; Pi clones it
+from a git daemon in the container, since Pi takes no file:// source. --readme
+reads the commands from another file, so a harness's block can be tried before
+the README carries it. --uninstall then arms Steer's global gate, check runner and status line and removes
 them: `readme` runs
 README `## Uninstall`, `plugin-first` removes the plugin, requires the
 removed-plugin notice, and runs `uninstall --harness`, and `steer-first` runs
@@ -31,16 +33,25 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DOCKERFILE = ROOT / "tests" / "docker" / "Dockerfile"
-HARNESSES = {"claude-code": "For Claude Code:", "codex": "For Codex:"}
-# The directory each harness installs the plugin copy under.
+HARNESSES = {"claude-code": "For Claude Code:", "codex": "For Codex:", "pi": "For Pi:"}
+# The directory Claude Code and Codex install a versioned plugin copy under.
 CACHES = {
     "claude-code": "~/.claude/plugins/cache/steer-marketplace/steer",
     "codex": "~/.codex/plugins/cache/steer-marketplace/steer",
 }
-# The CLI each harness runs, which names its lines in a block both harnesses share.
-CLIS = {"claude-code": "claude", "codex": "codex"}
-# The configuration file each harness keeps its global hooks in.
-HOOK_FILES = {"claude-code": "~/.claude/settings.json", "codex": "~/.codex/hooks.json"}
+# Pi clones a git package to git/<host>/<path> under its agent directory, and that
+# clone is the copy.
+PI_CLONE = "~/.pi/agent/git/github.com/steer-sh/steer"
+# The git daemon a --local Pi run installs from, and the clone Pi makes of it. Pi
+# reads a git:// URL as a git source only behind its git: prefix.
+PI_LOCAL_URL = "git://localhost/steer-sh/steer.git"
+PI_LOCAL_SOURCE = "git:" + PI_LOCAL_URL
+PI_LOCAL_CLONE = "~/.pi/agent/git/localhost/steer-sh/steer"
+# The CLI each harness runs, which names its lines in a block the harnesses share.
+CLIS = {"claude-code": "claude", "codex": "codex", "pi": "pi"}
+# The files each harness keeps its global hooks in.
+HOOK_FILES = {"claude-code": "~/.claude/settings.json", "codex": "~/.codex/hooks.json",
+              "pi": "~/.pi/agent/extensions/*"}
 # Where a --local run copies the staged checkout inside the container.
 LOCAL_SOURCE = "/home/runner/src"
 STEER = "~/.steer/bin/steer"
@@ -85,8 +96,30 @@ def uninstall_commands(readme, harness):
 
 
 def local_commands(commands):
-    """Point each marketplace add at the staged checkout instead of the published repository."""
-    return [re.sub(r"(plugin marketplace add )\S+", rf"\g<1>{LOCAL_SOURCE}", c) for c in commands]
+    """Point each marketplace add and Pi package command at the staged checkout instead of
+    the published repository."""
+    commands = [re.sub(r"(plugin marketplace add )\S+", rf"\g<1>{LOCAL_SOURCE}", c) for c in commands]
+    return [re.sub(r"^(pi (?:install|update|remove) )git:\S+", rf"\g<1>{PI_LOCAL_SOURCE}", c) for c in commands]
+
+
+def pi_daemon_lines():
+    """Return the bash lines that serve the staged checkout, with its build, over git://."""
+    return [
+        f"git -C {LOCAL_SOURCE} add -f bin",
+        f"git -C {LOCAL_SOURCE} -c user.name=fresh -c user.email=fresh@steer.invalid commit -qm bin",
+        "mkdir -p ~/srv/steer-sh",
+        f"git clone -q --bare {LOCAL_SOURCE} ~/srv/steer-sh/steer.git",
+        'git daemon --base-path="$HOME/srv" --export-all --reuseaddr --listen=127.0.0.1 --detach',
+        f"for _ in $(seq 50); do git ls-remote {PI_LOCAL_URL} >/dev/null 2>&1 && break; sleep 0.1; done",
+    ]
+
+
+def copy_lines(harness, version, local):
+    """Return the bash lines that set $copy to the harness's installed plugin copy."""
+    if harness == "pi":
+        return [f"copy={PI_LOCAL_CLONE if local else PI_CLONE}"]
+    return [f"copy={CACHES[harness]}/{version}",
+            *([f'[ -d "$copy" ] || copy={CACHES[harness]}/local'] if local else [])]
 
 
 def stage_local(dest):
@@ -148,9 +181,12 @@ def uninstall_lines(harness, commands, mode):
         "echo 'Claude Code still records the Steer plugin' >&2; exit 1; fi",
         "if grep -qE '^\\[plugins\\..steer@' ~/.codex/config.toml 2>/dev/null; then "
         "echo 'Codex still records the Steer plugin' >&2; exit 1; fi",
+        "if grep -q 'steer-sh/steer' ~/.pi/agent/settings.json 2>/dev/null; then "
+        "echo 'Pi still lists the Steer package' >&2; exit 1; fi",
         "echo '--- plugin record after removal'",
         "cat ~/.claude/plugins/installed_plugins.json 2>/dev/null || true",
         "grep -n -A2 '^\\[plugins' ~/.codex/config.toml 2>/dev/null || true",
+        "cat ~/.pi/agent/settings.json 2>/dev/null || true",
     ]
     return lines
 
@@ -166,22 +202,25 @@ def script(commands, harness, version, update=False, local=False, removal=None):
     own layer: overlayfs refuses to rename a directory an image layer holds (EXDEV).
     It arms a global registration that calls the stable executable, which the
     SessionStart update requires, and runs that update in place of bin install.
-    With local, it copies the mounted checkout to LOCAL_SOURCE first. removal is the
-    output of uninstall_lines, run after the install checks.
+    With local, it copies the mounted checkout to LOCAL_SOURCE first, and for Pi serves
+    it over git://. removal is the output of uninstall_lines, run after the install
+    checks.
     """
     lines = ["set -euo pipefail", "mkdir -p ~/.codex"]
     if local:
         lines.append(f"cp -a /src-ro {LOCAL_SOURCE}")
+        if harness == "pi":
+            lines += pi_daemon_lines()
     if update:
-        m = MARKETPLACES[harness]
-        lines.append(f"cp -a {m} {m}.layer && rm -rf {m} && mv {m}.layer {m}")
+        if harness in MARKETPLACES:
+            m = MARKETPLACES[harness]
+            lines.append(f"cp -a {m} {m}.layer && rm -rf {m} && mv {m}.layer {m}")
         lines.append(f"{STEER} check install --harness {harness} --scope global")
     for command in commands:
         lines += [f"echo '$ '{shlex.quote(command)}", command]
     lines += [
-        f"copy={CACHES[harness]}/{version}",
-        *([f'[ -d "$copy" ] || copy={CACHES[harness]}/local'] if local else []),
-        'test -x "$copy/scripts/steer" || { echo "no installed copy at $copy" >&2; ls ' + CACHES[harness] + ' >&2 || true; exit 1; }',
+        *copy_lines(harness, version, local),
+        'test -x "$copy/scripts/steer" || { echo "no installed copy at $copy" >&2; ls "$(dirname "$copy")" >&2 || true; exit 1; }',
         *(['echo "$ $copy/scripts/steer report cadence"',
            'started=$(cd /tmp && "$copy/scripts/steer" report cadence)',
            'echo "$started"',
@@ -201,7 +240,9 @@ def script(commands, harness, version, update=False, local=False, removal=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--harness", choices=[*HARNESSES, "both"], default="both")
+    parser.add_argument("--harness", choices=[*HARNESSES, "all"], default="all")
+    parser.add_argument("--readme", type=Path,
+                        help="read the Install, Update and Uninstall commands from this file")
     parser.add_argument("--image", default="steer-linux-fresh:latest", help="image tag to build and run")
     parser.add_argument("--no-build", action="store_true", help="run the existing image")
     parser.add_argument("--version", help="expected plugin version (default: the manifest's)")
@@ -226,6 +267,8 @@ def main():
         built = stage_local(stage)
         args.version = args.version or built
         readme = (stage / "README.md").read_text()
+    if args.readme:
+        readme = args.readme.read_text()
     args.version = args.version or manifest_version()
     try:
         return run_harnesses(args, readme, stage)
@@ -234,21 +277,42 @@ def main():
             shutil.rmtree(stage, ignore_errors=True)
 
 
-def run_harnesses(args, readme, stage):
-    """Run the install, and any update or uninstall, once per selected harness."""
-    if not args.no_build and not args.update_from:
-        subprocess.run(["docker", "build", "-t", args.image, "-f", str(DOCKERFILE), str(DOCKERFILE.parent)], check=True)
-    failed = []
-    for harness in (HARNESSES if args.harness == "both" else [args.harness]):
-        print(f"=== {harness}", flush=True)
-        name = f"steer-fresh-{harness}"
-        subprocess.run(["docker", "rm", "-f", name], capture_output=True)
-        image = f"{args.update_from}-{harness}" if args.update_from else args.image
+def plan(args, readme):
+    """Return (harness, commands, removal) for each selected harness, read from the README.
+
+    A missing block raises ValueError before any container runs.
+    """
+    out = []
+    for harness in (HARNESSES if args.harness == "all" else [args.harness]):
         heading = "Update" if args.update_from else "Install"
         commands = install_commands(readme, harness, heading)
         if args.local:
             commands = local_commands(commands)
-        removal = uninstall_lines(harness, uninstall_commands(readme, harness), args.uninstall) if args.uninstall else None
+        removal = None
+        if args.uninstall:
+            removing = uninstall_commands(readme, harness)
+            if args.local:
+                removing = local_commands(removing)
+            removal = uninstall_lines(harness, removing, args.uninstall)
+        out.append((harness, commands, removal))
+    return out
+
+
+def run_harnesses(args, readme, stage):
+    """Run the install, and any update or uninstall, once per selected harness."""
+    try:
+        runs = plan(args, readme)
+    except ValueError as error:
+        print(f"{error}; add it, pass --readme <file>, or name one harness with --harness", file=sys.stderr)
+        return 2
+    if not args.no_build and not args.update_from:
+        subprocess.run(["docker", "build", "-t", args.image, "-f", str(DOCKERFILE), str(DOCKERFILE.parent)], check=True)
+    failed = []
+    for harness, commands, removal in runs:
+        print(f"=== {harness}", flush=True)
+        name = f"steer-fresh-{harness}"
+        subprocess.run(["docker", "rm", "-f", name], capture_output=True)
+        image = f"{args.update_from}-{harness}" if args.update_from else args.image
         mount = ["-v", f"{stage}:/src-ro:ro"] if stage else []
         run = subprocess.run(["docker", "run", "--name", name, *mount, image, "bash", "-c",
                               script(commands, harness, args.version, update=bool(args.update_from),

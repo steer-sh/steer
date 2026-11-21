@@ -390,8 +390,11 @@ release's `--update-from <tag>` runs the README's `## Update` commands in it. It
 `--local` installs this checkout's HEAD with a Linux build instead, so it runs before a
 release; `--uninstall readme|plugin-first|steer-first` then arms the global gate, check runner and
 status line and removes them through the README's `## Uninstall` lines, after removing
-the plugin, or before removing it, which is the only test of what `claude plugin uninstall` and
-`codex plugin remove` write. Guard and rules removal is covered in `cli/e2e/` alone.
+the plugin, or before removing it, which is the only test of what `claude plugin uninstall`,
+`codex plugin remove` and `pi remove` write. Guard and rules removal is covered in `cli/e2e/` alone.
+Pi takes no `file://` source, so a `--local` Pi run serves the staged checkout from a
+`git daemon` in the container. `--readme <file>` reads the commands from another file,
+which tries a harness's block before the README carries it.
 
 For routing changes, `tests/routing_scenarios.py --model <model>` runs the
 `/steer --headless --route-only` scenarios in
