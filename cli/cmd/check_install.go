@@ -135,10 +135,12 @@ func checkInstallSteps(target harness.ID, scope string, arming checkscope.Arming
 	if step, ok := status.CommandStep(steerbin.Resolve(arming.Command)); ok {
 		steps = append(steps, step)
 	}
-	// Pi asks for trust only before it loads a project's extensions.
-	piGlobal := target == harness.Pi && scope == claude.GlobalScope
-	if entry, _ := harness.Get(target); entry.Capabilities.TrustReview && !piGlobal {
-		if step, ok := status.TrustStep(string(target), status.TrustUnknown, arming.Path); ok {
+	if entry, _ := harness.Get(target); entry.Capabilities.TrustReview {
+		trust := status.TrustUnknown
+		if target == harness.Pi {
+			trust = status.PiTrust(scope, ".", arming.Path)
+		}
+		if step, ok := status.TrustStep(string(target), trust, arming.Path); ok {
 			steps = append(steps, step)
 		}
 	}

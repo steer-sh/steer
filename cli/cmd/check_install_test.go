@@ -70,6 +70,10 @@ func TestCheckInstallArmsRootStopInBothHarnesses(t *testing.T) {
 		if target == harness.Codex && !strings.Contains(out, "/hooks") {
 			t.Fatalf("the Codex install does not name the trust review:\n%s", out)
 		}
+		// No Pi session has loaded the extension the install just wrote.
+		if target == harness.Pi && !strings.Contains(out, "/reload") {
+			t.Fatalf("the Pi install does not name the reload that loads its extension:\n%s", out)
+		}
 	}
 	if checks.RegisteredHookTimeout() <= int(checks.DefaultExecTimeout.Seconds()) {
 		t.Fatal("the registered timeout does not exceed the run deadline")

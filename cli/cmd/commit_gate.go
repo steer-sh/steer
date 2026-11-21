@@ -403,7 +403,7 @@ func installReviewChannel(cfg gate.Config) error {
 			"\nExtension: " + path
 	}
 	fmt.Println()
-	fmt.Println(renderInstallReadiness(installSteps(cfg, target, hookCommand), registered))
+	fmt.Println(renderInstallReadiness(installSteps(cfg, target, hookCommand, scope, path), registered))
 	return nil
 }
 
@@ -411,7 +411,7 @@ func installReviewChannel(cfg gate.Config) error {
 // Registration is one of four states, and it is the only one the write itself proves:
 // the harness must trust the hook, the hook command must resolve, and the reviewer CLI
 // must exist. Reporting "armed" on the write alone names the weakest of the four.
-func installSteps(cfg gate.Config, target harness.ID, command string) []status.Step {
+func installSteps(cfg gate.Config, target harness.ID, command, scope, path string) []status.Step {
 	var steps []status.Step
 	_, _, resolveErr := resolveReviewer(cfg)
 	if step, ok := status.ReviewerStep(settings.ReviewerProbe(cfg, resolveErr)); ok {
@@ -423,7 +423,11 @@ func installSteps(cfg gate.Config, target harness.ID, command string) []status.S
 	entry, _ := harness.Get(target)
 	if entry.Capabilities.TrustReview {
 		// The registration block below names the file, so the step does not repeat it.
-		if step, ok := status.TrustStep(string(target), status.TrustUnknown, ""); ok {
+		trust := status.TrustUnknown
+		if target == harness.Pi {
+			trust = status.PiTrust(scope, ".", path)
+		}
+		if step, ok := status.TrustStep(string(target), trust, ""); ok {
 			steps = append(steps, step)
 		}
 	}
