@@ -9,6 +9,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/codex"
 	"github.com/steer-sh/steer-cli/internal/harness"
+	"github.com/steer-sh/steer-cli/internal/pi"
 	"github.com/steer-sh/steer-cli/internal/testhome"
 )
 
@@ -83,6 +84,26 @@ func TestRemovedPluginReadsTheHarnessRecord(t *testing.T) {
 	writeFile(t, filepath.Join(home, ".codex", "config.toml"), "[plugins.'steer@m']\nenabled = true\n")
 	if removed(harness.Codex) {
 		t.Error("a single-quoted Codex plugin key for Steer read as a removed plugin")
+	}
+
+	t.Setenv("PI_CODING_AGENT_DIR", "")
+	piClone := filepath.Join(".pi", "agent", "git", "github.com", "steer-sh", "steer")
+	home = pluginHome(t, func(home string) string {
+		return filepath.Join(home, piClone, "bin", "linux-amd64", "steer")
+	})
+	if _, err := pi.RegisterCommitGateAndResolver(harness.GlobalScope, home, "steer commit-gate review-pi", 460,
+		"steer commit-gate backfill --if-due --apply --quiet", 30); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(home, piClone, "package.json"), `{"name":"steer","pi":{}}`)
+	writeFile(t, filepath.Join(home, ".pi", "agent", "settings.json"), `{"packages":[]}`)
+	if !removed(harness.Pi) {
+		t.Error("no Pi package entry: Pi not read as removed")
+	}
+	writeFile(t, filepath.Join(home, ".pi", "agent", "settings.json"),
+		`{"packages":["git:github.com/steer-sh/steer@release"]}`)
+	if removed(harness.Pi) {
+		t.Error("a Pi package entry for Steer read as a removed plugin")
 	}
 
 	pluginHome(t, func(home string) string { return filepath.Join(home, "src", "steer", "cli", "bin", "steer") })

@@ -118,8 +118,10 @@ same band as text and colour.
 
 Each install from another path adds that path, as `os.Executable` reports it, to
 `~/.steer/bin/source`, and `bin install` adds every active plugin copy it finds. When a recorded path lies in a harness's plugin cache and
-the harness's own install record (`installed_plugins.json`, or the `plugins` table
-of Codex's `config.toml`) no longer names Steer while its global configuration
+the harness's own install record (`installed_plugins.json`, the `plugins` table
+of Codex's `config.toml`, or the `packages` list of Pi's `settings.json`, read
+through the `git/<host>/<path>` clone each git source names) no longer names Steer
+while its global configuration
 still calls Steer, `status.RemovedPlugins` names that harness: the status line row
 and every commit the PreToolUse gate reviews name
 `steer uninstall --harness <id>`. This is a notice and never a removal, because an

@@ -16,6 +16,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/codex"
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/mods"
+	"github.com/steer-sh/steer-cli/internal/pi"
 	"github.com/steer-sh/steer-cli/internal/statestore"
 	"github.com/steer-sh/steer-cli/internal/steerbin"
 	"github.com/steer-sh/steer-cli/internal/steerpath"
@@ -67,14 +68,27 @@ func (p PluginCopy) BinInstallCommand() string {
 	return steerbin.Quote(filepath.Join(p.Path, "scripts", "steer")) + " bin install"
 }
 
-// PluginCopies reads the active cached Steer plugin copy in the Claude Code and Codex
-// global plugin caches. A harness with no cache yields no row. Both keep an updated
+// pluginHarnesses are the harnesses that install the Steer plugin as a copy.
+var pluginHarnesses = []harness.ID{harness.ClaudeCode, harness.Codex, harness.Pi}
+
+// pluginCache is the directory under a harness's global configuration that holds
+// its plugin copies.
+func pluginCache(id harness.ID, dir string) string {
+	if id == harness.Pi {
+		return filepath.Join(dir, "git")
+	}
+	return filepath.Join(dir, "plugins", "cache")
+}
+
+// PluginCopies reads the active Steer plugin copy of each harness: the Claude Code and
+// Codex global plugin caches, and the Steer package clones Pi's global settings list.
+// A harness with no cache yields no row. Claude Code and Codex keep an updated
 // plugin's earlier version directory: a Claude Code copy counts only when its install
 // record names it, and a Codex copy only when it is the version Codex loads.
 func PluginCopies() []PluginCopy {
 	stable, _ := steerbin.Path()
 	out := []PluginCopy{}
-	for _, id := range []harness.ID{harness.ClaudeCode, harness.Codex} {
+	for _, id := range pluginHarnesses {
 		h, ok := harness.Get(id)
 		if !ok {
 			continue
@@ -83,7 +97,12 @@ func PluginCopies() []PluginCopy {
 		if err != nil {
 			continue
 		}
-		roots, _ := filepath.Glob(filepath.Join(dir, "plugins", "cache", "*", pluginName, "*"))
+		var roots []string
+		if id == harness.Pi {
+			roots, _ = piPackageRoots(dir)
+		} else {
+			roots, _ = filepath.Glob(filepath.Join(pluginCache(id, dir), "*", pluginName, "*"))
+		}
 		sort.Strings(roots)
 		if id == harness.Codex {
 			roots = codexActiveRoots(roots)
@@ -182,11 +201,92 @@ func claudeInstallPaths(configDir string) (paths map[string]bool, ok bool) {
 	return paths, true
 }
 
+// piPackageRoots returns the clone of each git package Pi's settings file lists whose
+// package.json describes the Steer package. Pi clones a git source to
+// git/<host>/<path> under its configuration directory. ok is false when the settings
+// file is missing or unreadable.
+func piPackageRoots(dir string) (roots []string, ok bool) {
+	var settings struct {
+		Packages []json.RawMessage `json:"packages"`
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "settings.json"))
+	if err != nil || json.Unmarshal(data, &settings) != nil {
+		return nil, false
+	}
+	seen := map[string]bool{}
+	for _, raw := range settings.Packages {
+		var source string
+		if json.Unmarshal(raw, &source) != nil {
+			var entry struct {
+				Source string `json:"source"`
+			}
+			if json.Unmarshal(raw, &entry) != nil {
+				continue
+			}
+			source = entry.Source
+		}
+		rel, isGit := piGitPath(source)
+		if !isGit {
+			continue
+		}
+		root := filepath.Join(pluginCache(harness.Pi, dir), filepath.FromSlash(rel))
+		if !seen[root] && isSteerPackage(root) {
+			seen[root] = true
+			roots = append(roots, root)
+		}
+	}
+	return roots, true
+}
+
+// piGitPath reduces a Pi git package source (git:host/owner/repo@ref, an https or ssh
+// URL, or git@host:owner/repo) to the host/owner/repo path Pi clones it under.
+func piGitPath(source string) (string, bool) {
+	s := strings.TrimSpace(source)
+	switch {
+	case strings.HasPrefix(s, "git:"):
+		s = strings.TrimPrefix(s, "git:")
+	case strings.HasPrefix(s, "https://"), strings.HasPrefix(s, "http://"), strings.HasPrefix(s, "ssh://"):
+		_, s, _ = strings.Cut(s, "://")
+		if at := strings.Index(s, "@"); at >= 0 && at < strings.Index(s+"/", "/") {
+			s = s[at+1:]
+		}
+	case strings.HasPrefix(s, "git@"):
+		s = strings.Replace(strings.TrimPrefix(s, "git@"), ":", "/", 1)
+	default:
+		return "", false
+	}
+	if at := strings.LastIndex(s, "@"); at > strings.LastIndex(s, "/") {
+		s = s[:at]
+	}
+	s = strings.TrimSuffix(strings.Trim(s, "/"), ".git")
+	parts := strings.Split(s, "/")
+	if len(parts) < 3 {
+		return "", false
+	}
+	for _, part := range parts {
+		if part == "" || part == "." || part == ".." {
+			return "", false
+		}
+	}
+	return s, true
+}
+
+// isSteerPackage reports whether root holds a package.json that names the Steer
+// package and lists Pi resources.
+func isSteerPackage(root string) bool {
+	var pkg struct {
+		Name string          `json:"name"`
+		Pi   json.RawMessage `json:"pi"`
+	}
+	data, err := os.ReadFile(filepath.Join(root, "package.json"))
+	return err == nil && json.Unmarshal(data, &pkg) == nil && pkg.Name == pluginName && len(pkg.Pi) > 0
+}
+
 // PluginSources names each harness whose plugin cache holds a path the stable
 // executable was installed from.
 func PluginSources() []harness.ID {
 	var out []harness.ID
-	for _, id := range []harness.ID{harness.ClaudeCode, harness.Codex} {
+	for _, id := range pluginHarnesses {
 		if len(sourcesIn(id)) > 0 {
 			out = append(out, id)
 		}
@@ -204,7 +304,7 @@ func sourcesIn(id harness.ID) []string {
 	if err != nil {
 		return nil
 	}
-	cache := filepath.Join(dir, "plugins", "cache")
+	cache := pluginCache(id, dir)
 	var out []string
 	for _, source := range steerbin.Sources() {
 		if lexicallyWithin(cache, source) || steerpath.Within(cache, source) {
@@ -276,6 +376,12 @@ func globallyRegistered(id harness.ID) bool {
 	case harness.Codex:
 		return codex.CommitGateArming(g, "").Registered || codex.ResolverArmingRow(g, "").Registered ||
 			codex.CheckHookArming(g, "").Registered || codex.MasterArming(g, "").Registered
+	case harness.Pi:
+		if pi.CommitGateArming(g, "").Registered || pi.CheckRunnerArming(g, "").Registered {
+			return true
+		}
+		registered, err := (pi.Registrar{}).MasterRegistered(g)
+		return err == nil && registered
 	}
 	return false
 }
@@ -297,9 +403,18 @@ func UninstallCommand(id harness.ID) string {
 }
 
 // pluginInstalled reads the harness's own record of installed plugins: Claude Code's
-// installed_plugins.json, and the plugins table of Codex's config.toml. A record that
-// exists but cannot be read counts as installed, so a read failure raises no notice.
+// installed_plugins.json, the plugins table of Codex's config.toml, and the packages
+// Pi's settings.json lists. A record that exists but cannot be read counts as
+// installed, so a read failure raises no notice.
 func pluginInstalled(id harness.ID, dir string) bool {
+	if id == harness.Pi {
+		roots, ok := piPackageRoots(dir)
+		if !ok {
+			_, err := os.Stat(filepath.Join(dir, "settings.json"))
+			return !os.IsNotExist(err)
+		}
+		return len(roots) > 0
+	}
 	if id == harness.ClaudeCode {
 		paths, ok := claudeInstallPaths(dir)
 		if !ok {
