@@ -46,6 +46,11 @@ elif provider == 'agy':
     print(json.dumps({'response': text, 'status': 'SUCCESS',
                       'usage': {'input_tokens': 900, 'output_tokens': 40, 'thinking_tokens': 0,
                                 'cache_read_tokens': 0, 'total_tokens': 940}}))
+elif provider == 'pi':
+    usage = {'input': 900, 'output': 40, 'cacheRead': 0, 'cacheWrite': 0}
+    print(json.dumps({'type': 'message_end', 'message': {'role': 'assistant', 'stopReason': 'stop',
+                      'content': [{'type': 'text', 'text': text}], 'usage': usage}}))
+    print(json.dumps({'type': 'agent_settled', 'aborted': False}))
 else:
     print(json.dumps({'type': 'item.completed', 'item': {'type': 'agent_message', 'text': text}}))
     print(json.dumps({'type': 'turn.completed', 'usage': {'input_tokens': 900, 'output_tokens': 40}}))
@@ -239,6 +244,8 @@ class LiveReviewerRunner(unittest.TestCase):
             token = fakehome / sandbox.AGY_TOKEN
             token.parent.mkdir(parents=True)
             token.write_text("fixture login")
+            (fakehome / sandbox.PI_AGENT).mkdir(parents=True)
+            (fakehome / sandbox.PI_AGENT / "auth.json").write_text("{}")
             bindir = root / "bin"
             bindir.mkdir()
             for name in live_reviewers.BINARIES.values():
@@ -296,7 +303,7 @@ class LiveReviewerRunner(unittest.TestCase):
                 self.assertIn("partial reviewer diagnostic", (trace / "stderr.txt").read_text())
             return code, result
 
-    def test_three_providers_through_registered_gate(self):
+    def test_every_provider_through_registered_gate(self):
         for provider in live_reviewers.BINARIES:
             with self.subTest(provider=provider):
                 code, result = self.cell(provider)

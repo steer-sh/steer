@@ -2,7 +2,7 @@
 """Run one paid reviewer cell through the gate in a throwaway home.
 
 Requires explicit --provider, --model and --effort (use '' for no effort).
-Claude Code needs an exported sandbox login; Codex and agy use sandbox.py's
+Claude Code needs an exported sandbox login; Codex, agy and Pi use sandbox.py's
 login copies. Results contain actual argv, prompts, replies, timing and ledger
 rows. This exercises the native hook command directly, not interactive delivery.
 """
@@ -22,7 +22,10 @@ from pathlib import Path
 
 from sandbox import GIT_IDENTITY, REPO, Sandbox
 
-BINARIES = {"claude-code": "claude", "codex": "codex", "agy": "agy"}
+BINARIES = {"claude-code": "claude", "codex": "codex", "agy": "agy", "pi": "pi"}
+EFFORT_FLAGS = {"codex": "-c", "pi": "--thinking"}
+# An extension that marks its own loading; the Pi reviewer must load neither copy.
+PI_CANARY = 'import { writeFileSync } from "node:fs";\nwriteFileSync(MARKER, "");\nexport default function () {}\n'
 BASE = '''def average(values):
     """Return the arithmetic mean of a nonempty sequence.
 
@@ -88,7 +91,8 @@ def check_call(call, provider, model, effort):
     if not has_pair(argv, "--model", model):
         failures.append("model did not reach the CLI")
     if effort:
-        flag, value = ("-c", "model_reasoning_effort=" + effort) if provider == "codex" else ("--effort", effort)
+        flag = EFFORT_FLAGS.get(provider, "--effort")
+        value = "model_reasoning_effort=" + effort if provider == "codex" else effort
         if not has_pair(argv, flag, value):
             failures.append("effort did not reach the CLI")
     if provider == "claude-code":
@@ -99,6 +103,11 @@ def check_call(call, provider, model, effort):
         pairs = (("--sandbox", "read-only"), ("--disable", "hooks"), ("--disable", "apps"))
         if not argv or argv[-1] != "-":
             failures.append("Codex prompt is not on stdin")
+    elif provider == "pi":
+        flags = ("--no-session", "--no-extensions", "--no-mcp", "--no-skills",
+                 "--no-prompt-templates", "--no-themes", "--no-context-files", "--no-approve", "--offline",
+                 "--system-prompt", "--append-system-prompt")
+        pairs = (("--mode", "json"), ("--tools", "read,grep,find,ls"))
     else:
         flags = ("-p", "--print-timeout")
         pairs = (("--output-format", "json"), ("-p", "<prompt in prompt.txt>"))
@@ -122,7 +131,8 @@ def run_cell(args):
     report = {"provider": args.provider, "model": args.model, "effort": args.effort,
               "failures": [], "cost": "not measured; raw CLI replies retained"}
     try:
-        box = Sandbox(root, codex=args.provider == "codex", agy=args.provider == "agy")
+        box = Sandbox(root, codex=args.provider == "codex", agy=args.provider == "agy",
+                      pi=args.provider == "pi")
         env = box.env(claude=args.provider == "claude-code")
         # Keep operator overrides from redirecting the gate's state or changing its panel.
         env = {k: v for k, v in env.items()
@@ -172,6 +182,10 @@ def run_cell(args):
         codexdir = box.home / ".codex"
         codexdir.mkdir(exist_ok=True)
         (codexdir / "hooks.json").write_text(json.dumps({"hooks": {"Stop": [{"hooks": [stop]}]}}))
+        canary = PI_CANARY.replace("MARKER", json.dumps(str(marker)))
+        for extensions in (box.home / ".pi" / "agent" / "extensions", work / ".pi" / "extensions"):
+            extensions.mkdir(parents=True, exist_ok=True)
+            (extensions / "steer-canary.ts").write_text(canary)
         command([str(steer), "bin", "install"])
         command([str(steer), "commit-gate", "install", "--harness", "claude-code"])
         settings = json.loads((work / ".claude" / "settings.json").read_text())
@@ -217,7 +231,7 @@ def run_cell(args):
             if not ("average.py" in response and re.search(r"zero|singleton|divis|denominator|off.by.one", response, re.I)):
                 report["failures"].append("live reply did not identify the planted arithmetic defect")
         if marker.exists():
-            report["failures"].append("reviewer ran the sandbox Stop hook")
+            report["failures"].append("reviewer ran the sandbox Stop hook or loaded a Pi extension")
     except (OSError, ValueError, SystemExit, subprocess.SubprocessError) as error:
         report["failures"].append(str(error))
     finally:
@@ -225,8 +239,8 @@ def run_cell(args):
         if box:
             report["failures"] += box.leaks()
             report["sessions"] = box.sessions()
-            if any(report["sessions"].get(h) for h in ("claude", "codex")):
-                report["failures"].append("Claude Code or Codex saved a reviewer session")
+            if any(report["sessions"].get(h) for h in ("claude", "codex", "pi")):
+                report["failures"].append("Claude Code, Codex or Pi saved a reviewer session")
         report["passed"] = not report["failures"]
         (output / "result.json").write_text(json.dumps(report, indent=2))
         if args.keep:

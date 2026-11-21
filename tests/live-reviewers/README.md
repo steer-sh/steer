@@ -12,11 +12,12 @@ From the repository root, with your sandbox login available:
 python3 tests/live_reviewers.py --provider claude-code --model <model> --effort <effort> --output tests/live-reviewers/out/claude
 python3 tests/live_reviewers.py --provider codex --model <model> --effort <effort> --output tests/live-reviewers/out/codex
 python3 tests/live_reviewers.py --provider agy --model <model> --effort <effort> --output tests/live-reviewers/out/agy
+python3 tests/live_reviewers.py --provider pi --model <provider/model> --effort <effort> --output tests/live-reviewers/out/pi
 ```
 
 Replace the model and effort placeholders with IDs your reviewer CLI accepts;
 use `--effort ''` to omit effort. Claude Code requires
-`CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` exported. Codex and agy use the
+`CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` exported. Codex, agy and Pi use the
 login copies supplied by `sandbox.py`. Choose a new output directory for each
 run. The default output location above is ignored by git.
 
@@ -31,9 +32,10 @@ unknown return code and an elapsed-time upper bound observed by the runner.
 The trial has no ledger row; the live review must
 deny the planted defect and write a row with the selected identity. Isolation
 flags and prompt transport are checked from captured argv. The adopted fixture
-repository and sandbox Stop markers check for inherited hook execution.
+repository and sandbox Stop markers check for inherited hook execution; for Pi,
+a user and a project extension touch the same marker when they load.
 
-Claude Code and Codex must save no reviewer session; agy's session locations
+Claude Code, Codex and Pi must save no reviewer session; agy's session locations
 are recorded. Real-home changes and live audit/ledger leaks fail the cell.
 The default cleanup removes the sandbox home and copied logins; `--keep`
 retains them for diagnosis. Evidence in the output directory survives cleanup.
