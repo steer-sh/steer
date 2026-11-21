@@ -2,7 +2,7 @@
 name: steer-setup
 description: Set up steer after installing the plugin — pick a reviewer (a CLI or an OpenAI-compatible API) and model, arm the commit gate for this agent, and place the stable executable. Use for first-time steer setup, when adding a second harness (Claude Code or Codex) to an existing steer install, or when the user asks to configure, arm or repair the commit gate. Also arms repository checks at turn end and moves a personal check gate into Steer.
 user-invocable: true
-compatibility: Runs the bundled launcher at the plugin root (CLAUDE_PLUGIN_ROOT on Claude Code, two directories above this skill on Codex), or the steer CLI from PATH. Writes ~/.steer/config.json and the invoking harness's hook registration. Needs an installed, authenticated reviewer CLI — claude, codex or agy — or an OpenAI-compatible endpoint and an API key the user stores in their own terminal.
+compatibility: Runs the bundled launcher at the plugin root (CLAUDE_PLUGIN_ROOT on Claude Code, two directories above this skill on Codex), or the steer CLI from PATH. Writes ~/.steer/config.json and the invoking harness's hook registration. Needs an installed, authenticated reviewer CLI — claude, codex, agy or pi — or an OpenAI-compatible endpoint and an API key the user stores in their own terminal.
 allowed-tools: Bash(steer *), Read
 ---
 
@@ -95,6 +95,17 @@ When the user chooses `agy`, tell them two things before you write the choice:
   limits what an `agy` reviewer may read or run, so those rules are its boundary.
 - Every review stays in their `agy` history: each gated commit adds one
   conversation per reviewer run.
+
+When the user chooses `pi`, tell them three things before you write the choice:
+
+- Pi keeps its own login (`pi auth login <provider>`), and reviews use it. A review
+  loads none of their Pi extensions, skills, context files or project `.pi/`
+  configuration and saves no session.
+- A review can read, search and list files but has no shell or edit tool. Those
+  reads are not limited to the repository: a file outside it that a review reads,
+  for example because a diff asks it to, goes to their model provider.
+- Pi has no reviewer default in Steer. Ask for the model as `provider/id`, as
+  `pi --list-models` prints it, and write it in the model step below.
 
 When the user chooses `openai-compatible`, follow **The API reviewer** below
 instead of the rest of this step.

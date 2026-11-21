@@ -12,7 +12,7 @@ or ANTHROPIC_API_KEY in the environment; an empty home carries no login of its
 own. Claude Code passes neither variable to its tool or hook commands, so a
 claude-code reviewer the gate starts there has no login; `--claude` also writes
 the login into the sandbox's user settings `env`, which that reviewer reads. Codex takes a copy of the operator's `~/.codex/auth.json`, and agy a copy
-of its OAuth token file. Git reads a sandbox global configuration that carries a
+of its OAuth token file, and Pi a copy of `~/.pi/agent/auth.json`. Git reads a sandbox global configuration that carries a
 fixed author identity, and never the system configuration.
 
 After a run, `leaks()` names every real harness file the run changed and every
@@ -22,7 +22,7 @@ overwritten. `sessions()` lists the agent sessions saved inside the sandbox home
 
 Manual use runs one command inside a fresh sandbox and fails on a leak:
 
-    python3 tests/sandbox.py [--codex] [--agy] [--claude] [--keep] [--no-sessions] \
+    python3 tests/sandbox.py [--codex] [--agy] [--pi] [--claude] [--keep] [--no-sessions] \
         -- <command> [args...]
 
 The command's working directory is the sandbox's `work/` and its HOME is the
@@ -45,6 +45,7 @@ REAL_HOME = Path.home()
 REAL_AUDIT_LOG = REAL_HOME / ".steer" / "hooks" / "steer-audit.jsonl"
 REAL_LEDGER_DIR = REAL_HOME / ".steer" / "state" / "commit-review"
 AGY_TOKEN = Path(".gemini") / "antigravity-cli" / "antigravity-oauth-token"
+PI_AGENT = Path(".pi") / "agent"
 # The operator's harness and steer files a run could register into.
 REAL_GUARDED = [
     REAL_HOME / ".claude" / "settings.json",
@@ -59,6 +60,8 @@ REAL_GUARDED = [
     REAL_HOME / ".codex" / "hooks.json",
     REAL_HOME / ".codex" / "config.toml",
     REAL_HOME / ".codex" / "AGENTS.md",
+    REAL_HOME / PI_AGENT / "settings.json",
+    REAL_HOME / PI_AGENT / "AGENTS.md",
 ]
 CLAUDE_LOGIN_VARS = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY")
 GIT_IDENTITY = {"GIT_AUTHOR_NAME": "Steer Sandbox", "GIT_AUTHOR_EMAIL": "sandbox@steer.invalid",
@@ -66,7 +69,8 @@ GIT_IDENTITY = {"GIT_AUTHOR_NAME": "Steer Sandbox", "GIT_AUTHOR_EMAIL": "sandbox
                 "GIT_COMMITTER_EMAIL": "sandbox@steer.invalid"}
 # Where each harness saves a session, relative to the sandbox home.
 SESSION_DIRS = {"claude": Path(".claude") / "projects", "codex": Path(".codex") / "sessions",
-                "agy": Path(".gemini") / "antigravity-cli" / "conversations"}
+                "agy": Path(".gemini") / "antigravity-cli" / "conversations",
+                "pi": PI_AGENT / "sessions"}
 
 
 def digest(paths):
@@ -101,7 +105,7 @@ class Sandbox:
     """A home under root/home, with root as the boundary a leaked row is tested
     against. Put the run's working directory inside root."""
 
-    def __init__(self, root, codex=False, agy=False, audit_log=REAL_AUDIT_LOG,
+    def __init__(self, root, codex=False, agy=False, pi=False, audit_log=REAL_AUDIT_LOG,
                  guarded=REAL_GUARDED, ledger_dir=REAL_LEDGER_DIR):
         self.root = Path(os.path.realpath(root))
         self.home = self.root / "home"
@@ -124,6 +128,12 @@ class Sandbox:
                 raise SystemExit("sandbox: %s is missing; log in to agy first" % token)
             (self.home / AGY_TOKEN).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(token, self.home / AGY_TOKEN)
+        if pi:
+            auth = REAL_HOME / PI_AGENT / "auth.json"
+            if not auth.exists():
+                raise SystemExit("sandbox: %s is missing; log in to Pi first" % auth)
+            (self.home / PI_AGENT).mkdir(parents=True, exist_ok=True)
+            shutil.copy2(auth, self.home / PI_AGENT / "auth.json")
         self.gitconfig = self.home / ".gitconfig"
         self.gitconfig.write_text("[user]\n\tname = %s\n\temail = %s\n"
                                   % (GIT_IDENTITY["GIT_AUTHOR_NAME"],
@@ -143,6 +153,9 @@ class Sandbox:
         env["HOME"] = str(self.home)
         env["CODEX_HOME"] = str(self.home / ".codex")
         env.pop("CLAUDE_CONFIG_DIR", None)
+        # Pi reads its agent and session directories from these before HOME.
+        env.pop("PI_CODING_AGENT_DIR", None)
+        env.pop("PI_CODING_AGENT_SESSION_DIR", None)
         env["GIT_CONFIG_GLOBAL"] = str(self.gitconfig)
         env["GIT_CONFIG_NOSYSTEM"] = "1"
         env.update(GIT_IDENTITY)
@@ -222,6 +235,7 @@ def main():
         description="Run one command inside a fresh sandbox home and fail on a leak.")
     parser.add_argument("--codex", action="store_true", help="Give the sandbox a Codex login")
     parser.add_argument("--agy", action="store_true", help="Give the sandbox an agy login")
+    parser.add_argument("--pi", action="store_true", help="Give the sandbox a Pi login")
     parser.add_argument("--no-sessions", action="store_true",
                         help="Fail when any harness saved a session inside the sandbox")
     parser.add_argument("--keep", action="store_true", help="Keep the sandbox directory")
@@ -236,7 +250,7 @@ def main():
 
     root = Path(tempfile.mkdtemp(prefix="steer-sandbox-"))
     try:
-        box = Sandbox(root, codex=args.codex, agy=args.agy)
+        box = Sandbox(root, codex=args.codex, agy=args.agy, pi=args.pi)
         work = box.root / "work"
         work.mkdir()
         print("sandbox: %s" % box.root, file=sys.stderr)

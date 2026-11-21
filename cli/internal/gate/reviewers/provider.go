@@ -69,6 +69,11 @@ var providers = []Provider{
 		build:      func(o Options) gate.Reviewer { return NewClaudeCode(o.Model, o.Effort) },
 	},
 	{
+		ID: "pi", Label: "Pi", Executable: "pi",
+		Efforts: []string{"off", "minimal", "low", "medium", "high", "xhigh", "max"},
+		build:   func(o Options) gate.Reviewer { return NewPi(o.Model, o.Effort) },
+	},
+	{
 		ID: APIProviderID, Label: "OpenAI-compatible API", API: true,
 		validate: validateChatAPI,
 		build:    func(o Options) gate.Reviewer { return NewChatAPI(o) },

@@ -197,3 +197,62 @@ func decodeAgyUsage(data []byte) *gate.TokenUsage {
 	}
 	return reply.Usage.tokenUsage()
 }
+
+// piUsage is the usage of a Pi assistant message. Pi's input excludes cacheRead and
+// cacheWrite, and its output includes reasoning.
+type piUsage struct {
+	Input      *int `json:"input"`
+	Output     *int `json:"output"`
+	CacheRead  *int `json:"cacheRead"`
+	CacheWrite *int `json:"cacheWrite"`
+	Reasoning  *int `json:"reasoning"`
+}
+
+// piUsageSum sums the usage of a Pi run's assistant messages. A field enters the
+// run's usage only when every message reported it, as apiUsage does.
+type piUsageSum struct {
+	messages                                int
+	input, cached, output, reasoning        int
+	withInput, withCached, withOut, withRsn int
+}
+
+func (s *piUsageSum) add(u *piUsage) {
+	s.messages++
+	if u == nil {
+		return
+	}
+	if u.Input != nil && u.CacheRead != nil && u.CacheWrite != nil {
+		s.input += *u.Input + *u.CacheRead + *u.CacheWrite
+		s.withInput++
+	}
+	if u.CacheRead != nil {
+		s.cached += *u.CacheRead
+		s.withCached++
+	}
+	if u.Output != nil {
+		s.output += *u.Output
+		s.withOut++
+	}
+	if u.Reasoning != nil {
+		s.reasoning += *u.Reasoning
+		s.withRsn++
+	}
+}
+
+func (s *piUsageSum) tokenUsage() *gate.TokenUsage {
+	if s.messages == 0 {
+		return nil
+	}
+	every := func(sum, with int) *int {
+		if with != s.messages {
+			return nil
+		}
+		return &sum
+	}
+	return (&gate.TokenUsage{
+		Input:       every(s.input, s.withInput),
+		CachedInput: every(s.cached, s.withCached),
+		Output:      every(s.output, s.withOut),
+		Reasoning:   every(s.reasoning, s.withRsn),
+	}).Reported()
+}

@@ -574,6 +574,24 @@ permissions are its only boundary. In print mode agy denies any tool call that n
 allow rule names, because it cannot prompt, so an allow rule the operator keeps for
 interactive use applies to every review.
 
+The Pi reviewer (`reviewers/pi.go`) runs `pi --mode json` with the prompt on stdin
+and only Pi's read tools (`--tools read,grep,find,ls`), so it can follow a reference
+into an unchanged file but has no shell or edit tool. Those tools read any path the
+process can: read-only is not repo-only, and a file outside the checkout that a review
+reads reaches the model provider. It saves no
+session and discovers no extension, MCP server, skill, prompt template, theme or
+context file, and `--no-approve` declines the checkout's `.pi/` configuration. Its
+`--system-prompt` and an empty `--append-system-prompt` are private temporary
+files, which replace the user's `SYSTEM.md` and `APPEND_SYSTEM.md`. The user's
+`auth.json`, `models.json` and `settings.json` still apply, so Pi owns the login and
+the provider a `provider/id` model names. These flags are not an OS sandbox. Pi exits zero after an assistant error or abort, and `agent_end` can precede
+a retry, so a run is a success only when `agent_settled` arrives unaborted and the
+last assistant message stopped with `stop`; a `length` stop is a cut reply that goes
+through salvage. Usage sums every assistant message, retried attempts included. On a
+non-zero exit the reviewer runs `pi auth check --model … --json --no-refresh` and puts
+a not-ready result in the run's detail, because Pi's own message opens a stderr
+whose tail is document paths. An unset model runs Pi's own default.
+
 The `openai-compatible` provider (`reviewers/chatapi.go`) runs no process. With
 `reviewer.api.tools` off (the default) it sends the rendered prompt in one
 `POST {base_url}/chat/completions` and reads no file, so the prompt is its whole
