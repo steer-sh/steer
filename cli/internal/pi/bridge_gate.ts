@@ -2,6 +2,7 @@ import { execFile, spawn } from "node:child_process";
 
 const STEER_REVIEW = "__STEER_REVIEW__";
 const STEER_BACKFILL = "__STEER_BACKFILL__";
+const STEER_GUIDANCE = "__STEER_GUIDANCE__";
 const STEER_REVIEW_TIMEOUT_MS = __STEER_REVIEW_TIMEOUT_MS__;
 const STEER_BACKFILL_TIMEOUT_MS = __STEER_BACKFILL_TIMEOUT_MS__;
 
@@ -45,13 +46,37 @@ function backfill(cwd: string): void {
   child.unref();
 }
 
+// batchOf names the other tool calls in the assistant message that holds this
+// call. Pi runs every tool_call handler of a message before it runs any call,
+// and the session manager holds that message by then.
+function batchOf(ctx: any, toolCallId: any): any {
+  try {
+    const branch = ctx.sessionManager.getBranch?.() ?? [];
+    for (let i = branch.length - 1; i >= 0; i--) {
+      const message = branch[i]?.type === "message" ? branch[i].message : undefined;
+      if (message?.role !== "assistant" || !Array.isArray(message.content)) continue;
+      const calls = message.content.filter((block: any) => block?.type === "toolCall");
+      if (!calls.some((block: any) => block?.id === toolCallId)) break;
+      return {
+        found: true,
+        siblings: calls
+          .filter((block: any) => block?.id !== toolCallId)
+          .map((block: any) => String(block?.name ?? "")),
+      };
+    }
+  } catch {
+    // An unreadable session leaves the batch unknown.
+  }
+  return { found: false };
+}
+
 export default function (pi: any) {
   pi.on("tool_call", async (event: any, ctx: any) => {
     try {
       if (event?.toolName !== "bash" && event?.toolName !== "powershell") {
         return undefined;
       }
-      const reply = await review({
+      const payload: any = {
         hook_event_name: "PreToolUse",
         tool_name: "Bash",
         tool_input: { command: event?.input?.command ?? "" },
@@ -59,7 +84,13 @@ export default function (pi: any) {
         session_id: ctx.sessionManager.getSessionId(),
         transcript_path: ctx.sessionManager.getSessionFile(),
         model: ctx.model?.id ?? "",
-      });
+      };
+      if (event?.parentToolCallId) {
+        payload.parent_tool_call_id = String(event.parentToolCallId);
+      } else {
+        payload.steer_batch = batchOf(ctx, event?.toolCallId);
+      }
+      const reply = await review(payload);
       if (ctx.hasUI && typeof reply?.systemMessage === "string") {
         ctx.ui.notify(reply.systemMessage, "info");
       }
@@ -80,6 +111,18 @@ export default function (pi: any) {
     } catch {
       return undefined;
     }
+  });
+
+  pi.on("before_agent_start", async (event: any) => {
+    try {
+      const sections = event?.systemPromptOptions?.sections;
+      if (sections && typeof sections === "object") {
+        sections["steer-commit-gate"] = STEER_GUIDANCE;
+      }
+    } catch {
+      // A prompt without the guidance still reaches the gate.
+    }
+    return undefined;
   });
 
   pi.on("turn_end", async (_event: any, ctx: any) => {

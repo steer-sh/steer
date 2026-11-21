@@ -23,6 +23,10 @@ type Payload struct {
 	TranscriptPath string `json:"transcript_path"`
 	Model          string `json:"model"`
 	CWD            string `json:"cwd"`
+	// ParentToolCallID is set on a call another tool made, such as code mode.
+	ParentToolCallID string `json:"parent_tool_call_id"`
+	// Batch is nil from a bridge that predates it.
+	Batch *Batch `json:"steer_batch"`
 }
 
 // Output is the bridge reply. The TypeScript bridge consumes AdditionalContext and
@@ -81,7 +85,13 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, stdin io.
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
-	if reason, receipt := cc.PreflightDeny(command, cwd); reason != "" {
+	reason, receipt := "", ""
+	if why := unorderedCommit(payload); why != "" {
+		reason, receipt = unorderedReason(why), unorderedReceipt
+	} else {
+		reason, receipt = cc.PreflightDeny(command, cwd)
+	}
+	if reason != "" {
 		encoded, err := json.Marshal(Output{Block: true, Reason: reason,
 			SystemMessage: receipt})
 		if err == nil {

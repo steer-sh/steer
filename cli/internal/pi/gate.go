@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/steer-sh/steer-cli/internal/gate/cc"
 	"github.com/steer-sh/steer-cli/internal/version"
 )
 
@@ -20,9 +21,18 @@ const (
 	backfillLine    = "const STEER_BACKFILL = "
 	reviewToken     = `const STEER_REVIEW = "__STEER_REVIEW__";`
 	backfillToken   = `const STEER_BACKFILL = "__STEER_BACKFILL__";`
+	guidanceToken   = `const STEER_GUIDANCE = "__STEER_GUIDANCE__";`
 	reviewTimeout   = "__STEER_REVIEW_TIMEOUT_MS__"
 	backfillTimeout = "__STEER_BACKFILL_TIMEOUT_MS__"
 )
+
+// CommitGuidance is the commit form a Pi session is taught. Pi runs every
+// tool_call handler of an assistant message before any of its calls, so the gate
+// refuses a commit that shares its message with a call that can change files.
+const CommitGuidance = cc.CommitShapeGuidance + "\n" +
+	"- In Pi, make the commit the only tool call in its assistant message, as a " +
+	"top-level bash call and never from inside a codemode script: Pi runs the calls " +
+	"of one message at the same time."
 
 //go:embed bridge_gate.ts
 var gateBridgeSource string
@@ -50,10 +60,12 @@ func gateBridgeContent(review string, reviewSeconds int, backfill string, backfi
 	}
 	reviewJSON, _ := json.Marshal(review)
 	backfillJSON, _ := json.Marshal(backfill)
+	guidanceJSON, _ := json.Marshal(CommitGuidance)
 	source := strings.TrimRight(gateBridgeSource, "\n") + "\n"
 	for token, replacement := range map[string]string{
 		reviewToken:     reviewLine + string(reviewJSON) + ";",
 		backfillToken:   backfillLine + string(backfillJSON) + ";",
+		guidanceToken:   "const STEER_GUIDANCE = " + string(guidanceJSON) + ";",
 		reviewTimeout:   strconv.Itoa(reviewSeconds * 1000),
 		backfillTimeout: strconv.Itoa(backfillSeconds * 1000),
 	} {

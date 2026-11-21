@@ -543,7 +543,9 @@ the other's registration. Pi has no Stop runner.
 ## Commit gate and resolver
 
 `internal/gate/` is the review engine; `cc`, `codex` and `pi` adapt it to each
-harness's native hook. Steer reads review outcomes only from those harnesses'
+harness's native hook. The gate reviews a commit only when a harness's shell tool
+runs it; a commit made by any other tool, such as an MCP or extension tool, is
+outside it. Steer reads review outcomes only from those harnesses'
 transcripts (`gate/harvests`), so the gate has no channel outside them; ledger rows
 an earlier git pre-commit review wrote still read, with `channel: precommit`. Reviewer processes live under
 `internal/gate/reviewers/`; prompts and their pinned digests live under `prompts/`.
@@ -695,6 +697,16 @@ subagent does not inherit the session's SessionStart context. It never reaches
 `systemMessage`, and elsewhere both entry points print nothing. Each command the
 guidance quotes passes `PreflightDeny`. Codex adds an absolute repository selector
 with `git -C` because nested tool payloads can omit the shell working directory.
+Pi's gate extension puts `pi.CommitGuidance` in a `steer-commit-gate` system-prompt
+section at `before_agent_start`.
+
+Pi runs the `tool_call` handlers of every call in one assistant message before it
+runs any of them, then runs them at the same time; a codemode script's nested calls
+can also run at the same time. A review there could judge an index that a sibling
+`git add` changes before the commit runs. So the Pi extension sends the commit's
+siblings (`steer_batch`, read from the session) or its `parent_tool_call_id`, and
+`gatepi.Run` refuses before review a nested commit or one whose message also calls
+a tool other than `read`, `grep`, `find` and `ls`.
 
 Every decision that does not block carries a receipt to both the agent's context
 and the operator (`internal/gate/receipt.go`); no path lets a commit through

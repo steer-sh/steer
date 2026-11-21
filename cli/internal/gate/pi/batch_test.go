@@ -1,0 +1,53 @@
+package pi
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"os"
+	"strings"
+	"testing"
+
+	"github.com/steer-sh/steer-cli/internal/gate"
+)
+
+// TestRunRefusesACommitThatSharesItsBatchWithAWriter checks that a commit whose
+// siblings can change files, or that a code-mode script made, is refused before
+// any review, and that read-only siblings or an unread batch still review.
+func TestRunRefusesACommitThatSharesItsBatchWithAWriter(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		extra   string
+		refused bool
+	}{
+		{"bash sibling", `,"steer_batch":{"found":true,"siblings":["bash"]}`, true},
+		{"custom tool sibling", `,"steer_batch":{"found":true,"siblings":["read","deploy"]}`, true},
+		{"nested code-mode call", `,"parent_tool_call_id":"cm-1"`, true},
+		{"read-only siblings", `,"steer_batch":{"found":true,"siblings":["read","grep","find","ls"]}`, false},
+		{"alone", `,"steer_batch":{"found":true,"siblings":[]}`, false},
+		{"batch not found", `,"steer_batch":{"found":false}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := stagedRepo(t)
+			cfg := gate.Defaults()
+			cfg.StateDir = t.TempDir()
+			cfg.ReviewerRuns = 1
+			payload := `{"hook_event_name":"PreToolUse","tool_name":"Bash","session_id":"pi-session",` +
+				`"cwd":` + strconvJSON(repo) + `,"tool_input":{"command":"git commit -m \"add a\""}` +
+				tc.extra + `}`
+			var stdout bytes.Buffer
+			Run(context.Background(), cfg, stubReviewer{}, strings.NewReader(payload), &stdout)
+			var out Output
+			if err := json.Unmarshal(stdout.Bytes(), &out); err != nil || !out.Block {
+				t.Fatalf("output = %q, err = %v; want a block either way", stdout.String(), err)
+			}
+			refused := strings.Contains(out.Reason, "run the commit alone")
+			_, statErr := os.Stat(cfg.LogFile())
+			reviewed := statErr == nil
+			if refused != tc.refused || reviewed == tc.refused {
+				t.Fatalf("refused = %v, reviewed = %v; want refused = %v\nreason: %s",
+					refused, reviewed, tc.refused, out.Reason)
+			}
+		})
+	}
+}
