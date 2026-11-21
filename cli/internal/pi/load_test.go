@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/harness"
+	"github.com/steer-sh/steer-cli/internal/hookstore"
 )
 
 // startSession loads the bridge at path in node and fires its session_start
@@ -157,5 +158,77 @@ func TestRefreshBridgesRewritesAnOlderBodyAndKeepsItsCommand(t *testing.T) {
 	got := CheckRunnerArming(harness.GlobalScope, home)
 	if !BridgeCurrent(path) || got.Command != "steer check hook --harness pi" || got.Timeout != 75 {
 		t.Errorf("after refresh: current %v, arming %+v", BridgeCurrent(path), got)
+	}
+}
+
+// A gate or guard reply's operator line reaches stderr when Pi has no UI, as in
+// pi -p, where ctx.ui.notify shows nothing.
+func TestBridgeOperatorLineReachesStderrWithoutAUI(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not on PATH")
+	}
+	const line = "[steer] operator line"
+	reply := "import json, sys\nsys.stdin.read()\nprint(json.dumps({\"systemMessage\": \"" + line +
+		"\", \"block\": True, \"reason\": \"r\"}))\n"
+	for _, c := range []struct {
+		name     string
+		register func(t *testing.T, home string) string
+	}{
+		{"gate", func(t *testing.T, home string) string {
+			steer := filepath.Join(home, "steer")
+			if err := os.WriteFile(steer, []byte("#!/usr/bin/env python3\n"+reply), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			path, err := RegisterCommitGateAndResolver(harness.GlobalScope, home, steer+" commit-gate review-pi", 30,
+				steer+" commit-gate backfill", 30)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return path
+		}},
+		{"guards", func(t *testing.T, home string) string {
+			master, err := hookstore.MasterPathIn(harness.GlobalScope, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Dir(master), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(master, []byte(reply), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			path, err := RegisterMaster(harness.GlobalScope, home)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return path
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			home := isolateHome(t)
+			path := c.register(t, home)
+			script := `
+const { pathToFileURL } = await import("node:url");
+const mod = await import(pathToFileURL(process.argv[1]).href);
+const handlers = {};
+mod.default({ on: (event, fn) => (handlers[event] ??= []).push(fn), sendMessage() {} });
+const sessionManager = { getSessionId: () => "s", getSessionFile: () => "", getBranch: () => [] };
+for (const fn of handlers.tool_call ?? []) {
+  await fn({ toolName: "bash", toolCallId: "c1", input: { command: "git commit -m x" } },
+    { cwd: process.cwd(), hasUI: false, sessionManager, model: { id: "m" } });
+}
+`
+			cmd := exec.Command(node, "--input-type=module", "-e", script, path)
+			cmd.Dir = home
+			var stderr strings.Builder
+			cmd.Stderr = &stderr
+			if err := cmd.Run(); err != nil {
+				t.Fatalf("node: %v\n%s", err, stderr.String())
+			}
+			if !strings.Contains(stderr.String(), line) {
+				t.Errorf("stderr = %q, want the operator line %q", stderr.String(), line)
+			}
+		})
 	}
 }

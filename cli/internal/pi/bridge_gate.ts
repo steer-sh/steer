@@ -70,6 +70,15 @@ function batchOf(ctx: any, toolCallId: any): any {
   return { found: false };
 }
 
+// tellOperator shows an operator line: a notice in a UI, stderr in print mode.
+function tellOperator(ctx: any, message: string): void {
+  if (ctx.hasUI) {
+    ctx.ui.notify(message, "info");
+  } else {
+    process.stderr.write(message + "\n");
+  }
+}
+
 export default function (pi: any) {
   steerRecordLoad(pi);
   pi.on("tool_call", async (event: any, ctx: any) => {
@@ -92,8 +101,8 @@ export default function (pi: any) {
         payload.steer_batch = batchOf(ctx, event?.toolCallId);
       }
       const reply = await review(payload);
-      if (ctx.hasUI && typeof reply?.systemMessage === "string") {
-        ctx.ui.notify(reply.systemMessage, "info");
+      if (typeof reply?.systemMessage === "string") {
+        tellOperator(ctx, reply.systemMessage);
       }
       if (typeof reply?.additionalContext === "string") {
         pi.sendMessage(
