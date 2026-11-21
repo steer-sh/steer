@@ -22,9 +22,9 @@
         "cases": 21,
         "tested": true,
         "hook_digest": "44f19dea27b33814",
-        "master_digest": "53bce9745491187a",
+        "master_digest": "60386ad75d627280",
         "rule_hash": "5a5f6b4d71f06b4d8353fb015f9d43e9d841ecf73c96127d4aef15b338ab56c0",
-        "verified_at": "2026-11-16T02:08:47Z"
+        "verified_at": "2026-11-19T02:09:57Z"
       },
       "once": true
     },
@@ -32,7 +32,7 @@
       "file": "no-direct-main-hook.py",
       "rule": "never commit on main or push to main in this repository | work on a branch and merge through a pull request",
       "created": "2026-10-31",
-      "updated": "2026-10-31",
+      "updated": "2026-11-18",
       "source": "generated",
       "prompt_version": "22",
       "prompt_modules": [
@@ -41,21 +41,14 @@
       "hook_version": "22",
       "model": "claude-opus-5-5",
       "rule_hash": "219d4203914a9d920a1e0d83ba4b21c7373d55f4c1c181a31fdfa5af077d6d62",
-      "self_test": {
-        "passed": true,
-        "positive_pass": 18,
-        "positive_fail": 0,
-        "negative_pass": 17,
-        "negative_fail": 0
-      },
       "fixtures": {
-        "digest": "76955c248a83b34d",
-        "cases": 47,
+        "digest": "3576550711a0c303",
+        "cases": 63,
         "tested": true,
-        "hook_digest": "67b4f8486b4174f8",
-        "master_digest": "53bce9745491187a",
+        "hook_digest": "4b617459a608d9c4",
+        "master_digest": "60386ad75d627280",
         "rule_hash": "219d4203914a9d920a1e0d83ba4b21c7373d55f4c1c181a31fdfa5af077d6d62",
-        "verified_at": "2026-11-16T02:08:49Z"
+        "verified_at": "2026-11-19T02:10:01Z"
       }
     },
     "no-readme-edit-hook": {
@@ -83,9 +76,9 @@
         "cases": 33,
         "tested": true,
         "hook_digest": "213d866c4bbf2953",
-        "master_digest": "53bce9745491187a",
+        "master_digest": "60386ad75d627280",
         "rule_hash": "95d19019e65d4c17ad9335184e9f1f35a56bcde3c0c44c33a88814a694b643c7",
-        "verified_at": "2026-11-16T02:08:51Z"
+        "verified_at": "2026-11-19T02:10:03Z"
       }
     }
   },
