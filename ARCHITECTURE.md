@@ -517,7 +517,11 @@ worktree's own root. `checks.Adopt` needs a current or freshly
 replayed receipt for every declared check and an isolated oracle run that passes
 with nothing missing. `checks.Stop` is the harness-neutral Stop runner and
 `checks.StopHook` its one adapter, because Claude Code and Codex share the payload
-fields and reply shape. It acts on a root Stop in an adopted repository only,
+fields and reply shape. Pi has no hook commands, so its extension
+(`internal/pi/bridge_checks.ts`) writes that payload and reads that reply. It runs
+at `agent_before_settle`, after Pi's retries, compaction and queued messages, for a
+completed run only, and turns a block into a `steer-check` `custom_message` with
+`continue: true`. It acts on a root Stop in an adopted repository only,
 blocks a failure once, and yields when the tree, outcome and per-check results
 repeat in the same session. A block names each other session, of any harness,
 whose Stop run in the same working tree finished within the last hour, because
@@ -538,7 +542,8 @@ result and whether its detector changed before the recorded pass. It describes
 what followed a block, never whether the block was correct. `steer check
 install` registers the runner as its own Stop entry with
 `checks.RegisteredHookTimeout()`; commit-gate writers and runner writers each keep
-the other's registration. Pi has no Stop runner.
+the other's registration. `steer check migrate` imports a personal gate from Claude
+Code and Codex Stop hooks alone (`migrationHarnesses`).
 
 ## Commit gate and resolver
 
@@ -1091,9 +1096,10 @@ one. `check.sh`'s own failure is required reading only when no declared check
 accounts for it. `steer check blocks` stays the facts view of one repository.
 
 A check case is read at `JoinEntry`: no Stop payload names the entry its block
-creates, so `cc.StopBlock` and `codex.StopBlock` find it by
+creates, so `cc.StopBlock`, `codex.StopBlock` and `pi.StopBlock` find it by
 `checks.RunIDLine`, the reason's last line, matched as a whole line and narrowed
-by the payload's turn key. Each returns the turn before the block, back to its
+by the payload's turn key where the harness has one. Pi's block is its own
+`steer-check` entry, and its reader follows the session tree's active branch. Each returns the turn before the block, back to its
 prompt and bounded by `ContextSteps`, and the continuation after it; a later
 block in the same turn is a `hook_feedback` step, and `Matches` counts repeated
 entries. Both harnesses' readers, guard and Stop alike, end a reading

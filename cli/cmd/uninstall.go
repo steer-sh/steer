@@ -284,8 +284,11 @@ func uninstallItems(scope string) ([]uninstallItem, error) {
 			continue
 		}
 		remove := func() error { _, err := claude.RemoveCheckHook(scope); return err }
-		if target == harness.Codex {
+		switch target {
+		case harness.Codex:
 			remove = func() error { _, _, err := codexhooks.RemoveCheckHook(scope, cwd); return err }
+		case harness.Pi:
+			remove = func() error { _, _, err := pihooks.RemoveCheckRunner(scope, cwd); return err }
 		}
 		add(target, "check runner", arming.Path, remove,
 			fmt.Sprintf("steer check uninstall --harness %s --scope %s", target, scope))

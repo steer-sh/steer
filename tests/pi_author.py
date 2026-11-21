@@ -12,6 +12,9 @@ Cases:
   batch     With the guidance removed, a commit that shares its tool batch with
             `git add` is refused before review; the same commit run alone is
             reviewed.
+  check     A check.sh failure at Pi's settle boundary puts the block reason in
+            the session and continues the run; the model repairs the tree and
+            the next check run passes.
   guidance  The gate's commit guidance reaches the system prompt, and the
             commit the model makes is reviewed.
 
@@ -190,7 +193,52 @@ def case_batch(run):
     return PASS, "the batched commit was refused before review; the commit run alone was reviewed"
 
 
-CASES = {"batch": case_batch, "guidance": case_guidance}
+CHECK_SH = """#!/usr/bin/env bash
+if [ -e bad.txt ]; then
+  echo "check.sh: bad.txt must not exist in this repository; remove it" >&2
+  exit 1
+fi
+"""
+
+
+def check_runs(run):
+    rows = []
+    for f in (run.box.home / ".steer").rglob("runs.jsonl"):
+        rows += [json.loads(line) for line in f.read_text().splitlines() if line.strip()]
+    return [r for r in rows if r.get("harness") == "pi"]
+
+
+def case_check(run):
+    run.seed_repo()
+    oracle = run.repo / "check.sh"
+    oracle.write_text(CHECK_SH)
+    oracle.chmod(0o755)
+    run.sh("git", "add", "check.sh")
+    run.sh("git", "commit", "-q", "-m", "check")
+    run.steer("check", "adopt")
+    run.steer("check", "install", "--harness", "pi", "--scope", "project")
+    proc = run.pi("Create a file named bad.txt containing the word hi. Then reply done.")
+    entries = run.session_entries()
+    blocks = [e for e in entries if e.get("type") == "custom_message" and e.get("customType") == "steer-check"]
+    runs = check_runs(run)
+    dispositions = [r.get("disposition") for r in runs]
+    if not runs:
+        return FAIL, "no Pi check run was recorded\n" + proc.stdout[-1500:] + proc.stderr[-1500:]
+    if not blocks:
+        if (run.repo / "bad.txt").exists():
+            return FAIL, "check.sh failed and no block reached the session (dispositions %s)" % dispositions
+        return INCONCLUSIVE, "the model did not create bad.txt (dispositions %s)" % dispositions
+    if "steer check run: " not in json.dumps(blocks[0]):
+        return FAIL, "the block entry carries no run line"
+    if (run.repo / "bad.txt").exists():
+        return FAIL, "the model did not repair the tree after the block (dispositions %s)" % dispositions
+    if dispositions[-1] != "allow":
+        return FAIL, "the last check run was %s, want allow (dispositions %s)" % (dispositions[-1], dispositions)
+    return PASS, "the settle boundary blocked, the model removed bad.txt, the next run passed " \
+        "(dispositions %s)" % dispositions
+
+
+CASES = {"batch": case_batch, "check": case_check, "guidance": case_guidance}
 
 
 def main():

@@ -17,12 +17,13 @@ import (
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
 	"github.com/steer-sh/steer-cli/internal/harness"
+	pihooks "github.com/steer-sh/steer-cli/internal/pi"
 	"github.com/steer-sh/steer-cli/internal/tier"
 )
 
 // Harnesses are the harnesses whose root Stop event can run an adopted repository's
 // oracle. Pi registers no Stop runner.
-var Harnesses = []harness.ID{harness.ClaudeCode, harness.Codex}
+var Harnesses = []harness.ID{harness.ClaudeCode, harness.Codex, harness.Pi}
 
 // Scopes are the two registration scopes a runner can be armed at. A runner
 // registered at either scope runs, so either answer counts.
@@ -42,6 +43,10 @@ type Arming struct {
 // RunnerArming reads one harness's registration at one scope. projectDir is the
 // directory whose project configuration Codex reads; Claude Code resolves its own.
 func RunnerArming(target harness.ID, scope, projectDir string) (Arming, error) {
+	if target == harness.Pi {
+		a := pihooks.CheckRunnerArming(scope, projectDir)
+		return Arming{Registered: a.Registered, Timeout: a.Timeout, Command: a.Command, Path: a.Path}, nil
+	}
 	if target == harness.Codex {
 		a := codexhooks.CheckHookArming(scope, projectDir)
 		return Arming{Registered: a.Registered, Timeout: a.Timeout, Command: a.Command, Path: a.Path, Approval: a.Approval}, nil

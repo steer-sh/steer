@@ -11,6 +11,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/transcript"
 	"github.com/steer-sh/steer-cli/internal/transcript/cc"
 	"github.com/steer-sh/steer-cli/internal/transcript/codex"
+	txpi "github.com/steer-sh/steer-cli/internal/transcript/pi"
 )
 
 // The locator keys the masters write. A key's absence and its empty value are
@@ -192,6 +193,8 @@ func (c CheckCase) Reach() Reach {
 		turn = c.Run.Locators[locatorPromptID]
 	case harness.Codex:
 		turn = c.Run.Locators[locatorTurnID]
+	case harness.Pi:
+		// A Pi block is its own session entry, which the run line finds alone.
 	default:
 		return Reach{Granularity: transcript.JoinUnavailable,
 			Reason: fmt.Sprintf("harness %q has no Stop block reader", c.Run.Harness)}
@@ -236,6 +239,8 @@ func (c CheckCase) Reading(budget transcript.ContinuationBudget) transcript.Stop
 		reading, err = cc.StopBlock(reach.TranscriptPath, line, reach.TurnID, budget)
 	case harness.Codex:
 		reading, err = codex.StopBlock(reach.TranscriptPath, line, reach.TurnID, budget)
+	case harness.Pi:
+		reading, err = txpi.StopBlock(reach.TranscriptPath, line, budget)
 	}
 	if err != nil {
 		out.Reason = err.Error()

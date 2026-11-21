@@ -116,7 +116,7 @@ func TrustStep(harnessID, trust, path string) (Step, bool) {
 			step.Title += ": " + path
 		}
 	case harness.Pi:
-		step.Fix = "trust this project in Pi; a project extension runs only after that"
+		step.Fix = "trust this project in Pi (/trust), then /reload any Pi session already running here"
 	}
 	return step, true
 }
