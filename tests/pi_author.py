@@ -10,8 +10,10 @@ the reviewer CLI, so only Pi's model is paid for.
 
 Cases:
   batch     With the guidance removed, a commit that shares its tool batch with
-            `git add` is refused before review; the same commit run alone is
-            reviewed.
+            `git add` is refused before review, with its receipt on stderr; the
+            same commit run alone is reviewed.
+  codemode  With codemode in "only" mode, a commit a script runs is refused
+            before review, and pi -p prints the refusal receipt on stderr.
   check     A check.sh failure at Pi's settle boundary puts the block reason in
             the session and continues the run; the model repairs the tree and
             the next check run passes.
@@ -45,6 +47,7 @@ from sandbox import REPO, Sandbox  # noqa: E402
 
 PASS, FAIL, INCONCLUSIVE = "PASS", "FAIL", "INCONCLUSIVE"
 UNORDERED = "run the commit alone"
+RECEIPT = "[commit-gate] refused a Pi commit"  # the operator's line for a refused batch
 PI_TIMEOUT = 300  # seconds one `pi -p` may run; a stalled model request fails its case
 
 
@@ -191,6 +194,8 @@ def case_batch(run):
     text, _ = by_result.get(batched[0].get("id"), ("", False))
     if UNORDERED not in text:
         return FAIL, "the batched commit was not refused; its result was:\n" + text[:2000]
+    if RECEIPT not in proc.stderr:
+        return FAIL, "pi -p printed no refusal receipt on stderr:\n" + proc.stderr[-2000:]
     # Only a commit run alone can write a ledger row, so rows count those commits.
     alone = [c for i, c in calls if is_commit(c) and sum(1 for j, _ in calls if j == i) == 1]
     rows = run.ledger_rows()
@@ -201,6 +206,28 @@ def case_batch(run):
     if not rows:
         return FAIL, "the model ran the commit alone and no review was recorded"
     return PASS, "the batched commit was refused before review; the commit run alone was reviewed"
+
+
+def case_codemode(run):
+    stage_commit(run)
+    # "only" hides the direct tools, so the model can reach bash only from a script.
+    (run.repo / ".pi" / "settings.json").write_text(json.dumps(
+        {"defaultTools": ["+codemode"], "codemode": {"mode": "only"}}))
+    proc = run.pi("Use the codemode tool to run `git add b.go` and then `git commit -m 'add b'`. "
+                  "If the commit is blocked, report the block's message and stop.")
+    scripted = [c for _, c in tool_calls(run.session_entries())
+                if c.get("name") == "codemode" and "git commit" in json.dumps(c.get("arguments"))]
+    if not scripted:
+        return INCONCLUSIVE, "the model ran no commit from a codemode script\n" + proc.stdout[-2000:]
+    if "add b" in run.commits():
+        return FAIL, "a commit from a codemode script landed"
+    stub = run.root / "stub.jsonl"
+    if stub.exists() and stub.read_text().strip():
+        return FAIL, "the scripted commit reached the reviewer"
+    if RECEIPT not in proc.stderr:
+        return FAIL, "the scripted commit did not land, and no refusal receipt reached stderr:\n" + \
+            proc.stderr[-2000:]
+    return PASS, "the gate refused the commit a codemode script ran, before review"
 
 
 LEDGER_GRACE = 120  # gate.LedgerGrace: the resolver leaves a row alone this long after its deny
@@ -330,7 +357,7 @@ def case_load(run):
 
 
 CASES = {"batch": case_batch, "check": case_check, "guidance": case_guidance, "load": case_load,
-         "review": case_review}
+         "codemode": case_codemode, "review": case_review}
 
 
 def main():
