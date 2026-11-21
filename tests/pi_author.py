@@ -26,6 +26,8 @@ Cases:
   load      With the gate and check runner armed and the package loaded with
             -e, one session makes status read both bridges as approved, and the
             package's session extension runs report cadence.
+  notify    In RPC mode, where ctx.hasUI is true, a refused batch's receipt
+            reaches the client as a ctx.ui.notify request.
   review    The stub reviewer denies round 1; the model handles the finding and
             the commit lands on retry. After the ledger grace, the next
             session's turn_end resolves the retry row with the model's ledger.
@@ -48,6 +50,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -116,32 +119,48 @@ class Run:
 
     def rpc(self, *steps, approve=False):
         """Run pi --mode rpc through steps of (command, then), waiting for each command's
-        response before it calls then. RPC needs no prompt, so no model request runs."""
+        response, and after a prompt for agent_settled, before it calls then. It returns
+        every message it read up to the last step's boundary. Only a prompt step makes a
+        model request."""
         args = ["pi", "--mode", "rpc", "--model", self.model, "--session-dir", str(self.sessions)]
         if approve:
             args.append("--approve")
         proc = subprocess.Popen(args, cwd=self.repo, env=self.env, stdin=subprocess.PIPE,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        messages = []
+        # A stalled step closes stdout when the watchdog kills Pi, so readline returns.
+        watchdog = threading.Timer(PI_TIMEOUT, proc.kill)
         try:
             for i, (command, then) in enumerate(steps):
                 command = dict(command, id="steer-%d" % i)
                 proc.stdin.write(json.dumps(command) + "\n")
                 proc.stdin.flush()
+                watchdog.cancel()
+                watchdog = threading.Timer(PI_TIMEOUT, proc.kill)
+                watchdog.start()
+                answered = False
                 while True:
                     line = proc.stdout.readline()
                     if not line:
-                        raise RuntimeError("pi rpc exited before it answered %s: %s" % (
-                            command["type"], proc.stderr.read()[-1500:]))
+                        raise RuntimeError("pi rpc stopped before it finished %s (timeout %ss): %s" % (
+                            command["type"], PI_TIMEOUT, proc.stderr.read()[-1500:]))
                     msg = json.loads(line)
+                    messages.append(msg)
                     if msg.get("type") == "response" and msg.get("id") == command["id"]:
+                        if msg.get("success") is False:
+                            raise RuntimeError("pi rpc refused %s: %s" % (command["type"], msg.get("error")))
+                        answered = True
+                    if answered and (command["type"] != "prompt" or msg.get("type") == "agent_settled"):
                         break
                 if then:
                     then()
             proc.stdin.close()
             proc.wait(timeout=60)
         finally:
+            watchdog.cancel()
             if proc.poll() is None:
                 proc.kill()
+        return messages
 
     def gate_trust(self):
         status = json.loads(self.steer("status", "--json").stdout)
@@ -217,25 +236,58 @@ def case_guidance(run):
     return PASS, "the guidance reached the system prompt; the commit was reviewed"
 
 
-def case_batch(run):
+BATCH_PROMPT = ("Make exactly two bash tool calls, both in the SAME assistant message, issued in parallel: "
+                "`git add b.go` and `git commit -m 'add b'`. Do not run them one after the other. "
+                "If the commit is blocked, follow the block's instructions once, then stop and report.")
+
+
+def stage_batch(run):
+    """Stage a commit with the gate's guidance removed, or return why it cannot."""
     stage_commit(run)
-    # The guidance teaches the model not to batch, so this case removes it from
-    # the sandbox's bridge to test the refusal on its own.
+    # The guidance teaches the model not to batch, so the batch cases remove it
+    # from the sandbox's bridge to test the refusal on its own.
     bridge = run.repo / ".pi" / "extensions" / "steer-commit-gate.ts"
     text, n = re.subn(r'^const STEER_GUIDANCE = .*;$', 'const STEER_GUIDANCE = "";',
                       bridge.read_text(), count=1, flags=re.M)
     if n != 1:
-        return FAIL, "the gate bridge carries no STEER_GUIDANCE line"
+        return "the gate bridge carries no STEER_GUIDANCE line"
     bridge.write_text(text)
-    proc = run.pi(
-        "Make exactly two bash tool calls, both in the SAME assistant message, issued in parallel: "
-        "`git add b.go` and `git commit -m 'add b'`. Do not run them one after the other. "
-        "If the commit is blocked, follow the block's instructions once, then stop and report.")
+    return ""
+
+
+def batched_commits(entries):
+    calls = tool_calls(entries)
+    return [c for i, c in calls if is_commit(c) and
+            any(j == i and o is not c and o.get("name") == "bash" for j, o in calls)]
+
+
+def case_notify(run):
+    why = stage_batch(run)
+    if why:
+        return FAIL, why
+    messages = run.rpc(({"type": "prompt", "message": BATCH_PROMPT}, None), approve=True)
+    entries = run.session_entries()
+    batched = batched_commits(entries)
+    if not batched:
+        return INCONCLUSIVE, "the model sent no commit beside another bash call"
+    text, _ = results(entries).get(batched[0].get("id"), ("", False))
+    if UNORDERED not in text:
+        return FAIL, "the batched commit was not refused; its result was:\n" + text[:2000]
+    notices = [m for m in messages if m.get("type") == "extension_ui_request" and m.get("method") == "notify"]
+    if not any(RECEIPT in str(m.get("message")) for m in notices):
+        return FAIL, "the refused batch sent no notify with the receipt; notices: %s" % json.dumps(notices)[:1500]
+    return PASS, "in RPC, the refused batch's receipt arrived as a ctx.ui.notify request"
+
+
+def case_batch(run):
+    why = stage_batch(run)
+    if why:
+        return FAIL, why
+    proc = run.pi(BATCH_PROMPT)
     entries = run.session_entries()
     calls = tool_calls(entries)
     by_result = results(entries)
-    batched = [c for i, c in calls if is_commit(c) and
-               any(j == i and o is not c and o.get("name") == "bash" for j, o in calls)]
+    batched = batched_commits(entries)
     if not batched:
         return INCONCLUSIVE, "the model sent no commit beside another bash call\n" + proc.stdout[-2000:]
     text, _ = by_result.get(batched[0].get("id"), ("", False))
@@ -518,7 +570,7 @@ def case_load(run):
 
 
 CASES = {"batch": case_batch, "check": case_check, "cleanup": case_cleanup, "guidance": case_guidance, "load": case_load,
-         "codemode": case_codemode, "review": case_review, "trust": case_trust}
+         "codemode": case_codemode, "notify": case_notify, "review": case_review, "trust": case_trust}
 
 
 def main():
