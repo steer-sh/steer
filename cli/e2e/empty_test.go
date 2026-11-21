@@ -12,7 +12,7 @@ import (
 
 // TestEmptyMachineReadings runs the first commands a new user meets on a machine with
 // no Steer state, no reviewer CLI and no transcripts. Each one exits cleanly and states
-// local absence; none names Pi, which is unlisted.
+// local absence; none names Pi, which is optional.
 //
 // pins existing behaviour
 func TestEmptyMachineReadings(t *testing.T) {

@@ -158,7 +158,7 @@ func TestHealthGroupsApprovalIssues(t *testing.T) {
 	}
 }
 
-// An unlisted harness's unreadable approval cannot be cleared, so it blocks nothing.
+// An optional harness's unreadable approval cannot be cleared, so it blocks nothing.
 func TestHealthIgnoresUnlistedTrustUnknown(t *testing.T) {
 	s := healthyFixture()
 	s.Posture.Masters = append(s.Posture.Masters, MasterRuntime{Harness: "pi", Scope: "global", Path: "/x", State: MasterCurrent, Trust: TrustUnknown})

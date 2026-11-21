@@ -815,7 +815,7 @@ func init() {
 	reportCmd.Flags().IntVar(&reportDays, "days", cadence.DefaultWindowDays, "Look-back window in days")
 	reportCmd.Flags().BoolVar(&reportProjectOnly, "project-only", false, "Restrict the scan to transcripts of the current working directory")
 	reportCmd.Flags().BoolVar(&reportRepoOnly, "repo-only", false, "Restrict the scan to transcripts of the current checkout")
-	reportCmd.Flags().StringVar(&reportHarness, "harness", "", "Mine one harness only: all (default), claude-code, or codex")
+	reportCmd.Flags().StringVar(&reportHarness, "harness", "", "Mine one harness only: all (default), claude-code, codex or pi")
 	reportCmd.Flags().IntVar(&reportMaxBytes, "max-digest-bytes", report.DefaultMaxDigestBytes, "Size bound of the printed index page")
 	reportCmd.AddCommand(reportShowCmd)
 	reportShowCmd.Flags().StringVar(&reportShowReport, "report", "", "The report_id the index printed; refuse any other stored report")
@@ -833,12 +833,12 @@ func sourceWord(n int) string {
 	return "sources"
 }
 
-// coverageLines is one line per scanned harness. An unlisted harness gets a line only
+// coverageLines is one line per scanned harness. An optional harness gets a line only
 // when the scan found a file of its, readable or not.
 func coverageLines(harnesses []report.HarnessCoverage) []string {
 	var lines []string
 	for _, cov := range harnesses {
-		if !harness.Listed(cov.Harness) && cov.FilesScanned == 0 {
+		if harness.Optional(cov.Harness) && cov.FilesScanned == 0 {
 			continue
 		}
 		lines = append(lines, fmt.Sprintf("%s: %d file(s), %d session(s), %d thread(s).",

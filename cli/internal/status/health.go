@@ -309,14 +309,14 @@ func hookRows(s *SystemStatus) []hookRow {
 }
 
 // trustIssues groups hook approval problems per harness and scope, because one visit to
-// /hooks clears them together. Steer reads no approval on an unlisted harness, so its
+// /hooks clears them together. Steer reads no approval on an optional harness, so its
 // unknown state cannot be cleared and raises nothing.
 func trustIssues(s *SystemStatus) []Issue {
 	type group struct{ harness, scope, trust string }
 	whats := map[group][]string{}
 	var order []group
 	for _, row := range hookRows(s) {
-		if !harness.Listed(harness.ID(row.harness)) {
+		if harness.Optional(harness.ID(row.harness)) {
 			continue
 		}
 		switch row.trust {
@@ -464,7 +464,7 @@ func joinAnd(items []string) string {
 }
 
 // guardIssues reports guard runners that do not run what the store holds. A row for an
-// unlisted harness counts only where it registers a runner.
+// optional harness counts only where it registers a runner.
 func guardIssues(s *SystemStatus) []Issue {
 	var out []Issue
 	for _, m := range RunnersWithoutInterpreter(s.Posture.Masters, s.Posture.GuardInterpreter) {
@@ -478,7 +478,7 @@ func guardIssues(s *SystemStatus) []Issue {
 		label := HarnessLabel(m.Harness) + " " + m.Scope
 		switch {
 		case m.Detached():
-			if harness.Listed(harness.ID(m.Harness)) {
+			if !harness.Optional(harness.ID(m.Harness)) {
 				out = append(out, Issue{Severity: SeverityAttention, Title: label + " runs none of this scope's guards",
 					Fix: DetachedRepair(s.Posture.Masters, m.Scope)})
 			}

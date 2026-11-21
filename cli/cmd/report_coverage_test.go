@@ -8,7 +8,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/report"
 )
 
-// Pi is unlisted: its coverage line appears only when the scan read a Pi file.
+// Pi is optional: its coverage line appears only when the scan read a Pi file.
 func TestCoverageLinesNameAnUnlistedHarnessOnlyWithEvidence(t *testing.T) {
 	empty := []report.HarnessCoverage{{Harness: harness.ClaudeCode}, {Harness: harness.Codex}, {Harness: harness.Pi}}
 	got := strings.Join(coverageLines(empty), "\n")

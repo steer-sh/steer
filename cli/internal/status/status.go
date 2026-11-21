@@ -690,7 +690,7 @@ func collectPosture(cfg gate.Config, ev mine.EvidenceSet) Posture {
 			Trust:      CodexTrust(cg),
 			Command:    cg.Command,
 		}, ledgerCorpus, observed.gate[codexID]))
-		// Pi is unlisted: its rows appear only where its extension registers
+		// Pi is optional: its rows appear only where its extension registers
 		// either channel. One extension carries both, so both rows go together.
 		pg := pi.CommitGateArming(scope, cwd)
 		pr := pi.ResolverArming(scope, cwd)
@@ -760,7 +760,7 @@ func InstalledRules(scopes ...string) []RulesPresence {
 
 // RulesPresences reads each installed target's rules section in one scope. A
 // harness that is not installed gets no row: nothing reads its document, and a
-// sync writes only to installed harnesses. An unlisted harness gets a row only
+// sync writes only to installed harnesses. An optional harness gets a row only
 // where its document already carries a Steer rule. A read that fails yields an
 // unknown row, never an error.
 func RulesPresences(scope string, targets []harness.Registrar) []RulesPresence {
@@ -778,7 +778,7 @@ func RulesPresences(scope string, targets []harness.Registrar) []RulesPresence {
 		}
 		presence, err := claude.TargetRulesPresence(scope, target)
 		empty := err == nil && len(presence.Missing) == presence.Expected && len(presence.Extra) == 0
-		if !harness.Listed(target.Harness().ID) && (err != nil || empty) {
+		if harness.Optional(target.Harness().ID) && (err != nil || empty) {
 			continue
 		}
 		// An empty global section in a harness holding no Steer registration is one
@@ -874,8 +874,8 @@ func masterRuntimes(scope string) []MasterRuntime {
 			Installed: registrar.Harness().Installed(),
 		}
 		path, err := registrar.RegisteredMasterPath(scope)
-		if !harness.Listed(registrar.Harness().ID) && (err != nil || path == "") {
-			continue // an unlisted harness appears only with a registration
+		if harness.Optional(registrar.Harness().ID) && (err != nil || path == "") {
+			continue // an optional harness appears only with a registration
 		}
 		if err != nil {
 			out = append(out, row)
@@ -1108,8 +1108,8 @@ func telemetry(ev mine.EvidenceSet, blocks map[string]int) Telemetry {
 	}
 	for _, h := range harness.All() {
 		r := *row(string(h.ID))
-		if !harness.Listed(h.ID) && r == (HarnessTelemetry{Harness: r.Harness}) {
-			continue // an unlisted harness appears only with evidence
+		if harness.Optional(h.ID) && r == (HarnessTelemetry{Harness: r.Harness}) {
+			continue // an optional harness appears only with evidence
 		}
 		t.Harnesses = append(t.Harnesses, r)
 	}

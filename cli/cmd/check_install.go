@@ -53,7 +53,7 @@ func checkRunnerArming(target harness.ID, scope string) (checkscope.Arming, erro
 }
 
 var checkInstallCmd = &cobra.Command{
-	Use:   "install --harness <claude-code|codex>",
+	Use:   "install --harness <claude-code|codex|pi>",
 	Short: "Register the Stop runner so adopted repositories run check.sh at turn end",
 	Long: `install registers ` + "`steer check hook --harness <id>`" + ` on the harness's root Stop
 event at --scope, beside every other Stop hook. Its timeout exceeds the run
@@ -159,7 +159,7 @@ func checkInstallSteps(target harness.ID, scope string, arming checkscope.Arming
 }
 
 var checkUninstallCmd = &cobra.Command{
-	Use:   "uninstall --harness <claude-code|codex>",
+	Use:   "uninstall --harness <claude-code|codex|pi>",
 	Short: "Remove the Stop runner registration, keeping adoptions and check evidence",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -225,7 +225,7 @@ func printRunnerWiring(out io.Writer) {
 		}
 	}
 	if len(parts) == 0 {
-		fmt.Fprintln(out, "Stop runner: not registered (steer check install --harness claude-code|codex)")
+		fmt.Fprintln(out, "Stop runner: not registered (steer check install --harness claude-code|codex|pi)")
 		return
 	}
 	fmt.Fprintf(out, "Stop runner: %s\n", strings.Join(parts, "; "))

@@ -137,10 +137,11 @@ Concrete adapters under `internal/claude`, `internal/codex`, `internal/pi`, and
 `internal/gate/` own their configuration and event formats.
 `STEER_HARNESS` resolves ambiguity when multiple session markers are present.
 Pi uses `.pi` in a project and `~/.pi/agent` globally; Pi and Codex share project
-`AGENTS.md` but have separate global instruction documents. Pi is unlisted
-(`harness.Listed`): its adapters stay and an explicit `--harness pi` is accepted,
-but help text and messages never offer it, and a status reading names Pi only
-where a Pi registration or evidence for it exists.
+`AGENTS.md` but have separate global instruction documents. Pi is optional
+(`harness.Optional`): help text and messages offer it like the other two, but a
+status reading names Pi only where a Pi registration or evidence for it exists,
+and `guardscope.HookRegistrars` returns it only where its configuration directory
+exists, so a machine without Pi gets no Pi rows and no Pi files.
 
 Codex keys each hook approval by event, entry index and handler index, and hashes
 the handler definition, not the script it runs. A Codex registration therefore

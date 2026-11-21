@@ -11,8 +11,7 @@ command for that firing.
         [--codex-model M] [--pi-model M] [--keep]
 
 Claude Code needs CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY exported; Codex
-needs a login in ~/.codex/auth.json, and Pi one in ~/.pi/agent/auth.json. Pi runs
-only when named with --harness.
+needs a login in ~/.codex/auth.json, and Pi one in ~/.pi/agent/auth.json.
 """
 
 import argparse
@@ -186,7 +185,7 @@ def run(harness, args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--harness", action="append", choices=["claude", "codex", "pi"],
-                        help="Harness to check; repeatable (default: claude and codex)")
+                        help="Harness to check; repeatable (default: claude, codex and pi)")
     parser.add_argument("--claude-model", default="claude-haiku-5-5",
                         help="Claude Code model (default: claude-haiku-5-5)")
     parser.add_argument("--codex-model", default="gpt-6-luna",
@@ -196,8 +195,11 @@ def main():
     parser.add_argument("--keep", action="store_true", help="Keep each sandbox directory")
     args = parser.parse_args()
     failures = []
-    for harness in args.harness or ["claude", "codex"]:
-        found = run(harness, args)
+    for harness in args.harness or ["claude", "codex", "pi"]:
+        if shutil.which(harness) is None:
+            found = ["%s: no %s executable is on PATH" % (harness, harness)]
+        else:
+            found = run(harness, args)
         print("%s: %s" % (harness, "FAIL" if found else "PASS"))
         failures += found
     for failure in failures:

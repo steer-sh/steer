@@ -215,7 +215,7 @@ func (m *Model) checkIssues() []diagnosticIssue {
 			headline: "No agent runs this repository's checks at the end of a turn",
 			detail: "The checks declared here run only when one is registered to run them. " +
 				"Open Arming and press enter on a check runner row, or run: " +
-				"steer check install --harness claude-code|codex",
+				"steer check install --harness claude-code|codex|pi",
 		})
 	}
 	if c.Manifest && !c.Adopted {

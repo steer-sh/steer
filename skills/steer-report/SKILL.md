@@ -1,6 +1,6 @@
 ---
 name: steer-report
-description: Audits the fixes steer already installed, then mines Claude Code and Codex transcripts and the commit-review ledger for new fix candidates backed by evidence — repository checks, guards, instruction rules, or review prompt entries. Use for steer onboarding ("what hooks should I create?"), periodic review of installed hooks and fixes, or when the user asks to mine usage history for candidates.
+description: Audits the fixes steer already installed, then mines Claude Code, Codex and Pi transcripts and the commit-review ledger for new fix candidates backed by evidence — repository checks, guards, instruction rules, or review prompt entries. Use for steer onboarding ("what hooks should I create?"), periodic review of installed hooks and fixes, or when the user asks to mine usage history for candidates.
 user-invocable: true
 compatibility: Requires the steer CLI (report, commit-gate and check subcommands) on PATH or bundled under scripts/. Reads transcripts from ~/.claude/projects and $CODEX_HOME/sessions, and, when present, the commit-review ledger under ~/.steer/state/commit-review (~/.claude/state/commit-review on a machine that has not yet migrated).
 allowed-tools: Bash(steer *), Read, Edit, Write
@@ -139,7 +139,7 @@ Then Read the file whose path it prints. It is the first page of the report's in
 <STEER_BIN> report show c3 r1 i1 --report ID --to-file            # every occurrence or directive
 ```
 
-All projects and every harness are scanned by default (cross-project, cross-harness habits are the strongest candidates). Pass through any flags the user supplied (`--days N`, `--project-only`, `--repo-only`, `--harness claude-code|codex`, `--max-digest-bytes N`). `--project-only` reads the working directory alone; `--repo-only` reads every session launched anywhere inside the current checkout, and the two are mutually exclusive.
+All projects and every harness are scanned by default (cross-project, cross-harness habits are the strongest candidates). Pass through any flags the user supplied (`--days N`, `--project-only`, `--repo-only`, `--harness claude-code|codex|pi`, `--max-digest-bytes N`). `--project-only` reads the working directory alone; `--repo-only` reads every session launched anywhere inside the current checkout, and the two are mutually exclusive.
 
 The report — not the queue — is the transcript corpus. The queue carries one row saying how many correction clusters are ungrouped; the clusters themselves are here. Most hold a single occurrence, because a cluster key is the user's own wording and merges verbatim repeats and nothing else: two complaints about one habit, phrased differently, arrive as two clusters. A cluster is therefore never a problem and its `count` is never a recurrence. Merging them into classes is your job, not the tier's.
 
@@ -319,7 +319,7 @@ as the files committed under `.steer/`.
   which rewrites each target harness's section from the manifest; in the global
   scope that is each one holding a Steer registration.
   `plugins[]` is each cached copy of the Steer plugin in the Claude Code and Codex
-  plugin caches: `harness`, `path`, `target` (where `path` resolves when it is a
+  plugin caches, and each Steer package clone Pi's settings list: `harness`, `path`, `target` (where `path` resolves when it is a
   link) and `state` — `same-binary`, `different-binary` or `unknown` (a binary
   could not be read). A harness loads the skills and runs the launcher from its
   copy, while the hooks run `~/.steer/bin/steer`. `different-binary` says the two
@@ -615,7 +615,7 @@ no disclaimer after it.
   answers nothing. With no harm established, say the harm is unknown; never invent
   a tradeoff or call a proposal cost-free.
 - **Checks.** A repository check is always project scope. A yes adopts this
-  repository, and the check then blocks any Claude Code or Codex turn here that
+  repository, and the check then blocks any Claude Code, Codex or Pi turn here that
   fails it. Say that a yes needs substantial cleanup first when it does, and that
   it creates `check.sh` only when the evidence shows the repository has none.
   Say that adoption trusts the repository, not this version of `check.sh`: a

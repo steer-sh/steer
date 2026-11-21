@@ -144,7 +144,7 @@ func TestCollectEmptyMachineFailsSoft(t *testing.T) {
 		t.Error("empty machine should carry an empty attention queue")
 	}
 	// Posture is harness-qualified: the commit gate and its resolver report every
-	// listed harness in both scopes, and nothing is armed. Pi is unlisted and has
+	// listed harness in both scopes, and nothing is armed. Pi is optional and has
 	// no registration here, so no row names it.
 	if len(s.Posture.CommitGate) != 4 || len(s.Posture.Resolver) != 4 {
 		t.Errorf("gate posture should report the listed harnesses in both scopes, got %+v", s.Posture)

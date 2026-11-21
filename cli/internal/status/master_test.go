@@ -184,7 +184,7 @@ func TestRulesPresenceCoversInstalledHarnessesOnly(t *testing.T) {
 }
 
 // An installed Pi whose document carries no Steer rule gets no rules row, so an
-// unlisted harness is never named for drift Steer did not cause. Once the shared
+// optional harness is never named for drift Steer did not cause. Once the shared
 // project AGENTS.md carries the section, the Pi row reads it.
 func TestAnUnlistedHarnessReadsRulesOnlyWhereSteerWroteThem(t *testing.T) {
 	root := projectDir(t)
@@ -231,7 +231,7 @@ func rulesRowFor(t *testing.T, rows []RulesPresence, id string) RulesPresence {
 
 // A clone carries a committed store and none of this machine's registrations.
 // Every installed harness then runs none of the store's guards and reads
-// detached; Pi, unlisted and unregistered, carries no row; and a sync
+// detached; Pi, optional and unregistered, carries no row; and a sync
 // brings the row back to the master's own runtime state.
 func TestAnInstalledHarnessWithoutTheStoresRegistrationIsDetached(t *testing.T) {
 	root := projectDir(t)

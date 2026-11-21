@@ -845,9 +845,9 @@ func init() {
 		"Reviewers in the panel; default 3")
 
 	commitGateInstallCmd.Flags().StringVar(&commitGateHarness, "harness", "claude-code",
-		"PreToolUse harness (claude-code|codex)")
+		"PreToolUse harness (claude-code|codex|pi)")
 	commitGateRemoveCmd.Flags().StringVar(&commitGateRemoveHarness, "harness", "",
-		"PreToolUse harness (claude-code|codex), required")
+		"PreToolUse harness (claude-code|codex|pi), required")
 	commitGateRemoveCmd.Flags().BoolVar(&commitGateRemovePreCommit, "precommit", false,
 		"Remove this repository's git pre-commit hook from Steer's removed pre-commit review")
 }

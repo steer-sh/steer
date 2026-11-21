@@ -163,13 +163,13 @@ func Targets(targets []Registrar, fallback Registrar) []Registrar {
 // order fixes the iteration order of All, so every listing renders the same way.
 var order = []ID{ClaudeCode, Codex, Pi}
 
-// unlisted harnesses keep their adapters and accept an explicit name, but help
-// text and messages never offer them. A reading names one only where a
-// registration or evidence for it already exists.
-var unlisted = map[ID]bool{Pi: true}
+// optional harnesses are ones most Steer users do not run. A reading names one only
+// where a registration or evidence for it already exists, and a command naming no
+// harness writes to one only where its configuration directory exists.
+var optional = map[ID]bool{Pi: true}
 
-// Listed reports whether help text and messages offer the harness.
-func Listed(id ID) bool { return !unlisted[id] }
+// Optional reports whether a reading names the harness only where it is present.
+func Optional(id ID) bool { return optional[id] }
 
 // All returns every registered harness in a stable order.
 func All() []Harness {
@@ -196,7 +196,9 @@ func Parse(name string) (ID, error) {
 	if _, ok := registry[ID(trimmed)]; ok {
 		return ID(trimmed), nil
 	}
-	return Unknown, fmt.Errorf("unknown harness %q: expected %s", name, strings.Join(names(), " or "))
+	all := names()
+	return Unknown, fmt.Errorf("unknown harness %q: expected %s or %s", name,
+		strings.Join(all[:len(all)-1], ", "), all[len(all)-1])
 }
 
 // ParseOrDetect resolves an explicit name, falling back to the invoking harness
@@ -211,9 +213,7 @@ func ParseOrDetect(name string) (ID, error) {
 func names() []string {
 	out := make([]string, 0, len(order))
 	for _, id := range order {
-		if Listed(id) {
-			out = append(out, string(id))
-		}
+		out = append(out, string(id))
 	}
 	return out
 }

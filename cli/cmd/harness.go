@@ -75,7 +75,7 @@ func harnessNames(targets []harness.Registrar) string {
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&harnessFlag, "harness", "",
-		"Harness to register into (claude-code|codex); defaults to every installed harness, "+
+		"Harness to register into (claude-code|codex|pi); defaults to every installed harness, "+
 			"or in the global scope to those that hold a Steer registration when any does")
 	rootCmd.PersistentFlags().BoolVar(&allHarnesses, "all-harnesses", false,
 		"Register into every harness that supports hooks")

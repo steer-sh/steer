@@ -238,7 +238,7 @@ func ReadinessOf(s *SystemStatus, probe reviewers.Probe) Readiness {
 	if !registered {
 		r.Steps = append([]Step{{
 			Title: "no commit gate is registered, so nothing reviews a commit here",
-			Fix:   "/steer-setup in a Claude Code or Codex session",
+			Fix:   "/steer-setup in a Claude Code or Codex session, or /skill:steer-setup in Pi",
 		}}, r.Steps...)
 	}
 	r.Reviewing = len(enforcing) > 0 && !reviewerMissing
