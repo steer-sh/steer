@@ -252,16 +252,21 @@ func TestPluginCopiesReadThePiPackagesSettingsLists(t *testing.T) {
 // could leave the clone directory, reduces to nothing.
 func TestPiGitPathNamesTheCloneDirectory(t *testing.T) {
 	for source, want := range map[string]string{
-		"git:github.com/steer-sh/steer@release":    "github.com/steer-sh/steer",
-		"git:github.com/steer-sh/steer":            "github.com/steer-sh/steer",
-		"https://github.com/steer-sh/steer.git":    "github.com/steer-sh/steer",
-		"https://github.com/steer-sh/steer@v0.5.0": "github.com/steer-sh/steer",
-		"ssh://git@github.com/steer-sh/steer.git":  "github.com/steer-sh/steer",
-		"git@github.com:steer-sh/steer.git":        "github.com/steer-sh/steer",
-		"npm:steer":                                "",
-		"./steer":                                  "",
-		"git:github.com/steer":                     "",
-		"git:github.com/../steer":                  "",
+		"git:github.com/steer-sh/steer@release":     "github.com/steer-sh/steer",
+		"git:github.com/steer-sh/steer":             "github.com/steer-sh/steer",
+		"https://github.com/steer-sh/steer.git":     "github.com/steer-sh/steer",
+		"https://github.com/steer-sh/steer@v0.5.0":  "github.com/steer-sh/steer",
+		"ssh://git@github.com/steer-sh/steer.git":   "github.com/steer-sh/steer",
+		"git:git@github.com:steer-sh/steer.git":     "github.com/steer-sh/steer",
+		"git:git://localhost/steer-sh/steer.git":    "localhost/steer-sh/steer",
+		"git:https://example.com:8443/me/steer.git": "example.com/me/steer",
+		"git@github.com:steer-sh/steer.git":         "",
+		"git://localhost/steer-sh/steer.git":        "",
+		"git:steer-sh/steer@release":                "github.com/steer-sh/steer",
+		"npm:steer":                                 "",
+		"./steer":                                   "",
+		"git:github.com/steer":                      "",
+		"git:github.com/../steer":                   "",
 	} {
 		got, ok := piGitPath(source)
 		if got != want || ok != (want != "") {

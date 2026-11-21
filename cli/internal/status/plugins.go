@@ -242,16 +242,34 @@ func piPackageRoots(dir string) (roots []string, ok bool) {
 // URL, or git@host:owner/repo) to the host/owner/repo path Pi clones it under.
 func piGitPath(source string) (string, bool) {
 	s := strings.TrimSpace(source)
+	// Pi reads "git:" as a prefix even before "git://", and without it accepts only
+	// a URL that names its scheme.
+	prefixed := strings.HasPrefix(s, "git:")
+	if prefixed {
+		s = strings.TrimSpace(strings.TrimPrefix(s, "git:"))
+	}
 	switch {
-	case strings.HasPrefix(s, "git:"):
-		s = strings.TrimPrefix(s, "git:")
-	case strings.HasPrefix(s, "https://"), strings.HasPrefix(s, "http://"), strings.HasPrefix(s, "ssh://"):
+	case hasAnyPrefix(s, "https://", "http://", "ssh://", "git://"):
 		_, s, _ = strings.Cut(s, "://")
-		if at := strings.Index(s, "@"); at >= 0 && at < strings.Index(s+"/", "/") {
-			s = s[at+1:]
+		host, rest, _ := strings.Cut(s, "/")
+		if at := strings.LastIndex(host, "@"); at >= 0 {
+			host = host[at+1:]
 		}
-	case strings.HasPrefix(s, "git@"):
+		if colon := strings.Index(host, ":"); colon >= 0 {
+			host = host[:colon]
+		}
+		s = host + "/" + rest
+	case prefixed && strings.HasPrefix(s, "git@"):
 		s = strings.Replace(strings.TrimPrefix(s, "git@"), ":", "/", 1)
+	case prefixed:
+		host, _, _ := strings.Cut(s, "/")
+		if !strings.Contains(host, ".") && host != "localhost" {
+			// owner/repo is GitHub shorthand.
+			if strings.Count(s, "/") != 1 {
+				return "", false
+			}
+			s = "github.com/" + s
+		}
 	default:
 		return "", false
 	}
@@ -269,6 +287,15 @@ func piGitPath(source string) (string, bool) {
 		}
 	}
 	return s, true
+}
+
+func hasAnyPrefix(s string, prefixes ...string) bool {
+	for _, p := range prefixes {
+		if strings.HasPrefix(s, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // isSteerPackage reports whether root holds a package.json that names the Steer
