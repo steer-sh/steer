@@ -359,7 +359,7 @@ func TestAnApprovedPiGateNamesTheSessionsItCovers(t *testing.T) {
 	gate := ScopeArming{Harness: "pi", Scope: "global", Registered: true, Effective: true,
 		Resolvable: ResolveResolvable, Trust: TrustApproved}
 	r := ReadinessOf(&SystemStatus{Posture: Posture{CommitGate: []ScopeArming{gate}}}, available())
-	if !r.Reviewing || !strings.Contains(r.Headline, "Pi global "+piLoadedSessions) {
+	if !r.Reviewing || !strings.Contains(r.Headline, "Pi global "+PiLoadedSessions("global")) {
 		t.Errorf("reviewing %v, headline %q", r.Reviewing, r.Headline)
 	}
 }

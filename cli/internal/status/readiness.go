@@ -174,10 +174,16 @@ type Readiness struct {
 	Note string
 }
 
-// piLoadedSessions qualifies an enforcing Pi channel. A load record says which bytes
-// the newest Pi session start ran; a Pi process that imported earlier keeps those bytes
-// across /new and /resume until /reload or a restart.
-const piLoadedSessions = "(in Pi processes started, or sessions reloaded with /reload, since its extension last changed)"
+// PiLoadedSessions qualifies an enforcing Pi channel at scope. A load record says which
+// bytes the newest Pi session start ran; a Pi process that imported earlier keeps those
+// bytes across /new and /resume until /reload or a restart, and a process that does not
+// trust the project loads no project extension.
+func PiLoadedSessions(scope string) string {
+	if scope == harness.ProjectScope {
+		return "(in Pi processes that trust this project and started, or reloaded with /reload, since its extension last changed)"
+	}
+	return "(in Pi processes started, or sessions reloaded with /reload, since its extension last changed)"
+}
 
 // ReadinessOf separates setup failures from trust that the snapshot cannot verify.
 func ReadinessOf(s *SystemStatus, probe reviewers.Probe) Readiness {
@@ -244,7 +250,7 @@ func ReadinessOf(s *SystemStatus, probe reviewers.Probe) Readiness {
 		}
 		name := fmt.Sprintf("%s %s", HarnessLabel(a.Harness), a.Scope)
 		if harness.ID(a.Harness) == harness.Pi {
-			name += " " + piLoadedSessions
+			name += " " + PiLoadedSessions(a.Scope)
 		}
 		enforcing = append(enforcing, name)
 	}

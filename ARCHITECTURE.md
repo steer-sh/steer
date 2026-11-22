@@ -1328,8 +1328,10 @@ row's trust: approved when Pi loaded the file's current bytes, modified when it
 loaded earlier bytes, missing when no session loaded it, unknown when a record
 cannot be read. One record per file names the bytes the newest session start ran, so approved covers the
 Pi processes started, or sessions reloaded with `/reload`, since the file last
-changed (`/new` and `/resume` keep the imported module), and the readiness
-headline says so for a Pi channel. In project scope the nearest saved decision in Pi's
+changed (`/new` and `/resume` keep the imported module); in project scope, only
+those that trust the project, since an untrusted process loads no project extension.
+The readiness headline and the `commit-gate install` and `check install` summaries
+say so for a Pi channel (`status.PiLoadedSessions`). In project scope the nearest saved decision in Pi's
 `trust.json` (`pi.ProjectTrust`) comes first, and a declined project is disabled. A
 bridge an older Steer wrote has no recorder and reads unknown; `bin install`
 rewrites a global one (`pi.RefreshBridges`) and leaves a project one, which the

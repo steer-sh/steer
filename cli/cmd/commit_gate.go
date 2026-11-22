@@ -403,7 +403,7 @@ func installReviewChannel(cfg gate.Config) error {
 			"\nExtension: " + path
 	}
 	fmt.Println()
-	fmt.Println(renderInstallReadiness(installSteps(cfg, target, hookCommand, scope, path), registered))
+	fmt.Println(renderInstallReadiness(target, scope, installSteps(cfg, target, hookCommand, scope, path), registered))
 	return nil
 }
 
@@ -437,10 +437,19 @@ func installSteps(cfg gate.Config, target harness.ID, command, scope, path strin
 // renderInstallReadiness leads with whatever remains before the first review can
 // happen, and puts the registration facts beneath it. A success box over an open step
 // reads as a working gate.
-func renderInstallReadiness(steps []status.Step, registered string) string {
-	return renderReadinessBox(steps, "Ready — the next `git commit` in scope goes to the reviewer.\n"+
+func renderInstallReadiness(target harness.ID, scope string, steps []status.Step, registered string) string {
+	return renderReadinessBox(steps, readyFor(target, scope, "Ready — the next `git commit` in scope goes to the reviewer")+"\n"+
 		"To check that the reviewer answers: steer commit-gate test-reviewer",
 		"Not reviewing yet — %d %s before the first review.", registered)
+}
+
+// readyFor ends an install's ready line at scope. A Pi load record does not cover every
+// Pi process, so a Pi line names the ones it does.
+func readyFor(target harness.ID, scope, line string) string {
+	if target == harness.Pi {
+		return line + " " + status.PiLoadedSessions(scope) + "."
+	}
+	return line + "."
 }
 
 // renderReadinessBox renders an install's readiness box. pending is a format taking

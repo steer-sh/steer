@@ -79,7 +79,7 @@ this machine (steer check adopt).`,
 			entry.DisplayName, runnerEvent(target), scope, arming.Timeout, int(checks.DefaultExecTimeout.Seconds()), arming.Command, arming.Path)
 		fmt.Fprintln(cmd.OutOrStdout())
 		fmt.Fprintln(cmd.OutOrStdout(), renderReadinessBox(checkInstallSteps(target, scope, arming),
-			"Ready — the next root Stop in an adopted repository runs check.sh.",
+			readyFor(target, scope, "Ready — the next root Stop in an adopted repository runs check.sh"),
 			"Not running yet — %d %s before the next Stop runs check.sh.", registered))
 		return nil
 	},
