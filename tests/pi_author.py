@@ -290,9 +290,10 @@ def case_batch(run):
     batched = batched_commits(entries)
     if not batched:
         return INCONCLUSIVE, "the model sent no commit beside another bash call\n" + proc.stdout[-2000:]
-    text, _ = by_result.get(batched[0].get("id"), ("", False))
-    if UNORDERED not in text:
-        return FAIL, "the batched commit was not refused; its result was:\n" + text[:2000]
+    for call in batched:
+        text, _ = by_result.get(call.get("id"), ("", False))
+        if UNORDERED not in text:
+            return FAIL, "a batched commit was not refused; its result was:\n" + text[:2000]
     if RECEIPT not in proc.stderr:
         return FAIL, "pi -p printed no refusal receipt on stderr:\n" + proc.stderr[-2000:]
     # Only a commit run alone can write a ledger row, so rows count those commits.
