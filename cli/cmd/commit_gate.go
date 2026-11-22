@@ -63,7 +63,8 @@ decision.
 
 Each harness's hook shares one review engine:
   review        PreToolUse hook for Claude Code — reads a JSON payload on stdin
-  review-codex  PreToolUse hook for Codex — reads a JSON payload on stdin`,
+  review-codex  PreToolUse hook for Codex — reads a JSON payload on stdin
+  review-pi     tool_call hook for Pi — the Pi bridge sends it a JSON payload on stdin`,
 	Example: `  steer commit-gate install --harness claude-code --scope global
   steer status`,
 }
@@ -190,9 +191,8 @@ native hook reply on stdout. It always exits 0 so adapter failures fail open.`,
 }
 
 var commitGatePiReviewCmd = &cobra.Command{
-	Use:    "review-pi",
-	Hidden: true,
-	Short:  "Pi tool_call hook: rule on a Bash git commit before it runs",
+	Use:   "review-pi",
+	Short: "Pi tool_call hook: rule on a Bash git commit before it runs",
 	Long: `review-pi reads the Pi bridge's PreToolUse payload on stdin and writes Pi's
 native tool_call reply on stdout. It always exits 0 so adapter failures fail open.`,
 	RunE: func(cmd *cobra.Command, args []string) error {

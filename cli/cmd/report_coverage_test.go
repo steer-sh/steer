@@ -20,3 +20,18 @@ func TestCoverageLinesNameAnUnlistedHarnessOnlyWithEvidence(t *testing.T) {
 		t.Errorf("Pi evidence lines = %q", got)
 	}
 }
+
+// The cadence nudge names the steer-report skill in the form the harness running
+// the hook accepts.
+func TestReportSkillCommandNamesEachHarnessForm(t *testing.T) {
+	for id, want := range map[harness.ID]string{
+		harness.ClaudeCode: "/steer-report",
+		harness.Codex:      "/steer-report",
+		harness.Pi:         "/skill:steer-report",
+		harness.Unknown:    "/steer-report",
+	} {
+		if got := reportSkillCommand(id); got != want {
+			t.Errorf("reportSkillCommand(%q) = %q, want %q", id, got, want)
+		}
+	}
+}

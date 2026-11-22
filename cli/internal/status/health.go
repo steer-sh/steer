@@ -535,7 +535,7 @@ func checkIssues(c CheckTier) []Issue {
 	}
 	if !c.Armed() {
 		out = append(out, Issue{Severity: SeverityAttention, Title: "This repository's checks are adopted, but no harness runs them",
-			Detail: []string{"For Codex, use --harness codex."}, Fix: "steer check install --harness claude-code"})
+			Detail: []string{"For Codex or Pi, use --harness codex or --harness pi."}, Fix: "steer check install --harness claude-code"})
 	}
 	for _, a := range c.Runner {
 		if !a.Registered {

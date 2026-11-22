@@ -65,7 +65,9 @@ sessions, and diffs instruction-file directives
 (CLAUDE.md, AGENTS.md) against already-registered steer rules.
 
 Every harness with transcripts on this machine is mined — Claude Code
-(~/.claude/projects) and Codex ($CODEX_HOME/sessions). Use --harness to read
+(~/.claude/projects), Codex ($CODEX_HOME/sessions) and Pi
+($PI_CODING_AGENT_SESSION_DIR, else sessions under $PI_CODING_AGENT_DIR or
+~/.pi/agent). Use --harness to read
 one of them alone. A subagent thread is provenance on its
 root session, never a unit of its own, so every harness's sessions count the
 same way.
@@ -473,8 +475,8 @@ func runCadence() {
 				// the count names sources. Calling them problems reported the size of
 				// the raw pile as the number of problems found.
 				lines = append(lines, fmt.Sprintf(
-					"steer: %d %s of ungrouped evidence and %d tracked fix(es) need a decision — run /steer-report",
-					candidates, sourceWord(candidates), ineffective))
+					"steer: %d %s of ungrouped evidence and %d tracked fix(es) need a decision — run %s",
+					candidates, sourceWord(candidates), ineffective, reportSkillCommand(harness.Detect())))
 				rec = next
 			}
 		}
@@ -845,4 +847,13 @@ func coverageLines(harnesses []report.HarnessCoverage) []string {
 			cov.Harness, cov.FilesScanned, cov.SessionsScanned, cov.ThreadsScanned))
 	}
 	return lines
+}
+
+// reportSkillCommand is how the nudge's reader starts the steer-report skill in
+// the harness running the cadence hook: Pi names a skill as /skill:<name>.
+func reportSkillCommand(id harness.ID) string {
+	if id == harness.Pi {
+		return "/skill:steer-report"
+	}
+	return "/steer-report"
 }

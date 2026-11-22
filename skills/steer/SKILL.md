@@ -483,7 +483,7 @@ global scope, once any installed harness holds a Steer registration (commit gate
 check runner, guard runner, status line or rules section), `register` writes only
 to those that hold one: a harness with none was never set up or was removed with
 `steer uninstall --harness`. Add
-`--harness claude-code` or `--harness codex` to write to one only, or
+`--harness claude-code`, `--harness codex` or `--harness pi` to write to one only, or
 `--all-harnesses` to write to every hook-supporting harness whether or not it is
 installed here. On a machine with no harness directory, `register` writes to
 Claude Code.
