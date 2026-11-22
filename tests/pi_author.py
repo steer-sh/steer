@@ -9,6 +9,10 @@ the reviewer CLI, so only Pi's model is paid for.
     python3 tests/pi_author.py --model openai-codex/gpt-6-luna [--case NAME ...] [--keep]
 
 Cases:
+  backstop  The stub reviewer denies round 1 and the user asks for a bare reply
+            after the commit lands. A run that settles with no ledger is
+            refused once by the root-Stop backstop, and the resolver then finds
+            the ledger the model wrote after the refusal.
   batch     With the guidance removed, a commit that shares its tool batch with
             `git add` is refused before review, with its receipt on stderr; the
             same commit run alone is reviewed.
@@ -366,6 +370,30 @@ LEDGER_GRACE = 120  # gate.LedgerGrace: the resolver leaves a row alone this lon
 GRACE_MARGIN = 30  # seconds the settle resolver may take to start
 
 
+def resolved_owed(run, rows):
+    """The chain's retry and nitpick rows once the resolver has judged them, waiting out
+    the ledger grace and running one more session's settle when none has yet; None
+    when they stay unresolved. ledger_found is the gate's harvester's verdict."""
+    def owed():
+        return [r for r in run.ledger_rows() if r.get("phase") in ("retry", "nitpick")]
+
+    def done(rs):
+        return all(r.get("backfilled") or r.get("ledger_found") for r in rs)
+
+    if done(owed()):
+        return owed()
+    wait = max(r.get("ts", 0) for r in rows) + LEDGER_GRACE + 5 - time.time()
+    if wait > 0:
+        time.sleep(wait)
+    run.pi("Reply with the single word ok. Use no tools.")
+    for _ in range(120):
+        rs = owed()
+        if done(rs):
+            return rs
+        time.sleep(0.5)
+    return None
+
+
 def case_review(run):
     stage_commit(run)
     (run.root / "stub-script").write_text("finding\nclean\n")
@@ -391,23 +419,57 @@ def case_review(run):
     if any(r.get("backfilled") or r.get("ledger_found") for r in owed):
         return INCONCLUSIVE, "the retry row was resolved before the next session started: %s" % \
             json.dumps(owed)[:2000]
-    wait = max(r.get("ts", 0) for r in rows) + LEDGER_GRACE + 5 - time.time()
-    if wait > 0:
-        time.sleep(wait)
-    run.pi("Reply with the single word ok. Use no tools.")
-    for _ in range(120):
-        owed = [r for r in run.ledger_rows() if r.get("phase") in ("retry", "nitpick")]
-        if all(r.get("backfilled") or r.get("ledger_found") for r in owed):
-            break
-        time.sleep(0.5)
-    else:
-        return FAIL, "the next session's settle did not resolve the retry row: %s" % json.dumps(owed)[:2000]
-    found = [bool(r.get("ledger_found")) for r in owed]
-    if not all(found):
+    owed = resolved_owed(run, rows)
+    if owed is None:
+        return FAIL, "the next session's settle did not resolve the retry row"
+    if not all(r.get("ledger_found") for r in owed):
         return FAIL, "the settle resolved the retry row as a miss; the harvester found no ledger " \
             "(phases %s)\n%s" % (phases, proc.stdout[-2000:])
     return PASS, "round 1 denied, the commit landed on retry, and the next settle found its ledger " \
         "(phases %s)" % phases
+
+
+BACKSTOP = "steer-ledger-backstop"  # the gate bridge's customType for a backstop refusal
+LEDGER = "Commit gate fired"  # gate.LedgerHeader
+def case_backstop(run):
+    stage_commit(run)
+    (run.root / "stub-script").write_text("finding\nclean\n")
+    proc = run.pi("Stage b.go and commit it with the subject 'add b'. If the commit review reports "
+                  "findings, fix them and commit again. Write no report of the review: never write "
+                  "a line that starts 'Commit gate fired', even if the review asks for one. When the "
+                  "commit has landed, your final reply must be the single word done. If you are later "
+                  "told a report is missing, write it as instructed.")
+    entries = run.session_entries()
+    rows = run.ledger_rows()
+    phases = [r.get("phase") for r in rows]
+    if "add b" not in run.commits():
+        return INCONCLUSIVE, "the model did not land the commit (phases %s)\n%s" % (phases, proc.stdout[-2000:])
+    if "deny" not in phases:
+        return INCONCLUSIVE, "the review never denied, so no sequence was released (phases %s)" % phases
+    refusals = [i for i, e in enumerate(entries)
+                if e.get("type") == "custom_message" and e.get("customType") == BACKSTOP]
+    if len(refusals) > 1:
+        return FAIL, "the backstop refused %d times in one turn" % len(refusals)
+    if refusals and LEDGER not in json.dumps(entries[refusals[0]]):
+        return FAIL, "the refusal names no ledger header: %s" % json.dumps(entries[refusals[0]])[:2000]
+    if refusals and any(e.get("type") == "message" and (e.get("message") or {}).get("role") == "assistant"
+                        and LEDGER in json.dumps(e) for e in entries[:refusals[0]]):
+        # ledger_found cannot say which text the resolver matched, so a ledger-like
+        # reply before the refusal leaves the one after it unproven.
+        return INCONCLUSIVE, "an assistant reply before the refusal mentions the ledger header (phases %s)" % phases
+    owed = resolved_owed(run, rows)
+    if owed is None:
+        return FAIL, "the resolver did not judge the retry row: %s" % json.dumps(run.ledger_rows())[:2000]
+    found = bool(owed) and all(r.get("ledger_found") for r in owed)
+    if not refusals:
+        if found:
+            return INCONCLUSIVE, "the model wrote its ledger without a refusal (phases %s)" % phases
+        return FAIL, "the run settled with no ledger and no backstop refusal (phases %s)\n%s" % (
+            phases, proc.stdout[-2000:])
+    if not found:
+        return FAIL, "the harvester found no ledger after the refusal (phases %s)\n%s" % (
+            phases, proc.stdout[-2000:])
+    return PASS, "the settle with no ledger was refused once and the model then wrote it (phases %s)" % phases
 
 
 CHECK_SH = """#!/usr/bin/env bash
@@ -620,7 +682,7 @@ def case_load(run):
     return PASS, "Pi loaded both bridges and status read them approved; the session extension ran report cadence"
 
 
-CASES = {"batch": case_batch, "check": case_check, "cleanup": case_cleanup, "guidance": case_guidance, "load": case_load,
+CASES = {"backstop": case_backstop, "batch": case_batch, "check": case_check, "cleanup": case_cleanup, "guidance": case_guidance, "load": case_load,
          "codemode": case_codemode, "notify": case_notify, "review": case_review, "trust": case_trust}
 
 
