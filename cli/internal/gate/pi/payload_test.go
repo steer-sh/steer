@@ -139,7 +139,7 @@ func TestRunStampsTheContextDepthOfTheActiveBranch(t *testing.T) {
 	if err := json.Unmarshal(bytes.TrimSpace(raw), &row); err != nil {
 		t.Fatal(err)
 	}
-	if row["context_tokens"] != float64(2409) {
-		t.Fatalf("context_tokens = %v", row["context_tokens"])
+	if row["context_tokens"] != float64(2409) || row["prefix_lines"] != float64(4) {
+		t.Fatalf("row = %#v", row)
 	}
 }

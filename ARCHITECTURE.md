@@ -875,7 +875,11 @@ Each row's transcript prefix is stored once per session under `prefixes/`: the
 session file grows by appended gzip members, and a row names its slice with
 `prefix_lines` and `prefix_sha`. Read it through `gate.ReadPrefix`, which also
 resolves rows written before the merge; `scripts/merge-prefixes.py` converts a
-machine's older per-firing files.
+machine's older per-firing files. Every harness adapter stamps the same author fields
+(`task`, `task_turns` and the per-session file under `tasks/` through
+`Ledger.TaskFields`); Codex and Pi read their human turns through their transcript
+adapters, and Pi's drop the body of a `/skill:` command Pi resolved, keeping the
+arguments typed after it.
 
 ## Transcripts and session evidence
 
