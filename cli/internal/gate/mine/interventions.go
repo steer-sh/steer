@@ -520,6 +520,33 @@ func ScoreRecord(record Record, ev EvidenceSet) (map[string]any, error) {
 
 	beforeHosts, afterHosts := HostsIn(before), HostsIn(after)
 
+	return scoredRow(record, scoredWindows{
+		before:           incidenceMap(bHits, bTotal, bRate),
+		after:            incidenceMap(aHits, aTotal, aRate),
+		beforeCoverage:   coverageMap(beforeCov),
+		afterCoverage:    coverageMap(afterCov),
+		afterInstruments: afterInstruments,
+		beforeHosts:      beforeHosts,
+		afterHosts:       afterHosts,
+		observation: chainObservation(record, before, after, beforeCov, afterCov,
+			pattern, kf, ev, afterStart, clock),
+	}), nil
+}
+
+// scoredWindows is what an engine counted for one record: each window's incidence and
+// coverage maps, the after-window's instruments, each window's hosts, and the
+// observation.
+type scoredWindows struct {
+	before, after                 map[string]any
+	beforeCoverage, afterCoverage map[string]any
+	afterInstruments              []string
+	beforeHosts, afterHosts       []string
+	observation                   Observation
+}
+
+// scoredRow is the scored row both engines return, built from the record's stored
+// fields and the counted windows. An engine adds its own fields to it.
+func scoredRow(record Record, w scoredWindows) map[string]any {
 	return map[string]any{
 		"id":                str(record["id"]),
 		"class":             str(record["class"]),
@@ -530,18 +557,17 @@ func ScoreRecord(record Record, ev EvidenceSet) (map[string]any, error) {
 		"installed":         installedLabel(record),
 		"reason":            getString(record, "reason", ""),
 		"reopen":            getString(record, "reopen", ""),
-		"before":            incidenceMap(bHits, bTotal, bRate),
-		"after":             incidenceMap(aHits, aTotal, aRate),
-		"before_coverage":   coverageMap(beforeCov),
-		"after_coverage":    coverageMap(afterCov),
+		"before":            w.before,
+		"after":             w.after,
+		"before_coverage":   w.beforeCoverage,
+		"after_coverage":    w.afterCoverage,
 		"scope":             record["scope"],
 		"instrument":        record["instrument"],
-		"after_instruments": emptyIfNil(afterInstruments),
-		"before_hosts":      emptyIfNil(beforeHosts),
-		"after_hosts":       emptyIfNil(afterHosts),
-		"observation": chainObservation(record, before, after, beforeCov, afterCov,
-			pattern, kf, ev, afterStart, clock),
-	}, nil
+		"after_instruments": emptyIfNil(w.afterInstruments),
+		"before_hosts":      emptyIfNil(w.beforeHosts),
+		"after_hosts":       emptyIfNil(w.afterHosts),
+		"observation":       w.observation,
+	}
 }
 
 // EvidenceSet is every corpus a scoring pass may read, gathered once by the caller. Each
