@@ -275,6 +275,11 @@ also name it to the user, ask as above, and run
 a harness with no global Steer registration of its own reads neither detached nor
 drifted, and a sync that names no harness leaves it out.
 
+When the harness you are setting up is Pi, the two readings hold no Pi row until
+Pi has a guard runner or a Steer rule in that scope, so a clone's committed guards
+never read detached there. For each scope with a `hooks[]` or `rules[]` row, name
+Pi to the user, ask as above, and run `hooks sync --scope <scope> --harness pi`.
+
 Sync registers the runner the store already holds and rewrites each harness's
 rules section. Lines written by hand inside that section are removed; the rest of
 the file is left alone. In project scope these files are usually committed, so

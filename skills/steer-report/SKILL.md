@@ -615,8 +615,9 @@ no disclaimer after it.
   answers nothing. With no harm established, say the harm is unknown; never invent
   a tradeoff or call a proposal cost-free.
 - **Checks.** A repository check is always project scope. A yes adopts this
-  repository, and the check then blocks any Claude Code, Codex or Pi turn here that
-  fails it. Say that a yes needs substantial cleanup first when it does, and that
+  repository, and the check then blocks a failing turn here in each harness whose
+  Stop runner is armed; adoption arms no runner. Say that a harness the user works
+  in without one needs `/steer-setup`'s repository-checks step first. Say that a yes needs substantial cleanup first when it does, and that
   it creates `check.sh` only when the evidence shows the repository has none.
   Say that adoption trusts the repository, not this version of `check.sh`: a
   later pull that changes it runs at the next Stop with no new approval.
