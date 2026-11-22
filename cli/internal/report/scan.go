@@ -70,9 +70,11 @@ var pastedBlock = regexp.MustCompile(`(?s)<pasted_content\b[^>]*>(?:.*?</pasted_
 var steerRuleLine = regexp.MustCompile(`^(## Steer Rules$|- .+ \| .+)`)
 
 // steerInvocation matches a turn that invokes the steer skill: `/steer`, `/steer:steer`,
-// `$steer` or `$steer:steer`, alone or before its input. The harness hands the whole
-// turn to the skill, so every line of it is the request, not a correction of the agent.
-var steerInvocation = regexp.MustCompile(`^[/$]steer(?::steer)?(?:\s|$)`)
+// `$steer`, `$steer:steer` or Pi's `/skill:steer`, alone or before its input. The
+// harness hands the whole turn to the skill, so every line of it is the request, not a
+// correction of the agent. Pi records a skill it resolved as a `<skill name=…>` block,
+// which typedText drops; the literal command reaches here when Pi passed it through.
+var steerInvocation = regexp.MustCompile(`^(?:[/$]steer(?::steer)?|/skill:steer)(?:\s|$)`)
 
 // failurePattern matches lint/test/compile failures in Bash tool output.
 var failurePattern = regexp.MustCompile(`(?i)(error TS\d+|\beslint\b|\bFAILED\b|\bFAIL:|AssertionError|SyntaxError|Traceback \(most recent call last\)|panic:|\bruff\b|\bflake8\b|\bmypy\b|npm ERR!|ERROR in |error\[E\d+\])`)

@@ -309,8 +309,8 @@ func TestCandidateToolWindow(t *testing.T) {
 //
 // pins existing behaviour
 func TestCandidatesLeaveInstrumentAndClassifierAlone(t *testing.T) {
-	if got := ParserInstrument(); got != "scan-4284cbbd25fd" {
-		t.Errorf("ParserInstrument = %s, want scan-4284cbbd25fd", got)
+	if got := ParserInstrument(); got != "scan-00112953c05d" {
+		t.Errorf("ParserInstrument = %s, want scan-00112953c05d", got)
 	}
 	c := NewClassifier()
 	for _, e := range []transcript.Event{

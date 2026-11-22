@@ -547,6 +547,9 @@ func TestCorrectionSkipsASteerInvocation(t *testing.T) {
 		{"$steerage don't use eval", "$steerage don't use eval"},
 		{"$steer:steer-report don't use eval", "$steer:steer-report don't use eval"},
 		{"/steer-setup never use agy", "/steer-setup never use agy"},
+		{"/skill:steer never use var, use const instead", ""},
+		{"/skill:steer-setup never use agy", "/skill:steer-setup never use agy"},
+		{"<skill name=\"steer\" location=\"/p/SKILL.md\">\nbody\n</skill>\n\nnever use var", ""},
 		{"why does $steer:steer keep blocking? don't use it here", "why does $steer:steer keep blocking? don't use it here"},
 	}
 	for _, c := range cases {
