@@ -37,24 +37,34 @@ function cadence(cwd: string): Promise<any> {
 }
 
 export default function (pi: any) {
+  // The session's cadence context, until the first run takes it.
+  let pending: Promise<string | undefined> | undefined;
+
   // The handler does not wait for the cadence, so startup never waits on an install.
   pi.on("session_start", (_event: any, ctx: any) => {
-    void cadence(ctx.cwd).then((reply) => {
+    pending = cadence(ctx.cwd).then((reply) => {
       try {
         if (ctx.hasUI && typeof reply?.systemMessage === "string" && reply.systemMessage) {
           ctx.ui.notify(reply.systemMessage, "info");
         }
-        const context = reply?.hookSpecificOutput?.additionalContext;
-        if (typeof context === "string" && context) {
-          pi.sendMessage(
-            { customType: "steer-session", content: context, display: false },
-            { deliverAs: "nextTurn" },
-          );
-        }
       } catch {
-        // A session that ended before the cadence answered takes no message.
+        // A session that ended before the cadence answered shows nothing.
       }
+      const context = reply?.hookSpecificOutput?.additionalContext;
+      return typeof context === "string" && context ? context : undefined;
     });
     return undefined;
+  });
+
+  // The first run waits for a cadence still running, so its context reaches the
+  // first prompt, as a SessionStart hook's does.
+  pi.on("before_agent_start", async () => {
+    const waiting = pending;
+    pending = undefined;
+    const context = waiting && (await waiting);
+    if (!context) {
+      return undefined;
+    }
+    return { message: { customType: "steer-session", content: context, display: false } };
   });
 }
