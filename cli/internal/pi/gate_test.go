@@ -40,6 +40,7 @@ func TestCommitGateBridgeRoundTrip(t *testing.T) {
 		`pi.sendMessage(`, `{ deliverAs: "steer" }`, `return { block: true, reason: reply.reason }`,
 		`pi.on("before_agent_start"`, `sections["steer-commit-gate"] = STEER_GUIDANCE`,
 		`const STEER_GUIDANCE = "[commit-gate] Steer reviews`, `payload.steer_batch = batchOf(`,
+		`sourceInfo?.path === ` + "`builtin:${tool?.name}`",
 	} {
 		if !strings.Contains(string(raw), want) {
 			t.Errorf("generated bridge is missing %q", want)

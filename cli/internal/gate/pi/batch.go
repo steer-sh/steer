@@ -3,15 +3,19 @@ package pi
 import "strings"
 
 // Batch is what the bridge read about the assistant message that holds a call.
-// Siblings names the other tool calls in that message. Found is false when the
-// bridge could not find the message, and the gate then reviews as before.
+// Siblings names the other tool calls in that message, and Shipped those of them
+// whose registered tool is Pi's own rather than an extension's override. Found
+// is false when the bridge could not find the message, and the gate then
+// reviews as before.
 type Batch struct {
 	Found    bool     `json:"found"`
 	Siblings []string `json:"siblings"`
+	Shipped  []string `json:"shipped"`
 }
 
 // readOnlyTools are Pi's built-in tools that change no file, so a commit
-// beside them reviews the tree it lands.
+// beside them reviews the tree it lands. An extension can register a tool
+// under one of these names, so a sibling counts only when Shipped names it.
 var readOnlyTools = map[string]bool{"read": true, "grep": true, "find": true, "ls": true}
 
 // unorderedCommit names why the gate cannot know which tree a commit lands, or
@@ -26,9 +30,13 @@ func unorderedCommit(payload Payload) string {
 	if payload.Batch == nil || !payload.Batch.Found {
 		return ""
 	}
+	shipped := map[string]bool{}
+	for _, name := range payload.Batch.Shipped {
+		shipped[name] = true
+	}
 	var writers []string
 	for _, name := range payload.Batch.Siblings {
-		if !readOnlyTools[name] {
+		if !readOnlyTools[name] || !shipped[name] {
 			writers = append(writers, name)
 		}
 	}

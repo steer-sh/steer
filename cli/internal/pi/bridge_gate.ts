@@ -46,10 +46,22 @@ function backfill(cwd: string): void {
   child.unref();
 }
 
+// shippedTools names the tools whose registered definition is Pi's own, not an
+// extension's override of that name.
+function shippedTools(pi: any): string[] {
+  try {
+    return (pi.getAllTools?.() ?? [])
+      .filter((tool: any) => tool?.sourceInfo?.path === `builtin:${tool?.name}`)
+      .map((tool: any) => String(tool.name));
+  } catch {
+    return [];
+  }
+}
+
 // batchOf names the other tool calls in the assistant message that holds this
 // call. Pi runs every tool_call handler of a message before it runs any call,
 // and the session manager holds that message by then.
-function batchOf(ctx: any, toolCallId: any): any {
+function batchOf(pi: any, ctx: any, toolCallId: any): any {
   try {
     const branch = ctx.sessionManager.getBranch?.() ?? [];
     for (let i = branch.length - 1; i >= 0; i--) {
@@ -57,12 +69,11 @@ function batchOf(ctx: any, toolCallId: any): any {
       if (message?.role !== "assistant" || !Array.isArray(message.content)) continue;
       const calls = message.content.filter((block: any) => block?.type === "toolCall");
       if (!calls.some((block: any) => block?.id === toolCallId)) break;
-      return {
-        found: true,
-        siblings: calls
-          .filter((block: any) => block?.id !== toolCallId)
-          .map((block: any) => String(block?.name ?? "")),
-      };
+      const siblings = calls
+        .filter((block: any) => block?.id !== toolCallId)
+        .map((block: any) => String(block?.name ?? ""));
+      const shipped = shippedTools(pi);
+      return { found: true, siblings, shipped: siblings.filter((name: string) => shipped.includes(name)) };
     }
   } catch {
     // An unreadable session leaves the batch unknown.
@@ -98,7 +109,7 @@ export default function (pi: any) {
       if (event?.parentToolCallId) {
         payload.parent_tool_call_id = String(event.parentToolCallId);
       } else {
-        payload.steer_batch = batchOf(ctx, event?.toolCallId);
+        payload.steer_batch = batchOf(pi, ctx, event?.toolCallId);
       }
       const reply = await review(payload);
       if (typeof reply?.systemMessage === "string") {

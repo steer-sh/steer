@@ -12,8 +12,9 @@ import (
 )
 
 // TestRunRefusesACommitThatSharesItsBatchWithAWriter checks that a commit whose
-// siblings can change files, or that a code-mode script made, is refused before
-// any review, and that read-only siblings or an unread batch still review.
+// siblings can change files, including an extension's tool under a read-only
+// built-in's name, or that a code-mode script made, is refused before any
+// review, and that Pi's own read-only siblings or an unread batch still review.
 func TestRunRefusesACommitThatSharesItsBatchWithAWriter(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -21,9 +22,11 @@ func TestRunRefusesACommitThatSharesItsBatchWithAWriter(t *testing.T) {
 		refused bool
 	}{
 		{"bash sibling", `,"steer_batch":{"found":true,"siblings":["bash"]}`, true},
-		{"custom tool sibling", `,"steer_batch":{"found":true,"siblings":["read","deploy"]}`, true},
+		{"custom tool sibling", `,"steer_batch":{"found":true,"siblings":["read","deploy"],"shipped":["read"]}`, true},
+		{"overridden read sibling", `,"steer_batch":{"found":true,"siblings":["read","ls"],"shipped":["ls"]}`, true},
 		{"nested code-mode call", `,"parent_tool_call_id":"cm-1"`, true},
-		{"read-only siblings", `,"steer_batch":{"found":true,"siblings":["read","grep","find","ls"]}`, false},
+		{"read-only siblings", `,"steer_batch":{"found":true,"siblings":["read","grep","find","ls"],` +
+			`"shipped":["read","grep","find","ls"]}`, false},
 		{"alone", `,"steer_batch":{"found":true,"siblings":[]}`, false},
 		{"batch not found", `,"steer_batch":{"found":false}`, false},
 	} {

@@ -721,7 +721,9 @@ can also run at the same time. A review there could judge an index that a siblin
 `git add` changes before the commit runs. So the Pi extension sends the commit's
 siblings (`steer_batch`, read from the session) or its `parent_tool_call_id`, and
 `gatepi.Run` refuses before review a nested commit or one whose message also calls
-a tool other than `read`, `grep`, `find` and `ls`.
+a tool other than Pi's own `read`, `grep`, `find` and `ls`. An extension can
+register a tool under one of those names, so the extension also sends which
+siblings are Pi's shipped tool (`shipped`, from `pi.getAllTools()` `sourceInfo`).
 
 Every decision that does not block carries a receipt to both the agent's context
 and the operator (`internal/gate/receipt.go`); no path lets a commit through
