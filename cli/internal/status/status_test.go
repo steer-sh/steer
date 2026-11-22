@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/adjudication"
@@ -185,6 +186,64 @@ func TestCollectEmptyMachineFailsSoft(t *testing.T) {
 		if row.Trust != want {
 			t.Errorf("%s trust: got %q, want %q", row.Harness, row.Trust, want)
 		}
+	}
+}
+
+// An installed Pi that Steer never armed reads as unregistered Pi rows in every
+// arming reading, so status and the dashboard can offer to arm it, while the
+// health verdict stays what the same machine reads without Pi.
+func TestAnInstalledUnarmedPiReadsUnregisteredRows(t *testing.T) {
+	isolate(t)
+	read := func() (*SystemStatus, Health) {
+		s, err := Collect(Options{GateStateDir: t.TempDir(), WindowDays: 7})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s, HealthOf(s, availableProbe())
+	}
+	_, without := read()
+	if err := os.MkdirAll(os.Getenv("PI_CODING_AGENT_DIR"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s, with := read()
+
+	piScopes := func(rows []ScopeArming) []string {
+		var out []string
+		for _, row := range rows {
+			if row.Harness != "pi" {
+				continue
+			}
+			if row.Registered || row.Effective {
+				t.Errorf("an unarmed Pi reads registered: %+v", row)
+			}
+			out = append(out, row.Scope)
+		}
+		return out
+	}
+	for name, rows := range map[string][]ScopeArming{
+		"commit gate": s.Posture.CommitGate, "resolver": s.Posture.Resolver, "check runner": s.Checks.Runner,
+	} {
+		if got := piScopes(rows); len(got) != 2 {
+			t.Errorf("%s Pi rows in scopes %q, want both scopes", name, got)
+		}
+	}
+	masters := 0
+	for _, m := range s.Posture.Masters {
+		if m.Harness == "pi" {
+			masters++
+			if m.State != MasterNotRegistered || !m.Installed {
+				t.Errorf("Pi master row = %+v", m)
+			}
+		}
+	}
+	if masters != 2 {
+		t.Errorf("Pi master rows = %d, want one per scope", masters)
+	}
+	if row := s.Telemetry.Harnesses[len(s.Telemetry.Harnesses)-1]; row != (HarnessTelemetry{Harness: "pi"}) {
+		t.Errorf("last telemetry row = %+v, want an empty Pi row", row)
+	}
+	if !reflect.DeepEqual(with, without) {
+		t.Errorf("an unarmed Pi changed health:\nwith    %+v\nwithout %+v", with, without)
 	}
 }
 
@@ -904,7 +963,7 @@ func TestObservedReadsTheNewestRowPerHarness(t *testing.T) {
 // TestPiPostureReadsTheRegisteredExtension pins the Pi rows over an ARMED machine:
 // the empty-machine test proves only that they are absent. Pi writes the review and
 // the resolver into one extension file, so both rows read back from one write, and
-// the scope with no registration carries no Pi row.
+// the scope with no registration reads unregistered, because the write installed Pi.
 func TestPiPostureReadsTheRegisteredExtension(t *testing.T) {
 	isolate(t)
 	if _, err := pi.RegisterCommitGateAndResolver(claude.GlobalScope, t.TempDir(),
@@ -920,7 +979,7 @@ func TestPiPostureReadsTheRegisteredExtension(t *testing.T) {
 		if a.Harness == "pi" && a.Scope == claude.GlobalScope {
 			gateRow = a
 		}
-		if a.Harness == "pi" && a.Scope == claude.ProjectScope {
+		if a.Harness == "pi" && a.Scope == claude.ProjectScope && a.Registered {
 			t.Errorf("unregistered pi project gate row = %+v", a)
 		}
 	}
@@ -928,7 +987,7 @@ func TestPiPostureReadsTheRegisteredExtension(t *testing.T) {
 		if a.Harness == "pi" && a.Scope == claude.GlobalScope {
 			resolverRow = a
 		}
-		if a.Harness == "pi" && a.Scope == claude.ProjectScope {
+		if a.Harness == "pi" && a.Scope == claude.ProjectScope && a.Registered {
 			t.Errorf("unregistered pi project resolver row = %+v", a)
 		}
 	}

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -205,6 +206,32 @@ func TestAnOtherScopeStaleRunnerNamesItsOwnCommand(t *testing.T) {
 		if r.kind == guardRepair {
 			t.Errorf("Fixes offers a repair for a runner in the other scope: %q", r.name)
 		}
+	}
+}
+
+// A Pi that registers no runner reads detached beside a project store, but its
+// user may run Pi without Steer: neither Diagnostics nor Fixes names it, while a
+// detached Claude Code in the same scope still gets both.
+func TestAnUnarmedPiIsNoDetachedRunnerProblem(t *testing.T) {
+	m := New(gate.Defaults(), "project")
+	m.width = 200
+	m.snap = &status.SystemStatus{Posture: status.Posture{Masters: []status.MasterRuntime{
+		{Harness: "pi", Scope: "project", State: status.MasterDetached, Store: "/s", Installed: true},
+		{Harness: "claude-code", Scope: "project", State: status.MasterDetached, Store: "/s", Installed: true},
+	}}}
+	var headlines []string
+	for _, issue := range m.diagnosticIssues() {
+		headlines = append(headlines, issue.headline)
+	}
+	if got := strings.Join(headlines, "; "); strings.Contains(got, "Pi") || !strings.Contains(got, "Claude Code runs none") {
+		t.Errorf("diagnostics = %q, want Claude Code alone", got)
+	}
+	var labels []string
+	for _, r := range m.guardRepairs() {
+		labels = append(labels, r.label)
+	}
+	if !slices.Equal(labels, []string{"Run the guards in Claude Code"}) {
+		t.Errorf("guard repairs = %q, want Claude Code alone", labels)
 	}
 }
 

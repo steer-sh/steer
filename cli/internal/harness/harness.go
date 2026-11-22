@@ -164,12 +164,17 @@ func Targets(targets []Registrar, fallback Registrar) []Registrar {
 var order = []ID{ClaudeCode, Codex, Pi}
 
 // optional harnesses are ones most Steer users do not run. A reading names one only
-// where a registration or evidence for it already exists, and a command naming no
-// harness writes to one only where its configuration directory exists.
+// where its configuration directory exists or a registration or evidence for it
+// does, and a command naming no harness writes to one only where its configuration
+// directory exists.
 var optional = map[ID]bool{Pi: true}
 
 // Optional reports whether a reading names the harness only where it is present.
 func Optional(id ID) bool { return optional[id] }
+
+// Unlisted reports whether a reading leaves the harness out unless a registration or
+// evidence names it: an optional harness whose configuration directory is absent.
+func Unlisted(id ID) bool { return optional[id] && !registry[id].Installed() }
 
 // All returns every registered harness in a stable order.
 func All() []Harness {

@@ -333,6 +333,13 @@ func (m MasterRuntime) Stale() bool { return m.State == MasterStale || m.State =
 // Detached reports whether this harness runs none of the scope's guards.
 func (m MasterRuntime) Detached() bool { return m.State == MasterDetached }
 
+// Unarmed reports a row of an optional harness that registers no runner in its
+// scope. Setup reads it, but its user may run that harness without Steer, so no
+// notice, diagnostic or repair names it.
+func (m MasterRuntime) Unarmed() bool {
+	return m.Path == "" && harness.Optional(harness.ID(m.Harness))
+}
+
 // Rules section states. The manifest is what a record binds; the section is what
 // the agent reads.
 const (
@@ -691,11 +698,12 @@ func collectPosture(cfg gate.Config, ev mine.EvidenceSet) Posture {
 			Trust:      CodexTrust(cg),
 			Command:    cg.Command,
 		}, ledgerCorpus, observed.gate[codexID]))
-		// Pi is optional: its rows appear only where its extension registers
-		// either channel. One extension carries both, so both rows go together.
+		// Pi is optional: its rows appear where Pi is installed or its extension
+		// registers either channel. One extension carries both, so both rows go
+		// together.
 		pg := pi.CommitGateArming(scope, cwd)
 		pr := pi.ResolverArming(scope, cwd)
-		piListed := pg.Registered || pr.Registered
+		piListed := !harness.Unlisted(harness.Pi) || pg.Registered || pr.Registered
 		if piListed {
 			p.CommitGate = append(p.CommitGate, withEvidence(ScopeArming{
 				Harness:    piID,
@@ -873,8 +881,8 @@ func masterRuntimes(scope string) []MasterRuntime {
 			Installed: registrar.Harness().Installed(),
 		}
 		path, err := registrar.RegisteredMasterPath(scope)
-		if harness.Optional(registrar.Harness().ID) && (err != nil || path == "") {
-			continue // an optional harness appears only with a registration
+		if harness.Unlisted(registrar.Harness().ID) && (err != nil || path == "") {
+			continue // an uninstalled optional harness appears only with a registration
 		}
 		if err != nil {
 			out = append(out, row)
@@ -1149,8 +1157,8 @@ func telemetry(ev mine.EvidenceSet, blocks map[string]int) Telemetry {
 	}
 	for _, h := range harness.All() {
 		r := *row(string(h.ID))
-		if harness.Optional(h.ID) && r == (HarnessTelemetry{Harness: r.Harness}) {
-			continue // an optional harness appears only with evidence
+		if harness.Unlisted(h.ID) && r == (HarnessTelemetry{Harness: r.Harness}) {
+			continue // an uninstalled optional harness appears only with evidence
 		}
 		t.Harnesses = append(t.Harnesses, r)
 	}

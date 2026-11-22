@@ -203,6 +203,8 @@ outcome in `steer status` is that case; the key file has no such gap.
 
 Ask which agent will make the commits. The `posture.commit_gate[]` rows from Step 1
 already show which harnesses are registered, so name those and do not re-arm them.
+A `pi` row appears only where Pi is installed or armed, so offer an unregistered
+`pi` row with the others.
 
 ```bash
 # one of:
@@ -275,10 +277,10 @@ also name it to the user, ask as above, and run
 a harness with no global Steer registration of its own reads neither detached nor
 drifted, and a sync that names no harness leaves it out.
 
-When the harness you are setting up is Pi, the two readings hold no Pi row until
-Pi has a guard runner or a Steer rule in that scope, so a clone's committed guards
-never read detached there. For each scope with a `hooks[]` or `rules[]` row, name
-Pi to the user, ask as above, and run `hooks sync --scope <scope> --harness pi`.
+When the harness you are setting up is Pi, `posture.rules` holds no Pi row until
+Pi's document carries a Steer rule in that scope, so Steer's rules never read
+drifted there. For each scope with a `rules[]` row, name Pi to the user, ask as
+above, and run `hooks sync --scope <scope> --harness pi`.
 
 Sync registers the runner the store already holds and rewrites each harness's
 rules section. Lines written by hand inside that section are removed; the rest of

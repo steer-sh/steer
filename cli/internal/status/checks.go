@@ -190,7 +190,7 @@ func runnerArming(root string, observed map[string]time.Time) []ScopeArming {
 			if err != nil {
 				a = checkscope.Arming{}
 			}
-			if harness.Optional(target) && !a.Registered && observed[string(target)].IsZero() {
+			if harness.Unlisted(target) && !a.Registered && observed[string(target)].IsZero() {
 				continue
 			}
 			row := ScopeArming{

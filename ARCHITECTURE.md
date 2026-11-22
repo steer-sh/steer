@@ -141,9 +141,15 @@ Concrete adapters under `internal/claude`, `internal/codex`, `internal/pi`, and
 Pi uses `.pi` in a project and `~/.pi/agent` globally; Pi and Codex share project
 `AGENTS.md` but have separate global instruction documents. Pi is optional
 (`harness.Optional`): help text and messages offer it like the other two, but a
-status reading names Pi only where a Pi registration or evidence for it exists,
-and `guardscope.HookRegistrars` returns it only where its configuration directory
-exists, so a machine without Pi gets no Pi rows and no Pi files.
+status reading names Pi only where its configuration directory exists or a Pi
+registration or evidence for it does (`harness.Unlisted`), and
+`guardscope.HookRegistrars` returns it only where that directory exists, so a
+machine without Pi gets no Pi rows and no Pi files. The rules reading still needs a
+Steer rule in Pi's document. A Pi that registers no runner in a scope
+(`MasterRuntime.Unarmed`) can read detached there, but health, the detached-runner
+notice, the dashboard's issue list and Fixes, and repair targeting leave it out, so
+an installed Pi the operator never armed is offered for arming, never reported as
+broken, and never registered by a repair aimed at another harness.
 
 Codex keys each hook approval by event, entry index and handler index, and hashes
 the handler definition, not the script it runs. A Codex registration therefore

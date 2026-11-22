@@ -74,10 +74,11 @@ Read the linked architecture section before changing the corresponding boundary:
   Start with `cli/internal/harness/` and `cli/internal/steerpath/`; registration
   adapters and shared stores have different ownership.
   Pi is optional (`harness.Optional`): help text offers it, but a status row
-  names it only where a Pi registration or evidence exists, and a command naming
-  no harness writes Pi files only where Pi's agent directory exists (`~/.pi/agent`,
-  or `PI_CODING_AGENT_DIR`, which Pi itself reads). A new status
-  reading or default write target must apply the same test.
+  names it only where Pi's agent directory exists (`~/.pi/agent`, or
+  `PI_CODING_AGENT_DIR`, which Pi itself reads) or a Pi registration or evidence
+  does (`harness.Unlisted`; a rules row needs a Steer rule in Pi's document), and a
+  command naming no harness writes Pi files only where that directory exists. A new
+  status reading or default write target must apply the same test.
   Codex hook writers share `cli/internal/codex/hooks.go`'s `save`; every mutation
   must pass its scope so project writes refuse symlinked configuration paths.
   Pi bridge mutations share `cli/internal/pi/registrar.go`'s

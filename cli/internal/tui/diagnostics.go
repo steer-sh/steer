@@ -109,7 +109,7 @@ func (m *Model) diagnosticIssues() []diagnosticIssue {
 		})
 	}
 	for _, master := range m.snap.Posture.Masters {
-		if !master.Detached() {
+		if !master.Detached() || master.Unarmed() {
 			continue
 		}
 		agent := status.HarnessLabel(master.Harness)
