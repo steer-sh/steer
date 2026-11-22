@@ -60,6 +60,7 @@ from sandbox import REPO, Sandbox  # noqa: E402
 PASS, FAIL, INCONCLUSIVE = "PASS", "FAIL", "INCONCLUSIVE"
 UNORDERED = "run the commit alone"
 RECEIPT = "[commit-gate] refused a Pi commit"  # the operator's line for a refused batch
+NESTED = "runs inside another tool's call (code mode)"  # the gate's reason for a scripted commit
 PI_TIMEOUT = 300  # seconds one `pi -p` may run; a stalled model request fails its case
 
 
@@ -308,24 +309,45 @@ def case_batch(run):
     return PASS, "the batched commit was refused before review; the commit run alone was reviewed"
 
 
+def nested_refusals(entries):
+    """The nestedCalls records on codemode results that the gate refused as a
+    commit run inside another tool's call."""
+    out = []
+    for e in entries:
+        m = e.get("message") or {}
+        if e.get("type") != "message" or m.get("role") != "toolResult" or m.get("toolName") != "codemode":
+            continue
+        out += [r for r in (m.get("nestedCalls") or {}).get("calls") or []
+                if r.get("status") == "error" and NESTED in str(r.get("error"))]
+    return out
+
+
 def case_codemode(run):
     stage_commit(run)
+    reflog = run.sh("git", "reflog", "--format=%H").stdout
     # "only" hides the direct tools, so the model can reach bash only from a script.
     (run.repo / ".pi" / "settings.json").write_text(json.dumps(
         {"defaultTools": ["+codemode"], "codemode": {"mode": "only"}}))
     proc = run.pi("Use the codemode tool to run `git add b.go` and then `git commit -m 'add b'`. "
                   "If the commit is blocked, report the block's message and stop.")
-    scripted = [c for _, c in tool_calls(run.session_entries())
-                if c.get("name") == "codemode" and "git commit" in json.dumps(c.get("arguments"))]
-    if not scripted:
-        return INCONCLUSIVE, "the model ran no commit from a codemode script\n" + proc.stdout[-2000:]
-    if "add b" in run.commits():
-        return FAIL, "a commit from a codemode script landed"
+    # Any HEAD update is a commit, amend or reset, whatever its subject or command spelling.
+    if run.sh("git", "reflog", "--format=%H").stdout != reflog:
+        return FAIL, "HEAD moved during the codemode run: %s" % run.commits()
     stub = run.root / "stub.jsonl"
     if stub.exists() and stub.read_text().strip():
-        return FAIL, "the scripted commit reached the reviewer"
+        return FAIL, "a scripted commit reached the reviewer"
+    # Pi keeps each call a script made, with its error, on the codemode call's result;
+    # only the gate writes the code-mode reason, so a script's text alone proves nothing.
+    entries = run.session_entries()
+    if not nested_refusals(entries):
+        scripted = [c for _, c in tool_calls(entries)
+                    if c.get("name") == "codemode" and "commit" in json.dumps(c.get("arguments"))]
+        if scripted:
+            return FAIL, "a codemode script names a commit, and the gate refused no nested call:\n" + \
+                json.dumps(scripted)[:2000]
+        return INCONCLUSIVE, "no codemode script named a commit\n" + proc.stdout[-2000:]
     if RECEIPT not in proc.stderr:
-        return FAIL, "the scripted commit did not land, and no refusal receipt reached stderr:\n" + \
+        return FAIL, "the scripted commit was refused, and no refusal receipt reached stderr:\n" + \
             proc.stderr[-2000:]
     return PASS, "the gate refused the commit a codemode script ran, before review"
 
