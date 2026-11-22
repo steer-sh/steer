@@ -331,6 +331,7 @@ def case_codemode(run):
 
 
 LEDGER_GRACE = 120  # gate.LedgerGrace: the resolver leaves a row alone this long after its deny
+GRACE_MARGIN = 30  # seconds a detached turn_end resolver may take to start
 
 
 def case_review(run):
@@ -348,8 +349,16 @@ def case_review(run):
     owed = [r for r in rows if r.get("phase") in ("retry", "nitpick")]
     if not owed:
         return FAIL, "the commit landed with no retry row after the deny (phases %s)" % phases
-    # A session's own turn_end runs before the grace ends, so the next session's
-    # turn_end is the one that resolves the row.
+    # Pi's turn_end runs the resolver only once some row's grace has ended, and this
+    # home holds only this chain's rows. A first session that ended near or past the
+    # grace may have resolved the row from its own detached turn_end, so only one that
+    # ended with the grace well open leaves the next session to prove.
+    if time.time() >= min(r.get("ts", 0) for r in rows) + LEDGER_GRACE - GRACE_MARGIN:
+        return INCONCLUSIVE, "the first session outlasted the ledger grace, so its own turn_end " \
+            "may have resolved the retry row (phases %s)" % phases
+    if any(r.get("backfilled") or r.get("ledger_found") for r in owed):
+        return INCONCLUSIVE, "the retry row was resolved before the next session started: %s" % \
+            json.dumps(owed)[:2000]
     wait = max(r.get("ts", 0) for r in rows) + LEDGER_GRACE + 5 - time.time()
     if wait > 0:
         time.sleep(wait)
