@@ -15,9 +15,18 @@ import (
 // handlers, as Pi does when a session starts.
 func startSession(t *testing.T, node, path string) {
 	t.Helper()
+	startSessionAfter(t, node, path, "")
+}
+
+// startSessionAfter loads the bridge at path in node, runs the script between, then
+// calls the factory and fires its session_start handlers, as Pi does when it reuses
+// an imported module for /new, /resume or /fork.
+func startSessionAfter(t *testing.T, node, path, between string) {
+	t.Helper()
 	script := `
 const { pathToFileURL } = await import("node:url");
 const mod = await import(pathToFileURL(process.argv[1]).href);
+` + between + `
 const handlers = {};
 mod.default({ on: (event, fn) => (handlers[event] ??= []).push(fn), sendMessage() {} });
 for (const fn of handlers.session_start ?? []) await fn({ reason: "startup" }, { cwd: process.cwd(), hasUI: false });
@@ -58,12 +67,33 @@ func TestBridgeRecordsTheBytesPiLoaded(t *testing.T) {
 	if got := LoadOf(gate); !got.Known || got.Loaded {
 		t.Errorf("a bridge no session loaded: %+v, want known and not loaded", got)
 	}
+	// A record Steer cannot parse, or one naming no digest, may name the gate bridge,
+	// so its load is unknown.
+	broken := filepath.Join(LoadDir(), "broken.json")
+	for _, record := range []string{`{"path": `, `{"path": "` + gate + `"}`} {
+		if err := os.WriteFile(broken, []byte(record), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if got := LoadOf(gate); got.Known {
+			t.Errorf("beside the record %s: %+v, want unknown", record, got)
+		}
+	}
+	if err := os.Remove(broken); err != nil {
+		t.Fatal(err)
+	}
 
 	if _, err := RegisterCheckRunner(harness.GlobalScope, home, "steer check hook --harness pi", 90); err != nil {
 		t.Fatal(err)
 	}
 	if got := LoadOf(checks); !got.Loaded || got.Current {
 		t.Errorf("after a rewrite: %+v, want loaded and not current", got)
+	}
+
+	// A session start records the bytes Pi imported, not a rewrite that landed after
+	// the import.
+	startSessionAfter(t, node, checks, `(await import("node:fs")).appendFileSync(process.argv[1], "// rewritten\n");`)
+	if got := LoadOf(checks); !got.Loaded || got.Current {
+		t.Errorf("a rewrite after the import: %+v, want loaded and not current", got)
 	}
 
 	// A committed project bridge records its load in the home of whoever runs Pi,

@@ -1320,11 +1320,16 @@ process, and observed corpus activity. Resolution is a proxy for the harness's
 environment; activity does not identify scope or prove current trust. Readiness
 reports detectable setup problems with repairs and keeps trust uncertainty
 separate. Pi keeps no hook approval record, so each Pi bridge carries the load
-recorder (`internal/pi/bridge_load.ts`): at `session_start` it writes the resolved
-path and digest of the bytes Pi loaded to `~/.steer/state/pi-loads/`.
-`status.PiTrust` reads that record (`pi.LoadOf`) as the row's trust: approved when
-Pi loaded the file's current bytes, modified when it loaded earlier bytes, missing
-when no session loaded it. In project scope the nearest saved decision in Pi's
+recorder (`internal/pi/bridge_load.ts`): it reads its own bytes when Pi imports the
+module, and at each `session_start` writes their resolved path and digest to
+`~/.steer/state/pi-loads/`, since Pi reuses an imported module across `/new`,
+`/resume` and `/fork`. `status.PiTrust` reads that record (`pi.LoadOf`) as the
+row's trust: approved when Pi loaded the file's current bytes, modified when it
+loaded earlier bytes, missing when no session loaded it, unknown when a record
+cannot be read. One record per file names the bytes the newest session start ran, so approved covers the
+Pi processes started, or sessions reloaded with `/reload`, since the file last
+changed (`/new` and `/resume` keep the imported module), and the readiness
+headline says so for a Pi channel. In project scope the nearest saved decision in Pi's
 `trust.json` (`pi.ProjectTrust`) comes first, and a declined project is disabled. A
 bridge an older Steer wrote has no recorder and reads unknown; `bin install`
 rewrites a global one (`pi.RefreshBridges`) and leaves a project one, which the

@@ -351,3 +351,15 @@ func TestReadinessReadsCodexApproval(t *testing.T) {
 		t.Errorf("disabled: reviewing %v, steps %+v", r.Reviewing, r.Steps)
 	}
 }
+
+// An approved Pi gate counts as enforcing, and the headline names the sessions its
+// load record covers: a Pi session that started before the extension changed, and
+// never reloaded, leaves no record.
+func TestAnApprovedPiGateNamesTheSessionsItCovers(t *testing.T) {
+	gate := ScopeArming{Harness: "pi", Scope: "global", Registered: true, Effective: true,
+		Resolvable: ResolveResolvable, Trust: TrustApproved}
+	r := ReadinessOf(&SystemStatus{Posture: Posture{CommitGate: []ScopeArming{gate}}}, available())
+	if !r.Reviewing || !strings.Contains(r.Headline, "Pi global "+piLoadedSessions) {
+		t.Errorf("reviewing %v, headline %q", r.Reviewing, r.Headline)
+	}
+}

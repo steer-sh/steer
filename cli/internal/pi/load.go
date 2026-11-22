@@ -54,8 +54,9 @@ type loadRecord struct {
 	Digest string `json:"digest"`
 }
 
-// LoadOf reads the newest load record for the bridge at path. A bridge Pi never
-// loaded, or one whose directory holds no record, is known and not loaded.
+// LoadOf reads the load record for the bridge at path. A bridge no record names is
+// known and not loaded, unless a record could not be read: that one may name it, so
+// the answer is unknown.
 func LoadOf(path string) Load {
 	target, err := filepath.EvalSymlinks(path)
 	if err != nil {
@@ -74,16 +75,19 @@ func LoadOf(path string) Load {
 	}
 	sum := sha256.Sum256(content)
 	digest := hex.EncodeToString(sum[:])
+	unread := false
 	for _, e := range entries {
 		if e.IsDir() || strings.HasPrefix(e.Name(), ".") || filepath.Ext(e.Name()) != ".json" {
 			continue
 		}
 		raw, err := os.ReadFile(filepath.Join(LoadDir(), e.Name()))
 		if err != nil {
+			unread = true
 			continue
 		}
 		var rec loadRecord
-		if json.Unmarshal(raw, &rec) != nil || rec.Path == "" {
+		if json.Unmarshal(raw, &rec) != nil || rec.Path == "" || rec.Digest == "" {
+			unread = true
 			continue
 		}
 		if resolved, err := filepath.EvalSymlinks(rec.Path); err != nil || resolved != target {
@@ -91,7 +95,7 @@ func LoadOf(path string) Load {
 		}
 		return Load{Known: true, Loaded: true, Current: rec.Digest == digest}
 	}
-	return Load{Known: true}
+	return Load{Known: !unread}
 }
 
 // Trust is a project's saved trust decision in Pi.

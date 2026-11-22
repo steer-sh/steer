@@ -174,6 +174,11 @@ type Readiness struct {
 	Note string
 }
 
+// piLoadedSessions qualifies an enforcing Pi channel. A load record says which bytes
+// the newest Pi session start ran; a Pi process that imported earlier keeps those bytes
+// across /new and /resume until /reload or a restart.
+const piLoadedSessions = "(in Pi processes started, or sessions reloaded with /reload, since its extension last changed)"
+
 // ReadinessOf separates setup failures from trust that the snapshot cannot verify.
 func ReadinessOf(s *SystemStatus, probe reviewers.Probe) Readiness {
 	r := Readiness{}
@@ -237,7 +242,11 @@ func ReadinessOf(s *SystemStatus, probe reviewers.Probe) Readiness {
 		if open {
 			continue
 		}
-		enforcing = append(enforcing, fmt.Sprintf("%s %s", HarnessLabel(a.Harness), a.Scope))
+		name := fmt.Sprintf("%s %s", HarnessLabel(a.Harness), a.Scope)
+		if harness.ID(a.Harness) == harness.Pi {
+			name += " " + piLoadedSessions
+		}
+		enforcing = append(enforcing, name)
 	}
 	if registered {
 		steps, unverified := resolverSteps(s.Posture)

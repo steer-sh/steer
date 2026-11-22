@@ -1039,11 +1039,10 @@ func runnerTrust(id harness.ID, scope string) string {
 	return trustState(id, false, false)
 }
 
-// PiTrust reads whether Pi runs the extension at path. In project scope a project
-// Pi's trust file declines is disabled. An extension an older Steer wrote records no
-// load, so it is unknown. Otherwise the load the extension recorded decides: approved
-// when Pi loaded the file's current bytes, modified when it loaded earlier bytes,
-// and missing when no session loaded it.
+// PiTrust reads which bytes of the extension at path Pi's newest session start ran:
+// approved for the current bytes, modified for earlier bytes, missing for none. A Pi
+// process that imported earlier and never ran /reload is invisible to it. A project Pi's
+// trust file declines is disabled; an older bridge or unreadable records are unknown.
 func PiTrust(scope, cwd, path string) string {
 	if path == "" {
 		return TrustUnknown
