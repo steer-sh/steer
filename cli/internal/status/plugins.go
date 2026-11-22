@@ -99,7 +99,7 @@ func PluginCopies() []PluginCopy {
 		}
 		var roots []string
 		if id == harness.Pi {
-			roots, _ = piPackageRoots(dir)
+			roots, _, _ = piPackageRoots(dir)
 		} else {
 			roots, _ = filepath.Glob(filepath.Join(pluginCache(id, dir), "*", pluginName, "*"))
 		}
@@ -204,14 +204,16 @@ func claudeInstallPaths(configDir string) (paths map[string]bool, ok bool) {
 // piPackageRoots returns the clone of each git package Pi's settings file lists whose
 // package.json describes the Steer package. Pi clones a git source to
 // git/<host>/<path> under its configuration directory. ok is false when the settings
-// file is missing or unreadable.
-func piPackageRoots(dir string) (roots []string, ok bool) {
+// file is missing or unreadable. unread names each listed clone that holds no readable
+// package.json: Pi reinstalls a missing clone at startup and rewrites one in place on
+// update, so such an entry may still be Steer.
+func piPackageRoots(dir string) (roots, unread []string, ok bool) {
 	var settings struct {
 		Packages []json.RawMessage `json:"packages"`
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "settings.json"))
 	if err != nil || json.Unmarshal(data, &settings) != nil {
-		return nil, false
+		return nil, nil, false
 	}
 	seen := map[string]bool{}
 	for _, raw := range settings.Packages {
@@ -230,12 +232,18 @@ func piPackageRoots(dir string) (roots []string, ok bool) {
 			continue
 		}
 		root := filepath.Join(pluginCache(harness.Pi, dir), filepath.FromSlash(rel))
-		if !seen[root] && isSteerPackage(root) {
-			seen[root] = true
+		if seen[root] {
+			continue
+		}
+		seen[root] = true
+		switch steer, known := steerPackage(root); {
+		case !known:
+			unread = append(unread, root)
+		case steer:
 			roots = append(roots, root)
 		}
 	}
-	return roots, true
+	return roots, unread, true
 }
 
 // piGitPath reduces a Pi git package source (git:host/owner/repo@ref, an https or ssh
@@ -248,6 +256,7 @@ func piGitPath(source string) (string, bool) {
 	if prefixed {
 		s = strings.TrimSpace(strings.TrimPrefix(s, "git:"))
 	}
+	shorthand := false
 	switch {
 	case hasAnyPrefix(s, "https://", "http://", "ssh://", "git://"):
 		_, s, _ = strings.Cut(s, "://")
@@ -263,18 +272,21 @@ func piGitPath(source string) (string, bool) {
 		s = strings.Replace(strings.TrimPrefix(s, "git@"), ":", "/", 1)
 	case prefixed:
 		host, _, _ := strings.Cut(s, "/")
-		if !strings.Contains(host, ".") && host != "localhost" {
-			// owner/repo is GitHub shorthand.
-			if strings.Count(s, "/") != 1 {
-				return "", false
-			}
-			s = "github.com/" + s
-		}
+		shorthand = !strings.Contains(host, ".") && host != "localhost"
 	default:
 		return "", false
 	}
-	if at := strings.LastIndex(s, "@"); at > strings.LastIndex(s, "/") {
-		s = s[:at]
+	// Pi splits the ref at the first "@" after the host, so a ref may hold slashes.
+	host, rest, _ := strings.Cut(s, "/")
+	if repo, ref, found := strings.Cut(rest, "@"); found && repo != "" && ref != "" {
+		s = host + "/" + repo
+	}
+	if shorthand {
+		// owner/repo is GitHub shorthand.
+		if strings.Count(s, "/") != 1 {
+			return "", false
+		}
+		s = "github.com/" + s
 	}
 	s = strings.TrimSuffix(strings.Trim(s, "/"), ".git")
 	parts := strings.Split(s, "/")
@@ -298,15 +310,18 @@ func hasAnyPrefix(s string, prefixes ...string) bool {
 	return false
 }
 
-// isSteerPackage reports whether root holds a package.json that names the Steer
-// package and lists Pi resources.
-func isSteerPackage(root string) bool {
+// steerPackage reports whether root holds a package.json that names the Steer package
+// and lists Pi resources; known is false when that file cannot be read or parsed.
+func steerPackage(root string) (steer, known bool) {
 	var pkg struct {
 		Name string          `json:"name"`
 		Pi   json.RawMessage `json:"pi"`
 	}
 	data, err := os.ReadFile(filepath.Join(root, "package.json"))
-	return err == nil && json.Unmarshal(data, &pkg) == nil && pkg.Name == pluginName && len(pkg.Pi) > 0
+	if err != nil || json.Unmarshal(data, &pkg) != nil {
+		return false, false
+	}
+	return pkg.Name == pluginName && len(pkg.Pi) > 0, true
 }
 
 // PluginSources names each harness whose plugin cache holds a path the stable
@@ -435,12 +450,25 @@ func UninstallCommand(id harness.ID) string {
 // installed, so a read failure raises no notice.
 func pluginInstalled(id harness.ID, dir string) bool {
 	if id == harness.Pi {
-		roots, ok := piPackageRoots(dir)
+		roots, unread, ok := piPackageRoots(dir)
 		if !ok {
 			_, err := os.Stat(filepath.Join(dir, "settings.json"))
 			return !os.IsNotExist(err)
 		}
-		return len(roots) > 0
+		if len(roots) > 0 {
+			return true
+		}
+		// An unread clone is Steer's only when the stable executable came from its own
+		// bin directory; a clone can nest inside another package's clone path.
+		for _, root := range unread {
+			bin := filepath.Join(root, "bin")
+			for _, source := range sourcesIn(id) {
+				if lexicallyWithin(bin, source) || steerpath.Within(bin, source) {
+					return true
+				}
+			}
+		}
+		return false
 	}
 	if id == harness.ClaudeCode {
 		paths, ok := claudeInstallPaths(dir)

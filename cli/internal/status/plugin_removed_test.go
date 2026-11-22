@@ -105,6 +105,35 @@ func TestRemovedPluginReadsTheHarnessRecord(t *testing.T) {
 	if removed(harness.Pi) {
 		t.Error("a Pi package entry for Steer read as a removed plugin")
 	}
+	if err := os.Remove(filepath.Join(home, piClone, "package.json")); err != nil {
+		t.Fatal(err)
+	}
+	if removed(harness.Pi) {
+		t.Error("a listed Pi clone without its package.json read as a removed plugin")
+	}
+	writeFile(t, filepath.Join(home, piClone, "package.json"), `{"name":"tools","pi":{}}`)
+	if !removed(harness.Pi) {
+		t.Error("a listed Pi clone of another package read as the Steer plugin")
+	}
+	writeFile(t, filepath.Join(home, ".pi", "agent", "settings.json"),
+		`{"packages":["git:github.com/someone/tools"]}`)
+	if !removed(harness.Pi) {
+		t.Error("an unread clone of another listed package read as the Steer plugin")
+	}
+
+	nested := filepath.Join(".pi", "agent", "git", "gitlab.com", "team", "tools", "steer")
+	home = pluginHome(t, func(home string) string {
+		return filepath.Join(home, nested, "bin", "linux-amd64", "steer")
+	})
+	if _, err := pi.RegisterCommitGateAndResolver(harness.GlobalScope, home, "steer commit-gate review-pi", 460,
+		"steer commit-gate backfill --if-due --apply --quiet", 30); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(home, ".pi", "agent", "settings.json"),
+		`{"packages":["git:gitlab.com/team/tools"]}`)
+	if !removed(harness.Pi) {
+		t.Error("an unread clone whose path holds Steer's clone read as the Steer plugin")
+	}
 
 	pluginHome(t, func(home string) string { return filepath.Join(home, "src", "steer", "cli", "bin", "steer") })
 	if len(RemovedPlugins()) != 0 || PluginRemovedNotice() != "" {
