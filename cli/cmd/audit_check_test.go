@@ -9,6 +9,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/adjudication"
 	"github.com/steer-sh/steer-cli/internal/checks"
 	"github.com/steer-sh/steer-cli/internal/firingaudit"
+	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/transcript"
 )
 
@@ -66,6 +67,18 @@ func TestRenderCheckCaseShowsTheBlockAndBothSidesOfIt(t *testing.T) {
 		"oracle=invalid,pre-existing", "flaky", "1 context step(s) of 1 and 1 continuation step(s) of 1"} {
 		if !strings.Contains(string(out), want) {
 			t.Errorf("render missing %q:\n%s", want, out)
+		}
+	}
+
+	// A fork names the branch the harness's reader follows.
+	for h, want := range map[harness.ID]string{harness.Codex: "follows the first branch", harness.Pi: "follows the session's active branch"} {
+		show.Reading.Harness, show.Reading.BranchPoints = h, 2
+		out, err := renderCheckCase(show, firingaudit.Emission{StepsEmitted: 1, StepsAvailable: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(out), "2 fork(s) passed; this reading "+want) {
+			t.Errorf("a %s fork named the wrong branch:\n%s", h, out)
 		}
 	}
 }

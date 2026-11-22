@@ -11,8 +11,8 @@ import (
 
 // Continuation returns what the session did after a guard blocked one call:
 // the toolResult entry carrying toolCallID, and the entries descending from it
-// until a person speaks. It follows the branch StopBlock would, and counts each
-// other child of a walked entry in BranchPoints without reading it.
+// until a person speaks. It follows the branch StopBlock would; each walked
+// entry with a child off that branch counts once in BranchPoints.
 func Continuation(path, toolCallID string, budget transcript.ContinuationBudget) (transcript.Continuation, error) {
 	budget = budget.WithDefaults()
 	out := transcript.Continuation{

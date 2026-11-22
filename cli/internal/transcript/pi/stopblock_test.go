@@ -62,6 +62,9 @@ func TestStopBlockFollowsTheActiveBranchAndStopsAtThePerson(t *testing.T) {
 	if strings.Join(texts, "|") != "failed\nsteer check run: r1|repaired" || got.EndReason != transcript.EndHumanTurn {
 		t.Fatalf("steps = %q, end = %q", texts, got.EndReason)
 	}
+	if got.BranchPoints != 1 {
+		t.Errorf("BranchPoints = %d; want the abandoned child of the block counted", got.BranchPoints)
+	}
 	if missing, _ := StopBlock(path, "steer check run: other", transcript.ContinuationBudget{}); missing.Granularity != transcript.JoinUnavailable {
 		t.Fatalf("a line no block carries reached %q", missing.Granularity)
 	}
@@ -95,5 +98,8 @@ func TestStopBlockOffTheActiveBranchFollowsItsLatestDescendant(t *testing.T) {
 	}
 	if strings.Join(texts, "|") != "failed\nsteer check run: r1|retried|repaired" || got.EndReason != transcript.EndTranscript {
 		t.Fatalf("steps = %q, end = %q", texts, got.EndReason)
+	}
+	if got.BranchPoints != 1 {
+		t.Errorf("BranchPoints = %d; want the person's rewound child of the block counted", got.BranchPoints)
 	}
 }

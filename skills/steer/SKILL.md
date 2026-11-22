@@ -99,8 +99,8 @@ them, and any `--harness <id>`, from the rule text as you strip `--headless`.
 - `--route`: route the rule, then install on the routed tier as [Route the
   rule](#route-the-rule) says.
 
-`--harness <id>` names the harness the rule must hold in (`claude-code` or
-`codex`). Without it, the rule must hold in every harness installed here.
+`--harness <id>` names the harness the rule must hold in (`claude-code`,
+`codex` or `pi`). Without it, the rule must hold in every harness installed here.
 `supported` is false when the routed tier cannot enforce the rule in that
 harness, such as a repository check in a harness with no Stop runner.
 Keep the routed tier; never swap in a weaker one to reach `supported: true`.

@@ -30,7 +30,8 @@ type walkEntry struct {
 // before the steer-check entry that carries line, and the entries that descend
 // from it until a person speaks. Pi records a session as a tree, so the
 // continuation follows one branch: the active one when the block is on it, and
-// otherwise the branch to the block's most recently written descendant.
+// otherwise the branch to the block's most recently written descendant. Each
+// walked entry with a child off that branch counts once in BranchPoints.
 func StopBlock(path, line string, budget transcript.ContinuationBudget) (transcript.StopBlockReading, error) {
 	budget = budget.WithDefaults()
 	out := transcript.StopBlockReading{Continuation: transcript.Continuation{
@@ -100,16 +101,26 @@ func StopBlock(path, line string, budget transcript.ContinuationBudget) (transcr
 			done = out.Append(step, budget)
 		}
 	}
+	forked := map[string]bool{}
 	for _, e := range entries {
-		if done || !reached[e.ParentID] || reached[e.ID] {
+		if !reached[e.ParentID] || reached[e.ID] {
 			continue
 		}
+		// Scanning on after the walk stops counts a branch a rewind appended later.
 		if !onBranch(branch, e.ID) {
+			if !forked[e.ParentID] {
+				forked[e.ParentID] = true
+				out.BranchPoints++
+			}
+			continue
+		}
+		if done {
 			continue
 		}
 		if isHuman(e) {
-			out.EndReason = transcript.EndHumanTurn
-			break
+			// The person's turn ends the reading, so its own forks are not passed.
+			out.EndReason, done = transcript.EndHumanTurn, true
+			continue
 		}
 		reached[e.ID] = true
 		for _, step := range stepsOf(e) {

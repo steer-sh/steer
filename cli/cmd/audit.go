@@ -413,12 +413,8 @@ func renderCase(c firingaudit.Case, e firingaudit.Emission) ([]byte, error) {
 		fmt.Fprintf(w, "  %s\n", c.Continuation.Reason)
 	}
 	if c.Continuation.BranchPoints > 0 {
-		followed := "the first branch"
-		if c.Continuation.Harness == harness.Pi {
-			followed = txpi.BranchFollowed
-		}
 		fmt.Fprintf(w, "  %d fork(s) passed; this reading follows %s\n",
-			c.Continuation.BranchPoints, followed)
+			c.Continuation.BranchPoints, branchFollowed(c.Continuation.Harness))
 	}
 	for _, step := range c.Continuation.Steps {
 		line := string(step.Kind)
@@ -469,6 +465,14 @@ func endPhrase(reason string) string {
 
 // renderCheckCase writes one check block as text at one clip level. It ends on
 // the same account RenderCheckJSON carries.
+// branchFollowed names the branch a harness's reading follows past a fork.
+func branchFollowed(h harness.ID) string {
+	if h == harness.Pi {
+		return txpi.BranchFollowed
+	}
+	return "the first branch"
+}
+
 func renderCheckCase(c firingaudit.CheckShow, e firingaudit.Emission) ([]byte, error) {
 	var buf bytes.Buffer
 	w := &buf
@@ -537,7 +541,8 @@ func renderCheckCase(c firingaudit.CheckShow, e firingaudit.Emission) ([]byte, e
 	}
 	writeSteps(w, "before", reading.Context)
 	if reading.BranchPoints > 0 {
-		fmt.Fprintf(w, "  %d fork(s) passed; this reading follows the first branch\n", reading.BranchPoints)
+		fmt.Fprintf(w, "  %d fork(s) passed; this reading follows %s\n",
+			reading.BranchPoints, branchFollowed(reading.Harness))
 	}
 	writeSteps(w, "after", reading.Steps)
 	if end := endPhrase(reading.EndReason); end != "" {
