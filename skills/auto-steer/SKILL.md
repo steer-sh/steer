@@ -271,7 +271,9 @@ Otherwise write no coverage line.
    `.steer/` and the instruction documents, named by path, in each repository (in
    another repository, the paths its last `uncommitted` listed and any other file
    the pass wrote there); approve a Codex
-   guard runner in `/hooks` when `register` printed that line; commit the guard
+   guard runner in `/hooks` when `register` printed that line; run `/reload` in Pi,
+   after `/trust` where Pi declined the project, when `register` printed a line
+   that starts "Pi runs no"; commit the guard
    manifest before a project review prompt entry reaches the reviewer; adopt a
    repository for checks.
 

@@ -495,6 +495,13 @@ scope's runner in `/hooks`, Codex runs none of that scope's guards. In headless
 mode, put it in `pending`. Steer cannot read Codex's approval itself, so a
 missing line is no proof that the runner is approved.
 
+When `register` writes a Pi guard extension that no Pi session has loaded, or
+that sits in a project Pi's trust declines, its output carries a line that starts
+"Pi runs no". Relay it verbatim the same way, and in headless mode put it in
+`pending`: until a session runs `/reload` (after `/trust` where Pi declined the
+project), Pi runs none of that scope's guards. Pi's records miss a process that never
+reloaded, so a missing line is no proof that every Pi session runs the guard.
+
 Installing is not measuring. Where the guard runs and which units get counted are
 separate decisions: install everywhere, then score each harness on its own record
 with `--scope-harness`. Codex and Claude Code carry different models, so pooling

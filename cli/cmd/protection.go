@@ -75,8 +75,8 @@ func reconcileProtection(r *installReport, verifyLater func(scope string)) {
 	}
 }
 
-// reportProtectionChange names what a reconcile did, and the approval Codex needs
-// before it runs a guard runner registered for the first time.
+// reportProtectionChange names what a reconcile did, and the approval Codex or the
+// /reload Pi needs before it runs the guard runner.
 func reportProtectionChange(r *installReport, change protection.Change, targets []harness.Registrar) {
 	switch change {
 	case protection.Installed:
@@ -91,7 +91,9 @@ func reportProtectionChange(r *installReport, change protection.Change, targets 
 	default:
 		return
 	}
-	if line := codexApprovalLine(claude.GlobalScope, targets); line != "" {
-		r.action(line)
+	for _, line := range []string{codexApprovalLine(claude.GlobalScope, targets), piReloadLine(claude.GlobalScope, targets)} {
+		if line != "" {
+			r.action(line)
+		}
 	}
 }

@@ -14,6 +14,8 @@ import (
 	"github.com/steer-sh/steer-cli/internal/codex"
 	"github.com/steer-sh/steer-cli/internal/guard/fixture"
 	"github.com/steer-sh/steer-cli/internal/harness"
+	"github.com/steer-sh/steer-cli/internal/pi"
+	"github.com/steer-sh/steer-cli/internal/status"
 	"github.com/steer-sh/steer-cli/internal/styles"
 	"github.com/steer-sh/steer-cli/internal/utils"
 )
@@ -124,8 +126,10 @@ Optional provenance flags can be used to persist generation metadata.`,
 			scope,
 			harnessNames(targets),
 		)))
-		if line := codexApprovalLine(scope, targets); line != "" {
-			utils.Info(line)
+		for _, line := range []string{codexApprovalLine(scope, targets), piReloadLine(scope, targets)} {
+			if line != "" {
+				utils.Info(line)
+			}
 		}
 		printFixtureVerification(os.Stdout, result.Verification)
 		return nil
@@ -147,6 +151,30 @@ func codexApprovalLine(scope string, targets []harness.Registrar) string {
 		}
 		return fmt.Sprintf("Codex runs no %s-scope guard until you approve that runner: restart Codex, "+
 			"open /hooks and approve %q.", scope, codex.MasterStatusMessage)
+	}
+	return ""
+}
+
+// piReloadLine names the /reload (or /trust) Pi needs before a session runs the
+// scope's guard extension, or "" when Pi is not a target, its load and trust records
+// cannot be read, or a session loaded the extension, whose earlier bytes may still
+// run the scope's guards. The line speaks for this scope only.
+func piReloadLine(scope string, targets []harness.Registrar) string {
+	for _, target := range targets {
+		if target.Harness().ID != harness.Pi {
+			continue
+		}
+		bridge, err := pi.GuardBridgePath(scope, ".")
+		if err != nil {
+			return ""
+		}
+		trust := status.PiTrust(scope, ".", bridge)
+		if trust != status.TrustMissing && trust != status.TrustDisabled {
+			return ""
+		}
+		step, _ := status.TrustStep(string(harness.Pi), trust, "")
+		return fmt.Sprintf("Pi runs no %s-scope guard until a session loads Steer's extension: %s.",
+			scope, step.Fix)
 	}
 	return ""
 }
