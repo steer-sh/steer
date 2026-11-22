@@ -256,9 +256,10 @@ func piGitPath(source string) (string, bool) {
 	if prefixed {
 		s = strings.TrimSpace(strings.TrimPrefix(s, "git:"))
 	}
-	shorthand := false
+	shorthand, hosted := false, false
 	switch {
 	case hasAnyPrefix(s, "https://", "http://", "ssh://", "git://"):
+		hosted = true // a URL's #fragment is never part of its path
 		_, s, _ = strings.Cut(s, "://")
 		host, rest, _ := strings.Cut(s, "/")
 		if at := strings.LastIndex(host, "@"); at >= 0 {
@@ -270,11 +271,21 @@ func piGitPath(source string) (string, bool) {
 		s = host + "/" + rest
 	case prefixed && strings.HasPrefix(s, "git@"):
 		s = strings.Replace(strings.TrimPrefix(s, "git@"), ":", "/", 1)
+	case prefixed && piHostedShortcut(s) != "":
+		_, rest, _ := strings.Cut(s, ":")
+		s = piHostedShortcut(s) + "/" + strings.TrimLeft(rest, "/")
 	case prefixed:
 		host, _, _ := strings.Cut(s, "/")
 		shorthand = !strings.Contains(host, ".") && host != "localhost"
 	default:
 		return "", false
+	}
+	// A URL or hosted source ends its path at a "?" query or "#" ref; elsewhere both
+	// stay in the path.
+	if host, _, _ := strings.Cut(s, "/"); hosted || shorthand || piHostedDomain(host) {
+		if end := strings.IndexAny(s, "?#"); end >= 0 {
+			s = s[:end]
+		}
 	}
 	// Pi splits the ref at the first "@" after the host, so a ref may hold slashes.
 	host, rest, _ := strings.Cut(s, "/")
@@ -299,6 +310,36 @@ func piGitPath(source string) (string, bool) {
 		}
 	}
 	return s, true
+}
+
+// piHostedShortcuts maps each hosted-git-info shortcut Pi resolves (github:owner/repo)
+// to the host it clones from.
+var piHostedShortcuts = map[string]string{
+	"github":    "github.com",
+	"gitlab":    "gitlab.com",
+	"bitbucket": "bitbucket.org",
+	"sourcehut": "git.sr.ht",
+}
+
+// piHostedShortcut returns the host a shortcut source such as github:owner/repo names,
+// or "" when s starts with no shortcut.
+func piHostedShortcut(s string) string {
+	name, _, found := strings.Cut(s, ":")
+	if !found {
+		return ""
+	}
+	return piHostedShortcuts[name]
+}
+
+// piHostedDomain reports whether host is one whose sources Pi reads as hosted, where a
+// "#" starts the ref.
+func piHostedDomain(host string) bool {
+	for _, domain := range piHostedShortcuts {
+		if host == domain {
+			return true
+		}
+	}
+	return false
 }
 
 func hasAnyPrefix(s string, prefixes ...string) bool {
