@@ -57,14 +57,52 @@ func TestReachReportsWhatTheRowsLocatorsAllow(t *testing.T) {
 			got.Granularity, got.Reason)
 	}
 
-	// Pi has no lookup yet, and says so in its own terms rather than reading
-	// as a row whose evidence is missing.
-	pi := ccRow(t, "f", "2026-09-20T01:00:00Z")
-	pi.Harness = "pi"
-	if got := pi.Reach(); got.Granularity != transcript.JoinUnavailable ||
-		!strings.Contains(got.Reason, "Pi") {
-		t.Errorf("a Pi row = %q (%s); want unavailable naming Pi",
+	// A Pi row reaches the call through tool_call_id; Claude Code's key
+	// does not stand in for it.
+	pi := piRow(t, "f", "2026-09-20T01:00:00Z")
+	if got := pi.Reach(); got.Granularity != transcript.JoinCall || got.CallID != "call_f" {
+		t.Errorf("a Pi row = %+v; want %q at call_f", got, transcript.JoinCall)
+	}
+	// A call another tool made has no entry, so it is not queued as readable.
+	nested := piRow(t, "h", "2026-09-20T01:00:00Z")
+	nested.Locators["tool_call_id"] = "call_h/1"
+	if got := nested.Reach(); got.Granularity != transcript.JoinUnavailable ||
+		!strings.Contains(got.Reason, "inside call call_h") {
+		t.Errorf("a nested Pi call = %q (%s); want unavailable naming its parent",
 			got.Granularity, got.Reason)
+	}
+	ccKey := piRow(t, "g", "2026-09-20T01:00:00Z")
+	ccKey.Locators["tool_use_id"] = ccKey.Locators["tool_call_id"]
+	delete(ccKey.Locators, "tool_call_id")
+	if got := ccKey.Reach(); got.Granularity != transcript.JoinUnavailable ||
+		!strings.Contains(got.Reason, "call identifier") {
+		t.Errorf("a Pi row without tool_call_id = %q (%s); want unavailable naming it",
+			got.Granularity, got.Reason)
+	}
+}
+
+// piRow builds a Pi row whose session holds the blocked call and its denial.
+func piRow(t *testing.T, id, timestamp string) Row {
+	t.Helper()
+	call := "call_" + id
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	body := `{"type":"session","version":3,"id":"s","cwd":"/r"}
+{"type":"message","id":"u1","parentId":null,"message":{"role":"user","content":"run x"}}
+{"type":"message","id":"a1","parentId":"u1","message":{"role":"assistant","content":[{"type":"toolCall","id":"` + call + `","name":"bash","arguments":{"command":"python x.py"}}]}}
+{"type":"message","id":"r1","parentId":"a1","message":{"role":"toolResult","toolCallId":"` + call + `","toolName":"bash","content":[{"type":"text","text":"blocked"}],"isError":true}}
+{"type":"message","id":"a2","parentId":"r1","message":{"role":"assistant","content":[{"type":"text","text":"I will use python3."}]}}
+`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return Row{
+		FiringID:   id,
+		HookName:   "guard",
+		Harness:    "pi",
+		Timestamp:  timestamp,
+		HookDigest: "hook1",
+		RuleHash:   "rule1",
+		Locators:   map[string]string{"tool_call_id": call, "transcript_path": path},
 	}
 }
 
@@ -90,6 +128,16 @@ func TestContinuationDispatchesToTheHarnessThatRecordedTheRow(t *testing.T) {
 	if cc.Granularity != transcript.JoinCall {
 		t.Errorf("a Claude Code row read as %q; want %q",
 			cc.Granularity, transcript.JoinCall)
+	}
+
+	pi, err := piRow(t, "c", "2026-09-20T01:00:00Z").
+		Continuation(transcript.ContinuationBudget{})
+	if err != nil {
+		t.Fatalf("the Pi reading failed: %v", err)
+	}
+	if pi.Granularity != transcript.JoinCall || pi.Harness != harness.Pi ||
+		pi.Anchors.DenialEntry != "r1" || len(pi.Steps) != 2 {
+		t.Errorf("a Pi row read as %+v; want the denial r1 and the step after it", pi)
 	}
 }
 

@@ -102,7 +102,7 @@ func TrustStep(harnessID, trust, path string) (Step, bool) {
 		return Step{}, false
 	}
 	step := Step{Title: fmt.Sprintf("%s has not confirmed it trusts this hook (%s)",
-		HarnessLabel(harnessID), TrustPhrase(trust))}
+		HarnessLabel(harnessID), TrustPhrase(harnessID, trust))}
 	switch harness.ID(harnessID) {
 	case harness.Codex:
 		step.Fix = "restart Codex and approve the definitions in /hooks"
@@ -116,7 +116,17 @@ func TrustStep(harnessID, trust, path string) (Step, bool) {
 			step.Title += ": " + path
 		}
 	case harness.Pi:
-		step.Fix = "trust this project in Pi; a project extension runs only after that"
+		step.Title = fmt.Sprintf("Pi is not running this extension (%s)", TrustPhrase(harnessID, trust))
+		step.Fix = "run /reload in each running Pi session, or start Pi again; in a project, trust it when Pi asks"
+		switch trust {
+		case TrustModified:
+			step.Fix = "run /reload in each running Pi session, or start Pi again"
+		case TrustDisabled:
+			step.Fix = "trust this project in Pi (/trust), then /reload any Pi session already running here"
+		}
+		if path != "" {
+			step.Title += ": " + path
+		}
 	}
 	return step, true
 }
@@ -130,7 +140,7 @@ func knownOffStep(a ScopeArming, what string) (Step, bool) {
 	step, _ := TrustStep(a.Harness, a.Trust, "")
 	step.Title = what + " is turned off"
 	if a.Trust == TrustHooksOff {
-		step.Title = TrustPhrase(TrustHooksOff) + ", including " + what
+		step.Title = TrustPhrase(a.Harness, TrustHooksOff) + ", including " + what
 	}
 	return prefixHarness(step, a), true
 }
@@ -162,6 +172,17 @@ type Readiness struct {
 	// Note is one further fact, "" when there is none — that no review has been
 	// observed yet, which is not proof of breakage.
 	Note string
+}
+
+// PiLoadedSessions qualifies an enforcing Pi channel at scope. A load record says which
+// bytes the newest Pi session start ran; a Pi process that imported earlier keeps those
+// bytes across /new and /resume until /reload or a restart, and a process that does not
+// trust the project loads no project extension.
+func PiLoadedSessions(scope string) string {
+	if scope == harness.ProjectScope {
+		return "(in Pi processes that trust this project and started, or reloaded with /reload, since its extension last changed)"
+	}
+	return "(in Pi processes started, or sessions reloaded with /reload, since its extension last changed)"
 }
 
 // ReadinessOf separates setup failures from trust that the snapshot cannot verify.
@@ -206,7 +227,7 @@ func ReadinessOf(s *SystemStatus, probe reviewers.Probe) Readiness {
 			r.Steps = append(r.Steps, step)
 			open = true
 		} else if _, ok := TrustStep(a.Harness, a.Trust, ""); ok {
-			note := fmt.Sprintf("%s %s scope: %s; current hook trust cannot be verified", HarnessLabel(a.Harness), a.Scope, TrustPhrase(a.Trust))
+			note := fmt.Sprintf("%s %s scope: %s; current hook trust cannot be verified", HarnessLabel(a.Harness), a.Scope, TrustPhrase(a.Harness, a.Trust))
 			if phrase := ObservedPhrase(a); phrase != "" {
 				note += " · " + phrase
 			}
@@ -227,7 +248,11 @@ func ReadinessOf(s *SystemStatus, probe reviewers.Probe) Readiness {
 		if open {
 			continue
 		}
-		enforcing = append(enforcing, fmt.Sprintf("%s %s", HarnessLabel(a.Harness), a.Scope))
+		name := fmt.Sprintf("%s %s", HarnessLabel(a.Harness), a.Scope)
+		if harness.ID(a.Harness) == harness.Pi {
+			name += " " + PiLoadedSessions(a.Scope)
+		}
+		enforcing = append(enforcing, name)
 	}
 	if registered {
 		steps, unverified := resolverSteps(s.Posture)
@@ -238,7 +263,7 @@ func ReadinessOf(s *SystemStatus, probe reviewers.Probe) Readiness {
 	if !registered {
 		r.Steps = append([]Step{{
 			Title: "no commit gate is registered, so nothing reviews a commit here",
-			Fix:   "/steer-setup in a Claude Code or Codex session",
+			Fix:   "/steer-setup in a Claude Code or Codex session, or /skill:steer-setup in Pi",
 		}}, r.Steps...)
 	}
 	r.Reviewing = len(enforcing) > 0 && !reviewerMissing
@@ -284,7 +309,7 @@ func resolverSteps(p Posture) (steps []Step, unverified []string) {
 			steps = append(steps, step)
 		} else if _, ok := TrustStep(a.Harness, a.Trust, ""); ok {
 			unverified = append(unverified, fmt.Sprintf("%s %s scope: review-outcome reader: %s; current hook trust cannot be verified",
-				HarnessLabel(a.Harness), a.Scope, TrustPhrase(a.Trust)))
+				HarnessLabel(a.Harness), a.Scope, TrustPhrase(a.Harness, a.Trust)))
 		}
 	}
 	if candidate || len(steps) > 0 {

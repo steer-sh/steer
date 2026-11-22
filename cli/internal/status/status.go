@@ -332,6 +332,13 @@ func (m MasterRuntime) Stale() bool { return m.State == MasterStale || m.State =
 // Detached reports whether this harness runs none of the scope's guards.
 func (m MasterRuntime) Detached() bool { return m.State == MasterDetached }
 
+// Unarmed reports a row of an optional harness that registers no runner in its
+// scope. Setup reads it, but its user may run that harness without Steer, so no
+// notice, diagnostic or repair names it.
+func (m MasterRuntime) Unarmed() bool {
+	return m.Path == "" && harness.Optional(harness.ID(m.Harness))
+}
+
 // Rules section states. The manifest is what a record binds; the section is what
 // the agent reads.
 const (
@@ -690,11 +697,12 @@ func collectPosture(cfg gate.Config, ev mine.EvidenceSet) Posture {
 			Trust:      CodexTrust(cg),
 			Command:    cg.Command,
 		}, ledgerCorpus, observed.gate[codexID]))
-		// Pi is unlisted: its rows appear only where its extension registers
-		// either channel. One extension carries both, so both rows go together.
+		// Pi is optional: its rows appear where Pi is installed or its extension
+		// registers either channel. One extension carries both, so both rows go
+		// together.
 		pg := pi.CommitGateArming(scope, cwd)
 		pr := pi.ResolverArming(scope, cwd)
-		piListed := pg.Registered || pr.Registered
+		piListed := !harness.Unlisted(harness.Pi) || pg.Registered || pr.Registered
 		if piListed {
 			p.CommitGate = append(p.CommitGate, withEvidence(ScopeArming{
 				Harness:    piID,
@@ -702,10 +710,8 @@ func collectPosture(cfg gate.Config, ev mine.EvidenceSet) Posture {
 				Registered: pg.Registered,
 				Effective:  pg.Registered,
 				Timeout:    pg.Timeout,
-				// Steer reads no Pi trust record, so nothing is known: the false pair
-				// says so. trustState, not this line, turns that into a state.
-				Trust:   trustState(harness.Pi, false, false),
-				Command: pg.Command,
+				Trust:      PiTrust(scope, cwd, pg.Path),
+				Command:    pg.Command,
 			}, ledgerCorpus, observed.gate[piID]))
 		}
 		// The resolver rides a turn-end event, which takes no matcher: registered is
@@ -738,7 +744,7 @@ func collectPosture(cfg gate.Config, ev mine.EvidenceSet) Posture {
 				Registered: pr.Registered,
 				Effective:  pr.Registered,
 				Timeout:    pr.Timeout,
-				Trust:      trustState(harness.Pi, false, false),
+				Trust:      PiTrust(scope, cwd, pr.Path),
 				Command:    pr.Command,
 			}, "", 0))
 		}
@@ -760,7 +766,7 @@ func InstalledRules(scopes ...string) []RulesPresence {
 
 // RulesPresences reads each installed target's rules section in one scope. A
 // harness that is not installed gets no row: nothing reads its document, and a
-// sync writes only to installed harnesses. An unlisted harness gets a row only
+// sync writes only to installed harnesses. An optional harness gets a row only
 // where its document already carries a Steer rule. A read that fails yields an
 // unknown row, never an error.
 func RulesPresences(scope string, targets []harness.Registrar) []RulesPresence {
@@ -778,7 +784,7 @@ func RulesPresences(scope string, targets []harness.Registrar) []RulesPresence {
 		}
 		presence, err := claude.TargetRulesPresence(scope, target)
 		empty := err == nil && len(presence.Missing) == presence.Expected && len(presence.Extra) == 0
-		if !harness.Listed(target.Harness().ID) && (err != nil || empty) {
+		if harness.Optional(target.Harness().ID) && (err != nil || empty) {
 			continue
 		}
 		// An empty global section in a harness holding no Steer registration is one
@@ -874,8 +880,8 @@ func masterRuntimes(scope string) []MasterRuntime {
 			Installed: registrar.Harness().Installed(),
 		}
 		path, err := registrar.RegisteredMasterPath(scope)
-		if !harness.Listed(registrar.Harness().ID) && (err != nil || path == "") {
-			continue // an unlisted harness appears only with a registration
+		if harness.Unlisted(registrar.Harness().ID) && (err != nil || path == "") {
+			continue // an uninstalled optional harness appears only with a registration
 		}
 		if err != nil {
 			out = append(out, row)
@@ -1023,14 +1029,39 @@ func approvalTrust(approval string) string {
 	return TrustUnknown
 }
 
-// runnerTrust reads a harness's approval of its registered guard runner. Codex
-// is the one harness whose approval record Steer reads; any other harness that
+// runnerTrust reads a harness's approval of its registered guard runner: Codex's
+// approval record, or whether Pi runs its guard extension. Any other harness that
 // reviews hook trust reads as unknown.
 func runnerTrust(id harness.ID, scope string) string {
-	if id == harness.Codex {
+	switch id {
+	case harness.Codex:
 		return CodexTrust(codex.MasterArming(scope, "."))
+	case harness.Pi:
+		path, err := pi.GuardBridgePath(scope, ".")
+		if err != nil {
+			return TrustUnknown
+		}
+		return PiTrust(scope, ".", path)
 	}
 	return trustState(id, false, false)
+}
+
+// PiTrust reads which bytes of the extension at path Pi's newest session start ran:
+// approved for the current bytes, modified for earlier bytes, missing for none. A Pi
+// process that imported earlier and never ran /reload is invisible to it. A project Pi's
+// trust file declines is disabled; an older bridge or unreadable records are unknown.
+func PiTrust(scope, cwd, path string) string {
+	switch pi.RunningOf(scope, cwd, path) {
+	case pi.RunningCurrent:
+		return TrustApproved
+	case pi.RunningEarlier:
+		return TrustModified
+	case pi.RunningNone:
+		return TrustMissing
+	case pi.RunningDeclined:
+		return TrustDisabled
+	}
+	return TrustUnknown
 }
 
 // newestFiring is the epoch second of the last block the audit log beside a
@@ -1108,8 +1139,8 @@ func telemetry(ev mine.EvidenceSet, blocks map[string]int) Telemetry {
 	}
 	for _, h := range harness.All() {
 		r := *row(string(h.ID))
-		if !harness.Listed(h.ID) && r == (HarnessTelemetry{Harness: r.Harness}) {
-			continue // an unlisted harness appears only with evidence
+		if harness.Unlisted(h.ID) && r == (HarnessTelemetry{Harness: r.Harness}) {
+			continue // an uninstalled optional harness appears only with evidence
 		}
 		t.Harnesses = append(t.Harnesses, r)
 	}

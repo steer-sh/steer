@@ -1,8 +1,8 @@
 ---
 name: steer-setup
-description: Set up steer after installing the plugin — pick a reviewer (a CLI or an OpenAI-compatible API) and model, arm the commit gate for this agent, and place the stable executable. Use for first-time steer setup, when adding a second harness (Claude Code or Codex) to an existing steer install, or when the user asks to configure, arm or repair the commit gate. Also arms repository checks at turn end and moves a personal check gate into Steer.
+description: Set up steer after installing the plugin — pick a reviewer (a CLI or an OpenAI-compatible API) and model, arm the commit gate for this agent, and place the stable executable. Use for first-time steer setup, when adding a second harness (Claude Code, Codex or Pi) to an existing steer install, or when the user asks to configure, arm or repair the commit gate. Also arms repository checks at turn end and moves a personal check gate into Steer.
 user-invocable: true
-compatibility: Runs the bundled launcher at the plugin root (CLAUDE_PLUGIN_ROOT on Claude Code, two directories above this skill on Codex), or the steer CLI from PATH. Writes ~/.steer/config.json and the invoking harness's hook registration. Needs an installed, authenticated reviewer CLI — claude, codex, agy or pi — or an OpenAI-compatible endpoint and an API key the user stores in their own terminal.
+compatibility: Runs the bundled launcher at the plugin root (CLAUDE_PLUGIN_ROOT on Claude Code, two directories above this skill on Codex and Pi), or the steer CLI from PATH. Writes ~/.steer/config.json and the invoking harness's hook registration. Needs an installed, authenticated reviewer CLI — claude, codex, agy or pi — or an OpenAI-compatible endpoint and an API key the user stores in their own terminal.
 allowed-tools: Bash(steer *), Read
 ---
 
@@ -203,11 +203,14 @@ outcome in `steer status` is that case; the key file has no such gap.
 
 Ask which agent will make the commits. The `posture.commit_gate[]` rows from Step 1
 already show which harnesses are registered, so name those and do not re-arm them.
+A `pi` row appears only where Pi is installed or armed, so offer an unregistered
+`pi` row with the others.
 
 ```bash
 # one of:
 <STEER_BIN> commit-gate install --harness claude-code --scope global
 <STEER_BIN> commit-gate install --harness codex --scope global
+<STEER_BIN> commit-gate install --harness pi --scope global
 ```
 
 `--scope global` covers every repository. Use `--scope project` in the current
@@ -264,7 +267,7 @@ that runs none of that scope's guards. In `posture.rules`, a row whose `state` i
 each scope with either row, name the harnesses to the user and ask before you run:
 
 ```bash
-<STEER_BIN> hooks sync --scope <global|project> --harness <claude-code|codex>
+<STEER_BIN> hooks sync --scope <global|project> --harness <claude-code|codex|pi>
 ```
 
 Run it once per harness you named. When Step 3 did not arm the global gate in the
@@ -274,11 +277,16 @@ also name it to the user, ask as above, and run
 a harness with no global Steer registration of its own reads neither detached nor
 drifted, and a sync that names no harness leaves it out.
 
+When the harness you are setting up is Pi, `posture.rules` holds no Pi row until
+Pi's document carries a Steer rule in that scope, so Steer's rules never read
+drifted there. For each scope with a `rules[]` row, name Pi to the user, ask as
+above, and run `hooks sync --scope <scope> --harness pi`.
+
 Sync registers the runner the store already holds and rewrites each harness's
 rules section. Lines written by hand inside that section are removed; the rest of
 the file is left alone. In project scope these files are usually committed, so
-the user sees a diff in `.claude/settings.json`, `.codex/hooks.json`, `CLAUDE.md`
-or `AGENTS.md`. Sync never writes the store. If it refuses because the runner does
+the user sees a diff in `.claude/settings.json`, `.codex/hooks.json`,
+`.pi/extensions/steer-guards.ts`, `CLAUDE.md` or `AGENTS.md`. Sync never writes the store. If it refuses because the runner does
 not carry the store's guards, relay the refusal. The repair it names, `hooks
 rebuild`, rewrites the shared runner for the whole team, so it is the user's call.
 
@@ -294,6 +302,12 @@ Each harness decides whether a registered hook actually runs:
   and each one no inspection covers.
 - **Codex** — restart Codex, then review and approve the hook definitions in `/hooks`.
   Until then the gate is registered and not enforcing.
+- **Pi** — Steer writes each channel as an extension file, which Pi reads only when
+  it starts or reloads: tell the user to run `/reload` in this session, or to start
+  Pi again. A global extension in `~/.pi/agent/extensions` then runs. A project
+  extension in `.pi/extensions` runs only once the user trusts the project: Pi asks
+  when it starts in an untrusted project, and `/trust` saves the decision. Until then
+  the gate is registered and not enforcing.
 
 Then check that the reviewer answers. This sends one small sample diff to the
 configured reviewer and writes no review record:
@@ -323,8 +337,8 @@ changes the answer. Nothing else installs it. Ask the user; on yes:
 When the user already has a status line, it writes nothing, exits 1 and names two
 choices: `--wrap` keeps their row above Steer's, and `--replace` discards it. That
 exit is the question, not a failed setup: do not retry it. Relay both choices and
-run the one the user picks; never choose `--replace` for them. Codex has no status line; skip this step only
-when Claude Code is not armed.
+run the one the user picks; never choose `--replace` for them. Codex and Pi have no status line; skip this step
+only when Claude Code is not armed.
 
 Finish by reading the answer back:
 
@@ -358,10 +372,11 @@ this step describes, instead of steps 1 and 2.
 Three separate facts arm a repository, and none implies another:
 
 1. **The Stop runner is registered** in the harness:
-   `<STEER_BIN> check install --harness <claude-code|codex> --scope <project|global>`.
+   `<STEER_BIN> check install --harness <claude-code|codex|pi> --scope <project|global>`.
    In Codex, the user must approve the new Stop hook in
    `/hooks`; Steer cannot read that trust record, so `check install` reports the
-   step as unknown.
+   step as unknown. In Pi, the runner starts after `/reload`, and in project scope
+   after the user trusts the project, as Step 5 says.
 2. **The repository is adopted** on this machine: `<STEER_BIN> check adopt`
    inside it. Adoption replays each declared check and runs `check.sh` in
    isolation first, and it refuses on any failure. A registration alone runs

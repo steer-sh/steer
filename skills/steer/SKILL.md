@@ -2,8 +2,8 @@
 name: steer
 description: Turns a natural-language rule into the fix that can enforce it — a repository check, a PreToolUse Python guard, or an instruction rule — and installs it. Use when enforcing coding standards, blocking insecure patterns, making sure checks pass before a turn ends, managing hook lifecycle, or running steer CLI commands (register, remove, list, test).
 user-invocable: true
-prompt_version: 28
-compatibility: Requires Claude Code or Codex with tool-call hook support. Hooks are installed into .steer/hooks/ and registered in every installed harness Steer is set up in (settings.json for Claude Code, hooks.json for Codex). steer CLI must be available on PATH or bundled under scripts/.
+prompt_version: 30
+compatibility: Requires Claude Code, Codex or Pi with tool-call hook support. Hooks are installed into .steer/hooks/ and registered in every installed harness Steer is set up in (settings.json for Claude Code, hooks.json for Codex, an extension in .pi/extensions for Pi). steer CLI must be available on PATH or bundled under scripts/.
 allowed-tools: Bash(steer *), Bash(python3 *), Bash(echo *), Read, Write, Edit
 ---
 
@@ -99,8 +99,8 @@ them, and any `--harness <id>`, from the rule text as you strip `--headless`.
 - `--route`: route the rule, then install on the routed tier as [Route the
   rule](#route-the-rule) says.
 
-`--harness <id>` names the harness the rule must hold in (`claude-code` or
-`codex`). Without it, the rule must hold in every harness installed here.
+`--harness <id>` names the harness the rule must hold in (`claude-code`,
+`codex` or `pi`). Without it, the rule must hold in every harness installed here.
 `supported` is false when the routed tier cannot enforce the rule in that
 harness, such as a repository check in a harness with no Stop runner.
 Keep the routed tier; never swap in a weaker one to reach `supported: true`.
@@ -170,6 +170,7 @@ The master hook rewrites every other edit shape into these, so a guard never see
 - A **MultiEdit** arrives as one Edit per hunk, with that hunk's `old_string` and any `replace_all` as sent.
 - A **Codex patch** arrives as one Edit per updated file (a Write per added file). Its `old_string` joins the removed lines and its `new_string` the added lines, each in order across the file's hunks. They are ordered fragments that may not be contiguous: match text in them, never apply them as search-and-replace. A section that removes nothing has `old_string: ""`.
 - A **Codex file deletion** arrives as Edit with `steer_operation: "delete"`, `new_string: ""` and no `old_string`. A guard that needs the deleted content opens the file.
+- A **Codex file move** (`*** Move to:`) arrives first as a deletion of the old path that also carries `steer_move_to` with the new path, then as the Edit of the new path.
 - A **shell deletion** (`rm`, `git rm`) stays a Bash call; the guard parses the target from `command`.
 
 ### Hook Output (stdout) - To Block
@@ -482,7 +483,7 @@ global scope, once any installed harness holds a Steer registration (commit gate
 check runner, guard runner, status line or rules section), `register` writes only
 to those that hold one: a harness with none was never set up or was removed with
 `steer uninstall --harness`. Add
-`--harness claude-code` or `--harness codex` to write to one only, or
+`--harness claude-code`, `--harness codex` or `--harness pi` to write to one only, or
 `--all-harnesses` to write to every hook-supporting harness whether or not it is
 installed here. On a machine with no harness directory, `register` writes to
 Claude Code.
@@ -493,6 +494,13 @@ Relay that line verbatim in your reply to the user; until they approve that
 scope's runner in `/hooks`, Codex runs none of that scope's guards. In headless
 mode, put it in `pending`. Steer cannot read Codex's approval itself, so a
 missing line is no proof that the runner is approved.
+
+When `register` writes a Pi guard extension that no Pi session has loaded, or
+that sits in a project Pi's trust declines, its output carries a line that starts
+"Pi runs no". Relay it verbatim the same way, and in headless mode put it in
+`pending`: until a session runs `/reload` (after `/trust` where Pi declined the
+project), Pi runs none of that scope's guards. Pi's records miss a process that never
+reloaded, so a missing line is no proof that every Pi session runs the guard.
 
 Installing is not measuring. Where the guard runs and which units get counted are
 separate decisions: install everywhere, then score each harness on its own record

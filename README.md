@@ -4,7 +4,7 @@
 
 Steer is an agentic feedback loop. Independent reviewers check your agent's code before it commits. Over time, Steer finds the problems that reoccur and proposes fixes to prevent them. These fixes are audited for efficacy, and can evolve over time if your needs change.
 
-Steer currently supports Claude Code and Codex on macOS and Linux. It should work ok in WSL but that isn't a tested platform.
+Steer currently supports Claude Code, Codex and Pi Coding Agent on macOS and Linux. It should work ok in WSL but that isn't a tested platform.
 
 Website: [steer.sh](https://steer.sh)
 
@@ -24,15 +24,23 @@ codex plugin marketplace add steer-sh/steer
 codex plugin add steer@steer-marketplace
 ```
 
+For Pi:
+
+```bash
+pi install git:github.com/steer-sh/steer@release
+```
+
 The plugin consists of several components:
 * `steer` CLI executable
 * `/steer`, `/steer-report`, `/auto-steer` and `/steer-setup` skills
 * A session-start reminder hook when you should run `/steer-report`
-* Claude Code-exclusive features (not currently possible in Codex):
+* Claude Code-exclusive features (not currently possible in Codex or Pi):
   * Graphical Review Band (see below), drawn by Claude Code Mod
   * Custom Statusline for Claude Code
 
 The Codex hook trust model is different from Claude Code. It requires you to approve new hooks. Approve the hooks during initial install, and the first new guard in each scope. Later guards shouldn't require new approval. Note you may need to restart Codex if you don't get the hook approval prompt.
+
+Pi is also different. After setup or a new guard, run `/reload` or restart Pi. When Pi is started in a new project it will ask if you trust any project-level Steer extensions. Once you respond, run `/trust` to save this for future sessions in the project.
 
 ## Setup
 
@@ -42,7 +50,7 @@ The Codex hook trust model is different from Claude Code. It requires you to app
 
 After the installation step above, please run the `/steer-setup` skill. It helps you set up initial configuration such as which reviewer model to use. It then arms the commit gate for your agent in every repository and places `steer` at `~/.steer/bin/steer`. Optionally, you can add that directory to your `PATH` to run `steer` from your own shell.
 
-Reviews can run through 3 different CLIs: `claude`, `codex`, or `agy` (Google Antigravity). They can also be run through any OpenAI-compatible chat-completions endpoint, such as OpenRouter, with an API key that you store with `steer reviewer key set` in your own terminal. The reviewer can be different from the agent that writes your code. Actually, in early testing this is a preferable setup (OpenAI reviewing Anthropic models, for example). By default, three reviewers run in parallel. Keep in mind that reviews do take time and they will use your CLI usage quota or API credits. If latency is too high, it's recommended to use a smaller model or use less reasoning effort. Good results are definitely possible using smaller models with low reasoning.
+Reviews can run through 4 different CLIs: `claude`, `codex`, `pi` or `agy` (Google Antigravity). They can also be run through any OpenAI-compatible chat-completions endpoint, such as OpenRouter, with an API key that you store with `steer reviewer key set` in your own terminal. The reviewer can be different from the agent that writes your code. Actually, in early testing this is a preferable setup (OpenAI reviewing Anthropic models, for example). By default, three reviewers run in parallel. Keep in mind that reviews do take time and they will use your CLI usage quota or API credits. If latency is too high, it's recommended to use a smaller model or use less reasoning effort. Good results are definitely possible using smaller models with low reasoning.
 
 What reviewer model should you choose? As of November 2026, two good options with a mix of low-cost, speed and intelligence are **Sonnet 5.5 Low**, or **GPT-6.1-Terra Low**.
 
@@ -50,7 +58,7 @@ Due to the current state of `agy`, it's not possible to block tool usage with co
 
 Each review transmits the commit message, the diff, and unchanged files that refer to the changed code to the reviewer. The reviewer can also read other files in the repository with its own tools. Keep this in mind when it comes to storing secrets or anything else private in your repository.
 
-If you use both Codex and Claude Code, run `/steer-setup` in both CLI agents. It registers the new agent and keeps your reviewer configuration.
+If you use more than one CLI (Claude Code, Codex and Pi), run `/steer-setup` in each. It registers the new agent and keeps your reviewer configuration.
 
 ## Usage
 
@@ -101,7 +109,7 @@ The `/steer` skill creates a new rule using the most appropriate fix type: a rep
 /steer never use bare python in shell commands | use python3 instead
 ```
 
-Guard commands default to project scope and register with both Claude Code/Codex. Use `--scope global` or `--harness codex` to change scope or target CLI as needed.
+Guard commands default to project scope and register with Claude Code/Codex/Pi. Use `--scope global` or `--harness <claude-code|codex|pi>` to change scope or target CLI as needed.
 
 To remove a custom guard - you can ask your agent to do so, or run `steer guard remove <hook-name>`.
 
@@ -109,7 +117,7 @@ Steer ships with self-protection on by default. It blocks your agent from changi
 
 ## Other setups
 
-- **One repository only:** run `steer commit-gate install --harness <claude-code|codex> --scope project` in that repository instead of the global gate that setup installs.
+- **One repository only:** run `steer commit-gate install --harness <claude-code|codex|pi> --scope project` in that repository instead of the global gate that setup installs.
 
 ## Update
 
@@ -128,17 +136,24 @@ For Codex:
 codex plugin marketplace upgrade steer-marketplace
 ```
 
+For Pi:
+
+```bash
+pi update git:github.com/steer-sh/steer
+```
+
 `steer --version` names the build you run, with its commit and build date.
 
 If either a manual or automatic update fails to update the binary properly, you can run `scripts/steer bin install`.
 
 ## Uninstall
 
-Uninstall Steer as you would any other plugin from within Claude Code/Codex interfaces or using these commands:
+Uninstall Steer as you would any other plugin from within your agent interfaces or using these commands:
 
 ```bash
 claude plugin uninstall steer@steer-marketplace
 codex plugin remove steer@steer-marketplace
+pi remove git:github.com/steer-sh/steer
 ```
 However, to uninstall the hooks that Steer requires to function - please additionally run:
 
@@ -147,7 +162,7 @@ However, to uninstall the hooks that Steer requires to function - please additio
 ~/.steer/bin/steer uninstall --apply
 ```
 
-If you want to uninstall on only one CLI you can also do that with `~/.steer/bin/steer uninstall --harness <claude-code|codex>`.
+If you want to uninstall on only one CLI you can also do that with `~/.steer/bin/steer uninstall --harness <claude-code|codex|pi>`.
 
 Your local data in `~/.steer` including ledgers, guards and settings is not removed in case you reinstall. You can add `--purge` to the above command if you want it fully removed.
 

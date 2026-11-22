@@ -25,7 +25,14 @@ carries uncommitted changes.
 
 The two marketplace manifests and two root plugin manifests describe one identity:
 `.claude-plugin/marketplace.json`, `.agents/plugins/marketplace.json`,
-`.claude-plugin/plugin.json`, and `.codex-plugin/plugin.json`.
+`.claude-plugin/plugin.json`, and `.codex-plugin/plugin.json`. Pi installs the
+same root as a git package (`git:github.com/steer-sh/steer@release`) and reads the
+root `package.json`, whose `pi` key lists the same skills and one extension,
+`pi/steer-session.ts`. That extension runs the copy's `report cadence` at
+`session_start`, Pi's counterpart of the plugins' SessionStart hook. The guard,
+commit-gate and check extensions are never in the package: Steer generates each one
+with its commands and timeouts baked in, and Pi would load a package copy beside a
+generated file, running the channel twice.
 `cli/internal/plugindist/` pins identity, declared paths and bundled hook wiring.
 `scripts/steer` selects `bin/<os>-<arch>/steer` on macOS and Linux and refuses
 any other OS in one line; `scripts/steer.cmd` is the same refusal.
@@ -111,8 +118,12 @@ same band as text and colour.
 
 Each install from another path adds that path, as `os.Executable` reports it, to
 `~/.steer/bin/source`, and `bin install` adds every active plugin copy it finds. When a recorded path lies in a harness's plugin cache and
-the harness's own install record (`installed_plugins.json`, or the `plugins` table
-of Codex's `config.toml`) no longer names Steer while its global configuration
+the harness's own install record (`installed_plugins.json`, the `plugins` table
+of Codex's `config.toml`, or the `packages` list of Pi's `settings.json`, read
+through the `git/<host>/<path>` clone each git source names, where a listed clone
+with no readable `package.json` counts as Steer when a recorded path lies in its `bin/`) no
+longer names Steer
+while its global configuration
 still calls Steer, `status.RemovedPlugins` names that harness: the status line row
 and every commit the PreToolUse gate reviews name
 `steer uninstall --harness <id>`. This is a notice and never a removal, because an
@@ -128,10 +139,17 @@ Concrete adapters under `internal/claude`, `internal/codex`, `internal/pi`, and
 `internal/gate/` own their configuration and event formats.
 `STEER_HARNESS` resolves ambiguity when multiple session markers are present.
 Pi uses `.pi` in a project and `~/.pi/agent` globally; Pi and Codex share project
-`AGENTS.md` but have separate global instruction documents. Pi is unlisted
-(`harness.Listed`): its adapters stay and an explicit `--harness pi` is accepted,
-but help text and messages never offer it, and a status reading names Pi only
-where a Pi registration or evidence for it exists.
+`AGENTS.md` but have separate global instruction documents. Pi is optional
+(`harness.Optional`): help text and messages offer it like the other two, but a
+status reading names Pi only where its configuration directory exists or a Pi
+registration or evidence for it does (`harness.Unlisted`), and
+`guardscope.HookRegistrars` returns it only where that directory exists, so a
+machine without Pi gets no Pi rows and no Pi files. The rules reading still needs a
+Steer rule in Pi's document. A Pi that registers no runner in a scope
+(`MasterRuntime.Unarmed`) can read detached there, but health, the detached-runner
+notice, the dashboard's issue list and Fixes, and repair targeting leave it out, so
+an installed Pi the operator never armed is offered for arming, never reported as
+broken, and never registered by a repair aimed at another harness.
 
 Codex keys each hook approval by event, entry index and handler index, and hashes
 the handler definition, not the script it runs. A Codex registration therefore
@@ -299,11 +317,13 @@ are checks and reviews still holds one guard and a registered master. The guard
 is lexical and best-effort: it matches protected files by full path, resolving a
 relative one against the payload's `cwd`, in two classes. Steer's own files (the
 global store's master, manifest, audit log and its own file,
-`~/.steer/config.json`, and the current repository's stores)
+`~/.steer/config.json`, the current repository's stores, and the Pi bridges
+`steer-guards.ts`, `steer-commit-gate.ts` and `steer-checks.ts` in Pi's global and
+the repository's `extensions` directories, where they carry Steer's stamp)
 are closed to every change, and the block names the steer command the user runs
 instead. Harness configuration files (`~/.claude/settings.json`, the repository's
 `.claude/settings.json` and `.claude/settings.local.json`, `$CODEX_HOME/hooks.json`
-and `config.toml`, the repository's `.codex/hooks.json`) stay open to the Edit and
+and `config.toml`, the repository's `.codex/hooks.json`, Pi's `trust.json` and `settings.json`) stay open to the Edit and
 Write tools: the guard reads the file on disk, applies the edit, and blocks only a
 result that drops a hook command Steer registered (one naming `steer-hooks.py` or
 `~/.steer/bin/steer`, or whose first word is a steer executable) or moves it to
@@ -311,7 +331,15 @@ another event, matcher or field, counted per occurrence, sets
 `disableAllHooks`, or, in `config.toml`, turns off `[features] hooks` or
 `codex_hooks`, or removes, changes or sets `enabled = false` on a
 `[hooks.state."<hooks.json>:<event>:<entry>:<handler>"]` record whose handler is
-Steer's. A patch hunk out of its context is judged on its lines, and a
+Steer's, or, in Pi's `trust.json`, leaves a project holding a Steer bridge without
+the nearest saved decision granting it, declines it, or takes back a grant on that project or a
+parent of it, read for the current repository, each directory either side names and
+each project whose bridge `~/.steer/state/pi-loads/` records loading; a whole file
+that is not an object of boolean or null decisions holds no grant, and a hunk out of
+its context is applied to the file on disk. In Pi's `settings.json`, which holds no
+Steer registration (Pi discovers the bridges in its `extensions` directories), the
+guard blocks only moving `defaultProjectTrust` off `always` while such a project has
+no saved decision. A patch hunk out of its context is judged on its lines, and a
 `config.toml` one that adds a `hooks`/`enabled = false` switch or removes approval
 lines is blocked, since its table is unknown. A deletion of one is blocked, and so
 is a shell write, whose block sends the agent to Edit or Write. It also blocks
@@ -397,7 +425,8 @@ hunk also keeps its `replace_all` as sent. A patch section's `old_string` and
 `new_string` join its `-` and `+` lines in order across hunks: they are ordered
 fragments that may not be contiguous, never search-and-replace operands. A patch
 file deletion is an Edit marked `steer_operation: "delete"` with no `old_string`;
-the runtime never reads the deleted file. Patch syntax is never presented as a
+the runtime never reads the deleted file. A patch move is that deletion of the
+old path, carrying `steer_move_to`, followed by the new path's section. Patch syntax is never presented as a
 shell command. Guards run in fixed order
 over the virtual edits, and the first objection wins. Reply rendering is specific
 to Claude Code, Codex or Pi; guards continue using the shared Claude-shaped input
@@ -517,7 +546,11 @@ worktree's own root. `checks.Adopt` needs a current or freshly
 replayed receipt for every declared check and an isolated oracle run that passes
 with nothing missing. `checks.Stop` is the harness-neutral Stop runner and
 `checks.StopHook` its one adapter, because Claude Code and Codex share the payload
-fields and reply shape. It acts on a root Stop in an adopted repository only,
+fields and reply shape. Pi has no hook commands, so its extension
+(`internal/pi/bridge_checks.ts`) writes that payload and reads that reply. It runs
+at `agent_before_settle`, after Pi's retries, compaction and queued messages, for a
+completed run only, and turns a block into a `steer-check` `custom_message` with
+`continue: true`. It acts on a root Stop in an adopted repository only,
 blocks a failure once, and yields when the tree, outcome and per-check results
 repeat in the same session. A block names each other session, of any harness,
 whose Stop run in the same working tree finished within the last hour, because
@@ -538,12 +571,15 @@ result and whether its detector changed before the recorded pass. It describes
 what followed a block, never whether the block was correct. `steer check
 install` registers the runner as its own Stop entry with
 `checks.RegisteredHookTimeout()`; commit-gate writers and runner writers each keep
-the other's registration. Pi has no Stop runner.
+the other's registration. `steer check migrate` imports a personal gate from Claude
+Code and Codex Stop hooks alone (`migrationHarnesses`).
 
 ## Commit gate and resolver
 
 `internal/gate/` is the review engine; `cc`, `codex` and `pi` adapt it to each
-harness's native hook. Steer reads review outcomes only from those harnesses'
+harness's native hook. The gate reviews a commit only when a harness's shell tool
+runs it; a commit made by any other tool, such as an MCP or extension tool, is
+outside it. Steer reads review outcomes only from those harnesses'
 transcripts (`gate/harvests`), so the gate has no channel outside them; ledger rows
 an earlier git pre-commit review wrote still read, with `channel: precommit`. Reviewer processes live under
 `internal/gate/reviewers/`; prompts and their pinned digests live under `prompts/`.
@@ -695,6 +731,18 @@ subagent does not inherit the session's SessionStart context. It never reaches
 `systemMessage`, and elsewhere both entry points print nothing. Each command the
 guidance quotes passes `PreflightDeny`. Codex adds an absolute repository selector
 with `git -C` because nested tool payloads can omit the shell working directory.
+Pi's gate extension puts `pi.CommitGuidance` in a `steer-commit-gate` system-prompt
+section at `before_agent_start`.
+
+Pi runs the `tool_call` handlers of every call in one assistant message before it
+runs any of them, then runs them at the same time; a codemode script's nested calls
+can also run at the same time. A review there could judge an index that a sibling
+`git add` changes before the commit runs. So the Pi extension sends the commit's
+siblings (`steer_batch`, read from the session) or its `parent_tool_call_id`, and
+`gatepi.Run` refuses before review a nested commit or one whose message also calls
+a tool other than Pi's own `read`, `grep`, `find` and `ls`. An extension can
+register a tool under one of those names, so the extension also sends which
+siblings are Pi's shipped tool (`shipped`, from `pi.getAllTools()` `sourceInfo`).
 
 Every decision that does not block carries a receipt to both the agent's context
 and the operator (`internal/gate/receipt.go`); no path lets a commit through
@@ -761,7 +809,9 @@ file for its carry.
 `--rejoin` re-judges the links the resolver made (a row with
 `ledger_ts`; a hook-time capture has none) under the current rules, and keeps a
 link with no ledger left to read. Stop hooks run
-the resolver; Codex also registers SubagentStop, and Pi uses turn_end.
+the resolver; Codex also registers SubagentStop, and Pi's gate bridge runs it at
+`agent_before_settle`, detached for a run that did not complete, and at
+`agent_settled` for an aborted run, which Pi settles without that boundary.
 Pending rows have a grace
 period before they count as missing evidence. The hooks' `--if-due` form harvests
 again only when a row was written or a miss deadline passed since the last applied
@@ -793,12 +843,14 @@ round hands the agent findings, `Engine.release` writes a `chain-end` row
 blocking rounds (zero when a first round was NITPICK-only), the terminal round when
 the cap's final review or a NITPICK-only round handed the agent findings, and the
 PreToolUse turn (`prompt_id` on Claude Code,
-`turn_id` on Codex) with a presence flag. It records gate release, not git success.
+`turn_id` on Codex and Pi) with a presence flag. Pi has no turn ID of its own: its gate
+bridge sends the session entry ID of the newest user message on the active branch. It records gate release, not git success.
 The phase is in `NonReviewPhases`, so chains, mining and the resolver skip it. At a
 root Stop, the same `commit-gate backfill` hook first runs `internal/gate/stophook/`.
 It streams the local log once for release rows of this session's root thread, the
 Stop's turn and its transcript. It reads the ledger text blocks the resolver's own
-harvest reads (`cc.ReadLedgers`, `codex.ReadRollout`) under this session's key, so a
+harvest reads (`cc.ReadLedgers`, `codex.ReadRollout`, `pi.ReadLedgers` on the active
+branch) under this session's key, so a
 ledger split across text blocks does not count, with `last_assistant_message` as a
 separate candidate. It applies no time window: a ledger written more than the
 resolver's chain span after its deny satisfies the Stop and still misses. A
@@ -811,6 +863,11 @@ sections. Every read doubt fails open, and a release or Stop with no turn ID get
 operator notice. The check does not depend on `--if-due`, the resolver lock or
 `backfill.scanned`; after it the ordinary resolver runs, narrating on stderr. A
 ledger found only in the payload satisfies the check and creates no resolver link.
+Pi has no Stop hook: at `agent_before_settle` for a completed run, its gate bridge sends
+the backfill command a Stop payload and turns a block into a `steer-ledger-backstop`
+custom message with `continue: true`, as the check runner does. It sets
+`stop_hook_active` when the active branch already holds that message since the turn's
+user message, so the session itself bounds the refusal to one per turn.
 
 While a round's reviewers run, the engine keeps a live review file at
 `<state>/commit-review/live/<session>/<actor>-<repo hash>.json` (`internal/gate/live.go`):
@@ -828,7 +885,11 @@ Each row's transcript prefix is stored once per session under `prefixes/`: the
 session file grows by appended gzip members, and a row names its slice with
 `prefix_lines` and `prefix_sha`. Read it through `gate.ReadPrefix`, which also
 resolves rows written before the merge; `scripts/merge-prefixes.py` converts a
-machine's older per-firing files.
+machine's older per-firing files. Every harness adapter stamps the same author fields
+(`task`, `task_turns` and the per-session file under `tasks/` through
+`Ledger.TaskFields`); Codex and Pi read their human turns through their transcript
+adapters, and Pi's drop the body of a `/skill:` command Pi resolved, keeping the
+arguments typed after it.
 
 ## Transcripts and session evidence
 
@@ -1053,8 +1114,13 @@ and does not follow. A row carrying `agent_id` was recorded inside a subagent,
 whose entries live in the agent's own file (`cc.SubagentTranscript`) rather than
 the session transcript the row names; `Reach` selects that file and the walk reads
 only that agent's sidechain entries. When the agent file is absent it reads the
-session file, and a reading that reaches nothing there names the absent file. Codex and Pi have no lookup, and
-each says so in its own terms rather than reading as missing evidence.
+session file, and a reading that reaches nothing there names the absent file. A
+blocked Codex call writes no rollout item, so `codex.Continuation` reads the turn
+`turn_id` names, whole. Pi records a block as the `toolResult` carrying the call's
+id, which its guard bridge sends as `tool_call_id`; `pi.Continuation` walks the
+descendants of that entry along the branch `pi.StopBlock` would follow and counts
+the others. A call nested inside another tool's call has no entry, and the reading
+says so.
 
 `internal/adjudication/` holds one append-only receipt per judged block. A
 receipt records the join granularity, its transcript anchors and its extent
@@ -1079,9 +1145,10 @@ one. `check.sh`'s own failure is required reading only when no declared check
 accounts for it. `steer check blocks` stays the facts view of one repository.
 
 A check case is read at `JoinEntry`: no Stop payload names the entry its block
-creates, so `cc.StopBlock` and `codex.StopBlock` find it by
+creates, so `cc.StopBlock`, `codex.StopBlock` and `pi.StopBlock` find it by
 `checks.RunIDLine`, the reason's last line, matched as a whole line and narrowed
-by the payload's turn key. Each returns the turn before the block, back to its
+by the payload's turn key where the harness has one. Pi's block is its own
+`steer-check` entry, and its reader follows the session tree's active branch. Each returns the turn before the block, back to its
 prompt and bounded by `ContextSteps`, and the continuation after it; a later
 block in the same turn is a `hook_feedback` step, and `Matches` counts repeated
 entries. Both harnesses' readers, guard and Stop alike, end a reading
@@ -1287,7 +1354,23 @@ Arming distinguishes registered configuration, command resolution from this
 process, and observed corpus activity. Resolution is a proxy for the harness's
 environment; activity does not identify scope or prove current trust. Readiness
 reports detectable setup problems with repairs and keeps trust uncertainty
-separate. A resolver problem is a step beside the reviewing answer, never a reason
+separate. Pi keeps no hook approval record, so each Pi bridge carries the load
+recorder (`internal/pi/bridge_load.ts`): it reads its own bytes when Pi imports the
+module, and at each `session_start` writes their resolved path and digest to
+`~/.steer/state/pi-loads/`, since Pi reuses an imported module across `/new`,
+`/resume` and `/fork`. `status.PiTrust` reads that record (`pi.LoadOf`) as the
+row's trust: approved when Pi loaded the file's current bytes, modified when it
+loaded earlier bytes, missing when no session loaded it, unknown when a record
+cannot be read. One record per file names the bytes the newest session start ran, so approved covers the
+Pi processes started, or sessions reloaded with `/reload`, since the file last
+changed (`/new` and `/resume` keep the imported module); in project scope, only
+those that trust the project, since an untrusted process loads no project extension.
+The readiness headline and the `commit-gate install` and `check install` summaries
+say so for a Pi channel (`status.PiLoadedSessions`). In project scope the nearest saved decision in Pi's
+`trust.json` (`pi.ProjectTrust`) comes first, and a declined project is disabled. A
+bridge an older Steer wrote has no recorder and reads unknown; `bin install`
+rewrites a global one (`pi.RefreshBridges`) and leaves a project one, which the
+repository may commit, to the install that wrote it. A resolver problem is a step beside the reviewing answer, never a reason
 to withhold it; one working resolver reads every harness's ledger. Machine-local absence describes only the evidence available here.
 
 `internal/tui/` provides Arming, Problems, Fixes, Reviewer and Diagnostics panels.

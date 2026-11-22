@@ -62,7 +62,8 @@ class ReleasePreflight(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        for name in (*preflight.MARKETS, *preflight.PLUGINS, "README.md", *preflight.HOOK_FILES.values()):
+        for name in (*preflight.MARKETS, *preflight.PLUGINS, preflight.PI_PACKAGE, "README.md",
+                     *preflight.HOOK_FILES.values()):
             target = self.root / name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / name, target)
@@ -404,6 +405,34 @@ class FreshInstallRunner(unittest.TestCase):
         program = fresh_install.script(["true"], "codex", "9.9.9", local=True, removal=["echo removal"])
         self.assertLess(program.index("/src-ro"), program.index("true"))
         self.assertGreater(program.index("echo removal"), program.index("bin install"))
+
+    def test_a_local_pi_install_clones_the_staged_checkout_over_git(self):
+        self.assertEqual(fresh_install.local_commands(
+            ["pi install git:github.com/steer-sh/steer@release", "pi remove git:github.com/steer-sh/steer"]),
+            [f"pi install {fresh_install.PI_LOCAL_SOURCE}", f"pi remove {fresh_install.PI_LOCAL_SOURCE}"])
+        program = fresh_install.script([f"pi install {fresh_install.PI_LOCAL_SOURCE}"], "pi", "9.9.9", local=True)
+        self.assertLess(program.index("add -f bin"), program.index("git daemon"))
+        self.assertLess(program.index("git daemon"), program.index("pi install"))
+        self.assertIn(f"copy={fresh_install.PI_LOCAL_CLONE}", program)
+        published = fresh_install.script(["pi install x"], "pi", "9.9.9")
+        self.assertIn(f"copy={fresh_install.PI_CLONE}", published)
+        self.assertNotIn("git daemon", published)
+
+    def test_a_missing_harness_block_stops_before_any_container(self):
+        readme = ("## Install\n\nFor Claude Code:\n\n```bash\nclaude x\n```\n\n"
+                  "For Codex:\n\n```bash\ncodex x\n```\n\n## Update\n")
+        args = argparse.Namespace(harness="all", update_from=None, local=False, uninstall=None,
+                                  no_build=False, image="i", version="9.9.9", snapshot=None)
+        with patch.object(fresh_install.subprocess, "run") as run, \
+                patch("sys.stderr", new_callable=io.StringIO) as err:
+            self.assertEqual(fresh_install.run_harnesses(args, readme, None), 2)
+        run.assert_not_called()
+        self.assertIn("For Pi:", err.getvalue())
+
+    def test_a_pi_update_moves_no_marketplace(self):
+        program = fresh_install.script(["pi update git:github.com/steer-sh/steer"], "pi", "9.9.9", update=True)
+        self.assertNotIn(".layer", program)
+        self.assertIn('"$copy/scripts/steer" report cadence', program)
 
     def test_the_script_requires_the_expected_version(self):
         program = fresh_install.script(["true"], "codex", "9.9.9")

@@ -263,6 +263,10 @@ func TestRuntimeCarriesRemovedText(t *testing.T) {
 			`{"tool_name":"apply_patch","tool_input":{"command":` +
 				`"*** Begin Patch\n*** Delete File: gone.py\n*** End Patch"}}`,
 			true, "gone.py", "", "a deletion is marked with steer_operation"},
+		{"patch-move-delete-guard", []guard{{"delete-hook", deleteHookContent}},
+			`{"tool_name":"apply_patch","tool_input":{"command":` +
+				`"*** Begin Patch\n*** Update File: old.py\n*** Move to: new.py\n*** End Patch"}}`,
+			true, "old.py", "", "a move takes the file off its old path as a deletion does"},
 	}
 
 	for _, tc := range cases {
@@ -375,6 +379,9 @@ func TestRuntimeVirtualEditFieldsAsSent(t *testing.T) {
 		{"patch-delete",
 			patch(`*** Delete File: gone.py`),
 			map[string]any{"file_path": "gone.py", "steer_operation": "delete", "new_string": ""}},
+		{"patch-move-source",
+			patch(`*** Update File: old.py\n*** Move to: new.py\n@@\n-a\n+b`),
+			map[string]any{"file_path": "old.py", "steer_operation": "delete", "new_string": "", "steer_move_to": "new.py"}},
 	}
 
 	for _, tc := range cases {

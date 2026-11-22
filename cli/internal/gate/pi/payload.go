@@ -9,7 +9,6 @@ import (
 
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/cc"
-	txpi "github.com/steer-sh/steer-cli/internal/transcript/pi"
 )
 
 // Payload is the Claude-shaped envelope written by Pi's commit-gate bridge.
@@ -23,6 +22,13 @@ type Payload struct {
 	TranscriptPath string `json:"transcript_path"`
 	Model          string `json:"model"`
 	CWD            string `json:"cwd"`
+	// TurnID is the session entry ID of the newest user message on the active branch,
+	// which the settle backstop's payload names the same way.
+	TurnID string `json:"turn_id"`
+	// ParentToolCallID is set on a call another tool made, such as code mode.
+	ParentToolCallID string `json:"parent_tool_call_id"`
+	// Batch is nil from a bridge that predates it.
+	Batch *Batch `json:"steer_batch"`
 }
 
 // Output is the bridge reply. The TypeScript bridge consumes AdditionalContext and
@@ -81,7 +87,13 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, stdin io.
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
-	if reason, receipt := cc.PreflightDeny(command, cwd); reason != "" {
+	reason, receipt := "", ""
+	if why := unorderedCommit(payload); why != "" {
+		reason, receipt = unorderedReason(why), unorderedReceipt
+	} else {
+		reason, receipt = cc.PreflightDeny(command, cwd)
+	}
+	if reason != "" {
 		encoded, err := json.Marshal(Output{Block: true, Reason: reason,
 			SystemMessage: receipt})
 		if err == nil {
@@ -90,21 +102,16 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, stdin io.
 		return
 	}
 	repo := cc.RepoDir(command, cwd)
+	engine := gate.NewEngine(cfg, reviewer)
 	rowExtra := gate.Row{"client": "pi", "harness": "pi"}
-	if payload.TranscriptPath != "" {
-		rowExtra["transcript"] = payload.TranscriptPath
-		if depth, ok := txpi.ContextTokens(payload.TranscriptPath); ok {
-			rowExtra["context_tokens"] = depth
-		}
-	}
-	if payload.Model != "" {
-		rowExtra["author_model"] = payload.Model
+	for key, value := range AuthorFields(engine.Ledger(), cfg, payload.TranscriptPath,
+		payload.SessionID, payload.Model) {
+		rowExtra[key] = value
 	}
 	for key, value := range cc.RepoFields(repo) {
 		rowExtra[key] = value
 	}
 
-	engine := gate.NewEngine(cfg, reviewer)
 	decision := engine.Handle(ctx, gate.Request{
 		Repo: repo, Actor: payload.SessionID, Channel: gate.ChannelPreToolUse,
 		SessionID: payload.SessionID,
@@ -112,6 +119,7 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, stdin io.
 		Message:   cc.ExtractMessage(command, cwd),
 		RerunNote: cc.RerunNote(command),
 		RowExtra:  rowExtra,
+		TurnKey:   "turn_id", TurnID: payload.TurnID,
 	})
 	out, ok := Render(decision)
 	if !ok {

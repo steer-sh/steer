@@ -203,3 +203,88 @@ func TestDifferingPluginsKeyFollowsTheBuild(t *testing.T) {
 		t.Errorf("both builds key as %q", first)
 	}
 }
+
+// TestPluginCopiesReadThePiPackagesSettingsLists: a Pi copy is the clone of a git
+// package Pi's settings list, in string or object form, whose package.json is the
+// Steer package; a clone the settings do not list, or a listed clone of another
+// package, is no copy.
+func TestPluginCopiesReadThePiPackagesSettingsLists(t *testing.T) {
+	home := t.TempDir()
+	testhome.Set(t, home)
+	t.Setenv("PI_CODING_AGENT_DIR", "")
+	write := func(path, body string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git := filepath.Join(home, ".pi", "agent", "git")
+	steer := filepath.Join(git, "github.com", "steer-sh", "steer")
+	fork := filepath.Join(git, "example.com", "me", "steer-fork")
+	other := filepath.Join(git, "github.com", "someone", "tools")
+	unlisted := filepath.Join(git, "github.com", "old", "steer")
+	for _, root := range []string{steer, fork, unlisted} {
+		write(filepath.Join(root, "package.json"), `{"name":"steer","pi":{"skills":[]}}`)
+	}
+	write(filepath.Join(other, "package.json"), `{"name":"tools","pi":{}}`)
+	write(filepath.Join(home, ".pi", "agent", "settings.json"), `{"packages":[
+		"git:github.com/steer-sh/steer@release",
+		{"source":"https://example.com/me/steer-fork.git","skills":[]},
+		"git:github.com/someone/tools",
+		"npm:steer"
+	]}`)
+
+	got := map[string]string{}
+	for _, p := range PluginCopies() {
+		got[p.Path] = p.Harness
+	}
+	want := map[string]string{steer: "pi", fork: "pi"}
+	if len(got) != len(want) || got[steer] != "pi" || got[fork] != "pi" {
+		t.Errorf("copies = %v, want %v", got, want)
+	}
+}
+
+// TestPiGitPathNamesTheCloneDirectory: each git source form Pi accepts reduces to the
+// host/owner/repo path Pi clones it under, and a source that is not git, or that
+// could leave the clone directory, reduces to nothing.
+func TestPiGitPathNamesTheCloneDirectory(t *testing.T) {
+	for source, want := range map[string]string{
+		"git:github.com/steer-sh/steer@release":     "github.com/steer-sh/steer",
+		"git:github.com/steer-sh/steer":             "github.com/steer-sh/steer",
+		"https://github.com/steer-sh/steer.git":     "github.com/steer-sh/steer",
+		"https://github.com/steer-sh/steer@v0.5.0":  "github.com/steer-sh/steer",
+		"ssh://git@github.com/steer-sh/steer.git":   "github.com/steer-sh/steer",
+		"git:git@github.com:steer-sh/steer.git":     "github.com/steer-sh/steer",
+		"git:git://localhost/steer-sh/steer.git":    "localhost/steer-sh/steer",
+		"git:https://example.com:8443/me/steer.git": "example.com/me/steer",
+		"git@github.com:steer-sh/steer.git":         "",
+		"git://localhost/steer-sh/steer.git":        "",
+		"git:steer-sh/steer@release":                "github.com/steer-sh/steer",
+		"git:github.com/steer-sh/steer@feature/fix": "github.com/steer-sh/steer",
+		"git:git@github.com:steer-sh/steer@a/b":     "github.com/steer-sh/steer",
+		"https://github.com/steer-sh/steer.git@a/b": "github.com/steer-sh/steer",
+		"git:steer-sh/steer@feature/fix":            "github.com/steer-sh/steer",
+		"git:github:steer-sh/steer":                 "github.com/steer-sh/steer",
+		"git:github:steer-sh/steer@release":         "github.com/steer-sh/steer",
+		"git:gitlab:me/sub/steer":                   "gitlab.com/me/sub/steer",
+		"git:steer-sh/steer#a/b":                    "github.com/steer-sh/steer",
+		"git:github.com/steer-sh/steer.git#v1":      "github.com/steer-sh/steer",
+		"https://example.com/me/steer#v1":           "example.com/me/steer",
+		"git:example.com/me/steer#v1":               "example.com/me/steer#v1",
+		"git:github:steer-sh/steer?foo=bar#v1":      "github.com/steer-sh/steer",
+		"https://example.com/me/steer?x=y":          "example.com/me/steer",
+		"git:example.com/me/steer?x=y":              "example.com/me/steer?x=y",
+		"npm:steer":                                 "",
+		"./steer":                                   "",
+		"git:github.com/steer":                      "",
+		"git:github.com/../steer":                   "",
+	} {
+		got, ok := piGitPath(source)
+		if got != want || ok != (want != "") {
+			t.Errorf("piGitPath(%q) = %q, %v; want %q", source, got, ok, want)
+		}
+	}
+}

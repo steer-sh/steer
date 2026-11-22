@@ -13,13 +13,14 @@ import (
 	codexhooks "github.com/steer-sh/steer-cli/internal/codex"
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/harness"
+	pihooks "github.com/steer-sh/steer-cli/internal/pi"
 	"github.com/steer-sh/steer-cli/internal/status"
 	"github.com/steer-sh/steer-cli/internal/steerbin"
 	"github.com/steer-sh/steer-cli/internal/styles"
 )
 
 // runnerHarnesses are the harnesses whose root Stop event can block on check.sh.
-var runnerHarnesses = []harness.ID{harness.ClaudeCode, harness.Codex}
+var runnerHarnesses = []harness.ID{harness.ClaudeCode, harness.Codex, harness.Pi}
 
 // blockingHarness parses a --harness value for the Stop runner.
 func blockingHarness(name string) (harness.ID, error) {
@@ -27,8 +28,8 @@ func blockingHarness(name string) (harness.ID, error) {
 	if err != nil {
 		return harness.Unknown, err
 	}
-	if target != harness.ClaudeCode && target != harness.Codex {
-		return harness.Unknown, fmt.Errorf("blocking checks support claude-code and codex, not %s", target)
+	if target != harness.ClaudeCode && target != harness.Codex && target != harness.Pi {
+		return harness.Unknown, fmt.Errorf("blocking checks support claude-code, codex and pi, not %s", target)
 	}
 	return target, nil
 }
@@ -41,7 +42,7 @@ func checkHookCommand(target harness.ID) string {
 // resolving the project directory Codex reads.
 func checkRunnerArming(target harness.ID, scope string) (checkscope.Arming, error) {
 	cwd := ""
-	if target == harness.Codex {
+	if target == harness.Codex || target == harness.Pi {
 		dir, err := gate.ProjectDir()
 		if err != nil && scope != claude.GlobalScope {
 			return checkscope.Arming{}, err
@@ -52,7 +53,7 @@ func checkRunnerArming(target harness.ID, scope string) (checkscope.Arming, erro
 }
 
 var checkInstallCmd = &cobra.Command{
-	Use:   "install --harness <claude-code|codex>",
+	Use:   "install --harness <claude-code|codex|pi>",
 	Short: "Register the Stop runner so adopted repositories run check.sh at turn end",
 	Long: `install registers ` + "`steer check hook --harness <id>`" + ` on the harness's root Stop
 event at --scope, beside every other Stop hook. Its timeout exceeds the run
@@ -73,15 +74,23 @@ this machine (steer check adopt).`,
 			return err
 		}
 		entry, _ := harness.Get(target)
-		registered := fmt.Sprintf("Registered: the %s Stop runner on root Stop\nScope: %s\n"+
+		registered := fmt.Sprintf("Registered: the %s Stop runner on %s\nScope: %s\n"+
 			"Timeout: %ds (run deadline %ds + time to record)\nCommand: %s\nFile: %s",
-			entry.DisplayName, scope, arming.Timeout, int(checks.DefaultExecTimeout.Seconds()), arming.Command, arming.Path)
+			entry.DisplayName, runnerEvent(target), scope, arming.Timeout, int(checks.DefaultExecTimeout.Seconds()), arming.Command, arming.Path)
 		fmt.Fprintln(cmd.OutOrStdout())
-		fmt.Fprintln(cmd.OutOrStdout(), renderReadinessBox(checkInstallSteps(target, arming),
-			"Ready — the next root Stop in an adopted repository runs check.sh.",
+		fmt.Fprintln(cmd.OutOrStdout(), renderReadinessBox(checkInstallSteps(target, scope, arming),
+			readyFor(target, scope, "Ready — the next root Stop in an adopted repository runs check.sh"),
 			"Not running yet — %d %s before the next Stop runs check.sh.", registered))
 		return nil
 	},
+}
+
+// runnerEvent names the harness event the Stop runner answers.
+func runnerEvent(target harness.ID) string {
+	if target == harness.Pi {
+		return "the settle boundary (agent_before_settle)"
+	}
+	return "root Stop"
 }
 
 // registerCheckRunner writes the Stop runner for one harness at one scope and
@@ -96,6 +105,12 @@ func registerCheckRunner(target harness.ID, scope string) (checkscope.Arming, er
 			return checkscope.Arming{}, cwdErr
 		}
 		_, err = codexhooks.RegisterCheckHook(scope, cwd, command, timeout)
+	} else if target == harness.Pi {
+		cwd, cwdErr := gate.ProjectDir()
+		if cwdErr != nil {
+			return checkscope.Arming{}, cwdErr
+		}
+		_, err = pihooks.RegisterCheckRunner(scope, cwd, command, timeout)
 	} else {
 		err = claude.RegisterCheckHook(scope, command, timeout)
 	}
@@ -115,13 +130,17 @@ func registerCheckRunner(target harness.ID, scope string) (checkscope.Arming, er
 // checkInstallSteps is what still stands between this registration and a Stop
 // that runs check.sh: a command that resolves, a harness that trusts the hook,
 // and, when the current repository has a check.sh, its adoption.
-func checkInstallSteps(target harness.ID, arming checkscope.Arming) []status.Step {
+func checkInstallSteps(target harness.ID, scope string, arming checkscope.Arming) []status.Step {
 	var steps []status.Step
 	if step, ok := status.CommandStep(steerbin.Resolve(arming.Command)); ok {
 		steps = append(steps, step)
 	}
 	if entry, _ := harness.Get(target); entry.Capabilities.TrustReview {
-		if step, ok := status.TrustStep(string(target), status.TrustUnknown, arming.Path); ok {
+		trust := status.TrustUnknown
+		if target == harness.Pi {
+			trust = status.PiTrust(scope, ".", arming.Path)
+		}
+		if step, ok := status.TrustStep(string(target), trust, arming.Path); ok {
 			steps = append(steps, step)
 		}
 	}
@@ -142,7 +161,7 @@ func checkInstallSteps(target harness.ID, arming checkscope.Arming) []status.Ste
 }
 
 var checkUninstallCmd = &cobra.Command{
-	Use:   "uninstall --harness <claude-code|codex>",
+	Use:   "uninstall --harness <claude-code|codex|pi>",
 	Short: "Remove the Stop runner registration, keeping adoptions and check evidence",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -160,6 +179,12 @@ var checkUninstallCmd = &cobra.Command{
 				return cwdErr
 			}
 			path, removed, err = codexhooks.RemoveCheckHook(scope, cwd)
+		} else if target == harness.Pi {
+			cwd, cwdErr := gate.ProjectDir()
+			if cwdErr != nil {
+				return cwdErr
+			}
+			path, removed, err = pihooks.RemoveCheckRunner(scope, cwd)
 		} else {
 			path, _ = claude.GetSettingsFile(scope)
 			removed, err = claude.RemoveCheckHook(scope)
@@ -202,7 +227,7 @@ func printRunnerWiring(out io.Writer) {
 		}
 	}
 	if len(parts) == 0 {
-		fmt.Fprintln(out, "Stop runner: not registered (steer check install --harness claude-code|codex)")
+		fmt.Fprintln(out, "Stop runner: not registered (steer check install --harness claude-code|codex|pi)")
 		return
 	}
 	fmt.Fprintf(out, "Stop runner: %s\n", strings.Join(parts, "; "))
@@ -233,13 +258,21 @@ func relinkCheckRunners(r *installReport, scope, path string) (int, error) {
 		reportRelink(r, "codex", scope, "check runner", next)
 		rewritten++
 	}
+	p := pihooks.CheckRunnerArming(scope, cwd)
+	if next, ok := relinked(p.Registered, p.Command, path); ok {
+		if _, err := pihooks.RegisterCheckRunner(scope, cwd, next, p.Timeout); err != nil {
+			return rewritten, err
+		}
+		reportRelink(r, "pi", scope, "check runner", next)
+		rewritten++
+	}
 	return rewritten, nil
 }
 
 func init() {
 	checkCmd.AddCommand(checkInstallCmd, checkUninstallCmd)
 	for _, c := range []*cobra.Command{checkInstallCmd, checkUninstallCmd} {
-		c.Flags().String("harness", "", "the harness to register in: claude-code or codex")
+		c.Flags().String("harness", "", "the harness to register in: claude-code, codex or pi")
 		_ = c.MarkFlagRequired("harness")
 	}
 }

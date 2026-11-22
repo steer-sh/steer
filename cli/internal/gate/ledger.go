@@ -231,6 +231,23 @@ func (l *Ledger) SaveTask(session string, turns []Turn) Row {
 	return Row{"task_file": name, "task_sha": Digest(sb.String())}
 }
 
+// TaskFields stamps the latest human turn, capped at maxChars, the count of turns and
+// the task file SaveTask writes. No turns yield no fields.
+func (l *Ledger) TaskFields(session string, turns []Turn, maxChars int) Row {
+	if len(turns) == 0 {
+		return Row{}
+	}
+	last := turns[len(turns)-1].Text
+	if len(last) > maxChars {
+		last = last[:maxChars]
+	}
+	fields := Row{"task": last, "task_turns": len(turns)}
+	for key, value := range l.SaveTask(session, turns) {
+		fields[key] = value
+	}
+	return fields
+}
+
 // prefixLockStale is how old a session file's lock must be before a writer takes it over.
 const prefixLockStale = 60 * time.Second
 

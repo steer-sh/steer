@@ -205,9 +205,11 @@ held the repository, and never counts as a pass.
 
 ## At the end of a turn
 
-`steer check hook --harness <claude-code|codex>` is the Stop hook, and
-`steer check install --harness <claude-code|codex> --scope <project|global>`
-registers it. A registration authorizes nothing by itself: the hook runs
+`steer check hook --harness <claude-code|codex|pi>` is the Stop hook, and
+`steer check install --harness <claude-code|codex|pi> --scope <project|global>`
+registers it. Pi has no Stop event: Steer's Pi bridge sends the hook a Stop
+payload at `agent_before_settle`, when a run completes and Pi is about to go
+idle. A registration authorizes nothing by itself: the hook runs
 `check.sh` only in an adopted repository. In an adopted
 repository it runs `check.sh` for the root thread's Stop event; subagent Stop
 events are ignored. While a Claude Code subagent of the session still runs, the
@@ -244,10 +246,10 @@ a notice to the operator.
   declared check's result under that run.
 - `steer check adopt [repo]` and `steer check unadopt [repo]` grant and withdraw
   this machine's authorization for automatic runs.
-- `steer check install --harness <claude-code|codex> --scope <project|global>`
+- `steer check install --harness <claude-code|codex|pi> --scope <project|global>`
   registers the Stop hook, and `steer check uninstall` with the same flags
   removes it. Neither changes an adoption or its evidence.
-- `steer check hook --harness <claude-code|codex>` answers a Stop payload on
+- `steer check hook --harness <claude-code|codex|pi>` answers a Stop payload on
   stdin in that harness's reply format.
 - `steer check migrate [repo...] [--apply]` imports the approvals of a personal
   check gate as adoptions and replaces its Stop hook with this one. Without

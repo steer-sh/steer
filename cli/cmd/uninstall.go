@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -14,6 +15,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/guardscope"
 	"github.com/steer-sh/steer-cli/internal/harness"
+	"github.com/steer-sh/steer-cli/internal/hookstore"
 	"github.com/steer-sh/steer-cli/internal/instructions"
 	pihooks "github.com/steer-sh/steer-cli/internal/pi"
 	"github.com/steer-sh/steer-cli/internal/status"
@@ -38,8 +40,12 @@ type uninstallItem struct {
 	Path string
 	// Remove takes the registration out. A project-scope item is never removed.
 	Remove func() error
-	// Command removes a project-scope item one component at a time, or "".
+	// Command removes a project-scope item one component at a time: one command per
+	// line, or "".
 	Command string
+	// StoreWide marks a Command that changes the guard store every harness shares,
+	// which a one-harness plan does not name.
+	StoreWide bool
 }
 
 var uninstallCmd = &cobra.Command{
@@ -110,6 +116,11 @@ func runUninstall(cmd *cobra.Command, _ []string) error {
 	}
 	scoped, _ = splitByHarness(scoped, target)
 	if target != harness.Unknown {
+		for i := range scoped {
+			if scoped[i].StoreWide {
+				scoped[i].Command = ""
+			}
+		}
 		// A Git hook serves every agent, so a one-agent removal keeps it.
 		for _, item := range local {
 			item.Command = "rm " + steerbin.Quote(item.Path)
@@ -284,8 +295,11 @@ func uninstallItems(scope string) ([]uninstallItem, error) {
 			continue
 		}
 		remove := func() error { _, err := claude.RemoveCheckHook(scope); return err }
-		if target == harness.Codex {
+		switch target {
+		case harness.Codex:
 			remove = func() error { _, _, err := codexhooks.RemoveCheckHook(scope, cwd); return err }
+		case harness.Pi:
+			remove = func() error { _, _, err := pihooks.RemoveCheckRunner(scope, cwd); return err }
 		}
 		add(target, "check runner", arming.Path, remove,
 			fmt.Sprintf("steer check uninstall --harness %s --scope %s", target, scope))
@@ -307,7 +321,8 @@ func uninstallItems(scope string) ([]uninstallItem, error) {
 		if registered {
 			add(entry.ID, "guard runner", masterConfigPath(entry.ID, scope, cwd), func() error {
 				return registrar.RemoveMaster(scope)
-			}, "")
+			}, guardRemoveCommands(scope))
+			items[len(items)-1].StoreWide = true
 		}
 		document, err := registrar.InstructionPath(scope)
 		if err != nil {
@@ -503,8 +518,57 @@ func masterConfigPath(id harness.ID, scope, cwd string) string {
 		return path
 	case harness.Codex:
 		return codexhooks.MasterArming(scope, cwd).Path
+	case harness.Pi:
+		path, _ := pihooks.GuardBridgePath(scope, cwd)
+		return path
 	}
 	return ""
+}
+
+// guardRemoveCommands names the commands that empty a project store, one per line,
+// so the last one's sync removes the runner. A file is named by each entry that owns
+// it, or by its stem when none does; a file whose stem is another guard's id is one
+// remove refuses, so it is deleted first. A sync ends the list when no remove does.
+func guardRemoveCommands(scope string) string {
+	if scope != harness.ProjectScope {
+		return ""
+	}
+	hooks, err := claude.ListIndividualHooks(scope)
+	if err != nil {
+		return ""
+	}
+	manifest, err := claude.LoadManifest(scope)
+	if err != nil {
+		return ""
+	}
+	ids := make([]string, 0, len(manifest.Hooks))
+	for id := range manifest.Hooks {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	remove := func(id string) string { return "steer remove " + steerbin.Quote(id) + " --scope project" }
+	var deletes, removes []string
+	for _, hook := range hooks {
+		owned := false
+		for _, id := range ids {
+			if file, err := hookstore.EntryFileName(hookstore.ManifestName, id, manifest.Hooks[id].File); err == nil && file == hook.FileName {
+				removes = append(removes, remove(id))
+				owned = true
+			}
+		}
+		stem := strings.TrimSuffix(hook.FileName, ".py")
+		switch _, stemKeyed := manifest.Hooks[stem]; {
+		case owned:
+		case stemKeyed:
+			deletes = append(deletes, "rm "+steerbin.Quote(hook.Path))
+		default:
+			removes = append(removes, remove(stem))
+		}
+	}
+	if len(removes) == 0 {
+		removes = append(removes, "steer hooks sync --scope project")
+	}
+	return strings.Join(append(deletes, removes...), "\n")
 }
 
 func firstPath(paths ...string) string {
@@ -550,7 +614,9 @@ func printItems(out io.Writer, heading string, items []uninstallItem, withComman
 		}
 		fmt.Fprintln(out, line)
 		if withCommand && item.Command != "" {
-			fmt.Fprintln(out, "      "+item.Command)
+			for _, command := range strings.Split(item.Command, "\n") {
+				fmt.Fprintln(out, "      "+command)
+			}
 		}
 	}
 }

@@ -139,7 +139,40 @@ func TestRunStampsTheContextDepthOfTheActiveBranch(t *testing.T) {
 	if err := json.Unmarshal(bytes.TrimSpace(raw), &row); err != nil {
 		t.Fatal(err)
 	}
-	if row["context_tokens"] != float64(2409) {
-		t.Fatalf("context_tokens = %v", row["context_tokens"])
+	if row["context_tokens"] != float64(2409) || row["prefix_lines"] != float64(4) {
+		t.Fatalf("row = %#v", row)
+	}
+}
+
+// A sequence the gate releases records the bridge's turn, which the settle backstop
+// matches against the turn it names.
+func TestRunStampsTheTurnOnTheRelease(t *testing.T) {
+	repo := stagedRepo(t)
+	cfg := gate.Defaults()
+	cfg.StateDir = t.TempDir()
+	cfg.ReviewerRuns = 1
+	payload := `{"hook_event_name":"PreToolUse","tool_name":"Bash","session_id":"pi-session",` +
+		`"turn_id":"u1","cwd":` + strconvJSON(repo) + `,"tool_input":{"command":"git commit -m \"add a\""}}`
+	for range 2 {
+		var stdout bytes.Buffer
+		Run(context.Background(), cfg, stubReviewer{}, strings.NewReader(payload), &stdout)
+	}
+	raw, err := os.ReadFile(cfg.LogFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var releases []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		var row map[string]any
+		if err := json.Unmarshal([]byte(line), &row); err != nil {
+			t.Fatal(err)
+		}
+		if row["phase"] == gate.PhaseChainEnd {
+			releases = append(releases, row)
+		}
+	}
+	if len(releases) != 1 || releases[0]["release_turn_key"] != "turn_id" ||
+		releases[0]["release_turn"] != "u1" || releases[0]["release_turn_present"] != true {
+		t.Fatalf("releases = %#v, want one stamped with turn u1", releases)
 	}
 }

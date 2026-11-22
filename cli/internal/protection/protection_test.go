@@ -75,11 +75,18 @@ func archived(t *testing.T, scope string) int {
 // fireMaster sends a Bash call to the global master and returns its reason when it denies.
 func fireMaster(t *testing.T, repo, command string) string {
 	t.Helper()
+	return fireMasterTool(t, repo, "Bash", command)
+}
+
+// fireMasterTool sends one call whose input is a command string, such as Bash or
+// Codex's apply_patch, to the global master and returns its reason when it denies.
+func fireMasterTool(t *testing.T, repo, toolName, command string) string {
+	t.Helper()
 	master, err := claude.GetMasterHookPath(claude.GlobalScope)
 	if err != nil {
 		t.Fatal(err)
 	}
-	payload, _ := json.Marshal(map[string]any{"hook_event_name": "PreToolUse", "tool_name": "Bash",
+	payload, _ := json.Marshal(map[string]any{"hook_event_name": "PreToolUse", "tool_name": toolName,
 		"tool_input": map[string]any{"command": command}, "cwd": repo})
 	cmd := exec.Command("python3", master)
 	cmd.Dir = repo
@@ -143,6 +150,37 @@ func TestReconcileFollowsTheSetting(t *testing.T) {
 	}
 	if !Enabled(config.Config{}) || Enabled(config.Config{Protection: config.Protection{Self: SettingOff}}) {
 		t.Fatal("unset must read as on and off as off")
+	}
+}
+
+// A patch that moves a protected file to another path takes it off the path
+// Steer reads, so the master denies it as it denies the file's deletion; a move
+// of the agent's own file goes through.
+func TestTheMasterDeniesAPatchMovingAProtectedFileAway(t *testing.T) {
+	home, repo := withHomeAndRepo(t)
+	pi := filepath.Join(home, ".pi", "agent")
+	t.Setenv("PI_CODING_AGENT_DIR", pi)
+	if _, err := Reconcile(true, claudeOnly, Options{Unverified: true}); err != nil {
+		t.Fatal(err)
+	}
+	bridge := filepath.Join(pi, "extensions", "steer-guards.ts")
+	writeFile(t, bridge, "// steer-bridge: {\"bridge\":\"d\",\"channel\":\"guards\"}\n")
+	writeFile(t, filepath.Join(repo, "src", "a.py"), "x = 1\n")
+	move := func(from string) string {
+		return "*** Begin Patch\n*** Update File: " + from + "\n*** Move to: /tmp/x\n*** End Patch"
+	}
+
+	for _, from := range []string{
+		"~/.claude/settings.json",
+		filepath.Join(home, ".steer", "hooks", "steer-manifest.json"),
+		bridge,
+	} {
+		if fireMasterTool(t, repo, "apply_patch", move(from)) == "" {
+			t.Errorf("a patch moving %s away was allowed", from)
+		}
+	}
+	if reason := fireMasterTool(t, repo, "apply_patch", move("src/a.py")); reason != "" {
+		t.Errorf("a patch moving the agent's own file was denied: %q", reason)
 	}
 }
 

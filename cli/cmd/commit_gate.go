@@ -63,7 +63,8 @@ decision.
 
 Each harness's hook shares one review engine:
   review        PreToolUse hook for Claude Code — reads a JSON payload on stdin
-  review-codex  PreToolUse hook for Codex — reads a JSON payload on stdin`,
+  review-codex  PreToolUse hook for Codex — reads a JSON payload on stdin
+  review-pi     tool_call hook for Pi — the Pi bridge sends it a JSON payload on stdin`,
 	Example: `  steer commit-gate install --harness claude-code --scope global
   steer status`,
 }
@@ -190,9 +191,8 @@ native hook reply on stdout. It always exits 0 so adapter failures fail open.`,
 }
 
 var commitGatePiReviewCmd = &cobra.Command{
-	Use:    "review-pi",
-	Hidden: true,
-	Short:  "Pi tool_call hook: rule on a Bash git commit before it runs",
+	Use:   "review-pi",
+	Short: "Pi tool_call hook: rule on a Bash git commit before it runs",
 	Long: `review-pi reads the Pi bridge's PreToolUse payload on stdin and writes Pi's
 native tool_call reply on stdout. It always exits 0 so adapter failures fail open.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -399,11 +399,11 @@ func installReviewChannel(cfg gate.Config) error {
 		registered += "\nReview outcomes: read at the end of each turn (Stop and SubagentStop hooks)" +
 			"\nHooks: " + path
 	case harness.Pi:
-		registered += "\nReview outcomes: read at the end of each turn (turn_end handler)" +
+		registered += "\nReview outcomes: read at the end of each turn (agent_before_settle handler)" +
 			"\nExtension: " + path
 	}
 	fmt.Println()
-	fmt.Println(renderInstallReadiness(installSteps(cfg, target, hookCommand), registered))
+	fmt.Println(renderInstallReadiness(target, scope, installSteps(cfg, target, hookCommand, scope, path), registered))
 	return nil
 }
 
@@ -411,7 +411,7 @@ func installReviewChannel(cfg gate.Config) error {
 // Registration is one of four states, and it is the only one the write itself proves:
 // the harness must trust the hook, the hook command must resolve, and the reviewer CLI
 // must exist. Reporting "armed" on the write alone names the weakest of the four.
-func installSteps(cfg gate.Config, target harness.ID, command string) []status.Step {
+func installSteps(cfg gate.Config, target harness.ID, command, scope, path string) []status.Step {
 	var steps []status.Step
 	_, _, resolveErr := resolveReviewer(cfg)
 	if step, ok := status.ReviewerStep(settings.ReviewerProbe(cfg, resolveErr)); ok {
@@ -423,7 +423,11 @@ func installSteps(cfg gate.Config, target harness.ID, command string) []status.S
 	entry, _ := harness.Get(target)
 	if entry.Capabilities.TrustReview {
 		// The registration block below names the file, so the step does not repeat it.
-		if step, ok := status.TrustStep(string(target), status.TrustUnknown, ""); ok {
+		trust := status.TrustUnknown
+		if target == harness.Pi {
+			trust = status.PiTrust(scope, ".", path)
+		}
+		if step, ok := status.TrustStep(string(target), trust, ""); ok {
 			steps = append(steps, step)
 		}
 	}
@@ -433,10 +437,19 @@ func installSteps(cfg gate.Config, target harness.ID, command string) []status.S
 // renderInstallReadiness leads with whatever remains before the first review can
 // happen, and puts the registration facts beneath it. A success box over an open step
 // reads as a working gate.
-func renderInstallReadiness(steps []status.Step, registered string) string {
-	return renderReadinessBox(steps, "Ready — the next `git commit` in scope goes to the reviewer.\n"+
+func renderInstallReadiness(target harness.ID, scope string, steps []status.Step, registered string) string {
+	return renderReadinessBox(steps, readyFor(target, scope, "Ready — the next `git commit` in scope goes to the reviewer")+"\n"+
 		"To check that the reviewer answers: steer commit-gate test-reviewer",
 		"Not reviewing yet — %d %s before the first review.", registered)
+}
+
+// readyFor ends an install's ready line at scope. A Pi load record does not cover every
+// Pi process, so a Pi line names the ones it does.
+func readyFor(target harness.ID, scope, line string) string {
+	if target == harness.Pi {
+		return line + " " + status.PiLoadedSessions(scope) + "."
+	}
+	return line + "."
 }
 
 // renderReadinessBox renders an install's readiness box. pending is a format taking
@@ -845,9 +858,9 @@ func init() {
 		"Reviewers in the panel; default 3")
 
 	commitGateInstallCmd.Flags().StringVar(&commitGateHarness, "harness", "claude-code",
-		"PreToolUse harness (claude-code|codex)")
+		"PreToolUse harness (claude-code|codex|pi)")
 	commitGateRemoveCmd.Flags().StringVar(&commitGateRemoveHarness, "harness", "",
-		"PreToolUse harness (claude-code|codex), required")
+		"PreToolUse harness (claude-code|codex|pi), required")
 	commitGateRemoveCmd.Flags().BoolVar(&commitGateRemovePreCommit, "precommit", false,
 		"Remove this repository's git pre-commit hook from Steer's removed pre-commit review")
 }

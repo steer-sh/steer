@@ -184,7 +184,7 @@ func TestRulesPresenceCoversInstalledHarnessesOnly(t *testing.T) {
 }
 
 // An installed Pi whose document carries no Steer rule gets no rules row, so an
-// unlisted harness is never named for drift Steer did not cause. Once the shared
+// optional harness is never named for drift Steer did not cause. Once the shared
 // project AGENTS.md carries the section, the Pi row reads it.
 func TestAnUnlistedHarnessReadsRulesOnlyWhereSteerWroteThem(t *testing.T) {
 	root := projectDir(t)
@@ -231,8 +231,8 @@ func rulesRowFor(t *testing.T, rows []RulesPresence, id string) RulesPresence {
 
 // A clone carries a committed store and none of this machine's registrations.
 // Every installed harness then runs none of the store's guards and reads
-// detached; Pi, unlisted and unregistered, carries no row; and a sync
-// brings the row back to the master's own runtime state.
+// detached; Pi carries no row until it is installed, then reads detached outside
+// the nudge; and a sync brings the row back to the master's own runtime state.
 func TestAnInstalledHarnessWithoutTheStoresRegistrationIsDetached(t *testing.T) {
 	root := projectDir(t)
 	testhome.Set(t, root)
@@ -240,7 +240,8 @@ func TestAnInstalledHarnessWithoutTheStoresRegistrationIsDetached(t *testing.T) 
 		t.Fatal(err)
 	}
 	t.Setenv("CODEX_HOME", t.TempDir())
-	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(root, "no-pi"))
+	piDir := filepath.Join(root, "pi-agent")
+	t.Setenv("PI_CODING_AGENT_DIR", piDir)
 
 	content := []byte("#!/usr/bin/env python3\nimport sys\n\ndef main():\n    sys.exit(0)\n\nif __name__ == '__main__':\n    main()\n")
 	if _, err := claude.InstallManagedHook(claude.ProjectScope, claude.InstallManagedHookInput{
@@ -271,6 +272,27 @@ func TestAnInstalledHarnessWithoutTheStoresRegistrationIsDetached(t *testing.T) 
 	key, labels, scopes := DetachedMasters(rows)
 	if key == "" || len(labels) != 2 || strings.Join(scopes, ",") != "project" {
 		t.Fatalf("key %q, labels %q, scopes %q", key, labels, scopes)
+	}
+	if err := os.MkdirAll(piDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rows = MasterRuntimes(claude.ProjectScope)
+	if row := rowFor(t, rows, "pi"); !row.Detached() ||
+		!strings.HasSuffix(MasterPhrase(rows, row), "run: steer hooks sync --scope project --harness pi") {
+		t.Fatalf("installed Pi row = %#v, phrase %q", row, MasterPhrase(rows, row))
+	}
+	if withPi, _, _ := DetachedMasters(rows); withPi != key {
+		t.Fatalf("an installed Pi changed the nudge key from %q to %q", key, withPi)
+	}
+	// A Pi that registers a runner elsewhere was set up for Steer, so the nudge names it.
+	armed := slices.Clone(rows)
+	for i := range armed {
+		if armed[i].Harness == "pi" {
+			armed[i].Path = filepath.Join(root, "elsewhere", "steer-hooks.py")
+		}
+	}
+	if _, labels, _ := DetachedMasters(armed); len(labels) != 3 {
+		t.Fatalf("a registered detached Pi is left out of the nudge: %q", labels)
 	}
 
 	if _, err := claude.SyncStore(claude.ProjectScope, claude.Registrar{}, codex.Registrar{}); err != nil {
@@ -401,7 +423,8 @@ func TestAGlobalHarnessWithNoSteerRegistrationIsNotDetached(t *testing.T) {
 
 // A dashboard rebuild or sync writes the runner registration and the rules
 // sections in one operation, so it reaches a harness whose rules section drifted
-// as well as each registered one, and none other while one holds nothing.
+// as well as each registered one, and none other while one holds nothing. An
+// unarmed Pi that reads detached holds nothing either.
 func TestARepairReachesEveryDriftedRulesSection(t *testing.T) {
 	g := claude.GlobalScope
 	masters := []MasterRuntime{{Harness: "claude-code", Scope: g, State: MasterStale, Path: "/m", Installed: true},
@@ -418,5 +441,12 @@ func TestARepairReachesEveryDriftedRulesSection(t *testing.T) {
 	masters[1].Path, masters[2].Installed = "/m", false
 	if got := RepairTargets(drifted, masters, g); got != nil {
 		t.Errorf("RepairTargets with every installed harness registered = %q, want nil", got)
+	}
+	p := claude.ProjectScope
+	detached := []MasterRuntime{{Harness: "claude-code", Scope: p, State: MasterDetached, Store: "/s", Installed: true},
+		{Harness: "codex", Scope: p, State: MasterDetached, Store: "/s", Installed: true},
+		{Harness: "pi", Scope: p, State: MasterDetached, Store: "/s", Installed: true}}
+	if got := RepairTargets(nil, detached, p); !slices.Equal(got, []string{"claude-code", "codex"}) {
+		t.Errorf("RepairTargets beside an unarmed Pi = %q, want Claude Code and Codex", got)
 	}
 }

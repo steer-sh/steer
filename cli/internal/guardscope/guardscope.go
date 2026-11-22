@@ -33,7 +33,7 @@ func RegistrarFor(id harness.ID) (harness.Registrar, error) {
 
 // HookRegistrars returns an adapter for every harness Steer can register into,
 // keeping the registry's order. onlyInstalled drops the ones whose configuration
-// directory is absent from this machine; an unlisted harness is dropped when absent
+// directory is absent from this machine; an optional harness is dropped when absent
 // either way.
 func HookRegistrars(onlyInstalled bool) ([]harness.Registrar, error) {
 	out := make([]harness.Registrar, 0, len(harness.All()))
@@ -41,7 +41,7 @@ func HookRegistrars(onlyInstalled bool) ([]harness.Registrar, error) {
 		if !entry.Capabilities.HookRegistration {
 			continue
 		}
-		if (onlyInstalled || !harness.Listed(entry.ID)) && !entry.Installed() {
+		if (onlyInstalled || harness.Optional(entry.ID)) && !entry.Installed() {
 			continue
 		}
 		registrar, err := RegistrarFor(entry.ID)
@@ -160,6 +160,13 @@ func Check(tier string, scopeAll bool, scopeHarness []string, force bool) error 
 			"or pass --force. %s", strings.Join(missing, ", "), missing[0], where)
 	}
 	for _, id := range requested {
+		if id == harness.Pi && RunnerUnapproved(id) {
+			return fmt.Errorf("--scope-harness names pi, whose guard extension no Pi session " +
+				"runs: Pi runs it only after /reload or a restart, and in a project only once " +
+				"trusted, so its sessions would read the rule's text with no guard behind it. " +
+				"Run /reload in each Pi session (trust the project when Pi asks), drop it from " +
+				"the scope, or pass --force")
+		}
 		if RunnerUnapproved(id) {
 			return fmt.Errorf("--scope-harness names %s, whose guard runner is registered but "+
 				"has no approval record: %s runs no hook until the user approves it, so its "+
@@ -172,13 +179,40 @@ func Check(tier string, scopeAll bool, scopeHarness []string, force bool) error 
 }
 
 // RunnerUnapproved reports a harness whose every registered guard runner is known
-// to lack the approval the harness needs before it runs a hook. Codex is the one
-// harness whose approval record Steer reads. A present record is not proof of
-// approval, and an unreadable one is not proof of its absence, so neither counts.
+// not to run. Codex runs no hook without its approval record; a present record is
+// not proof of approval, and an unreadable one is not proof of its absence, so
+// neither counts. Pi runs its guard extension once a session loads it, in a project
+// Pi trusts; an unreadable load or trust record counts as running.
 func RunnerUnapproved(id harness.ID) bool {
-	if id != harness.Codex {
-		return false
+	switch id {
+	case harness.Codex:
+		return codexRunnerUnapproved()
+	case harness.Pi:
+		return piRunnerUnloaded()
 	}
+	return false
+}
+
+func piRunnerUnloaded() bool {
+	registered := false
+	for _, scope := range []string{harness.ProjectScope, harness.GlobalScope} {
+		held, err := (pi.Registrar{}).MasterRegistered(scope)
+		if err != nil {
+			return false
+		}
+		if !held {
+			continue
+		}
+		registered = true
+		bridge, err := pi.GuardBridgePath(scope, ".")
+		if err != nil || !pi.RunningOf(scope, ".", bridge).RunsNothing() {
+			return false
+		}
+	}
+	return registered
+}
+
+func codexRunnerUnapproved() bool {
 	registered := false
 	for _, scope := range []string{harness.ProjectScope, harness.GlobalScope} {
 		a := codex.MasterArming(scope, ".")

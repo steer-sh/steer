@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/steer-sh/steer-cli/internal/gate"
+	"github.com/steer-sh/steer-cli/internal/transcript"
 )
 
 // harnessTagRe matches only the OPENING tag. The harness writes its own text into
@@ -135,6 +136,24 @@ func HumanTurns(rows []transcriptRow) []gate.Turn {
 	return turns
 }
 
+// AdapterTurns streams one session file through a transcript adapter and keeps the
+// turns a person typed. An unreadable file yields none, so the gate fails open.
+func AdapterTurns(adapter transcript.Adapter, path string) []gate.Turn {
+	var turns []gate.Turn
+	session := transcript.Session{Path: path}
+	_, err := adapter.Stream(session, transcript.Filter{}, func(e transcript.Event) error {
+		if e.Kind != transcript.KindHumanTurn || e.Text == "" {
+			return nil
+		}
+		turns = append(turns, gate.Turn{TS: isoEpoch(e.Timestamp), Text: e.Text})
+		return nil
+	})
+	if err != nil {
+		return nil
+	}
+	return turns
+}
+
 func isoEpoch(ts string) *float64 {
 	if ts == "" {
 		return nil
@@ -181,17 +200,8 @@ func AuthorFields(ledger *gate.Ledger, cfg gate.Config, transcript, session stri
 		break
 	}
 
-	turns := HumanTurns(rows)
-	if len(turns) > 0 {
-		last := turns[len(turns)-1].Text
-		if len(last) > cfg.MaxTaskChars {
-			last = last[:cfg.MaxTaskChars]
-		}
-		fields["task"] = last
-		fields["task_turns"] = len(turns)
-		for key, value := range ledger.SaveTask(session, turns) {
-			fields[key] = value
-		}
+	for key, value := range ledger.TaskFields(session, HumanTurns(rows), cfg.MaxTaskChars) {
+		fields[key] = value
 	}
 	return fields
 }

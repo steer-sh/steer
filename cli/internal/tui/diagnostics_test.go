@@ -2,6 +2,7 @@ package tui
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -208,6 +209,32 @@ func TestAnOtherScopeStaleRunnerNamesItsOwnCommand(t *testing.T) {
 	}
 }
 
+// A Pi that registers no runner reads detached beside a project store, but its
+// user may run Pi without Steer: neither Diagnostics nor Fixes names it, while a
+// detached Claude Code in the same scope still gets both.
+func TestAnUnarmedPiIsNoDetachedRunnerProblem(t *testing.T) {
+	m := New(gate.Defaults(), "project")
+	m.width = 200
+	m.snap = &status.SystemStatus{Posture: status.Posture{Masters: []status.MasterRuntime{
+		{Harness: "pi", Scope: "project", State: status.MasterDetached, Store: "/s", Installed: true},
+		{Harness: "claude-code", Scope: "project", State: status.MasterDetached, Store: "/s", Installed: true},
+	}}}
+	var headlines []string
+	for _, issue := range m.diagnosticIssues() {
+		headlines = append(headlines, issue.headline)
+	}
+	if got := strings.Join(headlines, "; "); strings.Contains(got, "Pi") || !strings.Contains(got, "Claude Code runs none") {
+		t.Errorf("diagnostics = %q, want Claude Code alone", got)
+	}
+	var labels []string
+	for _, r := range m.guardRepairs() {
+		labels = append(labels, r.label)
+	}
+	if !slices.Equal(labels, []string{"Run the guards in Claude Code"}) {
+		t.Errorf("guard repairs = %q, want Claude Code alone", labels)
+	}
+}
+
 // The repository's checks and their last run are listed once, on Fixes, where
 // enter acts on them. Diagnostics keeps only a check issue that asks for a step.
 func TestRepositoryChecksAndTheirLastRunLiveOnFixes(t *testing.T) {
@@ -276,5 +303,31 @@ func TestALeftoverTeamLockfileIsADashboardIssue(t *testing.T) {
 	m.snap = &status.SystemStatus{LegacyTeamLockfile: "/r/steer-team.lock.json"}
 	if view := m.viewDiagnostics(); !strings.Contains(view, "no longer installs guards from /r/steer-team.lock.json") {
 		t.Errorf("the leftover lockfile is not reported:\n%s", view)
+	}
+}
+
+// An unapproved runner names its own harness's repair. Pi has no /hooks, so a Pi
+// reader told to approve the definitions there had no step that ran the guards.
+func TestAnUnapprovedRunnerNamesItsHarnessRepair(t *testing.T) {
+	for _, tc := range []struct {
+		harness, trust string
+		want, never    string
+	}{
+		{"pi", status.TrustMissing, "/reload", "/hooks"},
+		{"pi", status.TrustDisabled, "/trust", "/hooks"},
+		{"codex", status.TrustMissing, "approve the definitions in /hooks", "/reload"},
+		{"codex", status.TrustHooksOff, "config.toml", "/reload"},
+	} {
+		m := New(gate.Defaults(), "global")
+		m.snap = &status.SystemStatus{Posture: status.Posture{Masters: []status.MasterRuntime{{
+			Harness: tc.harness, Scope: "global", State: status.MasterCurrent, Trust: tc.trust, Path: "/m",
+		}}}}
+		var text string
+		for _, issue := range m.diagnosticIssues() {
+			text += issue.headline + ": " + issue.detail + "\n"
+		}
+		if !strings.Contains(text, tc.want) || strings.Contains(text, tc.never) {
+			t.Errorf("%s/%s: want %q and no %q in:\n%s", tc.harness, tc.trust, tc.want, tc.never, text)
+		}
 	}
 }

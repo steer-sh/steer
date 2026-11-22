@@ -5,7 +5,6 @@ import (
 
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/cc"
-	"github.com/steer-sh/steer-cli/internal/transcript"
 	txcodex "github.com/steer-sh/steer-cli/internal/transcript/codex"
 )
 
@@ -28,38 +27,10 @@ func AuthorFields(ledger *gate.Ledger, cfg gate.Config, rollout, actor, model st
 	if depth, ok := contextTokens(lines); ok {
 		fields["context_tokens"] = depth
 	}
-	turns := humanTurns(rollout)
-	if len(turns) == 0 {
-		return fields
-	}
-	last := turns[len(turns)-1].Text
-	if len(last) > cfg.MaxTaskChars {
-		last = last[:cfg.MaxTaskChars]
-	}
-	fields["task"] = last
-	fields["task_turns"] = len(turns)
-	for key, value := range ledger.SaveTask(actor, turns) {
+	for key, value := range ledger.TaskFields(actor, cc.AdapterTurns(txcodex.New(), rollout), cfg.MaxTaskChars) {
 		fields[key] = value
 	}
 	return fields
-}
-
-// humanTurns replays one rollout through the transcript adapter and keeps the turns a
-// person typed. An unreadable rollout yields none, so the gate fails open.
-func humanTurns(rollout string) []gate.Turn {
-	var turns []gate.Turn
-	session := transcript.Session{Path: rollout}
-	_, err := txcodex.New().Stream(session, transcript.Filter{}, func(e transcript.Event) error {
-		if e.Kind != transcript.KindHumanTurn || e.Text == "" {
-			return nil
-		}
-		turns = append(turns, gate.Turn{TS: epoch(e.Timestamp), Text: e.Text})
-		return nil
-	})
-	if err != nil {
-		return nil
-	}
-	return turns
 }
 
 func epoch(ts string) *float64 {

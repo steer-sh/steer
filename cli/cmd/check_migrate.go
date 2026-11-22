@@ -223,11 +223,15 @@ func selectedIdentities(selected []string) (map[string]bool, error) {
 	return chosen, nil
 }
 
+// migrationHarnesses are the harnesses whose Stop hooks can hold a personal check
+// gate. A Pi extension is not a hook command, so Pi has none to import.
+var migrationHarnesses = []harness.ID{harness.ClaudeCode, harness.Codex}
+
 // personalGates reports every registration of the personal Stop hook this
 // machine's harnesses carry.
 func personalGates() []migrationGate {
 	var gates []migrationGate
-	for _, target := range runnerHarnesses {
+	for _, target := range migrationHarnesses {
 		for _, scope := range []string{claude.ProjectScope, claude.GlobalScope} {
 			if g, ok := personalGateAt(target, scope); ok {
 				gates = append(gates, g)

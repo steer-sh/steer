@@ -18,26 +18,37 @@ func readableCase(t *testing.T, harnessID, turnKey string) CheckCase {
 	run.BlockReason = "check.sh failed (exit 1).\n\n" + checks.RunIDLine("1a")
 	path := filepath.Join(t.TempDir(), "t.jsonl")
 	var body string
-	if harnessID == "claude-code" {
+	switch harnessID {
+	case "claude-code":
 		body = fmt.Sprintf(`{"uuid":"fb","parentUuid":"","type":"user","isMeta":true,"promptId":"p1","message":{"content":%q}}`+"\n",
 			"Stop hook feedback:\n"+run.BlockReason)
-	} else {
+	case "pi":
+		body = fmt.Sprintf(`{"type":"custom_message","id":"fb","parentId":null,"customType":"steer-check","content":%q,"display":true}`+"\n",
+			run.BlockReason)
+	default:
 		body = fmt.Sprintf(`{"ordinal":4,"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":%q}],"internal_chat_message_metadata_passthrough":{"turn_id":"p1"}}}`+"\n",
 			"<hook_prompt hook_run_id=\"stop:0:h\">"+run.BlockReason+"</hook_prompt>")
 	}
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	run.Locators = map[string]string{"transcript_path": path, turnKey: "p1"}
+	run.Locators = map[string]string{"transcript_path": path}
+	if turnKey != "" {
+		run.Locators[turnKey] = "p1"
+	}
 	return CheckCase{Run: run}
 }
 
 // Each harness's reader finds the block by the run's own line and the turn key
-// its Stop payload carried.
+// its Stop payload carried. A Pi block is its own entry, so Pi carries no turn key.
 func TestCheckCaseReadingDispatchesToTheHarnessThatBlocked(t *testing.T) {
-	for harnessID, key := range map[string]string{"claude-code": "prompt_id", "codex": "turn_id"} {
+	for harnessID, key := range map[string]string{"claude-code": "prompt_id", "codex": "turn_id", "pi": ""} {
 		c := readableCase(t, harnessID, key)
-		if r := c.Reach(); r.Granularity != transcript.JoinEntry || r.TurnID != "p1" {
+		wantTurn := "p1"
+		if key == "" {
+			wantTurn = ""
+		}
+		if r := c.Reach(); r.Granularity != transcript.JoinEntry || r.TurnID != wantTurn {
 			t.Errorf("%s reach = %+v; want the entry join in turn p1", harnessID, r)
 		}
 		got := c.Reading(transcript.ContinuationBudget{})
@@ -56,7 +67,8 @@ func TestCheckCaseReachNamesWhatIsMissing(t *testing.T) {
 	delete(noPath.Run.Locators, "transcript_path")
 	gone := readableCase(t, "codex", "turn_id")
 	gone.Run.Locators["transcript_path"] = filepath.Join(t.TempDir(), "absent.jsonl")
-	pi := readableCase(t, "pi", "turn_id")
+	unknown := readableCase(t, "codex", "turn_id")
+	unknown.Run.Harness = "other"
 	for name, tc := range map[string]struct {
 		c    CheckCase
 		want string
@@ -64,7 +76,7 @@ func TestCheckCaseReachNamesWhatIsMissing(t *testing.T) {
 		"a run without its line": {legacy, "no block reason"},
 		"no transcript path":     {noPath, "no transcript path"},
 		"a transcript gone":      {gone, "is gone"},
-		"a harness with no Stop": {pi, "no Stop block reader"},
+		"a harness with no Stop": {unknown, "no Stop block reader"},
 	} {
 		r := tc.c.Reach()
 		if r.Granularity != transcript.JoinUnavailable || !strings.Contains(r.Reason, tc.want) {

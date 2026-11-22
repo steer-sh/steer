@@ -14,6 +14,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/cadence"
 	"github.com/steer-sh/steer-cli/internal/checks"
 	"github.com/steer-sh/steer-cli/internal/claude"
+	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/tier"
 )
 
@@ -81,7 +82,19 @@ func GuardCommandChangedPhrase(label string) string {
 // TrustPhrase names a harness's posture on a registration, "" when nothing needs
 // saying. Registration alone does not prove enforcement on a harness that reviews hook
 // trust itself.
-func TrustPhrase(trust string) string {
+func TrustPhrase(harnessID, trust string) string {
+	if harness.ID(harnessID) == harness.Pi {
+		switch trust {
+		case TrustModified:
+			return "Pi loaded an older version of it"
+		case TrustDisabled:
+			return "Pi does not trust this project"
+		case TrustMissing:
+			return "no Pi session has loaded it"
+		case TrustUnknown:
+			return "whether Pi loaded it is unknown"
+		}
+	}
 	switch trust {
 	case TrustRecordPresent:
 		return "approval could not be compared"
@@ -113,6 +126,14 @@ func MasterPhrase(rows []MasterRuntime, m MasterRuntime) string {
 	case MasterUnknown:
 		return "runtime has no version (unstamped) — run: " + RebuildRepair(rows, m.Scope)
 	case MasterDetached:
+		if m.Unarmed() {
+			command := SyncCommand(m.Scope)
+			if m.StoreSourcesDrifted() {
+				command = RebuildCommand(m.Scope) // sync refuses a runner that lacks the store's guards
+			}
+			return "runs none of this scope's guards: no runner is registered — to arm it, run: " +
+				repairFor(command, []string{m.Harness})
+		}
 		if m.Path == "" {
 			return "runs none of this scope's guards: no runner is registered — run: " + targetedRepair(rows, m.Scope, SyncCommand(m.Scope))
 		}
@@ -141,11 +162,12 @@ func targetedRepair(rows []MasterRuntime, scope, command string) string {
 	return repairFor(command, narrowTargets(rows, scope, masterTargets(rows, scope)))
 }
 
-// masterTargets are the harnesses that register a scope's master or read detached.
+// masterTargets are the harnesses that register a scope's master or read detached,
+// leaving out an unarmed optional harness.
 func masterTargets(rows []MasterRuntime, scope string) []string {
 	var targets []string
 	for _, m := range rows {
-		if m.Scope == scope && (m.Path != "" || m.Detached()) {
+		if m.Scope == scope && (m.Path != "" || m.Detached()) && !m.Unarmed() {
 			targets = append(targets, m.Harness)
 		}
 	}
@@ -153,10 +175,11 @@ func masterTargets(rows []MasterRuntime, scope string) []string {
 }
 
 // narrowTargets is targets while an installed harness holds no part of the scope,
-// and nil otherwise or when targets is empty.
+// and nil otherwise or when targets is empty. An unarmed optional harness holds no
+// part even where it reads detached.
 func narrowTargets(rows []MasterRuntime, scope string, targets []string) []string {
 	for _, m := range rows {
-		if m.Scope == scope && m.Path == "" && !m.Detached() && m.Installed {
+		if m.Scope == scope && m.Path == "" && (!m.Detached() || m.Unarmed()) && m.Installed {
 			return targets
 		}
 	}
@@ -325,12 +348,12 @@ func DetachedRepair(rows []MasterRuntime, scope string) string {
 
 // DetachedMasters summarizes the detached rows for a one-line notice, in the shape
 // RulesDrift uses: a key that changes whenever the set does, one label per row,
-// and each scope to sync, once.
+// and each scope to sync, once. An unarmed optional harness is left out.
 func DetachedMasters(rows []MasterRuntime) (key string, labels, scopes []string) {
 	var parts []string
 	seen := map[string]bool{}
 	for _, m := range rows {
-		if !m.Detached() {
+		if !m.Detached() || m.Unarmed() {
 			continue
 		}
 		store := m.Store
@@ -462,13 +485,17 @@ func (m MasterRuntime) RunnerUnapproved() bool {
 // RunnerTrustPhrase names a registered runner's approval, "" where the harness
 // reviews no hook trust.
 func RunnerTrustPhrase(m MasterRuntime) string {
+	if m.RunnerUnapproved() && harness.ID(m.Harness) == harness.Pi {
+		step, _ := TrustStep(m.Harness, m.Trust, "")
+		return TrustPhrase(m.Harness, m.Trust) + ", so Pi runs no guard — " + step.Fix
+	}
 	if m.RunnerUnapproved() && m.Trust != TrustMissing {
-		return TrustPhrase(m.Trust) + ", so the harness runs no guard — turn it on in /hooks"
+		return TrustPhrase(m.Harness, m.Trust) + ", so the harness runs no guard — turn it on in /hooks"
 	}
 	if m.RunnerUnapproved() {
 		return "no approval record, so the harness runs no guard — approve the definitions in /hooks"
 	}
-	return TrustPhrase(m.Trust)
+	return TrustPhrase(m.Harness, m.Trust)
 }
 
 // MasterObservedPhrase names the last block a registered master recorded. The

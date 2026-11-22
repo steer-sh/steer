@@ -23,7 +23,8 @@ const (
 	ProtectionOutdated = "outdated"
 	// ProtectionNotRunning: the store holds the current guard, and a harness Steer
 	// is set up in does not run it: no global master registration, a master that
-	// does not carry the guard, or a Codex runner awaiting approval.
+	// does not carry the guard, a Codex runner awaiting approval, or a Pi guard
+	// extension no Pi session has loaded.
 	ProtectionNotRunning = "not-running"
 	// ProtectionNotSetUp: no harness holds a global Steer registration, so no guard
 	// is expected and a guard the store holds runs nowhere.
@@ -102,6 +103,7 @@ const (
 	reasonUncovered    = "the global guard runner does not carry the current guard"
 	reasonUnapproved   = "Codex has not approved the global guard runner"
 	reasonUnreadable   = "Steer could not read whether Codex approved the global guard runner"
+	reasonPiUnloaded   = "no Pi session has loaded the global guard extension"
 )
 
 // notRunningReason names why the global master does not run the current guard
@@ -120,15 +122,21 @@ func notRunningReason(targets []harness.Registrar) (string, error) {
 		return reasonUncovered, nil
 	}
 	for _, target := range targets {
-		if target.Harness().ID != harness.Codex {
-			continue
-		}
-		a := codex.MasterArming(claude.GlobalScope, ".")
-		switch {
-		case a.Registered && !a.TrustStateKnown:
-			return reasonUnreadable, nil
-		case a.Registered && !a.TrustRecordPresent:
-			return reasonUnapproved, nil
+		switch target.Harness().ID {
+		case harness.Codex:
+			a := codex.MasterArming(claude.GlobalScope, ".")
+			switch {
+			case a.Registered && !a.TrustStateKnown:
+				return reasonUnreadable, nil
+			case a.Registered && !a.TrustRecordPresent:
+				return reasonUnapproved, nil
+			}
+		case harness.Pi:
+			// An extension an older Steer wrote still enforces, so an unknown load
+			// counts as running.
+			if runnerTrust(harness.Pi, claude.GlobalScope) == TrustMissing {
+				return reasonPiUnloaded, nil
+			}
 		}
 	}
 	return "", nil
@@ -175,6 +183,8 @@ func protectionIssues(p ProtectionReading, folded bool) []Issue {
 			fix = "Open /hooks in Codex and approve Steer's hooks."
 		case reasonUnreadable:
 			fix = "Inspect /hooks in Codex."
+		case reasonPiUnloaded:
+			fix = "Run /reload in each running Pi session, or start Pi again."
 		}
 		out = append(out, Issue{Severity: SeverityAttention, Title: "Self-protection is installed but an agent does not run it",
 			Detail: []string{p.Reason}, Fix: fix})

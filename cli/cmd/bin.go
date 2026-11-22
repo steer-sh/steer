@@ -436,8 +436,33 @@ func repointRegistrations(r *installReport, path string) (int, error) {
 			return rewritten, err
 		}
 		rewritten += n
+		n, err = refreshPiBridges(r, scope)
+		if err != nil {
+			return rewritten, err
+		}
+		rewritten += n
 	}
 	return rewritten, nil
+}
+
+// refreshPiBridges rewrites each global Pi extension an older Steer generated, after
+// the relinks above have repointed its commands. A project extension is a file the
+// repository may commit, so it is left to the install that wrote it. An older
+// extension still enforces, so a failed rewrite is a step left to the operator and
+// never stops the install.
+func refreshPiBridges(r *installReport, scope string) (int, error) {
+	if scope != claude.GlobalScope {
+		return 0, nil
+	}
+	paths, err := pihooks.RefreshBridges(scope, "")
+	for _, p := range paths {
+		r.info(fmt.Sprintf("pi, %s scope: rewrote %s with this build's extension", scope, p))
+	}
+	if err != nil {
+		r.action(fmt.Sprintf("pi, %s scope: an extension from an older Steer could not be rewritten (%v); "+
+			"steer status reads it as unknown until it is", scope, err))
+	}
+	return len(paths), nil
 }
 
 // relinked answers what a registered command becomes, and whether that differs from

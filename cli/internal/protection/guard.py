@@ -9,8 +9,8 @@ a careless agent, not one that hides a write behind bash -c, an interpreter,
 eval or a variable.
 
 Steer's own files are closed to every change. A harness configuration file is
-open to the Edit and Write tools except where the change removes a Steer entry or
-turns hooks off; a shell write to one is blocked, since its result cannot be read.
+open to the Edit and Write tools except where the change removes a Steer entry,
+turns hooks off or withdraws the trust they run under; a shell write to one is blocked, since its result cannot be read.
 """
 
 import collections
@@ -77,10 +77,39 @@ def codex_home():
     return os.path.join(os.path.expanduser("~"), ".codex")
 
 
+def pi_agent_dir():
+    configured = os.environ.get("PI_CODING_AGENT_DIR", "").strip()
+    if configured:
+        return configured
+    return os.path.join(os.path.expanduser("~"), ".pi", "agent")
+
+
+# The extensions Steer writes into Pi's extension directories.
+PI_BRIDGES = ("steer-guards.ts", "steer-commit-gate.ts", "steer-checks.ts")
+BRIDGE_STAMP = "// steer-bridge: "
+
+
+def is_steer_bridge(path):
+    """Whether path is an extension Steer wrote: its first stamp line in the first
+    20 lines names a bridge and a channel, as Steer requires before it replaces one."""
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            for _, line in zip(range(20), handle):
+                line = line.strip()
+                if line.startswith(BRIDGE_STAMP):
+                    stamp = json.loads(line[len(BRIDGE_STAMP):])
+                    return isinstance(stamp, dict) and bool(stamp.get("bridge")) and bool(stamp.get("channel"))
+    except Exception:
+        pass
+    return False
+
+
 # Kinds of harness configuration file.
 CLAUDE_SETTINGS = "claude-settings"
 CODEX_HOOKS = "codex-hooks"
 CODEX_CONFIG = "codex-config"
+PI_TRUST = "pi-trust"
+PI_SETTINGS = "pi-settings"
 
 # The steer command a user runs in place of each kind of Steer file.
 STEER_FILE_COMMANDS = {
@@ -89,6 +118,9 @@ STEER_FILE_COMMANDS = {
     "steer-audit.jsonl": "steer audit",
     "config.json": "steer config set",
     SELF_NAME + ".py": "steer config set " + SETTING_KEY + " off",
+    "steer-guards.ts": "steer hooks rebuild",
+    "steer-commit-gate.ts": "steer commit-gate install or steer commit-gate remove",
+    "steer-checks.ts": "steer check install or steer check uninstall",
 }
 
 
@@ -102,6 +134,10 @@ def protected_paths(store_dir, cwd):
     root = repo_root(cwd)
     for store in (os.path.join(root, ".steer", "hooks"), os.path.join(root, ".claude", "hooks")):
         steer_files.extend(os.path.join(store, name) for name in STORE_FILES)
+    pi = pi_agent_dir()
+    for extensions in (os.path.join(pi, "extensions"), os.path.join(root, ".pi", "extensions")):
+        bridges = (os.path.join(extensions, name) for name in PI_BRIDGES)
+        steer_files.extend(path for path in bridges if is_steer_bridge(path))
 
     codex = codex_home()
     harness_files = [
@@ -111,6 +147,8 @@ def protected_paths(store_dir, cwd):
         (os.path.join(codex, "hooks.json"), CODEX_HOOKS),
         (os.path.join(root, ".codex", "hooks.json"), CODEX_HOOKS),
         (os.path.join(codex, "config.toml"), CODEX_CONFIG),
+        (os.path.join(pi, "trust.json"), PI_TRUST),
+        (os.path.join(pi, "settings.json"), PI_SETTINGS),
     ]
     protected = {}
     for path, kind in harness_files:
@@ -297,8 +335,155 @@ def config_change_reason(before, after):
     return ""
 
 
-def harness_change_reason(kind, before, after):
+TRUST_PAIR = re.compile(r'"((?:[^"\\]|\\.)*)"\s*:\s*(true|false|null)')
+
+
+def trust_decisions(text, fragment):
+    """Pi's trust.json: directory -> True, False or None. A whole file that is not a
+    JSON object of those values holds no decision Pi reads; a fragment, such as a
+    patch hunk, is read for its "path": value pairs."""
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict) and all(value is None or isinstance(value, bool) for value in parsed.values()):
+            return parsed
+    except Exception:
+        pass
+    if not fragment:
+        return {}
+    values = {"true": True, "false": False, "null": None}
+    decisions = {}
+    for match in TRUST_PAIR.finditer(text):
+        try:
+            key = json.loads('"' + match.group(1) + '"')
+        except Exception:
+            key = match.group(1)
+        decisions[key] = values[match.group(2)]
+    return decisions
+
+
+def trust_chain(directory):
+    """directory and each of its parents, nearest first."""
+    chain = [directory]
+    while os.path.dirname(chain[-1]) != chain[-1]:
+        chain.append(os.path.dirname(chain[-1]))
+    return chain
+
+
+def nearest_trust(decisions, directory):
+    """The nearest saved decision for directory, as Pi reads it: from the directory
+    up through its parents, skipping a null one."""
+    for current in trust_chain(directory):
+        if decisions.get(current) is not None:
+            return decisions[current]
+    return None
+
+
+def runs_pi_bridges(directory):
+    extensions = os.path.join(directory, ".pi", "extensions")
+    return any(is_steer_bridge(os.path.join(extensions, name)) for name in PI_BRIDGES)
+
+
+def loaded_bridge_projects():
+    """The project directories whose Steer bridges a Pi session recorded loading in
+    ~/.steer/state/pi-loads."""
+    loads = os.path.join(os.path.expanduser("~"), ".steer", "state", "pi-loads")
+    projects = set()
+    try:
+        names = os.listdir(loads)
+    except Exception:
+        return projects
+    for name in names:
+        if not name.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(loads, name), "r", encoding="utf-8") as record:
+                path = json.load(record).get("path", "")
+        except Exception:
+            continue
+        extensions = os.path.dirname(path) if isinstance(path, str) else ""
+        if os.path.basename(extensions) == "extensions" and os.path.basename(os.path.dirname(extensions)) == ".pi":
+            projects.add(os.path.dirname(os.path.dirname(extensions)))
+    return projects
+
+
+def trust_change_reason(before, after, cwd):
+    """Why rewriting trust.json from before to after withdraws Pi's trust from a
+    project holding Steer's bridges, or ""."""
+    old, new = trust_decisions(before, False), trust_decisions(after, False)
+    return withdrawn_trust_reason(old, new, cwd)
+
+
+def trust_fragment_reason(before, old_string, new_string, cwd):
+    """The trust check for a hunk out of its context, such as an insertion with no
+    old text: the file on disk with the hunk's old pairs taken out and its new
+    pairs put in."""
+    old = dict(trust_decisions(before, False))
+    old.update(trust_decisions(old_string, True))
+    new = dict(old)
+    for key in trust_decisions(old_string, True):
+        new.pop(key, None)
+    new.update(trust_decisions(new_string, True))
+    return withdrawn_trust_reason(old, new, cwd)
+
+
+def bridged_projects(cwd, *decision_maps):
+    """The projects holding a Steer bridge among the current repository, each
+    directory a trust map names, and each project whose bridge a Pi session
+    recorded loading."""
+    candidates = {os.path.realpath(repo_root(cwd))} | loaded_bridge_projects()
+    for decisions in decision_maps:
+        candidates.update(key for key in decisions if isinstance(key, str) and os.path.isabs(key))
+    return [directory for directory in sorted(candidates) if runs_pi_bridges(directory)]
+
+
+DEFAULT_TRUST = re.compile(r'"defaultProjectTrust"\s*:\s*"([^"]*)"')
+
+
+def default_trust(text, fragment):
+    """The defaultProjectTrust value Pi's settings.json text sets, or None. A whole
+    file that is not a JSON object sets none."""
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            return parsed.get("defaultProjectTrust")
+    except Exception:
+        pass
+    match = DEFAULT_TRUST.search(text) if fragment else None
+    return match.group(1) if match else None
+
+
+def default_trust_reason(before, after, cwd):
+    """Why moving Pi's defaultProjectTrust from before off "always" leaves a project
+    holding a Steer bridge, with no saved decision, untrusted, or ""."""
+    if before != "always" or after == "always":
+        return ""
+    decisions = trust_decisions(read_text(os.path.join(pi_agent_dir(), "trust.json")), False)
+    for directory in bridged_projects(cwd, decisions):
+        if nearest_trust(decisions, directory) is None:
+            return "it stops Pi trusting " + directory + " by default, whose Steer extensions Pi then skips"
+    return ""
+
+
+def withdrawn_trust_reason(old, new, cwd):
+    """Why turning decisions old into new withdraws Pi's trust from a project
+    holding Steer's bridges, or "": it leaves a granted project without a granting
+    decision, declines one Pi would ask about, or takes back a grant on the project
+    or a parent of it, which a later edit may rely on."""
+    for directory in bridged_projects(cwd, old, new):
+        before, after = nearest_trust(old, directory), nearest_trust(new, directory)
+        lost = (before is True and after is not True) or (after is False and before is not False)
+        taken = any(old.get(key) is True and new.get(key) is not True for key in trust_chain(directory))
+        if lost or taken:
+            return "it withdraws Pi's trust covering " + directory + ", whose Steer extensions Pi then skips"
+    return ""
+
+
+def harness_change_reason(kind, before, after, cwd):
     """Why turning before into after removes a Steer entry or turns hooks off, or ""."""
+    if kind == PI_TRUST:
+        return trust_change_reason(before, after, cwd)
+    if kind == PI_SETTINGS:
+        return default_trust_reason(default_trust(before, False), default_trust(after, False), cwd)
     if kind == CODEX_CONFIG:
         return config_change_reason(before, after)
     if removed_registration(before, after):
@@ -344,13 +529,13 @@ def edit_fragment_reason(kind, old_string, new_string):
     return ""
 
 
-def harness_edit_reason(kind, path, tool_name, tool_input):
+def harness_edit_reason(kind, path, tool_name, tool_input, cwd):
     """Why an Edit or Write of a harness configuration file removes a Steer entry
     or turns hooks off, or ""."""
     before = read_text(path)
     if tool_name == "Write":
         content = tool_input.get("content", "")
-        return harness_change_reason(kind, before, content if isinstance(content, str) else "")
+        return harness_change_reason(kind, before, content if isinstance(content, str) else "", cwd)
     if tool_input.get("steer_operation") == "delete":
         return "it deletes the file"
     old_string = tool_input.get("old_string", "")
@@ -362,7 +547,14 @@ def harness_edit_reason(kind, path, tool_name, tool_input):
             after = before.replace(old_string, new_string)
         else:
             after = before.replace(old_string, new_string, 1)
-        return harness_change_reason(kind, before, after)
+        return harness_change_reason(kind, before, after, cwd)
+    if kind == PI_TRUST:
+        return trust_fragment_reason(before, old_string, new_string, cwd)
+    if kind == PI_SETTINGS:
+        if DEFAULT_TRUST.search(old_string) or DEFAULT_TRUST.search(new_string):
+            current = default_trust(old_string, True) or default_trust(before, False)
+            return default_trust_reason(current, default_trust(new_string, True), cwd)
+        return ""
     return edit_fragment_reason(kind, old_string, new_string)
 
 
@@ -569,8 +761,8 @@ STEER_FILE_REASON = (
     "If the change is needed, ask the user to run {command} themselves."
 )
 HARNESS_SHELL_REASON = (
-    "Steer's self-protection blocks a shell write to {path}, which registers your "
-    "agent's hooks. Make the change with the Edit or Write tool instead: Steer checks "
+    "Steer's self-protection blocks a shell write to {path}, which registers or "
+    "trusts your agent's hooks. Make the change with the Edit or Write tool instead: Steer checks "
     "those edits and allows any that keep its own entries."
 )
 HARNESS_EDIT_REASON = (
@@ -675,7 +867,7 @@ def main():
             edits = [dict(hunk, file_path=file_path) for hunk in tool_input.get("edits", []) if isinstance(hunk, dict)]
             tool_name = "Edit"
         for edit in edits:
-            why = harness_edit_reason(entry[1], canonical, tool_name, edit)
+            why = harness_edit_reason(entry[1], canonical, tool_name, edit, cwd)
             if why:
                 block(HARNESS_EDIT_REASON.format(path=file_path, why=why))
                 break

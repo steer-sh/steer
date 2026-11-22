@@ -39,22 +39,24 @@ def steer_repo_root(cwd):
 
 
 def steer_patch_sections(patch_text):
-    """Split an apply_patch document into (op, path, added, removed) tuples.
+    """Split an apply_patch document into (op, path, added, removed, source) tuples.
 
     apply_patch carries its whole multi-file patch in one string, so a guard that
     reads it as a command would inspect diff syntax rather than the code landing.
     added joins a section's + lines and removed its - lines, each in patch order
-    across every hunk; context lines are in neither.
+    across every hunk; context lines are in neither. path is where the section
+    lands; source is the path a Move to renamed it from, or "".
     """
     sections = []
     op = ""
     path = ""
+    source = ""
     added = []
     removed = []
 
     def flush():
         if op:
-            sections.append((op, path, "\n".join(added), "\n".join(removed)))
+            sections.append((op, path, "\n".join(added), "\n".join(removed), source))
 
     for line in (patch_text or "").split("\n"):
         header = None
@@ -69,11 +71,12 @@ def steer_patch_sections(patch_text):
         if header:
             flush()
             op, path = header
+            source = ""
             added = []
             removed = []
             continue
         if line.startswith("*** Move to: "):
-            # The patch renames as it edits; the target path is what lands.
+            source = source or path
             path = line[len("*** Move to: "):].strip()
             continue
         if line.startswith("*** "):
@@ -121,7 +124,12 @@ def steer_virtual_edits(payload):
         if not isinstance(command, str):
             command = ""
         edits = []
-        for op, path, added, removed in steer_patch_sections(command):
+        for op, path, added, removed, source in steer_patch_sections(command):
+            if source:
+                # A move takes the file off its old path, so a guard protecting
+                # that path sees it leave as a deletion.
+                fields = {"steer_operation": "delete", "new_string": "", "steer_move_to": path}
+                edits.append(steer_edit(payload, "Edit", source, fields))
             if op == "add":
                 fields = {"content": added}
                 edits.append(steer_edit(payload, "Write", path, fields))

@@ -13,7 +13,7 @@ import (
 // guardRuntime is a home holding the guard in its global store, and a repository
 // beside it.
 type guardRuntime struct {
-	home, codex, repo, hookPath string
+	home, codex, pi, repo, hookPath string
 }
 
 func setupGuardRuntime(t *testing.T) guardRuntime {
@@ -25,6 +25,7 @@ func setupGuardRuntime(t *testing.T) guardRuntime {
 	rt := guardRuntime{
 		home:  filepath.Join(root, "home"),
 		codex: filepath.Join(root, "codex-home"),
+		pi:    filepath.Join(root, "pi-agent"),
 		repo:  filepath.Join(root, "repo"),
 	}
 	store := filepath.Join(rt.home, ".steer", "hooks")
@@ -50,7 +51,7 @@ func (rt guardRuntime) run(t *testing.T, cwd string, payload map[string]any) (bo
 	}
 	cmd := exec.Command("python3", rt.hookPath)
 	cmd.Dir = cwd
-	cmd.Env = append(os.Environ(), "HOME="+rt.home, "CODEX_HOME="+rt.codex)
+	cmd.Env = append(os.Environ(), "HOME="+rt.home, "CODEX_HOME="+rt.codex, "PI_CODING_AGENT_DIR="+rt.pi)
 	cmd.Stdin = bytes.NewReader(input)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -95,7 +96,18 @@ func TestSelfProtectionBlocksSteerStateByFullPath(t *testing.T) {
 		filepath.Join(rt.home, ".steer", "config.json"),
 		filepath.Join(rt.repo, ".steer", "hooks", "steer-manifest.json"),
 		filepath.Join(rt.repo, ".claude", "hooks", "steer-hooks.py"),
+		filepath.Join(rt.pi, "extensions", "steer-guards.ts"),
+		filepath.Join(rt.pi, "extensions", "steer-commit-gate.ts"),
+		filepath.Join(rt.repo, ".pi", "extensions", "steer-guards.ts"),
+		filepath.Join(rt.repo, ".pi", "extensions", "steer-commit-gate.ts"),
+		filepath.Join(rt.repo, ".pi", "extensions", "steer-checks.ts"),
 	}
+	for _, path := range steerFiles {
+		if strings.HasSuffix(path, ".ts") {
+			writeFile(t, path, "// steer-bridge: {\"bridge\":\"d\",\"channel\":\"guards\"}\n")
+		}
+	}
+	writeFile(t, filepath.Join(rt.pi, "extensions", "steer-checks.ts"), "// steer-bridge: {}\n")
 	for _, path := range steerFiles {
 		t.Run(path, func(t *testing.T) {
 			if blocked, reason := rt.run(t, rt.repo, edit(path)); !blocked || !strings.Contains(reason, "ask the user to run steer ") {
@@ -113,6 +125,8 @@ func TestSelfProtectionBlocksSteerStateByFullPath(t *testing.T) {
 		filepath.Join(rt.repo, ".claude", "settings.json"),
 		filepath.Join(rt.repo, ".claude", "settings.local.json"),
 		filepath.Join(rt.repo, ".codex", "hooks.json"),
+		filepath.Join(rt.pi, "trust.json"),
+		filepath.Join(rt.pi, "settings.json"),
 	}
 	for _, path := range harnessFiles {
 		t.Run(path, func(t *testing.T) {
@@ -138,6 +152,9 @@ func TestSelfProtectionBlocksSteerStateByFullPath(t *testing.T) {
 		{rt.repo, "mv .claude /tmp/old-claude"},
 		{rt.repo, "cp /tmp/settings.json .claude/"},
 		{rt.repo, "echo '{}' > \".steer/hooks/steer-manifest.json\""},
+		{filepath.Join(rt.repo, "src"), "rm ../.pi/extensions/steer-commit-gate.ts"},
+		{rt.repo, "rm -rf .pi"},
+		{rt.repo, "mv " + filepath.Join(rt.pi, "extensions") + " /tmp/pi-extensions"},
 	}
 	for _, tc := range relative {
 		if blocked, _ := rt.run(t, tc.cwd, bash(tc.command)); !blocked {
@@ -164,6 +181,10 @@ func TestSelfProtectionBlocksSteerStateByFullPath(t *testing.T) {
 		bash("rm -rf src/build"),
 		bash("cp README.md .claude/"),
 		bash("chmod -R u+w ."),
+		edit(filepath.Join(rt.repo, ".pi", "extensions", "my-extension.ts")),
+		edit(filepath.Join(rt.pi, "extensions", "steer-checks.ts")),
+		edit(filepath.Join(rt.pi, "settings.json")),
+		bash("rm .pi/settings.json"),
 	}
 	for _, payload := range namesakes {
 		if blocked, reason := rt.run(t, rt.repo, payload); blocked {
@@ -281,6 +302,23 @@ func TestSelfProtectionGuardsSteersEntriesInHarnessFiles(t *testing.T) {
 	section := `[hooks.state."` + codexHooks + `:pre_tool_use:0:0"]`
 	writeFile(t, config, "model = \"m\"\n\n"+section+"\ntrusted_hash = \"sha256:abc\"\n")
 
+	writeFile(t, filepath.Join(rt.repo, ".pi", "extensions", "steer-guards.ts"), "// steer-bridge: {\"bridge\":\"d\",\"channel\":\"guards\"}\n")
+	parent := filepath.Dir(rt.repo)
+	other := filepath.Join(parent, "other")
+	work := filepath.Join(parent, "work")
+	loaded := filepath.Join(work, "proj", ".pi", "extensions", "steer-commit-gate.ts")
+	writeFile(t, loaded, "// steer-bridge: {\"bridge\":\"d\",\"channel\":\"guards\"}\n")
+	writeFile(t, filepath.Join(rt.home, ".steer", "state", "pi-loads", "0123.json"), `{"path": "`+loaded+`", "digest": "d"}`)
+	elsewhere, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	undecided := filepath.Join(elsewhere, "fresh")
+	writeFile(t, filepath.Join(undecided, ".pi", "extensions", "steer-checks.ts"), "// steer-bridge: {\"bridge\":\"d\",\"channel\":\"guards\"}\n")
+	trust := filepath.Join(rt.pi, "trust.json")
+	trusted := `{"` + parent + `": true, "` + rt.repo + `": true, "` + other + `": true, "` + work + `": true}`
+	writeFile(t, trust, trusted)
+
 	cases := []struct {
 		name    string
 		payload map[string]any
@@ -313,11 +351,46 @@ func TestSelfProtectionGuardsSteersEntriesInHarnessFiles(t *testing.T) {
 		{"a patch hunk adding hooks = false out of context", editText(config, "", "hooks = false"), true},
 		{"Codex hooks off with a comment and literal quotes", write(config, "['features']\n'hooks' = false # off\n"+section+"\ntrusted_hash = \"sha256:abc\"\n"), true},
 		{"Codex hooks off by a quoted dotted key", write(config, "features.\"hooks\" = false\n"+section+"\ntrusted_hash = \"sha256:abc\"\n"), true},
+		{"Pi's trust withdrawn from a project with Steer's bridges", editText(trust, `"`+rt.repo+`": true`, `"`+rt.repo+`": false`), true},
+		{"Pi's trust in that project removed by Write", write(trust, `{"`+other+`": true}`), true},
+		{"a parent's grant taken back while the project keeps its own", editText(trust, `"`+parent+`": true`, `"`+parent+`": false`), true},
+		{"a grant withdrawn from a parent of a project Pi loaded bridges in", editText(trust, `"`+work+`": true`, `"`+work+`": false`), true},
+		{"a Write Pi cannot parse", write(trust, trusted+","), true},
+		{"a Write holding a decision that is not a boolean", write(trust, strings.Replace(trusted, "{", `{"/tmp": "yes", `, 1)), true},
+		{"a decline of a project Pi would ask about", editText(trust, "", `"`+undecided+`": false,`), true},
+		{"an escaped key declining that project", editText(trust, "", `"`+strings.Replace(undecided, "fresh", `fr\u0065sh`, 1)+`": false,`), true},
+		{"an inserted decline under an inherited grant", editText(trust, "", `"`+filepath.Join(work, "proj")+`": false,`), true},
+		{"Pi's trust withdrawn by a hunk out of context", editText(trust, `"`+rt.repo+`":true`, `"`+rt.repo+`":null`), true},
+		{"Pi's trust withdrawn from a project without them", editText(trust, `"`+other+`": true`, `"`+other+`": false`), false},
+		{"Pi's trust granted to another project", write(trust, strings.Replace(trusted, "{", `{"/tmp": true, `, 1)), false},
 		{"a Steer handler's type changed", editText(settings, `"type": "command", "command": "`+gate, `"type": "prompt", "command": "`+gate), true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			blocked, reason := rt.run(t, rt.repo, tc.payload)
+			if blocked != tc.blocked {
+				t.Fatalf("blocked = %v, want %v (reason %q)", blocked, tc.blocked, reason)
+			}
+		})
+	}
+
+	piSettings := filepath.Join(rt.pi, "settings.json")
+	writeFile(t, piSettings, `{"theme": "dark", "defaultProjectTrust": "always"}`)
+	never := editText(piSettings, `"defaultProjectTrust": "always"`, `"defaultProjectTrust": "never"`)
+	defaults := []struct {
+		name, cwd string
+		payload   map[string]any
+		blocked   bool
+	}{
+		{"Pi's default trust taken from an undecided project", undecided, never, true},
+		{"a hunk out of context taking the default away", undecided, editText(piSettings, `"defaultProjectTrust":"always"`, ""), true},
+		{"a settings Write Pi cannot parse", undecided, write(piSettings, "{ broken"), true},
+		{"another Pi setting changed", undecided, editText(piSettings, `"dark"`, `"light"`), false},
+		{"the default changed where every project has a decision", rt.repo, never, false},
+	}
+	for _, tc := range defaults {
+		t.Run(tc.name, func(t *testing.T) {
+			blocked, reason := rt.run(t, tc.cwd, tc.payload)
 			if blocked != tc.blocked {
 				t.Fatalf("blocked = %v, want %v (reason %q)", blocked, tc.blocked, reason)
 			}

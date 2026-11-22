@@ -41,8 +41,10 @@ Read the linked architecture section before changing the corresponding boundary:
   track. Both marketplace entries install the `release` branch, which a `v*` tag
   replaces through `.github/workflows/release.yml`; the tag must equal every
   manifest version, because a harness refreshes its copy only on a version change.
-  `cli/internal/plugindist/` checks the four plugin/marketplace manifests together
-  and the README's install commands against their repository and marketplace.
+  `cli/internal/plugindist/` checks the four plugin/marketplace manifests and Pi's
+  root `package.json` together, and the README's install commands against their
+  repository and marketplace. Pi's package loads only `pi/steer-session.ts`; a
+  generated `.pi/extensions/steer-*.ts` file stays the one owner of its channel.
   A skill runs every steer command as `<STEER_BIN> …`, which the agent writes as
   the launcher's absolute path, never as bare `steer` or a shell variable;
   `TestSkillCommandsStartWithTheLauncherPlaceholder` pins it.
@@ -71,9 +73,12 @@ Read the linked architecture section before changing the corresponding boundary:
 - Harness support, paths, or migrations: [harnesses and storage](ARCHITECTURE.md#harnesses-and-storage).
   Start with `cli/internal/harness/` and `cli/internal/steerpath/`; registration
   adapters and shared stores have different ownership.
-  Pi is unlisted: help text and messages offer only harnesses `harness.Listed`
-  accepts, and a status row names Pi only where a Pi registration or evidence
-  exists. A new user-facing harness listing must apply the same test.
+  Pi is optional (`harness.Optional`): help text offers it, but a status row
+  names it only where Pi's agent directory exists (`~/.pi/agent`, or
+  `PI_CODING_AGENT_DIR`, which Pi itself reads) or a Pi registration or evidence
+  does (`harness.Unlisted`; a rules row needs a Steer rule in Pi's document), and a
+  command naming no harness writes Pi files only where that directory exists. A new
+  status reading or default write target must apply the same test.
   Codex hook writers share `cli/internal/codex/hooks.go`'s `save`; every mutation
   must pass its scope so project writes refuse symlinked configuration paths.
   Pi bridge mutations share `cli/internal/pi/registrar.go`'s
@@ -125,7 +130,9 @@ Read the linked architecture section before changing the corresponding boundary:
   The root-Stop ledger backstop (`cli/internal/gate/stophook/`, run by
   `commit-gate backfill`) reads only the `chain-end` rows `Engine.release` writes,
   so a new path that ends a blocked sequence, or hands findings without blocking, must
-  go through `release`.
+  go through `release`. Pi has no Stop hook: `cli/internal/pi/bridge_gate.ts` sends
+  the backstop its Stop payload at `agent_before_settle` and owns Pi's turn ID and
+  `stop_hook_active`.
   A new writer of the ledger shard takes `gate.LockLog`: `Ledger.Log` appends and
   `resolve.writeRows` renames over the file. A rewrite carries what reached the
   replaced file under `gate.LockSwap` (rename through carry, whole lines only), and
@@ -224,7 +231,7 @@ Read the linked architecture section before changing the corresponding boundary:
   adapter, and the dispatch in `cli/internal/firingaudit/continuation.go`.
   A reader returns the granularity it achieved with its source anchors; adding
   one means teaching `Reach` what that harness's locators allow.
-  The Stop block readers (`cc.StopBlock`, `codex.StopBlock`) find a block by
+  The Stop block readers (`cc.StopBlock`, `codex.StopBlock`, `pi.StopBlock`) find a block by
   `checks.RunIDLine`, so the block reason's last line changes with them.
 - Firing adjudications: the store `cli/internal/adjudication/` and its component
   name in `cli/internal/statestore/Components`. A corpus absent from that list never
@@ -278,6 +285,10 @@ Read the linked architecture section before changing the corresponding boundary:
   which harnesses a command naming none writes to; `currentRegistrars`
   (`cli/cmd/harness.go`) and the dashboard's actions both call it, so a new
   writing command or action takes it rather than every installed harness.
+- Pi bridges: each bridge body calls `steerRecordLoad(pi)` from its default export
+  and has its digest in `currentDigest` (`cli/internal/pi/load.go`); a bridge
+  without both reads unknown in status forever, and `pi.RefreshBridges` never
+  rewrites it.
 - Display wording: use shared `status`/`styles` helpers and check
   `cli/internal/status/vocabulary_test.go`. Stored tokens and human labels have
   different compatibility obligations.
@@ -383,8 +394,11 @@ release's `--update-from <tag>` runs the README's `## Update` commands in it. It
 `--local` installs this checkout's HEAD with a Linux build instead, so it runs before a
 release; `--uninstall readme|plugin-first|steer-first` then arms the global gate, check runner and
 status line and removes them through the README's `## Uninstall` lines, after removing
-the plugin, or before removing it, which is the only test of what `claude plugin uninstall` and
-`codex plugin remove` write. Guard and rules removal is covered in `cli/e2e/` alone.
+the plugin, or before removing it, which is the only test of what `claude plugin uninstall`,
+`codex plugin remove` and `pi remove` write. Guard and rules removal is covered in `cli/e2e/` alone.
+Pi takes no `file://` source, so a `--local` Pi run serves the staged checkout from a
+`git daemon` in the container. `--readme <file>` reads the commands from another file,
+which tries a harness's block before the README carries it.
 
 For routing changes, `tests/routing_scenarios.py --model <model>` runs the
 `/steer --headless --route-only` scenarios in

@@ -11,12 +11,14 @@ import (
 	"github.com/steer-sh/steer-cli/internal/transcript"
 	"github.com/steer-sh/steer-cli/internal/transcript/cc"
 	"github.com/steer-sh/steer-cli/internal/transcript/codex"
+	txpi "github.com/steer-sh/steer-cli/internal/transcript/pi"
 )
 
 // The locator keys the masters write. A key's absence and its empty value are
 // different facts, so a reader tests presence.
 const (
 	locatorAgentID        = "agent_id"
+	locatorToolCallID     = "tool_call_id"
 	locatorToolUseID      = "tool_use_id"
 	locatorTranscriptPath = "transcript_path"
 	locatorTurnID         = "turn_id"
@@ -103,9 +105,23 @@ func (r Row) Reach() Reach {
 		}
 		return Reach{Granularity: transcript.JoinTurn, TranscriptPath: path, TurnID: turn}
 	case harness.Pi:
-		return Reach{Granularity: transcript.JoinUnavailable,
-			TranscriptPath: path,
-			Reason:         "the Pi continuation lookup is not implemented"}
+		// Pi records a blocked call's denial as the toolResult carrying the
+		// call's id, which the guard bridge sends as tool_call_id.
+		id := r.Locators[locatorToolCallID]
+		if id == "" || path == "" {
+			return Reach{Granularity: transcript.JoinUnavailable,
+				Reason: "the row carries no call identifier and transcript path"}
+		}
+		if nested := txpi.NestedCall(id); nested != "" {
+			return Reach{Granularity: transcript.JoinUnavailable,
+				TranscriptPath: path, CallID: id, Reason: nested}
+		}
+		if _, err := os.Stat(path); err != nil {
+			return Reach{Granularity: transcript.JoinUnavailable,
+				TranscriptPath: path, CallID: id,
+				Reason: fmt.Sprintf("the transcript %s is gone", path)}
+		}
+		return Reach{Granularity: transcript.JoinCall, TranscriptPath: path, CallID: id}
 	default:
 		return Reach{Granularity: transcript.JoinUnavailable,
 			Reason: fmt.Sprintf("harness %q has no continuation lookup", r.Harness)}
@@ -147,6 +163,8 @@ func (r Row) continuationAt(reach Reach, budget transcript.ContinuationBudget) (
 		return got, err
 	case harness.Codex:
 		return codex.Continuation(reach.TranscriptPath, reach.TurnID, budget)
+	case harness.Pi:
+		return txpi.Continuation(reach.TranscriptPath, reach.CallID, budget)
 	}
 	// Reach reported a granularity for a harness with no reader, which is a
 	// disagreement inside this file rather than a fact about the row.
@@ -192,6 +210,8 @@ func (c CheckCase) Reach() Reach {
 		turn = c.Run.Locators[locatorPromptID]
 	case harness.Codex:
 		turn = c.Run.Locators[locatorTurnID]
+	case harness.Pi:
+		// A Pi block is its own session entry, which the run line finds alone.
 	default:
 		return Reach{Granularity: transcript.JoinUnavailable,
 			Reason: fmt.Sprintf("harness %q has no Stop block reader", c.Run.Harness)}
@@ -236,6 +256,8 @@ func (c CheckCase) Reading(budget transcript.ContinuationBudget) transcript.Stop
 		reading, err = cc.StopBlock(reach.TranscriptPath, line, reach.TurnID, budget)
 	case harness.Codex:
 		reading, err = codex.StopBlock(reach.TranscriptPath, line, reach.TurnID, budget)
+	case harness.Pi:
+		reading, err = txpi.StopBlock(reach.TranscriptPath, line, budget)
 	}
 	if err != nil {
 		out.Reason = err.Error()

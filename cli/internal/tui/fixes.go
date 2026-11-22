@@ -278,7 +278,7 @@ func (m *Model) guardRepairs() []fixRow {
 	// row serves both issues. It acts on the dashboard's scope, so the other scope
 	// gets no row.
 	for _, master := range m.snap.Posture.Masters {
-		if master.Scope != m.scope || !master.Detached() {
+		if master.Scope != m.scope || !master.Detached() || master.Unarmed() {
 			continue
 		}
 		agent := status.HarnessLabel(master.Harness)

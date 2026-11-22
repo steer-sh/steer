@@ -309,14 +309,15 @@ func hookRows(s *SystemStatus) []hookRow {
 }
 
 // trustIssues groups hook approval problems per harness and scope, because one visit to
-// /hooks clears them together. Steer reads no approval on an unlisted harness, so its
-// unknown state cannot be cleared and raises nothing.
+// /hooks, or one Pi /reload, clears them together.
 func trustIssues(s *SystemStatus) []Issue {
 	type group struct{ harness, scope, trust string }
 	whats := map[group][]string{}
 	var order []group
 	for _, row := range hookRows(s) {
-		if !harness.Listed(harness.ID(row.harness)) {
+		// Pi's state is unknown only when the load records cannot be read, which no
+		// Pi step clears.
+		if harness.ID(row.harness) == harness.Pi && row.trust == TrustUnknown {
 			continue
 		}
 		switch row.trust {
@@ -341,6 +342,11 @@ func trustIssues(s *SystemStatus) []Issue {
 		where := label + " " + key.scope
 		covers := strings.Join(whats[key], ", ")
 		step, _ := TrustStep(key.harness, key.trust, "")
+		if harness.ID(key.harness) == harness.Pi {
+			out = append(out, Issue{Severity: SeverityAttention, Title: where + " extensions are not running: " + covers,
+				Detail: []string{TrustPhrase(key.harness, key.trust)}, Fix: step.Fix})
+			continue
+		}
 		switch key.trust {
 		case TrustMissing:
 			out = append(out, Issue{Severity: SeverityAttention, Title: where + " hooks need approval",
@@ -464,7 +470,7 @@ func joinAnd(items []string) string {
 }
 
 // guardIssues reports guard runners that do not run what the store holds. A row for an
-// unlisted harness counts only where it registers a runner.
+// optional harness counts only where it registers a runner.
 func guardIssues(s *SystemStatus) []Issue {
 	var out []Issue
 	for _, m := range RunnersWithoutInterpreter(s.Posture.Masters, s.Posture.GuardInterpreter) {
@@ -478,7 +484,7 @@ func guardIssues(s *SystemStatus) []Issue {
 		label := HarnessLabel(m.Harness) + " " + m.Scope
 		switch {
 		case m.Detached():
-			if harness.Listed(harness.ID(m.Harness)) {
+			if !harness.Optional(harness.ID(m.Harness)) {
 				out = append(out, Issue{Severity: SeverityAttention, Title: label + " runs none of this scope's guards",
 					Fix: DetachedRepair(s.Posture.Masters, m.Scope)})
 			}
@@ -529,7 +535,7 @@ func checkIssues(c CheckTier) []Issue {
 	}
 	if !c.Armed() {
 		out = append(out, Issue{Severity: SeverityAttention, Title: "This repository's checks are adopted, but no harness runs them",
-			Detail: []string{"For Codex, use --harness codex."}, Fix: "steer check install --harness claude-code"})
+			Detail: []string{"For Codex or Pi, use --harness codex or --harness pi."}, Fix: "steer check install --harness claude-code"})
 	}
 	for _, a := range c.Runner {
 		if !a.Registered {

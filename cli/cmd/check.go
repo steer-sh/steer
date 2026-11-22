@@ -268,7 +268,7 @@ var checkUnadoptCmd = &cobra.Command{
 }
 
 var checkHookCmd = &cobra.Command{
-	Use:   "hook --harness <claude-code|codex>",
+	Use:   "hook --harness <claude-code|codex|pi>",
 	Short: "Run check.sh for a harness's root Stop event and reply in its hook format",
 	Long: `Reads a Stop payload on stdin. In an adopted repository it runs check.sh the
 way ` + "`steer check run`" + ` does, with source stop, and blocks the turn on a failure.
@@ -614,7 +614,7 @@ func init() {
 	rootCmd.AddCommand(checkCmd)
 	checkCmd.AddCommand(checkGuideCmd, checkInitCmd, checkAddCmd, checkTestCmd, checkListCmd, checkRemoveCmd,
 		checkExecCmd, checkGoTestCmd, checkRunCmd, checkAdoptCmd, checkUnadoptCmd, checkHookCmd)
-	checkHookCmd.Flags().String("harness", "", "the harness sending the payload: claude-code or codex")
+	checkHookCmd.Flags().String("harness", "", "the harness sending the payload: claude-code, codex or pi")
 	_ = checkHookCmd.MarkFlagRequired("harness")
 	checkHookCmd.Flags().Duration("timeout", checks.DefaultExecTimeout, "total bound on check.sh; its process group is stopped at the deadline")
 	checkExecCmd.Flags().Bool("all", false, "run every script check in the manifest")

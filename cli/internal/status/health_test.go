@@ -158,12 +158,25 @@ func TestHealthGroupsApprovalIssues(t *testing.T) {
 	}
 }
 
-// An unlisted harness's unreadable approval cannot be cleared, so it blocks nothing.
-func TestHealthIgnoresUnlistedTrustUnknown(t *testing.T) {
+// Pi's unknown state comes from unreadable load records, which no Pi step clears, so
+// it blocks nothing; an extension no session loaded is an issue whose repair is Pi's
+// /reload.
+func TestHealthReadsPiLoadStates(t *testing.T) {
 	s := healthyFixture()
 	s.Posture.Masters = append(s.Posture.Masters, MasterRuntime{Harness: "pi", Scope: "global", Path: "/x", State: MasterCurrent, Trust: TrustUnknown})
 	if h := HealthOf(s, availableProbe()); h.Verdict != VerdictHealthy {
-		t.Errorf("health = %+v", h)
+		t.Errorf("unknown: health = %+v", h)
+	}
+	s.Posture.Masters[len(s.Posture.Masters)-1].Trust = TrustMissing
+	h := HealthOf(s, availableProbe())
+	found := false
+	for _, issue := range h.Issues {
+		if strings.HasPrefix(issue.Title, "Pi global extensions are not running") && strings.Contains(issue.Fix, "/reload") {
+			found = true
+		}
+	}
+	if h.Verdict == VerdictHealthy || !found {
+		t.Errorf("missing: health = %+v, want a Pi issue whose fix names /reload", h)
 	}
 }
 

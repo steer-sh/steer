@@ -6,6 +6,7 @@ import (
 
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/reviewers"
+	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/status"
 )
 
@@ -14,7 +15,7 @@ import (
 // headline must lead with what remains.
 func TestInstallReadinessLeadsWithTheOpenSteps(t *testing.T) {
 	steps := []status.Step{{Title: "the reviewer CLI does not resolve", Fix: "install agy"}}
-	out := renderInstallReadiness(steps, "Registered: the Codex commit gate on PreToolUse")
+	out := renderInstallReadiness(harness.Codex, "global", steps, "Registered: the Codex commit gate on PreToolUse")
 	head := strings.TrimSpace(strings.Split(strings.TrimSpace(stripBox(out)), "\n")[0])
 	if !strings.Contains(head, "Not reviewing yet") {
 		t.Errorf("headline = %q; want the open steps first", head)
@@ -27,13 +28,32 @@ func TestInstallReadinessLeadsWithTheOpenSteps(t *testing.T) {
 }
 
 func TestInstallReadinessReportsReadyOnlyWithNoSteps(t *testing.T) {
-	out := renderInstallReadiness(nil, "Registered: the Claude Code commit gate on PreToolUse")
+	out := renderInstallReadiness(harness.ClaudeCode, "global", nil, "Registered: the Claude Code commit gate on PreToolUse")
 	if !strings.Contains(out, "Ready") || strings.Contains(out, "step(s) remain") {
 		t.Errorf("output = %q; want the ready headline", out)
 	}
 	// The write proves no reviewer answers, so the ready box names the command that does.
 	if !strings.Contains(out, "steer commit-gate test-reviewer") {
 		t.Errorf("output = %q; want the pointer to the reviewer test", out)
+	}
+}
+
+// A Pi load record names the bytes the newest Pi session start ran, and a Pi process
+// that does not trust the project loads no project extension, so a ready Pi install
+// names the sessions the record covers at its scope rather than every commit or Stop.
+func TestAReadyPiInstallNamesTheSessionsItCovers(t *testing.T) {
+	gateOut := strings.Join(strings.Fields(stripBox(renderInstallReadiness(harness.Pi, "project", nil, "Registered: the Pi commit gate"))), " ")
+	if !strings.Contains(gateOut, "goes to the reviewer "+status.PiLoadedSessions("project")+".") ||
+		!strings.Contains(gateOut, "trust this project") {
+		t.Errorf("commit gate output = %q; want the trusting Pi sessions named", gateOut)
+	}
+	checkLine := readyFor(harness.Pi, "global", "Ready — the next root Stop in an adopted repository runs check.sh")
+	if !strings.HasSuffix(checkLine, "runs check.sh "+status.PiLoadedSessions("global")+".") ||
+		strings.Contains(checkLine, "trust") {
+		t.Errorf("check install line = %q; want the global Pi sessions named", checkLine)
+	}
+	if readyFor(harness.ClaudeCode, "global", "Ready") != "Ready." {
+		t.Error("a Claude Code ready line carries the Pi qualification")
 	}
 }
 

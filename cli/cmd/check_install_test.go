@@ -14,6 +14,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/claude"
 	codexhooks "github.com/steer-sh/steer-cli/internal/codex"
 	"github.com/steer-sh/steer-cli/internal/harness"
+	pihooks "github.com/steer-sh/steer-cli/internal/pi"
 	"github.com/steer-sh/steer-cli/internal/steerbin"
 	"github.com/steer-sh/steer-cli/internal/testhome"
 )
@@ -69,6 +70,10 @@ func TestCheckInstallArmsRootStopInBothHarnesses(t *testing.T) {
 		if target == harness.Codex && !strings.Contains(out, "/hooks") {
 			t.Fatalf("the Codex install does not name the trust review:\n%s", out)
 		}
+		// No Pi session has loaded the extension the install just wrote.
+		if target == harness.Pi && !strings.Contains(out, "/reload") {
+			t.Fatalf("the Pi install does not name the reload that loads its extension:\n%s", out)
+		}
 	}
 	if checks.RegisteredHookTimeout() <= int(checks.DefaultExecTimeout.Seconds()) {
 		t.Fatal("the registered timeout does not exceed the run deadline")
@@ -94,7 +99,7 @@ func TestInstallNamesAdoptionOnlyWhereCheckShExists(t *testing.T) {
 		t.Fatalf("git init: %v: %s", err, out)
 	}
 	hasAdoptStep := func() bool {
-		for _, step := range checkInstallSteps(harness.ClaudeCode, checkscope.Arming{}) {
+		for _, step := range checkInstallSteps(harness.ClaudeCode, claude.GlobalScope, checkscope.Arming{}) {
 			if step.Fix == "steer check adopt" {
 				return true
 			}
@@ -113,11 +118,24 @@ func TestInstallNamesAdoptionOnlyWhereCheckShExists(t *testing.T) {
 	}
 }
 
-func TestCheckInstallRefusesPi(t *testing.T) {
+// TestCheckInstallRegistersAndRemovesPisRunner checks that install writes Pi's
+// settle extension, the arming reader finds it, and uninstall removes it.
+func TestCheckInstallRegistersAndRemovesPisRunner(t *testing.T) {
 	fakeHomes(t)
 
-	if _, err := runCheckCmd(t, checkInstallCmd, "pi"); err == nil {
-		t.Fatal("install accepted Pi, which has no blocking Stop support")
+	if _, err := runCheckCmd(t, checkInstallCmd, "pi"); err != nil {
+		t.Fatalf("install --harness pi: %v", err)
+	}
+	a, err := checkRunnerArming(harness.Pi, claude.GlobalScope)
+	if err != nil || !a.Registered || !strings.HasSuffix(a.Command, "check hook --harness pi") ||
+		a.Timeout != checks.RegisteredHookTimeout() {
+		t.Fatalf("pi arming = %#v, %v", a, err)
+	}
+	if _, err := runCheckCmd(t, checkUninstallCmd, "pi"); err != nil {
+		t.Fatalf("uninstall --harness pi: %v", err)
+	}
+	if a, _ := checkRunnerArming(harness.Pi, claude.GlobalScope); a.Registered {
+		t.Fatal("uninstall left Pi's runner registered")
 	}
 }
 
@@ -153,6 +171,9 @@ func TestBinInstallRelinksTheCheckRunner(t *testing.T) {
 	if _, err := codexhooks.RegisterCheckHook(claude.GlobalScope, "", "steer check hook --harness codex", 330); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := pihooks.RegisterCheckRunner(claude.GlobalScope, "", "steer check hook --harness pi", 330); err != nil {
+		t.Fatal(err)
+	}
 	path, err := steerbin.Ensure()
 	if err != nil {
 		t.Fatal(err)
@@ -162,8 +183,8 @@ func TestBinInstallRelinksTheCheckRunner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rewritten != 2 {
-		t.Fatalf("rewrote %d registration(s), want both runners", rewritten)
+	if rewritten != len(runnerHarnesses) {
+		t.Fatalf("rewrote %d registration(s), want every runner", rewritten)
 	}
 	for _, target := range runnerHarnesses {
 		a, err := checkRunnerArming(target, claude.GlobalScope)

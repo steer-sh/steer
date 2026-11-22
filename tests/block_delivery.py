@@ -7,11 +7,11 @@ and reads the agent's own transcript: the recorded result of the blocked call
 must carry the guard's reason, the `steer hook: ` footer and the contest
 command for that firing.
 
-    python3 tests/block_delivery.py [--harness claude|codex ...] [--claude-model M]
-        [--codex-model M] [--keep]
+    python3 tests/block_delivery.py [--harness claude|codex|pi ...] [--claude-model M]
+        [--codex-model M] [--pi-model M] [--keep]
 
 Claude Code needs CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY exported; Codex
-needs a login in ~/.codex/auth.json.
+needs a login in ~/.codex/auth.json, and Pi one in ~/.pi/agent/auth.json.
 """
 
 import argparse
@@ -64,7 +64,7 @@ def build_steer(bin_dir):
     return exe
 
 
-def install_guard(box, work, env):
+def install_guard(box, work, env, harness):
     subprocess.run(["git", "init", "-q"], cwd=work, check=True)
     hooks = work / ".steer" / "hooks"
     hooks.mkdir(parents=True)
@@ -73,7 +73,8 @@ def install_guard(box, work, env):
     guard.chmod(0o755)
     # register writes the rule into CLAUDE.md; a rule naming the token makes
     # the agent refuse the command, so no block would ever happen.
-    subprocess.run(["steer", "register", str(guard), "--rule", "sandbox guard for a hook test"],
+    target = {"claude": [], "codex": [], "pi": ["--harness", "pi"]}[harness]
+    subprocess.run(["steer", "register", str(guard), "--rule", "sandbox guard for a hook test"] + target,
                    cwd=work, env=env, check=True, stdout=subprocess.DEVNULL)
 
 
@@ -113,10 +114,25 @@ def codex_results(home):
     return out
 
 
+def pi_results(home):
+    """The text of every errored tool result in the sandbox's Pi sessions."""
+    out = []
+    for path in (home / ".pi" / "agent" / "sessions").rglob("*.jsonl"):
+        for line in path.read_text(errors="replace").splitlines():
+            try:
+                message = json.loads(line).get("message") or {}
+            except json.JSONDecodeError:
+                continue
+            if message.get("role") == "toolResult" and message.get("isError"):
+                out.append(" ".join(b.get("text", "") for b in message.get("content") or []
+                                    if isinstance(b, dict)))
+    return out
+
+
 def run(harness, args):
     root = Path(tempfile.mkdtemp(prefix="steer-delivery-"))
     try:
-        box = Sandbox(root, codex=harness == "codex")
+        box = Sandbox(root, codex=harness == "codex", pi=harness == "pi")
         bin_dir = box.root / "bin"
         bin_dir.mkdir()
         build_steer(bin_dir)
@@ -124,13 +140,19 @@ def run(harness, args):
         env["PATH"] = str(bin_dir) + os.pathsep + env.get("PATH", "")
         work = box.root / "work"
         work.mkdir()
-        install_guard(box, work, env)
+        install_guard(box, work, env, harness)
 
         if harness == "claude":
             cmd = ["claude", "-p", PROMPT, "--model", args.claude_model,
                    "--allowedTools", "Bash"] + box.claude_args()
             subprocess.run(cmd, cwd=work, env=env, timeout=600)
             results = claude_results(box.home)
+        elif harness == "pi":
+            # --approve trusts the project for this run, as /trust would.
+            cmd = ["pi", "-p", "--approve", "--model", args.pi_model, "--no-skills", PROMPT]
+            # pi -p reads an open stdin as more prompt and waits for it to close.
+            subprocess.run(cmd, cwd=work, env=env, timeout=600, stdin=subprocess.DEVNULL)
+            results = pi_results(box.home)
         else:
             # The sandbox wrote its only hook itself, and codex exec runs no
             # project hook without persisted trust.
@@ -162,17 +184,22 @@ def run(harness, args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--harness", action="append", choices=["claude", "codex"],
-                        help="Harness to check; repeatable (default: both)")
+    parser.add_argument("--harness", action="append", choices=["claude", "codex", "pi"],
+                        help="Harness to check; repeatable (default: claude, codex and pi)")
     parser.add_argument("--claude-model", default="claude-haiku-5-5",
                         help="Claude Code model (default: claude-haiku-5-5)")
     parser.add_argument("--codex-model", default="gpt-6-luna",
                         help="Codex model (default: gpt-6-luna)")
+    parser.add_argument("--pi-model", default="openai-codex/gpt-6-luna",
+                        help="Pi model (default: openai-codex/gpt-6-luna)")
     parser.add_argument("--keep", action="store_true", help="Keep each sandbox directory")
     args = parser.parse_args()
     failures = []
-    for harness in args.harness or ["claude", "codex"]:
-        found = run(harness, args)
+    for harness in args.harness or ["claude", "codex", "pi"]:
+        if shutil.which(harness) is None:
+            found = ["%s: no %s executable is on PATH" % (harness, harness)]
+        else:
+            found = run(harness, args)
         print("%s: %s" % (harness, "FAIL" if found else "PASS"))
         failures += found
     for failure in failures:

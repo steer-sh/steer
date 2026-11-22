@@ -265,27 +265,37 @@ func (m *Model) toggleChannel(row channelRow) error {
 
 // toggleCheckRunner registers or removes the Stop runner for one harness and
 // scope, through the functions `steer check install` and `uninstall` call. Codex
-// reads its project file at the directory the snapshot read the runner from.
+// and Pi read their project files at the directory the snapshot read the runner
+// from.
 func (m *Model) toggleCheckRunner(row channelRow, on bool) error {
 	command, _ := steerbin.HookCommand("check hook --harness " + row.harness)
 	timeout := checks.RegisteredHookTimeout()
-	if harness.ID(row.harness) == harness.Codex {
-		cwd := m.snap.Checks.Repo
-		if cwd == "" {
-			cwd, _ = os.Getwd()
-		}
+	cwd := m.snap.Checks.Repo
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
+	switch harness.ID(row.harness) {
+	case harness.Codex:
 		if on {
 			_, _, err := codex.RemoveCheckHook(row.scope, cwd)
 			return err
 		}
 		_, err := codex.RegisterCheckHook(row.scope, cwd, command, timeout)
 		return err
-	}
-	if on {
-		_, err := claude.RemoveCheckHook(row.scope)
+	case harness.Pi:
+		if on {
+			_, _, err := pi.RemoveCheckRunner(row.scope, cwd)
+			return err
+		}
+		_, err := pi.RegisterCheckRunner(row.scope, cwd, command, timeout)
 		return err
+	default:
+		if on {
+			_, err := claude.RemoveCheckHook(row.scope)
+			return err
+		}
+		return claude.RegisterCheckHook(row.scope, command, timeout)
 	}
-	return claude.RegisterCheckHook(row.scope, command, timeout)
 }
 
 // viewChannels renders the armable channels, then the action row, then a

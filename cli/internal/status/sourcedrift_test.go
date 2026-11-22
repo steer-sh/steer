@@ -118,6 +118,11 @@ func TestASyncThatWouldBeRefusedIsNotTheRepairOffered(t *testing.T) {
 	if got := DetachedRepair(rows, "project"); got != RebuildCommand("project") {
 		t.Fatalf("the repair offered is %q", got)
 	}
+	pi := detached
+	pi.Harness, pi.Path = "pi", ""
+	if got := MasterPhrase(nil, pi); !strings.HasSuffix(got, RebuildCommand("project")+" --harness pi") {
+		t.Fatalf("an unarmed Pi is offered %q", got)
+	}
 	detached.StoreSources = &claude.SourceComparison{State: claude.ComparisonComplete,
 		Guards: []claude.GuardSource{{Name: "beta", State: claude.SourceMatches}}}
 	if got := DetachedRepair([]MasterRuntime{detached}, "project"); got != SyncCommand("project") {
