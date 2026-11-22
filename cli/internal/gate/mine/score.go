@@ -1,7 +1,6 @@
 package mine
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"sort"
@@ -276,11 +275,6 @@ func joinOrNone(v []string) string {
 	return strings.Join(v, ", ")
 }
 
-func rateOf(m map[string]any) float64 {
-	f, _ := m["rate"].(json.Number).Float64()
-	return f
-}
-
 func filterByID(records []Record, id string) []Record {
 	var out []Record
 	for _, r := range records {
@@ -298,56 +292,4 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-// effectPoint renders the relative-risk point estimate, or "n/a" when the baseline
-// carries no rate to divide by.
-func effectPoint(v any) string {
-	m, _ := v.(map[string]any)
-	n, ok := m["estimate"].(json.Number)
-	if !ok {
-		return "n/a"
-	}
-	return n.String() + "x"
-}
-
-// effectRange renders the two bounds, with an unbounded upper bound as an infinity sign.
-func effectRange(v any) string {
-	m, _ := v.(map[string]any)
-	lo := "0.0"
-	if n, ok := m["lower"].(json.Number); ok {
-		lo = n.String()
-	}
-	hi := "inf"
-	if n, ok := m["upper"].(json.Number); ok {
-		hi = n.String()
-	}
-	return lo + " - " + hi
-}
-
-// attributionLine names the guard's audit join, empty when the record's tier writes no
-// audit rows. A silent guard is stated plainly: a range it did not cause is not its
-// effect.
-func attributionLine(v any) string {
-	attr, ok := v.(Attribution)
-	if !ok || !attr.Applicable {
-		return ""
-	}
-	if !attr.LogPresent {
-		return "attribution: no guard audit log on this machine — the firing join is unavailable"
-	}
-	if attr.Firings == 0 {
-		return fmt.Sprintf("attribution: %s never fired in the after-window", pyRepr(attr.HookID))
-	}
-	return fmt.Sprintf("attribution: %s fired %d time(s) across %d after-window session(s)",
-		pyRepr(attr.HookID), attr.Firings, attr.Sessions)
-}
-
-// requiredSuffix names the clean after-window a verdict still needs, when one exists.
-func requiredSuffix(v any) string {
-	n, ok := v.(int)
-	if !ok || n == 0 {
-		return ""
-	}
-	return fmt.Sprintf("  needs %d clean chains", n)
 }
