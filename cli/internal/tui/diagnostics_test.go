@@ -305,3 +305,29 @@ func TestALeftoverTeamLockfileIsADashboardIssue(t *testing.T) {
 		t.Errorf("the leftover lockfile is not reported:\n%s", view)
 	}
 }
+
+// An unapproved runner names its own harness's repair. Pi has no /hooks, so a Pi
+// reader told to approve the definitions there had no step that ran the guards.
+func TestAnUnapprovedRunnerNamesItsHarnessRepair(t *testing.T) {
+	for _, tc := range []struct {
+		harness, trust string
+		want, never    string
+	}{
+		{"pi", status.TrustMissing, "/reload", "/hooks"},
+		{"pi", status.TrustDisabled, "/trust", "/hooks"},
+		{"codex", status.TrustMissing, "approve the definitions in /hooks", "/reload"},
+		{"codex", status.TrustHooksOff, "config.toml", "/reload"},
+	} {
+		m := New(gate.Defaults(), "global")
+		m.snap = &status.SystemStatus{Posture: status.Posture{Masters: []status.MasterRuntime{{
+			Harness: tc.harness, Scope: "global", State: status.MasterCurrent, Trust: tc.trust, Path: "/m",
+		}}}}
+		var text string
+		for _, issue := range m.diagnosticIssues() {
+			text += issue.headline + ": " + issue.detail + "\n"
+		}
+		if !strings.Contains(text, tc.want) || strings.Contains(text, tc.never) {
+			t.Errorf("%s/%s: want %q and no %q in:\n%s", tc.harness, tc.trust, tc.want, tc.never, text)
+		}
+	}
+}

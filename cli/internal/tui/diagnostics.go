@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/status"
 )
 
@@ -166,11 +167,21 @@ func (m *Model) diagnosticIssues() []diagnosticIssue {
 			continue
 		}
 		agent := status.HarnessLabel(master.Harness)
+		headline := agent + " has not approved the guard runner in " + scopeReach(master.Scope)
+		cause := agent + " runs no hook it has not approved"
+		if harness.ID(master.Harness) == harness.Pi {
+			headline = "Pi is not running the guard runner in " + scopeReach(master.Scope)
+			cause = status.TrustPhrase(master.Harness, master.Trust)
+			cause = strings.ToUpper(cause[:1]) + cause[1:]
+		}
+		repair := "Restart " + agent + " and approve the definitions in /hooks."
+		if step, ok := status.TrustStep(master.Harness, master.Trust, ""); ok && step.Fix != "" {
+			repair = strings.ToUpper(step.Fix[:1]) + step.Fix[1:] + "."
+		}
 		out = append(out, diagnosticIssue{
-			headline: agent + " has not approved the guard runner in " + scopeReach(master.Scope),
-			detail: agent + " runs no hook it has not approved, so no guard runs there, while " +
-				"the rules it reads still name them. Restart " + agent + " and approve the " +
-				"definitions in /hooks.",
+			headline: headline,
+			detail: cause + ", so no guard runs there, while the rules it reads still " +
+				"name them. " + repair,
 		})
 	}
 	for _, r := range m.snap.Posture.Rules {
