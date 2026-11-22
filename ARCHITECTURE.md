@@ -425,7 +425,8 @@ hunk also keeps its `replace_all` as sent. A patch section's `old_string` and
 `new_string` join its `-` and `+` lines in order across hunks: they are ordered
 fragments that may not be contiguous, never search-and-replace operands. A patch
 file deletion is an Edit marked `steer_operation: "delete"` with no `old_string`;
-the runtime never reads the deleted file. Patch syntax is never presented as a
+the runtime never reads the deleted file. A patch move is that deletion of the
+old path, carrying `steer_move_to`, followed by the new path's section. Patch syntax is never presented as a
 shell command. Guards run in fixed order
 over the virtual edits, and the first objection wins. Reply rendering is specific
 to Claude Code, Codex or Pi; guards continue using the shared Claude-shaped input

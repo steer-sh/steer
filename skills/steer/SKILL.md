@@ -2,7 +2,7 @@
 name: steer
 description: Turns a natural-language rule into the fix that can enforce it — a repository check, a PreToolUse Python guard, or an instruction rule — and installs it. Use when enforcing coding standards, blocking insecure patterns, making sure checks pass before a turn ends, managing hook lifecycle, or running steer CLI commands (register, remove, list, test).
 user-invocable: true
-prompt_version: 29
+prompt_version: 30
 compatibility: Requires Claude Code, Codex or Pi with tool-call hook support. Hooks are installed into .steer/hooks/ and registered in every installed harness Steer is set up in (settings.json for Claude Code, hooks.json for Codex, an extension in .pi/extensions for Pi). steer CLI must be available on PATH or bundled under scripts/.
 allowed-tools: Bash(steer *), Bash(python3 *), Bash(echo *), Read, Write, Edit
 ---
@@ -170,6 +170,7 @@ The master hook rewrites every other edit shape into these, so a guard never see
 - A **MultiEdit** arrives as one Edit per hunk, with that hunk's `old_string` and any `replace_all` as sent.
 - A **Codex patch** arrives as one Edit per updated file (a Write per added file). Its `old_string` joins the removed lines and its `new_string` the added lines, each in order across the file's hunks. They are ordered fragments that may not be contiguous: match text in them, never apply them as search-and-replace. A section that removes nothing has `old_string: ""`.
 - A **Codex file deletion** arrives as Edit with `steer_operation: "delete"`, `new_string: ""` and no `old_string`. A guard that needs the deleted content opens the file.
+- A **Codex file move** (`*** Move to:`) arrives first as a deletion of the old path that also carries `steer_move_to` with the new path, then as the Edit of the new path.
 - A **shell deletion** (`rm`, `git rm`) stays a Bash call; the guard parses the target from `command`.
 
 ### Hook Output (stdout) - To Block
