@@ -66,3 +66,34 @@ func TestStopBlockFollowsTheActiveBranchAndStopsAtThePerson(t *testing.T) {
 		t.Fatalf("a line no block carries reached %q", missing.Granularity)
 	}
 }
+
+// TestStopBlockOffTheActiveBranchFollowsItsLatestDescendant checks a block the
+// session later rewound past: of the block's two children, the continuation
+// reads only the branch to the later one, and none of the active branch.
+func TestStopBlockOffTheActiveBranchFollowsItsLatestDescendant(t *testing.T) {
+	body := `{"type":"session","version":3,"id":"s","cwd":"/r"}
+{"type":"message","id":"u1","parentId":null,"message":{"role":"user","content":"make it"}}
+{"type":"message","id":"a1","parentId":"u1","message":{"role":"assistant","content":[{"type":"text","text":"made"}]}}
+{"type":"custom_message","id":"b1","parentId":"a1","customType":"steer-check","content":"failed\nsteer check run: r1","display":true}
+{"type":"message","id":"x1","parentId":"b1","message":{"role":"user","content":"stop"}}
+{"type":"message","id":"a2","parentId":"b1","message":{"role":"assistant","content":[{"type":"text","text":"retried"}]}}
+{"type":"message","id":"a3","parentId":"a2","message":{"role":"assistant","content":[{"type":"text","text":"repaired"}]}}
+{"type":"message","id":"u2","parentId":null,"message":{"role":"user","content":"start over"}}
+{"type":"message","id":"a4","parentId":"u2","message":{"role":"assistant","content":[{"type":"text","text":"active"}]}}
+`
+	path := filepath.Join(t.TempDir(), "s.jsonl")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := StopBlock(path, "steer check run: r1", transcript.ContinuationBudget{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var texts []string
+	for _, s := range got.Steps {
+		texts = append(texts, s.Text)
+	}
+	if strings.Join(texts, "|") != "failed\nsteer check run: r1|retried|repaired" || got.EndReason != transcript.EndTranscript {
+		t.Fatalf("steps = %q, end = %q", texts, got.EndReason)
+	}
+}

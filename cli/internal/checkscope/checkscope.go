@@ -21,8 +21,9 @@ import (
 	"github.com/steer-sh/steer-cli/internal/tier"
 )
 
-// Harnesses are the harnesses whose root Stop event can run an adopted repository's
-// oracle. Pi registers no Stop runner.
+// Harnesses are the harnesses that can run an adopted repository's oracle when a
+// root session stops: Claude Code and Codex at their Stop hook, Pi at its settle
+// boundary through Steer's check extension.
 var Harnesses = []harness.ID{harness.ClaudeCode, harness.Codex, harness.Pi}
 
 // Scopes are the two registration scopes a runner can be armed at. A runner

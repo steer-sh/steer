@@ -28,8 +28,9 @@ type walkEntry struct {
 
 // StopBlock reads the task around one check block in a Pi session: the turn
 // before the steer-check entry that carries line, and the entries that descend
-// from it until a person speaks. Pi records a session as a tree, so when the
-// block is on the active branch the continuation follows that branch alone.
+// from it until a person speaks. Pi records a session as a tree, so the
+// continuation follows one branch: the active one when the block is on it, and
+// otherwise the branch to the block's most recently written descendant.
 func StopBlock(path, line string, budget transcript.ContinuationBudget) (transcript.StopBlockReading, error) {
 	budget = budget.WithDefaults()
 	out := transcript.StopBlockReading{Continuation: transcript.Continuation{
@@ -64,7 +65,10 @@ func StopBlock(path, line string, budget transcript.ContinuationBudget) (transcr
 	if err != nil {
 		return out, err
 	}
-	onActive := active != nil && onBranch(active, root)
+	branch := active
+	if active != nil && !onBranch(active, root) {
+		branch = latestBranch(entries, byID, root)
+	}
 
 	// The context is the block's ancestors back to the prompt that opened the
 	// turn, oldest first.
@@ -100,7 +104,7 @@ func StopBlock(path, line string, budget transcript.ContinuationBudget) (transcr
 		if done || !reached[e.ParentID] || reached[e.ID] {
 			continue
 		}
-		if onActive && !onBranch(active, e.ID) {
+		if !onBranch(branch, e.ID) {
 			continue
 		}
 		if isHuman(e) {
@@ -119,6 +123,30 @@ func StopBlock(path, line string, budget transcript.ContinuationBudget) (transcr
 		out.EndReason = transcript.EndTranscript
 	}
 	return out, nil
+}
+
+// latestBranch is the path from root down to the last entry in file order that
+// descends from it, the leaf Pi would resume had that branch stayed active.
+func latestBranch(entries []walkEntry, byID map[string]walkEntry, root string) map[string]struct{} {
+	under := map[string]bool{root: true}
+	leaf := root
+	for _, e := range entries {
+		if e.ID != root && under[e.ParentID] {
+			under[e.ID] = true
+			leaf = e.ID
+		}
+	}
+	out := map[string]struct{}{}
+	for id := leaf; id != ""; id = byID[id].ParentID {
+		if _, seen := out[id]; seen {
+			break
+		}
+		out[id] = struct{}{}
+		if id == root {
+			break
+		}
+	}
+	return out
 }
 
 func readWalkEntries(path string) ([]walkEntry, error) {
