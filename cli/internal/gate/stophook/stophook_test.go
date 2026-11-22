@@ -53,8 +53,11 @@ func (f *fixture) release(chainID string, blocks int, fields map[string]any) {
 func (f *fixture) replies(texts ...string) {
 	f.t.Helper()
 	var lines []string
-	if f.harness == "codex" {
-		lines = append(lines, `{"timestamp":"2026-10-09T10:00:00.000Z","ordinal":0,"type":"session_meta","payload":{"session_id":"s1","id":"s1"}}`)
+	switch f.harness {
+	case "codex":
+		lines = append(lines, codexMeta)
+	case "pi":
+		lines = append(lines, piHeader)
 	}
 	for i, text := range texts {
 		lines = append(lines, f.assistantLine(i+1, "text", text))
@@ -64,7 +67,10 @@ func (f *fixture) replies(texts ...string) {
 
 func (f *fixture) assistantLine(i int, kind, text string) string {
 	var row map[string]any
-	if f.harness == "codex" {
+	switch f.harness {
+	case "pi":
+		return piEntry(i, map[string]any{"role": "assistant", "content": []any{map[string]any{"type": kind, kind: text}}})
+	case "codex":
 		itemType := "output_text"
 		if kind != "text" {
 			itemType = kind
@@ -72,7 +78,7 @@ func (f *fixture) assistantLine(i int, kind, text string) string {
 		row = map[string]any{"timestamp": "2026-10-09T10:00:00.000Z", "ordinal": i, "type": "response_item",
 			"payload": map[string]any{"type": "message", "role": "assistant", "phase": "final_answer",
 				"content": []any{map[string]any{"type": itemType, "text": text}}}}
-	} else {
+	default:
 		block := map[string]any{"type": kind, kind: text}
 		row = map[string]any{"type": "assistant", "sessionId": "s1", "timestamp": "2026-10-09T10:00:00.000Z",
 			"message": map[string]any{"role": "assistant", "content": []any{block}}}
@@ -93,11 +99,7 @@ func (f *fixture) stop(fields map[string]any) Result {
 	f.t.Helper()
 	payload := map[string]any{"hook_event_name": "Stop", "session_id": "s1",
 		"transcript_path": f.transcript, "stop_hook_active": false}
-	if f.harness == "codex" {
-		payload["turn_id"] = "turn-1"
-	} else {
-		payload["prompt_id"] = "turn-1"
-	}
+	payload[turnKeys[f.harness]] = "turn-1"
 	for k, v := range fields {
 		if v == nil {
 			delete(payload, k)
@@ -132,7 +134,7 @@ func ledger(chainID string, blocks, terminal int) string {
 	return b.String()
 }
 
-var harnesses = []string{"claude-code", "codex"}
+var harnesses = []string{"claude-code", "codex", "pi"}
 
 func TestAReleaseWithNoLedgerInReplyTextBlocksOnce(t *testing.T) {
 	for _, h := range harnesses {
@@ -232,13 +234,26 @@ func TestOnlyReplyTextCountsAsALedger(t *testing.T) {
 				"payload": map[string]any{"type": "function_call_output", "call_id": "c1", "output": text}})
 			return string(data)
 		}},
+		{"pi thinking", "pi", func(f *fixture) string { return f.assistantLine(1, "thinking", text) }},
+		{"pi user text", "pi", func(f *fixture) string {
+			return piEntry(1, map[string]any{"role": "user", "content": text})
+		}},
+		{"pi abandoned branch", "pi", func(f *fixture) string {
+			leaf, _ := json.Marshal(map[string]any{"type": "message", "id": "e3", "parentId": "e1",
+				"timestamp": "2026-10-09T10:00:00.000Z", "message": map[string]any{"role": "assistant", "content": "Committed."}})
+			return piEntry(1, map[string]any{"role": "user", "content": "commit it"}) + "\n" +
+				f.assistantLine(2, "text", text) + "\n" + string(leaf)
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFixture(t, tc.harness)
 			f.release("ab12", 1, nil)
 			var lines []string
-			if tc.harness == "codex" {
-				lines = append(lines, `{"timestamp":"2026-10-09T10:00:00.000Z","ordinal":0,"type":"session_meta","payload":{"session_id":"s1","id":"s1"}}`)
+			switch tc.harness {
+			case "codex":
+				lines = append(lines, codexMeta)
+			case "pi":
+				lines = append(lines, piHeader)
 			}
 			f.write(append(lines, tc.line(f))...)
 			if res := f.stop(nil); !res.Block {
@@ -306,7 +321,7 @@ func TestOnlyThisTurnsRootReleasesAreOwed(t *testing.T) {
 		{"another transcript", map[string]any{"transcript": "/elsewhere.jsonl"}},
 		{"no recorded turn", map[string]any{"release_turn": "", "release_turn_present": false}},
 		{"the pre-commit channel", map[string]any{"channel": gate.ChannelPreCommit}},
-		{"another harness", map[string]any{"harness": "pi"}},
+		{"another harness", map[string]any{"harness": "opencode"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFixture(t, "claude-code")
@@ -358,6 +373,14 @@ func TestEveryDoubtFailsOpen(t *testing.T) {
 		f := newFixture(t, "codex")
 		f.release("ab12", 1, nil)
 		f.write(`{"timestamp":"2026-10-09T10:00:00.000Z","ordinal":0,"type":"session_meta","payload":{"session_id":"s9","id":"s9"}}`)
+		if res := f.stop(nil); res.Block {
+			t.Errorf("result = %+v", res)
+		}
+	})
+	t.Run("pi session file of another session", func(t *testing.T) {
+		f := newFixture(t, "pi")
+		f.release("ab12", 1, nil)
+		f.write(strings.Replace(piHeader, `"s1"`, `"s9"`, 1))
 		if res := f.stop(nil); res.Block {
 			t.Errorf("result = %+v", res)
 		}
@@ -433,6 +456,19 @@ func codexMessage(fields map[string]any, texts ...string) string {
 	return string(data)
 }
 
+const piHeader = `{"type":"session","version":3,"id":"s1","cwd":"/repo"}`
+
+// piEntry is entry i of a Pi session's single branch, a message carrying message.
+func piEntry(i int, message map[string]any) string {
+	var parent any
+	if i > 1 {
+		parent = fmt.Sprintf("e%d", i-1)
+	}
+	data, _ := json.Marshal(map[string]any{"type": "message", "id": fmt.Sprintf("e%d", i), "parentId": parent,
+		"timestamp": "2026-10-09T10:00:00.000Z", "message": message})
+	return string(data)
+}
+
 const codexMeta = `{"timestamp":"2026-10-09T10:00:00.000Z","ordinal":0,"type":"session_meta","payload":{"session_id":"s1","id":"s1"}}`
 
 // The resolver reads one text block at a time, so a ledger split across one message's
@@ -475,6 +511,12 @@ func TestAnUndatedLedgerFailsOpen(t *testing.T) {
 	if res := codex.stop(nil); res.Block {
 		t.Errorf("codex: result = %+v", res)
 	}
+	pi := newFixture(t, "pi")
+	pi.release("ab12", 1, nil)
+	pi.write(piHeader, strings.Replace(pi.assistantLine(1, "text", ledger("ab12", 1, 0)), "2026-10-09T10:00:00.000Z", "not a time", 1))
+	if res := pi.stop(nil); res.Block {
+		t.Errorf("pi: result = %+v", res)
+	}
 }
 
 // A torn line is an incomplete read even when the tear falls before the header text.
@@ -492,6 +534,13 @@ func TestATornLineBeforeTheHeaderFailsOpen(t *testing.T) {
 	codex.write(codexMeta, line[:strings.Index(line, gate.LedgerHeader)])
 	if res := codex.stop(nil); res.Block {
 		t.Errorf("codex: result = %+v", res)
+	}
+	pi := newFixture(t, "pi")
+	pi.release("ab12", 1, nil)
+	line = pi.assistantLine(2, "text", ledger("ab12", 1, 0))
+	pi.write(piHeader, pi.assistantLine(1, "text", "Committed."), line[:strings.Index(line, gate.LedgerHeader)])
+	if res := pi.stop(nil); res.Block {
+		t.Errorf("pi: result = %+v", res)
 	}
 }
 

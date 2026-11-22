@@ -17,9 +17,11 @@ import (
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/cc"
 	gatecodex "github.com/steer-sh/steer-cli/internal/gate/codex"
+	gatepi "github.com/steer-sh/steer-cli/internal/gate/pi"
 )
 
-// Payload is the part of a Claude Code or Codex Stop payload the backstop reads.
+// Payload is the part of a Claude Code or Codex Stop payload the backstop reads, or
+// of the Stop-shaped payload Pi's commit-gate bridge sends at its settle boundary.
 // StopHookActive and LastAssistantMessage are nil when the payload omits them.
 type Payload struct {
 	HookEventName        string  `json:"hook_event_name"`
@@ -45,10 +47,10 @@ type Result struct {
 }
 
 // turnKeys is the payload field that names the turn, by harness.
-var turnKeys = map[string]string{"claude-code": "prompt_id", "codex": "turn_id"}
+var turnKeys = map[string]string{"claude-code": "prompt_id", "codex": "turn_id", "pi": "turn_id"}
 
 func (p Payload) turn(harness string) string {
-	if harness == "codex" {
+	if turnKeys[harness] == "turn_id" {
 		return p.TurnID
 	}
 	return p.PromptID
@@ -245,6 +247,14 @@ func replyTexts(harness string, p Payload) ([]string, bool) {
 			return nil, false
 		}
 		for _, m := range rollout.Ledgers {
+			texts = append(texts, m.Text)
+		}
+	case "pi":
+		key, msgs, err := gatepi.ReadLedgers(p.TranscriptPath)
+		if err != nil || key != p.SessionID {
+			return nil, false
+		}
+		for _, m := range msgs {
 			texts = append(texts, m.Text)
 		}
 	default:

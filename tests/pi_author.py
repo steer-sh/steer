@@ -30,7 +30,7 @@ Cases:
             reaches the client as a ctx.ui.notify request.
   review    The stub reviewer denies round 1; the model handles the finding and
             the commit lands on retry. After the ledger grace, the next
-            session's turn_end resolves the retry row with the model's ledger.
+            session's settle resolves the retry row with the model's ledger.
   trust     With no saved trust and no --approve, Pi loads no project bridge and
             status reports it; a saved trust loads it; a rewritten bridge reads
             modified across an RPC new_session, which keeps the imported
@@ -363,7 +363,7 @@ def case_codemode(run):
 
 
 LEDGER_GRACE = 120  # gate.LedgerGrace: the resolver leaves a row alone this long after its deny
-GRACE_MARGIN = 30  # seconds a detached turn_end resolver may take to start
+GRACE_MARGIN = 30  # seconds the settle resolver may take to start
 
 
 def case_review(run):
@@ -381,12 +381,12 @@ def case_review(run):
     owed = [r for r in rows if r.get("phase") in ("retry", "nitpick")]
     if not owed:
         return FAIL, "the commit landed with no retry row after the deny (phases %s)" % phases
-    # Pi's turn_end runs the resolver only once some row's grace has ended, and this
+    # Pi's settle runs the resolver only once some row's grace has ended, and this
     # home holds only this chain's rows. A first session that ended near or past the
-    # grace may have resolved the row from its own detached turn_end, so only one that
+    # grace may have resolved the row at its own settle, so only one that
     # ended with the grace well open leaves the next session to prove.
     if time.time() >= min(r.get("ts", 0) for r in rows) + LEDGER_GRACE - GRACE_MARGIN:
-        return INCONCLUSIVE, "the first session outlasted the ledger grace, so its own turn_end " \
+        return INCONCLUSIVE, "the first session outlasted the ledger grace, so its own settle " \
             "may have resolved the retry row (phases %s)" % phases
     if any(r.get("backfilled") or r.get("ledger_found") for r in owed):
         return INCONCLUSIVE, "the retry row was resolved before the next session started: %s" % \
@@ -401,12 +401,12 @@ def case_review(run):
             break
         time.sleep(0.5)
     else:
-        return FAIL, "the next session's turn_end did not resolve the retry row: %s" % json.dumps(owed)[:2000]
+        return FAIL, "the next session's settle did not resolve the retry row: %s" % json.dumps(owed)[:2000]
     found = [bool(r.get("ledger_found")) for r in owed]
     if not all(found):
-        return FAIL, "turn_end resolved the retry row as a miss; the harvester found no ledger " \
+        return FAIL, "the settle resolved the retry row as a miss; the harvester found no ledger " \
             "(phases %s)\n%s" % (phases, proc.stdout[-2000:])
-    return PASS, "round 1 denied, the commit landed on retry, and the next turn_end found its ledger " \
+    return PASS, "round 1 denied, the commit landed on retry, and the next settle found its ledger " \
         "(phases %s)" % phases
 
 

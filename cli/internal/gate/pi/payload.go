@@ -22,6 +22,9 @@ type Payload struct {
 	TranscriptPath string `json:"transcript_path"`
 	Model          string `json:"model"`
 	CWD            string `json:"cwd"`
+	// TurnID is the session entry ID of the newest user message on the active branch,
+	// which the settle backstop's payload names the same way.
+	TurnID string `json:"turn_id"`
 	// ParentToolCallID is set on a call another tool made, such as code mode.
 	ParentToolCallID string `json:"parent_tool_call_id"`
 	// Batch is nil from a bridge that predates it.
@@ -116,6 +119,7 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, stdin io.
 		Message:   cc.ExtractMessage(command, cwd),
 		RerunNote: cc.RerunNote(command),
 		RowExtra:  rowExtra,
+		TurnKey:   "turn_id", TurnID: payload.TurnID,
 	})
 	out, ok := Render(decision)
 	if !ok {

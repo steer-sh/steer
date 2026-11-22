@@ -34,6 +34,61 @@ function review(payload: any): Promise<any> {
   });
 }
 
+// backstop runs the resolver with a Stop payload, so it first checks the ledgers
+// this turn's released review sequences owe. It resolves the reply, or undefined.
+function backstop(payload: any, signal: any): Promise<any> {
+  return new Promise((resolve) => {
+    const child = execFile(
+      STEER_BACKFILL,
+      [],
+      {
+        cwd: payload.cwd,
+        encoding: "utf8",
+        shell: true,
+        signal,
+        timeout: STEER_BACKFILL_TIMEOUT_MS,
+        windowsHide: true,
+      },
+      (error, stdout) => {
+        const line = String(stdout ?? "").trim().split("\n")[0];
+        if (error || !line) {
+          resolve(undefined);
+          return;
+        }
+        try {
+          resolve(JSON.parse(line));
+        } catch {
+          resolve(undefined);
+        }
+      },
+    );
+    child.stdin?.end(JSON.stringify(payload));
+  });
+}
+
+const BACKSTOP_MESSAGE = "steer-ledger-backstop";
+
+// userTurn names the agent turn: the newest user message on the active branch.
+// The backstop's own entries are custom messages, so a refusal keeps the turn.
+function userTurn(ctx: any): { id: string; refused: boolean } {
+  let refused = false;
+  try {
+    const branch = ctx.sessionManager.getBranch?.() ?? [];
+    for (let i = branch.length - 1; i >= 0; i--) {
+      const entry = branch[i];
+      if (entry?.type === "custom_message" && entry.customType === BACKSTOP_MESSAGE) {
+        refused = true;
+      }
+      if (entry?.type === "message" && entry.message?.role === "user") {
+        return { id: String(entry.id ?? ""), refused };
+      }
+    }
+  } catch {
+    // An unreadable session names no turn, and the backstop then refuses nothing.
+  }
+  return { id: "", refused };
+}
+
 function backfill(cwd: string): void {
   const child = spawn(STEER_BACKFILL, [], {
     cwd,
@@ -105,6 +160,7 @@ export default function (pi: any) {
         session_id: ctx.sessionManager.getSessionId(),
         transcript_path: ctx.sessionManager.getSessionFile(),
         model: ctx.model?.id ?? "",
+        turn_id: userTurn(ctx).id,
       };
       if (event?.parentToolCallId) {
         payload.parent_tool_call_id = String(event.parentToolCallId);
@@ -146,11 +202,52 @@ export default function (pi: any) {
     return undefined;
   });
 
-  pi.on("turn_end", async (_event: any, ctx: any) => {
+  // agent_before_settle is Pi's root Stop: a refusal returns an entry with
+  // continue: true, and the session's own record of it keeps that to one per turn.
+  pi.on("agent_before_settle", async (event: any, ctx: any) => {
     try {
-      backfill(ctx.cwd);
+      if (event?.outcome !== "completed") {
+        backfill(ctx.cwd);
+        return undefined;
+      }
+      const turn = userTurn(ctx);
+      const reply = await backstop(
+        {
+          hook_event_name: "Stop",
+          cwd: ctx.cwd,
+          session_id: ctx.sessionManager.getSessionId(),
+          transcript_path: ctx.sessionManager.getSessionFile(),
+          turn_id: turn.id,
+          stop_hook_active: turn.refused,
+        },
+        ctx.signal,
+      );
+      if (typeof reply?.systemMessage === "string" && reply.systemMessage) {
+        tellOperator(ctx, reply.systemMessage);
+      }
+      if (reply?.decision !== "block" || typeof reply?.reason !== "string") {
+        return undefined;
+      }
+      return {
+        entries: [
+          ...(event.entries ?? []),
+          { type: "custom_message", customType: BACKSTOP_MESSAGE, content: reply.reason, display: true },
+        ],
+        continue: true,
+      };
     } catch {
-      // A resolver failure cannot change the completed turn.
+      return undefined;
+    }
+  });
+
+  // An aborted run skips agent_before_settle, so its rows are resolved here.
+  pi.on("agent_settled", async (event: any, ctx: any) => {
+    try {
+      if (event?.aborted === true) {
+        backfill(ctx.cwd);
+      }
+    } catch {
+      // A resolver failure cannot change the settled run.
     }
   });
 }

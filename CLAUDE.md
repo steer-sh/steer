@@ -130,7 +130,9 @@ Read the linked architecture section before changing the corresponding boundary:
   The root-Stop ledger backstop (`cli/internal/gate/stophook/`, run by
   `commit-gate backfill`) reads only the `chain-end` rows `Engine.release` writes,
   so a new path that ends a blocked sequence, or hands findings without blocking, must
-  go through `release`.
+  go through `release`. Pi has no Stop hook: `cli/internal/pi/bridge_gate.ts` sends
+  the backstop its Stop payload at `agent_before_settle` and owns Pi's turn ID and
+  `stop_hook_active`.
   A new writer of the ledger shard takes `gate.LockLog`: `Ledger.Log` appends and
   `resolve.writeRows` renames over the file. A rewrite carries what reached the
   replaced file under `gate.LockSwap` (rename through carry, whole lines only), and

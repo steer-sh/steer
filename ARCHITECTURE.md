@@ -808,7 +808,9 @@ file for its carry.
 `--rejoin` re-judges the links the resolver made (a row with
 `ledger_ts`; a hook-time capture has none) under the current rules, and keeps a
 link with no ledger left to read. Stop hooks run
-the resolver; Codex also registers SubagentStop, and Pi uses turn_end.
+the resolver; Codex also registers SubagentStop, and Pi's gate bridge runs it at
+`agent_before_settle`, detached for a run that did not complete, and at
+`agent_settled` for an aborted run, which Pi settles without that boundary.
 Pending rows have a grace
 period before they count as missing evidence. The hooks' `--if-due` form harvests
 again only when a row was written or a miss deadline passed since the last applied
@@ -840,12 +842,14 @@ round hands the agent findings, `Engine.release` writes a `chain-end` row
 blocking rounds (zero when a first round was NITPICK-only), the terminal round when
 the cap's final review or a NITPICK-only round handed the agent findings, and the
 PreToolUse turn (`prompt_id` on Claude Code,
-`turn_id` on Codex) with a presence flag. It records gate release, not git success.
+`turn_id` on Codex and Pi) with a presence flag. Pi has no turn ID of its own: its gate
+bridge sends the session entry ID of the newest user message on the active branch. It records gate release, not git success.
 The phase is in `NonReviewPhases`, so chains, mining and the resolver skip it. At a
 root Stop, the same `commit-gate backfill` hook first runs `internal/gate/stophook/`.
 It streams the local log once for release rows of this session's root thread, the
 Stop's turn and its transcript. It reads the ledger text blocks the resolver's own
-harvest reads (`cc.ReadLedgers`, `codex.ReadRollout`) under this session's key, so a
+harvest reads (`cc.ReadLedgers`, `codex.ReadRollout`, `pi.ReadLedgers` on the active
+branch) under this session's key, so a
 ledger split across text blocks does not count, with `last_assistant_message` as a
 separate candidate. It applies no time window: a ledger written more than the
 resolver's chain span after its deny satisfies the Stop and still misses. A
@@ -858,6 +862,11 @@ sections. Every read doubt fails open, and a release or Stop with no turn ID get
 operator notice. The check does not depend on `--if-due`, the resolver lock or
 `backfill.scanned`; after it the ordinary resolver runs, narrating on stderr. A
 ledger found only in the payload satisfies the check and creates no resolver link.
+Pi has no Stop hook: at `agent_before_settle` for a completed run, its gate bridge sends
+the backfill command a Stop payload and turns a block into a `steer-ledger-backstop`
+custom message with `continue: true`, as the check runner does. It sets
+`stop_hook_active` when the active branch already holds that message since the turn's
+user message, so the session itself bounds the refusal to one per turn.
 
 While a round's reviewers run, the engine keeps a live review file at
 `<state>/commit-review/live/<session>/<actor>-<repo hash>.json` (`internal/gate/live.go`):

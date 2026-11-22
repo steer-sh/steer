@@ -399,7 +399,7 @@ func installReviewChannel(cfg gate.Config) error {
 		registered += "\nReview outcomes: read at the end of each turn (Stop and SubagentStop hooks)" +
 			"\nHooks: " + path
 	case harness.Pi:
-		registered += "\nReview outcomes: read at the end of each turn (turn_end handler)" +
+		registered += "\nReview outcomes: read at the end of each turn (agent_before_settle handler)" +
 			"\nExtension: " + path
 	}
 	fmt.Println()
