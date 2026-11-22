@@ -1,6 +1,7 @@
-// Package stophook is the commit gate's root-Stop backstop. When the gate released a
-// review sequence that blocked in this turn, and no assistant reply text holds that
-// sequence's complete ledger, the Stop is refused once and the missing ledgers named.
+// Package stophook is the commit gate's ledger backstop. When the gate released a
+// review sequence that blocked, in this root turn or in this subagent's thread, and no
+// assistant reply text of that thread holds the sequence's complete ledger, the Stop
+// or SubagentStop is refused once and the missing ledgers named.
 //
 // Every doubt fails open: a partial read is never proof that a ledger is absent.
 package stophook
@@ -12,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/steer-sh/steer-cli/internal/gate"
@@ -22,7 +24,9 @@ import (
 
 // Payload is the part of a Claude Code or Codex Stop payload the backstop reads, or
 // of the Stop-shaped payload Pi's commit-gate bridge sends at its settle boundary.
-// StopHookActive and LastAssistantMessage are nil when the payload omits them.
+// StopHookActive and LastAssistantMessage are nil when the payload omits them. A
+// SubagentStop names the subagent in AgentID and its own transcript in
+// AgentTranscriptPath; TranscriptPath stays the root session's.
 type Payload struct {
 	HookEventName        string  `json:"hook_event_name"`
 	SessionID            string  `json:"session_id"`
@@ -30,15 +34,17 @@ type Payload struct {
 	PromptID             string  `json:"prompt_id"`
 	TurnID               string  `json:"turn_id"`
 	AgentID              string  `json:"agent_id"`
+	AgentTranscriptPath  string  `json:"agent_transcript_path"`
 	StopHookActive       *bool   `json:"stop_hook_active"`
 	LastAssistantMessage *string `json:"last_assistant_message"`
 }
 
 // Result is the backstop's answer to one hook payload.
 type Result struct {
-	// RootStop says the payload is a root thread's Stop event. Its caller then owes the
-	// harness at most one JSON reply on stdout and no narration there.
-	RootStop bool
+	// TurnEnd says the payload is a root thread's Stop or a subagent's SubagentStop.
+	// Its caller then owes the harness at most one JSON reply on stdout and no
+	// narration there.
+	TurnEnd bool
 	// Block refuses the Stop with Reason as the agent's next input.
 	Block  bool
 	Reason string
@@ -48,6 +54,15 @@ type Result struct {
 
 // turnKeys is the payload field that names the turn, by harness.
 var turnKeys = map[string]string{"claude-code": "prompt_id", "codex": "turn_id", "pi": "turn_id"}
+
+// subagentHarnesses are the harnesses that send SubagentStop. A Pi subagent is a Pi
+// process of its own, whose session settles as a root.
+var subagentHarnesses = map[string]bool{"claude-code": true, "codex": true}
+
+// subagent reports whether the payload is a subagent's SubagentStop.
+func (p Payload) subagent() bool {
+	return p.HookEventName == "SubagentStop" && p.AgentID != ""
+}
 
 func (p Payload) turn(harness string) string {
 	if turnKeys[harness] == "turn_id" {
@@ -90,10 +105,10 @@ func (o obligation) headings() string {
 // Check answers one hook payload against the adjudication log at logFile.
 func Check(logFile string, raw []byte) Result {
 	var p Payload
-	if json.Unmarshal(raw, &p) != nil || p.HookEventName != "Stop" || p.AgentID != "" {
+	if json.Unmarshal(raw, &p) != nil || !(p.HookEventName == "Stop" && p.AgentID == "" || p.subagent()) {
 		return Result{}
 	}
-	res := Result{RootStop: true}
+	res := Result{TurnEnd: true}
 	// One chance only: a Stop that a hook already refused, or a payload that does not
 	// say, is never refused again.
 	if p.StopHookActive == nil || *p.StopHookActive || p.SessionID == "" {
@@ -121,13 +136,13 @@ func Check(logFile string, raw []byte) Result {
 		}
 	}
 	if len(missing) > 0 {
-		res.Block, res.Reason = true, reason(missing)
+		res.Block, res.Reason = true, reason(missing, p.subagent())
 	}
 	return res
 }
 
-// obligations streams the log once and keeps the release rows this Stop's turn owns, in
-// log order, one per repository and sequence. unlocated names a harness whose release
+// obligations streams the log once and keeps the release rows this Stop owns, in log
+// order, one per repository and sequence. unlocated names a harness whose release
 // rows share this session while the Stop names no turn. ok is false when the log could
 // not be read through, or a line that does not parse is the last one or names a release
 // or this session. An older torn line naming neither stays in the log for good and
@@ -182,9 +197,11 @@ func torn(line []byte, session string) bool {
 	return strings.Contains(text, gate.PhaseChainEnd) || strings.Contains(text, session)
 }
 
-// ownedRelease reports whether one log line is a release row this Stop's turn owns: the
-// same root session and thread, turn and transcript, under a harness whose turn field
-// the Stop names.
+// ownedRelease reports whether one log line is a release row this Stop owns. A root
+// Stop owns the root thread's releases of its turn and transcript, under a harness
+// whose turn field the Stop names. A SubagentStop owns every release of its subagent's
+// thread in the session, whichever turn wrote it: a background subagent can release
+// after the root turn that started it has stopped.
 func ownedRelease(line []byte, p Payload, unlocated *string) (o obligation, harness, repo string, owned bool) {
 	var row struct {
 		Phase       string `json:"phase"`
@@ -209,27 +226,47 @@ func ownedRelease(line []byte, p Payload, unlocated *string) (o obligation, harn
 	if _, known := turnKeys[row.Harness]; !known {
 		return obligation{}, "", "", false
 	}
-	turn := p.turn(row.Harness)
-	if turn == "" {
-		*unlocated = row.Harness
+	if row.ChainID == "" || row.Header == "" || row.Blocks < 0 || (row.Blocks == 0 && row.Terminal < 1) {
 		return obligation{}, "", "", false
 	}
-	if !row.TurnPresent || row.Turn != turn || row.Thread != "" || row.ThreadID != "" ||
-		row.Transcript == "" || row.Transcript != p.TranscriptPath ||
-		row.ChainID == "" || row.Header == "" || row.Blocks < 0 || (row.Blocks == 0 && row.Terminal < 1) {
-		return obligation{}, "", "", false
+	if p.subagent() {
+		if !subagentHarnesses[row.Harness] || row.Thread != p.AgentID ||
+			(row.ThreadID != "" && row.ThreadID != p.AgentID) {
+			return obligation{}, "", "", false
+		}
+	} else {
+		turn := p.turn(row.Harness)
+		if turn == "" {
+			*unlocated = row.Harness
+			return obligation{}, "", "", false
+		}
+		if !row.TurnPresent || row.Turn != turn || row.Thread != "" || row.ThreadID != "" ||
+			row.Transcript == "" || row.Transcript != p.TranscriptPath {
+			return obligation{}, "", "", false
+		}
 	}
 	o = obligation{header: row.Header, chainID: strings.ToLower(row.ChainID), blocks: row.Blocks, terminal: row.Terminal}
 	return o, row.Harness, row.Repo, true
 }
 
 // replyTexts is every assistant reply text this Stop can see: each ledger text block the
-// resolver's harvest reads from the transcript under this session's key, and the
-// payload's last message as a candidate of its own. A ledger the harvest cannot read
-// is not counted, so a refusal asks for one it can. ok is false when
-// the transcript could not be read whole or does not belong to the payload.
+// resolver's harvest reads from the transcript under this session's key, or from a
+// subagent's own transcript under its agent's key, and the payload's last message as a
+// candidate of its own. A ledger the harvest cannot read is not counted, so a refusal
+// asks for one it can. ok is false when the transcript could not be read whole or does
+// not belong to the payload.
 func replyTexts(harness string, p Payload) ([]string, bool) {
 	var texts []string
+	if p.subagent() {
+		var ok bool
+		if texts, ok = subagentTexts(harness, p); !ok {
+			return nil, false
+		}
+		if p.LastAssistantMessage != nil && *p.LastAssistantMessage != "" {
+			texts = append(texts, *p.LastAssistantMessage)
+		}
+		return texts, true
+	}
 	switch harness {
 	case "claude-code":
 		msgs, err := cc.ReadLedgers(p.TranscriptPath)
@@ -266,6 +303,40 @@ func replyTexts(harness string, p Payload) ([]string, bool) {
 	return texts, true
 }
 
+// subagentTexts reads the ledger text blocks of the subagent's own transcript, which
+// must be the file the resolver's harvest reads for that agent.
+func subagentTexts(harness string, p Payload) ([]string, bool) {
+	path := p.AgentTranscriptPath
+	if path == "" {
+		return nil, false
+	}
+	var texts []string
+	switch harness {
+	case "claude-code":
+		if filepath.Base(path) != "agent-"+p.AgentID+".jsonl" || filepath.Base(filepath.Dir(path)) != "subagents" {
+			return nil, false
+		}
+		msgs, err := cc.ReadAgentLedgers(path, p.AgentID)
+		if err != nil {
+			return nil, false
+		}
+		for _, m := range msgs {
+			texts = append(texts, m.Text)
+		}
+	case "codex":
+		rollout, err := gatecodex.ReadRollout(path)
+		if err != nil || !rollout.Threaded || rollout.Key != p.AgentID {
+			return nil, false
+		}
+		for _, m := range rollout.Ledgers {
+			texts = append(texts, m.Text)
+		}
+	default:
+		return nil, false
+	}
+	return texts, true
+}
+
 // anyComplete reports whether one text holds one ledger block for o's sequence with a
 // section and a verdict bullet for every round o requires.
 func anyComplete(texts []string, o obligation) bool {
@@ -289,13 +360,17 @@ func anyComplete(texts []string, o obligation) bool {
 	return false
 }
 
-func reason(missing []obligation) string {
+func reason(missing []obligation, subagent bool) string {
+	ender := "This turn"
+	if subagent {
+		ender = "Your commits in this subagent"
+	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "[commit-gate] This turn ended %d review sequence(s) with no complete ledger "+
+	fmt.Fprintf(&b, "[commit-gate] %s ended %d review sequence(s) with no complete ledger "+
 		"in your reply text. Write each ledger now, as ordinary text in your final reply. "+
 		"Thinking text does not count, and one ledger must not be split across messages.\n\n"+
 		"Copy each header line as it stands, one header per sequence, and give each listed "+
-		"round its own section with an ACCEPTED or REJECTED line for each concern:\n", len(missing))
+		"round its own section with an ACCEPTED or REJECTED line for each concern:\n", ender, len(missing))
 	for _, o := range missing {
 		fmt.Fprintf(&b, "\n%s\nSections: %s\n", o.header, o.headings())
 	}

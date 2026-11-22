@@ -394,7 +394,7 @@ func installReviewChannel(cfg gate.Config) error {
 		entry.DisplayName, scope, timeout, int(cfg.ReviewTimeout.Seconds()), gate.HookTimeoutMargin)
 	switch target {
 	case harness.ClaudeCode:
-		registered += "\nReview outcomes: read at the end of each turn (Stop hook)"
+		registered += "\nReview outcomes: read at the end of each turn (Stop and SubagentStop hooks)"
 	case harness.Codex:
 		registered += "\nReview outcomes: read at the end of each turn (Stop and SubagentStop hooks)" +
 			"\nHooks: " + path
@@ -748,7 +748,9 @@ idempotent and, without --apply, writes nothing.
 
 As a Stop hook it reads the payload on stdin. On a root Stop it first checks that
 the reply text holds the ledger of each review sequence the gate released in that
-turn, and refuses the Stop once, naming each missing ledger, when one is absent.`,
+turn, and refuses the Stop once, naming each missing ledger, when one is absent. On
+a SubagentStop it checks the subagent's own transcript for each sequence that
+subagent released.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// A dry run writes nothing, and migrating the corpus is a write.
 		if backfillApply {
@@ -765,9 +767,9 @@ turn, and refuses the Stop once, naming each missing ledger, when one is absent.
 			Rejoin:    backfillRejoin,
 		}
 		out := cmd.OutOrStdout()
-		// A root Stop payload gets the ledger backstop first. Its stdout carries one JSON
-		// reply, so the resolver's narration goes to stderr.
-		if res := stophook.Check(cfg.LogFile(), hookInput(os.Stdin)); res.RootStop {
+		// A Stop or SubagentStop payload gets the ledger backstop first. Its stdout
+		// carries one JSON reply, so the resolver's narration goes to stderr.
+		if res := stophook.Check(cfg.LogFile(), hookInput(os.Stdin)); res.TurnEnd {
 			checks.WriteStopReply(out, stopReply(res))
 			if res.Block {
 				return nil

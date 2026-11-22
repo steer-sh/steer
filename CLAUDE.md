@@ -127,8 +127,8 @@ Read the linked architecture section before changing the corresponding boundary:
   The API reviewer's key never goes in `~/.steer/config.json`; it lives in the
   variable `reviewer.api.key_env` names or in the file `internal/apikey/` owns, and
   only `steer reviewer key set` writes that file.
-  The root-Stop ledger backstop (`cli/internal/gate/stophook/`, run by
-  `commit-gate backfill`) reads only the `chain-end` rows `Engine.release` writes,
+  The ledger backstop (`cli/internal/gate/stophook/`, run by `commit-gate backfill`
+  at a root Stop and at a SubagentStop for that subagent's releases) reads only the `chain-end` rows `Engine.release` writes,
   so a new path that ends a blocked sequence, or hands findings without blocking, must
   go through `release`. Pi has no Stop hook: `cli/internal/pi/bridge_gate.ts` sends
   the backstop its Stop payload at `agent_before_settle` and owns Pi's turn ID and
@@ -140,7 +140,9 @@ Read the linked architecture section before changing the corresponding boundary:
   lost or written twice.
   Claude subagent ledger recovery belongs in `cc.Harvest`, which reads child
   files by agent ID, including `SubagentHandback` reports in tool inputs;
-  keep `cc.ReadLedgers` root-only for the Stop backstop.
+  keep `cc.ReadLedgers` root-only for the Stop backstop. Claude Code's resolver hook
+  sits on Stop and SubagentStop (`applyBackfillHook`); `relinkClaude` adds a missing
+  SubagentStop entry to Steer's own resolver.
   Preview historical misses with `commit-gate backfill --reresolve` before
   adding `--apply`.
 - Transcript ingestion, classification, or snapshots:

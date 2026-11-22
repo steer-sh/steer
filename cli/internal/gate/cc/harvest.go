@@ -39,7 +39,7 @@ func Harvest(projectsDir string) resolve.Harvest {
 			if agent == "" {
 				continue
 			}
-			msgs, _ := readLedgers(p, agent)
+			msgs, _ := ReadAgentLedgers(p, agent)
 			out = append(out, msgs...)
 		}
 		resolve.SortLedgers(out)
@@ -53,6 +53,13 @@ func Harvest(projectsDir string) resolve.Harvest {
 // around it are still returned.
 func ReadLedgers(path string) ([]resolve.LedgerMsg, error) {
 	return readLedgers(path, "")
+}
+
+// ReadAgentLedgers returns the ledgers one subagent wrote in its own transcript: its
+// sidechain assistant text and the reports it delivered through the handback tool, keyed
+// by agent. Its error reports what ReadLedgers' does.
+func ReadAgentLedgers(path, agent string) ([]resolve.LedgerMsg, error) {
+	return readLedgers(path, agent)
 }
 
 // readLedgers selects the root stream when agent is empty, otherwise only the

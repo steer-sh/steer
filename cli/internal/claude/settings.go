@@ -186,13 +186,15 @@ func (e StopHookEntry) MarshalJSON() ([]byte, error) {
 	return json.Marshal(raw)
 }
 
-// Hooks contains the different types of hook events. Only PreToolUse and Stop are
-// modeled; every other event key (SessionStart, PostToolUse, ...) is carried
-// through extra so a settings round-trip never drops hooks steer doesn't own.
+// Hooks contains the different types of hook events. Only PreToolUse, Stop and
+// SubagentStop are modeled; every other event key (SessionStart, PostToolUse, ...) is
+// carried through extra so a settings round-trip never drops hooks steer doesn't own.
+// A SubagentStop group keeps any matcher it carries among its unmodeled keys.
 type Hooks struct {
-	PreToolUse []HookEntry
-	Stop       []StopHookEntry
-	extra      map[string]json.RawMessage
+	PreToolUse   []HookEntry
+	Stop         []StopHookEntry
+	SubagentStop []StopHookEntry
+	extra        map[string]json.RawMessage
 }
 
 // Settings is the root object of the settings.json file. Only the hooks key
@@ -214,11 +216,13 @@ func (h *Hooks) UnmarshalJSON(data []byte) error {
 		}
 		delete(raw, "PreToolUse")
 	}
-	if stop, ok := raw["Stop"]; ok {
-		if err := json.Unmarshal(stop, &h.Stop); err != nil {
-			return err
+	for key, groups := range map[string]*[]StopHookEntry{"Stop": &h.Stop, "SubagentStop": &h.SubagentStop} {
+		if stop, ok := raw[key]; ok {
+			if err := json.Unmarshal(stop, groups); err != nil {
+				return err
+			}
+			delete(raw, key)
 		}
-		delete(raw, "Stop")
 	}
 	h.extra = raw
 	return nil
@@ -236,14 +240,16 @@ func (h Hooks) MarshalJSON() ([]byte, error) {
 		}
 		raw["PreToolUse"] = pre
 	}
-	if len(h.Stop) > 0 {
-		stop, err := json.Marshal(h.Stop)
-		if err != nil {
-			return nil, err
+	for key, groups := range map[string][]StopHookEntry{"Stop": h.Stop, "SubagentStop": h.SubagentStop} {
+		if len(groups) > 0 {
+			stop, err := json.Marshal(groups)
+			if err != nil {
+				return nil, err
+			}
+			raw[key] = stop
+		} else {
+			delete(raw, key)
 		}
-		raw["Stop"] = stop
-	} else {
-		delete(raw, "Stop")
 	}
 	return json.Marshal(raw)
 }
@@ -789,9 +795,9 @@ func backfillIdentityErr(command string) error {
 		"contain %q or the hook cannot be recognised again", command, backfillIdentity)
 }
 
-// RegisterBackfillHook upserts the resolver's Stop hook, replacing any recognised
-// resolver command and preserving every other Stop hook. A settings.json with no Stop
-// groups gains one.
+// RegisterBackfillHook upserts the resolver's Stop and SubagentStop hooks, replacing
+// any recognised resolver command and preserving every other hook on those events. An
+// event with no groups gains one.
 func RegisterBackfillHook(scope, command string, timeout int) error {
 	if !strings.Contains(command, backfillIdentity) {
 		return backfillIdentityErr(command)
@@ -804,26 +810,31 @@ func RegisterBackfillHook(scope, command string, timeout int) error {
 	return SaveSettings(scope, settings)
 }
 
-// applyBackfillHook upserts the resolver's Stop hook in memory. It does not write.
+// applyBackfillHook upserts the resolver's Stop and SubagentStop hooks in memory. It
+// does not write. The SubagentStop hook gets a group of its own, so no matcher another
+// group carries limits it to some agent types.
 func applyBackfillHook(settings *Settings, command string, timeout int) {
-	groups := stripBackfillHooks(settings.Hooks.Stop)
 	hook := CommandHook{Type: "command", Command: command, Timeout: timeout}
+	groups := stripBackfillHooks(settings.Hooks.Stop)
 	if len(groups) > 0 {
 		groups[0].Hooks = append(groups[0].Hooks, hook)
 	} else {
 		groups = append(groups, StopHookEntry{Hooks: []CommandHook{hook}})
 	}
 	settings.Hooks.Stop = groups
+	settings.Hooks.SubagentStop = append(stripBackfillHooks(settings.Hooks.SubagentStop),
+		StopHookEntry{Hooks: []CommandHook{hook}})
 }
 
-// RemoveBackfillHook drops steer's resolver Stop hook, preserving every other Stop hook
-// and removing a group left empty.
+// RemoveBackfillHook drops steer's resolver Stop and SubagentStop hooks, preserving
+// every other hook and removing a group left empty.
 func RemoveBackfillHook(scope string) error {
 	settings, err := LoadSettings(scope)
 	if err != nil {
 		return err
 	}
 	settings.Hooks.Stop = stripBackfillHooks(settings.Hooks.Stop)
+	settings.Hooks.SubagentStop = stripBackfillHooks(settings.Hooks.SubagentStop)
 	return SaveSettings(scope, settings)
 }
 
@@ -837,13 +848,15 @@ func RemoveCommitGateAndResolver(scope string) (bool, error) {
 	}
 	removed := removeCommitGateHooks(settings)
 	stop := stripBackfillHooks(settings.Hooks.Stop)
-	if countStopHooks(stop) != countStopHooks(settings.Hooks.Stop) {
+	subagentStop := stripBackfillHooks(settings.Hooks.SubagentStop)
+	if countStopHooks(stop) != countStopHooks(settings.Hooks.Stop) ||
+		countStopHooks(subagentStop) != countStopHooks(settings.Hooks.SubagentStop) {
 		removed = true
 	}
 	if !removed {
 		return false, nil
 	}
-	settings.Hooks.Stop = stop
+	settings.Hooks.Stop, settings.Hooks.SubagentStop = stop, subagentStop
 	return true, SaveSettings(scope, settings)
 }
 
@@ -882,10 +895,16 @@ func stripStopHooks(groups []StopHookEntry, drop func(string) bool) []StopHookEn
 
 // BackfillArming is what a scope's settings.json says about the resolver.
 type BackfillArming struct {
+	// Registered says a resolver hook is on Stop or SubagentStop.
 	Registered bool
-	Timeout    int
-	// Command is the registered command verbatim.
+	// Complete says it is on Stop and, in a group that runs for every agent, on
+	// SubagentStop, which a subagent's ledger backstop needs.
+	Complete bool
+	Timeout  int
+	// Command is the registered command verbatim, read from Stop first.
 	Command string
+	// Commands is every resolver command registered on either event.
+	Commands []string
 }
 
 // BackfillHookArming reads a scope's settings.json and reports the resolver's state.
@@ -894,14 +913,42 @@ func BackfillHookArming(scope string) BackfillArming {
 	if err != nil {
 		return BackfillArming{}
 	}
-	for _, group := range settings.Hooks.Stop {
-		for _, hook := range group.Hooks {
-			if strings.Contains(hook.Command, backfillIdentity) {
-				return BackfillArming{Registered: true, Timeout: hook.Timeout, Command: hook.Command}
+	var a BackfillArming
+	covered := 0
+	for _, groups := range [][]StopHookEntry{settings.Hooks.Stop, settings.Hooks.SubagentStop} {
+		everyAgent := false
+		for _, group := range groups {
+			for _, hook := range group.Hooks {
+				if !strings.Contains(hook.Command, backfillIdentity) {
+					continue
+				}
+				if !a.Registered {
+					a.Registered, a.Timeout, a.Command = true, hook.Timeout, hook.Command
+				}
+				a.Commands = append(a.Commands, hook.Command)
+				everyAgent = everyAgent || matchesEveryAgent(group)
 			}
 		}
+		if everyAgent {
+			covered++
+		}
 	}
-	return BackfillArming{}
+	a.Complete = covered == 2
+	return a
+}
+
+// matchesEveryAgent reports whether a group runs for every agent: one with no
+// matcher, or a matcher of "" or "*".
+func matchesEveryAgent(group StopHookEntry) bool {
+	raw, ok := group.extra["matcher"]
+	if !ok {
+		return true
+	}
+	var matcher string
+	if json.Unmarshal(raw, &matcher) != nil {
+		return false
+	}
+	return matcher == "" || matcher == "*"
 }
 
 // BackfillHookArmed reports whether steer's Go resolver Stop hook is registered.

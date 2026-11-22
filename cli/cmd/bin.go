@@ -265,8 +265,19 @@ func relinkClaude(r *installReport, scope, path string) (int, error) {
 		reportRelink(r, "claude-code", scope, "commit gate", next)
 		rewritten++
 	}
+	// Rewriting the resolver replaces every resolver hook on Stop and SubagentStop, so
+	// it runs only while each of them is Steer's own: a user's wrapper is never
+	// stripped or copied. Steer's resolver missing from SubagentStop predates the
+	// subagent ledger backstop.
 	resolver := claude.BackfillHookArming(scope)
-	if next, ok := relinked(resolver.Registered, resolver.Command, path); ok {
+	own := resolver.Registered
+	for _, command := range resolver.Commands {
+		own = own && steerbin.IsSteerCommand(command)
+	}
+	if next, ok := relinked(resolver.Registered, resolver.Command, path); own && (ok || !resolver.Complete) {
+		if !ok {
+			next = resolver.Command
+		}
 		if err := claude.RegisterBackfillHook(scope, next, resolver.Timeout); err != nil {
 			return rewritten, err
 		}

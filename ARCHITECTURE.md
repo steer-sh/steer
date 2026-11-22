@@ -769,7 +769,8 @@ key, requiring the entry's `agentId` to match the filename. Child replies includ
 text blocks and `SubagentHandback` tool calls' `input.message` reports; each is
 harvested separately under the original transcript timestamp. Parent history,
 sibling entries and return notifications do not supply child adjudications.
-`cc.ReadLedgers` remains the root-only reader used by the Stop backstop.
+`cc.ReadLedgers` remains the root-only reader used by the Stop backstop;
+`cc.ReadAgentLedgers` is the child reader the harvest and the SubagentStop backstop share.
 After upgrading, `steer commit-gate backfill --reresolve` previews recovery of
 previously missed child ledgers; adding `--apply` writes those links.
 The gate gives each chain an ID (`ChainState.ChainID`),
@@ -860,7 +861,21 @@ this session. A sequence is answered when one `ChainBlocks` block carries its ID
 verdict bullet in each required round section. Otherwise, when `stop_hook_active` is
 explicitly false, the Stop is refused once, naming each missing header and its
 sections. Every read doubt fails open, and a release or Stop with no turn ID gets an
-operator notice. The check does not depend on `--if-due`, the resolver lock or
+operator notice.
+
+A subagent's releases carry its thread in `release_thread`, and the root Stop owes
+none of them. At a SubagentStop (Claude Code and Codex; Claude Code's resolver hook is
+registered on both events, as Codex's is) the backstop owes every release of that
+`agent_id` in the session, whatever turn wrote it, because a background subagent can
+release after the root turn that started it has stopped. It reads only the
+subagent's own transcript at `agent_transcript_path`, and only when that file is the
+one the harvest keys by the agent: `subagents/agent-<id>.jsonl` through
+`cc.ReadAgentLedgers` (hand-back reports included), or a Codex rollout whose
+`session_meta` names that thread. A ledger the root writes for a subagent's sequence
+does not count, because the resolver joins a child's rows only to ledgers under the
+child's key. `stop_hook_active` bounds the refusal to one per continuation; a
+subagent resumed later is asked again for a ledger still missing. A Pi subagent is a
+Pi process of its own, whose settle is a root Stop. The check does not depend on `--if-due`, the resolver lock or
 `backfill.scanned`; after it the ordinary resolver runs, narrating on stderr. A
 ledger found only in the payload satisfies the check and creates no resolver link.
 Pi has no Stop hook: at `agent_before_settle` for a completed run, its gate bridge sends
