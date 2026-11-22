@@ -141,8 +141,9 @@ type Continuation struct {
 	EndReason string `json:"end_reason,omitempty"`
 	// BranchPoints counts the entries the walk passed that had another child
 	// besides the one it followed. A session that was rewound records both
-	// branches, and this reading follows the first in file order, so a non-zero
-	// count marks a continuation that may be an abandoned branch.
+	// branches, and this reading follows one: Claude Code's the first in file
+	// order, Pi's the one pi.BranchFollowed names. A non-zero count marks a
+	// continuation that may be an abandoned branch.
 	BranchPoints int `json:"branch_points,omitempty"`
 	// Reason says why no continuation was reached, when none was.
 	Reason string `json:"reason,omitempty"`

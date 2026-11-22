@@ -7,6 +7,7 @@ import (
 
 	"github.com/steer-sh/steer-cli/internal/adjudication"
 	"github.com/steer-sh/steer-cli/internal/firingaudit"
+	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/transcript"
 )
 
@@ -126,6 +127,20 @@ func TestWriteCaseShowsTheActionAndWhatFollowed(t *testing.T) {
 	// A rule_hash the master never stamped is named, not left blank.
 	if !strings.Contains(text, "rule_hash=(none)") {
 		t.Errorf("an absent stamp printed as an empty column:\n%s", text)
+	}
+	if !strings.Contains(text, "follows the first branch") {
+		t.Errorf("a Claude Code fork did not name the branch followed:\n%s", text)
+	}
+
+	// A Pi reading follows the session's own branch, not the first.
+	c.Row.Harness, c.Continuation.Harness = "pi", harness.Pi
+	pi, err := renderCase(c, firingaudit.Emission{StepsAvailable: 1, StepsEmitted: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(pi), "follows the session's active branch") ||
+		strings.Contains(string(pi), "first branch") {
+		t.Errorf("a Pi fork named the wrong branch:\n%s", pi)
 	}
 }
 

@@ -14,8 +14,10 @@ import (
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/evidence"
 	"github.com/steer-sh/steer-cli/internal/firingaudit"
+	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/statestore"
 	"github.com/steer-sh/steer-cli/internal/transcript"
+	txpi "github.com/steer-sh/steer-cli/internal/transcript/pi"
 )
 
 var auditCmd = &cobra.Command{
@@ -411,8 +413,12 @@ func renderCase(c firingaudit.Case, e firingaudit.Emission) ([]byte, error) {
 		fmt.Fprintf(w, "  %s\n", c.Continuation.Reason)
 	}
 	if c.Continuation.BranchPoints > 0 {
-		fmt.Fprintf(w, "  %d fork(s) passed; this reading follows the first branch\n",
-			c.Continuation.BranchPoints)
+		followed := "the first branch"
+		if c.Continuation.Harness == harness.Pi {
+			followed = txpi.BranchFollowed
+		}
+		fmt.Fprintf(w, "  %d fork(s) passed; this reading follows %s\n",
+			c.Continuation.BranchPoints, followed)
 	}
 	for _, step := range c.Continuation.Steps {
 		line := string(step.Kind)

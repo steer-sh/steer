@@ -1104,8 +1104,13 @@ and does not follow. A row carrying `agent_id` was recorded inside a subagent,
 whose entries live in the agent's own file (`cc.SubagentTranscript`) rather than
 the session transcript the row names; `Reach` selects that file and the walk reads
 only that agent's sidechain entries. When the agent file is absent it reads the
-session file, and a reading that reaches nothing there names the absent file. Codex and Pi have no lookup, and
-each says so in its own terms rather than reading as missing evidence.
+session file, and a reading that reaches nothing there names the absent file. A
+blocked Codex call writes no rollout item, so `codex.Continuation` reads the turn
+`turn_id` names, whole. Pi records a block as the `toolResult` carrying the call's
+id, which its guard bridge sends as `tool_call_id`; `pi.Continuation` walks the
+descendants of that entry along the branch `pi.StopBlock` would follow and counts
+the others. A call nested inside another tool's call has no entry, and the reading
+says so.
 
 `internal/adjudication/` holds one append-only receipt per judged block. A
 receipt records the join granularity, its transcript anchors and its extent
