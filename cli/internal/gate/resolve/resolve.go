@@ -322,17 +322,14 @@ func denyTSFor(rows []resolverRow, i int) (float64, bool) {
 // phase is not a chain start and bounds nothing. One thread can interleave two
 // repositories' chains, so a row of another named repository bounds nothing either; an
 // unnamed repository on either side still bounds.
-func (r *resolver) chainEndTS(rows []resolverRow, i int, session string, firing int) float64 {
-	repo := pyStr(rows[i]["repo"])
-	for j := i + 1; j < len(rows); j++ {
-		row := rows[j]
-		phase := pyStr(row["phase"])
-		if gate.NonReviewPhases[phase] || phase == "clean" {
-			continue
-		}
-		if session != "" && joinKey(row) != session {
-			continue
-		}
+func (x *chainIndex) chainEndTS(i int, session string, firing int) float64 {
+	repo := pyStr(x.rows[i]["repo"])
+	starts := x.starts
+	if session != "" {
+		starts = x.keyStarts[session]
+	}
+	for _, j := range starts[sort.SearchInts(starts, i+1):] {
+		row := x.rows[j]
 		if other := pyStr(row["repo"]); repo != "" && other != "" && other != repo {
 			continue
 		}
@@ -382,73 +379,106 @@ func chainIDs(rows []resolverRow) []int {
 	return ids
 }
 
-// chainSubjects is every subject the rows of chain id carry. Each row stamps the
-// message of its own attempt, and the header the agent copies comes from a deny, so a
-// chain whose message changed between rounds answers to each of them.
-func chainSubjects(rows []resolverRow, ids []int, id int) map[string]bool {
-	out := map[string]bool{}
-	if id < 0 {
-		return out
-	}
+// chainIndex is the chain facts of one reading of the rows: the chain of each row,
+// what each chain's rows carry, and the rows that can end a chain. Every row of a
+// chain shares one thread key, so a fact of a chain is a fact of that key.
+type chainIndex struct {
+	rows      []resolverRow
+	ids       []int
+	chains    map[int]*chainFacts
+	byKey     map[string][]int // the chains of each thread key
+	starts    []int            // rows that can end an earlier chain: review phases other than clean
+	keyStarts map[string][]int // starts by thread key
+}
+
+// chainFacts is what the rows of one chain carry.
+type chainFacts struct {
+	firings  map[int]bool
+	subjects map[string]bool // every subject a row carries
+	timed    map[string]bool // the subjects of rows that carry a ts
+	start    float64         // the earliest and latest ts of its rows, once timed is set
+	end      float64
+	handed   bool // a deny, cap or nitpick row: the chain was handed findings and owes a ledger
+}
+
+func newChainIndex(rows []resolverRow) *chainIndex {
+	x := &chainIndex{rows: rows, ids: chainIDs(rows), chains: map[int]*chainFacts{},
+		byKey: map[string][]int{}, keyStarts: map[string][]int{}}
 	for j, row := range rows {
-		if ids[j] == id {
-			if s := pyStr(row["subject"]); s != "" {
-				out[s] = true
+		id := x.ids[j]
+		c := x.chains[id]
+		if c == nil {
+			c = &chainFacts{firings: map[int]bool{}, subjects: map[string]bool{}, timed: map[string]bool{}}
+			x.chains[id] = c
+			if id >= 0 {
+				x.byKey[joinKey(row)] = append(x.byKey[joinKey(row)], id)
 			}
 		}
+		n, _ := pyInt(row["firing"])
+		c.firings[n] = true
+		if id < 0 {
+			continue
+		}
+		phase := pyStr(row["phase"])
+		if phase != "clean" {
+			x.starts = append(x.starts, j)
+			x.keyStarts[joinKey(row)] = append(x.keyStarts[joinKey(row)], j)
+		}
+		if phase == "deny" || phase == "cap" || phase == gate.PhaseNitpick {
+			c.handed = true
+		}
+		subject := pyStr(row["subject"])
+		if subject != "" {
+			c.subjects[subject] = true
+		}
+		ts, ok := pyNum(row["ts"])
+		if !ok {
+			continue
+		}
+		if len(c.timed) == 0 {
+			c.start, c.end = ts, ts
+		} else {
+			c.start, c.end = math.Min(c.start, ts), math.Max(c.end, ts)
+		}
+		c.timed[subject] = true
 	}
-	return out
+	return x
+}
+
+// subjects is every subject the rows of chain id carry. Each row stamps the message of
+// its own attempt, and the header the agent copies comes from a deny, so a chain whose
+// message changed between rounds answers to each of them. A non-review row has none.
+func (x *chainIndex) subjects(id int) map[string]bool {
+	if id < 0 {
+		return nil
+	}
+	return x.chains[id].subjects
 }
 
 // nameOwner returns the one chain of thread key that carries subject name, was handed
 // findings, and could still claim a ledger written at when. ok is false when none or
 // several do: a name that two chains share identifies neither. A chain of clean rows
 // was handed no findings, so it owes no ledger and shares no name.
-func (r *resolver) nameOwner(rows []resolverRow, ids []int, key, name string, when float64) (int, bool) {
-	type span struct{ start, end float64 }
-	spans := map[int]*span{}
-	named := map[int]bool{}
-	handed := handedChains(rows, ids, key)
-	for j, row := range rows {
-		id := ids[j]
-		if id < 0 || joinKey(row) != key {
-			continue
-		}
-		ts, ok := pyNum(row["ts"])
-		if !ok {
-			continue
-		}
-		if s := spans[id]; s == nil {
-			spans[id] = &span{ts, ts}
-		} else {
-			s.start, s.end = math.Min(s.start, ts), math.Max(s.end, ts)
-		}
-		if pyStr(row["subject"]) == name {
-			named[id] = true
-		}
-	}
+func (r *resolver) nameOwner(x *chainIndex, key, name string, when float64) (int, bool) {
 	owner, n := -1, 0
-	for id := range named {
-		if !handed[id] {
+	for _, id := range x.byKey[key] {
+		c := x.chains[id]
+		if !c.handed || !c.timed[name] {
 			continue
 		}
-		if s := spans[id]; s.start <= when && when <= s.end+r.spanFor("chain") {
+		if c.start <= when && when <= c.end+r.spanFor("chain") {
 			owner, n = id, n+1
 		}
 	}
 	return owner, n == 1
 }
 
-// handedChains is the set of chains of thread key with a deny, cap or nitpick row: the
-// chains that were handed findings and so owe a ledger.
-func handedChains(rows []resolverRow, ids []int, key string) map[int]bool {
+// handedChains is the set of chains of thread key that were handed findings.
+func (x *chainIndex) handedChains(key string) map[int]bool {
 	out := map[int]bool{}
-	for j, row := range rows {
-		if ids[j] < 0 || joinKey(row) != key {
-			continue
-		}
-		if phase := pyStr(row["phase"]); phase == "deny" || phase == "cap" || phase == gate.PhaseNitpick {
-			out[ids[j]] = true
+	for _, id := range x.byKey[key] {
+		if x.chains[id].handed {
+			out[id] = true
 		}
 	}
 	return out
@@ -456,10 +486,9 @@ func handedChains(rows []resolverRow, ids []int, key string) map[int]bool {
 
 // namesAHandedChain reports whether a chain of thread key that was handed findings
 // carries subject name.
-func namesAHandedChain(rows []resolverRow, ids []int, key, name string) bool {
-	handed := handedChains(rows, ids, key)
-	for j, row := range rows {
-		if ids[j] >= 0 && handed[ids[j]] && joinKey(row) == key && pyStr(row["subject"]) == name {
+func (x *chainIndex) namesAHandedChain(key, name string) bool {
+	for _, id := range x.byKey[key] {
+		if c := x.chains[id]; c.handed && c.subjects[name] {
 			return true
 		}
 	}
@@ -519,171 +548,190 @@ func (m *missWhy) note(why string) {
 	}
 }
 
+// ledgerQuery is the row a ledger is picked for and the ledgers it is picked from.
+type ledgerQuery struct {
+	idx     *chainIndex
+	i       int
+	session string
+	firing  int
+	denyTS  float64
+	ledgers []LedgerMsg
+}
+
 // pickLedger returns the ledger answering row i and how it was joined: "chain",
 // "round" or "window". A miss returns (nil, join, why), why being a Miss* reason.
-func (r *resolver) pickLedger(rows []resolverRow, i int, denyTS float64, ledgers []LedgerMsg) (*LedgerMsg, string, string) {
-	row := rows[i]
-	session := joinKey(row)
+func (r *resolver) pickLedger(idx *chainIndex, i int, denyTS float64, ledgers []LedgerMsg) (*LedgerMsg, string, string) {
+	row := idx.rows[i]
 	firing, _ := pyInt(row["firing"])
+	q := ledgerQuery{idx: idx, i: i, session: joinKey(row), firing: firing, denyTS: denyTS, ledgers: ledgers}
 	join := joinFor(row, denyTS)
 	why := missWhy(MissNoLedger)
 
-	// answered is the latest candidate whose text for this round holds a verdict bullet,
-	// the test the Stop backstop applies; a round under "(see above)" adjudicated nothing,
-	// so a list of only such rounds is no list and the next join is tried. An empty block
-	// is dropped only here, after it has counted toward the refusals that choose among
-	// one message's blocks.
-	answered := func(cands []LedgerMsg, sections bool) *LedgerMsg {
-		for k := len(cands) - 1; k >= 0; k-- {
-			text := cands[k].Text
-			if sections {
-				text = gate.LedgerSection(text, firing)
-			}
-			if gate.HasLedgerLine(text) {
-				return &cands[k]
-			}
-			why.note(MissEmptyRound)
+	switch join {
+	case "chain":
+		if cand, got := r.chainJoin(q, &why); cand != nil {
+			return cand, got, ""
 		}
-		return nil
+	case "round":
+		if cand := r.roundJoin(q, &why); cand != nil {
+			return cand, "round", ""
+		}
+	default:
+		if cand := q.inWindow(r.spanFor("window")); len(cand) > 0 {
+			return &cand[len(cand)-1], "window", ""
+		}
 	}
+	return nil, join, string(why)
+}
 
-	inWindow := func(span float64) []LedgerMsg {
-		var out []LedgerMsg
-		for _, x := range ledgers {
-			if denyTS <= x.When && x.When <= denyTS+span && (session == "" || x.Key == session) {
-				out = append(out, x)
-			}
-		}
-		return out
-	}
-	// roundLedgers is every per-round block naming this round inside the bound. A message
-	// with two blocks for the round answered two chains at once, and one naming a round
-	// this chain never fired counted attempts the gate kept as separate chains: neither
-	// names this chain.
-	firings := map[int]bool{}
-	ids := chainIDs(rows)
-	for j, other := range rows {
-		if ids[j] == ids[i] {
-			n, _ := pyInt(other["firing"])
-			firings[n] = true
+// inWindow is every ledger of the row's thread written within span of its deny; a row
+// with no thread takes every thread's.
+func (q ledgerQuery) inWindow(span float64) []LedgerMsg {
+	var out []LedgerMsg
+	for _, x := range q.ledgers {
+		if q.denyTS <= x.When && x.When <= q.denyTS+span && (q.session == "" || x.Key == q.session) {
+			out = append(out, x)
 		}
 	}
-	roundLedgers := func(bound float64) []LedgerMsg {
-		var mine []LedgerMsg
-		for _, x := range inWindow(r.spanFor("round")) {
-			var hits []string
-			at := 0
-			starts := gate.RoundBlockStarts(x.Text)
-			foreign := false
-			for k, block := range gate.RoundBlocks(x.Text) {
-				n, ok := gate.LedgerRound(block)
-				if ok && n == firing {
-					hits = append(hits, block)
-					at = starts[k]
-				}
-				if ok && !firings[n] {
-					foreign = true
-				}
+	return out
+}
+
+// answered is the latest candidate whose text for this round holds a verdict bullet,
+// the test the Stop backstop applies; a round under "(see above)" adjudicated nothing,
+// so a list of only such rounds is no list and the next join is tried. An empty block
+// is dropped only here, after it has counted toward the refusals that choose among
+// one message's blocks.
+func (q ledgerQuery) answered(cands []LedgerMsg, sections bool, why *missWhy) *LedgerMsg {
+	for k := len(cands) - 1; k >= 0; k-- {
+		text := cands[k].Text
+		if sections {
+			text = gate.LedgerSection(text, q.firing)
+		}
+		if gate.HasLedgerLine(text) {
+			return &cands[k]
+		}
+		why.note(MissEmptyRound)
+	}
+	return nil
+}
+
+// roundLedgers is every per-round block naming this round inside the bound. A message
+// with two blocks for the round answered two chains at once, and one naming a round
+// this chain never fired counted attempts the gate kept as separate chains: neither
+// names this chain.
+func (r *resolver) roundLedgers(q ledgerQuery, bound float64, why *missWhy) []LedgerMsg {
+	firings := q.idx.chains[q.idx.ids[q.i]].firings
+	var mine []LedgerMsg
+	for _, x := range q.inWindow(r.spanFor("round")) {
+		var hits []string
+		at := 0
+		starts := gate.RoundBlockStarts(x.Text)
+		foreign := false
+		for k, block := range gate.RoundBlocks(x.Text) {
+			n, ok := gate.LedgerRound(block)
+			if ok && n == q.firing {
+				hits = append(hits, block)
+				at = starts[k]
 			}
+			if ok && !firings[n] {
+				foreign = true
+			}
+		}
+		switch {
+		case len(hits) == 0:
+		case len(hits) > 1:
+			why.note(MissRoundShared)
+		case foreign:
+			why.note(MissRoundsUnmatched)
+		case x.When < bound:
+			mine = append(mine, LedgerMsg{When: x.When, Key: x.Key, Path: x.Path, Text: hits[0], block: &at})
+		default:
+			why.note(MissPastBound)
+		}
+	}
+	return mine
+}
+
+// roundJoin is the ledger a round-era row takes: a per-round block inside its chain's
+// bound.
+func (r *resolver) roundJoin(q ledgerQuery, why *missWhy) *LedgerMsg {
+	if len(q.inWindow(r.spanFor("round"))) > 0 {
+		why.note(MissNoRound)
+	}
+	return q.answered(r.roundLedgers(q, q.idx.chainEndTS(q.i, q.session, q.firing), why), false, why)
+}
+
+// chainJoin is the ledger a chain-era row takes and its join: a chain block named by
+// the chain's ID or subject, else an unnamed one inside the bound, else a per-round
+// block.
+func (r *resolver) chainJoin(q ledgerQuery, why *missWhy) (*LedgerMsg, string) {
+	row := q.idx.rows[q.i]
+	id := q.idx.ids[q.i]
+	bound := q.idx.chainEndTS(q.i, q.session, q.firing)
+	subjects := q.idx.subjects(id)
+	chainID := strings.ToLower(pyStr(row["chain_id"]))
+	var named, bounded []LedgerMsg
+	cands := q.inWindow(r.spanFor("chain"))
+	if len(cands) > 0 {
+		why.note(MissNoHeader)
+	}
+	for _, x := range cands {
+		starts := gate.ChainBlockStarts(x.Text)
+		for k, block := range gate.ChainBlocks(x.Text) {
+			if !gate.LedgerRounds(block)[q.firing] {
+				why.note(MissNoSection)
+				continue
+			}
+			cand := LedgerMsg{When: x.When, Key: x.Key, Path: x.Path, Text: block, block: &starts[k]}
+			// A chain ID names one chain outright. A header without one falls to the
+			// subject below; a header with one never answers a chain that has none.
+			if blockID := gate.BlockChainID(block); blockID != "" {
+				if blockID == chainID {
+					named = append(named, cand)
+				} else {
+					why.note(MissIDConflict)
+				}
+				continue
+			}
+			got := gate.BlockSubject(block)
 			switch {
-			case len(hits) == 0:
-			case len(hits) > 1:
-				why.note(MissRoundShared)
-			case foreign:
-				why.note(MissRoundsUnmatched)
-			case x.When < bound:
-				mine = append(mine, LedgerMsg{When: x.When, Key: x.Key, Path: x.Path, Text: hits[0], block: &at})
-			default:
+			case got == "" || len(subjects) == 0:
+			case !subjects[got]:
+				// A chain with only a placeholder has no subject to contradict, so a
+				// block naming no other chain of the thread is unnamed and takes the
+				// bound. A git row's window spans every session and keeps the refusal.
+				if q.session == "" || !placeholderOnly(subjects) || q.idx.namesAHandedChain(q.session, got) {
+					why.note(MissSubjectUnmatched)
+					continue
+				}
+			case q.session != "":
+				// A name lets a block past the bound, so it must name exactly one
+				// chain. A row with no thread gets no name: its window spans every
+				// session, and the git channel stamps one subject on every commit.
+				if owner, ok := r.nameOwner(q.idx, q.session, got, x.When); ok && owner == id {
+					named = append(named, cand)
+				} else {
+					why.note(MissSubjectShared)
+				}
+				continue
+			}
+			if x.When < bound {
+				bounded = append(bounded, cand)
+			} else {
 				why.note(MissPastBound)
 			}
 		}
-		return mine
 	}
-
-	if join == "chain" {
-		bound := r.chainEndTS(rows, i, session, firing)
-		ids := chainIDs(rows)
-		subjects := chainSubjects(rows, ids, ids[i])
-		chainID := strings.ToLower(pyStr(row["chain_id"]))
-		var named, bounded []LedgerMsg
-		cands := inWindow(r.spanFor("chain"))
-		if len(cands) > 0 {
-			why.note(MissNoHeader)
-		}
-		for _, x := range cands {
-			starts := gate.ChainBlockStarts(x.Text)
-			for k, block := range gate.ChainBlocks(x.Text) {
-				if !gate.LedgerRounds(block)[firing] {
-					why.note(MissNoSection)
-					continue
-				}
-				cand := LedgerMsg{When: x.When, Key: x.Key, Path: x.Path, Text: block, block: &starts[k]}
-				// A chain ID names one chain outright. A header without one falls to the
-				// subject below; a header with one never answers a chain that has none.
-				if id := gate.BlockChainID(block); id != "" {
-					if id == chainID {
-						named = append(named, cand)
-					} else {
-						why.note(MissIDConflict)
-					}
-					continue
-				}
-				got := gate.BlockSubject(block)
-				switch {
-				case got == "" || len(subjects) == 0:
-				case !subjects[got]:
-					// A chain with only a placeholder has no subject to contradict, so a
-					// block naming no other chain of the thread is unnamed and takes the
-					// bound. A git row's window spans every session and keeps the refusal.
-					if session == "" || !placeholderOnly(subjects) || namesAHandedChain(rows, ids, session, got) {
-						why.note(MissSubjectUnmatched)
-						continue
-					}
-				case session != "":
-					// A name lets a block past the bound, so it must name exactly one
-					// chain. A row with no thread gets no name: its window spans every
-					// session, and the git channel stamps one subject on every commit.
-					if owner, ok := r.nameOwner(rows, ids, session, got, x.When); ok && owner == ids[i] {
-						named = append(named, cand)
-					} else {
-						why.note(MissSubjectShared)
-					}
-					continue
-				}
-				if x.When < bound {
-					bounded = append(bounded, cand)
-				} else {
-					why.note(MissPastBound)
-				}
-			}
-		}
-		if cand := answered(named, true); cand != nil {
-			return cand, "chain", ""
-		}
-		if cand := answered(bounded, true); cand != nil {
-			return cand, "chain", ""
-		}
-		if cand := answered(roundLedgers(bound), false); cand != nil {
-			return cand, "round", ""
-		}
-		return nil, "chain", string(why)
+	if cand := q.answered(named, true, why); cand != nil {
+		return cand, "chain"
 	}
-
-	if join == "round" {
-		if len(inWindow(r.spanFor("round"))) > 0 {
-			why.note(MissNoRound)
-		}
-		if cand := answered(roundLedgers(r.chainEndTS(rows, i, session, firing)), false); cand != nil {
-			return cand, "round", ""
-		}
-		return nil, "round", string(why)
+	if cand := q.answered(bounded, true, why); cand != nil {
+		return cand, "chain"
 	}
-
-	cand := inWindow(r.spanFor("window"))
-	if len(cand) > 0 {
-		return &cand[len(cand)-1], "window", ""
+	if cand := q.answered(r.roundLedgers(q, bound, why), false, why); cand != nil {
+		return cand, "round"
 	}
-	return nil, "window", string(why)
+	return nil, ""
 }
 
 // pending reports whether an --if-due run should harvest: some row is unresolved, its
@@ -797,6 +845,9 @@ func sameLink(row resolverRow) bool {
 			}
 			fields = append(fields, v)
 		}
+		// A fresh link holds structs, whose fields marshal in declaration order, and a
+		// decoded one holds maps, whose keys marshal sorted. Decoding into any and
+		// marshalling again turns both into maps and respells json.Number values.
 		data, _ := json.Marshal(fields)
 		var v any
 		json.Unmarshal(data, &v)
@@ -811,6 +862,7 @@ func (r *resolver) resolveAndWrite(rows []resolverRow, seenLines int, apply bool
 	r.say("%d rows, %d ledgers found across transcripts\n", len(rows), len(ledgers))
 
 	changed := 0
+	var chains *chainIndex
 	for i, row := range rows {
 		if !ExpectsLedger(row) || pyTruthy(row["ledger_found"]) || pyTruthy(row["backfilled"]) {
 			continue
@@ -833,7 +885,10 @@ func (r *resolver) resolveAndWrite(rows []resolverRow, seenLines int, apply bool
 		}
 
 		row["ledger_expected"] = true
-		cand, join, why := r.pickLedger(rows, i, denyTS, ledgers)
+		if chains == nil {
+			chains = newChainIndex(rows)
+		}
+		cand, join, why := r.pickLedger(chains, i, denyTS, ledgers)
 		if cand == nil {
 			if r.now() < denyTS+r.spanFor(join) {
 				if popRecheck(row) {
@@ -886,6 +941,8 @@ func (r *resolver) resolveAndWrite(rows []resolverRow, seenLines int, apply bool
 		row["backfilled"] = true
 		if cand.Key != "" && pyStr(row["session_id"]) == "" && pyStr(row["thread_id"]) == "" {
 			row["session_id"] = cand.Key
+			// The row's thread key changed, and with it the chains of every later row.
+			chains = nil
 		}
 		if sameLink(row) {
 			restoreLink(row)
