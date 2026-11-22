@@ -140,3 +140,67 @@ func TestBackfillRoundTripKeepsSiblingKeys(t *testing.T) {
 }
 
 func contains(s, sub string) bool { return strings.Contains(s, sub) }
+
+// TestTheResolverRidesStopAndSubagentStop pins that the resolver registers on both
+// turn-end events, in a SubagentStop group of its own beside a user's matcher group,
+// once however often it registers, and that both removal paths take it off both.
+func TestTheResolverRidesStopAndSubagentStop(t *testing.T) {
+	const resolver = "steer commit-gate backfill --if-due --apply --quiet"
+	foreign := `{"hooks": {"SubagentStop": [
+  {"matcher": "Explore", "hooks": [{"type": "command", "command": "~/.claude/hooks/sub.sh"}]}
+]}}`
+	subagentStop := func(t *testing.T) []any {
+		hooks, _ := readSettings(t)["hooks"].(map[string]any)
+		groups, _ := hooks["SubagentStop"].([]any)
+		return groups
+	}
+	withProjectDir(t)
+	writeSettings(t, foreign)
+	for range 2 {
+		if err := RegisterBackfillHook(ProjectScope, resolver, 30); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if a := BackfillHookArming(ProjectScope); !a.Registered || !a.Complete || a.Timeout != 30 {
+		t.Fatalf("arming = %+v, want registered on both events", a)
+	}
+	groups := subagentStop(t)
+	if len(groups) != 2 {
+		t.Fatalf("SubagentStop = %v, want the foreign group and one resolver group", groups)
+	}
+	if own := groups[1].(map[string]any); own["matcher"] != nil ||
+		own["hooks"].([]any)[0].(map[string]any)["command"] != resolver {
+		t.Fatalf("resolver group = %v, want the resolver alone with no matcher", own)
+	}
+	if err := RemoveBackfillHook(ProjectScope); err != nil {
+		t.Fatal(err)
+	}
+	if a := BackfillHookArming(ProjectScope); a.Registered {
+		t.Fatalf("arming = %+v after removal", a)
+	}
+	if groups := subagentStop(t); len(groups) != 1 || groups[0].(map[string]any)["matcher"] != "Explore" {
+		t.Fatalf("SubagentStop = %v, want the foreign group alone", groups)
+	}
+
+	writeSettings(t, `{"hooks": {"SubagentStop": [{"hooks": [{"type": "command", "command": "`+resolver+`"}]}]}}`)
+	if a := BackfillHookArming(ProjectScope); !a.Registered || a.Complete {
+		t.Fatalf("a SubagentStop-only resolver: arming = %+v, want registered and not complete", a)
+	}
+	writeSettings(t, `{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "`+resolver+`"}]}],
+  "SubagentStop": [{"matcher": "Explore", "hooks": [{"type": "command", "command": "`+resolver+`"}]}]}}`)
+	if a := BackfillHookArming(ProjectScope); !a.Registered || a.Complete {
+		t.Fatalf("a resolver limited to Explore agents: arming = %+v, want registered and not complete", a)
+	}
+	writeSettings(t, `{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "`+resolver+`"}]}],
+  "SubagentStop": [{"matcher": "Explore", "hooks": [{"type": "command", "command": "`+resolver+`"}]},
+    {"hooks": [{"type": "command", "command": "`+resolver+`"}]}]}}`)
+	if a := BackfillHookArming(ProjectScope); !a.Complete || len(a.Commands) != 3 {
+		t.Fatalf("an every-agent resolver after a limited one: arming = %+v, want complete with three commands", a)
+	}
+	if removed, err := RemoveCommitGateAndResolver(ProjectScope); err != nil || !removed {
+		t.Fatalf("RemoveCommitGateAndResolver = %v, %v; want true", removed, err)
+	}
+	if a := BackfillHookArming(ProjectScope); a.Registered {
+		t.Fatalf("arming = %+v after RemoveCommitGateAndResolver, want no resolver", a)
+	}
+}

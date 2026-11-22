@@ -143,7 +143,7 @@ func TestAReleaseWithNoLedgerInReplyTextBlocksOnce(t *testing.T) {
 			f.release("ab12", 2, nil)
 			f.replies("Done; the commit landed.")
 			res := f.stop(nil)
-			if !res.RootStop || !res.Block {
+			if !res.TurnEnd || !res.Block {
 				t.Fatalf("result = %+v, want a block", res)
 			}
 			for _, want := range []string{header("ab12", "add mod"), "**Round 1, blocking**, **Round 2, blocking**",
@@ -153,7 +153,7 @@ func TestAReleaseWithNoLedgerInReplyTextBlocksOnce(t *testing.T) {
 				}
 			}
 			for _, active := range []any{true, nil} {
-				if res := f.stop(map[string]any{"stop_hook_active": active}); res.Block || !res.RootStop {
+				if res := f.stop(map[string]any{"stop_hook_active": active}); res.Block || !res.TurnEnd {
 					t.Errorf("stop_hook_active %v: result = %+v, want a root Stop with no block", active, res)
 				}
 			}
@@ -327,7 +327,7 @@ func TestOnlyThisTurnsRootReleasesAreOwed(t *testing.T) {
 			f := newFixture(t, "claude-code")
 			f.release("ab12", 1, tc.fields)
 			f.replies("Committed.")
-			if res := f.stop(nil); res.Block || !res.RootStop {
+			if res := f.stop(nil); res.Block || !res.TurnEnd {
 				t.Errorf("result = %+v, want a root Stop with no block", res)
 			}
 		})
@@ -388,10 +388,10 @@ func TestEveryDoubtFailsOpen(t *testing.T) {
 	t.Run("malformed payload", func(t *testing.T) {
 		f := newFixture(t, "claude-code")
 		f.release("ab12", 1, nil)
-		if res := Check(f.log, []byte("{not json")); res.Block || res.RootStop {
+		if res := Check(f.log, []byte("{not json")); res.Block || res.TurnEnd {
 			t.Errorf("result = %+v", res)
 		}
-		if res := Check(f.log, nil); res.Block || res.RootStop {
+		if res := Check(f.log, nil); res.Block || res.TurnEnd {
 			t.Errorf("empty input: result = %+v", res)
 		}
 	})
@@ -407,7 +407,7 @@ func TestAStopWithoutItsTurnFieldNamesTheGap(t *testing.T) {
 	}
 }
 
-func TestOnlyARootStopIsChecked(t *testing.T) {
+func TestOnlyATurnEndIsChecked(t *testing.T) {
 	f := newFixture(t, "codex")
 	f.release("ab12", 1, nil)
 	f.replies("Committed.")
@@ -416,7 +416,7 @@ func TestOnlyARootStopIsChecked(t *testing.T) {
 		{"agent_id": "thread-9"},
 		{"hook_event_name": "PreToolUse"},
 	} {
-		if res := f.stop(fields); res.Block || res.RootStop {
+		if res := f.stop(fields); res.Block || res.TurnEnd {
 			t.Errorf("%v: result = %+v, want no root Stop", fields, res)
 		}
 	}
@@ -582,5 +582,172 @@ func TestALedgerUnderAnotherSessionDoesNotCount(t *testing.T) {
 	f.write(ccRow("msg-1", ledger("ab12", 1, 0), map[string]any{"sessionId": "s2"}))
 	if res := f.stop(nil); !res.Block {
 		t.Errorf("another session's ledger satisfied the Stop: %+v", res)
+	}
+}
+
+// childReplies writes agent's own transcript, one assistant message per text, at the
+// path its harness's harvest reads, and returns that path.
+func (f *fixture) childReplies(agent string, texts ...string) string {
+	f.t.Helper()
+	var path string
+	var lines []string
+	switch f.harness {
+	case "codex":
+		path = filepath.Join(f.dir, "rollout-child.jsonl")
+		lines = append(lines, fmt.Sprintf(`{"timestamp":"2026-10-09T10:00:00.000Z","ordinal":0,"type":"session_meta",`+
+			`"payload":{"session_id":"s1","id":%q,"subagent_history_start_ordinal":1}}`, agent))
+		for i, text := range texts {
+			lines = append(lines, codexMessage(map[string]any{"ordinal": i + 1}, text))
+		}
+	default:
+		path = filepath.Join(f.dir, "s1", "subagents", "agent-"+agent+".jsonl")
+		for i, text := range texts {
+			lines = append(lines, ccRow(fmt.Sprintf("m%d", i), text, map[string]any{"isSidechain": true, "agentId": agent}))
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		f.t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		f.t.Fatal(err)
+	}
+	return path
+}
+
+// subagentStop runs the check on agent's SubagentStop in another root turn than the
+// release's; fields override the payload.
+func (f *fixture) subagentStop(agent, path string, fields map[string]any) Result {
+	f.t.Helper()
+	all := map[string]any{"hook_event_name": "SubagentStop", "agent_id": agent, "agent_transcript_path": path,
+		turnKeys[f.harness]: "turn-2"}
+	for k, v := range fields {
+		all[k] = v
+	}
+	return f.stop(all)
+}
+
+// subagentRelease is a release written by agent's thread in root turn "turn-1".
+func subagentRelease(agent string) map[string]any {
+	return map[string]any{"release_thread": agent, "thread_id": agent, "actor": agent}
+}
+
+var subagentHarnessList = []string{"claude-code", "codex"}
+
+func TestASubagentStopOwesItsThreadsReleasesOnce(t *testing.T) {
+	for _, h := range subagentHarnessList {
+		t.Run(h, func(t *testing.T) {
+			f := newFixture(t, h)
+			f.release("ab12", 2, subagentRelease("agent-1"))
+			path := f.childReplies("agent-1", "Committed.")
+			res := f.subagentStop("agent-1", path, nil)
+			if !res.TurnEnd || !res.Block {
+				t.Fatalf("result = %+v, want a block", res)
+			}
+			for _, want := range []string{"Your commits in this subagent ended 1 review sequence(s)",
+				header("ab12", "add mod"), "**Round 1, blocking**, **Round 2, blocking**"} {
+				if !strings.Contains(res.Reason, want) {
+					t.Errorf("the reason does not name %q:\n%s", want, res.Reason)
+				}
+			}
+			for _, active := range []any{true, nil} {
+				if res := f.subagentStop("agent-1", path, map[string]any{"stop_hook_active": active}); res.Block || !res.TurnEnd {
+					t.Errorf("stop_hook_active %v: result = %+v, want a turn end with no block", active, res)
+				}
+			}
+			path = f.childReplies("agent-1", ledger("ab12", 2, 0))
+			if res := f.subagentStop("agent-1", path, nil); res.Block || !res.TurnEnd {
+				t.Errorf("a ledger in the subagent's transcript: result = %+v, want no block", res)
+			}
+		})
+	}
+}
+
+func TestASubagentStopOwesOnlyItsOwnThread(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		harness string
+		fields  map[string]any
+	}{
+		{"a root release", "claude-code", nil},
+		{"another subagent", "claude-code", subagentRelease("agent-2")},
+		{"another session", "claude-code", map[string]any{"release_thread": "agent-1", "session_id": "s2"}},
+		{"a disagreeing thread id", "codex", map[string]any{"release_thread": "agent-1", "thread_id": "agent-2"}},
+		{"a Pi release", "pi", subagentRelease("agent-1")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t, tc.harness)
+			f.release("ab12", 1, tc.fields)
+			path := filepath.Join(f.dir, "s1", "subagents", "agent-agent-1.jsonl")
+			if res := f.subagentStop("agent-1", path, nil); res.Block || !res.TurnEnd {
+				t.Errorf("result = %+v, want a turn end with no block", res)
+			}
+		})
+	}
+}
+
+func TestASubagentLedgerCountsOnlyFromItsOwnTranscript(t *testing.T) {
+	t.Run("a ledger in the root transcript", func(t *testing.T) {
+		f := newFixture(t, "claude-code")
+		f.release("ab12", 1, subagentRelease("agent-1"))
+		f.replies(ledger("ab12", 1, 0))
+		path := f.childReplies("agent-1", "Committed.")
+		if res := f.subagentStop("agent-1", path, nil); !res.Block {
+			t.Errorf("result = %+v, want a block", res)
+		}
+	})
+	t.Run("a Claude Code hand-back report", func(t *testing.T) {
+		f := newFixture(t, "claude-code")
+		f.release("ab12", 1, subagentRelease("agent-1"))
+		path := f.childReplies("agent-1")
+		row, _ := json.Marshal(map[string]any{"type": "assistant", "isSidechain": true, "agentId": "agent-1",
+			"sessionId": "s1", "timestamp": "2026-10-09T10:00:00.000Z", "message": map[string]any{"role": "assistant",
+				"content": []any{map[string]any{"type": "tool_use", "name": "SubagentHandback",
+					"input": map[string]any{"message": ledger("ab12", 1, 0)}}}}})
+		if err := os.WriteFile(path, append(row, '\n'), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if res := f.subagentStop("agent-1", path, nil); res.Block {
+			t.Errorf("result = %+v, want no block", res)
+		}
+	})
+}
+
+func TestASubagentStopFailsOpenOnAnyDoubtAboutItsTranscript(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		harness string
+		path    func(f *fixture) string
+	}{
+		{"no agent transcript", "claude-code", func(*fixture) string { return "" }},
+		{"a missing file", "claude-code", func(f *fixture) string {
+			return filepath.Join(f.dir, "s1", "subagents", "agent-agent-1.jsonl")
+		}},
+		{"another agent's file name", "claude-code", func(f *fixture) string {
+			old := f.childReplies("agent-1", "Committed.")
+			moved := filepath.Join(filepath.Dir(old), "agent-agent-2.jsonl")
+			os.Rename(old, moved)
+			return moved
+		}},
+		{"a file outside subagents", "claude-code", func(f *fixture) string {
+			old := f.childReplies("agent-1", "Committed.")
+			moved := filepath.Join(f.dir, "agent-agent-1.jsonl")
+			os.Rename(old, moved)
+			return moved
+		}},
+		{"a Codex rollout of another thread", "codex", func(f *fixture) string {
+			return f.childReplies("agent-2", "Committed.")
+		}},
+		{"a Codex root rollout", "codex", func(f *fixture) string {
+			f.replies("Committed.")
+			return f.transcript
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t, tc.harness)
+			f.release("ab12", 1, subagentRelease("agent-1"))
+			if res := f.subagentStop("agent-1", tc.path(f), nil); res.Block || !res.TurnEnd {
+				t.Errorf("result = %+v, want a turn end with no block", res)
+			}
+		})
 	}
 }

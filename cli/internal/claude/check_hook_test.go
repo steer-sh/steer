@@ -9,7 +9,7 @@ import (
 
 func TestCheckHookSitsBesideTheResolverAndForeignStopHooks(t *testing.T) {
 	withProjectTempDir(t)
-	settingsPath := writeProjectSettings(t, `{
+	writeProjectSettings(t, `{
   "hooks": {
     "Stop": [
       {"hooks": [{"type": "command", "command": "~/.claude/hooks/mine.sh"}]}
@@ -51,9 +51,17 @@ func TestCheckHookSitsBesideTheResolverAndForeignStopHooks(t *testing.T) {
 	if !commands["~/.claude/hooks/mine.sh"] || !BackfillHookArming(ProjectScope).Registered {
 		t.Fatalf("a foreign Stop hook or the resolver was lost: %v", commands)
 	}
-	hooks := readSettingsRaw(t, settingsPath)["hooks"].(map[string]any)
-	if sub := hooks["SubagentStop"].([]any); len(sub) != 1 {
-		t.Fatalf("SubagentStop = %v, want only the foreign entry", sub)
+	subCommands := map[string]bool{}
+	for _, group := range settings.Hooks.SubagentStop {
+		for _, hook := range group.Hooks {
+			if IsCheckHookCommand(hook.Command) {
+				t.Fatalf("SubagentStop carries the runner: %+v", settings.Hooks.SubagentStop)
+			}
+			subCommands[hook.Command] = true
+		}
+	}
+	if len(subCommands) != 2 || !subCommands["~/.claude/hooks/sub.sh"] {
+		t.Fatalf("SubagentStop = %v, want the foreign entry and the resolver", subCommands)
 	}
 
 	removed, err := RemoveCheckHook(ProjectScope)

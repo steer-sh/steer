@@ -714,15 +714,16 @@ func collectPosture(cfg gate.Config, ev mine.EvidenceSet) Posture {
 				Command:    pg.Command,
 			}, ledgerCorpus, observed.gate[piID]))
 		}
-		// The resolver rides a turn-end event, which takes no matcher: registered is
-		// effective. The rows follow the commit gate's harness order, because a
+		// The resolver rides the turn-end events, with no matcher: registered is
+		// effective. Claude Code's counts as registered on Stop and SubagentStop both,
+		// as Codex's does. The rows follow the commit gate's harness order, because a
 		// reader pairs a resolver row with the gate row it arms with.
 		b := claude.BackfillHookArming(scope)
 		p.Resolver = append(p.Resolver, withEvidence(ScopeArming{
 			Harness:    claudeID,
 			Scope:      scope,
-			Registered: b.Registered,
-			Effective:  b.Registered,
+			Registered: b.Complete,
+			Effective:  b.Complete,
 			Timeout:    b.Timeout,
 			Trust:      TrustNotApplicable,
 			Command:    b.Command,

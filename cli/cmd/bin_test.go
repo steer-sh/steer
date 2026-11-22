@@ -1,9 +1,11 @@
 package cmd
 
 import (
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -103,6 +105,66 @@ func TestInstallRegistersTheStableExecutable(t *testing.T) {
 	}
 	if steerbin.Resolve(command) != steerbin.Resolvable {
 		t.Fatal("a fresh registration names a command that does not resolve")
+	}
+}
+
+// TestRelinkAddsSubagentStopToAStopOnlyResolver pins that an install whose resolver
+// predates the subagent ledger backstop gains it on SubagentStop, and that no rewrite
+// copies a user's wrapper onto SubagentStop or strips one already there.
+func TestRelinkAddsSubagentStopToAStopOnlyResolver(t *testing.T) {
+	steer := func(path string) string {
+		return steerbin.Quote(path) + " commit-gate backfill --if-due --apply --quiet"
+	}
+	const wrapper = "/usr/local/bin/my-wrapper commit-gate backfill"
+	for _, tc := range []struct {
+		name     string
+		command  func(path string) string
+		sub      string
+		repaired bool
+	}{
+		{"steer's resolver", steer, "", true},
+		{"a user's wrapper", func(string) string { return wrapper }, "", false},
+		{"steer's resolver beside a user's limited wrapper", steer, wrapper, false},
+		{"an old-path resolver beside a user's limited wrapper", func(string) string {
+			return "steer commit-gate backfill --if-due --apply --quiet"
+		}, wrapper, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			testhome.Set(t, t.TempDir())
+			path, err := steerbin.Ensure()
+			if err != nil {
+				t.Fatal(err)
+			}
+			hooks := map[string]any{"Stop": []any{map[string]any{"hooks": []any{
+				map[string]any{"type": "command", "command": tc.command(path), "timeout": 30}}}}}
+			if tc.sub != "" {
+				hooks["SubagentStop"] = []any{map[string]any{"matcher": "Explore", "hooks": []any{
+					map[string]any{"type": "command", "command": tc.sub}}}}
+			}
+			file, err := claude.GetSettingsFile(claude.GlobalScope)
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, _ := json.Marshal(map[string]any{"hooks": hooks})
+			if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(file, data, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			rewritten, err := relinkClaude(quietReport(), claude.GlobalScope, path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			a := claude.BackfillHookArming(claude.GlobalScope)
+			if tc.sub != "" && !slices.Contains(a.Commands, tc.sub) {
+				t.Fatalf("the user's SubagentStop wrapper was removed: %+v", a)
+			}
+			if a.Complete != tc.repaired || (rewritten == 1) != tc.repaired || a.Command != tc.command(path) || a.Timeout != 30 {
+				t.Fatalf("rewritten %d, arming %+v; want complete %v with the command and timeout kept",
+					rewritten, a, tc.repaired)
+			}
+		})
 	}
 }
 
