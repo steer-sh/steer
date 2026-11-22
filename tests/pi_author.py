@@ -33,8 +33,9 @@ Cases:
             session's turn_end resolves the retry row with the model's ledger.
   trust     With no saved trust and no --approve, Pi loads no project bridge and
             status reports it; a saved trust loads it; a rewritten bridge reads
-            modified until an RPC new_session or a new process loads it; a
-            declined trust reads disabled. It runs RPC only, so no model
+            modified across an RPC new_session, which keeps the imported
+            bridge, until a new process loads it; a declined trust reads
+            disabled. It runs RPC only, so no model
             request is made.
 
 A case whose model did not make the calls the case needs reports INCONCLUSIVE
@@ -129,6 +130,10 @@ class Run:
         proc = subprocess.Popen(args, cwd=self.repo, env=self.env, stdin=subprocess.PIPE,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         messages = []
+        # Pi writes diagnostics to stderr; a drained pipe cannot fill and stall it.
+        errs = []
+        drain = threading.Thread(target=lambda: errs.append(proc.stderr.read()), daemon=True)
+        drain.start()
         # A stalled step closes stdout when the watchdog kills Pi, so readline returns.
         watchdog = threading.Timer(PI_TIMEOUT, proc.kill)
         try:
@@ -143,8 +148,9 @@ class Run:
                 while True:
                     line = proc.stdout.readline()
                     if not line:
+                        drain.join(timeout=5)
                         raise RuntimeError("pi rpc stopped before it finished %s (timeout %ss): %s" % (
-                            command["type"], PI_TIMEOUT, proc.stderr.read()[-1500:]))
+                            command["type"], PI_TIMEOUT, "".join(errs)[-1500:]))
                     msg = json.loads(line)
                     messages.append(msg)
                     if msg.get("type") == "response" and msg.get("id") == command["id"]:
@@ -156,7 +162,11 @@ class Run:
                 if then:
                     then()
             proc.stdin.close()
-            proc.wait(timeout=60)
+            # Pi exits 0 when stdin ends; any other code means its shutdown failed.
+            if proc.wait(timeout=60) != 0:
+                drain.join(timeout=5)
+                raise RuntimeError("pi rpc exited %s after its last step: %s" % (
+                    proc.returncode, "".join(errs)[-1500:]))
         finally:
             watchdog.cancel()
             if proc.poll() is None:
@@ -471,23 +481,32 @@ def case_trust(run):
             seen[label] = run.gate_trust()
         return then
 
-    run.rpc(({"type": "get_state"}, rewrite("rewritten", "25")),
-            ({"type": "new_session"}, lambda: seen.update(reloaded=run.gate_trust())))
-    if seen != {"rewritten": ["modified"], "reloaded": ["approved"]}:
-        return FAIL, "a rewrite and an RPC new_session read %s, want modified then approved" % seen
-    rewrite("rewritten", "30")()
+    # Pi keeps an imported extension across new_session, so that session still runs the old bridge
+    # and its session_start rewrites the load record with the old digest.
+    loads = {}
+
+    def renewed():
+        loads["after"] = load_records(run)
+        seen["new_session"] = run.gate_trust()
+
+    run.rpc(({"type": "get_state"}, lambda: (rewrite("rewritten", "25")(), loads.update(before=load_records(run)))),
+            ({"type": "new_session"}, renewed))
+    if seen != {"rewritten": ["modified"], "new_session": ["modified"]}:
+        return FAIL, "a rewrite and an RPC new_session read %s, want modified both times" % seen
+    if not loads["before"] or any(loads["after"].get(name, 0) <= mtime for name, mtime in loads["before"].items()):
+        return FAIL, "the RPC new_session rewrote no load record: before %s, after %s" % (
+            loads["before"], loads["after"])
     run.rpc(({"type": "get_state"}, None))
     state = run.gate_trust()
-    if seen["rewritten"] != ["modified"] or state != ["approved"]:
-        return FAIL, "a rewrite and a new process read %s then %s, want modified then approved" % (
-            seen["rewritten"], state)
+    if state != ["approved"]:
+        return FAIL, "a new process after the rewrite read %s, want approved" % state
 
     run.save_trust(False)
     state = run.gate_trust()
     if state != ["disabled"]:
         return FAIL, "with a declined trust, status read %s, want disabled" % state
-    return PASS, "untrusted: missing and reported; trusted: approved; a rewrite read modified until " \
-        "an RPC new_session or a new process loaded it; declined: disabled"
+    return PASS, "untrusted: missing and reported; trusted: approved; a rewrite read modified across " \
+        "an RPC new_session until a new process loaded it; declined: disabled"
 
 
 GUARD_SRC = """#!/usr/bin/env python3
