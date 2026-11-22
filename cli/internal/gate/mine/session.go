@@ -408,29 +408,19 @@ func ScoreSessionRecord(record Record, ev EvidenceSet) (map[string]any, error) {
 	afterInstruments := sessionInstruments(after)
 
 	beforeHarness, afterHarness := sessionHarnesses(before), sessionHarnesses(after)
-	return map[string]any{
-		"id":                str(record["id"]),
-		"class":             str(record["class"]),
-		"tier":              str(record["tier"]),
-		"target":            getString(record, "target", ""),
-		"hook_id":           hookID,
-		"status":            getString(record, "status", "active"),
-		"installed":         installedLabel(record),
-		"reason":            getString(record, "reason", ""),
-		"reopen":            getString(record, "reopen", ""),
-		"signal_kind":       signalKind,
-		"before":            incidenceMap(bHits, bTotal, bRate),
-		"after":             incidenceMap(aHits, aTotal, aRate),
-		"before_coverage":   sessionCoverageMap(beforeCov),
-		"after_coverage":    sessionCoverageMap(afterCov),
-		"scope":             record["scope"],
-		"instrument":        record["instrument"],
-		"after_instruments": emptyIfNil(afterInstruments),
-		"before_hosts":      emptyIfNil(beforeHarness),
-		"after_hosts":       emptyIfNil(afterHarness),
-		"observation": sessionObservation(record, before, after, beforeCov, afterCov,
+	row := scoredRow(record, scoredWindows{
+		before:           incidenceMap(bHits, bTotal, bRate),
+		after:            incidenceMap(aHits, aTotal, aRate),
+		beforeCoverage:   sessionCoverageMap(beforeCov),
+		afterCoverage:    sessionCoverageMap(afterCov),
+		afterInstruments: afterInstruments,
+		beforeHosts:      beforeHarness,
+		afterHosts:       afterHarness,
+		observation: sessionObservation(record, before, after, beforeCov, afterCov,
 			pattern, signalKind, attr, ev, afterStart, float64(now())),
-	}, nil
+	})
+	row["signal_kind"] = signalKind
+	return row, nil
 }
 
 func sessionCoverageMap(c SessionCoverage) map[string]any {

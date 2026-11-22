@@ -65,14 +65,7 @@ func (o MatchOpts) preview(spec CorpusSpec) (*baselinePreview, error) {
 				"accepted (register --kind defect) or rejected (--kind false-positive)")
 		}
 	}
-	scopeMap, err := BuildScope(o.ScopeAll, o.ScopeHarness, o.ScopeRepo, o.ScopeRepoRoot, o.ScopePath)
-	if err != nil {
-		return nil, err
-	}
-	if err := spec.ValidateScope(scopeMap); err != nil {
-		return nil, err
-	}
-	scope, _, err := ParseScope(Record{"scope": scopeMap})
+	scopeMap, scope, err := resolveScope(spec, o.ScopeAll, o.ScopeHarness, o.ScopeRepo, o.ScopeRepoRoot, o.ScopePath)
 	if err != nil {
 		return nil, err
 	}

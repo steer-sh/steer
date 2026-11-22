@@ -74,6 +74,35 @@ func TestRegisterRefusesOnlyACorpusItCannotBaseline(t *testing.T) {
 	}
 }
 
+// TestSessionWritersReadNoLedger checks that a transcript record is written when the
+// ledger path cannot be read, which a review-findings record is refused over.
+func TestSessionWritersReadNoLedger(t *testing.T) {
+	dir := t.TempDir()
+	unreadable := t.TempDir()
+	sessions := []SessionUnit{friction(1000, "claude-code", "proj", "bare python here")}
+	if err := Register(discard{}, dir, RegisterOpts{
+		Prose: testProse, Ledger: unreadable,
+		Class: "c", Match: "bare python", Corpus: CorpusTranscript, Sessions: sessions,
+		Tier: "guard", HookID: "test-guard", Target: "steer-hooks.py", ScopeAll: true, InstalledTS: 2000,
+	}); err != nil {
+		t.Fatalf("a session register must not read the ledger: %v", err)
+	}
+	if err := Reject(discard{}, dir, RejectOpts{
+		Prose: testProse, Ledger: unreadable,
+		Class: "r", Match: "bare python", Corpus: CorpusTranscript, Sessions: sessions,
+		Reason: "no", ScopeAll: true, RejectedTS: 2000,
+	}); err != nil {
+		t.Fatalf("a session reject must not read the ledger: %v", err)
+	}
+	if err := Register(discard{}, dir, RegisterOpts{
+		Prose: testProse, Ledger: unreadable,
+		Class: "c", Match: "x", Tier: "guard", HookID: "test-guard", Target: "steer-hooks.py",
+		ScopeAll: true, Force: true,
+	}); err == nil {
+		t.Fatal("a chain register must refuse a ledger it cannot read")
+	}
+}
+
 type discard struct{}
 
 func (discard) Write(p []byte) (int, error) { return len(p), nil }

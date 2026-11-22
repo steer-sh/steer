@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/steer-sh/steer-cli/internal/steerpath"
@@ -60,40 +61,19 @@ func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 	if err := o.Prose.Validate(o.Class); err != nil {
 		return err
 	}
-	spec, err := writableCorpus(o.Corpus)
+	t, err := resolveWriterTarget(o.Corpus, o.Match, o.Kind, o.SignalKind,
+		o.ScopeAll, o.ScopeHarness, o.ScopeRepo, o.ScopeRepoRoot, o.ScopePath)
 	if err != nil {
 		return err
 	}
-	kindFilter := "accepted"
-	if o.Kind == "false-positive" {
-		kindFilter = "rejected"
-	}
-	pattern, err := compilePattern(o.Match)
-	if err != nil {
-		return fmt.Errorf("bad regex %s: %w", pyRepr(o.Match), err)
-	}
-	if err := spec.ValidateSignalKind(o.SignalKind); err != nil {
-		return err
-	}
-	scopeMap, err := BuildScope(o.ScopeAll, o.ScopeHarness, o.ScopeRepo, o.ScopeRepoRoot, o.ScopePath)
-	if err != nil {
-		return err
-	}
-	if err := spec.ValidateScope(scopeMap); err != nil {
-		return err
-	}
-	scope, _, err := ParseScope(Record{"scope": scopeMap})
-	if err != nil {
-		return err
-	}
-	rows, err := LoadRows(stateDir, o.Ledger)
-	if err != nil {
-		return err
-	}
-	chains := BuildChains(rows, false)
+	spec, scopeMap, scope := t.spec, t.scopeMap, t.scope
 	installed := o.InstalledTS
 	if installed == 0 {
 		installed = now()
+	}
+	base, err := writerBaseline(stateDir, o.Ledger, t, o.Sessions, float64(installed))
+	if err != nil {
+		return err
 	}
 	release, err := lockInventory(stateDir)
 	if err != nil {
@@ -104,29 +84,17 @@ func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 	if err != nil {
 		return err
 	}
-	var bHits, bTotal int
-	var bRate float64
-	var instrument any
 	var decisions []Decision
 	if spec.Engine == EngineSession {
-		signalKind := o.SignalKind
-		if signalKind == "" {
-			signalKind = SignalAny
-		}
-		bHits, bTotal, bRate = SessionIncidence(baselineSessions(o.Sessions, scope, float64(installed)),
-			pattern, signalKind)
-		instrument = sessionInstrumentValue(o.Sessions)
-		decisions, err = SessionOverlappingDecisions(records, o.Sessions, pattern, signalKind)
+		decisions, err = SessionOverlappingDecisions(records, o.Sessions, t.pattern, t.signalKind)
 	} else {
-		bHits, bTotal, bRate = Incidence(baselineChains(chains, scope, float64(installed), float64(now())),
-			pattern, kindFilter)
-		instrument = instrumentValue(chains)
-		decisions, err = OverlappingDecisions(recordsForCorpus(records, spec.Corpus), chains, pattern, kindFilter)
+		decisions, err = OverlappingDecisions(recordsForCorpus(records, spec.Corpus), base.chains,
+			t.pattern, t.kindFilter)
 	}
 	if err != nil {
 		return err
 	}
-	if bHits == 0 && !o.Force {
+	if base.hits == 0 && !o.Force {
 		return fmt.Errorf("regex matches no unit in the scoped baseline — an intervention " +
 			"with no baseline can never be scored. Widen the scope or the regex, or pass --force")
 	}
@@ -206,8 +174,8 @@ func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 		"installed_date": stamp(float64(installed)),
 		"status":         "active",
 		"scope":          scopeMap,
-		"baseline":       baselineMap(bHits, bTotal, bRate),
-		"instrument":     instrument,
+		"baseline":       baselineMap(base.hits, base.total, base.rate),
+		"instrument":     base.instrument,
 	}
 	o.Prose.writeInto(record)
 	if spec.Engine == EngineSession {
@@ -401,58 +369,21 @@ func Reject(w io.Writer, stateDir string, o RejectOpts) error {
 	if err := validateReopenSubset(o.ReopenMatch, o.ReopenAt); err != nil {
 		return err
 	}
-	spec, err := writableCorpus(o.Corpus)
+	t, err := resolveWriterTarget(o.Corpus, o.Match, o.Kind, o.SignalKind,
+		o.ScopeAll, o.ScopeHarness, o.ScopeRepo, o.ScopeRepoRoot, o.ScopePath)
 	if err != nil {
 		return err
 	}
-	kindFilter := "accepted"
-	if o.Kind == "false-positive" {
-		kindFilter = "rejected"
-	}
-	pattern, err := compilePattern(o.Match)
-	if err != nil {
-		return fmt.Errorf("bad regex %s: %w", pyRepr(o.Match), err)
-	}
-	if err := spec.ValidateSignalKind(o.SignalKind); err != nil {
-		return err
-	}
-	scopeMap, err := BuildScope(o.ScopeAll, o.ScopeHarness, o.ScopeRepo, o.ScopeRepoRoot, o.ScopePath)
-	if err != nil {
-		return err
-	}
-	if err := spec.ValidateScope(scopeMap); err != nil {
-		return err
-	}
-	scope, _, err := ParseScope(Record{"scope": scopeMap})
-	if err != nil {
-		return err
-	}
-	rows, err := LoadRows(stateDir, o.Ledger)
-	if err != nil {
-		return err
-	}
-	chains := BuildChains(rows, false)
+	spec := t.spec
 	rejected := o.RejectedTS
 	if rejected == 0 {
 		rejected = now()
 	}
-	var bHits, bTotal int
-	var bRate float64
-	var instrument any
-	if spec.Engine == EngineSession {
-		signalKind := o.SignalKind
-		if signalKind == "" {
-			signalKind = SignalAny
-		}
-		bHits, bTotal, bRate = SessionIncidence(baselineSessions(o.Sessions, scope, float64(rejected)),
-			pattern, signalKind)
-		instrument = sessionInstrumentValue(o.Sessions)
-	} else {
-		bHits, bTotal, bRate = Incidence(baselineChains(chains, scope, float64(rejected), float64(now())),
-			pattern, kindFilter)
-		instrument = instrumentValue(chains)
+	base, err := writerBaseline(stateDir, o.Ledger, t, o.Sessions, float64(rejected))
+	if err != nil {
+		return err
 	}
-	if bHits == 0 && !o.Force {
+	if base.hits == 0 && !o.Force {
 		return fmt.Errorf("regex matches no unit in the scoped baseline — a rejection with " +
 			"no baseline can never be re-scored, and cannot be recognised when the class " +
 			"returns. Widen the scope or the regex, or pass --force")
@@ -483,9 +414,9 @@ func Reject(w io.Writer, stateDir string, o RejectOpts) error {
 		"rejected_ts":   int(rejected),
 		"rejected_date": stamp(float64(rejected)),
 		"status":        "rejected",
-		"scope":         scopeMap,
-		"baseline":      baselineMap(bHits, bTotal, bRate),
-		"instrument":    instrument,
+		"scope":         t.scopeMap,
+		"baseline":      baselineMap(base.hits, base.total, base.rate),
+		"instrument":    base.instrument,
 	}
 	o.Prose.writeInto(record)
 	if spec.Engine == EngineSession {
@@ -563,20 +494,13 @@ func ScopeSet(w io.Writer, stateDir, id string, o ScopeSetOpts) error {
 	if err != nil {
 		return fmt.Errorf("bad regex %s: %w", pyRepr(str(rec["match"])), err)
 	}
-	var bHits, bTotal int
-	var bRate float64
-	if spec.Engine == EngineSession {
-		bHits, bTotal, bRate = SessionIncidence(baselineSessions(o.Sessions, scope, SplitTS(rec)),
-			pattern, SessionSignalKind(rec))
-	} else {
-		rows, err := LoadRows(stateDir, o.Ledger)
-		if err != nil {
-			return err
-		}
-		bHits, bTotal, bRate = Incidence(baselineChains(BuildChains(rows, false), scope, SplitTS(rec), float64(now())),
-			pattern, RecordKindFilter(rec))
+	t := writerTarget{spec: spec, pattern: pattern, kindFilter: RecordKindFilter(rec),
+		signalKind: SessionSignalKind(rec), scopeMap: scopeMap, scope: scope}
+	base, err := writerBaseline(stateDir, o.Ledger, t, o.Sessions, SplitTS(rec))
+	if err != nil {
+		return err
 	}
-	if bHits == 0 && !o.Force {
+	if base.hits == 0 && !o.Force {
 		return fmt.Errorf("regex matches no unit in the scoped baseline — widen the scope, or pass --force")
 	}
 	setTS := o.ScopeSetTS
@@ -585,7 +509,7 @@ func ScopeSet(w io.Writer, stateDir, id string, o ScopeSetOpts) error {
 	}
 	rec["scope"] = scopeMap
 	rec["scope_set_ts"] = int(setTS)
-	rec["baseline"] = baselineMap(bHits, bTotal, bRate)
+	rec["baseline"] = baselineMap(base.hits, base.total, base.rate)
 	if err := save(stateDir, records); err != nil {
 		return err
 	}
@@ -608,6 +532,93 @@ func baselineChains(chains []Chain, scope *Scope, cutoff, at float64) []Chain {
 func baselineSessions(units []SessionUnit, scope *Scope, cutoff float64) []SessionUnit {
 	before, _, _ := SplitSessions(units, cutoff)
 	return SessionBaselineWindow(before, scope)
+}
+
+// writerTarget is what a writer counts its baseline with: the corpus, the class regex,
+// the verdict the chain engine counts, the signal kind the session engine counts, and
+// the frozen scope.
+type writerTarget struct {
+	spec       CorpusSpec
+	pattern    *regexp.Regexp
+	kindFilter string
+	signalKind string
+	scopeMap   map[string]any
+	scope      *Scope
+}
+
+// resolveWriterTarget validates the corpus, regex, signal kind and scope flags that
+// Register and Reject share, in the order both refuse them.
+func resolveWriterTarget(corpus, match, kind, signalKind string, scopeAll bool,
+	scopeHarness []string, scopeRepo, scopeRepoRoot, scopePath string) (writerTarget, error) {
+	spec, err := writableCorpus(corpus)
+	if err != nil {
+		return writerTarget{}, err
+	}
+	kindFilter := "accepted"
+	if kind == "false-positive" {
+		kindFilter = "rejected"
+	}
+	pattern, err := compilePattern(match)
+	if err != nil {
+		return writerTarget{}, fmt.Errorf("bad regex %s: %w", pyRepr(match), err)
+	}
+	if err := spec.ValidateSignalKind(signalKind); err != nil {
+		return writerTarget{}, err
+	}
+	scopeMap, scope, err := resolveScope(spec, scopeAll, scopeHarness, scopeRepo, scopeRepoRoot, scopePath)
+	if err != nil {
+		return writerTarget{}, err
+	}
+	if signalKind == "" {
+		signalKind = SignalAny
+	}
+	return writerTarget{spec: spec, pattern: pattern, kindFilter: kindFilter,
+		signalKind: signalKind, scopeMap: scopeMap, scope: scope}, nil
+}
+
+// resolveScope builds the scope the flags name, refuses a predicate the corpus's unit
+// cannot decide, and parses it.
+func resolveScope(spec CorpusSpec, all bool, harness []string, repo, repoRoot, path string) (map[string]any, *Scope, error) {
+	scopeMap, err := BuildScope(all, harness, repo, repoRoot, path)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := spec.ValidateScope(scopeMap); err != nil {
+		return nil, nil, err
+	}
+	scope, _, err := ParseScope(Record{"scope": scopeMap})
+	if err != nil {
+		return nil, nil, err
+	}
+	return scopeMap, scope, nil
+}
+
+// frozenBaseline is the incidence a writer stores and the instrument that counted it.
+// chains is the ledger's chains for the chain engine and nil for the session engine.
+type frozenBaseline struct {
+	hits, total int
+	rate        float64
+	instrument  any
+	chains      []Chain
+}
+
+// writerBaseline counts the target's regex over the window before cutoff that its
+// scope admits, through baselineChains or baselineSessions. Only the chain engine
+// reads the ledger.
+func writerBaseline(stateDir, ledger string, t writerTarget, sessions []SessionUnit, cutoff float64) (frozenBaseline, error) {
+	if t.spec.Engine == EngineSession {
+		hits, total, rate := SessionIncidence(baselineSessions(sessions, t.scope, cutoff), t.pattern, t.signalKind)
+		return frozenBaseline{hits: hits, total: total, rate: rate,
+			instrument: sessionInstrumentValue(sessions)}, nil
+	}
+	rows, err := LoadRows(stateDir, ledger)
+	if err != nil {
+		return frozenBaseline{}, err
+	}
+	chains := BuildChains(rows, false)
+	hits, total, rate := Incidence(baselineChains(chains, t.scope, cutoff, float64(now())), t.pattern, t.kindFilter)
+	return frozenBaseline{hits: hits, total: total, rate: rate,
+		instrument: instrumentValue(chains), chains: chains}, nil
 }
 
 // baselineMap is the stored baseline in the one candidate-record contract. Its
