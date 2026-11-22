@@ -30,7 +30,6 @@ import (
 	"github.com/steer-sh/steer-cli/internal/report"
 	"github.com/steer-sh/steer-cli/internal/sessions"
 	"github.com/steer-sh/steer-cli/internal/steerbin"
-	"github.com/steer-sh/steer-cli/internal/steerpath"
 )
 
 // StatusVersion is the schema version of the emitted snapshot. It mirrors
@@ -1052,34 +1051,17 @@ func runnerTrust(id harness.ID, scope string) string {
 // process that imported earlier and never ran /reload is invisible to it. A project Pi's
 // trust file declines is disabled; an older bridge or unreadable records are unknown.
 func PiTrust(scope, cwd, path string) string {
-	if path == "" {
-		return TrustUnknown
-	}
-	if scope == harness.ProjectScope {
-		root, err := steerpath.ProjectConfigDir(cwd)
-		if err != nil {
-			return TrustUnknown
-		}
-		switch pi.ProjectTrust(root) {
-		case pi.TrustDeclined:
-			return TrustDisabled
-		case pi.TrustUnread:
-			return TrustUnknown
-		}
-	}
-	if !pi.BridgeCurrent(path) {
-		return TrustUnknown
-	}
-	load := pi.LoadOf(path)
-	switch {
-	case !load.Known:
-		return TrustUnknown
-	case !load.Loaded:
-		return TrustMissing
-	case !load.Current:
+	switch pi.RunningOf(scope, cwd, path) {
+	case pi.RunningCurrent:
+		return TrustApproved
+	case pi.RunningEarlier:
 		return TrustModified
+	case pi.RunningNone:
+		return TrustMissing
+	case pi.RunningDeclined:
+		return TrustDisabled
 	}
-	return TrustApproved
+	return TrustUnknown
 }
 
 // newestFiring is the epoch second of the last block the audit log beside a

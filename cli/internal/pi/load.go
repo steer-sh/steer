@@ -150,6 +150,62 @@ func ProjectTrust(dir string) Trust {
 	}
 }
 
+// Running is what Pi's records say about whether Pi runs one Steer extension.
+type Running int
+
+const (
+	// RunningUnknown means a record could not be read, or the extension predates
+	// the load recorder and so leaves none.
+	RunningUnknown Running = iota
+	// RunningCurrent means a Pi session loaded the extension's current bytes.
+	RunningCurrent
+	// RunningEarlier means a Pi session loaded earlier bytes of the extension.
+	RunningEarlier
+	// RunningNone means no Pi session has loaded the extension.
+	RunningNone
+	// RunningDeclined means Pi's trust file declines the project that holds it.
+	RunningDeclined
+)
+
+// RunsNothing reports a state in which Pi is known to run none of the extension.
+func (r Running) RunsNothing() bool {
+	return r == RunningNone || r == RunningDeclined
+}
+
+// RunningOf reads which bytes of the extension at path Pi's newest session start
+// ran. A project extension is declined while Pi's trust declines the project at
+// cwd. A Pi process that imported earlier and never ran /reload is invisible to it.
+func RunningOf(scope, cwd, path string) Running {
+	if path == "" {
+		return RunningUnknown
+	}
+	if scope == harness.ProjectScope {
+		root, err := steerpath.ProjectConfigDir(cwd)
+		if err != nil {
+			return RunningUnknown
+		}
+		switch ProjectTrust(root) {
+		case TrustDeclined:
+			return RunningDeclined
+		case TrustUnread:
+			return RunningUnknown
+		}
+	}
+	if !BridgeCurrent(path) {
+		return RunningUnknown
+	}
+	load := LoadOf(path)
+	switch {
+	case !load.Known:
+		return RunningUnknown
+	case !load.Loaded:
+		return RunningNone
+	case !load.Current:
+		return RunningEarlier
+	}
+	return RunningCurrent
+}
+
 // currentDigest names the body this binary writes for each bridge file.
 func currentDigest(name string) string {
 	switch name {

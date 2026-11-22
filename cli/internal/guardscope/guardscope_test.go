@@ -1,6 +1,9 @@
 package guardscope
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -10,6 +13,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/claude"
 	"github.com/steer-sh/steer-cli/internal/codex"
 	"github.com/steer-sh/steer-cli/internal/harness"
+	"github.com/steer-sh/steer-cli/internal/pi"
 )
 
 // isolate points every harness at fresh directories and clears the session
@@ -151,6 +155,83 @@ func TestCheckRefusesACodexRunnerWithNoApprovalRecord(t *testing.T) {
 	}
 	if err := Check("steer", false, []string{"codex"}, false); err != nil {
 		t.Fatalf("runner with an approval record: %v", err)
+	}
+}
+
+// Pi runs its guard extension only once a session loads it, and a project's only
+// while Pi trusts the project, so Check refuses Pi while every registered extension
+// is known not to run, and accepts it once one session loaded current bytes.
+func TestCheckRefusesAPiGuardExtensionNoSessionRuns(t *testing.T) {
+	home := isolate(t)
+	agent := filepath.Join(home, ".pi", "agent")
+	t.Setenv("PI_CODING_AGENT_DIR", agent)
+	if _, err := pi.RegisterMaster(harness.ProjectScope, "."); err != nil {
+		t.Fatalf("register project extension: %v", err)
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, err := filepath.EvalSymlinks(cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trust, err := json.Marshal(map[string]bool{project: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(agent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agent, "trust.json"), trust, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err = Check("steer", false, []string{"pi"}, false)
+	if err == nil || !strings.Contains(err.Error(), "no Pi session runs") {
+		t.Fatalf("extension in a declined project: got %v", err)
+	}
+	if err := Check("steer", false, []string{"pi"}, true); err != nil {
+		t.Fatalf("--force: %v", err)
+	}
+
+	if _, err := pi.RegisterMaster(harness.GlobalScope, "."); err != nil {
+		t.Fatalf("register global extension: %v", err)
+	}
+	if !RunnerUnapproved(harness.Pi) {
+		t.Fatal("a global extension no session loaded read as running")
+	}
+	bridge, err := pi.GuardBridgePath(harness.GlobalScope, ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordPiLoad(t, bridge)
+	if err := Check("steer", false, []string{"pi"}, false); err != nil {
+		t.Fatalf("global extension a session loaded: %v", err)
+	}
+}
+
+// recordPiLoad writes the load record Pi's bridge writes when a session imports
+// the current bytes at path.
+func recordPiLoad(t *testing.T, path string) {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(content)
+	record, err := json.Marshal(map[string]string{"path": resolved, "digest": hex.EncodeToString(sum[:])})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(pi.LoadDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pi.LoadDir(), "guards.json"), record, 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 
