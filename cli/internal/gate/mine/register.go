@@ -177,6 +177,7 @@ func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 		"status":         "active",
 		"scope":          scopeMap,
 		"baseline":       baselineMap(base.hits, base.total, base.rate),
+		EvidenceKey:      base.evidence,
 		"instrument":     base.instrument,
 	}
 	o.Prose.writeInto(record)
@@ -425,6 +426,7 @@ func Reject(w io.Writer, stateDir string, o RejectOpts) error {
 		"status":        "rejected",
 		"scope":         t.scopeMap,
 		"baseline":      baselineMap(base.hits, base.total, base.rate),
+		EvidenceKey:     base.evidence,
 		"instrument":    base.instrument,
 	}
 	o.Prose.writeInto(record)
@@ -515,6 +517,8 @@ func ScopeSet(w io.Writer, stateDir, id string, o ScopeSetOpts) error {
 	rec["scope"] = scopeMap
 	rec["scope_set_ts"] = int(setTS)
 	rec["baseline"] = baselineMap(base.hits, base.total, base.rate)
+	rec[EvidenceKey] = base.evidence
+	delete(rec, backfilledKey)
 	if err := save(stateDir, records); err != nil {
 		return err
 	}
@@ -605,6 +609,7 @@ type frozenBaseline struct {
 	rate        float64
 	instrument  any
 	chains      []Chain
+	evidence    []any
 }
 
 // writerBaseline counts the target's regex over the window before cutoff that its
@@ -612,18 +617,22 @@ type frozenBaseline struct {
 // reads the ledger.
 func writerBaseline(stateDir, ledger string, t writerTarget, sessions []SessionUnit, cutoff float64) (frozenBaseline, error) {
 	if t.spec.Engine == EngineSession {
-		hits, total, rate := SessionIncidence(baselineSessions(sessions, t.scope, cutoff), t.pattern, t.signalKind)
+		window := baselineSessions(sessions, t.scope, cutoff)
+		hits, total, rate := SessionIncidence(window, t.pattern, t.signalKind)
 		return frozenBaseline{hits: hits, total: total, rate: rate,
-			instrument: sessionInstrumentValue(sessions)}, nil
+			instrument: sessionInstrumentValue(sessions),
+			evidence:   sessionEvidence(window, t.pattern, t.signalKind)}, nil
 	}
 	rows, err := LoadRows(stateDir, ledger)
 	if err != nil {
 		return frozenBaseline{}, err
 	}
 	chains := BuildChains(rows, false)
-	hits, total, rate := Incidence(baselineChains(chains, t.scope, cutoff, float64(now())), t.pattern, t.kindFilter)
+	window := baselineChains(chains, t.scope, cutoff, float64(now()))
+	hits, total, rate := Incidence(window, t.pattern, t.kindFilter)
 	return frozenBaseline{hits: hits, total: total, rate: rate,
-		instrument: instrumentValue(chains), chains: chains}, nil
+		instrument: instrumentValue(chains), chains: chains,
+		evidence: chainEvidence(window, t.pattern, t.kindFilter)}, nil
 }
 
 // baselineMap is the stored baseline in the one candidate-record contract. Its

@@ -122,6 +122,8 @@ type interventionFlags struct {
 	describeIntervent string
 	retireReason      string
 	retireStatus      string
+
+	backfillApply bool
 }
 
 const scopeHarnessUsage = "eligibility scope: harness ids the class is measured on (repeatable or comma-separated)"
@@ -462,7 +464,32 @@ func newInterventionCommands() (*interventionFlags, []*cobra.Command) {
 	retire.Flags().StringVar(&v.retireStatus, "status", "removed", "reworked|removed")
 	_ = retire.MarkFlagRequired("reason")
 
-	cmds := []*cobra.Command{match, register, reject, scope, score, list, describe, retire}
+	backfill := &cobra.Command{
+		Use:   "backfill-evidence",
+		Short: "List the baseline units an older record counted, where they still exist",
+		Long: "List the baseline units an older record counted, where they still exist.\n\n" +
+			"A record registered before evidence lists existed names no session or chain\n" +
+			"that justified it. This recomputes each such record's before-window hits from\n" +
+			"the ledger and session snapshots on this machine and marks every entry\n" +
+			"recomputed. Units whose transcripts or rows are gone stay missing, and a unit\n" +
+			"ingested or adjudicated after registration can match, so each line shows the\n" +
+			"units that match now beside the hits the baseline froze. A later run adds only\n" +
+			"the units a backfilled record lacks. It writes only with --apply.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := prepareState(); err != nil {
+				return err
+			}
+			return mine.BackfillEvidence(out(), gateConfig().StateDir, mine.BackfillEvidenceOpts{
+				Ledger:   v.ledger,
+				Sessions: storedSessions(),
+				Apply:    v.backfillApply,
+			})
+		},
+	}
+	backfill.Flags().BoolVar(&v.backfillApply, "apply", false, "write the lists")
+
+	cmds := []*cobra.Command{match, register, reject, scope, score, list, describe, retire, backfill}
 
 	findings := &cobra.Command{
 		Use:   "findings",

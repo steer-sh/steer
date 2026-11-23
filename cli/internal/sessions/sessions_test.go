@@ -410,6 +410,11 @@ func TestLoadReadsEveryShardAndSkipsJunk(t *testing.T) {
 	if len(loaded) != 2 {
 		t.Fatalf("want one session per shard, got %+v", loaded)
 	}
+	for _, u := range loaded {
+		if want := map[string]string{"a1": "hostA", "b1": "hostB"}[u.SessionID]; u.Host != want {
+			t.Errorf("%s: host %q, want the shard's %q", u.SessionID, u.Host, want)
+		}
+	}
 	if err := Save(dir, "hostA", loaded); err != nil {
 		t.Fatal(err)
 	}

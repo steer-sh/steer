@@ -1048,6 +1048,13 @@ A legacy scope migration recomputes the baseline and starts a new after-window;
 changing a frozen scope requires a new record. Baseline writers and scorers use
 the same eligibility pass.
 
+Each baseline writer also freezes `evidence[]` (`unitevidence.go`): one entry per
+baseline unit the regex matched, named by host, start, chain ID or session ID, and
+a locator for each matching finding or signal. An entry quotes no text, so the
+record keeps naming its units after the transcripts and ledger rows are gone.
+`fix backfill-evidence` recomputes the list for a record older than the field from
+what this machine still holds and marks each such entry `recomputed`.
+
 Repository scope has two predicates. The basename regex keeps its original
 semantics for existing records; the exact repository root introduced with scope
 version 3 separates checkouts that share a basename. Chains preserve the whole
