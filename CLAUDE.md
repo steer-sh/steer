@@ -271,6 +271,9 @@ Read the linked architecture section before changing the corresponding boundary:
   `textEntryFactsInScope` (`cli/internal/gate/mine/interventions.go`) decode one
   `rules.<id>.review` shape; `cli/internal/reviewpath/` is the one path grammar.
   The reviewer's guidance lives in the block preamble, never in `prompts/review.md`.
+  A function that branches on `tier.Instruction` or `tier.Review` must say what a
+  reviewed rule does there; `TestEveryTierBranchDecidesTheReviewedRule`
+  (`cli/cmd/tier_coverage_test.go`) pins it, and a new tier extends that test.
 - Report pass decision points: `skills/auto-steer/SKILL.md` runs the pass in
   `skills/steer-report/` and replaces each point where it asks, offers or waits.
   A new or moved step, question or offer there, or in the `steer` skill's install

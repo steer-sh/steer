@@ -164,6 +164,16 @@ func reviewedRules(scope string, data []byte) ([]ReviewedRule, error) {
 	return out, nil
 }
 
+// HoldsRule reports whether the addendum holds id as a reviewed rule of scope.
+func (a Addendum) HoldsRule(scope, id string) bool {
+	for _, r := range a.Rules {
+		if r.Scope == scope && r.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
 // RulesFor returns the reviewed rules a commit changing paths receives: each rule with
 // no paths, and each rule with a path that matches one of them.
 func (a Addendum) RulesFor(paths []string) []ReviewedRule {

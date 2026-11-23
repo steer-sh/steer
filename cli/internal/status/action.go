@@ -218,11 +218,17 @@ func artifactStatePhrase(kind tier.Kind, noun, name string, a *cadence.Artifact)
 		if kind == tier.Check {
 			return "the " + name + " is " + a.Detail
 		}
+		if kind == tier.Reviewed && a.Detail != "" {
+			// A reviewed rule's detail can say it left the working tree, so it is not "in place".
+			return "the " + name + " is changed: " + a.Detail
+		}
 		if a.Detail != "" {
 			return "the " + name + " is in place, but " + a.Detail
 		}
 		return "the " + name + " is in place, but its text differs from the text this record measured"
 	case cadence.ArtifactAbsent:
+		// A project reviewed rule that HEAD still holds reads changed, with a Detail, so
+		// an absent reviewed rule is gone from both the working tree and HEAD.
 		switch {
 		case kind == tier.Check:
 			return "the " + name + " is no longer declared in " + a.Repo

@@ -3,10 +3,13 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/claude"
+	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/styles"
 	"github.com/steer-sh/steer-cli/internal/tier"
 )
@@ -71,17 +74,10 @@ var rulesAddCmd = &cobra.Command{
 		if result.Overwritten && result.PreviousText != strings.TrimSpace(text) {
 			fmt.Printf("  was: %s\n", result.PreviousText)
 		}
-		if rules, err := claude.ListManagedRules(scope); err == nil {
-			for _, rule := range rules {
-				if rule.ID == result.ID && rule.Review != nil {
-					fmt.Printf("Reviewed: %s\n", reviewPathsPhrase(rule.Review))
-					if scope == claude.ProjectScope {
-						fmt.Printf("The commit gate reads project rules from HEAD. Commit %s on its own, before the change "+
-							"the rule is for: a commit that carries both is reviewed without the rule.\n", projectManifestPath())
-					}
-				}
-			}
+		if result.Review != nil {
+			fmt.Printf("Reviewed: %s\n", reviewPathsPhrase(result.Review))
 		}
+		printReviewedRuleCommitNote(os.Stdout, scope, result.ID, result.Review != nil)
 		return nil
 	},
 }
@@ -136,6 +132,7 @@ var rulesRemoveCmd = &cobra.Command{
 		}
 		fmt.Println(styles.SuccessBox.Render(fmt.Sprintf(
 			"Removed rule: %s\nScope: %s\nHarness: %s\nArchived: %s", result.ID, scope, harnessNames(targets), result.ArchivePath)))
+		printReviewedRuleCommitNote(os.Stdout, scope, result.ID, false)
 		return nil
 	},
 }
@@ -175,4 +172,23 @@ func reviewPathsPhrase(r *claude.RuleReview) string {
 		return "every commit"
 	}
 	return "commits that change " + strings.Join(r.Paths, ", ")
+}
+
+// printReviewedRuleCommitNote tells the user that a project reviewed rule's change
+// reaches the commit reviewer only once the store's manifest is committed, because the
+// gate reads project rules from HEAD. reviewed is whether the rule is reviewed after
+// the change. A rule that is not gets the note only while HEAD holds it as reviewed,
+// because only then does the reviewer go on reading it.
+func printReviewedRuleCommitNote(w io.Writer, scope, id string, reviewed bool) {
+	if scope != claude.ProjectScope {
+		return
+	}
+	switch {
+	case reviewed:
+		fmt.Fprintf(w, "The commit gate reads project rules from HEAD. Commit %s on its own, before the change "+
+			"the rule is for: a commit that carries both is reviewed against the rule as HEAD holds it.\n", projectManifestPath())
+	case gate.LoadAddendum(repoRootOrNone()).HoldsRule(claude.ProjectScope, id):
+		fmt.Fprintf(w, "The commit gate reads project rules from HEAD, so its reviewer goes on reading this "+
+			"rule until you commit %s.\n", projectManifestPath())
+	}
 }

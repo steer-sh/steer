@@ -280,6 +280,9 @@ reads them. A rule with a `review` section is a reviewed rule: it derives its
 `## Steer Rules` line like any rule, and the commit gate also reads it. Its
 `paths` follow `internal/reviewpath/`'s grammar, which the store validates on
 write and the gate matches on review; a project reviewed rule must name one.
+It archives as an instruction rule (`tier.Archived`). Its author reads the
+working tree and its reviewer reads HEAD, so a reader of a project reviewed
+rule compares both, and a change to one asks for the manifest commit.
 A guard's registered id can differ from its file stem. Resolution, firing
 metadata and fixture verification keep the registered id; embedded sources keep
 file-stem keys. An exact id resolves to its entry's file ahead of any stem match,

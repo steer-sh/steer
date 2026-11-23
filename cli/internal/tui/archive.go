@@ -11,6 +11,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/archive"
 	"github.com/steer-sh/steer-cli/internal/checks"
 	"github.com/steer-sh/steer-cli/internal/claude"
+	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/hookstore"
 	"github.com/steer-sh/steer-cli/internal/status"
@@ -23,6 +24,9 @@ type archiveForm struct {
 	tier  string
 	id    string
 	scope string
+	// reviewerReads marks a project rule that HEAD holds as a reviewed rule, which the
+	// commit reviewer reads until its removal is committed.
+	reviewerReads bool
 }
 
 // archivedEntry is the newest archive entry of one id in one tier and store.
@@ -138,7 +142,9 @@ func (m *Model) archiveKey(row fixRow) {
 	case row.kind == fixCheck && m.checking != "":
 		m.note("a check action is running; archive %s after it finishes", row.name)
 	default:
-		m.archiveForm = &archiveForm{tier: rowTier(row), id: row.name, scope: row.scope}
+		m.archiveForm = &archiveForm{tier: rowTier(row), id: row.name, scope: row.scope,
+			reviewerReads: row.kind == fixRule && row.scope == claude.ProjectScope &&
+				gate.LoadAddendum(repoRoot()).HoldsRule(claude.ProjectScope, row.name)}
 		m.editing = true
 		m.input.Prompt = "reason: "
 		m.input.Placeholder = "why this fix is removed (optional)"
@@ -199,8 +205,12 @@ func (m *Model) archiveFix(f archiveForm, reason string) (string, error) {
 		if _, err := claude.RemoveManagedRule(f.scope, f.id, reason, targets...); err != nil {
 			return "", err
 		}
-		return "archived " + noun + " " + f.id + "; the instructions in " + scopeReach(f.scope) +
-			" no longer carry it" + restore, nil
+		out := "archived " + noun + " " + f.id + "; the instructions in " + scopeReach(f.scope) + " no longer carry it"
+		if f.reviewerReads {
+			// A reviewed rule stays in the reviewer's prompt until the removal is committed.
+			out += "; " + commitStep("removal")
+		}
+		return out + restore, nil
 	case tier.Review:
 		if _, err := claude.RemoveAddendum(f.scope, f.id, reason); err != nil {
 			return "", err
@@ -241,8 +251,14 @@ func archiveConsequence(f archiveForm) string {
 		return "This removes the guard from " + scopeReach(f.scope) + ", so it no longer runs there. " +
 			"Its file, fixtures and manifest entry go to the archive, and the Archived section can restore them."
 	case tier.Instruction:
-		return "This removes the rule from the instructions each agent reads in " +
+		out := "This removes the rule from the instructions each agent reads in " +
 			scopeReach(f.scope) + ". Its text goes to the archive, and the Archived section can restore it."
+		// A reviewed rule archives as an instruction rule; f.reviewerReads marks one at HEAD.
+		if f.reviewerReads {
+			step := commitStep("removal")
+			out += " The commit reviewer reads this rule too: " + step + "."
+		}
+		return out
 	case tier.Review:
 		out := "This removes the " + f.scope + " entry, so the commit gate's reviewer is no longer told it. " +
 			"Its text goes to the archive, and the Archived section can restore it."
@@ -306,7 +322,8 @@ func (m *Model) restoreArchived(e *archivedEntry) tea.Cmd {
 	}
 	m.refresh()
 	note := "restored " + noun + " " + s.ID + " in " + scopeReach(e.scope) + fixtures
-	if s.Tier == string(tier.Review) && e.scope == claude.ProjectScope {
+	// A reviewed rule archives as an instruction rule, and the result says it was one.
+	if (s.Tier == string(tier.Review) || result.Reviewed) && e.scope == claude.ProjectScope {
 		note += "; " + commitStep("restore")
 	}
 	m.note("%s", note)

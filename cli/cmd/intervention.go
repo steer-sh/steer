@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -567,20 +568,35 @@ func printRetiredFix(w io.Writer, stateDir, id string) {
 	}
 }
 
-// removedFromWorkingTree reports a project review entry that HEAD still holds and
-// the working tree's store no longer does. A store that cannot be read reports false.
+// removedFromWorkingTree reports a project review entry or reviewed rule that HEAD
+// still holds and the working tree's store no longer does; a reviewed rule that lost
+// its review section counts as removed. A store that cannot be read reports false.
 func removedFromWorkingTree(t string, a *cadence.Artifact) bool {
-	if kind, _ := tier.Of(t); kind != tier.Review || a.Scope != claude.ProjectScope {
+	if a.Scope != claude.ProjectScope {
 		return false
 	}
-	entries, err := claude.ListAddendum(claude.ProjectScope)
-	if err != nil {
-		return false
-	}
-	for _, e := range entries {
-		if e.ID == a.ID {
+	var ids []string
+	switch kind, _ := tier.Of(t); kind {
+	case tier.Review:
+		entries, err := claude.ListAddendum(claude.ProjectScope)
+		if err != nil {
 			return false
 		}
+		for _, e := range entries {
+			ids = append(ids, e.ID)
+		}
+	case tier.Reviewed:
+		rules, err := claude.ListManagedRules(claude.ProjectScope)
+		if err != nil {
+			return false
+		}
+		for _, r := range rules {
+			if r.Review != nil {
+				ids = append(ids, r.ID)
+			}
+		}
+	default:
+		return false
 	}
-	return true
+	return !slices.Contains(ids, a.ID)
 }

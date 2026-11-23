@@ -3,6 +3,7 @@ package tui
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -600,5 +601,43 @@ func TestEachSectionHasItsOwnNameColumn(t *testing.T) {
 		if strings.HasPrefix(name, "config-path") && !strings.HasPrefix(name, "config-path resolve") {
 			t.Errorf("the rule's text sits in another section's column: %q", line)
 		}
+	}
+}
+
+// The form for a project rule asks for the removal's commit only when HEAD holds the
+// rule as a reviewed rule: only then does the commit reviewer go on reading it.
+func TestTheArchiveFormAsksForACommitOnlyForARuleTheReviewerReads(t *testing.T) {
+	repo := t.TempDir()
+	t.Chdir(repo)
+	git := func(args ...string) {
+		t.Helper()
+		c := exec.Command("git", append([]string{"-c", "user.name=t", "-c", "user.email=t@t.invalid",
+			"-c", "core.hooksPath=/dev/null"}, args...)...)
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	git("init", "-q")
+	review := claude.RuleOptions{Review: &claude.RuleReview{Paths: []string{"cli/"}}}
+	if _, err := claude.InstallRule(claude.ProjectScope, "committed", "resolve config from the repo root", review); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "-A")
+	git("commit", "-q", "-m", "rule")
+	if _, err := claude.InstallRule(claude.ProjectScope, "uncommitted", "name each flag once", review); err != nil {
+		t.Fatal(err)
+	}
+
+	m := New(gate.Defaults(), claude.ProjectScope)
+	for id, want := range map[string]bool{"committed": true, "uncommitted": false} {
+		m.archiveKey(fixRow{kind: fixRule, name: id, scope: claude.ProjectScope, removable: true})
+		if m.archiveForm == nil {
+			t.Fatalf("%s: no form opened", id)
+		}
+		got := strings.Contains(archiveConsequence(*m.archiveForm), "after you commit")
+		if got != want {
+			t.Errorf("%s: the form asks for a commit = %v, want %v: %q", id, got, want, archiveConsequence(*m.archiveForm))
+		}
+		m.archiveForm, m.editing = nil, false
 	}
 }

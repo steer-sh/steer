@@ -82,8 +82,9 @@ func TestRemovalPhraseNamesEachTiersRemovalCommand(t *testing.T) {
 	}
 }
 
-// Each artifact state reads as its own sentence, and a project review entry that
-// left HEAD says the commit gate no longer reads it.
+// Each artifact state reads as its own sentence, a project review entry that left HEAD
+// says the commit gate no longer reads it, and a changed reviewed rule is not called
+// "in place", since its detail can say it left the working tree.
 func TestArtifactPhraseNamesTheState(t *testing.T) {
 	cases := []struct {
 		tier string
@@ -105,6 +106,9 @@ func TestArtifactPhraseNamesTheState(t *testing.T) {
 		{"guard", &cadence.Artifact{ID: "g", Scope: "global", State: cadence.ArtifactPresent, Removed: "2026-02-01T00:00:00.000000000Z"},
 			"the guard g is in place as recorded; the archive records a removal of it at 2026-02-01T00:00:00.000000000Z, " +
 				"after this record was registered, so check whether the guard was out of place during this record's window"},
+		{"reviewed", &cadence.Artifact{ID: "cfg", Scope: "project", State: cadence.ArtifactChanged,
+			Detail: "it is removed from the working tree"},
+			"the reviewed rule cfg is changed: it is removed from the working tree"},
 		{"check", nil, ""},
 	}
 	for _, c := range cases {

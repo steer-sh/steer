@@ -21,6 +21,9 @@ type RestoreResult struct {
 	// Verification is the fixture rerun that followed a guard's install; nil for
 	// a rule or a review addendum entry.
 	Verification *FixtureVerification
+	// Reviewed is true for a restored reviewed rule: an instruction rule whose archived
+	// entry carries a review section.
+	Reviewed bool
 }
 
 // RestoreArchived puts an archived guard, instruction rule or review addendum
@@ -62,6 +65,7 @@ func RestoreArchived(scope string, s archive.Stored, targets ...harness.Registra
 		if _, err := InstallRule(scope, s.ID, entry.Text, opts, targets...); err != nil {
 			return nil, err
 		}
+		result.Reviewed = entry.Review != nil
 	case tier.Review:
 		if _, held := manifest.Addendum[s.ID]; held {
 			return nil, heldError("review addendum entry", s.ID, scope)

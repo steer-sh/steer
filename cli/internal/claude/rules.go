@@ -24,6 +24,8 @@ type InstallManagedRuleResult struct {
 	ID           string
 	Overwritten  bool
 	PreviousText string
+	// Review is the rule's review section after the install; a reviewed rule has one.
+	Review *RuleReview
 }
 
 // ErrRuleNotFound is a removal of a rule the store does not name. A caller
@@ -158,6 +160,7 @@ func InstallRule(scope, id, text string, opts RuleOptions, targets ...harness.Re
 		ID:           ruleID,
 		Overwritten:  overwritten,
 		PreviousText: existing.Text,
+		Review:       review,
 	}, nil
 }
 
