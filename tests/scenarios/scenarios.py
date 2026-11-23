@@ -128,6 +128,8 @@ def _observe(rec, before_ids=None, after_ids=None):
                        "after": (after_ids or (["scan-example|codex:adapter-example"] if session
                                                else ["reviewer-example/3/prompt-example (provider claude-code)"]))
                                 if rec["after"]["units"] else []},
+        "review": {"applicable": False, "unplaced": False, "chains": 0, "reviewed_rounds": 0,
+                   "finding_rounds": 0, "finding_chains": 0, "findings": {}},
         "declined": rec["status"] == "rejected",
     }
     if rec.get("hook_id"):
@@ -196,7 +198,7 @@ def _score(rec):
 
 def _queue(interventions=(), candidates=(), unscored=(), review_size=211):
     return {
-        "version": 16,
+        "version": 17,
         "interventions": _queued(interventions),
         "candidates": list(candidates),
         "unscored": list(unscored),

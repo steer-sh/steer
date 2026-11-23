@@ -109,9 +109,10 @@ func replay(provider, model, effort, base string, runs int, wt, diffFile, subjec
 	if err != nil {
 		return err
 	}
+	addendum := gate.LoadAddendum(wt)
 	ctxBlock := gate.BuildContext(cfg, wt, gate.ChangedTerms(diff, paths), paths)
 	prompt := gate.BuildReviewPrompt(gate.NeutralizeTags(subject), gate.NeutralizeTags(diff),
-		ctxBlock, gate.LoadAddendum(wt), paths)
+		ctxBlock, addendum, paths)
 	start := time.Now()
 	// The round's diff is staged on its base, so the index is what the commit lands.
 	result := gate.NewPanel(cfg, reviewer).Run(context.Background(), prompt, wt, gate.DiffSpec{StagedOnly: true})
@@ -135,7 +136,7 @@ func replay(provider, model, effort, base string, runs int, wt, diffFile, subjec
 		row[k] = v
 	}
 	if len(result.Reviews) > 0 {
-		for k, v := range gate.FindingShape(result.Reviews, paths) {
+		for k, v := range gate.FindingShape(result.Reviews, paths, addendum.AppliedRuleIDs(paths)) {
 			row[k] = v
 		}
 	}

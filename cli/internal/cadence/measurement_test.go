@@ -2,6 +2,7 @@ package cadence
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -51,6 +52,8 @@ func TestQueueVersionAndObservationRoundTrip(t *testing.T) {
 		ID: "r", Observation: mine.Observation{
 			Recurrence: mine.Recurrence{Occurred: true, Matches: 2},
 			Checks:     mine.CheckActivity{Applicable: true, Executions: 3, Blocked: 1},
+			Review: mine.ReviewActivity{Applicable: true, RuleKey: "project:tui", Chains: 2,
+				ReviewedRounds: 3, FindingRounds: 1, FindingChains: 1, Findings: map[string]int{"SUBSTANTIVE": 1}},
 		},
 		Scope:          &Scope{Version: 1, All: true},
 		BeforeCoverage: Coverage{Total: 8, Eligible: 8},
@@ -65,11 +68,12 @@ func TestQueueVersionAndObservationRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(data, &back); err != nil {
 		t.Fatal(err)
 	}
-	if back.Version != 16 || QueueVersion != 16 {
+	if back.Version != 17 || QueueVersion != 17 {
 		t.Fatalf("queue version drifted: %d", back.Version)
 	}
 	if len(back.Interventions) != 1 || !back.Interventions[0].Observation.Recurrence.Occurred ||
 		back.Interventions[0].Observation.Checks.Blocked != 1 ||
+		!reflect.DeepEqual(back.Interventions[0].Observation.Review, iv.Observation.Review) ||
 		back.Interventions[0].Artifact == nil || back.Interventions[0].Artifact.State != ArtifactAbsent {
 		t.Fatalf("observation did not round-trip: %#v", back.Interventions)
 	}

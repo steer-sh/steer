@@ -150,23 +150,52 @@ func TestTheEngineStampsAppliedRulesAndRuleFindings(t *testing.T) {
 	}
 }
 
-// The RULE line is optional: a finding that carries it names its rule, and the block
-// after it still parses.
+// The RULE line is optional: a finding that carries it names its rule, however the
+// reviewer wraps the id, and the block after it still parses. A key the round applied
+// keeps a wrapper character it ends in.
 func TestParseFindingsReadsTheOptionalRuleLine(t *testing.T) {
-	text := "[1] SEVERITY: SUBSTANTIVE\n    FILE: a.go\n    CLAIM: c.\n    FAILS WHEN: f.\n    RULE: `tui-reads-status`\n" +
-		"[2] SEVERITY: NITPICK\n    FILE: b.go\n    CLAIM: c.\n    FAILS WHEN: f.\n"
-	findings, err := ParseFindings(text)
-	if err != nil {
-		t.Fatalf("ParseFindings: %v", err)
-	}
-	if len(findings) != 2 || findings[0].Rule != "tui-reads-status" || findings[1].Rule != "" {
-		t.Fatalf("findings = %+v", findings)
-	}
-	if CountFindings(text) != 2 {
-		t.Fatalf("CountFindings = %d, want 2", CountFindings(text))
-	}
-	if got := ruleFindings([]string{text}); !reflect.DeepEqual(got, map[string]map[string]int{"tui-reads-status": {"SUBSTANTIVE": 1}}) {
-		t.Fatalf("ruleFindings = %v", got)
+	for _, c := range []struct {
+		line  string
+		known []string
+		want  string
+	}{
+		{"`tui-reads-status`", nil, "tui-reads-status"},
+		{"[global:py]", nil, "global:py"},
+		{"`[global:py]`", nil, "global:py"},
+		{"<global:py>", nil, "global:py"},
+		{"global:py.", nil, "global:py"},
+		{"**global:py**", nil, "global:py"},
+		{"[global:py] tui reads status", nil, "global:py"},
+		{"", nil, ""},
+		{"[global:py_]", []string{"global:py", "global:py_"}, "global:py_"},
+		{"global:py_.", []string{"global:py_"}, "global:py_"},
+		{"`global:py.`", []string{"global:py."}, "global:py."},
+		{"[global:py]", []string{"global:py", "global:py_"}, "global:py"},
+		{"[global:other_]", []string{"global:py"}, "global:other_"},
+		{"[global:py_]", []string{"global:py"}, "global:py_"},
+		{"[global:py_]", nil, "global:py_"},
+		{"_global:py_", []string{"global:py", "global:py_"}, "global:py"},
+		{"(global:py)", nil, "global:py"},
+	} {
+		text := "[1] SEVERITY: SUBSTANTIVE\n    FILE: a.go\n    CLAIM: c.\n    FAILS WHEN: f.\n    RULE: " + c.line + "\n" +
+			"[2] SEVERITY: NITPICK\n    FILE: b.go\n    CLAIM: c.\n    FAILS WHEN: f.\n"
+		findings, err := ParseFindings(text)
+		if err != nil {
+			t.Fatalf("%q: ParseFindings: %v", c.line, err)
+		}
+		if len(findings) != 2 || findings[1].Rule != "" || (c.known == nil && findings[0].Rule != c.want) {
+			t.Fatalf("%q: findings = %+v", c.line, findings)
+		}
+		if CountFindings(text) != 2 {
+			t.Fatalf("%q: CountFindings = %d, want 2", c.line, CountFindings(text))
+		}
+		want := map[string]map[string]int{}
+		if c.want != "" {
+			want[c.want] = map[string]int{"SUBSTANTIVE": 1}
+		}
+		if got := ruleFindings([]string{text}, c.known); !reflect.DeepEqual(got, want) {
+			t.Fatalf("%q: ruleFindings = %v", c.line, got)
+		}
 	}
 }
 

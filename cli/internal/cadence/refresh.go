@@ -30,8 +30,9 @@ import (
 // unknown scope or a session with no project. v15 carries scope.repo_root, the
 // exact repository root a v3 scope binds. v16 reads the transcript candidate from
 // this host's session snapshots and adds refreshed_at and fix to the transcript
-// corpus row.
-const QueueVersion = 16
+// corpus row. v17 adds observation.review: what the commit reviewer did with a
+// reviewed rule.
+const QueueVersion = 17
 
 // DefaultWindowDays is the transcript look-back a refresh and a status read use
 // when no --days is given.

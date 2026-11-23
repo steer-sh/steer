@@ -20,12 +20,82 @@ const reviewFindingPattern = `^[ \t]*\[\d+\][ \t]*SEVERITY:[ \t]*(BLOCKING|SUBST
 	`[ \t]+FAILS WHEN:[ \t]*([^ \t\r\n][^\r\n]*?)[ \t]*`
 
 // ruleFindingRe is a complete finding followed by the RULE line a reviewed rule's
-// finding carries; its last group is the rule id.
+// finding carries; its last group is the rest of that line, which ruleID reads.
 var ruleFindingRe = regexp.MustCompile(`(?im)` + reviewFindingPattern + `\r?\n` + ruleLinePattern)
 
-const ruleLinePattern = `[ \t]+RULE:[ \t]*[` + "`" + `\[]?([^ \t\r\n` + "`" + `\[\]]+)[` + "`" + `\]]?[ \t]*\r?$`
+const ruleLinePattern = `[ \t]+RULE:[ \t]*([^\r\n]*?)[ \t]*\r?$`
 
 var ruleLineRe = regexp.MustCompile(`(?i)^` + ruleLinePattern)
+
+// The wrappers a reviewer puts around a rule id: the brackets the preamble shows it
+// in, the angle brackets of its `RULE: <id>` template, parentheses, code ticks,
+// emphasis, quotes and a closing period. A rule id can itself end in one of them,
+// such as `py_`.
+const ruleIDTrim = "`[]<>()*_'\".,;: \t"
+
+// ruleID reads the rule key from the first word after RULE:. Of the keys in known
+// that the word holds inside mirrored wrappers, the longest wins; with none, the
+// word loses its mirrored wrappers and a closing period. `_global:py_` names
+// `global:py`, and `[global:py_]` names `global:py_`.
+func ruleID(rest string, known []string) string {
+	word := ""
+	for _, field := range strings.Fields(rest) {
+		if strings.Trim(field, ruleIDTrim) != "" {
+			word = field
+			break
+		}
+	}
+	if word == "" {
+		return ""
+	}
+	best := ""
+	for _, key := range known {
+		if len(key) <= len(best) {
+			continue
+		}
+		for at := strings.Index(word, key); at >= 0; {
+			if mirrors(word[:at], word[at+len(key):]) {
+				best = key
+				break
+			}
+			next := strings.Index(word[at+1:], key)
+			if next < 0 {
+				break
+			}
+			at += 1 + next
+		}
+	}
+	if best != "" {
+		return best
+	}
+	for {
+		word = strings.TrimRight(word, ".,;:")
+		if len(word) < 2 || !mirrors(word[:1], word[len(word)-1:]) {
+			return word
+		}
+		word = word[1 : len(word)-1]
+	}
+}
+
+// mirrors reports whether the wrappers after a rule id close the ones before it, a
+// closing period or comma aside. Every character on both sides is a wrapper.
+func mirrors(before, after string) bool {
+	after = strings.TrimRight(after, ".,;:")
+	if len(before) != len(after) || strings.Trim(before, ruleIDTrim) != "" {
+		return false
+	}
+	closing := map[byte]byte{'[': ']', '<': '>', '(': ')'}
+	for i := 0; i < len(before); i++ {
+		want := before[i]
+		if c, ok := closing[want]; ok {
+			want = c
+		}
+		if after[len(after)-1-i] != want {
+			return false
+		}
+	}
+	return true
+}
 
 // The loose count: any SEVERITY line, indexed or not. It rides the row for
 // measurement and NEVER drives a decision — it also matches `SEVERITY: NONE` and
@@ -103,9 +173,10 @@ func IsPath(cited string) bool {
 }
 
 // FindingShape is the severity mix and cross-file count for the log, parsed from the raw
-// reviews. The basename fallback errs toward calling a finding same-file, which
+// reviews. rules are the reviewed rule keys the round applied, which a RULE line's id
+// is read against. The basename fallback errs toward calling a finding same-file, which
 // understates the number this gate is judged by rather than inflating it.
-func FindingShape(reviews []string, changed []string) Row {
+func FindingShape(reviews []string, changed []string, rules []string) Row {
 	severities := map[string]int{}
 	var findings [][]string
 	for _, review := range reviews {
@@ -142,19 +213,22 @@ func FindingShape(reviews []string, changed []string) Row {
 		"cross_file_findings": cross,
 		"finding_files":       unique,
 	}
-	if byRule := ruleFindings(reviews); len(byRule) > 0 {
+	if byRule := ruleFindings(reviews, rules); len(byRule) > 0 {
 		row["rule_findings"] = byRule
 	}
 	return row
 }
 
-// ruleFindings counts the complete findings that name a reviewed rule, by rule id and
-// severity.
-func ruleFindings(reviews []string) map[string]map[string]int {
+// ruleFindings counts the complete findings that name a reviewed rule, by rule key and
+// severity, reading each RULE line against the applied keys in rules.
+func ruleFindings(reviews []string, rules []string) map[string]map[string]int {
 	out := map[string]map[string]int{}
 	for _, review := range reviews {
 		for _, m := range ruleFindingRe.FindAllStringSubmatch(review, -1) {
-			id := m[len(m)-1]
+			id := ruleID(m[len(m)-1], rules)
+			if id == "" {
+				continue
+			}
 			if out[id] == nil {
 				out[id] = map[string]int{}
 			}
@@ -239,7 +313,7 @@ func ParseFindings(text string) ([]ReviewFinding, error) {
 		i += len(findingFieldOrder)
 		if i+1 < len(lines) {
 			if rule := ruleLineRe.FindStringSubmatch(lines[i+1]); rule != nil {
-				finding.Rule = rule[1]
+				finding.Rule = ruleID(rule[1], nil)
 				i++
 			}
 		}

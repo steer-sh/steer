@@ -551,7 +551,7 @@ func (e *Engine) reviewCommit(ctx context.Context, req Request, chain *Chain, p 
 			"reviews_off_format": OffFormatReviews(result.Reviews)},
 		e.report(result),
 		e.ledger.SaveDiff(req.SessionID, firing, p.diff),
-		FindingShape(result.Reviews, p.paths)))
+		FindingShape(result.Reviews, p.paths, req.addendum.AppliedRuleIDs(p.rulePaths))))
 	if err == nil {
 		err = saveErr
 	}
@@ -590,7 +590,7 @@ func (e *Engine) nitpickRound(req Request, chain *Chain, p prepared, firing int,
 			"reviews_off_format": OffFormatReviews(result.Reviews)},
 		e.report(result),
 		e.ledger.SaveDiff(req.SessionID, firing, p.diff),
-		FindingShape(result.Reviews, p.paths)))
+		FindingShape(result.Reviews, p.paths, req.addendum.AppliedRuleIDs(p.rulePaths))))
 	// No cleared record under the stale-index notice, as on the clean path.
 	if p.notice == "" {
 		if cerr := chain.RememberCleared(p.raw, req.Channel, ClearedNitpick); cerr != nil && err == nil {
@@ -671,7 +671,7 @@ func (e *Engine) terminalReview(ctx context.Context, req Request, chain *Chain, 
 	}
 
 	review, findings := ComposeReview(result.Reviews)
-	shape := FindingShape(result.Reviews, p.paths)
+	shape := FindingShape(result.Reviews, p.paths, req.addendum.AppliedRuleIDs(p.rulePaths))
 	row["finding_slots"] = findings
 	row["severity_lines_loose"] = LooseFindingCount(result.Reviews)
 	row["reviews_off_format"] = OffFormatReviews(result.Reviews)

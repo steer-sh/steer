@@ -92,7 +92,7 @@ func TestFixture(t *testing.T) {
 		t.Fatalf("no reviewer answered: %s", gate.ReviewerTrouble(result.Runs))
 	}
 	review, findings := gate.ComposeReview(result.Reviews)
-	t.Logf("finding_slots %d, shape %v", findings, gate.FindingShape(result.Reviews, paths))
+	t.Logf("finding_slots %d, shape %v", findings, gate.FindingShape(result.Reviews, paths, nil))
 	t.Logf("\n=== RAW REVIEWS (score by hand against key.md) ===\n%s", review)
 }
 
