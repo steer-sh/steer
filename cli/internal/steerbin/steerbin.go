@@ -10,7 +10,6 @@ package steerbin
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +17,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/steer-sh/steer-cli/internal/atomicfile"
 	"github.com/steer-sh/steer-cli/internal/shellword"
 	"github.com/steer-sh/steer-cli/internal/steerpath"
 )
@@ -186,32 +186,15 @@ func runningBinary() (string, error) {
 	return resolved, nil
 }
 
-// copyExecutable writes src to dst through a temporary file in the destination
-// directory, then renames it. A running hook reads either the old file or the new
-// one, never a half-written one, and a Unix rename over a busy executable is legal.
+// copyExecutable replaces dst with src whole. A running hook reads either the old
+// file or the new one, and a Unix rename over a busy executable is legal.
 func copyExecutable(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return fmt.Errorf("failed to read %s: %w", src, err)
 	}
 	defer in.Close()
-	tmp, err := os.CreateTemp(filepath.Dir(dst), ".steer-bin-*")
-	if err != nil {
-		return fmt.Errorf("failed to stage the executable: %w", err)
-	}
-	staged := tmp.Name()
-	defer os.Remove(staged)
-	if _, err := io.Copy(tmp, in); err != nil {
-		tmp.Close()
-		return fmt.Errorf("failed to copy the executable: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("failed to close the staged executable: %w", err)
-	}
-	if err := os.Chmod(staged, 0o755); err != nil {
-		return fmt.Errorf("failed to mark the staged executable runnable: %w", err)
-	}
-	if err := os.Rename(staged, dst); err != nil {
+	if err := atomicfile.Copy(dst, in, 0o755); err != nil {
 		return fmt.Errorf("failed to install %s: %w", dst, err)
 	}
 	return nil

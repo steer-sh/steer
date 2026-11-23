@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/steer-sh/steer-cli/internal/atomicfile"
 )
 
 // reportFile holds the last stored report inside the steer-report state directory.
@@ -32,19 +34,7 @@ func Save(dir string, d *Digest) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(dir, reportFile+".*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), ReportPath(dir))
+	return atomicfile.WriteFile(ReportPath(dir), data, 0o600)
 }
 
 // Load reads the stored report in dir. A non-empty want names the report the

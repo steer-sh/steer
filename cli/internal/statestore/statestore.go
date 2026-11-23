@@ -8,11 +8,11 @@ package statestore
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
 
+	"github.com/steer-sh/steer-cli/internal/atomicfile"
 	"github.com/steer-sh/steer-cli/internal/steerpath"
 )
 
@@ -66,7 +66,7 @@ func Prepare(component string) (string, error) {
 			return "", err
 		}
 	}
-	if err := writeWhole(filepath.Join(neutral, markerName), nil, 0o644); err != nil {
+	if err := atomicfile.WriteFile(filepath.Join(neutral, markerName), nil, 0o644); err != nil {
 		return "", fmt.Errorf("failed to mark %s migrated: %w", component, err)
 	}
 	return neutral, nil
@@ -148,7 +148,7 @@ func relativeFiles(dir string) ([]string, error) {
 	return names, nil
 }
 
-// copyWhole streams src to dst through a temporary file in dst's directory. The
+// copyWhole streams src to dst, replacing dst whole. The
 // corpus holds saved diffs and a ledger of many megabytes, so the copy streams
 // rather than staging the whole file in memory.
 func copyWhole(src, dst string) error {
@@ -161,45 +161,5 @@ func copyWhole(src, dst string) error {
 	if info, err := in.Stat(); err == nil {
 		mode = info.Mode().Perm()
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(dst), ".steer-state-migrate.*")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-	if err := tmp.Chmod(mode); err != nil {
-		tmp.Close()
-		return err
-	}
-	if _, err := io.Copy(tmp, in); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpPath, dst)
-}
-
-// writeWhole writes content to path through a temporary file in the same
-// directory, so a reader never sees a partly written file.
-func writeWhole(path string, content []byte, mode os.FileMode) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".steer-state-write.*")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-	if err := tmp.Chmod(mode); err != nil {
-		tmp.Close()
-		return err
-	}
-	if _, err := tmp.Write(content); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpPath, path)
+	return atomicfile.Copy(dst, in, mode)
 }

@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/steer-sh/steer-cli/internal/atomicfile"
 	"github.com/steer-sh/steer-cli/internal/steerpath"
 )
 
@@ -297,24 +298,7 @@ func save(scope, path string, root map[string]any) error {
 		return err
 	}
 	raw := bytes.TrimRight(buf.Bytes(), "\n")
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".hooks.json.*")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-	if err := tmp.Chmod(0o644); err != nil {
-		tmp.Close()
-		return err
-	}
-	if _, err := tmp.Write(append(raw, '\n')); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpPath, path)
+	return atomicfile.WriteFile(path, append(raw, '\n'), 0o644)
 }
 
 // RegisterCommitGate upserts one Bash PreToolUse handler while preserving unrelated

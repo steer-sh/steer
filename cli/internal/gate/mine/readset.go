@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+
+	"github.com/steer-sh/steer-cli/internal/atomicfile"
 )
 
 // FindingKey identifies one finding of one chain: the chain's host and start, the
@@ -68,20 +70,7 @@ func saveKeySets(path string, sets keySets) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".keys-*")
-	if err != nil {
-		return err
-	}
-	if _, err := tmp.Write(append(data, '\n')); err != nil {
-		tmp.Close()
-		os.Remove(tmp.Name())
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmp.Name())
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
+	return atomicfile.WriteFile(path, append(data, '\n'), 0o600)
 }
 
 // recordShown narrows the pending set of one kind to the keys every whole-pile

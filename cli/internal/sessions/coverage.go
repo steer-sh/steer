@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/steer-sh/steer-cli/internal/atomicfile"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/report"
@@ -95,19 +96,7 @@ func saveCoverage(dir, host string, c Coverage) error {
 		return err
 	}
 	path := CoveragePath(dir, host)
-	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".*.tmp")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(append(data, '\n')); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
+	return atomicfile.WriteFile(path, append(data, '\n'), 0o600)
 }
 
 // CorrectionClusters ranks the user-correction clusters of the stored sessions f

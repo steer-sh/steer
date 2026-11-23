@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/steer-sh/steer-cli/internal/atomicfile"
 	"github.com/steer-sh/steer-cli/internal/statestore"
 )
 
@@ -96,24 +97,9 @@ func ReadQueue(dir string) (*Queue, error) {
 	return &q, nil
 }
 
-// writeAtomic writes bytes to a temp file in the same directory, then renames it
-// over the target. Rename is atomic within a directory on every supported OS.
+// writeAtomic replaces path whole with data.
 func writeAtomic(path string, data []byte) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		os.Remove(tmpName)
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmpName)
-		return err
-	}
-	return os.Rename(tmpName, path)
+	return atomicfile.WriteFile(path, data, 0o600)
 }
 
 // acquireLock takes an exclusive lock via O_CREATE|O_EXCL, portable to Windows

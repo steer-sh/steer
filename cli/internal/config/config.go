@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/steer-sh/steer-cli/internal/atomicfile"
 	"github.com/steer-sh/steer-cli/internal/steerpath"
 )
 
@@ -73,24 +74,7 @@ func Save(cfg Config) error {
 	if err != nil {
 		return fmt.Errorf("encode steer config: %w", err)
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".config.json.*")
-	if err != nil {
-		return fmt.Errorf("stage steer config: %w", err)
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-	if err := tmp.Chmod(0o644); err != nil {
-		tmp.Close()
-		return fmt.Errorf("set staged steer config permissions: %w", err)
-	}
-	if _, err := tmp.Write(append(data, '\n')); err != nil {
-		tmp.Close()
-		return fmt.Errorf("write staged steer config: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close staged steer config: %w", err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
+	if err := atomicfile.WriteFile(path, append(data, '\n'), 0o644); err != nil {
 		return fmt.Errorf("replace steer config: %w", err)
 	}
 	return nil
