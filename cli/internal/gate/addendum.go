@@ -372,34 +372,6 @@ func workingTreeProjectManifest(repo string) ([]byte, string, bool) {
 	return []byte("{}"), paths[0], true
 }
 
-// path is root-relative.
-func workingTreeProjectAddendum(repo string) (map[string]string, string, bool) {
-	out, ok := Git(repo, gitShort, "rev-parse", "--show-toplevel")
-	root := strings.TrimSuffix(out, "\n")
-	if !ok || root == "" {
-		return nil, "", false
-	}
-	paths := projectManifestPaths()
-	for _, path := range paths {
-		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
-		if errors.Is(err, fs.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return nil, "", false
-		}
-		texts, err := addendumTexts(data)
-		if err != nil {
-			return nil, "", false
-		}
-		return texts, path, true
-	}
-	if len(paths) == 0 {
-		return nil, "", false
-	}
-	return map[string]string{}, paths[0], true
-}
-
 func onlyManifests(paths []string) bool {
 	if len(paths) == 0 {
 		return false
