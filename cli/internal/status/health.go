@@ -138,8 +138,8 @@ func piCodemodeOnlyIssue(c PiCodemodeOnly) Issue {
 		Detail: []string{c.Path + " hides Pi's top-level bash tool while codemode is active, and " +
 			"the gate refuses a commit made inside a codemode script."},
 		Fix: `set codemode.mode to "on" in ` + c.Path + " and keep bash among Pi's startup tools, " +
-			"or remove the gate with " +
-			strings.Join(removes, " and ")}
+			"or remove the gate with " + strings.Join(removes, " and ") +
+			"; then run /reload in each open Pi session"}
 }
 
 // LegacyLockfileTitle, LegacyLockfileWhy and LegacyLockfileFix phrase a leftover
