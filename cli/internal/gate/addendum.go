@@ -13,11 +13,15 @@ import (
 	"strings"
 
 	"github.com/steer-sh/steer-cli/internal/hookstore"
+	"github.com/steer-sh/steer-cli/internal/reviewpath"
 	"github.com/steer-sh/steer-cli/internal/steerpath"
 )
 
 // addendumTag bounds the operator's entries in the review prompt.
 const addendumTag = "review-addendum"
+
+// reviewedRulesTag bounds the reviewed rules a commit's changed paths matched.
+const reviewedRulesTag = "reviewed-rules"
 
 // AddendumEntry is one review-tier entry, with the store it came from.
 type AddendumEntry struct {
@@ -26,11 +30,22 @@ type AddendumEntry struct {
 	Text  string
 }
 
+// ReviewedRule is one rule the author was given that the reviewer also checks, for a
+// commit that changes a path one of Paths matches. No paths matches every commit.
+type ReviewedRule struct {
+	Scope string
+	ID    string
+	Text  string
+	Paths []string
+}
+
 // Addendum is the operator's review-tier text for one repository: global entries
-// first, then project entries, each sorted by id. Errors are read failures that
-// dropped entries; the gate records them and reviews without those entries.
+// first, then project entries, each sorted by id, and the reviewed rules in the same
+// order. Errors are read failures that dropped entries; the gate records them and
+// reviews without those entries.
 type Addendum struct {
 	Entries []AddendumEntry
+	Rules   []ReviewedRule
 	Errors  []string
 	// projectUnread marks a project manifest at HEAD that did not parse.
 	projectUnread bool
@@ -85,6 +100,12 @@ func projectManifestPaths() []string {
 
 func (a *Addendum) add(scope string, data []byte) {
 	texts, err := addendumTexts(data)
+	if err == nil {
+		var rules []ReviewedRule
+		if rules, err = reviewedRules(scope, data); err == nil {
+			a.Rules = append(a.Rules, rules...)
+		}
+	}
 	if err != nil {
 		a.Errors = append(a.Errors, fmt.Sprintf("review addendum: %s store: %v", scope, err))
 		if scope == steerpath.ProjectScope {
@@ -116,6 +137,92 @@ func addendumTexts(data []byte) (map[string]string, error) {
 	}
 	return texts, nil
 }
+
+// reviewedRules decodes a manifest's rules that carry a review section, sorted by id,
+// with whitespace-collapsed text. A rule with no text is dropped.
+func reviewedRules(scope string, data []byte) ([]ReviewedRule, error) {
+	var manifest struct {
+		Rules map[string]struct {
+			Text   string `json:"text"`
+			Review *struct {
+				Paths []string `json:"paths"`
+			} `json:"review"`
+		} `json:"rules"`
+	}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return nil, err
+	}
+	var out []ReviewedRule
+	for id, entry := range manifest.Rules {
+		text := strings.Join(strings.Fields(entry.Text), " ")
+		if entry.Review == nil || text == "" {
+			continue
+		}
+		out = append(out, ReviewedRule{Scope: scope, ID: id, Text: text, Paths: entry.Review.Paths})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
+// RulesFor returns the reviewed rules a commit changing paths receives: each rule with
+// no paths, and each rule with a path that matches one of them.
+func (a Addendum) RulesFor(paths []string) []ReviewedRule {
+	slash := SlashPaths(paths)
+	var out []ReviewedRule
+	for _, r := range a.Rules {
+		if len(r.Paths) == 0 || reviewpath.MatchAny(r.Paths, slash) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// Key is the rule's id with its scope, <scope>:<id>, which names it in the prompt,
+// on a finding's RULE line and on the row; one id can be held by both scopes.
+func (r ReviewedRule) Key() string { return r.Scope + ":" + r.ID }
+
+// AppliedRuleIDs names the reviewed rules a commit changing paths receives, by Key,
+// or nil when it receives none.
+func (a Addendum) AppliedRuleIDs(paths []string) []string {
+	var ids []string
+	for _, r := range a.RulesFor(paths) {
+		ids = append(ids, r.Key())
+	}
+	return ids
+}
+
+// RulesBlock renders the reviewed rules a commit changing paths receives, or "" when
+// it receives none. Rule text is neutralised like the diff.
+func (a Addendum) RulesBlock(paths []string) string {
+	return renderRules(a.RulesFor(paths))
+}
+
+func renderRules(rules []ReviewedRule) string {
+	if len(rules) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n<" + reviewedRulesTag + ">\n")
+	b.WriteString(reviewedRulesPreamble)
+	for _, r := range rules {
+		b.WriteString("- [" + NeutralizeTags(r.Key()) + "] " + NeutralizeTags(r.Text) + "\n")
+	}
+	b.WriteString("</" + reviewedRulesTag + ">\n")
+	return b.String()
+}
+
+// reviewedRulesPreamble tells the reviewer how a reviewed rule changes the rules that
+// follow the context. Without it, a violation that still runs correctly is dropped or
+// rated NITPICK, and a NITPICK-only round does not block.
+const reviewedRulesPreamble = "The operator gave the author of this commit these rules, " +
+	"each as `[id] rule`. Check the diff and the commit message against each one. " +
+	"A change that clearly breaks a rule is a finding even when the code runs correctly, " +
+	"and even when it is a matter of structure the rules below call style: " +
+	"rate it SUBSTANTIVE, or NITPICK when the change only comes close to breaking it. " +
+	"Its FAILS WHEN names the rule and the changed line that breaks it. " +
+	"After its FAILS WHEN line, add one more line indented four spaces: `RULE: <id>`, " +
+	"with the id as it appears inside the brackets. " +
+	"A finding that no rule here describes keeps the rules below unchanged.\n"
 
 func sortedIDs(m map[string]string) []string {
 	keys := make([]string, 0, len(m))
@@ -244,13 +351,28 @@ func (a Addendum) Block() string {
 	return b.String()
 }
 
-// Digest is the first 8 hex chars of sha256 over Block, or "" when there are no
-// entries. It is the instrument's addendum half.
+// Digest is the first 8 hex chars of sha256 over Block and every configured reviewed
+// rule, or "" when there are neither. It is the instrument's addendum half. It covers
+// the whole configured set, not the rules one commit's paths matched, so consecutive
+// commits under one configuration share one instrument.
 func (a Addendum) Digest() string {
 	block := a.Block()
+	if len(a.Rules) > 0 {
+		block += configuredRules(a.Rules)
+	}
 	if block == "" {
 		return ""
 	}
 	sum := sha256.Sum256([]byte(block))
 	return hex.EncodeToString(sum[:])[:8]
+}
+
+// configuredRules renders every reviewed rule with its scope and paths, for the digest.
+func configuredRules(rules []ReviewedRule) string {
+	var b strings.Builder
+	b.WriteString(renderRules(rules))
+	for _, r := range rules {
+		b.WriteString(r.Scope + ":" + r.ID + " " + strings.Join(r.Paths, ",") + "\n")
+	}
+	return b.String()
 }

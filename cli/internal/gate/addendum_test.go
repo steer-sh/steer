@@ -127,13 +127,13 @@ func TestAnUnreadableProjectManifestIsAnError(t *testing.T) {
 
 func TestTheAddendumBlockPrecedesTheRules(t *testing.T) {
 	a := Addendum{Entries: []AddendumEntry{{Scope: "global", ID: "x", Text: "a known false positive"}}}
-	prompt := BuildReviewPrompt("msg", "diff", "ctx", a)
+	prompt := BuildReviewPrompt("msg", "diff", "ctx", a, nil)
 	block := strings.Index(prompt, "<review-addendum>")
 	rules := strings.Index(prompt, "Rules — these are strict:")
 	if block < 0 || rules < 0 || block > rules || !strings.Contains(prompt, "- a known false positive") {
 		t.Fatalf("block at %d, rules at %d:\n%s", block, rules, prompt)
 	}
-	if strings.Contains(BuildReviewPrompt("msg", "diff", "ctx", Addendum{}), "review-addendum") {
+	if strings.Contains(BuildReviewPrompt("msg", "diff", "ctx", Addendum{}, nil), "review-addendum") {
 		t.Fatal("an empty addendum rendered a block")
 	}
 }

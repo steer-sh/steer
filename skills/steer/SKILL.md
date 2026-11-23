@@ -1,8 +1,8 @@
 ---
 name: steer
-description: Turns a natural-language rule into the fix that can enforce it — a repository check, a PreToolUse Python guard, or an instruction rule — and installs it. Use when enforcing coding standards, blocking insecure patterns, making sure checks pass before a turn ends, managing hook lifecycle, or running steer CLI commands (register, remove, list, test).
+description: Turns a natural-language rule into the fix that can enforce it — a repository check, a PreToolUse Python guard, a reviewed rule the commit reviewer also checks, or an instruction rule — and installs it. Use when enforcing coding standards, blocking insecure patterns, making sure checks pass before a turn ends, managing hook lifecycle, or running steer CLI commands (register, remove, list, test).
 user-invocable: true
-prompt_version: 30
+prompt_version: 31
 compatibility: Requires Claude Code, Codex or Pi with tool-call hook support. Hooks are installed into .steer/hooks/ and registered in every installed harness Steer is set up in (settings.json for Claude Code, hooks.json for Codex, an extension in .pi/extensions for Pi). steer CLI must be available on PATH or bundled under scripts/.
 allowed-tools: Bash(steer *), Bash(python3 *), Bash(echo *), Read, Write, Edit
 ---
@@ -289,7 +289,8 @@ Then install on the routed tier:
 - **Pre-tool guard:** continue with Step 1. Steps 1 to 6 are the guard branch.
 - **Any other tier:** install it as that guide's section 3 says, then report the
   tier, what was installed and where, and what still needs the user. For an
-  instruction rule, the rule text is the whole rule, suggestion included.
+  instruction rule or a reviewed rule, the rule text is the whole rule,
+  suggestion included.
 
 ### Step 1: Analyze the Rule
 
@@ -621,7 +622,7 @@ record is retired. After a restore, the record carries `artifact.removed`:
 choice between the two to `/steer-report`.
 
 The other tiers have their own remove commands, and each archives the same way
-and takes `--reason`: `steer rules remove <id>` for an instruction rule,
+and takes `--reason`: `steer rules remove <id>` for an instruction rule or a reviewed rule,
 `steer commit-gate addendum remove <id>` for a review addendum entry, and
 `steer check remove <id>` for a repository check. `steer archive restore`
 restores all of them; pass `--tier` when one id holds entries of more than one tier.

@@ -58,11 +58,12 @@ func fill(tmpl string, fields map[string]string) string {
 
 // BuildReviewPrompt assembles the reviewer prompt. `context` is already a rendered
 // block (or empty); message and diff must be neutralised by the caller. The
-// addendum's block follows the context in the same slot, so the stock template and
-// its digest are unchanged.
-func BuildReviewPrompt(message, diff, context string, addendum Addendum) string {
+// addendum's block and the reviewed rules that paths match follow the context in the
+// same slot, so the stock template and its digest are unchanged.
+func BuildReviewPrompt(message, diff, context string, addendum Addendum, paths []string) string {
 	return fill(reviewPrompt, map[string]string{
-		"message": message, "diff": diff, "context": context + addendum.Block(),
+		"message": message, "diff": diff,
+		"context": context + addendum.Block() + addendum.RulesBlock(paths),
 	})
 }
 

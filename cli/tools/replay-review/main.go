@@ -111,7 +111,7 @@ func replay(provider, model, effort, base string, runs int, wt, diffFile, subjec
 	}
 	ctxBlock := gate.BuildContext(cfg, wt, gate.ChangedTerms(diff, paths), paths)
 	prompt := gate.BuildReviewPrompt(gate.NeutralizeTags(subject), gate.NeutralizeTags(diff),
-		ctxBlock, gate.LoadAddendum(wt))
+		ctxBlock, gate.LoadAddendum(wt), paths)
 	start := time.Now()
 	// The round's diff is staged on its base, so the index is what the commit lands.
 	result := gate.NewPanel(cfg, reviewer).Run(context.Background(), prompt, wt, gate.DiffSpec{StagedOnly: true})

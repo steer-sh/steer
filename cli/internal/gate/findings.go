@@ -12,10 +12,20 @@ import (
 // Field labels and allowed severities are case-insensitive because capitalization does
 // not change the finding; missing, reordered or empty fields do. A severity-shaped
 // line alone is prose, not a completed review finding.
-var reviewFindingRe = regexp.MustCompile(`(?im)^[ \t]*\[\d+\][ \t]*SEVERITY:[ \t]*(BLOCKING|SUBSTANTIVE|NITPICK)[ \t]*\r?\n` +
+var reviewFindingRe = regexp.MustCompile(`(?im)` + reviewFindingPattern + `\r?$`)
+
+const reviewFindingPattern = `^[ \t]*\[\d+\][ \t]*SEVERITY:[ \t]*(BLOCKING|SUBSTANTIVE|NITPICK)[ \t]*\r?\n` +
 	`[ \t]+FILE:[ \t]*([^ \t\r\n][^\r\n]*?)[ \t]*\r?\n` +
 	`[ \t]+CLAIM:[ \t]*([^ \t\r\n][^\r\n]*?)[ \t]*\r?\n` +
-	`[ \t]+FAILS WHEN:[ \t]*([^ \t\r\n][^\r\n]*?)[ \t]*\r?$`)
+	`[ \t]+FAILS WHEN:[ \t]*([^ \t\r\n][^\r\n]*?)[ \t]*`
+
+// ruleFindingRe is a complete finding followed by the RULE line a reviewed rule's
+// finding carries; its last group is the rule id.
+var ruleFindingRe = regexp.MustCompile(`(?im)` + reviewFindingPattern + `\r?\n` + ruleLinePattern)
+
+const ruleLinePattern = `[ \t]+RULE:[ \t]*[` + "`" + `\[]?([^ \t\r\n` + "`" + `\[\]]+)[` + "`" + `\]]?[ \t]*\r?$`
+
+var ruleLineRe = regexp.MustCompile(`(?i)^` + ruleLinePattern)
 
 // The loose count: any SEVERITY line, indexed or not. It rides the row for
 // measurement and NEVER drives a decision — it also matches `SEVERITY: NONE` and
@@ -127,11 +137,31 @@ func FindingShape(reviews []string, changed []string) Row {
 	if len(unique) > 20 {
 		unique = unique[:20]
 	}
-	return Row{
+	row := Row{
 		"severities":          severities,
 		"cross_file_findings": cross,
 		"finding_files":       unique,
 	}
+	if byRule := ruleFindings(reviews); len(byRule) > 0 {
+		row["rule_findings"] = byRule
+	}
+	return row
+}
+
+// ruleFindings counts the complete findings that name a reviewed rule, by rule id and
+// severity.
+func ruleFindings(reviews []string) map[string]map[string]int {
+	out := map[string]map[string]int{}
+	for _, review := range reviews {
+		for _, m := range ruleFindingRe.FindAllStringSubmatch(review, -1) {
+			id := m[len(m)-1]
+			if out[id] == nil {
+				out[id] = map[string]int{}
+			}
+			out[id][strings.ToUpper(m[1])]++
+		}
+	}
+	return out
 }
 
 // ReviewFinding is one parsed finding block from a reviewer's reply.
@@ -141,6 +171,8 @@ type ReviewFinding struct {
 	File      string
 	Claim     string
 	FailsWhen string
+	// Rule is the reviewed rule the finding names on its optional RULE line.
+	Rule string
 }
 
 // findingOpenRe matches the line that OPENS a finding: an index in brackets and
@@ -204,8 +236,14 @@ func ParseFindings(text string) ([]ReviewFinding, error) {
 				finding.FailsWhen = value
 			}
 		}
-		out = append(out, finding)
 		i += len(findingFieldOrder)
+		if i+1 < len(lines) {
+			if rule := ruleLineRe.FindStringSubmatch(lines[i+1]); rule != nil {
+				finding.Rule = rule[1]
+				i++
+			}
+		}
+		out = append(out, finding)
 	}
 	return out, nil
 }

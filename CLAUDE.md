@@ -266,6 +266,11 @@ Read the linked architecture section before changing the corresponding boundary:
   gate's HEAD reader `cli/internal/gate/addendum.go` and `mine.SteerAddendumFacts`
   decode one `review_addendum` shape. The stock `prompts/review.md` is never the
   review tier's target.
+- Reviewed rules: `RuleEntry.Review` (`cli/internal/claude/manifest.go`), the
+  gate's `reviewedRules` decoder (`cli/internal/gate/addendum.go`) and
+  `textEntryFactsInScope` (`cli/internal/gate/mine/interventions.go`) decode one
+  `rules.<id>.review` shape; `cli/internal/reviewpath/` is the one path grammar.
+  The reviewer's guidance lives in the block preamble, never in `prompts/review.md`.
 - Report pass decision points: `skills/auto-steer/SKILL.md` runs the pass in
   `skills/steer-report/` and replaces each point where it asks, offers or waits.
   A new or moved step, question or offer there, or in the `steer` skill's install

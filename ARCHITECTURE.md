@@ -276,7 +276,10 @@ The manifest has `hooks`, prose-only `rules` and `review_addendum` entries
 every installation boundary. Rule and addendum text is stored so its normalized
 digest can be recomputed; duplicate normalized text under another id of the same
 kind is refused. Addendum entries derive no harness document; the commit gate
-reads them.
+reads them. A rule with a `review` section is a reviewed rule: it derives its
+`## Steer Rules` line like any rule, and the commit gate also reads it. Its
+`paths` follow `internal/reviewpath/`'s grammar, which the store validates on
+write and the gate matches on review; a project reviewed rule must name one.
 A guard's registered id can differ from its file stem. Resolution, firing
 metadata and fixture verification keep the registered id; embedded sources keep
 file-stem keys. An exact id resolves to its entry's file ahead of any stem match,
@@ -676,6 +679,19 @@ unchanged. The addendum's digest joins the instrument string as
 `<prompt>+<addendum>` inside the digest segment, because a fifth segment is read
 as effort, and rides `instrument_fields` as `addendum_digest`. An absent addendum
 reads as known and empty.
+
+Reviewed rules load with the addendum, from the same two places. A commit gets
+only the rules whose paths match its changed paths, in a `<reviewed-rules>` block
+in the same slot; the block's own preamble tells the reviewer that a clear
+violation is a SUBSTANTIVE finding even when the code runs, and to name the rule
+as `<scope>:<id>` on a `RULE:` line after FAILS WHEN, which the four-line parsers
+pass over. Rules match the changed paths with renames split (`RuleMatchFiles`),
+so a file moved out of a rule's directory still reaches the rule, and a prose-only
+commit that any rule reaches is reviewed, not skipped.
+The addendum digest covers every configured rule, not the matched subset, so
+commits under one configuration share one instrument. A reviewed round's row
+carries `reviewed_rules_applied` (`<scope>:<id>`, from its `changed_paths`) and
+`rule_findings` (per `<scope>:<id>`, per severity).
 
 `gate.Load` resolves defaults, `~/.steer/config.json`, then environment overrides;
 command flags override those values. `internal/settings/` shares setting metadata

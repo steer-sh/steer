@@ -58,7 +58,8 @@ func RestoreArchived(scope string, s archive.Stored, targets ...harness.Registra
 		if err := decodeArchived(s, &entry); err != nil {
 			return nil, err
 		}
-		if _, err := InstallManagedRule(scope, s.ID, entry.Text, targets...); err != nil {
+		opts := RuleOptions{Review: entry.Review, ClearReview: entry.Review == nil}
+		if _, err := InstallRule(scope, s.ID, entry.Text, opts, targets...); err != nil {
 			return nil, err
 		}
 	case tier.Review:

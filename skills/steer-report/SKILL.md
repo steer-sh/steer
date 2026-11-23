@@ -482,7 +482,8 @@ A transcript candidate qualifies when some tier in the routing guide can address
 
 - A concrete pattern in an edit or a command: a pre-tool guard. "don't use console.log", "always python3 not python", "never commit .env files", "no rm -rf".
 - A property of the finished tree: a repository check. "tests must pass before the turn ends", "no literal test counts in scripts".
-- A judgment or workflow complaint with no mechanical test: an instruction rule, and only when it recurs across sessions and no instruction already says it. "ask before refactoring", "be more concise".
+- A rule no mechanical test decides, whose violation shows in the diff and is costly enough to block a commit: a reviewed rule, and only when it recurs across sessions and no instruction already says it. "read health from `status`; never compute it inside `tui`".
+- A judgment or workflow complaint the reviewer cannot see in a diff, or too soft to block a commit: an instruction rule, under the same recurrence test. "ask before refactoring", "be more concise".
 
 Discard the rest silently — do not pad the report.
 
@@ -524,6 +525,7 @@ not the flag value.
 |---|---|
 | `check` | repository check |
 | `steer` / `guard` | pre-tool guard |
+| `reviewed` | reviewed rule |
 | `prose` / `instruction` | instruction rule |
 | `prompt` / `review` | review prompt |
 
@@ -804,6 +806,8 @@ For each accepted review candidate:
    **`--tier steer` additionally requires `--hook-id`** — the steer-manifest key, which is also the `hook_name` in `hooks/steer-audit.jsonl`. That id makes the audit-log join deterministic. Reconstructing it later from `target` means searching the manifest for a path, and the manifest stops describing a hook the moment this loop renames or retires it. `register` also copies the rule text and `rule_hash` from the manifest, so the join survives a rename, plus `hook_version` and `hook_digest` — the identity of the implementation that ran. The rule hash names the policy text; a guard repaired without a rule change moves the digest alone, which is what says the treatment changed under a class still collecting. The lookup reads whichever store holds the id and refuses an id held by both; `--hook-scope project|global` names one.
 
    **`--tier prose` additionally requires `--rule-id` and `--not-mechanizable`.** The prose has to exist before a record can name it: write it with `steer rules add <id> --rule "<text>"`, which prints the scope's rules first and refuses text a second id already holds, then pass that id. `register` copies the rule text and its `rule_hash` onto the record, and refuses an id the store does not hold. `--not-mechanizable` carries the argument the routing ladder asks for — one sentence naming why a repository check and a pre-tool guard cannot detect this class. It is refused blank and refused when it only restates the class name. Today that argument is made in a session and lost there, so no later reader can check it was made at all; the flag preserves its presence, and its soundness stays the reader's.
+
+   **`--tier reviewed` requires what `--tier prose` requires, and a rule with a review section.** Write it with `steer rules add <id> --rule "<text>" --review-path <path>`; `register` refuses a rule with no review section, freezes its paths as `rule_review_paths`, and refuses a project rule that HEAD does not hold with the same text and paths. A `--kind false-positive` record is refused: a reviewed rule makes the reviewer raise more, so it fixes a defect class. The rule's own findings are not its recurrence count: each reviewed round's ledger row names the rules it applied (`reviewed_rules_applied`, as `<scope>:<id>`) and counts the findings that named each one (`rule_findings`, by the same key), so a finding there is a catch the reviewer made. Read the agent's compliance from the session evidence the class was mined from, and read the rule's precision from how authors answered its findings.
 
    **`--tier prompt` additionally requires `--addendum-id` and `--kind false-positive`.** The stock review prompt is compiled into the binary and fixed; a fix on this tier is an entry the commit gate adds to it. Write it with `steer commit-gate addendum add <id> --text "<text>"`, then pass that id. `register` copies the entry text and its `addendum_hash` onto the record, refuses an id the store does not hold, and refuses an id held by both stores unless `--addendum-scope project|global` names one. A defect class is refused, because an entry that stops the reviewer raising a real defect would read as a falling count. A project entry reaches the reviewer only once the store's `steer-manifest.json` is committed: the gate reads project entries from HEAD, so `register` refuses a project entry that HEAD does not hold with the same text. Commit the manifest first; `steer commit-gate addendum list` names each entry's state at HEAD.
 

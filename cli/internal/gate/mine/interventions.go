@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -359,6 +360,24 @@ func RequireAddendumAtHead(id, text string) error {
 		"read it yet. Commit the project steer-manifest.json, then register", pyRepr(id))
 }
 
+// RequireReviewedRuleAtHead refuses a project reviewed rule whose text or paths the
+// commit gate does not read yet, for the reason RequireAddendumAtHead refuses an entry.
+func RequireReviewedRuleAtHead(id, text string, paths []string) error {
+	want := normalizeRuleText(text)
+	for _, r := range gate.LoadAddendum(gate.Toplevel(".")).Rules {
+		if r.Scope != steerpath.ProjectScope || r.ID != id {
+			continue
+		}
+		if r.Text == want && slices.Equal(r.Paths, paths) {
+			return nil
+		}
+		return fmt.Errorf("project reviewed rule %s differs from HEAD, and the commit gate "+
+			"reads the committed rule. Commit the project steer-manifest.json, then register", pyRepr(id))
+	}
+	return fmt.Errorf("project reviewed rule %s is not at HEAD, so the commit gate does not "+
+		"read it yet. Commit the project steer-manifest.json, then register", pyRepr(id))
+}
+
 // textEntry names one manifest map of text entries and the facts a record stamps
 // from it: <prefix>, <prefix>_hash and <prefix>_scope.
 type textEntry struct {
@@ -422,7 +441,10 @@ func textEntryFactsInScope(kind textEntry, id, scope string) (map[string]any, er
 		return nil, fmt.Errorf("parsing the %s guard manifest: %w", scope, err)
 	}
 	var entries map[string]struct {
-		Text string `json:"text"`
+		Text   string `json:"text"`
+		Review *struct {
+			Paths []string `json:"paths"`
+		} `json:"review"`
 	}
 	if raw, ok := manifest[kind.key]; ok {
 		if err := json.Unmarshal(raw, &entries); err != nil {
@@ -438,6 +460,13 @@ func textEntryFactsInScope(kind textEntry, id, scope string) (map[string]any, er
 		kind.prefix:            entry.Text,
 		kind.prefix + "_hash":  hex.EncodeToString(sum[:]),
 		kind.prefix + "_scope": scope,
+	}
+	if entry.Review != nil {
+		paths := entry.Review.Paths
+		if paths == nil {
+			paths = []string{}
+		}
+		facts[kind.prefix+"_review_paths"] = paths
 	}
 	stampRepo(facts, kind.prefix, scope)
 	return facts, nil

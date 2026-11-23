@@ -83,7 +83,7 @@ func TestFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	panel := gate.NewPanel(cfg, reviewer)
-	prompt := gate.BuildReviewPrompt(gate.NeutralizeTags(string(message)), gate.NeutralizeTags(diff), contextBlock, gate.Addendum{})
+	prompt := gate.BuildReviewPrompt(gate.NeutralizeTags(string(message)), gate.NeutralizeTags(diff), contextBlock, gate.Addendum{}, nil)
 	result := panel.Run(context.Background(), prompt, repo, gate.DiffSpec{StagedOnly: true})
 
 	t.Logf("answered %d/%d, outcomes %v", result.Answered, cfg.ReviewerRuns,

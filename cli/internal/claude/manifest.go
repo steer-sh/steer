@@ -114,6 +114,16 @@ type RuleEntry struct {
 	RuleHash string `json:"rule_hash"`
 	Created  string `json:"created"`
 	Updated  string `json:"updated,omitempty"`
+	// Review makes the rule a reviewed rule: the commit gate also gives its text to
+	// the reviewer. Nil for an instruction rule.
+	Review *RuleReview `json:"review,omitempty"`
+}
+
+// RuleReview is a reviewed rule's review section. The gate gives the rule to the
+// reviewer for a commit that changes a path one of Paths matches (reviewpath); a
+// global rule with no paths reaches every review.
+type RuleReview struct {
+	Paths []string `json:"paths,omitempty"`
 }
 
 // Manifest stores hook metadata used for list/remove/CLAUDE.md cleanup, and the

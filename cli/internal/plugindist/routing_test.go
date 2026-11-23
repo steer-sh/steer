@@ -18,7 +18,7 @@ func TestRoutingGuideNamesEveryRung(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read %s: %v", routingGuide, err)
 	}
-	for _, k := range []tier.Kind{tier.Check, tier.Guard, tier.Instruction, tier.Review} {
+	for _, k := range []tier.Kind{tier.Check, tier.Guard, tier.Reviewed, tier.Instruction, tier.Review} {
 		row := "\n| " + tier.Name(k) + " |"
 		if !strings.Contains(string(raw), row) {
 			t.Errorf("%s has no table row for the %s rung, named %q", routingGuide, k, tier.Name(k))

@@ -105,6 +105,13 @@ func ArtifactOf(r mine.Record, src ArtifactSources) *Artifact {
 		return storeArtifact(r, src, kind, "hook", "hooks", hookDigest)
 	case tier.Instruction:
 		return storeArtifact(r, src, kind, "rule", "rules", textDigest)
+	case tier.Reviewed:
+		// A reviewed rule lives in the rule store and archives as an instruction rule.
+		a := storeArtifact(r, src, tier.Instruction, "rule", "rules", textDigest)
+		if a.State == ArtifactPresent {
+			compareReviewSection(r, src, a)
+		}
+		return a
 	case tier.Review:
 		return addendumArtifact(r, src)
 	case tier.Check:
@@ -149,6 +156,64 @@ func textDigest(raw json.RawMessage, id string) (string, bool, error) {
 		return "", false, nil
 	}
 	return digest(mine.NormalizeEntryText(e.Text)), true, nil
+}
+
+// compareReviewSection marks a present reviewed rule changed when its review section
+// is gone or names other paths than the record froze: the reviewer then reads the rule
+// for other commits, or for none.
+func compareReviewSection(r mine.Record, src ArtifactSources, a *Artifact) {
+	probe := *a
+	dir, placed := storeDir(r, src.RepoRoot, "rule", &probe)
+	if !placed {
+		return
+	}
+	data, err := os.ReadFile(filepath.Join(dir, hookstore.ManifestName))
+	if err != nil {
+		return
+	}
+	var manifest struct {
+		Rules map[string]struct {
+			Review *struct {
+				Paths []string `json:"paths"`
+			} `json:"review"`
+		} `json:"rules"`
+	}
+	if json.Unmarshal(data, &manifest) != nil {
+		return
+	}
+	review := manifest.Rules[a.ID].Review
+	if review == nil {
+		a.State = ArtifactChanged
+		a.Detail = "it is no longer a reviewed rule, so the commit reviewer does not read it"
+		return
+	}
+	frozen := strList(r["rule_review_paths"])
+	if strings.Join(review.Paths, "\x00") != strings.Join(frozen, "\x00") {
+		a.State = ArtifactChanged
+		a.Detail = fmt.Sprintf("its review paths are %s, not the %s this record measured",
+			pathList(review.Paths), pathList(frozen))
+	}
+}
+
+func strList(v any) []string {
+	switch t := v.(type) {
+	case []string:
+		return t
+	case []any:
+		out := make([]string, 0, len(t))
+		for _, x := range t {
+			out = append(out, fmt.Sprint(x))
+		}
+		return out
+	}
+	return nil
+}
+
+func pathList(paths []string) string {
+	if len(paths) == 0 {
+		return "(every commit)"
+	}
+	return strings.Join(paths, ", ")
 }
 
 // storeArtifact reads a guard or rule entry from the store its record names.

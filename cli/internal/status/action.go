@@ -178,6 +178,8 @@ func artifactNoun(k tier.Kind) (noun, remove string) {
 		return "guard", "steer remove "
 	case tier.Instruction:
 		return "rule", "steer rules remove "
+	case tier.Reviewed:
+		return "reviewed rule", "steer rules remove "
 	case tier.Review:
 		return "review prompt entry", "steer commit-gate addendum remove "
 	case tier.Check:
@@ -215,6 +217,9 @@ func artifactStatePhrase(kind tier.Kind, noun, name string, a *cadence.Artifact)
 	case cadence.ArtifactChanged:
 		if kind == tier.Check {
 			return "the " + name + " is " + a.Detail
+		}
+		if a.Detail != "" {
+			return "the " + name + " is in place, but " + a.Detail
 		}
 		return "the " + name + " is in place, but its text differs from the text this record measured"
 	case cadence.ArtifactAbsent:
