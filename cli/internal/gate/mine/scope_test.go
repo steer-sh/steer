@@ -184,7 +184,7 @@ func TestScopedBaselineAndMigration(t *testing.T) {
 		Prose:  testProse,
 		Ledger: ledger, Class: "widget flag", Match: "widget parser",
 		Tier: "guard", HookID: "test-guard", Target: "steer-hooks.py", InstalledTS: int64(install),
-		ScopeRepo: "steer", ScopePath: `\.go$`,
+		ScopeFlags: ScopeFlags{ScopeRepo: "steer", ScopePath: `\.go$`},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +232,7 @@ func TestScopeSetMigration(t *testing.T) {
 
 	migrateTS := ts + 1000
 	if err := ScopeSet(io.Discard, stateDir, "legacy", ScopeSetOpts{
-		Ledger: ledger, ScopeRepo: "steer", ScopeSetTS: int64(migrateTS),
+		Ledger: ledger, ScopeFlags: ScopeFlags{ScopeRepo: "steer"}, ScopeSetTS: int64(migrateTS),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +247,7 @@ func TestScopeSetMigration(t *testing.T) {
 
 	// A second scope on an already-scoped record is refused.
 	if err := ScopeSet(io.Discard, stateDir, "legacy", ScopeSetOpts{
-		Ledger: ledger, ScopeAll: true,
+		Ledger: ledger, ScopeFlags: ScopeFlags{ScopeAll: true},
 	}); err == nil {
 		t.Error("an installed scope must be frozen")
 	}
@@ -280,8 +280,8 @@ func TestCoverCorpusPreviewsWhatTheWriteFreezes(t *testing.T) {
 		check(t, "no scope excluded anything under an all-scope", cov.UnknownScope, 0)
 
 		if err := Register(io.Discard, stateDir, RegisterOpts{
-			Prose:    testProse,
-			ScopeAll: true, Ledger: ledger, Class: "widget parser flag loss", Match: "widget parser",
+			Prose:      testProse,
+			ScopeFlags: ScopeFlags{ScopeAll: true}, Ledger: ledger, Class: "widget parser flag loss", Match: "widget parser",
 			Kind: "defect", Tier: "guard", HookID: "test-guard", Target: "steer-hooks.py", InstalledTS: int64(install),
 		}); err != nil {
 			t.Fatal(err)

@@ -145,30 +145,46 @@ func TestReadMarkStopsCountingAPileAPassRead(t *testing.T) {
 // made the state directory.
 func TestWriteNudgeCreatesTheStateDirectory(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "steer-report")
-	if err := WriteNudge(dir, LoadNudge(dir).WithPlugins("claude-code:/cache/steer")); err != nil {
+	rec := LoadNudge(dir)
+	rec.Plugins = "claude-code:/cache/steer"
+	if err := WriteNudge(dir, rec); err != nil {
 		t.Fatalf("WriteNudge returned error: %v", err)
 	}
-	if ShouldNudgePlugins(dir, "claude-code:/cache/steer") {
+	if Due(LoadNudge(dir).Plugins, "claude-code:/cache/steer") {
 		t.Error("the same plugin copy nudged twice")
 	}
 }
 
-// standingNudge is one condition that nudges once per distinct key: its decision,
-// its record setter and its record field.
+// standingNudge is one condition that nudges once per distinct key: its record
+// field and a key.
 type standingNudge struct {
-	name   string
-	should func(dir, key string) bool
-	with   func(nudgeRecord, string) nudgeRecord
-	field  func(nudgeRecord) string
-	key    string
+	name  string
+	field func(*nudgeRecord) *string
+	key   string
 }
 
 var standingNudges = []standingNudge{
-	{"master", ShouldNudgeMaster, nudgeRecord.WithMaster, func(r nudgeRecord) string { return r.Master }, "claude-code/global:stale:aaaaaaaa"},
-	{"rules", ShouldNudgeRules, nudgeRecord.WithRules, func(r nudgeRecord) string { return r.Rules }, "codex/global:/h/.codex/AGENTS.md:config-path:0"},
-	{"detached", ShouldNudgeDetached, nudgeRecord.WithDetached, func(r nudgeRecord) string { return r.Detached }, "codex/global"},
-	{"source drift", ShouldNudgeSourceDrift, nudgeRecord.WithSourceDrift, func(r nudgeRecord) string { return r.SourceDrift }, "claude-code/global:no-bare-python"},
-	{"plugins", ShouldNudgePlugins, nudgeRecord.WithPlugins, func(r nudgeRecord) string { return r.Plugins }, "codex:/h/.codex/plugins/cache/m/steer/0.1.0"},
+	{"master", func(r *nudgeRecord) *string { return &r.Master }, "claude-code/global:stale:aaaaaaaa"},
+	{"rules", func(r *nudgeRecord) *string { return &r.Rules }, "codex/global:/h/.codex/AGENTS.md:config-path:0"},
+	{"detached", func(r *nudgeRecord) *string { return &r.Detached }, "codex/global"},
+	{"source drift", func(r *nudgeRecord) *string { return &r.SourceDrift }, "claude-code/global:no-bare-python"},
+	{"plugins", func(r *nudgeRecord) *string { return &r.Plugins }, "codex:/h/.codex/plugins/cache/m/steer/0.1.0"},
+}
+
+// due reads the record from dir and decides n's key against it.
+func (n standingNudge) due(dir, key string) bool {
+	rec := LoadNudge(dir)
+	return Due(*n.field(&rec), key)
+}
+
+// write persists the record from dir with n's field set to key.
+func (n standingNudge) write(t *testing.T, dir, key string) {
+	t.Helper()
+	rec := LoadNudge(dir)
+	*n.field(&rec) = key
+	if err := WriteNudge(dir, rec); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // A standing condition nudges when its key changes and stays quiet after. A
@@ -179,25 +195,21 @@ func TestStandingNudgesFireOncePerKey(t *testing.T) {
 	for _, n := range standingNudges {
 		t.Run(n.name, func(t *testing.T) {
 			dir := t.TempDir()
-			if n.should(dir, "") {
+			if n.due(dir, "") {
 				t.Error("an empty key nudged")
 			}
-			if !n.should(dir, n.key) {
+			if !n.due(dir, n.key) {
 				t.Fatal("a first key did not nudge")
 			}
-			if err := WriteNudge(dir, n.with(LoadNudge(dir), n.key)); err != nil {
-				t.Fatal(err)
-			}
-			if n.should(dir, n.key) {
+			n.write(t, dir, n.key)
+			if n.due(dir, n.key) {
 				t.Error("the same key nudged twice")
 			}
-			if !n.should(dir, n.key+"-other") {
+			if !n.due(dir, n.key+"-other") {
 				t.Error("a different key did not nudge")
 			}
-			if err := WriteNudge(dir, n.with(LoadNudge(dir), "")); err != nil {
-				t.Fatal(err)
-			}
-			if !n.should(dir, n.key) {
+			n.write(t, dir, "")
+			if !n.due(dir, n.key) {
 				t.Error("a returning key did not nudge after it was cleared")
 			}
 		})
@@ -212,12 +224,10 @@ func TestQueueNudgeCarriesEveryStandingKey(t *testing.T) {
 	for _, n := range standingNudges {
 		t.Run(n.name, func(t *testing.T) {
 			dir := t.TempDir()
-			if err := WriteNudge(dir, n.with(LoadNudge(dir), n.key)); err != nil {
-				t.Fatal(err)
-			}
+			n.write(t, dir, n.key)
 			q := &Queue{Candidates: []Candidate{{Corpus: "transcript-friction", UngroupedClusters: 1}}}
-			if _, rec := ShouldNudge(dir, q, "hash", time.Now()); n.field(rec) != n.key {
-				t.Fatalf("key: got %q, want %q", n.field(rec), n.key)
+			if _, rec := ShouldNudge(dir, q, "hash", time.Now()); *n.field(&rec) != n.key {
+				t.Fatalf("key: got %q, want %q", *n.field(&rec), n.key)
 			}
 		})
 	}

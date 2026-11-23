@@ -26,12 +26,8 @@ type MatchOpts struct {
 	ShowResidue bool
 	// The scope predicates and cutoff of the record the regex will be registered as.
 	// With any scope set, Match also counts the window register would freeze.
-	ScopeAll      bool
-	ScopeHarness  []string
-	ScopeRepo     string
-	ScopeRepoRoot string
-	ScopePath     string
-	InstalledTS   int64
+	ScopeFlags
+	InstalledTS int64
 }
 
 // baselinePreview is the registration window a scoped match counts beside the whole

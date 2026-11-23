@@ -44,12 +44,12 @@ func TestScopedMatchCountsTheChainsRegisterFreezes(t *testing.T) {
 	stateDir, ledger := writeLedger(t, rows)
 
 	frozen := registeredBaseline(t, stateDir, RegisterOpts{Ledger: ledger, Match: "widget parser",
-		Kind: "defect", ScopeHarness: []string{"codex"}, InstalledTS: cutoff})
+		Kind: "defect", ScopeFlags: ScopeFlags{ScopeHarness: []string{"codex"}}, InstalledTS: cutoff})
 	check(t, "register freezes the codex chains before the cutoff", frozen, "3/4")
 
 	var buf strings.Builder
 	if err := Match(&buf, stateDir, MatchOpts{Ledger: ledger, Regex: "widget parser", Kind: "accepted",
-		ScopeHarness: []string{"codex"}, InstalledTS: cutoff}); err != nil {
+		ScopeFlags: ScopeFlags{ScopeHarness: []string{"codex"}}, InstalledTS: cutoff}); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -75,12 +75,12 @@ func TestScopedMatchCountsTheSessionsRegisterFreezes(t *testing.T) {
 		friction(cutoff+500, "codex", "proj", "bare python here"),
 	}
 	frozen := registeredBaseline(t, t.TempDir(), RegisterOpts{Match: "bare python",
-		Corpus: CorpusTranscript, Sessions: units, ScopeHarness: []string{"codex"}, InstalledTS: cutoff})
+		Corpus: CorpusTranscript, Sessions: units, ScopeFlags: ScopeFlags{ScopeHarness: []string{"codex"}}, InstalledTS: cutoff})
 	check(t, "register freezes the codex sessions wholly before the cutoff", frozen, "1/2")
 
 	var buf strings.Builder
 	if err := Match(&buf, t.TempDir(), MatchOpts{Regex: "bare python", Corpus: CorpusTranscript,
-		Sessions: units, ScopeHarness: []string{"codex"}, InstalledTS: cutoff}); err != nil {
+		Sessions: units, ScopeFlags: ScopeFlags{ScopeHarness: []string{"codex"}}, InstalledTS: cutoff}); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -110,8 +110,8 @@ func TestMatchRefusesAPreviewRegisterCouldNotFreeze(t *testing.T) {
 	dir := findingsDir(t, nil, []map[string]any{c("the parser drops a flag")})
 	for name, o := range map[string]MatchOpts{
 		"a cutoff with no scope": {Kind: "accepted", InstalledTS: 2000},
-		"strict joins":           {Kind: "accepted", ScopeAll: true, StrictJoins: true},
-		"both verdicts":          {Kind: "both", ScopeAll: true},
+		"strict joins":           {Kind: "accepted", ScopeFlags: ScopeFlags{ScopeAll: true}, StrictJoins: true},
+		"both verdicts":          {Kind: "both", ScopeFlags: ScopeFlags{ScopeAll: true}},
 	} {
 		o.Regex = "parser"
 		if err := Match(&strings.Builder{}, dir, o); err == nil {

@@ -1,14 +1,8 @@
 package adjudication
 
 import (
-	"bufio"
-	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
-
-	"github.com/steer-sh/steer-cli/internal/jsonl"
 )
 
 // ExclusionLogName is the append-only stream of corrections to the audit stream,
@@ -67,38 +61,12 @@ func (e Exclusion) key() string {
 // missing stream yields none and no error. A line naming no subject reads as a
 // guard exclusion; a line whose subject this build does not know is skipped.
 func LoadExclusions(dir string) ([]Exclusion, error) {
-	file, err := os.Open(filepath.Join(dir, ExclusionLogName))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("failed to read %s: %w", ExclusionLogName, err)
-	}
-	defer file.Close()
-	var out []Exclusion
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		var e Exclusion
-		if err := json.Unmarshal([]byte(line), &e); err != nil {
-			continue
-		}
+	return loadStream(dir, ExclusionLogName, func(e *Exclusion) bool {
 		if e.Subject == "" {
 			e.Subject = SubjectGuard
 		}
-		if e.key() == "" {
-			continue
-		}
-		out = append(out, e)
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("failed to read %s: %w", ExclusionLogName, err)
-	}
-	return out, nil
+		return e.key() != ""
+	})
 }
 
 // AppendExclusion writes one entry to the stream in dir, which must already exist.
@@ -126,20 +94,7 @@ func AppendExclusion(dir string, e Exclusion) error {
 	if e.Action == Exclude && len(e.Evidence) == 0 {
 		return fmt.Errorf("an exclusion must name the evidence that the row records no real work")
 	}
-	line, err := json.Marshal(e)
-	if err != nil {
-		return fmt.Errorf("failed to encode the exclusion: %w", err)
-	}
-	file, err := os.OpenFile(filepath.Join(dir, ExclusionLogName),
-		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return fmt.Errorf("failed to open %s: %w", ExclusionLogName, err)
-	}
-	defer file.Close()
-	if _, err := file.Write(jsonl.Separated(filepath.Join(dir, ExclusionLogName), append(line, '\n'))); err != nil {
-		return fmt.Errorf("failed to append to %s: %w", ExclusionLogName, err)
-	}
-	return nil
+	return appendLine(dir, ExclusionLogName, "exclusion", e)
 }
 
 // Excluded reduces a stream to the guard rows it currently retires, keyed by row

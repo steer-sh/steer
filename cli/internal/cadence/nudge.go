@@ -90,83 +90,10 @@ func ShouldNudge(dir string, q *Queue, queueHash string, refresh time.Time) (boo
 // nudge line writes both halves back in one record.
 func LoadNudge(dir string) nudgeRecord { return readNudge(dir) }
 
-// ShouldNudgeMaster decides whether to name a stale guard master. An empty key
-// means every registered master carries this binary's runtime, which nudges
-// nothing and clears the record so a later staleness nudges again.
-func ShouldNudgeMaster(dir, key string) bool {
-	if key == "" {
-		return false
-	}
-	return readNudge(dir).Master != key
-}
-
-// WithMaster returns the record carrying a master key, so one write persists both
-// halves of a nudge.
-func (r nudgeRecord) WithMaster(key string) nudgeRecord {
-	r.Master = key
-	return r
-}
-
-// ShouldNudgeRules decides whether to name a drifted rules section. An empty key
-// means every section matches the manifest, which nudges nothing.
-func ShouldNudgeRules(dir, key string) bool {
-	if key == "" {
-		return false
-	}
-	return readNudge(dir).Rules != key
-}
-
-// WithRules returns the record carrying a rules key, so one write persists every
-// part of a nudge.
-func (r nudgeRecord) WithRules(key string) nudgeRecord {
-	r.Rules = key
-	return r
-}
-
-// ShouldNudgeDetached decides whether to name a harness that runs none of a
-// store's guards. An empty key means every installed harness runs them.
-func ShouldNudgeDetached(dir, key string) bool {
-	if key == "" {
-		return false
-	}
-	return readNudge(dir).Detached != key
-}
-
-// WithDetached returns the record carrying a detached key.
-func (r nudgeRecord) WithDetached(key string) nudgeRecord {
-	r.Detached = key
-	return r
-}
-
-// ShouldNudgeSourceDrift decides whether to name a registered runner whose guard
-// source differs from the store file. An empty key means every one agrees.
-func ShouldNudgeSourceDrift(dir, key string) bool {
-	if key == "" {
-		return false
-	}
-	return readNudge(dir).SourceDrift != key
-}
-
-// WithSourceDrift returns the record carrying a source-drift key.
-func (r nudgeRecord) WithSourceDrift(key string) nudgeRecord {
-	r.SourceDrift = key
-	return r
-}
-
-// ShouldNudgePlugins decides whether to name a cached plugin copy that bundles
-// another build than the stable executable. An empty key means every copy agrees.
-func ShouldNudgePlugins(dir, key string) bool {
-	if key == "" {
-		return false
-	}
-	return readNudge(dir).Plugins != key
-}
-
-// WithPlugins returns the record carrying a plugin-copy key.
-func (r nudgeRecord) WithPlugins(key string) nudgeRecord {
-	r.Plugins = key
-	return r
-}
+// Due decides whether a standing condition nudges: its key is non-empty and
+// differs from the key prev holds. An empty key means the condition is absent,
+// which nudges nothing.
+func Due(prev, key string) bool { return key != "" && prev != key }
 
 // WriteNudge persists the last-nudged record, creating dir when no refresh has yet.
 // A write failure is non-fatal: the worst case is one repeated nudge, never a

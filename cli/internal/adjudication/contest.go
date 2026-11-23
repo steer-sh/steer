@@ -1,15 +1,9 @@
 package adjudication
 
 import (
-	"bufio"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
-
-	"github.com/steer-sh/steer-cli/internal/jsonl"
 )
 
 // ContestLogName is the append-only stream of contests, beside the receipts in the
@@ -82,38 +76,12 @@ func ValidFiringID(id string) bool {
 // missing stream yields none and no error. A line naming no subject reads as a
 // guard contest; a line whose subject this build does not know is skipped.
 func LoadContests(dir string) ([]Contest, error) {
-	file, err := os.Open(filepath.Join(dir, ContestLogName))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("failed to read %s: %w", ContestLogName, err)
-	}
-	defer file.Close()
-	var out []Contest
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		var c Contest
-		if err := json.Unmarshal([]byte(line), &c); err != nil {
-			continue
-		}
+	return loadStream(dir, ContestLogName, func(c *Contest) bool {
 		if c.Subject == "" {
 			c.Subject = SubjectGuard
 		}
-		if c.ID() == "" {
-			continue
-		}
-		out = append(out, c)
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("failed to read %s: %w", ContestLogName, err)
-	}
-	return out, nil
+		return c.ID() != ""
+	})
 }
 
 // AppendContest writes one contest to the stream in dir, which must already exist.
@@ -138,20 +106,7 @@ func AppendContest(dir string, c Contest) error {
 	if len(c.Reason) > MaxContestReason {
 		return fmt.Errorf("the reason is %d bytes; keep it under %d", len(c.Reason), MaxContestReason)
 	}
-	line, err := json.Marshal(c)
-	if err != nil {
-		return fmt.Errorf("failed to encode the contest: %w", err)
-	}
-	file, err := os.OpenFile(filepath.Join(dir, ContestLogName),
-		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return fmt.Errorf("failed to open %s: %w", ContestLogName, err)
-	}
-	defer file.Close()
-	if _, err := file.Write(jsonl.Separated(filepath.Join(dir, ContestLogName), append(line, '\n'))); err != nil {
-		return fmt.Errorf("failed to append to %s: %w", ContestLogName, err)
-	}
-	return nil
+	return appendLine(dir, ContestLogName, "contest", c)
 }
 
 // Contested reduces a stream to the distinct blocks of one subject it names,

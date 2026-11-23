@@ -36,7 +36,7 @@ func TestCheckTierRecordCarriesItsBinding(t *testing.T) {
 	stateDir, ledger := writeLedger(t, nil)
 	if err := checkRegister(t, stateDir, ledger, RegisterOpts{
 		CheckID: "no-count", CheckFacts: boundFacts(),
-		ScopeHarness: []string{"claude-code"}, ScopeRepoRoot: boundRoot,
+		ScopeFlags: ScopeFlags{ScopeHarness: []string{"claude-code"}, ScopeRepoRoot: boundRoot},
 	}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestCheckTierRecordCarriesItsBinding(t *testing.T) {
 func TestCheckTierRecordRefusesAnUnboundOrUnscopedFix(t *testing.T) {
 	stateDir, ledger := writeLedger(t, nil)
 	if err := checkRegister(t, stateDir, ledger, RegisterOpts{
-		ScopeHarness: []string{"claude-code"}, ScopeRepoRoot: boundRoot,
+		ScopeFlags: ScopeFlags{ScopeHarness: []string{"claude-code"}, ScopeRepoRoot: boundRoot},
 	}); err == nil {
 		t.Error("a check-tier record with no check id was registered")
 	}
@@ -70,23 +70,23 @@ func TestCheckTierRecordRefusesAnUnboundOrUnscopedFix(t *testing.T) {
 	delete(partial, CheckReceiptKey)
 	if err := checkRegister(t, stateDir, ledger, RegisterOpts{
 		CheckID: "no-count", CheckFacts: partial,
-		ScopeHarness: []string{"claude-code"}, ScopeRepoRoot: boundRoot,
+		ScopeFlags: ScopeFlags{ScopeHarness: []string{"claude-code"}, ScopeRepoRoot: boundRoot},
 	}); err == nil {
 		t.Error("a binding with no validation receipt was registered")
 	}
 	if err := checkRegister(t, stateDir, ledger, RegisterOpts{
-		CheckID: "no-count", CheckFacts: boundFacts(), ScopeAll: true,
+		CheckID: "no-count", CheckFacts: boundFacts(), ScopeFlags: ScopeFlags{ScopeAll: true},
 	}); err == nil {
 		t.Error("--scope-all was accepted for a repository-bound check")
 	}
 	if err := checkRegister(t, stateDir, ledger, RegisterOpts{
-		CheckID: "no-count", CheckFacts: boundFacts(), ScopeHarness: []string{"claude-code"},
+		CheckID: "no-count", CheckFacts: boundFacts(), ScopeFlags: ScopeFlags{ScopeHarness: []string{"claude-code"}},
 	}); err == nil {
 		t.Error("a check-tier record was registered without naming its repository")
 	}
 	if err := checkRegister(t, stateDir, ledger, RegisterOpts{
 		CheckID: "no-count", CheckFacts: boundFacts(),
-		ScopeHarness: []string{"claude-code"}, ScopeRepoRoot: "/src/two/steer",
+		ScopeFlags: ScopeFlags{ScopeHarness: []string{"claude-code"}, ScopeRepoRoot: "/src/two/steer"},
 	}); err == nil {
 		t.Error("a record was scoped to a repository the check is not declared in")
 	}
@@ -120,11 +120,11 @@ func TestScopeSetKeepsABoundCheckInItsRepository(t *testing.T) {
 	if err := Save(stateDir, []Record{bound}); err != nil {
 		t.Fatal(err)
 	}
-	opts := ScopeSetOpts{Ledger: ledger, Force: true, ScopeAll: true}
+	opts := ScopeSetOpts{Ledger: ledger, Force: true, ScopeFlags: ScopeFlags{ScopeAll: true}}
 	if err := ScopeSet(io.Discard, stateDir, "r", opts); err == nil {
 		t.Error("a bound check record was given an every-repository window")
 	}
-	opts = ScopeSetOpts{Ledger: ledger, Force: true, ScopeRepoRoot: boundRoot}
+	opts = ScopeSetOpts{Ledger: ledger, Force: true, ScopeFlags: ScopeFlags{ScopeRepoRoot: boundRoot}}
 	if err := ScopeSet(io.Discard, stateDir, "r", opts); err != nil {
 		t.Errorf("the check's own repository was refused: %v", err)
 	}

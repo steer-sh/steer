@@ -117,7 +117,7 @@ func TestRegisterRefusesAGuardThatAlreadyBlockedBeforeTheCutoff(t *testing.T) {
 			Prose: testProse, Class: "bare", Match: "bare python", Corpus: CorpusTranscript,
 			Sessions: []SessionUnit{friction(1000, "claude-code", "proj", "bare python here")},
 			Firings:  firings, Tier: "guard", HookID: "no-bare-python", Target: "no-bare-python.py",
-			ScopeAll: true, InstalledTS: 2000,
+			ScopeFlags: ScopeFlags{ScopeAll: true}, InstalledTS: 2000,
 		}
 	}
 	block := func(scope string, ts float64) Firing {

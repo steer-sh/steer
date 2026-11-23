@@ -246,11 +246,11 @@ func artifactStatePhrase(kind tier.Kind, noun, name string, a *cadence.Artifact)
 func UnitName(unit string, n int) string {
 	switch orUnit(unit) {
 	case "chain":
-		return plural("review sequence", n)
+		return Plural("review sequence", n)
 	case "session":
-		return plural("agent session", n)
+		return Plural("agent session", n)
 	}
-	return plural("item", n)
+	return Plural("item", n)
 }
 
 // orUnit names the counted item when a record carries no unit tag.
@@ -261,12 +261,10 @@ func orUnit(unit string) string {
 	return unit
 }
 
-func plural(word string, n int) string {
+// Plural returns word for a count of one and word+"s" for any other count.
+func Plural(word string, n int) string {
 	if n == 1 {
 		return word
-	}
-	if word == "recurrence" {
-		return "recurrences"
 	}
 	return word + "s"
 }
@@ -299,7 +297,7 @@ func CheckActivityPhrase(obs mine.Observation) string {
 // count carries its denominator in words, so no fraction prints.
 func RecurrencePhrase(before, after cadence.Incidence, unit string) string {
 	unit = orUnit(unit)
-	s := fmt.Sprintf("%d %s in the %d %s since install", after.Hits, plural("recurrence", after.Hits), after.Units, UnitName(unit, after.Units))
+	s := fmt.Sprintf("%d %s in the %d %s since install", after.Hits, Plural("recurrence", after.Hits), after.Units, UnitName(unit, after.Units))
 	if before.Units > 0 {
 		s += fmt.Sprintf("; %d in the %d before", before.Hits, before.Units)
 	}

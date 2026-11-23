@@ -129,12 +129,10 @@ func resolveReviewer(cfg gate.Config) (gate.Config, gate.Reviewer, error) {
 	return settings.Resolve(cfg, warnOnce)
 }
 
-var commitGateReviewCmd = &cobra.Command{
-	Use:   "review",
-	Short: "PreToolUse hook: rule on a Bash `git commit` before it runs",
-	Long: `review reads a Claude Code PreToolUse payload on stdin and writes the hook's
-reply on stdout. It always exits 0: a gate that cannot answer must fail open.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+// reviewRunE runs one harness adapter's review hook over stdin and stdout and
+// always returns nil.
+func reviewRunE(run func(context.Context, gate.Config, gate.Reviewer, io.Reader, io.Writer)) func(*cobra.Command, []string) error {
+	return func(cmd *cobra.Command, args []string) error {
 		if err := prepareState(); err != nil {
 			fmt.Fprintln(os.Stderr, "steer commit-gate:", err)
 		}
@@ -147,9 +145,17 @@ reply on stdout. It always exits 0: a gate that cannot answer must fail open.`,
 			return nil
 		}
 		cfg.OperatorNotice = status.PluginRemovedNotice()
-		cc.Run(context.Background(), cfg, reviewer, os.Stdin, os.Stdout)
+		run(context.Background(), cfg, reviewer, os.Stdin, os.Stdout)
 		return nil
-	},
+	}
+}
+
+var commitGateReviewCmd = &cobra.Command{
+	Use:   "review",
+	Short: "PreToolUse hook: rule on a Bash `git commit` before it runs",
+	Long: `review reads a Claude Code PreToolUse payload on stdin and writes the hook's
+reply on stdout. It always exits 0: a gate that cannot answer must fail open.`,
+	RunE: reviewRunE(cc.Run),
 }
 
 // commitGatePreCommitCmd answers the git pre-commit hook an earlier Steer installed,
@@ -174,20 +180,7 @@ var commitGateCodexReviewCmd = &cobra.Command{
 	Short: "Codex PreToolUse hook: rule on a Bash git commit before it runs",
 	Long: `review-codex reads a Codex PreToolUse payload on stdin and writes Codex's
 native hook reply on stdout. It always exits 0 so adapter failures fail open.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := prepareState(); err != nil {
-			fmt.Fprintln(os.Stderr, "steer commit-gate:", err)
-		}
-		cfg := gateConfig()
-		reviewer, err := buildReviewer(cfg)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "steer commit-gate:", err)
-			return nil
-		}
-		cfg.OperatorNotice = status.PluginRemovedNotice()
-		gatecodex.Run(context.Background(), cfg, reviewer, os.Stdin, os.Stdout)
-		return nil
-	},
+	RunE: reviewRunE(gatecodex.Run),
 }
 
 var commitGatePiReviewCmd = &cobra.Command{
@@ -195,20 +188,7 @@ var commitGatePiReviewCmd = &cobra.Command{
 	Short: "Pi tool_call hook: rule on a Bash git commit before it runs",
 	Long: `review-pi reads the Pi bridge's PreToolUse payload on stdin and writes Pi's
 native tool_call reply on stdout. It always exits 0 so adapter failures fail open.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := prepareState(); err != nil {
-			fmt.Fprintln(os.Stderr, "steer commit-gate:", err)
-		}
-		cfg := gateConfig()
-		reviewer, err := buildReviewer(cfg)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "steer commit-gate:", err)
-			return nil
-		}
-		cfg.OperatorNotice = status.PluginRemovedNotice()
-		gatepi.Run(context.Background(), cfg, reviewer, os.Stdin, os.Stdout)
-		return nil
-	},
+	RunE: reviewRunE(gatepi.Run),
 }
 
 var commitGateTestReviewerCmd = &cobra.Command{

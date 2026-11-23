@@ -46,11 +46,7 @@ type RegisterOpts struct {
 	Supersedes      string
 	InstalledTS     int64
 	Force           bool
-	ScopeAll        bool
-	ScopeHarness    []string
-	ScopeRepo       string
-	ScopeRepoRoot   string
-	ScopePath       string
+	ScopeFlags
 }
 
 // Register records an intervention with its baseline incidence.
@@ -317,26 +313,22 @@ func refuseRunningGuard(o RegisterOpts, records []Record, fix GuardFix, scope *S
 
 // RejectOpts are the flags of `mine reject`.
 type RejectOpts struct {
-	Ledger        string
-	Class         string
-	Match         string
-	Kind          string
-	Corpus        string
-	SignalKind    string
-	Sessions      []SessionUnit
-	Reason        string
-	Reopen        string
-	ReopenMatch   string
-	ReopenAt      int
-	Note          string
-	Prose         Prose
-	RejectedTS    int64
-	Force         bool
-	ScopeAll      bool
-	ScopeHarness  []string
-	ScopeRepo     string
-	ScopeRepoRoot string
-	ScopePath     string
+	Ledger      string
+	Class       string
+	Match       string
+	Kind        string
+	Corpus      string
+	SignalKind  string
+	Sessions    []SessionUnit
+	Reason      string
+	Reopen      string
+	ReopenMatch string
+	ReopenAt    int
+	Note        string
+	Prose       Prose
+	RejectedTS  int64
+	Force       bool
+	ScopeFlags
 }
 
 // validateReopenSubset refuses half a reopen trigger. A regex without a count
@@ -436,15 +428,11 @@ func Reject(w io.Writer, stateDir string, o RejectOpts) error {
 
 // ScopeSetOpts are the flags of `mine scope`.
 type ScopeSetOpts struct {
-	Ledger        string
-	Sessions      []SessionUnit
-	ScopeAll      bool
-	ScopeHarness  []string
-	ScopeRepo     string
-	ScopeRepoRoot string
-	ScopePath     string
-	ScopeSetTS    int64
-	Force         bool
+	Ledger   string
+	Sessions []SessionUnit
+	ScopeFlags
+	ScopeSetTS int64
+	Force      bool
 }
 
 // ScopeSet installs a scope on a legacy, unscoped record. It recomputes the scoped

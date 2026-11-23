@@ -51,7 +51,7 @@ func TestRegisterRefusesOnlyACorpusItCannotBaseline(t *testing.T) {
 		Class: "c", Match: "bare python", Corpus: CorpusTranscript,
 		Sessions: []SessionUnit{friction(1000, "claude-code", "proj", "bare python here")},
 		Tier:     "guard", HookID: "test-guard",
-		Target: "steer-hooks.py", ScopeAll: true, InstalledTS: 2000,
+		Target: "steer-hooks.py", ScopeFlags: ScopeFlags{ScopeAll: true}, InstalledTS: 2000,
 	})
 	if err != nil {
 		t.Fatalf("the session corpus can freeze a baseline: %v", err)
@@ -59,7 +59,7 @@ func TestRegisterRefusesOnlyACorpusItCannotBaseline(t *testing.T) {
 	if err := Register(discard{}, dir, RegisterOpts{
 		Prose: testProse,
 		Class: "c", Match: "x", Corpus: "made-up",
-		Tier: "guard", HookID: "test-guard", Target: "steer-hooks.py", ScopeAll: true, Force: true,
+		Tier: "guard", HookID: "test-guard", Target: "steer-hooks.py", ScopeFlags: ScopeFlags{ScopeAll: true}, Force: true,
 	}); err == nil {
 		t.Fatal("an unknown corpus must be refused")
 	}
@@ -68,7 +68,7 @@ func TestRegisterRefusesOnlyACorpusItCannotBaseline(t *testing.T) {
 		Prose: testProse,
 		Class: "c", Match: "bare python", Corpus: CorpusTranscript,
 		Sessions: []SessionUnit{friction(1000, "claude-code", "proj", "bare python here")},
-		Tier:     "guard", HookID: "test-guard", Target: "steer-hooks.py", ScopePath: "cli/", InstalledTS: 2000,
+		Tier:     "guard", HookID: "test-guard", Target: "steer-hooks.py", ScopeFlags: ScopeFlags{ScopePath: "cli/"}, InstalledTS: 2000,
 	}); err == nil {
 		t.Fatal("--scope-path over the session corpus must be refused")
 	}
@@ -83,21 +83,21 @@ func TestSessionWritersReadNoLedger(t *testing.T) {
 	if err := Register(discard{}, dir, RegisterOpts{
 		Prose: testProse, Ledger: unreadable,
 		Class: "c", Match: "bare python", Corpus: CorpusTranscript, Sessions: sessions,
-		Tier: "guard", HookID: "test-guard", Target: "steer-hooks.py", ScopeAll: true, InstalledTS: 2000,
+		Tier: "guard", HookID: "test-guard", Target: "steer-hooks.py", ScopeFlags: ScopeFlags{ScopeAll: true}, InstalledTS: 2000,
 	}); err != nil {
 		t.Fatalf("a session register must not read the ledger: %v", err)
 	}
 	if err := Reject(discard{}, dir, RejectOpts{
 		Prose: testProse, Ledger: unreadable,
 		Class: "r", Match: "bare python", Corpus: CorpusTranscript, Sessions: sessions,
-		Reason: "no", ScopeAll: true, RejectedTS: 2000,
+		Reason: "no", ScopeFlags: ScopeFlags{ScopeAll: true}, RejectedTS: 2000,
 	}); err != nil {
 		t.Fatalf("a session reject must not read the ledger: %v", err)
 	}
 	if err := Register(discard{}, dir, RegisterOpts{
 		Prose: testProse, Ledger: unreadable,
 		Class: "c", Match: "x", Tier: "guard", HookID: "test-guard", Target: "steer-hooks.py",
-		ScopeAll: true, Force: true,
+		ScopeFlags: ScopeFlags{ScopeAll: true}, Force: true,
 	}); err == nil {
 		t.Fatal("a chain register must refuse a ledger it cannot read")
 	}

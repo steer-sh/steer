@@ -36,7 +36,7 @@ func TestBothInstructionSpellingsNeedARuleID(t *testing.T) {
 
 	for _, spelling := range []string{"instruction", "prose"} {
 		err := Register(io.Discard, stateDir, RegisterOpts{
-			Prose: testProse, ScopeAll: true, Ledger: ledger,
+			Prose: testProse, ScopeFlags: ScopeFlags{ScopeAll: true}, Ledger: ledger,
 			Class: "widget parser flag loss", Match: "widget parser",
 			Tier: spelling, Target: "CLAUDE.md",
 		})
@@ -56,7 +56,7 @@ func TestAnUnknownRuleIDIsRefused(t *testing.T) {
 	t.Chdir(t.TempDir())
 
 	err := Register(io.Discard, stateDir, RegisterOpts{
-		Prose: testProse, ScopeAll: true, Ledger: ledger,
+		Prose: testProse, ScopeFlags: ScopeFlags{ScopeAll: true}, Ledger: ledger,
 		Class: "widget parser flag loss", Match: "widget parser",
 		Tier: "instruction", Target: "CLAUDE.md", RuleID: "config-path",
 		NotMechanizable: testNotMechanizable,
@@ -77,7 +77,7 @@ func TestAnInstructionRecordFreezesItsRuleText(t *testing.T) {
 		"resolve a config path from the repo root")
 
 	if err := Register(io.Discard, stateDir, RegisterOpts{
-		Prose: testProse, ScopeAll: true, Ledger: ledger,
+		Prose: testProse, ScopeFlags: ScopeFlags{ScopeAll: true}, Ledger: ledger,
 		Class: "widget parser flag loss", Match: "widget parser",
 		Tier: "instruction", Target: "CLAUDE.md", RuleID: "config-path",
 		NotMechanizable: testNotMechanizable,
@@ -107,7 +107,7 @@ func TestAnInstructionTierNeedsItsNotMechanizableArgument(t *testing.T) {
 		"resolve a config path from the repo root")
 
 	opts := RegisterOpts{
-		Prose: testProse, ScopeAll: true, Ledger: ledger,
+		Prose: testProse, ScopeFlags: ScopeFlags{ScopeAll: true}, Ledger: ledger,
 		Class: "widget parser flag loss", Match: "widget parser",
 		Tier: "instruction", Target: "CLAUDE.md", RuleID: "config-path",
 	}
@@ -138,7 +138,7 @@ func TestOtherTiersNeedNoNotMechanizableArgument(t *testing.T) {
 	stateDir, ledger := registerRuleFixture(t)
 
 	if err := Register(io.Discard, stateDir, RegisterOpts{
-		Prose: testProse, ScopeAll: true, Ledger: ledger,
+		Prose: testProse, ScopeFlags: ScopeFlags{ScopeAll: true}, Ledger: ledger,
 		Class: "widget parser flag loss", Match: "widget parser",
 		Tier: "guard", HookID: "test-guard", Target: "steer-hooks.py",
 	}); err != nil {

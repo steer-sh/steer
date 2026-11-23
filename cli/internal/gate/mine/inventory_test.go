@@ -28,15 +28,15 @@ func TestConcurrentInventoryMutations(t *testing.T) {
 			err = Register(io.Discard, state, RegisterOpts{
 				Prose: testProse, Class: "concurrent class", Match: "concurrent",
 				Tier: "guard", HookID: "absent-test-guard", HookScope: "global",
-				ScopeAll: true, Force: true,
+				ScopeFlags: ScopeFlags{ScopeAll: true}, Force: true,
 			})
 		case strings.HasPrefix(operation, "reject"):
 			err = Reject(io.Discard, state, RejectOpts{
 				Prose: testProse, Class: "concurrent class", Match: "concurrent",
-				ScopeAll: true, Force: true,
+				ScopeFlags: ScopeFlags{ScopeAll: true}, Force: true,
 			})
 		case operation == "scope":
-			err = ScopeSet(io.Discard, state, "seed", ScopeSetOpts{ScopeAll: true, Force: true})
+			err = ScopeSet(io.Discard, state, "seed", ScopeSetOpts{ScopeFlags: ScopeFlags{ScopeAll: true}, Force: true})
 		case operation == "retire":
 			err = Retire(io.Discard, state, "seed", "concurrent retirement", "removed")
 		case operation == "describe":

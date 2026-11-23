@@ -162,7 +162,7 @@ func TestDescribeLeavesAChainVerdictUnchanged(t *testing.T) {
 	}
 	stateDir, ledger := writeLedger(t, rows)
 	if err := Register(io.Discard, stateDir, RegisterOpts{
-		Prose: testProse, ScopeAll: true, Ledger: ledger,
+		Prose: testProse, ScopeFlags: ScopeFlags{ScopeAll: true}, Ledger: ledger,
 		Class: "widget parser flag loss", Match: "widget parser",
 		Kind: "defect", Tier: "guard", HookID: "test-guard", Target: "steer-hooks.py", InstalledTS: int64(install),
 	}); err != nil {

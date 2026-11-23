@@ -37,6 +37,15 @@ type Scope struct {
 	raw      map[string]any
 }
 
+// ScopeFlags are the scope predicates a command takes, before BuildScope compiles them.
+type ScopeFlags struct {
+	ScopeAll      bool
+	ScopeHarness  []string
+	ScopeRepo     string
+	ScopeRepoRoot string
+	ScopePath     string
+}
+
 // Eligibility is one chain's standing against a scope. Unknown means the chain's
 // metadata is missing, so it withholds rather than shrinking the window.
 type Eligibility int
