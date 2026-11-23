@@ -102,62 +102,18 @@ type RenderCheck func(CheckShow, Emission) ([]byte, error)
 // from the end furthest from the block. It never withholds the run or its
 // failures. A zero allowance withholds nothing and still reports the size.
 func FitCheck(c CheckShow, max int, render RenderCheck) ([]byte, Emission, error) {
-	steps, context := len(c.Reading.Steps), len(c.Reading.Context)
-	base := Emission{MaxBytes: max, StepsAvailable: steps, ContextAvailable: context}
-
-	type level struct {
-		prior          bool
-		steps, context int
-	}
-	levels := []level{{prior: true, steps: steps, context: context}}
-	if len(c.Prior) > 0 {
-		levels = append(levels, level{steps: steps, context: context})
-	}
-	for n := steps - 1; n >= 0; n-- {
-		levels = append(levels, level{steps: n, context: context})
-	}
-	for n := context - 1; n >= 0; n-- {
-		levels = append(levels, level{context: n})
-	}
-
-	var smallest int
-	for _, l := range levels {
+	context := len(c.Reading.Context)
+	trim := func(l clipLevel) CheckShow {
 		trial := c
 		if !l.prior {
 			trial.Prior = nil
 		}
 		trial.Reading.Steps = c.Reading.Steps[:l.steps]
 		trial.Reading.Context = c.Reading.Context[context-l.context:]
-
-		e := base
-		e.StepsEmitted, e.ContextEmitted = l.steps, l.context
-		if !l.prior && len(c.Prior) > 0 {
-			e.Clipped = append(e.Clipped,
-				fmt.Sprintf("%d prior reading(s) withheld to fit the allowance", len(c.Prior)))
-		}
-		if l.steps < steps {
-			e.Clipped = append(e.Clipped, fmt.Sprintf(
-				"%d of %d continuation step(s) withheld to fit the allowance, from the end furthest from the block",
-				steps-l.steps, steps))
-		}
-		if l.context < context {
-			e.Clipped = append(e.Clipped, fmt.Sprintf(
-				"%d of %d context step(s) withheld to fit the allowance, from the end furthest from the block",
-				context-l.context, context))
-		}
-		size, out, err := settle(trial, e, render)
-		if err != nil {
-			return nil, Emission{}, err
-		}
-		if max <= 0 || size <= max {
-			e.EmittedBytes = size
-			return out, e, nil
-		}
-		smallest = size
+		return trial
 	}
-	return nil, Emission{}, fmt.Errorf(
-		"the allowance of %d byte(s) does not carry this block's run and failures, "+
-			"which need %d; raise --max-bytes or leave the case unread", max, smallest)
+	return fitLevels(len(c.Prior), len(c.Reading.Steps), context, max, trim, render,
+		"this block's run and failures")
 }
 
 // RenderCheckJSON is the JSON rendering, valid at every clip level because a

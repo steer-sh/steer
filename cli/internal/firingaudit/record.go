@@ -84,20 +84,8 @@ func Record(rows []Row, dir string, j Judgment,
 	// does not stop the judgment: the row carries the attempted action, which
 	// is what settles whether the block was right.
 	continuation := row.continuationOrUnavailable(budget)
-	if j.ContinuationInspected && !continuation.Reached() {
-		return adjudication.Receipt{}, fmt.Errorf(
-			"the judgment reports an inspected continuation and none was reached: %s",
-			continuation.Reason)
-	}
-	if j.InspectedSteps > 0 && !j.ContinuationInspected {
-		return adjudication.Receipt{}, fmt.Errorf(
-			"the judgment reports %d inspected continuation step(s) and no inspected continuation",
-			j.InspectedSteps)
-	}
-	if j.InspectedSteps > len(continuation.Steps) {
-		return adjudication.Receipt{}, fmt.Errorf(
-			"the judgment reports %d inspected continuation step(s) and the lookup reached %d",
-			j.InspectedSteps, len(continuation.Steps))
+	if err := checkInspection(continuation, j.ContinuationInspected, j.InspectedSteps); err != nil {
+		return adjudication.Receipt{}, err
 	}
 	anchors := continuation.Anchors
 	receipt := adjudication.Receipt{
@@ -127,4 +115,27 @@ func Record(rows []Row, dir string, j Judgment,
 		return adjudication.Receipt{}, err
 	}
 	return receipt, nil
+}
+
+// checkInspection refuses a judgment's inspected extent that the continuation c
+// cannot carry: an inspected continuation none reached, inspected steps without
+// an inspected continuation, or more inspected steps than the lookup reached.
+// It returns nil when the extent fits.
+func checkInspection(c transcript.Continuation, inspected bool, steps int) error {
+	if inspected && !c.Reached() {
+		return fmt.Errorf(
+			"the judgment reports an inspected continuation and none was reached: %s",
+			c.Reason)
+	}
+	if steps > 0 && !inspected {
+		return fmt.Errorf(
+			"the judgment reports %d inspected continuation step(s) and no inspected continuation",
+			steps)
+	}
+	if steps > len(c.Steps) {
+		return fmt.Errorf(
+			"the judgment reports %d inspected continuation step(s) and the lookup reached %d",
+			steps, len(c.Steps))
+	}
+	return nil
 }

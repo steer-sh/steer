@@ -40,18 +40,8 @@ func RecordCheck(cases []CheckCase, dir string, j CheckJudgment,
 		return adjudication.Receipt{}, err
 	}
 	reading := c.Reading(budget)
-	if j.ContinuationInspected && !reading.Reached() {
-		return adjudication.Receipt{}, fmt.Errorf(
-			"the judgment reports an inspected continuation and none was reached: %s", reading.Reason)
-	}
-	if j.InspectedSteps > 0 && !j.ContinuationInspected {
-		return adjudication.Receipt{}, fmt.Errorf(
-			"the judgment reports %d inspected continuation step(s) and no inspected continuation", j.InspectedSteps)
-	}
-	if j.InspectedSteps > len(reading.Steps) {
-		return adjudication.Receipt{}, fmt.Errorf(
-			"the judgment reports %d inspected continuation step(s) and the lookup reached %d",
-			j.InspectedSteps, len(reading.Steps))
+	if err := checkInspection(reading.Continuation, j.ContinuationInspected, j.InspectedSteps); err != nil {
+		return adjudication.Receipt{}, err
 	}
 	anchors := reading.Anchors
 	receipt := adjudication.Receipt{

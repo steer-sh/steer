@@ -35,41 +35,64 @@ type Render func(Case, Emission) ([]byte, error)
 // blocked action: an allowance that cannot carry those is refused. A zero
 // allowance withholds nothing and still reports the size.
 func Fit(c Case, max int, render Render) ([]byte, Emission, error) {
-	available := len(c.Continuation.Steps)
-	base := Emission{MaxBytes: max, StepsAvailable: available}
-
-	type level struct {
-		prior bool
-		steps int
-	}
-	levels := []level{{prior: true, steps: available}}
-	if len(c.Prior) > 0 {
-		levels = append(levels, level{prior: false, steps: available})
-	}
-	for n := available - 1; n >= 0; n-- {
-		levels = append(levels, level{prior: false, steps: n})
-	}
-
-	var smallest int
-	for _, l := range levels {
+	trim := func(l clipLevel) Case {
 		trial := c
 		if !l.prior {
 			trial.Prior = nil
 		}
 		trial.Continuation.Steps = c.Continuation.Steps[:l.steps]
+		return trial
+	}
+	return fitLevels(len(c.Prior), len(c.Continuation.Steps), 0, max, trim, render,
+		"this firing's row and blocked action")
+}
 
+// clipLevel is one rendering's extent: whether prior readings stay, and how many
+// continuation and context steps it keeps.
+type clipLevel struct {
+	prior          bool
+	steps, context int
+}
+
+// fitLevels renders trim's case at each clip level, least withheld first, and
+// returns the first rendering within max with its Emission. prior, steps and
+// context are the counts available on each axis; kept names what no level
+// withholds, for the error when even the last level exceeds max. A zero max
+// returns the first level.
+func fitLevels[C any](prior, steps, context, max int, trim func(clipLevel) C,
+	render func(C, Emission) ([]byte, error), kept string) ([]byte, Emission, error) {
+	base := Emission{MaxBytes: max, StepsAvailable: steps, ContextAvailable: context}
+
+	levels := []clipLevel{{prior: true, steps: steps, context: context}}
+	if prior > 0 {
+		levels = append(levels, clipLevel{steps: steps, context: context})
+	}
+	for n := steps - 1; n >= 0; n-- {
+		levels = append(levels, clipLevel{steps: n, context: context})
+	}
+	for n := context - 1; n >= 0; n-- {
+		levels = append(levels, clipLevel{context: n})
+	}
+
+	var smallest int
+	for _, l := range levels {
 		e := base
-		e.StepsEmitted = l.steps
-		if !l.prior && len(c.Prior) > 0 {
+		e.StepsEmitted, e.ContextEmitted = l.steps, l.context
+		if !l.prior && prior > 0 {
 			e.Clipped = append(e.Clipped,
-				fmt.Sprintf("%d prior reading(s) withheld to fit the allowance", len(c.Prior)))
+				fmt.Sprintf("%d prior reading(s) withheld to fit the allowance", prior))
 		}
-		if l.steps < available {
+		if l.steps < steps {
 			e.Clipped = append(e.Clipped, fmt.Sprintf(
 				"%d of %d continuation step(s) withheld to fit the allowance, from the end furthest from the block",
-				available-l.steps, available))
+				steps-l.steps, steps))
 		}
-		size, out, err := settle(trial, e, render)
+		if l.context < context {
+			e.Clipped = append(e.Clipped, fmt.Sprintf(
+				"%d of %d context step(s) withheld to fit the allowance, from the end furthest from the block",
+				context-l.context, context))
+		}
+		size, out, err := settle(trim(l), e, render)
 		if err != nil {
 			return nil, Emission{}, err
 		}
@@ -80,8 +103,8 @@ func Fit(c Case, max int, render Render) ([]byte, Emission, error) {
 		smallest = size
 	}
 	return nil, Emission{}, fmt.Errorf(
-		"the allowance of %d byte(s) does not carry this firing's row and blocked action, "+
-			"which need %d; raise --max-bytes or leave the case unread", max, smallest)
+		"the allowance of %d byte(s) does not carry %s, "+
+			"which need %d; raise --max-bytes or leave the case unread", max, kept, smallest)
 }
 
 // settle renders until the size the output claims is the size it has. The count
