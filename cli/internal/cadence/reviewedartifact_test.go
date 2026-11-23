@@ -11,6 +11,7 @@ import (
 
 // A reviewed rule is read against its frozen paths as well as its text: the same
 // section is present, other paths or no section is changed, and the reason says which.
+// A lost section is named even when the text changed with it.
 func TestArtifactReadsAReviewedRuleAgainstItsFrozenPaths(t *testing.T) {
 	home := t.TempDir()
 	testhome.Set(t, home)
@@ -26,6 +27,7 @@ func TestArtifactReadsAReviewedRuleAgainstItsFrozenPaths(t *testing.T) {
 	for body, want := range map[string]string{
 		`{"rules":{"config-path":{` + text + `,"review":{"paths":["docs/"]}}}}`: "docs/",
 		`{"rules":{"config-path":{` + text + `}}}`:                              "no longer a reviewed rule",
+		`{"rules":{"config-path":{"text":"another text"}}}`:                     "no longer a reviewed rule",
 	} {
 		writeManifest(t, store, body)
 		got := ArtifactOf(rec, ArtifactSources{})

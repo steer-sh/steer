@@ -107,7 +107,7 @@ func ArtifactOf(r mine.Record, src ArtifactSources) *Artifact {
 		return storeArtifact(r, src, kind, "rule", "rules", textDigest)
 	case tier.Reviewed:
 		a := storeArtifact(r, src, tier.Archived(kind), "rule", "rules", textDigest)
-		if a.State == ArtifactPresent {
+		if a.State == ArtifactPresent || a.State == ArtifactChanged {
 			compareReviewSection(r, src, a)
 		}
 		compareCommittedRule(r, src, a)
@@ -158,13 +158,14 @@ func textDigest(raw json.RawMessage, id string) (string, bool, error) {
 	return digest(mine.NormalizeEntryText(e.Text)), true, nil
 }
 
-// noReviewSection is the Detail of a reviewed rule whose store entry lost its review
+// NoReviewSection is the Detail of a reviewed rule whose store entry lost its review
 // section.
-const noReviewSection = "it is no longer a reviewed rule, so the commit reviewer does not read it"
+const NoReviewSection = "it is no longer a reviewed rule, so the commit reviewer does not read it"
 
 // compareReviewSection marks a present reviewed rule changed when its review section
 // is gone or names other paths than the record froze: the reviewer then reads the rule
-// for other commits, or for none.
+// for other commits, or for none. On a rule whose text already changed it records only
+// a lost section, which no re-baseline can measure.
 func compareReviewSection(r mine.Record, src ArtifactSources, a *Artifact) {
 	probe := *a
 	dir, placed := storeDir(r, src.RepoRoot, "rule", &probe)
@@ -187,7 +188,10 @@ func compareReviewSection(r mine.Record, src ArtifactSources, a *Artifact) {
 	}
 	review := manifest.Rules[a.ID].Review
 	if review == nil {
-		a.State, a.Detail = ArtifactChanged, noReviewSection
+		a.State, a.Detail = ArtifactChanged, NoReviewSection
+		return
+	}
+	if a.State == ArtifactChanged {
 		return
 	}
 	frozen := strList(r["rule_review_paths"])
@@ -196,6 +200,32 @@ func compareReviewSection(r mine.Record, src ArtifactSources, a *Artifact) {
 		a.Detail = fmt.Sprintf("its review paths are %s, not the %s this record measured",
 			pathList(review.Paths), pathList(frozen))
 	}
+}
+
+// The Details of a project reviewed rule whose working-tree copy and HEAD copy
+// differ; committing the store's manifest resolves each.
+const (
+	RemovedAtHead = "it is removed from the working tree, but HEAD still holds it, so the commit " +
+		"reviewer reads it until the removal is committed"
+	UnreviewedAtHead = "it is no longer a reviewed rule in the working tree, but HEAD still holds it, so the " +
+		"commit reviewer reads it until the change is committed"
+	MissingAtHead = "HEAD does not hold it as a reviewed rule, so the commit reviewer does not read it " +
+		"until the store's manifest is committed"
+	DiffersAtHead = "the copy at HEAD, which the commit reviewer reads, differs from the one this " +
+		"record measured, until the working tree's copy is committed"
+)
+
+// AwaitsCommit reports a changed project reviewed rule whose working tree and HEAD
+// disagree, so the change the reader acts on is a commit of the store's manifest.
+func (a *Artifact) AwaitsCommit() bool {
+	if !a.Changed() {
+		return false
+	}
+	switch a.Detail {
+	case RemovedAtHead, UnreviewedAtHead, MissingAtHead, DiffersAtHead:
+		return true
+	}
+	return false
 }
 
 // compareCommittedRule compares a project reviewed rule on disk with the copy at HEAD,
@@ -218,7 +248,7 @@ func compareCommittedRule(r mine.Record, src ArtifactSources, a *Artifact) {
 			return
 		}
 	}
-	unreviewed := a.State == ArtifactChanged && a.Detail == noReviewSection
+	unreviewed := a.State == ArtifactChanged && a.Detail == NoReviewSection
 	if a.State == ArtifactChanged && !unreviewed {
 		return
 	}
@@ -231,22 +261,18 @@ func compareCommittedRule(r mine.Record, src ArtifactSources, a *Artifact) {
 	switch {
 	case a.State == ArtifactAbsent && committed != nil:
 		a.State = ArtifactChanged
-		a.Detail = "it is removed from the working tree, but HEAD still holds it, so the commit " +
-			"reviewer reads it until the removal is committed"
+		a.Detail = RemovedAtHead
 		markRemoval(a, r, projectStore(src.RepoRoot), tier.Instruction)
 	case unreviewed && committed != nil:
-		a.Detail = "it is no longer a reviewed rule in the working tree, but HEAD still holds it, so the " +
-			"commit reviewer reads it until the change is committed"
+		a.Detail = UnreviewedAtHead
 	case a.State == ArtifactAbsent, unreviewed:
 	case committed == nil:
 		a.State = ArtifactChanged
-		a.Detail = "HEAD does not hold it as a reviewed rule, so the commit reviewer does not read it " +
-			"until the store's manifest is committed"
+		a.Detail = MissingAtHead
 	case digest(committed.Text) != str(r["rule_hash"]) && str(r["rule_hash"]) != "",
 		strings.Join(committed.Paths, "\x00") != strings.Join(strList(r["rule_review_paths"]), "\x00"):
 		a.State = ArtifactChanged
-		a.Detail = "the copy at HEAD, which the commit reviewer reads, differs from the one this " +
-			"record measured, until the working tree's copy is committed"
+		a.Detail = DiffersAtHead
 	}
 }
 
