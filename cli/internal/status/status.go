@@ -461,6 +461,9 @@ type SystemStatus struct {
 	// LegacyTeamLockfile is the path of a steer-team.lock.json left in the
 	// repository, "" when there is none.
 	LegacyTeamLockfile string `json:"-"`
+	// PiCodemodeOnly names the Pi settings file whose codemode "only" mode leaves an
+	// armed Pi commit gate no commit to accept; its Path is "" when there is none.
+	PiCodemodeOnly PiCodemodeOnly `json:"-"`
 	// ReviewerProbe is the caller's reading of the reviewer CLI, kept for the
 	// readiness answer.
 	ReviewerProbe reviewers.Probe `json:"-"`
@@ -551,6 +554,7 @@ func Collect(opts Options) (*SystemStatus, error) {
 	s.StoreProblems = dedupeStoreProblems(s.StoreProblems)
 	s.Addenda = AddendumInventory(opts.Addendum)
 	s.LegacyTeamLockfile = legacyTeamLockfile(opts.RepoRoot)
+	s.PiCodemodeOnly = piCodemodeOnly(s.Posture.CommitGate)
 	return s, nil
 }
 
@@ -753,6 +757,35 @@ func collectPosture(cfg gate.Config, ev mine.EvidenceSet) Posture {
 		p.Rules = append(p.Rules, RulesPresences(scope, guardRegistrars())...)
 	}
 	return p
+}
+
+// PiCodemodeOnly is a Pi settings file that hides the top-level bash tool, and the
+// scopes whose Pi commit gate it leaves no commit to accept.
+type PiCodemodeOnly struct {
+	Path   string
+	Scopes []string
+}
+
+// piCodemodeOnly reads Pi's codemode settings for a Pi started in this process's
+// directory, and only where a Pi commit gate is registered in some scope.
+func piCodemodeOnly(rows []ScopeArming) PiCodemodeOnly {
+	var scopes []string
+	for _, row := range rows {
+		if harness.ID(row.Harness) == harness.Pi && row.Registered {
+			scopes = append(scopes, row.Scope)
+		}
+	}
+	if len(scopes) == 0 {
+		return PiCodemodeOnly{}
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return PiCodemodeOnly{}
+	}
+	if path := pi.CodemodeOnly(cwd); path != "" {
+		return PiCodemodeOnly{Path: path, Scopes: scopes}
+	}
+	return PiCodemodeOnly{}
 }
 
 // InstalledRules reads every installed harness's rules section in the named

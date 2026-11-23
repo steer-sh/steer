@@ -86,6 +86,9 @@ func HealthOf(s *SystemStatus, probe reviewers.Probe) Health {
 			Fix:    LegacyLockfileFix})
 	}
 	h.Issues = append(h.Issues, modIssues(s)...)
+	if s.PiCodemodeOnly.Path != "" {
+		h.Issues = append(h.Issues, piCodemodeOnlyIssue(s.PiCodemodeOnly))
+	}
 	builds := BuildIssues(s.Posture.Plugins, hooks, running)
 	for i := range builds {
 		if deferred != "" && strings.HasPrefix(builds[i].Title, hooksBehindPrefix) {
@@ -121,6 +124,22 @@ func HealthOf(s *SystemStatus, probe reviewers.Probe) Health {
 		h.Ready = readyLines(s, readiness, buildsAgree(s.Posture.Plugins, hooks))
 	}
 	return h
+}
+
+// piCodemodeOnlyIssue phrases a Pi settings file whose codemode "only" mode leaves
+// the armed commit gate no commit to accept.
+func piCodemodeOnlyIssue(c PiCodemodeOnly) Issue {
+	var removes []string
+	for _, scope := range c.Scopes {
+		removes = append(removes, "steer commit-gate remove --harness pi --scope "+scope)
+	}
+	return Issue{Severity: SeverityAttention,
+		Title: `Pi cannot commit through its armed commit gate while codemode is active: codemode.mode is "only"`,
+		Detail: []string{c.Path + " hides Pi's top-level bash tool while codemode is active, and " +
+			"the gate refuses a commit made inside a codemode script."},
+		Fix: `set codemode.mode to "on" in ` + c.Path + " and keep bash among Pi's startup tools, " +
+			"or remove the gate with " + strings.Join(removes, " and ") +
+			"; then run /reload in each open Pi session"}
 }
 
 // LegacyLockfileTitle, LegacyLockfileWhy and LegacyLockfileFix phrase a leftover

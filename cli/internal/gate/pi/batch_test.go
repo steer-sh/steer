@@ -15,20 +15,23 @@ import (
 // siblings can change files, including an extension's tool under a read-only
 // built-in's name, or that a code-mode script made, is refused before any
 // review, and that Pi's own read-only siblings or an unread batch still review.
+// Only the code-mode refusal names the codemode "only" mode, which leaves no retry.
 func TestRunRefusesACommitThatSharesItsBatchWithAWriter(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		extra   string
 		refused bool
+		// onlyMode: the reason names Pi's codemode "only" mode, where no retry exists.
+		onlyMode bool
 	}{
-		{"bash sibling", `,"steer_batch":{"found":true,"siblings":["bash"]}`, true},
-		{"custom tool sibling", `,"steer_batch":{"found":true,"siblings":["read","deploy"],"shipped":["read"]}`, true},
-		{"overridden read sibling", `,"steer_batch":{"found":true,"siblings":["read","ls"],"shipped":["ls"]}`, true},
-		{"nested code-mode call", `,"parent_tool_call_id":"cm-1"`, true},
+		{"bash sibling", `,"steer_batch":{"found":true,"siblings":["bash"]}`, true, false},
+		{"custom tool sibling", `,"steer_batch":{"found":true,"siblings":["read","deploy"],"shipped":["read"]}`, true, false},
+		{"overridden read sibling", `,"steer_batch":{"found":true,"siblings":["read","ls"],"shipped":["ls"]}`, true, false},
+		{"nested code-mode call", `,"parent_tool_call_id":"cm-1"`, true, true},
 		{"read-only siblings", `,"steer_batch":{"found":true,"siblings":["read","grep","find","ls"],` +
-			`"shipped":["read","grep","find","ls"]}`, false},
-		{"alone", `,"steer_batch":{"found":true,"siblings":[]}`, false},
-		{"batch not found", `,"steer_batch":{"found":false}`, false},
+			`"shipped":["read","grep","find","ls"]}`, false, false},
+		{"alone", `,"steer_batch":{"found":true,"siblings":[]}`, false, false},
+		{"batch not found", `,"steer_batch":{"found":false}`, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := stagedRepo(t)
@@ -50,6 +53,9 @@ func TestRunRefusesACommitThatSharesItsBatchWithAWriter(t *testing.T) {
 			if refused != tc.refused || reviewed == tc.refused {
 				t.Fatalf("refused = %v, reviewed = %v; want refused = %v\nreason: %s",
 					refused, reviewed, tc.refused, out.Reason)
+			}
+			if onlyMode := strings.Contains(out.Reason, `codemode.mode is "only"`); onlyMode != tc.onlyMode {
+				t.Fatalf("names the only mode = %v, want %v\nreason: %s", onlyMode, tc.onlyMode, out.Reason)
 			}
 		})
 	}
