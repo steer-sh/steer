@@ -81,9 +81,9 @@ func HealthOf(s *SystemStatus, probe reviewers.Probe) Health {
 	}
 	if s.LegacyTeamLockfile != "" {
 		h.Issues = append(h.Issues, Issue{Severity: SeverityAttention,
-			Title:  "Steer no longer installs guards from " + s.LegacyTeamLockfile,
-			Detail: []string{"A clone runs only the guards committed in the repository, through the runner Steer builds from them, and the file can hold guards, or versions of them, that those lack."},
-			Fix:    "register each guard you want in the project, commit the guards with the rebuilt runner, then delete the file"})
+			Title:  LegacyLockfileTitle(s.LegacyTeamLockfile),
+			Detail: []string{LegacyLockfileWhy},
+			Fix:    LegacyLockfileFix})
 	}
 	h.Issues = append(h.Issues, modIssues(s)...)
 	builds := BuildIssues(s.Posture.Plugins, hooks, running)
@@ -121,6 +121,60 @@ func HealthOf(s *SystemStatus, probe reviewers.Probe) Health {
 		h.Ready = readyLines(s, readiness, buildsAgree(s.Posture.Plugins, hooks))
 	}
 	return h
+}
+
+// LegacyLockfileTitle, LegacyLockfileWhy and LegacyLockfileFix phrase a leftover
+// steer-team.lock.json for the text view and the dashboard.
+func LegacyLockfileTitle(path string) string {
+	return "Steer no longer installs guards from " + path
+}
+
+const (
+	LegacyLockfileWhy = "A clone runs only the guards committed in the repository, through the runner " +
+		"Steer builds from them, and the file can hold guards, or versions of them, that those lack."
+	LegacyLockfileFix = "register each guard you want in the project, commit the guards with the rebuilt " +
+		"runner, then delete the file"
+)
+
+// Stale runner repair kinds. A stale reading compares the runner with this binary by
+// inequality, so the repair follows the running CLI against the hooks' build.
+const (
+	// StaleRebuild rebuilds the scope's runner from this CLI.
+	StaleRebuild = "rebuild"
+	// StaleInstall installs a newer build, which rebuilds the global runners too.
+	StaleInstall = "install"
+	// StaleUnjudged is a CLI behind the hooks' build: a rebuild from it moves the
+	// runner backward, so only the stable executable can judge.
+	StaleUnjudged = "unjudged"
+)
+
+// StaleRepair is what clears a stale runner in one scope, and the command that does it.
+type StaleRepair struct {
+	Kind string
+	Fix  string
+	// Plugin is an install from the newest plugin copy ahead of the hooks, not from
+	// this CLI.
+	Plugin bool
+}
+
+// StaleRepairOf names the repair for a stale runner in scope. A CLI ahead of the hooks,
+// or one no order relates to them, installs for the global scope, from the newest
+// plugin copy ahead of the hooks when there is one; a project runner keeps its rebuild,
+// because bin install leaves it alone.
+func StaleRepairOf(s *SystemStatus, scope string) StaleRepair {
+	switch s.Posture.Builds.CLIToHooks() {
+	case BuildOlder:
+		return StaleRepair{Kind: StaleUnjudged, Fix: stableCommand("status")}
+	case BuildNewer, BuildUnordered, BuildConflict:
+		if scope != harness.GlobalScope {
+			break
+		}
+		if p := NewestAhead(s.Posture.Plugins, s.Posture.Builds.Hooks); p.Path != "" {
+			return StaleRepair{Kind: StaleInstall, Fix: p.BinInstallCommand(), Plugin: true}
+		}
+		return StaleRepair{Kind: StaleInstall, Fix: runningCommand("bin install")}
+	}
+	return StaleRepair{Kind: StaleRebuild, Fix: RebuildRepair(s.Posture.Masters, scope)}
 }
 
 func capitalize(s string) string {
@@ -403,22 +457,23 @@ func staleIssues(s *SystemStatus) (out []Issue, folded bool, deferred string) {
 		}
 		return strings.Join(parts, "; ")
 	}
-	switch rel := s.Posture.Builds.CLIToHooks(); rel {
-	case BuildOlder:
+	global := StaleRepairOf(s, harness.GlobalScope)
+	switch global.Kind {
+	case StaleUnjudged:
 		if what := covered(scopes...); what != "" {
 			return []Issue{{Severity: SeverityUnchecked,
 				Title:  "This CLI is behind the hooks' build, so it cannot judge what they run",
-				Detail: []string{"Differs from this CLI's build: " + what}, Fix: stableCommand("status")}}, outdated, ""
+				Detail: []string{"Differs from this CLI's build: " + what}, Fix: global.Fix}}, outdated, ""
 		}
 		return nil, false, ""
-	case BuildNewer, BuildUnordered, BuildConflict:
+	case StaleInstall:
 		what := covered(harness.GlobalScope)
 		if NewestAhead(s.Posture.Plugins, s.Posture.Builds.Hooks).Path != "" {
 			deferred = what
 		} else if what != "" {
 			issue := Issue{Severity: SeverityAttention, Title: hooksBehindPrefix + "this CLI",
-				Detail: []string{"Out of date: " + what}, Fix: runningCommand("bin install")}
-			if rel != BuildNewer {
+				Detail: []string{"Out of date: " + what}, Fix: global.Fix}
+			if s.Posture.Builds.CLIToHooks() != BuildNewer {
 				issue.Title = "Hooks run another build than this CLI"
 				issue.Detail = []string{"Differs from this CLI's build: " + what,
 					"Install only if this CLI's build should replace the hooks' build."}
@@ -437,7 +492,7 @@ func staleIssues(s *SystemStatus) (out []Issue, folded bool, deferred string) {
 			verb = " are out of date"
 		}
 		out = append(out, Issue{Severity: SeverityAttention, Title: runners(scope) + verb,
-			Fix: RebuildRepair(s.Posture.Masters, scope)})
+			Fix: StaleRepairOf(s, scope).Fix})
 	}
 	return out, folded, deferred
 }
@@ -484,7 +539,7 @@ func guardIssues(s *SystemStatus) []Issue {
 		label := HarnessLabel(m.Harness) + " " + m.Scope
 		switch {
 		case m.Detached():
-			if !harness.Optional(harness.ID(m.Harness)) {
+			if !m.Unarmed() {
 				out = append(out, Issue{Severity: SeverityAttention, Title: label + " runs none of this scope's guards",
 					Fix: DetachedRepair(s.Posture.Masters, m.Scope)})
 			}
@@ -536,6 +591,13 @@ func checkIssues(c CheckTier) []Issue {
 	if !c.Armed() {
 		out = append(out, Issue{Severity: SeverityAttention, Title: "This repository's checks are adopted, but no harness runs them",
 			Detail: []string{"For Codex or Pi, use --harness codex or --harness pi."}, Fix: "steer check install --harness claude-code"})
+	}
+	for _, row := range c.Checks {
+		if row.Validation == ValidationNone {
+			out = append(out, Issue{Severity: SeverityAttention, Title: "The check " + row.ID + " has no passing validation on this machine",
+				Detail: []string{"Nothing here shows it fails on the problem it names, so a passing run proves nothing about it."},
+				Fix:    "steer check test " + row.ID})
+		}
 	}
 	for _, a := range c.Runner {
 		if !a.Registered {

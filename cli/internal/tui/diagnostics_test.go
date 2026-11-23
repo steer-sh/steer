@@ -57,7 +57,8 @@ func TestEachIssueNamesWhereItIsRepaired(t *testing.T) {
 
 // A check issue whose repair a panel runs names that panel. The runner hint named
 // one harness and one scope for every reader, so a Codex user was told to
-// register Claude Code.
+// register Claude Code. A repository this machine has not adopted raises none:
+// declining adoption is a choice, and its checks have no receipts here yet.
 func TestCheckIssuesNameThePanelThatRepairsThem(t *testing.T) {
 	m := New(gate.Defaults(), "global")
 	m.width = 200
@@ -67,10 +68,18 @@ func TestCheckIssuesNameThePanelThatRepairsThem(t *testing.T) {
 		Checks: []status.CheckRow{{ID: "fmt", Validation: status.ValidationNone}},
 	}}
 	m.active = panelDiagnostics
+	if issues := m.checkIssues(); len(issues) != 0 {
+		t.Errorf("an unadopted repository raises %+v", issues)
+	}
+	for _, r := range m.checkRows() {
+		if r.attention {
+			t.Errorf("an unadopted repository marks the %q row for attention", r.display())
+		}
+	}
+	m.snap.Checks.Adopted = true
 	view := strings.Join(strings.Fields(m.viewDiagnostics()), " ")
 	for _, want := range []string{
 		"Open Arming and press enter on a check runner row",
-		"Open Fixes and press enter on the repository row",
 		"Open Fixes and press enter on its row",
 	} {
 		if !strings.Contains(view, want) {
@@ -206,6 +215,50 @@ func TestAnOtherScopeStaleRunnerNamesItsOwnCommand(t *testing.T) {
 		if r.kind == guardRepair {
 			t.Errorf("Fixes offers a repair for a runner in the other scope: %q", r.name)
 		}
+	}
+}
+
+// A stale runner's repair follows the dashboard's build against the hooks' build,
+// as steer status does. A dashboard behind the hooks offered a rebuild that moved
+// the runner backward; one ahead offered a rebuild that left the stable executable
+// and self-protection on the old build.
+func TestAStaleRunnerRepairFollowsTheBuildOrder(t *testing.T) {
+	t.Setenv("HOME", "/h")
+	hooks := status.BuildIdentity{Version: "0.1.5", Commit: "b"}
+	ahead := status.PluginCopy{Harness: "codex", Path: "/x", State: status.PluginDifferentBinary, Version: "0.1.6", Commit: "d"}
+	for name, tc := range map[string]struct {
+		running    status.BuildIdentity
+		plugins    []status.PluginCopy
+		want       string
+		rebuildRow bool
+	}{
+		"same build": {hooks, nil, "Open Fixes", true},
+		"CLI ahead":  {status.BuildIdentity{Version: "0.1.6", Commit: "c"}, nil, "bin install", false},
+		"CLI behind": {status.BuildIdentity{Version: "0.1.4", Commit: "a"}, nil, "/h/.steer/bin/steer status", false},
+		"dev build":  {status.BuildIdentity{Version: "dev", Commit: "c"}, nil, "Install only if this build should replace theirs", false},
+		"plugin ahead": {status.BuildIdentity{Version: "0.1.7", Commit: "c"}, []status.PluginCopy{ahead},
+			ahead.BinInstallCommand(), false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			m := New(gate.Defaults(), "global")
+			m.width = 400
+			m.snap = &status.SystemStatus{Posture: status.Posture{
+				Builds:  status.Builds{Running: tc.running, Hooks: hooks},
+				Plugins: tc.plugins,
+				Masters: []status.MasterRuntime{{Harness: "claude-code", Scope: "global", Path: "/m",
+					State: status.MasterStale, Installed: true}},
+			}}
+			var text string
+			for _, issue := range m.diagnosticIssues() {
+				text += issue.headline + ": " + issue.detail + "\n"
+			}
+			if !strings.Contains(text, tc.want) {
+				t.Errorf("diagnostics do not name %q:\n%s", tc.want, text)
+			}
+			if got := hasRepair(m.guardRepairs(), repairRunner); got != tc.rebuildRow {
+				t.Errorf("Fixes offers the rebuild = %v, want %v", got, tc.rebuildRow)
+			}
+		})
 	}
 }
 
