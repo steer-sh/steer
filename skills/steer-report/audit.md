@@ -15,6 +15,7 @@ show, in the vocabulary `SKILL.md` sets under "Words the reader sees".
 | `firing` | `applicable`, `log_present`, `hook_id`, `scope`, `class_scoped`, `rows`, `units` | What the guard's audit stream recorded, and over what. |
 | `fixtures` | `applicable`, `state`, `cases`, `changed`, `verified_at`, `shadowed`, `reason` | Whether the guard's stored cases were last run against the guard installed now. Never that the guard blocks correctly in the field. |
 | `checks` | `applicable`, `attribution`, `stream_present`, `registered_host`, `other_host`, `check_id`, `scope`, `executions`, `outcomes`, `blocked`, `changed_detector` | What a repository check's executions on this machine recorded, and over what. |
+| `review` | `applicable`, `rule_key`, `chains`, `reviewed_rounds`, `finding_rounds`, `finding_chains`, `findings`, `newest_ts` | What the commit reviewer did with a reviewed rule after its install: how often it read the rule and how often it named it in a finding. Never that a finding was correct, and never a recurrence. |
 | `coverage` | the two coverage maps plus `zero_eligible_after` | Which units the window could not account for. |
 | `provenance` | `kind` plus the identities per window | Whether the reviewer setup, or the way Steer reads session history, changed between the two periods. |
 
@@ -353,6 +354,24 @@ its measurement conditions:
     `outcomes` counts by execution outcome, `blocked` counts failures whose run
     blocked a turn, and `changed_detector` counts runs whose detector digest
     differs from the registered one — the same check id, counted like the rest.
+  - `review` — a reviewed rule's after-window activity, read from the ledger rows
+    of the window's eligible review chains: `{applicable, rule_key, chains,
+    reviewed_rounds, finding_rounds, finding_chains, findings, newest_ts}`.
+    `rule_key` is `<scope>:<id>`; a project rule counts only the chains of the
+    repository it was registered in, and `unplaced: true` marks a project record
+    that names none, which counts nothing. `reviewed_rounds` counts the rounds a
+    reviewer answered with the rule in its prompt; `finding_rounds` and `finding_chains` count the
+    rounds and chains with a finding naming it; `findings` counts those findings
+    by severity, and a NITPICK did not block. A finding naming the rule is a catch,
+    so on a reviewed record read the agent's compliance from `counts` and
+    `recurrence` over sessions, and the rule's precision from how the author
+    answered its findings in those chains. On the review-findings corpus a catch
+    that the record's regex and verdict filter admit also matches the class, so
+    `counts` and `recurrence` there can rise with the rule's catches. `chains: 0` is absent opportunity. `reviewed_rounds: 0`
+    beside eligible chains means no round in them recorded the rule as applied:
+    no commit changed its paths, or the rows came from a binary that did not
+    record the field. A chain whose adjudication is pending is not eligible, so
+    its catches wait for the resolver.
   - `coverage` — `before` / `after`, the same maps as above, plus
     `zero_eligible_after`. That flag is a statement, not a fault: every freshly
     installed record has zero eligible after-units, and absent opportunity is

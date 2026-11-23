@@ -14,6 +14,7 @@ type Observation struct {
 	Firing     FiringActivity        `json:"firing"`
 	Fixtures   FixtureReceipt        `json:"fixtures"`
 	Checks     CheckActivity         `json:"checks"`
+	Review     ReviewActivity        `json:"review"`
 	Coverage   ObservationCoverage   `json:"coverage"`
 	Provenance ObservationProvenance `json:"provenance"`
 	// Declined marks a record that installed no fix. Its after-window is the
@@ -165,6 +166,7 @@ func chainObservation(record Record, before, after []Chain, beforeCov, afterCov 
 		Firing:     firing,
 		Fixtures:   fixtureReceiptOf(record, ev),
 		Checks:     chainCheckActivity(record, ev, splitTS, clock),
+		Review:     reviewActivityOf(record, after),
 		Coverage: ObservationCoverage{
 			Before:            coverageMap(beforeCov),
 			After:             coverageMap(afterCov),
@@ -184,7 +186,7 @@ func chainObservation(record Record, before, after []Chain, beforeCov, afterCov 
 // session IS the unit here, so the rows can be tied to the eligible work.
 func sessionObservation(record Record, before, after []SessionUnit,
 	beforeCov, afterCov SessionCoverage, pattern patternMatcher, signalKind string,
-	attr Attribution, ev EvidenceSet, splitTS, clock float64) Observation {
+	attr Attribution, review ReviewActivity, ev EvidenceSet, splitTS, clock float64) Observation {
 
 	bHits, _, _ := SessionIncidence(before, pattern, signalKind)
 	aHits, _, _ := SessionIncidence(after, pattern, signalKind)
@@ -215,6 +217,7 @@ func sessionObservation(record Record, before, after []SessionUnit,
 		Firing:     firing,
 		Fixtures:   fixtureReceiptOf(record, ev),
 		Checks:     sessionCheckActivity(record, after, ev),
+		Review:     review,
 		Coverage: ObservationCoverage{
 			Before:            sessionCoverageMap(beforeCov),
 			After:             sessionCoverageMap(afterCov),

@@ -1,0 +1,79 @@
+package mine
+
+import (
+	"bytes"
+	"encoding/json"
+	"reflect"
+	"strings"
+	"testing"
+
+	"github.com/steer-sh/steer-cli/internal/gate"
+)
+
+func decodedRows(t *testing.T, raw ...string) []gate.Row {
+	t.Helper()
+	var rows []gate.Row
+	for _, r := range raw {
+		var row gate.Row
+		if err := json.Unmarshal([]byte(r), &row); err != nil {
+			t.Fatal(err)
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+// A reviewed rule's activity counts the rounds that gave it to the reviewer, the rounds
+// and chains with a finding naming it, and those findings by severity; another rule's
+// rounds and findings, and a record on another tier, count nothing.
+func TestReviewActivityCountsTheRulesRoundsAndFindings(t *testing.T) {
+	after := []Chain{
+		{RepoRoot: "/src/app", Rows: decodedRows(t,
+			`{"ts":100,"phase":"deny","reviewers":2,"reviewed_rules_applied":["project:tui"],"rule_findings":{"project:tui":{"SUBSTANTIVE":2},"global:other":{"BLOCKING":1}}}`,
+			`{"ts":200,"phase":"clean","reviewers":2,"reviewed_rules_applied":["project:tui"]}`)},
+		{RepoRoot: "/src/app", Rows: decodedRows(t,
+			`{"ts":300,"phase":"nitpick","reviewers":2,"reviewed_rules_applied":["project:tui","global:other"],"rule_findings":{"project:tui":{"NITPICK":1}}}`)},
+		{RepoRoot: "/src/app", Rows: decodedRows(t, `{"ts":400,"phase":"clean","reviewers":2,"reviewed_rules_applied":["global:other"]}`)},
+	}
+	record := Record{"tier": "reviewed", "rule_id": "tui", "rule_scope": "project", "rule_repo": "/src/app"}
+
+	got := reviewActivityOf(record, after)
+	want := ReviewActivity{
+		Applicable: true, RuleKey: "project:tui", Chains: 3,
+		ReviewedRounds: 3, FindingRounds: 2, FindingChains: 2,
+		Findings: map[string]int{"SUBSTANTIVE": 2, "NITPICK": 1}, NewestTS: 300,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("activity = %+v\nwant       %+v", got, want)
+	}
+	var out bytes.Buffer
+	writeReviewActivity(&out, got)
+	if line := out.String(); !strings.Contains(line, "3 answered rounds over 3 chains; 2 rounds in 2 chains named it (2 SUBSTANTIVE, 1 NITPICK)") {
+		t.Fatalf("text line = %q", line)
+	}
+
+	record["tier"] = "instruction"
+	if got := reviewActivityOf(record, after); got.Applicable || got.ReviewedRounds != 0 {
+		t.Fatalf("an instruction record read %+v", got)
+	}
+}
+
+// A project rule counts only its own repository's chains, and counts none when its
+// record names no repository; a round no reviewer answered is not a reviewed round.
+func TestReviewActivityKeepsToTheRulesRepositoryAndAnsweredRounds(t *testing.T) {
+	applied := `,"reviewed_rules_applied":["project:tui"],"rule_findings":{"project:tui":{"BLOCKING":1}}}`
+	after := []Chain{
+		{RepoRoot: "/src/app", Rows: decodedRows(t, `{"ts":1,"phase":"deny","reviewers":2`+applied,
+			`{"ts":2,"phase":"ungated","reviewers":0`+applied, `{"ts":3,"phase":"cap","reviewers":0`+applied)},
+		{RepoRoot: "/src/other", Rows: decodedRows(t, `{"ts":4,"phase":"deny","reviewers":2`+applied)},
+	}
+	record := Record{"tier": "reviewed", "rule_id": "tui", "rule_scope": "project", "rule_repo": "/src/app"}
+	got := reviewActivityOf(record, after)
+	if got.Chains != 1 || got.ReviewedRounds != 1 || got.Findings["BLOCKING"] != 1 {
+		t.Fatalf("activity = %+v", got)
+	}
+	delete(record, "rule_repo")
+	if got := reviewActivityOf(record, after); !got.Unplaced || got.Chains != 0 || got.ReviewedRounds != 0 {
+		t.Fatalf("an unplaced project rule read %+v", got)
+	}
+}

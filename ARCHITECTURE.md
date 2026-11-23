@@ -1073,6 +1073,17 @@ eligible root session. Chain scoring reports firings over the window period,
 without claiming they belong to the class's eligible commits. A missing audit log
 is unknown activity; it is distinct from a known zero.
 
+A reviewed-tier record's observation carries a `review` reading in place of
+firings: over the after-window's eligible review chains, the ledger rows whose
+`reviewed_rules_applied` names the rule and the findings `rule_findings` counts for
+it. Both engines read it; the session engine selects the chains with the record's
+own scope; a project rule counts only the chains of its frozen `rule_repo`, and a
+round in `gate.NonReviewPhases`, or one no reviewer answered, never counts; a
+project record with no `rule_repo` counts nothing. A finding naming the rule is a
+catch. On the review-findings corpus a catch the record's regex admits also counts
+as recurrence, so a reviewed record mined from sessions is registered on the
+transcript-friction corpus.
+
 A check-tier record's observation carries its check's executions the same two
 ways: `evidence.Gather` reads every repository's live check streams through
 `checks.ReadLiveEvidence`, and `mine` joins them on check id and exact root.
