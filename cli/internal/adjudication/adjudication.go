@@ -189,38 +189,12 @@ func Dir() string { return statestore.Resolve(Component) }
 // reads the same as one whose store is absent. A line naming no subject reads as a
 // guard receipt; a line whose subject this build does not know is skipped.
 func Load(dir string) ([]Receipt, error) {
-	file, err := os.Open(filepath.Join(dir, LogName))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("failed to read %s: %w", LogName, err)
-	}
-	defer file.Close()
-	var out []Receipt
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		var r Receipt
-		if err := json.Unmarshal([]byte(line), &r); err != nil {
-			continue
-		}
+	return loadStream(dir, LogName, func(r *Receipt) bool {
 		if r.Subject == "" {
 			r.Subject = SubjectGuard
 		}
-		if r.ID() == "" {
-			continue
-		}
-		out = append(out, r)
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("failed to read %s: %w", LogName, err)
-	}
-	return out, nil
+		return r.ID() != ""
+	})
 }
 
 // Append writes one receipt to the stream in dir, which must already exist.
@@ -249,20 +223,7 @@ func Append(dir string, r Receipt) error {
 	if r.InspectedSteps < 0 {
 		return fmt.Errorf("a receipt cannot report %d inspected continuation steps", r.InspectedSteps)
 	}
-	line, err := json.Marshal(r)
-	if err != nil {
-		return fmt.Errorf("failed to encode the receipt: %w", err)
-	}
-	file, err := os.OpenFile(filepath.Join(dir, LogName),
-		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return fmt.Errorf("failed to open %s: %w", LogName, err)
-	}
-	defer file.Close()
-	if _, err := file.Write(jsonl.Separated(filepath.Join(dir, LogName), append(line, '\n'))); err != nil {
-		return fmt.Errorf("failed to append to %s: %w", LogName, err)
-	}
-	return nil
+	return appendLine(dir, LogName, "receipt", r)
 }
 
 func validGuard(r Receipt) error {
@@ -358,4 +319,58 @@ func Latest(receipts []Receipt, subject string) map[string]Receipt {
 		}
 	}
 	return out
+}
+
+// loadStream reads the JSON lines of the stream name in dir, oldest first,
+// skipping blank and unparsable lines and every value keep rejects. keep may
+// normalize the value it is given. A missing stream yields nil and no error.
+func loadStream[T any](dir, name string, keep func(*T) bool) ([]T, error) {
+	file, err := os.Open(filepath.Join(dir, name))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to read %s: %w", name, err)
+	}
+	defer file.Close()
+	var out []T
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var v T
+		if err := json.Unmarshal([]byte(line), &v); err != nil {
+			continue
+		}
+		if !keep(&v) {
+			continue
+		}
+		out = append(out, v)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read %s: %w", name, err)
+	}
+	return out, nil
+}
+
+// appendLine encodes v and appends it as one line to the stream name in dir;
+// noun names v in the encoding error.
+func appendLine(dir, name, noun string, v any) error {
+	line, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Errorf("failed to encode the %s: %w", noun, err)
+	}
+	file, err := os.OpenFile(filepath.Join(dir, name),
+		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("failed to open %s: %w", name, err)
+	}
+	defer file.Close()
+	if _, err := file.Write(jsonl.Separated(filepath.Join(dir, name), append(line, '\n'))); err != nil {
+		return fmt.Errorf("failed to append to %s: %w", name, err)
+	}
+	return nil
 }
