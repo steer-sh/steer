@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/steer-sh/steer-cli/internal/atomicfile"
 	"github.com/steer-sh/steer-cli/internal/shellword"
 	"github.com/steer-sh/steer-cli/internal/steerpath"
 )
@@ -171,7 +172,7 @@ func WriteFile(path string, content []byte, mode os.FileMode) error {
 			return fmt.Errorf("%s is a symlink; the guard store writes only its own files", p)
 		}
 	}
-	return writeWhole(path, content, mode)
+	return atomicfile.WriteFile(path, content, mode)
 }
 
 func isLink(path string) bool {
@@ -213,7 +214,7 @@ func ignoreEvidence(scope, dir string) error {
 	if content != "" && !strings.HasSuffix(content, "\n") {
 		content += "\n"
 	}
-	return writeWhole(path, []byte(content+strings.Join(missing, "\n")+"\n"), 0o644)
+	return atomicfile.WriteFile(path, []byte(content+strings.Join(missing, "\n")+"\n"), 0o644)
 }
 
 // populated reports whether a directory holds a steer store. The manifest is the
@@ -319,29 +320,6 @@ func migrate(legacy, neutral string) error {
 		}
 	}
 	return nil
-}
-
-// writeWhole writes content to path through a temporary file in the same
-// directory, so a reader never sees a partly written file.
-func writeWhole(path string, content []byte, mode os.FileMode) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".steer-write.*")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-	if err := tmp.Chmod(mode); err != nil {
-		tmp.Close()
-		return err
-	}
-	if _, err := tmp.Write(content); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpPath, path)
 }
 
 // MasterPathFromCommand reads the master's path out of a registered hook command

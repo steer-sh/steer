@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/steer-sh/steer-cli/internal/atomicfile"
 	"github.com/steer-sh/steer-cli/internal/steerpath"
 )
 
@@ -199,19 +200,7 @@ func Save(root string, m Manifest) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create check store: %w", err)
 	}
-	tmp, err := os.CreateTemp(dir, ManifestName+".*.tmp")
-	if err != nil {
-		return fmt.Errorf("write check manifest: %w", err)
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(append(data, '\n')); err != nil {
-		tmp.Close()
-		return fmt.Errorf("write check manifest: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("write check manifest: %w", err)
-	}
-	if err := os.Rename(tmp.Name(), ManifestPath(root)); err != nil {
+	if err := atomicfile.WriteFile(ManifestPath(root), append(data, '\n'), 0o600); err != nil {
 		return fmt.Errorf("write check manifest: %w", err)
 	}
 	return nil

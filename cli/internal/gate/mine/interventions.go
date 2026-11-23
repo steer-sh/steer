@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/steer-sh/steer-cli/internal/atomicfile"
 	"github.com/steer-sh/steer-cli/internal/checks"
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/hookstore"
@@ -75,24 +76,7 @@ func save(stateDir string, records []Record) error {
 		b.WriteString(pyDumps(r, 0))
 		b.WriteByte('\n')
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".interventions-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if err := tmp.Chmod(0o644); err != nil {
-		tmp.Close()
-		return err
-	}
-	_, writeErr := tmp.WriteString(b.String())
-	closeErr := tmp.Close()
-	if writeErr != nil {
-		return writeErr
-	}
-	if closeErr != nil {
-		return closeErr
-	}
-	return os.Rename(tmp.Name(), path)
+	return atomicfile.WriteFile(path, []byte(b.String()), 0o644)
 }
 
 // RecordKindFilter is the verdict filter a record's regex was authored against.

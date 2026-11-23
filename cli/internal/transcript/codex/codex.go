@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/transcript"
@@ -312,7 +311,7 @@ func (st *streamState) normalize(line []byte) error {
 		st.counts.Skipped++
 		return nil
 	}
-	if !inWindow(r.Timestamp, st.filter.Since) {
+	if !transcript.InWindow(r.Timestamp, st.filter.Since) {
 		st.counts.Skipped++
 		return nil
 	}
@@ -589,17 +588,4 @@ func contains(list []string, want string) bool {
 		}
 	}
 	return false
-}
-
-// inWindow keeps an entry whose timestamp is missing or unparsable: dropping it
-// would silently narrow the corpus on a format change.
-func inWindow(timestamp string, since time.Time) bool {
-	if timestamp == "" || since.IsZero() {
-		return true
-	}
-	t, err := time.Parse(time.RFC3339, timestamp)
-	if err != nil {
-		return true
-	}
-	return !t.Before(since)
 }

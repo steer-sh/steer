@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/steer-sh/steer-cli/internal/atomicfile"
 	"github.com/steer-sh/steer-cli/internal/jsonl"
 )
 
@@ -325,23 +326,7 @@ func (l *Ledger) extendSessionPrefix(path, text string) bool {
 		l.noteErr("save_prefix: %v", err)
 		return false
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".prefix-*")
-	if err != nil {
-		l.noteErr("save_prefix: %v", err)
-		return false
-	}
-	_, err = tmp.Write(append(raw, member...))
-	if cerr := tmp.Close(); err == nil {
-		err = cerr
-	}
-	if err == nil {
-		err = os.Chmod(tmp.Name(), 0o644)
-	}
-	if err == nil {
-		err = os.Rename(tmp.Name(), path)
-	}
-	if err != nil {
-		os.Remove(tmp.Name())
+	if err := atomicfile.WriteFile(path, append(raw, member...), 0o644); err != nil {
 		l.noteErr("save_prefix: %v", err)
 		return false
 	}

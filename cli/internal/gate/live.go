@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 	"unicode/utf8"
+
+	"github.com/steer-sh/steer-cli/internal/atomicfile"
 )
 
 // LiveVersion is the shape version a live review file carries.
@@ -186,8 +188,8 @@ func (l *liveReview) end(phase string, result PanelResult) {
 	l.write()
 }
 
-// write replaces the file through a temporary name beside it, so a reader never
-// sees a partly written file. The caller holds mu, or is the only holder of l.
+// write replaces the file whole, so a reader never sees a partly written file. A
+// failure leaves the previous file. The caller holds mu, or is the only holder of l.
 func (l *liveReview) write() {
 	raw, err := json.Marshal(l.doc)
 	if err != nil {
@@ -197,16 +199,7 @@ func (l *liveReview) write() {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return
 	}
-	tmp, err := os.CreateTemp(dir, ".live-*.tmp")
-	if err != nil {
-		return
-	}
-	name := tmp.Name()
-	_, werr := tmp.Write(append(raw, '\n'))
-	cerr := tmp.Close()
-	if werr != nil || cerr != nil || os.Rename(name, l.path) != nil {
-		os.Remove(name)
-	}
+	_ = atomicfile.WriteFile(l.path, append(raw, '\n'), 0o600)
 }
 
 // clearLive removes the live review file of a request's chain key: the retry that

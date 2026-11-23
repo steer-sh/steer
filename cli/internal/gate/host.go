@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/steer-sh/steer-cli/internal/atomicfile"
 	"github.com/steer-sh/steer-cli/internal/steerpath"
 )
 
@@ -146,12 +147,7 @@ func AddFormerHost(name string) (string, error) {
 		names = []string{current}
 	}
 	names = append(names, slug)
-	tmp, err := writeHostTemp(path, names)
-	if err != nil {
-		return "", err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
+	if err := atomicfile.WriteFile(path, []byte(strings.Join(names, "\n")+"\n"), 0o644); err != nil {
 		return "", err
 	}
 	return slug, nil

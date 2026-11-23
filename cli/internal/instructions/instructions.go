@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/steer-sh/steer-cli/internal/atomicfile"
 	"github.com/steer-sh/steer-cli/internal/steerpath"
 )
 
@@ -233,28 +234,10 @@ func resolveLink(path, within string) (string, error) {
 	return target, nil
 }
 
-// writeAtomic replaces path through a temporary file in the same directory, so a
-// failed write leaves the document's own prose whole.
+// writeAtomic replaces path whole, so a failed write leaves the document's own
+// prose intact.
 func writeAtomic(path string, data []byte) error {
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".steer-*")
-	if err != nil {
-		return fmt.Errorf("failed to write %s: %w", path, err)
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return fmt.Errorf("failed to write %s: %w", path, err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("failed to write %s: %w", path, err)
-	}
-	if err := os.Chmod(tmpName, 0o644); err != nil {
-		return fmt.Errorf("failed to write %s: %w", path, err)
-	}
-	if err := os.Rename(tmpName, path); err != nil {
+	if err := atomicfile.WriteFile(path, data, 0o644); err != nil {
 		return fmt.Errorf("failed to write %s: %w", path, err)
 	}
 	return nil

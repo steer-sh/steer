@@ -11,6 +11,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/steer-sh/steer-cli/internal/atomicfile"
 	"github.com/steer-sh/steer-cli/internal/guard"
 	"github.com/steer-sh/steer-cli/internal/hookstore"
 	"github.com/steer-sh/steer-cli/internal/shellword"
@@ -329,7 +330,8 @@ func ConsolidateHooks(scope string) error {
 	}
 
 	masterContent := generateMasterHook(sources, guard.RequiredImports(), hookMeta)
-	if err := publishMaster(masterPath, []byte(masterContent)); err != nil {
+	// A guard firing loads the master by path, so it is never written in place.
+	if err := atomicfile.WriteFile(masterPath, []byte(masterContent), 0o755); err != nil {
 		return fmt.Errorf("failed to write master hook file: %w", err)
 	}
 
@@ -445,29 +447,6 @@ const masterBuildDigestPlaceholder = "0000000000000000"
 func sourceDigest(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])[:16]
-}
-
-// publishMaster writes the master through a temporary file in its own directory
-// and renames it into place. A guard firing loads the master by path, so a
-// rebuild that wrote in place could be read half-written.
-func publishMaster(path string, content []byte) error {
-	temp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*")
-	if err != nil {
-		return err
-	}
-	name := temp.Name()
-	defer os.Remove(name)
-	if _, err := temp.Write(content); err != nil {
-		temp.Close()
-		return err
-	}
-	if err := temp.Close(); err != nil {
-		return err
-	}
-	if err := os.Chmod(name, 0o755); err != nil {
-		return err
-	}
-	return os.Rename(name, path)
 }
 
 func generateMasterHook(sources []HookSource, importLines []string, hookMeta map[string]map[string]string) string {

@@ -18,6 +18,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/steer-sh/steer-cli/internal/atomicfile"
 )
 
 // Component is the statestore component that holds the inspection cache.
@@ -376,19 +378,7 @@ func UpdateCache(dir string, rows []Inspection) error {
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(dir, ".inspections.*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(append(data, '\n')); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), filepath.Join(dir, cacheFile))
+	return atomicfile.WriteFile(filepath.Join(dir, cacheFile), append(data, '\n'), 0o600)
 }
 
 // Read joins the enabled candidates to the cache in cacheDir. It runs no process.

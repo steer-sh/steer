@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/steer-sh/steer-cli/internal/atomicfile"
 	"github.com/steer-sh/steer-cli/internal/steerpath"
 )
 
@@ -174,24 +175,7 @@ func Write(key string) (string, error) {
 	if info, err := os.Lstat(path); err == nil && !info.Mode().IsRegular() {
 		return "", fmt.Errorf("%s exists and is not a regular file; remove it first", path)
 	}
-	tmp, err := os.CreateTemp(dir, "."+fileName+".*")
-	if err != nil {
-		return "", fmt.Errorf("stage the key file: %w", err)
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
-		return "", fmt.Errorf("restrict the staged key file: %w", err)
-	}
-	if _, err := tmp.WriteString(key + "\n"); err != nil {
-		tmp.Close()
-		return "", fmt.Errorf("write the staged key file: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return "", fmt.Errorf("close the staged key file: %w", err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
+	if err := atomicfile.WriteFile(path, []byte(key+"\n"), 0o600); err != nil {
 		return "", fmt.Errorf("replace the key file: %w", err)
 	}
 	return path, nil
