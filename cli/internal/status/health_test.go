@@ -83,6 +83,9 @@ func TestHealthVerdictPerReading(t *testing.T) {
 		"registered Pi detached": {func(s *SystemStatus) {
 			s.Posture.Masters[0] = MasterRuntime{Harness: "pi", Scope: "global", Path: "/elsewhere", State: MasterDetached}
 		}, availableProbe(), VerdictAttention, "Pi global runs none"},
+		"Pi codemode only": {func(s *SystemStatus) {
+			s.PiCodemodeOnly = PiCodemodeOnly{Path: "/pi/settings.json", Scopes: []string{"global"}}
+		}, availableProbe(), VerdictAttention, `codemode.mode is "only"`},
 		"no interpreter": {func(s *SystemStatus) { s.Posture.GuardInterpreter = InterpreterReading{Command: GuardInterpreter} }, availableProbe(), VerdictAttention, "not on this PATH"},
 		"hooks behind": {func(s *SystemStatus) {
 			s.Posture.Plugins[0] = PluginCopy{Harness: "codex", Path: "/p", State: PluginDifferentBinary, Version: "0.1.5", Commit: "b"}

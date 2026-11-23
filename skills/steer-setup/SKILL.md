@@ -307,7 +307,11 @@ Each harness decides whether a registered hook actually runs:
   Pi again. A global extension in `~/.pi/agent/extensions` then runs. A project
   extension in `.pi/extensions` runs only once the user trusts the project: Pi asks
   when it starts in an untrusted project, and `/trust` saves the decision. Until then
-  the gate is registered and not enforcing.
+  the gate is registered and not enforcing. Pi's `codemode.mode: "only"` setting
+  hides the top-level bash tool, and the gate refuses a commit made inside a
+  codemode script, so in that mode no commit can pass. When `steer status` names
+  this, tell the user before you finish: set `codemode.mode` to `"on"` with `bash`
+  among Pi's startup tools, or keep the gate off for Pi.
 
 Then check that the reviewer answers. This sends one small sample diff to the
 configured reviewer and writes no review record:
