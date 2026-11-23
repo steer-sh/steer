@@ -129,13 +129,14 @@ func ruleSeverities(v any, key string) map[string]int {
 }
 
 // sessionReviewActivity is reviewActivityOf for a session-corpus record: the review
-// chains it reads are the after-window chains its own scope admits.
-func sessionReviewActivity(record Record, ev EvidenceSet, scope *Scope, afterStart float64) ReviewActivity {
+// chains it reads are the after-window chains its own scope admits and whose evidence
+// is settled at clock.
+func sessionReviewActivity(record Record, ev EvidenceSet, scope *Scope, afterStart, clock float64) ReviewActivity {
 	if !tier.IsReviewed(str(record["tier"])) {
 		return reviewActivityOf(record, nil)
 	}
 	_, after := SplitChains(ev.Chains, afterStart)
-	return reviewActivityOf(record, CoverEvidence(after, scope, float64(now())).EligibleChains())
+	return reviewActivityOf(record, CoverEvidence(after, scope, clock).EligibleChains())
 }
 
 // writeReviewActivity prints a reviewed rule's activity line for `steer fix score`.

@@ -77,3 +77,45 @@ func TestReviewActivityKeepsToTheRulesRepositoryAndAnsweredRounds(t *testing.T) 
 		t.Fatalf("an unplaced project rule read %+v", got)
 	}
 }
+
+// Both scorers fill a reviewed record's Review from the chains their own window admits:
+// a chain before the split, a chain outside the record's scope and a chain whose ledger
+// is still pending count nothing.
+func TestBothScorersReadReviewActivityFromTheAdmittedChains(t *testing.T) {
+	const clock = 9000
+	applied := `,"reviewers":2,"reviewed_rules_applied":["global:tui"],"rule_findings":{"global:tui":{"SUBSTANTIVE":1}}}`
+	chain := func(ts float64, root string, rows ...string) Chain {
+		return Chain{StartTS: ts, EndTS: ts + 10, RepoRoot: root, RepoRootKnown: true, Rows: decodedRows(t, rows...)}
+	}
+	chains := []Chain{
+		chain(1000, "/src/app", `{"ts":1000,"phase":"clean"`+applied),
+		chain(3000, "/src/app", `{"ts":3000,"phase":"deny"`+applied, `{"ts":3010,"phase":"retry","concerns":{}}`),
+		chain(3100, "/src/other", `{"ts":3100,"phase":"clean"`+applied),
+		chain(clock-10, "/src/app", `{"ts":8990,"phase":"nitpick"`+applied),
+	}
+	sm, err := BuildScope(false, nil, "", "/src/app", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := Record{"id": "tui", "class": "tui", "match": "tui", "tier": "reviewed",
+		"installed_ts": 2000, "scope": sm, "rule_id": "tui", "rule_scope": "global"}
+	session := Record{"corpus": CorpusTranscript, "unit": UnitSession}
+	for k, v := range record {
+		session[k] = v
+	}
+	withClock(clock, func() {
+		for name, score := range map[string]func() (map[string]any, error){
+			"chain":   func() (map[string]any, error) { return ScoreRecord(record, EvidenceSet{Chains: chains}) },
+			"session": func() (map[string]any, error) { return ScoreSessionRecord(session, EvidenceSet{Chains: chains}) },
+		} {
+			scored, err := score()
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := observationOf(t, scored).Review
+			if got.Chains != 1 || got.ReviewedRounds != 1 || got.FindingRounds != 1 || got.Findings["SUBSTANTIVE"] != 1 {
+				t.Errorf("%s scorer: review = %+v, want the one admitted chain", name, got)
+			}
+		}
+	})
+}

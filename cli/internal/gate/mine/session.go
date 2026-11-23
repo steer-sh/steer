@@ -408,6 +408,7 @@ func ScoreSessionRecord(record Record, ev EvidenceSet) (map[string]any, error) {
 	afterInstruments := sessionInstruments(after)
 
 	beforeHarness, afterHarness := sessionHarnesses(before), sessionHarnesses(after)
+	clock := float64(now())
 	row := scoredRow(record, scoredWindows{
 		before:           incidenceMap(bHits, bTotal, bRate),
 		after:            incidenceMap(aHits, aTotal, aRate),
@@ -417,8 +418,8 @@ func ScoreSessionRecord(record Record, ev EvidenceSet) (map[string]any, error) {
 		beforeHosts:      beforeHarness,
 		afterHosts:       afterHarness,
 		observation: sessionObservation(record, before, after, beforeCov, afterCov,
-			pattern, signalKind, attr, sessionReviewActivity(record, ev, scope, afterStart), ev,
-			afterStart, float64(now())),
+			pattern, signalKind, attr, sessionReviewActivity(record, ev, scope, afterStart, clock), ev,
+			afterStart, clock),
 	})
 	row["signal_kind"] = signalKind
 	return row, nil
