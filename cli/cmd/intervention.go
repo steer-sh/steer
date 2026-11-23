@@ -575,28 +575,16 @@ func removedFromWorkingTree(t string, a *cadence.Artifact) bool {
 	if a.Scope != claude.ProjectScope {
 		return false
 	}
-	var ids []string
 	switch kind, _ := tier.Of(t); kind {
 	case tier.Review:
 		entries, err := claude.ListAddendum(claude.ProjectScope)
 		if err != nil {
 			return false
 		}
-		for _, e := range entries {
-			ids = append(ids, e.ID)
-		}
+		return !slices.ContainsFunc(entries, func(e claude.ManagedAddendumEntry) bool { return e.ID == a.ID })
 	case tier.Reviewed:
-		rules, err := claude.ListManagedRules(claude.ProjectScope)
-		if err != nil {
-			return false
-		}
-		for _, r := range rules {
-			if r.Review != nil {
-				ids = append(ids, r.ID)
-			}
-		}
-	default:
-		return false
+		// ArtifactOf already compared the working tree with HEAD.
+		return a.Detail == cadence.RemovedAtHead || a.Detail == cadence.UnreviewedAtHead
 	}
-	return !slices.Contains(ids, a.ID)
+	return false
 }

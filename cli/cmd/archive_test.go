@@ -373,11 +373,17 @@ func TestWorktreeRestoreAndRetireLeaveTheMainCheckoutsRecordAlone(t *testing.T) 
 
 // A project review entry or reviewed rule is read at HEAD, so after an uncommitted
 // removal, or an uncommitted --no-review, the retire asks for the commit rather than
-// naming a remove command.
+// naming a remove command. A committed --no-review asks for no commit.
 func TestFixRetireAsksToCommitAnUncommittedReviewRemoval(t *testing.T) {
+	unreview := func() error {
+		_, err := claude.InstallRule(claude.ProjectScope, "cfg", "resolve a config path from the repo root",
+			claude.RuleOptions{ClearReview: true})
+		return err
+	}
 	for _, c := range []struct {
 		name, record, command string
 		install, remove       func() error
+		committed             bool
 	}{
 		{"review entry",
 			`{"id":"fix","tier":"review","addendum_id":"nits","addendum_scope":"project","addendum_repo":"%s","installed_ts":1}`,
@@ -386,7 +392,7 @@ func TestFixRetireAsksToCommitAnUncommittedReviewRemoval(t *testing.T) {
 				_, err := claude.InstallAddendum(claude.ProjectScope, "nits", "naming preferences are not findings")
 				return err
 			},
-			func() error { _, err := claude.RemoveAddendum(claude.ProjectScope, "nits", ""); return err }},
+			func() error { _, err := claude.RemoveAddendum(claude.ProjectScope, "nits", ""); return err }, false},
 		{"reviewed rule",
 			`{"id":"fix","tier":"reviewed","rule_id":"cfg","rule_scope":"project","rule_repo":"%s","rule_review_paths":["cli/"],"installed_ts":1}`,
 			"rules remove",
@@ -395,7 +401,7 @@ func TestFixRetireAsksToCommitAnUncommittedReviewRemoval(t *testing.T) {
 					claude.RuleOptions{Review: &claude.RuleReview{Paths: []string{"cli/"}}})
 				return err
 			},
-			func() error { _, err := claude.RemoveManagedRule(claude.ProjectScope, "cfg", ""); return err }},
+			func() error { _, err := claude.RemoveManagedRule(claude.ProjectScope, "cfg", ""); return err }, false},
 		{"reviewed rule unreviewed",
 			`{"id":"fix","tier":"reviewed","rule_id":"cfg","rule_scope":"project","rule_repo":"%s","rule_review_paths":["cli/"],"installed_ts":1}`,
 			"rules remove",
@@ -404,23 +410,31 @@ func TestFixRetireAsksToCommitAnUncommittedReviewRemoval(t *testing.T) {
 					claude.RuleOptions{Review: &claude.RuleReview{Paths: []string{"cli/"}}})
 				return err
 			},
+			unreview, false},
+		{"reviewed rule unreviewed and committed",
+			`{"id":"fix","tier":"reviewed","rule_id":"cfg","rule_scope":"project","rule_repo":"%s","rule_review_paths":["cli/"],"installed_ts":1}`,
+			"rules remove",
 			func() error {
 				_, err := claude.InstallRule(claude.ProjectScope, "cfg", "resolve a config path from the repo root",
-					claude.RuleOptions{ClearReview: true})
+					claude.RuleOptions{Review: &claude.RuleReview{Paths: []string{"cli/"}}})
 				return err
-			}},
+			},
+			unreview, true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			root := archiveRepo(t)
 			if err := c.install(); err != nil {
 				t.Fatal(err)
 			}
-			for _, args := range [][]string{{"add", "-A"}, {"commit", "-q", "-m", "entry"}} {
-				g := exec.Command("git", append([]string{"-c", "user.name=t", "-c", "user.email=t@t.invalid", "-c", "core.hooksPath=/dev/null"}, args...)...)
-				if out, err := g.CombinedOutput(); err != nil {
-					t.Fatalf("git %v: %v: %s", args, err, out)
+			commit := func() {
+				for _, args := range [][]string{{"add", "-A"}, {"commit", "-q", "-m", "entry"}} {
+					g := exec.Command("git", append([]string{"-c", "user.name=t", "-c", "user.email=t@t.invalid", "-c", "core.hooksPath=/dev/null"}, args...)...)
+					if out, err := g.CombinedOutput(); err != nil {
+						t.Fatalf("git %v: %v: %s", args, err, out)
+					}
 				}
 			}
+			commit()
 			identity, err := checks.RepoIdentity(root)
 			if err != nil {
 				t.Fatal(err)
@@ -435,6 +449,9 @@ func TestFixRetireAsksToCommitAnUncommittedReviewRemoval(t *testing.T) {
 			if err := c.remove(); err != nil {
 				t.Fatal(err)
 			}
+			if c.committed {
+				commit()
+			}
 
 			retire := find(t, interventionCmd, "retire")
 			var stderr bytes.Buffer
@@ -446,7 +463,14 @@ func TestFixRetireAsksToCommitAnUncommittedReviewRemoval(t *testing.T) {
 			if err := retire.RunE(retire, []string{"fix"}); err != nil {
 				t.Fatal(err)
 			}
-			if got := stderr.String(); !strings.Contains(got, "its removal is not committed yet, so commit ") || strings.Contains(got, c.command) {
+			got := stderr.String()
+			if c.committed {
+				if strings.Contains(got, "not committed yet") || !strings.Contains(got, c.command) {
+					t.Fatalf("retire after a committed removal told the reader %q", got)
+				}
+				return
+			}
+			if !strings.Contains(got, "its removal is not committed yet, so commit ") || strings.Contains(got, c.command) {
 				t.Fatalf("retire after an uncommitted removal told the reader %q", got)
 			}
 		})
