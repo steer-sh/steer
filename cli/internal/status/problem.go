@@ -128,7 +128,7 @@ func CandidateTitle(c cadence.Candidate) string {
 func CandidateEvidence(c cadence.Candidate) string {
 	if c.Corpus == cadence.CorpusTranscript {
 		return fmt.Sprintf("%d %s in your session history that no problem covers yet",
-			c.UngroupedClusters, plural("correction snippet", c.UngroupedClusters))
+			c.UngroupedClusters, Plural("correction snippet", c.UngroupedClusters))
 	}
 	return fmt.Sprintf("%d %s carry a finding no problem covers yet",
 		c.UndecidedChains, UnitName("chain", c.UndecidedChains))

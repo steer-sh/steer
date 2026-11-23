@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"path"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 )
@@ -128,7 +127,6 @@ func FindingShape(reviews []string, changed []string) Row {
 	if len(unique) > 20 {
 		unique = unique[:20]
 	}
-	sort.Strings(unique)
 	return Row{
 		"severities":          severities,
 		"cross_file_findings": cross,

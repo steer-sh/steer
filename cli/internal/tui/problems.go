@@ -602,18 +602,7 @@ func verdictBadge(obs mine.Observation) string {
 // recurrences counts occurrences with its own noun, so no bare number reaches a
 // line without saying what it counts.
 func recurrences(n int) string {
-	return fmt.Sprintf("%d %s", n, plural("recurrence", n))
-}
-
-// plural is the TUI's own English plural for the nouns it owns.
-func plural(word string, n int) string {
-	if n == 1 {
-		return word
-	}
-	if word == "recurrence" {
-		return "recurrences"
-	}
-	return word + "s"
+	return fmt.Sprintf("%d %s", n, status.Plural("recurrence", n))
 }
 
 // expandedSummary leaves space for readable detail in a short terminal.
