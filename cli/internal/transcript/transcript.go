@@ -247,3 +247,17 @@ func ReplayDigest(a Adapter, paths []string) (string, error) {
 	}
 	return hex.EncodeToString(h.Sum(nil))[:8], nil
 }
+
+// InWindow reports whether timestamp falls at or after since. An empty
+// timestamp, a zero since, or a timestamp that does not parse as RFC 3339
+// counts as inside, so a format change never silently narrows the corpus.
+func InWindow(timestamp string, since time.Time) bool {
+	if timestamp == "" || since.IsZero() {
+		return true
+	}
+	t, err := time.Parse(time.RFC3339, timestamp)
+	if err != nil {
+		return true
+	}
+	return !t.Before(since)
+}

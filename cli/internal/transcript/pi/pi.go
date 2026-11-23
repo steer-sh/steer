@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/transcript"
@@ -359,7 +358,7 @@ func (st *streamState) normalize(line []byte) error {
 	if _, ok := st.replayed[e.ID]; ok {
 		return nil
 	}
-	if !inWindow(e.Timestamp, st.filter.Since) {
+	if !transcript.InWindow(e.Timestamp, st.filter.Since) {
 		return nil
 	}
 
@@ -495,17 +494,4 @@ func contentText(raw json.RawMessage) string {
 		}
 	}
 	return strings.Join(parts, "\n")
-}
-
-// inWindow keeps an entry whose timestamp is missing or unparsable: dropping it
-// would silently narrow the corpus on a format change.
-func inWindow(timestamp string, since time.Time) bool {
-	if timestamp == "" || since.IsZero() {
-		return true
-	}
-	t, err := time.Parse(time.RFC3339, timestamp)
-	if err != nil {
-		return true
-	}
-	return !t.Before(since)
 }
