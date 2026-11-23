@@ -249,10 +249,15 @@ func (a *Artifact) AwaitsCommit() bool {
 // which is the one the commit reviewer reads. The author reads the working tree, so a
 // rule that differs between the two is marked changed, with the side that differs.
 func compareCommittedRule(r mine.Record, src ArtifactSources, a *Artifact) {
-	if a.Scope != steerpath.ProjectScope || !sameRepo(src.RepoRoot, a.Repo) {
+	if a.Scope != steerpath.ProjectScope {
 		return
 	}
 	if a.State != ArtifactPresent && a.State != ArtifactAbsent && a.State != ArtifactChanged {
+		return
+	}
+	if !sameRepo(src.RepoRoot, a.Repo) {
+		// src.Addendum is a linked worktree's HEAD, not the bound checkout's.
+		a.State, a.Detail, a.Removed = ArtifactElsewhere, "", ""
 		return
 	}
 	if src.Addendum == nil {
