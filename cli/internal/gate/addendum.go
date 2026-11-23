@@ -244,23 +244,81 @@ func sortedIDs(m map[string]string) []string {
 }
 
 // pendingProjectAddendumNotice tells a denied commit that the working-tree project
-// manifest holds addendum entries that differ from the project entries its review
-// used. It returns "" when they match or either side cannot be read. When every
-// reviewed path is a project manifest, the notice omits the recovery step.
-func pendingProjectAddendumNotice(repo string, reviewed Addendum, reviewedPaths []string) string {
+// manifest holds review-addendum entries, or reviewed rules that reach rulePaths,
+// that differ from the project entries its review used. rulePaths is reviewedPaths
+// with renames split, the paths the review matched rules against. It returns "" when
+// they match or either side cannot be read. When every reviewed path is a project
+// manifest, the notice omits the recovery step.
+func pendingProjectAddendumNotice(repo string, reviewed Addendum, reviewedPaths, rulePaths []string) string {
 	if repo == "" || reviewed.projectUnread {
 		return ""
 	}
-	local, manifest, ok := workingTreeProjectAddendum(repo)
+	data, manifest, ok := workingTreeProjectManifest(repo)
 	if !ok {
 		return ""
 	}
-	used := map[string]string{}
-	for _, e := range reviewed.Entries {
-		if e.Scope == steerpath.ProjectScope {
-			used[e.ID] = e.Text
+	// Each comparison stands alone: a working-tree section that does not parse skips
+	// only its own comparison.
+	var parts []string
+	if local, err := addendumTexts(data); err == nil {
+		used := map[string]string{}
+		for _, e := range reviewed.Entries {
+			if e.Scope == steerpath.ProjectScope {
+				used[e.ID] = e.Text
+			}
+		}
+		if d := idChanges(used, local); d != "" {
+			parts = append(parts, "review-addendum changes ("+d+")")
 		}
 	}
+	if localRules, err := reviewedRules(steerpath.ProjectScope, data); err == nil {
+		if d := reviewedRuleChanges(reviewed.Rules, localRules, rulePaths); d != "" {
+			parts = append(parts, "reviewed-rule changes ("+d+")")
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	notice := fmt.Sprintf("[commit-gate] Uncommitted project %s are "+
+		"present in the working tree; this review used the project entries from HEAD.",
+		strings.Join(parts, " and "))
+	if !onlyManifests(reviewedPaths) {
+		notice += fmt.Sprintf(" To apply these changes before reviewing the code, stage only "+
+			"the intended changes to %s at the repository root, commit with no paths or `-a`, then restage the code.", manifest)
+	}
+	return notice
+}
+
+// reviewedRuleChanges compares the project rules among head with local, by text and
+// paths, for each id that reaches paths on either side, in idChanges' wording.
+func reviewedRuleChanges(head, local []ReviewedRule, paths []string) string {
+	var project []ReviewedRule
+	for _, r := range head {
+		if r.Scope == steerpath.ProjectScope {
+			project = append(project, r)
+		}
+	}
+	reach := map[string]bool{}
+	for _, side := range [][]ReviewedRule{project, local} {
+		for _, r := range (Addendum{Rules: side}).RulesFor(paths) {
+			reach[r.ID] = true
+		}
+	}
+	shapes := func(rules []ReviewedRule) map[string]string {
+		out := map[string]string{}
+		for _, r := range rules {
+			if reach[r.ID] {
+				out[r.ID] = r.Text + "\x00" + strings.Join(r.Paths, "\x00")
+			}
+		}
+		return out
+	}
+	return idChanges(shapes(project), shapes(local))
+}
+
+// idChanges names the ids local adds to, changes from, and removes from used, as
+// `added: "a"; changed: "b"; removed: "c"`, or "" when the two maps are equal.
+func idChanges(used, local map[string]string) string {
 	var added, changed, removed []string
 	for _, id := range sortedIDs(local) {
 		if text, found := used[id]; !found {
@@ -283,23 +341,37 @@ func pendingProjectAddendumNotice(repo string, reviewed Addendum, reviewedPaths 
 			parts = append(parts, group.label+": "+strings.Join(group.ids, ", "))
 		}
 	}
-	if len(parts) == 0 {
-		return ""
-	}
-	notice := fmt.Sprintf("[commit-gate] Uncommitted project review-addendum changes (%s) are "+
-		"present in the working tree; this review used the project entries from HEAD.",
-		strings.Join(parts, "; "))
-	if !onlyManifests(reviewedPaths) {
-		notice += fmt.Sprintf(" To apply these changes before reviewing the code, stage only "+
-			"the intended changes to %s at the repository root, commit with no paths or `-a`, then restage the code.", manifest)
-	}
-	return notice
+	return strings.Join(parts, "; ")
 }
 
-// workingTreeProjectAddendum reads the project manifest at the work-tree root of the
+// workingTreeProjectManifest reads the project manifest at the work-tree root of the
 // repository holding repo, neutral store first, falling back to legacy only when the
-// neutral file does not exist. No manifest in either store is an empty addendum; a
-// root git cannot resolve, or any other read or parse failure, is not ok. The returned
+// neutral file does not exist. No manifest in either store reads as an empty manifest;
+// a root git cannot resolve, or any other read failure, is not ok. The returned path
+// is root-relative.
+func workingTreeProjectManifest(repo string) ([]byte, string, bool) {
+	out, ok := Git(repo, gitShort, "rev-parse", "--show-toplevel")
+	root := strings.TrimSuffix(out, "\n")
+	if !ok || root == "" {
+		return nil, "", false
+	}
+	paths := projectManifestPaths()
+	for _, path := range paths {
+		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, "", false
+		}
+		return data, path, true
+	}
+	if len(paths) == 0 {
+		return nil, "", false
+	}
+	return []byte("{}"), paths[0], true
+}
+
 // path is root-relative.
 func workingTreeProjectAddendum(repo string) (map[string]string, string, bool) {
 	out, ok := Git(repo, gitShort, "rev-parse", "--show-toplevel")
