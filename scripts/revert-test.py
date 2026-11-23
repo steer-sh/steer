@@ -52,6 +52,13 @@ that run one test at once can collide on a path they share. A failure that does
 not happen again is unconfirmed; when it was decisive, its tests are judged again
 on one copy from the next variant on.
 
+Every go command uses GOCACHE and GOTMPDIR under EVIDENCE in the git directory,
+never the user's shared build cache, because each variant compiles new package
+objects. A run empties GOTMPDIR. A run that compiles variants removes, at its end,
+the cache files older than GO_TOUCH that it did not use, so the cache holds the
+compiles of about that window's runs; a run that stops before the variants keeps
+the cache warm.
+
 Each go command runs in its own process group, and go test with -timeout
 TEST_TIMEOUT. BUDGET starts before the lock wait; when it runs out, the running
 commands' groups are killed, and the run writes incomplete evidence, records no
@@ -106,6 +113,9 @@ FUNCS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "revert-test-fu
 EVIDENCE = "revert-test"
 LOCK = "lock"
 ACCEPTED = "accepted"
+GO_CACHE = "gocache"
+GO_WORK = "gotmp"
+GO_TOUCH = 3600 + 60
 WAIT = 120
 KEEP = 20
 NOISE = re.compile(r"^(=== (RUN|PAUSE|CONT|NAME)|--- (FAIL|PASS|SKIP)|\s*$)")
@@ -125,6 +135,7 @@ POLL = 0.2
 SCRUB = []
 HELD = []
 EXPIRED = []
+COMPILED = []
 BUDGET_REASON = "the time budget ran out before a variant decided it"
 
 
@@ -613,6 +624,43 @@ def clear_scratch(path):
     shutil.rmtree(path)
 
 
+def private_go_dirs(directory):
+    """Point every go command this run starts at a build cache and a work directory
+    under directory, and empty the work directory. Return (cache, work)."""
+    cache, work = os.path.join(directory, GO_CACHE), os.path.join(directory, GO_WORK)
+    clear_scratch(work)
+    os.makedirs(cache, exist_ok=True)
+    os.mkdir(work, 0o700)
+    os.environ["GOCACHE"] = cache
+    os.environ["GOCACHEPROG"] = ""
+    os.environ["GOTMPDIR"] = work
+    return cache, work
+
+
+def trim_go_cache(cache, begun):
+    """Remove each regular file in the Go build cache at cache whose mtime is before
+    begun - GO_TOUCH. Go refreshes an entry's mtime when a build uses it and the mtime
+    is older than GO_TOUCH, so every file this run used is kept. Cached executable
+    directories are kept."""
+    cutoff = begun - GO_TOUCH
+    try:
+        shards = os.listdir(cache)
+    except FileNotFoundError:
+        return
+    for shard in shards:
+        folder = os.path.join(cache, shard)
+        if len(shard) != 2 or not os.path.isdir(folder):
+            continue
+        for name in os.listdir(folder):
+            path = os.path.join(folder, name)
+            try:
+                info = os.lstat(path)
+                if stat.S_ISREG(info.st_mode) and info.st_mtime < cutoff:
+                    os.remove(path)
+            except FileNotFoundError:
+                pass
+
+
 def scrub(line):
     """Rewrite a go test output line so its paths are relative to the repository."""
     line = line.rstrip("\n")
@@ -1072,6 +1120,17 @@ def main():
         return 1
     # Each go test inherits the lock, so a successor cannot replace the copy under it.
     HELD.append(lock)
+    begun = time.time()
+    cache, work = private_go_dirs(directory)
+    try:
+        return check(root, directory, started, deadline)
+    finally:
+        clear_scratch(work)
+        if COMPILED:
+            trim_go_cache(cache, begun)
+
+
+def check(root, directory, started, deadline):
     base = base_revision()
     if base is None:
         return 1
@@ -1143,6 +1202,7 @@ def main():
         behavioural = hinted_first(early + data_variants(base, data) + late, previous, selected)
         linked = {t for t in live if data or mutated_packages & deps[t[0]]}
         asserts = lambda a: a["result"] == "fail" and a["kind"] == "assertion"
+        COMPILED.append(True)
         attempts = confirm(roots, prefix, deps, behavioural, linked, asserts, deadline)
         survivors = {t for t in linked
                      if not any(a["result"] == "fail" for a in attempts[t])}
