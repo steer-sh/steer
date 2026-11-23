@@ -220,7 +220,7 @@ func TestRetiringAClassReturnsItsFindingsAsNew(t *testing.T) {
 func TestSupersedingAClassReturnsTheFindingsItStopsCoveringAsNew(t *testing.T) {
 	dir := readThenCover(t)
 	if err := Register(io.Discard, dir, RegisterOpts{
-		Prose: testProse, ScopeAll: true, Class: "narrower parser class", Match: "zzz-parser-only",
+		Prose: testProse, ScopeFlags: ScopeFlags{ScopeAll: true}, Class: "narrower parser class", Match: "zzz-parser-only",
 		Tier: "guard", HookID: "test-guard", Target: "steer-hooks.py", InstalledTS: 5000,
 		Supersedes: "known", Force: true,
 	}); err != nil {

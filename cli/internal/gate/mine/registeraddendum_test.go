@@ -56,7 +56,7 @@ func registerAddendumFixture(t *testing.T) (stateDir, ledger string) {
 
 func addendumOpts(ledger string) RegisterOpts {
 	return RegisterOpts{
-		Prose: testProse, ScopeAll: true, Ledger: ledger,
+		Prose: testProse, ScopeFlags: ScopeFlags{ScopeAll: true}, Ledger: ledger,
 		Class: "widget style nit", Match: "style nit", Kind: "false-positive",
 		Tier: "review", Target: "steer-manifest.json", AddendumID: "no-style",
 	}

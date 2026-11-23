@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"github.com/steer-sh/steer-cli/internal/cadence"
 	"github.com/steer-sh/steer-cli/internal/checkscope"
 	"github.com/steer-sh/steer-cli/internal/claude"
@@ -33,6 +34,21 @@ func snapshotFreshnessNote(last, now time.Time) string {
 		last.Format(time.RFC3339), int(now.Sub(last).Hours()/24), how)
 }
 
+// scopeFlags holds the eligibility-scope flags a `steer fix` subcommand takes.
+type scopeFlags struct{ mine.ScopeFlags }
+
+// scopeAllUsage is --scope-all's help where the flag sets a record's scope.
+const scopeAllUsage = "eligibility scope: every unit (exclusive with the scope predicates)"
+
+// bind registers the five --scope-* flags on fs, with allUsage as --scope-all's help.
+func (f *scopeFlags) bind(fs *pflag.FlagSet, allUsage string) {
+	fs.BoolVar(&f.ScopeAll, "scope-all", false, allUsage)
+	fs.StringSliceVar(&f.ScopeHarness, "scope-harness", nil, scopeHarnessUsage)
+	fs.StringVar(&f.ScopeRepo, "scope-repo", "", "eligibility scope: regex on the repository root basename")
+	fs.StringVar(&f.ScopeRepoRoot, "scope-repo-root", "", scopeRepoRootUsage)
+	fs.StringVar(&f.ScopePath, "scope-path", "", "eligibility scope: regex on a repo-relative changed path")
+}
+
 // interventionFlags holds the flag values of the `steer fix` subcommands.
 type interventionFlags struct {
 	ledger string
@@ -49,11 +65,7 @@ type interventionFlags struct {
 	matchCorpus      string
 	matchSignalKind  string
 	matchShowResidue bool
-	matchScopeAll    bool
-	matchScopeHrn    []string
-	matchScopeRepo   string
-	matchScopeRoot   string
-	matchScopePath   string
+	matchScope       scopeFlags
 	matchInstalledTS int64
 
 	registerClass         string
@@ -77,11 +89,7 @@ type interventionFlags struct {
 	registerSupersedes    string
 	registerInstalledTS   int64
 	registerForce         bool
-	registerScopeAll      bool
-	registerScopeHrn      []string
-	registerScopeRepo     string
-	registerScopeRoot     string
-	registerScopePath     string
+	registerScope         scopeFlags
 
 	rejectClass      string
 	rejectMatch      string
@@ -97,17 +105,9 @@ type interventionFlags struct {
 	rejectIntervent  string
 	rejectRejectedTS int64
 	rejectForce      bool
-	rejectScopeAll   bool
-	rejectScopeHrn   []string
-	rejectScopeRepo  string
-	rejectScopeRoot  string
-	rejectScopePath  string
+	rejectScope      scopeFlags
 
-	scopeAll   bool
-	scopeHrn   []string
-	scopeRepo  string
-	scopeRoot  string
-	scopePath  string
+	scopeScope scopeFlags
 	scopeSetTS int64
 	scopeForce bool
 
@@ -195,12 +195,8 @@ func newInterventionCommands() (*interventionFlags, []*cobra.Command) {
 				ShowResidue: v.matchShowResidue,
 				Sessions:    storedSessions(),
 
-				ScopeAll:      v.matchScopeAll,
-				ScopeHarness:  v.matchScopeHrn,
-				ScopeRepo:     v.matchScopeRepo,
-				ScopeRepoRoot: v.matchScopeRoot,
-				ScopePath:     v.matchScopePath,
-				InstalledTS:   v.matchInstalledTS,
+				ScopeFlags:  v.matchScope.ScopeFlags,
+				InstalledTS: v.matchInstalledTS,
 			})
 		},
 	}
@@ -212,12 +208,7 @@ func newInterventionCommands() (*interventionFlags, []*cobra.Command) {
 	m.StringVar(&v.matchSignalKind, "signal-kind", "", signalKindUsage)
 	m.BoolVar(&v.matchShowResidue, "show-residue", false,
 		"list the frequent terms among the findings this regex misses")
-	m.BoolVar(&v.matchScopeAll, "scope-all", false,
-		"count the registration baseline over every unit (exclusive with the scope predicates)")
-	m.StringSliceVar(&v.matchScopeHrn, "scope-harness", nil, scopeHarnessUsage)
-	m.StringVar(&v.matchScopeRepo, "scope-repo", "", "eligibility scope: regex on the repository root basename")
-	m.StringVar(&v.matchScopeRoot, "scope-repo-root", "", scopeRepoRootUsage)
-	m.StringVar(&v.matchScopePath, "scope-path", "", "eligibility scope: regex on a repo-relative changed path")
+	v.matchScope.bind(m, "count the registration baseline over every unit (exclusive with the scope predicates)")
 	m.Int64Var(&v.matchInstalledTS, "installed-ts", 0,
 		"baseline cutoff, as register takes it (default now); needs a scope")
 
@@ -225,11 +216,11 @@ func newInterventionCommands() (*interventionFlags, []*cobra.Command) {
 		Use:   "register",
 		Short: "Record a fix with the baseline it is measured against",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := guardscope.Check(v.registerTier, v.registerScopeAll,
-				v.registerScopeHrn, v.registerForce); err != nil {
+			if err := guardscope.Check(v.registerTier, v.registerScope.ScopeAll,
+				v.registerScope.ScopeHarness, v.registerForce); err != nil {
 				return err
 			}
-			checkFacts, err := bindCheckTier(v.registerTier, v.registerCheckID, v.registerScopeHrn)
+			checkFacts, err := bindCheckTier(v.registerTier, v.registerCheckID, v.registerScope.ScopeHarness)
 			if err != nil {
 				return err
 			}
@@ -264,11 +255,7 @@ func newInterventionCommands() (*interventionFlags, []*cobra.Command) {
 				Supersedes:      v.registerSupersedes,
 				InstalledTS:     v.registerInstalledTS,
 				Force:           v.registerForce,
-				ScopeAll:        v.registerScopeAll,
-				ScopeHarness:    v.registerScopeHrn,
-				ScopeRepo:       v.registerScopeRepo,
-				ScopeRepoRoot:   v.registerScopeRoot,
-				ScopePath:       v.registerScopePath,
+				ScopeFlags:      v.registerScope.ScopeFlags,
 			})
 		},
 	}
@@ -303,11 +290,7 @@ func newInterventionCommands() (*interventionFlags, []*cobra.Command) {
 	r.StringVar(&v.registerSupersedes, "supersedes", "", "id of a record this replaces")
 	r.Int64Var(&v.registerInstalledTS, "installed-ts", 0, "install timestamp (default now)")
 	r.BoolVar(&v.registerForce, "force", false, "record despite a zero baseline, a blocking rejection or the guard's earlier blocks")
-	r.BoolVar(&v.registerScopeAll, "scope-all", false, "eligibility scope: every unit (exclusive with the scope predicates)")
-	r.StringSliceVar(&v.registerScopeHrn, "scope-harness", nil, scopeHarnessUsage)
-	r.StringVar(&v.registerScopeRepo, "scope-repo", "", "eligibility scope: regex on the repository root basename")
-	r.StringVar(&v.registerScopeRoot, "scope-repo-root", "", scopeRepoRootUsage)
-	r.StringVar(&v.registerScopePath, "scope-path", "", "eligibility scope: regex on a repo-relative changed path")
+	v.registerScope.bind(r, scopeAllUsage)
 	for _, name := range []string{"class", "match", "tier", "target", "problem", "intervention"} {
 		_ = register.MarkFlagRequired(name)
 	}
@@ -336,13 +319,9 @@ func newInterventionCommands() (*interventionFlags, []*cobra.Command) {
 					Problem:      v.rejectProblem,
 					Intervention: v.rejectIntervent,
 				},
-				RejectedTS:    v.rejectRejectedTS,
-				Force:         v.rejectForce,
-				ScopeAll:      v.rejectScopeAll,
-				ScopeHarness:  v.rejectScopeHrn,
-				ScopeRepo:     v.rejectScopeRepo,
-				ScopeRepoRoot: v.rejectScopeRoot,
-				ScopePath:     v.rejectScopePath,
+				RejectedTS: v.rejectRejectedTS,
+				Force:      v.rejectForce,
+				ScopeFlags: v.rejectScope.ScopeFlags,
 			})
 		},
 	}
@@ -361,11 +340,7 @@ func newInterventionCommands() (*interventionFlags, []*cobra.Command) {
 	rj.StringVar(&v.rejectIntervent, "intervention", "", rejectInterventionUsage)
 	rj.Int64Var(&v.rejectRejectedTS, "rejected-ts", 0, "rejection timestamp (default now)")
 	rj.BoolVar(&v.rejectForce, "force", false, "record despite a zero baseline")
-	rj.BoolVar(&v.rejectScopeAll, "scope-all", false, "eligibility scope: every unit (exclusive with the scope predicates)")
-	rj.StringSliceVar(&v.rejectScopeHrn, "scope-harness", nil, scopeHarnessUsage)
-	rj.StringVar(&v.rejectScopeRepo, "scope-repo", "", "eligibility scope: regex on the repository root basename")
-	rj.StringVar(&v.rejectScopeRoot, "scope-repo-root", "", scopeRepoRootUsage)
-	rj.StringVar(&v.rejectScopePath, "scope-path", "", "eligibility scope: regex on a repo-relative changed path")
+	v.rejectScope.bind(rj, scopeAllUsage)
 	for _, name := range []string{"class", "match", "reason", "reopen", "problem", "intervention"} {
 		_ = reject.MarkFlagRequired(name)
 	}
@@ -381,31 +356,23 @@ func newInterventionCommands() (*interventionFlags, []*cobra.Command) {
 			if err != nil {
 				return err
 			}
-			if err := guardscope.Check(tier, v.scopeAll, v.scopeHrn, v.scopeForce); err != nil {
+			if err := guardscope.Check(tier, v.scopeScope.ScopeAll, v.scopeScope.ScopeHarness, v.scopeForce); err != nil {
 				return err
 			}
 			if err := prepareState(); err != nil {
 				return err
 			}
 			return mine.ScopeSet(out(), gateConfig().StateDir, args[0], mine.ScopeSetOpts{
-				Ledger:        v.ledger,
-				Sessions:      storedSessions(),
-				ScopeAll:      v.scopeAll,
-				ScopeHarness:  v.scopeHrn,
-				ScopeRepo:     v.scopeRepo,
-				ScopeRepoRoot: v.scopeRoot,
-				ScopePath:     v.scopePath,
-				ScopeSetTS:    v.scopeSetTS,
-				Force:         v.scopeForce,
+				Ledger:     v.ledger,
+				Sessions:   storedSessions(),
+				ScopeFlags: v.scopeScope.ScopeFlags,
+				ScopeSetTS: v.scopeSetTS,
+				Force:      v.scopeForce,
 			})
 		},
 	}
 	sc := scope.Flags()
-	sc.BoolVar(&v.scopeAll, "scope-all", false, "eligibility scope: every unit (exclusive with the scope predicates)")
-	sc.StringSliceVar(&v.scopeHrn, "scope-harness", nil, scopeHarnessUsage)
-	sc.StringVar(&v.scopeRepo, "scope-repo", "", "eligibility scope: regex on the repository root basename")
-	sc.StringVar(&v.scopeRoot, "scope-repo-root", "", scopeRepoRootUsage)
-	sc.StringVar(&v.scopePath, "scope-path", "", "eligibility scope: regex on a repo-relative changed path")
+	v.scopeScope.bind(sc, scopeAllUsage)
 	sc.Int64Var(&v.scopeSetTS, "scope-set-ts", 0, "migration timestamp opening the after-window (default now)")
 	sc.BoolVar(&v.scopeForce, "force", false, "record despite a zero scoped baseline")
 

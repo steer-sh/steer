@@ -196,7 +196,7 @@ func TestAcceptancePlantedIneffectiveCheckThroughStop(t *testing.T) {
 			Problem:      "A response is written without the id field that every client reads.",
 			Intervention: "A repository check fails the turn when the response omits the id field.",
 		},
-		ScopeHarness: []string{"claude-code"}, ScopeRepoRoot: identity,
+		ScopeFlags: mine.ScopeFlags{ScopeHarness: []string{"claude-code"}, ScopeRepoRoot: identity},
 	}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
