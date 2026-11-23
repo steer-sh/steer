@@ -505,7 +505,7 @@ func runCadence() {
 		pluginKey += "|hooks=" + hooksBuild.DetailLabel()
 	}
 	install := hooksBehindInstall(pluginCopies, hooksBuild)
-	masterDue := cadence.ShouldNudgeMaster(dir, key)
+	masterDue := cadence.Due(rec.Master, key)
 	// After an update the global master is rebuilt and the update's own lines name
 	// what remains, so the condition is recorded without a line of its own.
 	if masterDue && !update.installed {
@@ -516,7 +516,7 @@ func runCadence() {
 	masters := status.MasterRuntimes(claude.GlobalScope, claude.ProjectScope)
 	rules := status.InstalledRules(claude.GlobalScope, claude.ProjectScope)
 	rulesKey, ruleLabels, ruleScopes := status.RulesDrift(rules)
-	if cadence.ShouldNudgeRules(dir, rulesKey) {
+	if cadence.Due(rec.Rules, rulesKey) {
 		repairs := make([]string, 0, len(ruleScopes))
 		for _, s := range ruleScopes {
 			repairs = append(repairs, status.RulesRepair(rules, masters, s))
@@ -526,7 +526,7 @@ func runCadence() {
 			strings.Join(ruleLabels, "; "), strings.Join(repairs, " and ")))
 	}
 	detachedKey, detachedLabels, detachedScopes := status.DetachedMasters(masters)
-	if cadence.ShouldNudgeDetached(dir, detachedKey) {
+	if cadence.Due(rec.Detached, detachedKey) {
 		repairs := make([]string, 0, len(detachedScopes))
 		for _, s := range detachedScopes {
 			repairs = append(repairs, status.DetachedRepair(masters, s))
@@ -536,7 +536,7 @@ func runCadence() {
 			strings.Join(detachedLabels, "; "), strings.Join(repairs, " and ")))
 	}
 	driftKey, driftLabels, driftScopes := status.DriftedMasters(masters)
-	if cadence.ShouldNudgeSourceDrift(dir, driftKey) {
+	if cadence.Due(rec.SourceDrift, driftKey) {
 		repairs := make([]string, 0, len(driftScopes))
 		for _, s := range driftScopes {
 			repairs = append(repairs, status.RebuildRepair(masters, s))
@@ -548,27 +548,24 @@ func runCadence() {
 	// A harness runs skills and the launcher from its cached plugin copy, and
 	// nothing refreshes that copy when the stable executable changes.
 	// A failed update leaves the hooks behind, so its notice prints every session.
-	if pluginLineDue(cadence.ShouldNudgePlugins(dir, pluginKey), masterDue, install) || update.failed {
+	if pluginLineDue(cadence.Due(rec.Plugins, pluginKey), masterDue, install) || update.failed {
 		lines = append(lines, pluginCopyLines(pluginCopies, hooksBuild)...)
 	}
+	prev := rec
+	rec.Master, rec.Rules, rec.Detached, rec.SourceDrift, rec.Plugins = key, rulesKey, detachedKey, driftKey, pluginKey
 	guidance := commitGuidance()
 	if len(lines) == 0 {
 		// No operator line, but a repaired condition still has to clear its key: a
 		// record left behind would suppress the nudge if that same condition
 		// came back.
-		if prev := cadence.LoadNudge(dir); prev.Master != key || prev.Rules != rulesKey ||
-			prev.Detached != detachedKey || prev.SourceDrift != driftKey || prev.Plugins != pluginKey {
-			_ = cadence.WriteNudge(dir, rec.WithMaster(key).WithRules(rulesKey).
-				WithDetached(detachedKey).WithSourceDrift(driftKey).WithPlugins(pluginKey))
+		if rec != prev {
+			_ = cadence.WriteNudge(dir, rec)
 		}
 		if out, ok := hookContextReply("SessionStart", nil, guidance); ok {
 			fmt.Println(string(out))
 		}
 		return
 	}
-	rec = rec.WithMaster(key).WithRules(rulesKey).WithDetached(detachedKey).WithSourceDrift(driftKey).
-		WithPlugins(pluginKey)
-
 	out, ok := hookContextReply("SessionStart", lines, guidance)
 	if !ok {
 		return
