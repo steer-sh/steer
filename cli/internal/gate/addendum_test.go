@@ -127,13 +127,13 @@ func TestAnUnreadableProjectManifestIsAnError(t *testing.T) {
 
 func TestTheAddendumBlockPrecedesTheRules(t *testing.T) {
 	a := Addendum{Entries: []AddendumEntry{{Scope: "global", ID: "x", Text: "a known false positive"}}}
-	prompt := BuildReviewPrompt("msg", "diff", "ctx", a)
+	prompt := BuildReviewPrompt("msg", "diff", "ctx", a, nil)
 	block := strings.Index(prompt, "<review-addendum>")
 	rules := strings.Index(prompt, "Rules — these are strict:")
 	if block < 0 || rules < 0 || block > rules || !strings.Contains(prompt, "- a known false positive") {
 		t.Fatalf("block at %d, rules at %d:\n%s", block, rules, prompt)
 	}
-	if strings.Contains(BuildReviewPrompt("msg", "diff", "ctx", Addendum{}), "review-addendum") {
+	if strings.Contains(BuildReviewPrompt("msg", "diff", "ctx", Addendum{}, nil), "review-addendum") {
 		t.Fatal("an empty addendum rendered a block")
 	}
 }
@@ -210,7 +210,7 @@ func TestADenyNamesUncommittedProjectAddendumChanges(t *testing.T) {
 		addendumManifest(t, map[string]string{"keep": "same", "edit": "new text", "new": "fresh"}))
 	gitCmd(t, repo, "add", "-A")
 
-	got := pendingProjectAddendumNotice(repo, LoadAddendum(repo), []string{"a.py", ".steer/hooks/steer-manifest.json"})
+	got := pendingProjectAddendumNotice(repo, LoadAddendum(repo), []string{"a.py", ".steer/hooks/steer-manifest.json"}, []string{"a.py", ".steer/hooks/steer-manifest.json"})
 	want := `(added: "new"; changed: "edit"; removed: "drop")`
 	if !strings.Contains(got, want) || !strings.Contains(got, "used the project entries from HEAD") {
 		t.Fatalf("notice = %q, want it to contain %s", got, want)
@@ -224,7 +224,7 @@ func TestNoNoticeWhenTheAddendumMatchesHead(t *testing.T) {
 	repo := committedAddendumRepo(t, map[string]string{"a": "same text"})
 	writeFileAt(t, repo, ".steer/hooks/steer-manifest.json",
 		`{"hooks":{"x":{}},"review_addendum":{"a":{"text":"  same\n text "}}}`)
-	if got := pendingProjectAddendumNotice(repo, LoadAddendum(repo), []string{"a.py"}); got != "" {
+	if got := pendingProjectAddendumNotice(repo, LoadAddendum(repo), []string{"a.py"}, []string{"a.py"}); got != "" {
 		t.Fatalf("notice = %q, want none for a manifest change outside the addendum", got)
 	}
 }
@@ -232,7 +232,7 @@ func TestNoNoticeWhenTheAddendumMatchesHead(t *testing.T) {
 func TestAManifestOnlyReviewGetsNoRecoveryStep(t *testing.T) {
 	repo := committedAddendumRepo(t, map[string]string{"a": "old"})
 	writeFileAt(t, repo, ".steer/hooks/steer-manifest.json", addendumManifest(t, map[string]string{"a": "new"}))
-	got := pendingProjectAddendumNotice(repo, LoadAddendum(repo), []string{".steer/hooks/steer-manifest.json"})
+	got := pendingProjectAddendumNotice(repo, LoadAddendum(repo), []string{".steer/hooks/steer-manifest.json"}, []string{".steer/hooks/steer-manifest.json"})
 	if !strings.Contains(got, `changed: "a"`) || strings.Contains(got, "restage") {
 		t.Fatalf("notice = %q, want the change without the recovery step", got)
 	}
@@ -242,14 +242,14 @@ func TestAManifestOnlyReviewGetsNoRecoveryStep(t *testing.T) {
 func TestAnUnreadableManifestGivesNoNotice(t *testing.T) {
 	repo := committedAddendumRepo(t, map[string]string{"a": "entry"})
 	writeFileAt(t, repo, ".steer/hooks/steer-manifest.json", "{not json")
-	if got := pendingProjectAddendumNotice(repo, LoadAddendum(repo), []string{"a.py"}); got != "" {
+	if got := pendingProjectAddendumNotice(repo, LoadAddendum(repo), []string{"a.py"}, []string{"a.py"}); got != "" {
 		t.Fatalf("working tree unreadable: notice = %q", got)
 	}
 
 	broken := buildRepo(t, map[string]string{".steer/hooks/steer-manifest.json": "{not json"})
 	gitCmd(t, broken, verb, "-qm", "init")
 	writeFileAt(t, broken, ".steer/hooks/steer-manifest.json", addendumManifest(t, map[string]string{"a": "entry"}))
-	if got := pendingProjectAddendumNotice(broken, LoadAddendum(broken), []string{"a.py"}); got != "" {
+	if got := pendingProjectAddendumNotice(broken, LoadAddendum(broken), []string{"a.py"}, []string{"a.py"}); got != "" {
 		t.Fatalf("HEAD unreadable: notice = %q", got)
 	}
 }
@@ -260,11 +260,11 @@ func TestTheWorkingTreeNeutralManifestShadowsLegacy(t *testing.T) {
 		".claude/hooks/steer-manifest.json": addendumManifest(t, map[string]string{"a": "legacy"}),
 	})
 	gitCmd(t, repo, verb, "-qm", "init")
-	if got := pendingProjectAddendumNotice(repo, LoadAddendum(repo), []string{"a.py"}); got != "" {
+	if got := pendingProjectAddendumNotice(repo, LoadAddendum(repo), []string{"a.py"}, []string{"a.py"}); got != "" {
 		t.Fatalf("legacy only, unchanged: notice = %q", got)
 	}
 	writeFileAt(t, repo, ".steer/hooks/steer-manifest.json", addendumManifest(t, map[string]string{"b": "neutral"}))
-	got := pendingProjectAddendumNotice(repo, LoadAddendum(repo), []string{"a.py"})
+	got := pendingProjectAddendumNotice(repo, LoadAddendum(repo), []string{"a.py"}, []string{"a.py"})
 	if !strings.Contains(got, `added: "b"; removed: "a"`) {
 		t.Fatalf("notice = %q, want the neutral manifest to replace the legacy entries", got)
 	}
@@ -274,7 +274,7 @@ func TestTheWorkingTreeNeutralManifestShadowsLegacy(t *testing.T) {
 func TestGlobalEntriesAreNotPending(t *testing.T) {
 	writeGlobalAddendum(t, map[string]string{"g": "global entry"})
 	repo := committedAddendumRepo(t, map[string]string{"a": "entry"})
-	if got := pendingProjectAddendumNotice(repo, LoadAddendum(repo), []string{"a.py"}); got != "" {
+	if got := pendingProjectAddendumNotice(repo, LoadAddendum(repo), []string{"a.py"}, []string{"a.py"}); got != "" {
 		t.Fatalf("notice = %q", got)
 	}
 }
@@ -312,7 +312,7 @@ func addendumSubdir(t *testing.T, repo string) string {
 func TestASubdirectoryCommitGetsNoFalseAddendumNotice(t *testing.T) {
 	repo := committedAddendumRepo(t, map[string]string{"a": "entry"})
 	sub := addendumSubdir(t, repo)
-	if got := pendingProjectAddendumNotice(sub, LoadAddendum(sub), []string{"a.py"}); got != "" {
+	if got := pendingProjectAddendumNotice(sub, LoadAddendum(sub), []string{"a.py"}, []string{"a.py"}); got != "" {
 		t.Fatalf("notice = %q, want none for an unchanged addendum", got)
 	}
 }
@@ -325,11 +325,11 @@ func TestASubdirectoryCommitNamesARealAddendumChange(t *testing.T) {
 	const manifest = ".steer/hooks/steer-manifest.json"
 	writeFileAt(t, repo, manifest, addendumManifest(t, map[string]string{"a": "new"}))
 
-	got := pendingProjectAddendumNotice(sub, LoadAddendum(sub), []string{"a.py"})
+	got := pendingProjectAddendumNotice(sub, LoadAddendum(sub), []string{"a.py"}, []string{"a.py"})
 	if !strings.Contains(got, `changed: "a"`) || !strings.Contains(got, "stage only the intended changes to "+manifest+" at the repository root") {
 		t.Fatalf("notice = %q, want the change and the root-relative manifest", got)
 	}
-	got = pendingProjectAddendumNotice(sub, LoadAddendum(sub), []string{manifest})
+	got = pendingProjectAddendumNotice(sub, LoadAddendum(sub), []string{manifest}, []string{manifest})
 	if !strings.Contains(got, `changed: "a"`) || strings.Contains(got, "restage") {
 		t.Fatalf("notice = %q, want the change without the recovery step", got)
 	}
@@ -344,7 +344,7 @@ func TestARepositoryRootEndingInASpaceKeepsItsManifest(t *testing.T) {
 	}
 	t.Cleanup(func() { os.RemoveAll(spaced) })
 	sub := addendumSubdir(t, spaced)
-	if got := pendingProjectAddendumNotice(sub, LoadAddendum(sub), []string{"a.py"}); got != "" {
+	if got := pendingProjectAddendumNotice(sub, LoadAddendum(sub), []string{"a.py"}, []string{"a.py"}); got != "" {
 		t.Fatalf("notice = %q, want none for an unchanged addendum", got)
 	}
 }
@@ -354,7 +354,79 @@ func TestARepositoryRootEndingInASpaceKeepsItsManifest(t *testing.T) {
 func TestAnUnresolvedRootIsNotAnEmptyAddendum(t *testing.T) {
 	dir := t.TempDir()
 	writeFileAt(t, dir, ".steer/hooks/steer-manifest.json", addendumManifest(t, map[string]string{"a": "entry"}))
-	if texts, _, ok := workingTreeProjectAddendum(dir); ok {
-		t.Fatalf("texts = %v, want not ok outside a repository", texts)
+	if data, _, ok := workingTreeProjectManifest(dir); ok {
+		t.Fatalf("manifest = %s, want not ok outside a repository", data)
+	}
+}
+
+// A working-tree change to a project reviewed rule is named only when the rule, at
+// HEAD or on disk, reaches the rule paths; its paths are part of what changed. A
+// section that does not parse leaves the other section's comparison standing.
+func TestADenyNamesUncommittedReviewedRuleChanges(t *testing.T) {
+	const manifest = ".steer/hooks/steer-manifest.json"
+	head := map[string]ruleSpec{
+		"py":  {text: "python rule", paths: []string{"*.py"}, review: true},
+		"tui": {text: "tui rule", paths: []string{"tui/"}, review: true},
+	}
+	sharperTUI := map[string]ruleSpec{
+		"py": head["py"], "tui": {text: "tui rule, sharper", paths: []string{"tui/"}, review: true},
+	}
+	for _, tc := range []struct {
+		name      string
+		local     string
+		paths     []string
+		rulePaths []string
+		want      string
+	}{
+		{name: "text changed", local: rulesManifest(t, map[string]ruleSpec{
+			"py":  {text: "python rule, sharper", paths: []string{"*.py"}, review: true},
+			"tui": head["tui"],
+		}), want: `reviewed-rule changes (changed: "py")`},
+		{name: "paths narrowed", local: rulesManifest(t, map[string]ruleSpec{
+			"py":  {text: "python rule", paths: []string{"a.py"}, review: true},
+			"tui": head["tui"],
+		}), want: `reviewed-rule changes (changed: "py")`},
+		{name: "paths moved off the commit", local: rulesManifest(t, map[string]ruleSpec{
+			"py":  {text: "python rule", paths: []string{"*.go"}, review: true},
+			"tui": head["tui"],
+		}), want: `reviewed-rule changes (changed: "py")`},
+		{name: "rule added", local: rulesManifest(t, map[string]ruleSpec{
+			"py": head["py"], "tui": head["tui"],
+			"all": {text: "every commit", review: true},
+		}), want: `reviewed-rule changes (added: "all")`},
+		{name: "review section dropped", local: rulesManifest(t, map[string]ruleSpec{
+			"py": {text: "python rule"}, "tui": head["tui"],
+		}), want: `reviewed-rule changes (removed: "py")`},
+		{name: "rule outside the paths changed", local: rulesManifest(t, sharperTUI), want: ""},
+		{name: "a rename's source reaches the rule", local: rulesManifest(t, sharperTUI),
+			paths: []string{"core/m.go"}, rulePaths: []string{"tui/m.go", "core/m.go"},
+			want: `reviewed-rule changes (changed: "tui")`},
+		{name: "an unreadable rules section", local: `{"hooks":{},"review_addendum":{"a":{"text":"new"}},` +
+			`"rules":{"py":{"text":"python rule","review":{"paths":"*.py"}}}}`,
+			want: `review-addendum changes (added: "a")`},
+		{name: "an unreadable addendum section", local: `{"hooks":{},"review_addendum":{"a":"not an object"},` +
+			`"rules":{"py":{"text":"python rule, sharper","review":{"paths":["*.py"]}},` +
+			`"tui":{"text":"tui rule","review":{"paths":["tui/"]}}}}`,
+			want: `reviewed-rule changes (changed: "py")`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := buildRepo(t, map[string]string{manifest: rulesManifest(t, head), "a.py": "x = 1\n"})
+			gitCmd(t, repo, verb, "-qm", "init")
+			writeFileAt(t, repo, manifest, tc.local)
+			paths, rulePaths := tc.paths, tc.rulePaths
+			if paths == nil {
+				paths, rulePaths = []string{"a.py"}, []string{"a.py"}
+			}
+			got := pendingProjectAddendumNotice(repo, LoadAddendum(repo), paths, rulePaths)
+			if tc.want == "" {
+				if got != "" {
+					t.Fatalf("notice = %q, want none", got)
+				}
+				return
+			}
+			if !strings.Contains(got, tc.want) || !strings.Contains(got, "used the project entries from HEAD") {
+				t.Fatalf("notice = %q, want it to contain %s", got, tc.want)
+			}
+		})
 	}
 }

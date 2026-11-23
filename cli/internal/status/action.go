@@ -97,6 +97,16 @@ func ActionSentence(obs mine.Observation, scope *cadence.Scope, t string, artifa
 		return "the check's id now names another binding than the one this record measured, " +
 			"so its window can mix runs of both checks — `steer fix register --supersedes " +
 			"<record-id>` starts a clean window"
+	case artifact.AwaitsCommit():
+		return "the commit reviewer reads this rule's copy at HEAD, or none, which differs from the working tree — " +
+			"committing the project's steer manifest brings HEAD to the working tree's state"
+	case artifact.Changed() && artifact.Detail == cadence.NoReviewSection:
+		return "the rule is no longer a reviewed rule, so no commit reviewer reads it and this record " +
+			"gains no new review activity — restore the section, or track the rule under the tier it now has"
+	case artifact.NeedsBaseline(t) && tier.IsReviewed(t) && artifact.Detail != "":
+		return "the rule's review section differs from the one this record measured, so these " +
+			"counts describe the earlier section — `steer fix register --supersedes <record-id>` " +
+			"starts a clean window"
 	case artifact.NeedsBaseline(t):
 		return "the fix's text differs from the text this record measured, so these counts " +
 			"describe the earlier text — `steer fix register --supersedes <record-id>` " +
@@ -178,6 +188,8 @@ func artifactNoun(k tier.Kind) (noun, remove string) {
 		return "guard", "steer remove "
 	case tier.Instruction:
 		return "rule", "steer rules remove "
+	case tier.Reviewed:
+		return "reviewed rule", "steer rules remove "
 	case tier.Review:
 		return "review prompt entry", "steer commit-gate addendum remove "
 	case tier.Check:
@@ -216,8 +228,17 @@ func artifactStatePhrase(kind tier.Kind, noun, name string, a *cadence.Artifact)
 		if kind == tier.Check {
 			return "the " + name + " is " + a.Detail
 		}
+		if kind == tier.Reviewed && a.Detail != "" {
+			// A reviewed rule's detail can say it left the working tree, so it is not "in place".
+			return "the " + name + " is changed: " + a.Detail
+		}
+		if a.Detail != "" {
+			return "the " + name + " is in place, but " + a.Detail
+		}
 		return "the " + name + " is in place, but its text differs from the text this record measured"
 	case cadence.ArtifactAbsent:
+		// A project reviewed rule that HEAD still holds reads changed, with a Detail, so
+		// an absent reviewed rule is gone from both the working tree and HEAD.
 		switch {
 		case kind == tier.Check:
 			return "the " + name + " is no longer declared in " + a.Repo

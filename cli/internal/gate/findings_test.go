@@ -34,7 +34,7 @@ const reviewTwo = `
 
 func TestFindingShape(t *testing.T) {
 	reviews := []string{reviewOne, reviewTwo}
-	shape := FindingShape(reviews, []string{"pkg/store.py"})
+	shape := FindingShape(reviews, []string{"pkg/store.py"}, nil)
 
 	wantSev := map[string]int{"BLOCKING": 2, "SUBSTANTIVE": 1, "NITPICK": 1}
 	if got := shape["severities"]; !reflect.DeepEqual(got, wantSev) {
@@ -60,7 +60,7 @@ func TestFindingShape(t *testing.T) {
 		t.Errorf("finding_files = %v, want a bare basename recorded as written", files)
 	}
 
-	empty := FindingShape(nil, nil)
+	empty := FindingShape(nil, nil, nil)
 	if empty["cross_file_findings"] != 0 || len(empty["finding_files"].([]string)) != 0 {
 		t.Errorf("no findings must not raise: %v", empty)
 	}
@@ -82,7 +82,7 @@ func TestDecoratedCitationsAreNotCrossFile(t *testing.T) {
 	for _, c := range cited {
 		review := []string{"[1] SEVERITY: BLOCKING\n    FILE: " + c +
 			"\n    CLAIM: one.\n    FAILS WHEN: something.\n"}
-		if got := FindingShape(review, []string{"pkg/store.py"})["cross_file_findings"]; got != 0 {
+		if got := FindingShape(review, []string{"pkg/store.py"}, nil)["cross_file_findings"]; got != 0 {
 			t.Errorf("%q: cross_file_findings = %v, want 0 — a decorated citation of a "+
 				"CHANGED file is not a cross-file finding", c, got)
 		}
@@ -103,7 +103,7 @@ func TestMarkdownLinkCitations(t *testing.T) {
 	for _, c := range cited {
 		review := []string{"[1] SEVERITY: BLOCKING\n    FILE: " + c +
 			"\n    CLAIM: one.\n    FAILS WHEN: something.\n"}
-		shape := FindingShape(review, []string{"pkg/store.py"})
+		shape := FindingShape(review, []string{"pkg/store.py"}, nil)
 		files := shape["finding_files"].([]string)
 		if !slices.Equal(files, []string{"pkg/store.py"}) {
 			t.Errorf("%q: finding_files = %v, want [pkg/store.py] — the link TEXT is the "+
@@ -118,7 +118,7 @@ func TestMarkdownLinkCitations(t *testing.T) {
 func TestRealCrossFileSurvivesNormalisation(t *testing.T) {
 	review := []string{"[1] SEVERITY: BLOCKING\n    FILE: other/thing.py:12\n" +
 		"    CLAIM: one.\n    FAILS WHEN: something.\n"}
-	if got := FindingShape(review, []string{"pkg/store.py"})["cross_file_findings"]; got != 1 {
+	if got := FindingShape(review, []string{"pkg/store.py"}, nil)["cross_file_findings"]; got != 1 {
 		t.Errorf("cross_file_findings = %v, want 1 — normalising citations must not "+
 			"swallow the real cross-file class", got)
 	}
@@ -129,7 +129,7 @@ func TestRealCrossFileSurvivesNormalisation(t *testing.T) {
 func TestProseCitationsAreDropped(t *testing.T) {
 	review := []string{"[1] SEVERITY: BLOCKING\n    FILE: Commit message\n" +
 		"    CLAIM: one.\n    FAILS WHEN: something.\n"}
-	shape := FindingShape(review, []string{"pkg/store.py"})
+	shape := FindingShape(review, []string{"pkg/store.py"}, nil)
 	if shape["cross_file_findings"] != 0 {
 		t.Errorf("cross_file_findings = %v, want 0 — the first word names no file",
 			shape["cross_file_findings"])
@@ -144,7 +144,7 @@ func TestProseCitationsAreDropped(t *testing.T) {
 
 	makefile := []string{"[1] SEVERITY: BLOCKING\n    FILE: Makefile\n" +
 		"    CLAIM: one.\n    FAILS WHEN: something.\n"}
-	if got := FindingShape(makefile, []string{"pkg/store.py"})["cross_file_findings"]; got != 0 {
+	if got := FindingShape(makefile, []string{"pkg/store.py"}, nil)["cross_file_findings"]; got != 0 {
 		t.Errorf("cross_file_findings = %v, want 0 — an extensionless top-level file is "+
 			"dropped too; the test errs toward understating, never inflating", got)
 	}

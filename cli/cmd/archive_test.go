@@ -171,41 +171,69 @@ func TestArchiveRestoreNamesTheRecordThatMeasuredTheFix(t *testing.T) {
 	}
 }
 
-// A project review entry is read at HEAD, where a committed removal still stands after
-// the restore; the record that tracks it is named all the same.
+// A project review entry or reviewed rule is read at HEAD, where a committed removal
+// still stands after the restore: the record that tracks it is named all the same, and
+// the restore asks for the commit. A reviewed rule archives as an instruction rule, so
+// --tier reviewed finds it there.
 func TestArchiveRestoreNamesAProjectReviewRecordBeforeTheRestoreIsCommitted(t *testing.T) {
-	root := archiveRepo(t)
-	if _, err := claude.InstallAddendum(claude.ProjectScope, "nits", "naming preferences are not findings"); err != nil {
-		t.Fatal(err)
-	}
-	identity, err := checks.RepoIdentity(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	stateDir := gateConfig().StateDir
-	if err := os.MkdirAll(stateDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	record := `{"id":"review-nits","tier":"review","addendum_id":"nits","addendum_scope":"project","addendum_repo":"` +
-		identity + `","installed_ts":` + fmt.Sprint(time.Now().Add(-time.Hour).Unix()) + "}\n"
-	if err := os.WriteFile(mine.InterventionsPath(stateDir), []byte(record), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := claude.RemoveAddendum(claude.ProjectScope, "nits", ""); err != nil {
-		t.Fatal(err)
-	}
-	commit := exec.Command("git", "-c", "user.name=t", "-c", "user.email=t@t.invalid", "-c", "core.hooksPath=/dev/null",
-		"commit", "-q", "--allow-empty", "-m", "base")
-	if out, err := commit.CombinedOutput(); err != nil {
-		t.Fatalf("git: %v: %s", err, out)
-	}
+	for _, c := range []struct {
+		name, id, record, tierFlag string
+		install, remove            func() error
+	}{
+		{"review entry", "nits",
+			`{"id":"fix","tier":"review","addendum_id":"nits","addendum_scope":"project","addendum_repo":"%s","installed_ts":%d}`, "",
+			func() error {
+				_, err := claude.InstallAddendum(claude.ProjectScope, "nits", "naming preferences are not findings")
+				return err
+			},
+			func() error { _, err := claude.RemoveAddendum(claude.ProjectScope, "nits", ""); return err }},
+		{"reviewed rule", "cfg",
+			`{"id":"fix","tier":"reviewed","rule_id":"cfg","rule_scope":"project","rule_repo":"%s","rule_review_paths":["cli/"],"installed_ts":%d}`, "reviewed",
+			func() error {
+				_, err := claude.InstallRule(claude.ProjectScope, "cfg", "resolve a config path from the repo root",
+					claude.RuleOptions{Review: &claude.RuleReview{Paths: []string{"cli/"}}})
+				return err
+			},
+			func() error { _, err := claude.RemoveManagedRule(claude.ProjectScope, "cfg", ""); return err }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			root := archiveRepo(t)
+			if err := c.install(); err != nil {
+				t.Fatal(err)
+			}
+			identity, err := checks.RepoIdentity(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stateDir := gateConfig().StateDir
+			if err := os.MkdirAll(stateDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			record := fmt.Sprintf(c.record, identity, time.Now().Add(-time.Hour).Unix()) + "\n"
+			if err := os.WriteFile(mine.InterventionsPath(stateDir), []byte(record), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := c.remove(); err != nil {
+				t.Fatal(err)
+			}
+			commit := exec.Command("git", "-c", "user.name=t", "-c", "user.email=t@t.invalid", "-c", "core.hooksPath=/dev/null",
+				"commit", "-q", "--allow-empty", "-m", "base")
+			if out, err := commit.CombinedOutput(); err != nil {
+				t.Fatalf("git: %v: %s", err, out)
+			}
 
-	out, err := runArchiveCmd(t, archiveRestoreCmd, claude.ProjectScope, []string{"nits"}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(out, "review-nits measured this fix") {
-		t.Fatalf("the restore did not name the project review record:\n%s", out)
+			var flags map[string]string
+			if c.tierFlag != "" {
+				flags = map[string]string{"tier": c.tierFlag}
+			}
+			out, err := runArchiveCmd(t, archiveRestoreCmd, claude.ProjectScope, []string{c.id}, flags)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(out, "fix measured this fix") || !strings.Contains(out, "on its own, before the change") {
+				t.Fatalf("the restore did not name the project record and the commit:\n%s", out)
+			}
+		})
 	}
 }
 
@@ -343,47 +371,109 @@ func TestWorktreeRestoreAndRetireLeaveTheMainCheckoutsRecordAlone(t *testing.T) 
 	}
 }
 
-// A project review entry is read at HEAD, so after an uncommitted removal the retire
-// asks for the commit rather than naming a remove command that has nothing to remove.
+// A project review entry or reviewed rule is read at HEAD, so after an uncommitted
+// removal, or an uncommitted --no-review, the retire asks for the commit rather than
+// naming a remove command. A committed --no-review asks for no commit.
 func TestFixRetireAsksToCommitAnUncommittedReviewRemoval(t *testing.T) {
-	root := archiveRepo(t)
-	if _, err := claude.InstallAddendum(claude.ProjectScope, "nits", "naming preferences are not findings"); err != nil {
-		t.Fatal(err)
+	unreview := func() error {
+		_, err := claude.InstallRule(claude.ProjectScope, "cfg", "resolve a config path from the repo root",
+			claude.RuleOptions{ClearReview: true})
+		return err
 	}
-	for _, args := range [][]string{{"add", "-A"}, {"commit", "-q", "-m", "entry"}} {
-		c := exec.Command("git", append([]string{"-c", "user.name=t", "-c", "user.email=t@t.invalid", "-c", "core.hooksPath=/dev/null"}, args...)...)
-		if out, err := c.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v: %s", args, err, out)
-		}
-	}
-	identity, err := checks.RepoIdentity(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	stateDir := gateConfig().StateDir
-	if err := os.MkdirAll(stateDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	record := `{"id":"review-nits","tier":"review","addendum_id":"nits","addendum_scope":"project","addendum_repo":"` + identity + `","installed_ts":1}` + "\n"
-	if err := os.WriteFile(mine.InterventionsPath(stateDir), []byte(record), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := claude.RemoveAddendum(claude.ProjectScope, "nits", ""); err != nil {
-		t.Fatal(err)
-	}
+	for _, c := range []struct {
+		name, record, command string
+		install, remove       func() error
+		committed             bool
+	}{
+		{"review entry",
+			`{"id":"fix","tier":"review","addendum_id":"nits","addendum_scope":"project","addendum_repo":"%s","installed_ts":1}`,
+			"addendum remove",
+			func() error {
+				_, err := claude.InstallAddendum(claude.ProjectScope, "nits", "naming preferences are not findings")
+				return err
+			},
+			func() error { _, err := claude.RemoveAddendum(claude.ProjectScope, "nits", ""); return err }, false},
+		{"reviewed rule",
+			`{"id":"fix","tier":"reviewed","rule_id":"cfg","rule_scope":"project","rule_repo":"%s","rule_review_paths":["cli/"],"installed_ts":1}`,
+			"rules remove",
+			func() error {
+				_, err := claude.InstallRule(claude.ProjectScope, "cfg", "resolve a config path from the repo root",
+					claude.RuleOptions{Review: &claude.RuleReview{Paths: []string{"cli/"}}})
+				return err
+			},
+			func() error { _, err := claude.RemoveManagedRule(claude.ProjectScope, "cfg", ""); return err }, false},
+		{"reviewed rule unreviewed",
+			`{"id":"fix","tier":"reviewed","rule_id":"cfg","rule_scope":"project","rule_repo":"%s","rule_review_paths":["cli/"],"installed_ts":1}`,
+			"rules remove",
+			func() error {
+				_, err := claude.InstallRule(claude.ProjectScope, "cfg", "resolve a config path from the repo root",
+					claude.RuleOptions{Review: &claude.RuleReview{Paths: []string{"cli/"}}})
+				return err
+			},
+			unreview, false},
+		{"reviewed rule unreviewed and committed",
+			`{"id":"fix","tier":"reviewed","rule_id":"cfg","rule_scope":"project","rule_repo":"%s","rule_review_paths":["cli/"],"installed_ts":1}`,
+			"rules remove",
+			func() error {
+				_, err := claude.InstallRule(claude.ProjectScope, "cfg", "resolve a config path from the repo root",
+					claude.RuleOptions{Review: &claude.RuleReview{Paths: []string{"cli/"}}})
+				return err
+			},
+			unreview, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			root := archiveRepo(t)
+			if err := c.install(); err != nil {
+				t.Fatal(err)
+			}
+			commit := func() {
+				for _, args := range [][]string{{"add", "-A"}, {"commit", "-q", "-m", "entry"}} {
+					g := exec.Command("git", append([]string{"-c", "user.name=t", "-c", "user.email=t@t.invalid", "-c", "core.hooksPath=/dev/null"}, args...)...)
+					if out, err := g.CombinedOutput(); err != nil {
+						t.Fatalf("git %v: %v: %s", args, err, out)
+					}
+				}
+			}
+			commit()
+			identity, err := checks.RepoIdentity(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stateDir := gateConfig().StateDir
+			if err := os.MkdirAll(stateDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(mine.InterventionsPath(stateDir), []byte(fmt.Sprintf(c.record, identity)+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := c.remove(); err != nil {
+				t.Fatal(err)
+			}
+			if c.committed {
+				commit()
+			}
 
-	retire := find(t, interventionCmd, "retire")
-	var stderr bytes.Buffer
-	retire.SetErr(&stderr)
-	if err := retire.Flags().Set("reason", "no signal"); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = retire.Flags().Set("reason", ""); retire.SetErr(nil) })
-	if err := retire.RunE(retire, []string{"review-nits"}); err != nil {
-		t.Fatal(err)
-	}
-	if got := stderr.String(); !strings.Contains(got, "its removal is not committed yet, so commit ") || strings.Contains(got, "addendum remove") {
-		t.Fatalf("retire after an uncommitted review removal told the reader %q", got)
+			retire := find(t, interventionCmd, "retire")
+			var stderr bytes.Buffer
+			retire.SetErr(&stderr)
+			if err := retire.Flags().Set("reason", "no signal"); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = retire.Flags().Set("reason", ""); retire.SetErr(nil) })
+			if err := retire.RunE(retire, []string{"fix"}); err != nil {
+				t.Fatal(err)
+			}
+			got := stderr.String()
+			if c.committed {
+				if strings.Contains(got, "not committed yet") || !strings.Contains(got, c.command) {
+					t.Fatalf("retire after a committed removal told the reader %q", got)
+				}
+				return
+			}
+			if !strings.Contains(got, "its removal is not committed yet, so commit ") || strings.Contains(got, c.command) {
+				t.Fatalf("retire after an uncommitted removal told the reader %q", got)
+			}
+		})
 	}
 }
 

@@ -58,7 +58,7 @@ func TrialReview(ctx context.Context, cfg Config, reviewer Reviewer) (TrialResul
 	if err := os.WriteFile(filepath.Join(dir, trialFile), []byte(trialSource), 0o644); err != nil {
 		return TrialResult{}, err
 	}
-	prompt := BuildReviewPrompt(NeutralizeTags(trialMessage), NeutralizeTags(trialDiff), "", Addendum{})
+	prompt := BuildReviewPrompt(NeutralizeTags(trialMessage), NeutralizeTags(trialDiff), "", Addendum{}, nil)
 	review := reviewer.Review
 	if vr, ok := wantsView(reviewer); ok {
 		// A reviewer that reads files reads the sample through a view, as a commit

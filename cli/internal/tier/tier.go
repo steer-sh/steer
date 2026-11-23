@@ -25,6 +25,9 @@ const (
 	Instruction Kind = "instruction"
 	// Review is a change to the review prompt.
 	Review Kind = "review"
+	// Reviewed is an instruction rule the commit reviewer also checks. It lives in
+	// the rule store beside the instruction rules.
+	Reviewed Kind = "reviewed"
 )
 
 // spellings maps every accepted flag value to its rung.
@@ -36,6 +39,7 @@ var spellings = map[string]Kind{
 	"instruction": Instruction,
 	"prompt":      Review,
 	"review":      Review,
+	"reviewed":    Reviewed,
 }
 
 // names are the rungs in the reader's words. A tier is a type and never a
@@ -45,6 +49,7 @@ var names = map[Kind]string{
 	Guard:       "pre-tool guard",
 	Instruction: "instruction rule",
 	Review:      "review prompt",
+	Reviewed:    "reviewed rule",
 }
 
 // Of reads a stored or typed tier value. ok is false for a value no spelling
@@ -92,6 +97,22 @@ func IsGuard(value string) bool {
 func IsReview(value string) bool {
 	k, _ := Of(value)
 	return k == Review
+}
+
+// IsReviewed says a record's fix is a reviewed rule: written guidance that the commit
+// reviewer also checks.
+func IsReviewed(value string) bool {
+	k, _ := Of(value)
+	return k == Reviewed
+}
+
+// Archived is the tier an archive files a removed fix of k under. A reviewed rule
+// lives in the rule store, so it archives as an instruction rule.
+func Archived(k Kind) Kind {
+	if k == Reviewed {
+		return Instruction
+	}
+	return k
 }
 
 // IsInstruction says a record's fix is written guidance, whose artifact is a rule

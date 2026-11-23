@@ -466,6 +466,16 @@ func TestArtifactReadsTheBoundCheckoutFromALinkedWorktree(t *testing.T) {
 	wantState(t, ArtifactOf(review, ArtifactSources{RepoRoot: tree,
 		Addendum: &gate.Addendum{}}), ArtifactElsewhere)
 
+	// A project reviewed rule's reviewer reads it at HEAD too, so it binds the same way.
+	writeManifest(t, filepath.Join(root, ".steer", "hooks"),
+		`{"rules":{"config-path":{"text":"resolve config from the repo root","review":{"paths":["cli/"]}}}}`)
+	reviewed := ruleRecord("project")
+	reviewed["tier"] = "reviewed"
+	reviewed["rule_repo"] = bound
+	reviewed["rule_review_paths"] = []any{"cli/"}
+	wantState(t, ArtifactOf(reviewed, ArtifactSources{RepoRoot: tree,
+		Addendum: &gate.Addendum{}}), ArtifactElsewhere)
+
 	// An unrelated repository is neither the bound checkout nor a worktree of it.
 	other := t.TempDir()
 	wantState(t, ArtifactOf(rec, ArtifactSources{RepoRoot: other}), ArtifactElsewhere)

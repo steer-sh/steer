@@ -249,6 +249,7 @@ func writeObservation(w io.Writer, obs Observation) {
 	}
 	writeFixtureReceipt(w, obs.Fixtures)
 	writeCheckActivity(w, obs.Checks)
+	writeReviewActivity(w, obs.Review)
 	if obs.Coverage.ZeroEligibleAfter {
 		fmt.Fprintln(w, "    coverage: no eligible work has arrived since the split")
 	}

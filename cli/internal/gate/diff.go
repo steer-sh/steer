@@ -546,7 +546,19 @@ func splitKeepEnds(text string) []string {
 // fail every "is this file in the diff" comparison and attach changed files as
 // unchanged callers. ok=false means git could not answer — fail open.
 func ChangedFiles(cfg Config, cwd string, spec DiffSpec) (paths []string, ok bool) {
+	return changedFiles(cfg, cwd, spec)
+}
+
+// RuleMatchFiles is ChangedFiles with rename detection off, so a file moved out of a
+// directory lists its old path too. Reviewed rules match against it: a move out of a
+// rule's directory is a change to that directory.
+func RuleMatchFiles(cfg Config, cwd string, spec DiffSpec) (paths []string, ok bool) {
+	return changedFiles(cfg, cwd, spec, "--no-renames")
+}
+
+func changedFiles(cfg Config, cwd string, spec DiffSpec, extra ...string) (paths []string, ok bool) {
 	args := append(diffBaseArgs(cwd, spec), "--name-only", "--no-relative", "-z")
+	args = append(args, extra...)
 	args = append(args, pathspecTail(trackedSelector(cwd, spec), nil)...)
 	out, ok := Git(cwd, gitMedium, args...)
 	if !ok {

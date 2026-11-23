@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -265,7 +266,7 @@ func newInterventionCommands() (*interventionFlags, []*cobra.Command) {
 	r.StringVar(&v.registerKind, "kind", "defect", "defect|false-positive")
 	r.StringVar(&v.registerCorpus, "corpus", mine.CorpusReviewFindings, corpusUsage)
 	r.StringVar(&v.registerSignalKind, "signal-kind", "", signalKindUsage)
-	r.StringVar(&v.registerTier, "tier", "", "type of fix: check|guard|instruction|review (required)")
+	r.StringVar(&v.registerTier, "tier", "", "type of fix: check|guard|instruction|reviewed|review (required)")
 	r.StringVar(&v.registerTarget, "target", "", "file the fix landed in (required)")
 	r.StringVar(&v.registerHookID, "hook-id", "",
 		"steer-manifest key, matching the audit log's hook_name; required for a guard tier")
@@ -274,7 +275,7 @@ func newInterventionCommands() (*interventionFlags, []*cobra.Command) {
 	r.StringVar(&v.registerCheckID, "check-id", "",
 		"id in .steer/checks/manifest.json naming the declared check; required for a check tier")
 	r.StringVar(&v.registerRuleID, "rule-id", "",
-		"steer-manifest rules key naming the installed prose; required for an instruction tier")
+		"steer-manifest rules key naming the installed prose; required for an instruction or reviewed tier")
 	r.StringVar(&v.registerRuleScope, "rule-scope", "",
 		"store owning --rule-id: project|global (default: whichever holds it, refusing both)")
 	r.StringVar(&v.registerAddendumID, "addendum-id", "",
@@ -283,7 +284,7 @@ func newInterventionCommands() (*interventionFlags, []*cobra.Command) {
 		"store owning --addendum-id: project|global (default: whichever holds it, refusing both)")
 	r.StringVar(&v.registerNotMech, mine.NotMechanizableFlag, "",
 		"why a repository check and a pre-tool guard cannot detect this class; "+
-			"required for an instruction tier")
+			"required for an instruction or reviewed tier")
 	r.StringVar(&v.registerNote, "note", "", "free-text note")
 	r.StringVar(&v.registerProblem, "problem", "", problemUsage)
 	r.StringVar(&v.registerIntervent, "intervention", "", interventionUsage)
@@ -567,20 +568,23 @@ func printRetiredFix(w io.Writer, stateDir, id string) {
 	}
 }
 
-// removedFromWorkingTree reports a project review entry that HEAD still holds and
-// the working tree's store no longer does. A store that cannot be read reports false.
+// removedFromWorkingTree reports a project review entry or reviewed rule that HEAD
+// still holds and the working tree's store no longer does; a reviewed rule that lost
+// its review section counts as removed. A store that cannot be read reports false.
 func removedFromWorkingTree(t string, a *cadence.Artifact) bool {
-	if kind, _ := tier.Of(t); kind != tier.Review || a.Scope != claude.ProjectScope {
+	if a.Scope != claude.ProjectScope {
 		return false
 	}
-	entries, err := claude.ListAddendum(claude.ProjectScope)
-	if err != nil {
-		return false
-	}
-	for _, e := range entries {
-		if e.ID == a.ID {
+	switch kind, _ := tier.Of(t); kind {
+	case tier.Review:
+		entries, err := claude.ListAddendum(claude.ProjectScope)
+		if err != nil {
 			return false
 		}
+		return !slices.ContainsFunc(entries, func(e claude.ManagedAddendumEntry) bool { return e.ID == a.ID })
+	case tier.Reviewed:
+		// ArtifactOf already compared the working tree with HEAD.
+		return a.Detail == cadence.RemovedAtHead || a.Detail == cadence.UnreviewedAtHead
 	}
-	return true
+	return false
 }

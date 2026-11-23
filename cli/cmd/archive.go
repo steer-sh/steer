@@ -88,7 +88,7 @@ no manifest entry names.`,
 			if !ok {
 				return fmt.Errorf("unknown tier %q: use one of %s", kind, strings.Join(tier.Accepted(), ", "))
 			}
-			kind = string(k)
+			kind = string(tier.Archived(k))
 		}
 
 		scope := currentScope()
@@ -135,6 +135,8 @@ no manifest entry names.`,
 			fmt.Fprintf(out, "The commit gate reads project entries from HEAD. Commit %s on its own, before the change "+
 				"the restored entry is for: a commit that carries both is reviewed without the entry.\n", projectManifestPath())
 		}
+		// A reviewed rule archives as an instruction rule, and the result says it was one.
+		printReviewedRuleCommitNote(out, scope, s.ID, result.Reviewed)
 		printRestorePointer(out, s, s.ID, scope)
 		return nil
 	},
@@ -238,7 +240,7 @@ func printRestorePointer(out io.Writer, restored archive.Stored, id, restoreScop
 	removed := restored.RemovedAt().Unix()
 	var ids []string
 	for _, r := range records {
-		if t, ok := tier.Of(fmt.Sprint(r["tier"])); !ok || string(t) != restored.Tier || r["retired_ts"] != nil {
+		if t, ok := tier.Of(fmt.Sprint(r["tier"])); !ok || string(tier.Archived(t)) != restored.Tier || r["retired_ts"] != nil {
 			continue
 		}
 		a := cadence.ArtifactOf(r, src)

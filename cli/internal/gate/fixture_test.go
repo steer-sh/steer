@@ -83,7 +83,7 @@ func TestFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	panel := gate.NewPanel(cfg, reviewer)
-	prompt := gate.BuildReviewPrompt(gate.NeutralizeTags(string(message)), gate.NeutralizeTags(diff), contextBlock, gate.Addendum{})
+	prompt := gate.BuildReviewPrompt(gate.NeutralizeTags(string(message)), gate.NeutralizeTags(diff), contextBlock, gate.Addendum{}, nil)
 	result := panel.Run(context.Background(), prompt, repo, gate.DiffSpec{StagedOnly: true})
 
 	t.Logf("answered %d/%d, outcomes %v", result.Answered, cfg.ReviewerRuns,
@@ -92,7 +92,7 @@ func TestFixture(t *testing.T) {
 		t.Fatalf("no reviewer answered: %s", gate.ReviewerTrouble(result.Runs))
 	}
 	review, findings := gate.ComposeReview(result.Reviews)
-	t.Logf("finding_slots %d, shape %v", findings, gate.FindingShape(result.Reviews, paths))
+	t.Logf("finding_slots %d, shape %v", findings, gate.FindingShape(result.Reviews, paths, nil))
 	t.Logf("\n=== RAW REVIEWS (score by hand against key.md) ===\n%s", review)
 }
 

@@ -75,6 +75,9 @@ type Request struct {
 
 	// addendum is loaded once by Handle, and every row and prompt of the request reads it.
 	addendum Addendum
+	// rulePaths is the round's changed paths with renames split, which reviewed rules
+	// match against; prepare's callers set it.
+	rulePaths []string
 	// chainID is the chain this request reviews in: new on a first review, carried
 	// from the chain state on a retry.
 	chainID string
@@ -115,6 +118,13 @@ func (e *Engine) log(req Request, row Row) error {
 	for key, value := range req.RowExtra {
 		setDefault(row, key, value)
 	}
+	// A reviewed round's row carries its changed paths; the rules they matched are
+	// the denominator a reviewed rule's findings are read against.
+	if _, reviewed := row["changed_paths"]; reviewed && len(req.rulePaths) > 0 {
+		if applied := req.addendum.AppliedRuleIDs(req.rulePaths); len(applied) > 0 {
+			setDefault(row, "reviewed_rules_applied", applied)
+		}
+	}
 	digest := req.addendum.Digest()
 	setDefault(row, "instrument", e.cfg.InstrumentIDWith(digest))
 	setDefault(row, "instrument_fields", e.cfg.InstrumentFieldsWith(digest))
@@ -124,7 +134,9 @@ func (e *Engine) log(req Request, row Row) error {
 // prepared is the reviewable material for one round.
 type prepared struct {
 	paths []string
-	diff  string
+	// rulePaths is paths with renames split, for reviewed rules.
+	rulePaths []string
+	diff      string
 	// notice is agent-facing text that must survive whatever this round rules. It
 	// carries what the reviewers CANNOT know: which tree they were handed.
 	notice string
@@ -142,7 +154,13 @@ func (e *Engine) prepare(req Request, firing int, d *DiffResult) (prepared, stri
 	if !ok {
 		return prepared{}, "norepo", nil
 	}
-	if IsProseOnly(paths) {
+	rulePaths := paths
+	if len(req.addendum.Rules) > 0 {
+		if split, ok := RuleMatchFiles(e.cfg, req.Repo, req.Spec); ok {
+			rulePaths = split
+		}
+	}
+	if IsProseOnly(paths) && len(req.addendum.RulesFor(rulePaths)) == 0 {
 		err := e.log(req, Row{"ts": time.Now().Unix(), "phase": "skip-prose",
 			"files": len(paths), "firing": firing})
 		return prepared{}, "prose", err
@@ -167,7 +185,7 @@ func (e *Engine) prepare(req Request, firing int, d *DiffResult) (prepared, stri
 			"files": len(paths), "chars": len(d.Raw), "firing": firing})
 		return prepared{}, "empty", err
 	}
-	return prepared{paths: paths, diff: d.Text, raw: d.Raw}, "", nil
+	return prepared{paths: paths, rulePaths: rulePaths, diff: d.Text, raw: d.Raw}, "", nil
 }
 
 // review runs the panel over a prepared round and keeps the round's live review file
@@ -187,7 +205,7 @@ func (e *Engine) review(ctx context.Context, req Request, p prepared, firing int
 		}
 	}
 	prompt := BuildReviewPrompt(
-		NeutralizeTags(req.Message), NeutralizeTags(p.diff), contextBlock, req.addendum)
+		NeutralizeTags(req.Message), NeutralizeTags(p.diff), contextBlock, req.addendum, p.rulePaths)
 	result := e.panel.run(ctx, prompt, req.Repo, req.Spec, live.runEnded)
 	result.Elapsed = time.Since(start)
 	result.live = live
@@ -225,6 +243,7 @@ func (e *Engine) handle(ctx context.Context, req Request) Decision {
 
 func (e *Engine) handleFirst(ctx context.Context, req Request, chain *Chain) Decision {
 	p, status, err := e.prepare(req, 1, nil)
+	req.rulePaths = p.rulePaths
 	if status != "" {
 		return e.skipped(req, status, err)
 	}
@@ -331,6 +350,7 @@ func (e *Engine) handleRetry(ctx context.Context, req Request, chain *Chain, sta
 
 	next := firing + 1
 	p, status, err := e.prepare(req, next, &after)
+	req.rulePaths = p.rulePaths
 	p.notice = notice
 	if err != nil && logErr == nil {
 		logErr = err
@@ -531,7 +551,7 @@ func (e *Engine) reviewCommit(ctx context.Context, req Request, chain *Chain, p 
 			"reviews_off_format": OffFormatReviews(result.Reviews)},
 		e.report(result),
 		e.ledger.SaveDiff(req.SessionID, firing, p.diff),
-		FindingShape(result.Reviews, p.paths)))
+		FindingShape(result.Reviews, p.paths, req.addendum.AppliedRuleIDs(p.rulePaths))))
 	if err == nil {
 		err = saveErr
 	}
@@ -551,7 +571,7 @@ func (e *Engine) reviewCommit(ctx context.Context, req Request, chain *Chain, p 
 	return Decision{
 		Kind: Deny,
 		Reason: p.notice + BuildDeny(result.Answered, review, firing, e.cfg.MaxFirings, req.RerunNote, CommitSubject(req.Message), req.chainID, e.cfg.ReviewerLabel()) +
-			separated(pendingProjectAddendumNotice(req.Repo, req.addendum, p.paths)),
+			separated(pendingProjectAddendumNotice(req.Repo, req.addendum, p.paths, p.rulePaths)),
 		SystemMessage: note,
 		LedgerError:   err,
 	}, 0
@@ -570,7 +590,7 @@ func (e *Engine) nitpickRound(req Request, chain *Chain, p prepared, firing int,
 			"reviews_off_format": OffFormatReviews(result.Reviews)},
 		e.report(result),
 		e.ledger.SaveDiff(req.SessionID, firing, p.diff),
-		FindingShape(result.Reviews, p.paths)))
+		FindingShape(result.Reviews, p.paths, req.addendum.AppliedRuleIDs(p.rulePaths))))
 	// No cleared record under the stale-index notice, as on the clean path.
 	if p.notice == "" {
 		if cerr := chain.RememberCleared(p.raw, req.Channel, ClearedNitpick); cerr != nil && err == nil {
@@ -651,7 +671,7 @@ func (e *Engine) terminalReview(ctx context.Context, req Request, chain *Chain, 
 	}
 
 	review, findings := ComposeReview(result.Reviews)
-	shape := FindingShape(result.Reviews, p.paths)
+	shape := FindingShape(result.Reviews, p.paths, req.addendum.AppliedRuleIDs(p.rulePaths))
 	row["finding_slots"] = findings
 	row["severity_lines_loose"] = LooseFindingCount(result.Reviews)
 	row["reviews_off_format"] = OffFormatReviews(result.Reviews)

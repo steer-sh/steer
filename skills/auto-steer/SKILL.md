@@ -2,7 +2,7 @@
 name: auto-steer
 description: Runs the steer-report pass without questions — audits the fixes steer installed, mines session and review history for recurring problems, then installs, repairs or removes every fix that clears a stated bar, and ends with one report of what changed, what was held back and what is left to do. Use when the user wants steer to act on its evidence without deciding each step ("auto steer", "just fix what steer finds") and will undo what they do not want.
 user-invocable: true
-compatibility: Requires the steer CLI on PATH or bundled under scripts/, and the steer-report and steer skills of the same plugin, whose files it reads. Reads what steer-report reads. Changes guards, instruction rules and review prompt entries in the global scope and in the project scope of each repository its evidence names, and repository checks in a repository already adopted. Never commits.
+compatibility: Requires the steer CLI on PATH or bundled under scripts/, and the steer-report and steer skills of the same plugin, whose files it reads. Reads what steer-report reads. Changes guards, instruction rules, reviewed rules and review prompt entries in the global scope and in the project scope of each repository its evidence names, and repository checks in a repository already adopted. Never commits.
 allowed-tools: Bash(steer *), Read, Edit, Write
 ---
 
@@ -134,6 +134,11 @@ drop whatever the user answered.
 - **Instruction rule.** The problem recurs across sessions, no instruction already
   says it, and you can write the `--not-mechanizable` sentence truthfully: no
   repository check and no guard can detect it.
+- **Reviewed rule.** It meets the instruction rule's bar, and both routing
+  questions answer yes from the evidence: the violation shows in a recorded diff or
+  commit message, and it caused rework a blocked commit would have saved. Its paths
+  cover the files those diffs changed and no wider than their directories. A rule
+  that would reach every commit is held.
 - **Review prompt entry.** A false-positive finding recurs across review sequences,
   each member holds when re-read against the code at its commit, and no existing
   entry says it.
@@ -225,8 +230,8 @@ changes: the repositories it acted in, and each one it held with its reason. An
 Otherwise write no coverage line.
 
 1. **What I changed.** One item per action. Each carries:
-   - what changed, exactly: an instruction rule or review prompt entry quoted in
-     full; for a guard or check, its rule, its scope and its files; for a repair,
+   - what changed, exactly: an instruction rule, reviewed rule (with its paths) or
+     review prompt entry quoted in full; for a guard or check, its rule, its scope and its files; for a repair,
      the lines before and after; for a removal, the name and the reason stored.
      For the removal of a project-scope fix committed in the repository, add that
      the committed removal changes enforcement for everyone who works there, while
@@ -274,7 +279,8 @@ Otherwise write no coverage line.
    guard runner in `/hooks` when `register` printed that line; run `/reload` in Pi,
    after `/trust` where Pi declined the project, when `register` printed a line
    that starts "Pi runs no"; commit the guard
-   manifest before a project review prompt entry reaches the reviewer; adopt a
+   manifest before a project review prompt entry or reviewed rule reaches the
+   reviewer; adopt a
    repository for checks.
 
 A report, to copy for shape; its fixes are invented:

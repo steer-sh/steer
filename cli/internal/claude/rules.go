@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/steer-sh/steer-cli/internal/harness"
+	"github.com/steer-sh/steer-cli/internal/reviewpath"
 	"github.com/steer-sh/steer-cli/internal/tier"
 )
 
@@ -23,6 +24,8 @@ type InstallManagedRuleResult struct {
 	ID           string
 	Overwritten  bool
 	PreviousText string
+	// Review is the rule's review section after the install; a reviewed rule has one.
+	Review *RuleReview
 }
 
 // ErrRuleNotFound is a removal of a rule the store does not name. A caller
@@ -56,6 +59,22 @@ func refuseMultilineRule(text string) error {
 // registers no master either: ListIndividualHooks reads the store's guard files,
 // so SyncTargets deregisters on its own.
 func InstallManagedRule(scope, id, text string, targets ...harness.Registrar) (*InstallManagedRuleResult, error) {
+	return InstallRule(scope, id, text, RuleOptions{}, targets...)
+}
+
+// RuleOptions sets a rule's review section. A zero value keeps the section a reworded
+// rule already has.
+type RuleOptions struct {
+	// Review makes the rule a reviewed rule with this section.
+	Review *RuleReview
+	// ClearReview makes a reviewed rule an instruction rule again.
+	ClearReview bool
+}
+
+// InstallRule is InstallManagedRule with the rule's review section. A project reviewed
+// rule must name its paths, because a project rule with none would reach the reviewer
+// on every commit; a global rule spans repositories and may name none.
+func InstallRule(scope, id, text string, opts RuleOptions, targets ...harness.Registrar) (*InstallManagedRuleResult, error) {
 	scope = strings.ToLower(strings.TrimSpace(scope))
 	if err := ValidateScope(scope); err != nil {
 		return nil, err
@@ -107,6 +126,15 @@ func InstallManagedRule(scope, id, text string, targets ...harness.Registrar) (*
 	}
 
 	existing, overwritten := manifest.Rules[ruleID]
+	review := existing.Review
+	switch {
+	case opts.ClearReview:
+		review = nil
+	case opts.Review != nil:
+		if review, err = normalizeReview(scope, opts.Review); err != nil {
+			return nil, err
+		}
+	}
 	now := time.Now().Format("2006-01-02")
 	created := existing.Created
 	if created == "" {
@@ -118,6 +146,7 @@ func InstallManagedRule(scope, id, text string, targets ...harness.Registrar) (*
 		RuleHash: hash,
 		Created:  created,
 		Updated:  now,
+		Review:   review,
 	}
 	if err := SetRuleEntry(scope, ruleID, entry); err != nil {
 		return nil, err
@@ -131,7 +160,31 @@ func InstallManagedRule(scope, id, text string, targets ...harness.Registrar) (*
 		ID:           ruleID,
 		Overwritten:  overwritten,
 		PreviousText: existing.Text,
+		Review:       review,
 	}, nil
+}
+
+// normalizeReview validates a review section's paths and returns them trimmed, sorted
+// and without duplicates.
+func normalizeReview(scope string, r *RuleReview) (*RuleReview, error) {
+	seen := map[string]bool{}
+	var paths []string
+	for _, p := range r.Paths {
+		p = strings.TrimSpace(p)
+		if err := reviewpath.Validate(p); err != nil {
+			return nil, err
+		}
+		if !seen[p] {
+			seen[p] = true
+			paths = append(paths, p)
+		}
+	}
+	if len(paths) == 0 && scope == ProjectScope {
+		return nil, fmt.Errorf("a project reviewed rule needs --review-path: the reviewer gets " +
+			"the rule only for a commit that changes a path it names, such as cli/internal/tui/ or *.go")
+	}
+	sort.Strings(paths)
+	return &RuleReview{Paths: paths}, nil
 }
 
 // RemoveManagedRule deletes one instruction rule and re-derives every target's

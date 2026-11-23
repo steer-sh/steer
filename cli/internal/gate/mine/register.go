@@ -130,9 +130,9 @@ func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 	// An instruction record names the rule its digest was taken over. Without it the
 	// record names a document and no text inside it, and nothing later can say which
 	// prose the decision was made about.
-	if tier.IsInstruction(o.Tier) {
+	if tier.IsInstruction(o.Tier) || tier.IsReviewed(o.Tier) {
 		if o.RuleID == "" {
-			return fmt.Errorf("an instruction tier needs --rule-id (the steer-manifest rules " +
+			return fmt.Errorf("an instruction or reviewed tier needs --rule-id (the steer-manifest rules " +
 				"key). Install the rule first with `steer rules add <id> --rule \"<text>\"`")
 		}
 		// The instruction rung is the last one to reach for, so the record states why
@@ -142,6 +142,12 @@ func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 			o.Class, ""); err != nil {
 			return err
 		}
+	}
+	// A reviewed rule changes what the reviewer raises toward more findings, so it fixes
+	// a defect class; a reviewer false positive goes to the review prompt.
+	if tier.IsReviewed(o.Tier) && o.Kind == "false-positive" {
+		return fmt.Errorf("a reviewed tier fixes a defect the reviewer should raise; " +
+			"a reviewer false positive goes to the review tier")
 	}
 	// A review record names the addendum entry it installed, and only a reviewer false
 	// positive routes to the review prompt.
@@ -219,6 +225,17 @@ func Register(w io.Writer, stateDir string, o RegisterOpts) error {
 		if facts == nil {
 			return fmt.Errorf("no rule %s in the steer store. Install it first with "+
 				"`steer rules add %s --rule \"<text>\"`", pyRepr(o.RuleID), o.RuleID)
+		}
+		paths, reviewed := facts["rule_review_paths"].([]string)
+		if tier.IsReviewed(o.Tier) && !reviewed {
+			return fmt.Errorf("rule %s has no review section, so the reviewer never reads it. "+
+				"Make it a reviewed rule with `steer rules add %s --rule \"<text>\" --review-path <path>`",
+				pyRepr(o.RuleID), o.RuleID)
+		}
+		if tier.IsReviewed(o.Tier) && facts["rule_scope"] == steerpath.ProjectScope {
+			if err := RequireReviewedRuleAtHead(o.RuleID, str(facts["rule"]), paths); err != nil {
+				return err
+			}
 		}
 		for k, v := range facts {
 			record[k] = v

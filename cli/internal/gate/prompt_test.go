@@ -43,7 +43,7 @@ func TestInstrumentID(t *testing.T) {
 // Every placeholder the templates carry must be filled, or a literal `{firing}`
 // reaches the agent.
 func TestNoPlaceholderSurvivesFill(t *testing.T) {
-	prompt := BuildReviewPrompt("msg", "diff", "ctx", Addendum{})
+	prompt := BuildReviewPrompt("msg", "diff", "ctx", Addendum{}, nil)
 	deny := BuildDeny(3, "reviews", 2, 4, rerunNoteText, "feat: a subject", "", "a reviewer")
 	capped := BuildCap(3, "reviews", 5, 4, "feat: a subject", "", "a reviewer")
 	nitpick := BuildNitpick(3, "reviews", 2, "feat: a subject", "", "a reviewer")

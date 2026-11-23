@@ -82,8 +82,9 @@ func TestRemovalPhraseNamesEachTiersRemovalCommand(t *testing.T) {
 	}
 }
 
-// Each artifact state reads as its own sentence, and a project review entry that
-// left HEAD says the commit gate no longer reads it.
+// Each artifact state reads as its own sentence, a project review entry that left HEAD
+// says the commit gate no longer reads it, and a changed reviewed rule is not called
+// "in place", since its detail can say it left the working tree.
 func TestArtifactPhraseNamesTheState(t *testing.T) {
 	cases := []struct {
 		tier string
@@ -105,6 +106,9 @@ func TestArtifactPhraseNamesTheState(t *testing.T) {
 		{"guard", &cadence.Artifact{ID: "g", Scope: "global", State: cadence.ArtifactPresent, Removed: "2026-02-01T00:00:00.000000000Z"},
 			"the guard g is in place as recorded; the archive records a removal of it at 2026-02-01T00:00:00.000000000Z, " +
 				"after this record was registered, so check whether the guard was out of place during this record's window"},
+		{"reviewed", &cadence.Artifact{ID: "cfg", Scope: "project", State: cadence.ArtifactChanged,
+			Detail: "it is removed from the working tree"},
+			"the reviewed rule cfg is changed: it is removed from the working tree"},
 		{"check", nil, ""},
 	}
 	for _, c := range cases {
@@ -170,5 +174,33 @@ func TestRemovalPhraseNamesNoCommandForARetargetedCheck(t *testing.T) {
 	present := &cadence.Artifact{ID: "no-count", State: cadence.ArtifactPresent, Detail: cadence.DetectorMoved}
 	if got := RemovalPhrase("check", present); !strings.Contains(got, "steer check remove no-count") {
 		t.Fatalf("RemovalPhrase = %q; want the remove command for the check the record follows", got)
+	}
+}
+
+// A changed reviewed rule's sentence follows what changed: a working tree that HEAD
+// does not match asks for the commit, a removed review section names no re-baseline
+// (registration refuses it), a changed review section names the section, and changed
+// text keeps the text sentence.
+func TestAChangedReviewedRuleNamesWhatChanged(t *testing.T) {
+	scope := &cadence.Scope{Version: 1, All: true}
+	obs := actionObs(false, 10)
+	for _, c := range []struct {
+		detail string
+		want   string
+		not    string
+	}{
+		{cadence.DiffersAtHead, "brings HEAD to the working tree's state", "--supersedes"},
+		{cadence.MissingAtHead, "brings HEAD to the working tree's state", "--supersedes"},
+		{cadence.RemovedAtHead, "brings HEAD to the working tree's state", "read these counts"},
+		{cadence.NoReviewSection, "is no longer a reviewed rule", "--supersedes"},
+		{"its review paths are a/, not the b/ this record measured", "review section differs", "text differs"},
+		{cadence.AheadOfHead, "brings HEAD to the working tree's state", "--supersedes"},
+		{"", "text differs", "review section"},
+	} {
+		a := &cadence.Artifact{ID: "cfg", Scope: "project", State: cadence.ArtifactChanged, Detail: c.detail}
+		got := ActionSentence(obs, scope, "reviewed", a)
+		if !strings.Contains(got, c.want) || strings.Contains(got, c.not) {
+			t.Errorf("detail %q: sentence = %q, want %q without %q", c.detail, got, c.want, c.not)
+		}
 	}
 }
