@@ -81,12 +81,10 @@ type diagnosticIssue struct {
 func (m *Model) diagnosticIssues() []diagnosticIssue {
 	out := m.checkIssues()
 	if path := m.snap.LegacyTeamLockfile; path != "" {
+		fix := status.LegacyLockfileFix
 		out = append(out, diagnosticIssue{
-			headline: "Steer no longer installs guards from " + path,
-			detail: "A clone runs only the guards committed in the repository, through the runner " +
-				"Steer builds from them, and the file can hold guards, or versions of them, that those " +
-				"lack. Register each guard you want in the project, commit the guards with the rebuilt " +
-				"runner, then delete the file.",
+			headline: status.LegacyLockfileTitle(path),
+			detail:   status.LegacyLockfileWhy + " " + strings.ToUpper(fix[:1]) + fix[1:] + ".",
 		})
 	}
 	masters := m.snap.Posture.Masters
@@ -95,19 +93,36 @@ func (m *Model) diagnosticIssues() []diagnosticIssue {
 			continue
 		}
 		agent := status.HarnessLabel(master.Harness)
+		where := "The guard runner for " + agent + " in " + scopeReach(master.Scope)
+		repair := status.StaleRepairOf(m.snap, master.Scope)
+		if repair.Kind == status.StaleUnjudged {
+			out = append(out, diagnosticIssue{
+				headline: where + " differs from this dashboard's build",
+				detail: "This dashboard runs an older build than the hooks, so it cannot judge what " +
+					"they run, and a rebuild from it writes an older runtime than the hooks' build. Read it " +
+					"through the executable the hooks run: " + repair.Fix,
+			})
+			continue
+		}
 		detail := "It was written by another Steer build than this dashboard's, or carries " +
 			"no version at all, so it does not run this build's guard runtime."
-		if master.Scope == m.scope {
+		switch {
+		case repair.Kind == status.StaleInstall && repair.Plugin:
+			detail += " A plugin copy runs a newer release than the hooks, and its install " +
+				"rebuilds the runner too; run: " + repair.Fix
+		case repair.Kind == status.StaleInstall &&
+			m.snap.Posture.Builds.CLIToHooks() != status.BuildNewer:
+			detail += " No version order relates this build to the hooks' build. Install only if " +
+				"this build should replace theirs, which rebuilds the runner too; run: " + repair.Fix
+		case repair.Kind == status.StaleInstall:
+			detail += " The install rebuilds it as well as the executable the hooks run; run: " + repair.Fix
+		case master.Scope == m.scope:
 			detail += " Open Fixes and run the maintenance action under Maintenance needed."
-		} else {
+		default:
 			detail += " The Fixes action rebuilds this dashboard's scope only; for this one, run: " +
-				status.RebuildRepair(masters, master.Scope)
+				repair.Fix
 		}
-		out = append(out, diagnosticIssue{
-			headline: "The guard runner for " + agent + " in " + scopeReach(master.Scope) +
-				" is out of date",
-			detail: detail,
-		})
+		out = append(out, diagnosticIssue{headline: where + " is out of date", detail: detail})
 	}
 	for _, master := range m.snap.Posture.Masters {
 		if !master.Detached() || master.Unarmed() {
@@ -208,33 +223,23 @@ func (m *Model) diagnosticIssues() []diagnosticIssue {
 	return out
 }
 
-// checkIssues are the open steps in this repository's check tier. A stale proof
-// is not among them: a stale check keeps running, and its label reports what
-// moved rather than asking for a repair.
+// checkIssues are the open steps in this repository's check tier. A repository
+// this machine has not adopted asks for none: adoption trusts its committers, so
+// declining it is a choice, and Fixes names the state on the repository row. A
+// stale proof is not among them either: a stale check keeps running, and its
+// label reports what moved rather than asking for a repair.
 func (m *Model) checkIssues() []diagnosticIssue {
 	c := m.snap.Checks
-	if c.Repo == "" {
+	if c.Repo == "" || !c.Adopted {
 		return nil
 	}
 	var out []diagnosticIssue
-	registered := false
-	for _, a := range c.Runner {
-		registered = registered || a.Registered
-	}
-	if c.Manifest && !registered {
+	if !c.Armed() {
 		out = append(out, diagnosticIssue{
 			headline: "No agent runs this repository's checks at the end of a turn",
 			detail: "The checks declared here run only when one is registered to run them. " +
 				"Open Arming and press enter on a check runner row, or run: " +
 				"steer check install --harness claude-code|codex|pi",
-		})
-	}
-	if c.Manifest && !c.Adopted {
-		out = append(out, diagnosticIssue{
-			headline: "This machine has not authorized this repository's checks",
-			detail: "Authorization is machine-local, so a clone carries none of it, and " +
-				"nothing here runs until it is given. Open Fixes and press enter on the " +
-				"repository row, or run: steer check adopt",
 		})
 	}
 	for _, a := range c.Runner {
@@ -252,7 +257,7 @@ func (m *Model) checkIssues() []diagnosticIssue {
 			continue
 		}
 		out = append(out, diagnosticIssue{
-			headline: "The check " + row.ID + " was never tested on this machine",
+			headline: "The check " + row.ID + " has no passing validation on this machine",
 			detail: "Nothing here shows it fails on the problem it names, so a passing run " +
 				"proves nothing about it. Open Fixes and press enter on its row, or run: " +
 				"steer check test " + row.ID,

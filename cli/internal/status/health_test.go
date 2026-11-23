@@ -73,9 +73,16 @@ func TestHealthVerdictPerReading(t *testing.T) {
 		"gate unconfirmed": {func(s *SystemStatus) {
 			s.Posture.CommitGate[0] = ScopeArming{Harness: "pi", Scope: "global", Registered: true, Effective: true, Resolvable: ResolveResolvable, Trust: TrustUnknown}
 		}, availableProbe(), VerdictUnchecked, "cannot be verified"},
-		"store unread":   {func(s *SystemStatus) { s.StoreProblems = []StoreProblem{{Scope: "project", Error: "bad"}} }, availableProbe(), VerdictAttention, "guard list"},
-		"checks unread":  {func(s *SystemStatus) { s.Checks.Error = "bad" }, availableProbe(), VerdictUnchecked, "checks"},
-		"checks unrun":   {func(s *SystemStatus) { s.Checks.Adopted = true }, availableProbe(), VerdictAttention, "no harness runs them"},
+		"store unread":  {func(s *SystemStatus) { s.StoreProblems = []StoreProblem{{Scope: "project", Error: "bad"}} }, availableProbe(), VerdictAttention, "guard list"},
+		"checks unread": {func(s *SystemStatus) { s.Checks.Error = "bad" }, availableProbe(), VerdictUnchecked, "checks"},
+		"checks unrun":  {func(s *SystemStatus) { s.Checks.Adopted = true }, availableProbe(), VerdictAttention, "no harness runs them"},
+		"check untested": {func(s *SystemStatus) {
+			s.Checks = CheckTier{Adopted: true, Runner: []ScopeArming{{Harness: "codex", Scope: "project", Registered: true}},
+				Checks: []CheckRow{{ID: "fmt", Validation: ValidationNone}}}
+		}, availableProbe(), VerdictAttention, "fmt has no passing validation"},
+		"registered Pi detached": {func(s *SystemStatus) {
+			s.Posture.Masters[0] = MasterRuntime{Harness: "pi", Scope: "global", Path: "/elsewhere", State: MasterDetached}
+		}, availableProbe(), VerdictAttention, "Pi global runs none"},
 		"no interpreter": {func(s *SystemStatus) { s.Posture.GuardInterpreter = InterpreterReading{Command: GuardInterpreter} }, availableProbe(), VerdictAttention, "not on this PATH"},
 		"hooks behind": {func(s *SystemStatus) {
 			s.Posture.Plugins[0] = PluginCopy{Harness: "codex", Path: "/p", State: PluginDifferentBinary, Version: "0.1.5", Commit: "b"}

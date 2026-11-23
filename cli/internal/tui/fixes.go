@@ -232,12 +232,11 @@ func (m *Model) checkRows() []fixRow {
 		return nil
 	}
 	rows := []fixRow{{kind: fixRepo, label: "this repository", description: c.Repo,
-		state:     status.CheckAdoptionPhrase(c) + "; " + lastRunPhrase(c.LatestRun),
-		attention: c.Manifest && !c.Adopted}}
+		state: status.CheckAdoptionPhrase(c) + "; " + lastRunPhrase(c.LatestRun)}}
 	for _, row := range c.Checks {
 		rows = append(rows, fixRow{kind: fixCheck, name: row.ID, description: row.Binding,
 			state:     status.CheckStatePhrase(row),
-			attention: row.Validation == status.ValidationNone,
+			attention: c.Adopted && row.Validation == status.ValidationNone,
 			scope:     claude.ProjectScope, removable: true})
 	}
 	return rows
@@ -257,9 +256,11 @@ func lastRunPhrase(r *status.CheckRun) string {
 func (m *Model) guardRepairs() []fixRow {
 	var rows []fixRow
 	// A rebuild writes the runner in the dashboard's scope, so a stale runner in
-	// the other scope gets no row here; Diagnostics carries its command instead.
+	// the other scope gets no row here, nor one whose repair is not a rebuild from
+	// this build; Diagnostics carries its command instead.
 	for _, master := range m.snap.Posture.Masters {
-		if master.Scope != m.scope || !master.Stale() {
+		if master.Scope != m.scope || !master.Stale() ||
+			status.StaleRepairOf(m.snap, master.Scope).Kind != status.StaleRebuild {
 			continue
 		}
 		agent := status.HarnessLabel(master.Harness)
