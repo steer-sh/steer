@@ -167,26 +167,10 @@ const NoReviewSection = "it is no longer a reviewed rule, so the commit reviewer
 // for other commits, or for none. On a rule whose text already changed it records only
 // a lost section, which no re-baseline can measure.
 func compareReviewSection(r mine.Record, src ArtifactSources, a *Artifact) {
-	probe := *a
-	dir, placed := storeDir(r, src.RepoRoot, "rule", &probe)
-	if !placed {
+	_, review, ok := diskRule(r, src, a)
+	if !ok {
 		return
 	}
-	data, err := os.ReadFile(filepath.Join(dir, hookstore.ManifestName))
-	if err != nil {
-		return
-	}
-	var manifest struct {
-		Rules map[string]struct {
-			Review *struct {
-				Paths []string `json:"paths"`
-			} `json:"review"`
-		} `json:"rules"`
-	}
-	if json.Unmarshal(data, &manifest) != nil {
-		return
-	}
-	review := manifest.Rules[a.ID].Review
 	if review == nil {
 		a.State, a.Detail = ArtifactChanged, NoReviewSection
 		return
@@ -202,6 +186,37 @@ func compareReviewSection(r mine.Record, src ArtifactSources, a *Artifact) {
 	}
 }
 
+// reviewSection is a manifest rule's review section.
+type reviewSection struct {
+	Paths []string `json:"paths"`
+}
+
+// diskRule reads a's rule from its store on disk: its whitespace-collapsed text and
+// its review section, nil when it has none. ok is false when the store cannot be
+// placed or read.
+func diskRule(r mine.Record, src ArtifactSources, a *Artifact) (string, *reviewSection, bool) {
+	probe := *a
+	dir, placed := storeDir(r, src.RepoRoot, "rule", &probe)
+	if !placed {
+		return "", nil, false
+	}
+	data, err := os.ReadFile(filepath.Join(dir, hookstore.ManifestName))
+	if err != nil {
+		return "", nil, false
+	}
+	var manifest struct {
+		Rules map[string]struct {
+			Text   string         `json:"text"`
+			Review *reviewSection `json:"review"`
+		} `json:"rules"`
+	}
+	if json.Unmarshal(data, &manifest) != nil {
+		return "", nil, false
+	}
+	rule := manifest.Rules[a.ID]
+	return strings.Join(strings.Fields(rule.Text), " "), rule.Review, true
+}
+
 // The Details of a project reviewed rule whose working-tree copy and HEAD copy
 // differ; committing the store's manifest resolves each.
 const (
@@ -213,6 +228,8 @@ const (
 		"until the store's manifest is committed"
 	DiffersAtHead = "the copy at HEAD, which the commit reviewer reads, differs from the one this " +
 		"record measured, until the working tree's copy is committed"
+	AheadOfHead = "the working tree's copy differs from the one this record measured, but HEAD, which " +
+		"the commit reviewer reads, still holds that one until the change is committed"
 )
 
 // AwaitsCommit reports a changed project reviewed rule whose working tree and HEAD
@@ -222,7 +239,7 @@ func (a *Artifact) AwaitsCommit() bool {
 		return false
 	}
 	switch a.Detail {
-	case RemovedAtHead, UnreviewedAtHead, MissingAtHead, DiffersAtHead:
+	case RemovedAtHead, UnreviewedAtHead, MissingAtHead, DiffersAtHead, AheadOfHead:
 		return true
 	}
 	return false
@@ -249,14 +266,36 @@ func compareCommittedRule(r mine.Record, src ArtifactSources, a *Artifact) {
 		}
 	}
 	unreviewed := a.State == ArtifactChanged && a.Detail == NoReviewSection
-	if a.State == ArtifactChanged && !unreviewed {
-		return
-	}
 	var committed *gate.ReviewedRule
 	for i, rule := range src.Addendum.Rules {
 		if rule.Scope == steerpath.ProjectScope && rule.ID == a.ID {
 			committed = &src.Addendum.Rules[i]
 		}
+	}
+	measuredAtHead := committed != nil &&
+		(str(r["rule_hash"]) == "" || digest(committed.Text) == str(r["rule_hash"])) &&
+		strings.Join(committed.Paths, "\x00") == strings.Join(strList(r["rule_review_paths"]), "\x00")
+	if a.State == ArtifactChanged && !unreviewed {
+		// The working tree changed the rule. A HEAD that holds the working tree's copy
+		// has the change committed; one that holds neither copy differs from both.
+		text, review, ok := diskRule(r, src, a)
+		switch {
+		case !ok || review == nil:
+		case text == "":
+			// The gate drops a rule with no text, as it drops one with no review section.
+			a.Detail = NoReviewSection
+			if committed != nil {
+				a.Detail = UnreviewedAtHead
+			}
+		case committed == nil:
+			a.Detail = MissingAtHead
+		case committed.Text == text && strings.Join(committed.Paths, "\x00") == strings.Join(review.Paths, "\x00"):
+		case measuredAtHead:
+			a.Detail = AheadOfHead
+		default:
+			a.Detail = DiffersAtHead
+		}
+		return
 	}
 	switch {
 	case a.State == ArtifactAbsent && committed != nil:
@@ -269,8 +308,7 @@ func compareCommittedRule(r mine.Record, src ArtifactSources, a *Artifact) {
 	case committed == nil:
 		a.State = ArtifactChanged
 		a.Detail = MissingAtHead
-	case digest(committed.Text) != str(r["rule_hash"]) && str(r["rule_hash"]) != "",
-		strings.Join(committed.Paths, "\x00") != strings.Join(strList(r["rule_review_paths"]), "\x00"):
+	case !measuredAtHead:
 		a.State = ArtifactChanged
 		a.Detail = DiffersAtHead
 	}

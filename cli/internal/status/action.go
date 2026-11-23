@@ -10,7 +10,6 @@ import (
 
 	"github.com/steer-sh/steer-cli/internal/cadence"
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
-	"github.com/steer-sh/steer-cli/internal/steerpath"
 	"github.com/steer-sh/steer-cli/internal/tier"
 )
 
@@ -102,18 +101,12 @@ func ActionSentence(obs mine.Observation, scope *cadence.Scope, t string, artifa
 		return "the commit reviewer reads this rule's copy at HEAD, or none, which differs from the working tree — " +
 			"committing the project's steer manifest brings HEAD to the working tree's state"
 	case artifact.Changed() && artifact.Detail == cadence.NoReviewSection:
-		return "the rule lost its review section, so no commit reviewer reads it and this record " +
+		return "the rule is no longer a reviewed rule, so no commit reviewer reads it and this record " +
 			"gains no new review activity — restore the section, or track the rule under the tier it now has"
 	case artifact.NeedsBaseline(t) && tier.IsReviewed(t) && artifact.Detail != "":
-		// compareCommittedRule does not read HEAD for a changed section, so a project
-		// rule's reviewer may still read the old one.
-		when := ""
-		if artifact.Scope == steerpath.ProjectScope {
-			when = " once the project's steer manifest is committed"
-		}
 		return "the rule's review section differs from the one this record measured, so these " +
 			"counts describe the earlier section — `steer fix register --supersedes <record-id>` " +
-			"starts a clean window" + when
+			"starts a clean window"
 	case artifact.NeedsBaseline(t):
 		return "the fix's text differs from the text this record measured, so these counts " +
 			"describe the earlier text — `steer fix register --supersedes <record-id>` " +

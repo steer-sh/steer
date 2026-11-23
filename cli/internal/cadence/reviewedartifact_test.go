@@ -41,7 +41,9 @@ func TestArtifactReadsAReviewedRuleAgainstItsFrozenPaths(t *testing.T) {
 // A project reviewed rule has two readers: the author reads the working tree and the
 // commit reviewer reads HEAD. A rule that HEAD lacks, holds with other text or paths,
 // or still holds after the working tree dropped it or its review section reads changed,
-// and says which; a HEAD that was not or could not be read leaves it unknown.
+// and says which; a HEAD that was not or could not be read leaves it unknown. A rule
+// edited on disk names HEAD when HEAD still holds the record's copy, and keeps the
+// edit's own reading once HEAD holds the edit.
 func TestArtifactReadsAProjectReviewedRuleAtHeadAsWellAsOnDisk(t *testing.T) {
 	testhome.Set(t, t.TempDir())
 	root := t.TempDir()
@@ -53,6 +55,9 @@ func TestArtifactReadsAProjectReviewedRuleAtHeadAsWellAsOnDisk(t *testing.T) {
 	const text = "resolve config from the repo root"
 	const onDisk = `{"rules":{"config-path":{"text":"` + text + `","review":{"paths":["cli/"]}}}}`
 	const unreviewed = `{"rules":{"config-path":{"text":"` + text + `"}}}`
+	const reworded = `{"rules":{"config-path":{"text":"resolve config from the cwd","review":{"paths":["cli/"]}}}}`
+	const emptied = `{"rules":{"config-path":{"text":" ","review":{"paths":["cli/"]}}}}`
+	const repathed = `{"rules":{"config-path":{"text":"` + text + `","review":{"paths":["docs/"]}}}}`
 	head := func(text string, paths ...string) *gate.Addendum {
 		return &gate.Addendum{Rules: []gate.ReviewedRule{{Scope: "project", ID: "config-path", Text: text, Paths: paths}}}
 	}
@@ -73,10 +78,18 @@ func TestArtifactReadsAProjectReviewedRuleAtHeadAsWellAsOnDisk(t *testing.T) {
 		{"unreviewed, not committed", unreviewed, head(text, "cli/"), ArtifactChanged, "HEAD still holds it"},
 		{"unreviewed and committed", unreviewed, &gate.Addendum{}, ArtifactChanged, "so the commit reviewer does not read it"},
 		{"HEAD unreadable", onDisk, &gate.Addendum{Errors: []string{"review addendum: project store: bad json"}}, ArtifactUnreadable, "bad json"},
+		{"text edited, not committed", reworded, head(text, "cli/"), ArtifactChanged, "HEAD, which the commit reviewer reads, still holds"},
+		{"text edited and committed", reworded, head("resolve config from the cwd", "cli/"), ArtifactChanged, ""},
+		{"text edited, HEAD holds a third", reworded, head("a third text", "cli/"), ArtifactChanged, "copy at HEAD"},
+		{"paths edited, not committed", repathed, head(text, "cli/"), ArtifactChanged, "HEAD, which the commit reviewer reads, still holds"},
+		{"paths edited and committed", repathed, head(text, "docs/"), ArtifactChanged, "review paths are"},
+		{"text edited, HEAD holds no reviewed copy", reworded, &gate.Addendum{}, ArtifactChanged, "HEAD does not hold it"},
+		{"text emptied and committed", emptied, &gate.Addendum{}, ArtifactChanged, "no longer a reviewed rule"},
+		{"text emptied, not committed", emptied, head(text, "cli/"), ArtifactChanged, "HEAD still holds it"},
 	} {
 		writeManifest(t, store, c.disk)
 		got := ArtifactOf(rec, ArtifactSources{RepoRoot: root, Addendum: c.head})
-		if got.State != c.state || !strings.Contains(got.Detail, c.detail) {
+		if got.State != c.state || !strings.Contains(got.Detail, c.detail) || (c.detail == "" && got.Detail != "") {
 			t.Errorf("%s: artifact = %+v; want state %q naming %q", c.name, got, c.state, c.detail)
 		}
 	}
