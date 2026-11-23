@@ -608,30 +608,12 @@ func RemoveMasterHook(scope string) error {
 		return err
 	}
 
-	removed := false
-	updatedEntries := make([]HookEntry, 0, len(settings.Hooks.PreToolUse))
-
-	for _, entry := range settings.Hooks.PreToolUse {
-		filteredHooks := make([]CommandHook, 0, len(entry.Hooks))
-		for _, hook := range entry.Hooks {
-			if IsSteerCommand(hook.Command) {
-				removed = true
-				continue
-			}
-			filteredHooks = append(filteredHooks, hook)
-		}
-
-		if len(filteredHooks) > 0 {
-			entry.Hooks = filteredHooks
-			updatedEntries = append(updatedEntries, entry)
-		}
-	}
-
+	entries, removed := stripPreToolUseHooks(settings.Hooks.PreToolUse, IsSteerCommand)
 	if !removed {
 		return nil
 	}
 
-	settings.Hooks.PreToolUse = updatedEntries
+	settings.Hooks.PreToolUse = entries
 	return SaveSettings(scope, settings)
 }
 
@@ -696,19 +678,7 @@ func commitGateIdentityErr(command string) error {
 // applyCommitGateHook upserts the gate's PreToolUse entry in memory, removing any gate
 // hook sitting under another matcher. It does not write.
 func applyCommitGateHook(settings *Settings, command string, timeout int) {
-	entries := make([]HookEntry, 0, len(settings.Hooks.PreToolUse)+1)
-	for _, entry := range settings.Hooks.PreToolUse {
-		hooks := make([]CommandHook, 0, len(entry.Hooks))
-		for _, hook := range entry.Hooks {
-			if !IsCommitGateCommand(hook.Command) {
-				hooks = append(hooks, hook)
-			}
-		}
-		if len(hooks) > 0 {
-			entry.Hooks = hooks
-			entries = append(entries, entry)
-		}
-	}
+	entries, _ := stripPreToolUseHooks(settings.Hooks.PreToolUse, IsCommitGateCommand)
 	entries = append(entries, HookEntry{
 		Matcher: CommitGateMatcher,
 		Hooks: []CommandHook{{
@@ -737,24 +707,31 @@ func RemoveCommitGateHook(scope string) error {
 // removeCommitGateHooks drops the gate's PreToolUse entry in memory, preserving every
 // other hook. It returns whether it removed anything and does not write.
 func removeCommitGateHooks(settings *Settings) bool {
+	entries, removed := stripPreToolUseHooks(settings.Hooks.PreToolUse, IsCommitGateCommand)
+	settings.Hooks.PreToolUse = entries
+	return removed
+}
+
+// stripPreToolUseHooks returns the PreToolUse groups with every hook drop matches
+// removed and any group left without hooks dropped, and whether it removed a hook.
+func stripPreToolUseHooks(groups []HookEntry, drop func(string) bool) ([]HookEntry, bool) {
 	removed := false
-	entries := make([]HookEntry, 0, len(settings.Hooks.PreToolUse))
-	for _, entry := range settings.Hooks.PreToolUse {
-		hooks := make([]CommandHook, 0, len(entry.Hooks))
-		for _, hook := range entry.Hooks {
-			if IsCommitGateCommand(hook.Command) {
+	out := make([]HookEntry, 0, len(groups)+1)
+	for _, group := range groups {
+		hooks := make([]CommandHook, 0, len(group.Hooks))
+		for _, hook := range group.Hooks {
+			if drop(hook.Command) {
 				removed = true
 				continue
 			}
 			hooks = append(hooks, hook)
 		}
 		if len(hooks) > 0 {
-			entry.Hooks = hooks
-			entries = append(entries, entry)
+			group.Hooks = hooks
+			out = append(out, group)
 		}
 	}
-	settings.Hooks.PreToolUse = entries
-	return removed
+	return out, removed
 }
 
 // CommitGateArming is what a scope's settings.json says about the gate.
