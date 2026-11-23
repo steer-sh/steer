@@ -59,6 +59,9 @@ type SessionUnit struct {
 	// Sources are the per-file contributions the store derived StartTS, EndTS and
 	// Signals from. A session stored before this field existed has none.
 	Sources []SessionSource `json:"sources,omitempty"`
+	// Host is the machine whose snapshot shard the loader read this session from. It
+	// is never stored: the shard's name carries it.
+	Host string `json:"-"`
 }
 
 // SessionSource is what one transcript file contributed to a session. Path is

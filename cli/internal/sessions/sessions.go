@@ -246,6 +246,20 @@ func LoadShardStrict(dir, host string) ([]mine.SessionUnit, error) {
 	return loadFilesWith([]string{ShardPath(dir, host)}, true)
 }
 
+// shardHost is the host a shard's file name carries, or "" for another name.
+func shardHost(path string) string {
+	name := filepath.Base(path)
+	host, ok := strings.CutPrefix(name, shardPrefix+".")
+	if !ok {
+		return ""
+	}
+	host, ok = strings.CutSuffix(host, ".jsonl")
+	if !ok {
+		return ""
+	}
+	return host
+}
+
 func loadFiles(paths []string) ([]mine.SessionUnit, error) {
 	return loadFilesWith(paths, false)
 }
@@ -279,6 +293,7 @@ func loadFilesWith(paths []string, strict bool) ([]mine.SessionUnit, error) {
 				continue
 			}
 			copied := u
+			copied.Host = shardHost(path)
 			byID[u.Harness+"\x1f"+u.SessionID] = &copied
 		}
 	}
