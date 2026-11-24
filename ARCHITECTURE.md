@@ -279,7 +279,7 @@ kind is refused. Addendum entries derive no harness document; the commit gate
 reads them. A rule with a `review` section is a reviewed rule: it derives its
 `## Steer Rules` line like any rule, and the commit gate also reads it. Its
 `paths` follow `internal/reviewpath/`'s grammar, which the store validates on
-write and the gate matches on review; a project reviewed rule must name one.
+write and the gate matches on review; a rule with no paths reaches every commit.
 It archives as an instruction rule (`tier.Archived`). Its author reads the
 working tree and its reviewer reads HEAD, so a reader of a project reviewed
 rule compares both, and a change to one asks for the manifest commit.

@@ -43,24 +43,24 @@ func TestAReviewedRuleKeepsItsSectionUntilCleared(t *testing.T) {
 	}
 }
 
-// A project reviewed rule must name its paths and each path must be in the grammar;
-// a global rule may name none.
-func TestAReviewedRuleRefusesPathsOutsideItsScope(t *testing.T) {
+// Each review path must be in the grammar; a reviewed rule of either scope may name
+// no path, which reaches every commit.
+func TestAReviewedRuleRefusesPathsOutsideTheGrammar(t *testing.T) {
 	testhome.Set(t, withProjectTempDir(t))
-	for _, paths := range [][]string{nil, {"cli/**"}} {
-		_, err := InstallRule(ProjectScope, "r", "a rule", RuleOptions{Review: &RuleReview{Paths: paths}})
-		if err == nil || !strings.Contains(err.Error(), "review") {
-			t.Errorf("paths %v: err = %v, want a refusal", paths, err)
-		}
+	_, err := InstallRule(ProjectScope, "r", "a rule", RuleOptions{Review: &RuleReview{Paths: []string{"cli/**"}}})
+	if err == nil || !strings.Contains(err.Error(), "review") {
+		t.Errorf("err = %v, want a refusal", err)
 	}
 	if got := storedReview(t, ProjectScope, "r"); got != nil {
 		t.Fatalf("a refused install stored %+v", got)
 	}
-	if _, err := InstallRule(GlobalScope, "g", "a global rule", RuleOptions{Review: &RuleReview{}}); err != nil {
-		t.Fatalf("a global reviewed rule with no paths: %v", err)
-	}
-	if got := storedReview(t, GlobalScope, "g"); got == nil || len(got.Paths) != 0 {
-		t.Fatalf("global review = %+v", got)
+	for _, scope := range []string{ProjectScope, GlobalScope} {
+		if _, err := InstallRule(scope, "g", "a "+scope+" rule", RuleOptions{Review: &RuleReview{}}); err != nil {
+			t.Fatalf("a %s reviewed rule with no paths: %v", scope, err)
+		}
+		if got := storedReview(t, scope, "g"); got == nil || len(got.Paths) != 0 {
+			t.Fatalf("%s review = %+v", scope, got)
+		}
 	}
 }
 

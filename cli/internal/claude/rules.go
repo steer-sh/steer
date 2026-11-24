@@ -71,9 +71,8 @@ type RuleOptions struct {
 	ClearReview bool
 }
 
-// InstallRule is InstallManagedRule with the rule's review section. A project reviewed
-// rule must name its paths, because a project rule with none would reach the reviewer
-// on every commit; a global rule spans repositories and may name none.
+// InstallRule is InstallManagedRule with the rule's review section. A reviewed rule of
+// either scope that names no path reaches the reviewer on every commit.
 func InstallRule(scope, id, text string, opts RuleOptions, targets ...harness.Registrar) (*InstallManagedRuleResult, error) {
 	scope = strings.ToLower(strings.TrimSpace(scope))
 	if err := ValidateScope(scope); err != nil {
@@ -131,7 +130,7 @@ func InstallRule(scope, id, text string, opts RuleOptions, targets ...harness.Re
 	case opts.ClearReview:
 		review = nil
 	case opts.Review != nil:
-		if review, err = normalizeReview(scope, opts.Review); err != nil {
+		if review, err = normalizeReview(opts.Review); err != nil {
 			return nil, err
 		}
 	}
@@ -166,7 +165,7 @@ func InstallRule(scope, id, text string, opts RuleOptions, targets ...harness.Re
 
 // normalizeReview validates a review section's paths and returns them trimmed, sorted
 // and without duplicates.
-func normalizeReview(scope string, r *RuleReview) (*RuleReview, error) {
+func normalizeReview(r *RuleReview) (*RuleReview, error) {
 	seen := map[string]bool{}
 	var paths []string
 	for _, p := range r.Paths {
@@ -178,10 +177,6 @@ func normalizeReview(scope string, r *RuleReview) (*RuleReview, error) {
 			seen[p] = true
 			paths = append(paths, p)
 		}
-	}
-	if len(paths) == 0 && scope == ProjectScope {
-		return nil, fmt.Errorf("a project reviewed rule needs --review-path: the reviewer gets " +
-			"the rule only for a commit that changes a path it names, such as cli/internal/tui/ or *.go")
 	}
 	sort.Strings(paths)
 	return &RuleReview{Paths: paths}, nil
