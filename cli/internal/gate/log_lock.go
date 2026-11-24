@@ -62,7 +62,7 @@ func LockSwap(cfg Config) (func(), error) {
 }
 
 func lockWithin(path string, wait time.Duration) (func(), error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
 	deadline := time.Now().Add(wait)

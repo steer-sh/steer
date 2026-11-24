@@ -1027,7 +1027,7 @@ func (r *resolver) writeRows(rows []resolverRow, seenLines int) error {
 		}
 	}
 	tmp := log + ".tmp"
-	if err := os.WriteFile(tmp, []byte(sb.String()), 0o644); err != nil {
+	if err := os.WriteFile(tmp, []byte(sb.String()), 0o600); err != nil {
 		return err
 	}
 	beforeSwap()
@@ -1113,7 +1113,7 @@ func newBackup(log string, ts int64, data []byte) (path string, linked bool, err
 		if errors.Is(err, fs.ErrExist) {
 			continue
 		}
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if errors.Is(err, fs.ErrExist) {
 			continue
 		}
@@ -1130,7 +1130,7 @@ func newBackup(log string, ts int64, data []byte) (path string, linked bool, err
 
 // appendTo appends data to the existing file at path as whole lines.
 func appendTo(path string, data []byte) error {
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}

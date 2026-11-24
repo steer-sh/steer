@@ -188,3 +188,33 @@ func TestMigrationTouchesOnlySteersOwnComponents(t *testing.T) {
 		t.Errorf("another tool's file changed: %q", got)
 	}
 }
+
+// TestPrepareClosesTheStateRootToOtherUsers checks that Prepare takes a state root an
+// older binary created open to other users and leaves it open to its owner alone.
+func TestPrepareClosesTheStateRootToOtherUsers(t *testing.T) {
+	tempHome(t)
+	root := filepath.Dir(steerpath.StateDir(component))
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	legacy := steerpath.LegacyStateDir(component)
+	write(t, filepath.Join(legacy, "adjudication.jsonl"), "{}\n")
+	if err := os.Chmod(legacy, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Prepare(component); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{root, steerpath.StateDir(component), legacy} {
+		info, err := os.Stat(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if perm := info.Mode().Perm(); perm != 0o700 {
+			t.Errorf("%s: mode %o, want 700", dir, perm)
+		}
+	}
+}
