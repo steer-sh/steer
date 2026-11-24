@@ -184,15 +184,10 @@ func TestAStalePluginCopyIsNamedOncePerChange(t *testing.T) {
 	s := NewSandbox(t, WithoutStubs())
 	s.MustSteer("bin", "install")
 	bin := filepath.Join(s.Home, ".claude", "plugins", "cache", "mkt", "steer", "0.1.0", "bin", runtime.GOOS+"-"+runtime.GOARCH)
-	if err := os.MkdirAll(bin, 0o755); err != nil {
-		t.Fatal(err)
-	}
 	copyPath := filepath.Join(bin, "steer")
 	writeCopy := func(content []byte) {
 		t.Helper()
-		if err := os.WriteFile(copyPath, content, 0o755); err != nil {
-			t.Fatal(err)
-		}
+		writeExecutable(t, copyPath, content)
 	}
 	cadence := func() string {
 		t.Helper()

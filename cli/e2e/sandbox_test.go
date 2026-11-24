@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -275,6 +276,23 @@ func (s *Sandbox) Write(rel, content string) {
 	}
 	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 		s.t.Fatal(err)
+	}
+}
+
+// writeExecutable writes data to path with mode 0o755, creating its directory. It
+// holds syscall.ForkLock so no process forks while the write descriptor is open: a
+// child forked then would hold the file open for writing until its own exec, and
+// running path in that window fails with ETXTBSY on Linux (golang/go#22315).
+func writeExecutable(t *testing.T, path string, data []byte) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	syscall.ForkLock.RLock()
+	err := os.WriteFile(path, data, 0o755)
+	syscall.ForkLock.RUnlock()
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

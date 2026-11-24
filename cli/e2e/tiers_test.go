@@ -23,12 +23,9 @@ const (
 func (s *Sandbox) DeclareTodoCheck() string {
 	s.t.Helper()
 	s.MustSteer("check", "init")
-	s.Write(todoScript, "#!/usr/bin/env bash\nset -euo pipefail\n"+
+	writeExecutable(s.t, filepath.Join(s.Repo, todoScript), []byte("#!/usr/bin/env bash\nset -euo pipefail\n"+
 		"for f in src/*; do\n  [ -f \"$f\" ] || continue\n"+
-		"  case \"$(<\"$f\")\" in *TODO*) echo \"FAIL: "+todoClass+"\" >&2; exit 1;; esac\ndone\n")
-	if err := os.Chmod(filepath.Join(s.Repo, todoScript), 0o755); err != nil {
-		s.t.Fatal(err)
-	}
+		"  case \"$(<\"$f\")\" in *TODO*) echo \"FAIL: "+todoClass+"\" >&2; exit 1;; esac\ndone\n"))
 	cases, _ := json.Marshal(map[string]any{"version": 1, "cases": []any{
 		map[string]any{"name": "clean", "exit_code": 0, "provenance": "a tree with no TODO",
 			"files": map[string]string{"src/a.txt": "done\n"}},

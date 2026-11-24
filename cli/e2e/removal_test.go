@@ -270,12 +270,7 @@ func TestALegacyPreCommitHookLetsTheCommitLandAndComesOut(t *testing.T) {
 	s.Reviewer("claude-code", "sonnet", "", 3, 3)
 	s.Script("finding")
 	hook := filepath.Join(s.Repo, ".git", "hooks", "pre-commit")
-	if err := os.MkdirAll(filepath.Dir(hook), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(hook, []byte(legacyPreCommitHook), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeExecutable(t, hook, []byte(legacyPreCommitHook))
 	before := s.Head()
 	s.StageCode("mod.py")
 	r := s.Run(s.Repo, "", nil, "git", "commit", "-m", "add mod")

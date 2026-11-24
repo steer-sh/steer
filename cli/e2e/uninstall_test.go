@@ -148,12 +148,7 @@ func TestRemovedPluginNoticeNamesUninstall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Dir(copyBin), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(copyBin, data, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeExecutable(t, copyBin, data)
 	record := filepath.Join(s.Home, ".claude", "plugins", "installed_plugins.json")
 	s.Write("../home/.claude/plugins/installed_plugins.json",
 		`{"plugins":{"steer@m":[{"installPath":"`+root+`"}]}}`+"\n")
