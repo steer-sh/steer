@@ -54,13 +54,24 @@ func Resolve(component string) string {
 // neutral root is kept and its legacy counterpart is left where it is.
 func Prepare(component string) (string, error) {
 	neutral := steerpath.StateDir(component)
-	if err := os.MkdirAll(neutral, 0o755); err != nil {
+	if err := os.MkdirAll(neutral, 0o700); err != nil {
 		return "", fmt.Errorf("failed to create state directory: %w", err)
+	}
+	// The root holds review prompts and transcript signals that quote code, so no
+	// other local user may enter it, whatever modes the files below it carry.
+	if err := ClosePrivate(filepath.Dir(neutral)); err != nil {
+		return "", fmt.Errorf("failed to make the state directory private: %w", err)
+	}
+	// A migration leaves the legacy copy in place, so close that directory too.
+	legacy := steerpath.LegacyStateDir(component)
+	if legacy != neutral && populated(legacy) {
+		if err := ClosePrivate(legacy); err != nil {
+			return "", fmt.Errorf("failed to make %s private: %w", legacy, err)
+		}
 	}
 	if migrated(neutral) {
 		return neutral, nil
 	}
-	legacy := steerpath.LegacyStateDir(component)
 	if legacy != neutral && populated(legacy) {
 		if err := migrate(legacy, neutral); err != nil {
 			return "", err
@@ -70,6 +81,19 @@ func Prepare(component string) (string, error) {
 		return "", fmt.Errorf("failed to mark %s migrated: %w", component, err)
 	}
 	return neutral, nil
+}
+
+// ClosePrivate removes the group and other permission bits from dir and keeps the
+// owner's, so a directory its owner made read-only stays read-only.
+func ClosePrivate(dir string) error {
+	info, err := os.Stat(dir)
+	if err != nil {
+		return err
+	}
+	if perm := info.Mode().Perm(); perm&0o077 != 0 {
+		return os.Chmod(dir, perm&^0o077)
+	}
+	return nil
 }
 
 // PrepareAll migrates every component. A writing entry point calls it once,
@@ -113,7 +137,7 @@ func migrate(legacy, neutral string) error {
 		if _, err := os.Stat(dst); err == nil {
 			continue
 		}
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
 			return fmt.Errorf("failed to create %s: %w", filepath.Dir(dst), err)
 		}
 		if err := copyWhole(src, dst); err != nil {

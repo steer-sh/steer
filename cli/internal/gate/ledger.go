@@ -105,7 +105,7 @@ func (l *Ledger) Log(row Row) error {
 		setDefault(row, "gate_errors", l.errs)
 		l.errs = nil
 	}
-	if err := os.MkdirAll(l.cfg.StateDir, 0o755); err != nil {
+	if err := os.MkdirAll(l.cfg.StateDir, 0o700); err != nil {
 		return fmt.Errorf("state dir: %w", err)
 	}
 	line, err := json.Marshal(row)
@@ -161,7 +161,7 @@ var afterAppend = func() {}
 
 // appendLine appends one row and reports whether path still names the file written.
 func appendLine(path string, line []byte) (bool, error) {
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return false, fmt.Errorf("open ledger: %w", err)
 	}
@@ -273,7 +273,7 @@ func (l *Ledger) SavePrefix(transcript string, lines []string) Row {
 		return Row{"prefix_file": name, "prefix_lines": len(lines), "prefix_sha": sha}
 	}
 	dir := l.cfg.PrefixDir()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		l.noteErr("save_prefix: %v", err)
 		return Row{}
 	}
@@ -326,7 +326,7 @@ func (l *Ledger) extendSessionPrefix(path, text string) bool {
 		l.noteErr("save_prefix: %v", err)
 		return false
 	}
-	if err := atomicfile.WriteFile(path, append(raw, member...), 0o644); err != nil {
+	if err := atomicfile.WriteFile(path, append(raw, member...), 0o600); err != nil {
 		l.noteErr("save_prefix: %v", err)
 		return false
 	}
@@ -339,7 +339,7 @@ func takePrefixLock(lock string) bool {
 	if info, err := os.Stat(lock); err == nil && time.Since(info.ModTime()) > prefixLockStale {
 		os.Remove(lock)
 	}
-	f, err := os.OpenFile(lock, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(lock, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return false
 	}
@@ -429,8 +429,8 @@ func slugOrDefault(s string, n int) string {
 }
 
 func writeFile(dir, name string, data []byte) error {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, name), data, 0o644)
+	return os.WriteFile(filepath.Join(dir, name), data, 0o600)
 }

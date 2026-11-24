@@ -196,7 +196,7 @@ func (l *liveReview) write() {
 		return
 	}
 	dir := filepath.Dir(l.path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return
 	}
 	_ = atomicfile.WriteFile(l.path, append(raw, '\n'), 0o600)

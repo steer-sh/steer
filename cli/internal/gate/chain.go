@@ -131,14 +131,14 @@ func (c *Chain) Pending(state ChainState) bool {
 // Save records the round a deny just closed. The error is returned rather than
 // swallowed: losing it lets the following commit through unreviewed.
 func (c *Chain) Save(state ChainState) error {
-	if err := os.MkdirAll(c.cfg.StateDir, 0o755); err != nil {
+	if err := os.MkdirAll(c.cfg.StateDir, 0o700); err != nil {
 		return err
 	}
 	raw, err := json.Marshal(state)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(c.statePath(), raw, 0o644)
+	return os.WriteFile(c.statePath(), raw, 0o600)
 }
 
 // Clear ends the chain. A missing file is success.
@@ -151,7 +151,7 @@ func (c *Chain) Clear() error {
 
 // RememberCleared records that this exact diff was reviewed and let through.
 func (c *Chain) RememberCleared(diff, channel, ending string) error {
-	if err := os.MkdirAll(c.cfg.StateDir, 0o755); err != nil {
+	if err := os.MkdirAll(c.cfg.StateDir, 0o700); err != nil {
 		return err
 	}
 	sha := Digest(diff)
@@ -162,7 +162,7 @@ func (c *Chain) RememberCleared(diff, channel, ending string) error {
 		return err
 	}
 	c.pruneCleared()
-	return os.WriteFile(c.clearedPath(sha), raw, 0o644)
+	return os.WriteFile(c.clearedPath(sha), raw, 0o600)
 }
 
 // LoadCleared returns the unexpired cleared record for this diff, or nil.

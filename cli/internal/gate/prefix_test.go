@@ -136,3 +136,47 @@ func TestReadPrefixFindsMergedContentFile(t *testing.T) {
 		t.Fatal("a slice that does not match prefix_sha must be refused")
 	}
 }
+
+// TestTheGateWritesItsStateForTheOwnerAlone checks that the ledger, a saved diff and
+// both prefix writers (a new file and an extended one) leave no file another local
+// user can read, inside a directory no other user can enter.
+func TestTheGateWritesItsStateForTheOwnerAlone(t *testing.T) {
+	cfg := prefixCfg(t)
+	cfg.StateDir = filepath.Join(cfg.StateDir, "commit-review")
+	ledger := gate.NewLedger(cfg)
+	if err := ledger.Log(gate.Row{"phase": "deny"}); err != nil {
+		t.Fatal(err)
+	}
+	ledger.SaveDiff("s1", 1, "diff --git a/x b/x\n")
+	ledger.SavePrefix("/t/session.jsonl", []string{"one"})
+	ledger.SavePrefix("/t/session.jsonl", []string{"one", "two"})
+	for _, dir := range []string{cfg.StateDir, cfg.DiffDir(), cfg.PrefixDir()} {
+		info, err := os.Stat(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if perm := info.Mode().Perm(); perm&0o077 != 0 {
+			t.Errorf("%s: mode %o lets another user in", dir, perm)
+		}
+	}
+	files := []string{cfg.LogFile()}
+	for _, name := range prefixFiles(t, cfg) {
+		files = append(files, filepath.Join(cfg.PrefixDir(), name))
+	}
+	diffs, _ := os.ReadDir(cfg.DiffDir())
+	for _, e := range diffs {
+		files = append(files, filepath.Join(cfg.DiffDir(), e.Name()))
+	}
+	if len(files) < 3 {
+		t.Fatalf("want the ledger, a diff and a prefix file, got %v", files)
+	}
+	for _, path := range files {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if perm := info.Mode().Perm(); perm&0o077 != 0 {
+			t.Errorf("%s: mode %o is readable by another user", path, perm)
+		}
+	}
+}
