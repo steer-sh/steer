@@ -42,6 +42,8 @@ The Codex hook trust model is different from Claude Code. It requires you to app
 
 Pi is also different. After setup or a new guard, run `/reload` or restart Pi. When Pi is started in a new project it will ask if you trust any project-level Steer extensions. Once you respond, run `/trust` to save this for future sessions in the project.
 
+If you set Pi `codemode.mode` to `only`, your agent will have no access to the bash tool. Currently this will mean Steer will refuse all commits. If you set `codemode.mode` to `on` and run `/reload`, your agent retains bash access and Steer should function normally.
+
 ## Setup
 
 ```text
@@ -66,7 +68,7 @@ If you use more than one CLI (Claude Code, Codex and Pi), run `/steer-setup` in 
 
 Nothing changes when committing repo changes. Once your agent makes a commit, it will be automatically reviewed and concerns raised on findings. Your CLI agent will check each finding against the code, fix what holds up, and send back a report on what it accepted and what it rejected. Steer will continue reviewing the commits until no accepted - non-nitpick - findings remain, or until 4 reviews in a row have blocked the commit. Change that number with `steer config set reviewer.rounds <1-10>`. 4 is the default because initial testing shows diminishing returns after this amount.
 
-**New in 0.4.0**: *Graphical Review Band*. Using Claude Code Mods, Steer now displays a uniquely-styled review band on both terminal and Desktop. This band shows the status of the commit review, as well as a preview of its findings.
+*Graphical Review Band*. Using Claude Code Mods, Steer now displays a uniquely-styled review band on both terminal and Desktop. This band shows the status of the commit review, as well as a preview of its findings.
 
 <p align="center">
   <img src="docs/review-band-desktop.png" width="900" alt="Steer's review band in the Claude Code Desktop app: round 2 of 4, Steer holds the commit while 3 runs read the diff">
@@ -81,10 +83,12 @@ Commits where every changed file is prose (`.md`, `.txt` and similar), or binary
 
 Steer reviews and decisions are stored locally under `~/.steer/state`. Run `/steer-report` in your CLI agent to read that data, as well as your session history. This triggers a conversation with your agent to check review findings, corrections and failed commands.
 
-For each recurring problem, `/steer-report` proposes a repository check, a guard, an instruction, or no change. It will also record if you decline a fix and will highlight if the problem grows afterwards.
+For each recurring problem, `/steer-report` proposes a repository check, a guard, a reviewed rule, an instruction, or no change. It will also record if you decline a fix and will highlight if the problem grows afterwards.
+
 
 * A repository check runs `./check.sh` at the end of each agent turn, once you adopt the repository.
 * Guards check tool calls before they run and tell the agent how to correct a violation. Guards are written in Python so they are easy for a human to inspect. This also means Python3 in your environment is required for them to run.
+* **New in 0.5.0**: A reviewed rule is an instruction that is additionally enforced by the commit reviewer. It is an optimal option when you cannot use a deterministic fix, and the problem is visible in a commit diff -- such as "API handlers must check the caller's permissions". Your agent reads the rule, and the reviewer gets the same rule. A violation blocks the commit.
 * An instruction is a prompt-level fix. Some fixes cannot be deterministic, so instruction is a fallback method.
 
 Steer measures the frequency of the problems you fix using before/after stats. Later reports will also audit each fix by examining each instance of blocks - were they legitimate blocks or in error? If they were in error, Steer will suggest modifications so the fix is as effective as possible.
@@ -103,7 +107,7 @@ The intention of `/auto-steer` is similar to auto-permissions mode in agent CLIs
 
 ## Add a rule yourself
 
-The `/steer` skill creates a new rule using the most appropriate fix type: a repo check, a guard, or an instruction. For example:
+The `/steer` skill creates a new rule using the most appropriate fix type: a repo check, a guard, a reviewed rule or an instruction. For example:
 
 ```text
 /steer never use bare python in shell commands | use python3 instead

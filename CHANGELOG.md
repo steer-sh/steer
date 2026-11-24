@@ -5,7 +5,44 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.5.0] - 2026-11-23
+
+### New fix tier: reviewed rules
+
+- **A rule the commit reviewer enforces**: some rules have no check or guard
+  that can decide them, but a reader of the diff can see a violation. Until
+  now such a rule was an instruction rule that nothing enforced. A reviewed
+  rule is an instruction rule that the commit reviewer also checks: the agent
+  reads it under `## Steer Rules`, and the reviewer gets the same text for each
+  commit that changes a path the rule names, or for every commit when it names
+  none. A clear violation blocks the commit. `/steer` routes a rule to this
+  tier between the guard and the instruction rule, and `steer rules add
+  --review-path <path>` or `--review` writes one.
+
+### Pi support
+
+- **Pi is a supported harness**: install Steer with `pi install`. Pi sessions
+  run Steer's guards, commit review and `check.sh` runner, and `/steer-setup`
+  arms them. Pi loads a new Steer extension only after `/reload`, and runs a
+  project extension only in a trusted project; `steer status` names a missing
+  step.
+- **Pi can be the commit reviewer**: set `reviewer.provider` to `pi` and
+  `reviewer.model` to a `provider/id` from `pi --list-models`. The review uses
+  Pi's own login and only its read-only tools.
+
+### Other changes
+
+- **Steer's state files are private**: `~/.steer/state` and the commit gate's
+  ledger, saved diffs and prompts are now readable only by their owner. Steer
+  closes existing state the next time it writes there.
+- **Self-protection blocks a patch that moves a protected file away**: run
+  `steer hooks rebuild --scope project` in each repository with project guards;
+  `steer bin install` rebuilds a stale global runner.
+- **A subagent's commits owe their review ledger**: when a Claude Code or Codex
+  subagent commits after a blocked review and reports no ledger, its stop is
+  refused once, as the main agent's stop already was.
+
+### Removed and moved commands
 
 - **Guard commands move under `steer guard`**: `steer guard register`, `list`,
   `remove` and `test`, beside `steer rules` and `steer check`. The former
@@ -487,6 +524,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 First public release.
 
+[0.5.0]: https://github.com/steer-sh/steer/releases/tag/v0.5.0
 [0.4.2]: https://github.com/steer-sh/steer/releases/tag/v0.4.2
 [0.4.1]: https://github.com/steer-sh/steer/releases/tag/v0.4.1
 [0.4.0]: https://github.com/steer-sh/steer/releases/tag/v0.4.0
