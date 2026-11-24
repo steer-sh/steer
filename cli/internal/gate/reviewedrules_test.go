@@ -94,20 +94,24 @@ func TestTheReviewedRulesBlockPrecedesTheStockRules(t *testing.T) {
 }
 
 // The commit under review can stage a new reviewed rule; only what HEAD holds reaches
-// its reviewer.
+// its reviewer, and a project rule with no paths reaches every commit.
 func TestAProjectReviewedRuleIsReadFromHead(t *testing.T) {
 	manifest := ".steer/hooks/steer-manifest.json"
-	repo := buildRepo(t, map[string]string{
-		manifest: rulesManifest(t, map[string]ruleSpec{"a": {text: "committed", paths: []string{"*.py"}, review: true}}),
-	})
+	committed := map[string]ruleSpec{
+		"a":     {text: "committed", paths: []string{"*.py"}, review: true},
+		"every": {text: "every commit", review: true},
+	}
+	repo := buildRepo(t, map[string]string{manifest: rulesManifest(t, committed)})
 	gitCmd(t, repo, verb, "-qm", "init")
-	writeFileAt(t, repo, manifest, rulesManifest(t, map[string]ruleSpec{
-		"a": {text: "committed", paths: []string{"*.py"}, review: true},
-		"b": {text: "staged", paths: []string{"*.py"}, review: true},
-	}))
+	committed["b"] = ruleSpec{text: "staged", paths: []string{"*.py"}, review: true}
+	writeFileAt(t, repo, manifest, rulesManifest(t, committed))
 	gitCmd(t, repo, "add", "-A")
-	if got := ruleIDs(LoadAddendum(repo).Rules); !reflect.DeepEqual(got, []string{"project:a"}) {
-		t.Fatalf("rules = %v, want the HEAD rule alone", got)
+	a := LoadAddendum(repo)
+	if got := ruleIDs(a.Rules); !reflect.DeepEqual(got, []string{"project:a", "project:every"}) {
+		t.Fatalf("rules = %v, want the HEAD rules alone", got)
+	}
+	if got := ruleIDs(a.RulesFor([]string{"docs/guide.txt"})); !reflect.DeepEqual(got, []string{"project:every"}) {
+		t.Fatalf("RulesFor = %v, want the pathless project rule alone", got)
 	}
 }
 

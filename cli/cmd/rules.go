@@ -26,7 +26,8 @@ digest a later read can recompute. Steer owns the section and nothing outside it
 prose written elsewhere in CLAUDE.md or AGENTS.md moves nothing Steer reads.
 
 A reviewed rule is an instruction rule that the commit gate also gives to its
-reviewer, for a commit that changes a path the rule names. Use it for a rule whose
+reviewer, for a commit that changes a path the rule names, or for every commit when
+it names none. Use it for a rule whose
 violation shows in the diff or the commit message. A path is ` + "`dir/`" + `,
 ` + "`*.ext`" + `, ` + "`dir/*.ext`" + ` or one file, relative to the repository root. A
 project reviewed rule reaches the reviewer only once the store's
@@ -144,7 +145,7 @@ func init() {
 	rulesAddCmd.Flags().StringArray("review-path", nil,
 		"make it a reviewed rule for commits that change this path (repeatable)")
 	rulesAddCmd.Flags().Bool("review", false,
-		"make it a reviewed rule for every commit; only a global rule may name no --review-path")
+		"make it a reviewed rule; with no --review-path it reaches every commit")
 	rulesAddCmd.Flags().Bool("no-review", false, "make a reviewed rule an instruction rule again")
 	rulesAddCmd.MarkFlagsMutuallyExclusive("review-path", "no-review")
 	rulesAddCmd.MarkFlagsMutuallyExclusive("review", "no-review")

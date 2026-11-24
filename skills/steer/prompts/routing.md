@@ -50,9 +50,10 @@ guard cannot decide the rule, or would misrepresent it. Then ask two questions:
    preference, where an occasional miss does no harm, fails.
 
 Two yes answers make it a reviewed rule; any no makes it an instruction rule. A
-reviewed rule names the paths it covers, so the reviewer reads it only for a
-commit that changes one of them. Keep the set small: each rule the reviewer
-reads takes part of its attention on every matching commit.
+reviewed rule usually names the paths it covers, so the reviewer reads it only
+for a commit that changes one of them; one that names no path reaches every
+commit. Keep the set small: each rule the reviewer reads takes part of its
+attention on every matching commit.
 
 A review prompt is not a rung of the ladder. It applies to one case only, a
 recurring reviewer false positive, and changes what the stock reviewer raises.
@@ -134,11 +135,13 @@ thing in other words is a duplicate the refusal does not catch.
 
 It is an instruction rule with a review section: the agent reads the text under
 `## Steer Rules`, and the commit gate gives the same text to the reviewer for a
-commit that changes a path the rule names. A path is relative to the repository
+commit that changes a path the rule names, or for every commit when it names
+none (`--review` in place of `--review-path`). A path is relative to the repository
 root and takes one of four forms: `dir/` (every path under it), `*.ext`, `dir/*.ext`
-or one file. A project rule must name a path. A global rule spans repositories,
-so it names an extension at most, or passes `--review` with no path to reach
-every commit. Tell the user the paths with the tier.
+or one file. Prefer naming paths: each rule takes reviewer attention on every
+commit it reaches. A global rule spans repositories, so it names an extension at
+most, or names no path. Either scope may name no path. Tell the user the paths,
+or that it reaches every commit, with the tier.
 
 The reviewer rates a clear violation SUBSTANTIVE, which blocks the commit, and
 names the rule as `<scope>:<id>` on a `RULE:` line. Each reviewed round's ledger

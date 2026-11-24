@@ -121,7 +121,7 @@ type RuleEntry struct {
 
 // RuleReview is a reviewed rule's review section. The gate gives the rule to the
 // reviewer for a commit that changes a path one of Paths matches (reviewpath); a
-// global rule with no paths reaches every review.
+// rule with no paths reaches every review.
 type RuleReview struct {
 	Paths []string `json:"paths,omitempty"`
 }
