@@ -423,3 +423,27 @@ func TestSelfProtectionResolvesAnOperandAgainstTheDirectoryFlag(t *testing.T) {
 		}
 	}
 }
+
+// A session in a linked worktree under the project's .claude/ removes the worktree
+// and its merged branch, then rmdirs the emptied parent: rmdir removes only an
+// empty directory, so it takes no protected file with it. A tree removal of that
+// parent still blocks, since it takes the worktree's own settings with it.
+func TestSelfProtectionLetsASessionRemoveItsLinkedWorktree(t *testing.T) {
+	rt := setupGuardRuntime(t)
+	worktree := filepath.Join(rt.repo, ".claude", "worktrees", "theme")
+	writeFile(t, filepath.Join(worktree, ".git"), "gitdir: "+filepath.Join(rt.repo, ".git", "worktrees", "theme")+"\n")
+	git := "git -C " + rt.repo
+	tests := []struct {
+		command string
+		blocked bool
+	}{
+		{git + " worktree remove .claude/worktrees/theme && " + git + " branch -d theme && " + git + " worktree list; rmdir " +
+			rt.repo + "/.claude/worktrees 2>/dev/null; ls -A " + rt.repo + "/.claude 2>&1; ssh dak 'grep -A4 \"libsdl2-dev\" /var/log/apt/history.log | tail -2'", false},
+		{"rm -rf " + rt.repo + "/.claude/worktrees", true},
+	}
+	for _, tc := range tests {
+		if blocked, reason := rt.run(t, worktree, bash(tc.command)); blocked != tc.blocked {
+			t.Errorf("%q: blocked = %v, want %v (reason %q)", tc.command, blocked, tc.blocked, reason)
+		}
+	}
+}
