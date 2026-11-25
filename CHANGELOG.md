@@ -5,6 +5,57 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-11-25
+
+### Reviewed rules in reports and audits
+
+- **`/steer-report` and `/auto-steer` read a reviewed rule's catches as the
+  rule working**: a reviewed rule prompts the commit reviewer to raise its
+  class of mistake, so accepted findings go up when the rule does its job.
+  Before, audit passes read those catches as recurrences and could propose
+  reworking or replacing a working rule, and `/auto-steer` could rework it
+  automatically. Both skills now report a catching rule as working and leave
+  its text alone. Among review findings, they count a failure only when a
+  finding was accepted without a fix (`ACCEPTED, not fixed`), and propose wider `--review-path` coverage when
+  a match occurs in files the rule did not cover.
+- **`/steer` and `/steer-report` recognize enforced and uncommitted reviewed
+  rules**: `/steer-report` no longer treats a reviewed rule under
+  `## Steer Rules` as unenforced prose, or proposes a guard to replace it, while
+  commit review is active for that harness and, for a project rule, once the
+  rule is committed to HEAD. On a clone where commit review is not armed, it
+  still flags the rule as unenforced. In `/steer`, asking for a rule that
+  already exists on disk as an uncommitted reviewed rule now tells you to
+  commit it instead of installing a duplicate.
+
+### Other changes
+
+- **Claude Code: the review band labels subagent reviews and lists hidden
+  ones**: when a subagent commits while another review is active, the band now
+  shows whose commit is on screen: `subagent · <worktree>` (numbered subagent 1,
+  subagent 2 when several subagents share a repository), or
+  `main thread · <repo>` whenever another review is also listed. Up to two
+  status lines underneath keep any other held or running reviews in view, held
+  commits first, with a count when more than two are active.
+- **`/steer-report` reads only new rejected review findings**: rejected review
+  findings now use the same incremental read split as accepted findings,
+  instead of re-reading your entire rejected history on every pass.
+  `/steer-report` reads the full rejected dump only on a first run, when
+  nothing is new, or when you ask for a full sweep.
+- **Self-protection allows `rmdir` on empty directories above protected
+  paths**: cleaning up an emptied parent directory such as `.claude/worktrees`
+  with `rmdir` after `git worktree remove` no longer triggers a self-protection
+  block. `rmdir` removes only empty directories and cannot delete protected
+  files; tree removals (`rm -r`, `mv`) above active hooks or settings still
+  block. Run `steer hooks rebuild --scope project` in each repository with
+  project guards; `steer bin install` rebuilds a stale global runner.
+
+### Development
+
+- `check.sh` adds staticcheck's unused-code report and a check against new
+  `os.CreateTemp` replace-by-rename sites; revert-test uses its own trimmed Go
+  build cache; e2e no longer fails at random with "text file busy"; the
+  repository gains a reviewed rule against copying a sibling variant's body.
+
 ## [0.5.0] - 2026-11-23
 
 ### New fix tier: reviewed rules
