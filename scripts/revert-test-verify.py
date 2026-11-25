@@ -143,12 +143,14 @@ def check_reuse(work, cache):
     root = fixture(work, "reuse")
     first = run_script(root, cache, workers=1)
     run_script(root, cache, workers=1)
-    before = entries(cache)
+    private = os.path.join(evidence_dir(root), module().GO_CACHE)
+    before = entries(private)
     last = run_script(root, cache, workers=1)
     report("run exits 0", first.returncode == 0 and last.returncode == 0,
            first.stderr + last.stderr)
-    report("a repeated run adds no cache entries", entries(cache) == before,
-           "(+%d)" % (entries(cache) - before))
+    report("the runs build in the private cache", before > 0, "(%d)" % before)
+    report("a repeated run adds no cache entries", entries(private) == before,
+           "(+%d)" % (entries(private) - before))
     record = json.load(open(sorted(glob.glob(os.path.join(evidence_dir(root), "*.json")),
                                    key=os.path.getmtime)[-1]))["tests"][0]
     report("the repeated run ran the test",
@@ -201,6 +203,10 @@ def check_lock(root, cache):
 def check_orphan(work, cache):
     """Killing the parent must leave the lock with the go test it started."""
     root = fixture(work, "orphan", sleep=SLEEP)
+    # The timing below assumes that the go test starts without a compile.
+    run_script(root, cache)
+    for name in ("pass", "accepted"):
+        os.remove(os.path.join(evidence_dir(root), name))
     running = subprocess.Popen([sys.executable, SCRIPT], cwd=root,
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                env=dict(os.environ, GOCACHE=cache, GOFLAGS=""))

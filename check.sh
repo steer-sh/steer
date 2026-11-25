@@ -48,6 +48,7 @@ python3 tests/test_replay_reviewers.py
 python3 tests/test_ci_base.py
 python3 tests/test_revert_moves.py
 python3 tests/test_revert_rejudge.py
+python3 tests/test_revert_cache.py
 # The Claude Code mod: the validator's reading of its handlers, and its own tests.
 python3 scripts/check-mod.py
 status=0

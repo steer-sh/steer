@@ -326,7 +326,9 @@ is judged again only when its package's test-side files or the checker change
 evidence (deciding variant, failure excerpt, diffs, full output) is written to
 `.git/revert-test/<key>.json`, and the console names the file. It copies the module
 to one scratch path per worker per worktree (`REVERT_TEST_WORKERS`, default up to four)
-and holds `.git/revert-test/lock` for the whole run, so two runs in one worktree are
+and holds `.git/revert-test/lock` for the whole run; its go commands use the
+`gocache` and `gotmp` directories beside that lock, never the shared Go cache,
+and a run that compiles variants removes the entries older than an hour that it did not use. Two runs in one worktree are
 serialized and a blocked run fails naming the lock. Workers run the new tests of
 different variants at once; a decisive failure counts only after it happens again with
 no other variant running, and evidence records one that does not as unconfirmed.
