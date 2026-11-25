@@ -46,17 +46,17 @@ type MatchedChains struct {
 	// Elsewhere is a chain not recorded in a project rule's repository, which the rule
 	// never reaches, whatever its findings' verdicts.
 	Elsewhere int `json:"elsewhere"`
-	// Deferred is a chain where a matched finding was accepted and not fixed: the
-	// defect landed.
+	// Unreached is a chain where no reviewed round recorded the rule as applied.
+	Unreached int `json:"unreached"`
+	// UnreachedPaths are the changed paths of the unreached chains, sorted.
+	UnreachedPaths []string `json:"unreached_paths,omitempty"`
+	// Deferred is a chain the rule reached where a matched finding was accepted and
+	// not fixed: the defect landed.
 	Deferred int `json:"deferred"`
 	// Named is a chain where a reviewed round held a finding naming the rule.
 	Named int `json:"named"`
 	// Unnamed is a chain whose reviewer had the rule and named it in no finding.
 	Unnamed int `json:"unnamed"`
-	// Unreached is a chain where no reviewed round recorded the rule as applied.
-	Unreached int `json:"unreached"`
-	// UnreachedPaths are the changed paths of the unreached chains, sorted.
-	UnreachedPaths []string `json:"unreached_paths,omitempty"`
 }
 
 // reviewActivityOf reads a reviewed rule's activity over the given eligible
@@ -131,22 +131,23 @@ func reviewActivityOf(record Record, after []Chain, pattern patternMatcher, kind
 
 // place counts one matched chain in its group and collects an unreached chain's paths.
 func (m *MatchedChains) place(hits []Finding, caught, reached bool, paths []string, unreached map[string]bool) {
+	if !reached {
+		m.Unreached++
+		for _, p := range paths {
+			unreached[p] = true
+		}
+		return
+	}
 	for _, f := range hits {
 		if Deferred(f) {
 			m.Deferred++
 			return
 		}
 	}
-	switch {
-	case caught:
+	if caught {
 		m.Named++
-	case reached:
+	} else {
 		m.Unnamed++
-	default:
-		m.Unreached++
-		for _, p := range paths {
-			unreached[p] = true
-		}
 	}
 }
 
@@ -226,8 +227,8 @@ func writeReviewActivity(w io.Writer, a ReviewActivity) {
 			a.RuleKey, a.ReviewedRounds, a.Chains, a.FindingRounds, a.FindingChains, severityList(a.Findings))
 	}
 	if m := a.Matched; m != nil {
-		fmt.Fprintf(w, "    matched chains: %d elsewhere, %d deferred, %d named the rule, %d unnamed, %d unreached\n",
-			m.Elsewhere, m.Deferred, m.Named, m.Unnamed, m.Unreached)
+		fmt.Fprintf(w, "    matched chains: %d elsewhere, %d unreached, %d deferred, %d named the rule, %d unnamed\n",
+			m.Elsewhere, m.Unreached, m.Deferred, m.Named, m.Unnamed)
 		if len(m.UnreachedPaths) > 0 {
 			fmt.Fprintf(w, "    unreached paths: %s\n", strings.Join(m.UnreachedPaths, ", "))
 		}

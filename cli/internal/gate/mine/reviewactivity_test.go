@@ -80,9 +80,9 @@ func TestReviewActivityKeepsToTheRulesRepositoryAndAnsweredRounds(t *testing.T) 
 }
 
 // Each chain the class regex matches lands in exactly one group: a chain in another
-// repository first, even with a deferred match, then a deferred match, a chain with a
-// finding naming the rule, a chain whose reviewer had the rule and did not name it,
-// and a chain no reviewed round gave the rule; an unreached chain's paths are listed.
+// repository first, then a chain no reviewed round gave the rule, each even with a
+// deferred match, then a deferred match, a chain with a finding naming the rule, and
+// a chain whose reviewer had the rule and did not name it; unreached paths are listed.
 func TestReviewActivityPlacesEachMatchedChainInOneGroup(t *testing.T) {
 	const applied = `{"ts":1,"phase":"deny","reviewers":2,"reviewed_rules_applied":["project:tui"]`
 	named := applied + `,"rule_findings":{"project:tui":{"SUBSTANTIVE":1}}}`
@@ -97,14 +97,15 @@ func TestReviewActivityPlacesEachMatchedChainInOneGroup(t *testing.T) {
 		chain("/src/app", repaired, []string{"docs/b.md", "cmd/a.go"},
 			`{"ts":1,"phase":"deny","reviewers":2,"reviewed_rules_applied":["global:other"]}`),
 		chain("/src/app", []Finding{{Verdict: "REJECTED", Text: "tui drift"}}, []string{"z.go"}),
+		chain("/src/app", []Finding{{Verdict: "ACCEPTED", Qualifier: "not fixed", Text: "tui drift"}}, []string{"web/c.ts"}),
 		chain("/src/other", repaired, []string{"x.go"}),
 		chain("/src/other", []Finding{{Verdict: "ACCEPTED", Qualifier: "not fixed", Text: "tui drift"}}, []string{"y.go"}),
 	}
 	record := Record{"tier": "reviewed", "rule_id": "tui", "rule_scope": "project", "rule_repo": "/src/app"}
 
 	got := reviewActivityOf(record, after, regexp.MustCompile("tui"), "accepted").Matched
-	want := &MatchedChains{Elsewhere: 2, Deferred: 1, Named: 1, Unnamed: 1, Unreached: 1,
-		UnreachedPaths: []string{"cmd/a.go", "docs/b.md"}}
+	want := &MatchedChains{Elsewhere: 2, Unreached: 2, Deferred: 1, Named: 1, Unnamed: 1,
+		UnreachedPaths: []string{"cmd/a.go", "docs/b.md", "web/c.ts"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("matched = %+v\nwant      %+v", got, want)
 	}
