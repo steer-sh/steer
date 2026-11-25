@@ -22,9 +22,9 @@
         "cases": 21,
         "tested": true,
         "hook_digest": "44f19dea27b33814",
-        "master_digest": "60386ad75d627280",
+        "master_digest": "74503cabd02b7f02",
         "rule_hash": "5a5f6b4d71f06b4d8353fb015f9d43e9d841ecf73c96127d4aef15b338ab56c0",
-        "verified_at": "2026-11-19T02:09:57Z"
+        "verified_at": "2026-11-25T02:51:32Z"
       },
       "once": true
     },
@@ -46,9 +46,9 @@
         "cases": 63,
         "tested": true,
         "hook_digest": "4b617459a608d9c4",
-        "master_digest": "60386ad75d627280",
+        "master_digest": "74503cabd02b7f02",
         "rule_hash": "219d4203914a9d920a1e0d83ba4b21c7373d55f4c1c181a31fdfa5af077d6d62",
-        "verified_at": "2026-11-19T02:10:01Z"
+        "verified_at": "2026-11-25T02:51:36Z"
       }
     },
     "no-readme-edit-hook": {
@@ -72,13 +72,30 @@
         "negative_fail": 0
       },
       "fixtures": {
-        "digest": "b7eca784972d01f2",
-        "cases": 33,
+        "digest": "ab1d0b3a4c4e5427",
+        "cases": 50,
         "tested": true,
-        "hook_digest": "213d866c4bbf2953",
-        "master_digest": "60386ad75d627280",
+        "hook_digest": "6f3db8c71d049a39",
+        "master_digest": "74503cabd02b7f02",
         "rule_hash": "95d19019e65d4c17ad9335184e9f1f35a56bcde3c0c44c33a88814a694b643c7",
-        "verified_at": "2026-11-19T02:10:03Z"
+        "verified_at": "2026-11-25T02:51:39Z"
+      }
+    }
+  },
+  "rules": {
+    "sibling-skeleton": {
+      "text": "When you add another variant of an adapter, stream, store, bridge, runner or command (a harness, a reviewer, a JSONL stream, a test runner, a subcommand), move the code it shares with the existing variants into one helper, and keep in each variant only what differs. Do not copy an existing variant's body. A copy that a test requires to stay identical is exempt.",
+      "rule_hash": "73071a3cc5ddeb4e26b8e848c937e09d6085a72902f7aa4017e271fce91b03b3",
+      "created": "2026-11-24",
+      "updated": "2026-11-24",
+      "review": {
+        "paths": [
+          "cli/",
+          "hooks/mod/",
+          "pi/",
+          "scripts/",
+          "tests/"
+        ]
       }
     }
   },

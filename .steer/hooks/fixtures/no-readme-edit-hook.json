@@ -545,6 +545,278 @@
         "README.md": "# steer\n"
       },
       "origin": "synthetic"
+    },
+    {
+      "name": "audited block e40a218ceb966ea817730f3020501c2c",
+      "payload": {
+        "tool_input": {
+          "command": "python3 - \u003c\u003c'EOF'\nfrom pathlib import Path\np = Path(\"scripts/preflight-release.py\")\ns = p.read_text()\ns = s.replace('''HOOK_FILES = {\".claude-plugin/plugin.json\": \"hooks/hooks.json\", \".codex-plugin/plugin.json\": \"hooks/codex.json\"}\n''', '''HOOK_FILES = {\".claude-plugin/plugin.json\": \"hooks/hooks.json\", \".codex-plugin/plugin.json\": \"hooks/codex.json\"}\n# Pi installs the bundle from git and reads its resources from the pi key of this file.\nPI_PACKAGE = \"package.json\"\n# The extension the Pi package loads.\nPI_FILES = (\"pi/steer-session.ts\",)\n''', 1)\ns = s.replace('BUNDLE_FILES = (*SKILL_FILES, *MOD_FILES)', 'BUNDLE_FILES = (*SKILL_FILES, *MOD_FILES, *PI_FILES)', 1)\ns = s.replace('''            raise ValueError(f\"{name}: missing bundled skill or hook declarations\")\n    return entries[0]''', '''            raise ValueError(f\"{name}: missing bundled skill or hook declarations\")\n    package = json.loads((root / PI_PACKAGE).read_text())\n    resources = package.get(\"pi\")\n    if {k: v for k, v in package.items() if k not in (\"pi\", \"private\")} != expected:\n        raise ValueError(f\"{PI_PACKAGE}: differs from the marketplace plugin\")\n    if not isinstance(resources, dict) or resources.get(\"skills\") != plugin.get(\"skills\") \\\\\n            or resources.get(\"extensions\") != [\"./\" + name for name in PI_FILES]:\n        raise ValueError(f\"{PI_PACKAGE}: missing bundled skill or extension declarations\")\n    return entries[0]''', 1)\ns = s.replace('for name in (*MARKETS, *PLUGINS, \"README.md\"):', 'for name in (*MARKETS, *PLUGINS, PI_PACKAGE, \"README.md\"):', 1)\np.write_text(s)\nt = Path(\"tests/test_release_tools.py\")\nu = t.read_text()\nu = u.replace('for name in (*preflight.MARKETS, *preflight.PLUGINS, \"README.md\", *preflight.HOOK_FILES.values()):',\n 'for name in (*preflight.MARKETS, *preflight.PLUGINS, preflight.PI_PACKAGE, \"README.md\",\\n                     *preflight.HOOK_FILES.values()):', 1)\nt.write_text(u)\nEOF\ngrep -n 'PI_PACKAGE\\|PI_FILES' scripts/preflight-release.py tests/test_release_tools.py"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "allow",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "reconstructed"
+    },
+    {
+      "name": "inline python writing the root README through a resolved path is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "python3 -c \"from pathlib import Path; p = Path('README.md').resolve(); p.write_text('x')\""
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "inline python -c writing the root README through a bound name is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "python3 -c \"p='README.md'; open(p, 'w').close()\""
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "inline python opening the root README as a handle then writing is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "python3 - \u003c\u003c'EOF'\nf = open('README.md', 'w')\nf.write('new')\nEOF"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "inline python writing the root README through a call split over lines is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "python3 - \u003c\u003c'EOF'\nfrom pathlib import Path\nPath(\n    'README.md'\n).write_text('x')\nEOF"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "inline python opening the root README with arguments on separate lines is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "python3 - \u003c\u003c'EOF'\nopen(\n    'README.md',\n    'w').close()\nEOF"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "inline python deleting the root README in its binding statement is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "python3 -c \"from pathlib import Path; p = Path('README.md').unlink()\""
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "inline python binding the root README with a trailing comment then writing is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "python3 - \u003c\u003c'EOF'\nfrom pathlib import Path\np = Path('README.md')  # don't touch\np.write_text('x')\nEOF"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "inline python writing through a name before rebinding it elsewhere is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "python3 - \u003c\u003c'EOF'\nfrom pathlib import Path\np = Path('README.md')\np.write_text('x')\np = Path('tests/live/README.md')\nEOF"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "inline python writing a name rebound away from the root README is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "python3 -c \"p = 'README.md'; p = 'other.txt'; open(p, 'w').close()\""
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "inline python writing a bound README path reassigned from itself is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "python3 -c \"from pathlib import Path; p = Path('README.md'); p = p.resolve(); p.write_text('x')\""
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "inline python writing the root README through an alias is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "python3 -c \"p = 'README.md'; q = p; open(q, 'w').close()\""
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "inline python writing the root README after a conditional rebind is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "python3 - \u003c\u003c'EOF'\nfrom pathlib import Path\np = Path('README.md')\nif False:\n    p = Path('other.txt')\np.write_text('x')\nEOF"
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "inline python writing other content while it names the root README is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "python3 -c \"from pathlib import Path; p = Path('README.md'); Path('other.txt').write_text('p')\""
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "inline python writing a joined path to the root README is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "python3 -c \"from pathlib import Path; p = Path.cwd() / 'README.md'; p.write_text('new')\""
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "inline python writing the root README through an f-string is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "python3 -c \"p = 'README.md'; open(f'{p}', 'w').close()\""
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
+    },
+    {
+      "name": "inline node writing the root README through a const is blocked",
+      "payload": {
+        "tool_input": {
+          "command": "node -e \"const p = 'README.md'; require('fs').writeFileSync(p, 'x')\""
+        },
+        "tool_name": "Bash"
+      },
+      "expect": "block",
+      "files": {
+        ".git/HEAD": "ref: refs/heads/feat\n",
+        ".git/config": "[remote \"origin\"]\n\turl = git@github.com:steer-sh/steer.git\n",
+        "README.md": "# steer\n"
+      },
+      "origin": "synthetic"
     }
   ]
 }
