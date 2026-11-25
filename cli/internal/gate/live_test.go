@@ -54,10 +54,14 @@ func (h *harness) startHeld(reviewer *heldReviewer) (<-chan Decision, func()) {
 			h.t.Error("the held review did not stop during cleanup")
 		}
 	})
+	dir := h.repo
+	if h.commitDir != "" {
+		dir = h.commitDir
+	}
 	go func() {
 		defer close(exited)
 		done <- NewEngine(h.cfg, reviewer).Handle(ctx, Request{
-			Repo: h.repo, Actor: "session-1", Channel: ChannelPreToolUse,
+			Repo: dir, Actor: "session-1", Channel: ChannelPreToolUse,
 			SessionID: "session-1", Spec: h.spec, Message: "subject",
 		})
 	}()
@@ -131,6 +135,20 @@ func (h *harness) handleHeld(reviewer *heldReviewer) (LiveReview, Decision) {
 	return running, h.waitHeldDone(done)
 }
 
+// TestTheLiveFileNamesTheWorkTreeOfACommitRunInASubdirectory checks that a reader
+// naming the repository sees the work tree, not the directory the command ran in.
+func TestTheLiveFileNamesTheWorkTreeOfACommitRunInASubdirectory(t *testing.T) {
+	h := newHarness(t)
+	h.commitDir = filepath.Join(h.repo, "sub")
+	if err := os.Mkdir(h.commitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	running, _ := h.handleHeld(newHeldReviewer(findingReply(oneFinding)))
+	if running.Repo != Toplevel(h.repo) {
+		t.Errorf("repo = %q, want the work tree %q", running.Repo, Toplevel(h.repo))
+	}
+}
+
 func TestARunningReviewIsRecordedWhileItsReviewersRead(t *testing.T) {
 	h := newHarness(t)
 	before := time.Now().UnixMilli()
@@ -140,8 +158,8 @@ func TestARunningReviewIsRecordedWhileItsReviewersRead(t *testing.T) {
 		t.Errorf("state=%q outcome=%q ended_ms=%d, want a running review with no outcome",
 			running.State, running.Outcome, running.EndedMS)
 	}
-	if running.SessionID != "session-1" || running.Repo != h.repo {
-		t.Errorf("session=%q repo=%q, want session-1 and %q", running.SessionID, running.Repo, h.repo)
+	if running.SessionID != "session-1" || running.Repo != Toplevel(h.repo) {
+		t.Errorf("session=%q repo=%q, want session-1 and %q", running.SessionID, running.Repo, Toplevel(h.repo))
 	}
 	if running.Round != 1 || running.MaxRounds != h.cfg.MaxFirings || running.Final {
 		t.Errorf("round=%d max_rounds=%d final=%v, want 1 of %d, not final",

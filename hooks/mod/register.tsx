@@ -5,7 +5,20 @@
 import type { EngineInterface, Register, RenderChildren, RenderInput } from 'claude-code'
 
 import { BOOK_COLUMNS, BOOK_ROWS, COLORS, FRAME_MS, MARK_MIN_COLUMNS, RUN_COLUMNS, bookCells, bookStep, runCells } from './marks'
-import { bySeverity, clock, parseLive, pickView, plural, sessionSlug, severityCounts } from './review'
+import {
+  actorOf,
+  bySeverity,
+  clock,
+  hiddenViews,
+  numberThreads,
+  parseLive,
+  plural,
+  sessionSlug,
+  sessionViews,
+  severityCounts,
+  statusLines,
+  whoOf,
+} from './review'
 import type { LiveReview, ReviewView } from './review'
 import {
   BOOK_HEIGHT,
@@ -59,6 +72,9 @@ let polls = 0
 let liveRoot = ''
 let sessionId = ''
 let docs: LiveReview[] = []
+// Each subagent thread's number in this session, kept while the session lasts.
+let numbers = new Map<string, number>()
+let numberedSession = ''
 // What the band last drew from, so a poll redraws only on a change.
 let drawnKey = ''
 
@@ -103,17 +119,30 @@ async function poll($: EngineInterface): Promise<void> {
     }
   }
   docs = read
-  const view = pickView(docs, sessionId, await $.clock.now())
-  const key = keyOf(view)
+  const views = sessionViews(docs, sessionId, await $.clock.now())
+  numberViews(views)
+  const key = keyOf(views)
   if (key !== drawnKey) $.ui.invalidate('ui.render')
 }
 
-/** Everything of a view that changes what the band draws. */
-function keyOf(view: ReviewView | null): string {
-  if (!view) return ''
-  const { doc } = view
-  const seconds = view.kind === 'running' && ticking ? Math.floor(view.elapsedMs / 1000) : 0
-  return [view.kind, doc.started_ms, doc.round, doc.runs_ended.length, doc.findings.length, seconds].join(':')
+/** Numbers the subagent threads of the current session, starting again for a new one. */
+function numberViews(views: readonly ReviewView[]) {
+  if (numberedSession !== sessionId) {
+    numbers = new Map()
+    numberedSession = sessionId
+  }
+  numberThreads(views, numbers)
+}
+
+/** Everything of a session's views that changes what the band draws: the band's own, then each other one. */
+function keyOf(views: readonly ReviewView[]): string {
+  return views
+    .map(view => {
+      const { doc } = view
+      const seconds = view.kind === 'running' && ticking ? Math.floor(view.elapsedMs / 1000) : 0
+      return [view.kind, doc.thread_id, doc.repo, doc.started_ms, doc.round, doc.runs_ended.length, doc.findings.length, seconds].join(':')
+    })
+    .join('|')
 }
 
 function startPolling($: EngineInterface) {
@@ -177,7 +206,8 @@ function fitRight(doc: LiveReview, clockText: string | undefined, left: string, 
 
 const cut = (text: string, width: number) => (text.length <= width ? text : `${text.slice(0, Math.max(1, width - 1))}…`)
 
-function band($: EngineInterface, e: RenderInput<'AbovePrompt'>, view: ReviewView, now: number) {
+function band($: EngineInterface, e: RenderInput<'AbovePrompt'>, views: readonly ReviewView[], now: number) {
+  const view = views[0] as ReviewView
   const els = $.ui.resolve(e)
   const { Box, Text } = els
   const { doc } = view
@@ -186,6 +216,12 @@ function band($: EngineInterface, e: RenderInput<'AbovePrompt'>, view: ReviewVie
   const Svg = e.surface === 'desktop' && 'Svg' in els ? els.Svg : undefined
   const vector = VECTOR[view.kind]
   ticking = !Svg
+  // The reviews the band lists: its own, then each one a status line names.
+  const hidden = hiddenViews(views)
+  const listed = [view, ...hidden]
+  const agent = whoOf(view, listed, numbers)
+  const actor = actorOf(agent, doc)
+  const status = statusLines(hidden, v => whoOf(v, listed, numbers), ticking)
   // Seconds since this state first drew: where the vector art's animations stand.
   let t = 0
   if (Svg) {
@@ -205,7 +241,7 @@ function band($: EngineInterface, e: RenderInput<'AbovePrompt'>, view: ReviewVie
   const head = (bold: string, dim = '') => {
     const label = labelOf(bold, dim)
     if (!Svg) {
-      const left = `REVIEW${bold ? ` · ${bold}` : ''}${dim ? ` · ${dim}` : ''}`
+      const left = `REVIEW${bold ? ` · ${bold}` : ''}${agent ? ` · ${agent}` : ''}${dim ? ` · ${dim}` : ''}`
       const fitted = fitRight(doc, clockText, left, room)
       return (
         <Box justifyContent="space-between" columnGap={2}>
@@ -242,12 +278,13 @@ function band($: EngineInterface, e: RenderInput<'AbovePrompt'>, view: ReviewVie
     )
   }
 
-  /** The header's words after `REVIEW`: a bold part, then a dim part; either may be empty. */
+  /** The header's words after `REVIEW`: a bold part, the agent that made the commit, then a dim part; any may be empty. The result comes before the agent, so a narrow header cuts the agent first. */
   function labelOf(bold: string, dim: string): RenderChildren {
     if (!Svg)
       return (
         <Text>
           {bold ? <Text weight="bold"> · {bold}</Text> : ''}
+          {agent ? <Text> · {agent}</Text> : ''}
           {dim ? <Text dimColor> · {dim}</Text> : ''}
         </Text>
       )
@@ -256,6 +293,12 @@ function band($: EngineInterface, e: RenderInput<'AbovePrompt'>, view: ReviewVie
       parts.push(
         <Box flexShrink={1} minWidth={0}>
           <Text weight="bold" wrap="truncate">{` · ${bold}`}</Text>
+        </Box>,
+      )
+    if (agent)
+      parts.push(
+        <Box flexShrink={100} minWidth={0}>
+          <Text wrap="truncate">{` · ${agent}`}</Text>
         </Box>,
       )
     if (dim)
@@ -318,7 +361,7 @@ function band($: EngineInterface, e: RenderInput<'AbovePrompt'>, view: ReviewVie
           : `Steer holds the commit while ${plural(doc.runs, 'run')} read${doc.runs === 1 ? 's' : ''} the diff.`}
       </Text>,
       <Box flexWrap="wrap">{runs}</Box>,
-      <Text dimColor>Claude waits for the result.</Text>,
+      <Text dimColor>{actor} waits for the result.</Text>,
     ]
     // Lays the runs out as flex-wrap does, two columns apart, and counts the extra rows.
     let used = 0
@@ -361,7 +404,7 @@ function band($: EngineInterface, e: RenderInput<'AbovePrompt'>, view: ReviewVie
         ),
       ),
       <Text dimColor>
-        {more > 0 ? `…${plural(more, 'more finding')}. ` : ''}Claude now fixes or rejects each finding.
+        {more > 0 ? `…${plural(more, 'more finding')}. ` : ''}{actor} now fixes or rejects each finding.
       </Text>,
     ]
   } else if (view.kind === 'passed') {
@@ -376,6 +419,37 @@ function band($: EngineInterface, e: RenderInput<'AbovePrompt'>, view: ReviewVie
     ]
   }
   if (view.kind !== 'running' && moving?.requestId === e.requestId) stopFrames()
+
+  // A status line per review the band hides, each with a rail in its own result hue.
+  const statusRails: string[] = []
+  const statusRows: RenderChildren[] = status.map(line => {
+    const hue = line.kind === 'held' ? COLORS.held : line.kind === 'running' ? (Svg ? LABEL_COLOR : COLORS.review) : COLORS.dim
+    statusRails.push(hue)
+    const text = line.kind === 'more' ? line.text : `${line.who}: ${line.state}${line.tail ? ` · ${line.tail}` : ''}`
+    if (Svg)
+      return (
+        <Box flexDirection="row" minWidth={0}>
+          <Box flexShrink={0}>
+            <Text color={hue}>▌ </Text>
+          </Box>
+          <Box flexShrink={1} minWidth={0}>
+            <Text dimColor wrap="truncate">
+              {text}
+            </Text>
+          </Box>
+        </Box>
+      )
+    if (line.kind === 'more') return <Text dimColor>{line.text}</Text>
+    return (
+      <Text wrap="truncate-end">
+        <Text dimColor>{line.who}: </Text>
+        <Text color={hue}>{line.state}</Text>
+        <Text dimColor>{line.tail ? ` · ${line.tail}` : ''}</Text>
+      </Text>
+    )
+  })
+  // With status lines the rail and the book stay beside the band's own lines.
+  const top = statusRows.length > 0 ? ('flex-start' as const) : undefined
 
   if (Svg) {
     const { tone, motion } = vector
@@ -401,12 +475,12 @@ function band($: EngineInterface, e: RenderInput<'AbovePrompt'>, view: ReviewVie
           <Svg source={skySvg(tone, motion, t)} alt="steer" width={SKY_WIDTH} height={GROUND_HEIGHT} />
         </Box>
         {/* Desktop paints a Box over the absolute art only when the Box holds an absolute child. */}
-        <Box position="relative" marginRight={1} flexShrink={0} alignItems="center">
+        <Box position="relative" marginRight={1} flexShrink={0} alignItems="center" alignSelf={top}>
           <Box position="absolute" top={0} left={0} />
           <Svg source={railSvg(tone, railHeight)} alt="steer" width={RAIL_WIDTH} height={railHeight} />
         </Box>
         {book ? (
-          <Box position="relative" marginRight={2} flexShrink={0} alignItems="center">
+          <Box position="relative" marginRight={2} flexShrink={0} alignItems="center" alignSelf={top}>
             <Box position="absolute" top={0} left={0} />
             <Svg
               source={bookSvg(tone, vector.pose, t, small)}
@@ -421,6 +495,7 @@ function band($: EngineInterface, e: RenderInput<'AbovePrompt'>, view: ReviewVie
         <Box position="relative" flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
           <Box position="absolute" top={0} left={0} />
           {lines}
+          {statusRows}
         </Box>
       </Box>
     )
@@ -432,6 +507,9 @@ function band($: EngineInterface, e: RenderInput<'AbovePrompt'>, view: ReviewVie
         {lines.map(() => (
           <Text color={rail}>▌</Text>
         ))}
+        {statusRails.map(hue => (
+          <Text color={hue}>▌</Text>
+        ))}
       </Box>
       {mark ? (
         <Box marginRight={2} flexShrink={0}>
@@ -440,6 +518,7 @@ function band($: EngineInterface, e: RenderInput<'AbovePrompt'>, view: ReviewVie
       ) : null}
       <Box flexDirection="column" flexGrow={1}>
         {lines}
+        {statusRows}
       </Box>
     </Box>
   )
@@ -455,15 +534,17 @@ export const register: Register = on => {
     // A mod installed into a running session gets no session.start.
     startPolling($)
     const now = await $.clock.now()
-    const view = e.props.hasSurvey ? null : pickView(docs, sessionId, now)
+    const views = e.props.hasSurvey ? [] : sessionViews(docs, sessionId, now)
+    numberViews(views)
+    const view = views[0]
     if (!view) {
       drawnKey = ''
       if (moving?.requestId === e.requestId) stopFrames()
       return next(e)
     }
-    const drawn = band($, e, view, now)
+    const drawn = band($, e, views, now)
     // After the band, which decides whether the clock ticks and so what the key holds.
-    drawnKey = keyOf(view)
+    drawnKey = keyOf(views)
     return drawn
   })
 }

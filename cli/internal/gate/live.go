@@ -35,8 +35,9 @@ type LiveReview struct {
 	SessionID string `json:"session_id"`
 	// ThreadID names the subagent thread the commit came from, empty on the root thread.
 	ThreadID string `json:"thread_id,omitempty"`
-	Repo     string `json:"repo"`
-	ChainID  string `json:"chain_id,omitempty"`
+	// Repo is the work tree the commit ran in, never a subdirectory of it.
+	Repo    string `json:"repo"`
+	ChainID string `json:"chain_id,omitempty"`
 	// Round is the firing; MaxRounds is the block limit in force for it.
 	Round     int `json:"round"`
 	MaxRounds int `json:"max_rounds"`
@@ -121,7 +122,7 @@ func (e *Engine) beginLive(req Request, firing int, final bool) *liveReview {
 	now := time.Now().UnixMilli()
 	live := &liveReview{path: path, stop: make(chan struct{}), doc: LiveReview{
 		Version: LiveVersion, SessionID: req.SessionID, ThreadID: req.ThreadID,
-		Repo: req.Repo, ChainID: req.chainID,
+		Repo: Toplevel(req.Repo), ChainID: req.chainID,
 		Round: firing, MaxRounds: e.cfg.MaxFirings, Final: final,
 		Reviewer: e.cfg.ReviewerProvider, Model: e.cfg.ReviewerModel,
 		Runs: e.cfg.ReviewerRuns, RunsEnded: []LiveRun{},
