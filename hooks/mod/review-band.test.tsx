@@ -378,3 +378,40 @@ test('a passed terminal header, which has no book, gives the reviewer the column
   expect(await texts(ui)).toContain('round 2 of 4 · stub-provider · stub-model · 1:41')
   await ui.unmount()
 })
+
+test('a subagent review names its agent, and the main thread review it hides gets a status line', async ($, on) => {
+  await world($, on, {
+    [`${LIVE}/${SESSION}/a-1.json`]: running(),
+    [`${LIVE}/${SESSION}/b-2.json`]: running({ thread_id: 'agent-a', repo: '/wt/wt-auth', started_ms: NOW - 3_000 }),
+  })
+  const terminal = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  const drawn = await texts(terminal)
+  expect(drawn).toContain(' · subagent · wt-auth')
+  expect(drawn).toContain('The subagent waits for the result.')
+  expect(drawn).toContain('Main thread · repo: commit in review · 1:43')
+  await terminal.unmount()
+
+  const desktop = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  const words = await texts(desktop)
+  expect(words).toContain('Main thread · repo: commit in review')
+  expect(words).not.toContain('commit in review · ')
+  await desktop.unmount()
+})
+
+test('held reviews list first, two shared names get numbers, and past two lines the rest are counted', async ($, on) => {
+  await world($, on, {
+    [`${LIVE}/${SESSION}/a-1.json`]: running({ started_ms: NOW - 2_000 }),
+    [`${LIVE}/${SESSION}/b-1.json`]: ended('deny', { thread_id: 'agent-a', repo: '/wt/wt-auth', started_ms: NOW - 60_000, findings: FINDINGS }),
+    [`${LIVE}/${SESSION}/c-1.json`]: running({ thread_id: 'agent-b', repo: '/wt/wt-auth', started_ms: NOW - 30_000 }),
+    [`${LIVE}/${SESSION}/d-1.json`]: running({ thread_id: 'agent-c', repo: '/wt/wt-docs', started_ms: NOW - 20_000 }),
+    [`${LIVE}/${SESSION}/e-1.json`]: ended('deny', { thread_id: 'agent-d', repo: '/wt/wt-docs', started_ms: NOW - 50_000 }),
+  })
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  const drawn = await texts(ui)
+  expect(drawn).toContain(' · main thread · repo')
+  expect(drawn).toContain('Claude waits for the result.')
+  expect(drawn).toContain('Subagent 1 · wt-auth: commit held · 1 blocking, 1 substantive, 1 nitpick')
+  expect(drawn).toContain('+3 more: 1 commit held, 2 in review')
+  expect(drawn).not.toContain('wt-docs')
+  await ui.unmount()
+})

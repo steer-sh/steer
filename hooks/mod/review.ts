@@ -7,6 +7,10 @@ export type LiveFinding = { severity: Severity; file: string; claim: string }
 
 export type LiveReview = {
   session_id: string
+  /** The subagent thread the commit came from; empty on the main thread. */
+  thread_id: string
+  /** The repository directory the commit ran in. */
+  repo: string
   round: number
   max_rounds: number
   final: boolean
@@ -88,6 +92,8 @@ export function parseLive(text: string): LiveReview | null {
   }
   return {
     session_id: d.session_id,
+    thread_id: isString(d.thread_id) ? d.thread_id : '',
+    repo: isString(d.repo) ? d.repo : '',
     round: d.round as number,
     max_rounds: d.max_rounds as number,
     final: d.final === true,
@@ -139,19 +145,88 @@ function endedKind(doc: LiveReview): 'held' | 'handed' | 'passed' | 'unreviewed'
   }
 }
 
-/** The one view to show among a session's files: a running review first, then the newest ended one. */
-export function pickView(docs: readonly LiveReview[], sessionId: string, now: number): ReviewView | null {
-  let best: ReviewView | null = null
+/** Every view a session's files show at `now`, the band's own first: running reviews by newest start, then ended ones by newest end. */
+export function sessionViews(docs: readonly LiveReview[], sessionId: string, now: number): ReviewView[] {
+  const views: ReviewView[] = []
   for (const doc of docs) {
     if (doc.session_id !== sessionId) continue
     const view = viewOf(doc, now)
-    if (!view) continue
-    if (!best || rank(view) > rank(best)) best = view
+    if (view) views.push(view)
   }
-  return best
+  return views.sort((a, b) => rank(b) - rank(a))
 }
 
 const rank = (v: ReviewView) => (v.kind === 'running' ? 1e15 + v.doc.started_ms : v.doc.ended_ms)
+
+/** Status lines the band gives to the reviews it hides. */
+export const STATUS_LINES = 2
+
+/** The reviews behind the band's own that get a status line: held ones first, then running ones, each oldest first. */
+export function hiddenViews(views: readonly ReviewView[]): ReviewView[] {
+  const order = (v: ReviewView) => (v.kind === 'held' ? 0 : 1)
+  return views
+    .slice(1)
+    .filter(v => v.kind === 'held' || v.kind === 'running')
+    .sort((a, b) => order(a) - order(b) || a.doc.started_ms - b.doc.started_ms)
+}
+
+/** Gives each subagent thread a number the first time one of its reviews is seen, in the order they started. */
+export function numberThreads(views: readonly ReviewView[], numbers: Map<string, number>): void {
+  for (const view of [...views].sort((a, b) => a.doc.started_ms - b.doc.started_ms)) {
+    const id = view.doc.thread_id
+    if (id && !numbers.has(id)) numbers.set(id, numbers.size + 1)
+  }
+}
+
+/** The last part of a repository path: a worktree's own folder name. */
+const repoName = (repo: string) => repo.split(/[\\/]/).filter(Boolean).pop() ?? ''
+
+/**
+ * Who made the commit `view` reviews, as "subagent · wt-auth" or "main thread · steer";
+ * empty for the main thread while it is the only review. A subagent carries its number
+ * only while another subagent's review names the same repository.
+ */
+export function whoOf(view: ReviewView, views: readonly ReviewView[], numbers: ReadonlyMap<string, number>): string {
+  const { thread_id: thread, repo } = view.doc
+  if (!thread && views.length < 2) return ''
+  const place = repoName(repo)
+  const twin =
+    thread !== '' && views.some(o => o.doc.thread_id !== '' && o.doc.thread_id !== thread && repoName(o.doc.repo) === place)
+  const n = twin ? numbers.get(thread) : undefined
+  const agent = thread ? `subagent${n ? ` ${n}` : ''}` : 'main thread'
+  return place ? `${agent} · ${place}` : agent
+}
+
+/** The agent that acts on the review's result, as a sentence's subject. */
+export function actorOf(who: string, doc: LiveReview): string {
+  if (!doc.thread_id) return 'Claude'
+  const agent = who.split(' · ')[0] ?? ''
+  return agent === 'subagent' || agent === '' ? 'The subagent' : capital(agent)
+}
+
+const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
+
+/** One line for a hidden review, or the count of the ones past the last line. */
+export type StatusLine =
+  | { kind: 'held' | 'running'; who: string; state: string; tail: string }
+  | { kind: 'more'; text: string }
+
+/**
+ * The band's status lines for `hidden`: one each up to STATUS_LINES, else one each
+ * before the last, which counts the rest. `clocks` adds a running review's elapsed time.
+ */
+export function statusLines(hidden: readonly ReviewView[], name: (v: ReviewView) => string, clocks: boolean): StatusLine[] {
+  const line = (v: ReviewView): StatusLine =>
+    v.kind === 'held'
+      ? { kind: 'held', who: capital(name(v)), state: 'commit held', tail: severityCounts(v.doc.findings) }
+      : { kind: 'running', who: capital(name(v)), state: 'commit in review', tail: clocks ? clock(v.elapsedMs) : '' }
+  if (hidden.length <= STATUS_LINES) return hidden.map(line)
+  const named = hidden.slice(0, STATUS_LINES - 1)
+  const rest = hidden.slice(STATUS_LINES - 1)
+  const held = rest.filter(v => v.kind === 'held').length
+  const parts = [held ? `${plural(held, 'commit')} held` : '', rest.length - held ? `${rest.length - held} in review` : '']
+  return [...named.map(line), { kind: 'more', text: `+${rest.length} more: ${parts.filter(Boolean).join(', ')}` }]
+}
 
 /** Findings ordered BLOCKING, SUBSTANTIVE, NITPICK, each level in the order written. */
 export const bySeverity = (findings: readonly LiveFinding[]) =>

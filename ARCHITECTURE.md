@@ -114,7 +114,11 @@ carries its light and dark shades and picks one through `prefers-color-scheme`.
 Desktop restarts an image's animations at each redraw, so the Desktop band shows no
 running clock and redraws only on a change of state; the animations are placed by the
 time since the state first drew, so such a redraw continues them. Other hosts get the
-same band as text and colour.
+same band as text and colour. A session holds one live file per agent and repository,
+and the band draws one of them: the newest running review, else the newest ended one.
+It names the agent and repository of a subagent's review, and of any review while
+another is listed, and gives the held and running reviews it hides at most two status
+lines.
 
 Each install from another path adds that path, as `os.Executable` reports it, to
 `~/.steer/bin/source`, and `bin install` adds every active plugin copy it finds. When a recorded path lies in a harness's plugin cache and

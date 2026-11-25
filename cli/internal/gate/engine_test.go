@@ -62,6 +62,8 @@ type harness struct {
 	spec DiffSpec
 	// turnKey and turnID are the turn identity the adapter would pass.
 	turnKey, turnID string
+	// commitDir is the directory a held review's commit runs in; empty means repo.
+	commitDir string
 }
 
 func newHarness(t *testing.T, replies ...RawRun) *harness {
