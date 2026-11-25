@@ -24,7 +24,9 @@ WRAPPERS = {"sudo", "env", "time", "nohup", "exec", "command", "xargs"}
 SHELLS = {"bash", "sh", "zsh"}
 INTERPRETERS = {"python", "python3", "perl", "ruby", "node"}
 INTERPRETER_WRITE = re.compile(r"write|rename|unlink|remove|os\.replace|shutil|['\"](?:[wax]b?\+?|r\+)['\"]")
-README_LITERAL = re.compile(r"['\"]([^'\"\n]*README\.md)['\"]")
+STRING_LITERAL = re.compile(r"'''(.*?)'''|\"\"\"(.*?)\"\"\"|'((?:\\.|[^'\\\n])*)'|\"((?:\\.|[^\"\\\n])*)\"",
+                            re.DOTALL)
+README_PATH = re.compile(r"[^'\"\n]*README\.md")
 GIT_VALUE_FLAGS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace"}
 HEREDOC = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
 SUGGESTION = ("Suggestion: the maintainer edits README.md by hand; tell the user "
@@ -145,13 +147,20 @@ def written_paths(tokens, directory):
 
 
 def interpreter_targets(tokens, bodies):
-    """Return the README.md paths named in literals of interpreter code that writes files."""
+    """Return the README.md paths named by string literals of interpreter code that writes files.
+
+    A literal counts only when its whole content is a path; a README.md
+    mention inside a longer string, such as source text being replaced in
+    another file, does not.
+    """
     if not tokens or os.path.basename(tokens[0]) not in INTERPRETERS:
         return []
     code = " ".join(tokens[1:]) + "\n" + bodies
     if not INTERPRETER_WRITE.search(code):
         return []
-    return README_LITERAL.findall(code)
+    contents = (next(group for group in match.groups() if group is not None)
+                for match in STRING_LITERAL.finditer(code))
+    return [content for content in contents if README_PATH.fullmatch(content)]
 
 
 def bash_violation(command, cwd):
