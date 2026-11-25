@@ -25,6 +25,12 @@ go build ./...
 go vet ./...
 # No Windows binary ships, so this is the only compile of the Windows build-tag files.
 GOOS=windows GOARCH=amd64 go vet ./...
+# Unused unexported code. The matrix merges both targets with the e2e tag, so an
+# identifier is reported only when no configuration that builds its file uses it.
+go tool staticcheck -checks U1000 -matrix ./... <<'EOF'
+default: -tags e2e
+windows: GOOS=windows GOARCH=amd64 -tags e2e
+EOF
 # Known vulnerabilities in the toolchain and the modules the code reaches; reads vuln.go.dev.
 # A finding, or a govulncheck that cannot run, warns and does not fail the run.
 go tool govulncheck ./... || echo "check.sh: warning: govulncheck reported a finding or could not run (exit $?)" >&2

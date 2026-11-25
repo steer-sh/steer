@@ -2,6 +2,11 @@
   "version": 1,
   "checks": [
     {
+      "id": "no-createtemp",
+      "kind": "script",
+      "script": "scripts/no-createtemp.py"
+    },
+    {
       "id": "revert-test",
       "kind": "script",
       "script": "scripts/revert-test.py",

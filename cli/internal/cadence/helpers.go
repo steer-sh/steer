@@ -8,14 +8,6 @@ func str(v any) string {
 	return s
 }
 
-// strOr reads a string field, falling back to def when absent or empty.
-func strOr(v any, def string) string {
-	if s, ok := v.(string); ok && s != "" {
-		return s
-	}
-	return def
-}
-
 // numFloat reads a JSON number (json.Number or float64) as a float.
 func numFloat(v any) float64 {
 	switch n := v.(type) {

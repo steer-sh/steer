@@ -6,9 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
-	"unicode/utf8"
 )
 
 func runGit(args ...string) (string, error) {
@@ -25,44 +23,6 @@ func runGit(args ...string) (string, error) {
 		return "", fmt.Errorf("git %s failed: %s", strings.Join(args, " "), msg)
 	}
 	return stdout.String(), nil
-}
-
-func gitTopLevel() (string, error) {
-	out, err := runGit("rev-parse", "--show-toplevel")
-	if err != nil {
-		return "", fmt.Errorf("not inside a git repository: %w", err)
-	}
-	return strings.TrimSpace(out), nil
-}
-
-// gitChangedFiles runs a git name list and returns its paths verbatim, sorted and
-// without duplicates. args must include -z and --name-only, which names a rename by
-// its destination alone. A path that is not valid UTF-8 is an error: the guard
-// payload is JSON, which would hand a guard a different name.
-func gitChangedFiles(args ...string) ([]string, error) {
-	out, err := runGit(args...)
-	if err != nil {
-		return nil, err
-	}
-
-	seen := map[string]struct{}{}
-	paths := make([]string, 0)
-	for _, path := range strings.Split(out, "\x00") {
-		if path == "" {
-			continue
-		}
-		if !utf8.ValidString(path) {
-			return nil, fmt.Errorf("cannot verify path %q: it is not valid UTF-8", path)
-		}
-		if _, ok := seen[path]; ok {
-			continue
-		}
-		seen[path] = struct{}{}
-		paths = append(paths, path)
-	}
-
-	sort.Strings(paths)
-	return paths, nil
 }
 
 // gitHooksDir is the hooks directory git runs for the current work tree, from
