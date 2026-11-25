@@ -82,6 +82,23 @@
       }
     }
   },
+  "rules": {
+    "sibling-skeleton": {
+      "text": "When you add another variant of an adapter, stream, store, bridge, runner or command (a harness, a reviewer, a JSONL stream, a test runner, a subcommand), move the code it shares with the existing variants into one helper, and keep in each variant only what differs. Do not copy an existing variant's body. A copy that a test requires to stay identical is exempt.",
+      "rule_hash": "73071a3cc5ddeb4e26b8e848c937e09d6085a72902f7aa4017e271fce91b03b3",
+      "created": "2026-11-24",
+      "updated": "2026-11-24",
+      "review": {
+        "paths": [
+          "cli/",
+          "hooks/mod/",
+          "pi/",
+          "scripts/",
+          "tests/"
+        ]
+      }
+    }
+  },
   "review_addendum": {
     "no-windows-pi-findings": {
       "text": "Windows is out of scope in this repository: Steer ships for macOS and Linux. Do not report a defect that occurs only on Windows. A defect that also occurs on macOS or Linux stays reportable, and you describe it there.",
