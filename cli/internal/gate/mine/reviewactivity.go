@@ -3,6 +3,7 @@ package mine
 import (
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
 	"github.com/steer-sh/steer-cli/internal/gate"
@@ -34,11 +35,34 @@ type ReviewActivity struct {
 	// Findings counts the findings naming the rule by severity; a NITPICK did not block.
 	Findings map[string]int `json:"findings"`
 	NewestTS float64        `json:"newest_ts,omitempty"`
+	// Matched places each after-window chain the record's class regex matched, on the
+	// review-findings corpus only; nil on a session-corpus record.
+	Matched *MatchedChains `json:"matched,omitempty"`
+}
+
+// MatchedChains puts each matched after-window chain in exactly one group, taken in
+// field order, so the groups sum to recurrence.matches.
+type MatchedChains struct {
+	// Elsewhere is a chain not recorded in a project rule's repository, which the rule
+	// never reaches, whatever its findings' verdicts.
+	Elsewhere int `json:"elsewhere"`
+	// Deferred is a chain where a matched finding was accepted and not fixed: the
+	// defect landed.
+	Deferred int `json:"deferred"`
+	// Named is a chain where a reviewed round held a finding naming the rule.
+	Named int `json:"named"`
+	// Unnamed is a chain whose reviewer had the rule and named it in no finding.
+	Unnamed int `json:"unnamed"`
+	// Unreached is a chain where no reviewed round recorded the rule as applied.
+	Unreached int `json:"unreached"`
+	// UnreachedPaths are the changed paths of the unreached chains, sorted.
+	UnreachedPaths []string `json:"unreached_paths,omitempty"`
 }
 
 // reviewActivityOf reads a reviewed rule's activity over the given eligible
-// after-window chains. A record on another tier reads not applicable.
-func reviewActivityOf(record Record, after []Chain) ReviewActivity {
+// after-window chains. With a pattern, it also places each chain the pattern matches
+// under kind. A record on another tier reads not applicable.
+func reviewActivityOf(record Record, after []Chain, pattern patternMatcher, kind string) ReviewActivity {
 	a := ReviewActivity{Findings: map[string]int{}}
 	id, scope := str(record["rule_id"]), str(record["rule_scope"])
 	if !tier.IsReviewed(str(record["tier"])) || id == "" || scope == "" {
@@ -55,17 +79,29 @@ func reviewActivityOf(record Record, after []Chain) ReviewActivity {
 			return a
 		}
 	}
+	if pattern != nil {
+		a.Matched = &MatchedChains{}
+	}
+	unreached := map[string]bool{}
 	for _, chain := range after {
+		var hits []Finding
+		if pattern != nil {
+			hits = ChainHits(chain, pattern, kind)
+		}
 		if repo != "" && !sameRepoRoot(chain.RepoRoot, repo) {
+			if len(hits) > 0 {
+				a.Matched.Elsewhere++
+			}
 			continue
 		}
 		a.Chains++
-		caught := false
+		caught, reached := false, false
 		for _, row := range chain.Rows {
 			if gate.NonReviewPhases[str(row["phase"])] || numFloat(row["reviewers"]) < 1 ||
 				!holdsString(row["reviewed_rules_applied"], a.RuleKey) {
 				continue
 			}
+			reached = true
 			a.ReviewedRounds++
 			bySeverity := ruleSeverities(row["rule_findings"], a.RuleKey)
 			if len(bySeverity) == 0 {
@@ -83,8 +119,45 @@ func reviewActivityOf(record Record, after []Chain) ReviewActivity {
 		if caught {
 			a.FindingChains++
 		}
+		if len(hits) > 0 {
+			a.Matched.place(hits, caught, reached, chain.Paths, unreached)
+		}
+	}
+	if a.Matched != nil {
+		a.Matched.UnreachedPaths = sortedPaths(unreached)
 	}
 	return a
+}
+
+// place counts one matched chain in its group and collects an unreached chain's paths.
+func (m *MatchedChains) place(hits []Finding, caught, reached bool, paths []string, unreached map[string]bool) {
+	for _, f := range hits {
+		if Deferred(f) {
+			m.Deferred++
+			return
+		}
+	}
+	switch {
+	case caught:
+		m.Named++
+	case reached:
+		m.Unnamed++
+	default:
+		m.Unreached++
+		for _, p := range paths {
+			unreached[p] = true
+		}
+	}
+}
+
+// sortedPaths returns the set's members sorted.
+func sortedPaths(set map[string]bool) []string {
+	out := make([]string, 0, len(set))
+	for p := range set {
+		out = append(out, p)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // holdsString reports whether a decoded JSON list holds want.
@@ -133,10 +206,10 @@ func ruleSeverities(v any, key string) map[string]int {
 // is settled at clock.
 func sessionReviewActivity(record Record, ev EvidenceSet, scope *Scope, afterStart, clock float64) ReviewActivity {
 	if !tier.IsReviewed(str(record["tier"])) {
-		return reviewActivityOf(record, nil)
+		return reviewActivityOf(record, nil, nil, "")
 	}
 	_, after := SplitChains(ev.Chains, afterStart)
-	return reviewActivityOf(record, CoverEvidence(after, scope, clock).EligibleChains())
+	return reviewActivityOf(record, CoverEvidence(after, scope, clock).EligibleChains(), nil, "")
 }
 
 // writeReviewActivity prints a reviewed rule's activity line for `steer fix score`.
@@ -151,6 +224,13 @@ func writeReviewActivity(w io.Writer, a ReviewActivity) {
 	default:
 		fmt.Fprintf(w, "    review: %s applied in %d answered rounds over %d chains; %d rounds in %d chains named it (%s)\n",
 			a.RuleKey, a.ReviewedRounds, a.Chains, a.FindingRounds, a.FindingChains, severityList(a.Findings))
+	}
+	if m := a.Matched; m != nil {
+		fmt.Fprintf(w, "    matched chains: %d elsewhere, %d deferred, %d named the rule, %d unnamed, %d unreached\n",
+			m.Elsewhere, m.Deferred, m.Named, m.Unnamed, m.Unreached)
+		if len(m.UnreachedPaths) > 0 {
+			fmt.Fprintf(w, "    unreached paths: %s\n", strings.Join(m.UnreachedPaths, ", "))
+		}
 	}
 }
 

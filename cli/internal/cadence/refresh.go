@@ -31,8 +31,9 @@ import (
 // exact repository root a v3 scope binds. v16 reads the transcript candidate from
 // this host's session snapshots and adds refreshed_at and fix to the transcript
 // corpus row. v17 adds observation.review: what the commit reviewer did with a
-// reviewed rule.
-const QueueVersion = 17
+// reviewed rule. v18 adds observation.review.matched: the group each matched chain
+// falls in.
+const QueueVersion = 18
 
 // DefaultWindowDays is the transcript look-back a refresh and a status read use
 // when no --days is given.

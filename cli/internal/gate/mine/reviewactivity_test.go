@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -37,7 +38,7 @@ func TestReviewActivityCountsTheRulesRoundsAndFindings(t *testing.T) {
 	}
 	record := Record{"tier": "reviewed", "rule_id": "tui", "rule_scope": "project", "rule_repo": "/src/app"}
 
-	got := reviewActivityOf(record, after)
+	got := reviewActivityOf(record, after, nil, "")
 	want := ReviewActivity{
 		Applicable: true, RuleKey: "project:tui", Chains: 3,
 		ReviewedRounds: 3, FindingRounds: 2, FindingChains: 2,
@@ -53,7 +54,7 @@ func TestReviewActivityCountsTheRulesRoundsAndFindings(t *testing.T) {
 	}
 
 	record["tier"] = "instruction"
-	if got := reviewActivityOf(record, after); got.Applicable || got.ReviewedRounds != 0 {
+	if got := reviewActivityOf(record, after, nil, ""); got.Applicable || got.ReviewedRounds != 0 {
 		t.Fatalf("an instruction record read %+v", got)
 	}
 }
@@ -68,19 +69,53 @@ func TestReviewActivityKeepsToTheRulesRepositoryAndAnsweredRounds(t *testing.T) 
 		{RepoRoot: "/src/other", Rows: decodedRows(t, `{"ts":4,"phase":"deny","reviewers":2`+applied)},
 	}
 	record := Record{"tier": "reviewed", "rule_id": "tui", "rule_scope": "project", "rule_repo": "/src/app"}
-	got := reviewActivityOf(record, after)
+	got := reviewActivityOf(record, after, nil, "")
 	if got.Chains != 1 || got.ReviewedRounds != 1 || got.Findings["BLOCKING"] != 1 {
 		t.Fatalf("activity = %+v", got)
 	}
 	delete(record, "rule_repo")
-	if got := reviewActivityOf(record, after); !got.Unplaced || got.Chains != 0 || got.ReviewedRounds != 0 {
+	if got := reviewActivityOf(record, after, nil, ""); !got.Unplaced || got.Chains != 0 || got.ReviewedRounds != 0 {
 		t.Fatalf("an unplaced project rule read %+v", got)
+	}
+}
+
+// Each chain the class regex matches lands in exactly one group: a chain in another
+// repository first, even with a deferred match, then a deferred match, a chain with a
+// finding naming the rule, a chain whose reviewer had the rule and did not name it,
+// and a chain no reviewed round gave the rule; an unreached chain's paths are listed.
+func TestReviewActivityPlacesEachMatchedChainInOneGroup(t *testing.T) {
+	const applied = `{"ts":1,"phase":"deny","reviewers":2,"reviewed_rules_applied":["project:tui"]`
+	named := applied + `,"rule_findings":{"project:tui":{"SUBSTANTIVE":1}}}`
+	repaired := []Finding{{Verdict: "ACCEPTED", Text: "tui drift"}}
+	chain := func(root string, findings []Finding, paths []string, rows ...string) Chain {
+		return Chain{RepoRoot: root, Findings: findings, Paths: paths, Rows: decodedRows(t, rows...)}
+	}
+	after := []Chain{
+		chain("/src/app", []Finding{{Verdict: "ACCEPTED", Qualifier: "not fixed", Text: "tui drift"}}, nil, named),
+		chain("/src/app", repaired, nil, named),
+		chain("/src/app", repaired, nil, applied+`}`),
+		chain("/src/app", repaired, []string{"docs/b.md", "cmd/a.go"},
+			`{"ts":1,"phase":"deny","reviewers":2,"reviewed_rules_applied":["global:other"]}`),
+		chain("/src/app", []Finding{{Verdict: "REJECTED", Text: "tui drift"}}, []string{"z.go"}),
+		chain("/src/other", repaired, []string{"x.go"}),
+		chain("/src/other", []Finding{{Verdict: "ACCEPTED", Qualifier: "not fixed", Text: "tui drift"}}, []string{"y.go"}),
+	}
+	record := Record{"tier": "reviewed", "rule_id": "tui", "rule_scope": "project", "rule_repo": "/src/app"}
+
+	got := reviewActivityOf(record, after, regexp.MustCompile("tui"), "accepted").Matched
+	want := &MatchedChains{Elsewhere: 2, Deferred: 1, Named: 1, Unnamed: 1, Unreached: 1,
+		UnreachedPaths: []string{"cmd/a.go", "docs/b.md"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("matched = %+v\nwant      %+v", got, want)
+	}
+	if got := reviewActivityOf(record, after, nil, "").Matched; got != nil {
+		t.Fatalf("a record without a chain pattern placed %+v", got)
 	}
 }
 
 // Both scorers fill a reviewed record's Review from the chains their own window admits:
 // a chain before the split, a chain outside the record's scope and a chain whose ledger
-// is still pending count nothing.
+// is still pending count nothing. Only the chain scorer places matched chains.
 func TestBothScorersReadReviewActivityFromTheAdmittedChains(t *testing.T) {
 	const clock = 9000
 	applied := `,"reviewers":2,"reviewed_rules_applied":["global:tui"],"rule_findings":{"global:tui":{"SUBSTANTIVE":1}}}`
@@ -115,6 +150,9 @@ func TestBothScorersReadReviewActivityFromTheAdmittedChains(t *testing.T) {
 			got := observationOf(t, scored).Review
 			if got.Chains != 1 || got.ReviewedRounds != 1 || got.FindingRounds != 1 || got.Findings["SUBSTANTIVE"] != 1 {
 				t.Errorf("%s scorer: review = %+v, want the one admitted chain", name, got)
+			}
+			if (got.Matched != nil) != (name == "chain") {
+				t.Errorf("%s scorer: matched = %+v; only the chain scorer places matched chains", name, got.Matched)
 			}
 		}
 	})
