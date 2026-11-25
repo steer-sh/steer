@@ -166,7 +166,7 @@ func chainObservation(record Record, before, after []Chain, beforeCov, afterCov 
 		Firing:     firing,
 		Fixtures:   fixtureReceiptOf(record, ev),
 		Checks:     chainCheckActivity(record, ev, splitTS, clock),
-		Review:     reviewActivityOf(record, after),
+		Review:     reviewActivityOf(record, after, pattern, kind),
 		Coverage: ObservationCoverage{
 			Before:            coverageMap(beforeCov),
 			After:             coverageMap(afterCov),

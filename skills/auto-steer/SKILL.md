@@ -190,6 +190,15 @@ repair, a `check.sh` wiring repair, a failure outside the task).
 
 - **A false match.** Tighten the record as the audit file says and register the
   replacement with `--supersedes`. This changes tracking and no behavior.
+- **A confirmed match on a reviewed record on `review-findings`.** Read it by
+  its `review.matched` groups, not as a recurrence under an installed fix. For
+  `named` and `unnamed` chains, change nothing and report the rule as working.
+  Never rework the rule's text for them. Read `deferred` chains as a confirmed
+  recurrence under an installed fix. Hold under "Needs your decision" wider review
+  paths for `unreached` chains, a narrower scope for `elsewhere` chains, and a
+  check or guard for catches that share one mechanical tell, naming whether the
+  new fix would step the reviewed rule down with `--no-review`; never install any
+  of them.
 - **A confirmed recurrence under an installed fix.** Rework the fix when the
   reworked fix meets its tier's bar above, and supersede the record. Otherwise
   hold it. Never remove a fix because the problem came back.
