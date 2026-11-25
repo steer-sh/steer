@@ -1,0 +1,83 @@
+package claude
+
+import (
+	"reflect"
+	"strings"
+	"testing"
+
+	"github.com/steer-sh/steer-cli/internal/testhome"
+)
+
+func storedReview(t *testing.T, scope, id string) *RuleReview {
+	t.Helper()
+	manifest, err := LoadManifest(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return manifest.Rules[id].Review
+}
+
+// A review section is stored with sorted, distinct paths; a plain rewording keeps it,
+// and ClearReview makes the rule an instruction rule again.
+func TestAReviewedRuleKeepsItsSectionUntilCleared(t *testing.T) {
+	withProjectTempDir(t)
+	opts := RuleOptions{Review: &RuleReview{Paths: []string{" *.go", "cli/internal/tui/", "*.go"}}}
+	if _, err := InstallRule(ProjectScope, "tui", "tui reads status", opts); err != nil {
+		t.Fatal(err)
+	}
+	want := &RuleReview{Paths: []string{"*.go", "cli/internal/tui/"}}
+	if got := storedReview(t, ProjectScope, "tui"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("review = %+v, want %+v", got, want)
+	}
+	if _, err := InstallManagedRule(ProjectScope, "tui", "tui reads health from status"); err != nil {
+		t.Fatal(err)
+	}
+	if got := storedReview(t, ProjectScope, "tui"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("rewording dropped the review section: %+v", got)
+	}
+	if _, err := InstallRule(ProjectScope, "tui", "tui reads health from status", RuleOptions{ClearReview: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := storedReview(t, ProjectScope, "tui"); got != nil {
+		t.Fatalf("ClearReview left %+v", got)
+	}
+}
+
+// Each review path must be in the grammar; a reviewed rule of either scope may name
+// no path, which reaches every commit.
+func TestAReviewedRuleRefusesPathsOutsideTheGrammar(t *testing.T) {
+	testhome.Set(t, withProjectTempDir(t))
+	_, err := InstallRule(ProjectScope, "r", "a rule", RuleOptions{Review: &RuleReview{Paths: []string{"cli/**"}}})
+	if err == nil || !strings.Contains(err.Error(), "review") {
+		t.Errorf("err = %v, want a refusal", err)
+	}
+	if got := storedReview(t, ProjectScope, "r"); got != nil {
+		t.Fatalf("a refused install stored %+v", got)
+	}
+	for _, scope := range []string{ProjectScope, GlobalScope} {
+		if _, err := InstallRule(scope, "g", "a "+scope+" rule", RuleOptions{Review: &RuleReview{}}); err != nil {
+			t.Fatalf("a %s reviewed rule with no paths: %v", scope, err)
+		}
+		if got := storedReview(t, scope, "g"); got == nil || len(got.Paths) != 0 {
+			t.Fatalf("%s review = %+v", scope, got)
+		}
+	}
+}
+
+// A removed reviewed rule comes back from the archive with its review section.
+func TestRestoreBringsBackAReviewedRulesSection(t *testing.T) {
+	withProjectTempDir(t)
+	opts := RuleOptions{Review: &RuleReview{Paths: []string{"cli/internal/tui/"}}}
+	if _, err := InstallRule(ProjectScope, "tui", "tui reads status", opts); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RemoveManagedRule(ProjectScope, "tui", "testing restore"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RestoreArchived(ProjectScope, onlyEntry(t)); err != nil {
+		t.Fatal(err)
+	}
+	if got := storedReview(t, ProjectScope, "tui"); !reflect.DeepEqual(got, opts.Review) {
+		t.Fatalf("restored review = %+v", got)
+	}
+}

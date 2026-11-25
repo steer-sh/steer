@@ -1,0 +1,12 @@
+package resp
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestResponse(t *testing.T) {
+	if !strings.Contains(Response(), "\"id\"") {
+		t.Errorf("missing field id in %s", Response())
+	}
+}

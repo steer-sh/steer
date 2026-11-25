@@ -1,0 +1,131 @@
+// Package pi adapts Pi extension events to the harness-neutral commit gate.
+package pi
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"os"
+
+	"github.com/steer-sh/steer-cli/internal/gate"
+	"github.com/steer-sh/steer-cli/internal/gate/cc"
+)
+
+// Payload is the Claude-shaped envelope written by Pi's commit-gate bridge.
+type Payload struct {
+	HookEventName string `json:"hook_event_name"`
+	ToolName      string `json:"tool_name"`
+	ToolInput     struct {
+		Command string `json:"command"`
+	} `json:"tool_input"`
+	SessionID      string `json:"session_id"`
+	TranscriptPath string `json:"transcript_path"`
+	Model          string `json:"model"`
+	CWD            string `json:"cwd"`
+	// TurnID is the session entry ID of the newest user message on the active branch,
+	// which the settle backstop's payload names the same way.
+	TurnID string `json:"turn_id"`
+	// ParentToolCallID is set on a call another tool made, such as code mode.
+	ParentToolCallID string `json:"parent_tool_call_id"`
+	// Batch is nil from a bridge that predates it.
+	Batch *Batch `json:"steer_batch"`
+}
+
+// Output is the bridge reply. The TypeScript bridge consumes AdditionalContext and
+// SystemMessage, then returns only Pi's native block fields to the tool_call event.
+type Output struct {
+	Block             bool   `json:"block,omitempty"`
+	Reason            string `json:"reason,omitempty"`
+	AdditionalContext string `json:"additionalContext,omitempty"`
+	SystemMessage     string `json:"systemMessage,omitempty"`
+}
+
+// Render turns an engine decision into Pi's reply. A clean review never returns an
+// explicit allow: undefined is Pi's ordinary continuation contract.
+func Render(d gate.Decision) (Output, bool) {
+	message := d.SystemMessage
+	if d.LedgerError != nil {
+		note := "[commit-gate] the adjudication row could NOT be written (" +
+			d.LedgerError.Error() + "). The commit is not blocked by this."
+		if message == "" {
+			message = note
+		} else {
+			message += " " + note
+		}
+	}
+	switch d.Kind {
+	case gate.Deny:
+		return Output{Block: true, Reason: d.Reason, SystemMessage: message}, true
+	case gate.Allow, gate.ContextOnly:
+		// Pi's reply has no approval to grant, so an Allow renders as its receipt.
+		return Output{AdditionalContext: d.Reason, SystemMessage: message}, true
+	default:
+		if message == "" {
+			return Output{}, false
+		}
+		return Output{SystemMessage: message}, true
+	}
+}
+
+// Run reads a Pi bridge payload, rules on a commit, and writes a native reply. Every
+// adapter failure prints nothing so a broken gate cannot block the tool call.
+func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, stdin io.Reader, stdout io.Writer) {
+	raw, err := io.ReadAll(stdin)
+	if err != nil {
+		return
+	}
+	var payload Payload
+	if json.Unmarshal(raw, &payload) != nil || payload.HookEventName != "PreToolUse" ||
+		payload.ToolName != "Bash" || payload.SessionID == "" {
+		return
+	}
+	command := payload.ToolInput.Command
+	if !cc.IsCommitCommand(command) {
+		return
+	}
+	cwd := payload.CWD
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
+	reason, receipt := "", ""
+	if why := unorderedCommit(payload); why != "" {
+		reason, receipt = unorderedReason(why), unorderedReceipt
+	} else {
+		reason, receipt = cc.PreflightDeny(command, cwd)
+	}
+	if reason != "" {
+		encoded, err := json.Marshal(Output{Block: true, Reason: reason,
+			SystemMessage: receipt})
+		if err == nil {
+			_, _ = stdout.Write(append(encoded, '\n'))
+		}
+		return
+	}
+	repo := cc.RepoDir(command, cwd)
+	engine := gate.NewEngine(cfg, reviewer)
+	rowExtra := gate.Row{"client": "pi", "harness": "pi"}
+	for key, value := range AuthorFields(engine.Ledger(), cfg, payload.TranscriptPath,
+		payload.SessionID, payload.Model) {
+		rowExtra[key] = value
+	}
+	for key, value := range cc.RepoFields(repo) {
+		rowExtra[key] = value
+	}
+
+	decision := engine.Handle(ctx, gate.Request{
+		Repo: repo, Actor: payload.SessionID, Channel: gate.ChannelPreToolUse,
+		SessionID: payload.SessionID,
+		Spec:      cc.DiffSpecFor(command, cwd),
+		Message:   cc.ExtractMessage(command, cwd),
+		RerunNote: cc.RerunNote(command),
+		RowExtra:  rowExtra,
+		TurnKey:   "turn_id", TurnID: payload.TurnID,
+	})
+	out, ok := Render(decision)
+	if !ok {
+		return
+	}
+	if encoded, err := json.Marshal(out); err == nil {
+		_, _ = stdout.Write(append(encoded, '\n'))
+	}
+}

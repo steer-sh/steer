@@ -1,0 +1,19 @@
+package resp
+
+import (
+	"math/rand"
+	"strconv"
+	"testing"
+)
+
+func TestDraw(t *testing.T) {
+	if rand.Int() < 0 {
+		t.Error("negative draw")
+	}
+}
+
+func TestParse(t *testing.T) {
+	if _, err := strconv.Atoi("1"); err != nil {
+		t.Error(err)
+	}
+}

@@ -1,0 +1,386 @@
+package tui
+
+import (
+	"regexp"
+	"slices"
+	"strings"
+	"testing"
+
+	"github.com/steer-sh/steer-cli/internal/checks"
+	"github.com/steer-sh/steer-cli/internal/gate"
+	"github.com/steer-sh/steer-cli/internal/guard"
+	"github.com/steer-sh/steer-cli/internal/status"
+)
+
+// A clean screen says these checks found nothing. It does not say the system
+// works: the page runs a fixed set of checks and reads nothing else.
+func TestACleanScreenClaimsOnlyItsOwnChecks(t *testing.T) {
+	m := New(gate.Defaults(), "global")
+	m.width = 200
+	m.snap = &status.SystemStatus{}
+	m.active = panelDiagnostics
+	view := m.viewDiagnostics()
+	if !strings.Contains(view, "No issues detected by these checks") {
+		t.Errorf("the clean state does not name its own coverage:\n%s", view)
+	}
+	if strings.Contains(view, "everything") {
+		t.Errorf("the clean state claims more than it checked:\n%s", view)
+	}
+}
+
+// Each issue names its consequence and the panel that repairs it. The waiting
+// review outcomes are Arming's action row, so they are not an issue here too.
+func TestEachIssueNamesWhereItIsRepaired(t *testing.T) {
+	m := New(gate.Defaults(), "global")
+	m.width = 200
+	m.snap = &status.SystemStatus{Posture: status.Posture{
+		Unresolved: 3,
+		Masters: []status.MasterRuntime{{
+			Harness: "claude-code", Scope: "global", State: status.MasterUnknown,
+			Expected: guard.RuntimeDigest(),
+		}},
+	}}
+	m.active = panelDiagnostics
+	view := m.viewDiagnostics()
+	if strings.Contains(view, "no outcome yet") {
+		t.Errorf("diagnostics repeats the waiting outcomes Arming acts on:\n%s", view)
+	}
+	for _, want := range []string{
+		"The guard runner for Claude Code in every project on this machine is out of date",
+		"Open Fixes",
+	} {
+		if !strings.Contains(strings.Join(strings.Fields(view), " "), want) {
+			t.Errorf("the issue list is missing %q:\n%s", want, view)
+		}
+	}
+}
+
+// A check issue whose repair a panel runs names that panel. The runner hint named
+// one harness and one scope for every reader, so a Codex user was told to
+// register Claude Code. A repository this machine has not adopted raises none:
+// declining adoption is a choice, and its checks have no receipts here yet.
+func TestCheckIssuesNameThePanelThatRepairsThem(t *testing.T) {
+	m := New(gate.Defaults(), "global")
+	m.width = 200
+	m.snap = &status.SystemStatus{Checks: status.CheckTier{
+		Repo: "/repo", Manifest: true,
+		Runner: []status.ScopeArming{{Harness: "codex", Scope: "project"}},
+		Checks: []status.CheckRow{{ID: "fmt", Validation: status.ValidationNone}},
+	}}
+	m.active = panelDiagnostics
+	if issues := m.checkIssues(); len(issues) != 0 {
+		t.Errorf("an unadopted repository raises %+v", issues)
+	}
+	for _, r := range m.checkRows() {
+		if r.attention {
+			t.Errorf("an unadopted repository marks the %q row for attention", r.display())
+		}
+	}
+	m.snap.Checks.Adopted = true
+	view := strings.Join(strings.Fields(m.viewDiagnostics()), " ")
+	for _, want := range []string{
+		"Open Arming and press enter on a check runner row",
+		"Open Fixes and press enter on its row",
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("the check issues do not say %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "--harness claude-code --scope global") {
+		t.Errorf("the runner hint still names one harness and scope:\n%s", view)
+	}
+	m.snap.Checks.LatestRun = &status.CheckRun{Outcome: checks.OutcomePassed, IntegrationFailure: true}
+	view = strings.Join(strings.Fields(m.viewDiagnostics()), " ")
+	if !strings.Contains(view, "incomplete verification") || strings.Contains(view, "Add the managed line") {
+		t.Errorf("nonpassing result is described as missing wiring:\n%s", view)
+	}
+}
+
+// Each history count appears once, with the noun it counts. The review count was
+// printed twice, once as a corpus size and once as telemetry.
+func TestHistoryCountsAppearOnceWithTheirNoun(t *testing.T) {
+	m := New(gate.Defaults(), "global")
+	m.width = 200
+	m.snap = &status.SystemStatus{Telemetry: status.Telemetry{
+		ReviewChains: 41, SessionSnapshots: 12, AuditFirings: 7,
+	}}
+	m.active = panelDiagnostics
+	view := m.viewDiagnostics()
+	for _, want := range []string{
+		"review sequences", "agent sessions", "guard blocks",
+	} {
+		if got := strings.Count(view, want); got != 1 {
+			t.Errorf("%q appears %d times, want once:\n%s", want, got, view)
+		}
+	}
+	if strings.Contains(view, "Telemetry") {
+		t.Error("the separate telemetry block survives")
+	}
+}
+
+// An absent count says it is absent HERE, and it is not a health signal either
+// way: a stored row proves something was recorded, never that it is current.
+func TestAnAbsentCountIsLocal(t *testing.T) {
+	m := New(gate.Defaults(), "global")
+	m.width = 200
+	m.snap = &status.SystemStatus{}
+	m.active = panelDiagnostics
+	view := m.viewDiagnostics()
+	if !strings.Contains(view, "none recorded here") {
+		t.Errorf("an empty count does not say where it is empty:\n%s", view)
+	}
+	if !strings.Contains(view, "Counts recorded on this machine") {
+		t.Errorf("the counts do not say they are local:\n%s", view)
+	}
+}
+
+// Feedback belongs to the panel whose action wrote it. A Reviewer cancellation
+// showing on Diagnostics reads as that page's own state.
+func TestFeedbackStaysOnItsOwnPanel(t *testing.T) {
+	m := New(gate.Defaults(), "global")
+	m.snap = &status.SystemStatus{}
+	m.active = panelReviewer
+	m.note("cancelled")
+	if m.visibleMessage() != "cancelled" {
+		t.Fatal("the panel does not show its own feedback")
+	}
+	m.updateNav(keyOf("tab"))
+	if got := m.visibleMessage(); got != "" {
+		t.Errorf("the feedback followed the reader to another panel: %q", got)
+	}
+}
+
+// A read that finishes after the reader moved away names the panel that started
+// it, so the note is waiting when they come back rather than lost.
+func TestAnAsyncNoteNamesItsOwnPanel(t *testing.T) {
+	m := New(gate.Defaults(), "global")
+	m.snap = &status.SystemStatus{}
+	m.active = panelDiagnostics
+	m.outcomesRead(outcomesReadMsg{before: 2})
+	if m.visibleMessage() != "" {
+		t.Error("the arming panel's note rendered on diagnostics")
+	}
+	m.active = panelChannels
+	if m.visibleMessage() == "" {
+		t.Error("the note was lost rather than filed under the panel that started it")
+	}
+}
+
+// The technical block is behind t. Storage paths, runner versions and how the
+// evidence was produced support inspection; none is needed to read the issues.
+func TestDiagnosticsTechnicalBlockHidesBehindAKey(t *testing.T) {
+	m := New(gate.Defaults(), "global")
+	m.width = 200
+	m.snap = &status.SystemStatus{
+		Corpora: []status.CorpusRow{{Corpus: "commit-review", Present: true, Size: 3,
+			Path: "/abs/state/commit-review"}},
+		Posture: status.Posture{Reviewer: "agy/gemini-3.7-flash", Instrument: "agy/2/abc/v1"},
+	}
+	m.active = panelDiagnostics
+
+	if strings.Contains(m.viewDiagnostics(), "/abs/state/commit-review") {
+		t.Error("a storage path shows before t")
+	}
+	m.panelKey(keyOf("t"))
+	view := m.viewDiagnostics()
+	for _, want := range []string{"/abs/state/commit-review", "agy/gemini-3.7-flash", "agy/2/abc/v1"} {
+		if !strings.Contains(strings.Join(strings.Fields(view), " "), want) {
+			t.Errorf("the technical block is missing %q:\n%s", want, view)
+		}
+	}
+}
+
+// A stale runner in the other scope names the command that rebuilds that scope.
+// The Fixes action rebuilds the dashboard's scope, so sending the reader there
+// ran an operation that left the runner it named untouched.
+func TestAnOtherScopeStaleRunnerNamesItsOwnCommand(t *testing.T) {
+	m := New(gate.Defaults(), "project")
+	m.width = 200
+	m.snap = &status.SystemStatus{Posture: status.Posture{
+		Masters: []status.MasterRuntime{{
+			Harness: "codex", Scope: "global", State: status.MasterStale,
+			Runtime: "deadbeef", Expected: guard.RuntimeDigest(),
+		}},
+	}}
+	m.active = panelDiagnostics
+	view := strings.Join(strings.Fields(m.viewDiagnostics()), " ")
+	if !strings.Contains(view, status.RebuildCommand("global")) {
+		t.Errorf("the issue does not name the command for its own scope:\n%s", view)
+	}
+	if strings.Contains(view, "Open Fixes") {
+		t.Errorf("the issue sends the reader to an action in the other scope:\n%s", view)
+	}
+	m.active = panelFixes
+	for _, r := range m.fixRows() {
+		if r.kind == guardRepair {
+			t.Errorf("Fixes offers a repair for a runner in the other scope: %q", r.name)
+		}
+	}
+}
+
+// A stale runner's repair follows the dashboard's build against the hooks' build,
+// as steer status does. A dashboard behind the hooks offered a rebuild that moved
+// the runner backward; one ahead offered a rebuild that left the stable executable
+// and self-protection on the old build.
+func TestAStaleRunnerRepairFollowsTheBuildOrder(t *testing.T) {
+	t.Setenv("HOME", "/h")
+	hooks := status.BuildIdentity{Version: "0.1.5", Commit: "b"}
+	ahead := status.PluginCopy{Harness: "codex", Path: "/x", State: status.PluginDifferentBinary, Version: "0.1.6", Commit: "d"}
+	for name, tc := range map[string]struct {
+		running    status.BuildIdentity
+		plugins    []status.PluginCopy
+		want       string
+		rebuildRow bool
+	}{
+		"same build": {hooks, nil, "Open Fixes", true},
+		"CLI ahead":  {status.BuildIdentity{Version: "0.1.6", Commit: "c"}, nil, "bin install", false},
+		"CLI behind": {status.BuildIdentity{Version: "0.1.4", Commit: "a"}, nil, "/h/.steer/bin/steer status", false},
+		"dev build":  {status.BuildIdentity{Version: "dev", Commit: "c"}, nil, "Install only if this build should replace theirs", false},
+		"plugin ahead": {status.BuildIdentity{Version: "0.1.7", Commit: "c"}, []status.PluginCopy{ahead},
+			ahead.BinInstallCommand(), false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			m := New(gate.Defaults(), "global")
+			m.width = 400
+			m.snap = &status.SystemStatus{Posture: status.Posture{
+				Builds:  status.Builds{Running: tc.running, Hooks: hooks},
+				Plugins: tc.plugins,
+				Masters: []status.MasterRuntime{{Harness: "claude-code", Scope: "global", Path: "/m",
+					State: status.MasterStale, Installed: true}},
+			}}
+			var text string
+			for _, issue := range m.diagnosticIssues() {
+				text += issue.headline + ": " + issue.detail + "\n"
+			}
+			if !strings.Contains(text, tc.want) {
+				t.Errorf("diagnostics do not name %q:\n%s", tc.want, text)
+			}
+			if got := hasRepair(m.guardRepairs(), repairRunner); got != tc.rebuildRow {
+				t.Errorf("Fixes offers the rebuild = %v, want %v", got, tc.rebuildRow)
+			}
+		})
+	}
+}
+
+// A Pi that registers no runner reads detached beside a project store, but its
+// user may run Pi without Steer: neither Diagnostics nor Fixes names it, while a
+// detached Claude Code in the same scope still gets both.
+func TestAnUnarmedPiIsNoDetachedRunnerProblem(t *testing.T) {
+	m := New(gate.Defaults(), "project")
+	m.width = 200
+	m.snap = &status.SystemStatus{Posture: status.Posture{Masters: []status.MasterRuntime{
+		{Harness: "pi", Scope: "project", State: status.MasterDetached, Store: "/s", Installed: true},
+		{Harness: "claude-code", Scope: "project", State: status.MasterDetached, Store: "/s", Installed: true},
+	}}}
+	var headlines []string
+	for _, issue := range m.diagnosticIssues() {
+		headlines = append(headlines, issue.headline)
+	}
+	if got := strings.Join(headlines, "; "); strings.Contains(got, "Pi") || !strings.Contains(got, "Claude Code runs none") {
+		t.Errorf("diagnostics = %q, want Claude Code alone", got)
+	}
+	var labels []string
+	for _, r := range m.guardRepairs() {
+		labels = append(labels, r.label)
+	}
+	if !slices.Equal(labels, []string{"Run the guards in Claude Code"}) {
+		t.Errorf("guard repairs = %q, want Claude Code alone", labels)
+	}
+}
+
+// The repository's checks and their last run are listed once, on Fixes, where
+// enter acts on them. Diagnostics keeps only a check issue that asks for a step.
+func TestRepositoryChecksAndTheirLastRunLiveOnFixes(t *testing.T) {
+	m := New(gate.Defaults(), "global")
+	m.width = 200
+	m.snap = &status.SystemStatus{Checks: status.CheckTier{
+		Repo: "/w/steer", Manifest: true, Adopted: true,
+		LatestRun: &status.CheckRun{Source: checks.SourceStop, Outcome: checks.OutcomePassed},
+		Checks:    []status.CheckRow{{ID: "no-count", Binding: "check.sh", Validation: checks.FreshCurrent}},
+	}}
+	m.active = panelDiagnostics
+	if view := m.viewDiagnostics(); strings.Contains(view, "passed at the end of a turn") ||
+		strings.Contains(view, "no-count") {
+		t.Errorf("diagnostics repeats the checks Fixes lists:\n%s", view)
+	}
+	m.active = panelFixes
+	fixes := strings.Join(strings.Fields(m.viewFixes()), " ")
+	if !strings.Contains(fixes, "last run passed at the end of a turn") {
+		t.Errorf("fixes does not name the last check.sh run:\n%s", fixes)
+	}
+}
+
+// While an installed harness holds no Steer registration in a scope, every repair
+// the dashboard prints for that scope's runner or rules names the registered
+// harness. A plain rebuild or sync registers every installed harness, so it set
+// up again the agent the operator had removed Steer from.
+func TestNoPrintedRepairRegistersARemovedHarnessAgain(t *testing.T) {
+	m := New(gate.Defaults(), "project")
+	m.width = 400
+	m.snap = &status.SystemStatus{
+		Rules: []status.RuleInfo{{ID: "use-python3", Scope: "global", Text: "use python3"}},
+		Posture: status.Posture{
+			Masters: []status.MasterRuntime{
+				{Harness: "claude-code", Scope: "global", State: status.MasterStale, Path: "/m",
+					Runtime: "deadbeef", Expected: guard.RuntimeDigest(), Installed: true},
+				{Harness: "codex", Scope: "global", State: status.MasterNotRegistered, Installed: true},
+			},
+			Rules: []status.RulesPresence{{Harness: "claude-code", Scope: "global",
+				State: status.RulesDrifted, Missing: []string{"use-python3"}}},
+		},
+	}
+	m.active = panelDiagnostics
+	m.technical = true
+	view := strings.Join(strings.Fields(m.viewDiagnostics()), " ")
+	for _, r := range m.ruleRows() {
+		view += " " + r.state
+	}
+	untargeted := regexp.MustCompile(`steer hooks (rebuild|sync) --scope global( --harness (\S+))?`)
+	found := untargeted.FindAllStringSubmatch(view, -1)
+	if len(found) < 3 {
+		t.Fatalf("want the runner, technical and rules repairs, found %q in:\n%s", found, view)
+	}
+	for _, f := range found {
+		if f[3] != "claude-code" {
+			t.Errorf("%q registers a harness other than Claude Code:\n%s", f[0], view)
+		}
+	}
+}
+
+// A steer-team.lock.json left in the repository is a dashboard issue, as it is
+// in steer status, because clones no longer install the guards it holds.
+func TestALeftoverTeamLockfileIsADashboardIssue(t *testing.T) {
+	m := New(gate.Defaults(), "global")
+	m.width = 200
+	m.active = panelDiagnostics
+	m.snap = &status.SystemStatus{LegacyTeamLockfile: "/r/steer-team.lock.json"}
+	if view := m.viewDiagnostics(); !strings.Contains(view, "no longer installs guards from /r/steer-team.lock.json") {
+		t.Errorf("the leftover lockfile is not reported:\n%s", view)
+	}
+}
+
+// An unapproved runner names its own harness's repair. Pi has no /hooks, so a Pi
+// reader told to approve the definitions there had no step that ran the guards.
+func TestAnUnapprovedRunnerNamesItsHarnessRepair(t *testing.T) {
+	for _, tc := range []struct {
+		harness, trust string
+		want, never    string
+	}{
+		{"pi", status.TrustMissing, "/reload", "/hooks"},
+		{"pi", status.TrustDisabled, "/trust", "/hooks"},
+		{"codex", status.TrustMissing, "approve the definitions in /hooks", "/reload"},
+		{"codex", status.TrustHooksOff, "config.toml", "/reload"},
+	} {
+		m := New(gate.Defaults(), "global")
+		m.snap = &status.SystemStatus{Posture: status.Posture{Masters: []status.MasterRuntime{{
+			Harness: tc.harness, Scope: "global", State: status.MasterCurrent, Trust: tc.trust, Path: "/m",
+		}}}}
+		var text string
+		for _, issue := range m.diagnosticIssues() {
+			text += issue.headline + ": " + issue.detail + "\n"
+		}
+		if !strings.Contains(text, tc.want) || strings.Contains(text, tc.never) {
+			t.Errorf("%s/%s: want %q and no %q in:\n%s", tc.harness, tc.trust, tc.want, tc.never, text)
+		}
+	}
+}

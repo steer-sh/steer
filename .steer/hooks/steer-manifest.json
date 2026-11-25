@@ -1,0 +1,110 @@
+{
+  "hooks": {
+    "near-copy-test-hook": {
+      "file": "near-copy-test-hook.py",
+      "rule": "never add a Go test that nearly copies another test in the same file | add the case as a row in the twin test or a shared helper; if the test is distinct, say what it checks in its doc comment and retry",
+      "created": "2026-11-15",
+      "updated": "2026-11-15",
+      "source": "generated",
+      "prompt_version": "28",
+      "hook_version": "28",
+      "model": "claude-opus-5-5",
+      "rule_hash": "5a5f6b4d71f06b4d8353fb015f9d43e9d841ecf73c96127d4aef15b338ab56c0",
+      "self_test": {
+        "passed": true,
+        "positive_pass": 8,
+        "positive_fail": 0,
+        "negative_pass": 13,
+        "negative_fail": 0
+      },
+      "fixtures": {
+        "digest": "defcb316c971253d",
+        "cases": 21,
+        "tested": true,
+        "hook_digest": "44f19dea27b33814",
+        "master_digest": "74503cabd02b7f02",
+        "rule_hash": "5a5f6b4d71f06b4d8353fb015f9d43e9d841ecf73c96127d4aef15b338ab56c0",
+        "verified_at": "2026-11-25T02:51:32Z"
+      },
+      "once": true
+    },
+    "no-direct-main-hook": {
+      "file": "no-direct-main-hook.py",
+      "rule": "never commit on main or push to main in this repository | work on a branch and merge through a pull request",
+      "created": "2026-10-31",
+      "updated": "2026-11-18",
+      "source": "generated",
+      "prompt_version": "22",
+      "prompt_modules": [
+        "shell-lint"
+      ],
+      "hook_version": "22",
+      "model": "claude-opus-5-5",
+      "rule_hash": "219d4203914a9d920a1e0d83ba4b21c7373d55f4c1c181a31fdfa5af077d6d62",
+      "fixtures": {
+        "digest": "3576550711a0c303",
+        "cases": 63,
+        "tested": true,
+        "hook_digest": "4b617459a608d9c4",
+        "master_digest": "74503cabd02b7f02",
+        "rule_hash": "219d4203914a9d920a1e0d83ba4b21c7373d55f4c1c181a31fdfa5af077d6d62",
+        "verified_at": "2026-11-25T02:51:36Z"
+      }
+    },
+    "no-readme-edit-hook": {
+      "file": "no-readme-edit-hook.py",
+      "rule": "never change the repository-root README.md | the maintainer edits README.md by hand; tell the user what change it needs and quote the text",
+      "created": "2026-11-08",
+      "updated": "2026-11-08",
+      "source": "generated",
+      "prompt_version": "26",
+      "prompt_modules": [
+        "shell-lint"
+      ],
+      "hook_version": "26",
+      "model": "claude-opus-5-5",
+      "rule_hash": "95d19019e65d4c17ad9335184e9f1f35a56bcde3c0c44c33a88814a694b643c7",
+      "self_test": {
+        "passed": true,
+        "positive_pass": 18,
+        "positive_fail": 0,
+        "negative_pass": 15,
+        "negative_fail": 0
+      },
+      "fixtures": {
+        "digest": "ab1d0b3a4c4e5427",
+        "cases": 50,
+        "tested": true,
+        "hook_digest": "6f3db8c71d049a39",
+        "master_digest": "74503cabd02b7f02",
+        "rule_hash": "95d19019e65d4c17ad9335184e9f1f35a56bcde3c0c44c33a88814a694b643c7",
+        "verified_at": "2026-11-25T02:51:39Z"
+      }
+    }
+  },
+  "rules": {
+    "sibling-skeleton": {
+      "text": "When you add another variant of an adapter, stream, store, bridge, runner or command (a harness, a reviewer, a JSONL stream, a test runner, a subcommand), move the code it shares with the existing variants into one helper, and keep in each variant only what differs. Do not copy an existing variant's body. A copy that a test requires to stay identical is exempt.",
+      "rule_hash": "73071a3cc5ddeb4e26b8e848c937e09d6085a72902f7aa4017e271fce91b03b3",
+      "created": "2026-11-24",
+      "updated": "2026-11-24",
+      "review": {
+        "paths": [
+          "cli/",
+          "hooks/mod/",
+          "pi/",
+          "scripts/",
+          "tests/"
+        ]
+      }
+    }
+  },
+  "review_addendum": {
+    "no-windows-pi-findings": {
+      "text": "Windows is out of scope in this repository: Steer ships for macOS and Linux. Do not report a defect that occurs only on Windows. A defect that also occurs on macOS or Linux stays reportable, and you describe it there.",
+      "text_hash": "8236418e2c9740b60b0fdb8cde4a9e5665e0f4122593dd13c4c0f09366046be2",
+      "created": "2026-10-31",
+      "updated": "2026-11-21"
+    }
+  }
+}

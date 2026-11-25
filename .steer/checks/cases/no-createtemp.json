@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "new-site",
+      "exit_code": 1,
+      "diagnostic": "cli/internal/store/store.go:6: os.CreateTemp outside atomicfile",
+      "provenance": "the temp-file-and-rename pattern ef50341 moved off 21 sites onto atomicfile",
+      "files": {
+        "cli/internal/store/store.go": "package store\n\nimport \"os\"\n\nfunc save(path string, data []byte) error {\n\ttmp, err := os.CreateTemp(\"\", \"x-*\")\n\tif err != nil {\n\t\treturn err\n\t}\n\ttmp.Write(data)\n\ttmp.Close()\n\treturn os.Rename(tmp.Name(), path)\n}\n"
+      }
+    },
+    {
+      "name": "atomicfile-helper",
+      "exit_code": 0,
+      "provenance": "the helper itself creates the temporary file",
+      "files": {
+        "cli/internal/atomicfile/atomicfile.go": "package atomicfile\n\nimport \"os\"\n\nfunc Copy(path string) error {\n\t_, err := os.CreateTemp(\".\", \".steer-tmp-*\")\n\treturn err\n}\n"
+      }
+    },
+    {
+      "name": "test-file",
+      "exit_code": 0,
+      "provenance": "a test may create scratch files directly",
+      "files": {
+        "cli/internal/store/store_test.go": "package store\n\nimport \"os\"\n\nfunc helper() {\n\tos.CreateTemp(\"\", \"t-*\")\n}\n"
+      }
+    },
+    {
+      "name": "host-claim",
+      "exit_code": 0,
+      "provenance": "writeHostTemp in cli/internal/gate/host.go feeds os.Link, which ef50341 kept on purpose",
+      "files": {
+        "cli/internal/gate/host.go": "package gate\n\nimport \"os\"\n\nfunc writeHostTemp(path string) (string, error) {\n\tf, err := os.CreateTemp(\".\", \"host-*.tmp\")\n\tif err != nil {\n\t\treturn \"\", err\n\t}\n\treturn f.Name(), f.Close()\n}\n"
+      }
+    },
+    {
+      "name": "host-package-elsewhere",
+      "exit_code": 1,
+      "diagnostic": "cli/internal/gate/ledger.go:6: os.CreateTemp outside atomicfile",
+      "provenance": "the host-claim allowance is by file, not by the gate package",
+      "files": {
+        "cli/internal/gate/ledger.go": "package gate\n\nimport \"os\"\n\nfunc save() {\n\tos.CreateTemp(\".\", \"ledger-*\")\n}\n"
+      }
+    },
+    {
+      "name": "comment-and-string",
+      "exit_code": 0,
+      "provenance": "a mention in a comment or a string literal is not a call",
+      "files": {
+        "cli/internal/store/store.go": "package store\n\n\n// save never calls os.CreateTemp( directly.\n/* os.CreateTemp(\"\", \"x\") */\nfunc save() string {\n\treturn \"os.CreateTemp(\" + `os.CreateTemp(`\n}\n"
+      }
+    }
+  ]
+}

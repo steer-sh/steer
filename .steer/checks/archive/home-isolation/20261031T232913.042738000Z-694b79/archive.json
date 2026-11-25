@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "tier": "check",
+  "id": "home-isolation",
+  "scope": "project",
+  "removed": "2026-10-31T23:29:13.042738000Z",
+  "reason": "The problem it records occurs only on Windows, which is out of scope.",
+  "manifest": {
+    "id": "home-isolation",
+    "kind": "script",
+    "script": "scripts/home-isolation.sh"
+  }
+}
