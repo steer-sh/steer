@@ -2,7 +2,7 @@
 name: steer
 description: Turns a natural-language rule into the fix that can enforce it — a repository check, a PreToolUse Python guard, a reviewed rule the commit reviewer also checks, or an instruction rule — and installs it. Use when enforcing coding standards, blocking insecure patterns, making sure checks pass before a turn ends, managing hook lifecycle, or running steer CLI commands (register, remove, list, test).
 user-invocable: true
-prompt_version: 32
+prompt_version: 33
 compatibility: Requires Claude Code, Codex or Pi with tool-call hook support. Hooks are installed into .steer/hooks/ and registered in every installed harness Steer is set up in (settings.json for Claude Code, hooks.json for Codex, an extension in .pi/extensions for Pi). steer CLI must be available on PATH or bundled under scripts/.
 allowed-tools: Bash(steer *), Bash(python3 *), Bash(echo *), Read, Write, Edit
 ---
@@ -208,7 +208,13 @@ long output. The snapshot lists guards in both scopes; each row names its scope.
 
 - Guards: `hooks[]`. A row whose `source` is `steer` is Steer's self-protection,
   which guards Steer itself and covers no rule of the user's.
-- Instruction rules: `rules[]`.
+- Instruction and reviewed rules: `rules[]`. A row with `review` is a reviewed
+  rule and a row without it is an instruction rule. A reviewed rule whose
+  `review.state` is `uncommitted` exists on disk, but the commit reviewer gets it
+  only after it is committed; under `uncommitted-change` the reviewer still gets
+  the committed text. Tell the user to commit it rather than install it again.
+  Under `uncommitted-removal` the store on disk holds an instruction rule, and the
+  reviewer reads the committed reviewed rule until that change is committed.
 - Review prompt entries: `addenda[]`.
 - Repository checks: `checks.checks[]`, for this repository only. For a request
   to run the tests before a turn ends, `checks.adopted` and `checks.runner[]`

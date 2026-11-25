@@ -34,7 +34,8 @@ func sampleDigest() *Digest {
 	d.InstructionFiles = []InstructionFile{{
 		Harness: harness.ClaudeCode, Path: "CLAUDE.md",
 		SteerRules: []string{"- no bare python | use python3"}, GuardRules: []string{"- no bare python | use python3"},
-		Directives: []Directive{{Section: "Style", Text: "never use var"}, {Section: "Git", Text: "never force push"}},
+		ReviewedRules: []string{"- share one helper"},
+		Directives:    []Directive{{Section: "Style", Text: "never use var"}, {Section: "Git", Text: "never force push"}},
 	}}
 	d.assignIDs()
 	return d
@@ -81,7 +82,8 @@ func TestIndexListsTheUserSignalsOnly(t *testing.T) {
 			t.Errorf("signal %s = %+v, want %+v", s.Signal, s, want[s.Signal])
 		}
 	}
-	if len(idx.InstructionFiles) != 1 || idx.InstructionFiles[0].Directives != 2 || idx.InstructionFiles[0].ID != "i1" {
+	if len(idx.InstructionFiles) != 1 || idx.InstructionFiles[0].Directives != 2 || idx.InstructionFiles[0].ID != "i1" ||
+		strings.Join(idx.InstructionFiles[0].ReviewedRules, "|") != "- share one helper" {
 		t.Errorf("instruction files = %+v", idx.InstructionFiles)
 	}
 }
@@ -193,7 +195,8 @@ func TestDetailPageHoldsEveryOccurrenceAndDirective(t *testing.T) {
 	if strings.Join(got["c1"], ",") != "s1,s2" || strings.Join(got["i1"], ",") != "Style,Git" {
 		t.Errorf("rows = %+v", det.Rows)
 	}
-	if len(det.Items) != 2 || det.Items[0].Signal != "user_corrections" || det.Items[1].Path != "CLAUDE.md" {
+	if len(det.Items) != 2 || det.Items[0].Signal != "user_corrections" || det.Items[1].Path != "CLAUDE.md" ||
+		strings.Join(det.Items[1].ReviewedRules, "|") != "- share one helper" {
 		t.Errorf("items = %+v", det.Items)
 	}
 	if _, err := DetailPage(sampleDigest(), []string{"c9"}, 0, 0); err == nil {
