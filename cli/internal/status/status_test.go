@@ -247,8 +247,7 @@ func TestAnInstalledUnarmedPiReadsUnregisteredRows(t *testing.T) {
 	}
 }
 
-func floatPtr(f float64) *float64 { return &f }
-func intPtr(n int) *int           { return &n }
+func intPtr(n int) *int { return &n }
 
 // TestJSONContractIsStable pins the emitted key set and order. It marshals a fully
 // populated SystemStatus literal — no Config, no machine state — against a golden

@@ -75,16 +75,6 @@ func Canonical(path string) string {
 	return resolved
 }
 
-func nonEmptyLines(text string) []string {
-	var out []string
-	for _, line := range strings.Split(text, "\n") {
-		if strings.TrimSpace(line) != "" {
-			out = append(out, line)
-		}
-	}
-	return out
-}
-
 // nulFields splits git's -z output into its non-empty paths.
 func nulFields(text string) []string {
 	var out []string

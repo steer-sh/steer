@@ -26,15 +26,6 @@ func withCmdProjectTempDir(t *testing.T) string {
 	return tempDir
 }
 
-// installFactoryGuards installs two guards an earlier Steer installed from its
-// preset catalog, as an upgraded install still holds them.
-func installFactoryGuards(t *testing.T, scope string) {
-	t.Helper()
-	for _, name := range []string{"test-guard-a", "test-guard-b"} {
-		addOrphanFactoryHook(t, scope, name, name, name+" rule")
-	}
-}
-
 func addOrphanFactoryHook(t *testing.T, scope, hookName, sourceID, rule string) string {
 	t.Helper()
 

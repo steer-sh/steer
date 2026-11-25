@@ -112,14 +112,6 @@ func TestCoverEvidenceMovesUnmeasurableChainsToUnknown(t *testing.T) {
 	check(t, "a preview counts scope standing only", preview.Eligible, 3)
 }
 
-func scopedRecord(ts int) Record {
-	return Record{
-		"id": "r", "class": "c", "match": "boom", "tier": "check",
-		"status": "active", "installed_ts": ts,
-		"scope": map[string]any{"version": ScopeVersion, "all": true},
-	}
-}
-
 func withClock(at int64, fn func()) {
 	prev := now
 	now = func() int64 { return at }

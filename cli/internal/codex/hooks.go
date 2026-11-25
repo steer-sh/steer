@@ -203,9 +203,6 @@ func isResolver(command string) bool { return strings.Contains(command, resolver
 
 func isSteerOwned(command string) bool { return isGate(command) || isResolver(command) }
 
-// filter drops this gate's own handlers, keeping every other key at every level.
-func filter(entries []any) []any { return filterBy(entries, isGate) }
-
 func filterBy(entries []any, drop func(string) bool) []any {
 	out := make([]any, 0, len(entries))
 	for _, raw := range entries {

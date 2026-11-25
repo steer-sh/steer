@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"io"
 	"os"
 	"runtime"
@@ -113,16 +112,5 @@ func TestConfigSetTimeoutNamesTheRegistrationItDoesNotReach(t *testing.T) {
 	out := captureStdout(t, func() { setSetting(t, "reviewer.timeout", "300") })
 	if !strings.Contains(out, "steer commit-gate install") {
 		t.Errorf("set did not name the re-registration:\n%s", out)
-	}
-}
-
-func writeLine(t *testing.T, path string, record map[string]any) {
-	t.Helper()
-	data, err := json.Marshal(record)
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
-	if err := os.WriteFile(path, append(data, '\n'), 0o644); err != nil {
-		t.Fatalf("WriteFile %s: %v", path, err)
 	}
 }

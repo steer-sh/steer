@@ -1222,21 +1222,6 @@ func countBlocks(runs []checks.OracleRun, retired map[string]adjudication.Exclus
 	return out
 }
 
-// firingsApplicable reports whether a tier contributes to the audit-log firing
-// count. Only the guard tier's master PreToolUse hook writes that log; check,
-// instruction and review write no audit-log firings, so a reader shows n/a
-// rather than a misleading zero. The review tier's firings live in the
-// adjudication ledger, surfaced already as chains and incidence, not here.
-func firingsApplicable(tier string) bool {
-	return tier == "guard"
-}
-
-// boolOf reads a bool value from a decoded map, false when absent or not a bool.
-func boolOf(v any) bool {
-	b, _ := v.(bool)
-	return b
-}
-
 // corpusRows carries the cadence corpus sweep into the snapshot, adding the path
 // each corpus lives at so a reader knows where to look.
 func corpusRows(rows []cadence.CorpusStatus, opts Options) []CorpusRow {
