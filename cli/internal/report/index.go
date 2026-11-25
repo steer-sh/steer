@@ -36,12 +36,13 @@ type SignalSummary struct {
 // InstructionSummary is an instruction document without its directives, which
 // its details hold.
 type InstructionSummary struct {
-	ID         string     `json:"id"`
-	Harness    harness.ID `json:"harness"`
-	Path       string     `json:"path"`
-	Directives int        `json:"directives"`
-	SteerRules []string   `json:"steer_rules"`
-	GuardRules []string   `json:"guard_rules"`
+	ID            string     `json:"id"`
+	Harness       harness.ID `json:"harness"`
+	Path          string     `json:"path"`
+	Directives    int        `json:"directives"`
+	SteerRules    []string   `json:"steer_rules"`
+	GuardRules    []string   `json:"guard_rules"`
+	ReviewedRules []string   `json:"reviewed_rules"`
 }
 
 // Page says which slice of a listing one output holds. NextCursor is absent on
@@ -102,6 +103,8 @@ type DetailItem struct {
 	Path       string     `json:"path,omitempty"`
 	SteerRules []string   `json:"steer_rules,omitempty"`
 	GuardRules []string   `json:"guard_rules,omitempty"`
+	// ReviewedRules is a document's reviewed rules; see InstructionFile.
+	ReviewedRules []string `json:"reviewed_rules,omitempty"`
 }
 
 // DetailRow is one occurrence of a cluster, or one directive of a document.
@@ -154,7 +157,7 @@ func IndexPage(d *Digest, cursor, maxBytes int) ([]byte, error) {
 	for _, f := range d.InstructionFiles {
 		head.InstructionFiles = append(head.InstructionFiles, InstructionSummary{
 			ID: f.ID, Harness: f.Harness, Path: f.Path, Directives: len(f.Directives),
-			SteerRules: f.SteerRules, GuardRules: f.GuardRules,
+			SteerRules: f.SteerRules, GuardRules: f.GuardRules, ReviewedRules: f.ReviewedRules,
 		})
 	}
 	for _, list := range d.Signals.lists() {
@@ -241,6 +244,7 @@ func DetailPage(d *Digest, ids []string, cursor, maxBytes int) ([]byte, error) {
 		if f, ok := files[id]; ok {
 			detail.Items = append(detail.Items, DetailItem{
 				ID: id, Harness: f.Harness, Path: f.Path, SteerRules: f.SteerRules, GuardRules: f.GuardRules,
+				ReviewedRules: f.ReviewedRules,
 			})
 			for _, dir := range f.Directives {
 				rows = append(rows, DetailRow{ID: id, Section: dir.Section, Text: dir.Text})

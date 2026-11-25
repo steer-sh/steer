@@ -45,7 +45,7 @@ func TestARefusedStoreIsNotAnEmptyStore(t *testing.T) {
 		t.Fatalf("the problem does not name the file to edit: %q", problems[0].Error)
 	}
 
-	if _, ruleProblems := collectRules(); len(ruleProblems) == 0 {
+	if _, ruleProblems := collectRules(nil); len(ruleProblems) == 0 {
 		t.Fatal("the rule reader reported a refused store as a store with no rules")
 	}
 }

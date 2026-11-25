@@ -3,6 +3,7 @@ package status
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/steer-sh/steer-cli/internal/gate"
@@ -89,6 +90,62 @@ func TestAddendumInventoryNeverReadsAnUnreadHeadAsLive(t *testing.T) {
 		}
 		if got := rows["global/g"].State; got != AddendumLive {
 			t.Errorf("%s head: global entry state = %q; want live", name, got)
+		}
+	}
+}
+
+// A rule's review state is what the commit gate reads of it: an instruction rule
+// carries none, a global reviewed rule is read from disk, and a project rule is
+// read against HEAD's text and paths, including a `--no-review` that HEAD still
+// holds and a HEAD that was not read.
+func TestRulesReadEachReviewedRuleAgainstHead(t *testing.T) {
+	home := t.TempDir()
+	testhome.Set(t, home)
+	t.Chdir(t.TempDir())
+	writeStore(t, filepath.Join(home, ".steer", "hooks"),
+		`{"rules":{"g":{"text":"global rule","review":{}}}}`)
+	writeStore(t, filepath.Join(".steer", "hooks"), `{"rules":{
+		"prose":{"text":"an instruction rule"},
+		"live":{"text":"a  committed rule","review":{"paths":["cli/"]}},
+		"new":{"text":"not committed","review":{}},
+		"narrowed":{"text":"paths changed","review":{"paths":["cli/"]}},
+		"unreviewed":{"text":"no-review on disk"}}}`)
+	head := &gate.Addendum{Rules: []gate.ReviewedRule{
+		{Scope: "global", ID: "g", Text: "global rule"},
+		{Scope: "project", ID: "live", Text: "a committed rule", Paths: []string{"cli/"}},
+		{Scope: "project", ID: "narrowed", Text: "paths changed", Paths: []string{"cli/", "docs/"}},
+		{Scope: "project", ID: "unreviewed", Text: "no-review on disk"},
+	}}
+
+	for name, tc := range map[string]struct {
+		head *gate.Addendum
+		want map[string]string
+	}{
+		"read": {head, map[string]string{
+			"global/g": AddendumLive, "project/prose": "", "project/live": AddendumLive,
+			"project/new": AddendumUncommitted, "project/narrowed": AddendumUncommittedChange,
+			"project/unreviewed": AddendumUncommittedRemoval}},
+		"unread": {nil, map[string]string{
+			"global/g": AddendumLive, "project/prose": "", "project/live": AddendumUnreadable}},
+	} {
+		rules, _ := collectRules(tc.head)
+		got := map[string]string{}
+		for _, r := range rules {
+			if r.Review != nil {
+				got[r.Scope+"/"+r.ID] = r.Review.State
+			} else {
+				got[r.Scope+"/"+r.ID] = ""
+			}
+		}
+		for key, want := range tc.want {
+			if got[key] != want {
+				t.Errorf("%s head: %s review state = %q; want %q (all %v)", name, key, got[key], want, got)
+			}
+		}
+		for _, r := range rules {
+			if name == "read" && r.ID == "narrowed" && strings.Join(r.Review.HeadPaths, ",") != "cli/,docs/" {
+				t.Errorf("a pending path change carries the paths the gate reads, got %+v", r.Review)
+			}
 		}
 	}
 }

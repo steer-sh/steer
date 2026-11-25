@@ -77,7 +77,8 @@ import (
 // v37 adds the guard source state stamps-differ and guards[].stamps: a runner
 // carrying a guard's current source under an old rule or identity.
 // v39 removes team: Steer no longer reads a team lockfile.
-const StatusVersion = 39
+// v40 adds rules[].review: a reviewed rule's paths on disk and at HEAD, and its state.
+const StatusVersion = 40
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20
@@ -548,7 +549,7 @@ func Collect(opts Options) (*SystemStatus, error) {
 		s.Hooks = append(s.Hooks, hooks...)
 		s.StoreProblems = append(s.StoreProblems, problems...)
 	}
-	rules, problems := collectRules()
+	rules, problems := collectRules(opts.Addendum)
 	s.Rules = rules
 	s.StoreProblems = append(s.StoreProblems, problems...)
 	s.StoreProblems = dedupeStoreProblems(s.StoreProblems)

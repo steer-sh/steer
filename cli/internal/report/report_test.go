@@ -275,7 +275,7 @@ func TestExtractInstructionFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	md, err := ExtractInstructionFile(harness.ClaudeCode, path, nil)
+	md, err := ExtractInstructionFile(harness.ClaudeCode, path, RuleEnforcers{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,7 +289,7 @@ func TestExtractInstructionFile(t *testing.T) {
 		t.Errorf("section = %q", md.Directives[0].Section)
 	}
 
-	missing, err := ExtractInstructionFile(harness.ClaudeCode, filepath.Join(dir, "nope.md"), nil)
+	missing, err := ExtractInstructionFile(harness.ClaudeCode, filepath.Join(dir, "nope.md"), RuleEnforcers{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,26 +298,34 @@ func TestExtractInstructionFile(t *testing.T) {
 	}
 }
 
-// A guard and an instruction rule both write a line into the section, so only a
-// line whose text is a guard's rule reads as enforced. The same text outside the
-// section is a directive, never a guard rule.
+// A guard, a reviewed rule and an instruction rule all write a line into the
+// section, so only a line whose text is a guard's rule reads as guarded, and only
+// one whose text is a reviewed rule the gate reads reads as reviewed; the reviewed
+// match folds whitespace as the gate does. The same text outside the section is a
+// directive, never a guard rule.
 func TestOnlyAGuardsLineReadsAsEnforced(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "AGENTS.md")
 	content := "## Conventions\n- use python3 instead\n\n## Steer Rules\n<!-- managed-by-steer -->\n" +
-		"- resolve a config path from the repo root\n- use python3 instead\n"
+		"- resolve a config path from the repo root\n- use python3 instead\n- share one helper\n"
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	md, err := ExtractInstructionFile(harness.Codex, path, []string{"use python3 instead", "a guard with no line"})
+	md, err := ExtractInstructionFile(harness.Codex, path, RuleEnforcers{
+		Guard:    []string{"use python3 instead", "a guard with no line"},
+		Reviewed: []string{"share  one\nhelper", "a reviewed rule with no line"},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(md.SteerRules) != 2 {
+	if len(md.SteerRules) != 3 {
 		t.Errorf("steer rules = %q", md.SteerRules)
 	}
 	if len(md.GuardRules) != 1 || md.GuardRules[0] != "use python3 instead" {
 		t.Errorf("guard rules = %q, want only the guard's line", md.GuardRules)
+	}
+	if len(md.ReviewedRules) != 1 || md.ReviewedRules[0] != "share one helper" {
+		t.Errorf("reviewed rules = %q, want only the reviewed rule's line", md.ReviewedRules)
 	}
 	if len(md.Directives) != 1 {
 		t.Errorf("directives = %+v", md.Directives)
@@ -364,8 +372,8 @@ func TestDigestReportsCoveragePerHarness(t *testing.T) {
 	scanner, projects := Scan(adapters, time.Time{}, transcript.Filter{AllProjects: true}, nil)
 	d := scanner.Finalize(30, projects, nil)
 
-	if d.DigestVersion != 8 {
-		t.Errorf("digest_version = %d; want 8", d.DigestVersion)
+	if d.DigestVersion != 9 {
+		t.Errorf("digest_version = %d; want 9", d.DigestVersion)
 	}
 	// Two root sessions and one thread: a thread is provenance, not a unit.
 	if d.Stats.SessionsScanned != 2 || d.Stats.ThreadsScanned != 1 {
@@ -604,7 +612,7 @@ func TestExtractInstructionFileStopsAtTheEndMarker(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	md, err := ExtractInstructionFile(harness.ClaudeCode, path, []string{"my own bullet"})
+	md, err := ExtractInstructionFile(harness.ClaudeCode, path, RuleEnforcers{Guard: []string{"my own bullet"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -627,7 +635,7 @@ func TestExtractInstructionFileCutsOnARuneBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	md, err := ExtractInstructionFile(harness.Codex, path, nil)
+	md, err := ExtractInstructionFile(harness.Codex, path, RuleEnforcers{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -649,7 +657,7 @@ func TestExtractInstructionFileMarksCutBullets(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	md, err := ExtractInstructionFile(harness.ClaudeCode, path, []string{long})
+	md, err := ExtractInstructionFile(harness.ClaudeCode, path, RuleEnforcers{Guard: []string{long}})
 	if err != nil {
 		t.Fatal(err)
 	}
