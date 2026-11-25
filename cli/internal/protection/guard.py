@@ -655,8 +655,8 @@ def steer_positionals(words, start, value_after_redirection):
 # Commands that write every file they name, and ones that write only the last.
 WRITES_EVERY_OPERAND = {"rm", "rmdir", "unlink", "mv", "chmod", "chown", "truncate", "touch", "tee"}
 WRITES_LAST_OPERAND = {"cp", "install", "ln"}
-# Commands that take a directory's contents with it.
-REMOVES_TREES = {"rm", "rmdir", "mv"}
+# Commands that take a directory's contents with it; rmdir removes only an empty one.
+REMOVES_TREES = {"rm", "mv"}
 # Words that run the command after them.
 COMMAND_PREFIXES = {"sudo", "command", "env", "nohup", "time", "exec", "builtin"}
 
