@@ -239,7 +239,7 @@ func TestGuardRulesMatchTheBulletSyncWrites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	md, err := report.ExtractInstructionFile(harness.ClaudeCode, path, rules)
+	md, err := report.ExtractInstructionFile(harness.ClaudeCode, path, report.RuleEnforcers{Guard: rules})
 	if err != nil {
 		t.Fatal(err)
 	}

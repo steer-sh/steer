@@ -17,7 +17,7 @@ import (
 // DigestVersion is the schema version of the stored report and of every page
 // read from it. The steer-report skill prompt reads this field; bump it whenever
 // the shape or semantics change.
-const DigestVersion = 8
+const DigestVersion = 9
 
 // DefaultMaxDigestBytes bounds one page of index, listing or detail output.
 const DefaultMaxDigestBytes = 40960
@@ -152,8 +152,19 @@ type InstructionFile struct {
 	SteerRules []string `json:"steer_rules"`
 	// GuardRules are the SteerRules lines whose text is a guard's rule in the
 	// manifest of the document's scope.
-	GuardRules []string    `json:"guard_rules"`
-	Directives []Directive `json:"directives"`
+	GuardRules []string `json:"guard_rules"`
+	// ReviewedRules are the SteerRules lines whose text is a reviewed rule the
+	// commit gate reads in the document's scope: on disk for a global rule, at
+	// HEAD for a project rule.
+	ReviewedRules []string    `json:"reviewed_rules"`
+	Directives    []Directive `json:"directives"`
+}
+
+// RuleEnforcers are the rule texts of one scope that something besides the
+// agent's instructions enforces: a guard, or the commit reviewer.
+type RuleEnforcers struct {
+	Guard    []string
+	Reviewed []string
 }
 
 // HarnessCoverage is one harness's share of the scan. It answers what the

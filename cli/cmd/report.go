@@ -223,6 +223,7 @@ func collectInstructionFiles(only harness.ID) []report.InstructionFile {
 	if err != nil {
 		return out
 	}
+	head := gate.LoadAddendum(repoRootOrNone())
 	for _, h := range harness.All() {
 		if only != harness.Unknown && h.ID != only {
 			continue
@@ -236,7 +237,8 @@ func collectInstructionFiles(only harness.ID) []report.InstructionFile {
 				}
 				path = filepath.Join(dir, h.InstructionFile)
 			}
-			md, err := report.ExtractInstructionFile(h.ID, path, guardRuleTexts(scope))
+			md, err := report.ExtractInstructionFile(h.ID, path, report.RuleEnforcers{
+				Guard: guardRuleTexts(scope), Reviewed: reviewedRuleTexts(scope, head)})
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "warning: could not read %s: %v\n", path, err)
 				continue
@@ -259,6 +261,19 @@ func guardRuleTexts(scope string) []string {
 		return nil
 	}
 	return rules
+}
+
+// reviewedRuleTexts are the scope's reviewed rules where the commit gate reads
+// them, head: a project rule changed or added on disk but not committed is not
+// one the reviewer is given.
+func reviewedRuleTexts(scope string, head gate.Addendum) []string {
+	var out []string
+	for _, r := range head.Rules {
+		if r.Scope == scope {
+			out = append(out, r.Text)
+		}
+	}
+	return out
 }
 
 var reportRefreshCmd = &cobra.Command{

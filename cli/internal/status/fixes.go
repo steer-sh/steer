@@ -32,11 +32,25 @@ const (
 	AddendumUnreadable = "unreadable"
 )
 
-// RuleInfo is one instruction-tier rule in a store.
+// RuleInfo is one rule in a store. Review is set for a reviewed rule, on disk or,
+// for a project rule, at the HEAD the commit gate reads; it is nil for an
+// instruction rule.
 type RuleInfo struct {
-	ID    string `json:"id"`
-	Scope string `json:"scope"`
-	Text  string `json:"text"`
+	ID     string          `json:"id"`
+	Scope  string          `json:"scope"`
+	Text   string          `json:"text"`
+	Review *RuleReviewInfo `json:"review,omitempty"`
+}
+
+// RuleReviewInfo is what the commit gate reads of a reviewed rule. Paths is the
+// review section on disk and HeadPaths the one the gate reads for a project rule
+// at HEAD; no paths means every commit. State is one of the Addendum states, read
+// against the rule's text and paths at HEAD for a project rule.
+type RuleReviewInfo struct {
+	Paths     []string `json:"paths,omitempty"`
+	HeadPaths []string `json:"head_paths,omitempty"`
+	State     string   `json:"state"`
+	Detail    string   `json:"detail,omitempty"`
 }
 
 // AddendumInfo is one review addendum entry. Text is the store on disk; HeadText
@@ -51,10 +65,10 @@ type AddendumInfo struct {
 	Detail   string `json:"detail,omitempty"`
 }
 
-// collectRules reads the rules in both stores. A store the reader refuses yields
-// no rows and one store problem, so a refused store is not read as a store with
-// no rules.
-func collectRules() ([]RuleInfo, []StoreProblem) {
+// collectRules reads the rules in both stores, each reviewed rule against head, the
+// addendum the commit gate reads. A store the reader refuses yields no rows and one
+// store problem, so a refused store is not read as a store with no rules.
+func collectRules(head *gate.Addendum) ([]RuleInfo, []StoreProblem) {
 	out := []RuleInfo{}
 	var problems []StoreProblem
 	for _, scope := range []string{claude.ProjectScope, claude.GlobalScope} {
@@ -67,7 +81,7 @@ func collectRules() ([]RuleInfo, []StoreProblem) {
 			continue
 		}
 		for id, r := range manifest.Rules {
-			out = append(out, RuleInfo{ID: id, Scope: scope, Text: r.Text})
+			out = append(out, RuleInfo{ID: id, Scope: scope, Text: r.Text, Review: ruleReview(id, scope, r, head)})
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -77,6 +91,38 @@ func collectRules() ([]RuleInfo, []StoreProblem) {
 		return out[i].ID < out[j].ID
 	})
 	return out, problems
+}
+
+// ruleReview is what the commit gate reads of one rule, nil when neither the store
+// on disk nor the gate's copy holds it as a reviewed rule. The gate drops a rule
+// with no text, as it drops one with no review section.
+func ruleReview(id, scope string, r claude.RuleEntry, head *gate.Addendum) *RuleReviewInfo {
+	text := normalizeEntry(r.Text)
+	onDisk := r.Review != nil && text != ""
+	gateErr, gateRead := addendumStoreError(scope, head)
+	var committed *gate.ReviewedRule
+	if gateRead && gateErr == "" {
+		for i, c := range head.Rules {
+			if c.Scope == scope && c.ID == id {
+				committed = &head.Rules[i]
+			}
+		}
+	}
+	atHead := scope == claude.ProjectScope && committed != nil
+	if !onDisk && !atHead {
+		return nil
+	}
+	out := &RuleReviewInfo{}
+	if r.Review != nil {
+		out.Paths = r.Review.Paths
+	}
+	if atHead {
+		out.HeadPaths = committed.Paths
+	}
+	same := atHead && committed.Text == text &&
+		strings.Join(committed.Paths, "\x00") == strings.Join(out.Paths, "\x00")
+	out.State, out.Detail = committedState(scope, onDisk, atHead, same, gateRead, gateErr)
+	return out
 }
 
 // AddendumInventory joins the addendum entries on disk with what the commit gate
@@ -130,9 +176,15 @@ func addendumRows(scope string, head *gate.Addendum) []AddendumInfo {
 	return out
 }
 
-// addendumState is what the gate reads for one entry. A global entry is read from
-// disk, so it is live whenever the store on disk holds it.
+// addendumState is what the gate reads for one entry.
 func addendumState(row AddendumInfo, scope string, gateRead bool, gateErr string) (string, string) {
+	return committedState(scope, row.Text != "", row.HeadText != "", row.Text == row.HeadText, gateRead, gateErr)
+}
+
+// committedState is what the commit gate reads of one review-tier item: onDisk and
+// atHead say which copy holds it, and same whether the two agree. A global item is
+// read from disk, so it is live whenever the store on disk holds it.
+func committedState(scope string, onDisk, atHead, same, gateRead bool, gateErr string) (string, string) {
 	switch {
 	case scope != claude.ProjectScope:
 		return AddendumLive, ""
@@ -140,11 +192,11 @@ func addendumState(row AddendumInfo, scope string, gateRead bool, gateErr string
 		return AddendumUnreadable, "the commit gate's copy at HEAD was not read"
 	case gateErr != "":
 		return AddendumUnreadable, gateErr
-	case row.HeadText == "":
+	case !atHead:
 		return AddendumUncommitted, ""
-	case row.Text == "":
+	case !onDisk:
 		return AddendumUncommittedRemoval, ""
-	case row.Text != row.HeadText:
+	case !same:
 		return AddendumUncommittedChange, ""
 	}
 	return AddendumLive, ""
