@@ -47,11 +47,20 @@ func TestFieldSourceIgnoresAnUnusableNumericOverride(t *testing.T) {
 	checkSource(t, "a zero override is no override", settings.Source(field, stored), "config")
 }
 
+// TestConfigHelpNamesEverySetting checks that the help names every key and starts
+// every key's usage in one column, past the longest key.
 func TestConfigHelpNamesEverySetting(t *testing.T) {
 	help := settings.KeyHelp()
 	for _, name := range settings.Names() {
 		if !strings.Contains(help, name) {
 			t.Errorf("the generated help omits %s", name)
+		}
+	}
+	column := 2 + settings.NameWidth() + 1
+	for i, line := range strings.Split(help, "\n") {
+		name := settings.Fields[i].Name
+		if !strings.HasPrefix(line[2:], name) || line[column-1] != ' ' || line[column] == ' ' {
+			t.Errorf("usage of %s does not start at column %d: %q", name, column, line)
 		}
 	}
 }

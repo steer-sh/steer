@@ -45,8 +45,9 @@ var configShowCmd = &cobra.Command{
 		fmt.Println()
 		fmt.Printf("  File  %s%s\n", steerpath.ConfigFile(), configFileNote())
 		fmt.Println()
+		width := settings.NameWidth()
 		for _, f := range settings.Fields {
-			fmt.Printf("  %-22s %-24s %s\n", f.Name, settings.EffectiveValue(f, cfg, file), styles.MutedText.Render(settings.Source(f, file)))
+			fmt.Printf("  %-*s %-24s %s\n", width, f.Name, settings.EffectiveValue(f, cfg, file), styles.MutedText.Render(settings.Source(f, file)))
 		}
 		fmt.Println()
 		if resolveErr != nil {

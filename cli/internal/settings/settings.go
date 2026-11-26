@@ -443,11 +443,21 @@ func Names() []string {
 	return names
 }
 
+// NameWidth is the length of the longest key, the width a column of keys pads to.
+func NameWidth() int {
+	width := 0
+	for _, f := range Fields {
+		width = max(width, len(f.Name))
+	}
+	return width
+}
+
 // KeyHelp renders the key documentation an editor's help prints.
 func KeyHelp() string {
 	var b strings.Builder
+	width := NameWidth()
 	for _, f := range Fields {
-		fmt.Fprintf(&b, "  %-22s %s\n", f.Name, f.Usage)
+		fmt.Fprintf(&b, "  %-*s %s\n", width, f.Name, f.Usage)
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
