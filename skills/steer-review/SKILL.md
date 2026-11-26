@@ -59,7 +59,7 @@ prints, with a `trouble` field and any `warnings`). Report the error and each
 warning, and stop.
 
 Otherwise read the JSON, in this order. `warnings` lists a settings file that did
-not load, an API reviewer with `reviewer.api.tools` off (it read only the diff), an
+not load, an API reviewer with `reviewer.api.tools` off (it would read only the diff), an
 effort the provider does not document, a reviewed-rule manifest that did not load
 or a diff that was not saved; whichever case below ends the
 skill, report each warning with it, so a skip or a clean result is not read as
@@ -68,9 +68,12 @@ complete.
 1. `phase` `skip-empty`: the branch changes nothing reviewable. Say so and stop.
    `phase` `skip-prose`: the branch changes prose files only, which steer does not
    review. Say that the changes were not reviewed, and stop.
-2. `answered` below `runs`: in Step 6, say how many reviewers answered.3. `store_error`, or `findings_unparsed` above zero: the rulings cannot be
+2. `answered` below `runs`: in Step 6, say how many reviewers answered.
+3. `store_error`, or `findings_unparsed` above zero: the rulings cannot be
    recorded, because the review was not stored or a reply's findings cannot be
-   numbered. Rule on every finding in `findings[]` and in the `review` text in
+   numbered. With `findings_unparsed` above zero, rule on every finding in the
+   `review` text, which holds every reply, including those `findings[]` numbers;
+   with `store_error` alone, rule on every finding in `findings[]`. Do this in
    Steps 3 and 4, skip Step 5, and in Step 6 say that the rulings are not recorded
    and why.
 4. `finding_slots` zero: run `<STEER_BIN> review rule <review_id> --clean`. Tell the
