@@ -10,8 +10,9 @@ import (
 )
 
 // TestBranchConfigInheritsAndOverrides checks each layer of the branch reviewer's
-// precedence: commit reviewer, file, environment, flags, and the drop of model and
-// effort when the provider changes.
+// precedence: commit reviewer, file, environment, flags, the branch's own effort
+// default for a CLI reviewer alone, and the drop of the model when the provider
+// changes.
 func TestBranchConfigInheritsAndOverrides(t *testing.T) {
 	base := gate.Defaults()
 	base.ReviewerProvider = "codex"
@@ -30,25 +31,28 @@ func TestBranchConfigInheritsAndOverrides(t *testing.T) {
 		file, flags config.BranchReviewer
 		want        want
 	}{
-		{name: "unset inherits the commit reviewer with branch runs and timeout",
-			want: want{"codex", "gpt-fast", "low", 1, settings.DefaultBranchTimeout}},
-		{name: "same provider keeps the model and effort",
-			file: config.BranchReviewer{Provider: "codex", Effort: "high"},
-			want: want{"codex", "gpt-fast", "high", 1, settings.DefaultBranchTimeout}},
-		{name: "another provider drops the model and effort",
+		{name: "unset inherits the commit reviewer with branch effort, runs and timeout",
+			want: want{"codex", "gpt-fast", settings.DefaultBranchEffort, 1, settings.DefaultBranchTimeout}},
+		{name: "same provider keeps the model and takes a set effort",
+			file: config.BranchReviewer{Provider: "codex", Effort: "medium"},
+			want: want{"codex", "gpt-fast", "medium", 1, settings.DefaultBranchTimeout}},
+		{name: "another provider drops the model and keeps the branch effort",
 			file: config.BranchReviewer{Provider: "claude-code"},
-			want: want{"claude-code", "", "", 1, settings.DefaultBranchTimeout}},
+			want: want{"claude-code", "", settings.DefaultBranchEffort, 1, settings.DefaultBranchTimeout}},
+		{name: "an API reviewer gets no branch effort default",
+			file: config.BranchReviewer{Provider: "openai-compatible"},
+			want: want{"openai-compatible", "", "", 1, settings.DefaultBranchTimeout}},
 		{name: "runs over the limit are capped",
 			file: config.BranchReviewer{Runs: 9, Timeout: 30},
-			want: want{"codex", "gpt-fast", "low", settings.MaxBranchRuns, 30 * time.Second}},
+			want: want{"codex", "gpt-fast", settings.DefaultBranchEffort, settings.MaxBranchRuns, 30 * time.Second}},
 		{name: "the environment outranks the file",
 			env:  map[string]string{settings.BranchModelEnv: "gpt-env", settings.BranchRunsEnv: "2"},
 			file: config.BranchReviewer{Model: "gpt-file", Runs: 4},
-			want: want{"codex", "gpt-env", "low", 2, settings.DefaultBranchTimeout}},
+			want: want{"codex", "gpt-env", settings.DefaultBranchEffort, 2, settings.DefaultBranchTimeout}},
 		{name: "a flag outranks the environment",
 			env:   map[string]string{settings.BranchModelEnv: "gpt-env"},
 			flags: config.BranchReviewer{Model: "gpt-flag"},
-			want:  want{"codex", "gpt-flag", "low", 1, settings.DefaultBranchTimeout}},
+			want:  want{"codex", "gpt-flag", settings.DefaultBranchEffort, 1, settings.DefaultBranchTimeout}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, key := range []string{settings.BranchProviderEnv, settings.BranchModelEnv,

@@ -18,7 +18,12 @@ const (
 	// MaxBranchRuns is the largest panel a branch review may ask for.
 	MaxBranchRuns = 5
 	// DefaultBranchTimeout is a branch reviewer's wall clock with none configured.
-	DefaultBranchTimeout = 600 * time.Second
+	DefaultBranchTimeout = 720 * time.Second
+	// DefaultBranchEffort is a CLI branch reviewer's reasoning effort with none
+	// configured, whatever the commit reviewer's is. An API reviewer has no such
+	// default, since an endpoint may refuse reasoning_effort: it keeps the
+	// inherited effort, and sends none when that is unset.
+	DefaultBranchEffort = "high"
 
 	// The API reviewer's tool loop caps for a branch, which spans many more files
 	// than a commit.
@@ -38,8 +43,9 @@ const (
 // BranchConfig derives the branch reviewer's configuration from the commit
 // reviewer's, base, under the file's branch_reviewer keys, then the BRANCH_REVIEW_*
 // environment, then flags. A key none of them sets inherits base's value, except
-// runs and timeout, which take the branch defaults. A provider other than base's
-// drops base's model and effort, which name another provider's settings.
+// runs, timeout and a CLI reviewer's effort, which take the branch defaults. A
+// provider other than base's drops base's model and effort, which name another
+// provider's settings.
 func BranchConfig(base gate.Config, file, flags config.BranchReviewer) gate.Config {
 	want := file
 	envString(&want.Provider, BranchProviderEnv)
@@ -56,6 +62,9 @@ func BranchConfig(base gate.Config, file, flags config.BranchReviewer) gate.Conf
 	}
 	if model := strings.TrimSpace(want.Model); model != "" {
 		cfg.ReviewerModel, cfg.ReviewerModelOverride = model, model
+	}
+	if !isAPI(cfg.ReviewerProvider) {
+		cfg.ReviewerEffort = DefaultBranchEffort
 	}
 	if effort := strings.TrimSpace(want.Effort); effort != "" {
 		cfg.ReviewerEffort = effort
@@ -80,6 +89,11 @@ func LoadBranch(flags config.BranchReviewer) (gate.Config, error) {
 		file = config.Config{}
 	}
 	return BranchConfig(gate.WithEnv(gate.WithFile(gate.Defaults(), file)), file.BranchReviewer, flags), err
+}
+
+func isAPI(provider string) bool {
+	p, ok := reviewers.FindProvider(provider)
+	return ok && p.API
 }
 
 func sameProvider(a, b string) bool {
@@ -191,8 +205,8 @@ var BranchReviewerFields = []Field{
 		Label:        "Branch reasoning effort",
 		Help:         "How hard the branch reviewer thinks. Any value is passed through.",
 		Kind:         KindText,
-		DefaultLabel: "reviewer.effort for the same provider",
-		Usage:        "Branch reviewer reasoning effort; unset means reviewer.effort when the provider matches",
+		DefaultLabel: DefaultBranchEffort + "; an API reviewer: reviewer.effort for the same provider",
+		Usage:        "Branch reviewer reasoning effort; unset means " + DefaultBranchEffort + ", or for an API reviewer reviewer.effort when the provider matches",
 		Get:          func(c config.Config) string { return c.BranchReviewer.Effort },
 		Set: func(c *config.Config, v string) error {
 			c.BranchReviewer.Effort = v
@@ -204,7 +218,12 @@ var BranchReviewerFields = []Field{
 			}
 			return "(the provider's own)"
 		},
-		Inherits: sameProviderInherits("reviewer.effort"),
+		Inherits: func(file config.Config) string {
+			if isAPI(branchInForce(file).ReviewerProvider) {
+				return sameProviderInherits("reviewer.effort")(file)
+			}
+			return ""
+		},
 	},
 	{
 		Name: "branch_reviewer.runs", Env: BranchRunsEnv, Numeric: true,

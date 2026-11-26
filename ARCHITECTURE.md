@@ -1021,7 +1021,9 @@ when the endpoint refuses tools, as for a commit. agy, which cannot search and t
 prompt on argv, is refused. The panel is the commit
 gate's `Panel`, configured by `settings.BranchConfig`: the `branch_reviewer.*` keys
 inherit `reviewer.*` (a different provider drops the inherited model and effort),
-with their own runs, timeout and API tool-loop caps.
+with their own runs, timeout and API tool-loop caps. A CLI reviewer's effort defaults
+to `high`; an API reviewer's keeps the inherited one, since an endpoint may refuse
+`reasoning_effort`.
 
 Tracked edits that HEAD does not hold, in the index or the working tree, stop the
 review unless `--allow-dirty` names them to the reviewer (up to 20, the rest

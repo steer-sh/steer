@@ -42,6 +42,7 @@ It is advisory: it blocks nothing. Each review is recorded in
 ruling on each finding is recorded with steer review rule.
 
 The branch reviewer is the branch_reviewer.* settings, which inherit reviewer.*
+except runs, timeout and a CLI reviewer's effort, which default to the branch's own
 (see steer config show).`,
 	Example: dedent(`
   steer review branch
