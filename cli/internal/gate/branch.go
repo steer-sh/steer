@@ -28,7 +28,7 @@ const (
 
 	// BranchInstrumentSuffix marks rows of the branch review. Bump it when branch diff
 	// assembly or finding parsing changes what the reviewers read or what counts.
-	BranchInstrumentSuffix = "go-branch-v1"
+	BranchInstrumentSuffix = "go-branch-v2"
 
 	// dirtyTag bounds the note naming tracked edits that are not in HEAD.
 	dirtyTag = "dirty-working-tree"
