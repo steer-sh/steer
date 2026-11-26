@@ -102,6 +102,9 @@ type diffPlan struct {
 	// keepCruft lists OS cruft among the untracked files. The diff leaves it out;
 	// the commit view keeps it, because an add that names it lands it.
 	keepCruft bool
+	// branch words the budget notes for a branch review, whose reviewer can read
+	// the files a note says were dropped.
+	branch bool
 }
 
 // emptyTreeSHA1 is git's empty-tree object under SHA-1. A repository created with
@@ -172,7 +175,12 @@ func canonicalPatch(args []string) []string {
 
 // newDiffPlan builds the argument vectors and the exclusion pathspecs.
 func newDiffPlan(cfg Config, cwd string, spec DiffSpec) *diffPlan {
-	base := diffBaseArgs(cwd, spec)
+	return planOver(cfg, cwd, spec, diffBaseArgs(cwd, spec))
+}
+
+// planOver is newDiffPlan over base, the leading `diff` arguments that select the
+// two trees.
+func planOver(cfg Config, cwd string, spec DiffSpec, base []string) *diffPlan {
 	// --no-relative on every call, and it is not about the pathspecs. It is already
 	// the default, but a repo setting `diff.relative = true` restricts git diff to the
 	// cwd's SUBTREE, so a commit made from a subdirectory would be reviewed with every
@@ -611,39 +619,80 @@ func renderDiff(cfg Config, plan *diffPlan, diff, names string, newPaths []strin
 }
 
 func renderBody(cfg Config, plan *diffPlan, diff, names string, newPaths []string) string {
+	words := commitNotes
+	if plan.branch {
+		words = branchNotes
+	}
 	if len(diff) > cfg.MaxDiffChars {
 		stat := plan.stat(newPaths)
 		kept, dropped, ok := budgetSections(diff, names, cfg.MaxDiffChars)
 		if !ok {
-			// Nothing fits: one file's own diff overruns the whole budget. Stat only.
-			// This says what is missing and invites no reads — the reviewer cannot run
-			// a command, so telling it to read the working tree is a false claim that
-			// costs latency on tool calls that can never resolve.
-			diff = fmt.Sprintf("[diff is %d chars — too large to inline, and no single "+
-				"file's diff fits the budget. Stat below is all that is available; "+
-				"the hunks are NOT visible to you. Do not raise a finding about "+
-				"code you cannot see here.]\n\n%s", len(diff), stat)
+			diff = fmt.Sprintf(words.noneFits, len(diff), stat)
 		} else {
-			diff = fmt.Sprintf("[The review harness dropped %d file(s) from the diff "+
-				"below to fit its budget, NOT the commit: %s. These files ARE part of "+
-				"the commit and their hunks are not visible to you. Do not raise a "+
-				"finding about them, and do not treat a change the message describes "+
-				"as missing because its file is one of them. Full stat:]\n\n%s\n\n%s",
-				len(dropped), strings.Join(dropped, ", "), stat, kept)
+			diff = fmt.Sprintf(words.dropped, len(dropped), strings.Join(dropped, ", "), stat, kept)
 		}
 	}
 	if len(plan.excluded) > 0 {
 		// Say what was dropped, or the message-vs-diff rule fires on it: "bump deps"
 		// against a diff with no lock file in it is a finding the reviewer is right to
 		// raise and wrong about, and that false positive is manufactured by this filter.
-		diff = "[Excluded from the diff below by the review harness, NOT by the " +
-			"commit: " + strings.Join(plan.excluded, ", ") + ". These files ARE part of the " +
-			"commit; their contents are generated and were dropped to spend the " +
-			"budget on reviewable code. Do not raise a finding because a change " +
-			"the message describes is not visible in one of them.]\n\n" + diff
+		diff = fmt.Sprintf(words.excluded, strings.Join(plan.excluded, ", ")) + diff
 	}
 	return diff
 }
+
+// budgetNotes words what the harness left out of a diff: noneFits takes the diff's
+// size and the stat, dropped the count and names of dropped files, the stat and the
+// kept diff, and excluded the names of generated files.
+type budgetNotes struct {
+	noneFits, dropped, excluded string
+}
+
+// commitNotes are a commit review's. Its reviewer may have no file tools, so the
+// notes invite no reads: telling it to read the working tree is a false claim that
+// costs latency on tool calls that can never resolve.
+var commitNotes = budgetNotes{
+	noneFits: "[diff is %d chars — too large to inline, and no single " +
+		"file's diff fits the budget. Stat below is all that is available; " +
+		"the hunks are NOT visible to you. Do not raise a finding about " +
+		"code you cannot see here.]\n\n%s",
+	dropped: "[The review harness dropped %d file(s) from the diff " +
+		"below to fit its budget, NOT the commit: %s. These files ARE part of " +
+		"the commit and their hunks are not visible to you. Do not raise a " +
+		"finding about them, and do not treat a change the message describes " +
+		"as missing because its file is one of them. Full stat:]\n\n%s\n\n%s",
+	excluded: "[Excluded from the diff below by the review harness, NOT by the " +
+		"commit: %s. These files ARE part of the " +
+		"commit; their contents are generated and were dropped to spend the " +
+		"budget on reviewable code. Do not raise a finding because a change " +
+		"the message describes is not visible in one of them.]\n\n",
+}
+
+// branchNotes are a branch review's, whose reviewer reads the repository at HEAD, so
+// a note about dropped files tells it where to read them.
+var branchNotes = budgetNotes{
+	noneFits: "[The branch diff is %d chars, too large to inline, and no single " +
+		"file's diff fits the budget. The stat below summarises the files the branch " +
+		"changes; `git diff --name-only <base> <head>` lists them whole. These files " +
+		"ARE part of the branch: read them with your repository tools before you rule " +
+		"on them." + gitReadNote + "]\n\n%s",
+	dropped: "[The review harness dropped %d file(s) from the diff below to fit its " +
+		"budget: %s. These files ARE part of the branch at HEAD; their diffs were " +
+		"omitted to fit the prompt budget. Read them with your repository tools " +
+		"before ruling on callers or interactions that touch them." + gitReadNote +
+		" Full stat:]\n\n%s\n\n%s",
+	excluded: "[Excluded from the diff below by the review harness, NOT by the branch: " +
+		"%s. These files ARE part of the branch at HEAD; their contents are generated " +
+		"and were dropped to spend the budget on reviewable code. Do not raise a " +
+		"finding because a change a commit message describes is not visible in one " +
+		"of them.]\n\n",
+}
+
+// gitReadNote says where a dropped file's change is: HEAD shows what a file became,
+// not what the branch removed, and a deleted file is absent there.
+const gitReadNote = " Where your tools run git, `git diff <base> <head> -- <path>` " +
+	"shows a dropped file's change and `git show <base>:<path>` a deleted file, with " +
+	"<base> and <head> the range named above."
 
 // maxSubmoduleLogChars bounds the commit list that submoduleLog appends.
 const maxSubmoduleLogChars = 8_000
