@@ -39,8 +39,16 @@ const SHINE_CROSS = 1.1
 /** How strong the shine is, 0 to 1, on a light app and on a dark app. */
 const SHINE_LIGHT = 0.7
 const SHINE_DARK = 0.55
-/** How strong the cross cut into the shield shows. */
+/** How strong the cross cut into the shield shows, and how much darker it is than the shield. */
 const CUT_OPACITY = 0.3
+const CUT_DARK = 0.55
+/** How much darker the shield's right half is. */
+const SHADE_RIGHT = 0.22
+/** How much the shield darkens toward its point, and lightens at its top. */
+const SHADE_LOW = 0.16
+const SHADE_TOP = 0.22
+/** How strong the highlight on the shield's left rim is. */
+const RIM_OPACITY = 0.35
 /** How many times the check's cross blinks, and how long one blink takes. */
 const BLINKS = 3
 const BLINK_SECONDS = 0.6
@@ -334,14 +342,19 @@ export function markSvg(mark: Mark, moving: boolean, t: number, small = false): 
 
   if (mark === 'shield') {
     const flash = moves
-      ? `<g class="af" clip-path="url(#k)"><path class="rs" d="${SHIELD}" fill="none" stroke-width="6"/><path class="rf" d="${CUT}"/></g>` +
+      ? `<g class="af" clip-path="url(#k)"><path class="rs" d="${SHIELD}" fill="none" stroke-width="6"/><path class="rf" d="${CUT}" fill-opacity="${CUT_OPACITY}"/></g>` +
         `<g clip-path="url(#k)"><path class="sh as" d="M-6 -2H8L-12 62H-26Z"/></g>`
       : ''
     return (
       `${open}<defs><clipPath id="k"><path d="${SHIELD}"/></clipPath>` +
-      `<mask id="u"><rect width="${MARK_WIDTH}" height="${MARK_HEIGHT}" fill="#ffffff"/><path d="${CUT}" fill="#000000"/></mask></defs>` +
+      `<mask id="u"><rect width="${MARK_WIDTH}" height="${MARK_HEIGHT}" fill="#ffffff"/><path d="${CUT}" fill="#000000"/></mask>` +
+      `<linearGradient id="v" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff" stop-opacity="${SHADE_TOP}"/>` +
+      `<stop offset=".45" stop-color="#ffffff" stop-opacity="0"/><stop offset="1" stop-color="#000000" stop-opacity="${SHADE_LOW}"/></linearGradient></defs>` +
       `<path class="hf" d="${SHIELD}" mask="url(#u)"/>` +
-      `<path class="hf" d="${CUT}" fill-opacity="${CUT_OPACITY}"/>` +
+      `<g clip-path="url(#k)" mask="url(#u)"><rect x="32" width="32" height="${MARK_HEIGHT}" fill="#000000" fill-opacity="${SHADE_RIGHT}"/>` +
+      `<rect width="${MARK_WIDTH}" height="${MARK_HEIGHT}" fill="url(#v)"/>` +
+      `<path d="M32 4L10 11V28C10 42.5 19.5 51.5 32 57" fill="none" stroke="#ffffff" stroke-opacity="${RIM_OPACITY}" stroke-width="3"/></g>` +
+      `<path class="hf" d="${CUT}"/><path d="${CUT}" fill="#000000" fill-opacity="${CUT_DARK}"/>` +
       `${flash}</svg>`
     )
   }

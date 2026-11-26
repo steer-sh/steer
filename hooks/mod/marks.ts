@@ -130,29 +130,30 @@ const SHIELD = ['#######', '###c###', '#ccccc#', '###c###', '.##c##.', '..###..'
 
 export const SHIELD_COLUMNS = 7
 
-/** Frames in one pass of the shine; a block shows salmon for the first BLOCK_FRAMES of it. */
+/** Frames in one pass of the mark: a block shows salmon for the first BLOCK_FRAMES, then the shine crosses from SHINE_START. */
 export const SHINE_FRAMES = 36
 const BLOCK_FRAMES = 9
+const SHINE_START = 12
 
-const filled = (map: readonly string[], x: number, y: number) => (map[y]?.[x] ?? '.') !== '.'
-
-/** A shield pixel with an empty neighbour or the map's edge beside it. */
-const isEdge = (x: number, y: number) =>
-  !filled(SHIELD, x - 1, y) || !filled(SHIELD, x + 1, y) || !filled(SHIELD, x, y - 1) || !filled(SHIELD, x, y + 1)
+/** The shield's outline: the pixels that turn salmon at a block. */
+const isEdge = (x: number, y: number) => y === 0 || y === 5 || x === 0 || x === 6 || (y === 4 && (x === 1 || x === 5))
 
 /**
- * The shield. With `t` a shine crosses it on the diagonal, and at a block the edge
- * and the cross are salmon for the first frames of the pass; without, it is still.
+ * The shield, its right half a darker shade. With `t` its outline and cut are salmon
+ * for the first frames of the pass, then a shine two pixels wide crosses it on the
+ * diagonal; without, it is still.
  */
 export function shieldCells(t?: number): string {
   const k = t === undefined ? -1 : t % SHINE_FRAMES
   const blocking = k >= 0 && k < BLOCK_FRAMES
+  const shine = k - SHINE_START
   return cellsOf(SHIELD_COLUMNS, BLOCK_ROWS, (x, y) => {
     const ch = SHIELD[y]?.[x]
     if (!ch || ch === '.') return null
-    if (k >= 0 && x + y === k) return [LIGHT, 0.9]
-    if (ch === 'c') return blocking ? [HELD, 1] : [GUARD, 0.3]
-    return blocking && isEdge(x, y) ? [HELD, 1] : [GUARD, 1]
+    const lit = k >= SHINE_START && (x + y === shine || x + y === shine - 1)
+    if (ch === 'c') return [blocking ? HELD : GUARD, lit ? 0.6 : 0.22]
+    if (lit) return [LIGHT, 1]
+    return [blocking && isEdge(x, y) ? HELD : GUARD, x < 3 ? 1 : 0.72]
   })
 }
 
@@ -170,21 +171,24 @@ export function crossCells(t?: number): string {
   const shown = t === undefined || Math.floor(t / BLINK_FRAMES) % 2 === 0
   return cellsOf(BOX_COLUMNS, BLOCK_ROWS, (x, y) => {
     const ch = BOX_CROSS[y]?.[x]
-    if (ch === '#') return [CHECK, 1]
-    if (ch === 'x') return shown ? [HELD, 1] : [HELD, 0.25]
+    if (ch === '#') return [CHECK, 0.8]
+    if (ch === 'x') return [HELD, shown ? 1 : 0.4]
     return null
   })
 }
 
-/** Frames the tick takes to draw: one column a frame. */
-export const TICK_FRAMES = BOX_COLUMNS
+/** Columns of the tick drawn each frame. */
+const TICK_SPEED = 0.6
+
+/** Frames the tick takes to draw. */
+export const TICK_FRAMES = Math.ceil((BOX_COLUMNS - 1) / TICK_SPEED)
 
 /** The box with a tick. With `t` the tick is drawn left to right up to that frame; without, it is whole. */
 export function tickCells(t?: number): string {
   return cellsOf(BOX_COLUMNS, BLOCK_ROWS, (x, y) => {
     const ch = BOX_TICK[y]?.[x]
-    if (ch === '#') return [CHECK, 1]
-    if (ch === 'v') return t === undefined || x <= t ? [PASS, 1] : null
+    if (ch === '#') return [CHECK, 0.8]
+    if (ch === 'v') return t === undefined || x <= t * TICK_SPEED ? [PASS, 1] : null
     return null
   })
 }
