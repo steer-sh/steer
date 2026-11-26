@@ -307,7 +307,10 @@ Read the linked architecture section before changing the corresponding boundary:
   Stop runner's `sleep.Find` and the mod's `parseSleep` (`hooks/mod/sleep.ts`, its
   path in `pollSleeps`), decode one record shape and one path. The mod runs
   `steer sleep` and `steer wake` with the arguments `hooks/mod/fixband.tsx` builds. A changed
-  shape bumps `sleep.Version`. The self-protection guard's `sleep_entry`
+  shape bumps `sleep.Version` and the runtime's `STEER_SLEEP_VERSION` together:
+  `status.SleepRefusal` reads that constant from each registered master
+  (`claude.ReadMasterFile`), and `steer sleep guard` refuses while a master that
+  runs the guard lacks it. The self-protection guard's `sleep_entry`
   (`cli/internal/protection/guard.py`) closes the directory, and a new sleep
   command or flag joins its `evaluate_steer_invocation` and `STEER_VALUE_FLAGS`.
   A new Stop disposition joins every reader of `OracleRun.Disposition`

@@ -67,7 +67,7 @@ const stopRun = (over: Record<string, unknown> = {}) => ({
  * `files` stays live, so a test appends to it; a steer sleep or wake writes or removes
  * the record as the CLI does.
  */
-async function world($: Engine, on: On, files: Record<string, string>) {
+async function world($: Engine, on: On, files: Record<string, string>, refusal = '') {
   const clock = mock.clock(on, { now: NOW })
   mock.env(on, { HOME })
   files[`${CHECKS}/.steer-state`] = ''
@@ -114,6 +114,7 @@ async function world($: Engine, on: On, files: Record<string, string>) {
     const target = kind === 'guard' ? (argv[3] ?? '') : at('--repo')
     const path = `${SLEEP}/${await repoKey(at('--session'))}/${kind}-${await repoKey(target)}.json`
     const now = await clock.now()
+    if (refusal) return { value: { exitCode: 1, stdout: '', stderr: refusal, isStdoutTruncated: false, isStderrTruncated: false } }
     if (verb === 'sleep')
       files[path] = JSON.stringify({
         version: 1,
@@ -181,7 +182,7 @@ test('a guard block opens an offer; Sleep sleeps that guard for the session, the
   await offer.ui.press({ key: 'steer-sleep' })
   await clock.advance(1000)
   await offer.ui.unmount()
-  expect(runs).toEqual([[STEER, 'sleep', 'guard', 'no-direct-main-hook', '--session', SESSION, '--minutes', '5']])
+  expect(runs).toEqual([[STEER, 'sleep', 'guard', 'no-direct-main-hook', '--repo', REPO, '--session', SESSION, '--minutes', '5']])
 
   files[AUDIT] += line(guardRow({ enforcement: 'slept', firing_id: 'f2', timestamp: iso(NOW + 4_000) }))
   await clock.advance(1000)
@@ -195,6 +196,30 @@ test('a guard block opens an offer; Sleep sleeps that guard for the session, the
   await asleep.ui.unmount()
   expect(runs[1]).toEqual([STEER, 'wake', 'guard', 'no-direct-main-hook', '--session', SESSION])
   expect(await textOnce($)).toBe('engine')
+})
+
+test("Sleep names each repository the guard blocked in, before the last prompt too, and a refusal shows the message in steer's error box and leaves the offer open", async ($, on) => {
+  const files: Record<string, string> = { [AUDIT]: '' }
+  const why = 'the project guard runner predates sleep — run: steer hooks rebuild --scope project'
+  const box = `\n╭${'─'.repeat(why.length + 9)}╮\n│ Error: ${why} │\n╰${'─'.repeat(why.length + 9)}╯\nRun steer --help\n`
+  const { clock, runs } = await world($, on, files, box)
+  files[AUDIT] += line(guardRow({ repository: '/other', firing_id: 'f0' }))
+  await clock.advance(1000)
+  await $.turn.start({ text: 'try again', turnId: 'next' })
+  await clock.advance(1000)
+  files[AUDIT] += line(guardRow({ timestamp: iso(await clock.now()) })) + line(guardRow({ timestamp: iso(await clock.now()), firing_id: 'f2' }))
+  await clock.advance(1000)
+
+  const offer = await drawn($)
+  await offer.ui.press({ key: 'steer-sleep' })
+  await clock.advance(1000)
+  await offer.ui.unmount()
+  const after = await drawn($)
+  await after.ui.unmount()
+  expect(runs[0]).toEqual([STEER, 'sleep', 'guard', 'no-direct-main-hook', '--repo', '/other', '--repo', REPO, '--session', SESSION, '--minutes', '5'])
+  expect(after.text).toContain(`Sleep did not start: ${why}`)
+  expect(after.text).not.toContain('sleeps')
+  expect(after.buttons).toEqual(['steer-sleep', 'steer-dismiss'])
 })
 
 test('Dismiss closes an offer, the next typed prompt closes a later one, and the self-protection guard gets none', async ($, on) => {
@@ -303,7 +328,7 @@ test('an offer takes the band from a running review, which shrinks to a status l
 
 const doc = { started_ms: 1, ended_ms: 2, findings: [], thread_id: '', repo: '/r' } as unknown as ReviewView['doc']
 const reviewOf = (kind: ReviewView['kind']): ReviewView => ({ kind, doc, elapsedMs: 0 }) as ReviewView
-const offer: FixView = { kind: 'offer', type: 'guard', key: 'guard:g', hook: 'g', rule: '', tool: 'Bash', count: 1, rowIds: ['x'], atMs: 1 }
+const offer: FixView = { kind: 'offer', type: 'guard', key: 'guard:g', hook: 'g', rule: '', tool: 'Bash', repos: ['/r'], count: 1, rowIds: ['x'], atMs: 1 }
 const sleeping: FixView = { kind: 'sleeping', type: 'guard', key: 'guard:h', target: 'h', startedMs: 0, untilMs: 60_000, passed: 0 }
 const recovered: FixView = { kind: 'recovered', type: 'check', key: 'check:/r', repo: '/r', atMs: 1 }
 

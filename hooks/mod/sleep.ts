@@ -40,7 +40,7 @@ export function parseSleep(text: string): SleepRecord | null {
 
 /** A guard or check state the band can show. `key` names its target: one state per target. */
 export type FixView =
-  | { kind: 'offer'; type: 'guard'; key: string; hook: string; rule: string; tool: string; count: number; rowIds: string[]; atMs: number }
+  | { kind: 'offer'; type: 'guard'; key: string; hook: string; rule: string; tool: string; repos: string[]; count: number; rowIds: string[]; atMs: number }
   | {
       kind: 'offer'
       type: 'check'
@@ -83,6 +83,13 @@ export function fixViews(input: {
   const answered = new Map<string, number>()
   for (const r of mine) answered.set(keyOf(r.kind, r.target), Math.max(answered.get(keyOf(r.kind, r.target)) ?? 0, r.startedMs))
   const open = (key: string, at: number) => at > input.closedAt && at > (answered.get(key) ?? -Infinity)
+  // Every repository each guard blocked in, closed blocks too: a sleep is session-wide.
+  const blockedIn = new Map<string, string[]>()
+  for (const row of input.rows) {
+    if (row.kind !== 'guard' || !row.block.repo) continue
+    const repos = blockedIn.get(row.block.hook) ?? []
+    if (!repos.includes(row.block.repo)) blockedIn.set(row.block.hook, [...repos, row.block.repo])
+  }
   const offers = new Map<string, FixView & { kind: 'offer' }>()
   const recovered: FixView[] = []
   for (const row of input.rows) {
@@ -107,6 +114,7 @@ export function fixViews(input: {
         hook: block.hook,
         rule: block.rule,
         tool: block.tool,
+        repos: blockedIn.get(block.hook) ?? [],
         count: (had?.count ?? 0) + 1,
         rowIds: [...(had?.rowIds ?? []), row.id],
         atMs: block.atMs,

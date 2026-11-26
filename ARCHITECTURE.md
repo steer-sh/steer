@@ -421,6 +421,12 @@ write one file and need no lock. Its readers are the guard runtime
 of another version, target or session, one longer than the longest sleep, or a link
 in its place as no sleep. The self-protection guard never sleeps: the command
 refuses it and the runtime ignores a record for a guard of `source: steer`.
+`steer sleep guard` writes no record, and names the rebuild, while a registered
+master of the global scope or of a repository `--repo` names (default: the working
+directory's) runs the guard without declaring the runtime's `STEER_SLEEP_VERSION`:
+such a master was built before it honored sleeps and would keep blocking. The band
+names each repository the offer's blocks came from, and a refusal leaves the offer
+open with the error's message on it.
 `sleeps.jsonl` beside the records logs each sleep and each early wake, which
 `steer sleep list` reads; an expiry writes nothing.
 

@@ -102,7 +102,7 @@ async function runSteer($: EngineInterface, key: string, args: string[], after: 
   try {
     const result = await $.process.run([await steerBin($), ...args], { timeoutMs: 15_000 })
     if (result.exitCode === 0) after()
-    else failures.set(key, firstLine(result.stderr) || firstLine(result.stdout) || `steer exited ${result.exitCode}`)
+    else failures.set(key, errorLine(result.stderr) || firstLine(result.stdout) || `steer exited ${result.exitCode}`)
   } catch (err) {
     failures.set(key, firstLine(String(err)))
   } finally {
@@ -114,8 +114,18 @@ async function runSteer($: EngineInterface, key: string, args: string[], after: 
 
 const firstLine = (text: string) => (text.split('\n').find(l => l.trim() !== '') ?? '').trim()
 
+/** The message of the error box steer prints on stderr: its first line of text, without the border or "Error: ". */
+const errorLine = (text: string) =>
+  firstLine(
+    text
+      .replace(/\x1b\[[0-9;]*m/g, '')
+      .split('\n')
+      .map(l => l.replace(/[\u2500-\u257f]/g, '').trim())
+      .join('\n'),
+  ).replace(/^Error: /, '')
+
 const targetArgs = (v: FixView) => {
-  if (v.kind === 'offer') return v.type === 'guard' ? ['guard', v.hook] : ['check', '--repo', v.repo]
+  if (v.kind === 'offer') return v.type === 'guard' ? ['guard', v.hook, ...v.repos.flatMap(r => ['--repo', r])] : ['check', '--repo', v.repo]
   if (v.kind === 'sleeping') return v.type === 'guard' ? ['guard', v.target] : ['check', '--repo', v.target]
   return []
 }

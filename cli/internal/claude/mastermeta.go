@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -14,6 +15,7 @@ import (
 const (
 	masterMetaConst  = "STEER_HOOK_META"
 	masterBuildConst = "STEER_MASTER_BUILD_DIGEST"
+	masterSleepConst = "STEER_SLEEP_VERSION"
 )
 
 // MasterHookMeta is one guard's identity as the registered master carries it.
@@ -32,6 +34,9 @@ type MasterIdentity struct {
 	BuildDigest string
 	// Hooks is each guard's identity, by hook name.
 	Hooks map[string]MasterHookMeta
+	// SleepVersion is the sleep record version the runtime honors, 0 when it
+	// honors no sleep.
+	SleepVersion int
 }
 
 // ReadMasterIdentity reads the registered master in a guard store directory.
@@ -41,11 +46,16 @@ type MasterIdentity struct {
 // an empty identity and no error, because a machine that installed no guard is
 // not a failure to read one.
 func ReadMasterIdentity(dir string) (MasterIdentity, error) {
-	out := MasterIdentity{Hooks: map[string]MasterHookMeta{}}
 	if dir == "" {
-		return out, nil
+		return MasterIdentity{Hooks: map[string]MasterHookMeta{}}, nil
 	}
-	path := filepath.Join(dir, MasterHookName)
+	return ReadMasterFile(filepath.Join(dir, MasterHookName))
+}
+
+// ReadMasterFile is ReadMasterIdentity for the master at path, such as the file a
+// harness registration names.
+func ReadMasterFile(path string) (MasterIdentity, error) {
+	out := MasterIdentity{Hooks: map[string]MasterHookMeta{}}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -56,6 +66,7 @@ func ReadMasterIdentity(dir string) (MasterIdentity, error) {
 	text := string(data)
 
 	out.BuildDigest = pythonStringConst(text, masterBuildConst)
+	out.SleepVersion = pythonIntConst(text, masterSleepConst)
 
 	object, ok := pythonDictConst(text, masterMetaConst)
 	if !ok {
@@ -88,6 +99,23 @@ func pythonStringConst(text, name string) string {
 		return ""
 	}
 	return rest[1 : 1+end]
+}
+
+// pythonIntConst returns the value of `NAME = <digits>`, or 0.
+func pythonIntConst(text, name string) int {
+	rest, ok := afterAssignment(text, name)
+	if !ok {
+		return 0
+	}
+	end := strings.IndexFunc(rest, func(r rune) bool { return r < '0' || r > '9' })
+	if end < 0 {
+		end = len(rest)
+	}
+	n, err := strconv.Atoi(rest[:end])
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 // pythonDictConst returns the object literal assigned to name. The writer emits

@@ -1,20 +1,25 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steer-sh/steer-cli/internal/protection"
 	"github.com/steer-sh/steer-cli/internal/sleep"
+	"github.com/steer-sh/steer-cli/internal/status"
 )
 
 var (
 	sleepSession string
 	sleepMinutes int
 	sleepRepo    string
-	sleepJSON    bool
+	// sleepGuardRepos are the repositories whose project guard runner a guard's sleep checks.
+	sleepGuardRepos []string
+	sleepJSON       bool
 )
 
 var sleepCmd = &cobra.Command{
@@ -44,6 +49,9 @@ var sleepGuardCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if args[0] == protection.HookName {
 			return fmt.Errorf("the self-protection guard has no sleep; turning it off needs %s", "steer config set protection.self off")
+		}
+		if err := guardCanSleep(args[0]); err != nil {
+			return err
 		}
 		return putSleep(cmd, sleep.KindGuard, args[0], args[0])
 	},
@@ -128,6 +136,34 @@ var wakeCheckCmd = &cobra.Command{
 	},
 }
 
+// guardCanSleep refuses while a registered master that runs hook, globally or in
+// a repository --repo names (default: the working directory's), cannot honor a sleep.
+func guardCanSleep(hook string) error {
+	if len(sleepGuardRepos) == 0 {
+		if refusal := status.SleepRefusal(hook, sleep.Version); refusal != "" {
+			return errors.New(refusal)
+		}
+		return nil
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.Chdir(wd) }()
+	for _, dir := range sleepGuardRepos {
+		if !filepath.IsAbs(dir) {
+			dir = filepath.Join(wd, dir)
+		}
+		if err := os.Chdir(dir); err != nil {
+			return fmt.Errorf("--repo %s: %w", dir, err)
+		}
+		if refusal := status.SleepRefusal(hook, sleep.Version); refusal != "" {
+			return errors.New(refusal)
+		}
+	}
+	return nil
+}
+
 // sleepRepoIdentity is the repository --repo names, or the one the working directory is in.
 func sleepRepoIdentity() (string, error) {
 	dir := sleepRepo
@@ -179,6 +215,8 @@ func init() {
 	for _, c := range []*cobra.Command{sleepCheckCmd, wakeCheckCmd} {
 		c.Flags().StringVar(&sleepRepo, "repo", "", "the repository (default: the one the working directory is in)")
 	}
+	sleepGuardCmd.Flags().StringArrayVar(&sleepGuardRepos, "repo", nil,
+		"a repository whose guard runner must honor the sleep, repeatable (default: the one the working directory is in)")
 	sleepListCmd.Flags().StringVar(&sleepSession, "session", "", "list only this session's sleeps")
 	sleepListCmd.Flags().BoolVar(&sleepJSON, "json", false, "emit JSON")
 	sleepCmd.AddCommand(sleepGuardCmd, sleepCheckCmd, sleepListCmd)
