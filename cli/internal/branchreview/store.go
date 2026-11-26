@@ -13,6 +13,7 @@ import (
 
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/jsonl"
+	"github.com/steer-sh/steer-cli/internal/statestore"
 	"github.com/steer-sh/steer-cli/internal/steerpath"
 )
 
@@ -130,7 +131,7 @@ func List(dir, host, repo string) ([]Listed, error) {
 
 // appendRow writes one row to path, creating the store private to the user.
 func appendRow(path, noun string, row any) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	if err := statestore.PreparePrivate(filepath.Dir(path)); err != nil {
 		return fmt.Errorf("create %s: %w", filepath.Dir(path), err)
 	}
 	return jsonl.Append(path, 0o600, noun, row)
@@ -142,7 +143,10 @@ func saveDiff(dir, text string) (gate.Row, error) {
 	sha := gate.Digest(text)
 	name := sha + ".patch"
 	diffs := filepath.Join(dir, "diffs")
-	if err := os.MkdirAll(diffs, 0o700); err != nil {
+	if err := statestore.PreparePrivate(dir); err != nil {
+		return nil, err
+	}
+	if err := statestore.PreparePrivate(diffs); err != nil {
 		return nil, err
 	}
 	if err := os.WriteFile(filepath.Join(diffs, name), []byte(text), 0o600); err != nil {

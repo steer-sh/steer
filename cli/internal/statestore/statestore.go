@@ -83,6 +83,18 @@ func Prepare(component string) (string, error) {
 	return neutral, nil
 }
 
+// PreparePrivate creates dir and closes it and its parent to other users, so a
+// state root an older binary left open is closed by whichever writer comes first.
+func PreparePrivate(dir string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	if err := ClosePrivate(filepath.Dir(dir)); err != nil {
+		return err
+	}
+	return ClosePrivate(dir)
+}
+
 // ClosePrivate removes the group and other permission bits from dir and keeps the
 // owner's, so a directory its owner made read-only stays read-only.
 func ClosePrivate(dir string) error {

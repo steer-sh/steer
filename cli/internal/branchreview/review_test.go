@@ -101,9 +101,23 @@ func TestRunReviewsTheWholeBranchAndRecordsIt(t *testing.T) {
 	reviewer := &stub{replies: []string{oneFinding, "NO FINDINGS", oneFinding}}
 	req := request(t, repo)
 	req.Warnings = []string{"reviewer.api.tools is off"}
+	// A state root an older binary left open is closed by the first review.
+	stateRoot := filepath.Join(t.TempDir(), "state")
+	if err := os.MkdirAll(stateRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(stateRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	req.Dir = filepath.Join(stateRoot, Component)
 	res, err := Run(context.Background(), config(3), reviewer, req)
 	if err != nil {
 		t.Fatal(err)
+	}
+	for _, dir := range []string{stateRoot, req.Dir, filepath.Join(req.Dir, "diffs")} {
+		if info, err := os.Stat(dir); err != nil || info.Mode().Perm() != 0o700 {
+			t.Errorf("%s: %v, %v; want mode 700", dir, info, err)
+		}
 	}
 	if len(res.Warnings) != 1 || res.Warnings[0] != req.Warnings[0] {
 		t.Errorf("warnings = %q; want the request's warning", res.Warnings)

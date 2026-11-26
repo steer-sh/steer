@@ -46,13 +46,7 @@ func Dir() string { return steerpath.StateDir(Component) }
 // prepare creates Dir, keeping it and the state root above it private.
 func prepare() (string, error) {
 	dir := Dir()
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", err
-	}
-	if err := statestore.ClosePrivate(filepath.Dir(dir)); err != nil {
-		return "", err
-	}
-	return dir, statestore.ClosePrivate(dir)
+	return dir, statestore.PreparePrivate(dir)
 }
 
 // Record is one live sleep: what sleeps, in which session, from when until when.
