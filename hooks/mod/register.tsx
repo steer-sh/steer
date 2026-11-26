@@ -98,7 +98,7 @@ async function poll($: EngineInterface): Promise<void> {
   if (key !== drawnKey) $.ui.invalidate('ui.render')
 }
 
-/** Everything the band draws from: the reviews, then the guard and check states; empty when it draws nothing. */
+/** Everything the band draws from: the reviews, then the guard and check states; empty when there are no reviews and no fixes. */
 function bandKey(views: readonly ReviewView[], now: number): string {
   const reviews = keyOf(views)
   const fixes = fixKey(currentFixes(sessionId, now), now, ticking)
