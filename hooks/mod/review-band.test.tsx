@@ -415,3 +415,18 @@ test('held reviews list first, two shared names get numbers, and past two lines 
   expect(drawn).not.toContain('wt-docs')
   await ui.unmount()
 })
+
+test('with nothing to show, a poll asks for no redraw', async ($, on) => {
+  let redraws = 0
+  on('ui.invalidate', (_, e, next) => {
+    if (e.event === 'ui.render') redraws++
+    return next(e)
+  })
+  const clock = await world($, on, {})
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await texts(ui)).toBe('engine')
+  redraws = 0
+  await clock.advance(5000)
+  expect(redraws).toBe(0)
+  await ui.unmount()
+})
