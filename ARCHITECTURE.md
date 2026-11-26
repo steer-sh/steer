@@ -111,8 +111,10 @@ exposure. It handles no gating event either, such as `prompt.submit`, which
 `turn.start`. Enforcement stays in the settings hooks and the CLI, which every harness
 shares. `hooks/mod/marks.ts` holds the colours and pixel marks, drawn as terminal
 half-block cells. `hooks/mod/vector.ts` holds the Desktop app's drawings: `Svg`
-documents for the band's ground, its rail, the book and each run's pulse. Each drawing
-carries its light and dark shades and picks one through `prefers-color-scheme`.
+documents for the band's ground, its rail, the book, each run's pulse, the guard's
+shield and the check's box. Each drawing carries its light and dark shades and picks
+one through `prefers-color-scheme`; `hooks/mod/card.tsx` lays every Desktop band out
+as one card (tinted ground, wash, sky, rail, mark, lines).
 Desktop restarts an image's animations at each redraw, so the Desktop band shows no
 running clock and redraws only on a change of state; the animations are placed by the
 time since the state first drew, so such a redraw continues them. Other hosts get the
@@ -130,8 +132,11 @@ keeps, the guard stores' `steer-audit.jsonl` and the check state's `runs.jsonl` 
 repository a review, a guard row or a check run names, and each check-state directory
 whose runs changed after it started watching. Each poll reads only the bytes a record
 gained, and a block recorded more than a few seconds before the mod started watching
-gets no row. The terminal row draws the guard's shield or the check's box;
-other hosts draw the row's text and rail alone.
+gets no row. The terminal row draws the guard's shield or the check's box in pixels,
+Desktop draws them and the rail as `Svg` with no card ground, and other hosts draw the
+row's text and rail alone. The engine (2.1.331 and 2.1.332) answers `$.ui.place` with
+`isPlaced: false` where no terminal is attached, so a Desktop-only session draws no
+row yet.
 
 After each guard block or check Stop block, except the self-protection guard's, the
 band offers to sleep that guard or that repository's check.sh (`hooks/mod/fixband.tsx`,
@@ -147,8 +152,9 @@ drawn in full, in the order offer, running review, held review, countdown, then 
 state, which takes the slot only alone; the reviews count as one state ranked by the
 one the review band would draw, so their own order is unchanged. Every other live state
 gets one status line in its hue, two at most, and only the full state's mark moves.
-Desktop draws a guard or check state as text, rail and native buttons until its vector
-marks exist.
+On Desktop a guard or check state takes the review band's card in its type's hue (a
+sleeping countdown in a dim one), with the mark beside its lines and native buttons;
+each mark moves once, from the time the state first drew, then stands still.
 
 Each install from another path adds that path, as `os.Executable` reports it, to
 `~/.steer/bin/source`, and `bin install` adds every active plugin copy it finds. When a recorded path lies in a harness's plugin cache and

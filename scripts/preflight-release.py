@@ -42,6 +42,7 @@ MOD_FILES = (
     "hooks/mod/sleep.ts",
     "hooks/mod/band.ts",
     "hooks/mod/fixband.tsx",
+    "hooks/mod/card.tsx",
 )
 # The text files a harness runs from the bundle, compared byte for byte.
 BUNDLE_FILES = (*SKILL_FILES, *MOD_FILES, *PI_FILES)

@@ -13,27 +13,10 @@ import type { Hidden } from './band'
 import { closeOffers, currentFixes, drawFix, fixKey, pollSleeps, statusRowsOf } from './fixband'
 import { actorOf, bySeverity, clock, numberThreads, parseLive, plural, sessionSlug, sessionViews, severityCounts, whoOf } from './review'
 import type { LiveReview, ReviewView } from './review'
-import {
-  BOOK_HEIGHT,
-  BOOK_SMALL_HEIGHT,
-  BOOK_SMALL_WIDTH,
-  BOOK_WIDTH,
-  GROUND_HEIGHT,
-  LABEL_COLOR,
-  PULSE_HEIGHT,
-  PULSE_WIDTH,
-  RAIL_WIDTH,
-  SKY_WIDTH,
-  WASH_WIDTH,
-  bookSvg,
-  cardColors,
-  pulseSvg,
-  railSvg,
-  skySvg,
-  washSvg,
-} from './vector'
+import { BOOK_HEIGHT, BOOK_SMALL_HEIGHT, BOOK_SMALL_WIDTH, BOOK_WIDTH, LABEL_COLOR, PULSE_HEIGHT, PULSE_WIDTH, bookSvg, pulseSvg, stateClock } from './vector'
 import type { Motion, Pose, Tone } from './vector'
 import { drawRow, pollBlocks, stateRoot } from './rows'
+import { vectorCard } from './card'
 
 const POLL_MS = 1000
 // How many polls pass before the state directory is resolved again.
@@ -45,8 +28,6 @@ const ANSWERED = new Set(['ok', 'salvaged', 'salvaged_clean'])
 
 // Columns the card's edge and the book take from a line where the band is drawn with `Svg`.
 const VECTOR_MARK_COLUMNS = 18
-// The height of a line of text where the band is drawn with `Svg`, in CSS px.
-const ROW_PX = 20
 // Columns a run's pulse and the gap after it take beside its words.
 const PULSE_COLUMNS = 4
 
@@ -77,8 +58,8 @@ let frameTimer: Timer | null = null
 let frame = 0
 let moving: { requestId: string; runs: number; done: Set<number> } | null = null
 
-// The review state the vector band last drew and when it first drew it: its art's time zero.
-let entered = { id: '', at: 0 }
+// Seconds since the review state the vector band draws first drew: its art's time zero.
+const reviewClock = stateClock()
 // Whether the band shows a running clock. A redraw restarts the vector art's animations,
 // so the vector band shows none and redraws only on a change of state.
 let ticking = true
@@ -218,12 +199,7 @@ function band($: EngineInterface, e: RenderInput<'AbovePrompt'>, views: readonly
   const actor = actorOf(agent, doc)
   const status = statusLines(others, v => whoOf(v, listed, numbers), ticking, now)
   // Seconds since this state first drew: where the vector art's animations stand.
-  let t = 0
-  if (Svg) {
-    const id = `${view.kind}:${doc.started_ms}:${doc.round}`
-    if (entered.id !== id) entered = { id, at: now }
-    t = Math.max(0, now - entered.at) / 1000
-  }
+  const t = Svg ? reviewClock(`${view.kind}:${doc.started_ms}:${doc.round}`, now) : 0
   // The columns left for a line of text beside the rail and the mark.
   // A narrow Desktop band leaves the book out, as a narrow terminal leaves its marks out.
   const book = Svg !== undefined && columns >= MARK_MIN_COLUMNS
@@ -416,57 +392,21 @@ function band($: EngineInterface, e: RenderInput<'AbovePrompt'>, views: readonly
   if (view.kind !== 'running' && moving?.requestId === e.requestId) stopFrames()
 
   // A status line per state the band hides, each with a rail in its own hue.
-  const { rows: statusRows, rails: statusRails } = statusRowsOf(els, status, Svg !== undefined, Svg ? LABEL_COLOR : COLORS.review)
-  // With status lines the rail and the book stay beside the band's own lines.
-  const top = statusRows.length > 0 ? ('flex-start' as const) : undefined
+  const { rows: statusRows, rails: statusRails } = statusRowsOf(els, status, Svg !== undefined)
 
   if (Svg) {
-    const { tone, motion } = vector
-    const card = cardColors(tone)
     const small = lines.length === 1
-    const railHeight = (lines.length + wrapped) * ROW_PX - 4
-    return (
-      <Box
-        key="steer-review"
-        position="relative"
-        flexDirection="row"
-        alignItems="center"
-        paddingX={1}
-        overflow="hidden"
-        backgroundColor={card.ground}
-        borderStyle="round"
-        borderColor={card.edge}
-      >
-        <Box key="steer-wash" position="absolute" top={-1} left={0} bottom={-1}>
-          <Svg source={washSvg(tone, motion, t)} alt="steer" width={WASH_WIDTH} height={GROUND_HEIGHT} />
-        </Box>
-        <Box key="steer-sky" position="absolute" top={-1} right={0} bottom={-1}>
-          <Svg source={skySvg(tone, motion, t)} alt="steer" width={SKY_WIDTH} height={GROUND_HEIGHT} />
-        </Box>
-        {/* Desktop paints a Box over the absolute art only when the Box holds an absolute child. */}
-        <Box position="relative" marginRight={1} flexShrink={0} alignItems="center" alignSelf={top}>
-          <Box position="absolute" top={0} left={0} />
-          <Svg source={railSvg(tone, railHeight)} alt="steer" width={RAIL_WIDTH} height={railHeight} />
-        </Box>
-        {book ? (
-          <Box position="relative" marginRight={2} flexShrink={0} alignItems="center" alignSelf={top}>
-            <Box position="absolute" top={0} left={0} />
-            <Svg
-              source={bookSvg(tone, vector.pose, t, small)}
-              alt={vector.alt}
-              width={small ? BOOK_SMALL_WIDTH : BOOK_WIDTH}
-              height={small ? BOOK_SMALL_HEIGHT : BOOK_HEIGHT}
-            />
-          </Box>
-        ) : (
-          ''
-        )}
-        <Box position="relative" flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
-          <Box position="absolute" top={0} left={0} />
-          {lines}
-          {statusRows}
-        </Box>
-      </Box>
+    const mark = book
+      ? {
+          source: bookSvg(vector.tone, vector.pose, t, small),
+          alt: vector.alt,
+          width: small ? BOOK_SMALL_WIDTH : BOOK_WIDTH,
+          height: small ? BOOK_SMALL_HEIGHT : BOOK_HEIGHT,
+        }
+      : undefined
+    return vectorCard(
+      { Box, Svg },
+      { key: 'steer-review', tone: vector.tone, motion: vector.motion, t, rows: lines.length + wrapped, mark, lines, status: statusRows },
     )
   }
 
@@ -499,7 +439,7 @@ export const register: Register = on => {
     return next(e)
   })
 
-  on('ui.render', { component: 'Placed' }, ($, e, next) => drawRow($, e) ?? next(e))
+  on('ui.render', { component: 'Placed' }, async ($, e, next) => drawRow($, e, await $.clock.now()) ?? next(e))
 
   // The next prompt closes every offer to sleep: a main-loop turn that starts from typed
   // text, not a continuation such as a Stop block's. Observed only.

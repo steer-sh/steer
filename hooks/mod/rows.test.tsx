@@ -321,3 +321,67 @@ test('a check row placed before its executions were read names the failed check 
   expect(drawn).toContain('go-test. Claude continues')
   expect(drawn).toContain('1 check failed')
 })
+
+type Drawing = { alt: string; width: number; height: number; source: string }
+
+/** The Svg elements a row drew, in order: its rail, then its mark. */
+const drawings = async (ui: { findAll(q: { type: string }): Promise<{ props: Record<string, unknown> }[]> }) =>
+  (await ui.findAll({ type: 'Svg' })).map(s => s.props as Drawing)
+
+test('on desktop each row draws an SVG rail in its hue and its mark beside the text, with no rail glyph; a narrow row leaves the mark out', async ($, on) => {
+  const files: Record<string, string> = { [AUDIT]: '', [RUNS]: '', [EXECUTIONS]: '' }
+  const { clock } = await world($, on, files)
+  files[AUDIT] += line(guardRow())
+  files[EXECUTIONS] += line({ run_id: 'r1', session: SESSION, check_id: 'go-test', outcome: 'failed' })
+  files[RUNS] += line(stopRun())
+  files[RUNS] += line(stopRun({ run_id: 'r2', finished: iso(NOW + 9_000), outcome: 'passed', disposition: 'allow' }))
+  files[RUNS] += line(stopRun({ run_id: 'r3', finished: iso(NOW + 12_000) }))
+  files[RUNS] += line(stopRun({ run_id: 'r4', finished: iso(NOW + 15_000), disposition: 'yield' }))
+  await clock.advance(1000)
+
+  // Each row's rail takes its light shade on a light app, and its mark's alt and motion.
+  const cases = [
+    { id: 'guard-f1', rail: '#9a6a10', alt: 'guard stopped a call', keyframes: ['@keyframes af', '@keyframes as'] },
+    { id: 'check-r1', rail: '#1d7d6f', alt: 'check kept the turn open', keyframes: ['@keyframes ab'] },
+    { id: 'check-pass-r2', rail: '#4c7d1a', alt: 'check passes', keyframes: ['@keyframes ak'] },
+    { id: 'check-unfixed-r4', rail: '#c9562b', alt: 'check ended unfixed', keyframes: [] },
+  ]
+  for (const c of cases) {
+    const ui = await $.ui.mount(row(c.id, 'desktop'))
+    expect(await texts(ui)).not.toContain('▌')
+    const [rail, mark, ...rest] = await drawings(ui)
+    expect(rest).toHaveLength(0)
+    for (const svg of [rail, mark]) {
+      expect(svg?.alt).not.toBe('')
+      expect(svg?.source).toContain('@media (prefers-color-scheme:dark)')
+    }
+    expect(rail?.source).toContain(`.ts{stroke:${c.rail}}`)
+    expect(mark?.alt).toBe(c.alt)
+    expect(mark?.source.includes('@keyframes')).toBe(c.keyframes.length > 0)
+    for (const k of c.keyframes) expect(mark?.source).toContain(k)
+    await ui.unmount()
+  }
+
+  const narrow = await $.ui.mount({ ...row('guard-f1', 'desktop'), viewport: { columns: 60, rows: 40 } })
+  expect((await drawings(narrow)).map(d => d.alt)).toEqual(['steer'])
+  expect(await texts(narrow)).toContain('Steer stopped this command: never commit on main in this repository.')
+})
+
+test("a desktop row's redraw places its mark's motion at the time since the row first drew", async ($, on) => {
+  const files: Record<string, string> = { [AUDIT]: '' }
+  const { clock } = await world($, on, files)
+  files[AUDIT] += line(guardRow())
+  await clock.advance(1000)
+  const delays = async () => {
+    const ui = await $.ui.mount(row('guard-f1', 'desktop'))
+    const mark = (await drawings(ui))[1]?.source ?? ''
+    await ui.unmount()
+    return [...mark.matchAll(/linear (-?[\d.]+)s both/g)].map(m => m[1])
+  }
+  // A narrow draw shows no mark, so the motion waits for the first draw that does.
+  await (await $.ui.mount({ ...row('guard-f1', 'desktop'), viewport: { columns: 60, rows: 40 } })).unmount()
+  await clock.advance(300)
+  expect(await delays()).toEqual(['0'])
+  await clock.advance(400)
+  expect(await delays()).toEqual(['-0.4'])
+})

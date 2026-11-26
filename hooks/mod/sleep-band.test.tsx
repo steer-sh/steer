@@ -325,3 +325,63 @@ test('the band shows the most urgent state in full: an offer, a running review, 
   const lines = statusLines(shown?.hidden ?? [], () => '', true, 0)
   expect(lines.map(l => (l.kind === 'more' ? l.text : `${l.who}: ${l.state}`))).toEqual(['Review: commit passed', '+2 more'])
 })
+
+type Drawing = { alt: string; width: number; height: number; source: string }
+
+/** The band's Svg elements, its card and its text, drawn once on desktop at `columns`. */
+async function desktopBand($: Engine, columns = 120) {
+  const ui = (await $.ui.mount({ ...BAND, surface: 'desktop', props: { ...BAND.props, bodyColumns: columns } })) as unknown as {
+    findAll(q: { type: string }): Promise<{ text: string; key?: string; props: Record<string, unknown> }[]>
+    unmount(): Promise<void>
+  }
+  const svgs = (await ui.findAll({ type: 'Svg' })).map(s => s.props as Drawing)
+  const cards = (await ui.findAll({ type: 'Box' })).filter(b => b.props.borderStyle === 'round').map(b => b.props)
+  const text = (await ui.findAll({ type: 'Text' })).map(t => t.text).join('\n')
+  const buttons = (await ui.findAll({ type: 'Button' })).map(b => b.key)
+  await ui.unmount()
+  return { svgs, cards, text, buttons }
+}
+
+test('on desktop the offer and the countdown draw a card with the guard mark, its own shades and no rail glyph', async ($, on) => {
+  const files: Record<string, string> = { [AUDIT]: '' }
+  const { clock } = await world($, on, files)
+  files[AUDIT] += line(guardRow())
+  await clock.advance(1000)
+
+  const offer = await desktopBand($)
+  expect(offer.text).not.toContain('▌')
+  expect(offer.text).toContain('stopped a command')
+  expect(offer.buttons).toEqual(['steer-sleep', 'steer-dismiss'])
+  expect(offer.cards).toHaveLength(1)
+  expect(/^#[0-9a-f]{8}$/.test(String(offer.cards[0]?.backgroundColor))).toBe(true)
+  // The wash, the sky, the rail and the shield, each with an alt and its dark shades.
+  expect(offer.svgs).toHaveLength(4)
+  for (const svg of offer.svgs) {
+    expect(svg.alt).not.toBe('')
+    expect(svg.source).toContain('@media (prefers-color-scheme:dark)')
+  }
+  const shield = offer.svgs[3] as Drawing
+  expect(shield.alt).toBe('guard stopped a call')
+  expect(shield.height).toBe(60)
+  expect(shield.source).toContain('@keyframes as')
+  // The sky's light crosses once for the block, not again and again.
+  expect(offer.svgs[1]?.source).toContain('1 both')
+
+  // A narrow band leaves the mark out.
+  expect((await desktopBand($, 60)).svgs).toHaveLength(3)
+
+  const at = await clock.now()
+  const record = `${SLEEP}/${await repoKey(SESSION)}/guard-${await repoKey('no-direct-main-hook')}.json`
+  files[record] = JSON.stringify({ version: 1, kind: 'guard', target: 'no-direct-main-hook', session: SESSION, by: 'user', started_ms: at, until_ms: at + 300_000 })
+  await clock.advance(1000)
+  const asleep = await desktopBand($)
+  expect(asleep.text).toContain('no-direct-main-hook sleeps')
+  expect(asleep.text).toContain('5 min left')
+  expect(asleep.buttons).toEqual(['steer-wake'])
+  const small = asleep.svgs[3] as Drawing
+  expect(small.alt).toBe('guard sleeps')
+  expect(small.height).toBe(18)
+  expect(small.source).not.toContain('@keyframes')
+  // A narrow countdown leaves its small mark out too.
+  expect((await desktopBand($, 60)).svgs.map(d => d.alt)).toEqual(['steer', 'steer', 'steer'])
+})

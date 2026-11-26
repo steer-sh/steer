@@ -3,16 +3,19 @@
 // under its full state. A Sleep or Wake press runs the steer CLI, which writes the
 // sleep; the mod only reads it back.
 
-import type { EngineInterface, RenderChildren, RenderElement, RenderInput } from 'claude-code'
+import type { EngineInterface, RenderChildren, RenderElement, RenderInput, TextProps } from 'claude-code'
 
 import { passedText, timeLeft } from './band'
 import type { StatusLine } from './band'
 import { repoKey, repoName, ruleParts } from './blocks'
+import { textPart, vectorCard } from './card'
 import { BLOCK_ROWS, BOX_COLUMNS, COLORS, MARK_MIN_COLUMNS, SHIELD_COLUMNS, crossCells, shieldCells } from './marks'
 import { plural } from './review'
 import { sessionRecords, stateRoot } from './rows'
 import { SLEEP_MINUTES, fixViews, parseSleep } from './sleep'
 import type { FixView, SleepRecord } from './sleep'
+import { MARK_HEIGHT, MARK_SMALL_HEIGHT, MARK_SMALL_WIDTH, MARK_WIDTH, markSvg, stateClock, textColor } from './vector'
+import type { Mark, Motion, Tone } from './vector'
 
 // The session the state below belongs to.
 let owner = ''
@@ -138,28 +141,28 @@ const hueOf = (type: 'guard' | 'check') => (type === 'guard' ? COLORS.guard : CO
 /** The noun for what a guard stopped, by the tool it stopped. */
 const noun = (tool: string) => (tool === 'Bash' ? 'command' : 'call')
 
-/** Rails and rows for the band's status lines, each rail in its state's hue. */
+/** The hue of a status line's state. */
+const toneOf = (line: StatusLine): Tone =>
+  line.kind === 'more'
+    ? 'dim'
+    : line.type === 'guard' || line.type === 'check'
+      ? line.type
+      : line.kind === 'held'
+        ? 'held'
+        : line.kind === 'running'
+          ? 'review'
+          : 'dim'
+
+/** Rails and rows for the band's status lines, each rail in its state's hue; `desktop` for a surface that draws `Svg`. */
 export function statusRowsOf(
   els: ReturnType<EngineInterface['ui']['resolve']>,
   status: readonly StatusLine[],
   desktop: boolean,
-  runningHue: string,
 ): { rows: RenderChildren[]; rails: string[] } {
   const { Box, Text } = els
   const rails: string[] = []
   const rows = status.map(line => {
-    const hue =
-      line.kind === 'more'
-        ? COLORS.dim
-        : line.type === 'guard'
-          ? COLORS.guard
-          : line.type === 'check'
-            ? COLORS.check
-            : line.kind === 'held'
-              ? COLORS.held
-              : line.kind === 'running'
-                ? runningHue
-                : COLORS.dim
+    const hue = desktop ? textColor(toneOf(line)) : COLORS[toneOf(line)]
     rails.push(hue)
     const text = line.kind === 'more' ? line.text : `${line.who}: ${line.state}${line.tail ? ` · ${line.tail}` : ''}`
     if (desktop)
@@ -187,6 +190,28 @@ export function statusRowsOf(
   return { rows, rails }
 }
 
+/** What a Desktop card draws for a state: its hue, how its ground moves, its mark, whether the mark moves, and the mark's alt. */
+function vectorOf(view: FixView): { tone: Tone; motion: Motion; mark: Mark; moves: boolean; small: boolean; alt: string } {
+  if (view.kind === 'offer')
+    return view.type === 'guard'
+      ? { tone: 'guard', motion: 'once', mark: 'shield', moves: true, small: false, alt: 'guard stopped a call' }
+      : { tone: 'check', motion: 'once', mark: 'cross', moves: true, small: false, alt: 'check kept the turn open' }
+  if (view.kind === 'sleeping')
+    return {
+      tone: 'dim',
+      motion: 'still',
+      mark: view.type === 'guard' ? 'shield' : 'box',
+      moves: false,
+      small: true,
+      alt: view.type === 'guard' ? 'guard sleeps' : 'check.sh sleeps',
+    }
+  return { tone: 'pass', motion: 'still', mark: 'tick', moves: true, small: true, alt: 'check.sh passes' }
+}
+
+/** When the state the card shows first drew: a new block of the same target starts its motion again. */
+const fixClock = stateClock()
+const fixId = (view: FixView) => `${view.kind}:${view.key}:${view.kind === 'sleeping' ? view.startedMs : view.atMs}`
+
 /** Draws a guard or check state in full, with the status lines under it. */
 export function drawFix(
   $: EngineInterface,
@@ -200,13 +225,23 @@ export function drawFix(
   const { Box, Text, Button } = els
   const columns = typeof e.props.bodyColumns === 'number' ? e.props.bodyColumns : 0
   const Raster = e.surface === 'terminal' && 'Raster' in els && columns >= MARK_MIN_COLUMNS ? els.Raster : undefined
-  const hue = hueOf(view.type)
+  const Svg = e.surface === 'desktop' && 'Svg' in els ? els.Svg : undefined
+  const desktop = Svg !== undefined
+  const hue = desktop ? textColor(view.type) : hueOf(view.type)
+  const heldHue = desktop ? textColor('held') : COLORS.held
+  const passHue = desktop ? textColor('pass') : COLORS.pass
   const label = view.type === 'guard' ? 'GUARD' : 'CHECK'
   const busy = pending.has(view.key)
   const failed = failures.get(view.key)
   let rail: string = hue
   let mark: RenderChildren = null
   let lines: RenderChildren[]
+  const part = (text: string, props: TextProps = {}, shrink = 1) => textPart({ Box, Text }, text, props, shrink)
+  const parts = (...items: RenderChildren[]) => (
+    <Box flexDirection="row" flexShrink={1} minWidth={0}>
+      {items}
+    </Box>
+  )
 
   if (view.kind === 'offer') {
     if (Raster)
@@ -243,17 +278,21 @@ export function drawFix(
         : 'Sleep lets turns here end without check.sh in this session.'
     lines = [
       <Box flexDirection="row" justifyContent="space-between" columnGap={2}>
-        <Box flexShrink={1} minWidth={0}>
-          <Text wrap="truncate-end">
-            <Text color={hue} weight="bold">
-              {label}
+        {desktop ? (
+          parts(part(label, { color: hue, weight: 'bold' }, 0), part(` · ${what}`, { color: hue, weight: 'bold' }))
+        ) : (
+          <Box flexShrink={1} minWidth={0}>
+            <Text wrap="truncate-end">
+              <Text color={hue} weight="bold">
+                {label}
+              </Text>
+              <Text color={hue} weight="bold">
+                {' '}
+                · {what}
+              </Text>
             </Text>
-            <Text color={hue} weight="bold">
-              {' '}
-              · {what}
-            </Text>
-          </Text>
-        </Box>
+          </Box>
+        )}
         <Box flexShrink={3} minWidth={0}>
           <Text dimColor wrap="truncate">
             {name}
@@ -264,7 +303,7 @@ export function drawFix(
       <Box flexDirection="row" justifyContent="space-between" columnGap={2}>
         <Box flexShrink={1} minWidth={0}>
           {failed ? (
-            <Text color={COLORS.held} wrap="truncate-end">
+            <Text color={heldHue} wrap="truncate-end">
               Sleep did not start: {failed}
             </Text>
           ) : (
@@ -286,20 +325,29 @@ export function drawFix(
   } else if (view.kind === 'sleeping') {
     rail = COLORS.dim
     const what = view.type === 'guard' ? `${view.target} sleeps` : 'check.sh sleeps'
+    const left = ` · ${what} · ${timeLeft(view.untilMs, now, clocks)} · ${passedText(view)}`
     lines = [
       <Box flexDirection="row" justifyContent="space-between" columnGap={2}>
-        <Box flexShrink={1} minWidth={0}>
-          <Text wrap="truncate-end">
-            <Text color={hue} weight="bold">
-              {label}
+        {desktop ? (
+          parts(
+            part(label, { color: hue, weight: 'bold' }, 0),
+            part(left),
+            failed ? part(` · Wake did not run: ${failed}`, { color: heldHue }) : '',
+          )
+        ) : (
+          <Box flexShrink={1} minWidth={0}>
+            <Text wrap="truncate-end">
+              <Text color={hue} weight="bold">
+                {label}
+              </Text>
+              <Text>
+                {' '}
+                · {what} · {timeLeft(view.untilMs, now, clocks)} · {passedText(view)}
+              </Text>
+              {failed ? <Text color={COLORS.held}> · Wake did not run: {failed}</Text> : ''}
             </Text>
-            <Text>
-              {' '}
-              · {what} · {timeLeft(view.untilMs, now, clocks)} · {passedText(view)}
-            </Text>
-            {failed ? <Text color={COLORS.held}> · Wake did not run: {failed}</Text> : ''}
-          </Text>
-        </Box>
+          </Box>
+        )}
         <Box flexShrink={0}>
           <Button key="steer-wake" onPress={() => wakeNow($, view)}>
             Wake
@@ -310,17 +358,35 @@ export function drawFix(
   } else {
     rail = COLORS.pass
     lines = [
-      <Text wrap="truncate-end">
-        <Text color={hue} weight="bold">
-          {label}
+      desktop ? (
+        parts(part(label, { color: hue, weight: 'bold' }, 0), part(' · check.sh passes now · ', {}, 0), part('all checks passed', { color: passHue }))
+      ) : (
+        <Text wrap="truncate-end">
+          <Text color={hue} weight="bold">
+            {label}
+          </Text>
+          <Text> · check.sh passes now · </Text>
+          <Text color={COLORS.pass}>all checks passed</Text>
         </Text>
-        <Text> · check.sh passes now · </Text>
-        <Text color={COLORS.pass}>all checks passed</Text>
-      </Text>,
+      ),
     ]
   }
 
-  const { rows, rails } = statusRowsOf(els, status, false, COLORS.review)
+  const { rows, rails } = statusRowsOf(els, status, desktop)
+  if (Svg) {
+    const v = vectorOf(view)
+    const t = fixClock(fixId(view), now)
+    const drawn =
+      columns >= MARK_MIN_COLUMNS
+        ? {
+            source: markSvg(v.mark, v.moves, t, v.small),
+            alt: v.alt,
+            width: v.small ? MARK_SMALL_WIDTH : MARK_WIDTH,
+            height: v.small ? MARK_SMALL_HEIGHT : MARK_HEIGHT,
+          }
+        : undefined
+    return vectorCard({ Box, Svg }, { key: 'steer-fix', tone: v.tone, motion: v.motion, t, rows: lines.length, mark: drawn, lines, status: rows })
+  }
   return (
     <Box key="steer-fix" flexDirection="row">
       <Box flexDirection="column" marginRight={1} flexShrink={0}>

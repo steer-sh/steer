@@ -2,7 +2,7 @@
 // and one when check.sh passes again after a block. Each poll reads only the bytes
 // the records gained since the last one, and places a row for each new block.
 
-import type { EngineInterface, RenderChildren, RenderElement, RenderInput } from 'claude-code'
+import type { BoxProps, ElementConstructor, EngineInterface, RenderChildren, RenderElement, RenderInput, SvgProps, TextProps } from 'claude-code'
 
 import { nextStep, parseCheckRun, parseExecution, parseGuardRow, parseSleptRow, repoKey, rowsOf, ruleParts, splitLines, tailAt } from './blocks'
 import type { BlockRow, CheckExecution, CheckRun, GuardBlock, SleptCall, Tail } from './blocks'
@@ -19,7 +19,10 @@ import {
   shieldCells,
   tickCells,
 } from './marks'
+import { railHeight, textPart } from './card'
 import { plural } from './review'
+import { MARK_HEIGHT, MARK_WIDTH, RAIL_WIDTH, markSvg, railSvg, textColor } from './vector'
+import type { Mark, Tone } from './vector'
 
 // How far before a file's end the first read starts: past rows of other sessions are skipped.
 const FIRST_READ_BYTES = 256 * 1024
@@ -31,6 +34,8 @@ const GRACE_MS = 5_000
 const RESCAN_EVERY = 10
 // Frames the cross blinks before it stands still.
 const BLINK_FOR = 30
+// A row that first draws on a vector surface this long after its block shows its mark still.
+const MOVE_WITHIN_MS = 30_000
 
 type Timer = { cancel(): void }
 
@@ -59,6 +64,8 @@ let polls = 0
 // Whether a poll is reading: a slow poll and the next one must not read the same bytes.
 let busy = false
 let rows = new Map<string, BlockRow>()
+// When each row first drew on a vector surface: its mark's time zero.
+let firstDrawn = new Map<string, number>()
 
 /** Starts again for a new session: /clear gives the same process one. */
 function reset(session: string, now: number) {
@@ -73,6 +80,7 @@ function reset(session: string, now: number) {
   checkKeys = new Set()
   polls = 0
   rows = new Map()
+  firstDrawn = new Map()
 }
 
 /** The lines a file gained since the last read of it; none for a missing file. */
@@ -257,11 +265,11 @@ function failedNames(failed: readonly string[]): string {
   return [...shown, ...(more > 0 ? [`${more} more`] : [])].join(' · ')
 }
 
-/** Line 2 of a row: plain text with one part in a colour of its own. */
-type Result = { lead: string; hot?: string; hotColor?: string; tail?: string }
+/** Line 2 of a row: plain text with one part in a hue of its own. */
+type Result = { lead: string; hot?: string; hotTone?: Tone; tail?: string }
 
-/** What a row says: its label, rail, timing phrase, the dim name at the right, and its two sentences. */
-function wordsOf(row: BlockRow): { label: string; hue: string; rail: string; when: string; name: string; result: Result; next: string } {
+/** What a row says: its label, its hue and its rail's, timing phrase, the dim name at the right, and its two sentences. */
+function wordsOf(row: BlockRow): { label: string; hue: Tone; rail: Tone; when: string; name: string; result: Result; next: string } {
   if (row.kind === 'guard') {
     const { block } = row
     const { never, instead } = ruleParts(block.rule)
@@ -269,8 +277,8 @@ function wordsOf(row: BlockRow): { label: string; hue: string; rail: string; whe
     const noun = stoppedNoun(block.tool)
     return {
       label: 'GUARD',
-      hue: COLORS.guard,
-      rail: COLORS.guard,
+      hue: 'guard',
+      rail: 'guard',
       when: 'before a tool runs',
       name: block.hook,
       result: { lead: never ? `Steer stopped this ${noun}: ${never}.` : `Steer stopped this ${noun}.` },
@@ -281,21 +289,21 @@ function wordsOf(row: BlockRow): { label: string; hue: string; rail: string; whe
   if (row.kind === 'check-passed')
     return {
       label: 'CHECK',
-      hue: COLORS.check,
-      rail: COLORS.pass,
+      hue: 'check',
+      rail: 'pass',
       when: 'when the turn ends',
       name,
-      result: { lead: 'check.sh passes now: ', hot: 'all checks passed', hotColor: COLORS.pass, tail: '.' },
+      result: { lead: 'check.sh passes now: ', hot: 'all checks passed', hotTone: 'pass', tail: '.' },
       next: 'The turn ends.',
     }
   if (row.kind === 'check-unfixed')
     return {
       label: 'CHECK',
-      hue: COLORS.check,
-      rail: COLORS.held,
+      hue: 'check',
+      rail: 'held',
       when: 'when the turn ends',
       name,
-      result: { lead: 'check.sh still does not pass: ', hot: 'the turn ends without a fix', hotColor: COLORS.held, tail: '.' },
+      result: { lead: 'check.sh still does not pass: ', hot: 'the turn ends without a fix', hotTone: 'held', tail: '.' },
       next: 'Steer does not block twice for the same failure.',
     }
   const { failed } = row
@@ -304,17 +312,17 @@ function wordsOf(row: BlockRow): { label: string; hue: string; rail: string; whe
       ? {
           lead: 'Steer kept the turn open: ',
           hot: `${plural(failed.length, 'check')} ${row.allFailed ? 'failed' : 'did not pass'}`,
-          hotColor: COLORS.held,
+          hotTone: 'held',
           tail: ' in check.sh.',
         }
       : row.run.outcome === 'passed'
-        ? { lead: 'Steer kept the turn open: ', hot: 'a declared check left no result', hotColor: COLORS.held, tail: '.' }
-        : { lead: 'Steer kept the turn open: ', hot: `check.sh ${row.run.outcome || 'failed'}`, hotColor: COLORS.held, tail: '.' }
+        ? { lead: 'Steer kept the turn open: ', hot: 'a declared check left no result', hotTone: 'held', tail: '.' }
+        : { lead: 'Steer kept the turn open: ', hot: `check.sh ${row.run.outcome || 'failed'}`, hotTone: 'held', tail: '.' }
   const names = failedNames(failed)
   return {
     label: 'CHECK',
-    hue: COLORS.check,
-    rail: COLORS.check,
+    hue: 'check',
+    rail: 'check',
     when: 'when the turn ends',
     name,
     result,
@@ -322,8 +330,18 @@ function wordsOf(row: BlockRow): { label: string; hue: string; rail: string; whe
   }
 }
 
-/** Draws one of Steer's placed rows; undefined for a row that is not Steer's. */
-export function drawRow($: EngineInterface, e: RenderInput<'Placed'>): RenderElement | undefined {
+/** The Desktop mark for a row, and what it says. */
+const vectorMarkOf = (row: BlockRow): { mark: Mark; alt: string } =>
+  row.kind === 'guard'
+    ? { mark: 'shield', alt: 'guard stopped a call' }
+    : row.kind === 'check-failed'
+      ? { mark: 'cross', alt: 'check kept the turn open' }
+      : row.kind === 'check-unfixed'
+        ? { mark: 'unfixed', alt: 'check ended unfixed' }
+        : { mark: 'tick', alt: 'check passes' }
+
+/** Draws one of Steer's placed rows at `now`; undefined for a row that is not Steer's. */
+export function drawRow($: EngineInterface, e: RenderInput<'Placed'>, now: number): RenderElement | undefined {
   if (e.props.plugin !== $.plugin.name) return undefined
   const row = rows.get(e.props.id)
   if (!row) return undefined
@@ -332,6 +350,8 @@ export function drawRow($: EngineInterface, e: RenderInput<'Placed'>): RenderEle
   const w = wordsOf(row)
   const columns = e.viewport?.columns ?? MARK_MIN_COLUMNS
   const Raster = e.surface === 'terminal' && 'Raster' in els && columns >= MARK_MIN_COLUMNS ? els.Raster : undefined
+  const Svg = e.surface === 'desktop' && 'Svg' in els ? els.Svg : undefined
+  if (Svg) return drawVectorRow(Box, Text, Svg, row, w, columns >= MARK_MIN_COLUMNS, now)
   let mark: RenderChildren = null
   if (Raster) {
     const live = moving.get(e.requestId)
@@ -347,7 +367,7 @@ export function drawRow($: EngineInterface, e: RenderInput<'Placed'>): RenderEle
     <Box flexDirection="row" justifyContent="space-between" columnGap={2}>
       <Box flexShrink={1} minWidth={0}>
         <Text wrap="truncate-end">
-          <Text color={w.hue} weight="bold">
+          <Text color={COLORS[w.hue]} weight="bold">
             {w.label}
           </Text>
           <Text dimColor> · {w.when}</Text>
@@ -361,7 +381,7 @@ export function drawRow($: EngineInterface, e: RenderInput<'Placed'>): RenderEle
     </Box>,
     <Text wrap="truncate-end">
       {w.result.lead}
-      {w.result.hot ? <Text color={w.result.hotColor}>{w.result.hot}</Text> : ''}
+      {w.result.hot ? <Text color={w.result.hotTone ? COLORS[w.result.hotTone] : undefined}>{w.result.hot}</Text> : ''}
       {w.result.tail ?? ''}
     </Text>,
     <Text dimColor wrap="truncate-end">
@@ -372,7 +392,7 @@ export function drawRow($: EngineInterface, e: RenderInput<'Placed'>): RenderEle
     <Box key={`steer-${row.id}`} flexDirection="row">
       <Box flexDirection="column" marginRight={1} flexShrink={0}>
         {lines.map(() => (
-          <Text color={w.rail}>▌</Text>
+          <Text color={COLORS[w.rail]}>▌</Text>
         ))}
       </Box>
       {mark ? (
@@ -380,6 +400,63 @@ export function drawRow($: EngineInterface, e: RenderInput<'Placed'>): RenderEle
           {mark}
         </Box>
       ) : null}
+      <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
+        {lines}
+      </Box>
+    </Box>
+  )
+}
+
+/**
+ * A row where the surface draws `Svg`: a rail and, with `withMark`, the mark beside
+ * its three lines, and no ground. The mark moves once from when it first drew,
+ * unless it first drew long after its block.
+ */
+function drawVectorRow(
+  Box: ElementConstructor<BoxProps>,
+  Text: ElementConstructor<TextProps>,
+  Svg: ElementConstructor<SvgProps>,
+  row: BlockRow,
+  w: ReturnType<typeof wordsOf>,
+  withMark: boolean,
+  now: number,
+): RenderElement {
+  // A row drawn without its mark keeps the mark's motion for when it shows.
+  if (withMark && !firstDrawn.has(row.id)) firstDrawn.set(row.id, now)
+  const drawnAt = firstDrawn.get(row.id) ?? now
+  const t = Math.max(0, now - drawnAt) / 1000
+  const moves = drawnAt - atOf(row) < MOVE_WITHIN_MS
+  const { mark, alt } = vectorMarkOf(row)
+  const part = (text: string, props: TextProps = {}, shrink = 1) => textPart({ Box, Text }, text, props, shrink)
+  const lines = [
+    <Box flexDirection="row" justifyContent="space-between" columnGap={2}>
+      <Box flexDirection="row" flexShrink={1} minWidth={0}>
+        {part(w.label, { color: textColor(w.hue), weight: 'bold' }, 0)}
+        {part(` · ${w.when}`, { dimColor: true })}
+      </Box>
+      {part(w.name, { dimColor: true }, 3)}
+    </Box>,
+    <Box flexDirection="row" minWidth={0}>
+      {/* A lead with no coloured part is the whole sentence, so it gives way. */}
+      {part(w.result.lead, {}, w.result.hot ? 0 : 1)}
+      {w.result.hot ? part(w.result.hot, w.result.hotTone ? { color: textColor(w.result.hotTone) } : {}) : ''}
+      {w.result.tail ? part(w.result.tail, {}, 0) : ''}
+    </Box>,
+    part(w.next, { dimColor: true }),
+  ]
+  const rail = railHeight(lines.length)
+  return (
+    <Box key={`steer-${row.id}`} flexDirection="row" alignItems="center">
+      <Box marginRight={1} flexShrink={0} alignItems="center">
+        <Svg source={railSvg(w.rail, rail)} alt="steer" width={RAIL_WIDTH} height={rail} />
+      </Box>
+      {withMark ? (
+        <Box marginRight={2} flexShrink={0} alignItems="center">
+          <Svg source={markSvg(mark, moves, t)} alt={alt} width={MARK_WIDTH} height={MARK_HEIGHT} />
+        </Box>
+      ) : (
+        ''
+      )}
       <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
         {lines}
       </Box>
