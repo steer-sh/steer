@@ -106,7 +106,9 @@ names `hooks/codex.json`, the same file without `modules`. The mod is a view
 of state Steer writes: it draws a band above the prompt from the commit gate's live
 review file and handles no tool event and no `classic.*` event, because a tool
 handler runs ahead of every settings hook and Steer reports a mod that has one as an
-exposure. Enforcement stays in the settings hooks and the CLI, which every harness
+exposure. It handles no gating event either, such as `prompt.submit`, which
+`scripts/check-mod.py` refuses when the validator lists it as one; it observes
+`turn.start`. Enforcement stays in the settings hooks and the CLI, which every harness
 shares. `hooks/mod/marks.ts` holds the colours and pixel marks, drawn as terminal
 half-block cells. `hooks/mod/vector.ts` holds the Desktop app's drawings: `Svg`
 documents for the band's ground, its rail, the book and each run's pulse. Each drawing
@@ -130,6 +132,23 @@ whose runs changed after it started watching. Each poll reads only the bytes a r
 gained, and a block recorded more than a few seconds before the mod started watching
 gets no row. The terminal row draws the guard's shield or the check's box;
 other hosts draw the row's text and rail alone.
+
+After each guard block or check Stop block, except the self-protection guard's, the
+band offers to sleep that guard or that repository's check.sh (`hooks/mod/fixband.tsx`,
+`hooks/mod/sleep.ts`). The offer stays until Dismiss or until a main-loop turn starts
+from typed text (`turn.start`, which a Stop block's continuation starts with none). Sleep
+and Wake run `steer sleep` or `steer wake` through `$.process.run`, with the stable
+executable when it is installed and the plugin's launcher otherwise; the mod never
+writes the sleep itself. It reads the session's sleep records back each poll and shows
+a one-line countdown with the calls the guard let through (its `slept` audit rows) or
+the turns that ended (`slept` runs), and a short line for a few seconds when check.sh
+passes again. The band has one slot (`hooks/mod/band.ts`): the most urgent state is
+drawn in full, in the order offer, running review, held review, countdown, then a short
+state, which takes the slot only alone; the reviews count as one state ranked by the
+one the review band would draw, so their own order is unchanged. Every other live state
+gets one status line in its hue, two at most, and only the full state's mark moves.
+Desktop draws a guard or check state as text, rail and native buttons until its vector
+marks exist.
 
 Each install from another path adds that path, as `os.Executable` reports it, to
 `~/.steer/bin/source`, and `bin install` adds every active plugin copy it finds. When a recorded path lies in a harness's plugin cache and

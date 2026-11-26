@@ -1,25 +1,17 @@
 // Steer's Claude Code mod: a band above the prompt that shows this session's commit
-// review while it runs and how it ended, and a transcript row for each guard block and
-// check Stop block. It reads the files the commit gate, the guards and the Stop runner
-// write and handles no tool event; enforcement stays in the settings hooks.
+// review while it runs and how it ended, and after a guard or check block an offer to
+// sleep it, and a transcript row for each guard block and check Stop block. It reads
+// the files the commit gate, the guards, the Stop runner and the sleep commands write,
+// runs the steer CLI for a Sleep or Wake press, and handles no tool event;
+// enforcement stays in the settings hooks.
 
 import type { EngineInterface, Register, RenderChildren, RenderInput } from 'claude-code'
 
 import { BOOK_COLUMNS, BOOK_ROWS, COLORS, FRAME_MS, MARK_MIN_COLUMNS, RUN_COLUMNS, bookCells, bookStep, runCells } from './marks'
-import {
-  actorOf,
-  bySeverity,
-  clock,
-  hiddenViews,
-  numberThreads,
-  parseLive,
-  plural,
-  sessionSlug,
-  sessionViews,
-  severityCounts,
-  statusLines,
-  whoOf,
-} from './review'
+import { compose, statusLines } from './band'
+import type { Hidden } from './band'
+import { closeOffers, currentFixes, drawFix, fixKey, pollSleeps, statusRowsOf } from './fixband'
+import { actorOf, bySeverity, clock, numberThreads, parseLive, plural, sessionSlug, sessionViews, severityCounts, whoOf } from './review'
 import type { LiveReview, ReviewView } from './review'
 import {
   BOOK_HEIGHT,
@@ -118,11 +110,15 @@ async function poll($: EngineInterface): Promise<void> {
   docs = read
   const now = await $.clock.now()
   await pollBlocks($, sessionId, now, [...new Set(read.map(doc => doc.repo).filter(Boolean))]).catch(() => undefined)
+  await pollSleeps($, sessionId, now).catch(() => undefined)
   const views = sessionViews(docs, sessionId, now)
   numberViews(views)
-  const key = keyOf(views)
+  const key = bandKey(views, now)
   if (key !== drawnKey) $.ui.invalidate('ui.render')
 }
+
+/** Everything the band draws from: the reviews, then the guard and check states. */
+const bandKey = (views: readonly ReviewView[], now: number) => `${keyOf(views)}#${fixKey(currentFixes(sessionId, now), now, ticking)}`
 
 /** Numbers the subagent threads of the current session, starting again for a new one. */
 function numberViews(views: readonly ReviewView[]) {
@@ -205,7 +201,7 @@ function fitRight(doc: LiveReview, clockText: string | undefined, left: string, 
 
 const cut = (text: string, width: number) => (text.length <= width ? text : `${text.slice(0, Math.max(1, width - 1))}…`)
 
-function band($: EngineInterface, e: RenderInput<'AbovePrompt'>, views: readonly ReviewView[], now: number) {
+function band($: EngineInterface, e: RenderInput<'AbovePrompt'>, views: readonly ReviewView[], others: readonly Hidden[], now: number) {
   const view = views[0] as ReviewView
   const els = $.ui.resolve(e)
   const { Box, Text } = els
@@ -215,12 +211,12 @@ function band($: EngineInterface, e: RenderInput<'AbovePrompt'>, views: readonly
   const Svg = e.surface === 'desktop' && 'Svg' in els ? els.Svg : undefined
   const vector = VECTOR[view.kind]
   ticking = !Svg
-  // The reviews the band lists: its own, then each one a status line names.
-  const hidden = hiddenViews(views)
+  // The reviews the band lists: its own, then each one a status line names; then the guard and check states.
+  const hidden = others.flatMap(item => (item.type === 'review' ? [item.view] : []))
   const listed = [view, ...hidden]
   const agent = whoOf(view, listed, numbers)
   const actor = actorOf(agent, doc)
-  const status = statusLines(hidden, v => whoOf(v, listed, numbers), ticking)
+  const status = statusLines(others, v => whoOf(v, listed, numbers), ticking, now)
   // Seconds since this state first drew: where the vector art's animations stand.
   let t = 0
   if (Svg) {
@@ -419,34 +415,8 @@ function band($: EngineInterface, e: RenderInput<'AbovePrompt'>, views: readonly
   }
   if (view.kind !== 'running' && moving?.requestId === e.requestId) stopFrames()
 
-  // A status line per review the band hides, each with a rail in its own result hue.
-  const statusRails: string[] = []
-  const statusRows: RenderChildren[] = status.map(line => {
-    const hue = line.kind === 'held' ? COLORS.held : line.kind === 'running' ? (Svg ? LABEL_COLOR : COLORS.review) : COLORS.dim
-    statusRails.push(hue)
-    const text = line.kind === 'more' ? line.text : `${line.who}: ${line.state}${line.tail ? ` · ${line.tail}` : ''}`
-    if (Svg)
-      return (
-        <Box flexDirection="row" minWidth={0}>
-          <Box flexShrink={0}>
-            <Text color={hue}>▌ </Text>
-          </Box>
-          <Box flexShrink={1} minWidth={0}>
-            <Text dimColor wrap="truncate">
-              {text}
-            </Text>
-          </Box>
-        </Box>
-      )
-    if (line.kind === 'more') return <Text dimColor>{line.text}</Text>
-    return (
-      <Text wrap="truncate-end">
-        <Text dimColor>{line.who}: </Text>
-        <Text color={hue}>{line.state}</Text>
-        <Text dimColor>{line.tail ? ` · ${line.tail}` : ''}</Text>
-      </Text>
-    )
-  })
+  // A status line per state the band hides, each with a rail in its own hue.
+  const { rows: statusRows, rails: statusRails } = statusRowsOf(els, status, Svg !== undefined, Svg ? LABEL_COLOR : COLORS.review)
   // With status lines the rail and the book stay beside the band's own lines.
   const top = statusRows.length > 0 ? ('flex-start' as const) : undefined
 
@@ -531,21 +501,42 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Placed' }, ($, e, next) => drawRow($, e) ?? next(e))
 
+  // The next prompt closes every offer to sleep: a main-loop turn that starts from typed
+  // text, not a continuation such as a Stop block's. Observed only.
+  on('turn.start', async ($, e, next) => {
+    if (e.agentId === undefined && e.text !== '') {
+      closeOffers(await $.clock.now())
+      $.ui.invalidate('ui.render')
+    }
+    return next(e)
+  })
+
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     // A mod installed into a running session gets no session.start.
     startPolling($)
     const now = await $.clock.now()
     const views = e.props.hasSurvey ? [] : sessionViews(docs, sessionId, now)
     numberViews(views)
-    const view = views[0]
-    if (!view) {
+    const fixes = e.props.hasSurvey ? [] : currentFixes(sessionId, now)
+    const shown = compose(views, fixes)
+    if (!shown) {
       drawnKey = ''
       if (moving?.requestId === e.requestId) stopFrames()
       return next(e)
     }
-    const drawn = band($, e, views, now)
+    if (shown.full.type === 'fix') {
+      // Only the full state's mark moves: a review listed under it stops its book.
+      if (moving?.requestId === e.requestId) stopFrames()
+      ticking = e.surface !== 'desktop'
+      const listed = views
+      const status = statusLines(shown.hidden, v => whoOf(v, listed, numbers), ticking, now)
+      const drawn = drawFix($, e, shown.full.view, status, now, ticking)
+      drawnKey = bandKey(views, now)
+      return drawn
+    }
+    const drawn = band($, e, views, shown.hidden, now)
     // After the band, which decides whether the clock ticks and so what the key holds.
-    drawnKey = keyOf(views)
+    drawnKey = bandKey(views, now)
     return drawn
   })
 }

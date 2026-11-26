@@ -303,8 +303,10 @@ Read the linked architecture section before changing the corresponding boundary:
   without both reads unknown in status forever, and `pi.RefreshBridges` never
   rewrites it.
 - Sleep records: the writer `cli/internal/sleep/` (`Record`, `Version`, `Path`) and
-  its readers, the runtime's `steer_sleeping` (`cli/internal/guard/runtime.py`) and
-  the Stop runner's `sleep.Find`, decode one record shape and one path. A changed
+  its readers, the runtime's `steer_sleeping` (`cli/internal/guard/runtime.py`), the
+  Stop runner's `sleep.Find` and the mod's `parseSleep` (`hooks/mod/sleep.ts`, its
+  path in `pollSleeps`), decode one record shape and one path. The mod runs
+  `steer sleep` and `steer wake` with the arguments `hooks/mod/fixband.tsx` builds. A changed
   shape bumps `sleep.Version`. The self-protection guard's `sleep_entry`
   (`cli/internal/protection/guard.py`) closes the directory, and a new sleep
   command or flag joins its `evaluate_steer_invocation` and `STEER_VALUE_FLAGS`.

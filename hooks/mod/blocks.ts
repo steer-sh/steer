@@ -63,6 +63,17 @@ const timeOf = (v: unknown) => {
   return Number.isFinite(ms) ? ms : 0
 }
 
+/** One call a sleeping guard let through, as its audit row records it. */
+export type SleptCall = { hook: string; session: string; atMs: number }
+
+/** Parses one audit row; null for a row that is not a sleeping guard's pass. */
+export function parseSleptRow(line: string): SleptCall | null {
+  const d = record(line)
+  if (!d || d.enforcement !== 'slept') return null
+  const hook = str(d, 'hook_name')
+  return hook ? { hook, session: str(d, 'session_id'), atMs: timeOf(d.timestamp) } : null
+}
+
 /** Parses one audit row; null for a row that is not a guard block. */
 export function parseGuardRow(line: string): GuardBlock | null {
   const d = record(line)
@@ -214,7 +225,11 @@ export function splitLines(tail: Tail, added: Uint8Array): { lines: string[]; ta
   return { lines: lines.filter(l => l.trim() !== ''), tail: { offset, carry: bytes.slice(end + 1), skip: false } }
 }
 
-/** The directory name under the check state that holds a repository's records (repoKey in cli/internal/checks/receipts.go). */
+/**
+ * The directory name under the check state that holds a repository's records (repoKey in
+ * cli/internal/checks/receipts.go), and the name of a session's sleep directory and a
+ * target's sleep record (Key in cli/internal/sleep).
+ */
 export async function repoKey(identity: string): Promise<string> {
   const sum = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(identity)))
   return Array.from(sum.subarray(0, 8), b => b.toString(16).padStart(2, '0')).join('')

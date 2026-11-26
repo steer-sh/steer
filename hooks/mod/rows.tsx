@@ -4,8 +4,8 @@
 
 import type { EngineInterface, RenderChildren, RenderElement, RenderInput } from 'claude-code'
 
-import { nextStep, parseCheckRun, parseExecution, parseGuardRow, repoKey, rowsOf, ruleParts, splitLines, tailAt } from './blocks'
-import type { BlockRow, CheckExecution, CheckRun, GuardBlock, Tail } from './blocks'
+import { nextStep, parseCheckRun, parseExecution, parseGuardRow, parseSleptRow, repoKey, rowsOf, ruleParts, splitLines, tailAt } from './blocks'
+import type { BlockRow, CheckExecution, CheckRun, GuardBlock, SleptCall, Tail } from './blocks'
 import {
   BLOCK_ROWS,
   BOX_COLUMNS,
@@ -49,6 +49,7 @@ let watched = ''
 let watchFrom = 0
 let tails = new Map<string, Tail>()
 let guards: GuardBlock[] = []
+let slept: SleptCall[] = []
 let runs: CheckRun[] = []
 let executions: CheckExecution[] = []
 // The repositories whose guard stores the mod reads, and the check-state directories whose records it reads.
@@ -65,6 +66,7 @@ function reset(session: string, now: number) {
   watchFrom = now
   tails = new Map()
   guards = []
+  slept = []
   runs = []
   executions = []
   repos = new Set()
@@ -147,6 +149,8 @@ async function readAndPlace($: EngineInterface, session: string, now: number, se
   for (const repo of repos) stores.push(`${repo}/.steer/hooks`, `${repo}/.claude/hooks`)
   for (const store of stores) {
     for (const line of await added($, `${store}/steer-audit.jsonl`)) {
+      const pass = parseSleptRow(line)
+      if (pass?.session === session) slept.push(pass)
       const block = parseGuardRow(line)
       if (block?.session !== session) continue
       guards.push(block)
@@ -188,6 +192,16 @@ async function readAndPlace($: EngineInterface, session: string, now: number, se
       .catch(() => rows.delete(row.id))
   }
   if (changed) $.ui.invalidate('ui.render')
+}
+
+/**
+ * The session's block rows since the mod started watching, in the order they
+ * happened, whether or not a transcript placed them; the calls sleeping guards let
+ * through; and its check runs.
+ */
+export function sessionRecords(): { rows: BlockRow[]; slept: SleptCall[]; runs: CheckRun[] } {
+  const seen = rowsOf(guards, runs, executions, watched).filter(row => atOf(row) >= watchFrom - GRACE_MS)
+  return { rows: seen, slept: [...slept], runs: [...runs] }
 }
 
 /** What of a row a later poll can change: its failed checks, its run number and its repository label. */
