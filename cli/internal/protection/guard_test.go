@@ -101,6 +101,7 @@ func TestSelfProtectionBlocksSteerStateByFullPath(t *testing.T) {
 		filepath.Join(rt.repo, ".pi", "extensions", "steer-guards.ts"),
 		filepath.Join(rt.repo, ".pi", "extensions", "steer-commit-gate.ts"),
 		filepath.Join(rt.repo, ".pi", "extensions", "steer-checks.ts"),
+		filepath.Join(rt.home, ".steer", "state", "sleep", "sess-1", "guard-0123456789abcdef.json"),
 	}
 	for _, path := range steerFiles {
 		if strings.HasSuffix(path, ".ts") {
@@ -155,6 +156,11 @@ func TestSelfProtectionBlocksSteerStateByFullPath(t *testing.T) {
 		{filepath.Join(rt.repo, "src"), "rm ../.pi/extensions/steer-commit-gate.ts"},
 		{rt.repo, "rm -rf .pi"},
 		{rt.repo, "mv " + filepath.Join(rt.pi, "extensions") + " /tmp/pi-extensions"},
+		{rt.repo, "mkdir -p ~/.steer/state/sleep/s && cp /tmp/rec.json ~/.steer/state/sleep/s/"},
+		{rt.repo, "mv /tmp/sleeps ~/.steer/state/sleep"},
+		{rt.repo, "cp -R /tmp/state ~/.steer/"},
+		{rt.repo, "cp -R /tmp/.steer ~"},
+		{rt.repo, "rm -rf ~/.steer/state"},
 	}
 	for _, tc := range relative {
 		if blocked, _ := rt.run(t, tc.cwd, bash(tc.command)); !blocked {
@@ -185,6 +191,10 @@ func TestSelfProtectionBlocksSteerStateByFullPath(t *testing.T) {
 		edit(filepath.Join(rt.pi, "extensions", "steer-checks.ts")),
 		edit(filepath.Join(rt.pi, "settings.json")),
 		bash("rm .pi/settings.json"),
+		bash("cat ~/.steer/state/sleep/s/guard-0123456789abcdef.json"),
+		bash("echo x > ~/.steer/state/sleeps.txt"),
+		bash("cp notes.txt ~"),
+		bash("rm -rf ~/.steer/state/checks/0123456789abcdef"),
 	}
 	for _, payload := range namesakes {
 		if blocked, reason := rt.run(t, rt.repo, payload); blocked {
@@ -226,6 +236,12 @@ func TestSelfProtectionReadsEverySteerInvocationPastFlagsAndPunctuation(t *testi
 		{"a rule naming the removal", "steer register --rule \"steer remove steer-self-protection\" ./user-custom.py", false},
 		{"the name in the next command", "steer remove --force; echo steer-self-protection", false},
 		{"a directory named steer", "cd steer && steer list", false},
+		{"sleeping a guard", "steer sleep guard no-direct-main-hook --session s", true},
+		{"sleeping check.sh after its flags", "steer --session s sleep check --repo .", true},
+		{"sleeping a guard through the guard group", "steer guard sleep x", true},
+		{"waking a guard", "steer wake guard no-direct-main-hook --session s", true},
+		{"waking check.sh in another directory", "steer -C /tmp/other wake check --session s", true},
+		{"listing sleeps", "steer sleep list --session s", false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

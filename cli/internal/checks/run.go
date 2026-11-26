@@ -301,6 +301,26 @@ func RunOracle(root string, opts RunOptions) (OracleRun, []Execution, error) {
 	return run, records, nil
 }
 
+// recordUnrun records a Stop run that ran no check.sh, with the disposition and
+// reason that kept it from running.
+func recordUnrun(identity string, req StopRequest, disposition, reason string) (OracleRun, error) {
+	now := time.Now().UTC()
+	run := OracleRun{
+		Version: OracleRunVersion, RunID: newRunID(), Repo: identity, Source: SourceStop,
+		Harness: req.Harness, Session: req.Session, Started: now, Finished: now, Deadline: now,
+		Outcome: OutcomeNotExecuted, Reason: reason, Disposition: disposition,
+		Locators: req.Locators, StopHookActive: req.StopHookActive, SteerVersion: version.Version,
+	}
+	dir, err := evidenceRoot("")
+	if err != nil {
+		return run, err
+	}
+	if err := appendJSONL(runsPath(dir, identity), run); err != nil {
+		return run, fmt.Errorf("record oracle run: %w", err)
+	}
+	return run, nil
+}
+
 func concurrentReason(holder LockHolder) string {
 	if holder.RunID == "" {
 		return "another " + OracleName + " run holds the repository"

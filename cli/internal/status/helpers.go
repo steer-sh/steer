@@ -63,17 +63,25 @@ func observationOf(v any) mine.Observation {
 	return obs
 }
 
-// countLines counts non-empty lines in a file. A missing file reads as zero.
-func countLines(path string) int {
+// countBlockRows counts an audit log's rows that are not a sleeping guard's
+// pass. A line that is not JSON counts, as every line did before sleeps.
+func countBlockRows(path string) int {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return 0
 	}
 	count := 0
 	for _, line := range bytes.Split(data, []byte("\n")) {
-		if len(bytes.TrimSpace(line)) > 0 {
-			count++
+		if len(bytes.TrimSpace(line)) == 0 {
+			continue
 		}
+		var row struct {
+			Enforcement string `json:"enforcement"`
+		}
+		if json.Unmarshal(line, &row) == nil && !mine.IsBlockRow(row.Enforcement) {
+			continue
+		}
+		count++
 	}
 	return count
 }

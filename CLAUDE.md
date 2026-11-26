@@ -263,6 +263,8 @@ Read the linked architecture section before changing the corresponding boundary:
   `steer hooks rebuild --scope <scope>`, so every reader tests presence.
   The runtime's `steer_blocked_before` also reads `hook_name`, `session_id`,
   `file_path` and `repository` back as a block-once guard's state.
+  `enforcement` is `block` or `slept`; a Go reader decides it through
+  `mine.IsBlockRow`, so a new reader of the log must too.
 - Review addendum: the manifest key in `cli/internal/claude/manifest.go`, the
   gate's HEAD reader `cli/internal/gate/addendum.go` and `mine.SteerAddendumFacts`
   decode one `review_addendum` shape. The stock `prompts/review.md` is never the
@@ -300,6 +302,14 @@ Read the linked architecture section before changing the corresponding boundary:
   and has its digest in `currentDigest` (`cli/internal/pi/load.go`); a bridge
   without both reads unknown in status forever, and `pi.RefreshBridges` never
   rewrites it.
+- Sleep records: the writer `cli/internal/sleep/` (`Record`, `Version`, `Path`) and
+  its readers, the runtime's `steer_sleeping` (`cli/internal/guard/runtime.py`) and
+  the Stop runner's `sleep.Find`, decode one record shape and one path. A changed
+  shape bumps `sleep.Version`. The self-protection guard's `sleep_entry`
+  (`cli/internal/protection/guard.py`) closes the directory, and a new sleep
+  command or flag joins its `evaluate_steer_invocation` and `STEER_VALUE_FLAGS`.
+  A new Stop disposition joins every reader of `OracleRun.Disposition`
+  (`LatestRuns`, `IsStopBlock`, the mod's `parseCheckRun` callers).
 - Display wording: use shared `status`/`styles` helpers and check
   `cli/internal/status/vocabulary_test.go`. Stored tokens and human labels have
   different compatibility obligations.

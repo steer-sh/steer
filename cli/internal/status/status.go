@@ -1193,13 +1193,13 @@ func auditFirings() int {
 		if err != nil || path == "" {
 			continue
 		}
-		return countLines(filepath.Join(filepath.Dir(path), claude.AuditLogName))
+		return countBlockRows(filepath.Join(filepath.Dir(path), claude.AuditLogName))
 	}
 	dir, err := claude.GetHooksDir(claude.GlobalScope)
 	if err != nil {
 		return 0
 	}
-	return countLines(filepath.Join(dir, claude.AuditLogName))
+	return countBlockRows(filepath.Join(dir, claude.AuditLogName))
 }
 
 // checkBlocks counts the check.sh Stop blocks in this machine's live check state

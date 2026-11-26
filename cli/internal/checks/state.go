@@ -63,9 +63,13 @@ func stopObserved(runs []OracleRun) map[string]time.Time {
 // LatestRuns splits a repository's run history, oldest first, into the newest
 // run that executed and a refusal recorded after it. A refused run runs no
 // check and reports no outcome of its own, so reporting it as the latest result
-// hides the result of the run that held the repository.
+// hides the result of the run that held the repository. A slept run ran nothing
+// and is neither.
 func LatestRuns(runs []OracleRun) (executed *OracleRun, refused *OracleRun) {
 	for i := len(runs) - 1; i >= 0; i-- {
+		if runs[i].Disposition == DispositionSlept {
+			continue
+		}
 		if runs[i].ConcurrentWith != "" {
 			if refused == nil {
 				refused = &runs[i]

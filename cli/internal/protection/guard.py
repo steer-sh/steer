@@ -23,8 +23,8 @@ import sys
 SELF_NAME = "steer-self-protection"
 SETTING_KEY = "protection.self"
 
-# Value-taking flags of steer's root, guard, remove, register and config
-# commands, each long form beside its shorthand. A flag its command does not define makes the CLI exit, so one table
+# Value-taking flags of steer's root, guard, remove, register, config, sleep and
+# wake commands, each long form beside its shorthand. A flag its command does not define makes the CLI exit, so one table
 # serves every position in an invocation.
 STEER_VALUE_FLAGS = {
     "-C",
@@ -32,13 +32,16 @@ STEER_VALUE_FLAGS = {
     "--fixtures",
     "--harness",
     "--hook-version",
+    "--minutes",
     "--model",
     "--prompt-modules",
     "--prompt-version",
     "--reason",
+    "--repo",
     "--rule",
     "--scope",
     "--self-test",
+    "--session",
     "--skill-version",
     "--source",
 }
@@ -122,6 +125,30 @@ STEER_FILE_COMMANDS = {
     "steer-commit-gate.ts": "steer commit-gate install or steer commit-gate remove",
     "steer-checks.ts": "steer check install or steer check uninstall",
 }
+
+
+# The command a user runs in place of a write to the sleep state.
+SLEEP_COMMAND = "steer sleep or steer wake"
+
+
+def sleep_dir(cwd):
+    """The directory of the user's sleeps (cli/internal/sleep), canonical. Every
+    path in it is Steer's own state."""
+    return canonicalize_path(os.path.join(os.path.expanduser("~"), ".steer", "state", "sleep"), cwd)
+
+
+def sleep_entry(canonical, cwd):
+    """The protected entry for a canonical path inside the sleep directory, or for a
+    directory under ~/.steer that holds it, where a copy or move could plant a
+    record; None otherwise."""
+    root = sleep_dir(cwd)
+    steer_home = canonicalize_path(os.path.join(os.path.expanduser("~"), ".steer"), cwd)
+    inside = canonical == root or canonical.startswith(root.rstrip(os.sep) + os.sep)
+    holds = root.startswith(canonical.rstrip(os.sep) + os.sep) and (
+        canonical == steer_home or canonical.startswith(steer_home + os.sep))
+    if inside or holds:
+        return ("steer", SLEEP_COMMAND)
+    return None
 
 
 def protected_paths(store_dir, cwd):
@@ -744,6 +771,9 @@ def hits_protected(raw_target, removes_trees, protected, cwd):
         return None
     if canonical in protected:
         return protected[canonical]
+    held = sleep_entry(canonical, cwd)
+    if held:
+        return held
     if not removes_trees:
         return None
     prefix = canonical.rstrip(os.sep) + os.sep
@@ -818,6 +848,9 @@ def evaluate_steer_invocation(positionals, self_path, cwd):
         return None
     if operation in ("remove", "register") and names_self(operand, self_path, cwd):
         return "Steer's self-protection blocks " + operation + " of its own guard. Only the user turns it off."
+    if operation in ("sleep", "wake") and operand != "list":
+        return ("Steer's self-protection blocks steer " + operation + ": only the user puts a guard or "
+                "check.sh to sleep or wakes it. Continue with a permitted approach.")
     return None
 
 
@@ -855,7 +888,7 @@ def main():
     if tool_name in ("Edit", "Write", "MultiEdit"):
         file_path = tool_input.get("file_path", "")
         canonical = canonicalize_path(file_path, cwd) if isinstance(file_path, str) else ""
-        entry = protected.get(canonical) if canonical else None
+        entry = (protected.get(canonical) or sleep_entry(canonical, cwd)) if canonical else None
         if entry is None:
             sys.exit(0)
         if entry[0] == "steer":

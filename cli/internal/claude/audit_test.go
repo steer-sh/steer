@@ -9,8 +9,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/steer-sh/steer-cli/internal/hookstore"
+	"github.com/steer-sh/steer-cli/internal/sleep"
+	"github.com/steer-sh/steer-cli/internal/testhome"
 )
 
 const blockingHookContent = `#!/usr/bin/env python3
@@ -666,5 +669,79 @@ func TestABlockOnceGuardPassesAfterItsFirstBlockInASessionOnAFile(t *testing.T) 
 			t.Fatalf("step %d (%s, %s): blocked = %v, want %v; output: %s",
 				i, step.session, step.file, masterBlocked(out), step.blocked, out)
 		}
+	}
+}
+
+// While the user's sleep of a guard is live in a session, the guard lets each
+// call through there and logs it as slept; another session, an expired sleep and
+// the next block after a wake still block, and a block-once guard's slept rows
+// do not count as its first block.
+func TestASleepingGuardLetsCallsThroughAndLogsEach(t *testing.T) {
+	withProjectTempDir(t)
+	requirePython3(t)
+	testhome.Set(t, t.TempDir())
+	if _, err := InstallManagedHook(ProjectScope, InstallManagedHookInput{
+		HookName: "no-var-hook",
+		FileName: "no-var-hook.py",
+		Rule:     "never use var",
+		Content:  []byte(blockingHookContent),
+		Metadata: HookInstallMetadata{Source: SourceGenerated, Once: true},
+	}); err != nil {
+		t.Fatalf("InstallManagedHook returned error: %v", err)
+	}
+	call := func(session string) string {
+		data, _ := json.Marshal(map[string]any{"session_id": session, "tool_name": "Bash",
+			"tool_input": map[string]any{"command": "var x = 1"}})
+		return string(data)
+	}
+	if _, err := sleep.Put("s1", sleep.KindGuard, "no-var-hook", 5*time.Minute, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sleep.Put("s3", sleep.KindGuard, "no-var-hook", 5*time.Minute, time.Now().Add(-10*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	steps := []struct {
+		session string
+		wake    bool
+		blocked bool
+	}{
+		{"s1", false, false},
+		{"s1", false, false},
+		{"s2", false, true},
+		{"s3", false, true},
+		{"s1", true, true},
+	}
+	for i, step := range steps {
+		if step.wake {
+			if _, _, err := sleep.Remove(step.session, sleep.KindGuard, "no-var-hook", time.Now()); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if out := runMasterHook(t, call(step.session)); masterBlocked(out) != step.blocked {
+			t.Fatalf("step %d (%s): blocked = %v, want %v; output: %s", i, step.session, masterBlocked(out), step.blocked, out)
+		}
+	}
+
+	hooksDir, err := GetHooksDir(ProjectScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(hooksDir, AuditLogName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		var row struct {
+			Enforcement string `json:"enforcement"`
+			SessionID   string `json:"session_id"`
+		}
+		if err := json.Unmarshal([]byte(line), &row); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, row.SessionID+":"+row.Enforcement)
+	}
+	if want := "s1:slept s1:slept s2:block s3:block s1:block"; strings.Join(got, " ") != want {
+		t.Errorf("audit rows %v; want %s", got, want)
 	}
 }

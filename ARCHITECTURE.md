@@ -364,8 +364,9 @@ no saved decision. A patch hunk out of its context is judged on its lines, and a
 `config.toml` one that adds a `hooks`/`enabled = false` switch or removes approval
 lines is blocked, since its table is unknown. A deletion of one is blocked, and so
 is a shell write, whose block sends the agent to Edit or Write. It also blocks
-`config set protection.self`, and `remove` or `register` of itself, with or
-without the `guard` group word. A shell command is split into simple commands, and a path counts only
+`config set protection.self`, `remove` or `register` of itself, and `sleep` or
+`wake` other than `sleep list`, with or without the `guard` group word, and every
+path in the sleep directory `~/.steer/state/sleep/`. A shell command is split into simple commands, and a path counts only
 where its command writes it (an output redirection, an operand of `rm` or `mv`
 or a directory holding a protected file, the last operand of `cp`), and a quoted
 `>` stays an argument, so reading a protected file is never blocked. A
@@ -380,6 +381,23 @@ scope: the global copy is replaced in place by the next reconcile, and
 status reads the global guard `on` and every harness the rebuild registers is
 one it runs in, which `bin install` and status name; team
 lock, apply and verify neither install nor remove it.
+
+A sleep (`internal/sleep/`, `steer sleep` and `steer wake` in `cmd/sleep.go`) lets
+one guard, or one repository's check.sh, through for one session for 1 to 60
+minutes, 5 by default. Only the user sets one: the self-protection guard refuses
+the agent's command and its writes, and in Claude Code the band's button runs the
+command outside any tool call. Each sleep is one file,
+`<state>/sleep/<key of the session ID>/<guard|check>-<key of the target>.json`, where
+a key is the first 8 bytes of the SHA-256 of the session ID, the guard's name or the
+repository identity, holding the
+target, the session and the start and end in milliseconds, so a sleep and a wake each
+write one file and need no lock. Its readers are the guard runtime
+(`steer_sleeping`), the Stop runner (`sleep.Find`) and the mod; each treats a record
+of another version, target or session, one longer than the longest sleep, or a link
+in its place as no sleep. The self-protection guard never sleeps: the command
+refuses it and the runtime ignores a record for a guard of `source: steer`.
+`sleeps.jsonl` beside the records logs each sleep and each early wake, which
+`steer sleep list` reads; an expiry writes nothing.
 
 `steer archive list` reads the project hook store, the global hook store and the
 project check store. `steer archive restore` selects one entry with
@@ -478,6 +496,14 @@ written. The audit log is therefore also the guard's state: a change to those
 fields, or a row removed from the log, changes what a block-once guard lets
 through. A call that names no file, such as Bash, shares one key per session and
 repository. A payload without a session id never matches, so it always blocks.
+
+While the user's sleep of a guard is live in the payload's session, a call the
+guard would block passes, and the runtime appends one row with `enforcement:
+"slept"` for it, with the same fields as a block and no `contest_protocol`; the
+guards after it still run. `mine.IsBlockRow` is the one reading of a row's
+enforcement: the observation loader, the firing audit queue, status's
+`telemetry.audit_firings` and the block-once lookup count only block rows, and the
+mod counts the slept ones as the commands a sleep let through.
 Runtime writes refuse linked audit files, payload directories and sidecar files,
 and linked store directories. A project store also refuses a linked parent
 `.steer` (or legacy `.claude`); a global store permits the operator's parent link.
@@ -579,7 +605,11 @@ a whole-tree check cannot attribute a failure to one session's edits. A subagent
 shares its parent's session, so that notice cannot name it: `StopHook` reads Claude
 Code's `background_tasks` and runs no check for a root Stop while a subagent task
 still runs, with a notice to the operator and no run record. Codex sends no such
-list, so its root Stop is always checked. Each run records its disposition and the
+list, so its root Stop is always checked. While the user's sleep of the
+repository's check.sh is live in the session, the turn ends without running it and
+the runner records a run with outcome `not-executed`, disposition `slept` and a
+notice to the operator; it is not a block, `LatestRuns` skips it and it clears no
+retry state. Each run records its disposition and the
 working-tree signature it judged. A Stop run also records the payload's
 transcript locators by key presence (`transcript_path`, and the turn as Claude
 Code's `prompt_id` or Codex's `turn_id`) and `stop_hook_active`; a block records

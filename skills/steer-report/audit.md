@@ -109,6 +109,17 @@ contest line) and `contested_excluded`, with each contested block's
 `failures[]`. `unmatched_checks[]` names contested runs no recorded block here
 carries. Read and summarize them by the same rules as a guard's.
 
+```bash
+<STEER_BIN> sleep list --json
+```
+
+Each `sleep` row is the user letting one guard (`kind: guard`, `target` its name),
+or one repository's check.sh (`kind: check`, `target` the repository), through in
+one `session` from `started_ms` to `until_ms`; a `wake` row ended one early. A
+sleep is the user's own signal that a block was unwanted at that moment. Report it
+beside that guard's or repository's contests, never as a judgment that a block was
+wrong.
+
 A contest never unblocks anything and never exempts a guard, and never recommend
 removal on contests alone. The reading pass below reads contested blocks in queue
 order, among the flagged cases the queue lists ahead of the rest, so its case cap
