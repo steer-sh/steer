@@ -55,15 +55,18 @@ can take several minutes; give the command a timeout of at least 15 minutes.
 
 A non-zero exit means the review did not complete: no base branch, uncommitted
 edits, a reviewer that cannot run, or no reviewer answered (the JSON then still
-prints, with a `trouble` field). Report the error and stop.
+prints, with a `trouble` field and any `warnings`). Report the error and each
+warning, and stop.
 
-Otherwise read the JSON, in this order:
+Otherwise read the JSON, in this order. `warnings` lists a reviewed-rule manifest
+that did not load or a diff that was not saved; whichever case below ends the
+skill, report each warning with it, so a skip or a clean result is not read as
+complete.
 
 1. `phase` `skip-empty`: the branch changes nothing reviewable. Say so and stop.
    `phase` `skip-prose`: the branch changes prose files only, which steer does not
    review. Say that the changes were not reviewed, and stop.
-2. `answered` below `runs`: in Step 6, say how many reviewers answered.
-3. `store_error`, or `findings_unparsed` above zero: the rulings cannot be
+2. `answered` below `runs`: in Step 6, say how many reviewers answered.3. `store_error`, or `findings_unparsed` above zero: the rulings cannot be
    recorded, because the review was not stored or a reply's findings cannot be
    numbered. Rule on every finding in `findings[]` and in the `review` text in
    Steps 3 and 4, skip Step 5, and in Step 6 say that the rulings are not recorded

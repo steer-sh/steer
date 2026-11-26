@@ -292,6 +292,9 @@ func branchReviewJSON(res branchreview.Result, cfg gate.Config) map[string]any {
 	if res.Trouble != "" {
 		out["trouble"] = res.Trouble
 	}
+	if len(res.Warnings) > 0 {
+		out["warnings"] = res.Warnings
+	}
 	if res.StoreError != nil {
 		out["store_error"] = res.StoreError.Error()
 	}
