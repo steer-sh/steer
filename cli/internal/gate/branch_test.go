@@ -109,8 +109,8 @@ func TestBranchCommitsKeepsEverySubjectWhenCut(t *testing.T) {
 		}
 		last = at
 	}
-	if !strings.Contains(text, "[message cut by the review harness") {
-		t.Error("a cut message carries no marker")
+	if !strings.Contains(text, "[message cut by the review harness; where your tools run git") {
+		t.Errorf("a cut message carries no marker that holds for a reviewer without git:\n%s", text[len(text)-300:])
 	}
 }
 
@@ -132,6 +132,9 @@ func TestBranchCommitsStaysNearItsBudgetForManyCommits(t *testing.T) {
 	}
 	if !strings.Contains(text, fmt.Sprintf("subject %04d", n-1)) || strings.Contains(text, body) {
 		t.Errorf("the newest subject is missing or a body survived:\n%.300s", text)
+	}
+	if !strings.HasPrefix(text, "[the ") || strings.Count(text, "; where your tools run git, `git log") != 2 {
+		t.Errorf("the cut oldest commits and bodies carry no marker that holds for a reviewer without git:\n%.300s", text)
 	}
 	lines := strings.Split(text, "\n")
 	if !strings.HasPrefix(lines[1], "commit ") || !strings.HasPrefix(lines[2], "subject ") {

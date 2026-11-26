@@ -146,9 +146,9 @@ func BranchCommits(repo, base, head string) (text string, count int, ok bool) {
 		}
 		text = strings.Join(messages[kept:], "\n")
 		if kept > 0 {
-			text = fmt.Sprintf("[the %d oldest commits cut by the review harness; run git log to read them]\n", kept) + text
+			text = fmt.Sprintf("[the %d oldest commits cut by the review harness"+gitLogNote+"them]\n", kept) + text
 		}
-		return text + "\n[message bodies cut by the review harness; run git log to read them]", len(messages), true
+		return text + "\n[message bodies cut by the review harness" + gitLogNote + "them]", len(messages), true
 	}
 	for i, message := range messages {
 		if len(message) > share {
@@ -158,11 +158,14 @@ func BranchCommits(repo, base, head string) (text string, count int, ok bool) {
 			}
 			// The `commit <id>` line and the subject line stay whole.
 			cut = max(cut, subjectEnd(message))
-			messages[i] = message[:cut] + "\n[message cut by the review harness; run git log to read it whole]"
+			messages[i] = message[:cut] + "\n[message cut by the review harness" + gitLogNote + "it whole]"
 		}
 	}
 	return strings.Join(messages, "\n\n"), len(messages), true
 }
+
+// gitLogNote tells a reviewer where a cut message is, without assuming it can run git.
+const gitLogNote = "; where your tools run git, `git log` over the branch's range shows "
 
 // subjectEnd is the offset of the newline that ends a rendered message's subject
 // line, the second line, or the message's length when it has none.
