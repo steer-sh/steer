@@ -13,7 +13,8 @@ commit-gate activation are explicit setup operations.
 `skills/steer/SKILL.md` routes a rule to a tier and handles guard generation and removal,
 and `skills/steer-report/SKILL.md` reads the queue and evidence to propose interventions.
 Both route through `skills/steer/prompts/routing.md`; `/steer-report` reads it as a
-sibling, so the two skills ship in one bundle.
+sibling, so the two skills ship in one bundle. `skills/steer-review/SKILL.md` runs
+the [branch review](#branch-review) before a pull request.
 `skills/auto-steer/SKILL.md` holds no pass of its own: it reads the `steer-report`
 files as siblings and supplies a decision policy for each point where that pass
 asks the reader. Its bar to install is stricter than the report's bar to show, a
@@ -1000,6 +1001,41 @@ machine's older per-firing files. Every harness adapter stamps the same author f
 `Ledger.TaskFields`); Codex and Pi read their human turns through their transcript
 adapters, and Pi's drop the body of a `/skill:` command Pi resolved, keeping the
 arguments typed after it.
+
+### Branch review
+
+`steer review branch` (`cli/cmd/review.go`, `internal/branchreview/`) reviews a
+branch's net change, from the merge base of its base branch to HEAD, before a pull
+request opens. It is advisory: no hook calls it and it blocks nothing. The
+`steer-review` skill runs it, rules on each finding and records the rulings.
+
+It shares the gate's pieces and none of its chain. `gate.GetBranchDiff` runs the
+commit diff plan over two commit IDs with its own budget (`MaxBranchDiffChars`) and
+its own budget notes, which send the reviewer to read a dropped file rather than
+forbid findings about it. `prompts/branch-review.md` has its own pinned digest and
+rows carry `gate.BranchInstrumentSuffix`; it attaches no `BuildContext` callers,
+because a CLI reviewer, or an API reviewer with `reviewer.api.tools` on, can read the
+repository at HEAD with its own tools. An API reviewer with tools off reads only the
+diff, and the command warns that it does; one in `auto` falls back to the diff alone
+when the endpoint refuses tools, as for a commit. agy, which cannot search and takes its
+prompt on argv, is refused. The panel is the commit
+gate's `Panel`, configured by `settings.BranchConfig`: the `branch_reviewer.*` keys
+inherit `reviewer.*` (a different provider drops the inherited model and effort),
+with their own runs, timeout and API tool-loop caps.
+
+Tracked edits that HEAD does not hold, in the index or the working tree, stop the
+review unless `--allow-dirty` names them to the reviewer (up to 20, the rest
+counted), since CLI reviewers read
+the disk and an API reviewer reads the index. Rows live in
+`~/.steer/state/branch-review/` (`reviews.<host>.jsonl`, `rulings.<host>.jsonl`,
+`diffs/`), apart from the commit-review ledger, and the component is not in
+`statestore.Components`: it has no legacy corpus. No resolver, `gate/mine` or status
+reader reads it. A review that runs pins both ends as `refs/branch-review/<sha>`,
+best effort: a skipped review pins nothing, and a failed `update-ref` is not
+reported. A ruling receipt
+(`steer review rule`) needs one ruling per finding, numbered across the panel, and
+stamps the HEAD at ruling time, so `head_advanced` (HEAD descends from the reviewed
+head) is observed rather than reported by the agent.
 
 ## Transcripts and session evidence
 

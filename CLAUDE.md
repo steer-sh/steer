@@ -145,6 +145,14 @@ Read the linked architecture section before changing the corresponding boundary:
   SubagentStop entry to Steer's own resolver.
   Preview historical misses with `commit-gate backfill --reresolve` before
   adding `--apply`.
+- Branch review (`steer review`, the `steer-review` skill):
+  [branch review](ARCHITECTURE.md#branch-review). Start with
+  `cli/internal/branchreview/` and `cli/internal/gate/branch.go`. Its rows live in
+  `~/.steer/state/branch-review/`, never in the commit-review ledger and outside
+  `statestore.Components`; a reader of the ledger must not learn to read them. Its
+  prompt `prompts/branch-review.md` has its own pinned digest, and a change to branch
+  diff assembly or finding parsing bumps `gate.BranchInstrumentSuffix`. Its
+  `branch_reviewer.*` keys resolve through `settings.BranchConfig`, not `gate.WithFile`.
 - Transcript ingestion, classification, or snapshots:
   [transcripts](ARCHITECTURE.md#transcripts-and-session-evidence).
   `cli/internal/transcript/` owns normalization; `cli/internal/report/` classifies
