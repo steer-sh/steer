@@ -4,7 +4,7 @@
 
 import type { EngineInterface, RenderChildren, RenderElement, RenderInput } from 'claude-code'
 
-import { parseCheckRun, parseExecution, parseGuardRow, repoKey, rowsOf, ruleParts, splitLines, tailAt } from './blocks'
+import { nextStep, parseCheckRun, parseExecution, parseGuardRow, repoKey, rowsOf, ruleParts, splitLines, tailAt } from './blocks'
 import type { BlockRow, CheckExecution, CheckRun, GuardBlock, Tail } from './blocks'
 import {
   BLOCK_ROWS,
@@ -19,6 +19,7 @@ import {
   shieldCells,
   tickCells,
 } from './marks'
+import { plural } from './review'
 
 // How far before a file's end the first read starts: past rows of other sessions are skipped.
 const FIRST_READ_BYTES = 256 * 1024
@@ -171,8 +172,8 @@ async function readAndPlace($: EngineInterface, session: string, now: number, se
   for (const row of rowsOf(guards, runs, executions, session)) {
     const had = rows.get(row.id)
     if (had) {
-      // Executions a later poll read update a row already placed.
-      if (failedOf(had) !== failedOf(row)) changed = true
+      // Executions or runs a later poll read update a row already placed.
+      if (shownOf(had) !== shownOf(row)) changed = true
       rows.set(row.id, row)
       continue
     }
@@ -189,7 +190,9 @@ async function readAndPlace($: EngineInterface, session: string, now: number, se
   if (changed) $.ui.invalidate('ui.render')
 }
 
-const failedOf = (row: BlockRow) => (row.kind === 'check-failed' ? row.failed.join(',') : '')
+/** What of a row a later poll can change: its failed checks, its run number and its repository label. */
+const shownOf = (row: BlockRow) =>
+  row.kind === 'guard' ? '' : [row.kind === 'check-failed' ? row.failed.join(',') : '', row.n, row.place].join('|')
 
 const atOf = (row: BlockRow) => (row.kind === 'guard' ? row.block.atMs : row.run.finishedMs)
 
@@ -227,26 +230,38 @@ function startFrames($: EngineInterface) {
   })
 }
 
-const repoName = (repo: string) => repo.split(/[\\/]/).filter(Boolean).pop() ?? ''
+/** The noun for what a guard stopped, by the tool it stopped. */
+const stoppedNoun = (tool: string) =>
+  tool === 'Bash' ? 'command' : ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'apply_patch'].includes(tool) ? 'edit' : 'call'
 
-/** What a row says: its label, its timing phrase, the dim name at the right, and two sentences. */
-function wordsOf(row: BlockRow): { label: string; hue: string; rail: string; when: string; name: string; result: string; next: string } {
+/** Up to two failed check names, then how many more. */
+function failedNames(failed: readonly string[]): string {
+  const shown = failed.slice(0, 2)
+  const more = failed.length - shown.length
+  return [...shown, ...(more > 0 ? [`${more} more`] : [])].join(' · ')
+}
+
+/** Line 2 of a row: plain text with one part in a colour of its own. */
+type Result = { lead: string; hot?: string; hotColor?: string; tail?: string }
+
+/** What a row says: its label, rail, timing phrase, the dim name at the right, and its two sentences. */
+function wordsOf(row: BlockRow): { label: string; hue: string; rail: string; when: string; name: string; result: Result; next: string } {
   if (row.kind === 'guard') {
     const { block } = row
     const { never, instead } = ruleParts(block.rule)
     const actor = block.thread ? 'The subagent' : 'Claude'
-    const call = block.tool ? `a ${block.tool} call` : 'a tool call'
+    const noun = stoppedNoun(block.tool)
     return {
       label: 'GUARD',
       hue: COLORS.guard,
-      rail: COLORS.held,
+      rail: COLORS.guard,
       when: 'before a tool runs',
       name: block.hook,
-      result: never ? `Steer stopped ${call}. Rule: ${never}.` : `Steer stopped ${call}.`,
-      next: instead ? `${actor} should ${instead}.` : `${actor} continues without that call.`,
+      result: { lead: never ? `Steer stopped this ${noun}: ${never}.` : `Steer stopped this ${noun}.` },
+      next: `${actor} ${nextStep(instead, noun)}.`,
     }
   }
-  const name = `check.sh · ${repoName(row.run.repo)}`
+  const name = `${row.place ? `${row.place} · ` : ''}run ${row.n}`
   if (row.kind === 'check-passed')
     return {
       label: 'CHECK',
@@ -254,23 +269,30 @@ function wordsOf(row: BlockRow): { label: string; hue: string; rail: string; whe
       rail: COLORS.pass,
       when: 'when the turn ends',
       name,
-      result: 'check.sh passes again.',
-      next: 'The turn can end.',
+      result: { lead: 'check.sh passes now: ', hot: 'all checks passed', hotColor: COLORS.pass, tail: '.' },
+      next: 'The turn ends.',
     }
-  const what =
-    row.failed.length > 0
-      ? `${row.failed.join(', ')} did not pass`
+  const { failed } = row
+  const result: Result =
+    failed.length > 0
+      ? {
+          lead: 'Steer kept the turn open: ',
+          hot: `${plural(failed.length, 'check')} ${row.allFailed ? 'failed' : 'did not pass'}`,
+          hotColor: COLORS.held,
+          tail: ' in check.sh.',
+        }
       : row.run.outcome === 'passed'
-        ? 'a declared check left no result'
-        : `check.sh ${row.run.outcome || 'failed'}`
+        ? { lead: 'Steer kept the turn open: ', hot: 'a declared check left no result', hotColor: COLORS.held, tail: '.' }
+        : { lead: 'Steer kept the turn open: ', hot: `check.sh ${row.run.outcome || 'failed'}`, hotColor: COLORS.held, tail: '.' }
+  const names = failedNames(failed)
   return {
     label: 'CHECK',
     hue: COLORS.check,
-    rail: COLORS.held,
+    rail: COLORS.check,
     when: 'when the turn ends',
     name,
-    result: `Steer kept the turn open: ${what}.`,
-    next: 'Claude fixes the failure before the turn ends.',
+    result,
+    next: `${names ? `${names}. ` : ''}Claude continues until check.sh passes.`,
   }
 }
 
@@ -311,7 +333,11 @@ export function drawRow($: EngineInterface, e: RenderInput<'Placed'>): RenderEle
         </Text>
       </Box>
     </Box>,
-    <Text wrap="truncate-end">{w.result}</Text>,
+    <Text wrap="truncate-end">
+      {w.result.lead}
+      {w.result.hot ? <Text color={w.result.hotColor}>{w.result.hot}</Text> : ''}
+      {w.result.tail ?? ''}
+    </Text>,
     <Text dimColor wrap="truncate-end">
       {w.next}
     </Text>,

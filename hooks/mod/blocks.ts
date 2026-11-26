@@ -30,16 +30,22 @@ export type CheckRun = {
 /** One declared check's result inside a run, as executions.jsonl records it. */
 export type CheckExecution = { runId: string; session: string; checkId: string; outcome: string }
 
-/** A transcript row the mod places, keyed by `id`. */
+/**
+ * A transcript row the mod places, keyed by `id`. A check row carries `n`, the run's
+ * place among this session's check.sh runs in its repository, and `place`, the
+ * repository's name when the session's runs name more than one.
+ */
 export type BlockRow =
   | { kind: 'guard'; id: string; block: GuardBlock }
-  | { kind: 'check-failed'; id: string; run: CheckRun; failed: string[] }
-  | { kind: 'check-passed'; id: string; run: CheckRun }
+  | { kind: 'check-failed'; id: string; run: CheckRun; failed: string[]; allFailed: boolean; n: number; place: string }
+  | { kind: 'check-passed'; id: string; run: CheckRun; n: number; place: string }
 
 const isString = (v: unknown): v is string => typeof v === 'string'
 
 // The execution outcomes that pass, as Execution.Passed reads them (cli/internal/checks/execution.go).
 const PASSES = new Set(['passed', 'passed-cached'])
+// The outcomes that fail, as Execution.Failed reads them; skipped and not-executed are neither.
+const FAILS = new Set(['failed', 'error', 'timeout', 'unavailable'])
 
 function record(line: string): Record<string, unknown> | null {
   try {
@@ -112,10 +118,16 @@ const isStopBlock = (run: CheckRun) => run.disposition === 'block'
 /** A run that let the turn end on a passing check.sh. */
 const isStopPass = (run: CheckRun) => run.disposition === 'allow' && run.outcome === 'passed'
 
+/** A run that ran check.sh: not refused by the repository lock and not skipped while it slept. */
+const ranOracle = (run: CheckRun) => run.outcome !== 'not-executed'
+
+/** The last part of a repository path. */
+export const repoName = (repo: string) => repo.split(/[\\/]/).filter(Boolean).pop() ?? ''
+
 /**
  * The rows a session's records call for, in the order they happened. A guard row per
  * block; a check row per Stop block, naming the declared checks that did not pass
- * (any outcome but a pass, as the runner reads it); and
+ * (any outcome but a pass, as the runner reads it) and whether each of them failed; and
  * one pass row for the first passing run after a block in the same repository.
  */
 export function rowsOf(
@@ -129,20 +141,30 @@ export function rowsOf(
     if (block.session === session) rows.push({ at: block.atMs, row: { kind: 'guard', id: `guard-${block.firingId}`, block } })
   }
   const failedIn = new Map<string, string[]>()
+  const notFailing = new Set<string>()
   for (const ex of executions) {
     if (PASSES.has(ex.outcome)) continue
+    if (!FAILS.has(ex.outcome)) notFailing.add(ex.runId)
     const names = failedIn.get(ex.runId) ?? []
     if (!names.includes(ex.checkId)) names.push(ex.checkId)
     failedIn.set(ex.runId, names)
   }
   const blockedRepos = new Set<string>()
-  for (const run of [...runs].sort((a, b) => a.finishedMs - b.finishedMs)) {
-    if (run.session !== session) continue
+  const mine = [...runs].filter(run => run.session === session).sort((a, b) => a.finishedMs - b.finishedMs)
+  const several = new Set(mine.map(run => run.repo)).size > 1
+  const counted = new Map<string, number>()
+  for (const run of mine) {
+    if (!ranOracle(run)) continue
+    const n = (counted.get(run.repo) ?? 0) + 1
+    counted.set(run.repo, n)
+    const place = several ? repoName(run.repo) : ''
     if (isStopBlock(run)) {
       blockedRepos.add(run.repo)
-      rows.push({ at: run.finishedMs, row: { kind: 'check-failed', id: `check-${run.runId}`, run, failed: failedIn.get(run.runId) ?? [] } })
+      const failed = failedIn.get(run.runId) ?? []
+      const allFailed = !notFailing.has(run.runId)
+      rows.push({ at: run.finishedMs, row: { kind: 'check-failed', id: `check-${run.runId}`, run, failed, allFailed, n, place } })
     } else if (isStopPass(run) && blockedRepos.delete(run.repo)) {
-      rows.push({ at: run.finishedMs, row: { kind: 'check-passed', id: `check-pass-${run.runId}`, run } })
+      rows.push({ at: run.finishedMs, row: { kind: 'check-passed', id: `check-pass-${run.runId}`, run, n, place } })
     }
   }
   return rows.sort((a, b) => a.at - b.at).map(r => r.row)
@@ -151,7 +173,20 @@ export function rowsOf(
 /** A rule's two parts: what it forbids, and what to do instead; either may be empty. */
 export function ruleParts(rule: string): { never: string; instead: string } {
   const [head = '', ...rest] = rule.split('|')
-  return { never: head.trim(), instead: rest.join('|').trim() }
+  return { never: trimEnd(head), instead: trimEnd(rest.join('|')) }
+}
+
+const trimEnd = (text: string) => text.trim().replace(/[.;:]+$/, '')
+
+/**
+ * What the agent does next, from a rule's instead-part: "use python3 instead" reads
+ * "continues with python3"; any other part is quoted after "continues:".
+ */
+export function nextStep(instead: string, noun = 'call'): string {
+  if (!instead) return `continues without that ${noun}`
+  const use = /^use\s+(.+?)(\s+instead)?$/i.exec(instead)
+  if (use?.[1]) return `continues with ${use[1]}`
+  return `continues: ${instead}`
 }
 
 /**

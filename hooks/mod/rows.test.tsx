@@ -2,8 +2,9 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { parseGuardRow, repoKey, rowsOf, ruleParts, splitLines, tailAt } from './blocks'
+import { nextStep, parseGuardRow, repoKey, rowsOf, ruleParts, splitLines, tailAt } from './blocks'
 import type { CheckExecution, CheckRun, GuardBlock } from './blocks'
+import { COLORS } from './marks'
 
 const HOME = '/home/u'
 const SESSION = 'sess-1'
@@ -92,6 +93,14 @@ test('the check state key is the one cli/internal/checks derives from the reposi
 test('a rule splits into what it forbids and what to do instead', () => {
   expect(ruleParts('never push to main | open a pull request')).toEqual({ never: 'never push to main', instead: 'open a pull request' })
   expect(ruleParts('never push to main')).toEqual({ never: 'never push to main', instead: '' })
+  expect(ruleParts('never use bare "python". | use python3 instead.')).toEqual({ never: 'never use bare "python"', instead: 'use python3 instead' })
+})
+
+test('what the agent does next reads from the rule: a "use" part names the replacement, any other part is quoted', () => {
+  expect(nextStep('use python3 instead', 'command')).toBe('continues with python3')
+  expect(nextStep('use const or let')).toBe('continues with const or let')
+  expect(nextStep('work on a branch')).toBe('continues: work on a branch')
+  expect(nextStep('', 'edit')).toBe('continues without that edit')
 })
 
 test('rows follow the session in time order: a guard block, a check block with its failed checks, then one pass', () => {
@@ -110,6 +119,23 @@ test('rows follow the session in time order: a guard block, a check block with i
   expect(rows.map(r => r.id)).toEqual(['guard-f1', 'check-r1', 'check-pass-r2'])
   const failed = rows[1]
   expect(failed?.kind === 'check-failed' ? failed.failed : []).toEqual(['go-test', 'skipped-one'])
+  expect(failed?.kind === 'check-failed' ? failed.allFailed : true).toBe(false)
+  expect(rows.map(r => (r.kind === 'guard' ? 0 : r.n))).toEqual([0, 1, 2])
+})
+
+test("a check row's run number counts the session's check.sh runs in its repository, not a run that never ran check.sh", () => {
+  const rows = rowsOf(
+    [],
+    [
+      run({ runId: 'r0', finishedMs: 1, outcome: 'not-executed', disposition: 'concurrent' }),
+      run({ runId: 'r1', finishedMs: 2 }),
+      run({ runId: 'x1', repo: '/other', finishedMs: 3 }),
+      run({ runId: 'r2', finishedMs: 4 }),
+    ],
+    [],
+    SESSION,
+  )
+  expect(rows.map(r => (r.kind === 'guard' ? '' : `${r.place}:${r.n}`))).toEqual(['repo:1', 'other:1', 'repo:2'])
 })
 
 test('a passing run with no block before it gets no row', () => {
@@ -171,6 +197,10 @@ const line = (doc: unknown) => `${JSON.stringify(doc)}\n`
 const texts = async (ui: { findAll(q: { type: string }): Promise<{ text: string }[]> }) =>
   (await ui.findAll({ type: 'Text' })).map(t => t.text).join('\n')
 
+/** The colour of each line's rail glyph. */
+const rails = async (ui: { findAll(q: { type: string }): Promise<{ text: string; props: Record<string, unknown> }[]> }) =>
+  (await ui.findAll({ type: 'Text' })).filter(t => t.text === '▌').map(t => t.props.color)
+
 const row = (id: string, surface: 'terminal' | 'desktop') =>
   ({ plugin: 'steer', component: 'Placed', requestId: `row-${id}`, surface, props: { id, plugin: 'steer' } }) as const
 
@@ -186,9 +216,10 @@ test('a guard block after the mod starts gets a row with the rule and a shield; 
   expect(drawn).toContain('GUARD')
   expect(drawn).toContain('before a tool runs')
   expect(drawn).toContain('no-direct-main-hook')
-  expect(drawn).toContain('Steer stopped a Bash call. Rule: never commit on main in this repository.')
-  expect(drawn).toContain('The subagent should work on a branch.')
+  expect(drawn).toContain('Steer stopped this command: never commit on main in this repository.')
+  expect(drawn).toContain('The subagent continues: work on a branch.')
   expect((await terminal.findAll({ type: 'Raster' })).map(r => r.key)).toEqual(['mark'])
+  expect(await rails(terminal)).toEqual([COLORS.guard, COLORS.guard, COLORS.guard])
   await terminal.unmount()
 
   const desktop = await $.ui.mount(row('guard-f1', 'desktop'))
@@ -204,19 +235,26 @@ test('a check Stop block names the failed check, and the next passing run closes
   await clock.advance(1000)
   // A run read in the same poll as its executions names them, whichever file grew last.
   const first = await $.ui.mount(row('check-r1', 'terminal'))
-  expect(await texts(first)).toContain('go-test did not pass')
+  expect(await texts(first)).toContain('go-test. Claude continues until check.sh passes.')
   await first.unmount()
   files[RUNS] += line(stopRun({ run_id: 'r2', finished: iso(NOW + 9_000), outcome: 'passed', disposition: 'allow' }))
   await clock.advance(1000)
   expect(placed).toEqual(['check-r1', 'check-pass-r2'])
 
-  const failed = await texts(await $.ui.mount(row('check-r1', 'terminal')))
+  const failedRow = await $.ui.mount(row('check-r1', 'terminal'))
+  expect(await rails(failedRow)).toEqual([COLORS.check, COLORS.check, COLORS.check])
+  const failed = await texts(failedRow)
   expect(failed).toContain('CHECK')
   expect(failed).toContain('when the turn ends')
-  expect(failed).toContain('check.sh · repo')
-  expect(failed).toContain('Steer kept the turn open: go-test did not pass.')
-  const passed = await texts(await $.ui.mount(row('check-pass-r2', 'terminal')))
-  expect(passed).toContain('check.sh passes again.')
+  expect(failed).toContain('run 1')
+  expect(failed).toContain('1 check failed')
+  expect(failed).toContain(' in check.sh.')
+  const passedRow = await $.ui.mount(row('check-pass-r2', 'terminal'))
+  expect(await rails(passedRow)).toEqual([COLORS.pass, COLORS.pass, COLORS.pass])
+  const passed = await texts(passedRow)
+  expect(passed).toContain('all checks passed')
+  expect(passed).toContain('The turn ends.')
+  expect(passed).toContain('run 2')
 })
 
 test('a check block in a repository the session reached later gets a row, and so does an integration failure', async ($, on) => {
@@ -227,7 +265,7 @@ test('a check block in a repository the session reached later gets a row, and so
   await clock.advance(10_000)
   expect(placed).toEqual(['check-r1'])
   const drawn = await texts(await $.ui.mount(row('check-r1', 'terminal')))
-  expect(drawn).toContain('Steer kept the turn open: a declared check left no result.')
+  expect(drawn).toContain('a declared check left no result')
 })
 
 test('a row whose placement failed, or that no surface drew, is placed at a later poll', async ($, on) => {
@@ -254,5 +292,7 @@ test('a check row placed before its executions were read names the failed check 
   expect(placed).toEqual(['check-r1'])
   files[EXECUTIONS] = line({ run_id: 'r1', session: SESSION, check_id: 'go-test', outcome: 'failed' })
   await clock.advance(1000)
-  expect(await texts(await $.ui.mount(row('check-r1', 'terminal')))).toContain('go-test did not pass')
+  const drawn = await texts(await $.ui.mount(row('check-r1', 'terminal')))
+  expect(drawn).toContain('go-test. Claude continues')
+  expect(drawn).toContain('1 check failed')
 })
