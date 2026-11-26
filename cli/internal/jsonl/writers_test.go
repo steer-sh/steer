@@ -34,7 +34,8 @@ func TestEveryAppendingWriterSeparatesATornRow(t *testing.T) {
 			return err
 		}
 		src := string(data)
-		if strings.Count(src, "O_APPEND") > strings.Count(src, "jsonl.Separated(") {
+		// "Separated(" also counts this package's own unqualified call in Append.
+		if strings.Count(src, "O_APPEND") > strings.Count(src, "Separated(")-strings.Count(src, "func Separated(") {
 			rel, _ := filepath.Rel(root, path)
 			unseparated = append(unseparated, rel)
 		}

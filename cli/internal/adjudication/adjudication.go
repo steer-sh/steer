@@ -7,10 +7,7 @@
 package adjudication
 
 import (
-	"bufio"
-	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -321,56 +318,12 @@ func Latest(receipts []Receipt, subject string) map[string]Receipt {
 	return out
 }
 
-// loadStream reads the JSON lines of the stream name in dir, oldest first,
-// skipping blank and unparsable lines and every value keep rejects. keep may
-// normalize the value it is given. A missing stream yields nil and no error.
+// loadStream is jsonl.Load over the stream name in dir.
 func loadStream[T any](dir, name string, keep func(*T) bool) ([]T, error) {
-	file, err := os.Open(filepath.Join(dir, name))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("failed to read %s: %w", name, err)
-	}
-	defer file.Close()
-	var out []T
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		var v T
-		if err := json.Unmarshal([]byte(line), &v); err != nil {
-			continue
-		}
-		if !keep(&v) {
-			continue
-		}
-		out = append(out, v)
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("failed to read %s: %w", name, err)
-	}
-	return out, nil
+	return jsonl.Load(filepath.Join(dir, name), keep)
 }
 
-// appendLine encodes v and appends it as one line to the stream name in dir;
-// noun names v in the encoding error.
+// appendLine is jsonl.Append to the stream name in dir.
 func appendLine(dir, name, noun string, v any) error {
-	line, err := json.Marshal(v)
-	if err != nil {
-		return fmt.Errorf("failed to encode the %s: %w", noun, err)
-	}
-	file, err := os.OpenFile(filepath.Join(dir, name),
-		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return fmt.Errorf("failed to open %s: %w", name, err)
-	}
-	defer file.Close()
-	if _, err := file.Write(jsonl.Separated(filepath.Join(dir, name), append(line, '\n'))); err != nil {
-		return fmt.Errorf("failed to append to %s: %w", name, err)
-	}
-	return nil
+	return jsonl.Append(filepath.Join(dir, name), 0o644, noun, v)
 }

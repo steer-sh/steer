@@ -205,10 +205,10 @@ func DirtyTreeNote(paths, branchPaths []string) string {
 	for i, p := range branchPaths {
 		inBranch[i] = NeutralizeBranchTags(p)
 	}
-	return pathsNote(dirtyTag, "The branch diff ends at HEAD. The working tree also "+
-		"holds edits that are not committed, to the paths below, so a file you open on "+
-		"disk at one of them is not the version under review. Do not raise a finding "+
-		"from the on-disk copy of one of these paths.\n",
+	return pathsNote(dirtyTag, "The branch diff ends at HEAD. The index or the working "+
+		"tree also holds edits that are not committed, to the paths below, so a file you "+
+		"open at one of them, on disk or through your tools, is not the version under "+
+		"review. Do not raise a finding from what you read at one of these paths.\n",
 		" (also changed by the branch; only its committed part is under review)",
 		"- and %d more paths with uncommitted edits\n", named, inBranch)
 }
