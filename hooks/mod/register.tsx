@@ -1,6 +1,7 @@
 // Steer's Claude Code mod: a band above the prompt that shows this session's commit
-// review while it runs and how it ended. It reads the live review file the commit gate
-// writes and handles no tool event; the gate itself stays in the settings hooks.
+// review while it runs and how it ended, and a transcript row for each guard block and
+// check Stop block. It reads the files the commit gate, the guards and the Stop runner
+// write and handles no tool event; enforcement stays in the settings hooks.
 
 import type { EngineInterface, Register, RenderChildren, RenderInput } from 'claude-code'
 
@@ -40,6 +41,7 @@ import {
   washSvg,
 } from './vector'
 import type { Motion, Pose, Tone } from './vector'
+import { drawRow, pollBlocks, stateRoot } from './rows'
 
 const POLL_MS = 1000
 // How many polls pass before the state directory is resolved again.
@@ -93,13 +95,8 @@ let ticking = true
 async function resolveRoot($: EngineInterface): Promise<string> {
   const override = await $.env.get('COMMIT_GATE_STATE_DIR')
   if (override) return `${override}/live`
-  const home = await $.env.get('HOME')
-  if (!home) return ''
-  const neutral = `${home}/.steer/state/commit-review`
-  const legacy = `${home}/.claude/state/commit-review`
-  if (await $.fs.exists(`${neutral}/.steer-state`)) return `${neutral}/live`
-  const old = await $.fs.list(legacy).catch(() => [])
-  return `${old.length > 0 ? legacy : neutral}/live`
+  const root = await stateRoot($, 'commit-review')
+  return root ? `${root}/live` : ''
 }
 
 async function poll($: EngineInterface): Promise<void> {
@@ -119,7 +116,9 @@ async function poll($: EngineInterface): Promise<void> {
     }
   }
   docs = read
-  const views = sessionViews(docs, sessionId, await $.clock.now())
+  const now = await $.clock.now()
+  await pollBlocks($, sessionId, now, [...new Set(read.map(doc => doc.repo).filter(Boolean))]).catch(() => undefined)
+  const views = sessionViews(docs, sessionId, now)
   numberViews(views)
   const key = keyOf(views)
   if (key !== drawnKey) $.ui.invalidate('ui.render')
@@ -529,6 +528,8 @@ export const register: Register = on => {
     if (e.isInteractive) startPolling($)
     return next(e)
   })
+
+  on('ui.render', { component: 'Placed' }, ($, e, next) => drawRow($, e) ?? next(e))
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     // A mod installed into a running session gets no session.start.

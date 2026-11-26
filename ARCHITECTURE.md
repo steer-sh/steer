@@ -120,6 +120,17 @@ It names the agent and repository of a subagent's review, and of any review whil
 another is listed, and gives the held and running reviews it hides at most two status
 lines.
 
+The mod also places one transcript row (`$.ui.place`) for each guard block and check
+Stop block in the session, and one when check.sh passes again after a block
+(`hooks/mod/rows.tsx`). It writes no file for them: it reads the records Steer already
+keeps, the guard stores' `steer-audit.jsonl` and the check state's `runs.jsonl` and
+`executions.jsonl` (`hooks/mod/blocks.ts`). It watches the session's repository, each
+repository a review, a guard row or a check run names, and each check-state directory
+whose runs changed after it started watching. Each poll reads only the bytes a record
+gained, and a block recorded more than a few seconds before the mod started watching
+gets no row. The terminal row draws the guard's shield or the check's box;
+other hosts draw the row's text and rail alone.
+
 Each install from another path adds that path, as `os.Executable` reports it, to
 `~/.steer/bin/source`, and `bin install` adds every active plugin copy it finds. When a recorded path lies in a harness's plugin cache and
 the harness's own install record (`installed_plugins.json`, the `plugins` table

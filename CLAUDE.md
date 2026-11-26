@@ -257,8 +257,9 @@ Read the linked architecture section before changing the corresponding boundary:
   execution stay four separate facts.
 - Audit row fields: the writer `cli/internal/guard/runtime.py`, the stamps
   `cli/internal/claude/consolidation.go` puts in `STEER_HOOK_META`, the Pi
-  payload `cli/internal/pi/bridge_guards.ts` and the reader
-  `cli/internal/gate/mine/session.go`. A new field reaches rows only after
+  payload `cli/internal/pi/bridge_guards.ts` and the readers
+  `cli/internal/gate/mine/session.go` and the mod's `hooks/mod/blocks.ts`, which
+  also reads check `runs.jsonl` and `executions.jsonl` rows. A new field reaches rows only after
   `steer hooks rebuild --scope <scope>`, so every reader tests presence.
   The runtime's `steer_blocked_before` also reads `hook_name`, `session_id`,
   `file_path` and `repository` back as a block-once guard's state.

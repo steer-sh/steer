@@ -32,7 +32,14 @@ SKILL_FILES = ("skills/auto-steer/SKILL.md", "skills/steer/SKILL.md", "skills/st
                "skills/steer-report/reading.md",
                "skills/steer-setup/SKILL.md")
 # The Claude Code mod that hooks/hooks.json names under modules, and the files it imports.
-MOD_FILES = ("hooks/mod/register.tsx", "hooks/mod/marks.ts", "hooks/mod/review.ts", "hooks/mod/vector.ts")
+MOD_FILES = (
+    "hooks/mod/register.tsx",
+    "hooks/mod/marks.ts",
+    "hooks/mod/review.ts",
+    "hooks/mod/vector.ts",
+    "hooks/mod/blocks.ts",
+    "hooks/mod/rows.tsx",
+)
 # The text files a harness runs from the bundle, compared byte for byte.
 BUNDLE_FILES = (*SKILL_FILES, *MOD_FILES, *PI_FILES)
 LAUNCHER = "scripts/steer"

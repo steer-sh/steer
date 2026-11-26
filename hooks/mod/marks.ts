@@ -4,6 +4,8 @@
 /** Hue names the fix type; held and pass name the result. */
 export const COLORS = {
   review: '#9badff',
+  guard: '#e6c98a',
+  check: '#8fd0c4',
   held: '#f0b49b',
   pass: '#c4d99b',
   ink: '#f5f7ed',
@@ -112,5 +114,77 @@ export function runCells(done: boolean, t: number, phase: number): string {
     if (done) return [REVIEW, 1]
     const d = head - x
     return [REVIEW, d === 0 ? 1 : d === 1 ? 0.6 : d === 2 ? 0.3 : 0.14]
+  })
+}
+
+const GUARD = hex(COLORS.guard)
+const CHECK = hex(COLORS.check)
+const HELD = hex(COLORS.held)
+const PASS = hex(COLORS.pass)
+
+/** Rows a block row's mark takes: three lines of text, six pixels. */
+export const BLOCK_ROWS = 3
+
+// The guard mark: a solid shield with a cross cut in. '#' is the shield, 'c' the cut.
+const SHIELD = ['#######', '###c###', '#ccccc#', '###c###', '.##c##.', '..###..'] as const
+
+export const SHIELD_COLUMNS = 7
+
+/** Frames in one pass of the shine; a block shows salmon for the first BLOCK_FRAMES of it. */
+export const SHINE_FRAMES = 36
+const BLOCK_FRAMES = 9
+
+const filled = (map: readonly string[], x: number, y: number) => (map[y]?.[x] ?? '.') !== '.'
+
+/** A shield pixel with an empty neighbour or the map's edge beside it. */
+const isEdge = (x: number, y: number) =>
+  !filled(SHIELD, x - 1, y) || !filled(SHIELD, x + 1, y) || !filled(SHIELD, x, y - 1) || !filled(SHIELD, x, y + 1)
+
+/**
+ * The shield. With `t` a shine crosses it on the diagonal, and at a block the edge
+ * and the cross are salmon for the first frames of the pass; without, it is still.
+ */
+export function shieldCells(t?: number): string {
+  const k = t === undefined ? -1 : t % SHINE_FRAMES
+  const blocking = k >= 0 && k < BLOCK_FRAMES
+  return cellsOf(SHIELD_COLUMNS, BLOCK_ROWS, (x, y) => {
+    const ch = SHIELD[y]?.[x]
+    if (!ch || ch === '.') return null
+    if (k >= 0 && x + y === k) return [LIGHT, 0.9]
+    if (ch === 'c') return blocking ? [HELD, 1] : [GUARD, 0.3]
+    return blocking && isEdge(x, y) ? [HELD, 1] : [GUARD, 1]
+  })
+}
+
+// The check mark: a box holding a cross on a failure ('x') or a tick on recovery ('v').
+const BOX_CROSS = ['########', '#xx..xx#', '#..xx..#', '#..xx..#', '#xx..xx#', '########'] as const
+const BOX_TICK = ['########', '#....vv#', '#...vv.#', '#v.vv..#', '#.vv...#', '########'] as const
+
+export const BOX_COLUMNS = 8
+
+/** Frames between two blinks of the cross. */
+const BLINK_FRAMES = 5
+
+/** The box with a cross. With `t` the cross blinks; without, it shows. */
+export function crossCells(t?: number): string {
+  const shown = t === undefined || Math.floor(t / BLINK_FRAMES) % 2 === 0
+  return cellsOf(BOX_COLUMNS, BLOCK_ROWS, (x, y) => {
+    const ch = BOX_CROSS[y]?.[x]
+    if (ch === '#') return [CHECK, 1]
+    if (ch === 'x') return shown ? [HELD, 1] : [HELD, 0.25]
+    return null
+  })
+}
+
+/** Frames the tick takes to draw: one column a frame. */
+export const TICK_FRAMES = BOX_COLUMNS
+
+/** The box with a tick. With `t` the tick is drawn left to right up to that frame; without, it is whole. */
+export function tickCells(t?: number): string {
+  return cellsOf(BOX_COLUMNS, BLOCK_ROWS, (x, y) => {
+    const ch = BOX_TICK[y]?.[x]
+    if (ch === '#') return [CHECK, 1]
+    if (ch === 'v') return t === undefined || x <= t ? [PASS, 1] : null
+    return null
   })
 }
