@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
@@ -138,22 +139,31 @@ var wakeCheckCmd = &cobra.Command{
 
 // guardCanSleep refuses while a registered master that runs hook, globally or in
 // a repository --repo names (default: the working directory's), cannot honor a sleep.
+// A --repo directory that no longer exists is skipped; when every one is, the
+// working directory's repository is checked.
 func guardCanSleep(hook string) error {
-	if len(sleepGuardRepos) == 0 {
+	wd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	var dirs []string
+	for _, dir := range sleepGuardRepos {
+		if !filepath.IsAbs(dir) {
+			dir = filepath.Join(wd, dir)
+		}
+		if _, err := os.Stat(dir); errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		dirs = append(dirs, dir)
+	}
+	if len(dirs) == 0 {
 		if refusal := status.SleepRefusal(hook, sleep.Version); refusal != "" {
 			return errors.New(refusal)
 		}
 		return nil
 	}
-	wd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
 	defer func() { _ = os.Chdir(wd) }()
-	for _, dir := range sleepGuardRepos {
-		if !filepath.IsAbs(dir) {
-			dir = filepath.Join(wd, dir)
-		}
+	for _, dir := range dirs {
 		if err := os.Chdir(dir); err != nil {
 			return fmt.Errorf("--repo %s: %w", dir, err)
 		}

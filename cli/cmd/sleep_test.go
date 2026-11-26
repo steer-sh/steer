@@ -66,7 +66,9 @@ func runSleep(args ...string) (string, error) {
 // registered master that runs the guard in a repository --repo names lacks the
 // runtime's sleep version; a global master without it that runs other guards, and
 // a repository whose master has it, do not refuse. A relative --repo resolves from
-// the working directory the command started in.
+// the working directory the command started in, and a --repo directory that no
+// longer exists is skipped; when every one is, the working directory's masters
+// are checked.
 func TestSleepGuardRefusesWhileItsMasterCannotSleep(t *testing.T) {
 	testhome.Set(t, t.TempDir())
 	stale := withCmdProjectTempDir(t)
@@ -90,8 +92,12 @@ func TestSleepGuardRefusesWhileItsMasterCannotSleep(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := runSleep("sleep", "guard", "g", "--session", "s", "--repo", current, "--repo", filepath.Base(current)); err != nil {
-		t.Fatalf("a current project master, beside a global one that does not run g, refused its sleep: %v", err)
+	deleted := filepath.Join(t.TempDir(), "removed-worktree")
+	if _, err := runSleep("sleep", "guard", "g", "--session", "s", "--repo", deleted, "--repo", current, "--repo", filepath.Base(current)); err != nil {
+		t.Fatalf("a current project master, beside a global one that does not run g and a deleted --repo, refused its sleep: %v", err)
+	}
+	if _, live := sleep.Find("s", sleep.KindGuard, "g", time.Now()); !live {
+		t.Error("an allowed sleep wrote no live record")
 	}
 	if _, err := runSleep("wake", "guard", "g", "--session", "s"); err != nil {
 		t.Fatal(err)
@@ -103,6 +109,12 @@ func TestSleepGuardRefusesWhileItsMasterCannotSleep(t *testing.T) {
 	}
 	if _, live := sleep.Find("s", sleep.KindGuard, "g", time.Now()); live {
 		t.Error("a refused sleep wrote a live record")
+	}
+	if err := os.Chdir(stale); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runSleep("sleep", "guard", "g", "--session", "s", "--repo", deleted); err == nil {
+		t.Error("steer sleep with every --repo deleted skipped the working directory's master that cannot sleep g")
 	}
 }
 
