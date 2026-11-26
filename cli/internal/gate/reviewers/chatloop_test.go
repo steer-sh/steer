@@ -131,21 +131,28 @@ func TestToolLoopReadsTheViewAndAnswers(t *testing.T) {
 	}
 }
 
-// TestToolLoopStopsAtTheTurnCap: a model that only calls tools gets maxToolTurns
-// turns with tools, then one request without them, and the run is tool_budget.
+// TestToolLoopStopsAtTheTurnCap: a model that only calls tools gets the turn cap's
+// turns with tools, then one request without them, and the run is tool_budget. An
+// unset ToolTurns is maxToolTurns.
 func TestToolLoopStopsAtTheTurnCap(t *testing.T) {
-	srv, s := scriptedServer(t, ok(callsReply("a.go")))
-	raw := loopReviewer(srv.URL, "required").ReviewView(context.Background(), "p", "", loopView(t))
-	if raw.Outcome != gate.OutcomeToolBudget || raw.Response != "" {
-		t.Fatalf("run = %+v", raw)
-	}
-	if len(s.requests) != maxToolTurns+1 {
-		t.Fatalf("%d requests, want %d", len(s.requests), maxToolTurns+1)
-	}
-	last := s.requests[maxToolTurns]
-	msgs := messagesOf(last)
-	if last["tools"] != nil || msgs[len(msgs)-1]["content"] != budgetSpentPrompt {
-		t.Errorf("the last request offers tools or does not ask for the review")
+	for _, tc := range []struct {
+		set, want int
+	}{{0, maxToolTurns}, {maxToolTurns + 3, maxToolTurns + 3}} {
+		srv, s := scriptedServer(t, ok(callsReply("a.go")))
+		r := loopReviewer(srv.URL, "required")
+		r.ToolTurns = tc.set
+		raw := r.ReviewView(context.Background(), "p", "", loopView(t))
+		if raw.Outcome != gate.OutcomeToolBudget || raw.Response != "" {
+			t.Fatalf("ToolTurns %d: run = %+v", tc.set, raw)
+		}
+		if len(s.requests) != tc.want+1 {
+			t.Fatalf("ToolTurns %d: %d requests, want %d", tc.set, len(s.requests), tc.want+1)
+		}
+		last := s.requests[tc.want]
+		msgs := messagesOf(last)
+		if last["tools"] != nil || msgs[len(msgs)-1]["content"] != budgetSpentPrompt {
+			t.Errorf("ToolTurns %d: the last request offers tools or does not ask for the review", tc.set)
+		}
 	}
 }
 
@@ -190,6 +197,13 @@ func TestToolLoopEndsATurnOverTheCallCap(t *testing.T) {
 	raw := loopReviewer(srv.URL, "auto").ReviewView(context.Background(), "p", "", loopView(t))
 	if raw.Outcome != gate.OutcomeToolBudget || raw.Tools.Calls != 0 || len(s.requests) != 1 {
 		t.Errorf("run = %+v, tools %+v, %d requests", raw, raw.Tools, len(s.requests))
+	}
+	// A raised ToolCalls runs the same turn.
+	srv, _ = scriptedServer(t, ok(callsReply(paths...)), ok(reply("stop", "NO FINDINGS")))
+	r := loopReviewer(srv.URL, "auto")
+	r.ToolCalls = maxToolCalls + 1
+	if raw := r.ReviewView(context.Background(), "p", "", loopView(t)); raw.Tools.Calls != maxToolCalls+1 {
+		t.Errorf("ToolCalls %d: run = %+v, tools %+v", r.ToolCalls, raw, raw.Tools)
 	}
 }
 

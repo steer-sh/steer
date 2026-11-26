@@ -38,6 +38,10 @@ type Config struct {
 	ReviewerAPIKeyEnv  string
 	// ReviewerAPITools is the tool mode: off, auto or required; "" is off.
 	ReviewerAPITools string
+	// ReviewerToolCalls and ReviewerToolTurns cap an API reviewer's tool loop; zero
+	// is the reviewer's default.
+	ReviewerToolCalls int
+	ReviewerToolTurns int
 	// ReviewerEndpoint is the host an API reviewer sends to, which the instrument
 	// records. It is the reviewer's own answer, "" for a CLI reviewer.
 	ReviewerEndpoint string
