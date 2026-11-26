@@ -139,6 +139,34 @@ func TestStopEndsTheTurnUncheckedWhileTheUserSleepsCheckSh(t *testing.T) {
 	}
 }
 
+// A slept Stop after a block records the checks still declared, so the block's
+// follow-up does not read its failed check as removed before the next Stop.
+func TestASleptStopKeepsTheBlockedCheckDeclared(t *testing.T) {
+	identity, req := stopRepo(t, map[string]string{"a": "exit 1\n"}, "")
+	if d := Stop(req); d.Disposition != DispositionBlock {
+		t.Fatalf("first stop: %s; want a block", d.Disposition)
+	}
+	if _, err := sleep.Put(req.Session, sleep.KindCheck, identity, 5*time.Minute, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if d := Stop(req); d.Disposition != DispositionSlept {
+		t.Fatalf("stop while asleep: %s; want slept", d.Disposition)
+	}
+	got, err := BlockFollowups(identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].NextStop == nil || got[0].NextStop.Disposition != DispositionSlept || len(got[0].Checks) != 1 {
+		t.Fatalf("followups %+v; want one block whose next Stop is the slept run", got)
+	}
+	if c := got[0].Checks[0]; c.Undeclared {
+		t.Errorf("followup %+v; want the check still declared at the slept Stop", c)
+	}
+	if got[0].SessionTree != FollowUnknown {
+		t.Errorf("session tree %s; want unknown, the slept Stop read no tree", got[0].SessionTree)
+	}
+}
+
 // Retry state belongs to one session of one harness: a failure another
 // session or harness was blocked on still blocks.
 func TestStopRetryStateIsPerSessionAndHarness(t *testing.T) {

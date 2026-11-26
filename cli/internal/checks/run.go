@@ -158,10 +158,8 @@ func RunOracle(root string, opts RunOptions) (OracleRun, []Execution, error) {
 	} else if err != nil {
 		return OracleRun{}, nil, err
 	}
-	var declared []Declaration
-	if m, err := Load(root); err == nil {
-		declared = m.Checks
-	} else if !errors.Is(err, ErrNoManifest) {
+	declared, err := declarations(root)
+	if err != nil {
 		return OracleRun{}, nil, err
 	}
 	bash, err := exec.LookPath("bash")
@@ -190,9 +188,7 @@ func RunOracle(root string, opts RunOptions) (OracleRun, []Execution, error) {
 	if run.Source == "" {
 		run.Source = SourceRun
 	}
-	for _, d := range declared {
-		run.Declared = append(run.Declared, d.ID)
-	}
+	run.Declared = declaredIDs(declared)
 	dir, err := evidenceRoot(opts.EvidenceDir)
 	if err != nil {
 		return run, nil, err
@@ -301,14 +297,39 @@ func RunOracle(root string, opts RunOptions) (OracleRun, []Execution, error) {
 	return run, records, nil
 }
 
+// declarations returns the checks the repository's manifest declares; a
+// repository with no manifest declares none.
+func declarations(root string) ([]Declaration, error) {
+	m, err := Load(root)
+	if errors.Is(err, ErrNoManifest) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return m.Checks, nil
+}
+
+func declaredIDs(declared []Declaration) []string {
+	var ids []string
+	for _, d := range declared {
+		ids = append(ids, d.ID)
+	}
+	return ids
+}
+
 // recordUnrun records a Stop run that ran no check.sh, with the disposition and
-// reason that kept it from running.
+// reason that kept it from running and the checks declared when it stopped.
 func recordUnrun(identity string, req StopRequest, disposition, reason string) (OracleRun, error) {
+	declared, err := declarations(identity)
+	if err != nil {
+		return OracleRun{}, err
+	}
 	now := time.Now().UTC()
 	run := OracleRun{
 		Version: OracleRunVersion, RunID: newRunID(), Repo: identity, Source: SourceStop,
 		Harness: req.Harness, Session: req.Session, Started: now, Finished: now, Deadline: now,
-		Outcome: OutcomeNotExecuted, Reason: reason, Disposition: disposition,
+		Declared: declaredIDs(declared), Outcome: OutcomeNotExecuted, Reason: reason, Disposition: disposition,
 		Locators: req.Locators, StopHookActive: req.StopHookActive, SteerVersion: version.Version,
 	}
 	dir, err := evidenceRoot("")
