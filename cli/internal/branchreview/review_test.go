@@ -100,9 +100,13 @@ func TestRunReviewsTheWholeBranchAndRecordsIt(t *testing.T) {
 	repo := branchRepo(t)
 	reviewer := &stub{replies: []string{oneFinding, "NO FINDINGS", oneFinding}}
 	req := request(t, repo)
+	req.Warnings = []string{"reviewer.api.tools is off"}
 	res, err := Run(context.Background(), config(3), reviewer, req)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(res.Warnings) != 1 || res.Warnings[0] != req.Warnings[0] {
+		t.Errorf("warnings = %q; want the request's warning", res.Warnings)
 	}
 	// Run numbers follow the composed output, which shows no clean reply.
 	if !strings.Contains(res.Review, "--- reviewer 2 ---") || strings.Contains(res.Review, "--- reviewer 3 ---") {
@@ -127,6 +131,9 @@ func TestRunReviewsTheWholeBranchAndRecordsIt(t *testing.T) {
 	var row map[string]any
 	if err := json.Unmarshal(raw, &row); err != nil {
 		t.Fatal(err)
+	}
+	if errs, _ := row["review_errors"].([]any); len(errs) != 1 || errs[0] != req.Warnings[0] {
+		t.Errorf("review_errors = %v; want the request's warning", row["review_errors"])
 	}
 	if fields, _ := row["instrument_fields"].(map[string]any); fields["engine"] != gate.BranchInstrumentSuffix {
 		t.Errorf("instrument_fields = %v", row["instrument_fields"])
@@ -226,18 +233,25 @@ func TestASkippedReviewReportsAManifestThatDidNotLoad(t *testing.T) {
 }
 
 // TestRunSkipsABranchWithNothingToReview checks that HEAD at its base records a skip
-// row and runs no reviewer.
+// row, with the request's warnings, and runs no reviewer.
 func TestRunSkipsABranchWithNothingToReview(t *testing.T) {
 	repo := branchRepo(t)
 	git(t, repo, "switch", "-q", "main")
 	reviewer := &stub{}
 	req := request(t, repo)
+	req.Warnings = []string{"settings file did not load"}
 	res, err := Run(context.Background(), config(1), reviewer, req)
 	if err != nil || res.Phase != PhaseSkipEmpty || len(reviewer.prompts) != 0 {
 		t.Fatalf("result = %+v, %v, %d prompts", res, err, len(reviewer.prompts))
 	}
+	if len(res.Warnings) != 1 || res.Warnings[0] != req.Warnings[0] {
+		t.Errorf("warnings = %q; want the request's warning", res.Warnings)
+	}
 	if review, err := FindReview(req.Dir, req.Host, res.ReviewID); err != nil || review.Phase != PhaseSkipEmpty {
 		t.Errorf("the skip row = %+v, %v", review, err)
+	}
+	if raw, _ := os.ReadFile(ReviewsFile(req.Dir, req.Host)); !strings.Contains(string(raw), "settings file did not load") {
+		t.Errorf("the skip row does not record the request's warning: %s", raw)
 	}
 }
 

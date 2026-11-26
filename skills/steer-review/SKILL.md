@@ -58,8 +58,10 @@ edits, a reviewer that cannot run, or no reviewer answered (the JSON then still
 prints, with a `trouble` field and any `warnings`). Report the error and each
 warning, and stop.
 
-Otherwise read the JSON, in this order. `warnings` lists a reviewed-rule manifest
-that did not load or a diff that was not saved; whichever case below ends the
+Otherwise read the JSON, in this order. `warnings` lists a settings file that did
+not load, an API reviewer with `reviewer.api.tools` off (it read only the diff), an
+effort the provider does not document, a reviewed-rule manifest that did not load
+or a diff that was not saved; whichever case below ends the
 skill, report each warning with it, so a skip or a clean result is not read as
 complete.
 

@@ -93,6 +93,9 @@ type Request struct {
 	// Dir is the store directory; Host names the shard.
 	Dir  string
 	Host string
+	// Warnings are the caller's failures before the run, such as a settings file
+	// that did not load; the row and Result record them first.
+	Warnings []string
 }
 
 // Result is what one branch review produced.
@@ -118,8 +121,8 @@ type Result struct {
 	Trouble string
 	// StoreError is a failure to record the review, which the review still survives.
 	StoreError error
-	// Warnings are the failures the row records beside the review: a reviewed-rule
-	// manifest that did not load, or a diff that was not saved.
+	// Warnings are the failures the row records beside the review: the request's
+	// own, a reviewed-rule manifest that did not load, or a diff that was not saved.
 	Warnings []string
 }
 
@@ -177,9 +180,10 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, req Reque
 	}
 	// Recorded before the skips: a rule that did not load may be the rule that
 	// would have reviewed a prose-only branch.
-	if len(addendum.Errors) > 0 {
-		row["review_errors"] = addendum.Errors
-		res.Warnings = addendum.Errors
+	errs := append(append([]string{}, req.Warnings...), addendum.Errors...)
+	if len(errs) > 0 {
+		row["review_errors"] = errs
+		res.Warnings = errs
 	}
 
 	switch {
@@ -231,7 +235,6 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, req Reque
 	if len(applied) > 0 {
 		row["reviewed_rules_applied"] = applied
 	}
-	errs := append([]string{}, addendum.Errors...)
 	if saved, err := saveDiff(req.Dir, diff.Text); err != nil {
 		errs = append(errs, "save_diff: "+err.Error())
 	} else {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -73,24 +74,44 @@ own findings from 1.`,
 		if err != nil {
 			return err
 		}
+		// Pre-run warnings ride the result, so --json and the row carry them; a
+		// run that stops before a result prints them here.
+		var warnings []string
+		warn := func(w string) {
+			if !slices.Contains(warnings, w) {
+				warnings = append(warnings, w)
+			}
+		}
+		printWarnings := func() {
+			for _, w := range warnings {
+				fmt.Fprintln(os.Stderr, "steer:", w)
+			}
+		}
 		cfg, fileErr := settings.LoadBranch(reviewFlags)
 		if fileErr != nil {
-			fmt.Fprintln(os.Stderr, "steer:", fileErr, "— using the shipped defaults")
+			warn(fileErr.Error() + " — using the shipped defaults")
 		}
-		if err := branchProviderUsable(cfg); err != nil {
+		toolsWarning, err := branchProviderUsable(cfg)
+		if err != nil {
+			printWarnings()
 			return err
 		}
-		cfg, reviewer, err := settings.Resolve(cfg, warnOnce)
+		if toolsWarning != "" {
+			warn(toolsWarning)
+		}
+		cfg, reviewer, err := settings.Resolve(cfg, warn)
 		if err != nil {
+			printWarnings()
 			return err
 		}
 		fmt.Fprintf(os.Stderr, "Reviewing the branch with %s: %d run(s), each up to %s.\n",
 			cfg.ReviewerLabel(), cfg.ReviewerRuns, cfg.ReviewTimeout)
 		res, err := branchreview.Run(context.Background(), cfg, reviewer, branchreview.Request{
 			Repo: repo, BaseRef: reviewBase, AllowDirty: reviewAllowDirty,
-			Dir: branchreview.Dir(), Host: cfg.HostID,
+			Dir: branchreview.Dir(), Host: cfg.HostID, Warnings: warnings,
 		})
 		if err != nil {
+			printWarnings()
 			return err
 		}
 		if reviewJSON {
@@ -223,23 +244,23 @@ func reviewRepo() (string, error) {
 	return gate.Canonical(strings.TrimSpace(out)), nil
 }
 
-// branchProviderUsable refuses a provider that cannot review a branch, and warns
-// about an API reviewer that cannot read past the diff.
-func branchProviderUsable(cfg gate.Config) error {
+// branchProviderUsable refuses a provider that cannot review a branch, and returns a
+// warning for an API reviewer that cannot read past the diff.
+func branchProviderUsable(cfg gate.Config) (string, error) {
 	p, ok := reviewers.FindProvider(cfg.ReviewerProvider)
 	if !ok {
-		return nil
+		return "", nil
 	}
 	if p.ID == "agy" {
-		return errors.New("the agy reviewer cannot review a branch: it takes the prompt on its command line, " +
+		return "", errors.New("the agy reviewer cannot review a branch: it takes the prompt on its command line, " +
 			"which a branch diff overruns, and it cannot search the repository; set branch_reviewer.provider " +
 			"to codex, claude-code, pi or " + reviewers.APIProviderID)
 	}
 	if p.API && (cfg.ReviewerAPITools == "" || cfg.ReviewerAPITools == "off") {
-		fmt.Fprintln(os.Stderr, "steer: reviewer.api.tools is off, so the branch reviewer reads only the diff "+
-			"and no unchanged file; steer config set reviewer.api.tools auto lets it read them")
+		return "reviewer.api.tools is off, so the branch reviewer reads only the diff " +
+			"and no unchanged file; steer config set reviewer.api.tools auto lets it read them", nil
 	}
-	return nil
+	return "", nil
 }
 
 func renderBranchReview(out io.Writer, res branchreview.Result, cfg gate.Config) {
