@@ -191,6 +191,8 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, req Reque
 		res.Phase = PhaseSkipEmpty
 	case gate.IsProseOnly(diff.Paths) && len(addendum.RulesFor(diff.RulePaths)) == 0:
 		res.Phase = PhaseSkipProse
+	case diff.BinaryOnly && len(addendum.RulesFor(diff.RulePaths)) == 0:
+		res.Phase = PhaseSkipBinary
 	}
 	if res.Phase != "" {
 		row["phase"] = res.Phase

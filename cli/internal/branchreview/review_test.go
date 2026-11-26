@@ -250,7 +250,9 @@ func TestASkippedReviewReportsAManifestThatDidNotLoad(t *testing.T) {
 }
 
 // TestRunSkipsABranchWithNothingToReview checks that HEAD at its base records a skip
-// row, with the request's warnings, and runs no reviewer.
+// row, with the request's warnings, and runs no reviewer; that a branch changing only
+// an existing binary file is skipped too, unless git may run an external diff or a
+// reviewed rule covers the file.
 func TestRunSkipsABranchWithNothingToReview(t *testing.T) {
 	repo := branchRepo(t)
 	git(t, repo, "switch", "-q", "main")
@@ -272,6 +274,39 @@ func TestRunSkipsABranchWithNothingToReview(t *testing.T) {
 	}
 	if raw, _ := os.ReadFile(ReviewsFile(req.Dir, req.Host)); !strings.Contains(string(raw), "settings file did not load") {
 		t.Errorf("the skip row does not record the request's warning: %s", raw)
+	}
+
+	t.Setenv("GIT_EXTERNAL_DIFF", "")
+	os.Unsetenv("GIT_EXTERNAL_DIFF")
+	write(t, repo, "logo.png", "\x89PNG\x00\x01")
+	git(t, repo, "add", "-A")
+	git(t, repo, verb, "-q", "-m", "add logo")
+	git(t, repo, "switch", "-q", "-c", "pics")
+	write(t, repo, "logo.png", "\x89PNG\x00\x02")
+	git(t, repo, verb, "-q", "-am", "redraw logo")
+	if res, err := Run(context.Background(), config(1), reviewer, req); err != nil || res.Phase != PhaseSkipBinary ||
+		len(reviewer.prompts) != 0 {
+		t.Errorf("binary-only branch: result = %+v, %v, %d prompts", res, err, len(reviewer.prompts))
+	}
+	git(t, repo, "config", "diff.external", "true")
+	if res, err := Run(context.Background(), config(1), reviewer, req); err != nil || res.Phase == PhaseSkipBinary {
+		t.Errorf("binary-only branch under an external diff: result = %+v, %v; want it reviewed", res, err)
+	}
+	git(t, repo, "config", "--unset", "diff.external")
+	git(t, repo, "switch", "-q", "main")
+	if err := os.MkdirAll(filepath.Join(repo, ".steer", "hooks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, repo, ".steer/hooks/steer-manifest.json",
+		`{"hooks":{},"rules":{"png":{"text":"keep logos small","review":{"paths":["*.png"]}}}}`)
+	git(t, repo, "add", "-A")
+	git(t, repo, verb, "-q", "-m", "png rule")
+	git(t, repo, "switch", "-q", "-c", "ruled-pics")
+	write(t, repo, "logo.png", "\x89PNG\x00\x03")
+	git(t, repo, verb, "-q", "-am", "redraw logo again")
+	if res, err := Run(context.Background(), config(1), reviewer, req); err != nil || res.Phase == PhaseSkipBinary ||
+		len(res.Warnings) != 1 {
+		t.Errorf("binary-only branch under a reviewed rule: result = %+v, %v; want it reviewed", res, err)
 	}
 }
 

@@ -73,6 +73,9 @@ type BranchDiff struct {
 	Paths []string
 	// RulePaths are the same paths with renames split, which reviewed rules match.
 	RulePaths []string
+	// BinaryOnly reports that Raw holds only content changes to existing binary
+	// files, as IsBinaryOnly reads them, and git runs no external diff program.
+	BinaryOnly bool
 }
 
 // GetBranchDiff assembles the diff of base..head, both commit IDs, for a reviewer
@@ -96,7 +99,8 @@ func GetBranchDiff(cfg Config, repo, base, head string) (BranchDiff, bool) {
 		return BranchDiff{}, false
 	}
 	return BranchDiff{Text: renderDiff(cfg, plan, diff, names, nil), Raw: diff,
-		Paths: paths, RulePaths: rulePaths}, true
+		Paths: paths, RulePaths: rulePaths,
+		BinaryOnly: IsBinaryOnly(diff, paths) && !externalDiffConfigured(repo)}, true
 }
 
 func branchPaths(repo, base, head string, extra ...string) ([]string, bool) {

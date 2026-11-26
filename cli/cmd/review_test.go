@@ -48,6 +48,7 @@ func TestReviewListLineSaysWhatEachReviewAwaits(t *testing.T) {
 		{"unparsed", branchreview.Listed{Review: branchreview.Review{Phase: branchreview.PhaseFindings, Slots: 3, Unparsed: 1}},
 			"3 finding(s), 1 reply(ies) unparsed", "cannot be ruled one by one"},
 		{"skip", branchreview.Listed{Review: branchreview.Review{Phase: branchreview.PhaseSkipEmpty}}, "0 finding(s)", "nothing to rule"},
+		{"skip binary", branchreview.Listed{Review: branchreview.Review{Phase: branchreview.PhaseSkipBinary}}, "skip-binary 0 finding(s)", "nothing to rule"},
 		{"ruled", branchreview.Listed{Review: findings, Rulable: true, Ruled: true}, "2 finding(s)", "  ruled"},
 		{"advanced", branchreview.Listed{Review: findings, Rulable: true, Ruled: true, HeadAdvanced: true},
 			"2 finding(s)", "ruled, HEAD moved after review"},
@@ -75,6 +76,7 @@ func TestRenderBranchReviewSaysWhatEachPhaseLeaves(t *testing.T) {
 	}{
 		{"skip empty", branchreview.Result{Phase: branchreview.PhaseSkipEmpty}, "Nothing to review", "Reviewer"},
 		{"skip prose", branchreview.Result{Phase: branchreview.PhaseSkipProse}, "prose files only", "Reviewer"},
+		{"skip binary", branchreview.Result{Phase: branchreview.PhaseSkipBinary}, "existing binary files", "Reviewer"},
 		{"finding", branchreview.Result{Phase: branchreview.PhaseFindings, Answered: 1, Runs: answered,
 			Review: "x", Findings: []branchreview.Finding{finding}}, "FAILS WHEN: always.\n\n", "RULE:"},
 		{"rule finding", branchreview.Result{Phase: branchreview.PhaseFindings, Answered: 1, Runs: answered,

@@ -36,12 +36,13 @@ func RulingsFile(dir, host string) string {
 
 // The phases a review row records.
 const (
-	PhaseClean     = "clean"
-	PhaseFindings  = "findings"
-	PhaseNitpick   = "nitpick"
-	PhaseUngated   = "ungated"
-	PhaseSkipEmpty = "skip-empty"
-	PhaseSkipProse = "skip-prose"
+	PhaseClean      = "clean"
+	PhaseFindings   = "findings"
+	PhaseNitpick    = "nitpick"
+	PhaseUngated    = "ungated"
+	PhaseSkipEmpty  = "skip-empty"
+	PhaseSkipProse  = "skip-prose"
+	PhaseSkipBinary = "skip-binary"
 )
 
 // Finding is one parsed finding of a review, numbered across the whole panel.

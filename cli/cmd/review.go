@@ -242,7 +242,7 @@ func reviewListLine(r branchreview.Listed) string {
 	case !r.Rulable:
 		status = "nothing to rule"
 	}
-	return fmt.Sprintf("%s  %s  %s..%s  %-9s %s  %s", r.ReviewID,
+	return fmt.Sprintf("%s  %s  %s..%s  %-11s %s  %s", r.ReviewID,
 		time.Unix(r.TS, 0).Format("2006-01-02 15:04"), shortSHA(r.BaseSHA), shortSHA(r.HeadSHA),
 		r.Phase, count, status)
 }
@@ -286,6 +286,9 @@ func renderBranchReview(out io.Writer, res branchreview.Result, cfg gate.Config)
 		return
 	case branchreview.PhaseSkipProse:
 		fmt.Fprintln(out, "Not reviewed: the branch changes prose files only.")
+		return
+	case branchreview.PhaseSkipBinary:
+		fmt.Fprintln(out, "Not reviewed: the branch only changes the content of existing binary files.")
 		return
 	}
 	fmt.Fprintf(out, "Reviewer %s, %d of %d run(s) answered in %s.\n\n", cfg.ReviewerLabel(), res.Answered,

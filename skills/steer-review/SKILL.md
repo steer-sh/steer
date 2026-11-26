@@ -68,6 +68,8 @@ complete.
 1. `phase` `skip-empty`: the branch changes nothing reviewable. Say so and stop.
    `phase` `skip-prose`: the branch changes prose files only, which steer does not
    review. Say that the changes were not reviewed, and stop.
+   `phase` `skip-binary`: the branch only changes the content of existing binary
+   files, which a reviewer cannot read. Say that the changes were not reviewed, and stop.
 2. `answered` below `runs`: in Step 6, say how many reviewers answered.
 3. `store_error`, or `findings_unparsed` above zero: the rulings cannot be
    recorded, because the review was not stored or a reply's findings cannot be
