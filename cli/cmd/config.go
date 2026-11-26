@@ -124,6 +124,12 @@ changes the instrument the ledger stamps on every later review row.`,
 		if f.Identity {
 			previewReviewer(next)
 		}
+		// No resolver runs for a branch key, so the branch effort is checked here.
+		if f.Name == "branch_reviewer.provider" || f.Name == "branch_reviewer.effort" {
+			if warning := settings.BranchEffortWarning(next); warning != "" {
+				utils.Warning(warning)
+			}
+		}
 		if err := config.Save(next); err != nil {
 			return err
 		}

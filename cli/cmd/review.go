@@ -267,10 +267,8 @@ func branchProviderUsable(cfg gate.Config) (string, error) {
 	if !ok {
 		return "", nil
 	}
-	if p.ID == "agy" {
-		return "", errors.New("the agy reviewer cannot review a branch: it takes the prompt on its command line, " +
-			"which a branch diff overruns, and it cannot search the repository; set branch_reviewer.provider " +
-			"to codex, claude-code, pi or " + reviewers.APIProviderID)
+	if err := settings.BranchProviderRefusal(p.ID); err != nil {
+		return "", err
 	}
 	if p.API && (cfg.ReviewerAPITools == "" || cfg.ReviewerAPITools == "off") {
 		return "reviewer.api.tools is off, so the branch reviewer reads only the diff " +

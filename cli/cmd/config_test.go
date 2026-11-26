@@ -72,6 +72,7 @@ func TestConfigSetRefusesValuesTheGateCouldNotRun(t *testing.T) {
 	cases := []struct{ key, value string }{
 		{"reviewer.nonsense", "x"},
 		{"reviewer.provider", "gpt"},
+		{"branch_reviewer.provider", "agy"},
 		{"reviewer.runs", "many"},
 		{"reviewer.timeout", "-1"},
 	}
@@ -103,6 +104,19 @@ func captureStdout(t *testing.T, fn func()) string {
 		t.Fatalf("ReadAll: %v", err)
 	}
 	return string(out)
+}
+
+// A branch effort key runs no reviewer preview, so set prints the branch effort
+// warning itself.
+func TestConfigSetWarnsOfAnUndocumentedBranchEffort(t *testing.T) {
+	tempSettingsHome(t)
+	for _, key := range []string{"COMMIT_GATE_PROVIDER", "COMMIT_GATE_EFFORT", "BRANCH_REVIEW_PROVIDER", "BRANCH_REVIEW_EFFORT"} {
+		t.Setenv(key, "")
+	}
+	out := captureStdout(t, func() { setSetting(t, "branch_reviewer.effort", "extreme") })
+	if strings.Count(out, "branch reviewer effort") != 1 {
+		t.Errorf("set printed the branch effort warning other than once:\n%s", out)
+	}
 }
 
 // A timeout is not part of the reviewer's identity, so set names the harness wall

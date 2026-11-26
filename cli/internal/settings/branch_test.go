@@ -1,11 +1,13 @@
 package settings_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/steer-sh/steer-cli/internal/config"
 	"github.com/steer-sh/steer-cli/internal/gate"
+	"github.com/steer-sh/steer-cli/internal/gate/reviewers"
 	"github.com/steer-sh/steer-cli/internal/settings"
 )
 
@@ -101,6 +103,63 @@ func TestBranchRunsSettingTakesOneToTheLimit(t *testing.T) {
 	p, _ := settings.Find("branch_reviewer.provider")
 	if err := p.Set(&c, "nonesuch"); err == nil {
 		t.Error("branch_reviewer.provider accepted an unknown provider")
+	}
+}
+
+// TestBranchProviderSettingRefusesAgy checks that branch_reviewer.provider refuses
+// agy with the reason a branch review gives, and that its choices and usage omit it.
+func TestBranchProviderSettingRefusesAgy(t *testing.T) {
+	f, err := settings.Find("branch_reviewer.provider")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c config.Config
+	if err := f.Set(&c, " AGY "); err == nil || err.Error() != settings.BranchProviderRefusal("agy").Error() {
+		t.Errorf("Set agy: %v; want the branch refusal", err)
+	}
+	if err := f.Set(&c, "codex"); err != nil || c.BranchReviewer.Provider != "codex" {
+		t.Errorf("Set codex: %v, stored %q", err, c.BranchReviewer.Provider)
+	}
+	for _, choice := range f.Choices() {
+		if choice.Value == "agy" {
+			t.Errorf("choices offer agy: %v", f.Choices())
+		}
+	}
+	if len(f.Choices()) != len(reviewers.Providers())-1 {
+		t.Errorf("choices %v; want every provider but agy", f.Choices())
+	}
+	if err := f.Set(&c, "nonesuch"); err == nil || strings.Contains(err.Error(), "agy") {
+		t.Errorf("Set nonesuch: %v; want a refusal that does not offer agy", err)
+	}
+	if strings.Contains(f.Usage, "agy") || !strings.Contains(f.Usage, "codex") {
+		t.Errorf("usage %q; want codex and no agy", f.Usage)
+	}
+}
+
+// TestBranchEffortWarningReadsTheBranchReviewerInForce checks that the warning
+// judges the branch effort against the branch provider, not the commit reviewer's.
+func TestBranchEffortWarningReadsTheBranchReviewerInForce(t *testing.T) {
+	for _, key := range []string{"COMMIT_GATE_PROVIDER", "COMMIT_GATE_EFFORT", settings.BranchProviderEnv, settings.BranchEffortEnv} {
+		t.Setenv(key, "")
+	}
+	for _, tc := range []struct {
+		name  string
+		file  config.Config
+		warns bool
+	}{
+		{"default", config.Config{}, false},
+		{"undocumented", config.Config{BranchReviewer: config.BranchReviewer{Effort: "extreme"}}, true},
+		{"documented for the branch provider", config.Config{
+			Reviewer:       config.Reviewer{Provider: "claude-code"},
+			BranchReviewer: config.BranchReviewer{Provider: "pi", Effort: "minimal"}}, false},
+		{"undocumented for the branch provider", config.Config{
+			Reviewer:       config.Reviewer{Provider: "pi"},
+			BranchReviewer: config.BranchReviewer{Provider: "claude-code", Effort: "minimal"}}, true},
+	} {
+		got := settings.BranchEffortWarning(tc.file)
+		if (got != "") != tc.warns || (tc.warns && !strings.HasPrefix(got, "branch reviewer effort")) {
+			t.Errorf("%s: warning %q", tc.name, got)
+		}
 	}
 }
 

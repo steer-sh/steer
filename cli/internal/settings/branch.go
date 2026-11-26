@@ -178,6 +178,52 @@ func envDropsFile(file config.Config) bool {
 	return !sameProvider(env, inForce)
 }
 
+// BranchProviderRefusal is the reason provider cannot review a branch, or nil when
+// it can or no provider spells it. agy takes the prompt on its command line, which
+// a branch diff overruns, and cannot search the repository.
+func BranchProviderRefusal(provider string) error {
+	p, ok := reviewers.FindProvider(provider)
+	if !ok || branchCapable(p) {
+		return nil
+	}
+	return fmt.Errorf("the %s reviewer cannot review a branch: it takes the prompt on its command line, "+
+		"which a branch diff overruns, and it cannot search the repository; set branch_reviewer.provider "+
+		"to one of %s", p.ID, strings.Join(branchProviderNames(), ", "))
+}
+
+// branchCapable reports whether p can review a branch.
+func branchCapable(p reviewers.Provider) bool { return p.ID != "agy" }
+
+// branchProviderNames lists the IDs of the providers that can review a branch.
+func branchProviderNames() []string {
+	out := []string{}
+	for _, c := range branchProviderChoices() {
+		out = append(out, c.Value)
+	}
+	return out
+}
+
+// branchProviderChoices lists the providers branch_reviewer.provider offers.
+func branchProviderChoices() []Choice {
+	out := []Choice{}
+	for _, p := range reviewers.Providers() {
+		if branchCapable(p) {
+			out = append(out, Choice{Value: p.ID, Label: p.Label})
+		}
+	}
+	return out
+}
+
+// BranchEffortWarning is the effort warning for the branch reviewer that file and
+// the environment put in force, or "" when its effort is documented or unchecked.
+func BranchEffortWarning(file config.Config) string {
+	cfg := branchInForce(file)
+	if w := reviewers.EffortWarning(cfg.ReviewerProvider, cfg.ReviewerEffort); w != "" {
+		return "branch " + w
+	}
+	return ""
+}
+
 // BranchReviewerFields are the keys of the branch reviewer. The dashboard's
 // Reviewer panel does not list them.
 var BranchReviewerFields = []Field{
@@ -187,11 +233,14 @@ var BranchReviewerFields = []Field{
 		Help:         "The CLI or API Steer runs to review a whole branch before a pull request.",
 		Kind:         KindChoice,
 		DefaultLabel: "the commit reviewer",
-		Choices:      providerChoices,
-		Usage:        "Branch reviewer (" + strings.Join(reviewers.ProviderNames(), "|") + "); unset means reviewer.provider",
+		Choices:      branchProviderChoices,
+		Usage:        "Branch reviewer (" + strings.Join(branchProviderNames(), "|") + "); unset means reviewer.provider",
 		Get:          func(c config.Config) string { return c.BranchReviewer.Provider },
 		Set: func(c *config.Config, v string) error {
-			return setProvider(&c.BranchReviewer.Provider, v)
+			if err := BranchProviderRefusal(v); err != nil {
+				return err
+			}
+			return setProvider(&c.BranchReviewer.Provider, v, branchProviderNames())
 		},
 		FileEffective: func(c config.Config) string { return branchInForce(c).ReviewerProvider },
 		Inherits:      func(config.Config) string { return "reviewer.provider" },
