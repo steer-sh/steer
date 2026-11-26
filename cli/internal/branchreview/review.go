@@ -19,11 +19,14 @@ var defaultBases = []string{"origin/main", "main", "origin/master", "master"}
 // and HEAD. An empty ref tries origin's HEAD, then defaultBases.
 func ResolveBase(repo, ref string) (string, string, error) {
 	candidates := []string{ref}
+	// labels names a candidate by the ref a user would type, where that differs.
+	labels := map[string]string{}
 	if ref == "" {
 		candidates = nil
-		if out, ok := gate.Git(repo, gitWait, "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD"); ok {
+		if out, ok := gate.Git(repo, gitWait, "symbolic-ref", "-q", "refs/remotes/origin/HEAD"); ok {
 			if name := strings.TrimSpace(out); name != "" {
 				candidates = append(candidates, name)
+				labels[name] = strings.TrimPrefix(name, "refs/remotes/")
 			}
 		}
 		candidates = append(candidates, defaultBases...)
@@ -38,6 +41,9 @@ func ResolveBase(repo, ref string) (string, string, error) {
 		out, ok := gate.Git(repo, gitWait, "merge-base", c, "HEAD")
 		if !ok {
 			return "", "", fmt.Errorf("%s and HEAD share no history, so the branch has no base; name one with --base <ref>", c)
+		}
+		if label, ok := labels[c]; ok {
+			return label, strings.TrimSpace(out), nil
 		}
 		return c, strings.TrimSpace(out), nil
 	}

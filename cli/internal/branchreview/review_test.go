@@ -330,8 +330,12 @@ func TestResolveBaseNamesTheFlagWhenNoBaseResolves(t *testing.T) {
 	}
 	git(t, repo, "update-ref", "refs/remotes/origin/trunk", "trunk")
 	git(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
-	if ref, _, err := ResolveBase(repo, ""); err != nil || ref != "origin/trunk" {
-		t.Errorf("origin's HEAD = %q, %v; want origin/trunk", ref, err)
+	// A local branch spelled like the remote one is not the base.
+	git(t, repo, "branch", "-q", "origin/trunk", "HEAD")
+	git(t, repo, "config", "core.warnAmbiguousRefs", "false")
+	want := git(t, repo, "rev-parse", "trunk")
+	if ref, base, err := ResolveBase(repo, ""); err != nil || ref != "origin/trunk" || base != want {
+		t.Errorf("origin's HEAD = %q at %s, %v; want origin/trunk at %s", ref, base, err, want)
 	}
 }
 
