@@ -217,10 +217,12 @@ const moving = new Map<string, { row: BlockRow; start: number }>()
 const settled = new Set<string>()
 
 /** How long a row's mark moves, in frames. */
-const runFor = (row: BlockRow) => (row.kind === 'guard' ? SHINE_FRAMES : row.kind === 'check-failed' ? BLINK_FOR : TICK_FRAMES)
+const runFor = (row: BlockRow) =>
+  row.kind === 'guard' ? SHINE_FRAMES : row.kind === 'check-failed' ? BLINK_FOR : row.kind === 'check-unfixed' ? 0 : TICK_FRAMES
 
 function cellsFor(row: BlockRow, t?: number): string {
   if (row.kind === 'guard') return shieldCells(t)
+  if (row.kind === 'check-unfixed') return crossCells()
   return row.kind === 'check-failed' ? crossCells(t) : tickCells(t)
 }
 
@@ -286,6 +288,16 @@ function wordsOf(row: BlockRow): { label: string; hue: string; rail: string; whe
       result: { lead: 'check.sh passes now: ', hot: 'all checks passed', hotColor: COLORS.pass, tail: '.' },
       next: 'The turn ends.',
     }
+  if (row.kind === 'check-unfixed')
+    return {
+      label: 'CHECK',
+      hue: COLORS.check,
+      rail: COLORS.held,
+      when: 'when the turn ends',
+      name,
+      result: { lead: 'check.sh still does not pass: ', hot: 'the turn ends without a fix', hotColor: COLORS.held, tail: '.' },
+      next: 'Steer does not block twice for the same failure.',
+    }
   const { failed } = row
   const result: Result =
     failed.length > 0
@@ -306,7 +318,7 @@ function wordsOf(row: BlockRow): { label: string; hue: string; rail: string; whe
     when: 'when the turn ends',
     name,
     result,
-    next: `${names ? `${names}. ` : ''}Claude continues until check.sh passes.`,
+    next: `${names ? `${names}. ` : ''}Claude continues the turn to fix it.`,
   }
 }
 

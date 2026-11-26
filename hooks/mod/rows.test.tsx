@@ -138,6 +138,19 @@ test("a check row's run number counts the session's check.sh runs in its reposit
   expect(rows.map(r => (r.kind === 'guard' ? '' : `${r.place}:${r.n}`))).toEqual(['repo:1', 'other:1', 'repo:2'])
 })
 
+test('a block closes once per turn end: a yield, then a later pass, while a timeout or a sleep ends it with no row', () => {
+  const cases: [Partial<CheckRun>[], string[]][] = [
+    [[{}, { runId: 'r2', disposition: 'yield' }, { runId: 'r3', disposition: 'allow', outcome: 'passed' }], ['check-r1', 'check-unfixed-r2', 'check-pass-r3']],
+    [[{}, { runId: 'r2', disposition: 'timeout', outcome: 'timeout' }, { runId: 'r3', disposition: 'yield' }], ['check-r1']],
+    [[{}, { runId: 'r2', disposition: 'yield' }, { runId: 'r3', disposition: 'yield' }], ['check-r1', 'check-unfixed-r2']],
+    [[{}, { runId: 'r2', disposition: 'slept', outcome: 'not-executed' }, { runId: 'r3', disposition: 'yield' }], ['check-r1']],
+  ]
+  for (const [steps, ids] of cases) {
+    const runs = steps.map((over, i) => run({ finishedMs: i + 2, ...over }))
+    expect(rowsOf([], runs, [], SESSION).map(r => r.id)).toEqual(ids)
+  }
+})
+
 test('a passing run with no block before it gets no row', () => {
   expect(rowsOf([], [run({ disposition: 'allow', outcome: 'passed' })], [], SESSION)).toEqual([])
 })
@@ -227,7 +240,20 @@ test('a guard block after the mod starts gets a row with the rule and a shield; 
   await desktop.unmount()
 })
 
-test('a check Stop block names the failed check, and the next passing run closes it', async ($, on) => {
+const CLOSERS = [
+  { name: 'a passing run', disposition: 'allow', outcome: 'passed', id: 'check-pass-r2', rail: COLORS.pass, words: ['all checks passed', 'The turn ends.'] },
+  {
+    name: 'a yield on the same failure',
+    disposition: 'yield',
+    outcome: 'failed',
+    id: 'check-unfixed-r2',
+    rail: COLORS.held,
+    words: ['check.sh still does not pass: ', 'the turn ends without a fix', 'Steer does not block twice for the same failure.'],
+  },
+] as const
+
+for (const closer of CLOSERS)
+test(`a check Stop block names the failed check, and ${closer.name} closes it`, async ($, on) => {
   const files: Record<string, string> = { [RUNS]: '', [EXECUTIONS]: '' }
   const { clock, placed } = await world($, on, files)
   files[EXECUTIONS] += line({ run_id: 'r1', session: SESSION, check_id: 'go-test', outcome: 'failed' })
@@ -235,11 +261,11 @@ test('a check Stop block names the failed check, and the next passing run closes
   await clock.advance(1000)
   // A run read in the same poll as its executions names them, whichever file grew last.
   const first = await $.ui.mount(row('check-r1', 'terminal'))
-  expect(await texts(first)).toContain('go-test. Claude continues until check.sh passes.')
+  expect(await texts(first)).toContain('go-test. Claude continues the turn to fix it.')
   await first.unmount()
-  files[RUNS] += line(stopRun({ run_id: 'r2', finished: iso(NOW + 9_000), outcome: 'passed', disposition: 'allow' }))
+  files[RUNS] += line(stopRun({ run_id: 'r2', finished: iso(NOW + 9_000), outcome: closer.outcome, disposition: closer.disposition }))
   await clock.advance(1000)
-  expect(placed).toEqual(['check-r1', 'check-pass-r2'])
+  expect(placed).toEqual(['check-r1', closer.id])
 
   const failedRow = await $.ui.mount(row('check-r1', 'terminal'))
   expect(await rails(failedRow)).toEqual([COLORS.check, COLORS.check, COLORS.check])
@@ -249,12 +275,11 @@ test('a check Stop block names the failed check, and the next passing run closes
   expect(failed).toContain('run 1')
   expect(failed).toContain('1 check failed')
   expect(failed).toContain(' in check.sh.')
-  const passedRow = await $.ui.mount(row('check-pass-r2', 'terminal'))
-  expect(await rails(passedRow)).toEqual([COLORS.pass, COLORS.pass, COLORS.pass])
-  const passed = await texts(passedRow)
-  expect(passed).toContain('all checks passed')
-  expect(passed).toContain('The turn ends.')
-  expect(passed).toContain('run 2')
+  const closingRow = await $.ui.mount(row(closer.id, 'terminal'))
+  expect(await rails(closingRow)).toEqual([closer.rail, closer.rail, closer.rail])
+  const closing = await texts(closingRow)
+  for (const words of closer.words) expect(closing).toContain(words)
+  expect(closing).toContain('run 2')
 })
 
 test('a check block in a repository the session reached later gets a row, and so does an integration failure', async ($, on) => {

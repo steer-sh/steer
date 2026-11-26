@@ -39,6 +39,7 @@ export type BlockRow =
   | { kind: 'guard'; id: string; block: GuardBlock }
   | { kind: 'check-failed'; id: string; run: CheckRun; failed: string[]; allFailed: boolean; n: number; place: string }
   | { kind: 'check-passed'; id: string; run: CheckRun; n: number; place: string }
+  | { kind: 'check-unfixed'; id: string; run: CheckRun; n: number; place: string }
 
 const isString = (v: unknown): v is string => typeof v === 'string'
 
@@ -139,7 +140,9 @@ export const repoName = (repo: string) => repo.split(/[\\/]/).filter(Boolean).po
  * The rows a session's records call for, in the order they happened. A guard row per
  * block; a check row per Stop block, naming the declared checks that did not pass
  * (any outcome but a pass, as the runner reads it) and whether each of them failed; and
- * one pass row for the first passing run after a block in the same repository.
+ * after a block in the same repository, one unfixed row for a yield on the same
+ * failure, and one pass row for the next passing run, also after a yield. Another run
+ * that lets the turn end (a timeout, an error, a sleep) ends the block with no row.
  */
 export function rowsOf(
   guards: readonly GuardBlock[],
@@ -160,22 +163,33 @@ export function rowsOf(
     if (!names.includes(ex.checkId)) names.push(ex.checkId)
     failedIn.set(ex.runId, names)
   }
-  const blockedRepos = new Set<string>()
+  // Each repository's story since its last block: blocked, or ended with check.sh not passing.
+  const story = new Map<string, 'blocked' | 'ended'>()
   const mine = [...runs].filter(run => run.session === session).sort((a, b) => a.finishedMs - b.finishedMs)
   const several = new Set(mine.map(run => run.repo)).size > 1
   const counted = new Map<string, number>()
   for (const run of mine) {
-    if (!ranOracle(run)) continue
+    if (!ranOracle(run)) {
+      // A run that did not execute check.sh (a sleep, a concurrent run) still ends the turn.
+      if (story.get(run.repo) === 'blocked') story.set(run.repo, 'ended')
+      continue
+    }
     const n = (counted.get(run.repo) ?? 0) + 1
     counted.set(run.repo, n)
     const place = several ? repoName(run.repo) : ''
+    const state = story.get(run.repo)
     if (isStopBlock(run)) {
-      blockedRepos.add(run.repo)
+      story.set(run.repo, 'blocked')
       const failed = failedIn.get(run.runId) ?? []
       const allFailed = !notFailing.has(run.runId)
       rows.push({ at: run.finishedMs, row: { kind: 'check-failed', id: `check-${run.runId}`, run, failed, allFailed, n, place } })
-    } else if (isStopPass(run) && blockedRepos.delete(run.repo)) {
-      rows.push({ at: run.finishedMs, row: { kind: 'check-passed', id: `check-pass-${run.runId}`, run, n, place } })
+    } else if (isStopPass(run)) {
+      if (state) rows.push({ at: run.finishedMs, row: { kind: 'check-passed', id: `check-pass-${run.runId}`, run, n, place } })
+      story.delete(run.repo)
+    } else if (state === 'blocked') {
+      if (run.disposition === 'yield')
+        rows.push({ at: run.finishedMs, row: { kind: 'check-unfixed', id: `check-unfixed-${run.runId}`, run, n, place } })
+      story.set(run.repo, 'ended')
     }
   }
   return rows.sort((a, b) => a.at - b.at).map(r => r.row)

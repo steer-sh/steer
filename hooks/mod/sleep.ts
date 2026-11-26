@@ -93,6 +93,7 @@ export function fixViews(input: {
         recovered.push({ kind: 'recovered', type: 'check', key, repo: row.run.repo, atMs: row.run.finishedMs })
       continue
     }
+    if (row.kind === 'check-unfixed') continue
     if (input.closed.has(row.id)) continue
     if (row.kind === 'guard') {
       const { block } = row

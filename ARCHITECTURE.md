@@ -123,8 +123,8 @@ another is listed, and gives the held and running reviews it hides at most two s
 lines.
 
 The mod also places one transcript row (`$.ui.place`) for each guard block and check
-Stop block in the session, and one when check.sh passes again after a block
-(`hooks/mod/rows.tsx`). It writes no file for them: it reads the records Steer already
+Stop block in the session, and one when the turn first ends after a block: check.sh
+passes again, or the Stop runner yields on the same failure (`hooks/mod/rows.tsx`). It writes no file for them: it reads the records Steer already
 keeps, the guard stores' `steer-audit.jsonl` and the check state's `runs.jsonl` and
 `executions.jsonl` (`hooks/mod/blocks.ts`). It watches the session's repository, each
 repository a review, a guard row or a check run names, and each check-state directory
