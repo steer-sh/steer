@@ -11,8 +11,8 @@ import (
 
 // TestBranchConfigInheritsAndOverrides checks each layer of the branch reviewer's
 // precedence: commit reviewer, file, environment, flags, the branch's own effort
-// default for a CLI reviewer alone, and the drop of the model when the provider
-// changes.
+// default for a CLI reviewer alone, and the drop of the model and effort beneath
+// any layer that changes the provider.
 func TestBranchConfigInheritsAndOverrides(t *testing.T) {
 	base := gate.Defaults()
 	base.ReviewerProvider = "codex"
@@ -53,6 +53,18 @@ func TestBranchConfigInheritsAndOverrides(t *testing.T) {
 			env:   map[string]string{settings.BranchModelEnv: "gpt-env"},
 			flags: config.BranchReviewer{Model: "gpt-flag"},
 			want:  want{"codex", "gpt-flag", settings.DefaultBranchEffort, 1, settings.DefaultBranchTimeout}},
+		{name: "a flag's provider drops the file's model",
+			file:  config.BranchReviewer{Model: "gpt-file"},
+			flags: config.BranchReviewer{Provider: "claude-code"},
+			want:  want{"claude-code", "", settings.DefaultBranchEffort, 1, settings.DefaultBranchTimeout}},
+		{name: "a flag switching back to the commit provider drops the file's model",
+			file:  config.BranchReviewer{Provider: "claude-code", Model: "claude-file"},
+			flags: config.BranchReviewer{Provider: "codex"},
+			want:  want{"codex", "", settings.DefaultBranchEffort, 1, settings.DefaultBranchTimeout}},
+		{name: "the environment's provider drops the file's effort",
+			env:  map[string]string{settings.BranchProviderEnv: "openai-compatible"},
+			file: config.BranchReviewer{Provider: "claude-code", Effort: "max"},
+			want: want{"openai-compatible", "", "", 1, settings.DefaultBranchTimeout}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, key := range []string{settings.BranchProviderEnv, settings.BranchModelEnv,
@@ -93,7 +105,8 @@ func TestBranchRunsSettingTakesOneToTheLimit(t *testing.T) {
 }
 
 // TestBranchSourceNamesTheInheritedKey checks that an unset branch key reports the
-// commit reviewer key it inherits, and the default once the provider differs.
+// commit reviewer key it inherits, and the default once the provider differs or
+// the environment's provider discards the stored value.
 func TestBranchSourceNamesTheInheritedKey(t *testing.T) {
 	for _, key := range []string{"COMMIT_GATE_MODEL", settings.BranchProviderEnv, settings.BranchModelEnv} {
 		t.Setenv(key, "")
@@ -109,5 +122,17 @@ func TestBranchSourceNamesTheInheritedKey(t *testing.T) {
 	}
 	if got := settings.EffectiveValue(model, gate.Config{}, file); got != gate.DefaultReviewerModels["claude-code"] {
 		t.Errorf("another provider: model in force %q, want its default", got)
+	}
+	t.Setenv(settings.BranchProviderEnv, "codex")
+	if got := settings.Source(model, file); got != "default" {
+		t.Errorf("switched away and back: source %q", got)
+	}
+	file.BranchReviewer.Model = "claude-file"
+	if got := settings.Source(model, file); got != "default" {
+		t.Errorf("stored model under another environment provider: source %q", got)
+	}
+	t.Setenv(settings.BranchProviderEnv, "")
+	if got := settings.Source(model, file); got != "config" {
+		t.Errorf("stored model: source %q", got)
 	}
 }

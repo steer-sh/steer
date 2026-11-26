@@ -65,6 +65,9 @@ type Field struct {
 	// Inherits names the key whose value is in force while this one is unset, or
 	// returns "" when none is; nil for a key that inherits nothing.
 	Inherits func(config.Config) string
+	// Dropped reports that a higher layer discards this key's stored value, so the
+	// file does not supply what is in force; nil for a key no layer discards.
+	Dropped func(config.Config) bool
 	// Display renders that same value for a person: a name rather than an id, and
 	// a duration rather than a count of seconds.
 	Display func(gate.Config) string
@@ -478,7 +481,7 @@ func Source(f Field, file config.Config) string {
 			return "env " + f.Env
 		}
 	}
-	if f.Get(file) != "" {
+	if f.Get(file) != "" && (f.Dropped == nil || !f.Dropped(file)) {
 		return "config"
 	}
 	if f.Inherits != nil {

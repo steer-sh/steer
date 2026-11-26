@@ -42,26 +42,31 @@ const (
 
 // BranchConfig derives the branch reviewer's configuration from the commit
 // reviewer's, base, under the file's branch_reviewer keys, then the BRANCH_REVIEW_*
-// environment, then flags. A key none of them sets inherits base's value, except
-// runs, timeout and a CLI reviewer's effort, which take the branch defaults. A
-// provider other than base's drops base's model and effort, which name another
-// provider's settings.
+// environment, then flags, each applied as a layer over the one below. A layer
+// that names a provider other than the one in force drops the model and effort
+// beneath it, which name another provider's settings. A key no layer sets
+// inherits base's value, except runs, timeout and a CLI reviewer's effort, which
+// take the branch defaults.
 func BranchConfig(base gate.Config, file, flags config.BranchReviewer) gate.Config {
-	want := file
-	envString(&want.Provider, BranchProviderEnv)
-	envString(&want.Model, BranchModelEnv)
-	envString(&want.Effort, BranchEffortEnv)
-	envPositive(&want.Runs, BranchRunsEnv)
-	envPositive(&want.Timeout, BranchTimeoutEnv)
-	overlay(&want, flags)
+	var env config.BranchReviewer
+	envString(&env.Provider, BranchProviderEnv)
+	envString(&env.Model, BranchModelEnv)
+	envString(&env.Effort, BranchEffortEnv)
+	envPositive(&env.Runs, BranchRunsEnv)
+	envPositive(&env.Timeout, BranchTimeoutEnv)
 
 	cfg := base
-	if provider := strings.TrimSpace(want.Provider); provider != "" && !sameProvider(provider, base.ReviewerProvider) {
-		cfg.ReviewerProvider = provider
-		cfg.ReviewerModel, cfg.ReviewerModelOverride, cfg.ReviewerEffort = "", "", ""
-	}
-	if model := strings.TrimSpace(want.Model); model != "" {
-		cfg.ReviewerModel, cfg.ReviewerModelOverride = model, model
+	var want config.BranchReviewer
+	for _, layer := range []config.BranchReviewer{file, env, flags} {
+		if provider := strings.TrimSpace(layer.Provider); provider != "" && !sameProvider(provider, cfg.ReviewerProvider) {
+			cfg.ReviewerProvider = provider
+			cfg.ReviewerModel, cfg.ReviewerModelOverride, cfg.ReviewerEffort = "", "", ""
+			want.Effort = ""
+		}
+		if model := strings.TrimSpace(layer.Model); model != "" {
+			cfg.ReviewerModel, cfg.ReviewerModelOverride = model, model
+		}
+		overlay(&want, layer)
 	}
 	if !isAPI(cfg.ReviewerProvider) {
 		cfg.ReviewerEffort = DefaultBranchEffort
@@ -142,16 +147,35 @@ func branchInForce(file config.Config) gate.Config {
 	return BranchConfig(gate.WithEnv(gate.WithFile(gate.Defaults(), file)), file.BranchReviewer, config.BranchReviewer{})
 }
 
-// sameProviderInherits returns an Inherits for a key that inherits name while the
-// branch reviewer runs the commit reviewer's provider.
+// sameProviderInherits returns an Inherits for a key that inherits name while
+// neither the settings file nor the environment names a branch provider other
+// than the commit reviewer's: a switch away drops the inherited value even when
+// a higher layer switches back.
 func sameProviderInherits(name string) func(config.Config) string {
 	return func(file config.Config) string {
 		commit := gate.WithEnv(gate.WithFile(gate.Defaults(), file)).ReviewerProvider
-		if sameProvider(branchInForce(file).ReviewerProvider, commit) {
-			return name
+		for _, p := range []string{file.BranchReviewer.Provider, os.Getenv(BranchProviderEnv)} {
+			if p = strings.TrimSpace(p); p != "" && !sameProvider(p, commit) {
+				return ""
+			}
 		}
-		return ""
+		return name
 	}
+}
+
+// envDropsFile reports that BRANCH_REVIEW_PROVIDER names a provider other than
+// the one the settings file puts in force, which discards the file's branch model
+// and effort.
+func envDropsFile(file config.Config) bool {
+	env := strings.TrimSpace(os.Getenv(BranchProviderEnv))
+	if env == "" {
+		return false
+	}
+	inForce := gate.WithEnv(gate.WithFile(gate.Defaults(), file)).ReviewerProvider
+	if p := strings.TrimSpace(file.BranchReviewer.Provider); p != "" {
+		inForce = p
+	}
+	return !sameProvider(env, inForce)
 }
 
 // BranchReviewerFields are the keys of the branch reviewer. The dashboard's
@@ -199,6 +223,7 @@ var BranchReviewerFields = []Field{
 			return "(the CLI's own)"
 		},
 		Inherits: sameProviderInherits("reviewer.model"),
+		Dropped:  envDropsFile,
 	},
 	{
 		Name: "branch_reviewer.effort", Env: BranchEffortEnv,
@@ -224,6 +249,7 @@ var BranchReviewerFields = []Field{
 			}
 			return ""
 		},
+		Dropped: envDropsFile,
 	},
 	{
 		Name: "branch_reviewer.runs", Env: BranchRunsEnv, Numeric: true,
