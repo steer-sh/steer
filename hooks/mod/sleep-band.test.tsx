@@ -71,7 +71,6 @@ async function world($: Engine, on: On, files: Record<string, string>) {
   const clock = mock.clock(on, { now: NOW })
   mock.env(on, { HOME })
   files[`${CHECKS}/.steer-state`] = ''
-  files[`${SLEEP}/.steer-state`] = ''
   files[`${HOME}/.steer/state/commit-review/.steer-state`] = ''
   files[`${REPO}/.git`] = ''
   files[STEER] = ''

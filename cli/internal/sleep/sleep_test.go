@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/steer-sh/steer-cli/internal/statestore"
+	"github.com/steer-sh/steer-cli/internal/steerpath"
 	"github.com/steer-sh/steer-cli/internal/testhome"
 )
 
@@ -81,7 +81,7 @@ func TestASleepCoversOnlyItsTargetAndSessionUntilItEndsOrWakes(t *testing.T) {
 func TestARecordOutsideTheSleepContractIsNoSleep(t *testing.T) {
 	testhome.Set(t, t.TempDir())
 	now := time.UnixMilli(1_700_000_000_000)
-	dir, err := statestore.Prepare(Component)
+	dir, err := prepare()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,5 +128,31 @@ func TestARecordOutsideTheSleepContractIsNoSleep(t *testing.T) {
 	}
 	if _, err := Put("s", KindCheck, "/repo", (MaxMinutes+1)*time.Minute, now); err == nil {
 		t.Error("Put accepted a sleep longer than the longest")
+	}
+}
+
+// A record in the legacy state root is no sleep, before or after the first Put:
+// only the neutral directory the self-protection guard closes holds sleeps.
+func TestARecordInTheLegacyStateRootIsNoSleep(t *testing.T) {
+	testhome.Set(t, t.TempDir())
+	now := time.UnixMilli(1_700_000_000_000)
+	rec := Record{Version: Version, Kind: KindCheck, Target: "/repo", Session: "s", By: ByUser,
+		StartedMS: now.Add(-time.Minute).UnixMilli(), UntilMS: now.Add(time.Minute).UnixMilli()}
+	data, _ := json.Marshal(rec)
+	legacy := Path(steerpath.LegacyStateDir(Component), rec.Session, rec.Kind, rec.Target)
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacy, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, live := Find("s", KindCheck, "/repo", now); live {
+		t.Error("a legacy record is live before any sleep was set")
+	}
+	if _, err := Put("s", KindGuard, "g", time.Minute, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, live := Find("s", KindCheck, "/repo", now); live {
+		t.Error("a legacy record is live after a sleep was set")
 	}
 }

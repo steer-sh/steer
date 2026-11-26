@@ -19,6 +19,7 @@ import (
 	"github.com/steer-sh/steer-cli/internal/atomicfile"
 	"github.com/steer-sh/steer-cli/internal/jsonl"
 	"github.com/steer-sh/steer-cli/internal/statestore"
+	"github.com/steer-sh/steer-cli/internal/steerpath"
 )
 
 const (
@@ -38,6 +39,21 @@ const (
 	// EventsName is the append-only log of each sleep and wake.
 	EventsName = "sleeps.jsonl"
 )
+
+// Dir is the directory that holds every sleep. It has no legacy location.
+func Dir() string { return steerpath.StateDir(Component) }
+
+// prepare creates Dir, keeping it and the state root above it private.
+func prepare() (string, error) {
+	dir := Dir()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	if err := statestore.ClosePrivate(filepath.Dir(dir)); err != nil {
+		return "", err
+	}
+	return dir, statestore.ClosePrivate(dir)
+}
 
 // Record is one live sleep: what sleeps, in which session, from when until when.
 type Record struct {
@@ -104,7 +120,7 @@ func Put(session, kind, target string, d time.Duration, now time.Time) (Record, 
 	if d < time.Minute || d > time.Duration(MaxMinutes)*time.Minute {
 		return Record{}, fmt.Errorf("a sleep lasts 1 to %d minutes", MaxMinutes)
 	}
-	dir, err := statestore.Prepare(Component)
+	dir, err := prepare()
 	if err != nil {
 		return Record{}, err
 	}
@@ -136,7 +152,7 @@ func Remove(session, kind, target string, now time.Time) (Record, bool, error) {
 	if err := validate(session, kind, target); err != nil {
 		return Record{}, false, err
 	}
-	dir := statestore.Resolve(Component)
+	dir := Dir()
 	path := Path(dir, session, kind, target)
 	rec, ok := read(path, session, kind, target)
 	if !ok {
@@ -156,7 +172,7 @@ func Find(session, kind, target string, now time.Time) (Record, bool) {
 	if validate(session, kind, target) != nil {
 		return Record{}, false
 	}
-	rec, ok := read(Path(statestore.Resolve(Component), session, kind, target), session, kind, target)
+	rec, ok := read(Path(Dir(), session, kind, target), session, kind, target)
 	if !ok || !rec.Live(now) {
 		return Record{}, false
 	}
@@ -199,7 +215,7 @@ func appendEvent(dir string, ev Event) error {
 
 // Events reads the sleep log, oldest first. A missing log holds none.
 func Events() ([]Event, error) {
-	data, err := os.ReadFile(filepath.Join(statestore.Resolve(Component), EventsName))
+	data, err := os.ReadFile(filepath.Join(Dir(), EventsName))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}

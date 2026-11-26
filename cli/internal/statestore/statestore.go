@@ -29,7 +29,6 @@ var Components = []string{
 	"commit-review",
 	"firing-audits",
 	"mods",
-	"sleep",
 	"steer-report",
 	"transcript-sessions",
 }

@@ -11,7 +11,7 @@ import { repoKey, repoName, ruleParts } from './blocks'
 import { textPart, vectorCard } from './card'
 import { BLOCK_ROWS, BOX_COLUMNS, COLORS, MARK_MIN_COLUMNS, SHIELD_COLUMNS, crossCells, shieldCells } from './marks'
 import { plural } from './review'
-import { sessionRecords, stateRoot } from './rows'
+import { sessionRecords } from './rows'
 import { SLEEP_MINUTES, fixViews, parseSleep } from './sleep'
 import type { FixView, SleepRecord } from './sleep'
 import { MARK_HEIGHT, MARK_SMALL_HEIGHT, MARK_SMALL_WIDTH, MARK_WIDTH, markSvg, stateClock, textColor } from './vector'
@@ -43,9 +43,9 @@ function own(session: string) {
  */
 export async function pollSleeps($: EngineInterface, session: string, now: number): Promise<void> {
   own(session)
-  const root = await stateRoot($, 'sleep')
-  if (!session || !root) return
-  const dir = `${root}/${await repoKey(session)}`
+  const home = await $.env.get('HOME')
+  if (!session || !home) return
+  const dir = `${home}/.steer/state/sleep/${await repoKey(session)}`
   const read: SleepRecord[] = []
   for (const entry of await $.fs.list(dir).catch(() => [])) {
     if (entry.kind !== 'file' || entry.isLink || !entry.name.endsWith('.json')) continue
