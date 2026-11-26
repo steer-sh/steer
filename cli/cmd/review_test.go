@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 
@@ -55,6 +56,34 @@ func TestReviewListLineSaysWhatEachReviewAwaits(t *testing.T) {
 	} {
 		if line := reviewListLine(tc.row); !strings.Contains(line, tc.count+"  ") || !strings.HasSuffix(line, tc.status) {
 			t.Errorf("%s: line %q; want %q and the status %q", tc.name, line, tc.count, tc.status)
+		}
+	}
+}
+
+// TestRenderBranchReviewSaysWhatEachPhaseLeaves checks the text a review prints for
+// each way it ends: a skip names why, and a finding that names a reviewed rule
+// shows its RULE line.
+func TestRenderBranchReviewSaysWhatEachPhaseLeaves(t *testing.T) {
+	answered := []gate.ReviewRun{{}}
+	finding := branchreview.Finding{Index: 1, Run: 1, Severity: "BLOCKING", File: "b.go", Claim: "B returns A.", FailsWhen: "always."}
+	ruled := finding
+	ruled.Rule = "global:b"
+	for _, tc := range []struct {
+		name       string
+		res        branchreview.Result
+		want, lack string
+	}{
+		{"skip empty", branchreview.Result{Phase: branchreview.PhaseSkipEmpty}, "Nothing to review", "Reviewer"},
+		{"skip prose", branchreview.Result{Phase: branchreview.PhaseSkipProse}, "prose files only", "Reviewer"},
+		{"finding", branchreview.Result{Phase: branchreview.PhaseFindings, Answered: 1, Runs: answered,
+			Review: "x", Findings: []branchreview.Finding{finding}}, "FAILS WHEN: always.\n\n", "RULE:"},
+		{"rule finding", branchreview.Result{Phase: branchreview.PhaseFindings, Answered: 1, Runs: answered,
+			Review: "x", Findings: []branchreview.Finding{ruled}}, "FAILS WHEN: always.\n    RULE: global:b\n\n", ""},
+	} {
+		var out bytes.Buffer
+		renderBranchReview(&out, tc.res, gate.Defaults())
+		if got := out.String(); !strings.Contains(got, tc.want) || (tc.lack != "" && strings.Contains(got, tc.lack)) {
+			t.Errorf("%s: output %q; want %q without %q", tc.name, got, tc.want, tc.lack)
 		}
 	}
 }

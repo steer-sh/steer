@@ -299,7 +299,7 @@ func TestResolveBaseNamesTheFlagWhenNoBaseResolves(t *testing.T) {
 func TestRuleTakesOneValidRulingPerFinding(t *testing.T) {
 	repo := branchRepo(t)
 	req := request(t, repo)
-	res, err := Run(context.Background(), config(2), &stub{replies: []string{oneFinding, oneFinding}}, req)
+	res, err := Run(context.Background(), config(2), &stub{replies: []string{oneFinding + "\n    RULE: global:b", oneFinding + "\n    RULE: global:b"}}, req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,7 +331,8 @@ func TestRuleTakesOneValidRulingPerFinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if receipt.Accepted != 1 || receipt.AcceptedNotFixed != 1 || !receipt.HeadAdvanced || receipt.Rulings[0].Claim != "B returns A." {
+	if receipt.Accepted != 1 || receipt.AcceptedNotFixed != 1 || !receipt.HeadAdvanced || receipt.Rulings[0].Claim != "B returns A." ||
+		receipt.Rulings[0].Rule != "global:b" || receipt.Rulings[1].Rule != "global:b" {
 		t.Errorf("receipt = %+v", receipt)
 	}
 	listed, err := List(req.Dir, req.Host, repo)

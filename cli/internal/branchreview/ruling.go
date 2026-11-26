@@ -31,6 +31,7 @@ type Ruling struct {
 	Severity string `json:"severity"`
 	File     string `json:"file"`
 	Claim    string `json:"claim"`
+	Rule     string `json:"rule,omitempty"`
 }
 
 // Receipt is one recorded set of rulings on a review.
@@ -97,7 +98,8 @@ func Rule(dir, host, repo, harnessID string, review Review, rulings []RulingInpu
 		default:
 			receipt.Accepted++
 		}
-		receipt.Rulings = append(receipt.Rulings, Ruling{RulingInput: in, Severity: f.Severity, File: f.File, Claim: f.Claim})
+		receipt.Rulings = append(receipt.Rulings, Ruling{RulingInput: in, Severity: f.Severity, File: f.File, Claim: f.Claim,
+			Rule: f.Rule})
 	}
 	if missing := len(byIndex) - len(seen); missing > 0 {
 		var unruled []string

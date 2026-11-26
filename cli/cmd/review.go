@@ -306,8 +306,12 @@ func renderBranchReview(out io.Writer, res branchreview.Result, cfg gate.Config)
 	}
 	// Each reviewer numbers its own findings from 1; rule takes these numbers.
 	for _, f := range res.Findings {
-		fmt.Fprintf(out, "[%d] SEVERITY: %s  (reviewer %d)\n    FILE: %s\n    CLAIM: %s\n    FAILS WHEN: %s\n\n",
+		fmt.Fprintf(out, "[%d] SEVERITY: %s  (reviewer %d)\n    FILE: %s\n    CLAIM: %s\n    FAILS WHEN: %s\n",
 			f.Index, f.Severity, f.Run, f.File, f.Claim, f.FailsWhen)
+		if f.Rule != "" {
+			fmt.Fprintf(out, "    RULE: %s\n", f.Rule)
+		}
+		fmt.Fprintln(out)
 	}
 	fmt.Fprintf(out, "Rule on each finding by the number above, after any fix commits: steer review rule %s --stdin\n", res.ReviewID)
 }
