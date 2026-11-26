@@ -42,6 +42,8 @@ func write(t *testing.T, repo, path, body string) {
 // two commits on top of it.
 func branchRepo(t *testing.T) string {
 	t.Helper()
+	// LoadAddendum reads the global manifest under the home directory.
+	t.Setenv("HOME", t.TempDir())
 	repo := gate.Canonical(t.TempDir())
 	git(t, repo, "init", "-q", "-b", "main")
 	write(t, repo, "a.go", "package a\n\nfunc A() int { return 1 }\n")
@@ -193,6 +195,33 @@ func TestRunNeverReadsAnUnusableAnswerAsClean(t *testing.T) {
 		if _, err := Rule(req.Dir, req.Host, repo, "", review, nil); err == nil || !strings.Contains(err.Error(), tc.ruleRefusalIn) {
 			t.Errorf("reply %q: Rule err = %v; want %q", tc.reply, err, tc.ruleRefusalIn)
 		}
+	}
+}
+
+// TestASkippedReviewReportsAManifestThatDidNotLoad checks that a prose-only skip
+// still records and returns the reviewed-rule manifest's load error, since a rule
+// it dropped may be one that would have reviewed the branch.
+func TestASkippedReviewReportsAManifestThatDidNotLoad(t *testing.T) {
+	repo := branchRepo(t)
+	git(t, repo, "switch", "-q", "main")
+	if err := os.MkdirAll(filepath.Join(repo, ".steer", "hooks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, repo, ".steer/hooks/steer-manifest.json", "{not json")
+	git(t, repo, "add", "-A")
+	git(t, repo, verb, "-q", "-m", "broken manifest")
+	git(t, repo, "switch", "-q", "-c", "docs")
+	write(t, repo, "notes.md", "# notes\n")
+	git(t, repo, "add", "-A")
+	git(t, repo, verb, "-q", "-m", "docs")
+	req := request(t, repo)
+	res, err := Run(context.Background(), config(1), &stub{}, req)
+	if err != nil || res.Phase != PhaseSkipProse || len(res.Warnings) != 1 {
+		t.Fatalf("result = %+v, %v", res, err)
+	}
+	raw, _ := os.ReadFile(ReviewsFile(req.Dir, req.Host))
+	if !strings.Contains(string(raw), `"review_errors"`) {
+		t.Errorf("the skip row does not record the load error: %s", raw)
 	}
 }
 

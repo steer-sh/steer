@@ -175,6 +175,12 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, req Reque
 	if len(dirty) > 0 {
 		row["dirty_paths"] = gate.SlashPaths(dirty)
 	}
+	// Recorded before the skips: a rule that did not load may be the rule that
+	// would have reviewed a prose-only branch.
+	if len(addendum.Errors) > 0 {
+		row["review_errors"] = addendum.Errors
+		res.Warnings = addendum.Errors
+	}
 
 	switch {
 	case base == head || diff.Raw == "":
