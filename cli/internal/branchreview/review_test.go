@@ -310,8 +310,9 @@ func TestRunSkipsABranchWithNothingToReview(t *testing.T) {
 	}
 }
 
-// TestResolveBaseNamesTheFlagWhenNoBaseResolves checks the default order and the
-// errors for a missing default and a bad --base.
+// TestResolveBaseNamesTheFlagWhenNoBaseResolves checks the default order, the
+// errors for a missing default and a bad --base, and that origin's HEAD is recorded
+// by its short name.
 func TestResolveBaseNamesTheFlagWhenNoBaseResolves(t *testing.T) {
 	repo := branchRepo(t)
 	if ref, _, err := ResolveBase(repo, ""); err != nil || ref != "main" {
@@ -326,6 +327,11 @@ func TestResolveBaseNamesTheFlagWhenNoBaseResolves(t *testing.T) {
 	}
 	if ref, _, err := ResolveBase(repo, "trunk"); err != nil || ref != "trunk" {
 		t.Errorf("--base trunk = %q, %v", ref, err)
+	}
+	git(t, repo, "update-ref", "refs/remotes/origin/trunk", "trunk")
+	git(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+	if ref, _, err := ResolveBase(repo, ""); err != nil || ref != "origin/trunk" {
+		t.Errorf("origin's HEAD = %q, %v; want origin/trunk", ref, err)
 	}
 }
 

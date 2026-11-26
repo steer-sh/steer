@@ -21,7 +21,7 @@ func ResolveBase(repo, ref string) (string, string, error) {
 	candidates := []string{ref}
 	if ref == "" {
 		candidates = nil
-		if out, ok := gate.Git(repo, gitWait, "symbolic-ref", "-q", "refs/remotes/origin/HEAD"); ok {
+		if out, ok := gate.Git(repo, gitWait, "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD"); ok {
 			if name := strings.TrimSpace(out); name != "" {
 				candidates = append(candidates, name)
 			}
