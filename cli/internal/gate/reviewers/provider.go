@@ -15,6 +15,9 @@ type Options struct {
 	KeyEnv  string
 	// Tools is the API reviewer's tool mode, one of ToolModes; "" is off.
 	Tools string
+	// ToolCalls and ToolTurns cap the API reviewer's tool loop; zero is its default.
+	ToolCalls int
+	ToolTurns int
 }
 
 // ToolModes are the values reviewer.api.tools takes: off sends the prompt alone,

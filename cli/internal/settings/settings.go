@@ -62,6 +62,12 @@ type Field struct {
 	Effective func(gate.Config) string
 	// FileEffective renders the value in force from the settings file alone.
 	FileEffective func(config.Config) string
+	// Inherits names the key whose value is in force while this one is unset, or
+	// returns "" when none is; nil for a key that inherits nothing.
+	Inherits func(config.Config) string
+	// Dropped reports that a higher layer discards this key's stored value, so the
+	// file does not supply what is in force; nil for a key no layer discards.
+	Dropped func(config.Config) bool
 	// Display renders that same value for a person: a name rather than an id, and
 	// a duration rather than a count of seconds.
 	Display func(gate.Config) string
@@ -81,7 +87,33 @@ type Choice struct {
 }
 
 // Fields is the whole editable surface, in the order an editor lists it.
-var Fields = append(append([]Field{}, ReviewerFields...), ProtectionField)
+var Fields = append(append(append([]Field{}, ReviewerFields...), BranchReviewerFields...), ProtectionField)
+
+// providerChoices lists every reviewer provider a provider key offers.
+func providerChoices() []Choice {
+	out := []Choice{}
+	for _, p := range reviewers.Providers() {
+		out = append(out, Choice{Value: p.ID, Label: p.Label})
+	}
+	return out
+}
+
+// setProvider stores a provider name, or nothing for the default, and lists names
+// when it refuses one no provider spells. The provider set
+// is closed, so a typo is a write-time error rather than a review that fails open on
+// every run. reviewers.FindProvider is the one reader of a name, so this can never
+// accept a spelling the gate rejects. Whether the provider's other settings are
+// complete is not asked here: a provider is named before its URL is.
+func setProvider(dst *string, v string, names []string) error {
+	if v != "" {
+		if _, ok := reviewers.FindProvider(v); !ok {
+			return fmt.Errorf("unknown reviewer provider %q: expected %s",
+				v, strings.Join(names, ", "))
+		}
+	}
+	*dst = v
+	return nil
+}
 
 // ProtectionField turns Steer's self-protection guard off or back on.
 var ProtectionField = Field{
@@ -127,30 +159,12 @@ var ReviewerFields = []Field{
 		Help:         "The CLI or API Steer runs to review a change before it commits.",
 		Kind:         KindChoice,
 		DefaultLabel: reviewers.ProviderLabel(""),
-		Choices: func() []Choice {
-			out := []Choice{}
-			for _, p := range reviewers.Providers() {
-				out = append(out, Choice{Value: p.ID, Label: p.Label})
-			}
-			return out
-		},
-		Display: func(c gate.Config) string { return reviewers.ProviderLabel(c.ReviewerProvider) },
-		Usage:   "Reviewer (" + strings.Join(reviewers.ProviderNames(), "|") + "); unset means claude-code",
-		Get:     func(c config.Config) string { return c.Reviewer.Provider },
+		Choices:      providerChoices,
+		Display:      func(c gate.Config) string { return reviewers.ProviderLabel(c.ReviewerProvider) },
+		Usage:        "Reviewer (" + strings.Join(reviewers.ProviderNames(), "|") + "); unset means claude-code",
+		Get:          func(c config.Config) string { return c.Reviewer.Provider },
 		Set: func(c *config.Config, v string) error {
-			// The provider set is closed, so a typo is a write-time error rather than
-			// a hook that fails open on every commit. reviewers.FindProvider is the
-			// one reader of a name, so this can never accept a spelling the gate
-			// rejects. Whether the provider's other settings are complete is not
-			// asked here: a provider is named before its URL is.
-			if v != "" {
-				if _, ok := reviewers.FindProvider(v); !ok {
-					return fmt.Errorf("unknown reviewer provider %q: expected %s",
-						v, strings.Join(reviewers.ProviderNames(), ", "))
-				}
-			}
-			c.Reviewer.Provider = v
-			return nil
+			return setProvider(&c.Reviewer.Provider, v, reviewers.ProviderNames())
 		},
 		Effective: func(c gate.Config) string { return c.ReviewerProvider },
 	},
@@ -429,11 +443,21 @@ func Names() []string {
 	return names
 }
 
+// NameWidth is the length of the longest key, the width a column of keys pads to.
+func NameWidth() int {
+	width := 0
+	for _, f := range Fields {
+		width = max(width, len(f.Name))
+	}
+	return width
+}
+
 // KeyHelp renders the key documentation an editor's help prints.
 func KeyHelp() string {
 	var b strings.Builder
+	width := NameWidth()
 	for _, f := range Fields {
-		fmt.Fprintf(&b, "  %-22s %s\n", f.Name, f.Usage)
+		fmt.Fprintf(&b, "  %-*s %s\n", width, f.Name, f.Usage)
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
@@ -468,8 +492,15 @@ func Source(f Field, file config.Config) string {
 			return "env " + f.Env
 		}
 	}
-	if f.Get(file) != "" {
+	if f.Get(file) != "" && (f.Dropped == nil || !f.Dropped(file)) {
 		return "config"
+	}
+	if f.Inherits != nil {
+		for _, parent := range ReviewerFields {
+			if name := f.Inherits(file); name != "" && parent.Name == name {
+				return parent.Name + " (" + Source(parent, file) + ")"
+			}
+		}
 	}
 	return "default"
 }
@@ -504,6 +535,9 @@ func ReviewerOptions(cfg gate.Config) reviewers.Options {
 		BaseURL: cfg.ReviewerAPIBaseURL,
 		KeyEnv:  cfg.ReviewerAPIKeyEnv,
 		Tools:   cfg.ReviewerAPITools,
+
+		ToolCalls: cfg.ReviewerToolCalls,
+		ToolTurns: cfg.ReviewerToolTurns,
 	}
 }
 

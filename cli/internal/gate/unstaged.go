@@ -30,16 +30,29 @@ func UnstagedPaths(cwd string) ([]string, bool) {
 // Paths the diff also changes come first, then the rest, each sorted; at most
 // maxUnstagedPaths are named and the remainder counted. Empty when unstaged is.
 func UnstagedNote(unstaged, diffPaths []string) string {
-	if len(unstaged) == 0 {
+	return pathsNote(unstagedTag, "This commit lands the staged index. The working tree also holds edits "+
+		"that this commit does NOT land, to the paths below, so a file you open on disk "+
+		"at one of them is not the version under review. Do not raise a finding from "+
+		"the on-disk copy of one of these paths.\n",
+		" (also changed by this commit; only its staged part lands)",
+		"- and %d more paths with unstaged edits\n", unstaged, diffPaths)
+}
+
+// pathsNote renders a tagged prompt section that names paths whose on-disk copy is
+// not the version under review: intro, then the paths diffPaths also holds with
+// inDiff after each, then the rest, at most maxUnstagedPaths in all, and rest
+// counting the remainder. Empty when paths is.
+func pathsNote(tag, intro, inDiff, rest string, paths, diffPaths []string) string {
+	if len(paths) == 0 {
 		return ""
 	}
-	inDiff := map[string]bool{}
+	inSet := map[string]bool{}
 	for _, p := range diffPaths {
-		inDiff[p] = true
+		inSet[p] = true
 	}
 	var both, other []string
-	for _, p := range unstaged {
-		if inDiff[p] {
+	for _, p := range paths {
+		if inSet[p] {
 			both = append(both, p)
 		} else {
 			other = append(other, p)
@@ -49,16 +62,13 @@ func UnstagedNote(unstaged, diffPaths []string) string {
 	sort.Strings(other)
 
 	var b strings.Builder
-	b.WriteString("\n<" + unstagedTag + ">\n")
-	b.WriteString("This commit lands the staged index. The working tree also holds edits " +
-		"that this commit does NOT land, to the paths below, so a file you open on disk " +
-		"at one of them is not the version under review. Do not raise a finding from " +
-		"the on-disk copy of one of these paths.\n")
+	b.WriteString("\n<" + tag + ">\n")
+	b.WriteString(intro)
 	named := 0
 	for _, group := range []struct {
 		paths  []string
 		suffix string
-	}{{both, " (also changed by this commit; only its staged part lands)"}, {other, ""}} {
+	}{{both, inDiff}, {other, ""}} {
 		for _, p := range group.paths {
 			if named == maxUnstagedPaths {
 				break
@@ -67,10 +77,10 @@ func UnstagedNote(unstaged, diffPaths []string) string {
 			named++
 		}
 	}
-	if rest := len(unstaged) - named; rest > 0 {
-		fmt.Fprintf(&b, "- and %d more paths with unstaged edits\n", rest)
+	if left := len(paths) - named; left > 0 {
+		fmt.Fprintf(&b, rest, left)
 	}
-	b.WriteString("</" + unstagedTag + ">\n")
+	b.WriteString("</" + tag + ">\n")
 	return b.String()
 }
 

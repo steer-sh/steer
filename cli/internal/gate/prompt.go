@@ -151,11 +151,17 @@ func (c Config) InstrumentID() string { return c.InstrumentIDWith("") }
 // the prompt digest as `<prompt>+<addendum>`, inside the one segment, because a
 // reader takes a fifth segment for the effort.
 func (c Config) InstrumentIDWith(addendumDigest string) string {
-	digest := PromptDigest()
+	return c.instrumentID(PromptDigest(), InstrumentSuffix, addendumDigest)
+}
+
+// instrumentID renders the identity of a reviewer reading the prompt whose digest is
+// promptDigest, through the implementation engine names.
+func (c Config) instrumentID(promptDigest, engine, addendumDigest string) string {
+	digest := promptDigest
 	if addendumDigest != "" {
 		digest += "+" + addendumDigest
 	}
-	id := fmt.Sprintf("%s/%d/%s/%s", c.ReviewerModel, c.ReviewerRuns, digest, InstrumentSuffix)
+	id := fmt.Sprintf("%s/%d/%s/%s", c.ReviewerModel, c.ReviewerRuns, digest, engine)
 	if c.ReviewerEffort != "" {
 		id += "/" + c.ReviewerEffort
 	}
@@ -177,13 +183,18 @@ func (c Config) InstrumentFields() map[string]any { return c.InstrumentFieldsWit
 // `addendum_digest` key is written only when there are entries; a reader takes its
 // absence as no addendum.
 func (c Config) InstrumentFieldsWith(addendumDigest string) map[string]any {
+	return c.instrumentFields(PromptDigest(), InstrumentSuffix, addendumDigest)
+}
+
+// instrumentFields is instrumentID by dimension.
+func (c Config) instrumentFields(promptDigest, engine, addendumDigest string) map[string]any {
 	fields := map[string]any{
 		"provider":      c.ReviewerProvider,
 		"model":         c.ReviewerModel,
 		"effort":        c.ReviewerEffort,
 		"runs":          c.ReviewerRuns,
-		"prompt_digest": PromptDigest(),
-		"engine":        InstrumentSuffix,
+		"prompt_digest": promptDigest,
+		"engine":        engine,
 	}
 	if addendumDigest != "" {
 		fields["addendum_digest"] = addendumDigest

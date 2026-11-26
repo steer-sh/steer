@@ -14,8 +14,21 @@ import (
 
 // Config is the JSON document stored at ~/.steer/config.json.
 type Config struct {
-	Reviewer   Reviewer   `json:"reviewer"`
-	Protection Protection `json:"protection,omitzero"`
+	Reviewer Reviewer `json:"reviewer"`
+	// BranchReviewer configures `steer review branch`; settings.BranchConfig says
+	// which unset keys inherit from Reviewer.
+	BranchReviewer BranchReviewer `json:"branch_reviewer,omitzero"`
+	Protection     Protection     `json:"protection,omitzero"`
+}
+
+// BranchReviewer configures the reviewer of a whole branch before a pull request.
+// Timeout is in seconds.
+type BranchReviewer struct {
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model,omitempty"`
+	Effort   string `json:"effort,omitempty"`
+	Runs     int    `json:"runs,omitempty"`
+	Timeout  int    `json:"timeout,omitempty"`
 }
 
 // Protection configures the guard that keeps an agent from changing Steer's own

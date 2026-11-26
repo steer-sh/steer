@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// The digests of the six templates. review.md's digest is the instrument's prompt
+// The digests of the seven templates. review.md's digest is the instrument's prompt
 // half, so a change there makes every row written afterwards a different instrument;
 // deny.md, cap.md and nitpick.md are read by the agent alone and move no instrument.
 // These are golden values, not a checksum of convenience. Regenerate one only
@@ -22,6 +22,8 @@ var promptDigests = map[string]struct {
 	"nitpick":    {nitpickTemplate, "23ced2dc4dc2f61de49a4d3b5beec78bff9ad89dbac61884ea18c48c7e2424c8"},
 	"round-note": {roundNote, "f40acabd50e95481f309c08ccacf4cac025835d79e8e265601170f7c4a4d34c3"},
 	"rerun-note": {rerunNoteText, "27d14c6916336301abd551b90d82d5fc799e027ae7d95b0520ef501c0efa9f1b"},
+	// The branch review's instrument prompt half, as review.md is the commit review's.
+	"branch-review": {branchPrompt, "0ab9b80dd35857afffd8d228b5ac1be0702649f98988a862c945c04fae71033d"},
 }
 
 func TestPromptDigestsArePinned(t *testing.T) {

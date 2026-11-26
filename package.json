@@ -12,7 +12,7 @@
   "keywords": ["code-review", "commit-review", "checks", "guards", "hooks"],
   "pi": {
     "extensions": ["./pi/steer-session.ts"],
-    "skills": ["./skills/auto-steer", "./skills/steer", "./skills/steer-report", "./skills/steer-setup"],
+    "skills": ["./skills/auto-steer", "./skills/steer", "./skills/steer-report", "./skills/steer-review", "./skills/steer-setup"],
     "prompts": [],
     "themes": []
   }

@@ -31,6 +31,9 @@ type ChatAPI struct {
 	KeyEnv  string
 	// Tools is the tool mode, one of ToolModes; "" is off.
 	Tools string
+	// ToolCalls and ToolTurns are the tool loop's caps; zero is the default cap.
+	ToolCalls int
+	ToolTurns int
 	// Client defaults to one that refuses a redirect to another origin.
 	// Overridable so a test can point at a local server.
 	Client *http.Client
@@ -39,7 +42,24 @@ type ChatAPI struct {
 }
 
 func NewChatAPI(o Options) *ChatAPI {
-	return &ChatAPI{Model: o.Model, Effort: o.Effort, BaseURL: o.BaseURL, KeyEnv: o.KeyEnv, Tools: o.Tools}
+	return &ChatAPI{Model: o.Model, Effort: o.Effort, BaseURL: o.BaseURL, KeyEnv: o.KeyEnv, Tools: o.Tools,
+		ToolCalls: o.ToolCalls, ToolTurns: o.ToolTurns}
+}
+
+// callCap is the calls one run executes, each call of a multi-call turn counted.
+func (c *ChatAPI) callCap() int {
+	if c.ToolCalls > 0 {
+		return c.ToolCalls
+	}
+	return maxToolCalls
+}
+
+// turnCap is the requests that offer tools; one more asks for the review.
+func (c *ChatAPI) turnCap() int {
+	if c.ToolTurns > 0 {
+		return c.ToolTurns
+	}
+	return maxToolTurns
 }
 
 func (c *ChatAPI) Name() string { return APIProviderID }
@@ -207,13 +227,10 @@ type chatResponse struct {
 	Usage *chatUsage `json:"usage"`
 }
 
-// The loop's caps. The tool output caps are in viewtools.go; all of them hold inside
-// the review timeout.
+// The loop's default caps, which a commit review runs with. The tool output caps
+// are in viewtools.go; all of them hold inside the review timeout.
 const (
-	// maxToolCalls bounds the calls one run executes, each call of a multi-call turn
-	// counted.
 	maxToolCalls = 24
-	// maxToolTurns bounds the requests that offer tools; one more asks for the review.
 	maxToolTurns = 8
 )
 
@@ -299,8 +316,9 @@ func (c *ChatAPI) converse(ctx context.Context, prompt, key string, view *gate.C
 	use := &gate.ToolUse{Mode: "tools"}
 	tools := &viewTools{view: view}
 	messages := []chatMessage{textMessage("system", toolsSystemPrompt), textMessage("user", prompt)}
+	callCap, turnCap := c.callCap(), c.turnCap()
 	for turn := 1; ; turn++ {
-		offer := turn <= maxToolTurns && use.Calls < maxToolCalls && !tools.spent()
+		offer := turn <= turnCap && use.Calls < callCap && !tools.spent()
 		req := chatRequest{Model: c.Model, ReasoningEffort: c.Effort, Messages: messages}
 		if offer {
 			req.Tools = toolSpecs
@@ -340,7 +358,7 @@ func (c *ChatAPI) converse(ctx context.Context, prompt, key string, view *gate.C
 		}
 		// Every call of a turn needs a reply, so a turn over the call cap would send a
 		// refusal per call; it ends the run instead.
-		if len(calls) > maxToolCalls {
+		if len(calls) > callCap {
 			return gate.RawRun{Outcome: gate.OutcomeToolBudget, ResponseModel: parsed.Model, Tools: use,
 				Detail: fmt.Sprintf("the model asked for %d tool calls in one turn", len(calls))}
 		}
@@ -353,7 +371,7 @@ func (c *ChatAPI) converse(ctx context.Context, prompt, key string, view *gate.C
 		messages = append(messages, assistant)
 		for _, call := range calls {
 			var result string
-			if use.Calls >= maxToolCalls {
+			if use.Calls >= callCap {
 				result = "refused: the tool call budget of this review is spent; give the review now"
 				use.Refused++
 			} else {

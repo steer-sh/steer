@@ -45,8 +45,9 @@ var configShowCmd = &cobra.Command{
 		fmt.Println()
 		fmt.Printf("  File  %s%s\n", steerpath.ConfigFile(), configFileNote())
 		fmt.Println()
+		width := settings.NameWidth()
 		for _, f := range settings.Fields {
-			fmt.Printf("  %-22s %-24s %s\n", f.Name, settings.EffectiveValue(f, cfg, file), styles.MutedText.Render(settings.Source(f, file)))
+			fmt.Printf("  %-*s %-24s %s\n", width, f.Name, settings.EffectiveValue(f, cfg, file), styles.MutedText.Render(settings.Source(f, file)))
 		}
 		fmt.Println()
 		if resolveErr != nil {
@@ -123,6 +124,12 @@ changes the instrument the ledger stamps on every later review row.`,
 		// which previewReviewer runs; warning here too would print it twice.
 		if f.Identity {
 			previewReviewer(next)
+		}
+		// No resolver runs for a branch key, so the branch effort is checked here.
+		if f.Name == "branch_reviewer.provider" || f.Name == "branch_reviewer.effort" {
+			if warning := settings.BranchEffortWarning(next); warning != "" {
+				utils.Warning(warning)
+			}
 		}
 		if err := config.Save(next); err != nil {
 			return err
