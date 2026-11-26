@@ -15,14 +15,16 @@ import (
 	"time"
 
 	"github.com/steer-sh/steer-cli/internal/atomicfile"
+	"github.com/steer-sh/steer-cli/internal/sleep"
 	"github.com/steer-sh/steer-cli/internal/statestore"
 	"github.com/steer-sh/steer-cli/internal/steerbin"
 )
 
-// Stop dispositions. Allow, block and yield follow a completed run. The others
-// are fail-open states: the turn ends without a verdict from check.sh. Ignored
-// and outside-repository are silent; every other state names itself to the
-// operator.
+// Stop dispositions. Allow, block and yield follow a completed run. Slept is a
+// turn that ended without running check.sh while the user's sleep of it was
+// live. The others are fail-open states: the turn ends without a verdict from
+// check.sh. Ignored and outside-repository are silent; every other state names
+// itself to the operator.
 const (
 	DispositionAllow      = "allow"
 	DispositionBlock      = "block"
@@ -39,6 +41,7 @@ const (
 	// DispositionSubagentActive is a root Stop while a subagent of the session
 	// still runs.
 	DispositionSubagentActive = "subagent-active"
+	DispositionSlept          = "slept"
 )
 
 const (
@@ -112,6 +115,9 @@ func Stop(req StopRequest) StopDecision {
 		}
 		return d
 	}
+	if rec, ok := sleep.Find(req.Session, sleep.KindCheck, identity, time.Now()); ok {
+		return stopSlept(identity, req, rec)
+	}
 	if len(req.RunningSubagents) > 0 {
 		return StopDecision{Disposition: DispositionSubagentActive,
 			Message: fmt.Sprintf("%sa subagent of this session still runs (%s), so %s did not run for this turn. "+
@@ -165,6 +171,19 @@ func Stop(req StopRequest) StopDecision {
 		d.Message = fmt.Sprintf("%s%s could not complete in %s (%s); the turn was not checked.", stopMessagePrefix, OracleName, identity, run.Reason)
 	}
 	return d
+}
+
+// stopSlept lets the turn end without running check.sh and records the run as slept.
+func stopSlept(identity string, req StopRequest, rec sleep.Record) StopDecision {
+	until := time.UnixMilli(rec.UntilMS)
+	run, err := recordUnrun(identity, req, DispositionSlept,
+		fmt.Sprintf("the user put %s to sleep in this session until %s", OracleName, until.UTC().Format(time.RFC3339)))
+	if err != nil {
+		return stopError(identity, err)
+	}
+	return StopDecision{Disposition: DispositionSlept, Run: &run,
+		Message: fmt.Sprintf("%s%s sleeps in %s for this session until %s, as you set; the turn ended without running it.",
+			stopMessagePrefix, OracleName, identity, until.Local().Format("15:04"))}
 }
 
 func stopError(repo string, err error) StopDecision {

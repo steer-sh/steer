@@ -12,15 +12,17 @@ import (
 )
 
 // Both readers of the stream name a row by the same digest of its own bytes, so
-// one exclusion reaches the queue and the recurrence counts alike.
+// one exclusion reaches the queue and the recurrence counts alike, and both
+// leave out the row of a call a sleeping guard let through.
 func TestLoadersStampTheSameRowDigest(t *testing.T) {
 	dir := t.TempDir()
 	lines := []string{
 		`{"timestamp":"2026-09-01T00:00:00Z","hook_name":"g","session_id":"s1"}`,
-		`{"timestamp":"2026-09-02T00:00:00Z","hook_name":"g","firing_id":"f2"}`,
+		`{"timestamp":"2026-09-02T00:00:00Z","hook_name":"g","firing_id":"f2","enforcement":"block"}`,
 	}
+	slept := `{"timestamp":"2026-09-03T00:00:00Z","hook_name":"g","firing_id":"f3","enforcement":"slept"}`
 	if err := os.WriteFile(filepath.Join(dir, AuditLogName),
-		[]byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		[]byte(strings.Join(append(lines, slept), "\n")+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	rows, _ := Load(dir)

@@ -1,13 +1,16 @@
 // Steer's vector marks, for a surface that draws `Svg`: the band's ground, its rail,
-// the book and a run's pulse. Each drawing is an SVG document that carries its light
+// the book, a run's pulse, the guard's shield and the check's box. Each drawing is an SVG document that carries its light
 // and dark shades. Desktop restarts an image's animations at each redraw, so each
 // drawing places its animations `t` seconds in, and a redraw continues the motion.
 
-/** What the band's hue says: a review running, a commit held, a commit let through. */
-export type Tone = 'review' | 'held' | 'pass'
+/**
+ * What a hue says: a review running, a commit or turn held, a commit or check let
+ * through, a guard or a check, or a state at rest.
+ */
+export type Tone = 'review' | 'held' | 'pass' | 'guard' | 'check' | 'dim'
 
-/** How the ground moves: `live` while a review runs, `still` otherwise. */
-export type Motion = 'live' | 'still'
+/** How the ground moves: `live` while a review runs, `once` for a block's entrance, `still` otherwise. */
+export type Motion = 'live' | 'once' | 'still'
 
 /**
  * What the book shows: `reading` moves a light down its lines, `marked` hangs a ribbon
@@ -26,30 +29,98 @@ const SWEEP_FIRST = 0.1
 const SWEEP_LIGHT = 0.8
 const SWEEP_DARK = 0.14
 
-// The tone on a light ground, on a dark ground, and a shade that reads on either.
-const ON_LIGHT: Record<Tone, string> = { review: '#3157e8', held: '#c9562b', pass: '#4c7d1a' }
-const ON_DARK: Record<Tone, string> = { review: '#9badff', held: '#f0b49b', pass: '#c4d99b' }
-const ON_EITHER: Record<Tone, string> = { review: '#5f7cf2', held: '#d9774f', pass: '#7da53c' }
+// The motion of the guard and check marks, each played once from when the state first drew. Times are in seconds.
+/** How long the shield's edge and cross hold salmon at a block, then how long they take to fade back. */
+const FLASH_HOLD = 0.9
+const FLASH_FADE = 0.6
+/** When the shine starts across the shield, and how long it takes to cross. */
+const SHINE_AT = 0.5
+const SHINE_CROSS = 1.1
+/** How strong the shine is, 0 to 1, on a light app and on a dark app. */
+const SHINE_LIGHT = 0.7
+const SHINE_DARK = 0.55
+/** How strong the cross cut into the shield shows, and how much darker it is than the shield. */
+const CUT_OPACITY = 0.3
+const CUT_DARK = 0.55
+/** How much darker the shield's right half is. */
+const SHADE_RIGHT = 0.22
+/** How much the shield darkens toward its point, and lightens at its top. */
+const SHADE_LOW = 0.16
+const SHADE_TOP = 0.22
+/** How strong the highlight on the shield's left rim is. */
+const RIM_OPACITY = 0.35
+/** How many times the check's cross blinks, and how long one blink takes. */
+const BLINKS = 3
+const BLINK_SECONDS = 0.6
+/** How dim the cross is at the low point of a blink. */
+const BLINK_LOW = 0.15
+/** When the tick starts, and how long it takes to draw. */
+const TICK_AT = 0.25
+const TICK_DRAW = 0.6
 
-/** The `REVIEW` label's colour, which reads on a light app and a dark one. */
-export const LABEL_COLOR = ON_EITHER.review
+// The tone on a light ground, on a dark ground, and a shade that reads on either.
+const ON_LIGHT: Record<Tone, string> = {
+  review: '#3157e8',
+  held: '#c9562b',
+  pass: '#4c7d1a',
+  guard: '#9a6a10',
+  check: '#1d7d6f',
+  dim: '#868d82',
+}
+const ON_DARK: Record<Tone, string> = {
+  review: '#9badff',
+  held: '#f0b49b',
+  pass: '#c4d99b',
+  guard: '#e6c98a',
+  check: '#8fd0c4',
+  dim: '#aeb8a7',
+}
+const ON_EITHER: Record<Tone, string> = {
+  review: '#5f7cf2',
+  held: '#d9774f',
+  pass: '#7da53c',
+  guard: '#a8792a',
+  check: '#2f9a8a',
+  dim: '#9aa395',
+}
+
+/** A tone's colour for text, which reads on a light app and a dark one. */
+export const textColor = (tone: Tone) => ON_EITHER[tone]
+
+/** The `REVIEW` label's colour. */
+export const LABEL_COLOR = textColor('review')
 
 /** The card's ground and edge: a tint of the tone that reads on a light app and a dark one. */
 export function cardColors(tone: Tone): { ground: string; edge: string } {
   return { ground: ON_EITHER[tone] + '17', edge: ON_EITHER[tone] + '55' }
 }
 
+/** A class, the property it colours and the tone it takes. */
+type Shade = readonly [cls: string, prop: 'stroke' | 'fill' | 'stop-color', tone: Tone]
+
 /**
- * The CSS every drawing starts with. Shapes take these classes for their colours:
- * `ts` stroke and `tf` fill in the tone, `tc` a gradient stop in the tone, `pg` a book
- * page, `lm` the reading light and `sn` a stop of the crossing light.
+ * CSS that gives each class its property in its tone's light shade, and the dark
+ * shade under `prefers-color-scheme`. `light` and `dark` are each half's own rules.
+ */
+function shaded(shades: readonly Shade[], light = '', dark = ''): string {
+  const half = (of: Record<Tone, string>) => shades.map(([cls, prop, tone]) => `.${cls}{${prop}:${of[tone]}}`).join('')
+  return `${half(ON_LIGHT)}${light}@media (prefers-color-scheme:dark){${half(ON_DARK)}${dark}}`
+}
+
+/**
+ * The CSS every ground and book drawing starts with. Shapes take these classes for
+ * their colours: `ts` stroke and `tf` fill in the tone, `tc` a gradient stop in the
+ * tone, `pg` a book page, `lm` the reading light and `sn` a stop of the crossing light.
  */
 function paint(tone: Tone): string {
-  const l = ON_LIGHT[tone]
-  const d = ON_DARK[tone]
-  return (
-    `.ts{stroke:${l}}.tf{fill:${l}}.tc{stop-color:${l}}.pg{fill:#ffffff;fill-opacity:.92}.lm{stroke:${l}}.sn{stop-color:#ffffff}` +
-    `@media (prefers-color-scheme:dark){.ts{stroke:${d}}.tf{fill:${d}}.tc{stop-color:${d}}.pg{fill:${d};fill-opacity:.14}.lm{stroke:#f5f7ed}.sn{stop-color:${d}}}`
+  return shaded(
+    [
+      ['ts', 'stroke', tone],
+      ['tf', 'fill', tone],
+      ['tc', 'stop-color', tone],
+    ],
+    `.pg{fill:#ffffff;fill-opacity:.92}.lm{stroke:${ON_LIGHT[tone]}}.sn{stop-color:#ffffff}`,
+    `.pg{fill:${ON_DARK[tone]};fill-opacity:.14}.lm{stroke:#f5f7ed}.sn{stop-color:${ON_DARK[tone]}}`,
   )
 }
 
@@ -98,17 +169,18 @@ export function washSvg(tone: Tone, motion: Motion, t: number): string {
 
 /**
  * The ground's right layer: a glow of the tone toward the right edge. `live` adds a
- * light that crosses again and again.
+ * light that crosses again and again, `once` one that crosses one time.
  */
 export function skySvg(tone: Tone, motion: Motion, t: number): string {
-  const live = motion === 'live'
-  // The part of a cycle, in percent, that the crossing takes.
+  const live = motion !== 'still'
+  // The part of a cycle, in percent, that the crossing takes; `once` plays one cycle.
   const cross = (SWEEP_CROSS / SWEEP_EVERY) * 100
+  const repeat = motion === 'live' ? 'infinite' : '1 both'
   const css =
     paint(tone) +
     `.so{opacity:${SWEEP_LIGHT}}@media (prefers-color-scheme:dark){.so{opacity:${SWEEP_DARK}}}` +
     (live
-      ? `.ah{opacity:0;animation:ah ${sec(SWEEP_EVERY)} linear ${due(SWEEP_FIRST, t)} infinite}@keyframes ah{0%{transform:translateX(-260px);opacity:0}${n(cross * 0.12)}%{opacity:1}${n(cross * 0.86)}%{opacity:1}${n(cross)}%,100%{transform:translateX(${SKY_WIDTH}px);opacity:0}}`
+      ? `.ah{opacity:0;animation:ah ${sec(SWEEP_EVERY)} linear ${due(SWEEP_FIRST, t)} ${repeat}}@keyframes ah{0%{transform:translateX(-260px);opacity:0}${n(cross * 0.12)}%{opacity:1}${n(cross * 0.86)}%{opacity:1}${n(cross)}%,100%{transform:translateX(${SKY_WIDTH}px);opacity:0}}`
       : '')
   // The mask fades the crossing light in from the layer's left edge.
   const light = `<g class="so" mask="url(#m)"><path class="ah" d="M70 0H260L190 ${GROUND_HEIGHT}H0Z" fill="url(#s)"/></g>`
@@ -213,4 +285,101 @@ export function pulseSvg(done: boolean, t: number, offset: number): string {
     `<defs><linearGradient id="c" x1="0" x2="1"><stop class="tc" offset="0" stop-opacity="0"/><stop class="tc" offset="1"/></linearGradient><clipPath id="k"><rect y="2.5" width="${PULSE_WIDTH}" height="3" rx="1.5"/></clipPath></defs>` +
     `${track('.22')}<g clip-path="url(#k)"><rect class="ap" y="2.5" width="12" height="3" rx="1.5" fill="url(#c)"/></g></svg>`
   )
+}
+
+/**
+ * A guard or check mark: `shield` for a guard, `cross` for a check that failed,
+ * `tick` for a check that passes again, `unfixed` for one that ended unfixed and
+ * `box`, the empty box, for a check at rest.
+ */
+export type Mark = 'shield' | 'cross' | 'tick' | 'unfixed' | 'box'
+
+/** The mark's size beside three lines of text, and beside a band of one line. */
+export const MARK_WIDTH = 64
+export const MARK_HEIGHT = 60
+export const MARK_SMALL_WIDTH = 19
+export const MARK_SMALL_HEIGHT = 18
+
+const SHIELD = 'M32 4L54 11V28C54 42.5 44.5 51.5 32 57C19.5 51.5 10 42.5 10 28V11Z'
+const CUT = 'M28.5 14H35.5V23.5H45V30.5H35.5V46H28.5V30.5H19V23.5H28.5Z'
+const BOX = 'M14 9H50A6 6 0 0 1 56 15V45A6 6 0 0 1 50 51H14A6 6 0 0 1 8 45V15A6 6 0 0 1 14 9Z'
+const CROSS = 'M22.5 19.5L41.5 40.5M41.5 19.5L22.5 40.5'
+const TICK = 'M20 31L28.5 39.5L44 21'
+// The tick's length, for the stroke that draws it.
+const TICK_LENGTH = 37
+
+/**
+ * The mark, in its hue and its result's. `moving` plays its motion once: the shield
+ * shows salmon at its edge and cross, then a shine crosses it; the cross blinks; the
+ * tick draws left to right. Without it, and for `unfixed`, the mark is still. `small`
+ * is for a band of one line.
+ */
+export function markSvg(mark: Mark, moving: boolean, t: number, small = false): string {
+  const hue: Tone = mark === 'shield' ? 'guard' : 'check'
+  const moves = moving && mark !== 'unfixed' && mark !== 'box'
+  const shades = shaded(
+    [
+      ['hf', 'fill', hue],
+      ['hs', 'stroke', hue],
+      ['rf', 'fill', 'held'],
+      ['rs', 'stroke', 'held'],
+      ['ps', 'stroke', 'pass'],
+    ],
+    `.sh{fill:#ffffff;opacity:${SHINE_LIGHT}}`,
+    `.sh{fill:#f5f7ed;opacity:${SHINE_DARK}}`,
+  )
+  const hold = (FLASH_HOLD / (FLASH_HOLD + FLASH_FADE)) * 100
+  const motion = !moves
+    ? ''
+    : mark === 'shield'
+      ? `.af{opacity:0;animation:af ${sec(FLASH_HOLD + FLASH_FADE)} linear ${due(0, t)} both}@keyframes af{0%,${n(hold)}%{opacity:1}100%{opacity:0}}` +
+        `.as{animation:as ${sec(SHINE_CROSS)} ease-in-out ${due(SHINE_AT, t)} both}@keyframes as{from{transform:translateX(0)}to{transform:translateX(80px)}}`
+      : mark === 'cross'
+        ? `.ab{animation:ab ${sec(BLINK_SECONDS)} linear ${due(0, t)} ${BLINKS} backwards}@keyframes ab{0%,50%{opacity:1}50.01%,100%{opacity:${BLINK_LOW}}}`
+        : `.ak{stroke-dasharray:${TICK_LENGTH};animation:ak ${sec(TICK_DRAW)} ease-out ${due(TICK_AT, t)} both}@keyframes ak{from{stroke-dashoffset:${TICK_LENGTH}}to{stroke-dashoffset:0}}`
+  const open = doc(small ? MARK_SMALL_WIDTH : MARK_WIDTH, small ? MARK_SMALL_HEIGHT : MARK_HEIGHT, `0 0 ${MARK_WIDTH} ${MARK_HEIGHT}`, shades + motion)
+  const pen = `fill="none" stroke-linecap="round" stroke-linejoin="round"`
+
+  if (mark === 'shield') {
+    const flash = moves
+      ? `<g class="af" clip-path="url(#k)"><path class="rs" d="${SHIELD}" fill="none" stroke-width="6"/><path class="rf" d="${CUT}" fill-opacity="${CUT_OPACITY}"/></g>` +
+        `<g clip-path="url(#k)"><path class="sh as" d="M-6 -2H8L-12 62H-26Z"/></g>`
+      : ''
+    return (
+      `${open}<defs><clipPath id="k"><path d="${SHIELD}"/></clipPath>` +
+      `<mask id="u"><rect width="${MARK_WIDTH}" height="${MARK_HEIGHT}" fill="#ffffff"/><path d="${CUT}" fill="#000000"/></mask>` +
+      `<linearGradient id="v" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff" stop-opacity="${SHADE_TOP}"/>` +
+      `<stop offset=".45" stop-color="#ffffff" stop-opacity="0"/><stop offset="1" stop-color="#000000" stop-opacity="${SHADE_LOW}"/></linearGradient></defs>` +
+      `<path class="hf" d="${SHIELD}" mask="url(#u)"/>` +
+      `<g clip-path="url(#k)" mask="url(#u)"><rect x="32" width="32" height="${MARK_HEIGHT}" fill="#000000" fill-opacity="${SHADE_RIGHT}"/>` +
+      `<rect width="${MARK_WIDTH}" height="${MARK_HEIGHT}" fill="url(#v)"/>` +
+      `<path d="M32 4L10 11V28C10 42.5 19.5 51.5 32 57" fill="none" stroke="#ffffff" stroke-opacity="${RIM_OPACITY}" stroke-width="3"/></g>` +
+      `<path class="hf" d="${CUT}"/><path d="${CUT}" fill="#000000" fill-opacity="${CUT_DARK}"/>` +
+      `${flash}</svg>`
+    )
+  }
+
+  const edge = small ? 7 : 4.5
+  const box = `<path class="hf hs" d="${BOX}" fill-opacity=".12" stroke-width="${edge}" stroke-linejoin="round"/>`
+  const inner = small ? 9 : 5.5
+  const sign =
+    mark === 'box'
+      ? ''
+      : mark === 'tick'
+        ? `<path class="ps${moves ? ' ak' : ''}" d="${TICK}" ${pen} stroke-width="${inner}"/>`
+        : `<path class="rs${moves ? ' ab' : ''}" d="${CROSS}" ${pen} stroke-width="${inner}"/>`
+  return `${open}${box}${sign}</svg>`
+}
+
+/**
+ * A clock for one drawing site: the seconds since the state `id` first drew there,
+ * starting again when the site draws another state. The drawings place their
+ * animations at this time, so a redraw continues them.
+ */
+export function stateClock(): (id: string, now: number) => number {
+  let entered = { id: '', at: 0 }
+  return (id, now) => {
+    if (entered.id !== id) entered = { id, at: now }
+    return Math.max(0, now - entered.at) / 1000
+  }
 }

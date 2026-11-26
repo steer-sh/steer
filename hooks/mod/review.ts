@@ -158,9 +158,6 @@ export function sessionViews(docs: readonly LiveReview[], sessionId: string, now
 
 const rank = (v: ReviewView) => (v.kind === 'running' ? 1e15 + v.doc.started_ms : v.doc.ended_ms)
 
-/** Status lines the band gives to the reviews it hides. */
-export const STATUS_LINES = 2
-
 /** The reviews behind the band's own that get a status line: held ones first, then running ones, each oldest first. */
 export function hiddenViews(views: readonly ReviewView[]): ReviewView[] {
   const order = (v: ReviewView) => (v.kind === 'held' ? 0 : 1)
@@ -205,28 +202,6 @@ export function actorOf(who: string, doc: LiveReview): string {
 }
 
 const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
-
-/** One line for a hidden review, or the count of the ones past the last line. */
-export type StatusLine =
-  | { kind: 'held' | 'running'; who: string; state: string; tail: string }
-  | { kind: 'more'; text: string }
-
-/**
- * The band's status lines for `hidden`: one each up to STATUS_LINES, else one each
- * before the last, which counts the rest. `clocks` adds a running review's elapsed time.
- */
-export function statusLines(hidden: readonly ReviewView[], name: (v: ReviewView) => string, clocks: boolean): StatusLine[] {
-  const line = (v: ReviewView): StatusLine =>
-    v.kind === 'held'
-      ? { kind: 'held', who: capital(name(v)), state: 'commit held', tail: severityCounts(v.doc.findings) }
-      : { kind: 'running', who: capital(name(v)), state: 'commit in review', tail: clocks ? clock(v.elapsedMs) : '' }
-  if (hidden.length <= STATUS_LINES) return hidden.map(line)
-  const named = hidden.slice(0, STATUS_LINES - 1)
-  const rest = hidden.slice(STATUS_LINES - 1)
-  const held = rest.filter(v => v.kind === 'held').length
-  const parts = [held ? `${plural(held, 'commit')} held` : '', rest.length - held ? `${rest.length - held} in review` : '']
-  return [...named.map(line), { kind: 'more', text: `+${rest.length} more: ${parts.filter(Boolean).join(', ')}` }]
-}
 
 /** Findings ordered BLOCKING, SUBSTANTIVE, NITPICK, each level in the order written. */
 export const bySeverity = (findings: readonly LiveFinding[]) =>

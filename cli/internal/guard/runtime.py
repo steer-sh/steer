@@ -174,6 +174,9 @@ STEER_EVIDENCE_INLINE_LIMIT = 16384
 # without it was written by a master whose footer offered no contest.
 STEER_CONTEST_PROTOCOL = 1
 STEER_PAYLOADS_DIR = "steer-audit-payloads"
+# An audit row's enforcement: a block, or a call let through while its guard slept.
+STEER_ENFORCEMENT_BLOCK = "block"
+STEER_ENFORCEMENT_SLEPT = "slept"
 
 # Every identifier a harness can supply for the call being blocked. A key that
 # did not arrive is left out of the row, so a reader tells "not supplied" from
@@ -364,13 +367,16 @@ def steer_audit_torn(store):
         return False
 
 
-def steer_audit_log(hook_name, payload, edit, harness, edit_index=None, firing_id=""):
+def steer_audit_log(hook_name, payload, edit, harness, edit_index=None, firing_id="",
+                    enforcement=STEER_ENFORCEMENT_BLOCK):
     """Append one JSON line per block decision to steer-audit.jsonl.
 
     firing_id is the identifier the block's footer shows. When the caller has
     none, the row gets its own when one can be allocated, and no
-    contest_protocol, because its footer offered no contest. Auditing must never
-    break or weaken the block decision, so every failure path is swallowed.
+    contest_protocol, because its footer offered no contest. enforcement is
+    "slept" for a call the guard let through while the user's sleep of it was
+    live. Auditing must never break or weaken the block decision, so every
+    failure path is swallowed.
     """
     try:
         meta = STEER_HOOK_META.get(hook_name, {})
@@ -409,7 +415,7 @@ def steer_audit_log(hook_name, payload, edit, harness, edit_index=None, firing_i
             "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "rule": meta.get("rule", ""),
             "hook_name": meta.get("hook_name", hook_name),
-            "enforcement": "block",
+            "enforcement": enforcement,
             "harness": harness,
             "session_id": session_id,
             "thread_id": thread_id,
@@ -498,6 +504,7 @@ def steer_blocked_before(hook_name, payload, edit):
                 except Exception:
                     continue
                 if (isinstance(row, dict) and row.get("hook_name") == name
+                        and row.get("enforcement", STEER_ENFORCEMENT_BLOCK) == STEER_ENFORCEMENT_BLOCK
                         and row.get("session_id") == session_id
                         and row.get("file_path", "") == file_path
                         and row.get("repository", "") == repository):
@@ -505,6 +512,50 @@ def steer_blocked_before(hook_name, payload, edit):
     except Exception:
         pass
     return False
+
+
+STEER_SELF_PROTECTION = "steer-self-protection"
+STEER_SLEEP_VERSION = 1
+STEER_SLEEP_MAX_MS = 60 * 60 * 1000
+
+
+def steer_sleep_key(name):
+    """A session's directory or a target's record name, as cli/internal/sleep Key spells it."""
+    return hashlib.sha256(name.encode("utf-8")).hexdigest()[:16]
+
+
+def steer_sleeping(hook_name, payload):
+    """True while the user's sleep of this guard in this session is live
+    (cli/internal/sleep). The self-protection guard never sleeps. A record that
+    is not a regular file, names another guard or session, or outlasts the
+    longest sleep is no sleep, and any failure to read one answers False."""
+    try:
+        meta = STEER_HOOK_META.get(hook_name, {})
+        name = meta.get("hook_name", hook_name)
+        if name == STEER_SELF_PROTECTION or meta.get("source") == "steer":
+            return False
+        session_id = payload.get("session_id")
+        if not isinstance(session_id, str) or not session_id:
+            return False
+        path = os.path.join(os.path.expanduser("~"), ".steer", "state", "sleep",
+                            steer_sleep_key(session_id), "guard-" + steer_sleep_key(name) + ".json")
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        with os.fdopen(os.open(path, flags), "r", encoding="utf-8") as handle:
+            if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                return False
+            record = json.loads(handle.read(65536))
+        if not isinstance(record, dict):
+            return False
+        started = record.get("started_ms")
+        until = record.get("until_ms")
+        if (record.get("version") != STEER_SLEEP_VERSION or record.get("kind") != "guard"
+                or record.get("target") != name or record.get("session") != session_id
+                or type(started) is not int or type(until) is not int):
+            return False
+        now = int(datetime.datetime.now(datetime.timezone.utc).timestamp() * 1000)
+        return started <= now < until and until - started <= STEER_SLEEP_MAX_MS
+    except Exception:
+        return False
 
 
 def steer_cli():
@@ -754,6 +805,12 @@ def steer_run(hook_names):
             if (STEER_HOOK_META.get(hook_name, {}).get("once") == "true"
                     and steer_blocked_before(hook_name, payload, edit)):
                 continue
+            # A sleeping guard lets the call through and logs it once; the
+            # guards after it still run.
+            if steer_sleeping(hook_name, payload):
+                steer_audit_log(hook_name, payload, edit, harness, edit_index,
+                                enforcement=STEER_ENFORCEMENT_SLEPT)
+                break
             firing_id = steer_new_firing_id()
             steer_audit_log(hook_name, payload, edit, harness, edit_index, firing_id)
             print(steer_render_block(output, result, hook_name, harness, firing_id))

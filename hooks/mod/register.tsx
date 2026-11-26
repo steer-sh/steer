@@ -1,45 +1,22 @@
 // Steer's Claude Code mod: a band above the prompt that shows this session's commit
-// review while it runs and how it ended. It reads the live review file the commit gate
-// writes and handles no tool event; the gate itself stays in the settings hooks.
+// review while it runs and how it ended, and after a guard or check block an offer to
+// sleep it, and a transcript row for each guard block and check Stop block. It reads
+// the files the commit gate, the guards, the Stop runner and the sleep commands write,
+// runs the steer CLI for a Sleep or Wake press, and handles no tool event;
+// enforcement stays in the settings hooks.
 
 import type { EngineInterface, Register, RenderChildren, RenderInput } from 'claude-code'
 
 import { BOOK_COLUMNS, BOOK_ROWS, COLORS, FRAME_MS, MARK_MIN_COLUMNS, RUN_COLUMNS, bookCells, bookStep, runCells } from './marks'
-import {
-  actorOf,
-  bySeverity,
-  clock,
-  hiddenViews,
-  numberThreads,
-  parseLive,
-  plural,
-  sessionSlug,
-  sessionViews,
-  severityCounts,
-  statusLines,
-  whoOf,
-} from './review'
+import { compose, statusLines } from './band'
+import type { Hidden } from './band'
+import { closeOffers, currentFixes, drawFix, fixKey, pollSleeps, statusRowsOf } from './fixband'
+import { actorOf, bySeverity, clock, numberThreads, parseLive, plural, sessionSlug, sessionViews, severityCounts, whoOf } from './review'
 import type { LiveReview, ReviewView } from './review'
-import {
-  BOOK_HEIGHT,
-  BOOK_SMALL_HEIGHT,
-  BOOK_SMALL_WIDTH,
-  BOOK_WIDTH,
-  GROUND_HEIGHT,
-  LABEL_COLOR,
-  PULSE_HEIGHT,
-  PULSE_WIDTH,
-  RAIL_WIDTH,
-  SKY_WIDTH,
-  WASH_WIDTH,
-  bookSvg,
-  cardColors,
-  pulseSvg,
-  railSvg,
-  skySvg,
-  washSvg,
-} from './vector'
+import { BOOK_HEIGHT, BOOK_SMALL_HEIGHT, BOOK_SMALL_WIDTH, BOOK_WIDTH, LABEL_COLOR, PULSE_HEIGHT, PULSE_WIDTH, bookSvg, pulseSvg, stateClock } from './vector'
 import type { Motion, Pose, Tone } from './vector'
+import { drawRow, pollBlocks, stateRoot } from './rows'
+import { vectorCard } from './card'
 
 const POLL_MS = 1000
 // How many polls pass before the state directory is resolved again.
@@ -51,8 +28,6 @@ const ANSWERED = new Set(['ok', 'salvaged', 'salvaged_clean'])
 
 // Columns the card's edge and the book take from a line where the band is drawn with `Svg`.
 const VECTOR_MARK_COLUMNS = 18
-// The height of a line of text where the band is drawn with `Svg`, in CSS px.
-const ROW_PX = 20
 // Columns a run's pulse and the gap after it take beside its words.
 const PULSE_COLUMNS = 4
 
@@ -83,8 +58,8 @@ let frameTimer: Timer | null = null
 let frame = 0
 let moving: { requestId: string; runs: number; done: Set<number> } | null = null
 
-// The review state the vector band last drew and when it first drew it: its art's time zero.
-let entered = { id: '', at: 0 }
+// Seconds since the review state the vector band draws first drew: its art's time zero.
+const reviewClock = stateClock()
 // Whether the band shows a running clock. A redraw restarts the vector art's animations,
 // so the vector band shows none and redraws only on a change of state.
 let ticking = true
@@ -93,13 +68,8 @@ let ticking = true
 async function resolveRoot($: EngineInterface): Promise<string> {
   const override = await $.env.get('COMMIT_GATE_STATE_DIR')
   if (override) return `${override}/live`
-  const home = await $.env.get('HOME')
-  if (!home) return ''
-  const neutral = `${home}/.steer/state/commit-review`
-  const legacy = `${home}/.claude/state/commit-review`
-  if (await $.fs.exists(`${neutral}/.steer-state`)) return `${neutral}/live`
-  const old = await $.fs.list(legacy).catch(() => [])
-  return `${old.length > 0 ? legacy : neutral}/live`
+  const root = await stateRoot($, 'commit-review')
+  return root ? `${root}/live` : ''
 }
 
 async function poll($: EngineInterface): Promise<void> {
@@ -119,10 +89,20 @@ async function poll($: EngineInterface): Promise<void> {
     }
   }
   docs = read
-  const views = sessionViews(docs, sessionId, await $.clock.now())
+  const now = await $.clock.now()
+  await pollBlocks($, sessionId, now, [...new Set(read.map(doc => doc.repo).filter(Boolean))]).catch(() => undefined)
+  await pollSleeps($, sessionId, now).catch(() => undefined)
+  const views = sessionViews(docs, sessionId, now)
   numberViews(views)
-  const key = keyOf(views)
+  const key = bandKey(views, now)
   if (key !== drawnKey) $.ui.invalidate('ui.render')
+}
+
+/** Everything the band draws from: the reviews, then the guard and check states; empty when there are no reviews and no fixes. */
+function bandKey(views: readonly ReviewView[], now: number): string {
+  const reviews = keyOf(views)
+  const fixes = fixKey(currentFixes(sessionId, now), now, ticking)
+  return reviews || fixes ? `${reviews}#${fixes}` : ''
 }
 
 /** Numbers the subagent threads of the current session, starting again for a new one. */
@@ -206,7 +186,7 @@ function fitRight(doc: LiveReview, clockText: string | undefined, left: string, 
 
 const cut = (text: string, width: number) => (text.length <= width ? text : `${text.slice(0, Math.max(1, width - 1))}…`)
 
-function band($: EngineInterface, e: RenderInput<'AbovePrompt'>, views: readonly ReviewView[], now: number) {
+function band($: EngineInterface, e: RenderInput<'AbovePrompt'>, views: readonly ReviewView[], others: readonly Hidden[], now: number) {
   const view = views[0] as ReviewView
   const els = $.ui.resolve(e)
   const { Box, Text } = els
@@ -216,19 +196,14 @@ function band($: EngineInterface, e: RenderInput<'AbovePrompt'>, views: readonly
   const Svg = e.surface === 'desktop' && 'Svg' in els ? els.Svg : undefined
   const vector = VECTOR[view.kind]
   ticking = !Svg
-  // The reviews the band lists: its own, then each one a status line names.
-  const hidden = hiddenViews(views)
+  // The reviews the band lists: its own, then each one a status line names; then the guard and check states.
+  const hidden = others.flatMap(item => (item.type === 'review' ? [item.view] : []))
   const listed = [view, ...hidden]
   const agent = whoOf(view, listed, numbers)
   const actor = actorOf(agent, doc)
-  const status = statusLines(hidden, v => whoOf(v, listed, numbers), ticking)
+  const status = statusLines(others, v => whoOf(v, listed, numbers), ticking, now)
   // Seconds since this state first drew: where the vector art's animations stand.
-  let t = 0
-  if (Svg) {
-    const id = `${view.kind}:${doc.started_ms}:${doc.round}`
-    if (entered.id !== id) entered = { id, at: now }
-    t = Math.max(0, now - entered.at) / 1000
-  }
+  const t = Svg ? reviewClock(`${view.kind}:${doc.started_ms}:${doc.round}`, now) : 0
   // The columns left for a line of text beside the rail and the mark.
   // A narrow Desktop band leaves the book out, as a narrow terminal leaves its marks out.
   const book = Svg !== undefined && columns >= MARK_MIN_COLUMNS
@@ -420,84 +395,22 @@ function band($: EngineInterface, e: RenderInput<'AbovePrompt'>, views: readonly
   }
   if (view.kind !== 'running' && moving?.requestId === e.requestId) stopFrames()
 
-  // A status line per review the band hides, each with a rail in its own result hue.
-  const statusRails: string[] = []
-  const statusRows: RenderChildren[] = status.map(line => {
-    const hue = line.kind === 'held' ? COLORS.held : line.kind === 'running' ? (Svg ? LABEL_COLOR : COLORS.review) : COLORS.dim
-    statusRails.push(hue)
-    const text = line.kind === 'more' ? line.text : `${line.who}: ${line.state}${line.tail ? ` · ${line.tail}` : ''}`
-    if (Svg)
-      return (
-        <Box flexDirection="row" minWidth={0}>
-          <Box flexShrink={0}>
-            <Text color={hue}>▌ </Text>
-          </Box>
-          <Box flexShrink={1} minWidth={0}>
-            <Text dimColor wrap="truncate">
-              {text}
-            </Text>
-          </Box>
-        </Box>
-      )
-    if (line.kind === 'more') return <Text dimColor>{line.text}</Text>
-    return (
-      <Text wrap="truncate-end">
-        <Text dimColor>{line.who}: </Text>
-        <Text color={hue}>{line.state}</Text>
-        <Text dimColor>{line.tail ? ` · ${line.tail}` : ''}</Text>
-      </Text>
-    )
-  })
-  // With status lines the rail and the book stay beside the band's own lines.
-  const top = statusRows.length > 0 ? ('flex-start' as const) : undefined
+  // A status line per state the band hides, each with a rail in its own hue.
+  const { rows: statusRows, rails: statusRails } = statusRowsOf(els, status, Svg !== undefined)
 
   if (Svg) {
-    const { tone, motion } = vector
-    const card = cardColors(tone)
     const small = lines.length === 1
-    const railHeight = (lines.length + wrapped) * ROW_PX - 4
-    return (
-      <Box
-        key="steer-review"
-        position="relative"
-        flexDirection="row"
-        alignItems="center"
-        paddingX={1}
-        overflow="hidden"
-        backgroundColor={card.ground}
-        borderStyle="round"
-        borderColor={card.edge}
-      >
-        <Box key="steer-wash" position="absolute" top={-1} left={0} bottom={-1}>
-          <Svg source={washSvg(tone, motion, t)} alt="steer" width={WASH_WIDTH} height={GROUND_HEIGHT} />
-        </Box>
-        <Box key="steer-sky" position="absolute" top={-1} right={0} bottom={-1}>
-          <Svg source={skySvg(tone, motion, t)} alt="steer" width={SKY_WIDTH} height={GROUND_HEIGHT} />
-        </Box>
-        {/* Desktop paints a Box over the absolute art only when the Box holds an absolute child. */}
-        <Box position="relative" marginRight={1} flexShrink={0} alignItems="center" alignSelf={top}>
-          <Box position="absolute" top={0} left={0} />
-          <Svg source={railSvg(tone, railHeight)} alt="steer" width={RAIL_WIDTH} height={railHeight} />
-        </Box>
-        {book ? (
-          <Box position="relative" marginRight={2} flexShrink={0} alignItems="center" alignSelf={top}>
-            <Box position="absolute" top={0} left={0} />
-            <Svg
-              source={bookSvg(tone, vector.pose, t, small)}
-              alt={vector.alt}
-              width={small ? BOOK_SMALL_WIDTH : BOOK_WIDTH}
-              height={small ? BOOK_SMALL_HEIGHT : BOOK_HEIGHT}
-            />
-          </Box>
-        ) : (
-          ''
-        )}
-        <Box position="relative" flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
-          <Box position="absolute" top={0} left={0} />
-          {lines}
-          {statusRows}
-        </Box>
-      </Box>
+    const mark = book
+      ? {
+          source: bookSvg(vector.tone, vector.pose, t, small),
+          alt: vector.alt,
+          width: small ? BOOK_SMALL_WIDTH : BOOK_WIDTH,
+          height: small ? BOOK_SMALL_HEIGHT : BOOK_HEIGHT,
+        }
+      : undefined
+    return vectorCard(
+      { Box, Svg },
+      { key: 'steer-review', tone: vector.tone, motion: vector.motion, t, rows: lines.length + wrapped, mark, lines, status: statusRows },
     )
   }
 
@@ -530,21 +443,44 @@ export const register: Register = on => {
     return next(e)
   })
 
+  on('ui.render', { component: 'Placed' }, async ($, e, next) => drawRow($, e, await $.clock.now()) ?? next(e))
+
+  // The next prompt closes every offer to sleep: a main-loop turn that starts from typed
+  // text, not a continuation such as a Stop block's. Observed only.
+  on('turn.start', async ($, e, next) => {
+    if (e.agentId === undefined && e.text !== '') {
+      closeOffers(await $.clock.now())
+      $.ui.invalidate('ui.render')
+    }
+    return next(e)
+  })
+
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     // A mod installed into a running session gets no session.start.
     startPolling($)
     const now = await $.clock.now()
     const views = e.props.hasSurvey ? [] : sessionViews(docs, sessionId, now)
     numberViews(views)
-    const view = views[0]
-    if (!view) {
+    const fixes = e.props.hasSurvey ? [] : currentFixes(sessionId, now)
+    const shown = compose(views, fixes)
+    if (!shown) {
       drawnKey = ''
       if (moving?.requestId === e.requestId) stopFrames()
       return next(e)
     }
-    const drawn = band($, e, views, now)
+    if (shown.full.type === 'fix') {
+      // Only the full state's mark moves: a review listed under it stops its book.
+      if (moving?.requestId === e.requestId) stopFrames()
+      ticking = e.surface !== 'desktop'
+      const listed = views
+      const status = statusLines(shown.hidden, v => whoOf(v, listed, numbers), ticking, now)
+      const drawn = drawFix($, e, shown.full.view, status, now, ticking)
+      drawnKey = bandKey(views, now)
+      return drawn
+    }
+    const drawn = band($, e, views, shown.hidden, now)
     // After the band, which decides whether the clock ticks and so what the key holds.
-    drawnKey = keyOf(views)
+    drawnKey = bandKey(views, now)
     return drawn
   })
 }

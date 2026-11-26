@@ -113,7 +113,8 @@ type Evidence struct {
 //
 // The bool reports whether any stream was readable, which separates "the guard
 // never fired" from "no audit evidence exists here". Rows are deduplicated on the
-// same key mine.LoadFirings uses, so both readers agree on what one row is.
+// same key mine.LoadFirings uses, so both readers agree on what one row is, and
+// both leave out a row a sleeping guard wrote for a call it let through.
 func Load(dirs ...string) (rows []Row, present bool) {
 	seen := map[string]bool{}
 	for _, dir := range dirs {
@@ -131,7 +132,7 @@ func Load(dirs ...string) (rows []Row, present bool) {
 				continue
 			}
 			var row Row
-			if err := json.Unmarshal([]byte(line), &row); err != nil {
+			if err := json.Unmarshal([]byte(line), &row); err != nil || !mine.IsBlockRow(row.Enforcement) {
 				continue
 			}
 			key := row.FiringID

@@ -27,8 +27,10 @@ func TestSelfProtectionValueFlagTableMatchesTheCLI(t *testing.T) {
 		}
 	}
 	rootCmd.PersistentFlags().VisitAll(collect)
-	commands := []*cobra.Command{guardCmd, removeCmd, registerCmd, configCmd}
+	commands := []*cobra.Command{guardCmd, removeCmd, registerCmd, configCmd, sleepCmd, wakeCmd}
 	commands = append(commands, configCmd.Commands()...)
+	commands = append(commands, sleepCmd.Commands()...)
+	commands = append(commands, wakeCmd.Commands()...)
 	for _, command := range commands {
 		command.PersistentFlags().VisitAll(collect)
 		command.Flags().VisitAll(collect)

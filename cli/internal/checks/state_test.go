@@ -33,6 +33,7 @@ func TestLatestRunsReportsTheHolderRatherThanTheRefusal(t *testing.T) {
 		{RunID: "first", Outcome: OutcomeFailed},
 		{RunID: "held", Outcome: OutcomePassed},
 		{RunID: "refused", Outcome: OutcomeNotExecuted, ConcurrentWith: "held"},
+		{RunID: "slept", Outcome: OutcomeNotExecuted, Disposition: DispositionSlept},
 	}
 	executed, refused := LatestRuns(history)
 	if executed == nil || executed.RunID != "held" {
@@ -42,7 +43,7 @@ func TestLatestRunsReportsTheHolderRatherThanTheRefusal(t *testing.T) {
 		t.Fatalf("refused %+v; want the run turned away after it", refused)
 	}
 
-	executed, refused = LatestRuns(history[2:])
+	executed, refused = LatestRuns(history[2:3])
 	if executed != nil {
 		t.Fatalf("executed %+v; want none when every run on record was refused", executed)
 	}

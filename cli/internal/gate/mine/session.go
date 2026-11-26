@@ -142,6 +142,14 @@ func RowDigest(line string) string {
 // AuditLogName is the guard store's audit stream, one JSON row per block decision.
 const AuditLogName = "steer-audit.jsonl"
 
+// EnforcementSlept marks an audit row for a call a guard let through while the
+// user's sleep of it was live (cli/internal/sleep).
+const EnforcementSlept = "slept"
+
+// IsBlockRow reports whether an audit row's enforcement records a block. Every
+// master before sleeps wrote "block" alone.
+func IsBlockRow(enforcement string) bool { return enforcement == "" || enforcement == "block" }
+
 // LoadFirings reads the guard audit streams in the named store directories. The bool
 // reports whether any store was readable, which separates "the guard never fired" from
 // "no audit evidence exists here".
@@ -182,8 +190,9 @@ func LoadStoreFirings(stores ...AuditStore) (firings []Firing, present bool) {
 				RuleHash          string `json:"rule_hash"`
 				MasterBuildDigest string `json:"master_build_digest"`
 				Repository        string `json:"repository"`
+				Enforcement       string `json:"enforcement"`
 			}
-			if err := json.Unmarshal([]byte(line), &row); err != nil {
+			if err := json.Unmarshal([]byte(line), &row); err != nil || !IsBlockRow(row.Enforcement) {
 				continue
 			}
 			// The two scopes share one store on a migrated machine, so the same row can

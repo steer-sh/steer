@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/steer-sh/steer-cli/internal/sleep"
 	"github.com/steer-sh/steer-cli/internal/statestore"
 )
 
@@ -105,6 +106,64 @@ func TestStopBlocksAFailureOnceThenYieldsUntilTheTreeChanges(t *testing.T) {
 	want := []string{DispositionBlock, DispositionYield, DispositionBlock, DispositionAllow, DispositionBlock, DispositionAllow, DispositionBlock}
 	if got := dispositions(t, root); strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("recorded dispositions %v; want %v", got, want)
+	}
+}
+
+// While the user's sleep of a repository's check.sh is live in a session, that
+// session's turns end without running it and each is recorded as slept; another
+// session, and the same one after a wake, runs check.sh again.
+func TestStopEndsTheTurnUncheckedWhileTheUserSleepsCheckSh(t *testing.T) {
+	identity, req := stopRepo(t, map[string]string{"a": "exit 1\n"}, "")
+	if _, err := sleep.Put(req.Session, sleep.KindCheck, identity, 5*time.Minute, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	d := Stop(req)
+	if d.Disposition != DispositionSlept || d.Reason != "" || d.Run == nil || d.Run.Outcome != OutcomeNotExecuted ||
+		!strings.Contains(d.Message, "sleeps") || d.Reply() == nil || d.Reply().Decision != "" {
+		t.Fatalf("stop while asleep %+v; want a slept run that lets the turn end with a notice", d)
+	}
+	other := req
+	other.Session = "session-b"
+	if d := Stop(other); d.Disposition != DispositionBlock {
+		t.Fatalf("another session: %s; want a block", d.Disposition)
+	}
+	if _, _, err := sleep.Remove(req.Session, sleep.KindCheck, identity, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if d := Stop(req); d.Disposition != DispositionBlock {
+		t.Fatalf("after a wake: %s; want a block", d.Disposition)
+	}
+	want := []string{DispositionSlept, DispositionBlock, DispositionBlock}
+	if got := dispositions(t, identity); strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("recorded dispositions %v; want %v", got, want)
+	}
+}
+
+// A slept Stop after a block records the checks still declared, so the block's
+// follow-up does not read its failed check as removed before the next Stop.
+func TestASleptStopKeepsTheBlockedCheckDeclared(t *testing.T) {
+	identity, req := stopRepo(t, map[string]string{"a": "exit 1\n"}, "")
+	if d := Stop(req); d.Disposition != DispositionBlock {
+		t.Fatalf("first stop: %s; want a block", d.Disposition)
+	}
+	if _, err := sleep.Put(req.Session, sleep.KindCheck, identity, 5*time.Minute, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if d := Stop(req); d.Disposition != DispositionSlept {
+		t.Fatalf("stop while asleep: %s; want slept", d.Disposition)
+	}
+	got, err := BlockFollowups(identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].NextStop == nil || got[0].NextStop.Disposition != DispositionSlept || len(got[0].Checks) != 1 {
+		t.Fatalf("followups %+v; want one block whose next Stop is the slept run", got)
+	}
+	if c := got[0].Checks[0]; c.Undeclared {
+		t.Errorf("followup %+v; want the check still declared at the slept Stop", c)
+	}
+	if got[0].SessionTree != FollowUnknown {
+		t.Errorf("session tree %s; want unknown, the slept Stop read no tree", got[0].SessionTree)
 	}
 }
 

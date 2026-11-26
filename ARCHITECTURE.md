@@ -106,11 +106,15 @@ names `hooks/codex.json`, the same file without `modules`. The mod is a view
 of state Steer writes: it draws a band above the prompt from the commit gate's live
 review file and handles no tool event and no `classic.*` event, because a tool
 handler runs ahead of every settings hook and Steer reports a mod that has one as an
-exposure. Enforcement stays in the settings hooks and the CLI, which every harness
+exposure. It handles no gating event either, such as `prompt.submit`, which
+`scripts/check-mod.py` refuses when the validator lists it as one; it observes
+`turn.start`. Enforcement stays in the settings hooks and the CLI, which every harness
 shares. `hooks/mod/marks.ts` holds the colours and pixel marks, drawn as terminal
 half-block cells. `hooks/mod/vector.ts` holds the Desktop app's drawings: `Svg`
-documents for the band's ground, its rail, the book and each run's pulse. Each drawing
-carries its light and dark shades and picks one through `prefers-color-scheme`.
+documents for the band's ground, its rail, the book, each run's pulse, the guard's
+shield and the check's box. Each drawing carries its light and dark shades and picks
+one through `prefers-color-scheme`; `hooks/mod/card.tsx` lays every Desktop band out
+as one card (tinted ground, wash, sky, rail, mark, lines).
 Desktop restarts an image's animations at each redraw, so the Desktop band shows no
 running clock and redraws only on a change of state; the animations are placed by the
 time since the state first drew, so such a redraw continues them. Other hosts get the
@@ -119,6 +123,38 @@ and the band draws one of them: the newest running review, else the newest ended
 It names the agent and repository of a subagent's review, and of any review while
 another is listed, and gives the held and running reviews it hides at most two status
 lines.
+
+The mod also places one transcript row (`$.ui.place`) for each guard block and check
+Stop block in the session, and one when the turn first ends after a block: check.sh
+passes again, or the Stop runner yields on the same failure (`hooks/mod/rows.tsx`). It writes no file for them: it reads the records Steer already
+keeps, the guard stores' `steer-audit.jsonl` and the check state's `runs.jsonl` and
+`executions.jsonl` (`hooks/mod/blocks.ts`). It watches the session's repository, each
+repository a review, a guard row or a check run names, and each check-state directory
+whose runs changed after it started watching. Each poll reads only the bytes a record
+gained, and a block recorded more than a few seconds before the mod started watching
+gets no row. The terminal row draws the guard's shield or the check's box in pixels,
+Desktop draws them and the rail as `Svg` with no card ground, and other hosts draw the
+row's text and rail alone. The engine (2.1.331 and 2.1.332) answers `$.ui.place` with
+`isPlaced: false` where no terminal is attached, so a Desktop-only session draws no
+row yet.
+
+After each guard block or check Stop block, except the self-protection guard's, the
+band offers to sleep that guard or that repository's check.sh (`hooks/mod/fixband.tsx`,
+`hooks/mod/sleep.ts`). The offer stays until Dismiss or until a main-loop turn starts
+from typed text (`turn.start`, which a Stop block's continuation starts with none). Sleep
+and Wake run `steer sleep` or `steer wake` through `$.process.run`, with the stable
+executable when it is installed and the plugin's launcher otherwise; the mod never
+writes the sleep itself. It reads the session's sleep records back each poll and shows
+a one-line countdown with the calls the guard let through (its `slept` audit rows) or
+the turns that ended (`slept` runs), and a short line for a few seconds when check.sh
+passes again. The band has one slot (`hooks/mod/band.ts`): the most urgent state is
+drawn in full, in the order offer, running review, held review, countdown, then a short
+state, which takes the slot only alone; the reviews count as one state ranked by the
+one the review band would draw, so their own order is unchanged. Every other live state
+gets one status line in its hue, two at most, and only the full state's mark moves.
+On Desktop a guard or check state takes the review band's card in its type's hue (a
+sleeping countdown in a dim one), with the mark beside its lines and native buttons;
+each mark moves once, from the time the state first drew, then stands still.
 
 Each install from another path adds that path, as `os.Executable` reports it, to
 `~/.steer/bin/source`, and `bin install` adds every active plugin copy it finds. When a recorded path lies in a harness's plugin cache and
@@ -353,8 +389,9 @@ no saved decision. A patch hunk out of its context is judged on its lines, and a
 `config.toml` one that adds a `hooks`/`enabled = false` switch or removes approval
 lines is blocked, since its table is unknown. A deletion of one is blocked, and so
 is a shell write, whose block sends the agent to Edit or Write. It also blocks
-`config set protection.self`, and `remove` or `register` of itself, with or
-without the `guard` group word. A shell command is split into simple commands, and a path counts only
+`config set protection.self`, `remove` or `register` of itself, and `sleep` or
+`wake` other than `sleep list`, with or without the `guard` group word, and every
+path in the sleep directory `~/.steer/state/sleep/`. A shell command is split into simple commands, and a path counts only
 where its command writes it (an output redirection, an operand of `rm` or `mv`
 or a directory holding a protected file, the last operand of `cp`), and a quoted
 `>` stays an argument, so reading a protected file is never blocked. A
@@ -369,6 +406,29 @@ scope: the global copy is replaced in place by the next reconcile, and
 status reads the global guard `on` and every harness the rebuild registers is
 one it runs in, which `bin install` and status name; team
 lock, apply and verify neither install nor remove it.
+
+A sleep (`internal/sleep/`, `steer sleep` and `steer wake` in `cmd/sleep.go`) lets
+one guard, or one repository's check.sh, through for one session for 1 to 60
+minutes, 5 by default. Only the user sets one: the self-protection guard refuses
+the agent's command and its writes, and in Claude Code the band's button runs the
+command outside any tool call. Each sleep is one file,
+`<state>/sleep/<key of the session ID>/<guard|check>-<key of the target>.json`, where
+a key is the first 8 bytes of the SHA-256 of the session ID, the guard's name or the
+repository identity, holding the
+target, the session and the start and end in milliseconds, so a sleep and a wake each
+write one file and need no lock. Its readers are the guard runtime
+(`steer_sleeping`), the Stop runner (`sleep.Find`) and the mod; each treats a record
+of another version, target or session, one longer than the longest sleep, or a link
+in its place as no sleep. The self-protection guard never sleeps: the command
+refuses it and the runtime ignores a record for a guard of `source: steer`.
+`steer sleep guard` writes no record, and names the rebuild, while a registered
+master of the global scope or of a repository `--repo` names (default: the working
+directory's) runs the guard without declaring the runtime's `STEER_SLEEP_VERSION`:
+such a master was built before it honored sleeps and would keep blocking. The band
+names each repository the offer's blocks came from, and a refusal leaves the offer
+open with the error's message on it.
+`sleeps.jsonl` beside the records logs each sleep and each early wake, which
+`steer sleep list` reads; an expiry writes nothing.
 
 `steer archive list` reads the project hook store, the global hook store and the
 project check store. `steer archive restore` selects one entry with
@@ -467,6 +527,14 @@ written. The audit log is therefore also the guard's state: a change to those
 fields, or a row removed from the log, changes what a block-once guard lets
 through. A call that names no file, such as Bash, shares one key per session and
 repository. A payload without a session id never matches, so it always blocks.
+
+While the user's sleep of a guard is live in the payload's session, a call the
+guard would block passes, and the runtime appends one row with `enforcement:
+"slept"` for it, with the same fields as a block and no `contest_protocol`; the
+guards after it still run. `mine.IsBlockRow` is the one reading of a row's
+enforcement: the observation loader, the firing audit queue, status's
+`telemetry.audit_firings` and the block-once lookup count only block rows, and the
+mod counts the slept ones as the commands a sleep let through.
 Runtime writes refuse linked audit files, payload directories and sidecar files,
 and linked store directories. A project store also refuses a linked parent
 `.steer` (or legacy `.claude`); a global store permits the operator's parent link.
@@ -568,7 +636,11 @@ a whole-tree check cannot attribute a failure to one session's edits. A subagent
 shares its parent's session, so that notice cannot name it: `StopHook` reads Claude
 Code's `background_tasks` and runs no check for a root Stop while a subagent task
 still runs, with a notice to the operator and no run record. Codex sends no such
-list, so its root Stop is always checked. Each run records its disposition and the
+list, so its root Stop is always checked. While the user's sleep of the
+repository's check.sh is live in the session, the turn ends without running it and
+the runner records a run with outcome `not-executed`, disposition `slept` and a
+notice to the operator; it is not a block, `LatestRuns` skips it and it clears no
+retry state. Each run records its disposition and the
 working-tree signature it judged. A Stop run also records the payload's
 transcript locators by key presence (`transcript_path`, and the turn as Claude
 Code's `prompt_id` or Codex's `turn_id`) and `stop_hook_active`; a block records
