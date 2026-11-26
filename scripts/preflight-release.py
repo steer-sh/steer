@@ -29,7 +29,7 @@ PI_PACKAGE = "package.json"
 PI_FILES = ("pi/steer-session.ts",)
 SKILL_FILES = ("skills/auto-steer/SKILL.md", "skills/steer/SKILL.md", "skills/steer/prompts/routing.md",
                "skills/steer-report/SKILL.md", "skills/steer-report/audit.md",
-               "skills/steer-report/reading.md",
+               "skills/steer-report/reading.md", "skills/steer-review/SKILL.md",
                "skills/steer-setup/SKILL.md")
 # The Claude Code mod that hooks/hooks.json names under modules, and the files it imports.
 MOD_FILES = (
@@ -106,7 +106,7 @@ def identity(root):
             raise ValueError(f"{name}: differs from the marketplace plugin")
         if plugin.get("hooks") != "./" + HOOK_FILES[name] or plugin.get("skills") != [
                 "./skills/auto-steer", "./skills/steer", "./skills/steer-report",
-                "./skills/steer-setup"]:
+                "./skills/steer-review", "./skills/steer-setup"]:
             raise ValueError(f"{name}: missing bundled skill or hook declarations")
     package = json.loads((root / PI_PACKAGE).read_text())
     resources = package.get("pi")
