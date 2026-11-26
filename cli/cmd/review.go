@@ -216,19 +216,35 @@ var reviewListCmd = &cobra.Command{
 			return nil
 		}
 		for _, r := range rows {
-			ruled := "not ruled"
-			if r.Ruled {
-				ruled = "ruled"
-				if r.HeadAdvanced {
-					ruled += ", HEAD moved after review"
-				}
-			}
-			fmt.Fprintf(out, "%s  %s  %s..%s  %-9s %d finding(s)  %s\n", r.ReviewID,
-				time.Unix(r.TS, 0).Format("2006-01-02 15:04"), shortSHA(r.BaseSHA), shortSHA(r.HeadSHA),
-				r.Phase, len(r.Findings), ruled)
+			fmt.Fprintln(out, reviewListLine(r))
 		}
 		return nil
 	},
+}
+
+// reviewListLine is one review's line in steer review list: its range, phase,
+// finding count and whether it was ruled or has nothing to rule.
+func reviewListLine(r branchreview.Listed) string {
+	count := fmt.Sprintf("%d finding(s)", r.Slots)
+	if r.Unparsed > 0 {
+		count += fmt.Sprintf(", %d reply(ies) unparsed", r.Unparsed)
+	}
+	status := "not ruled"
+	switch {
+	case r.Ruled && r.HeadAdvanced:
+		status = "ruled, HEAD moved after review"
+	case r.Ruled && r.HeadElsewhere:
+		status = "ruled, HEAD moved off the reviewed commit"
+	case r.Ruled:
+		status = "ruled"
+	case r.Unparsed > 0:
+		status = "cannot be ruled one by one"
+	case !r.Rulable:
+		status = "nothing to rule"
+	}
+	return fmt.Sprintf("%s  %s  %s..%s  %-9s %s  %s", r.ReviewID,
+		time.Unix(r.TS, 0).Format("2006-01-02 15:04"), shortSHA(r.BaseSHA), shortSHA(r.HeadSHA),
+		r.Phase, count, status)
 }
 
 // reviewRepo is the git toplevel of the working directory.

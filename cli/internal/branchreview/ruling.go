@@ -67,15 +67,8 @@ func Rule(dir, host, repo, harnessID string, review Review, rulings []RulingInpu
 		return Receipt{}, fmt.Errorf("review %s was of %s, not %s; run this from that repository",
 			review.ReviewID, review.Repo, repo)
 	}
-	switch review.Phase {
-	case PhaseClean, PhaseFindings, PhaseNitpick:
-	default:
-		return Receipt{}, fmt.Errorf("review %s ended %s: no reviewer's answer is there to rule on",
-			review.ReviewID, review.Phase)
-	}
-	if review.Unparsed > 0 {
-		return Receipt{}, fmt.Errorf("review %s holds %d reply(ies) whose findings could not be parsed, so "+
-			"they cannot be ruled one by one", review.ReviewID, review.Unparsed)
+	if err := review.refusal(); err != nil {
+		return Receipt{}, err
 	}
 	byIndex := map[int]Finding{}
 	for _, f := range review.Findings {
@@ -146,6 +139,21 @@ func checkRuling(in RulingInput) error {
 	}
 	if strings.TrimSpace(in.Resolution) == "" {
 		return errors.New("the resolution is empty; say in one sentence what you did or why the premise is false")
+	}
+	return nil
+}
+
+// refusal says why review takes no rulings, or is nil when it does.
+func (r Review) refusal() error {
+	switch r.Phase {
+	case PhaseClean, PhaseFindings, PhaseNitpick:
+	default:
+		return fmt.Errorf("review %s ended %s: no reviewer's answer is there to rule on",
+			r.ReviewID, r.Phase)
+	}
+	if r.Unparsed > 0 {
+		return fmt.Errorf("review %s holds %d reply(ies) whose findings could not be parsed, so "+
+			"they cannot be ruled one by one", r.ReviewID, r.Unparsed)
 	}
 	return nil
 }

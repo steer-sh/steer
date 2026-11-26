@@ -93,8 +93,11 @@ func FindReview(dir, host, id string) (Review, error) {
 // Listed is a review with what its latest ruling receipt says.
 type Listed struct {
 	Review
-	Ruled        bool `json:"ruled"`
-	HeadAdvanced bool `json:"head_advanced"`
+	// Rulable reports that steer review rule accepts rulings on this review.
+	Rulable       bool `json:"rulable"`
+	Ruled         bool `json:"ruled"`
+	HeadAdvanced  bool `json:"head_advanced"`
+	HeadElsewhere bool `json:"head_elsewhere,omitempty"`
 }
 
 // List returns the host's reviews of repo, newest first; an empty repo lists every
@@ -119,7 +122,8 @@ func List(dir, host, repo string) ([]Listed, error) {
 			continue
 		}
 		receipt, ruled := latest[r.ReviewID]
-		out = append(out, Listed{Review: r, Ruled: ruled, HeadAdvanced: receipt.HeadAdvanced})
+		out = append(out, Listed{Review: r, Rulable: r.refusal() == nil, Ruled: ruled,
+			HeadAdvanced: receipt.HeadAdvanced, HeadElsewhere: receipt.HeadElsewhere})
 	}
 	return out, nil
 }

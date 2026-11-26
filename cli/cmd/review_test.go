@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/steer-sh/steer-cli/internal/branchreview"
 	"github.com/steer-sh/steer-cli/internal/gate"
 	"github.com/steer-sh/steer-cli/internal/gate/reviewers"
 )
@@ -28,6 +29,32 @@ func TestBranchProviderUsableWarnsOfAnAPIReviewerWithoutTools(t *testing.T) {
 		}
 		if got := strings.Contains(warning, "reviewer.api.tools is off"); got != tc.warns {
 			t.Errorf("%s tools %q: warning = %q", tc.provider, tc.tools, warning)
+		}
+	}
+}
+
+// TestReviewListLineSaysWhatEachReviewAwaits checks that a list line counts finding
+// slots, not parsed findings, notes unparsed replies, names a skip as having nothing
+// to rule, and tells a ruling on a moved HEAD apart from one on the reviewed commit.
+func TestReviewListLineSaysWhatEachReviewAwaits(t *testing.T) {
+	findings := branchreview.Review{Phase: branchreview.PhaseFindings, Slots: 2}
+	for _, tc := range []struct {
+		name          string
+		row           branchreview.Listed
+		count, status string
+	}{
+		{"awaiting", branchreview.Listed{Review: findings, Rulable: true}, "2 finding(s)", "not ruled"},
+		{"unparsed", branchreview.Listed{Review: branchreview.Review{Phase: branchreview.PhaseFindings, Slots: 3, Unparsed: 1}},
+			"3 finding(s), 1 reply(ies) unparsed", "cannot be ruled one by one"},
+		{"skip", branchreview.Listed{Review: branchreview.Review{Phase: branchreview.PhaseSkipEmpty}}, "0 finding(s)", "nothing to rule"},
+		{"ruled", branchreview.Listed{Review: findings, Rulable: true, Ruled: true}, "2 finding(s)", "  ruled"},
+		{"advanced", branchreview.Listed{Review: findings, Rulable: true, Ruled: true, HeadAdvanced: true},
+			"2 finding(s)", "ruled, HEAD moved after review"},
+		{"elsewhere", branchreview.Listed{Review: findings, Rulable: true, Ruled: true, HeadElsewhere: true},
+			"2 finding(s)", "ruled, HEAD moved off the reviewed commit"},
+	} {
+		if line := reviewListLine(tc.row); !strings.Contains(line, tc.count+"  ") || !strings.HasSuffix(line, tc.status) {
+			t.Errorf("%s: line %q; want %q and the status %q", tc.name, line, tc.count, tc.status)
 		}
 	}
 }

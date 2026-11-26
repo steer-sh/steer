@@ -202,6 +202,9 @@ func TestRunNeverReadsAnUnusableAnswerAsClean(t *testing.T) {
 		if _, err := Rule(req.Dir, req.Host, repo, "", review, nil); err == nil || !strings.Contains(err.Error(), tc.ruleRefusalIn) {
 			t.Errorf("reply %q: Rule err = %v; want %q", tc.reply, err, tc.ruleRefusalIn)
 		}
+		if listed, err := List(req.Dir, req.Host, repo); err != nil || len(listed) != 1 || listed[0].Rulable {
+			t.Errorf("reply %q: List = %+v, %v; want one review that is not rulable", tc.reply, listed, err)
+		}
 	}
 }
 
@@ -249,6 +252,9 @@ func TestRunSkipsABranchWithNothingToReview(t *testing.T) {
 	}
 	if review, err := FindReview(req.Dir, req.Host, res.ReviewID); err != nil || review.Phase != PhaseSkipEmpty {
 		t.Errorf("the skip row = %+v, %v", review, err)
+	}
+	if listed, err := List(req.Dir, req.Host, repo); err != nil || len(listed) != 1 || listed[0].Rulable {
+		t.Errorf("List = %+v, %v; want the skip as not rulable", listed, err)
 	}
 	if raw, _ := os.ReadFile(ReviewsFile(req.Dir, req.Host)); !strings.Contains(string(raw), "settings file did not load") {
 		t.Errorf("the skip row does not record the request's warning: %s", raw)
@@ -315,7 +321,7 @@ func TestRuleTakesOneValidRulingPerFinding(t *testing.T) {
 		t.Errorf("receipt = %+v", receipt)
 	}
 	listed, err := List(req.Dir, req.Host, repo)
-	if err != nil || len(listed) != 1 || !listed[0].Ruled || !listed[0].HeadAdvanced {
+	if err != nil || len(listed) != 1 || !listed[0].Rulable || !listed[0].Ruled || !listed[0].HeadAdvanced {
 		t.Errorf("List = %+v, %v", listed, err)
 	}
 	// A HEAD that does not descend from the reviewed one is not an advance.
@@ -323,5 +329,8 @@ func TestRuleTakesOneValidRulingPerFinding(t *testing.T) {
 	moved, err := Rule(req.Dir, req.Host, repo, "", review, []RulingInput{ok, {Index: 2, Verdict: VerdictRejected, Resolution: "x"}})
 	if err != nil || moved.HeadAdvanced || !moved.HeadElsewhere {
 		t.Errorf("on main: receipt = %+v, %v", moved, err)
+	}
+	if listed, err := List(req.Dir, req.Host, repo); err != nil || len(listed) != 1 || listed[0].HeadAdvanced || !listed[0].HeadElsewhere {
+		t.Errorf("on main: List = %+v, %v", listed, err)
 	}
 }
