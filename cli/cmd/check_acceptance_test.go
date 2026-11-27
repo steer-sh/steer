@@ -24,6 +24,9 @@ import (
 const cliUnderTestEnv = "STEER_CMD_TEST_CLI"
 
 func TestMain(m *testing.M) {
+	// Under go test os.Executable is this test binary, so a detached child would
+	// rerun the whole suite and spawn more children that outlive the run.
+	spawnDetached = func(...string) {}
 	if os.Getenv(cliUnderTestEnv) == "1" {
 		if err := Execute(); err != nil {
 			os.Exit(1)
