@@ -1042,7 +1042,13 @@ directory; a named `--ledger` reads none. The newest ruling receipt of a review 
 its rulings into the row's concerns, joined `ruling`, which the cross-chain dedup
 skips. An unruled review with findings is pending for `mine.BranchRulingGrace` and
 missed after it, counted from the end of the review; one with unparsed replies is
-missed at once. A review that runs pins both ends as `refs/branch-review/<sha>`,
+missed at once. `mine findings` and `forgetRead` read through it; the dump marks a
+branch chain `channel=branch`, and its incidence lines count commit chains alone. In
+`--undecided`, `mine.ChainCoverage` hides a branch finding that a rejected class
+matches, or an active class matches from before its split (`mine.SplitTS`). One an
+active class matches at or after the split stays shown, marked
+`[caught-after=<id>]`: no score counts it, so it is evidence about that fix, not a
+new candidate. A review that runs pins both ends as `refs/branch-review/<sha>`,
 best effort: a skipped review pins nothing, and a failed `update-ref` is not
 reported. A ruling receipt
 (`steer review rule`) needs one ruling per finding, numbered across the panel, and

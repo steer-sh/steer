@@ -149,7 +149,7 @@ func forgetRead(stateDir string, record Record) error {
 		return nil
 	}
 	kind := RecordKindFilter(record)
-	rows, err := LoadRows(stateDir, "")
+	rows, err := LoadReviewRows(stateDir, "")
 	if err != nil {
 		return err
 	}
