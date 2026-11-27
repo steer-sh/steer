@@ -1045,8 +1045,9 @@ missed after it, counted from the end of the review; one with unparsed replies i
 missed at once. `mine findings` and `forgetRead` read through it; the dump marks a
 branch chain `channel=branch`, and its incidence lines count commit chains alone. In
 `--undecided`, `mine.ChainCoverage` hides a branch finding that only a rejected
-class, or an active class from before its split (`mine.SplitTS`), matches. One an
-active class matches at or after the split stays shown, marked
+class, an active class from before its split (`mine.SplitTS`), or an active class
+whose scope does not hold the chain matches. One an active class matches at or after
+the split, on a chain its scope holds, stays shown, marked
 `[caught-after=<id>]`, whatever other class covers it: no score counts it, so it is
 evidence about that fix, not a new candidate. `cadence.Refresh` adds `mine.LoadBranchChains` to the commit chains
 it scores for the review pointer's `undecided_chains` and the review corpus row

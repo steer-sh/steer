@@ -8,13 +8,18 @@ import (
 // Deciding is one live class decision, compiled, that may cover a finding in the
 // review corpus. Kind is the record's normalized verdict filter: the verdict a
 // finding must carry for this class to speak about it. Active marks an installed
-// fix, and SplitTS is where its windows split (SplitTS).
+// fix, SplitTS is where its after-window opens (SplitTS, or scope_set_ts for a legacy
+// record scoped later, as Score opens it), and Scope is its stored scope:
+// nil for a legacy record, which Score reads over the whole corpus. BadScope marks a
+// stored scope that does not parse, which Score refuses.
 type Deciding struct {
-	ID      string
-	Kind    string
-	Pattern *regexp.Regexp
-	Active  bool
-	SplitTS float64
+	ID       string
+	Kind     string
+	Pattern  *regexp.Regexp
+	Active   bool
+	SplitTS  float64
+	Scope    *Scope
+	BadScope bool
 }
 
 // DecidingClasses compiles the records that may cover a review finding: a live
@@ -38,8 +43,13 @@ func DecidingClasses(records []Record) []Deciding {
 		if err != nil {
 			continue
 		}
+		scope, _, err := ParseScope(r)
+		after := SplitTS(r)
+		if v := numFloat(r["scope_set_ts"]); v != 0 {
+			after = v
+		}
 		out = append(out, Deciding{ID: str(r["id"]), Kind: kind, Pattern: pattern,
-			Active: status == "active", SplitTS: SplitTS(r)})
+			Active: status == "active", SplitTS: after, Scope: scope, BadScope: err != nil})
 	}
 	return out
 }
@@ -64,15 +74,17 @@ func CoveringIDs(f Finding, deciding []Deciding) []string {
 // ChainCoverage splits the classes matching one finding of ch, each list sorted.
 // covering decides the finding as CoveringIDs does. caughtAfter holds the active
 // classes a branch review chain matched at or after their split, as Score splits a
-// window: no score reads a branch chain, so that finding stays shown as evidence
-// about those fixes, whatever other class covers it. A rejected class covers a branch
-// finding at any time.
+// window, on a chain their scope holds: no score reads a branch chain, so that
+// finding stays shown as evidence about those fixes, whatever other class covers it.
+// A class whose scope excludes the chain, cannot decide it or does not parse covers
+// it, as on a commit chain. A rejected class covers a branch finding at any time.
 func ChainCoverage(ch Chain, f Finding, deciding []Deciding) (covering, caughtAfter []string) {
 	for _, d := range deciding {
 		if !KindFilter(f, d.Kind) || !d.Pattern.MatchString(f.Text) {
 			continue
 		}
-		if ch.Channel == ChannelBranch && d.Active && numFloat(ch.StartTS) >= d.SplitTS {
+		if ch.Channel == ChannelBranch && d.Active && numFloat(ch.StartTS) >= d.SplitTS &&
+			!d.BadScope && (d.Scope == nil || d.Scope.Classify(ch) == Eligible) {
 			caughtAfter = append(caughtAfter, d.ID)
 			continue
 		}

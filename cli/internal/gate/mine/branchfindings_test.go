@@ -29,6 +29,30 @@ func installedAt(id, match string, ts int) Record {
 	return r
 }
 
+// scopedTo gives r a stored scope over the repositories repo matches.
+func scopedTo(r Record, repo string) Record {
+	r["scope"] = map[string]any{"version": ScopeVersionV1, "repo": repo}
+	return r
+}
+
+// pathScoped gives r a stored scope over the changed paths path matches.
+func pathScoped(r Record, path string) Record {
+	r["scope"] = map[string]any{"version": ScopeVersionV1, "path": path}
+	return r
+}
+
+// scopedLater gives r the scope a legacy record took at ts.
+func scopedLater(r Record, ts int) Record {
+	r["scope_set_ts"] = ts
+	return scopedTo(r, "app")
+}
+
+// badScope gives r a stored scope of a version no binary reads.
+func badScope(r Record) Record {
+	r["scope"] = map[string]any{"version": 99, "all": true}
+	return r
+}
+
 // TestUndecidedShowsABranchFindingUnderItsChannel checks that an undecided branch
 // finding reaches the dump, labelled channel=branch in text and JSON, while the
 // commit chain beside it carries no channel, and that a class's incidence in the
@@ -67,8 +91,8 @@ func TestUndecidedShowsABranchFindingUnderItsChannel(t *testing.T) {
 
 // TestUndecidedBranchFindingCoverage checks the branch rule of ChainCoverage in the
 // dump: an active class hides a branch finding from before its split and shows one
-// after it, marked with its id, even when another class covers it; a rejected class
-// hides it at any time.
+// after it, marked with its id, even when another class covers it, only on a chain its
+// scope holds; a rejected class hides it at any time.
 func TestUndecidedBranchFindingCoverage(t *testing.T) {
 	rejected := reviewRecord("noise", "handle", "defect", "rejected")
 	rejected["rejected_ts"] = 1
@@ -82,7 +106,12 @@ func TestUndecidedBranchFindingCoverage(t *testing.T) {
 		"a later class covering it does not hide the catch": {
 			[]Record{installedAt("fix", "handle", 4000), installedAt("late", "leaks", 9000)},
 			"  [ACCEPTED] [caught-after=fix] [covered-by=late] the branch leaks a handle"},
-		"a rejected class covers it": {[]Record{rejected}, ""},
+		"a class scoped to another repository covers it":        {[]Record{scopedTo(installedAt("fix", "handle", 4000), "other")}, ""},
+		"a class whose scope cannot decide the chain covers it": {[]Record{pathScoped(installedAt("fix", "handle", 4000), "src/")}, ""},
+		"a class whose scope does not parse covers it":          {[]Record{badScope(installedAt("fix", "handle", 4000))}, ""},
+		"a class scoped after the review covers it":             {[]Record{scopedLater(installedAt("fix", "handle", 4000), 9000)}, ""},
+		"a class scoped to its repository shows it as caught":   {[]Record{scopedTo(installedAt("fix", "handle", 4000), "app")}, caught},
+		"a rejected class covers it":                            {[]Record{rejected}, ""},
 	} {
 		out := findingsOut(t, branchFindingsDir(t, tc.records, "the branch leaks a handle"),
 			FindingsOpts{Kind: "accepted", Undecided: true})
