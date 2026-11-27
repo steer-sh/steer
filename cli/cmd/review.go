@@ -305,6 +305,7 @@ func renderBranchReview(out io.Writer, res branchreview.Result, cfg gate.Config)
 		fmt.Fprintln(out, res.Review)
 		fmt.Fprintf(out, "\n%d reply(ies) above are not wholly in the finding format, so their findings cannot be ruled one by one.\n",
 			res.Unparsed)
+		renderPolicy(out)
 		return
 	}
 	// Each reviewer numbers its own findings from 1; rule takes these numbers.
@@ -316,7 +317,14 @@ func renderBranchReview(out io.Writer, res branchreview.Result, cfg gate.Config)
 		}
 		fmt.Fprintln(out)
 	}
+	renderPolicy(out)
 	fmt.Fprintf(out, "Rule on each finding by the number above, after any fix commits: steer review rule %s --stdin\n", res.ReviewID)
+}
+
+// renderPolicy prints the adjudication policy the commit gate's deny carries, so a
+// branch finding is ruled under the same policy as a commit's.
+func renderPolicy(out io.Writer) {
+	fmt.Fprintf(out, "\nRule on each finding under this policy:\n\n%s\n\n", gate.AdjudicationPolicy())
 }
 
 // branchReviewJSON is the machine-readable form of a review's result.
@@ -331,6 +339,9 @@ func branchReviewJSON(res branchreview.Result, cfg gate.Config) map[string]any {
 	}
 	if res.Findings == nil {
 		out["findings"] = []branchreview.Finding{}
+	}
+	if res.Review != "" {
+		out["adjudication"] = gate.AdjudicationPolicy()
 	}
 	if res.Trouble != "" {
 		out["trouble"] = res.Trouble

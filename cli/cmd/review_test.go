@@ -89,3 +89,33 @@ func TestRenderBranchReviewSaysWhatEachPhaseLeaves(t *testing.T) {
 		}
 	}
 }
+
+// TestBranchReviewCarriesTheCommitGatePolicy checks that a review with something to
+// rule hands the agent the commit gate's adjudication policy, as text and as JSON, and
+// a clean review does not.
+func TestBranchReviewCarriesTheCommitGatePolicy(t *testing.T) {
+	answered := []gate.ReviewRun{{}}
+	finding := branchreview.Finding{Index: 1, Run: 1, Severity: "BLOCKING", File: "b.go", Claim: "B returns A.", FailsWhen: "always."}
+	policy := gate.AdjudicationPolicy()
+	for _, tc := range []struct {
+		name string
+		res  branchreview.Result
+		want bool
+	}{
+		{"findings", branchreview.Result{Phase: branchreview.PhaseFindings, Answered: 1, Runs: answered,
+			Review: "x", Slots: 1, Findings: []branchreview.Finding{finding}}, true},
+		{"unparsed", branchreview.Result{Phase: branchreview.PhaseFindings, Answered: 1, Runs: answered,
+			Review: "prose", Unparsed: 1}, true},
+		{"clean", branchreview.Result{Phase: branchreview.PhaseClean, Answered: 1, Runs: answered}, false},
+	} {
+		var out bytes.Buffer
+		renderBranchReview(&out, tc.res, gate.Defaults())
+		if got := strings.Contains(out.String(), policy); got != tc.want {
+			t.Errorf("%s: text carries the policy = %v, want %v", tc.name, got, tc.want)
+		}
+		got, ok := branchReviewJSON(tc.res, gate.Defaults())["adjudication"]
+		if ok != tc.want || (ok && got != policy) {
+			t.Errorf("%s: JSON adjudication = %v (present %v), want present %v", tc.name, got, ok, tc.want)
+		}
+	}
+}

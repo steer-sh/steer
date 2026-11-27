@@ -7,9 +7,10 @@ import (
 	"testing"
 )
 
-// The digests of the seven templates. review.md's digest is the instrument's prompt
+// The digests of the eight templates. review.md's digest is the instrument's prompt
 // half, so a change there makes every row written afterwards a different instrument;
-// deny.md, cap.md and nitpick.md are read by the agent alone and move no instrument.
+// deny.md, cap.md, nitpick.md and adjudication.md are read by the agent alone and
+// move no instrument.
 // These are golden values, not a checksum of convenience. Regenerate one only
 // when the prompt change is the intended change.
 var promptDigests = map[string]struct {
@@ -17,11 +18,13 @@ var promptDigests = map[string]struct {
 	want string
 }{
 	"review":     {reviewPrompt, "22c02ff71dd349d0622fe4d359182944057912d5ec051b72fa114aff24f2a1ff"},
-	"deny":       {denyTemplate, "9ba32aa2552d2b3205aa1491bc444e2688a8e440f5e81b418fc7b1db890fd4b1"},
-	"cap":        {capTemplate, "89df834419fdae8cb8585bdc6b977d2f7d5eb2377d6eb8b1aaddc6d3a0130c32"},
-	"nitpick":    {nitpickTemplate, "23ced2dc4dc2f61de49a4d3b5beec78bff9ad89dbac61884ea18c48c7e2424c8"},
+	"deny":       {denyTemplate, "296c1ce098a8e5f2e838bcd384ba714f6c3bba04d8bfcc74cff73450eaf5ae90"},
+	"cap":        {capTemplate, "85949b7e29177570f1ce8e2ab0a73ad6289875e191fa4f5135e9a622f7e1fda6"},
+	"nitpick":    {nitpickTemplate, "56047a3169d3fc337bbf9558bb18ff1cbaae8c3c6232573dc3452a13c336f602"},
 	"round-note": {roundNote, "f40acabd50e95481f309c08ccacf4cac025835d79e8e265601170f7c4a4d34c3"},
 	"rerun-note": {rerunNoteText, "27d14c6916336301abd551b90d82d5fc799e027ae7d95b0520ef501c0efa9f1b"},
+	// The author-side policy the deny, cap and nitpick templates and a branch review share.
+	"adjudication": {adjudicationPolicy, "e480864f058a929749b0575d2aaac5c8cb68097bc2709797e8bae5a170bc1e4e"},
 	// The branch review's instrument prompt half, as review.md is the commit review's.
 	"branch-review": {branchPrompt, "0ab9b80dd35857afffd8d228b5ac1be0702649f98988a862c945c04fae71033d"},
 }
@@ -53,7 +56,7 @@ func TestNoPlaceholderSurvivesFill(t *testing.T) {
 		for _, placeholder := range []string{
 			"{message}", "{diff}", "{context}", "{count}", "{review}",
 			"{firing}", "{cap}", "{round_note}", "{rerun_note}", "{subject}",
-			"{chain}", "{reviewer}", "{sections}",
+			"{chain}", "{reviewer}", "{sections}", "{adjudication}",
 		} {
 			if strings.Contains(out, placeholder) {
 				t.Errorf("%s output still carries %s", name, placeholder)
