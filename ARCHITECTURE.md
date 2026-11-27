@@ -1047,8 +1047,8 @@ branch chain `channel=branch`, and its incidence lines count commit chains alone
 `--undecided`, `mine.ChainCoverage` hides a branch finding that a rejected class
 matches, or an active class matches from before its split (`mine.SplitTS`). One an
 active class matches at or after the split stays shown, marked
-`[caught-after=<id>]`: no score counts it, so it is evidence about that fix, not a
-new candidate. `cadence.Refresh` adds `mine.LoadBranchChains` to the commit chains
+`[caught-after=<id>]`, whatever other class covers it: no score counts it, so it is
+evidence about that fix, not a new candidate. `cadence.Refresh` adds `mine.LoadBranchChains` to the commit chains
 it scores for the review pointer's `undecided_chains` and the review corpus row
 alone, under the same coverage, so a caught-after finding keeps its chain undecided;
 `interventions[]` and every score read the commit chains. A review that runs pins both ends as `refs/branch-review/<sha>`,

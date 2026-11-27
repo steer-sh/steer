@@ -90,7 +90,7 @@ func Findings(out io.Writer, stateDir string, o FindingsOpts) error {
 		chainResidue := 0
 		chainNew := false
 		for _, f := range findings {
-			if len(f.CoveredBy) > 0 {
+			if len(f.CoveredBy) > 0 && len(f.CaughtAfter) == 0 {
 				covered++
 				continue
 			}
@@ -239,10 +239,13 @@ func Findings(out io.Writer, stateDir string, o FindingsOpts) error {
 		for _, f := range c["findings"].([]RenderedFinding) {
 			verdict := verdictLabel(f.Finding)
 			switch {
-			case len(f.CoveredBy) > 0:
-				fmt.Fprintf(w, "  [%s] [covered-by=%s] %s\n", verdict, strings.Join(f.CoveredBy, ","), f.Text)
+			case len(f.CaughtAfter) > 0 && len(f.CoveredBy) > 0:
+				fmt.Fprintf(w, "  [%s] [caught-after=%s] [covered-by=%s] %s\n", verdict,
+					strings.Join(f.CaughtAfter, ","), strings.Join(f.CoveredBy, ","), f.Text)
 			case len(f.CaughtAfter) > 0:
 				fmt.Fprintf(w, "  [%s] [caught-after=%s] %s\n", verdict, strings.Join(f.CaughtAfter, ","), f.Text)
+			case len(f.CoveredBy) > 0:
+				fmt.Fprintf(w, "  [%s] [covered-by=%s] %s\n", verdict, strings.Join(f.CoveredBy, ","), f.Text)
 			default:
 				fmt.Fprintf(w, "  [%s] %s\n", verdict, f.Text)
 			}

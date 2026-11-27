@@ -65,7 +65,8 @@ func CoveringIDs(f Finding, deciding []Deciding) []string {
 // covering decides the finding as CoveringIDs does. caughtAfter holds the active
 // classes a branch review chain matched at or after their split, as Score splits a
 // window: no score reads a branch chain, so that finding stays shown as evidence
-// about those fixes. A rejected class covers a branch finding at any time.
+// about those fixes, whatever other class covers it. A rejected class covers a branch
+// finding at any time.
 func ChainCoverage(ch Chain, f Finding, deciding []Deciding) (covering, caughtAfter []string) {
 	for _, d := range deciding {
 		if !KindFilter(f, d.Kind) || !d.Pattern.MatchString(f.Text) {
@@ -84,11 +85,12 @@ func ChainCoverage(ch Chain, f Finding, deciding []Deciding) (covering, caughtAf
 
 // HasUncovered reports whether any finding of ch is covered by no class, as
 // ChainCoverage reads it: a branch finding an active class caught after its split
-// is uncovered. One covered finding does not decide the others: a residual
-// unclassified finding is the evidence a reader still has to cluster.
+// is uncovered, whatever other class covers it. One covered finding does not decide
+// the others: a residual unclassified finding is the evidence a reader still has to
+// cluster.
 func HasUncovered(ch Chain, findings []Finding, deciding []Deciding) bool {
 	for _, f := range findings {
-		if covering, _ := ChainCoverage(ch, f, deciding); len(covering) == 0 {
+		if covering, caught := ChainCoverage(ch, f, deciding); len(covering) == 0 || len(caught) > 0 {
 			return true
 		}
 	}

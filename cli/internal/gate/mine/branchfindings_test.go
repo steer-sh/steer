@@ -67,20 +67,24 @@ func TestUndecidedShowsABranchFindingUnderItsChannel(t *testing.T) {
 
 // TestUndecidedBranchFindingCoverage checks the branch rule of ChainCoverage in the
 // dump: an active class hides a branch finding from before its split and shows one
-// after it, marked with its id; a rejected class hides it at any time.
+// after it, marked with its id, even when another class covers it; a rejected class
+// hides it at any time.
 func TestUndecidedBranchFindingCoverage(t *testing.T) {
 	rejected := reviewRecord("noise", "handle", "defect", "rejected")
 	rejected["rejected_ts"] = 1
+	caught := "  [ACCEPTED] [caught-after=fix] the branch leaks a handle"
 	for name, tc := range map[string]struct {
-		record Record
-		want   string
+		records []Record
+		want    string
 	}{
-		"an active class installed after the review covers it": {installedAt("fix", "handle", 9000), ""},
-		"an active class installed before it shows it as caught": {installedAt("fix", "handle", 4000),
-			"  [ACCEPTED] [caught-after=fix] the branch leaks a handle"},
-		"a rejected class covers it": {rejected, ""},
+		"an active class installed after the review covers it":   {[]Record{installedAt("fix", "handle", 9000)}, ""},
+		"an active class installed before it shows it as caught": {[]Record{installedAt("fix", "handle", 4000)}, caught},
+		"a later class covering it does not hide the catch": {
+			[]Record{installedAt("fix", "handle", 4000), installedAt("late", "leaks", 9000)},
+			"  [ACCEPTED] [caught-after=fix] [covered-by=late] the branch leaks a handle"},
+		"a rejected class covers it": {[]Record{rejected}, ""},
 	} {
-		out := findingsOut(t, branchFindingsDir(t, []Record{tc.record}, "the branch leaks a handle"),
+		out := findingsOut(t, branchFindingsDir(t, tc.records, "the branch leaks a handle"),
 			FindingsOpts{Kind: "accepted", Undecided: true})
 		if tc.want == "" {
 			if strings.Contains(out, "leaks a handle") {
