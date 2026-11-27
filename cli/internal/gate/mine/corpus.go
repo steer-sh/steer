@@ -46,6 +46,22 @@ func LoadRows(stateDir, ledger string) ([]gate.Row, error) {
 		sort.Strings(matches)
 		paths = matches
 	}
+	rows, err := loadShards(paths, ShardHost, func(row gate.Row) {
+		recoverChangedPaths(stateDir, row)
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		return rowTS(rows[i]) < rowTS(rows[j])
+	})
+	return rows, nil
+}
+
+// loadShards reads each JSONL file in paths, in order, skipping a missing file,
+// a blank line and a line decodeRow rejects. A row missing `host` takes host(path), and
+// onRow then sees each row before it is kept. Rows come back in file order.
+func loadShards(paths []string, host func(string) string, onRow func(gate.Row)) ([]gate.Row, error) {
 	var rows []gate.Row
 	for _, p := range paths {
 		data, err := readFileIfExists(p)
@@ -55,7 +71,7 @@ func LoadRows(stateDir, ledger string) ([]gate.Row, error) {
 		if data == nil {
 			continue
 		}
-		fallback := ShardHost(p)
+		fallback := host(p)
 		for _, line := range strings.Split(string(data), "\n") {
 			line = strings.TrimSpace(line)
 			if line == "" {
@@ -68,13 +84,10 @@ func LoadRows(stateDir, ledger string) ([]gate.Row, error) {
 			if _, ok := row["host"]; !ok {
 				row["host"] = fallback
 			}
-			recoverChangedPaths(stateDir, row)
+			onRow(row)
 			rows = append(rows, row)
 		}
 	}
-	sort.SliceStable(rows, func(i, j int) bool {
-		return rowTS(rows[i]) < rowTS(rows[j])
-	})
 	return rows, nil
 }
 
