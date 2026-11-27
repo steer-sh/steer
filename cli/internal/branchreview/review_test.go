@@ -101,6 +101,7 @@ func TestRunReviewsTheWholeBranchAndRecordsIt(t *testing.T) {
 	reviewer := &stub{replies: []string{oneFinding, "NO FINDINGS", oneFinding}}
 	req := request(t, repo)
 	req.Warnings = []string{"reviewer.api.tools is off"}
+	req.Harness = "codex"
 	// A state root an older binary left open is closed by the first review.
 	stateRoot := filepath.Join(t.TempDir(), "state")
 	if err := os.MkdirAll(stateRoot, 0o755); err != nil {
@@ -148,6 +149,9 @@ func TestRunReviewsTheWholeBranchAndRecordsIt(t *testing.T) {
 	}
 	if errs, _ := row["review_errors"].([]any); len(errs) != 1 || errs[0] != req.Warnings[0] {
 		t.Errorf("review_errors = %v; want the request's warning", row["review_errors"])
+	}
+	if row["channel"] != gate.ChannelBranch || row["harness"] != "codex" {
+		t.Errorf("channel = %v, harness = %v; want %q and the request's harness", row["channel"], row["harness"], gate.ChannelBranch)
 	}
 	if fields, _ := row["instrument_fields"].(map[string]any); fields["engine"] != gate.BranchInstrumentSuffix {
 		t.Errorf("instrument_fields = %v", row["instrument_fields"])
@@ -250,7 +254,8 @@ func TestASkippedReviewReportsAManifestThatDidNotLoad(t *testing.T) {
 }
 
 // TestRunSkipsABranchWithNothingToReview checks that HEAD at its base records a skip
-// row, with the request's warnings, and runs no reviewer; that a branch changing only
+// row, with the request's warnings and the branch channel but no harness the request
+// did not name, and runs no reviewer; that a branch changing only
 // an existing binary file is skipped too, unless git may run an external diff or a
 // reviewed rule covers the file.
 func TestRunSkipsABranchWithNothingToReview(t *testing.T) {
@@ -272,8 +277,16 @@ func TestRunSkipsABranchWithNothingToReview(t *testing.T) {
 	if listed, err := List(req.Dir, req.Host, repo); err != nil || len(listed) != 1 || listed[0].Rulable {
 		t.Errorf("List = %+v, %v; want the skip as not rulable", listed, err)
 	}
-	if raw, _ := os.ReadFile(ReviewsFile(req.Dir, req.Host)); !strings.Contains(string(raw), "settings file did not load") {
+	raw, _ := os.ReadFile(ReviewsFile(req.Dir, req.Host))
+	var row map[string]any
+	if err := json.Unmarshal(raw, &row); err != nil {
+		t.Fatal(err)
+	}
+	if errs, _ := row["review_errors"].([]any); len(errs) != 1 || errs[0] != req.Warnings[0] {
 		t.Errorf("the skip row does not record the request's warning: %s", raw)
+	}
+	if _, named := row["harness"]; row["channel"] != gate.ChannelBranch || named {
+		t.Errorf("skip row channel = %v, harness = %v; want %q and no harness", row["channel"], row["harness"], gate.ChannelBranch)
 	}
 
 	t.Setenv("GIT_EXTERNAL_DIFF", "")
