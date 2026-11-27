@@ -11,7 +11,7 @@ allowed-tools: Bash(steer *), Read, Edit, Write
 This skill closes the friction loop. It decides two things, in this order:
 
 1. **Is a problem the loop already answered still happening?** A class that came back gets reworked or removed.
-2. **Which new patterns recur often enough to deserve a hook?** Both corpora feed this — transcript friction and commit-review findings.
+2. **Which new patterns recur often enough to deserve a hook?** Both corpora feed this — transcript friction and review findings.
 
 The default output is an executive assessment: what needs attention, what can stay
 in place, what remains uncertain, and which new findings merit action. Complete
@@ -24,7 +24,7 @@ The audit comes first on purpose. Proposing new hooks is the interesting half, a
 Two corpora feed this skill, and either may be empty on a given machine:
 
 - **Transcript friction** — repeated corrections, rejected tool calls, recurring lint/test failures, and instruction-file rules (CLAUDE.md, AGENTS.md) not yet enforced. Mined by `steer report` across every harness with transcripts on this machine.
-- **Review findings** — defects the commit-review gate and `steer review branch` found and adjudicated. Mined by `steer fix findings`. Absent when this machine holds neither a commit-review ledger nor a ruled branch review.
+- **Review findings** — defects the commit-review gate and `steer review branch` found, with the author's rulings where they exist. Mined by `steer fix findings`. Absent when this machine holds neither a commit-review ledger nor a branch review.
 
 An empty corpus produces one line, never an error. An adopter with no commit-review ledger still gets the transcript half — the cold-start front door.
 
@@ -442,7 +442,7 @@ candidate's `undecided_chains`; `interventions[]` still reads commit chains alon
 
 ### 2b. Review findings
 
-If the queue's `review-findings` corpus row is present, dump the findings: it counts commit-review chains and ruled branch reviews, so a machine with branch reviews alone still has a pile. If not, skip to Step 3 and add nothing: Step 1's sweep sentence already told the reader that review history is absent, and what comes next.
+If the queue's `review-findings` corpus row is present, dump the findings: it counts commit-review chains and every branch review the reviewer answered, ruled or not, so a machine with branch reviews alone still has a pile. If not, skip to Step 3 and add nothing: Step 1's sweep sentence already told the reader that review history is absent, and what comes next.
 
 ```bash
 <STEER_BIN> fix findings --kind accepted --undecided --to-file
