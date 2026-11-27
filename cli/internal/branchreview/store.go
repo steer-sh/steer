@@ -1,7 +1,9 @@
 // Package branchreview reviews a whole branch before a pull request and records
 // what the reviewers found and how the author ruled on it. It is advisory: nothing
 // here blocks a command. Its rows live in their own store, apart from the commit
-// review's ledger, so no reader of commit-review evidence counts them.
+// review's ledger. gate/mine reads them as chains for the readers that find
+// candidates (mine.LoadReviewRows); no reader that scores a fix or freezes its
+// baseline reads them.
 package branchreview
 
 import (

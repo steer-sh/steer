@@ -510,7 +510,7 @@ func newInterventionCommands() (*interventionFlags, []*cobra.Command) {
 	f.StringVar(&v.findingsKind, "kind", "accepted",
 		"accepted|repaired|deferred|rejected|both; repaired and deferred split accepted by the ACCEPTED, not fixed ruling")
 	f.Float64Var(&v.findingsSince, "since", 0, "only the last N days")
-	f.BoolVar(&v.findingsStrictJoins, "strict-joins", false, "round-joined rows only")
+	f.BoolVar(&v.findingsStrictJoins, "strict-joins", false, "round-joined commit rows and ruled branch reviews only")
 	f.BoolVar(&v.findingsIncludeEmpty, "include-empty", false, "keep chains with no findings")
 	f.BoolVar(&v.findingsUndecided, "undecided", false,
 		"drop the chains a live class already covers, and mark the covered findings in the rest")

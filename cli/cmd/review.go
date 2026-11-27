@@ -108,7 +108,7 @@ own findings from 1.`,
 			cfg.ReviewerLabel(), cfg.ReviewerRuns, cfg.ReviewTimeout)
 		res, err := branchreview.Run(context.Background(), cfg, reviewer, branchreview.Request{
 			Repo: repo, BaseRef: reviewBase, AllowDirty: reviewAllowDirty,
-			Dir: branchreview.Dir(), Host: cfg.HostID, Warnings: warnings,
+			Dir: branchreview.Dir(), Host: cfg.HostID, Harness: string(harness.Detect()), Warnings: warnings,
 		})
 		if err != nil {
 			printWarnings()

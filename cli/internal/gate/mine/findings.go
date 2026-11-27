@@ -23,17 +23,20 @@ type FindingsOpts struct {
 
 // RenderedFinding is a finding plus what the dump knows about it. CoveredBy is the
 // classes covering it, populated only in the undecided view, so a default dump
-// emits exactly the JSON it emitted before the view existed.
+// emits exactly the JSON it emitted before the view existed. CaughtAfter is the
+// active classes a branch review matched after their split (ChainCoverage): the
+// finding stays shown, as evidence about those fixes rather than a new candidate.
 type RenderedFinding struct {
 	Finding
-	CoveredBy []string `json:"covered_by,omitempty"`
+	CoveredBy   []string `json:"covered_by,omitempty"`
+	CaughtAfter []string `json:"caught_after,omitempty"`
 }
 
 // Findings emits adjudicated findings grouped by chain, for a reader to cluster.
 func Findings(out io.Writer, stateDir string, o FindingsOpts) error {
 	ew := &errWriter{w: out}
 	var w io.Writer = ew
-	rows, err := LoadRows(stateDir, o.Ledger)
+	rows, err := LoadReviewRows(stateDir, o.Ledger)
 	if err != nil {
 		return err
 	}
@@ -70,9 +73,9 @@ func Findings(out io.Writer, stateDir string, o FindingsOpts) error {
 	var payload []map[string]any
 	var shown []Chain
 	selected, covered, residue, carrying, residueChains := 0, 0, 0, 0, 0
-	deferred, shownDeferred := 0, 0
+	deferred, shownDeferred, caught := 0, 0, 0
 	for _, ch := range chains {
-		findings := renderFindings(filterFindings(ch.Findings, o.Kind), deciding, o.Undecided)
+		findings := renderFindings(ch, filterFindings(ch.Findings, o.Kind), deciding, o.Undecided)
 		selected += len(findings)
 		chainDeferred := 0
 		for _, f := range findings {
@@ -87,11 +90,14 @@ func Findings(out io.Writer, stateDir string, o FindingsOpts) error {
 		chainResidue := 0
 		chainNew := false
 		for _, f := range findings {
-			if len(f.CoveredBy) > 0 {
+			if len(f.CoveredBy) > 0 && len(f.CaughtAfter) == 0 {
 				covered++
 				continue
 			}
 			chainResidue++
+			if len(f.CaughtAfter) > 0 {
+				caught++
+			}
 			if o.Undecided {
 				key := FindingKey(ch, f.Finding)
 				shownKeys[key] = true
@@ -123,6 +129,9 @@ func Findings(out io.Writer, stateDir string, o FindingsOpts) error {
 		}
 		if ch.RepoRootKnown {
 			entry["repo_root"] = ch.RepoRoot
+		}
+		if ch.Channel == ChannelBranch {
+			entry["channel"] = ch.Channel
 		}
 		if o.Undecided {
 			entry["new"] = chainNew
@@ -171,8 +180,15 @@ func Findings(out io.Writer, stateDir string, o FindingsOpts) error {
 		for _, d := range deciding {
 			decides[d.ID] = o.Kind == "both" || d.Kind == kindVerdict(o.Kind)
 		}
+		// A class's incidence is read over commit chains, the corpus its score reads.
+		commitChains := make([]Chain, 0, len(chains))
+		for _, ch := range chains {
+			if ch.Channel != ChannelBranch {
+				commitChains = append(commitChains, ch)
+			}
+		}
 		for _, r := range records {
-			printDecisionIncidence(w, r, chains)
+			printDecisionIncidence(w, r, commitChains)
 			if o.Undecided && !decides[str(r["id"])] {
 				fmt.Fprintln(w, "#     decides none of the findings below: retired, another corpus, or another verdict")
 			}
@@ -188,6 +204,9 @@ func Findings(out io.Writer, stateDir string, o FindingsOpts) error {
 		fmt.Fprintf(w, "# --undecided: %d covered, %d remaining over %d chain(s) — those %d chains are what is printed below\n",
 			covered, residue, residueChains, len(payload))
 		fmt.Fprintln(w, "# a covered finding is shown in place, marked [covered-by=...]; quote the text without the marker")
+		if caught > 0 {
+			fmt.Fprintf(w, "# %d branch review finding(s) an active class matched after its install are marked [caught-after=...]: evidence about that fix, not a new candidate\n", caught)
+		}
 		if readRecorded {
 			fmt.Fprintf(w, "# %d chain(s) carry a finding no earlier pass read and come first under %q; the other %d follow under %q\n",
 				newChains, newHeading, len(payload)-newChains, readHeading)
@@ -211,15 +230,25 @@ func Findings(out io.Writer, stateDir string, o FindingsOpts) error {
 		if o.Undecided && i == newChains {
 			fmt.Fprintf(w, "%s: %d chain(s)\n\n", readHeading, len(payload)-newChains)
 		}
-		fmt.Fprintf(w, "--- %s  ts=%s  repo=%s  rounds=%d  files=%d  end=%s\n",
-			c["date"], pyStr(c["start_ts"]), labels[i], c["rounds"], c["files"], pyStr(c["terminal"]))
+		channel := ""
+		if c["channel"] == ChannelBranch {
+			channel = "  channel=" + ChannelBranch
+		}
+		fmt.Fprintf(w, "--- %s  ts=%s  repo=%s  rounds=%d  files=%d  end=%s%s\n",
+			c["date"], pyStr(c["start_ts"]), labels[i], c["rounds"], c["files"], pyStr(c["terminal"]), channel)
 		for _, f := range c["findings"].([]RenderedFinding) {
 			verdict := verdictLabel(f.Finding)
-			if len(f.CoveredBy) > 0 {
+			switch {
+			case len(f.CaughtAfter) > 0 && len(f.CoveredBy) > 0:
+				fmt.Fprintf(w, "  [%s] [caught-after=%s] [covered-by=%s] %s\n", verdict,
+					strings.Join(f.CaughtAfter, ","), strings.Join(f.CoveredBy, ","), f.Text)
+			case len(f.CaughtAfter) > 0:
+				fmt.Fprintf(w, "  [%s] [caught-after=%s] %s\n", verdict, strings.Join(f.CaughtAfter, ","), f.Text)
+			case len(f.CoveredBy) > 0:
 				fmt.Fprintf(w, "  [%s] [covered-by=%s] %s\n", verdict, strings.Join(f.CoveredBy, ","), f.Text)
-				continue
+			default:
+				fmt.Fprintf(w, "  [%s] %s\n", verdict, f.Text)
 			}
-			fmt.Fprintf(w, "  [%s] %s\n", verdict, f.Text)
 		}
 		fmt.Fprintln(w)
 	}
@@ -323,14 +352,15 @@ func repoLabels(chains []Chain) []string {
 	return labels
 }
 
-// renderFindings pairs each finding with the classes covering it. Outside the
-// undecided view nothing is consulted, so no finding carries a marker.
-func renderFindings(findings []Finding, deciding []Deciding, undecided bool) []RenderedFinding {
+// renderFindings pairs each finding of ch with the classes covering it and those it
+// was caught after. Outside the undecided view nothing is consulted, so no finding
+// carries a marker.
+func renderFindings(ch Chain, findings []Finding, deciding []Deciding, undecided bool) []RenderedFinding {
 	out := make([]RenderedFinding, 0, len(findings))
 	for _, f := range findings {
 		r := RenderedFinding{Finding: f}
 		if undecided {
-			r.CoveredBy = CoveringIDs(f, deciding)
+			r.CoveredBy, r.CaughtAfter = ChainCoverage(ch, f, deciding)
 		}
 		out = append(out, r)
 	}

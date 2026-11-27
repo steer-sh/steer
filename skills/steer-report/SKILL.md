@@ -2,7 +2,7 @@
 name: steer-report
 description: Audits the fixes steer already installed, then mines Claude Code, Codex and Pi transcripts and the commit-review ledger for new fix candidates backed by evidence — repository checks, guards, instruction rules, or review prompt entries. Use for steer onboarding ("what hooks should I create?"), periodic review of installed hooks and fixes, or when the user asks to mine usage history for candidates.
 user-invocable: true
-compatibility: Requires the steer CLI (report, commit-gate and check subcommands) on PATH or bundled under scripts/. Reads transcripts from ~/.claude/projects, $CODEX_HOME/sessions and Pi's sessions ($PI_CODING_AGENT_SESSION_DIR, else sessions under $PI_CODING_AGENT_DIR or ~/.pi/agent), and, when present, the commit-review ledger under ~/.steer/state/commit-review (~/.claude/state/commit-review on a machine that has not yet migrated).
+compatibility: Requires the steer CLI (report, commit-gate and check subcommands) on PATH or bundled under scripts/. Reads transcripts from ~/.claude/projects, $CODEX_HOME/sessions and Pi's sessions ($PI_CODING_AGENT_SESSION_DIR, else sessions under $PI_CODING_AGENT_DIR or ~/.pi/agent), and, when present, the commit-review ledger under ~/.steer/state/commit-review (~/.claude/state/commit-review on a machine that has not yet migrated) and the branch-review store under ~/.steer/state/branch-review.
 allowed-tools: Bash(steer *), Read, Edit, Write
 ---
 
@@ -11,7 +11,7 @@ allowed-tools: Bash(steer *), Read, Edit, Write
 This skill closes the friction loop. It decides two things, in this order:
 
 1. **Is a problem the loop already answered still happening?** A class that came back gets reworked or removed.
-2. **Which new patterns recur often enough to deserve a hook?** Both corpora feed this — transcript friction and commit-review findings.
+2. **Which new patterns recur often enough to deserve a hook?** Both corpora feed this — transcript friction and review findings.
 
 The default output is an executive assessment: what needs attention, what can stay
 in place, what remains uncertain, and which new findings merit action. Complete
@@ -24,7 +24,7 @@ The audit comes first on purpose. Proposing new hooks is the interesting half, a
 Two corpora feed this skill, and either may be empty on a given machine:
 
 - **Transcript friction** — repeated corrections, rejected tool calls, recurring lint/test failures, and instruction-file rules (CLAUDE.md, AGENTS.md) not yet enforced. Mined by `steer report` across every harness with transcripts on this machine.
-- **Commit-review findings** — defects the commit-review gate found and adjudicated. Mined by `steer fix findings`. Absent when there is no commit-review ledger on this machine.
+- **Review findings** — defects the commit-review gate and `steer review branch` found, with the author's rulings where they exist. Mined by `steer fix findings`. Absent when this machine holds neither a commit-review ledger nor a branch review.
 
 An empty corpus produces one line, never an error. An adopter with no commit-review ledger still gets the transcript half — the cold-start front door.
 
@@ -81,7 +81,7 @@ id and draw no audit conclusion for it. Fail soft — if a command errors, say s
 one line, continue, and read `audit.md` anyway: without a snapshot, nothing shows
 that there is no fix to audit.
 
-Then Read the queue **once**: `~/.steer/state/steer-report/queue.json` (`version: 18`). It holds:
+Then Read the queue **once**: `~/.steer/state/steer-report/queue.json` (`version: 19`). It holds:
 
 - `interventions[]` — full contract records the tier flagged as **asking for a reader**: the class recurred after the split, an absent guard audit log or missing check evidence left the fix's activity unread, the record carries no frozen scope, the fix it binds is `absent` or `unreadable`, or the fix is in place but carries `artifact.removed`. These carry a `match`; they are the audit's action list, pre-filtered. Each carries `problem` and `intervention` — the record's own explanation of what goes wrong and what it does about it, authored when the class was found. Lead your report with those rather than with the class name or the regex, and correct one that no longer describes the evidence with `steer fix describe ID`, which changes no window. Each also carries the conditions the counts were taken under: `corpus` and `unit` (`review-findings` counts by `chain`, `transcript-friction` by `session` — never compare the two rates), `signal_kind` on a session-unit record, `scope` (the frozen eligibility rule, `null` on a legacy record), `before_coverage` / `after_coverage` (`total`, `eligible`, `ineligible`, `unknown`, `unknown_scope`, `unknown_evidence`, `pending`, `ledger_missed`, `ledger_overdue`, `partial_exposure`), `observation` — the seven field blocks documented in `audit.md` — and `artifact`, where the fix the record binds stands now.
 - `unscored[]` — ids of records no engine reads. Report their existence; do not read a result into them.
@@ -176,7 +176,7 @@ A correction occurrence can carry two context fields, each `{text, cut}` with `c
 
 An `after_interrupt` occurrence carries the same two fields, read from before the interrupt. A `correction_candidates` occurrence carries them too.
 
-### The `steer status --json` contract (`status_version: 40`)
+### The `steer status --json` contract (`status_version: 41`)
 
 Step 1 reads this snapshot for posture and the full class inventory. The unit is
 the failure class and what the corpus recorded about it, not the hook count. This
@@ -229,6 +229,8 @@ v38 adds `posture.protection` and removes `presets[]`: Steer ships no presets, a
 guard an earlier Steer installed from one is a `hooks[]` row whose `source` is `factory`.
 v39 removes `team`: Steer reads no team lockfile, and a repository shares its fixes
 as the files committed under `.steer/`.
+v41 counts branch review chains in the review `corpora[]` row and the review
+candidate's `undecided_chains`; `interventions[]` still reads commit chains alone.
 
 - `status_version` — the schema version. `--json` is a stable agent contract.
 - `posture` — the arming state: `instrument` (reviewer model / runs / prompt
@@ -438,9 +440,9 @@ as the files committed under `.steer/`.
   a file outside its store is refused this way, and an operator repairs it by
   editing the named entry.
 
-### 2b. Commit-review findings
+### 2b. Review findings
 
-If this machine has a commit-review ledger, dump the findings. If not, skip to Step 3 and add nothing: Step 1's sweep sentence already told the reader that review history is absent, and what comes next.
+If the queue's `review-findings` corpus row is present, dump the findings: it counts commit-review chains and every branch review the reviewer answered, ruled or not, so a machine with branch reviews alone still has a pile. If not, skip to Step 3 and add nothing: Step 1's sweep sentence already told the reader that review history is absent, and what comes next.
 
 ```bash
 <STEER_BIN> fix findings --kind accepted --undecided --to-file
@@ -451,20 +453,20 @@ Read each dump **once**, from its start to the `=== read before` line: the decid
 
 The new section holds every chain with a finding no earlier pass read: a later chain, or a finding a retired class returned to the pile. The read-before section holds the chains an earlier pass read and left as one-offs. For each finding in the new section, in this order:
 
-1. Compare it with the decided classes above the header. A class marked `decides none of the findings below` cannot cover it, so a resemblance to one is no miss. A finding that describes the problem of any other class but carries no `[covered-by=...]` marker is a miss of that class's regex. It is a recurrence only when its chain started after the date in the class's headline and the chain is inside every predicate of the class's `scope` in `interventions[]`: repository, harness and paths. `steer fix match` with the record's `--scope-*` flags marks a chain inside or outside that scope. An earlier miss is a miss in the baseline, and one outside the scope is no evidence about the class. Name the class and the finding, and propose a wider regex through `register --supersedes`. A superseding record opens a fresh window, so the missed recurrence counts in its baseline and never as a recurrence; say so in the proposal.
+1. Compare it with the decided classes above the header. A class marked `decides none of the findings below` cannot cover it, so a resemblance to one is no miss. A finding that describes the problem of any other class but carries no `[covered-by=...]` marker is a miss of that class's regex. It is a recurrence only when its chain started after the date in the class's headline and the chain is inside every predicate of the class's `scope` in `interventions[]`: repository, harness and paths. `steer fix match` with the record's `--scope-*` flags marks a chain inside or outside that scope. An earlier miss is a miss in the baseline, and one outside the scope is no evidence about the class. Name the class and the finding, and propose a wider regex through `register --supersedes`. A superseding record opens a fresh window, so the missed recurrence counts in its baseline and never as a recurrence; say so in the proposal. A finding marked `[caught-after=<class-id>]` is no miss and no new candidate: that class's regex matched it, in a branch review inside the class's scope that started after the class's install (after its scope was set, for a legacy record scoped later). It is a post-install branch catch, evidence about that record: report it beside the record's Step 1 audit reading, and never count it into the record's windows, which read commit chains alone.
 2. Search the read-before section for a partner. Draft the regex this finding's class would need, in the words that name the kind of mistake and not in this commit's identifiers, and Grep the dump file with it. A finding that names more than one mistake, such as a defect and a commit message that claims the opposite, can belong to a class for each: search for each one. Members of one class rarely share identifiers or paths, so a search by those words misses most partners. Read each matched chain in full before you pair it.
 
 Read the whole of a dump instead when its new section is empty, when the header says no earlier pass recorded a read, or when the user asks for a full sweep. A search finds no partner that shares no words with the new finding; a full read is the only way to find one.
 
-The queue's review candidate names how many chains carry an accepted finding that no class regex — active or rejected — yet covers (`undecided_chains`). A class counts as covering one only when it is live (active or rejected, never removed or reworked), mined from this corpus, and authored against that finding's verdict — a false-positive class decides rejected findings and leaves an accepted defect undecided. A transcript-friction class names a pattern in a session transcript, so its regex meeting a finding's text here is a coincidence. A record stored before the corpus tags existed reads as review-findings. That is the pool the classes below come from; the review side has no per-class threshold the tier can compute, because a new class has no regex until you author one.
+The queue's review candidate names how many chains carry an accepted finding that no class regex — active or rejected — yet covers (`undecided_chains`). A class counts as covering one only when it is live (active or rejected, never removed or reworked), mined from this corpus, and authored against that finding's verdict — a false-positive class decides rejected findings and leaves an accepted defect undecided. A live active class does not cover a branch review's finding that it matched after its install (after its scope was set, for a legacy record scoped later), inside its scope: that finding stays undecided, marked `[caught-after=...]` in the dump. A transcript-friction class names a pattern in a session transcript, so its regex meeting a finding's text here is a coincidence. A record stored before the corpus tags existed reads as review-findings. That is the pool the classes below come from; the review side has no per-class threshold the tier can compute, because a new class has no regex until you author one.
 
-`--undecided` hands you the pool, not the corpus: it drops the chains whose every finding of the dump's verdict a live class already covers, so what you cluster over is what is left to decide. A chain that carries one covered finding and one residual finding stays, with the covered one shown in place and marked `[covered-by=<class-id>]`. Quote the finding text without that marker — it is generated classification metadata, not part of the reviewer's words. The header names how many findings are covered, how many remain, and over how many chains, which is the arithmetic that tells you whether your classes are finished.
+`--undecided` hands you the pool, not the corpus: it drops the chains whose every finding of the dump's verdict a live class already covers, so what you cluster over is what is left to decide. A chain that carries one covered finding and one residual finding stays, with the covered one shown in place and marked `[covered-by=<class-id>]`. A branch review's finding that an active class matched after its install is residual, marked `[caught-after=<class-id>]`. Quote the finding text without either marker — each is generated classification metadata, not part of the reviewer's words. The header names how many findings are covered, how many remain, and over how many chains, which is the arithmetic that tells you whether your classes are finished.
 
 A finding marked `[ACCEPTED, not fixed]` is a true concern the author left unrepaired, because no supported use needed the repair or the user said to leave it; the header names how many the dump holds. A class made mostly of them is weak evidence for a defect fix. `--kind repaired` and `--kind deferred` split the accepted dump by that ruling.
 
 Each chain header names the repository its rows recorded (`repo=`), so the project-or-global scope of a proposal is arithmetic over the chains in the class, not recall. Two checkouts sharing a directory name are both named by their whole path. A chain whose rows carried no repository metadata reads `repo=unknown`: it is a missing fact, so leave it out of the count rather than assigning it to the repository you are standing in. Counting where a class occurred tells you where it has been seen, never where it would occur — a class seen in one repository can still be a global rule.
 
-Output is grouped by chain — one chain per commit attempt, findings deduplicated within it. The header line gives the denominator (`N chains reviewed`), which is what every rate on the review side is over. `--undecided` does not move that denominator: it narrows what you are shown, never what a rate is over, so an incidence printed under it means the same thing it means without it.
+Output is grouped by chain — one chain per commit attempt, findings deduplicated within it. A chain whose header ends `channel=branch` (`"channel": "branch"` in JSON) is one review of a whole branch, not a commit attempt. The header line gives the denominator (`N chains reviewed`), branch reviews included. Each class's incidence above it counts commit chains alone, the corpus its score reads, so a branch review never moves a class's rate. `--undecided` does not move that denominator: it narrows what you are shown, never what a rate is over, so an incidence printed under it means the same thing it means without it.
 
 Above that header the dump lists every class already decided on this corpus, each with its incidence **now** and, for a rejection, its reason and reopen condition. Read that block before you cluster. It is the one place a past refusal reaches you at the moment you would otherwise re-derive it.
 
@@ -507,6 +509,8 @@ The script does no semantic grouping by design. Read the findings and name the c
 - It appears on **2 or more distinct chains**, and you state the count in the proposal. Two occurrences justify showing the class to the reader; the reader decides whether to install it. Say where you drew the class boundary, because the count follows from it: one class split in half can read as 2 and 3 where the merged class reads as 5.
 - It spans **more than one commit and more than one file**. A defect that only ever hit one file is that file's bug, not a class.
 - It names a **concrete, detectable tell** — a pattern in the source or the commit message, not a quality ("insufficient error handling").
+
+A class whose every member is a `channel=branch` chain has no baseline: `steer fix match`, `register` and `reject` read commit chains alone, so `match` finds none of its members. Present it as an observation, with how many branch reviews carry it, and install nothing. Do not pass `--force` to freeze an empty baseline, and do not install a fix without its record: an unrecorded fix leaves its findings undecided on every pass. A class with a commit chain among its members qualifies as any other, and its baseline counts those commit chains alone.
 
 Do the same pass over the rejected dump. A recurring **false-positive** class is equally actionable — it goes to the review addendum as a suppression, and it answers whether the rejected fraction is a prompt problem or reviewer noise.
 
@@ -779,7 +783,7 @@ For each accepted review candidate:
 
    Add `--show-residue` to see what the regex leaves behind: the findings of that kind it does not match, and the terms recurring among them, each with its count in the residue and its count across the whole corpus. Where the two counts are equal the term is the corpus's own vocabulary and names nothing; where the residue count is well under the corpus count, the regex already reaches most of that term's chains. A residue term with a high count and few matches is the class you did not name — either widen the regex or author a second class for it. The residue is per finding, so a chain your regex matches still contributes the findings inside it that it misses. What it lists is unmatched by **this** regex, which is not the same as unclassified: another registered class may already cover it, and `mine findings --undecided` is what answers that.
 
-   Iterate until it matches the class members and nothing else. This regex is the class's permanent definition — `score` re-counts with it months from now, so an over-broad regex will report the class as recurring forever, and a commit-specific one will report a quiet window it did not earn. Prefer the defect's vocabulary over any single commit's identifiers.
+   Iterate until it matches the class members and nothing else. `match` reads commit chains alone, so a `channel=branch` member never appears in it: test the regex against that member's text as the findings dump prints it. This regex is the class's permanent definition — `score` re-counts with it months from now, so an over-broad regex will report the class as recurring forever, and a commit-specific one will report a quiet window it did not earn. Prefer the defect's vocabulary over any single commit's identifiers.
 
 2. **Install the fix** through its tier's workflow, and verify it fires on the real case:
 

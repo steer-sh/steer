@@ -56,9 +56,12 @@ func rowAnchorTS(rows []gate.Row, i int) (float64, bool) {
 }
 
 // ChainEvidence grades one chain, worst row wins: unresolved outranks a closed miss, so a
-// miss never hides work the resolver still owes. now is the clock the grace window is
-// measured against.
+// miss never hides work the resolver still owes. now is the clock the grace window
+// runs on. A branch review chain owes its author's rulings instead (branchEvidence).
 func ChainEvidence(ch Chain, now float64) Evidence {
+	if ch.Channel == ChannelBranch {
+		return branchEvidence(ch, now)
+	}
 	worst := EvidenceComplete
 	for i, row := range ch.Rows {
 		if !expectsLedger(row) {

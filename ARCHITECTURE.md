@@ -1031,8 +1031,28 @@ counted), since CLI reviewers read
 the disk and an API reviewer reads the index. Rows live in
 `~/.steer/state/branch-review/` (`reviews.<host>.jsonl`, `rulings.<host>.jsonl`,
 `diffs/`), apart from the commit-review ledger, and the component is not in
-`statestore.Components`: it has no legacy corpus. No resolver, `gate/mine` or status
-reader reads it. A review that runs pins both ends as `refs/branch-review/<sha>`,
+`statestore.Components`: it has no legacy corpus. No resolver reads it, and no reader
+that scores a fix or freezes its baseline: `mine.LoadRows` stays the commit ledger
+alone. Only `mine.LoadReviewRows` reads it, the loader for readers that find
+candidates. It adds each review row to the commit rows, and `BuildChains` makes each
+review a reviewer answered a one-row chain keyed `branch:<review_id>`
+(`Chain.Channel` is `branch`); a skipped or ungated review is a non-review phase and
+makes none. The store is read from `mine.BranchReviewDirFor` beside the commit-review state
+directory; a named `--ledger` reads none. The newest ruling receipt of a review turns
+its rulings into the row's concerns, joined `ruling`, which the cross-chain dedup
+skips. An unruled review with findings is pending for `mine.BranchRulingGrace` and
+missed after it, counted from the end of the review; one with unparsed replies is
+missed at once. `mine findings` and `forgetRead` read through it; the dump marks a
+branch chain `channel=branch`, and its incidence lines count commit chains alone. In
+`--undecided`, `mine.ChainCoverage` hides a branch finding that only a rejected
+class, an active class from before its split (`mine.SplitTS`), or an active class
+whose scope does not hold the chain matches. One an active class matches at or after
+the split, on a chain its scope holds, stays shown, marked
+`[caught-after=<id>]`, whatever other class covers it: no score counts it, so it is
+evidence about that fix, not a new candidate. `cadence.Refresh` adds `mine.LoadBranchChains` to the commit chains
+it scores for the review pointer's `undecided_chains` and the review corpus row
+alone, under the same coverage, so a caught-after finding keeps its chain undecided;
+`interventions[]` and every score read the commit chains. A review that runs pins both ends as `refs/branch-review/<sha>`,
 best effort: a skipped review pins nothing, and a failed `update-ref` is not
 reported. A ruling receipt
 (`steer review rule`) needs one ruling per finding, numbered across the panel, and

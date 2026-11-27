@@ -87,11 +87,17 @@ func TestHasUncoveredKeepsAResidualFinding(t *testing.T) {
 		{Verdict: "ACCEPTED", Text: "the parser drops a flag"},
 		{Verdict: "ACCEPTED", Text: "a defect no class names"},
 	}
-	if !HasUncovered(findings, deciding) {
+	if !HasUncovered(Chain{}, findings, deciding) {
 		t.Error("one covered finding must not decide the others")
 	}
-	if HasUncovered(findings[:1], deciding) {
+	if HasUncovered(Chain{}, findings[:1], deciding) {
 		t.Error("a fully covered set has nothing uncovered")
+	}
+	early, late := reviewRecord("early", "parser", "defect", "active"), reviewRecord("late", "drops", "defect", "active")
+	early["installed_ts"], late["installed_ts"] = 4000, 9000
+	branch := Chain{Channel: ChannelBranch, StartTS: 5000}
+	if !HasUncovered(branch, findings[:1], DecidingClasses([]Record{early, late})) {
+		t.Error("a branch finding caught after one class's split stays uncovered while a later class covers it")
 	}
 }
 

@@ -78,7 +78,9 @@ import (
 // carrying a guard's current source under an old rule or identity.
 // v39 removes team: Steer no longer reads a team lockfile.
 // v40 adds rules[].review: a reviewed rule's paths on disk and at HEAD, and its state.
-const StatusVersion = 40
+// v41 counts branch review chains in the review corpora[] row and the review
+// candidate's undecided_chains; interventions[] still reads commit chains alone.
+const StatusVersion = 41
 
 // recentChainLimit caps the chain list a snapshot carries.
 const recentChainLimit = 20

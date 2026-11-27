@@ -27,10 +27,12 @@ type Row map[string]any
 
 // Channel names the adapter that wrote a row, so a reader can tell a field that is
 // absent by construction from one that was lost. No adapter writes ChannelPreCommit
-// now; rows the removed git pre-commit review wrote still carry it.
+// now; rows the removed git pre-commit review wrote still carry it. ChannelBranch
+// marks a branch review row, which the branch-review store holds.
 const (
 	ChannelPreToolUse = "pretooluse"
 	ChannelPreCommit  = "precommit"
+	ChannelBranch     = "branch"
 )
 
 var slugRe = regexp.MustCompile(`[^A-Za-z0-9_-]`)

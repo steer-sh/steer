@@ -99,6 +99,8 @@ type Request struct {
 	// Dir is the store directory; Host names the shard.
 	Dir  string
 	Host string
+	// Harness names the agent harness that ran the review, or "" when none did.
+	Harness string
 	// Warnings are the caller's failures before the run, such as a settings file
 	// that did not load; the row and Result record them first.
 	Warnings []string
@@ -175,8 +177,12 @@ func Run(ctx context.Context, cfg gate.Config, reviewer gate.Reviewer, req Reque
 		"ts": time.Now().Unix(), "review_id": id, "repo": req.Repo, "branch": res.Branch,
 		"base_ref": baseRef, "base_sha": base, "head_sha": head, "commits": count,
 		"dirty_allowed": req.AllowDirty, "files": len(diff.Paths), "host": req.Host,
+		"channel":           gate.ChannelBranch,
 		"instrument":        cfg.BranchInstrumentID(addendum.Digest()),
 		"instrument_fields": cfg.BranchInstrumentFields(addendum.Digest()),
+	}
+	if req.Harness != "" {
+		row["harness"] = req.Harness
 	}
 	if tree, ok := gate.Git(req.Repo, gitWait, "rev-parse", "HEAD^{tree}"); ok {
 		row["tree_sha"] = strings.TrimSpace(tree)

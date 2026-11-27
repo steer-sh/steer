@@ -23,7 +23,7 @@ BASE = Path(__file__).with_name("base_status.json")
 
 def _base():
     snap = json.loads(BASE.read_text())
-    snap["status_version"] = 40
+    snap["status_version"] = 41
     snap["posture"]["readiness"].pop("unverified", None)
     snap.pop("presets", None)
     snap["posture"]["protection"] = {"state": "on", "setting": "on", "store": "current", "legacy": []}
@@ -198,7 +198,7 @@ def _score(rec):
 
 def _queue(interventions=(), candidates=(), unscored=(), review_size=211):
     return {
-        "version": 17,
+        "version": 19,
         "interventions": _queued(interventions),
         "candidates": list(candidates),
         "unscored": list(unscored),

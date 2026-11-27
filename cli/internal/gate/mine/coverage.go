@@ -7,11 +7,19 @@ import (
 
 // Deciding is one live class decision, compiled, that may cover a finding in the
 // review corpus. Kind is the record's normalized verdict filter: the verdict a
-// finding must carry for this class to speak about it.
+// finding must carry for this class to speak about it. Active marks an installed
+// fix, SplitTS is where its after-window opens (SplitTS, or scope_set_ts for a legacy
+// record scoped later, as Score opens it), and Scope is its stored scope:
+// nil for a legacy record, which Score reads over the whole corpus. BadScope marks a
+// stored scope that does not parse, which Score refuses.
 type Deciding struct {
-	ID      string
-	Kind    string
-	Pattern *regexp.Regexp
+	ID       string
+	Kind     string
+	Pattern  *regexp.Regexp
+	Active   bool
+	SplitTS  float64
+	Scope    *Scope
+	BadScope bool
 }
 
 // DecidingClasses compiles the records that may cover a review finding: a live
@@ -35,7 +43,13 @@ func DecidingClasses(records []Record) []Deciding {
 		if err != nil {
 			continue
 		}
-		out = append(out, Deciding{ID: str(r["id"]), Kind: kind, Pattern: pattern})
+		scope, _, err := ParseScope(r)
+		after := SplitTS(r)
+		if v := numFloat(r["scope_set_ts"]); v != 0 {
+			after = v
+		}
+		out = append(out, Deciding{ID: str(r["id"]), Kind: kind, Pattern: pattern,
+			Active: status == "active", SplitTS: after, Scope: scope, BadScope: err != nil})
 	}
 	return out
 }
@@ -53,22 +67,42 @@ var matchEveryFinding = regexp.MustCompile("")
 // matches its text. A class authored against accepted findings therefore cannot
 // cover a rejected one, whatever kind the reader asked to see.
 func CoveringIDs(f Finding, deciding []Deciding) []string {
-	var ids []string
-	for _, d := range deciding {
-		if KindFilter(f, d.Kind) && d.Pattern.MatchString(f.Text) {
-			ids = append(ids, d.ID)
-		}
-	}
-	sort.Strings(ids)
-	return ids
+	covering, _ := ChainCoverage(Chain{}, f, deciding)
+	return covering
 }
 
-// HasUncovered reports whether any finding is covered by no class. One covered
-// finding does not decide the others: a residual unclassified finding is the
-// evidence a reader still has to cluster.
-func HasUncovered(findings []Finding, deciding []Deciding) bool {
+// ChainCoverage splits the classes matching one finding of ch, each list sorted.
+// covering decides the finding as CoveringIDs does. caughtAfter holds the active
+// classes a branch review chain matched at or after their split, as Score splits a
+// window, on a chain their scope holds: no score reads a branch chain, so that
+// finding stays shown as evidence about those fixes, whatever other class covers it.
+// A class whose scope excludes the chain, cannot decide it or does not parse covers
+// it, as on a commit chain. A rejected class covers a branch finding at any time.
+func ChainCoverage(ch Chain, f Finding, deciding []Deciding) (covering, caughtAfter []string) {
+	for _, d := range deciding {
+		if !KindFilter(f, d.Kind) || !d.Pattern.MatchString(f.Text) {
+			continue
+		}
+		if ch.Channel == ChannelBranch && d.Active && numFloat(ch.StartTS) >= d.SplitTS &&
+			!d.BadScope && (d.Scope == nil || d.Scope.Classify(ch) == Eligible) {
+			caughtAfter = append(caughtAfter, d.ID)
+			continue
+		}
+		covering = append(covering, d.ID)
+	}
+	sort.Strings(covering)
+	sort.Strings(caughtAfter)
+	return covering, caughtAfter
+}
+
+// HasUncovered reports whether any finding of ch is covered by no class, as
+// ChainCoverage reads it: a branch finding an active class caught after its split
+// is uncovered, whatever other class covers it. One covered finding does not decide
+// the others: a residual unclassified finding is the evidence a reader still has to
+// cluster.
+func HasUncovered(ch Chain, findings []Finding, deciding []Deciding) bool {
 	for _, f := range findings {
-		if len(CoveringIDs(f, deciding)) == 0 {
+		if covering, caught := ChainCoverage(ch, f, deciding); len(covering) == 0 || len(caught) > 0 {
 			return true
 		}
 	}

@@ -143,7 +143,9 @@ drop whatever the user answered.
   each member holds when re-read against the code at its commit, and no existing
   entry says it.
 
-Hold a finding in any tier when it depends on a workflow question only the user can
+Hold a finding in any tier when every member is a branch review (`channel=branch`):
+it has no baseline, so install nothing for it and never pass `register` `--force`.
+Hold it also when it depends on a workflow question only the user can
 answer, when a refused class covers it ("Tracked fixes" below), or when the harm
 reading (`steer-report` Step 5, "Harm") finds acceptable work the fix would
 obstruct. An unknown harm does not hold a finding; say that it is unknown.
@@ -199,6 +201,10 @@ repair, a `check.sh` wiring repair, a failure outside the task).
   check or guard for catches that share one mechanical tell, naming whether the
   new fix would step the reviewed rule down with `--no-review`; never install any
   of them.
+- **A post-install branch catch** (`[caught-after=<id>]` in the findings dump).
+  Report it beside that record, or under "Not acted on" when the record is
+  otherwise quiet, and change nothing: no score reads it, so it never reworks,
+  supersedes or removes the fix.
 - **A confirmed recurrence under an installed fix.** Rework the fix when the
   reworked fix meets its tier's bar above, and supersede the record. Otherwise
   hold it. Never remove a fix because the problem came back.
@@ -278,7 +284,8 @@ Otherwise write no coverage line.
 3. **Not acted on.** One line for each thing the pass examined and left unchanged
    where the user has nothing to decide now: a refused problem that matched again
    while its reopen condition is not met, a block whose reading did not settle,
-   the blocks the pass's caps left unread, and, when it is so, that no new problem
+   the blocks the pass's caps left unread, a post-install branch catch whose
+   record the report does not otherwise name, and, when it is so, that no new problem
    cleared the bar. An item that needs the user's answer goes under "Needs your
    decision".
 4. **Still to do.** What only the user can do: commit the changed files under
