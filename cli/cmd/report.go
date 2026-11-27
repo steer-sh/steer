@@ -677,8 +677,12 @@ func spawnRefresh() { spawnDetached("report", "refresh") }
 // inside the SessionStart timeout.
 func spawnFixtureVerify(scope string) { spawnDetached("fixture", "verify", "--scope", scope) }
 
-// spawnDetached starts this binary with args and does not wait for it.
-func spawnDetached(args ...string) {
+// spawnDetached starts this binary with args and does not wait for it; the
+// package's TestMain replaces it.
+var spawnDetached = startDetached
+
+// startDetached starts this binary with args and does not wait for it.
+func startDetached(args ...string) {
 	exe, err := os.Executable()
 	if err != nil {
 		return
