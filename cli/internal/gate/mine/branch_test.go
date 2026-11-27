@@ -175,10 +175,12 @@ func TestBranchReviewDirFor(t *testing.T) {
 	testhome.Set(t, t.TempDir())
 	other := t.TempDir()
 	for name, tc := range map[string][2]string{
-		"the legacy store reads the neutral one": {steerpath.LegacyStateDir("commit-review"), steerpath.StateDir("branch-review")},
-		"the neutral store reads its sibling":    {steerpath.StateDir("commit-review"), steerpath.StateDir("branch-review")},
-		"a commit-review dir reads its sibling":  {"/x/commit-review", "/x/branch-review"},
-		"any other dir reads inside itself":      {other, filepath.Join(other, "branch-review")},
+		"the legacy store reads the neutral one":  {steerpath.LegacyStateDir("commit-review"), steerpath.StateDir("branch-review")},
+		"the neutral store reads its sibling":     {steerpath.StateDir("commit-review"), steerpath.StateDir("branch-review")},
+		"a commit-review dir reads its sibling":   {"/x/commit-review", "/x/branch-review"},
+		"a trailing slash reads the same sibling": {"/x/commit-review/", "/x/branch-review"},
+		"a trailing slash on the legacy store":    {steerpath.LegacyStateDir("commit-review") + "/", steerpath.StateDir("branch-review")},
+		"any other dir reads inside itself":       {other, filepath.Join(other, "branch-review")},
 	} {
 		check(t, name, BranchReviewDirFor(tc[0]), tc[1])
 	}

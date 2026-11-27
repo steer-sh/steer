@@ -34,6 +34,7 @@ var (
 // the sibling branch-review directory for any directory named commit-review, and a
 // branch-review directory inside any other.
 func BranchReviewDirFor(stateDir string) string {
+	stateDir = filepath.Clean(stateDir)
 	switch {
 	case stateDir == steerpath.LegacyStateDir("commit-review"):
 		return steerpath.StateDir(branchreview.Component)
