@@ -1031,8 +1031,18 @@ counted), since CLI reviewers read
 the disk and an API reviewer reads the index. Rows live in
 `~/.steer/state/branch-review/` (`reviews.<host>.jsonl`, `rulings.<host>.jsonl`,
 `diffs/`), apart from the commit-review ledger, and the component is not in
-`statestore.Components`: it has no legacy corpus. No resolver, `gate/mine` or status
-reader reads it. A review that runs pins both ends as `refs/branch-review/<sha>`,
+`statestore.Components`: it has no legacy corpus. No resolver reads it, and no reader
+that scores a fix or freezes its baseline: `mine.LoadRows` stays the commit ledger
+alone. Only `mine.LoadReviewRows` reads it, the loader for readers that find
+candidates. It adds each review row to the commit rows, and `BuildChains` makes each
+review a reviewer answered a one-row chain keyed `branch:<review_id>`
+(`Chain.Channel` is `branch`); a skipped or ungated review is a non-review phase and
+makes none. The store is read from `mine.BranchReviewDirFor` beside the commit-review state
+directory; a named `--ledger` reads none. The newest ruling receipt of a review turns
+its rulings into the row's concerns, joined `ruling`, which the cross-chain dedup
+skips. An unruled review with findings is pending for `mine.BranchRulingGrace` and
+missed after it, counted from the end of the review; one with unparsed replies is
+missed at once. A review that runs pins both ends as `refs/branch-review/<sha>`,
 best effort: a skipped review pins nothing, and a failed `update-ref` is not
 reported. A ruling receipt
 (`steer review rule`) needs one ruling per finding, numbered across the panel, and

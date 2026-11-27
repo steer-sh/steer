@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/steer-sh/steer-cli/internal/branchreview"
 	"github.com/steer-sh/steer-cli/internal/gate"
 )
 
@@ -133,8 +134,11 @@ func recoverChangedPaths(stateDir string, row gate.Row) {
 	row["changed_paths"] = list
 }
 
-// Chain is one commit attempt: the run of rows from one firing-1 opener to the next.
+// Chain is one commit attempt, the run of rows from one firing-1 opener to the next,
+// or one branch review.
 type Chain struct {
+	// Channel is ChannelBranch for a branch review and ChannelCommit otherwise.
+	Channel     string
 	Host        string
 	StartTS     any
 	EndTS       any
@@ -225,7 +229,12 @@ func chainsForHost(rows []gate.Row, strictJoins bool) []Chain {
 	replySeen, windowSeen := map[string]bool{}, map[string]bool{}
 	printSeen, unstampedSeen, stampedSeen := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	open := func(row gate.Row) int {
+		channel := ChannelCommit
+		if str(row["channel"]) == ChannelBranch {
+			channel = ChannelBranch
+		}
 		chains = append(chains, Chain{
+			Channel: channel,
 			Host:    rowHost(row),
 			StartTS: row["ts"],
 			EndTS:   row["ts"],
@@ -283,14 +292,14 @@ func chainsForHost(rows []gate.Row, strictJoins bool) []Chain {
 				}
 			}
 		}
-		if phase == "clean" || phase == "cap" || phase == gate.PhaseNitpick {
+		if phase == "clean" || phase == "cap" || phase == gate.PhaseNitpick || phase == branchreview.PhaseFindings {
 			p := phase
 			ch.Terminal = &p
 		}
 		if sess := str(row["session_id"]); sess != "" {
 			ch.Sessions = appendUnique(ch.Sessions, sess)
 		}
-		if strictJoins && str(row["ledger_join"]) != "round" {
+		if join := str(row["ledger_join"]); strictJoins && join != "round" && join != RulingJoin {
 			continue
 		}
 		// A reply is its ledger_ts, and a block of it is the one a row took. A window
@@ -303,7 +312,8 @@ func chainsForHost(rows []gate.Row, strictJoins bool) []Chain {
 		// alone, so beside a stamped row of the same reply only the bullets compare.
 		reply, bullets, stamp := "", "", ""
 		window := false
-		if truthy(row["ledger_ts"]) {
+		// A ruling receipt answers one branch review alone, so it shares no reply.
+		if truthy(row["ledger_ts"]) && str(row["ledger_join"]) != RulingJoin {
 			reply = numString(row["ledger_ts"])
 			bullets = reply + "\x1f" + ledgerPrint(row["concerns"])
 			join := str(row["ledger_join"])

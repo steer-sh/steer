@@ -149,7 +149,11 @@ Read the linked architecture section before changing the corresponding boundary:
   [branch review](ARCHITECTURE.md#branch-review). Start with
   `cli/internal/branchreview/` and `cli/internal/gate/branch.go`. Its rows live in
   `~/.steer/state/branch-review/`, never in the commit-review ledger and outside
-  `statestore.Components`; a reader of the ledger must not learn to read them. Its
+  `statestore.Components`. In `gate/mine` only `mine.LoadReviewRows`
+  (`cli/internal/gate/mine/branch.go`) reads them, for readers that find candidates;
+  `mine.LoadRows` and every reader that scores a fix or freezes a baseline (`Score`,
+  `Match`, `writerBaseline`, `CoverCorpus`, `BackfillEvidence`, `evidence.Gather`)
+  stay commit-only. Its
   prompt `prompts/branch-review.md` has its own pinned digest, and a change to branch
   diff assembly or finding parsing bumps `gate.BranchInstrumentSuffix`. Its
   `branch_reviewer.*` keys resolve through `settings.BranchConfig`, not `gate.WithFile`.
