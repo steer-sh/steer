@@ -32,8 +32,9 @@ import (
 // this host's session snapshots and adds refreshed_at and fix to the transcript
 // corpus row. v17 adds observation.review: what the commit reviewer did with a
 // reviewed rule. v18 adds observation.review.matched: the group each matched chain
-// falls in.
-const QueueVersion = 18
+// falls in. v19 counts branch review chains in the review pointer's
+// undecided_chains and the review corpus row, never in interventions.
+const QueueVersion = 19
 
 // DefaultWindowDays is the transcript look-back a refresh and a status read use
 // when no --days is given.
@@ -241,7 +242,11 @@ func Refresh(opts Options) (*Queue, error) {
 	sort.Strings(q.Unscored)
 
 	// --- review-findings candidate pointer: undecided chains + dump -----------
-	undecided := undecidedChains(chains, records)
+	// The dump reads branch review chains beside the commit chains; no score does,
+	// so they join this pointer and the corpus row alone.
+	branchChains, _ := mine.LoadBranchChains(opts.GateStateDir, opts.Ledger)
+	reviewChains := append(append([]mine.Chain{}, chains...), branchChains...)
+	undecided := undecidedChains(reviewChains, records)
 	if undecided > 0 {
 		q.Candidates = append(q.Candidates, Candidate{
 			Corpus:          CorpusReviewFindings,
@@ -267,7 +272,7 @@ func Refresh(opts Options) (*Queue, error) {
 	transcriptRow.Size = len(ev.Sessions)
 	transcriptRow.Present = transcriptRow.Size > 0
 	q.Corpora = []CorpusStatus{
-		{Corpus: CorpusReviewFindings, Present: len(chains) > 0, Size: len(chains)},
+		{Corpus: CorpusReviewFindings, Present: len(reviewChains) > 0, Size: len(reviewChains)},
 		transcriptRow,
 	}
 
@@ -309,10 +314,10 @@ func observationOf(v any) mine.Observation {
 }
 
 // undecidedChains counts chains carrying an accepted finding that no live class
-// decision covers. The eligibility rules live in mine.DecidingClasses, which the
-// findings dump shares, so the queue's count and the dump's view of the same
-// corpus cannot drift apart. It is an upper bound the skill refines by clustering
-// the dump.
+// decision covers. The eligibility rules live in mine.DecidingClasses and the
+// coverage in mine.ChainCoverage, which the findings dump shares, so the queue's
+// count and the dump's view of the same corpus cannot drift apart. It is an upper
+// bound the skill refines by clustering the dump.
 func undecidedChains(chains []mine.Chain, records []mine.Record) int {
 	deciding := mine.DecidingClasses(records)
 	count := 0
@@ -321,7 +326,7 @@ func undecidedChains(chains []mine.Chain, records []mine.Record) int {
 		if len(accepted) == 0 {
 			continue
 		}
-		if mine.HasUncovered(accepted, deciding) {
+		if mine.HasUncovered(ch, accepted, deciding) {
 			count++
 		}
 	}

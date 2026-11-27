@@ -464,3 +464,82 @@ func TestRefreshTranscriptCandidateIgnoresOtherHosts(t *testing.T) {
 		t.Fatalf("this host's covered shard holds no correction: %+v %+v", row, c)
 	}
 }
+
+// writeJSONL writes rows as one JSONL file at path.
+func writeJSONL(t *testing.T, path string, rows ...map[string]any) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	var data []byte
+	for _, r := range rows {
+		line, err := json.Marshal(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		data = append(append(data, line...), '\n')
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestRefreshCountsBranchChainsOutsideTheScoredInterventions checks that ruled
+// branch reviews join the review pointer's undecided count and the review corpus
+// row, a finding an active class caught after its split among them, while the
+// interventions scored over the commit chains stay byte-identical.
+func TestRefreshCountsBranchChainsOutsideTheScoredInterventions(t *testing.T) {
+	home := isolate(t)
+	writeManifest(t, filepath.Join(home, ".steer", "hooks"), `{"rules":{}}`)
+	state := t.TempDir()
+	rec := ruleRecord("global")
+	for k, v := range map[string]any{"id": "config-path-loss", "class": "config path loss",
+		"match": "config path", "kind": "defect", "target": "CLAUDE.md",
+		"unit": mine.UnitChain, "corpus": mine.CorpusReviewFindings, "installed_ts": 1000,
+		"scope": map[string]any{"version": 1, "all": true}} {
+		rec[k] = v
+	}
+	if err := mine.Save(state, []mine.Record{rec}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := Refresh(Options{GateStateDir: state})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(before.Interventions) != 1 || len(before.Candidates) != 0 || before.Corpora[0].Present {
+		t.Fatalf("without a branch store: %+v", before)
+	}
+
+	branch := filepath.Join(state, "branch-review")
+	review := func(ts int, id string) map[string]any {
+		return map[string]any{"ts": ts, "review_id": id, "phase": "findings", "host": "h1",
+			"channel": "branch", "repo": "/r/app", "files": 1, "findings_unparsed": 0}
+	}
+	accept := func(ts int, id, claim string) map[string]any {
+		return map[string]any{"ts": ts, "review_id": id, "host": "h1",
+			"rulings": []any{map[string]any{"index": 1, "verdict": "ACCEPTED", "claim": claim}}}
+	}
+	writeJSONL(t, filepath.Join(branch, "reviews.h1.jsonl"), review(5000, "caught"), review(5100, "new"))
+	writeJSONL(t, filepath.Join(branch, "rulings.h1.jsonl"),
+		accept(5050, "caught", "config path lost on reload"), accept(5150, "new", "a handle leaks"))
+
+	after, err := Refresh(Options{GateStateDir: state})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The read's clock closes each after-window; the two reads may fall in two seconds.
+	for _, q := range []*Queue{before, after} {
+		for i := range q.Interventions {
+			q.Interventions[i].Observation.Counts.ObservedTS = 0
+		}
+	}
+	if !reflect.DeepEqual(after.Interventions, before.Interventions) {
+		t.Errorf("branch chains moved the scored interventions:\n%+v\n%+v", after.Interventions, before.Interventions)
+	}
+	if len(after.Candidates) != 1 || after.Candidates[0].UndecidedChains != 2 {
+		t.Errorf("both branch chains are undecided, the caught-after one included: %+v", after.Candidates)
+	}
+	if got := after.Corpora[0]; !got.Present || got.Size != 2 {
+		t.Errorf("the review corpus row counts the branch chains: %+v", got)
+	}
+}

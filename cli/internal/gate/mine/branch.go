@@ -65,6 +65,25 @@ func LoadReviewRows(stateDir, ledger string) ([]gate.Row, error) {
 	return rows, nil
 }
 
+// LoadBranchChains is the chains of the branch reviews beside stateDir: the chains
+// BuildChains makes of LoadReviewRows that LoadRows lacks, since a branch row is
+// placed by its own chain_id and shares no reply with a commit row. A named ledger
+// reads none. A reader that counts candidates beside a commit corpus it already
+// holds adds these; no reader that scores a fix calls it.
+func LoadBranchChains(stateDir, ledger string) ([]Chain, error) {
+	if ledger != "" {
+		return nil, nil
+	}
+	rows, err := loadBranchRows(BranchReviewDirFor(stateDir))
+	if err != nil || len(rows) == 0 {
+		return nil, err
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		return rowTS(rows[i]) < rowTS(rows[j])
+	})
+	return BuildChains(rows, false), nil
+}
+
 // loadBranchRows reads every host's review rows in dir, each keyed to its own chain
 // "branch:<review_id>". A row whose review was ruled carries the newest receipt's
 // rulings as its concerns, joined as RulingJoin. A missing dir holds no rows.

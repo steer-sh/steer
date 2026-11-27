@@ -81,7 +81,7 @@ id and draw no audit conclusion for it. Fail soft — if a command errors, say s
 one line, continue, and read `audit.md` anyway: without a snapshot, nothing shows
 that there is no fix to audit.
 
-Then Read the queue **once**: `~/.steer/state/steer-report/queue.json` (`version: 18`). It holds:
+Then Read the queue **once**: `~/.steer/state/steer-report/queue.json` (`version: 19`). It holds:
 
 - `interventions[]` — full contract records the tier flagged as **asking for a reader**: the class recurred after the split, an absent guard audit log or missing check evidence left the fix's activity unread, the record carries no frozen scope, the fix it binds is `absent` or `unreadable`, or the fix is in place but carries `artifact.removed`. These carry a `match`; they are the audit's action list, pre-filtered. Each carries `problem` and `intervention` — the record's own explanation of what goes wrong and what it does about it, authored when the class was found. Lead your report with those rather than with the class name or the regex, and correct one that no longer describes the evidence with `steer fix describe ID`, which changes no window. Each also carries the conditions the counts were taken under: `corpus` and `unit` (`review-findings` counts by `chain`, `transcript-friction` by `session` — never compare the two rates), `signal_kind` on a session-unit record, `scope` (the frozen eligibility rule, `null` on a legacy record), `before_coverage` / `after_coverage` (`total`, `eligible`, `ineligible`, `unknown`, `unknown_scope`, `unknown_evidence`, `pending`, `ledger_missed`, `ledger_overdue`, `partial_exposure`), `observation` — the seven field blocks documented in `audit.md` — and `artifact`, where the fix the record binds stands now.
 - `unscored[]` — ids of records no engine reads. Report their existence; do not read a result into them.
@@ -176,7 +176,7 @@ A correction occurrence can carry two context fields, each `{text, cut}` with `c
 
 An `after_interrupt` occurrence carries the same two fields, read from before the interrupt. A `correction_candidates` occurrence carries them too.
 
-### The `steer status --json` contract (`status_version: 40`)
+### The `steer status --json` contract (`status_version: 41`)
 
 Step 1 reads this snapshot for posture and the full class inventory. The unit is
 the failure class and what the corpus recorded about it, not the hook count. This
@@ -229,6 +229,8 @@ v38 adds `posture.protection` and removes `presets[]`: Steer ships no presets, a
 guard an earlier Steer installed from one is a `hooks[]` row whose `source` is `factory`.
 v39 removes `team`: Steer reads no team lockfile, and a repository shares its fixes
 as the files committed under `.steer/`.
+v41 counts branch review chains in the review `corpora[]` row and the review
+candidate's `undecided_chains`; `interventions[]` still reads commit chains alone.
 
 - `status_version` — the schema version. `--json` is a stable agent contract.
 - `posture` — the arming state: `instrument` (reviewer model / runs / prompt

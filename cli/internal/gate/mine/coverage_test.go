@@ -87,10 +87,10 @@ func TestHasUncoveredKeepsAResidualFinding(t *testing.T) {
 		{Verdict: "ACCEPTED", Text: "the parser drops a flag"},
 		{Verdict: "ACCEPTED", Text: "a defect no class names"},
 	}
-	if !HasUncovered(findings, deciding) {
+	if !HasUncovered(Chain{}, findings, deciding) {
 		t.Error("one covered finding must not decide the others")
 	}
-	if HasUncovered(findings[:1], deciding) {
+	if HasUncovered(Chain{}, findings[:1], deciding) {
 		t.Error("a fully covered set has nothing uncovered")
 	}
 }

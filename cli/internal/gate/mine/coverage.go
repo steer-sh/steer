@@ -82,12 +82,13 @@ func ChainCoverage(ch Chain, f Finding, deciding []Deciding) (covering, caughtAf
 	return covering, caughtAfter
 }
 
-// HasUncovered reports whether any finding is covered by no class. One covered
-// finding does not decide the others: a residual unclassified finding is the
-// evidence a reader still has to cluster.
-func HasUncovered(findings []Finding, deciding []Deciding) bool {
+// HasUncovered reports whether any finding of ch is covered by no class, as
+// ChainCoverage reads it: a branch finding an active class caught after its split
+// is uncovered. One covered finding does not decide the others: a residual
+// unclassified finding is the evidence a reader still has to cluster.
+func HasUncovered(ch Chain, findings []Finding, deciding []Deciding) bool {
 	for _, f := range findings {
-		if len(CoveringIDs(f, deciding)) == 0 {
+		if covering, _ := ChainCoverage(ch, f, deciding); len(covering) == 0 {
 			return true
 		}
 	}
