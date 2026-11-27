@@ -1058,7 +1058,11 @@ alone, under the same coverage, so a caught-after finding keeps its chain undeci
 `interventions[]` and every score read the commit chains. A review that runs pins both ends as `refs/branch-review/<sha>`,
 best effort: a skipped review pins nothing, and a failed `update-ref` is not
 reported. A ruling receipt
-(`steer review rule`) needs one ruling per finding, numbered across the panel, and
+(`steer review rule`) needs one ruling per defect, with each finding, numbered across
+the panel, in exactly one: a ruling names several findings by `indices` when reviewers
+report one defect, so the receipt, its counts and the concerns `mine` reads from it
+hold that defect once. A receipt from before `indices` loads its `index` as a list of
+one. The receipt
 stamps the HEAD at ruling time, so `head_advanced` (HEAD descends from the reviewed
 head) is observed rather than reported by the agent. A review with a reply to rule
 prints `gate.AdjudicationPolicy` beside its findings, and `--json` carries it as

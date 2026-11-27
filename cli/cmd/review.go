@@ -136,13 +136,15 @@ own findings from 1.`,
 
 var reviewRuleCmd = &cobra.Command{
 	Use:   "rule REVIEW_ID",
-	Short: "Record your ruling on each finding of a branch review",
-	Long: `rule records one ruling per finding of a branch review on this machine. Read the
+	Short: "Record your ruling on each defect a branch review found",
+	Long: `rule records one ruling per defect of a branch review on this machine. Read the
 rulings as JSON on stdin with --stdin:
 
-  {"rulings": [{"index": 1, "verdict": "ACCEPTED", "qualifier": "", "resolution": "..."}]}
+  {"rulings": [{"index": 1, "verdict": "ACCEPTED", "qualifier": "", "resolution": "..."},
+               {"indices": [2, 3], "verdict": "REJECTED", "qualifier": "", "resolution": "..."}]}
 
-verdict is ACCEPTED or REJECTED; an acceptance you leave unfixed takes the
+Each finding is in exactly one ruling. When several reviewers report one defect,
+one ruling names all their findings with indices. verdict is ACCEPTED or REJECTED; an acceptance you leave unfixed takes the
 qualifier "not fixed"; resolution is one sentence. A review with no findings takes
 --clean. Record the rulings after the fix commits land: the receipt stamps the
 current HEAD, and a HEAD that moved since the review reads as head_advanced.`,
@@ -184,8 +186,8 @@ current HEAD, and a HEAD that moved since the review reads as head_advanced.`,
 		case receipt.HeadElsewhere:
 			moved = "HEAD is now a commit that does not descend from the reviewed one"
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "Recorded %d ruling(s) on review %s: %d accepted, %d accepted and not fixed, %d rejected; %s.\n",
-			len(receipt.Rulings), receipt.ReviewID, receipt.Accepted, receipt.AcceptedNotFixed, receipt.Rejected, moved)
+		fmt.Fprintf(cmd.OutOrStdout(), "Recorded %d ruling(s) on the %d finding(s) of review %s: %d accepted, %d accepted and not fixed, %d rejected; %s.\n",
+			len(receipt.Rulings), len(review.Findings), receipt.ReviewID, receipt.Accepted, receipt.AcceptedNotFixed, receipt.Rejected, moved)
 		return nil
 	},
 }

@@ -3,6 +3,7 @@ package branchreview
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -17,15 +18,22 @@ const (
 	QualifierNotFix = "not fixed"
 )
 
-// RulingInput is one ruling as the author writes it.
+// RulingInput is one ruling on one defect as the author writes it. It names the
+// findings that report the defect with Index, for one, or Indices, for several
+// reviewers' reports of the same defect.
 type RulingInput struct {
-	Index      int    `json:"index"`
+	Index      int    `json:"index,omitempty"`
+	Indices    []int  `json:"indices,omitempty"`
 	Verdict    string `json:"verdict"`
 	Qualifier  string `json:"qualifier"`
 	Resolution string `json:"resolution"`
 }
 
-// Ruling is a ruling with the finding it answers copied beside it.
+// Ruling is a ruling on one defect with the finding it answers copied beside it. A
+// recorded ruling names its findings by Indices alone, ascending; a receipt from
+// before Indices names one by Index, and LoadReceipts moves it into Indices. For a
+// defect several findings report, File and Claim are the lowest index's, Severity
+// the most severe, and Rule the first a finding names.
 type Ruling struct {
 	RulingInput
 	Severity string `json:"severity"`
@@ -46,9 +54,10 @@ type Receipt struct {
 	// HeadAdvanced reports that commits landed on the reviewed head between the
 	// review and the ruling; HeadElsewhere that HEAD moved to a commit that does not
 	// descend from it.
-	HeadAdvanced     bool     `json:"head_advanced"`
-	HeadElsewhere    bool     `json:"head_elsewhere,omitempty"`
-	Harness          string   `json:"harness"`
+	HeadAdvanced  bool   `json:"head_advanced"`
+	HeadElsewhere bool   `json:"head_elsewhere,omitempty"`
+	Harness       string `json:"harness"`
+	// Accepted, AcceptedNotFixed and Rejected count rulings, one per defect.
 	Accepted         int      `json:"accepted"`
 	AcceptedNotFixed int      `json:"accepted_not_fixed"`
 	Rejected         int      `json:"rejected"`
@@ -57,11 +66,21 @@ type Receipt struct {
 
 // LoadReceipts reads the host's ruling receipts in dir, oldest first.
 func LoadReceipts(dir, host string) ([]Receipt, error) {
-	return jsonl.Load(RulingsFile(dir, host), func(r *Receipt) bool { return r.ReviewID != "" })
+	return jsonl.Load(RulingsFile(dir, host), func(r *Receipt) bool {
+		for i := range r.Rulings {
+			if in := &r.Rulings[i].RulingInput; len(in.Indices) == 0 && in.Index > 0 {
+				in.Indices, in.Index = []int{in.Index}, 0
+			}
+		}
+		return r.ReviewID != ""
+	})
 }
 
-// Rule checks rulings against review, one per finding, and records the receipt
-// stamped with repo's current HEAD. A review whose findings were not all parsed
+// severityRank orders the reviewer's severity levels, most severe highest.
+var severityRank = map[string]int{"NITPICK": 1, "SUBSTANTIVE": 2, "BLOCKING": 3}
+
+// Rule checks rulings against review, one per defect with each finding in exactly
+// one, and records the receipt stamped with repo's current HEAD. A review whose findings were not all parsed
 // cannot be ruled finding by finding, so it is refused.
 func Rule(dir, host, repo, harnessID string, review Review, rulings []RulingInput) (Receipt, error) {
 	if repo != review.Repo {
@@ -79,17 +98,26 @@ func Rule(dir, host, repo, harnessID string, review Review, rulings []RulingInpu
 	receipt := Receipt{ReviewID: review.ReviewID, Repo: repo, Host: host,
 		ReviewHeadSHA: review.HeadSHA, Harness: harnessID}
 	for _, in := range rulings {
-		f, ok := byIndex[in.Index]
-		if !ok {
-			return Receipt{}, fmt.Errorf("review %s has no finding %d", review.ReviewID, in.Index)
+		indices, err := rulingIndices(in)
+		if err != nil {
+			return Receipt{}, err
 		}
-		if seen[in.Index] {
-			return Receipt{}, fmt.Errorf("finding %d is ruled twice", in.Index)
+		var group []Finding
+		for _, i := range indices {
+			f, ok := byIndex[i]
+			if !ok {
+				return Receipt{}, fmt.Errorf("review %s has no finding %d", review.ReviewID, i)
+			}
+			if seen[i] {
+				return Receipt{}, fmt.Errorf("finding %d is ruled twice", i)
+			}
+			seen[i] = true
+			group = append(group, f)
 		}
-		seen[in.Index] = true
 		if err := checkRuling(in); err != nil {
-			return Receipt{}, fmt.Errorf("finding %d: %w", in.Index, err)
+			return Receipt{}, fmt.Errorf("finding %d: %w", indices[0], err)
 		}
+		in.Index, in.Indices = 0, indices
 		switch {
 		case in.Verdict == VerdictRejected:
 			receipt.Rejected++
@@ -98,8 +126,7 @@ func Rule(dir, host, repo, harnessID string, review Review, rulings []RulingInpu
 		default:
 			receipt.Accepted++
 		}
-		receipt.Rulings = append(receipt.Rulings, Ruling{RulingInput: in, Severity: f.Severity, File: f.File, Claim: f.Claim,
-			Rule: f.Rule})
+		receipt.Rulings = append(receipt.Rulings, rulingOf(in, group))
 	}
 	if missing := len(byIndex) - len(seen); missing > 0 {
 		var unruled []string
@@ -108,7 +135,7 @@ func Rule(dir, host, repo, harnessID string, review Review, rulings []RulingInpu
 				unruled = append(unruled, fmt.Sprint(f.Index))
 			}
 		}
-		return Receipt{}, fmt.Errorf("every finding needs one ruling; %d are unruled: %s", missing, strings.Join(unruled, ", "))
+		return Receipt{}, fmt.Errorf("every finding needs to be in one ruling; %d are unruled: %s", missing, strings.Join(unruled, ", "))
 	}
 	head, ok := gate.Git(repo, gitWait, "rev-parse", "HEAD")
 	if !ok {
@@ -124,6 +151,41 @@ func Rule(dir, host, repo, harnessID string, review Review, rulings []RulingInpu
 		receipt.HeadElsewhere = !descends
 	}
 	return receipt, appendRow(RulingsFile(dir, host), "ruling receipt", receipt)
+}
+
+// rulingIndices is the ascending set of findings in names, from Index or Indices but
+// not both.
+func rulingIndices(in RulingInput) ([]int, error) {
+	switch {
+	case in.Index != 0 && len(in.Indices) > 0:
+		return nil, fmt.Errorf("a ruling names its findings by index or by indices, not both (index %d, indices %v)", in.Index, in.Indices)
+	case len(in.Indices) > 0:
+		indices := slices.Clone(in.Indices)
+		slices.Sort(indices)
+		for i := 1; i < len(indices); i++ {
+			if indices[i] == indices[i-1] {
+				return nil, fmt.Errorf("finding %d is ruled twice", indices[i])
+			}
+		}
+		return indices, nil
+	case in.Index != 0:
+		return []int{in.Index}, nil
+	}
+	return nil, errors.New("a ruling names no finding; give it an index or indices")
+}
+
+// rulingOf is in with its findings, ascending by index, copied beside it.
+func rulingOf(in RulingInput, group []Finding) Ruling {
+	r := Ruling{RulingInput: in, Severity: group[0].Severity, File: group[0].File, Claim: group[0].Claim}
+	for _, f := range group {
+		if severityRank[f.Severity] > severityRank[r.Severity] {
+			r.Severity = f.Severity
+		}
+		if r.Rule == "" {
+			r.Rule = f.Rule
+		}
+	}
+	return r
 }
 
 func checkRuling(in RulingInput) error {
