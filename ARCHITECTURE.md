@@ -1044,8 +1044,8 @@ skips. An unruled review with findings is pending for `mine.BranchRulingGrace` a
 missed after it, counted from the end of the review; one with unparsed replies is
 missed at once. `mine findings` and `forgetRead` read through it; the dump marks a
 branch chain `channel=branch`, and its incidence lines count commit chains alone. In
-`--undecided`, `mine.ChainCoverage` hides a branch finding that a rejected class
-matches, or an active class matches from before its split (`mine.SplitTS`). One an
+`--undecided`, `mine.ChainCoverage` hides a branch finding that only a rejected
+class, or an active class from before its split (`mine.SplitTS`), matches. One an
 active class matches at or after the split stays shown, marked
 `[caught-after=<id>]`, whatever other class covers it: no score counts it, so it is
 evidence about that fix, not a new candidate. `cadence.Refresh` adds `mine.LoadBranchChains` to the commit chains
