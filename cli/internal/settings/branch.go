@@ -224,8 +224,8 @@ func BranchEffortWarning(file config.Config) string {
 	return ""
 }
 
-// BranchReviewerFields are the keys of the branch reviewer. The dashboard's
-// Reviewer panel does not list them.
+// BranchReviewerFields are the keys of the branch reviewer, the ones the
+// dashboard's Reviewer panel lists below ReviewerFields.
 var BranchReviewerFields = []Field{
 	{
 		Name: "branch_reviewer.provider", Env: BranchProviderEnv,

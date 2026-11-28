@@ -49,7 +49,10 @@ func TestReviewerPanelNamesEverySetting(t *testing.T) {
 	m.width = 200
 	m.active = panelReviewer
 	view := m.View()
-	for _, f := range settings.ReviewerFields {
+	for _, f := range settings.Fields {
+		if f.Name == settings.ProtectionField.Name {
+			continue
+		}
 		if !strings.Contains(view, settings.LabelOf(f)) {
 			t.Errorf("the reviewer panel omits %s", settings.LabelOf(f))
 		}
@@ -62,24 +65,34 @@ func TestReviewerPanelNamesEverySetting(t *testing.T) {
 // An edit writes through config.Save, the one writer `steer config set` calls, so a
 // value set here is the value that command reads back.
 func TestReviewerPanelWritesTheSettingsFile(t *testing.T) {
-	tempSettingsHome(t)
-	m := New(gate.Defaults(), "global")
-	m.active = panelReviewer
-	m.cursor[panelReviewer] = indexOfField(t, "reviewer.model")
+	for _, tc := range []struct {
+		name, value string
+		stored      func(config.Config) string
+	}{
+		{"reviewer.model", "gemini-3.7-flash", func(c config.Config) string { return c.Reviewer.Model }},
+		{"branch_reviewer.model", "gpt-6-astra", func(c config.Config) string { return c.BranchReviewer.Model }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tempSettingsHome(t)
+			m := New(gate.Defaults(), "global")
+			m.active = panelReviewer
+			m.cursor[panelReviewer] = indexOfField(t, tc.name)
 
-	m.Update(key("enter"))
-	m.input.SetValue("gemini-3.7-flash")
-	m.Update(key("enter"))
+			m.Update(key("enter"))
+			m.input.SetValue(tc.value)
+			m.Update(key("enter"))
 
-	got, err := config.Load()
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-	if got.Reviewer.Model != "gemini-3.7-flash" {
-		t.Fatalf("stored model %q, want gemini-3.7-flash", got.Reviewer.Model)
-	}
-	if m.editing {
-		t.Error("the editor is still open after a write")
+			got, err := config.Load()
+			if err != nil {
+				t.Fatalf("config.Load: %v", err)
+			}
+			if v := tc.stored(got); v != tc.value {
+				t.Fatalf("stored %s %q, want %s", tc.name, v, tc.value)
+			}
+			if m.editing {
+				t.Error("the editor is still open after a write")
+			}
+		})
 	}
 }
 
@@ -116,38 +129,57 @@ func TestReviewerPanelChoosesTheCLIFromAList(t *testing.T) {
 // answer is a default: a model name is rarely one the new CLI accepts, and
 // keeping or dropping it unasked are both wrong.
 func TestChangingTheCLIAsksAboutTheModelAndTheEffort(t *testing.T) {
-	tempSettingsHome(t)
-	if err := config.Save(config.Config{Reviewer: config.Reviewer{
-		Provider: "agy", Model: "gemini-3.7-flash", Effort: "high"}}); err != nil {
-		t.Fatalf("config.Save: %v", err)
-	}
-	m := New(gate.Defaults(), "global")
-	m.active = panelReviewer
-	m.cursor[panelReviewer] = indexOfField(t, "reviewer.provider")
+	for _, tc := range []struct {
+		field  string
+		stored config.Config
+		values func(config.Config) (provider, model, effort string)
+	}{
+		{"reviewer.provider",
+			config.Config{Reviewer: config.Reviewer{Provider: "agy", Model: "gemini-3.7-flash", Effort: "high"}},
+			func(c config.Config) (string, string, string) {
+				return c.Reviewer.Provider, c.Reviewer.Model, c.Reviewer.Effort
+			}},
+		{"branch_reviewer.provider",
+			config.Config{BranchReviewer: config.BranchReviewer{Provider: "codex", Model: "gpt-6-astra", Effort: "high"}},
+			func(c config.Config) (string, string, string) {
+				return c.BranchReviewer.Provider, c.BranchReviewer.Model, c.BranchReviewer.Effort
+			}},
+	} {
+		t.Run(tc.field, func(t *testing.T) {
+			tempSettingsHome(t)
+			if err := config.Save(tc.stored); err != nil {
+				t.Fatalf("config.Save: %v", err)
+			}
+			start, _, _ := tc.values(tc.stored)
+			m := New(gate.Defaults(), "global")
+			m.active = panelReviewer
+			m.cursor[panelReviewer] = indexOfField(t, tc.field)
 
-	m.Update(key("enter"))
-	m.Update(key("down"))
-	m.Update(key("enter"))
+			m.Update(key("enter"))
+			m.Update(key("down"))
+			m.Update(key("enter"))
 
-	if got, _ := config.Load(); got.Reviewer.Provider != "agy" {
-		t.Fatalf("the CLI changed before the question was answered: %q", got.Reviewer.Provider)
-	}
-	if !strings.Contains(m.message, "keep the current model") {
-		t.Errorf("the panel does not ask about the model and the effort: %q", m.message)
-	}
+			if got, _ := config.Load(); func() string { p, _, _ := tc.values(got); return p }() != start {
+				t.Fatalf("the CLI changed before the question was answered")
+			}
+			if !strings.Contains(m.message, "keep the current model") {
+				t.Errorf("the panel does not ask about the model and the effort: %q", m.message)
+			}
 
-	m.Update(key("right"))
-	m.Update(key("enter"))
-	got, err := config.Load()
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-	if got.Reviewer.Provider != "codex" {
-		t.Fatalf("stored provider %q, want codex", got.Reviewer.Provider)
-	}
-	if got.Reviewer.Model != "" || got.Reviewer.Effort != "" {
-		t.Errorf("the new CLI kept %q / %q, want its own defaults",
-			got.Reviewer.Model, got.Reviewer.Effort)
+			m.Update(key("right"))
+			m.Update(key("enter"))
+			got, err := config.Load()
+			if err != nil {
+				t.Fatalf("config.Load: %v", err)
+			}
+			provider, model, effort := tc.values(got)
+			if provider == start {
+				t.Fatalf("stored provider is still %q", start)
+			}
+			if model != "" || effort != "" {
+				t.Errorf("the new CLI kept %q / %q, want its own defaults", model, effort)
+			}
+		})
 	}
 }
 
@@ -390,11 +422,35 @@ func TestReviewerPanelNamesAPinnedRegistration(t *testing.T) {
 
 func indexOfField(t *testing.T, name string) int {
 	t.Helper()
-	for i, f := range settings.ReviewerFields {
+	for i, f := range reviewerPanelFields {
 		if f.Name == name {
 			return i
 		}
 	}
 	t.Fatalf("no setting named %s", name)
 	return 0
+}
+
+// A branch provider the panel stored can go back to inheriting the commit
+// reviewer, because the editor offers the unset value first.
+func TestReviewerPanelClearsTheBranchProvider(t *testing.T) {
+	tempSettingsHome(t)
+	if err := config.Save(config.Config{BranchReviewer: config.BranchReviewer{Provider: "codex"}}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	m := New(gate.Defaults(), "global")
+	m.active = panelReviewer
+	m.cursor[panelReviewer] = indexOfField(t, "branch_reviewer.provider")
+
+	m.Update(key("enter"))
+	m.reviewer.choice = 0
+	m.Update(key("enter"))
+
+	got, err := config.Load()
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if got.BranchReviewer.Provider != "" {
+		t.Fatalf("stored branch provider %q, want it unset", got.BranchReviewer.Provider)
+	}
 }
