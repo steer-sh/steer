@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -352,9 +353,10 @@ func TestResolveBaseNamesTheFlagWhenNoBaseResolves(t *testing.T) {
 	}
 }
 
-// TestRuleTakesOneValidRulingPerFinding checks each refusal of a ruling set, then a
-// valid set's counts and its head_advanced stamp after a fix commit.
-func TestRuleTakesOneValidRulingPerFinding(t *testing.T) {
+// TestRuleTakesEachFindingInOneRuling checks each refusal of a ruling set, then a
+// valid set's counts and its head_advanced stamp after a fix commit, and one ruling
+// over two findings that report one defect.
+func TestRuleTakesEachFindingInOneRuling(t *testing.T) {
 	repo := branchRepo(t)
 	req := request(t, repo)
 	res, err := Run(context.Background(), config(2), &stub{replies: []string{oneFinding + "\n    RULE: global:b", oneFinding + "\n    RULE: global:b"}}, req)
@@ -374,6 +376,10 @@ func TestRuleTakesOneValidRulingPerFinding(t *testing.T) {
 		{"bad verdict", []RulingInput{ok, {Index: 2, Verdict: "MAYBE", Resolution: "x"}}, "verdict"},
 		{"qualified rejection", []RulingInput{ok, {Index: 2, Verdict: VerdictRejected, Qualifier: QualifierNotFix, Resolution: "x"}}, "no qualifier"},
 		{"empty resolution", []RulingInput{ok, {Index: 2, Verdict: VerdictRejected}}, "resolution is empty"},
+		{"index and indices", []RulingInput{{Index: 1, Indices: []int{2}, Verdict: VerdictRejected, Resolution: "x"}}, "not both"},
+		{"no index", []RulingInput{ok, {Verdict: VerdictRejected, Resolution: "x"}}, "names no finding"},
+		{"repeated in indices", []RulingInput{{Indices: []int{1, 2, 1}, Verdict: VerdictRejected, Resolution: "x"}}, "ruled twice"},
+		{"index and a group", []RulingInput{ok, {Indices: []int{1, 2}, Verdict: VerdictRejected, Resolution: "x"}}, "ruled twice"},
 	} {
 		if _, err := Rule(req.Dir, req.Host, repo, "", review, tc.rulings); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: err = %v; want %q", tc.name, err, tc.want)
@@ -397,6 +403,14 @@ func TestRuleTakesOneValidRulingPerFinding(t *testing.T) {
 	if err != nil || len(listed) != 1 || !listed[0].Rulable || !listed[0].Ruled || !listed[0].HeadAdvanced {
 		t.Errorf("List = %+v, %v", listed, err)
 	}
+	// Both reviewers reported one defect: one ruling covers both, and counts once.
+	grouped, err := Rule(req.Dir, req.Host, repo, "codex", review, []RulingInput{
+		{Indices: []int{2, 1}, Verdict: VerdictAccepted, Resolution: "fixed B"}})
+	if err != nil || len(grouped.Rulings) != 1 || grouped.Accepted != 1 ||
+		!slices.Equal(grouped.Rulings[0].Indices, []int{1, 2}) || grouped.Rulings[0].Index != 0 ||
+		grouped.Rulings[0].Claim != "B returns A." || grouped.Rulings[0].Rule != "global:b" {
+		t.Errorf("grouped receipt = %+v, %v", grouped, err)
+	}
 	// A HEAD that does not descend from the reviewed one is not an advance.
 	git(t, repo, "switch", "-q", "main")
 	moved, err := Rule(req.Dir, req.Host, repo, "", review, []RulingInput{ok, {Index: 2, Verdict: VerdictRejected, Resolution: "x"}})
@@ -405,5 +419,32 @@ func TestRuleTakesOneValidRulingPerFinding(t *testing.T) {
 	}
 	if listed, err := List(req.Dir, req.Host, repo); err != nil || len(listed) != 1 || listed[0].HeadAdvanced || !listed[0].HeadElsewhere {
 		t.Errorf("on main: List = %+v, %v", listed, err)
+	}
+}
+
+// TestRulingOfGroupTakesTheMostSevere checks that a ruling on a defect several
+// findings report keeps the lowest index's claim, the most severe level and the
+// first reviewed rule a finding names.
+func TestRulingOfGroupTakesTheMostSevere(t *testing.T) {
+	r := rulingOf(RulingInput{Indices: []int{1, 3}}, []Finding{
+		{Index: 1, Severity: "NITPICK", File: "a.go", Claim: "first"},
+		{Index: 3, Severity: "BLOCKING", File: "b.go", Claim: "second", Rule: "global:x"},
+	})
+	if r.Severity != "BLOCKING" || r.Claim != "first" || r.File != "a.go" || r.Rule != "global:x" {
+		t.Errorf("rulingOf = %+v", r)
+	}
+}
+
+// TestLoadReceiptsReadsALegacyIndex checks that a receipt written before indices
+// existed loads with its one index in Indices.
+func TestLoadReceiptsReadsALegacyIndex(t *testing.T) {
+	dir := t.TempDir()
+	line := `{"review_id":"r1","rulings":[{"index":2,"verdict":"REJECTED","qualifier":"","resolution":"x"}]}` + "\n"
+	if err := os.WriteFile(RulingsFile(dir, "h"), []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadReceipts(dir, "h")
+	if err != nil || len(got) != 1 || !slices.Equal(got[0].Rulings[0].Indices, []int{2}) || got[0].Rulings[0].Index != 0 {
+		t.Errorf("LoadReceipts = %+v, %v", got, err)
 	}
 }

@@ -88,17 +88,26 @@ text numbers each reviewer's findings from 1.
 
 ## Step 3: Rule on each finding
 
-For each finding, state its load-bearing premise in one sentence, then test that
-premise against the code by reading it. Then rule:
+The JSON's `adjudication` field is the policy the commit gate gives an author for
+its own findings. Apply it to every finding here as written; do not apply a
+summary of it from memory. If the JSON has no `adjudication` field, the CLI is
+older than this skill and cannot record these rulings: stop, and tell the user
+that the steer executable needs an update.
 
-- **ACCEPTED** — the premise holds and the failure reaches a use the branch must
-  support, a caller or reader it breaks, or a protection boundary. Fix it.
-- **ACCEPTED, not fixed** — the premise holds, but the failure needs an input no
-  supported use produces and stops safely, or the user said to leave it.
+For each finding, state its load-bearing premise in one sentence, then test that
+premise against the code by reading it. Then, before any edit, record what the
+policy asks for (needed by, failure if unchanged, response) and rule:
+
+- **ACCEPTED** — the premise holds and the policy's response is a repair, a
+  refusal or narrowing, or a removal. Make that change.
+- **ACCEPTED, not fixed** — the premise holds and the policy leaves it unfixed, or
+  the user said to leave it.
 - **REJECTED** — the premise is false. Say what the code does instead.
 
 The reviewer's severity label does not decide a ruling. Two findings that cannot
-both be true get one ruling each, and at least one of them is rejected.
+both be true get one ruling each, and at least one of them is rejected. When more
+than one reviewer ran (`runs` above 1), several findings can report one defect:
+rule on that defect once, in one ruling that names all of their indices.
 
 ## Step 4: Fix, in ordinary commits
 
@@ -108,14 +117,16 @@ gate on its own. Run the repository's checks before each commit.
 ## Step 5: Record the rulings
 
 Record them after the fix commits land, so the receipt shows that HEAD advanced.
-Every finding gets exactly one ruling; `qualifier` is `"not fixed"` only on an
+Give one ruling per defect, and put every finding in exactly one ruling: `index`
+names a single finding, and `indices` names every finding that reports the same
+defect; `qualifier` is `"not fixed"` only on an
 acceptance you leave unfixed, and `resolution` is one sentence:
 
 ```bash
 <STEER_BIN> review rule <review_id> --stdin <<'JSON'
 {"rulings": [
-  {"index": 1, "verdict": "ACCEPTED", "qualifier": "", "resolution": "<what you changed, file:line>"},
-  {"index": 2, "verdict": "REJECTED", "qualifier": "", "resolution": "<why the premise is false>"}
+  {"index": 1, "verdict": "ACCEPTED", "qualifier": "", "resolution": "needed by <the requirement>; <what you changed, file:line>"},
+  {"indices": [2, 3], "verdict": "REJECTED", "qualifier": "", "resolution": "<why the premise is false>"}
 ]}
 JSON
 ```
@@ -125,7 +136,7 @@ for another reason, the rulings are not recorded: say so in Step 6.
 
 ## Step 6: Report
 
-The user has not read the review. Give them one line per finding: what it claimed,
-in your own words, the ruling, and what you did. Name each finding ruled ACCEPTED,
+The user has not read the review. Give them one line per distinct defect: what it
+claimed, in your own words, the ruling, and what you did. Name each finding ruled ACCEPTED,
 not fixed, as a defect the branch still carries. Open a pull request only if the
 user asked for it.

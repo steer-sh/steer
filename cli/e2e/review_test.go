@@ -110,6 +110,17 @@ func TestBranchReviewIsRuledAndListed(t *testing.T) {
 		t.Fatalf("after refused rulings, listed = %v, want rulable and not ruled", l)
 	}
 
+	// One ruling over findings 2 and 3, as for one defect two reviewers report: the
+	// receipt holds two rulings and counts two defects.
+	grouped := rule(`{"rulings": [{"index": 1, "verdict": "REJECTED", "resolution": "False."},
+		{"indices": [3, 2], "verdict": "REJECTED", "resolution": "False."}]}`)
+	var receipt map[string]any
+	if err := json.Unmarshal([]byte(grouped.Stdout), &receipt); grouped.Code != 0 || err != nil ||
+		receipt["rejected"] != float64(2) || len(receipt["rulings"].([]any)) != 2 {
+		t.Fatalf("grouped ruling exited %d, receipt %v (%v), want 2 rejected rulings:\n%s",
+			grouped.Code, receipt, err, grouped.Output())
+	}
+
 	for _, tc := range []struct {
 		name     string
 		commit   bool

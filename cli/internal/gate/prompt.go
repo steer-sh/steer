@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// The six prompts. Their digests are pinned: the instrument digest is a hash of
+// The seven prompts. Their digests are pinned: the instrument digest is a hash of
 // reviewPrompt, so a drift there silently reclassifies every row that follows.
 var (
 	//go:embed prompts/review.md
@@ -23,7 +23,28 @@ var (
 	roundNote string
 	//go:embed prompts/rerun-note.md
 	rerunNoteText string
+	//go:embed prompts/adjudication.md
+	adjudicationPolicy string
 )
+
+// AdjudicationPolicy is the policy an author applies to each review finding before
+// it edits: the deny, cap and nitpick templates carry it, and a branch review hands
+// it to the agent that rules.
+func AdjudicationPolicy() string {
+	return strings.TrimRight(adjudicationPolicy, "\n")
+}
+
+// indentedPolicy is AdjudicationPolicy with each non-empty line indented three
+// spaces, for a template that places it inside a numbered item.
+func indentedPolicy() string {
+	lines := strings.Split(AdjudicationPolicy(), "\n")
+	for i, line := range lines {
+		if line != "" {
+			lines[i] = "   " + line
+		}
+	}
+	return strings.Join(lines, "\n")
+}
 
 // MaxSubjectChars bounds the chain key. The template hands the agent the same
 // truncation the row stores, so the two carry one string and match exactly.
@@ -91,6 +112,7 @@ func BuildDeny(count int, review string, firing, cap int, rerun, subject, chainI
 		"count": fmt.Sprint(count), "review": review, "cap": fmt.Sprint(cap),
 		"firing": fmt.Sprint(firing), "round_note": round, "rerun_note": rerun,
 		"subject": subject, "chain": chainSlot(chainID), "reviewer": reviewer,
+		"adjudication": AdjudicationPolicy(),
 	})
 }
 
@@ -103,6 +125,7 @@ func BuildCap(count int, review string, firing, cap int, subject, chainID, revie
 		"count": fmt.Sprint(count), "review": review,
 		"firing": fmt.Sprint(firing), "cap": fmt.Sprint(cap),
 		"subject": subject, "chain": chainSlot(chainID), "reviewer": reviewer,
+		"adjudication": indentedPolicy(),
 	})
 }
 
@@ -122,6 +145,7 @@ func BuildNitpick(count int, review string, firing int, subject, chainID, review
 		"count": fmt.Sprint(count), "review": review, "firing": fmt.Sprint(firing),
 		"sections": strings.Join(sections, ", "), "subject": subject,
 		"chain": chainSlot(chainID), "reviewer": reviewer,
+		"adjudication": indentedPolicy(),
 	})
 }
 

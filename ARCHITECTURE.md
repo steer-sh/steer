@@ -922,7 +922,10 @@ rated NITPICK, no review that reached the composed review without a complete fin
 Such a round, at any firing below the cap, writes a `nitpick` row (`gate.PhaseNitpick`)
 carrying what a deny row carries, saves no chain state, and hands the reviews to the
 agent as `ContextOnly` text under `prompts/nitpick.md`, which applies the deny and cap
-templates' repair policy and asks for the sequence's ledger now. The round ends the
+templates' repair policy and asks for the sequence's ledger now. That policy is one
+file, `prompts/adjudication.md` (`gate.AdjudicationPolicy`), which the three templates
+fill in, nitpick and cap indented inside their numbered item; a branch review hands
+the agent the same text. The round ends the
 sequence: it does not count toward `MaxFirings`, and the next commit starts a new one.
 `MaxFirings` is the `reviewer.rounds` setting, 1 to `gate.MaxFiringsLimit`; no setting
 turns off the final review after it. The engine reads the limit on each commit, so every
@@ -1055,9 +1058,16 @@ alone, under the same coverage, so a caught-after finding keeps its chain undeci
 `interventions[]` and every score read the commit chains. A review that runs pins both ends as `refs/branch-review/<sha>`,
 best effort: a skipped review pins nothing, and a failed `update-ref` is not
 reported. A ruling receipt
-(`steer review rule`) needs one ruling per finding, numbered across the panel, and
+(`steer review rule`) needs one ruling per defect, with each finding, numbered across
+the panel, in exactly one: a ruling names several findings by `indices` when reviewers
+report one defect, so the receipt, its counts and the concerns `mine` reads from it
+hold that defect once. A receipt from before `indices` loads its `index` as a list of
+one. The receipt
 stamps the HEAD at ruling time, so `head_advanced` (HEAD descends from the reviewed
-head) is observed rather than reported by the agent.
+head) is observed rather than reported by the agent. A review with a reply to rule
+prints `gate.AdjudicationPolicy` beside its findings, and `--json` carries it as
+`adjudication`, so the `steer-review` skill rules under the commit gate's policy
+rather than its own copy of it.
 
 ## Transcripts and session evidence
 
