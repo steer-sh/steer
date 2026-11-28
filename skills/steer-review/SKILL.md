@@ -90,7 +90,9 @@ text numbers each reviewer's findings from 1.
 
 The JSON's `adjudication` field is the policy the commit gate gives an author for
 its own findings. Apply it to every finding here as written; do not apply a
-summary of it from memory.
+summary of it from memory. If the JSON has no `adjudication` field, the CLI is
+older than this skill and cannot record these rulings: stop, and tell the user
+that the steer executable needs an update.
 
 For each finding, state its load-bearing premise in one sentence, then test that
 premise against the code by reading it. Then, before any edit, record what the
