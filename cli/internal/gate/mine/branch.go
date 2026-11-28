@@ -4,7 +4,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strings"
 
 	"github.com/steer-sh/steer-cli/internal/branchreview"
 	"github.com/steer-sh/steer-cli/internal/gate"
@@ -150,8 +149,7 @@ func latestReceipts(dir string) (map[string]branchreview.Receipt, error) {
 }
 
 // applyReceipt stamps receipt onto its review row: the harness the row lacks and,
-// for a review whose findings were all parsed, each ruling as one concern. A ruling
-// on several findings carries each finding's claim from the row, one per line.
+// for a review whose findings were all parsed, each ruling as one concern.
 func applyReceipt(row gate.Row, receipt branchreview.Receipt) {
 	if str(row["harness"]) == "" && receipt.Harness != "" {
 		row["harness"] = receipt.Harness
@@ -161,23 +159,14 @@ func applyReceipt(row gate.Row, receipt branchreview.Receipt) {
 		numInt(row["findings_unparsed"]) != 0 {
 		return
 	}
-	claims := findingClaims(row)
 	list := make([]any, 0, len(receipt.Rulings))
 	for _, r := range receipt.Rulings {
-		var lines []string
-		if len(r.Indices) > 1 {
-			for _, i := range r.Indices {
-				if line, ok := claims[i]; ok {
-					lines = append(lines, line)
-				}
-			}
-		}
-		if len(lines) == 0 {
-			lines = []string{claimText(r.File, r.Claim)}
+		text := r.Claim
+		if r.File != "" {
+			text = r.File + ": " + r.Claim
 		}
 		list = append(list, map[string]any{
-			"verdict": r.Verdict, "qualifier": r.Qualifier, "concern": strings.Join(lines, "\n"),
-			"resolution": r.Resolution,
+			"verdict": r.Verdict, "qualifier": r.Qualifier, "concern": text, "resolution": r.Resolution,
 		})
 	}
 	row["concerns"] = list
@@ -185,26 +174,6 @@ func applyReceipt(row gate.Row, receipt branchreview.Receipt) {
 	row["ledger_ts"] = receipt.TS
 	row["ledger_join"] = RulingJoin
 	row["ledger_round"] = 1
-}
-
-// findingClaims maps each finding index on a review row to its claim text.
-func findingClaims(row gate.Row) map[int]string {
-	findings, _ := row["findings"].([]any)
-	out := make(map[int]string, len(findings))
-	for _, f := range findings {
-		if m, ok := f.(map[string]any); ok {
-			out[numInt(m["index"])] = claimText(str(m["file"]), str(m["claim"]))
-		}
-	}
-	return out
-}
-
-// claimText is a claim led by the file it names, when it names one.
-func claimText(file, claim string) string {
-	if file == "" {
-		return claim
-	}
-	return file + ": " + claim
 }
 
 // branchShardHost is the host a branch-review stream's file name carries.

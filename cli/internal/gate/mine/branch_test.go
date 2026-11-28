@@ -140,29 +140,6 @@ func TestLoadReviewRowsReadsBranchReviewsAsChains(t *testing.T) {
 	check(t, "and missed after it", ChainEvidence(open, 5100+BranchRulingGrace), EvidenceMissed)
 }
 
-// TestGroupedRulingCarriesEveryFindingsClaim checks that a ruling on several
-// findings becomes one concern holding each finding's claim, so a class that matches
-// only a higher index's wording still matches the defect.
-func TestGroupedRulingCarriesEveryFindingsClaim(t *testing.T) {
-	root := t.TempDir()
-	branch := filepath.Join(root, "branch-review")
-	writeStream(t, filepath.Join(branch, "reviews.h1.jsonl"),
-		branchRow(1020, "grouped", branchreview.PhaseFindings,
-			branchreview.Finding{Index: 1, File: "a.go", Claim: "nil map"},
-			branchreview.Finding{Index: 2, File: "b.go", Claim: "retry loop never ends"}))
-	grouped := ruling(0, "ACCEPTED", "", "a.go", "nil map")
-	grouped.Indices = []int{1, 2}
-	writeStream(t, filepath.Join(branch, "rulings.h1.jsonl"), receipt(2000, "grouped", grouped))
-
-	rows, err := LoadReviewRows(filepath.Join(root, "commit-review"), "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	ch := chainByID(t, BuildChains(rows, false), "branch:grouped")
-	check(t, "one concern for the one defect", len(ch.Findings), 1)
-	check(t, "the concern holds both claims", ch.Findings[0].Text, "a.go: nil map\nb.go: retry loop never ends")
-}
-
 // TestLoadRowsReadsNoBranchRows checks the scoring boundary: LoadRows, and
 // LoadReviewRows given a named ledger, read the commit ledger alone while a branch
 // store sits beside it.
