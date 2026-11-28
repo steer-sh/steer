@@ -16,6 +16,11 @@ import (
 	"github.com/steer-sh/steer-cli/internal/steerbin"
 )
 
+// reviewerPanelFields are the keys the Reviewer panel lists: the commit reviewer's,
+// then the branch reviewer's.
+var reviewerPanelFields = append(append([]settings.Field{}, settings.ReviewerFields...),
+	settings.BranchReviewerFields...)
+
 // reviewerEdit is one setting's pending write.
 type reviewerEdit struct {
 	field settings.Field
@@ -46,7 +51,7 @@ func (m *Model) reviewerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.String() != "enter" && msg.String() != "e" {
 		return m, nil
 	}
-	f := settings.ReviewerFields[m.cursor[panelReviewer]]
+	f := reviewerPanelFields[m.cursor[panelReviewer]]
 	file, err := config.Load()
 	if err != nil {
 		m.note("error: %v", err)
@@ -66,9 +71,19 @@ func (m *Model) reviewerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// editorChoices are the rows a closed-set editor offers. A key that inherits
+// another key's value while unset offers the unset value first, so a stored
+// choice can be cleared back to inheritance.
+func editorChoices(f settings.Field) []settings.Choice {
+	if f.Inherits == nil {
+		return f.Choices()
+	}
+	return append([]settings.Choice{{Value: "", Label: "Unset: " + f.DefaultLabel}}, f.Choices()...)
+}
+
 // choiceIndex is the row a stored value sits on, 0 when the value names none.
 func choiceIndex(f settings.Field, value string) int {
-	for i, c := range f.Choices() {
+	for i, c := range editorChoices(f) {
 		if c.Value == value {
 			return i
 		}
@@ -105,7 +120,7 @@ func (m *Model) reviewerEditing(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				ed.carry = dropValues
 			}
 		}
-		if n := len(ed.field.Choices()); n > 0 {
+		if n := len(editorChoices(ed.field)); n > 0 {
 			ed.choice = (ed.choice%n + n) % n
 		}
 		return m, nil
@@ -137,7 +152,7 @@ func (m *Model) forgetCarry() {
 func (m *Model) commitReviewerEdit() (tea.Model, tea.Cmd) {
 	ed := m.reviewer
 	if ed.field.Kind == settings.KindChoice {
-		choices := ed.field.Choices()
+		choices := editorChoices(ed.field)
 		if ed.choice < 0 || ed.choice >= len(choices) {
 			return m, nil
 		}
@@ -167,16 +182,19 @@ func (m *Model) saveReviewerValue(value string) (tea.Model, tea.Cmd) {
 	}
 	// The model and the effort belong to the CLI that runs them, so a CLI change
 	// asks rather than carrying them forward or dropping them unseen.
-	if ed.field.Name == "reviewer.provider" && carriesValues(file) && ed.carry == carryUnasked {
-		ed.asked = true
-		ed.question = fmt.Sprintf("← keep the current model and effort · → use %s's own · then enter",
-			reviewers.ProviderLabel(value))
-		m.note("%s", ed.question)
-		return m, nil
+	carried, carries := carriedValues[ed.field.Name]
+	if carries && ed.carry == carryUnasked {
+		if model, effort := carried(&file); *model != "" || *effort != "" {
+			ed.asked = true
+			ed.question = fmt.Sprintf("← keep the current model and effort · → use %s's own · then enter",
+				providerName(ed.field, value))
+			m.note("%s", ed.question)
+			return m, nil
+		}
 	}
-	if ed.carry == dropValues {
-		next.Reviewer.Model = ""
-		next.Reviewer.Effort = ""
+	if carries && ed.carry == dropValues {
+		model, effort := carried(&next)
+		*model, *effort = "", ""
 	}
 	ed.next, ed.value = next, value
 	if err := config.Save(next); err != nil {
@@ -189,9 +207,24 @@ func (m *Model) saveReviewerValue(value string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// carriesValues says the file holds a model or an effort a CLI change would carry.
-func carriesValues(file config.Config) bool {
-	return file.Reviewer.Model != "" || file.Reviewer.Effort != ""
+// carriedValues maps each provider key to the model and the effort stored with it,
+// which a change of that provider would carry.
+var carriedValues = map[string]func(*config.Config) (model, effort *string){
+	"reviewer.provider": func(c *config.Config) (*string, *string) {
+		return &c.Reviewer.Model, &c.Reviewer.Effort
+	},
+	"branch_reviewer.provider": func(c *config.Config) (*string, *string) {
+		return &c.BranchReviewer.Model, &c.BranchReviewer.Effort
+	},
+}
+
+// providerName names the provider a value selects, and an unset one as what it
+// inherits.
+func providerName(f settings.Field, value string) string {
+	if value == "" && f.Inherits != nil {
+		return f.DefaultLabel
+	}
+	return reviewers.ProviderLabel(value)
 }
 
 // storedLabel names a written value, and an unset one as the default it returns to.
@@ -270,7 +303,7 @@ func (m *Model) reloadReviewer() {
 // when it is open, and any registration that outranks the file.
 func (m *Model) viewReviewer() string {
 	width := m.bodyWidth()
-	out := m.title("Reviewer — settings for review before commit")
+	out := m.title("Reviewer — settings for review before commit and before a pull request")
 	out += wrapTo(secondary("These are saved for every project on this machine. An environment "+
 		"variable, or a flag left on a registration, can still outrank them."), "  ", width)
 	file, err := config.Load()
@@ -279,9 +312,13 @@ func (m *Model) viewReviewer() string {
 		file = config.Config{}
 	}
 	out += "\n"
-	for i, f := range settings.ReviewerFields {
+	for i, f := range reviewerPanelFields {
+		if i == len(settings.ReviewerFields) {
+			out += m.viewReviewerKey(width)
+			out += section("Branch review — steer review branch, before a pull request")
+		}
 		selected := i == m.cursor[panelReviewer]
-		out += selectedRow(reviewerLabel(settings.LabelOf(f), selected), " "+settings.DisplayValue(f, m.cfg), selected && !m.editing, width)
+		out += selectedRow(reviewerLabel(settings.LabelOf(f), selected), " "+settings.DisplayValue(f, m.cfg, file), selected && !m.editing, width)
 		if override := overrideNote(f, file); override != "" {
 			out += wrapTo(warn("Override: ")+override, "    ", width)
 		}
@@ -289,7 +326,6 @@ func (m *Model) viewReviewer() string {
 			out += wrapTo(secondary(f.Help), "    ", width)
 		}
 	}
-	out += m.viewReviewerKey(width)
 
 	if m.editing && m.reviewer != nil {
 		out += inset(m.viewReviewerEditor(file, width-3), width, true)
@@ -324,8 +360,8 @@ func (m *Model) viewReviewerKey(width int) string {
 func (m *Model) viewReviewerDetails(width int) string {
 	out := section("Details")
 	out += wrapTo(dim("Saved in "+configPath()), "  ", width)
-	names := make([]string, 0, len(settings.ReviewerFields))
-	for _, f := range settings.ReviewerFields {
+	names := make([]string, 0, len(reviewerPanelFields))
+	for _, f := range reviewerPanelFields {
 		names = append(names, f.Name)
 	}
 	return out + wrapTo(dim("Keys: "+strings.Join(names, ", ")), "  ", width)
@@ -352,7 +388,7 @@ func (m *Model) viewReviewerEditor(file config.Config, width int) string {
 	ed := m.reviewer
 	out := section("Edit " + settings.LabelOf(ed.field))
 	if ed.field.Kind == settings.KindChoice {
-		for i, c := range ed.field.Choices() {
+		for i, c := range editorChoices(ed.field) {
 			out += selectedRow(c.Label, "", i == ed.choice, width)
 		}
 	} else {
@@ -441,7 +477,7 @@ func configPath() string {
 }
 
 func reviewerLabel(label string, selected bool) string {
-	text := fmt.Sprintf("%-18s", label)
+	text := fmt.Sprintf("%-24s", label)
 	if selected {
 		return text
 	}

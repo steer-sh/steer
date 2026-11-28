@@ -362,6 +362,10 @@ End with the report: tell the user to run `/steer-report` as the first message o
 new session, not in this one. The report reads their past sessions, and this setup
 conversation takes context and cost that the report needs.
 
+Tell the user that before they open a pull request they can run `/steer-review`,
+which reviews the whole branch with the same reviewer unless they set a branch
+reviewer, by asking the agent or in the dashboard's Reviewer panel.
+
 ## Step 6: Repository checks (only when the user asks)
 
 A repository check blocks the end of an agent's turn while the repository's

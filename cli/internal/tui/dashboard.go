@@ -20,7 +20,6 @@ import (
 	"github.com/steer-sh/steer-cli/internal/gate/mine"
 	"github.com/steer-sh/steer-cli/internal/harness"
 	"github.com/steer-sh/steer-cli/internal/report"
-	"github.com/steer-sh/steer-cli/internal/settings"
 	"github.com/steer-sh/steer-cli/internal/status"
 )
 
@@ -189,7 +188,7 @@ func (m *Model) rowCount(p panel) int {
 	case panelFixes:
 		return len(m.fixRows())
 	case panelReviewer:
-		return len(settings.ReviewerFields)
+		return len(reviewerPanelFields)
 	}
 	return 0
 }

@@ -390,11 +390,11 @@ func EffectiveValue(f Field, cfg gate.Config, file config.Config) string {
 }
 
 // DisplayValue is the value in force, in the reader's words.
-func DisplayValue(f Field, cfg gate.Config) string {
+func DisplayValue(f Field, cfg gate.Config, file config.Config) string {
 	if f.Display != nil {
 		return f.Display(cfg)
 	}
-	value := f.Effective(cfg)
+	value := EffectiveValue(f, cfg, file)
 	if value == "" && f.DefaultLabel != "" {
 		return f.DefaultLabel
 	}
